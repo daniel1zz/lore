@@ -72,6 +72,26 @@ import {
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
+/**
+ * Doc types `--supersedes` (this command's CREATE-time compose flag) may
+ * target — DELIBERATELY NARROWER than `ValidityService.VALIDITY_ELIGIBLE_TYPES`
+ * (which, since task-a-task-cannot-be-retracted-supersedes-emits-a-repair,
+ * also accepts `task` for the STANDALONE `lore invalidate <task>` retraction
+ * path). This is an intentional, independently-declared constant — NOT a
+ * re-derivation of ValidityService's set that happened to drift — because
+ * `--supersedes` composes "create a NEW doc that replaces an OLD one," a
+ * forward-looking gesture that fits knowledge/adr (SPEC-043 D11's original
+ * scope). A task is typically retracted RETROSPECTIVELY, after its correct
+ * replacement already exists as an independent `lore create task` call —
+ * exactly the shape this task's own real-world fixture took
+ * (task-check-ac-ref-integrity-re-implements-governing-spec created FIRST,
+ * task-lore-evidence-ac-accepts-an-ac-ref-on-an-ad-hoc-task-that retracted
+ * SECOND, as two separate commands). A caller retracting a task always uses
+ * the two-step `lore create task` + `lore invalidate <old> --superseded-by
+ * <new>` flow, never this atomic compose.
+ */
+const SUPERSEDE_CREATE_ELIGIBLE_TYPES: ReadonlySet<DocType> = new Set(["knowledge", "adr"]);
+
 const ADR_DECISION_STATUSES = ["proposed", "accepted", "deprecated", "superseded"] as const;
 type AdrDecisionStatus = (typeof ADR_DECISION_STATUSES)[number];
 
@@ -207,7 +227,7 @@ export default defineCommand({
     supersedes: {
       type: "string",
       description:
-        "ID or slug of an existing knowledge/adr doc this new doc supersedes — creates then invalidates the old doc in one command (SPEC-043 D11). Half-failure (create ok, invalidate fails) reports a nonzero exit naming the exact repair command; the new doc is still created.",
+        "ID or slug of an existing knowledge/adr doc this new doc supersedes — creates then invalidates the old doc in one command (SPEC-043 D11). The target's type is validated BEFORE any write: a non-knowledge/adr target (e.g. a task) is refused with exit 4 and creates NOTHING (task-a-task-cannot-be-retracted-supersedes-emits-a-repair). Half-failure past that point (create ok, invalidate fails) reports a nonzero exit naming the exact repair command; the new doc is still created.",
     },
     by: {
       type: "string",
@@ -529,6 +549,34 @@ export default defineCommand({
           process.exitCode = 1;
           return;
         }
+
+        // Defect 1 fix (task-a-task-cannot-be-retracted-supersedes-emits-a-
+        // repair): validate the target's type BEFORE any write. The
+        // precondition is knowable up front — the target already exists, so
+        // its type is a plain read — so refusing AFTER creating the new doc
+        // (the pre-fix behavior) named a repair command
+        // (`lore invalidate <target> --superseded-by <new>`) that failed
+        // IDENTICALLY on retry for a type-ineligible target. Nothing is
+        // created when this check refuses (assert-doc-count-unchanged, AC1).
+        const supersedeTargetResult = await app.corpusService.get(args.supersedes);
+        if (!supersedeTargetResult.ok) {
+          process.stderr.write(formatError(supersedeTargetResult.error) + "\n");
+          process.exitCode = exitCode(supersedeTargetResult.error);
+          return;
+        }
+        const supersedeTargetType = supersedeTargetResult.value.doc.type;
+        if (!SUPERSEDE_CREATE_ELIGIBLE_TYPES.has(supersedeTargetType)) {
+          process.stderr.write(
+            `Error: --supersedes target '${args.supersedes}' has type '${supersedeTargetType}'; ` +
+              `only ${[...SUPERSEDE_CREATE_ELIGIBLE_TYPES].join("/")} documents can be targeted by ` +
+              `--supersedes. A ${supersedeTargetType} is retracted via the two-step ` +
+              `'lore create ${supersedeTargetType} ...' + 'lore invalidate <old> --superseded-by <new>' ` +
+              `flow instead (see 'lore invalidate --help').\n`,
+          );
+          process.exitCode = 4;
+          return;
+        }
+
         const orchResult = await createWithSupersedes(
           {
             create: app.corpusService.create.bind(app.corpusService),

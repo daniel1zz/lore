@@ -347,6 +347,30 @@ export const taskExtraSchema = z
      * Source: task-red-first-discipline-is-asked-for-in-prose-but-never
      */
     red_first: z.boolean().optional(),
+    /**
+     * Bi-temporal validity metadata (SPEC-043 D1) — a task is a SECOND
+     * eligible type alongside knowledge/adr as of
+     * task-a-task-cannot-be-retracted-supersedes-emits-a-repair (Defect 2):
+     * `draft`/`in-review` tasks had no retraction path visible to
+     * `list`/`ready`/`search` at all (`VALID_TRANSITIONS` only reaches
+     * `deprecated` from `approved`/`active`, and a task caught wrong while
+     * still `draft` — the normal case, since that is when it gets reviewed —
+     * could never be deprecated). Written exclusively via
+     * `ValidityService.invalidate` (`lore invalidate`), never `lore set`
+     * (D10 applies here too). ORTHOGONAL to `status` (D5) — a task's
+     * workflow lifecycle is untouched by retraction; a `draft` task can be
+     * bi-temporally invalid while its `status` stays `draft`.
+     *
+     * Deliberately NOT reachable via `lore create task --supersedes` (the
+     * create-time compose flag stays scoped to knowledge/adr, SPEC-043 D11's
+     * original intent — see `SUPERSEDE_CREATE_ELIGIBLE_TYPES`,
+     * `adapters/cli/commands/create.ts`) — a task is retracted via the
+     * two-step `lore create task` + `lore invalidate <old> --superseded-by
+     * <new>` flow instead, matching how this task's own real-world fixture
+     * was actually retracted (the replacement task was created FIRST, as an
+     * independent command).
+     */
+    validity: validitySchema.optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {

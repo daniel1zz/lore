@@ -654,13 +654,14 @@ export const LoreBootstrapSchema = z.object({
 
 /**
  * Input schema for lore_invalidate (SPEC-043 §Design Decisions D2, D6) — the SOLE MCP
- * write path for a `knowledge`/`adr` doc's bi-temporal `extra.validity`. `by` is
- * required (not defaulted) — same MCP actor-identity precedent as `lore_claim`/
- * `lore_release`/`lore_evidence_add`. `superseded_by` is resolved and PERSISTED as its
- * ULID (never the raw id-or-slug). `undo` clears a prior invalidation instead of
- * setting one; `decision_status_unchanged` surfaces structurally on the response when
- * an ADR's `decision_status: "superseded"` is NOT auto-reverted by `undo` (review U7 —
- * MCP agents never read CLI help text).
+ * write path for a `knowledge`/`adr`/`task` doc's bi-temporal `extra.validity` (`task`
+ * added by task-a-task-cannot-be-retracted-supersedes-emits-a-repair, the same
+ * retraction mechanism as the CLI). `by` is required (not defaulted) — same MCP
+ * actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`.
+ * `superseded_by` is resolved and PERSISTED as its ULID (never the raw id-or-slug).
+ * `undo` clears a prior invalidation instead of setting one; `decision_status_unchanged`
+ * surfaces structurally on the response when an ADR's `decision_status: "superseded"`
+ * is NOT auto-reverted by `undo` (review U7 — MCP agents never read CLI help text).
  */
 export const LoreInvalidateSchema = z.object({
   id_or_slug: z.string(),
@@ -2011,7 +2012,7 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   registerToolWithArgs(
     server,
     "lore_invalidate",
-    "Mark a knowledge/adr document invalid (or undo a prior invalidation) — the SOLE MCP write path for extra.validity",
+    "Mark a knowledge/adr/task document invalid (retract it, for a task) or undo a prior invalidation — the SOLE MCP write path for extra.validity",
     LoreInvalidateSchema,
     async (args) => {
       if (app.validityService === undefined) {
@@ -2028,6 +2029,15 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       const payload: Record<string, unknown> = { doc: result.value.doc };
       if (result.value.decision_status_unchanged !== undefined) {
         payload["decision_status_unchanged"] = result.value.decision_status_unchanged;
+      }
+      // BOUNDARY advisories (AC6, task-a-task-cannot-be-retracted-supersedes-
+      // emits-a-repair) — same fields the CLI surfaces, so an MCP agent (who
+      // never reads CLI help text) gets the SAME named-not-silent signal.
+      if (result.value.task_already_terminal !== undefined) {
+        payload["task_already_terminal"] = result.value.task_already_terminal;
+      }
+      if (result.value.task_claim_holder !== undefined) {
+        payload["task_claim_holder"] = result.value.task_claim_holder;
       }
       return textContent(payload);
     },

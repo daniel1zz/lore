@@ -1,31 +1,38 @@
 /**
  * Six-dimension tests for ValidityService.invalidate + CorpusService's D10
- * knowledge/adr writer guard (SPEC-043 §Design Decisions D2, D10).
- * Uses InMemoryStore — no file I/O, no SQLite.
+ * knowledge/adr writer guard (SPEC-043 §Design Decisions D2, D10), plus the
+ * `task` eligibility widening from task-a-task-cannot-be-retracted-supersedes-
+ * emits-a-repair (Defect 2). Uses InMemoryStore — no file I/O, no SQLite.
  *
  * Dimension mapping:
  *   HAPPY:      invalidate writes invalid_at/reason, preserves sibling extra keys,
  *               bumps version, audits with details.version; supersededBy resolves a
  *               slug to a ULID; ADR convergence (superseded/deprecated); undo clears
- *               invalid_at/invalidated_by/reason
+ *               invalid_at/invalidated_by/reason; a TASK target is now eligible —
+ *               extra.validity is set while doc.status is left UNTOUCHED (D5)
  *   NEGATIVE:   future invalid_at rejected at the service seam; undo on a
  *               never-invalidated doc; malformed validity rejected with the REAL
  *               issue (not a misleading generic message), both via `set` and via ADR
  *               `create`
  *   BOUNDARY:   re-invalidating keeps the ORIGINAL invalid_at while refreshing
- *               reason/invalidated_by (first signal wins)
+ *               reason/invalidated_by (first signal wins); retracting an
+ *               already-archived task surfaces `task_already_terminal`; retracting a
+ *               task claimed by a DIFFERENT actor surfaces `task_claim_holder` — both
+ *               NAMED, non-blocking (task-a-task-cannot-be-retracted... AC6)
  *   ERROR:      nonexistent target → DOC_NOT_FOUND; unresolvable supersededBy →
- *               DOC_NOT_FOUND naming the bad ref; non-knowledge/adr target →
- *               VALIDATION_ERROR naming allowed types
+ *               DOC_NOT_FOUND naming the bad ref; a target OUTSIDE knowledge/adr/task
+ *               (e.g. plan) → VALIDATION_ERROR naming all three allowed types
  *   STATE:      partial-failure recovery — a forced link-write failure still commits
  *               the doc half; re-running the SAME invalidate call repairs the
  *               missing link (idempotent)
  *   REGRESSION: a legacy doc with no validity round-trips `set`/`get` untouched (no
  *               phantom validity key introduced); D10 guard rejects a `set` patch
  *               that changes extra.validity, naming `lore invalidate`, while an
- *               identical (unchanged) validity patch is NOT rejected
+ *               identical (unchanged) validity patch is NOT rejected; undo on a task
+ *               clears invalid_at exactly like a knowledge doc
  *
- * @spec_ref SPEC-043 AC-MH-2, AC-MH-3, AC-MH-4, AC-MH-10
+ * @spec_ref SPEC-043 AC-MH-2, AC-MH-3, AC-MH-4, AC-MH-10;
+ *   task-a-task-cannot-be-retracted-supersedes-emits-a-repair
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -329,18 +336,147 @@ describe("ERROR — ValidityService.invalidate", () => {
     expect(result.error.id).toBe("knowledge-does-not-exist");
   });
 
-  it("non-knowledge/adr target → VALIDATION_ERROR naming allowed types", async () => {
+  // reason: `task` became a THIRD eligible type (task-a-task-cannot-be-
+  // retracted-supersedes-emits-a-repair, Defect 2) — this negative case now
+  // targets a `plan`, which stays genuinely ineligible, rather than a task.
+  it("target OUTSIDE knowledge/adr/task (e.g. plan) → VALIDATION_ERROR naming all allowed types", async () => {
     const { corpusService, validityService } = makeServices();
     const planId = await createPlan(corpusService);
-    const taskId = await createTask(corpusService, planId);
 
-    const result = await validityService.invalidate(taskId, { by: "alice" });
+    const result = await validityService.invalidate(planId, { by: "alice" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
     if (result.error.code !== "VALIDATION_ERROR") return;
     expect(result.error.message).toMatch(/knowledge/);
     expect(result.error.message).toMatch(/adr/);
+    expect(result.error.message).toMatch(/task/);
+  });
+});
+
+// ─── Defect 2 — task retraction (task-a-task-cannot-be-retracted-supersedes-
+// emits-a-repair): ValidityService.invalidate now accepts `task` ────────────
+
+describe("HAPPY — ValidityService.invalidate on a task (Defect 2)", () => {
+  it("invalidates a draft task: extra.validity is set, doc.status is left UNTOUCHED (D5)", async () => {
+    const { corpusService, validityService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId, "Wrong task");
+    const replacementId = await createTask(corpusService, planId, "Correct task");
+
+    const result = await validityService.invalidate(taskId, {
+      by: "alice",
+      supersededBy: replacementId,
+      reason: "diagnosed backwards",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.doc.extra["validity"]).toMatchObject({
+      invalidated_by: replacementId,
+      reason: "diagnosed backwards",
+    });
+    // D5 — retraction never touches the workflow lifecycle field.
+    expect(result.value.doc.status).toBe("draft");
+    // No ADR-only side effect leaks onto a task.
+    expect(result.value.doc.extra["decision_status"]).toBeUndefined();
+  });
+
+  it("undo on a task clears invalid_at/invalidated_by/reason exactly like a knowledge doc", async () => {
+    const { corpusService, validityService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const invalidated = await validityService.invalidate(taskId, { by: "alice", reason: "wrong" });
+    expect(invalidated.ok).toBe(true);
+    if (!invalidated.ok) return;
+
+    const undone = await validityService.invalidate(taskId, { by: "alice", undo: true });
+    expect(undone.ok).toBe(true);
+    if (!undone.ok) return;
+    const validity = undone.value.doc.extra["validity"] as Record<string, unknown> | undefined;
+    expect(validity?.["invalid_at"]).toBeUndefined();
+    expect(undone.value.doc.status).toBe("draft");
+  });
+});
+
+// ─── BOUNDARY (AC6) — named, non-blocking outcomes ─────────────────────────
+
+describe("BOUNDARY — retracting an already-terminal task / a task claimed by another actor (AC6)", () => {
+  it("retracting an already-archived task surfaces task_already_terminal and still succeeds", async () => {
+    const { corpusService, validityService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    // Force the task straight to archived (bypassing the normal done() walk —
+    // this test only cares about ValidityService's read of the prior status).
+    const before = await store.find(taskId);
+    if (!before.ok || before.value === null) throw new Error("setup failed");
+    const forced = await store.update(taskId, { status: "archived", version: before.value.version + 1 }, {
+      expected_version: before.value.version,
+    });
+    if (!forced.ok) throw new Error("setup failed");
+
+    const result = await validityService.invalidate(taskId, { by: "alice", reason: "retracted after close" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.task_already_terminal).toBe("archived");
+    // Retraction still applies — never blocked by terminal status (D5).
+    expect(result.value.doc.extra["validity"]).toMatchObject({ invalid_at: expect.any(String) });
+    // Status itself is untouched by the retraction.
+    expect(result.value.doc.status).toBe("archived");
+  });
+
+  it("retracting a task carrying a claim held by a DIFFERENT actor surfaces task_claim_holder and still succeeds", async () => {
+    const { corpusService, validityService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const before = await store.find(taskId);
+    if (!before.ok || before.value === null) throw new Error("setup failed");
+    const claimed = await store.update(
+      taskId,
+      { extra: { ...before.value.extra, claim: { by: "bob", at: "2026-07-01T00:00:00.000Z" } }, version: before.value.version + 1 },
+      { expected_version: before.value.version },
+    );
+    if (!claimed.ok) throw new Error("setup failed");
+
+    const result = await validityService.invalidate(taskId, { by: "alice", reason: "wrong turn" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.task_claim_holder).toBe("bob");
+    expect(result.value.task_already_terminal).toBeUndefined();
+  });
+
+  it("retracting a task the SAME actor holds a claim on does NOT surface task_claim_holder", async () => {
+    const { corpusService, validityService, store } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const before = await store.find(taskId);
+    if (!before.ok || before.value === null) throw new Error("setup failed");
+    const claimed = await store.update(
+      taskId,
+      { extra: { ...before.value.extra, claim: { by: "alice", at: "2026-07-01T00:00:00.000Z" } }, version: before.value.version + 1 },
+      { expected_version: before.value.version },
+    );
+    if (!claimed.ok) throw new Error("setup failed");
+
+    const result = await validityService.invalidate(taskId, { by: "alice", reason: "self-caught mistake" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.task_claim_holder).toBeUndefined();
+  });
+
+  it("a knowledge doc never carries either task-scoped advisory", async () => {
+    const { corpusService, validityService } = makeServices();
+    const k1 = await createKnowledge(corpusService, "K1");
+
+    const result = await validityService.invalidate(k1.id, { by: "alice" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.task_already_terminal).toBeUndefined();
+    expect(result.value.task_claim_holder).toBeUndefined();
   });
 });
 
