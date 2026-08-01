@@ -57,7 +57,7 @@ function runLore(args: string[], cwd: string): RunResult {
 }
 
 /**
- * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * Disables all five `lore gate` service-layer checkpoints for this fixture's corpus
  * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
  * by default in every production `createApp`, which every subprocess-spawned `lore`
  * command in this file goes through). None of this file's ACs exercise spec-create/
@@ -69,6 +69,16 @@ function runLore(args: string[], cwd: string): RunResult {
  * service/CLI-gate layers elsewhere, not re-tested here). Mirrors the config shape
  * `tests/integration/gate-config-disable.bun.test.ts` establishes
  * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
+ *
+ * `task-create` (spec-declaring-ac-scope-is-required-at-task-creation-so-the)
+ * joins this list for the SAME reason: the AC-ACODE-3 evidence fixtures declare
+ * a script-mode AC on their spec specifically so `--ac`/`--ac-ref` cross-entity
+ * validation has something to reference, but their `createTask` calls
+ * deliberately omit `--ac-scope` (that flag is this file's own, unrelated
+ * concern — declared-scope authoring has its own dedicated coverage,
+ * `create-task-ac-scope.test.ts`). Without this, those fixture tasks would
+ * refuse at creation with `AC_SCOPE_REQUIRED`, unrelated to what each test
+ * actually exercises.
  */
 function disableAllGates(dir: string): void {
   appendFileSync(
@@ -83,6 +93,8 @@ function disableAllGates(dir: string): void {
       "    plan-promote:",
       "      enabled: false",
       "    task-claim:",
+      "      enabled: false",
+      '    "task-create":',
       "      enabled: false",
       "",
     ].join("\n"),

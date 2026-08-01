@@ -66,6 +66,8 @@ import {
   formatTaskCreateAdhocConflictError,
   formatTaskCreateMissingFlagsError,
   inferTaskParentId,
+  resolveAcScopeForCreate,
+  type ResolvedAcScope,
 } from "../create-task-validation.js";
 
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
@@ -180,7 +182,7 @@ export default defineCommand({
     "ac-scope": {
       type: "string",
       description:
-        "[task only, repeatable] Declare an extra.ac_scope entry — an acceptance-criterion id on the governing spec that THIS task claims (e.g. AC-VS-9). Consumed by `lore verify`'s declared-scope intersection; edit later with `lore scope add|rm` (there is no `lore set --ac-scope`).",
+        "[task only, repeatable] Declare an extra.ac_scope entry — an acceptance-criterion id on the governing spec that THIS task claims (e.g. AC-VS-9). Pass an explicit empty value (--ac-scope \"\") to declare this task claims NONE, storing an empty array (distinct from omitting the flag entirely). Required (may be empty) when the parent plan's spec declares >= 1 script-mode AC (spec-declaring-ac-scope-is-required-at-task-creation-so-the). Consumed by `lore verify`'s declared-scope intersection; edit later with `lore scope add|rm` (there is no `lore set --ac-scope`).",
     },
     "code-anchor": {
       type: "string",
@@ -485,7 +487,7 @@ export default defineCommand({
         args["requires-uat"] as boolean | undefined,
         args.adhoc as boolean | undefined,
         args.linkage as string | undefined,
-        normalizeRepeatable(args["ac-scope"]),
+        resolveAcScopeForCreate(args["ac-scope"] as string | string[] | undefined),
       );
 
       // SPEC-065 D4: --parent defaults to the (already-resolved) --plan-id when
@@ -631,11 +633,16 @@ export default defineCommand({
  * has no planId, so the extra-object branch below fires on `adhoc === true`
  * as an ALTERNATIVE to the pre-SPEC-069 `planId !== undefined` gate, not a
  * replacement of it — a --plan-id task without --adhoc is unaffected.
- * For tasks (spec-declared-scope-attestation-contract-task-owned-ac-scope):
- * includes ac_scope ONLY when --ac-scope was passed at least once (repeatable),
- * RAW — per-id shape is validated by `taskExtraSchema` at the service seam, and
- * an omitted flag leaves the key ABSENT rather than `[]` (see the branch's own
- * comment for why that distinction is load-bearing).
+ * For tasks (spec-declared-scope-attestation-contract-task-owned-ac-scope,
+ * extended by spec-declaring-ac-scope-is-required-at-task-creation-so-the
+ * §Design Decisions D2): includes ac_scope iff `--ac-scope` was PASSED at
+ * least once (`acScope.passed`, resolved by `resolveAcScopeForCreate` —
+ * `create-task-validation.ts`) — an omitted flag leaves the key ABSENT
+ * (nobody declared a scope); a passed flag stores `acScope.ids` VERBATIM,
+ * which is `[]` when every occurrence was empty/whitespace-only (an author
+ * explicitly declaring "this task claims nothing", D2 — a state DISTINCT
+ * from absent, not the "always non-empty" shape the pre-existing comment
+ * here described before this task landed).
  */
 function buildExtra(
   docType: DocType,
@@ -649,7 +656,7 @@ function buildExtra(
   requiresUat?: boolean,
   adhoc?: boolean,
   linkage?: string,
-  acScope?: string[],
+  acScope?: ResolvedAcScope,
 ): Record<string, unknown> | undefined {
   if (docType === "adr" && decisionStatus !== undefined) {
     return { decision_status: decisionStatus };
@@ -670,12 +677,14 @@ function buildExtra(
     }
     // Only a PASSED --ac-scope writes the key. An omitted flag leaves it
     // ABSENT, never `[]`: absent means nobody declared a scope, `[]` means an
-    // author declared this task claims nothing, and the two get different
-    // refusals from `lore verify` (spec-declared-scope-attestation-contract-
-    // task-owned-ac-scope §Contract Details). Only `lore scope rm` of the final
-    // id may produce the empty form.
-    if (acScope !== undefined && acScope.length > 0) {
-      extra["ac_scope"] = acScope;
+    // author declared this task claims nothing (either via `--ac-scope ""`
+    // at create time, spec-declaring-ac-scope-is-required-at-task-creation-
+    // so-the §Design Decisions D2, or via `lore scope rm` of the final id
+    // post-create), and the two get different refusals from `lore verify`
+    // (spec-declared-scope-attestation-contract-task-owned-ac-scope §Contract
+    // Details).
+    if (acScope !== undefined && acScope.passed) {
+      extra["ac_scope"] = acScope.ids;
     }
     return extra;
   }

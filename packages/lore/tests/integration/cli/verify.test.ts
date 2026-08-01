@@ -96,7 +96,7 @@ function runLore(args: string[], cwd: string, envOverrides: Record<string, strin
 }
 
 /**
- * Disables all four `lore gate` service-layer checkpoints for this fixture's corpus
+ * Disables all five `lore gate` service-layer checkpoints for this fixture's corpus
  * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
  * by default in every production `createApp`, which every subprocess-spawned `lore`
  * command in this file goes through). None of this file's ACs exercise spec-create/
@@ -108,6 +108,16 @@ function runLore(args: string[], cwd: string, envOverrides: Record<string, strin
  * not what they're testing. Mirrors the config shape
  * `tests/integration/gate-config-disable.bun.test.ts` establishes
  * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
+ *
+ * `task-create` (spec-declaring-ac-scope-is-required-at-task-creation-so-the)
+ * joins this list for the SAME reason: `createTask`'s `acScope` parameter
+ * defaults to `[]` (zero `--ac-scope` flags) for every caller that doesn't need
+ * declared-scope selection (e.g. AC-VRF-10.N1's ambiguous-claim fixture, which
+ * declares a script-mode AC purely so `lore verify` has something structurally
+ * reachable, then creates TWO tasks to test claim ambiguity, unrelated to
+ * ac_scope). Without this, those fixture tasks would refuse at creation with
+ * `AC_SCOPE_REQUIRED` — declared-scope AUTHORING has its own dedicated
+ * coverage (`create-task-ac-scope.test.ts` / `-e2e.bun.test.ts`), not this file.
  */
 function disableAllGates(dir: string): void {
   appendFileSync(
@@ -122,6 +132,8 @@ function disableAllGates(dir: string): void {
       "    plan-promote:",
       "      enabled: false",
       "    task-claim:",
+      "      enabled: false",
+      '    "task-create":',
       "      enabled: false",
       "",
     ].join("\n"),

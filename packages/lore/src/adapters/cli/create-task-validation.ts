@@ -177,3 +177,54 @@ export function inferTaskParentId(
   if (rawParent !== undefined) return rawParent;
   return resolvedPlanId;
 }
+
+/**
+ * Resolved `--ac-scope` intent — whether the flag was passed AT ALL, plus the
+ * exact ids to store (spec-declaring-ac-scope-is-required-at-task-creation-
+ * so-the §Design Decisions D2). The CLI-ergonomics half of the absent-vs-
+ * empty contract `taskExtraSchema.ac_scope`/`acScopeArraySchema` (`@lore/core`)
+ * already enforces at the schema layer — a repeatable `string` citty flag
+ * naturally yields ids or nothing, with no built-in way to say "I passed this
+ * flag on purpose to declare an EMPTY scope"; this function adds that one
+ * missing bit.
+ */
+export interface ResolvedAcScope {
+  /** Whether `--ac-scope` appeared at least once on the command line. */
+  readonly passed: boolean;
+  /** The ids to store — `[]` when every occurrence was empty/whitespace-only. */
+  readonly ids: string[];
+}
+
+/**
+ * Resolves the CLI's raw `--ac-scope` occurrence(s) into {@link ResolvedAcScope}.
+ * citty/mri yields `undefined` for zero occurrences, a bare `string` for one,
+ * a `string[]` for >= 2 (mirrors `commands/create.ts::normalizeRepeatable`'s
+ * existing contract, which this supersedes for `--ac-scope` only — every other
+ * repeatable flag, e.g. `--anchor`, keeps using `normalizeRepeatable`).
+ *
+ * A single passed occurrence whose value is empty/whitespace-only (e.g.
+ * `--ac-scope ""`) is the CLI's sentinel for "I explicitly declare this task
+ * claims NOTHING" (D2) — it is dropped from `ids`, but `passed` stays `true`,
+ * so the caller stores `extra.ac_scope: []` rather than treating the flag as
+ * never having been passed. Real ids pass through COMPLETELY UNTOUCHED (no
+ * trim) — AC-ACS-2 requires the stored array equal EXACTLY the ids passed.
+ *
+ * @param rawFlag - `args["ac-scope"]` as citty/mri parsed it.
+ * @returns `{passed: false, ids: []}` when the flag was never passed;
+ *   `{passed: true, ids: [...]}` otherwise.
+ * @example
+ * resolveAcScopeForCreate(undefined);        // => { passed: false, ids: [] }
+ * @example
+ * resolveAcScopeForCreate("AC-1");           // => { passed: true, ids: ["AC-1"] }
+ * @example
+ * resolveAcScopeForCreate(["AC-1", "AC-2"]); // => { passed: true, ids: ["AC-1", "AC-2"] }
+ * @example
+ * resolveAcScopeForCreate("");               // => { passed: true, ids: [] } — explicit empty (D2)
+ */
+export function resolveAcScopeForCreate(rawFlag: string | string[] | undefined): ResolvedAcScope {
+  if (rawFlag === undefined) {
+    return { passed: false, ids: [] };
+  }
+  const raw = Array.isArray(rawFlag) ? rawFlag.map(String) : [String(rawFlag)];
+  return { passed: true, ids: raw.filter((s) => s.trim() !== "") };
+}

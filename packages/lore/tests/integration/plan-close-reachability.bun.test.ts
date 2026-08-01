@@ -166,6 +166,16 @@ function createFixtureChain(dir: string): { planSlug: string } {
   // reachability, not review-judgment.
   appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
 
+  // reason: spec-declaring-ac-scope-is-required-at-task-creation-so-the — this
+  // spec now declares a script-mode AC (AC-CLOSURE-6-1), so task-create's
+  // admission gate would otherwise require the fixture task below to declare
+  // ac_scope. Disabled rather than declared: this suite's subject is the
+  // plan-close deny message's WORDING (per this file's header), which conjunct
+  // produces the denial is deliberately irrelevant here — task-create is an
+  // independent checkpoint from plan-close's own attestation-floor predicate
+  // under test.
+  appendWorkflowConfig(dir, '\nworkflow:\n  gates:\n    "task-create":\n      enabled: false\n');
+
   // reason: spec-declared-scope-attestation-contract-task-owned-ac-scope §Facts
   // D5 demoted the per-task zero-attested condition, so this fixture's
   // self-reported-only entry no longer denies the close by itself; the surviving

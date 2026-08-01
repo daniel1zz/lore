@@ -1,0 +1,270 @@
+/**
+ * End-to-end tests for the `task-create` admission gate's interaction with
+ * `lore verify` (spec-declaring-ac-scope-is-required-at-task-creation-so-the),
+ * spawning the COMPILED `dist/lore` binary (Bun.spawnSync) against throwaway
+ * corpora (mkdtemp + `lore init`) — never the repo's own `.lore/` corpus
+ * (project CLAUDE.md hard rule). Requires `bun run build` first;
+ * `assertFreshBinary` fails loud before any test runs if `dist/lore` is
+ * missing or older than the newest `.ts` source under `packages/{lore,core}/src`
+ * (false-oracle vector 4).
+ *
+ * Why the COMPILED binary and not `bun run src/index.ts` (the vitest sibling
+ * file, `create-task-ac-scope.test.ts`, covers AC-ACS-1/2/3/4/5/7 that way):
+ * these two ACs are specifically about `lore verify`'s RUNNER-ATTESTED evidence
+ * path — the same "real trusted-runner execution" surface this repo's other
+ * `.bun.test.ts` e2e suites (`cli-scope-writer.bun.test.ts`) exercise against
+ * the compiled artifact, so a stale build can never silently pass.
+ *
+ * Coverage:
+ *   REGRESSION: `lore verify` with an ABSENT `ac_scope` PLUS an explicit `--ac`
+ *               still runs the named id and writes RUNNER-ATTESTED evidence —
+ *               the back-catalogue recovery path (D4: the admission rule binds
+ *               at CREATE only, it never re-evaluates existing tasks) stays
+ *               open. Simulated by creating the fixture task with the
+ *               `task-create` checkpoint disabled by config (the same shape a
+ *               task created before this rule existed would carry: `ac_scope`
+ *               genuinely absent) (AC-ACS-6)
+ *   HAPPY (E2E, the whole point): a task created UNDER this rule (declaring
+ *               `--ac-scope` because its plan's spec has a script-mode AC) is
+ *               verified by `lore verify <plan>` and the resulting evidence
+ *               entry — read back via `lore get --json`, never inferred from
+ *               a zero exit code alone — carries an `attestation` block
+ *               (AC-ACS-8)
+ *
+ * @spec_ref AC-ACS-6 AC-ACS-8
+ */
+
+import { describe, expect, it, beforeAll, afterEach, setDefaultTimeout } from "bun:test";
+import { mkdtempSync, rmSync, appendFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+
+// reason: each test spawns ~6-7 compiled-binary processes; bun's 5s default
+// hook timeout is comfortably exceeded on a loaded machine (mirrors
+// cli-scope-writer.bun.test.ts's identical rationale for the same raise).
+setDefaultTimeout(120_000);
+
+// tests/integration/cli/ → tests/integration/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
+const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
+const LORE_BIN = join(REPO_ROOT, "dist", "lore");
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+function runLore(args: string[], cwd: string): RunResult {
+  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+    cwd,
+    env: { ...process.env, HOME: cwd, EDITOR: "true" },
+  });
+  return {
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+    exitCode: proc.exitCode ?? 1,
+  };
+}
+
+/** Runs a fixture-setup command, failing loud (never silently) on a nonzero exit. */
+function mustRun(args: string[], cwd: string): RunResult {
+  const result = runLore(args, cwd);
+  if (result.exitCode !== 0) {
+    throw new Error(`fixture command \`lore ${args.join(" ")}\` failed (${result.exitCode}): ${result.stderr}`);
+  }
+  return result;
+}
+
+function extractSlug(stdout: string): string {
+  const m = stdout.match(/Slug:\s+(\S+)/);
+  const slug = m?.[1];
+  if (!slug) throw new Error(`Could not extract slug from: ${stdout}`);
+  return slug;
+}
+
+interface DocJson {
+  readonly slug: string;
+  readonly extra: Record<string, unknown>;
+}
+
+function getDoc(slug: string, cwd: string): DocJson {
+  const result = mustRun(["get", slug, "--json"], cwd);
+  return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
+}
+
+beforeAll(() => {
+  assertFreshBinary(LORE_BIN, [
+    join(REPO_ROOT, "packages", "lore", "src"),
+    join(REPO_ROOT, "packages", "core", "src"),
+  ]);
+});
+
+let tmpDir: string;
+
+afterEach(() => {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* best-effort cleanup */
+  }
+});
+
+// ─── AC-ACS-6 — REGRESSION: ac_scope ABSENT + explicit --ac still attests ───
+
+describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalogue recovery)", () => {
+  it("still runs the named id and writes runner-attested evidence", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-acscope-e2e-regression-"));
+    mustRun(["init"], tmpDir);
+
+    // reason: simulates a task created BEFORE this admission rule existed —
+    // the ONLY way to construct a real ac_scope-ABSENT task under a
+    // script-lineaged plan now that task-create refuses it by default.
+    // Disabling the checkpoint for creation does not touch `lore verify`'s
+    // OWN escape valve under test below; once created, the doc's ac_scope
+    // is genuinely absent regardless of why.
+    appendFileSync(
+      join(tmpDir, ".lore", "config.yaml"),
+      ["workflow:", "  gates:", '    "task-create":', "      enabled: false", ""].join("\n"),
+    );
+
+    mustRun(["create", "prd", "--title", "Regression PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
+    mustRun(
+      ["create", "spec", "--title", "Regression Spec", "--parent", "prd-regression-prd", "--no-ai", "--content", "## Overview\nbody"],
+      tmpDir,
+    );
+    mustRun(
+      [
+        "ac",
+        "add",
+        "spec-regression-spec",
+        "AC-REG-1",
+        "--statement",
+        "A dogfood AC.",
+        "--mode",
+        "script",
+        "--oracle",
+        "other",
+        "--command",
+        "true",
+      ],
+      tmpDir,
+    );
+    mustRun(["create", "plan", "--title", "Regression Plan", "--parent", "spec-regression-spec", "--no-ai", "--content", "body"], tmpDir);
+    const createResult = mustRun(
+      [
+        "create",
+        "task",
+        "--title",
+        "Pre-Rule Task",
+        "--parent",
+        "plan-regression-plan",
+        "--plan-id",
+        "plan-regression-plan",
+        "--no-ai",
+        "--content",
+        "body",
+      ],
+      tmpDir,
+    );
+    const taskSlug = extractSlug(createResult.stdout);
+
+    // Verify the fixture actually constructed the state this REGRESSION guards:
+    // ac_scope genuinely ABSENT on the created task.
+    expect("ac_scope" in getDoc(taskSlug, tmpDir).extra).toBe(false);
+
+    const verifyResult = runLore(
+      ["verify", "plan-regression-plan", "--task", taskSlug, "--ac", "AC-REG-1", "--allow-new-commands"],
+      tmpDir,
+    );
+
+    expect(verifyResult.exitCode).toBe(0);
+    expect(verifyResult.stdout).toContain("AC-REG-1");
+    expect(verifyResult.stdout).toContain("pass");
+
+    const evidence = getDoc(taskSlug, tmpDir).extra["verification_evidence"] as
+      | Array<Record<string, unknown>>
+      | undefined;
+    expect(evidence ?? []).toHaveLength(1);
+    const attestation = evidence?.[0]?.["attestation"] as Record<string, unknown> | undefined;
+    expect(attestation).toBeDefined();
+    expect(attestation?.["runner"]).toBe("lore-cli");
+    expect(attestation?.["exit_code"]).toBe(0);
+  });
+});
+
+// ─── AC-ACS-8 — HAPPY (E2E, the whole point) ─────────────────────────────────
+
+describe("lore verify — a task created under this rule is attested end-to-end (AC-ACS-8)", () => {
+  it("declares --ac-scope at creation, is verified, and the STORED evidence entry carries an attestation block", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "lore-acscope-e2e-happy-"));
+    mustRun(["init"], tmpDir);
+
+    mustRun(["create", "prd", "--title", "E2E PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
+    mustRun(
+      ["create", "spec", "--title", "E2E Spec", "--parent", "prd-e2e-prd", "--no-ai", "--content", "## Overview\nbody"],
+      tmpDir,
+    );
+    mustRun(
+      [
+        "ac",
+        "add",
+        "spec-e2e-spec",
+        "AC-E2E-1",
+        "--statement",
+        "A dogfood AC.",
+        "--mode",
+        "script",
+        "--oracle",
+        "other",
+        "--command",
+        "true",
+      ],
+      tmpDir,
+    );
+    mustRun(["create", "plan", "--title", "E2E Plan", "--parent", "spec-e2e-spec", "--no-ai", "--content", "body"], tmpDir);
+
+    // Declares --ac-scope AT CREATION TIME — this is the admission rule's
+    // whole point: the create path REQUIRES this, unlike the regression
+    // fixture above (which disabled the checkpoint to construct the
+    // pre-rule state).
+    const createResult = mustRun(
+      [
+        "create",
+        "task",
+        "--title",
+        "Rule-Compliant Task",
+        "--parent",
+        "plan-e2e-plan",
+        "--plan-id",
+        "plan-e2e-plan",
+        "--no-ai",
+        "--content",
+        "body",
+        "--ac-scope",
+        "AC-E2E-1",
+      ],
+      tmpDir,
+    );
+    const taskSlug = extractSlug(createResult.stdout);
+    expect(getDoc(taskSlug, tmpDir).extra["ac_scope"]).toEqual(["AC-E2E-1"]);
+
+    const verifyResult = runLore(["verify", "plan-e2e-plan", "--task", taskSlug, "--allow-new-commands"], tmpDir);
+
+    expect(verifyResult.exitCode).toBe(0);
+    expect(verifyResult.stdout).toContain("AC-E2E-1");
+    expect(verifyResult.stdout).toContain("pass");
+
+    // Asserted on the STORED entry, never on the zero exit code alone.
+    const evidence = getDoc(taskSlug, tmpDir).extra["verification_evidence"] as
+      | Array<Record<string, unknown>>
+      | undefined;
+    expect(evidence ?? []).toHaveLength(1);
+    const attestation = evidence?.[0]?.["attestation"] as Record<string, unknown> | undefined;
+    expect(attestation).toBeDefined();
+    expect(attestation?.["runner"]).toBe("lore-cli");
+    expect(attestation?.["exit_code"]).toBe(0);
+    expect(attestation?.["timed_out"]).toBe(false);
+    expect(evidence?.[0]?.["ac_ref"]).toBe("AC-E2E-1");
+  });
+});
