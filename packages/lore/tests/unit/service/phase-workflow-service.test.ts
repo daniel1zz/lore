@@ -403,6 +403,97 @@ describe("PhaseWorkflowService — REGRESSION §3: legacy task doc read toleranc
   });
 });
 
+// ─── plan membership: legacy task extra.plan_id vs parent_id ────────────────
+// task-plan-membership-is-extra-plan-id-but-the-last-task AC4 — `fetchPlanChildren`'s
+// LEGACY task query (D2 read tolerance) is created via the SAME `--plan-id`/`--parent`
+// pair as any other task (SPEC-065 D4), so it is subject to the identical divergence
+// the task tier's `ready()`/`computePlanNowFullyTerminal` fix removes. The sibling
+// `phasesResult` query is UNCHANGED — `PhaseMigrationService` (phase docs' sole
+// writer) always sets `parent_id === extra.plan_id`, so no divergence is structurally
+// possible there (see `fetchPlanChildren`'s own comment).
+
+describe("PhaseWorkflowService — plan membership: legacy task extra.plan_id vs parent_id", () => {
+  function makeDivergedLegacyTaskRecord(overrides: Partial<DocRecord> = {}): DocRecord {
+    const base: DocRecord = {
+      id: "01HTASKDIVERGED0000000001",
+      slug: "task-diverged",
+      type: "task",
+      role: "plan",
+      title: "Diverged Legacy Task",
+      status: "draft",
+      priority: "medium",
+      content: "# Diverged Legacy Task",
+      parent_id: "01HPLAN000000000000000000", // filed under plan-one
+      created_at: "2026-07-19T00:00:00.000Z",
+      updated_at: "2026-07-19T00:00:00.000Z",
+      created_by: "system",
+      version: 1,
+      deleted_at: null,
+      tags: [],
+      extra: { plan_id: "01HPLANOTHER0000000000001" }, // BELONGS to plan-other instead
+    };
+    return { ...base, ...overrides };
+  }
+
+  function makeUndivergedLegacyTaskRecord(overrides: Partial<DocRecord> = {}): DocRecord {
+    const base: DocRecord = {
+      id: "01HTASKPLAIN00000000000001",
+      slug: "task-plain-legacy",
+      type: "task",
+      role: "plan",
+      title: "Plain Legacy Task",
+      status: "draft",
+      priority: "medium",
+      content: "# Plain Legacy Task",
+      parent_id: "01HPLAN000000000000000000",
+      created_at: "2026-07-19T00:00:00.000Z",
+      updated_at: "2026-07-19T00:00:00.000Z",
+      created_by: "system",
+      version: 1,
+      deleted_at: null,
+      tags: [],
+      extra: { plan_id: "01HPLAN000000000000000000" },
+    };
+    return { ...base, ...overrides };
+  }
+
+  it("NEGATIVE: ready() on the OWNING plan (extra.plan_id) lists the diverged legacy task, even though it is filed elsewhere", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord()); // plan-one (the FILED-under plan)
+    await mustInsert(store, makePlanRecord({ id: "01HPLANOTHER0000000000001", slug: "plan-other" })); // the OWNING plan
+    await mustInsert(store, makeDivergedLegacyTaskRecord());
+
+    const ready = await service.ready("plan-other");
+    expect(ready.ok).toBe(true);
+    if (!ready.ok) return;
+    expect(ready.value.records.map((r) => r.task.slug)).toContain("task-diverged");
+  });
+
+  it("NEGATIVE: ready() on the FILED-under plan (parent_id) does NOT list the diverged legacy task — it does not belong there", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord()); // plan-one
+    await mustInsert(store, makePlanRecord({ id: "01HPLANOTHER0000000000001", slug: "plan-other" }));
+    await mustInsert(store, makeDivergedLegacyTaskRecord());
+
+    const ready = await service.ready("plan-one");
+    expect(ready.ok).toBe(true);
+    if (!ready.ok) return;
+    expect(ready.value.records.map((r) => r.task.slug)).not.toContain("task-diverged");
+    expect(ready.value.records).toEqual([]);
+  });
+
+  it("REGRESSION: an undiverged legacy task's ready() listing is unchanged (parent_id === extra.plan_id, the common case)", async () => {
+    const { store, service } = makeServices();
+    await mustInsert(store, makePlanRecord());
+    await mustInsert(store, makeUndivergedLegacyTaskRecord());
+
+    const ready = await service.ready("plan-one");
+    expect(ready.ok).toBe(true);
+    if (!ready.ok) return;
+    expect(ready.value.records.map((r) => r.task.slug)).toEqual(["task-plain-legacy"]);
+  });
+});
+
 // ─── REGRESSION §5: anchor-overlap gate field renames end-to-end ────────────
 
 describe("PhaseWorkflowService — REGRESSION §5: anchor-overlap gate field 'gate:phase-claim:anchor-overlap'", () => {

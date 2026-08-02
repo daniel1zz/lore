@@ -351,6 +351,39 @@ export interface DoneOpts {
  * `"archived"` — one entry per audited write {@link TaskWorkflowService.done}'s own
  * JSDoc describes.
  */
+/**
+ * A distinct, explicit VALUE {@link TaskWorkflowService}'s internal
+ * `computePlanNowFullyTerminal` returns when the plan's `extra.plan_id`-based
+ * (property) member set is EMPTY while the retired `parent_id`-based (proxy)
+ * member set is NON-EMPTY — a contradiction, never conflated with "no members,
+ * nothing to report" (ADR proxy/silence/opt-in review Q2,
+ * task-plan-membership-is-extra-plan-id-but-the-last-task). Reported so a
+ * caller can tell "this plan genuinely has zero real members" apart from
+ * "something is filed here that does not consider itself a member" — NEVER
+ * resolved by unioning the two sets, which would re-admit the exact
+ * misattribution this fix removes.
+ */
+export interface PlanMembershipDisagreement {
+  plan_slug: string;
+  /**
+   * Count of tasks whose `parent_id` points at this plan while their OWN
+   * `extra.plan_id` does not — i.e. every doc the retired proxy-only query
+   * would have (mis)counted as a member.
+   */
+  parent_id_only_count: number;
+}
+
+/**
+ * {@link TaskWorkflowService.computePlanNowFullyTerminal}'s return facts — a
+ * discriminated union (never two structurally-similar `{plan_slug}` shapes
+ * distinguished only by which optional field is present) so "the advisory
+ * fires" and "the two membership sources disagree" can never be confused with
+ * each other while being threaded through to {@link DoneResult}.
+ */
+type PlanTerminalityFact =
+  | { kind: "fully_terminal"; plan_slug: string }
+  | ({ kind: "membership_disagreement" } & PlanMembershipDisagreement);
+
 export interface DoneResult {
   task: DocRecord;
   already_done: boolean;
@@ -358,16 +391,27 @@ export interface DoneResult {
   /**
    * Present ONLY when this call performed a real archive walk (never on the
    * `already_done: true` idempotent no-op branch) AND that walk made the
-   * task's parent PLAN's every child task terminal (`archived`/`deprecated`)
-   * while the plan itself is still non-terminal (spec-plan-closure-must-be-
-   * loud-terminality-divergence-silent DD-2, AC-CLOSURE-3). A pure FACT — no
-   * plan document is read-modify-written to produce it, and `done()` never
-   * writes the plan (Invariant 1: `done` announces, it never closes; the
-   * `plan-close` gate remains the sole path to actually archiving the plan).
-   * `undefined` for: a non-last task, an adhoc/planless task (no `plan`-typed
-   * parent), or a plan that is already terminal.
+   * task's parent PLAN's every REAL child task (membership per `extra.plan_id`
+   * — task-plan-membership-is-extra-plan-id-but-the-last-task) terminal
+   * (`archived`/`deprecated`) while the plan itself is still non-terminal
+   * (spec-plan-closure-must-be-loud-terminality-divergence-silent DD-2,
+   * AC-CLOSURE-3). A pure FACT — no plan document is read-modify-written to
+   * produce it, and `done()` never writes the plan (Invariant 1: `done`
+   * announces, it never closes; the `plan-close` gate remains the sole path to
+   * actually archiving the plan). `undefined` for: a non-last task, an
+   * adhoc/planless task (no `plan`-typed parent), a plan that is already
+   * terminal, or a `plan_membership_disagreement` (below) — mutually exclusive
+   * with that field, since a disagreement means the property-based member set
+   * is empty and "fully terminal" cannot also be true.
    */
   plan_now_fully_terminal?: { plan_slug: string };
+  /**
+   * Present ONLY when `computePlanNowFullyTerminal` detected the membership-
+   * source disagreement described on {@link PlanMembershipDisagreement} for the
+   * archived task's parent plan. See that type's JSDoc and ADR review Q2,
+   * task-plan-membership-is-extra-plan-id-but-the-last-task.
+   */
+  plan_membership_disagreement?: PlanMembershipDisagreement;
 }
 
 /**
@@ -641,6 +685,21 @@ export function computeArchiveWalk(from: DocStatus): DocStatus[] {
  *  read-only fact computation, not the drift detector. */
 function isTerminalStatus(status: DocStatus): boolean {
   return status === "archived" || status === "deprecated";
+}
+
+/**
+ * Plan-membership predicate keyed on `extra.plan_id` — the DECLARED property of plan
+ * membership (mandatory for every non-adhoc task; `--plan-id` is the flag that writes
+ * it, `createDocInputSchema`'s task branch enforces its presence). `parent_id` is a
+ * PROXY a task's `--parent` may deliberately diverge from (SPEC-065 D4 — "a task
+ * parented somewhere OTHER than its own plan passes --parent explicitly"), so a
+ * `parent_id`-keyed query silently drops a diverged member from ITS OWN plan and
+ * attributes it to whatever plan it happens to be filed under instead
+ * (task-plan-membership-is-extra-plan-id-but-the-last-task). Every plan-scoped task
+ * query in this file goes through this predicate, never a bare `t.parent_id === planId`.
+ */
+function isPlanMember(task: DocRecord, planId: DocId): boolean {
+  return task.extra["plan_id"] === planId;
 }
 
 /**
@@ -1936,12 +1995,23 @@ export class TaskWorkflowService {
     // "last task" signal since nothing changed this call.
     const planFactResult = await this.computePlanNowFullyTerminal(task);
     if (!planFactResult.ok) return planFactResult;
+    const planFact = planFactResult.value;
 
     return ok({
       task,
       already_done: false,
       transitions,
-      ...(planFactResult.value !== undefined ? { plan_now_fully_terminal: planFactResult.value } : {}),
+      ...(planFact?.kind === "fully_terminal"
+        ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug } }
+        : {}),
+      ...(planFact?.kind === "membership_disagreement"
+        ? {
+            plan_membership_disagreement: {
+              plan_slug: planFact.plan_slug,
+              parent_id_only_count: planFact.parent_id_only_count,
+            },
+          }
+        : {}),
     });
   }
 
@@ -2281,16 +2351,23 @@ export class TaskWorkflowService {
   // ── ready ────────────────────────────────────────────────────────────────
 
   /**
-   * Computed readiness report for every task under a plan. Zero writes (D3).
+   * Computed readiness report for every task BELONGING to a plan. Zero writes (D3).
    *
    * Fetches: (1) the plan's parent doc, once, to derive the SPEC-032 §3.4
-   * `upstream_unapproved` advisory (non-null iff the parent is a `spec`), (2) the
-   * plan's child tasks, (3) `blocks`-type links targeting those tasks in one batch
-   * query (D7), (4) statuses/slugs for the referenced blocker docs — then delegates
-   * to the pure `evaluateReadiness`. SPEC-042 D7 additionally derives `sessions`
-   * (this plan's FRESH claims grouped by `deriveSessions`) and `anchor_conflicts`
-   * (fresh, foreign, anchor-overlapping sibling pairs) — both PLAN-SCOPED, zero
-   * extra store IO (reuses the SAME `tasks` array already fetched below).
+   * `upstream_unapproved` advisory (non-null iff the parent is a `spec`), (2) every
+   * `type: "task"` doc corpus-wide, narrowed client-side to this plan's members via
+   * `isPlanMember` (`extra.plan_id === plan.id` — the DECLARED property; `parent_id`
+   * is a proxy `--parent` may deliberately diverge from, SPEC-065 D4, and a
+   * `parent_id`-keyed query silently drops a diverged member from its own plan —
+   * task-plan-membership-is-extra-plan-id-but-the-last-task. The store has no
+   * extra-field filter, so this is corpus-wide + client-side, the SAME shape the
+   * blocker-status lookup below already uses), (3) `blocks`-type links targeting
+   * those tasks in one batch query (D7), (4) statuses/slugs for the referenced
+   * blocker docs — then delegates to the pure `evaluateReadiness`. SPEC-042 D7
+   * additionally derives `sessions` (this plan's FRESH claims grouped by
+   * `deriveSessions`) and `anchor_conflicts` (fresh, foreign, anchor-overlapping
+   * sibling pairs) — both PLAN-SCOPED, zero extra store IO (reuses the SAME `tasks`
+   * array already fetched below).
    *
    * @param planIdOrSlug - Plan document ULID or slug
    * @param now - Time seam (D10) — drives claim staleness computation
@@ -2328,8 +2405,12 @@ export class TaskWorkflowService {
       }
     }
 
-    const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
-    if (!tasksResult.ok) return tasksResult;
+    // reason: task-plan-membership-is-extra-plan-id-but-the-last-task — plan
+    // membership is `extra.plan_id`, not `parent_id` (see `isPlanMember`'s JSDoc).
+    // `findMany` has no extra-field filter, so this is a corpus-wide `type: "task"`
+    // scan narrowed client-side, rather than a `parent_id`-filtered store query.
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    if (!allTasksResult.ok) return allTasksResult;
 
     const nowIso = now();
     // reason: task-a-task-cannot-be-retracted-supersedes-emits-a-repair AC3 —
@@ -2339,7 +2420,9 @@ export class TaskWorkflowService {
     // no-op check on `doc.type`) that reads false for every task that was
     // never invalidated, so this filter is a byte-identical no-op for every
     // pre-existing plan.
-    const tasks = tasksResult.value.filter((t) => !isInvalidated(t, nowIso));
+    const tasks = allTasksResult.value.filter(
+      (t) => isPlanMember(t, plan.id) && !isInvalidated(t, nowIso),
+    );
 
     if (tasks.length === 0) return ok({ records: [], sessions: [], anchor_conflicts: [] });
 
@@ -2612,26 +2695,44 @@ export class TaskWorkflowService {
   }
 
   /**
-   * Computes DD-2's `DoneResult.plan_now_fully_terminal` fact (spec-plan-closure-
-   * must-be-loud-terminality-divergence-silent, AC-CLOSURE-3) — a READ-ONLY check,
-   * never a write: `done()`'s own Invariant 1 forbids this service from touching the
-   * plan document. Returns `undefined` (not an error) for every case that does not
-   * warrant the advisory: `archivedTask.parent_id === null`, a parent that fails to
+   * Computes DD-2's `DoneResult.plan_now_fully_terminal`/`plan_membership_disagreement`
+   * facts (spec-plan-closure-must-be-loud-terminality-divergence-silent, AC-CLOSURE-3;
+   * membership fixed by task-plan-membership-is-extra-plan-id-but-the-last-task) — a
+   * READ-ONLY check, never a write: `done()`'s own Invariant 1 forbids this service from
+   * touching the plan document. Returns `ok(undefined)` for every case that does not
+   * warrant either fact: `archivedTask.parent_id === null`, a parent that fails to
    * resolve or is not `type: "plan"` (adhoc tasks auto-parent to the root PRD —
    * `CorpusService._createImpl`'s adhoc block), a plan that is ALREADY terminal
-   * (nothing left to announce), or a plan with ≥1 still-non-terminal child task.
+   * (nothing left to announce), or a plan with ≥1 still-non-terminal REAL member.
+   *
+   * Plan membership is `extra.plan_id` (the DECLARED property `isPlanMember` reads),
+   * NOT `parent_id` (a proxy `--parent` may deliberately diverge from, SPEC-065 D4) —
+   * see `isPlanMember`'s own JSDoc. Because the store has no extra-field filter, this
+   * reads every `type: "task"` doc corpus-wide and filters client-side (same "one
+   * unfiltered findMany + client-side pick" shape `ready()`'s blocker-status lookup
+   * already uses at the real plan sizes §8.3's rationale targets).
+   *
+   * Q2 (ADR proxy/silence/opt-in review): an EMPTY property-based member set must not
+   * silently read the same as "nothing to report" when the retired `parent_id`-keyed
+   * query would have found members — that is a contradiction, not a quiet non-event.
+   * This is detected and reported as `{kind: "membership_disagreement", ...}`, a value
+   * distinct from `ok(undefined)`, NEVER resolved by unioning the two member sets (a
+   * union would re-admit the exact misattribution this fix removes).
    *
    * @param archivedTask - The task DocRecord AFTER `_doneImpl`'s walk wrote it to
    *   `"archived"` — its `parent_id` is unchanged by that walk (only `status`/
    *   `version`/`updated_at` are touched), so this reads that same field.
-   * @returns `ok({ plan_slug })` when every child task under the parent plan is now
-   *   terminal and the plan itself is not; `ok(undefined)` otherwise; `err(...)` only
-   *   on a genuine store failure reading the parent or siblings (propagated, not
-   *   swallowed — a store error here must not silently masquerade as "no advisory").
+   * @returns `ok({kind: "fully_terminal", plan_slug})` when every REAL member of the
+   *   parent plan is now terminal and the plan itself is not; `ok({kind:
+   *   "membership_disagreement", plan_slug, parent_id_only_count})` when the property-
+   *   based member set is empty but the proxy-based one is not; `ok(undefined)`
+   *   otherwise; `err(...)` only on a genuine store failure reading the parent or
+   *   corpus-wide tasks (propagated, not swallowed — a store error here must not
+   *   silently masquerade as "no advisory").
    */
   private async computePlanNowFullyTerminal(
     archivedTask: DocRecord,
-  ): Promise<Result<{ plan_slug: string } | undefined, LoreError>> {
+  ): Promise<Result<PlanTerminalityFact | undefined, LoreError>> {
     if (archivedTask.parent_id === null) return ok(undefined);
 
     const parentResult = await this.store.find(archivedTask.parent_id);
@@ -2640,14 +2741,30 @@ export class TaskWorkflowService {
     if (plan === null || plan.type !== "plan") return ok(undefined);
     if (isTerminalStatus(plan.status)) return ok(undefined);
 
-    const siblingsResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
-    if (!siblingsResult.ok) return siblingsResult;
-    const siblings = siblingsResult.value;
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    if (!allTasksResult.ok) return allTasksResult;
+    const allTasks = allTasksResult.value;
 
-    const allTerminal = siblings.length > 0 && siblings.every((t) => isTerminalStatus(t.status));
+    const members = allTasks.filter((t) => isPlanMember(t, plan.id));
+
+    if (members.length === 0) {
+      const parentIdOnlyCount = allTasks.filter(
+        (t) => t.parent_id === plan.id && !isPlanMember(t, plan.id),
+      ).length;
+      if (parentIdOnlyCount > 0) {
+        return ok({
+          kind: "membership_disagreement",
+          plan_slug: plan.slug,
+          parent_id_only_count: parentIdOnlyCount,
+        });
+      }
+      return ok(undefined);
+    }
+
+    const allTerminal = members.every((t) => isTerminalStatus(t.status));
     if (!allTerminal) return ok(undefined);
 
-    return ok({ plan_slug: plan.slug });
+    return ok({ kind: "fully_terminal", plan_slug: plan.slug });
   }
 
   /**
