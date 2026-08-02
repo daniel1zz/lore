@@ -102,7 +102,7 @@ describe("assessPlan — typed-field schema violations are treated as malformed 
     });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -138,7 +138,7 @@ describe("assessPlan — typed-field schema violations are treated as malformed 
     });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.retried).toBe(true);

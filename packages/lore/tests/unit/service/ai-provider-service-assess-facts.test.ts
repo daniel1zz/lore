@@ -150,7 +150,7 @@ describe("assessPlan — facts are creation-time-frozen, immune to a contradicto
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: contradictoryJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -180,7 +180,7 @@ describe("assessPlan — facts are creation-time-frozen, immune to a contradicto
     });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 

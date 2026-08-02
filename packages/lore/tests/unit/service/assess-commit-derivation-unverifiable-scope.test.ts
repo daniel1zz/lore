@@ -22,11 +22,18 @@
  *   - AC #4: the forced-unverifiable outcome is a DISTINCT, assert-by-value state, never
  *     conflated with the pre-existing T6 grounding-based suppression.
  *
+ * ⛔ `commitDerivationUnverifiable` is now a REQUIRED field on `assessPlan`'s `opts`
+ * (task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan mechanizes the ADR's Q3
+ * "Opt-in" closure) — there is no longer a compiling call site that OMITS it. The CONTROL
+ * case below, previously exercised by omitting the field entirely, is now exercised by
+ * passing it explicitly as `false` — the exact value omission used to default to, so the
+ * asserted BEHAVIOR is unchanged even though the TypeScript shape that expresses it is not.
+ *
  * Six-dimension coverage:
  *   HAPPY:      the judge scores scope_fidelity absence-based DESPITE the flag — it is
  *               forcibly removed and an explicit "not scored" unverifiable[] entry is
  *               added, regardless of what the judge itself cited.
- *   CONTROL:    the SAME judge response with the flag OMITTED/false keeps the existing
+ *   CONTROL:    the SAME judge response with the flag explicitly `false` keeps the existing
  *               (pre-existing) grounding-based behavior unchanged (no new suppression) —
  *               proves this is an ADDITIVE floor, not a behavior change to the default path.
  *   BOUNDARY:   the judge scores scope_fidelity EVIDENCE-based (not absence) while the
@@ -121,10 +128,10 @@ describe("commitDerivationUnverifiable: HAPPY — an absence-based scope_fidelit
   });
 });
 
-// ─── CONTROL: flag omitted/false leaves the pre-existing (T6) behavior unchanged ────
+// ─── CONTROL: flag explicitly false leaves the pre-existing (T6) behavior unchanged ─
 
-describe("commitDerivationUnverifiable: CONTROL — omitting the flag (or false) never triggers this floor; T6's own grounding rule still governs", () => {
-  it("with the flag omitted, an ungrounded absence-based scope_fidelity score is STILL suppressed by the pre-existing T6 rule (unrelated mechanism, same net removal) but with T6's own reason text, not this floor's", async () => {
+describe("commitDerivationUnverifiable: CONTROL — the flag explicitly false never triggers this floor; T6's own grounding rule still governs", () => {
+  it("with the flag explicitly false, an ungrounded absence-based scope_fidelity score is STILL suppressed by the pre-existing T6 rule (unrelated mechanism, same net removal) but with T6's own reason text, not this floor's", async () => {
     const bundle = await makeBundleWithOneTask();
     const judgeJson = JSON.stringify({
       verdict: "partially_met",
@@ -139,7 +146,7 @@ describe("commitDerivationUnverifiable: CONTROL — omitting the flag (or false)
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
