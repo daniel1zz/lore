@@ -223,7 +223,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: scriptedJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 

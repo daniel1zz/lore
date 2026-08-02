@@ -278,26 +278,34 @@ function diffAgainstFirstParent(cwd: string, sha: string, warnings: string[]): s
  *      `scope_fidelity` score publish as a real finding. `"unverifiable_convention_mismatch"`
  *      is a distinct, named value a caller MUST branch on — never a bare boolean/empty
  *      collapse.
- *   3. **Opt-in** — unconditional whenever a caller passes `allTasksArchived: true`; the
- *      parameter defaults to `undefined` (treated as `false`) ONLY so existing 2-arg call
- *      sites keep compiling unchanged — every call site that CAN compute this fact (every
- *      caller holds the bundle's `DocRecord[]`) is expected to pass it, not opt out of it.
+ *   3. **Opt-in** — CLOSED (task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan):
+ *      `allTasksArchived` is now a REQUIRED third parameter — no default, no `?`. It was
+ *      briefly optional-with-a-default ONLY so the pre-existing 2-arg
+ *      `deriveCommitSetForPlan(cwd, taskSlugs)` call site in `../mcp/tools.ts` kept
+ *      compiling while a concurrent session's file anchors excluded that file — which is
+ *      exactly the proxy that let the MCP adapter's omission go unnoticed by the type
+ *      checker (it still compiled, still passed all 12 pre-existing tests, and still
+ *      silently reported `"no_commits_found"` for the contradiction state). Both adapters
+ *      that create an assessment (CLI `commands/assess.ts`, MCP `../mcp/tools.ts`) now
+ *      compute this fact from their own already-loaded `bundle.tasks` and MUST pass it — a
+ *      third adapter that forgets fails `bun run typecheck`, not silently at runtime.
  *
  * @param cwd - Repository root to run git in (callers pass `process.cwd()` in
  *   production; tests pass a throwaway `git init` fixture directory).
  * @param taskSlugs - Every task-in-plan's slug (`bundle.tasks.map(t => t.slug)`).
- * @param allTasksArchived - Whether EVERY task in the plan already has
+ * @param allTasksArchived - REQUIRED. Whether EVERY task in the plan already has
  *   `status === "archived"` (caller-computed — this module never imports `@lore/core`'s
- *   `DocStatus` to stay a pure git wrapper). Optional; omitted/`undefined` behaves exactly
- *   as before this parameter existed (a zero-match result is always `"no_commits_found"`).
+ *   `DocStatus` to stay a pure git wrapper). No default: every caller must compute and
+ *   pass this fact explicitly (task-the-mcp-assess-adapter-still-calls-
+ *   derivecommitsetforplan — see the ADR three-question review above, Q3).
  * @returns `status: "no_commits_found"` when NOT ONE task slug appears in ANY commit
- *   message reachable from `cwd`'s HEAD AND `allTasksArchived` is not `true` — a named,
+ *   message reachable from `cwd`'s HEAD AND `allTasksArchived` is `false` — a named,
  *   honest boundary state, never a silent empty `"derived"` diff. `status:
  *   "unverifiable_convention_mismatch"` for that SAME zero-match condition when
  *   `allTasksArchived` IS `true` — a distinct value, never collapsed with the above.
  *
  * @example
- * deriveCommitSetForPlan("/repo", ["task-own-a", "task-own-b"]);
+ * deriveCommitSetForPlan("/repo", ["task-own-a", "task-own-b"], false);
  * // → { status: "derived", commits: [...], tasks_without_commits: [], diff_text: "...", warnings: [] }
  * @example
  * deriveCommitSetForPlan("/repo", ["task-archived-a"], true); // every task archived, zero matches
@@ -306,7 +314,7 @@ function diffAgainstFirstParent(cwd: string, sha: string, warnings: string[]): s
 export function deriveCommitSetForPlan(
   cwd: string,
   taskSlugs: string[],
-  allTasksArchived?: boolean,
+  allTasksArchived: boolean,
 ): CommitDerivationResult {
   const warnings: string[] = [];
   const matchedBySha = new Map<string, { subject: string; taskSlugs: Set<string> }>();
@@ -335,7 +343,7 @@ export function deriveCommitSetForPlan(
       // value, never silently folded into the same "no_commits_found" a genuinely
       // commit-less (still in-progress) plan gets. See this function's own JSDoc/the
       // module header for the ADR three-question review this answers.
-      status: allTasksArchived === true ? "unverifiable_convention_mismatch" : "no_commits_found",
+      status: allTasksArchived ? "unverifiable_convention_mismatch" : "no_commits_found",
       commits: [],
       tasks_without_commits: [...taskSlugs],
       diff_text: "",

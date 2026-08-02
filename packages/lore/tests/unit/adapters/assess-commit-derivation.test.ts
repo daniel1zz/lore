@@ -46,10 +46,13 @@
  *               failed: the third argument was silently ignored by plain-JS call
  *               semantics and the old code always returned `"no_commits_found"`), then the
  *               source was fixed to make it pass.
- *   CONTROL:    the exact SAME zero-match fixture with `allTasksArchived: false`/omitted
+ *   CONTROL:    the exact SAME zero-match fixture with `allTasksArchived: false`
  *               still derives the pre-existing `"no_commits_found"` value, byte-identical
  *               to the pre-fix behavior — the new parameter never affects the case it
  *               doesn't apply to (AC #6, distinguishable-genuinely-commit-less control).
+ *               (`allTasksArchived` is now a REQUIRED third parameter — task-the-mcp-
+ *               assess-adapter-still-calls-derivecommitsetforplan — so this CONTROL is
+ *               expressed as an explicit `false`, never an omitted argument.)
  *   CONTROL:    a plan whose commits DO mention the slug derives the identical `"derived"`
  *               commit list regardless of `allTasksArchived`'s value (AC #5 — the flag
  *               only matters on a zero-match result, never overrides a real derivation).
@@ -132,7 +135,7 @@ describe("deriveCommitSetForPlan — PRIMARY ORACLE: interleaved foreign history
     const c4Own = commit(dir, "own-b.txt", "CONTENT_OWN_B_MARKER\n", "implements task-plan-x-own-task-b");
     commit(dir, "foreign3.txt", "CONTENT_FOREIGN_GAMMA\n", "unrelated foreign change gamma");
 
-    const result = deriveCommitSetForPlan(dir, ["task-plan-x-own-task-a", "task-plan-x-own-task-b"]);
+    const result = deriveCommitSetForPlan(dir, ["task-plan-x-own-task-a", "task-plan-x-own-task-b"], false);
 
     expect(result.status).toBe("derived");
     expect(result.commits).toHaveLength(2);
@@ -174,7 +177,7 @@ describe("deriveCommitSetForPlan — CONTROL: contiguous commits (SPEC oracle #5
     const cYA = commit(dir, "y-a.txt", "CONTENT_Y_A\n", "implements task-plan-y-a");
     const cLast = commit(dir, "y-b.txt", "CONTENT_Y_B\n", "implements task-plan-y-b");
 
-    const result = deriveCommitSetForPlan(dir, ["task-plan-y-a", "task-plan-y-b"]);
+    const result = deriveCommitSetForPlan(dir, ["task-plan-y-a", "task-plan-y-b"], false);
     expect(result.status).toBe("derived");
     expect(result.diff_text).toContain("CONTENT_Y_A");
     expect(result.diff_text).toContain("CONTENT_Y_B");
@@ -205,7 +208,7 @@ describe("deriveCommitSetForPlan — BOUNDARY: no discoverable commits (zero-com
     const dir = initRepo();
     commit(dir, "unrelated.txt", "unrelated content\n", "a commit that names neither task slug");
 
-    const result = deriveCommitSetForPlan(dir, ["task-plan-z-a", "task-plan-z-b"]);
+    const result = deriveCommitSetForPlan(dir, ["task-plan-z-a", "task-plan-z-b"], false);
 
     expect(result.status).toBe("no_commits_found");
     expect(result.commits).toEqual([]);
@@ -215,7 +218,7 @@ describe("deriveCommitSetForPlan — BOUNDARY: no discoverable commits (zero-com
 
   it("a plan with genuinely zero commits (fresh repo, no commits at all) also reports 'no_commits_found'", () => {
     const dir = initRepo();
-    const result = deriveCommitSetForPlan(dir, ["task-plan-empty-a"]);
+    const result = deriveCommitSetForPlan(dir, ["task-plan-empty-a"], false);
     expect(result.status).toBe("no_commits_found");
     expect(result.tasks_without_commits).toEqual(["task-plan-empty-a"]);
   });
@@ -236,7 +239,7 @@ describe("deriveCommitSetForPlan — BOUNDARY: ancestor pruning collapses a merg
       env: GIT_ENV,
     });
 
-    const result = deriveCommitSetForPlan(dir, ["task-plan-w-a"]);
+    const result = deriveCommitSetForPlan(dir, ["task-plan-w-a"], false);
     expect(result.status).toBe("derived");
     // Both the inner commit and the merge commit matched the same token, but the inner
     // commit is an ancestor of the merge commit — only the merge (the maximal/tip
@@ -258,8 +261,8 @@ describe("deriveCommitSetForPlan — NEGATIVE: cwd exists but is not a git repos
     const dir = mkdtempSync(join(tmpdir(), "lore-assess-commit-derivation-nongit-"));
     createdDirs.push(dir);
 
-    expect(() => deriveCommitSetForPlan(dir, ["task-anything"])).not.toThrow();
-    const result = deriveCommitSetForPlan(dir, ["task-anything"]);
+    expect(() => deriveCommitSetForPlan(dir, ["task-anything"], false)).not.toThrow();
+    const result = deriveCommitSetForPlan(dir, ["task-anything"], false);
     expect(result.status).toBe("no_commits_found");
     expect(result.warnings.length).toBeGreaterThan(0);
   });
@@ -270,8 +273,8 @@ describe("deriveCommitSetForPlan — NEGATIVE: cwd exists but is not a git repos
 describe("deriveCommitSetForPlan — ERROR: cwd does not exist on disk at all", () => {
   it("degrades gracefully — no_commits_found, non-empty warnings, never throws", () => {
     const nonexistent = join(tmpdir(), "lore-assess-commit-derivation-does-not-exist-xyz-123");
-    expect(() => deriveCommitSetForPlan(nonexistent, ["task-anything"])).not.toThrow();
-    const result = deriveCommitSetForPlan(nonexistent, ["task-anything"]);
+    expect(() => deriveCommitSetForPlan(nonexistent, ["task-anything"], false)).not.toThrow();
+    const result = deriveCommitSetForPlan(nonexistent, ["task-anything"], false);
     expect(result.status).toBe("no_commits_found");
     expect(result.warnings.length).toBeGreaterThan(0);
   });
@@ -284,8 +287,8 @@ describe("deriveCommitSetForPlan — STATE: idempotent across repeated calls", (
     const dir = initRepo();
     commit(dir, "own.txt", "CONTENT_IDEMPOTENT\n", "implements task-plan-idem-a");
 
-    const first = deriveCommitSetForPlan(dir, ["task-plan-idem-a"]);
-    const second = deriveCommitSetForPlan(dir, ["task-plan-idem-a"]);
+    const first = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false);
+    const second = deriveCommitSetForPlan(dir, ["task-plan-idem-a"], false);
     expect(second).toEqual(first);
   });
 });
@@ -296,11 +299,11 @@ describe("deriveCommitSetForPlan — REGRESSION: an unrelated later commit never
   it("a subsequent commit that names neither task slug is excluded from a re-derived result", () => {
     const dir = initRepo();
     commit(dir, "own.txt", "CONTENT_REG_OWN\n", "implements task-plan-reg-a");
-    const before = deriveCommitSetForPlan(dir, ["task-plan-reg-a"]);
+    const before = deriveCommitSetForPlan(dir, ["task-plan-reg-a"], false);
     expect(before.diff_text).toContain("CONTENT_REG_OWN");
 
     commit(dir, "later-unrelated.txt", "CONTENT_REG_UNRELATED\n", "a later commit naming nothing relevant");
-    const after = deriveCommitSetForPlan(dir, ["task-plan-reg-a"]);
+    const after = deriveCommitSetForPlan(dir, ["task-plan-reg-a"], false);
 
     expect(after.commits).toHaveLength(1);
     expect(after.diff_text).toContain("CONTENT_REG_OWN");
@@ -339,23 +342,26 @@ describe("deriveCommitSetForPlan — RED-FIRST: convention-mismatch (allTasksArc
   // Comparable to this file's other 3-spawn-call CONTROL cases (198-303ms measured);
   // 15000ms gives ample headroom for a concurrent-worktree load spike.
 
-  // ─── CONTROL: the identical zero-match fixture WITHOUT allTasksArchived stays the
+  // ─── CONTROL: the identical zero-match fixture with allTasksArchived: false stays the
   // pre-existing 'no_commits_found' — the new parameter never changes the case it
   // doesn't apply to (AC #6: distinguishable from the mismatch state above).
-  it("CONTROL: the identical conventional-commit fixture without allTasksArchived (or false) still derives 'no_commits_found', distinguishably from the archived-mismatch case", () => {
+  //
+  // reason: `allTasksArchived` is now a REQUIRED third parameter (task-the-mcp-assess-
+  // adapter-still-calls-derivecommitsetforplan closed the ADR's Q3 "Opt-in" gap) — there
+  // is no longer a compiling call site that OMITS it, so this CONTROL is exercised with a
+  // single explicit `false` call instead of comparing an omitted call against an explicit
+  // one; the asserted BEHAVIOR (this is the pre-existing, unaffected path) is unchanged.
+  it("CONTROL: the identical conventional-commit fixture with allTasksArchived: false still derives 'no_commits_found', distinguishably from the archived-mismatch case", () => {
     const dir = initRepo();
     commit(dir, "a.txt", "content-a\n", "fix(evidence): self-reported fail must carry a non-empty output_tail");
     commit(dir, "b.txt", "content-b\n", "feat(assess): add scope mismatch warning");
 
-    const omitted = deriveCommitSetForPlan(dir, ["task-conv-not-archived-a", "task-conv-not-archived-b"]);
     const explicitFalse = deriveCommitSetForPlan(dir, ["task-conv-not-archived-a", "task-conv-not-archived-b"], false);
 
-    for (const result of [omitted, explicitFalse]) {
-      expect(result.status).toBe("no_commits_found");
-      expect(result.status).not.toBe("unverifiable_convention_mismatch");
-      expect(result.commits).toEqual([]);
-      expect(result.diff_text).toBe("");
-    }
+    expect(explicitFalse.status).toBe("no_commits_found");
+    expect(explicitFalse.status).not.toBe("unverifiable_convention_mismatch");
+    expect(explicitFalse.commits).toEqual([]);
+    expect(explicitFalse.diff_text).toBe("");
   }, 15000);
   // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
   // D1/check-test-budgets): 3 direct spawn-helper calls (`initRepo` x1, `commit` x2).
@@ -364,18 +370,20 @@ describe("deriveCommitSetForPlan — RED-FIRST: convention-mismatch (allTasksArc
 
   // ─── CONTROL: a real, matched derivation is byte-identical regardless of
   // allTasksArchived — the flag only ever matters on a ZERO-match result (AC #5).
-  it("CONTROL: a plan whose commits DO mention the task slug derives the identical 'derived' commit set whether allTasksArchived is true, false, or omitted", () => {
+  //
+  // reason: same closure as above — `allTasksArchived` is REQUIRED, so this CONTROL now
+  // compares the `true` and `false` values against each other instead of also including
+  // an omitted third variant.
+  it("CONTROL: a plan whose commits DO mention the task slug derives the identical 'derived' commit set whether allTasksArchived is true or false", () => {
     const dir = initRepo();
     commit(dir, "base.txt", "base\n", "seed commit");
     commit(dir, "own.txt", "CONTENT_ARCHIVED_MATCH\n", "implements task-conv-matched-a");
 
     const withArchivedTrue = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], true);
     const withArchivedFalse = deriveCommitSetForPlan(dir, ["task-conv-matched-a"], false);
-    const omitted = deriveCommitSetForPlan(dir, ["task-conv-matched-a"]);
 
     expect(withArchivedTrue.status).toBe("derived");
     expect(withArchivedTrue).toEqual(withArchivedFalse);
-    expect(withArchivedTrue).toEqual(omitted);
     expect(withArchivedTrue.diff_text).toContain("CONTENT_ARCHIVED_MATCH");
   }, 15000);
   // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its

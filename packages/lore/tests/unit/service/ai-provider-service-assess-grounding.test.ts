@@ -137,7 +137,7 @@ describe("assessPlan — ungrounded absence claims surface in rubric_warning, ne
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: ungroundedJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.rubric_warning).toBeDefined();
@@ -161,7 +161,7 @@ describe("assessPlan — ungrounded absence claims surface in rubric_warning, ne
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: groundedJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const warnings = result.value.rubric_warning ?? [];

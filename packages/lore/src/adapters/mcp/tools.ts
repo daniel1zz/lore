@@ -1605,20 +1605,41 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       // requiring the caller to assemble a diff themselves.
       let diffText: string | undefined = args.diff_text;
       let diffSource: DiffSourceRecord;
+      // reason: task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan —
+      // mirrors `commands/assess.ts`'s own `commitDerivationUnverifiable` local exactly:
+      // set ONLY by the auto-derived branch below when the derivation reports
+      // `"unverifiable_convention_mismatch"`; forwarded to `assessPlan` so the SERVICE
+      // layer (never this adapter) forbids `scope_fidelity` from publishing an
+      // absence-based score in that state. `false` on every OTHER path (explicit
+      // `diff_text` override, or a genuinely commit-less plan) is a deliberate value,
+      // never an omission — `assessPlan`'s `opts.commitDerivationUnverifiable` is a
+      // REQUIRED field precisely so this adapter cannot silently skip computing it the
+      // way it previously did.
+      let commitDerivationUnverifiable = false;
       if (args.diff_text !== undefined) {
         diffSource = { mode: "explicit_diff_text" };
       } else {
-        const derivation = deriveCommitSetForPlan(
-          process.cwd(),
-          bundle.tasks.map((t) => t.slug),
-        );
+        // reason: task-lore-assess-derives-a-plan-s-commits-by-grepping-task — every task
+        // already `archived` means merged work exists BY DEFINITION (VALID_TRANSITIONS,
+        // @lore/core); a zero-match derivation in that state is a commit-message
+        // CONVENTION MISMATCH, not genuine absence, so it must be told apart from a plan
+        // that plausibly has no merged work yet. Mirrors `commands/assess.ts` exactly —
+        // `deriveCommitSetForPlan`'s `allTasksArchived` parameter is REQUIRED (no default),
+        // so this computation cannot be omitted and still compile.
+        const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
+        const derivation = deriveCommitSetForPlan(process.cwd(), bundle.tasks.map((t) => t.slug), allTasksArchived);
         diffSource = { mode: "auto_derived", ...derivation };
-        if (derivation.status === "derived") diffText = derivation.diff_text;
+        if (derivation.status === "derived") {
+          diffText = derivation.diff_text;
+        } else if (derivation.status === "unverifiable_convention_mismatch") {
+          commitDerivationUnverifiable = true;
+        }
       }
 
       const assessResult = await app.aiProviderService.assessPlan(bundle, {
         ...(diffText !== undefined ? { diffText } : {}),
         source: app.callerSurface,
+        commitDerivationUnverifiable,
       });
       if (!assessResult.ok) return errorContent(assessResult.error);
 

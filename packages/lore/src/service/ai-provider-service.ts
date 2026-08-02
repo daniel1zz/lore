@@ -11,7 +11,8 @@
  *     - regenerateContent(doc, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - refineContent(doc, userPrompt, opts?) → Promise<Result<GenerateOutput, LoreError>>  (SPEC-019)
  *     - inferLinkType(from, to, opts?) → Promise<Result<{linkType: LinkType}, LoreError>>  (SPEC-019)
- *     - assessPlan(bundle, opts?) → Promise<Result<AssessmentResult, LoreError>>  (SPEC-026, v6 SPEC-040)
+ *     - assessPlan(bundle, opts) → Promise<Result<AssessmentResult, LoreError>>  (SPEC-026, v6 SPEC-040;
+ *       `opts.commitDerivationUnverifiable` is REQUIRED, not optional — see assessPlan's own JSDoc)
  *     - judgeDoc(bundle, checks, opts?) → Promise<Result<NewReviewJudgment, LoreError>>  (SPEC-034, SPEC-040 D8)
  *   - validateAcIdContainment(output, declaredIds) → Result<void, LoreError>  (SPEC-038 §5 D5)
  *   - computeGroundingWarnings(output, truncatedSections) → string[]  (SPEC-040 §T2 D4, pure, exported for direct testing)
@@ -398,15 +399,19 @@ function suppressUngroundedAbsenceFindings(
  *      `unverifiable[]` entry naming the dimension and stating in words that it was "not
  *      scored" (AC #3's literal requirement), so a reader of the persisted record can never
  *      mistake "removed" for "never existed" or "clean".
- *   3. Opt-in — runs unconditionally whenever the caller passes
- *      `commitDerivationUnverifiable: true`; the flag defaults to `undefined`/`false`
- *      ONLY so pre-existing 2-arg `assessPlan(bundle, opts)` call sites (and any that omit
- *      the field) keep compiling and behaving exactly as before — every call site that CAN
- *      compute this fact (the CLI's `commands/assess.ts`, once wired) is expected to pass
- *      it, not opt out of it. `packages/lore/src/adapters/mcp/tools.ts` does not yet pass
- *      this flag (out of this task's file anchors — a concurrent session owns it); until
- *      it does, the MCP surface keeps the pre-existing two-state behavior for this one
- *      case, unchanged.
+ *   3. Opt-in — CLOSED (task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan):
+ *      `commitDerivationUnverifiable` is now a REQUIRED field on `assessPlan`'s `opts`
+ *      (no default, no `?`) — there is no longer a compiling call site that omits it.
+ *      Both adapters that create an assessment (CLI `commands/assess.ts`, MCP
+ *      `../adapters/mcp/tools.ts`) compute `allTasksArchived` from their already-loaded
+ *      bundle, pass it to `deriveCommitSetForPlan` (whose own `allTasksArchived` parameter
+ *      is likewise now required), and thread the resulting
+ *      `status === "unverifiable_convention_mismatch"` boolean straight through — a THIRD
+ *      adapter that forgets this step fails `bun run typecheck`, not silently at runtime.
+ *      This closes the exact gap that let the MCP surface ship without it: two new
+ *      required parameters made optional-and-additive so the original 2-arg call kept
+ *      compiling, which is precisely what let the omission go unnoticed by the type
+ *      checker (see the task's own "Proxy" analysis).
  *
  * @invariant Pure — returns the SAME `dimensionScores`/`unverifiable`/`typedGaps`
  *   references when `commitDerivationUnverifiable` is not `true`, or `scope_fidelity` is
@@ -917,32 +922,43 @@ export class AIProviderService {
    * @param bundle - {plan, spec?, tasks[]} from CorpusService.getPlanBundle
    * @param opts.diffText - Optional diff text (already acquired by the CLI layer)
    * @param opts.source - Caller surface, forwarded to telemetry as caller_surface
-   * @param opts.commitDerivationUnverifiable - task-lore-assess-derives-a-plan-s-commits-
-   *   by-grepping-task AC #3 — `true` when the caller's commit-set derivation
+   * @param opts.commitDerivationUnverifiable - REQUIRED (task-the-mcp-assess-adapter-
+   *   still-calls-derivecommitsetforplan mechanizes this — no default, every caller must
+   *   compute and pass it explicitly). `true` when the caller's commit-set derivation
    *   (`assess-commit-derivation.ts`) reported `"unverifiable_convention_mismatch"` for
    *   this plan. Forces `scope_fidelity` out of the persisted `dimension_scores`
-   *   (see `forceScopeFidelityUnverifiable`), regardless of the judge's own output —
-   *   defaults to `false`/not forcing anything when omitted.
+   *   (see `forceScopeFidelityUnverifiable`), regardless of the judge's own output. Pass
+   *   `false` for every other path (explicit `--diff`/`diff_text` override, or a
+   *   genuinely commit-less plan) — a deliberate value, never an omission.
    * @returns Result<AssessmentResult, LoreError> — never throws
    *
    * @example
    * const bundleResult = await app.corpusService.getPlanBundle("plan-my-feature");
    * if (!bundleResult.ok) { ... }
-   * const assessResult = await svc.assessPlan(bundleResult.value, { source: app.callerSurface });
+   * const assessResult = await svc.assessPlan(bundleResult.value, {
+   *   source: app.callerSurface,
+   *   commitDerivationUnverifiable: false,
+   * });
    * if (!assessResult.ok) { process.exitCode = exitCode(assessResult.error); return; }
    * console.log(assessResult.value.verdict, assessResult.value.overall_score);
    *
    * Source: SPEC-026 §3 D1, D2; §4 AC-ASSESS-1, AC-ASSESS-3, AC-ASSESS-4, AC-ASSESS-5;
    * SPEC-038 §5 AC-ACODE-4, AC-ACODE-5; task-lore-assess-derives-a-plan-s-commits-by-
-   * grepping-task AC #3
+   * grepping-task AC #3; task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan
    */
   async assessPlan(
     bundle: PlanBundle,
-    opts?: {
+    opts: {
       // reason: explicit `| undefined` required by exactOptionalPropertyTypes.
       diffText?: string | undefined;
       source?: CallerSurface | undefined;
-      commitDerivationUnverifiable?: boolean | undefined;
+      // reason: REQUIRED, not optional — task-the-mcp-assess-adapter-still-calls-
+      // derivecommitsetforplan mechanizes the ADR's Q3 (Opt-in) closure: an
+      // optional-with-default flag is exactly what let the MCP adapter omit it silently
+      // while still compiling. Every caller (CLI, MCP, any future adapter) must compute
+      // this fact from its own `allTasksArchived` + `deriveCommitSetForPlan` call and
+      // pass it explicitly — there is no longer a default to fall back on.
+      commitDerivationUnverifiable: boolean;
     },
   ): Promise<Result<AssessmentResult, LoreError>> {
     const t0 = performance.now();
@@ -953,7 +969,7 @@ export class AIProviderService {
     // section and (b) persisted verbatim into extra.assessment.facts — a judge's output
     // can never overwrite what facts.ac_coverage/task_evidence/scope/etc. actually say.
     const declaredCriteriaForFacts = extractDeclaredAcceptanceCriteria(bundle.spec);
-    const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(opts?.diffText));
+    const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(opts.diffText));
     const sourceVersions = this._buildSourceVersions(bundle);
 
     // reason: hotfix (task-assess-diff-range-scope-mismatch-warning) — a deterministic,
@@ -962,7 +978,7 @@ export class AIProviderService {
     // persisted verbatim by `_finalizeAssessment`. `computeScopeMismatchWarning` itself
     // degrades to `undefined` (no warning) when no task in the plan declares any anchors
     // or the diff touches no files — never an error, never a blocked run.
-    const diffFilesForScope = parseDiffFilePaths(opts?.diffText ?? "");
+    const diffFilesForScope = parseDiffFilePaths(opts.diffText ?? "");
     const taskAnchorsForScope = bundle.tasks.flatMap((task) => extractFileAnchors(task));
     const scopeWarning = computeScopeMismatchWarning(diffFilesForScope, taskAnchorsForScope);
 
@@ -985,7 +1001,7 @@ export class AIProviderService {
     if (!reproducibleResult.ok) return reproducibleResult;
     const { prompt, truncated, declaredAcIds } = templateResult.value(
       bundle,
-      opts?.diffText,
+      opts.diffText,
       this.assessBudgets,
       facts,
     );
@@ -1006,7 +1022,7 @@ export class AIProviderService {
         template_source: "built-in",
         kind: "assess",
         target_doc_id: null,
-        caller_surface: opts?.source,
+        caller_surface: opts.source,
       });
     };
 
@@ -1039,7 +1055,7 @@ export class AIProviderService {
           facts,
           sourceVersions,
           scopeWarning,
-          opts?.commitDerivationUnverifiable ?? false,
+          opts.commitDerivationUnverifiable,
           reproducibleResult.value,
         ),
       );
@@ -1075,7 +1091,7 @@ export class AIProviderService {
           facts,
           sourceVersions,
           scopeWarning,
-          opts?.commitDerivationUnverifiable ?? false,
+          opts.commitDerivationUnverifiable,
           reproducibleResult.value,
         ),
       );

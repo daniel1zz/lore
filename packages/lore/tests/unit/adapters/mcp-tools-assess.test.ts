@@ -437,3 +437,126 @@ describe("lore_assess — auto-derived commit set: PRIMARY ORACLE + BOUNDARY", (
     expect(data.diff_source.tasks_without_commits).toHaveLength(2);
   });
 });
+
+// ─── lore_assess — commit-derivation convention-mismatch suppression
+// (task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan) ───────────────
+//
+// The CLI path (commands/assess.ts) computes `allTasksArchived` from the already-loaded
+// bundle, passes it to `deriveCommitSetForPlan`, and threads the resulting
+// `commitDerivationUnverifiable` flag into `assessPlan` so the SERVICE layer forbids an
+// absence-scored `scope_fidelity` from ever publishing when every task in the plan is
+// already archived (merged work by definition) yet zero commits reference any task
+// slug — a commit-message CONVENTION MISMATCH, not genuine absence
+// (task-lore-assess-derives-a-plan-s-commits-by-grepping-task). `tools.ts` previously
+// called `deriveCommitSetForPlan` with the OLD 2-arg shape, so this suppression never
+// reached the MCP surface: the SAME fixture below used to report `"no_commits_found"`
+// and publish an absence-scored `scope_fidelity` — the false-major-finding route this
+// describe block proves is now closed. Real `git init` fixture (same idiom as the block
+// above), CONVENTIONALLY-worded commits deliberately referencing NEITHER task's slug
+// (mirrors assess-commit-derivation.test.ts's own RED-FIRST fixture), and a scripted
+// judge response that scores `scope_fidelity` absence-based — exactly the shape that
+// manufactures a false major finding pre-fix.
+describe("lore_assess — commit-derivation convention-mismatch suppression (task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan)", () => {
+  const call = () => getToolHandler(server, "lore_assess");
+
+  let gitTmpDir: string;
+  let originalCwd: string;
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "Tester",
+    GIT_AUTHOR_EMAIL: "t@example.com",
+    GIT_COMMITTER_NAME: "Tester",
+    GIT_COMMITTER_EMAIL: "t@example.com",
+  };
+
+  beforeEach(() => {
+    gitTmpDir = mkdtempSync(join(tmpdir(), "lore-mcp-assess-convention-mismatch-test-"));
+    spawnSync("git", ["init", "-q"], { cwd: gitTmpDir, env: gitEnv });
+    originalCwd = process.cwd();
+    process.chdir(gitTmpDir);
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    try {
+      rmSync(gitTmpDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  function gitCommit(filename: string, content: string, message: string) {
+    writeFileSync(join(gitTmpDir, filename), content);
+    spawnSync("git", ["add", filename], { cwd: gitTmpDir, env: gitEnv });
+    spawnSync("git", ["commit", "-q", "-m", message], { cwd: gitTmpDir, env: gitEnv });
+  }
+
+  it("an all-archived plan whose commits carry conventional (slug-less) messages reports 'unverifiable_convention_mismatch' (never 'no_commits_found'), and scope_fidelity is absent from dimension_scores with a NOT SCORED unverifiable[] entry", async () => {
+    const { planId } = await createPlanWithNamedTasks(["MCP Archived Task Alpha"]);
+    // Conventional Commits messages — deliberately reference NEITHER task's slug,
+    // mirroring the measured defect (fix(evidence): ... never mentions the task slug it
+    // closes).
+    gitCommit("a.txt", "content-a\n", "fix(evidence): self-reported fail must carry a non-empty output_tail");
+    gitCommit("b.txt", "content-b\n", "feat(assess): add scope mismatch warning");
+
+    // Every task in this plan is already archived — merged work exists BY DEFINITION
+    // (VALID_TRANSITIONS, @lore/core) — so a zero-match derivation against the fixture
+    // above is a CONTRADICTION, not a legitimate absence.
+    const tasksResult = await store.findMany({ parent_id: planId, type: "task" });
+    if (!tasksResult.ok) throw new Error("findMany failed");
+    for (const task of tasksResult.value) {
+      const setResult = await corpusService.set(task.id, { status: "archived" });
+      if (!setResult.ok) throw new Error(`Failed to archive task: ${JSON.stringify(setResult.error)}`);
+    }
+
+    // Scripted judge response scores scope_fidelity absence-based — exactly the shape
+    // that (pre-fix) manufactures a false major finding once diff_available=false.
+    aiProvider.setMode({
+      kind: "ok",
+      content: JSON.stringify({
+        verdict: "partially_met",
+        overall_score: 50,
+        ac_scores: [],
+        gaps: [],
+        recommendations: [],
+        dimension_scores: {
+          scope_fidelity: { score: 20, confidence: 0.2, based_on: "absence", reasoning: "cannot verify" },
+        },
+      }),
+    });
+
+    const result = await call()({ plan_id_or_slug: planId, ai: true }); // NOTE: no diff_text
+    expect(result.isError).toBeFalsy();
+
+    const data = parseResult(result) as {
+      result: {
+        dimension_scores?: Record<string, unknown>;
+        unverifiable?: { material: string; reason: string }[];
+      };
+      diff_source: { mode: string; status?: string };
+    };
+
+    // The distinct, named contradiction status — never the shared "no_commits_found" a
+    // genuinely commit-less plan gets (ADR three-question review Q2: an empty result and
+    // a clean result must not be the same value).
+    expect(data.diff_source.mode).toBe("auto_derived");
+    expect(data.diff_source.status).toBe("unverifiable_convention_mismatch");
+    expect(data.diff_source.status).not.toBe("no_commits_found");
+
+    // scope_fidelity forcibly removed from the persisted dimension_scores, regardless of
+    // what the judge itself reported, with an explicit "not scored" unverifiable[] entry.
+    expect(data.result.dimension_scores?.["scope_fidelity"]).toBeUndefined();
+    const scopeEntry = (data.result.unverifiable ?? []).find((u) =>
+      u.material.toLowerCase().includes("scope_fidelity"),
+    );
+    expect(scopeEntry).toBeDefined();
+    expect(scopeEntry?.reason.toLowerCase()).toContain("not scored");
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/check-test-budgets): 4 direct `spawnSync`/`gitCommit` calls in this body
+  // (`gitCommit` is itself a spawn helper — its own body directly calls `spawnSync`
+  // twice — so calling it twice counts as 2 spawn-helper invocations, plus the fixture's
+  // own `git init` in beforeEach). Comparable to this file's other git-fixture describe
+  // block (380-708ms measured); 15000ms gives ample headroom for a concurrent-worktree
+  // load spike.
+});

@@ -106,7 +106,7 @@ describe("REGRESSION (superseded AC-067-4): ungrounded absence-based dimension s
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -133,7 +133,7 @@ describe("REGRESSION (superseded AC-067-4): ungrounded absence-based dimension s
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // reason: 0.9 (the judge's self-reported float) does not survive — but neither does
@@ -158,7 +158,7 @@ describe("REGRESSION (superseded AC-067-4): ungrounded absence-based dimension s
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const entry = result.value.dimension_scores?.["evidence_integrity"];
@@ -183,7 +183,7 @@ describe("REGRESSION (superseded AC-067-4): ungrounded absence-based dimension s
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const entry = result.value.dimension_scores?.["scope_fidelity"];
@@ -213,7 +213,7 @@ describe("AC-067-5: task-truncation coverage caps confidence and, at 100%, force
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider, SMALL_TASK_BUDGET);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -244,7 +244,7 @@ describe("AC-067-5: task-truncation coverage caps confidence and, at 100%, force
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider, SMALL_TASK_BUDGET);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.overall_confidence).toBeUndefined();
@@ -266,7 +266,7 @@ describe("AC-067-5: task-truncation coverage caps confidence and, at 100%, force
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider, SMALL_TASK_BUDGET);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -291,7 +291,7 @@ describe("AC-067-5: task-truncation coverage caps confidence and, at 100%, force
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider, SMALL_TASK_BUDGET);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.verdict).toBe("met");
@@ -319,7 +319,7 @@ describe("AC-067-6: fully-grounded, untruncated judgment passes finalization unc
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -341,7 +341,7 @@ describe("AC-067-6: fully-grounded, untruncated judgment passes finalization unc
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.verdict).toBe("met");
@@ -361,7 +361,7 @@ describe("AC-067-6: fully-grounded, untruncated judgment passes finalization unc
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.judgment.overall_confidence).toBeUndefined();
@@ -381,7 +381,7 @@ describe("AC-067-6: fully-grounded, untruncated judgment passes finalization unc
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: judgeJson });
     const service = makeAssessService(provider);
 
-    const result = await service.assessPlan(bundle, {});
+    const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.rubric_warning).toBeUndefined();
