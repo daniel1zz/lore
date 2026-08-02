@@ -23,6 +23,13 @@
  *     prompts are IDENTICAL outside the per-row evidence lines (same facts section, same
  *     rubric, same output instruction — one builder body, not a forked twin).
  *
+ * Additional coverage (task-assess-templates-5-binds-the-projected-renderer-while-two):
+ * `reproducible` is now a first-class field of each registry entry (`AssessTemplateRegistryEntry`,
+ * `assess-template.ts`) — `false` on slot 5 (SPEC-040 §T2 D6 explicitly exempted it from the
+ * byte-identical guarantee), `true` on slots 6 and 7 (both output-frozen). Exercised via
+ * `getAssessTemplateReproducibility`, a Result-returning lookup mirroring
+ * `getAssessTemplate`'s own shape.
+ *
  * @spec_ref AC-AEP-9, AC-AEP-10
  */
 
@@ -31,6 +38,7 @@ import {
   ASSESS_PROMPT_VERSION,
   ASSESS_TEMPLATES,
   getAssessTemplate,
+  getAssessTemplateReproducibility,
   buildAssessPromptV7,
   type AssessBudgets,
 } from "../../../src/ai/assess-template.js";
@@ -263,5 +271,96 @@ describe("AC-AEP-10: getAssessTemplate(7) renders the projected shape via the sh
     // sanity: the prompts themselves are NOT identical (the evidence rows do differ) —
     // otherwise the strip-and-compare above would be vacuous.
     expect(frozenPrompt).not.toBe(activePrompt);
+  });
+});
+
+// ─── task-assess-templates-5-binds-the-projected-renderer-while-two: reproducible field ──
+//
+// AC1: reproducible becomes a FIRST-CLASS field of the registry entry (not a comment) —
+//      `false` on slot 5, `true` on slots 6 and 7. This is the GENERALIZATION the task's
+//      own three named options (freeze slot 5 / remove key 5 / keep the policy) did not
+//      offer on their own: a per-slot field answers the question for every CURRENT and
+//      FUTURE slot at once, rather than fixing one slot and deferring the same ambiguity.
+// AC3: "frozen" is disambiguated — slot-stable (key permanence, true of 5/6/7 alike) vs
+//      output-frozen (byte-identity guarantee, true only of 6/7). `getAssessTemplateReproducibility`
+//      is the machine-readable form of "output-frozen", so this suite pins its numeric answer
+//      rather than re-asserting prose.
+// AC6 CONTROL: slot 5's PRE-EXISTING tests (assess-template-registry.test.ts,
+//      ai-provider-service-assess.test.ts) assert `ASSESS_TEMPLATES[5] === buildAssessPrompt`
+//      by reference identity — this suite additionally asserts that identity survives the
+//      registry restructure into `{fn, reproducible}` entries (ASSESS_TEMPLATES stays a
+//      derived, function-only view).
+
+describe("getAssessTemplateReproducibility — registry entry reproducibility (task-assess-templates-5-binds-the-projected-renderer-while-two, AC1/AC3)", () => {
+  it("HAPPY: slot 5 (buildAssessPrompt) is declared reproducible: false — SPEC-040 §T2 D6 explicitly exempted it from the byte-identical guarantee", () => {
+    const result = getAssessTemplateReproducibility(5);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBe(false);
+  });
+
+  it("HAPPY: slot 6 (the output-frozen pre-projection entry) is declared reproducible: true", () => {
+    const result = getAssessTemplateReproducibility(6);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBe(true);
+  });
+
+  it("HAPPY: slot 7 (the active entry, ASSESS_PROMPT_VERSION) is declared reproducible: true", () => {
+    const result = getAssessTemplateReproducibility(ASSESS_PROMPT_VERSION);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBe(true);
+  });
+
+  it("NEGATIVE/ERROR: an unregistered version returns err(AI_PROVIDER_ERROR) naming the version, never a thrown TypeError — same failure shape as getAssessTemplate", () => {
+    let result: ReturnType<typeof getAssessTemplateReproducibility> | undefined;
+    expect(() => {
+      result = getAssessTemplateReproducibility(999);
+    }).not.toThrow();
+    expect(result).toBeDefined();
+    if (result === undefined) return;
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("AI_PROVIDER_ERROR");
+    expect("message" in result.error ? result.error.message : "").toContain("registered for version 999");
+  });
+
+  it("BOUNDARY: a negative/nonsensical version number also fails loud via err(), not a thrown TypeError", () => {
+    const result = getAssessTemplateReproducibility(-1);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("AI_PROVIDER_ERROR");
+  });
+
+  it("STATE: reproducible is a genuine boolean tri-state distinction across the registry — slot 5's `false` is not merely 'falsy', it is an explicit boolean literal distinct from slot 6/7's `true`", () => {
+    const five = getAssessTemplateReproducibility(5);
+    const six = getAssessTemplateReproducibility(6);
+    const seven = getAssessTemplateReproducibility(7);
+    expect([five, six, seven].every((r) => r.ok)).toBe(true);
+    if (!five.ok || !six.ok || !seven.ok) return;
+    expect(typeof five.value).toBe("boolean");
+    expect(typeof six.value).toBe("boolean");
+    expect(typeof seven.value).toBe("boolean");
+    expect(five.value).not.toBe(six.value);
+  });
+
+  it("CONTROL/REGRESSION (AC6): ASSESS_TEMPLATES[5] is STILL the exact buildAssessPrompt function reference after the registry restructure into {fn, reproducible} entries", async () => {
+    const { buildAssessPrompt } = await import("../../../src/ai/assess-template.js");
+    expect(ASSESS_TEMPLATES[5]).toBe(buildAssessPrompt);
+  });
+
+  it("CONTROL/REGRESSION (AC6): ASSESS_TEMPLATES[7] is STILL the exact buildAssessPromptV7 function reference after the registry restructure", () => {
+    expect(ASSESS_TEMPLATES[7]).toBe(buildAssessPromptV7);
+  });
+
+  it("CONTROL/REGRESSION (AC6): getAssessTemplate(5)'s returned function is STILL callable and renders the same v5 shape as before (existing behaviour unaffected by the reproducibility field)", () => {
+    const templateResult = getAssessTemplate(5);
+    expect(templateResult.ok).toBe(true);
+    if (!templateResult.ok) return;
+    const bundle = makeBundle([]);
+    const { prompt } = templateResult.value(bundle, undefined, BUDGETS);
+    expect(prompt).toContain("# Role");
+    expect(prompt).toContain("# Output Instruction");
   });
 });

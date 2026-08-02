@@ -8,10 +8,13 @@
  *   - buildAssessSummaryText(result) — a compact Markdown digest of an AssessmentResult
  *     (verdict + AC score table + gaps + recommendations + judge metadata), additively
  *     extended with dimension scores / typed gaps / typed recommendations / rubric
- *     warnings tables when present on the result. Added to `lore_assess`'s JSON envelope
- *     as `summary` — the envelope's existing `assessment`/`result` fields already carry
- *     the full typed data verbatim; `summary` exists so an agent reading MCP text
- *     content gets a scannable digest without re-deriving one from the nested JSON.
+ *     warnings tables when present on the result, PLUS (task-assess-templates-5-binds-
+ *     the-projected-renderer-while-two) a presence-guarded `Reproducible: yes|no` line
+ *     next to the Judge line when `judgment.reproducible` is recorded. Added to
+ *     `lore_assess`'s JSON envelope as `summary` — the envelope's existing
+ *     `assessment`/`result` fields already carry the full typed data verbatim;
+ *     `summary` exists so an agent reading MCP text content gets a scannable digest
+ *     without re-deriving one from the nested JSON.
  *
  * Invariants:
  *   - No IO, no wall-clock reads — pure string assembly (mirrors
@@ -129,6 +132,21 @@ export function buildAssessSummaryText(result: AssessmentResult): string {
       (result.judgment.truncated.length > 0 ? `, truncated: ${result.judgment.truncated.join(", ")}` : "") +
       `)`,
   );
+
+  // reason: additive-only (task-assess-templates-5-binds-the-projected-renderer-while-two)
+  // — presence-guarded like every other SPEC-040/067 judgment field (legacy result renders
+  // byte-identically), mirrors the CLI's assess-render.ts. `judgment.reproducible` is a
+  // genuine three-state field (true / false / absent-means-"not recorded", never coerced)
+  // — see @lore/core's judgmentSchema JSDoc for the full contract.
+  if (result.judgment.reproducible !== undefined) {
+    lines.push(
+      `Reproducible: ${
+        result.judgment.reproducible
+          ? "yes (this prompt_version's rendering is guaranteed byte-identical)"
+          : "no (this prompt_version's rendering is NOT guaranteed byte-identical across runs)"
+      }`,
+    );
+  }
 
   // SPEC-067 D4: additive-only — absent on every pre-SPEC-067 assessment and every run
   // below the truncation-cap threshold.

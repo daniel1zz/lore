@@ -6,15 +6,29 @@
  * Public surface:
  *   - ASSESS_PROMPT_VERSION — the currently active key into ASSESS_TEMPLATES; bump whenever
  *     the prompt text or rubric changes materially
- *   - AssessTemplateFn — the shape every registry entry must satisfy (mirrors
- *     review-template.ts's ReviewTemplateFn)
- *   - ASSESS_TEMPLATES — version-keyed registry (SPEC-040 §T2 D6, re-keyed T5): `5` is the
- *     frozen v5 entry (`buildAssessPrompt`, provenance only), `6` is the FROZEN pre-projection
- *     v6 entry (`buildAssessPromptV6Frozen` — byte-identical to `buildAssessPromptV6`'s
- *     behaviour before T3/a639485), `7` is the active entry (`buildAssessPromptV7`, T3's
- *     projected evidence renderer)
+ *   - AssessTemplateFn — the shape every registry entry's builder function must satisfy
+ *     (mirrors review-template.ts's ReviewTemplateFn)
+ *   - AssessTemplateRegistryEntry — {fn, reproducible} pair (task-assess-templates-5-binds-
+ *     the-projected-renderer-while-two): `reproducible` is a FIRST-CLASS field, not a
+ *     comment, so every slot answers "is this version's rendering guaranteed byte-identical
+ *     forever" explicitly and the answer is machine-readable, not prose the reader of a
+ *     persisted assessment doc would have to go find in this file
+ *   - ASSESS_TEMPLATE_REGISTRY — version-keyed `Record<number, AssessTemplateRegistryEntry>`,
+ *     the SSOT both `ASSESS_TEMPLATES` (function-only view, back-compat with reference-
+ *     identity-pinned tests) and `getAssessTemplateReproducibility` derive from
+ *   - ASSESS_TEMPLATES — version-keyed registry of BUILDER FUNCTIONS ONLY (SPEC-040 §T2 D6,
+ *     re-keyed T5, derived from ASSESS_TEMPLATE_REGISTRY): `5` is the SLOT-STABLE v5 entry
+ *     (`buildAssessPrompt`, provenance only — key `5` never moves, but its OUTPUT is not
+ *     guaranteed reproducible, `reproducible: false`), `6` is the OUTPUT-FROZEN pre-
+ *     projection v6 entry (`buildAssessPromptV6OutputFrozen` — byte-identical to
+ *     `buildAssessPromptV6`'s behaviour before T3/a639485, `reproducible: true`), `7` is the
+ *     active entry (`buildAssessPromptV7`, T3's projected evidence renderer,
+ *     `reproducible: true`)
  *   - getAssessTemplate(version) — Result-returning registry lookup; an absent version is
  *     err(AI_PROVIDER_ERROR) naming it, never an uncaught throw
+ *   - getAssessTemplateReproducibility(version) — Result-returning lookup for the OTHER half
+ *     of a registry entry (its `reproducible` declaration), same failure shape as
+ *     getAssessTemplate
  *   - buildAssessPrompt(bundle, diffText, budgets) — the v5 prompt builder (registry entry `5`)
  *   - buildAssessPromptV6(bundle, diffText, budgets, facts?) / buildAssessPromptV7(same
  *     signature) — two names for the SAME active builder (registry entry `7`, T5): adds a
@@ -23,9 +37,10 @@
  *     plan declares `extra.ac_scope` — marks out-of-scope AC-table rows and restricts the
  *     output's allowed `ac_id` set (D5). `buildAssessPromptV6`'s name is kept because
  *     AC-AEP-4 pins a direct caller asserting it renders the SAME projected evidence shape
- *     as v5 — it could not be repurposed to mean "frozen" without breaking that spec-level
- *     AC, so the frozen entry got a new name (`buildAssessPromptV6Frozen`) instead of this
- *     one. `buildAssessPromptV7` is the forward-looking alias for any new caller.
+ *     as v5 — it could not be repurposed to mean "output-frozen" without breaking that
+ *     spec-level AC, so the output-frozen entry got a new name
+ *     (`buildAssessPromptV6OutputFrozen`) instead of this one. `buildAssessPromptV7` is the
+ *     forward-looking alias for any new caller.
  *   - buildAssessDiffMeta(diffText) — derives the {@link DiffMeta} regression-signal shape
  *     from the SAME diff-header parse `truncateDiffByFile` uses (`listDiffFiles`,
  *     `diff-truncation.ts`) — single derivation site, consumed by both v6/v7's own facts
@@ -59,11 +74,17 @@
  *     prompt (here) and the corrective-retry prompt (which embeds this prompt verbatim, see
  *     {@link buildAssessRetryPrompt}). ASSESS_PROMPT_VERSION bumped 1 → 2 for this change,
  *     and 2 → 3 for the truncation manifest (bugfix F3).
- *   - **v5 → v6 registry split (SPEC-040 §T2 D6)**: `buildAssessPrompt` (v5) is now frozen as
- *     `ASSESS_TEMPLATES[5]` — kept for provenance/regression, no byte-identical guarantee
- *     required going forward, but its EXISTING tests must stay green. `buildAssessPromptV6`
- *     extends v5's role→materials→rubric→output structure with a "# Deterministic Facts"
- *     section and a three-dimension rubric; see its own JSDoc for the full delta.
+ *   - **v5 → v6 registry split (SPEC-040 §T2 D6)**: `buildAssessPrompt` (v5) is now
+ *     SLOT-STABLE as `ASSESS_TEMPLATES[5]` — the registry KEY `5` is never renumbered or
+ *     repurposed, kept for provenance/regression — but explicitly NOT output-frozen: no
+ *     byte-identical guarantee is required going forward, only that its EXISTING tests stay
+ *     green (`reproducible: false` on its {@link AssessTemplateRegistryEntry}, per
+ *     task-assess-templates-5-binds-the-projected-renderer-while-two — this is the
+ *     GENERALIZATION of that decision: a single `reproducible` field answers the question
+ *     for every future slot at once, rather than freezing one slot and deferring the same
+ *     ambiguity to the next one). `buildAssessPromptV6` extends v5's
+ *     role→materials→rubric→output structure with a "# Deterministic Facts" section and a
+ *     three-dimension rubric; see its own JSDoc for the full delta.
  *   - **Evidence row projection, not embedding (SPEC-lore-assess-project-evidence-rows-
  *     instead-of-embedding-the D1)**: `renderTaskEvidence` projects each evidence row as
  *     `(oracle, ac_ref, result, command, tail_bytes)` — `tail_bytes` ALWAYS rendered (0 for
@@ -77,7 +98,8 @@
  *     is UNCHANGED — it measures `task.content` ALONE, never the rendered evidence text
  *     (AC-067-5 pins this in isolation: a tiny task budget with zero evidence must truncate
  *     purely on content length) — the `` `task:${task.slug}` `` truncated[] entry vocabulary
- *     is likewise UNCHANGED (frozen — `computeTaskTruncationRatio`, `@lore/core/assessment.ts`,
+ *     is likewise UNCHANGED (fixed string format, unrelated to registry slot-stability or
+ *     output-freeze — `computeTaskTruncationRatio`, `@lore/core/assessment.ts`,
  *     keys off the `task:` prefix; `findUngroundedAbsenceDimensions`,
  *     `../service/ai-provider-service.ts`, substring-matches it) — AC-AEP-3 regression-pins
  *     the exact string.
@@ -89,18 +111,36 @@
  *     before and after that change landed. The fix is an injectable `EvidenceRenderer`
  *     parameter on the shared v6/v7 builder core (`assembleFactsBasedAssessPrompt`) — ONE
  *     builder body, not a forked twin. `ASSESS_TEMPLATES[6]` now binds
- *     `renderTaskEvidenceV6Frozen` (byte-identical to `renderTaskEvidence`'s PRE-D1
+ *     `renderTaskEvidenceV6OutputFrozen` (byte-identical to `renderTaskEvidence`'s PRE-D1
  *     behaviour, captured from `a639485^`), and `ASSESS_TEMPLATES[7]` binds the current
  *     (projected) `renderTaskEvidence` and becomes `ASSESS_PROMPT_VERSION`. See the
  *     `buildAssessPromptV6` doc for why that exported NAME still means "projected" even
  *     though its registry slot moved to `7`.
+ *   - **"Frozen" is disambiguated into two distinct adjectives, never used bare**
+ *     (task-assess-templates-5-binds-the-projected-renderer-while-two): **slot-stable**
+ *     means the registry KEY is permanent — `getAssessTemplate(N)` for a given `N` will
+ *     always resolve to SOME entry, and that entry never gets repointed at a behaviourally
+ *     different builder under the same key (true of every key: 5, 6, 7, and any future
+ *     one). **output-frozen** means the entry's RENDERED TEXT is additionally guaranteed
+ *     byte-identical for the same input, forever — strictly stronger than slot-stable, and
+ *     NOT true of every key (slot 5 is slot-stable but not output-frozen; the
+ *     `reproducible` field on {@link AssessTemplateRegistryEntry} is the machine-readable
+ *     form of exactly this distinction). This disambiguation exists because the two prior
+ *     JSDoc sites in this file used "frozen" for both senses within three lines of each
+ *     other, which produced two incorrect conclusions before this comment was written
+ *     (see the task's own corrections: no real AC-AEP-4/AC-AEP-9 conflict, and no explicit
+ *     assess-side non-drift invariant was ever violated — do not conflate this module's
+ *     concerns with `GENERATE_PROMPT_VERSION`'s unrelated SSOT comment at
+ *     `../service/ai-provider-service.ts:515`).
  *
  * Side-effect class: pure
  *
  * Source: SPEC-026 §3 D2, D7, D8; §5; SPEC-028 AC-AE-2, AC-AE-3, AC-AE-4; SPEC-029 AC-AR-1;
  * bugfix F3 (`knowledge-assess-diff-truncation-systematically-hides-tests-from`);
  * SPEC-040 §T2 D1, D2, D3, D5, D6;
- * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1, D2 (T3), T5 (freeze + registry re-key)
+ * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the D1, D2 (T3), T5 (freeze + registry re-key);
+ * task-assess-templates-5-binds-the-projected-renderer-while-two (reproducible field, slot-stable/
+ * output-frozen vocabulary); adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the (Q1-Q3)
  */
 
 import { err, ok, truncateSection, type LoreError, type PlanBundle, type DocRecord, type Result } from "@lore/core";
@@ -165,17 +205,24 @@ import {
  * **v6 → v7 (SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, AC-AEP-9/10)**:
  * T3 changed the evidence-row rendering SHARED by `buildAssessPrompt` (v5) and the v6/v7
  * builder, while `ASSESS_PROMPT_VERSION` stayed `6` — so an assessment stamped
- * `prompt_version: 6` rendered differently before and after that landed, breaking the
- * documented "prompt and stamped version can never drift apart" invariant
- * (`../service/ai-provider-service.ts`). Fixed by PARAMETERIZING the shared builder core
- * (`assembleFactsBasedAssessPrompt`) over an injectable evidence renderer instead of
- * forking it: `ASSESS_TEMPLATES[6]` now binds `renderTaskEvidenceV6Frozen` (byte-identical
- * to the PRE-T3 rendering, so `getAssessTemplate(6)` stays reproducible forever), and
- * `ASSESS_TEMPLATES[7]` binds T3's projected renderer and becomes the active
- * `ASSESS_PROMPT_VERSION`. `buildAssessPromptV6` (the exported function) keeps its NAME and
- * its (projected) BEHAVIOUR unchanged — AC-AEP-4 pins a direct caller asserting it matches
- * v5's projected shape — it simply moved to registry slot `7`; `buildAssessPromptV7` is the
- * same function under the name that matches its new active slot.
+ * `prompt_version: 6` rendered differently before and after that landed. (Correction,
+ * task-assess-templates-5-binds-the-projected-renderer-while-two: an earlier version of
+ * this comment claimed this broke a documented "prompt and stamped version can never drift
+ * apart" invariant in `../service/ai-provider-service.ts` — that citation was misattributed.
+ * The comment at that file's line ~515 is about `GENERATE_PROMPT_VERSION` and the GENERATE
+ * templates, not assess; no explicit non-drift invariant was ever written for the assess
+ * path. The problem was real regardless — output-freeze was silently lost for slot 6 — it
+ * just was never a documented invariant being broken.) Fixed by PARAMETERIZING the shared
+ * builder core (`assembleFactsBasedAssessPrompt`) over an injectable evidence renderer
+ * instead of forking it: `ASSESS_TEMPLATES[6]` now binds `renderTaskEvidenceV6OutputFrozen`
+ * (byte-identical to the PRE-T3 rendering, so `getAssessTemplate(6)` stays output-frozen
+ * forever, `reproducible: true`), and `ASSESS_TEMPLATES[7]` binds T3's projected renderer
+ * and becomes the active `ASSESS_PROMPT_VERSION` (also `reproducible: true` — any FUTURE
+ * behavioural change moves to a new key rather than mutating `7` in place).
+ * `buildAssessPromptV6` (the exported function) keeps its NAME and its (projected)
+ * BEHAVIOUR unchanged — AC-AEP-4 pins a direct caller asserting it matches v5's projected
+ * shape — it simply moved to registry slot `7`; `buildAssessPromptV7` is the same function
+ * under the name that matches its new active slot.
  */
 export const ASSESS_PROMPT_VERSION = 7;
 
@@ -293,7 +340,7 @@ function renderTaskEvidence(task: PlanBundle["tasks"][number], acIdsUnderJudgmen
  * instead-of-embedding-the T5 ("parameterize, don't fork"). T3 changed `renderTaskEvidence`,
  * which is SHARED by `buildAssessPrompt` (v5) and the v6/v7 builder, while
  * `ASSESS_PROMPT_VERSION` stayed `6` — so a prompt stamped `prompt_version: 6` rendered
- * differently before and after that change. Both {@link renderTaskEvidenceV6Frozen}
+ * differently before and after that change. Both {@link renderTaskEvidenceV6OutputFrozen}
  * (`ASSESS_TEMPLATES[6]`) and {@link renderTaskEvidence} (`ASSESS_TEMPLATES[7]`) satisfy
  * this shape, so ONE builder body can bind either without a duplicated twin.
  */
@@ -303,14 +350,15 @@ type EvidenceRenderer = (
 ) => string;
 
 /**
- * FROZEN pre-projection evidence renderer (SPEC-lore-assess-project-evidence-rows-instead-
- * of-embedding-the T5, AC-AEP-9) — byte-identical to `renderTaskEvidence`'s behaviour
- * BEFORE a639485 (T3) repurposed it into the `(oracle, ac_ref, result, command,
+ * OUTPUT-FROZEN pre-projection evidence renderer (SPEC-lore-assess-project-evidence-rows-
+ * instead-of-embedding-the T5, AC-AEP-9) — byte-identical to `renderTaskEvidence`'s
+ * behaviour BEFORE a639485 (T3) repurposed it into the `(oracle, ac_ref, result, command,
  * tail_bytes)` projection (captured verbatim from `git show a639485^:.../assess-template.ts`).
  * Registered as `ASSESS_TEMPLATES[6]` so `getAssessTemplate(6)` keeps rendering exactly
  * what it always has, independent of whatever `renderTaskEvidence` itself does for the
- * ACTIVE version — an assessment stamped `prompt_version: 6` must stay reproducible.
- * Ignores `acIdsUnderJudgment` (this pre-projection shape has no "under judgment" concept —
+ * ACTIVE version — an assessment stamped `prompt_version: 6` must stay reproducible
+ * (`reproducible: true` on this slot's {@link AssessTemplateRegistryEntry}). Ignores
+ * `acIdsUnderJudgment` (this pre-projection shape has no "under judgment" concept —
  * every row's tail was shown unconditionally); the parameter exists only so this function
  * satisfies the shared {@link EvidenceRenderer} signature used by
  * {@link assembleFactsBasedAssessPrompt}.
@@ -320,10 +368,10 @@ type EvidenceRenderer = (
  * @returns The rendered evidence block, or `"(no evidence recorded)"` when absent/malformed
  *
  * @example
- * renderTaskEvidenceV6Frozen(taskWithOneRow, new Set());
+ * renderTaskEvidenceV6OutputFrozen(taskWithOneRow, new Set());
  * // => `  [1] oracle=test command="bun test" result=pass recorder=alice\n      output_tail: ...`
  */
-function renderTaskEvidenceV6Frozen(
+function renderTaskEvidenceV6OutputFrozen(
   task: PlanBundle["tasks"][number],
   _acIdsUnderJudgment: ReadonlySet<string>,
 ): string {
@@ -733,8 +781,8 @@ function renderFactsSection(facts: AssessmentFacts): string {
  * three-dimension rubric) → output instruction (v5's `ac_scores` shape PLUS
  * `dimension_scores`/`typed_gaps`/`typed_recommendations`/`unverifiable`), PARAMETERIZED
  * by which {@link EvidenceRenderer} projects each task's verification_evidence rows. Both
- * registered builders below — the FROZEN `ASSESS_TEMPLATES[6]` and the active
- * `ASSESS_TEMPLATES[7]` — delegate here, binding {@link renderTaskEvidenceV6Frozen} or
+ * registered builders below — the OUTPUT-FROZEN `ASSESS_TEMPLATES[6]` and the active
+ * `ASSESS_TEMPLATES[7]` — delegate here, binding {@link renderTaskEvidenceV6OutputFrozen} or
  * {@link renderTaskEvidence} respectively. ONE builder body, never a forked twin: forking
  * is exactly the defect T3 surfaced (`renderTaskEvidence` was shared, so changing it
  * changed BOTH v5's AND this builder's output even though `ASSESS_PROMPT_VERSION` didn't
@@ -758,7 +806,7 @@ function renderFactsSection(facts: AssessmentFacts): string {
  *   {@link computeAssessmentFacts} and {@link buildAssessDiffMeta} — never re-derives
  *   `ac_coverage` itself (single derivation site, `@lore/core`).
  * @param evidenceRenderer - The {@link EvidenceRenderer} to project each task's evidence
- *   rows with — the ONLY behavioural difference between the frozen v6 entry and the
+ *   rows with — the ONLY behavioural difference between the output-frozen v6 entry and the
  *   active v7 entry.
  * @returns { prompt, truncated, declaredAcIds } — `declaredAcIds` is scope-restricted (D5)
  */
@@ -823,8 +871,8 @@ function assembleFactsBasedAssessPrompt(
       `### Task: ${task.title} (${task.slug}, status=${task.status})\n` +
       `${taskSection.text}\n` +
       // reason: SPEC-...T5 — the evidence rendering is the ONE thing that differs between
-      // the frozen v6 entry and the active v7 entry; injected as a parameter rather than
-      // forking this whole builder (AC-AEP-10).
+      // the output-frozen v6 entry and the active v7 entry; injected as a parameter rather
+      // than forking this whole builder (AC-AEP-10).
       `Evidence:\n${evidenceRenderer(task, acIdsUnderJudgment)}`
     );
   });
@@ -945,8 +993,9 @@ function assembleFactsBasedAssessPrompt(
  * unchanged on purpose: AC-AEP-4 (SPEC-lore-assess-project-evidence-rows-instead-of-
  * embedding-the) pins a direct caller of `buildAssessPromptV6` asserting it renders the
  * identical projected evidence shape as `buildAssessPrompt` (v5), so this name could not be
- * repurposed to mean "frozen" without breaking that spec-level AC — the FROZEN pre-
- * projection entry is {@link buildAssessPromptV6Frozen} instead, a distinct function.
+ * repurposed to mean "output-frozen" without breaking that spec-level AC — the
+ * output-frozen pre-projection entry is {@link buildAssessPromptV6OutputFrozen} instead, a
+ * distinct function.
  *
  * @param bundle - {plan, spec?, tasks[], knowledge_links?} from CorpusService.getPlanBundle
  * @param diffText - Optional git diff / diff-file content (already read by the CLI layer)
@@ -986,44 +1035,86 @@ export function buildAssessPromptV7(
 }
 
 /**
- * FROZEN registry entry for `ASSESS_TEMPLATES[6]` (SPEC-lore-assess-project-evidence-rows-
- * instead-of-embedding-the T5, AC-AEP-9) — the SAME shared {@link assembleFactsBasedAssessPrompt}
- * core as {@link buildAssessPromptV6}/{@link buildAssessPromptV7}, bound to the
- * pre-projection {@link renderTaskEvidenceV6Frozen} renderer instead of the active
+ * OUTPUT-FROZEN registry entry for `ASSESS_TEMPLATES[6]` (SPEC-lore-assess-project-evidence-
+ * rows-instead-of-embedding-the T5, AC-AEP-9) — the SAME shared
+ * {@link assembleFactsBasedAssessPrompt} core as {@link buildAssessPromptV6}/
+ * {@link buildAssessPromptV7}, bound to the pre-projection
+ * {@link renderTaskEvidenceV6OutputFrozen} renderer instead of the active
  * {@link renderTaskEvidence}. This is what makes `getAssessTemplate(6)` stay
  * byte-identical to its behaviour before a639485 (T3), independent of whatever
  * `renderTaskEvidence` itself does for the active version — an assessment stamped
- * `prompt_version: 6` remains reproducible. Not exported: nothing outside this module's own
- * registry needs to call the frozen entry directly.
+ * `prompt_version: 6` remains reproducible (`reproducible: true` on
+ * {@link ASSESS_TEMPLATE_REGISTRY}[6]). Not exported: nothing outside this module's own
+ * registry needs to call the output-frozen entry directly.
  */
-function buildAssessPromptV6Frozen(
+function buildAssessPromptV6OutputFrozen(
   bundle: PlanBundle,
   diffText: string | undefined,
   budgets: AssessBudgets,
   facts?: AssessmentFacts,
 ): BuildAssessPromptResult {
-  return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidenceV6Frozen);
+  return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidenceV6OutputFrozen);
+}
+
+/**
+ * One entry in {@link ASSESS_TEMPLATE_REGISTRY} — pairs a template BUILDER FUNCTION with its
+ * REPRODUCIBILITY declaration (task-assess-templates-5-binds-the-projected-renderer-while-two,
+ * per `adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the`'s Q2 generalization).
+ *
+ * `reproducible` answers, for THIS registry key specifically: is `getAssessTemplate(version)`'s
+ * bound function guaranteed to render byte-identical output for the same input, FOREVER (no
+ * future edit may change this key's behaviour in place — a behavioural change requires a NEW
+ * key)? `true` on slots 6 and 7 (both output-frozen, in the disambiguated sense above the
+ * module's registry construction below); `false` on slot 5 — `buildAssessPrompt` is
+ * slot-stable (key `5` never moves) but was EXPLICITLY exempted from the byte-identical
+ * guarantee by SPEC-040 §T2 D6 ("no byte-identical guarantee required going forward"), and its
+ * output genuinely changed at a639485 (T3) while the key stayed `5`. This field is the
+ * GENERALIZATION the task's own three named options did not offer: freezing slot 5's output
+ * (rejected option) would fix exactly one slot and defer the identical ambiguity to slots
+ * 8, 9, … — a per-slot `reproducible` field answers the question for every CURRENT and
+ * FUTURE slot at once, and makes the drift permission legible to a reader instead of merely
+ * documented in prose three files away from where `prompt_version` is actually persisted
+ * (`@lore/core`'s `assessment.ts`).
+ */
+export interface AssessTemplateRegistryEntry {
+  fn: AssessTemplateFn;
+  reproducible: boolean;
 }
 
 /**
  * Version-keyed registry of assess judge prompt builders (SPEC-040 §T2 D6, re-keyed by
  * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, mirrors
- * `review-template.ts`'s `REVIEW_TEMPLATES`). `5` is the frozen v5 entry
- * (`buildAssessPrompt`) kept for provenance; `6` is the FROZEN pre-projection v6 entry
- * (`buildAssessPromptV6Frozen` — byte-identical to `buildAssessPromptV6`'s behaviour
- * before T3/a639485, so `getAssessTemplate(6)` stays reproducible forever); `7` is the
- * active `ASSESS_PROMPT_VERSION` entry (`buildAssessPromptV7`, T3's projected evidence
- * renderer). A future prompt revision adds a new key here rather than mutating an existing
- * one, so historical assessments' `judgment.prompt_version` stays meaningful.
+ * `review-template.ts`'s `REVIEW_TEMPLATES`) — the SSOT both {@link ASSESS_TEMPLATES}
+ * (function-only view) and {@link getAssessTemplateReproducibility} derive from. `5` is the
+ * SLOT-STABLE v5 entry (`buildAssessPrompt`) kept for provenance — key permanent,
+ * `reproducible: false`; `6` is the OUTPUT-FROZEN pre-projection v6 entry
+ * (`buildAssessPromptV6OutputFrozen` — byte-identical to `buildAssessPromptV6`'s behaviour
+ * before T3/a639485, `reproducible: true`); `7` is the active `ASSESS_PROMPT_VERSION` entry
+ * (`buildAssessPromptV7`, T3's projected evidence renderer, `reproducible: true`). A future
+ * prompt revision adds a new key here rather than mutating an existing one, so historical
+ * assessments' `judgment.prompt_version` stays meaningful — and that new key MUST declare
+ * its own `reproducible` value rather than inheriting one silently.
  */
-export const ASSESS_TEMPLATES: Record<number, AssessTemplateFn> = {
-  5: buildAssessPrompt,
-  6: buildAssessPromptV6Frozen,
-  7: buildAssessPromptV7,
+const ASSESS_TEMPLATE_REGISTRY: Record<number, AssessTemplateRegistryEntry> = {
+  5: { fn: buildAssessPrompt, reproducible: false },
+  6: { fn: buildAssessPromptV6OutputFrozen, reproducible: true },
+  7: { fn: buildAssessPromptV7, reproducible: true },
 };
 
 /**
- * Result-returning lookup into {@link ASSESS_TEMPLATES} (SPEC-040 §T2 D6) — an absent
+ * Version-keyed registry of assess judge prompt BUILDER FUNCTIONS ONLY — derived from
+ * {@link ASSESS_TEMPLATE_REGISTRY} (same function references, never cloned) so pre-existing
+ * reference-identity-pinned tests (`ASSESS_TEMPLATES[5] === buildAssessPrompt`, etc. —
+ * `assess-template-registry.test.ts`, `ai-provider-service-assess.test.ts`) continue to pass
+ * unchanged. Prefer {@link ASSESS_TEMPLATE_REGISTRY} / {@link getAssessTemplateReproducibility}
+ * for any NEW caller that also needs the reproducibility declaration.
+ */
+export const ASSESS_TEMPLATES: Record<number, AssessTemplateFn> = Object.fromEntries(
+  Object.entries(ASSESS_TEMPLATE_REGISTRY).map(([version, entry]) => [version, entry.fn]),
+);
+
+/**
+ * Result-returning lookup into {@link ASSESS_TEMPLATE_REGISTRY} (SPEC-040 §T2 D6) — an absent
  * version is `err(AI_PROVIDER_ERROR)` naming the version, never an uncaught throw (e.g. a
  * bare `ASSESS_TEMPLATES[version]!` non-null assertion on a caller-supplied version).
  *
@@ -1039,18 +1130,55 @@ export const ASSESS_TEMPLATES: Record<number, AssessTemplateFn> = {
  * @example
  * getAssessTemplate(999); // → err({ code: "AI_PROVIDER_ERROR", message: "...version 999..." })
  */
+/**
+ * Shared "unregistered version" error builder for {@link getAssessTemplate} and
+ * {@link getAssessTemplateReproducibility} — single message-construction site so the two
+ * Result-returning lookups over {@link ASSESS_TEMPLATE_REGISTRY} can never drift on wording.
+ */
+function unregisteredAssessTemplateVersionError(version: number): LoreError {
+  return {
+    code: "AI_PROVIDER_ERROR",
+    provider: "assess-template-registry",
+    message:
+      `No assess judge prompt template registered for version ${version}. ` +
+      `Known versions: ${Object.keys(ASSESS_TEMPLATE_REGISTRY).join(", ")}.`,
+  };
+}
+
 export function getAssessTemplate(version: number): Result<AssessTemplateFn, LoreError> {
-  const template = ASSESS_TEMPLATES[version];
-  if (template === undefined) {
-    return err({
-      code: "AI_PROVIDER_ERROR",
-      provider: "assess-template-registry",
-      message:
-        `No assess judge prompt template registered for version ${version}. ` +
-        `Known versions: ${Object.keys(ASSESS_TEMPLATES).join(", ")}.`,
-    });
+  const entry = ASSESS_TEMPLATE_REGISTRY[version];
+  if (entry === undefined) {
+    return err(unregisteredAssessTemplateVersionError(version));
   }
-  return ok(template);
+  return ok(entry.fn);
+}
+
+/**
+ * Result-returning lookup for the OTHER half of an {@link AssessTemplateRegistryEntry} — its
+ * `reproducible` declaration — the counterpart {@link getAssessTemplate} does not expose
+ * (that lookup returns only the callable function, preserving its pre-existing return type
+ * for callers like `AIProviderService.assessPlan` that invoke the result directly). Added so
+ * a version-agnostic caller can ask "is THIS prompt_version's rendering reproducible" without
+ * duplicating {@link ASSESS_TEMPLATE_REGISTRY}'s per-slot answers anywhere else — e.g. the
+ * judgment-stamping call site that persists `prompt_version` alongside a `reproducible` flag
+ * (`packages/core/src/assessment.ts`'s `judgmentSchema`) should read this lookup rather than
+ * re-deriving the answer.
+ *
+ * @param version - Registry key (typically {@link ASSESS_PROMPT_VERSION})
+ * @returns `ok(reproducible)` when registered; `err(AI_PROVIDER_ERROR)` naming the version
+ *   otherwise (same failure shape as {@link getAssessTemplate})
+ *
+ * @example
+ * getAssessTemplateReproducibility(5); // → ok(false) — slot-stable, NOT output-frozen
+ * getAssessTemplateReproducibility(7); // → ok(true)
+ * getAssessTemplateReproducibility(999); // → err({ code: "AI_PROVIDER_ERROR", ... })
+ */
+export function getAssessTemplateReproducibility(version: number): Result<boolean, LoreError> {
+  const entry = ASSESS_TEMPLATE_REGISTRY[version];
+  if (entry === undefined) {
+    return err(unregisteredAssessTemplateVersionError(version));
+  }
+  return ok(entry.reproducible);
 }
 
 /**

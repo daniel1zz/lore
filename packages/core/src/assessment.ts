@@ -7,7 +7,8 @@
  * Public surface:
  *   - evidenceRefSchema / EvidenceRef — one evidence citation inside an ac_scores entry
  *   - acScoreSchema / AcScore — per-AC judge score + reasoning + evidence
- *   - judgmentSchema / Judgment — judge run metadata (provider, prompt version, retry, truncation)
+ *   - judgmentSchema / Judgment — judge run metadata (provider, prompt version, retry,
+ *     truncation, optional three-state `reproducible` declaration for `prompt_version`)
  *   - scopeSchema — discriminator for what was assessed (v1 always {type: "plan", id})
  *   - ASSESSMENT_DIMENSIONS / AssessmentDimension — closed, append-only dimension taxonomy
  *     (SPEC-040 D2) — documented, not schema-enforced (see dimensionScoresSchema invariant)
@@ -125,12 +126,22 @@
  *       ONLY on the persisted shape (never on `llmAssessmentOutputSchema` — the judge itself
  *       never emits either override), set when {@link computeTaskTruncationRatio} reaches
  *       `TRUNCATION_DOWNGRADE_THRESHOLDS.inconclusiveRatio` (100% of tasks truncated, D4).
+ *   - `judgmentSchema.reproducible` (task-assess-templates-5-binds-the-projected-renderer-
+ *     while-two) is a NEW optional field, additive-only, mirroring the SPEC-067 fields above
+ *     — a GENUINE three-state boolean (`true` / `false` / absent-means-"not recorded", never
+ *     coerced): declares whether `prompt_version`'s registry entry
+ *     (`packages/lore/src/ai/assess-template.ts`'s `ASSESS_TEMPLATES` /
+ *     `getAssessTemplateReproducibility`) is guaranteed byte-identical output forever. See
+ *     the field's own JSDoc on {@link judgmentSchema} for the full three-state contract and
+ *     `adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the` (Q2) for why absence
+ *     must never read as `true`.
  *
  * Side-effect class: pure
  *
  * Source: SPEC-026 §3 D2, D6, D7; §4 AC-ASSESS-1..13; §5; §8.1, §8.2; SPEC-029 AC-AR-2, AC-AR-3;
  *   SPEC-040 §T1 D1, D2, D3, D9; AC-ADF-2, AC-ADF-10;
  *   task-assess-diff-range-scope-mismatch-warning (hotfix plan, AC-040-SCOPE-1);
+ *   task-assess-templates-5-binds-the-projected-renderer-while-two (judgment.reproducible);
  *   SPEC-067 D3, D4
  */
 
@@ -193,6 +204,22 @@ export type AcScore = z.infer<typeof acScoreSchema>;
  *   ac_scores[].reasoning was clipped; when present, it lists the ac_id of every AC score
  *   whose reasoning was shortened by {@link clipOverlongReasoning} before this judgment was
  *   built — never an empty array (the field is simply omitted when nothing was clipped).
+ * @invariant reproducible is additive-only and a genuine THREE-STATE field, never coerced
+ *   to a boolean (task-assess-templates-5-binds-the-projected-renderer-while-two, per
+ *   `adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the`'s Q2): `true` means
+ *   `prompt_version`'s registry entry (`ASSESS_TEMPLATES`/`getAssessTemplateReproducibility`,
+ *   `packages/lore/src/ai/assess-template.ts`) is declared OUTPUT-FROZEN — re-rendering the
+ *   same input through the SAME registry key will always produce byte-identical text.
+ *   `false` means the registry entry is explicitly declared NOT reproducible (currently
+ *   only slot 5, `buildAssessPrompt` — SPEC-040 §T2 D6 exempted it from the byte-identical
+ *   guarantee, and its rendering genuinely changed at commit a639485 while the registry key
+ *   stayed `5`). `undefined` (the field simply absent) means NEITHER of those — this
+ *   assessment was persisted before this field existed, and NO claim about reproducibility
+ *   can be read from it. A reader (or any future code) MUST treat absence as "not recorded",
+ *   never as an implicit `true` — an absent field silently reading as "reproducible" is
+ *   exactly the failure mode the cited ADR's Question 2 names. Stamped by the caller that
+ *   resolves `prompt_version`'s registry entry (see `getAssessTemplateReproducibility` in
+ *   `assess-template.ts`) — this schema only declares the shape, it never derives the value.
  *
  * @example
  * judgmentSchema.parse({
@@ -207,6 +234,10 @@ export type AcScore = z.infer<typeof acScoreSchema>;
  *   provider: "claude-cli", prompt_version: 6, duration_ms: 4230,
  *   retried: false, truncated: ["task:t1", "task:t2"],
  *   overall_confidence: "low", degraded_by_truncation: true,
+ * });
+ * judgmentSchema.parse({
+ *   provider: "claude-cli", prompt_version: 5, duration_ms: 4230,
+ *   retried: false, truncated: [], reproducible: false,
  * });
  */
 export const judgmentSchema = z.object({
@@ -229,6 +260,14 @@ export const judgmentSchema = z.object({
    * convention) — never `false`, just omitted.
    */
   degraded_by_truncation: z.literal(true).optional(),
+  /**
+   * task-assess-templates-5-binds-the-projected-renderer-while-two — whether `prompt_version`'s
+   * registry entry is declared reproducible (byte-identical output forever). Genuinely
+   * three-state: `true` / `false` / absent-means-"not recorded" — see this field's own
+   * `@invariant` above on {@link judgmentSchema} for the full contract. Additive-only:
+   * absent on every assessment persisted before this field existed.
+   */
+  reproducible: z.boolean().optional(),
 });
 
 /** Derived TypeScript type for judge run metadata. */
@@ -1410,6 +1449,24 @@ export function renderAssessmentContent(result: AssessmentResult): string {
   lines.push("");
   lines.push(`- Provider: ${result.judgment.provider}`);
   lines.push(`- Prompt version: ${result.judgment.prompt_version}`);
+  // reason: additive-only field (task-assess-templates-5-binds-the-projected-renderer-
+  // while-two) — rendered immediately alongside "Prompt version" (the field it qualifies),
+  // NOT presence-guarded away to silence: an assessment persisted before this field existed
+  // simply omits the line (byte-identical to pre-existing legacy rendering, REGRESSION-
+  // pinned by assessment-schema-compat.test.ts's "ends with Truncated sections: (none)"
+  // assertion), but whenever the value IS known, `true`/`false` render as visibly distinct
+  // text — never inferred, never defaulted. See judgmentSchema's own JSDoc for the full
+  // three-state contract (absence must NOT be read as "reproducible": ADR
+  // lore-s-mechanisms-validate-a-proxy-for-the-property-not-the, Q2).
+  if (result.judgment.reproducible !== undefined) {
+    lines.push(
+      `- Reproducible: ${
+        result.judgment.reproducible
+          ? "yes (this prompt_version's rendering is guaranteed byte-identical)"
+          : "no (this prompt_version's rendering is NOT guaranteed byte-identical across runs)"
+      }`,
+    );
+  }
   lines.push(`- Duration: ${result.judgment.duration_ms}ms`);
   lines.push(`- Retried: ${result.judgment.retried}`);
   lines.push(

@@ -124,6 +124,22 @@ function emptyArraysResult(): AssessmentResult {
   return { ...legacyResult(), ac_scores: [], gaps: [], recommendations: [] };
 }
 
+/**
+ * Result whose judgment declares `reproducible: true` (mirrors ASSESS_TEMPLATES[6]/[7]'s
+ * registry declaration) — task-assess-templates-5-binds-the-projected-renderer-while-two.
+ */
+function reproducibleTrueResult(): AssessmentResult {
+  return { ...legacyResult(), judgment: { ...baseJudgment(), reproducible: true } };
+}
+
+/**
+ * Result whose judgment declares `reproducible: false` (mirrors ASSESS_TEMPLATES[5]'s
+ * registry declaration — SPEC-040 §T2 D6 exempted slot 5 from the byte-identical guarantee).
+ */
+function reproducibleFalseResult(): AssessmentResult {
+  return { ...legacyResult(), judgment: { ...baseJudgment(), prompt_version: 5, reproducible: false } };
+}
+
 /** Result whose judge-authored text contains raw pipe characters. */
 function pipeHostileResult(): AssessmentResult {
   return {
@@ -269,7 +285,14 @@ describe("assess render sites — STATE (deterministic, repeated calls match)", 
 // ─── REGRESSION (legacy-only parity across all three sites) ─────────────────────
 
 describe("assess render sites — REGRESSION (legacy-only result has no typed-block markers anywhere)", () => {
-  const FORBIDDEN_MARKERS = ["Dimension Score", "Typed Gap", "Typed Recommendation", "Rubric Warning", "Unverifiable"];
+  const FORBIDDEN_MARKERS = [
+    "Dimension Score",
+    "Typed Gap",
+    "Typed Recommendation",
+    "Rubric Warning",
+    "Unverifiable",
+    "Reproducible",
+  ];
 
   for (const site of SITES) {
     it(`${site.name}: a legacy-only AssessmentResult contains none of the SPEC-040 section markers`, () => {
@@ -284,4 +307,37 @@ describe("assess render sites — REGRESSION (legacy-only result has no typed-bl
       expect(text).toContain("Add a negative-path test.");
     });
   }
+});
+
+// ─── Reproducible field (task-assess-templates-5-binds-the-projected-renderer-while-two) ──
+//
+// AC1: reproducible becomes a first-class registry field (assess-template.ts, covered by
+//      assess-prompt-version-freeze.test.ts). AC2: stamped into judgment + rendered at every
+//      report site (this block). AC4: absence is a THIRD, distinct state from an explicit
+//      `true` — never inferred, never defaulted; pinned here by asserting the exact rendered
+//      substrings differ (or are entirely absent) across all three states.
+
+describe("assess render sites — Reproducible field (AC1/AC2/AC4, three distinct states)", () => {
+  for (const site of SITES) {
+    it(`${site.name}: judgment.reproducible === true renders 'Reproducible: yes'`, () => {
+      const text = site.render(reproducibleTrueResult());
+      expect(text).toContain("Reproducible: yes");
+    });
+
+    it(`${site.name}: judgment.reproducible === false renders 'Reproducible: no' — visibly DISTINCT from the true case, never 'yes'`, () => {
+      const text = site.render(reproducibleFalseResult());
+      expect(text).toContain("Reproducible: no");
+      expect(text).not.toContain("Reproducible: yes");
+    });
+
+    it(`${site.name}: judgment.reproducible ABSENT (legacy result) renders NO 'Reproducible' line at all — absence is never read/rendered as true`, () => {
+      const text = site.render(legacyResult());
+      expect(text).not.toContain("Reproducible:");
+    });
+  }
+
+  it("REGRESSION (core): a legacy result's rendering still ends with 'Truncated sections: (none)' — the new field is presence-guarded, never always-on, so pre-existing byte-identity holds", () => {
+    const text = renderAssessmentContent(legacyResult());
+    expect(text.trimEnd().endsWith("Truncated sections: (none)")).toBe(true);
+  });
 });
