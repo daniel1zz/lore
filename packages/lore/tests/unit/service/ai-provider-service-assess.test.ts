@@ -1226,7 +1226,31 @@ describe("assessPlan — diff-range scope-mismatch warning (task-assess-diff-ran
     expect(result.value.scope_warning?.diff_file_count).toBe(3);
     expect(result.value.scope_warning?.intersecting_count).toBe(1);
     expect(result.value.scope_warning?.message).toContain("3 files");
-    expect(result.value.scope_warning?.message).toContain("only 1 intersect");
+    // reason: task-computescopemismatchwarning-cannot-distinguish-a-too-wide reworded the
+    // message to name what was found (in-scope count) rather than assert an unestablished
+    // cause ("the range may be too wide") — this pins the NEW wording, not the old one.
+    expect(result.value.scope_warning?.message).toContain("only 1 are this plan's declared task anchors or a recognized test of one");
+    expect(result.value.scope_warning?.message).not.toContain("may be too wide");
+  });
+
+  it("HAPPY (production path, task-computescopemismatchwarning-cannot-distinguish-a-too-wide): a diff whose non-anchor files are all recognized co-located test siblings → no warning through the REAL assessPlan call", async () => {
+    const store = new InMemoryStore();
+    const bundle = await makeBundleWithTaskAnchors(store, ["src/a.ts"]);
+    // Only "src/a.ts" is a declared anchor; the other two files are its co-located test
+    // siblings under THIS repo's own test-file convention (`deriveRepoTestedSourcePath`,
+    // ai-provider-service.ts) — a source file plus its two mandated test runners, exactly
+    // the pattern that used to false-positive (measured: 17/4 and 8/2 intersecting). A green
+    // unit test on `computeScopeMismatchWarning` alone does NOT prove this convention is
+    // actually wired at the real call site — this test drives the production `assessPlan()`
+    // path end to end.
+    const diffText = diffTouching(["src/a.ts", "src/a.test.ts", "src/a.bun.test.ts"]);
+    const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
+    const { service } = makeAssessService({ provider });
+
+    const result = await service.assessPlan(bundle, { diffText, commitDerivationUnverifiable: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.scope_warning).toBeUndefined();
   });
 
   it("BOUNDARY: a plan with zero task anchors → check skipped entirely, no warning even though 0 files intersect", async () => {

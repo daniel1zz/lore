@@ -66,11 +66,16 @@
  *   - assessPlan (hotfix task-assess-diff-range-scope-mismatch-warning) ALSO computes an
  *     optional `scope_warning` — a deterministic, non-blocking FACTS comparison between the
  *     diff's changed files (`parseDiffFilePaths`) and the plan's declared task
- *     `file_anchors` (`computeScopeMismatchWarning`, both `@lore/core`) — exactly once,
- *     alongside `facts`/`sourceVersions`, and persisted verbatim by `_finalizeAssessment`.
- *     It NEVER affects `verdict`, `overall_score`, retry behavior, or whether the
- *     assessment persists; absent (no field, not `undefined`) when no task in the plan
- *     declares anchors, no diff was supplied, or the intersection is half-or-more.
+ *     `file_anchors` (`computeScopeMismatchWarning`, `@lore/core`, given THIS file's own
+ *     `deriveRepoTestedSourcePath` as its test→source convention — task-
+ *     computescopemismatchwarning-cannot-distinguish-a-too-wide) — exactly once, alongside
+ *     `facts`/`sourceVersions`, and persisted verbatim by `_finalizeAssessment`. It NEVER
+ *     affects `verdict`, `overall_score`, retry behavior, or whether the assessment persists;
+ *     absent (no field, not `undefined`) when no task in the plan declares anchors, no diff
+ *     was supplied, the intersection is half-or-more, OR `computeScopeMismatchWarning`
+ *     returned `ScopeMismatchNotMeasured` (an internal "could not be attempted" signal — see
+ *     `assessPlan`'s own `scopeWarning` local for the narrowing that keeps this field's
+ *     persisted contract exactly as it was before that task).
  *
  * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
  *
@@ -88,6 +93,7 @@ import type {
   DimensionScores,
   LlmAssessmentOutput,
   PlanBundle,
+  ScopeMismatchNotMeasured,
   ScopeMismatchWarning,
   SourceVersionRef,
   TypedGap,
@@ -480,6 +486,78 @@ function forceScopeFidelityUnverifiable(
     unverifiable: [...(unverifiableEntries ?? []), forcedEntry],
     typedGaps: typedGaps === undefined ? undefined : typedGaps.filter((gap) => gap.dimension !== "scope_fidelity"),
   };
+}
+
+// ─── Scope-Mismatch Test-Convention Injection (task-computescopemismatchwarning-cannot-distinguish-a-too-wide) ───
+
+/**
+ * This repo's own test-file → source-file convention, injected as `computeScopeMismatchWarning`'s
+ * `deriveTestedSourcePath` parameter (`@lore/core` deliberately carries no opinion on any
+ * project's test layout — see that function's own JSDoc). Pure string transformation, no
+ * filesystem access — the tested source path is a GUESS, never verified to exist on disk;
+ * `anchorsOverlap` simply won't match a wrong guess against a real declared anchor, which is
+ * why a wrong guess here is harmless rather than a silent mis-classification.
+ *
+ * Handles the two test-file layouts this repo actually uses (see this repo's CLAUDE.md "Test
+ * file convention" section and `bun run test:changed`'s own module header):
+ *   1. A co-located sibling in `src/` sharing the source module's basename —
+ *      `packages/X/src/foo.test.ts` / `packages/X/src/foo.bun.test.ts` → `packages/X/src/foo.ts`
+ *      (the majority convention — dozens of `packages/core/src/*.test.ts` files sit directly
+ *      beside their source module).
+ *   2. A same-basename file under a mirrored `tests/` tree, optionally further grouped under
+ *      one `unit/`/`integration/` segment (this repo's own split, with no `src/` counterpart)
+ *      — the `tests` segment is swapped for `src`, and one immediately-following `unit`/
+ *      `integration` grouping segment is dropped, e.g.
+ *      `packages/lore/tests/unit/service/foo.test.ts` → `packages/lore/src/service/foo.ts`.
+ *
+ * @invariant KNOWN, ACCEPTED RESIDUAL (documented, not silently dropped): a TOPIC-named test
+ *   under a `tests/` tree whose basename does not match its tested source module (e.g. this
+ *   very task's own `packages/core/tests/scope-mismatch-warning.test.ts`, which tests
+ *   `assessment.ts`) derives a directory-correct but basename-wrong guess — it will overlap a
+ *   DIRECTORY-scoped anchor covering that path, but never a specific-FILE anchor for a
+ *   different basename. A heuristic that tried to bridge topic-named basenames would risk
+ *   sweeping in an unrelated file as in-scope, which the governing task explicitly rejects as
+ *   worse than under-classifying (see `isFileInScopeForAnchors`'s own JSDoc, `@lore/core`).
+ *
+ * @param filePath - One diff file path (repo-relative POSIX, matching `parseDiffFilePaths`'s
+ *   output shape).
+ * @returns The derived source path, or `undefined` when `filePath` does not end in a
+ *   recognized test suffix (`.bun.test.ts` / `.test.ts` / `.test.tsx`) at all.
+ *
+ * @example
+ * deriveRepoTestedSourcePath("packages/core/src/assessment.test.ts");
+ * // → "packages/core/src/assessment.ts" (rule 1)
+ *
+ * @example
+ * deriveRepoTestedSourcePath("packages/lore/tests/unit/service/ai-provider-service.bun.test.ts");
+ * // → "packages/lore/src/service/ai-provider-service.ts" (rule 2, "unit" grouping dropped)
+ *
+ * @example
+ * deriveRepoTestedSourcePath("docs/readme.md"); // → undefined (not a test file at all)
+ */
+export function deriveRepoTestedSourcePath(filePath: string): string | undefined {
+  const suffixRules: ReadonlyArray<readonly [string, string]> = [
+    [".bun.test.ts", ".ts"],
+    [".test.tsx", ".tsx"],
+    [".test.ts", ".ts"],
+  ];
+  const rule = suffixRules.find(([suffix]) => filePath.endsWith(suffix));
+  if (rule === undefined) return undefined;
+  const [suffix, ext] = rule;
+  const strippedPath = filePath.slice(0, -suffix.length) + ext;
+
+  const segments = strippedPath.split("/");
+  const testsIdx = segments.indexOf("tests");
+  if (testsIdx === -1) {
+    // Rule 1: co-located sibling — same directory, suffix already stripped above.
+    return strippedPath;
+  }
+
+  // Rule 2: mirrored `tests/` tree — swap the "tests" segment for "src", dropping one
+  // immediately-following "unit"/"integration" grouping segment (no `src/` counterpart).
+  const rest = segments.slice(testsIdx + 1);
+  const restWithoutGrouping = rest[0] === "unit" || rest[0] === "integration" ? rest.slice(1) : rest;
+  return [...segments.slice(0, testsIdx), "src", ...restWithoutGrouping].join("/");
 }
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
@@ -975,12 +1053,30 @@ export class AIProviderService {
     // reason: hotfix (task-assess-diff-range-scope-mismatch-warning) — a deterministic,
     // non-blocking FACTS comparison between the diff's changed files and the plan's
     // declared task file_anchors, computed once alongside `facts`/`sourceVersions` and
-    // persisted verbatim by `_finalizeAssessment`. `computeScopeMismatchWarning` itself
-    // degrades to `undefined` (no warning) when no task in the plan declares any anchors
-    // or the diff touches no files — never an error, never a blocked run.
+    // persisted verbatim by `_finalizeAssessment`. `deriveRepoTestedSourcePath` (this file)
+    // is THIS repo's own test→source convention (task-computescopemismatchwarning-cannot-
+    // distinguish-a-too-wide) — without it, `computeScopeMismatchWarning` would judge every
+    // file by direct anchor overlap only and the false-positive fix that task built would
+    // never actually run in production, only in its own unit test (the exact inert-mechanism
+    // failure the ADR's Q1/Q3 warn about).
     const diffFilesForScope = parseDiffFilePaths(opts.diffText ?? "");
     const taskAnchorsForScope = bundle.tasks.flatMap((task) => extractFileAnchors(task));
-    const scopeWarning = computeScopeMismatchWarning(diffFilesForScope, taskAnchorsForScope);
+    const scopeMismatchOutcome = computeScopeMismatchWarning(
+      diffFilesForScope,
+      taskAnchorsForScope,
+      deriveRepoTestedSourcePath,
+    );
+    // reason: `ScopeMismatchNotMeasured` (the comparison could not be attempted at all — no
+    // task declared anchors, or the diff touched no files) is an INTERNAL signal, never a
+    // persisted field — `AssessmentResult.scope_warning` stays reserved for a genuine
+    // `ScopeMismatchWarning` (the persisted contract is unchanged, per
+    // adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the's Q2: the distinction
+    // matters for `computeScopeMismatchWarning`'s OWN callers/tests, not for what this
+    // service persists downstream). Both "not measured" and "measured, genuinely fine"
+    // degrade to the SAME `undefined` here, exactly matching this function's pre-existing,
+    // byte-identical "no field, not a stored false" persisted behaviour.
+    const scopeWarning: ScopeMismatchWarning | undefined =
+      scopeMismatchOutcome === undefined || "status" in scopeMismatchOutcome ? undefined : scopeMismatchOutcome;
 
     const templateResult = getAssessTemplate(ASSESS_PROMPT_VERSION);
     if (!templateResult.ok) return templateResult;
