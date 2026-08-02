@@ -8,6 +8,10 @@
  *     the declared write-contention message (the only ambient `process.argv`
  *     read in the error path; the reconstruction itself is pure)
  *   - formatTable() / formatTree() / formatNavigation() / relativeTime() — output helpers
+ *   - formatShortId() — the ONE shared ULID short-id renderer (head+tail,
+ *     git-style); every human-readable id display in this adapter routes
+ *     through it (see its own doc comment for the rationale and the
+ *     collision-probability derivation)
  *
  * Note: DB discovery and App construction live in `loader.ts` to avoid
  * importing bun:sqlite into this module (vitest cannot resolve bun:sqlite).
@@ -910,6 +914,96 @@ export function formatStalenessBadge(judgment: ReviewJudgment): string {
   return `[stale? ${judgment.confidence.toFixed(2)} ✋${judgment.blocking_questions.length}Q]`;
 }
 
+// ─── Short ID Rendering (task-short-id-rendering-truncates-ulids-to-8-chars-a-1024ms) ──
+
+/**
+ * Render a document id as a git-style short id: head (8 chars) + `…` + tail
+ * (5 chars). The ONE shared formatter for every human-readable id display in
+ * this adapter — every call site below that used to hand-roll its own
+ * `id.slice(0, 8)` now routes through this function instead (nine sites, three
+ * files: `utils.ts`'s `formatTree`/`formatTreeChildren`/`formatNavigation`,
+ * `commands/get.ts`'s document header, `commands/link.ts`'s two `Linked <from>
+ * → <to>` operands). `--json` output on every one of those surfaces is
+ * UNCHANGED — it always serializes the full, untruncated id; only the
+ * human-readable text path renders through this function.
+ *
+ * ⛔ Do NOT fold `context-projection.ts`'s `sha256Hash8` into this function —
+ * that is a sha256 CONTENT-hash truncation (a different concept, different
+ * collision math: a deliberately short fingerprint over section *bodies*, not
+ * a document identifier), left byte-identical by this change.
+ *
+ * ## Why the previous rendering (`.slice(0, 8)`) was broken
+ *
+ * A ULID is 26 Crockford-base32 characters: the first 10 encode the 48-bit
+ * millisecond timestamp, the remaining 16 encode 80 bits of randomness.
+ * `.slice(0, 8)` kept only the HIGH 40 bits of the timestamp and ZERO bits of
+ * randomness — any two docs created inside the same 1024ms window (32^2, the
+ * resolution an 8-char timestamp prefix carries) printed a BYTE-IDENTICAL
+ * short id. This was not a rare same-millisecond fluke: it was a near-
+ * certainty for this corpus's normal write pattern (batch doc creation), and
+ * is the defect this function fixes.
+ *
+ * ## Options weighed (task §Required — recorded here per its explicit
+ * "state the collision probability, do not assert it is enough" instruction)
+ *
+ *   (a) REJECTED — lengthen the prefix. All 10 timestamp characters are
+ *       already the FULL 48-bit timestamp and still carry zero randomness;
+ *       same-millisecond writes would still collide byte-for-byte. Any fix by
+ *       lengthening the prefix alone buys nothing — it must reach INTO the
+ *       random half to work at all, which is exactly what (b) does.
+ *   (b) CHOSEN — head (8 chars) + tail (5 chars), git-style. The 5-char tail
+ *       is drawn entirely from the ULID's 80-bit random half — specifically
+ *       its LOWEST 25 bits (string positions 21-25 of the 26-char id; the
+ *       random half itself spans positions 10-25). Two rendered ids collide
+ *       under this scheme only if BOTH halves match: the same 40-bit
+ *       timestamp prefix (i.e. the same 1024ms window — the ONLY condition
+ *       under which the old 8-char form ever collided) AND the same 25-bit
+ *       tail. Conditioned on "same window" (the worst case), the residual
+ *       collision probability is exactly the tail-match probability:
+ *       1 / 32^5 = 1 / 33,554,432 ≈ 2.98 × 10⁻⁸ — roughly 1 in 33.5 million,
+ *       assuming the random half is drawn from a uniform CSPRNG (true for a
+ *       spec-compliant ULID generator; this codebase's generator (`ulidx`'s
+ *       `ulid()`) is not itself monotonic, so this is the applicable case —
+ *       a MONOTONIC generator that increments the random part on a same-ms
+ *       collision would make same-window collisions rarer still).
+ *   (c) REJECTED — print the slug instead of the id. Every one of the nine
+ *       call sites already prints the title (slug-derived) right next to the
+ *       id, so a slug here would be redundant AND roughly double the line
+ *       width. The slug is also editable while the id is immutable — a worse
+ *       invariant for a short-id-as-identifier use case.
+ *   (d) REJECTED — shortest-unique-prefix, computed against the corpus
+ *       (git-style ambiguous-abbreviation growth). Requires a corpus-wide id
+ *       lookup PER RENDER, plus new prefix-matching production surface inside
+ *       `resolve()` — cost this task's anchors (pure presentation-layer files)
+ *       cannot absorb.
+ *
+ * ⛔ NOT RESOLVABLE: unlike a full id or a full slug, this head+tail string is
+ * NOT accepted by `lore get <short>` — `resolve()` only matches a full id, a
+ * full slug, or a unique id PREFIX (contiguous from the start); this
+ * non-contiguous head…tail form matches neither. A reader wanting to open a
+ * doc from its printed short id must use the title/slug printed alongside it,
+ * or `lore search`. This is a deliberate trade (option (d) above, which WOULD
+ * have been resolvable, was rejected for its cost) — stated here rather than
+ * left implicit.
+ *
+ * @param id - Full document id (a ULID in production; tests may pass any
+ *   string). Ids no longer than `headLen + tailLen` (malformed/legacy data —
+ *   e.g. a 6-char or empty string) render WHOLE, unsliced, with no `…`
+ *   separator — never throws, never produces an overlapping/nonsensical
+ *   substring.
+ * @returns The rendered short id, ready to interpolate into a display line.
+ * @example
+ *   formatShortId("01KYYDXH4SBSHGHAXNPKEY9SMB") // "01KYYDXH…Y9SMB"
+ *   formatShortId("abcdef")                      // "abcdef" (6 <= 13, whole)
+ *   formatShortId("")                             // "" (boundary: empty)
+ */
+export function formatShortId(id: string): string {
+  const headLen = 8;
+  const tailLen = 5;
+  if (id.length <= headLen + tailLen) return id;
+  return `${id.slice(0, headLen)}…${id.slice(-tailLen)}`;
+}
+
 // ─── Table Output ───────────────────────────────────────────────────────────
 
 /**
@@ -951,7 +1045,7 @@ export function formatTree(
   prefix: string = "",
   badges: ReadonlyMap<string, string> = new Map(),
 ): string {
-  const label = `${node.doc.id.slice(0, 8)}… ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
+  const label = `${formatShortId(node.doc.id)} ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
   const lines: string[] = [prefix === "" ? label : label];
 
   for (let i = 0; i < node.children.length; i++) {
@@ -975,7 +1069,7 @@ function formatTreeChildren(
   prefix: string,
   badges: ReadonlyMap<string, string>,
 ): string[] {
-  const label = `${node.doc.id.slice(0, 8)}… ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
+  const label = `${formatShortId(node.doc.id)} ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
   const lines: string[] = [label];
 
   for (let i = 0; i < node.children.length; i++) {
@@ -1006,7 +1100,7 @@ export function formatNavigation(nav: DocWithNavigation["navigation"]): string {
   const lines: string[] = ["── Navigation " + "─".repeat(50)];
 
   if (nav.parent) {
-    lines.push(`Parent:   ${nav.parent.id.slice(0, 8)}… ${nav.parent.title}`);
+    lines.push(`Parent:   ${formatShortId(nav.parent.id)} ${nav.parent.title}`);
   } else {
     lines.push("Parent:   (none)");
   }
@@ -1014,7 +1108,7 @@ export function formatNavigation(nav: DocWithNavigation["navigation"]): string {
   if (nav.siblings.length > 0) {
     const sibStr = nav.siblings
       .slice(0, 5)
-      .map((s) => `${s.id.slice(0, 8)}… ${s.title}`)
+      .map((s) => `${formatShortId(s.id)} ${s.title}`)
       .join(", ");
     lines.push(`Siblings: ${sibStr}`);
   } else {
@@ -1024,7 +1118,7 @@ export function formatNavigation(nav: DocWithNavigation["navigation"]): string {
   if (nav.children.length > 0) {
     const childStr = nav.children
       .slice(0, 5)
-      .map((c) => `${c.id.slice(0, 8)}… ${c.title}`)
+      .map((c) => `${formatShortId(c.id)} ${c.title}`)
       .join(", ");
     lines.push(`Children: ${childStr}`);
   } else {
@@ -1034,7 +1128,7 @@ export function formatNavigation(nav: DocWithNavigation["navigation"]): string {
   if (nav.related.length > 0) {
     const relStr = nav.related
       .slice(0, 5)
-      .map((r) => `${r.id.slice(0, 8)}… ${r.title} (${r.link_type})`)
+      .map((r) => `${formatShortId(r.id)} ${r.title} (${r.link_type})`)
       .join(", ");
     lines.push(`Related:  ${relStr}`);
   }

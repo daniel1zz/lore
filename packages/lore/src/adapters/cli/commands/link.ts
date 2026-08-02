@@ -20,7 +20,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
+import { exitCode, formatError, formatShortId, resolveActor } from "../utils.js";
 import { linkTypeSchema } from "@lore/core";
 import type { LinkType } from "@lore/core";
 
@@ -153,7 +153,7 @@ export default defineCommand({
           console.log(JSON.stringify({ ok: true, data: link }, null, 2));
         } else {
           console.log(
-            `Linked ${link.from_id.slice(0, 8)}… → ${link.to_id.slice(0, 8)}… ` +
+            `Linked ${formatShortId(link.from_id)} → ${formatShortId(link.to_id)} ` +
               `(${link.link_type}) [inferred]`,
           );
         }
@@ -184,7 +184,7 @@ export default defineCommand({
       if (args.json) {
         console.log(JSON.stringify({ ok: true, data: link }, null, 2));
       } else {
-        console.log(`Linked ${link.from_id.slice(0, 8)}… → ${link.to_id.slice(0, 8)}… (${link.link_type})`);
+        console.log(`Linked ${formatShortId(link.from_id)} → ${formatShortId(link.to_id)} (${link.link_type})`);
       }
     } finally {
       app.close();
