@@ -222,6 +222,24 @@ function ageMinutesBetween(nowIso: string, atIso: string): number {
 }
 
 /**
+ * Plan-membership predicate keyed on `extra.plan_id` — mirrors
+ * `TaskWorkflowService`'s identical private helper of the same name (cross-service
+ * imports are forbidden by this codebase's architecture — service/CLAUDE.md — so
+ * this tiny pure predicate is duplicated here, same precedent as
+ * `computeAnchorAdvisories` below, "ported unchanged"). `extra.plan_id` is the
+ * DECLARED property of plan membership for a LEGACY flat `task` doc under a plan
+ * (mandatory at creation, mirrors the task tier); `parent_id` is a proxy a task's
+ * `--parent` may deliberately diverge from (SPEC-065 D4). A `parent_id`-keyed query
+ * silently drops a diverged legacy task from its own plan
+ * (task-plan-membership-is-extra-plan-id-but-the-last-task). NOT used for `phase`-
+ * typed docs — see `fetchPlanChildren`'s own comment for why no divergence is
+ * structurally possible there.
+ */
+function isPlanMember(task: DocRecord, planId: DocId): boolean {
+  return task.extra["plan_id"] === planId;
+}
+
+/**
  * Projects one `ChecklistItem` into its render-ready {@link PhaseScorecardChecklistItem}
  * form for `planPhaseStatus` (SPEC-077 S3) — computed here so no HTTP-route consumer
  * re-derives `dropped`/`checked`/`result` precedence itself.
@@ -1388,16 +1406,34 @@ export class PhaseWorkflowService {
 
   /**
    * Fetches a plan's `phase`-typed children UNION its legacy `task`-typed children
-   * (D2 read tolerance) — two type-filtered `findMany` calls (the store interface has
-   * no multi-type filter), never a single unfiltered scan (which would risk silently
-   * absorbing an unrelated doc type sharing the same `parent_id`, however unlikely).
+   * (D2 read tolerance).
+   *
+   * The `phase` half stays a `parent_id`-filtered `findMany` — CORRECT unchanged:
+   * `PhaseMigrationService` (phase docs' sole writer, a raw-insert migration, never a
+   * user-facing `--parent`/`--plan-id` flag pair) always sets a phase's `parent_id`
+   * and `extra.plan_id` to the SAME plan id, so no divergence is structurally
+   * possible and `parent_id` IS the property here.
+   *
+   * The legacy-task half is NOT — a legacy flat task is created via the SAME `lore
+   * create task --plan-id/--parent` pair as any other task, so it is subject to the
+   * identical SPEC-065 D4 divergence TaskWorkflowService.ready()'s fix removes
+   * (task-plan-membership-is-extra-plan-id-but-the-last-task): `parent_id` is a proxy
+   * for membership, `extra.plan_id` (`isPlanMember`) is the property. The store has
+   * no extra-field filter, so this is a corpus-wide `type: "task"` scan narrowed
+   * client-side, never a single unfiltered scan across BOTH doc types (which would
+   * risk silently absorbing an unrelated doc type sharing the same `parent_id`,
+   * however unlikely) — still two type-separated queries, only the task half's
+   * membership predicate changed.
    */
   private async fetchPlanChildren(planId: DocId): Promise<Result<DocRecord[], LoreError>> {
     const phasesResult = await this.store.findMany({ parent_id: planId, type: "phase" });
     if (!phasesResult.ok) return phasesResult;
-    const legacyTasksResult = await this.store.findMany({ parent_id: planId, type: "task" });
-    if (!legacyTasksResult.ok) return legacyTasksResult;
-    return ok([...phasesResult.value, ...legacyTasksResult.value]);
+
+    const allLegacyTasksResult = await this.store.findMany({ type: "task" });
+    if (!allLegacyTasksResult.ok) return allLegacyTasksResult;
+    const legacyTasks = allLegacyTasksResult.value.filter((t) => isPlanMember(t, planId));
+
+    return ok([...phasesResult.value, ...legacyTasks]);
   }
 
   /**
