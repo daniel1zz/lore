@@ -31,7 +31,12 @@
  *               worktree (cwd not a git repo) and a claim whose recorded
  *               worktree is NOT a git repository are BOTH unaffected (no
  *               fabricated refusal), and `measureWorktreeCleanliness` reports
- *               each as its own DISTINCT not-measured status value
+ *               each as its own DISTINCT not-measured status value. ALSO
+ *               covers task-the-uncommitted-worktree-guard-treats-no-claim-
+ *               at-all-as-a's own missing combination: NO claim recorded at
+ *               ALL (never claimed), called from a REAL git-repo cwd — this
+ *               must be accepted, never refused as if it were the STATE
+ *               block's "claim recorded no worktree" case below
  *   STATE:      the Q3 opt-in-hole close — a claim recording NO worktree,
  *               called from a cwd that IS a real git repository, is refused;
  *               the identical claim called from a NON-repo cwd is unaffected
@@ -41,6 +46,7 @@
  *               succeeds exactly as before this guard existed
  *
  * @spec_ref task-lore-evidence-and-lore-release-accept-an-attestation-from
+ * @spec_ref task-the-uncommitted-worktree-guard-treats-no-claim-at-all-as-a
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -310,6 +316,33 @@ describe("ERROR — not-measured controls record DISTINCT values, never fabricat
     const result = await taskWorkflowService.addEvidence(
       taskId,
       evidence({ callerCwd: nonRepoCwd }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  // reason: task-the-uncommitted-worktree-guard-treats-no-claim-at-all-as-a
+  // — the missing combination that let the defect ship. Every OTHER test in
+  // this file constructs a claim first (`taskWorkflowService.claim(...)`),
+  // so the claim-less case — a task with NO `extra.claim` at ALL, called
+  // with a REAL git-repo callerCwd (the orchestrator's post-merge
+  // re-verification path from its main checkout) — was never exercised.
+  // RED before the fix: `claim?.worktree === undefined` was indistinguishable
+  // from "a claim exists but recorded no worktree", so this call was
+  // FALSELY REFUSED with the Q3 mismatch message ("its claim recorded NO
+  // worktree, but this call is running from inside a git repository …
+  // Re-claim with `lore claim <task> --worktree "$PWD"`") — a repair
+  // prescription for a claim that never existed. GREEN after the fix: no
+  // claim at all is accepted unconditionally, before the Q3 check ever runs.
+  it("NO claim at all (never claimed), called from a REAL git-repo cwd, is accepted — NOT refused as if the claim recorded no worktree", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const taskId = await createPlanAndTask(corpusService);
+    const realRepoCwd = makeCleanRepo();
+
+    // Deliberately NO taskWorkflowService.claim(...) call — extra.claim is
+    // genuinely absent, not merely a claim without a worktree.
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({ callerCwd: realRepoCwd }),
     );
     expect(result.ok).toBe(true);
   });
