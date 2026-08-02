@@ -81,6 +81,20 @@
  * the rest. Same shared-decision CLI/MCP split as the two guards above
  * (`findMixedRunnerRefusal`, `../cli/evidence-precheck.js`).
  *
+ * `lore_evidence_add` and `lore_release` now thread `caller_cwd` through to
+ * `TaskWorkflowService.addEvidence`/`release`'s uncommitted-worktree
+ * attestation guard (defect: task-lore-evidence-add-and-lore-release-over-
+ * mcp-get-no — the SECOND instance of an optional-new-parameter silently
+ * leaving an adapter unwired this session, see
+ * task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan) — neither
+ * tool passed `callerCwd` at all before this fix, so the Q3 opt-in-hole close
+ * (task-lore-evidence-and-lore-release-accept-an-attestation-from) was
+ * silently absent on this surface. `lore_release` gains a NEW `caller_cwd`
+ * field; `lore_evidence_add` reuses its PRE-EXISTING one (added earlier for
+ * the oracle-file-existence precheck) for this second, orthogonal purpose.
+ * See the module section header directly above `resolveMcpCallerCwd` (this
+ * file's own Helpers section) for the full three-question review.
+ *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
  *   2. Immediately patches `_registeredTools[name].inputSchema = schema` on the registered tool
@@ -456,12 +470,28 @@ export const LoreClaimSchema = z.object({
   steal: z.boolean().optional(),
 });
 
-/** Input schema for lore_release. */
+/**
+ * Input schema for lore_release.
+ * `caller_cwd` (task-lore-evidence-add-and-lore-release-over-mcp-get-no) —
+ * see {@link LoreEvidenceAddSchema.caller_cwd}'s JSDoc for the full "MCP has
+ * no meaningful `process.cwd()`" rationale; this field EXISTS SOLELY to feed
+ * {@link resolveMcpCallerCwd} → `ReleaseOpts.callerCwd`, the uncommitted-
+ * worktree attestation guard's Q3 mismatch check
+ * (`checkUncommittedAttestationWorktree`, task-lore-evidence-and-lore-
+ * release-accept-an-attestation-from) — `lore_release` had NO `caller_cwd`
+ * field at all before this fix, unlike `lore_evidence_add`'s pre-existing one
+ * (added earlier for an unrelated purpose, the oracle-file-existence
+ * precheck). Optional: an agent that genuinely does not know its own
+ * directory must not be forced to fabricate one; an omitted value degrades
+ * to "not measured" (no fabricated refusal), never a silent reuse of the
+ * MCP server's own irrelevant `process.cwd()`.
+ */
 export const LoreReleaseSchema = z.object({
   id_or_slug: z.string(),
   by: z.string().min(1),
   reason: z.string().optional(),
   force: z.boolean().optional(),
+  caller_cwd: z.string().optional(),
 });
 
 /**
@@ -495,6 +525,14 @@ export const LoreEvidenceAddSchema = z.object({
    * is byte-identical to pre-fix behavior and a genuinely missing file is
    * still refused regardless. Mirrors `lore verify`'s `--execution-root`
    * (SPEC-063).
+   *
+   * SECOND use (task-lore-evidence-add-and-lore-release-over-mcp-get-no):
+   * also fed to {@link resolveMcpCallerCwd} → `EvidenceInput.callerCwd`, the
+   * uncommitted-worktree attestation guard's Q3 mismatch check
+   * (`checkUncommittedAttestationWorktree`, task-lore-evidence-and-lore-
+   * release-accept-an-attestation-from) — the SAME caller-declared value,
+   * reused for a SECOND, orthogonal purpose rather than a second field,
+   * since both readings are "the calling agent's own real directory".
    */
   caller_cwd: z.string().optional(),
 });
@@ -757,6 +795,194 @@ function errorContent(error: LoreError) {
     content: [{ type: "text" as const, text: JSON.stringify(error) }],
     isError: true as const,
   };
+}
+
+// ─── task-lore-evidence-add-and-lore-release-over-mcp-get-no ────────────────
+// (this is the SECOND instance of one pattern in a single session — see the
+// sibling fix for `deriveCommitSetForPlan`, task-the-mcp-assess-adapter-
+// still-calls-derivecommitsetforplan — of an optional new parameter letting
+// an adapter compile while providing NONE of the new behavior.)
+//
+// `commands/evidence.ts`/`commands/release.ts` (task-lore-evidence-and-lore-
+// release-accept-an-attestation-from) populate `EvidenceInput.callerCwd`/
+// `ReleaseOpts.callerCwd` with their own `process.cwd()` — a fresh CLI
+// subprocess per invocation, so this is ALWAYS the real caller's directory.
+// This MCP surface had NO equivalent wiring at all: neither
+// `lore_evidence_add` nor `lore_release` passed `callerCwd`, so the Q3
+// opt-in-hole close (a claim recording NO worktree, from a call plainly
+// running inside a real git repo, refuses instead of silently passing) was
+// silently absent for every MCP caller — exactly the pre-fix behavior.
+//
+// MCP has no equivalent to a fresh subprocess's `process.cwd()`: this
+// server is a long-lived stdio process (see this module's own header) whose
+// `process.cwd()` reflects wherever THAT PROCESS was launched, once, at
+// startup — never "which directory the calling agent is logically operating
+// in right now" (the SAME fact `lore_evidence_add`'s pre-existing
+// `caller_cwd` field, added for the oracle-file-existence precheck, already
+// documents). So this surface reuses that SAME caller-declared field for
+// this SECOND purpose (evidence) and gains it fresh on `lore_release` (which
+// had no `caller_cwd` field at all) — never the MCP server's own
+// `process.cwd()`, which would be exactly the wrong value (see
+// {@link resolveMcpCallerCwd}'s own JSDoc for why a wrong-but-plausible
+// default is worse than an honest "not measured").
+//
+// MEASURED regression (this task's own dispatch, before landing): a naive
+// "always thread `args.caller_cwd` through to `callerCwd` verbatim" design
+// broke a PRE-EXISTING, unrelated passing test
+// (`mcp-tools-task-workflow.test.ts`'s "AC-2.H1 (GREEN)" — the oracle-file
+// precheck's OWN `caller_cwd` escape hatch) — that test supplies a REAL
+// `caller_cwd` (`<repo>/packages/lore`, a real git working tree) on a task
+// that was NEVER claimed at all, purely to help the precheck resolve a file.
+// With a naive design, that SAME real path also flowed into the worktree
+// guard's `callerCwd`, and since the task has no claim (`worktree ===
+// undefined` collapses "claim exists without a worktree" and "no claim at
+// all" into ONE branch inside the off-limits `checkUncommittedAttestationWorktree`
+// — see that function's own JSDoc), the Q3 mismatch fired: `isInsideGitRepo`
+// on a real repo path → refused. This is EXACTLY the widening AC-7 forbids
+// ("the CLI's Q3 close targets a claim that RECORDED NO WORKTREE, not the
+// absence of a claim; do not widen that"). Fix: {@link hasRecordedTaskClaim}
+// gates whether a REAL `callerCwd` reaches the worktree guard at all — a
+// task with no claim recorded gets the not-measured sentinel for THIS
+// purpose regardless of what `caller_cwd` the caller supplied, while the
+// oracle-file precheck's OWN (unrelated, pre-existing) use of the SAME raw
+// `args.caller_cwd` value is completely untouched by this gate.
+//
+// adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the — the
+// three-question review this fix answers:
+//
+//   Q1 Proxy — is "an MCP tool call supplied `caller_cwd`" a proxy for "the
+//     calling agent's real directory is known", or the property itself? It
+//     is necessarily a PROXY: a caller can pass any string it likes,
+//     including a stale or fabricated path. Accepted, with the same
+//     mitigation the CLI's identical precheck field already relies on: the
+//     value is used ONLY to ask `isInsideGitRepo` a yes/no question (never
+//     trusted as "this exact tree is what was verified") — a fabricated
+//     value that happens to resolve to SOME real repo produces, at worst,
+//     the SAME refusal-or-pass a genuine caller_cwd would, never a forged
+//     PASS on a dirty tree (the primary whole-worktree predicate stays keyed
+//     off the claim's own recorded worktree, completely unaffected by this
+//     field — see the module section header in task-workflow-service.ts).
+//     A SECOND proxy layer sits on top: {@link hasRecordedTaskClaim} is
+//     itself a proxy for "this call is plausibly about an actively-claimed
+//     task" — a stale/foreign claim still counts. Accepted: the worktree
+//     guard's OWN authorization checks (holder/force) run independently and
+//     are completely unaffected by this gate.
+//   Q2 Silence — what does this do when the calling agent supplies NO
+//     `caller_cwd`, OR when the target has no recorded claim at all? Reusing
+//     the MCP server's own `process.cwd()` as a silent default was
+//     REJECTED: it is almost always SOME real repo path (the server has to
+//     be launched from somewhere), so it would manufacture spurious Q3
+//     refusals for every caller that simply never declared its directory —
+//     the "silence bug one level down" this task's own filing warns against
+//     (conflating "MCP cannot know" with "the claim recorded no worktree").
+//     Instead, {@link resolveMcpCallerCwd} returns the DISTINCT,
+//     never-a-real-path sentinel {@link NOT_MEASURED_NO_CALLER_CWD} —
+//     `isInsideGitRepo` deterministically reports `false` for it (verified
+//     by this file's own test suite AND by the regression this section's
+//     header describes), so BOTH "no caller_cwd declared" and "no claim
+//     recorded at all" degrade to "not measured" (no fabricated refusal),
+//     never silently reusing the server's own irrelevant cwd.
+//   Q3 Opt-in — does this bind every MCP call, or only those that opt in?
+//     `caller_cwd` stays OPTIONAL on both schemas (an agent that genuinely
+//     does not know its own directory must not be forced to fabricate one,
+//     and the majority of evidence/release calls have nothing to do with
+//     the worktree guard at all). What is NOT optional is the WIRING itself:
+//     {@link resolveMcpCallerCwd} takes REQUIRED parameters, so every call
+//     site in THIS file that constructs an evidence/release input MUST
+//     explicitly resolve a `callerCwd` value AND explicitly state whether a
+//     claim is recorded — deleting either argument at a call site is a
+//     compile error (`TS2554`), not a silent omission. A FUTURE fourth
+//     adapter (or a new branch in this file) can still choose not to call
+//     this helper at all, same residual limitation the sibling
+//     `deriveCommitSetForPlan` fix already accepts — required-at-the-
+//     boundary is the strongest closure available without editing the
+//     off-limits service file that owns `EvidenceInput`/`ReleaseOpts`.
+
+/**
+ * Distinct sentinel meaning "this MCP call has no REAL `callerCwd` to offer
+ * the worktree guard's Q3 check" (AC2, task-lore-evidence-add-and-lore-
+ * release-over-mcp-get-no) — either because the caller declared no
+ * `caller_cwd` at all, or because {@link hasRecordedTaskClaim} says the
+ * target has no recorded claim (see {@link resolveMcpCallerCwd}). Passed
+ * through to `TaskWorkflowService.addEvidence`/`release`'s `callerCwd`
+ * parameter so the Q3 mismatch check (`checkUncommittedAttestationWorktree`,
+ * task-lore-evidence-and-lore-release-accept-an-attestation-from) degrades
+ * to "not a git repo" (`isInsideGitRepo` is a real `git rev-parse`
+ * subprocess call against this literal string as a `cwd` — it fails to
+ * resolve, and that failure mode degrades to `false` by that function's own
+ * "never throws" contract) rather than silently reusing the CLI's
+ * `undefined`-means-"skip-the-check" semantics for the ENTIRELY DIFFERENT
+ * reason of "MCP genuinely cannot observe its caller's directory". Never a
+ * real filesystem path by construction (no leading `/`, embeds characters no
+ * real caller_cwd would ever legitimately carry) — see the module section
+ * header above for the full Q1/Q2/Q3 review.
+ */
+const NOT_MEASURED_NO_CALLER_CWD = "<not-measured-no-caller-cwd>";
+
+/**
+ * Whether `idOrSlug` currently has ANY recorded claim (`extra.claim`
+ * present, with or without a `worktree`) — task-lore-evidence-add-and-lore-
+ * release-over-mcp-get-no AC-7: "the CLI's Q3 close targets a claim that
+ * RECORDED NO WORKTREE, not the absence of a claim; do not widen that."
+ * `{@link checkUncommittedAttestationWorktree}` (the off-limits service
+ * function this whole fix feeds) cannot make this distinction itself — it
+ * reads `claim?.worktree`, which is `undefined` for BOTH "no claim object at
+ * all" and "a claim exists but never recorded `--worktree`" — so this MCP
+ * adapter makes the distinction ITSELF, before ever calling the service, by
+ * checking whether a claim is recorded on the target doc at all.
+ *
+ * ADVISORY pre-check ONLY, never a gate: a doc that fails to resolve here
+ * (`DOC_NOT_FOUND` or any other read error) reads as `false` — the REAL
+ * resolution error still surfaces from the actual `addEvidence`/`release`
+ * call this precedes, completely unaffected by this helper's own outcome.
+ *
+ * @param corpusService - Used read-only, never mutates.
+ * @param idOrSlug - The evidence/release target, verbatim from the tool call.
+ * @returns `true` iff the resolved doc's `extra.claim` is a non-null value.
+ */
+async function hasRecordedTaskClaim(
+  corpusService: App["corpusService"],
+  idOrSlug: string,
+): Promise<boolean> {
+  const docResult = await corpusService.get(idOrSlug);
+  if (!docResult.ok) return false;
+  const claim = docResult.value.doc.extra["claim"];
+  return claim !== undefined && claim !== null;
+}
+
+/**
+ * Resolves the `callerCwd` argument threaded to
+ * `TaskWorkflowService.addEvidence`/`release`'s uncommitted-worktree
+ * attestation guard (task-lore-evidence-and-lore-release-accept-an-
+ * attestation-from Q3) from an MCP tool's own caller-declared `caller_cwd`
+ * schema field — the REQUIRED parameters here (not optional) are the
+ * mechanization this task exists to add: every call site in this file that
+ * builds an evidence/release service input must explicitly resolve a value
+ * through this function, so a future call site cannot silently omit
+ * `callerCwd` the way `lore_evidence_add`/`lore_release` themselves did
+ * before this fix (see the module section header above) — and cannot
+ * silently repeat the MEASURED regression that same header describes either
+ * (a real `caller_cwd` leaking into the guard for a never-claimed task).
+ *
+ * @param callerCwdArg - The tool's own `caller_cwd` input field, verbatim
+ *   (still OPTIONAL at the MCP schema level — see the module section header
+ *   above for why forcing every caller to supply one is NOT the fix here).
+ * @param hasRecordedClaim - {@link hasRecordedTaskClaim}'s result for this
+ *   same call's target doc — `false` forces the not-measured sentinel
+ *   REGARDLESS of `callerCwdArg`, closing the "absence of a claim" widening
+ *   this task's AC-7 explicitly forbids.
+ * @returns `callerCwdArg` unchanged when `hasRecordedClaim` is `true` and a
+ *   value was supplied; {@link NOT_MEASURED_NO_CALLER_CWD} otherwise.
+ * @example
+ * resolveMcpCallerCwd("/Users/agent/worktree", true); // => "/Users/agent/worktree"
+ * @example
+ * resolveMcpCallerCwd("/Users/agent/worktree", false); // => "<not-measured-no-caller-cwd>"
+ * @example
+ * resolveMcpCallerCwd(undefined, true); // => "<not-measured-no-caller-cwd>"
+ */
+function resolveMcpCallerCwd(callerCwdArg: string | undefined, hasRecordedClaim: boolean): string {
+  if (!hasRecordedClaim) return NOT_MEASURED_NO_CALLER_CWD;
+  return callerCwdArg ?? NOT_MEASURED_NO_CALLER_CWD;
 }
 
 // ─── Tool Registration Helper ─────────────────────────────────────────────────
@@ -1356,11 +1582,21 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
   // lore_release
   registerToolWithArgs(server, "lore_release", "Clear the advisory execution lease on a task", LoreReleaseSchema, async (args) => {
+    // reason: task-lore-evidence-add-and-lore-release-over-mcp-get-no —
+    // AC-7's "absence of a claim" guard, computed BEFORE the release call so
+    // `resolveMcpCallerCwd` can gate on it (see this file's own module
+    // section header above `hasRecordedTaskClaim`).
+    const hasClaim = await hasRecordedTaskClaim(corpusService, args.id_or_slug);
     const result = await taskWorkflowService.release(args.id_or_slug, {
       by: args.by,
       ...(args.reason !== undefined ? { reason: args.reason } : {}),
       force: args.force === true,
       source: "mcp",
+      // reason: task-lore-evidence-add-and-lore-release-over-mcp-get-no —
+      // wires the uncommitted-worktree attestation guard's Q3 mismatch check
+      // through to this surface (see this file's own module section header
+      // above `resolveMcpCallerCwd` for the full three-question review).
+      callerCwd: resolveMcpCallerCwd(args.caller_cwd, hasClaim),
     });
     if (!result.ok) return errorContent(result.error);
     // reason: AC-RELEASE-ADVISORY — same `hasZeroReleaseEvidence` check the CLI's
@@ -1469,6 +1705,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       return errorContent(filteredPassRefusal);
     }
 
+    // reason: task-lore-evidence-add-and-lore-release-over-mcp-get-no —
+    // AC-7's "absence of a claim" guard, computed BEFORE the evidence call
+    // so `resolveMcpCallerCwd` can gate on it (see this file's own module
+    // section header above `hasRecordedTaskClaim`).
+    const hasClaim = await hasRecordedTaskClaim(corpusService, args.id_or_slug);
+
     const evidenceInput = {
       oracle: args.oracle,
       command: args.command,
@@ -1478,6 +1720,14 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       ...(args.output_tail !== undefined ? { output_tail: args.output_tail } : {}),
       ...(args.ac_ref !== undefined ? { ac_ref: args.ac_ref } : {}),
       ...(args.checklist_ref !== undefined ? { checklist_ref: args.checklist_ref } : {}),
+      // reason: task-lore-evidence-add-and-lore-release-over-mcp-get-no —
+      // wires the uncommitted-worktree attestation guard's Q3 mismatch check
+      // through to this surface (see this file's own module section header
+      // above `resolveMcpCallerCwd` for the full three-question review).
+      // Harmless-but-unused on the phase-workflow retry dispatch below
+      // (`PhaseWorkflowService` does not implement this guard at all) —
+      // `EvidenceInput` is the SAME imported type either target consumes.
+      callerCwd: resolveMcpCallerCwd(args.caller_cwd, hasClaim),
     };
 
     let result = await taskWorkflowService.addEvidence(args.id_or_slug, evidenceInput);
