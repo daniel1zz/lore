@@ -164,12 +164,10 @@ interface RunOpts {
 
 interface RunResult {
   result: ReturnType<typeof spawnSync>;
-  elapsedMs: number;
 }
 
 function runHook({ cwd, extraEnv = {} }: RunOpts): RunResult {
   const stateBase = mkScratchDir("freshness-state-");
-  const t0 = performance.now();
   const result = spawnSync("node", [HOOK_PATH], {
     cwd,
     encoding: "utf8",
@@ -181,8 +179,7 @@ function runHook({ cwd, extraEnv = {} }: RunOpts): RunResult {
       ...extraEnv,
     },
   });
-  const elapsedMs = performance.now() - t0;
-  return { result, elapsedMs };
+  return { result };
 }
 
 function parseAdditionalContext(stdout: string): string {
