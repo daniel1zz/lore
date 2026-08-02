@@ -55,7 +55,10 @@
  *   given inconsistently), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase,
  *   50-entry cap reached, bad oracle/result value, unknown ac_ref/checklist_ref, OR
  *   a missing oracle file / an unproven filtered pass / a mixed-runner command per
- *   the three prechecks below), 5 = STALE_VERSION.
+ *   the three prechecks below, OR a `--result pass` from a claim whose recorded
+ *   worktree is uncommitted / from a no-worktree claim running inside a real git
+ *   repo — TaskWorkflowService's own uncommitted-worktree guard, see module header),
+ *   5 = STALE_VERSION.
  *
  * Mixed-runner invocation guard (defect: task-vitest-run-silently-drops-a-bun-
  * test-ts-named-alongside-a) — a single `vitest run` invocation naming a
@@ -134,8 +137,22 @@
  * there instead (mirrors `lore verify`'s `--execution-root`, SPEC-063, for the
  * identical class of problem).
  *
+ * Uncommitted-worktree attestation guard (task-lore-evidence-and-lore-
+ * release-accept-an-attestation-from) — a self-reported `--result pass` used
+ * to record cleanly even while the claim's own recorded `--worktree` sat
+ * uncommitted, letting the corpus attest a task no commit backs (2026-08-01
+ * incident: 7 such rows + a release recorded while the branch carried no
+ * commits at all). `evidenceInput.callerCwd` below passes this process's own
+ * `process.cwd()` through to `TaskWorkflowService.addEvidence` — used ONLY
+ * to close an opt-in hole (a claim recording NO worktree, from a call
+ * plainly running inside a real git repo, refuses instead of silently
+ * passing); the primary whole-worktree `git status --porcelain` predicate
+ * itself lives entirely in the service (`task-workflow-service.ts`), keyed
+ * off the claim's own recorded worktree, not this cwd.
+ *
  * Source: SPEC-025 §4 AC-WF-1, AC-WF-2; SPEC-038 §4, §7 D3; SPEC-056 §Design Decisions D8;
- *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the
+ *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the;
+ *   task-lore-evidence-and-lore-release-accept-an-attestation-from
  */
 
 import { existsSync, readFileSync } from "fs";
@@ -321,6 +338,14 @@ export default defineCommand({
         result: args.result as (typeof VALID_RESULTS)[number],
         recorded_by: by,
         source: app.callerSurface,
+        // reason: task-lore-evidence-and-lore-release-accept-an-attestation-
+        // from — TaskWorkflowService's uncommitted-worktree guard uses this
+        // ONLY to detect the Q3 opt-in-hole mismatch (a claim recording NO
+        // worktree while this call plainly runs from inside a real git repo).
+        // A fresh subprocess per CLI invocation inherits the caller's real
+        // shell cwd (same fact this file's own missing-oracle-file precheck
+        // already documents), so this is always correct here.
+        callerCwd: process.cwd(),
         ...(outputTail !== undefined ? { output_tail: outputTail } : {}),
         ...(typeof args.ac === "string" ? { ac_ref: args.ac } : {}),
         ...(typeof args["checklist-ref"] === "string" ? { checklist_ref: args["checklist-ref"] } : {}),
