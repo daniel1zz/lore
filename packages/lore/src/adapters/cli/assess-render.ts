@@ -9,7 +9,10 @@
  *   - formatAssessmentSummary(result) — verdict + AC score table + gaps +
  *     recommendations + judge metadata (legacy shape, byte-identical when no SPEC-040
  *     typed fields are present) PLUS, additively, dimension scores / typed gaps /
- *     typed recommendations / rubric warnings tables when present on the result.
+ *     typed recommendations / rubric warnings tables when present on the result, PLUS
+ *     (task-assess-templates-5-binds-the-projected-renderer-while-two) a presence-guarded
+ *     `Reproducible: yes|no` line next to the Judge line when `judgment.reproducible` is
+ *     recorded — absent when the field is absent, never inferred.
  *   - computeGitDiffMaxBuffer(maxDiffChars) — sizes `spawnSync`'s `maxBuffer` for the
  *     `git diff` acquisition call against the EFFECTIVE `ai.assess.max_diff_chars`
  *     budget (task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1).
@@ -203,6 +206,22 @@ export function formatAssessmentSummary(result: AssessmentResult): string {
       (result.judgment.truncated.length > 0 ? `, truncated: ${result.judgment.truncated.join(", ")}` : "") +
       `)`,
   );
+
+  // reason: additive-only (task-assess-templates-5-binds-the-projected-renderer-while-two)
+  // — presence-guarded like every other SPEC-040/067 judgment field (legacy result renders
+  // byte-identically). `judgment.reproducible` is a genuine three-state field (true / false
+  // / absent-means-"not recorded", never coerced) — see @lore/core's judgmentSchema JSDoc
+  // for the full contract. Rendered right next to the "Judge:" line since that is where
+  // prompt_version (the field this qualifies) is shown.
+  if (result.judgment.reproducible !== undefined) {
+    lines.push(
+      `Reproducible: ${
+        result.judgment.reproducible
+          ? "yes (this prompt_version's rendering is guaranteed byte-identical)"
+          : "no (this prompt_version's rendering is NOT guaranteed byte-identical across runs)"
+      }`,
+    );
+  }
 
   // SPEC-067 D4: additive-only — absent on every pre-SPEC-067 assessment and every run
   // below the truncation-cap threshold.
