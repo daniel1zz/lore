@@ -43,9 +43,52 @@
  *
  * @spec_ref task-verifying-a-handoff-you-just-authored-arms-the-coverage
  *   §Candidate predicates (2); §Oracle; AC 2, 3, 5, 6
+ *
+ * ─── Extension (task-the-session-start-marker-collapses-five-distinct) ─────
+ *
+ * The five describe blocks above only ever asserted `toContain(RESUME_COVERAGE_FLOOR)`
+ * for the non-measured kinds — proving the ARMING VERDICT, never that the
+ * mechanism's total absence was OBSERVABLE. The blocks below extend this
+ * same file to assert the KIND VALUE is now surfaced in the rendered feed
+ * text (which is also what `--json` embeds, via `ResumeFeedOutcome.feed`),
+ * and that the `"unreadable"` kind additionally writes a stderr line.
+ *
+ * RED-before-GREEN: run directly against `readSessionStartIso`
+ * (`packages/lore/tests/unit/flows/session-start-read.test.ts` — 11/11 RED
+ * with `TypeError: (0 , readSessionStartIso) is not a function` against the
+ * pre-fix source, restored via `git show <prev-commit>` + `cp`, never a
+ * destructive git operation). This file's additions below were verified
+ * GREEN against the fix; see this task's final report for the exact
+ * commands.
+ *
+ * Six-dimension coverage (this extension):
+ *   HAPPY:      AC 5 CONTROL — measured + matching actor -> floor still
+ *               suppressed, output BYTE-IDENTICAL to `renderResumeFeed`
+ *               called directly (never through the note-carrying path)
+ *   NEGATIVE:   AC 4a — no session-id env var -> feed carries the
+ *               "no-session-id" kind literal in its one-line note
+ *   BOUNDARY:   AC 4b — session id set, marker absent -> feed carries the
+ *               "no-marker" kind literal, DISTINCT from "no-session-id"'s
+ *               note text
+ *   ERROR:      AC 4c/4d — marker with a wrong-typed `started_at` and,
+ *               separately, a marker with invalid JSON -> both surface the
+ *               "unreadable" kind literal AND emit a stderr line (asserted
+ *               via a `process.stderr.write` spy) — the two are asserted as
+ *               SEPARATE test cases (different code paths)
+ *   STATE:      the note is INSERTED BEFORE `RESUME_COVERAGE_FLOOR` and
+ *               `RESUME_SCOPE_CLOSURE` stays the trailing block — the
+ *               pre-existing ordering invariant is undisturbed by the new
+ *               block
+ *   REGRESSION: AC 2 — the measured/suppressed CONTROL path never carries
+ *               the authorship-undetermined note, proving the two paths
+ *               (measured vs non-measured) are mutually exclusive in the
+ *               rendered output, not merely in the internal boolean
+ *
+ * @spec_ref task-the-session-start-marker-collapses-five-distinct
+ *   §Acceptance Criteria AC 2, 3, 4, 5, 6
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,7 +103,7 @@ import {
   sessionStartMarkerFilename,
   type HandoffExtra,
 } from "@lore/core";
-import { buildResumeFeed } from "../../src/flows/feed-flow.js";
+import { buildResumeFeed, renderResumeFeed } from "../../src/flows/feed-flow.js";
 import type { App } from "../../src/app.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../../src/service/session-service.js";
 
@@ -243,5 +286,152 @@ describe("REGRESSION — Q2 fail-safe: session id present but the marker cannot 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.feed).toContain(RESUME_COVERAGE_FLOOR);
+  });
+});
+
+// ─── Extension — task-the-session-start-marker-collapses-five-distinct ────
+// AC 2 (byte-identical arming), AC 3 (observability), AC 4 (kind-value
+// assertions), AC 5 (measured-path byte-identity CONTROL).
+
+// ─── HAPPY — AC 5 CONTROL ───────────────────────────────────────────────────
+
+describe("HAPPY — AC 5 CONTROL: measured + matching actor -> output BYTE-IDENTICAL to renderResumeFeed called directly", () => {
+  it("buildResumeFeed's feed equals renderResumeFeed(resume, true) exactly — no authorship note leaks into the measured/suppressed path", async () => {
+    process.env["CLAUDE_CODE_SESSION_ID"] = testSessionId;
+    writeMarker("2026-08-01T10:00:00.000Z"); // before the handoff (10:05) was written — same shape as the HAPPY RED scenario above
+
+    const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
+    const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
+
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // AC 5: byte-identical to "today" — calling the pure renderer directly
+    // with the SAME suppressFloor value and no third argument.
+    expect(result.value.feed).toBe(renderResumeFeed(resumeResult, true));
+    // REGRESSION half: the measured/suppressed path never carries the
+    // authorship-undetermined note — the two paths are mutually exclusive
+    // in the RENDERED OUTPUT, not merely in the internal boolean.
+    expect(result.value.feed).not.toContain("could not be determined");
+  });
+});
+
+// ─── NEGATIVE — AC 4a ────────────────────────────────────────────────────────
+
+describe("NEGATIVE — AC 4a: no CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID at all -> feed carries the no-session-id kind literal", () => {
+  it('feed contains "could not be determined" and the "no-session-id" kind literal', async () => {
+    // Deliberately do NOT set either env var (beforeEach already deleted both).
+    const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
+    const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
+
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.feed).toContain("could not be determined");
+    expect(result.value.feed).toContain("no-session-id");
+    expect(result.value.feed).toContain(RESUME_COVERAGE_FLOOR);
+  });
+});
+
+// ─── BOUNDARY — AC 4b ────────────────────────────────────────────────────────
+
+describe("BOUNDARY — AC 4b: session id set, marker absent -> feed carries no-marker, distinct from no-session-id", () => {
+  it('feed contains the "no-marker" kind literal and NOT "no-session-id"', async () => {
+    process.env["CLAUDE_CODE_SESSION_ID"] = testSessionId;
+    // Deliberately do NOT write a marker file.
+
+    const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
+    const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
+
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.feed).toContain("no-marker");
+    expect(result.value.feed).not.toContain("no-session-id");
+    expect(result.value.feed).toContain(RESUME_COVERAGE_FLOOR);
+  });
+});
+
+// ─── ERROR — AC 4c / AC 4d, distinct code paths, each with a stderr line ────
+
+describe("ERROR — AC 4c: marker with a wrong-typed started_at -> unreadable kind surfaced + stderr line", () => {
+  it('feed contains "unreadable" and process.stderr.write was called naming the marker as unreadable', async () => {
+    process.env["CLAUDE_CODE_SESSION_ID"] = testSessionId;
+    writeFileSync(markerPath, JSON.stringify({ started_at: 12345 }), "utf8");
+
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
+      const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
+
+      const result = await buildResumeFeed(stubApp(resumeResult), {
+        handoff: record.handoff_slug,
+        by: CURRENT_ACTOR,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.feed).toContain("unreadable");
+      expect(result.value.feed).toContain(RESUME_COVERAGE_FLOOR);
+      expect(stderrSpy).toHaveBeenCalled();
+      const stderrText = stderrSpy.mock.calls.map((call) => String(call[0])).join("");
+      expect(stderrText).toContain("session-start marker unreadable");
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+});
+
+describe("ERROR — AC 4d: marker with invalid JSON -> unreadable kind surfaced + stderr line (DIFFERENT code path from AC 4c)", () => {
+  it('feed contains "unreadable" and process.stderr.write was called naming the marker as unreadable', async () => {
+    process.env["CLAUDE_CODE_SESSION_ID"] = testSessionId;
+    writeFileSync(markerPath, "{ not valid json", "utf8");
+
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
+      const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
+
+      const result = await buildResumeFeed(stubApp(resumeResult), {
+        handoff: record.handoff_slug,
+        by: CURRENT_ACTOR,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.feed).toContain("unreadable");
+      expect(result.value.feed).toContain(RESUME_COVERAGE_FLOOR);
+      expect(stderrSpy).toHaveBeenCalled();
+      const stderrText = stderrSpy.mock.calls.map((call) => String(call[0])).join("");
+      expect(stderrText).toContain("session-start marker unreadable");
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+});
+
+// ─── STATE — ordering: note before floor, closure stays trailing ───────────
+
+describe("STATE — the authorship note is inserted BEFORE RESUME_COVERAGE_FLOOR, and RESUME_SCOPE_CLOSURE stays the trailing block", () => {
+  it("ordering: note index < floor index < closure index; RESUME_SCOPE_CLOSURE remains the LAST block", async () => {
+    // No session id set -> non-measured, note + floor both present.
+    const record = buildRecord(ORCHESTRATOR_EXTRA, HANDOFF_CREATED_AT);
+    const resumeResult: ResumeResult = { found: true, handoff: record, multi_actor: false, readiness: null };
+
+    const result = await buildResumeFeed(stubApp(resumeResult), { handoff: record.handoff_slug, by: CURRENT_ACTOR });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const feed = result.value.feed;
+    const noteIdx = feed.indexOf("could not be determined");
+    const floorIdx = feed.indexOf(RESUME_COVERAGE_FLOOR);
+    const closureIdx = feed.indexOf(RESUME_SCOPE_CLOSURE);
+    expect(noteIdx).toBeGreaterThanOrEqual(0);
+    expect(floorIdx).toBeGreaterThan(noteIdx);
+    expect(closureIdx).toBeGreaterThan(floorIdx);
+    expect(feed.endsWith(RESUME_SCOPE_CLOSURE)).toBe(true);
   });
 });

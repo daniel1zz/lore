@@ -31,23 +31,40 @@
  *   buildFeed(app, checkpoint, parentIdOrSlug?) — the full composition
  *   SESSION_RESUME_CHECKPOINT                — the `"session-resume"` checkpoint
  *                                               literal (SPEC-041 §3 D5)
- *   renderResumeFeed(resume, suppressFloor?)  — pure `ResumeResult` → advisory text,
- *                                               closing with `RESUME_SCOPE_CLOSURE`
- *                                               whenever a ticket is actually rendered
+ *   renderResumeFeed(resume, suppressFloor?, authorshipUndeterminedNote?) — pure
+ *                                               `ResumeResult` → advisory text, closing
+ *                                               with `RESUME_SCOPE_CLOSURE` whenever a
+ *                                               ticket is actually rendered
  *                                               (spec-context-provenance-injected-corpus-global-state-and-a
  *                                               D3). `suppressFloor` (default `false`,
  *                                               task-verifying-a-handoff-you-just-authored-arms-the-coverage
  *                                               D1) withholds `RESUME_COVERAGE_FLOOR`
- *                                               on the single-record path when `true` —
- *                                               computed by `buildResumeFeed` below, NEVER
- *                                               by this function itself (stays pure).
+ *                                               on the single-record path when `true`.
+ *                                               `authorshipUndeterminedNote` (optional,
+ *                                               task-the-session-start-marker-collapses-five-distinct
+ *                                               AC 3) — when supplied, inserted on the
+ *                                               single-record path BEFORE the floor,
+ *                                               stating that same-session authorship
+ *                                               could not be determined and the floor
+ *                                               therefore armed unconditionally. Both
+ *                                               are computed by `buildResumeFeed` below,
+ *                                               NEVER by this function itself (stays
+ *                                               pure).
  *   buildResumeFeed(app, opts)               — SPEC-041 S2 resume dispatch, called
  *                                               BEFORE `buildFeed`'s
  *                                               `CHECKPOINT_PRODUCED_TYPE` lookup. Also
  *                                               computes the same-session-authorship
  *                                               `suppressFloor` decision (D1 below) via
  *                                               the ONE new IO read in this module: the
- *                                               SessionStart hook's marker file.
+ *                                               SessionStart hook's marker file — now a
+ *                                               DISCRIMINATED read
+ *                                               ({@link readSessionStartIso}, task-the-
+ *                                               session-start-marker-collapses-five-distinct
+ *                                               AC 1), so a non-`"measured"` outcome
+ *                                               (never distinguishable from a genuinely
+ *                                               different session before that task) is
+ *                                               surfaced via `authorshipUndeterminedNote`
+ *                                               rather than silently collapsed.
  *   SPECIAL_FEED_CHECKPOINTS                 — SPEC-070 Fix F7 SSOT: the special
  *                                               checkpoint set (session-resume/
  *                                               phase-start/task-start) + which
@@ -95,22 +112,36 @@
  *   filesystem beyond `app`'s own store — `readSessionStartIso` below reads
  *   `os.tmpdir()` for the SessionStart hook's marker
  *   (`assets/hooks/session-start-marker.mjs`), never `app.corpusService` —
- *   the marker is a session-scoped fact, orthogonal to the corpus. ANY
- *   failure to establish it (missing session-id env var, missing/unreadable/
- *   corrupt marker) yields `sessionStartIso: undefined`, and
- *   `isSameSessionAuthorship` (`@lore/core`) is fail-safe on `undefined` —
- *   arms, never suppresses, on an unknown boundary (ADR "Q2 Silence" review).
- *   `renderResumeFeed` itself performs NO IO for this decision — it only
- *   consumes the already-computed boolean, so it stays pure/testable exactly
- *   as before this task.
+ *   the marker is a session-scoped fact, orthogonal to the corpus.
+ *   `readSessionStartIso` returns a DISCRIMINATED `SessionStartReadResult`
+ *   (task-the-session-start-marker-collapses-five-distinct AC 1) — the
+ *   PRE-existing collapse of five distinct conditions (no session-id env
+ *   var, no marker file, corrupt JSON, wrong-typed `started_at`, any IO
+ *   error) into one `string | undefined` made "measured: a different
+ *   session" indistinguishable from "never measured at all", which is
+ *   exactly the "an empty result and a clean result must not be the same
+ *   value" failure the governing proxy/silence/opt-in ADR names. Every
+ *   non-`"measured"` kind still feeds `isSameSessionAuthorship` (`@lore/core`)
+ *   an `undefined` `sessionStartIso` — that function is fail-safe on
+ *   `undefined` (arms, never suppresses, ADR "Q2 Silence" review) — so the
+ *   ARMING VERDICT for every non-measured kind is byte-identical to before
+ *   this task (AC 2). What changed is OBSERVABILITY only:
+ *   `buildResumeFeed` also derives a one-line `authorshipUndeterminedNote`
+ *   from the non-measured kind (AC 3) and passes it to `renderResumeFeed`,
+ *   and additionally writes one stderr line for the `"unreadable"` kind — a
+ *   corrupt/wrong-typed marker is a real fault, not a normal steady state.
+ *   `renderResumeFeed` itself performs NO IO for either decision — it only
+ *   consumes the already-computed boolean/string, so it stays pure/testable
+ *   exactly as before this task.
  *
  * Side-effect class: IO (corpusService reads, outlineService MDX resolution,
  *   sessionService reads, `os.tmpdir()` marker read for `suppressFloor` — no
- *   writes)
+ *   writes, except one advisory stderr line when the marker is unreadable)
  * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5;
  *   spec-context-provenance-injected-corpus-global-state-and-a D3;
  *   spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D3, D10;
- *   task-verifying-a-handoff-you-just-authored-arms-the-coverage D1, D2
+ *   task-verifying-a-handoff-you-just-authored-arms-the-coverage D1, D2;
+ *   task-the-session-start-marker-collapses-five-distinct AC 1-6
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -398,15 +429,36 @@ function renderReadinessPointer(readiness: ResumeResult["readiness"]): string {
  *   argument keeps today's exact behavior — this function performs NO IO to
  *   decide the value itself; {@link buildResumeFeed} computes it and passes
  *   it in, keeping this function pure/testable exactly as before.
+ * @invariant `authorshipUndeterminedNote` (task-the-session-start-marker-collapses-five-distinct
+ *   AC 2, AC 3) is inserted on the single-record path ONLY, BEFORE
+ *   `RESUME_COVERAGE_FLOOR` — never on the `multi_actor` or not-found
+ *   branches (`buildResumeFeed` only ever attempts the authorship read on
+ *   the single-record found path, matching `suppressFloor`'s own scope, so
+ *   this parameter and `suppressFloor` are always consistent with each
+ *   other by construction, not by a runtime check here). Defaults to
+ *   `undefined` (nothing inserted) so every pre-existing call site that does
+ *   not pass this argument keeps today's exact byte-for-byte output — this
+ *   parameter changes OBSERVABILITY only, never the `suppressFloor` verdict
+ *   itself, which is computed independently and passed in unchanged.
  * @param resume - A `SessionService.resume` result.
  * @param suppressFloor - When `true` on the single-record path, omits
  *   `RESUME_COVERAGE_FLOOR` from the rendered text (default `false`).
+ * @param authorshipUndeterminedNote - When supplied on the single-record
+ *   path, a one-line advisory inserted before `RESUME_COVERAGE_FLOOR`
+ *   stating that same-session authorship could not be determined and the
+ *   floor was therefore armed unconditionally (default `undefined` — no
+ *   line inserted).
  * @returns `"(no handoff recorded)"` when `!resume.found`; a multi-actor
  *   result ending in `RESUME_SCOPE_CLOSURE`; otherwise a single-record ticket
- *   ending in `RESUME_COVERAGE_FLOOR` (unless `suppressFloor`) then
+ *   carrying `authorshipUndeterminedNote` (if supplied) then
+ *   `RESUME_COVERAGE_FLOOR` (unless `suppressFloor`) then
  *   `RESUME_SCOPE_CLOSURE`.
  */
-export function renderResumeFeed(resume: ResumeResult, suppressFloor = false): string {
+export function renderResumeFeed(
+  resume: ResumeResult,
+  suppressFloor = false,
+  authorshipUndeterminedNote?: string,
+): string {
   if (!resume.found) {
     return "(no handoff recorded)";
   }
@@ -425,12 +477,38 @@ export function renderResumeFeed(resume: ResumeResult, suppressFloor = false): s
   return [
     renderResumeRecord(record),
     renderReadinessPointer(resume.readiness),
+    ...(authorshipUndeterminedNote !== undefined ? [authorshipUndeterminedNote] : []),
     ...(suppressFloor ? [] : [RESUME_COVERAGE_FLOOR]),
     RESUME_SCOPE_CLOSURE,
   ]
     .filter((s) => s !== "")
     .join("\n\n");
 }
+
+/**
+ * Discriminated outcome of {@link readSessionStartIso}'s attempt to establish
+ * the CURRENTLY-arming session's start-time fact
+ * (task-the-session-start-marker-collapses-five-distinct AC 1). Before this
+ * task, all five of the conditions below collapsed into one
+ * `string | undefined` — `undefined` meant BOTH "measured: a different/
+ * earlier session" AND "never measured at all", which made the whole
+ * same-session-authorship mechanism (task-verifying-a-handoff-you-just-authored-arms-the-coverage
+ * D1) silently, indistinguishably inert on any install that has not
+ * re-run `lore setup` (steady state: `"no-session-id"` or `"no-marker"`).
+ * `"measured"` is the only kind carrying a usable fact; every other kind is
+ * still treated as an unknown boundary by {@link isSameSessionAuthorship}
+ * (arms — Q2 fail-safe, byte-identical direction to before this task, AC 2)
+ * but is now externally visible via {@link buildResumeFeed}'s
+ * `authorshipUndeterminedNote`.
+ */
+export type SessionStartReadResult =
+  | { readonly kind: "measured"; readonly startedAt: string }
+  | { readonly kind: "no-session-id" }
+  | { readonly kind: "no-marker" }
+  | { readonly kind: "unreadable"; readonly detail: string };
+
+/** Every {@link SessionStartReadResult} kind except `"measured"` — the shape {@link describeUnmeasuredAuthorship} accepts, so a `"measured"` result cannot be passed to it by construction. */
+type UnmeasuredSessionStartReadResult = Exclude<SessionStartReadResult, { kind: "measured" }>;
 
 /**
  * Reads the CURRENTLY-arming session's start-time marker
@@ -446,35 +524,87 @@ export function renderResumeFeed(resume: ResumeResult, suppressFloor = false): s
  * SessionStart-hook-written marker invisible to a later `lore feed`
  * invocation).
  *
- * @invariant Never throws. An absent/blank session-id env var, a
- *   missing/unreadable/corrupt marker file, or a marker missing a string
- *   `started_at` field ALL degrade to `undefined` — the ONLY signal this
- *   function ever returns for "no session-start fact available". The caller
- *   ({@link buildResumeFeed}) must treat `undefined` as unknown, never as a
- *   match (`isSameSessionAuthorship`'s own Q2 fail-safe contract, `@lore/core`).
+ * Exported (task-the-session-start-marker-collapses-five-distinct AC 4) so
+ * the discrimination is unit-testable directly, without simulating every
+ * kind through the full `buildResumeFeed` IO wiring.
+ *
+ * @invariant Never throws — every failure mode maps to a `SessionStartReadResult`
+ *   kind rather than propagating. `"unreadable"`'s two triggers
+ *   (`JSON.parse` throwing on malformed JSON vs. a successfully-parsed value
+ *   with no string `started_at`) are DISTINCT code paths (AC 4c/4d), both
+ *   converging on the same kind because both mean the same thing to a
+ *   caller: a marker exists but cannot be trusted.
  * @param env - Environment map (test seam); defaults to `process.env`.
- * @returns This session's marker `started_at` (ISO 8601), or `undefined`.
+ * @returns The discriminated outcome — see {@link SessionStartReadResult}.
  */
-function readSessionStartIso(env: Record<string, string | undefined> = process.env): string | undefined {
+export function readSessionStartIso(
+  env: Record<string, string | undefined> = process.env,
+): SessionStartReadResult {
   const sessionId = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
-  if (sessionId === undefined || sessionId.trim() === "") return undefined;
+  if (sessionId === undefined || sessionId.trim() === "") {
+    return { kind: "no-session-id" };
+  }
 
   const markerPath = join(tmpdir(), sessionStartMarkerFilename(sessionId));
+  let raw: string;
   try {
-    if (!existsSync(markerPath)) return undefined;
-    const parsed: unknown = JSON.parse(readFileSync(markerPath, "utf8"));
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "started_at" in parsed &&
-      typeof (parsed as Record<string, unknown>)["started_at"] === "string"
-    ) {
-      return (parsed as Record<string, unknown>)["started_at"] as string;
-    }
-    return undefined;
-  } catch {
-    return undefined;
+    if (!existsSync(markerPath)) return { kind: "no-marker" };
+    raw = readFileSync(markerPath, "utf8");
+  } catch (cause) {
+    return { kind: "unreadable", detail: `marker file could not be read: ${String(cause)}` };
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (cause) {
+    // AC 4d: malformed JSON — a THROWING code path, distinct from the
+    // successfully-parsed-but-wrong-shape path below (AC 4c).
+    return { kind: "unreadable", detail: `marker file is not valid JSON: ${String(cause)}` };
+  }
+
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    "started_at" in parsed &&
+    typeof (parsed as Record<string, unknown>)["started_at"] === "string"
+  ) {
+    return { kind: "measured", startedAt: (parsed as Record<string, unknown>)["started_at"] as string };
+  }
+  // AC 4c: parse SUCCEEDED but `started_at` is absent or non-string — a
+  // NON-throwing code path, distinct from the catch block above.
+  return { kind: "unreadable", detail: 'marker file has no string "started_at" field' };
+}
+
+/**
+ * Renders the one-line advisory `buildResumeFeed` surfaces on the
+ * `session-resume` output whenever {@link readSessionStartIso} returns
+ * anything other than `"measured"` (task-the-session-start-marker-collapses-five-distinct
+ * AC 3) — stating that same-session authorship could not be determined and
+ * the resume-ticket coverage floor was therefore armed unconditionally. The
+ * `result.kind` literal is embedded verbatim so a caller (or a test) can key
+ * on the KIND VALUE from the rendered text alone, never on mere absence of
+ * `RESUME_COVERAGE_FLOOR`.
+ *
+ * @param result - A non-`"measured"` {@link SessionStartReadResult}.
+ * @returns The one-line advisory text (never empty, never throws).
+ */
+function describeUnmeasuredAuthorship(result: UnmeasuredSessionStartReadResult): string {
+  const reason = ((): string => {
+    switch (result.kind) {
+      case "no-session-id":
+        return "no-session-id: neither CLAUDE_CODE_SESSION_ID nor CLAUDE_SESSION_ID is set";
+      case "no-marker":
+        return "no-marker: the SessionStart hook's marker file was not found (hook not installed, or has not fired yet)";
+      case "unreadable":
+        return `unreadable: ${result.detail}`;
+      default: {
+        const exhaustive: never = result;
+        throw new Error(`describeUnmeasuredAuthorship: unhandled session-start read kind: ${JSON.stringify(exhaustive)}`);
+      }
+    }
+  })();
+  return `⚠ same-session authorship could not be determined (${reason}) — resume-ticket coverage floor armed unconditionally`;
 }
 
 /**
@@ -498,6 +628,19 @@ function readSessionStartIso(env: Record<string, string | undefined> = process.e
  * A multi-record or not-found result never attempts this — `suppressFloor`
  * stays `false`, matching `renderResumeFeed`'s own default and its
  * pre-existing multi_actor behavior (D10, unchanged).
+ *
+ * `readSessionStartIso`'s result is now a DISCRIMINATED
+ * `SessionStartReadResult` (task-the-session-start-marker-collapses-five-distinct
+ * AC 1). Only `"measured"` feeds a real `startedAt` into
+ * `isSameSessionAuthorship`; every other kind feeds it `undefined` — THE
+ * EXACT SAME CALL, with the exact same fail-safe `sessionStartIso: undefined`
+ * argument shape as before this task, so `suppressFloor`'s VERDICT for every
+ * non-measured kind is byte-identical (AC 2). What this task adds on top:
+ * a non-measured kind also derives a one-line `authorshipUndeterminedNote`
+ * ({@link describeUnmeasuredAuthorship}) threaded into `renderResumeFeed`
+ * (AC 3), and the `"unreadable"` kind additionally writes one stderr line —
+ * a corrupt or wrong-typed marker is a real fault, not this mechanism's
+ * normal (if inert) steady state.
  *
  * @param app - Wired `App` providing `sessionService`.
  * @param opts - `{plan?, handoff?, by?}`, forwarded to `SessionService.resume` untouched.
@@ -523,16 +666,34 @@ export async function buildResumeFeed(
 
   const resume = result.value;
   let suppressFloor = false;
+  let authorshipUndeterminedNote: string | undefined;
   if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
     const currentActor = resolveActor(opts.by);
-    const sessionStartIso = readSessionStartIso();
+    const sessionStart = readSessionStartIso();
+    const sessionStartIso = sessionStart.kind === "measured" ? sessionStart.startedAt : undefined;
+    // Same call, same argument shape as before this task — the arming
+    // VERDICT for every non-measured kind is therefore byte-identical
+    // (task-the-session-start-marker-collapses-five-distinct AC 2).
     suppressFloor = isSameSessionAuthorship(resume.handoff, currentActor, sessionStartIso);
+
+    if (sessionStart.kind !== "measured") {
+      authorshipUndeterminedNote = describeUnmeasuredAuthorship(sessionStart);
+      if (sessionStart.kind === "unreadable") {
+        // reason: a corrupt/wrong-typed marker is a real fault, not this
+        // mechanism's normal (if inert) steady state — AC 3 requires this
+        // to be loud on stderr, distinct from the advisory feed line above.
+        process.stderr.write(
+          `lore: session-start marker unreadable (${sessionStart.detail}) — same-session authorship ` +
+            "could not be determined; the resume-ticket coverage floor will arm unconditionally.\n",
+        );
+      }
+    }
   }
 
   return ok({
     checkpoint: SESSION_RESUME_CHECKPOINT,
     resume,
-    feed: renderResumeFeed(resume, suppressFloor),
+    feed: renderResumeFeed(resume, suppressFloor, authorshipUndeterminedNote),
   });
 }
 
