@@ -53,8 +53,21 @@
  *     diff-range scope guard, hotfix plan)
  *   - scopeMismatchWarningSchema / ScopeMismatchWarning — non-blocking advisory shape
  *     surfaced when a `lore assess --diff` range looks too wide for the plan it's assessing
- *   - computeScopeMismatchWarning(diffFiles, taskAnchors) — pure fact-only comparison
- *     between a diff's changed files and a plan's declared task file_anchors
+ *   - ScopeMismatchNotMeasured — distinct "the comparison could not be attempted" outcome of
+ *     computeScopeMismatchWarning, never confusable with `undefined` (measured, fine) or a
+ *     real ScopeMismatchWarning (measured, mismatch) — task-computescopemismatchwarning-
+ *     cannot-distinguish-a-too-wide, per adr-lore-s-mechanisms-validate-a-proxy-for-the-
+ *     property-not-the's Q2 (Silence)
+ *   - DeriveTestedSourcePath — caller-injected, repo-specific test-file→source-file path
+ *     convention (pure string transform; this browser-safe leaf package has no opinion on
+ *     any project's test-file layout)
+ *   - isFileInScopeForAnchors(file, taskAnchors, deriveTestedSourcePath?) — the classification
+ *     rule computeScopeMismatchWarning scores against, exported standalone so the rule itself
+ *     is directly testable
+ *   - computeScopeMismatchWarning(diffFiles, taskAnchors, deriveTestedSourcePath?) — pure
+ *     fact-only comparison between a diff's changed files and a plan's declared task
+ *     file_anchors; classifies non-anchor files as in-scope test-of-anchor evidence vs.
+ *     genuine drift BEFORE scoring the ratio
  *   - TRUNCATION_DOWNGRADE_THRESHOLDS — the SPEC-067 D4 truncation-ratio thresholds
  *     (single exported constant, never scattered literals)
  *   - computeTaskTruncationRatio(truncatedSections, totalTaskCount) — pure fraction of a
@@ -94,14 +107,17 @@
  *     — never reimplemented here (single derivation site).
  *   - parseDiffFilePaths never throws — a diff with no recognizable `diff --git a/... b/...`
  *     headers (e.g. empty string, a non-git diff format) simply yields `[]`.
- *   - computeScopeMismatchWarning is a deterministic FACTS comparison (diff files ∩ task
- *     anchors), never an LLM judgment — it must not be confused with the judge's own
- *     `scope_fidelity` dimension score. It returns `undefined` (no warning, not an error)
- *     in two cases: `taskAnchors` is empty (no task in the plan declared any file_anchors —
- *     a warning here would be noise on the many older plans with no anchors at all) OR
- *     `diffFiles` is empty (nothing to compare against). Otherwise it warns iff STRICTLY
- *     fewer than half of `diffFiles` intersect `taskAnchors` — exactly half is NOT a
- *     mismatch (boundary-tested).
+ *   - computeScopeMismatchWarning is a deterministic FACTS comparison (diff files vs. task
+ *     anchors, test-of-anchor files reclassified as in-scope by isFileInScopeForAnchors
+ *     BEFORE scoring), never an LLM judgment — it must not be confused with the judge's own
+ *     `scope_fidelity` dimension score. It returns {@link ScopeMismatchNotMeasured} — never a
+ *     bare `undefined` — in two cases: `taskAnchors` is empty (no task in the plan declared
+ *     any file_anchors) OR `diffFiles` is empty (nothing to compare against); both are
+ *     "the comparison could not be attempted", distinct from `undefined` ("attempted, and
+ *     it's fine") per adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the's Q2 —
+ *     see task-computescopemismatchwarning-cannot-distinguish-a-too-wide. Otherwise it warns
+ *     iff STRICTLY fewer than half of `diffFiles` are in-scope — exactly half is NOT a
+ *     mismatch (boundary-tested, byte-identical to the pre-fix behaviour).
  *   - `scope_warning` on {@link assessmentResultSchema} is OPTIONAL and ADDITIVE, mirroring
  *     `facts`/`source_versions` — every assessment persisted before this warning existed
  *     has no `scope_warning` and still validates unchanged. It NEVER affects `verdict`,
@@ -142,7 +158,10 @@
  *   SPEC-040 §T1 D1, D2, D3, D9; AC-ADF-2, AC-ADF-10;
  *   task-assess-diff-range-scope-mismatch-warning (hotfix plan, AC-040-SCOPE-1);
  *   task-assess-templates-5-binds-the-projected-renderer-while-two (judgment.reproducible);
- *   SPEC-067 D3, D4
+ *   SPEC-067 D3, D4;
+ *   task-computescopemismatchwarning-cannot-distinguish-a-too-wide (test-of-anchor
+ *   reclassification, ScopeMismatchNotMeasured);
+ *   adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the (Proxy/Silence/Opt-in)
  */
 
 import { z } from "zod";
@@ -676,7 +695,11 @@ export function parseDiffFilePaths(diffText: string): string[] {
 export const scopeMismatchWarningSchema = z.object({
   /** Total distinct files the diff touches. */
   diff_file_count: z.number().int().nonnegative(),
-  /** How many of those files intersect the plan's declared task file_anchors. */
+  /**
+   * How many of those files are IN SCOPE per {@link isFileInScopeForAnchors} — a direct
+   * anchor overlap OR a recognized test of an anchor-overlapping source file. NOT merely
+   * "directly touches a declared anchor" (that was the pre-fix, over-narrow meaning).
+   */
   intersecting_count: z.number().int().nonnegative(),
   /** Human-readable warning text — ready to print as-is (CLI text + `--json`). */
   message: z.string().min(1),
@@ -686,55 +709,187 @@ export const scopeMismatchWarningSchema = z.object({
 export type ScopeMismatchWarning = z.infer<typeof scopeMismatchWarningSchema>;
 
 /**
+ * Distinct "the comparison could not be attempted" outcome of
+ * {@link computeScopeMismatchWarning} (ADR Q2, Silence) — a check's absent precondition must
+ * never collapse into the same value as "measured, genuinely fine, no warning". Deliberately
+ * NOT structurally compatible with {@link ScopeMismatchWarning} (different field set): a
+ * caller that narrows on `.status` cannot mistake a not-measured marker for a real warning to
+ * surface, and one that ignores `.status` entirely still gets a value it must explicitly
+ * decide to persist/print (never a silent pass-through, since it is not `undefined`).
+ *
+ * Whether a caller SURFACES this to a human is a presentation choice; that it EXISTS as a
+ * value distinct from `undefined` is not (task-computescopemismatchwarning-cannot-
+ * distinguish-a-too-wide).
+ */
+export interface ScopeMismatchNotMeasured {
+  /** Discriminant — always `"not-measured"`. */
+  readonly status: "not-measured";
+  /** Why the comparison could not be attempted. Stable `"not-measured: "` prefix. */
+  readonly reason: string;
+}
+
+/**
+ * Caller-supplied convention for mapping a candidate diff file path to the SOURCE path it is
+ * a TEST for — a pure string transformation, never filesystem access. Returns `undefined`
+ * when the caller's convention does not recognize `filePath` as a test file at all.
+ *
+ * `@lore/core` is a browser-safe, dependency-free leaf package (see this module's own
+ * header) with no opinion on any project's test-file layout — a sibling `.test.ts`, a
+ * `.bun.test.ts` runner split, a mirrored `tests/` directory tree, or none of the above.
+ * Every consumer answers this differently, so the convention is injected as a parameter
+ * rather than hard-coded here.
+ *
+ * @example
+ * // A repo-specific convention — NOT implemented in this package, only its shape is:
+ * const deriveTestedSourcePath: DeriveTestedSourcePath = (f) => {
+ *   if (f.endsWith(".bun.test.ts")) return f.slice(0, -".bun.test.ts".length) + ".ts";
+ *   if (f.endsWith(".test.ts")) return f.slice(0, -".test.ts".length) + ".ts";
+ *   return undefined;
+ * };
+ */
+export type DeriveTestedSourcePath = (filePath: string) => string | undefined;
+
+/**
+ * The classification rule {@link computeScopeMismatchWarning} scores against. A diff file is
+ * IN SCOPE for `taskAnchors` iff EITHER:
+ *   (a) it directly overlaps a declared anchor ({@link anchorsOverlap}), OR
+ *   (b) `deriveTestedSourcePath` recognizes it as a test file AND the SOURCE path it derives
+ *       overlaps a declared anchor.
+ *
+ * (b) exists because task `file_anchors` declare the IMPLEMENTATION surface (so the
+ * `noAnchorOverlap` gate can serialize concurrent writers on source files) — they are never
+ * expected to also enumerate every test file beside that source. A test file for an in-scope
+ * source file is in-scope EVIDENCE of that change, not scope drift. Every other file —
+ * neither a declared anchor nor a recognized test of one — is OUT OF SCOPE: the genuine
+ * range-drift signal {@link computeScopeMismatchWarning} warns on.
+ *
+ * Pure: `deriveTestedSourcePath`, if supplied, MUST itself be a pure string transformation —
+ * this function never touches the filesystem to decide test-ness, and neither may its caller.
+ *
+ * @param file - One diff file path (as {@link parseDiffFilePaths} yields).
+ * @param taskAnchors - The plan's declared task `file_anchors` (already-normalized — the
+ *   same precondition {@link anchorsOverlap} documents).
+ * @param deriveTestedSourcePath - Optional repo-specific test→source convention (see
+ *   {@link DeriveTestedSourcePath}). Omitted → `file` is judged by direct overlap only, i.e.
+ *   no test-file reclassification (rule (a) alone).
+ * @returns `true` iff `file` is in scope by (a) or (b) above.
+ *
+ * @example
+ * isFileInScopeForAnchors("src/a.ts", ["src/a.ts"]); // → true (direct overlap)
+ *
+ * @example
+ * isFileInScopeForAnchors("src/a.test.ts", ["src/a.ts"], (f) =>
+ *   f.endsWith(".test.ts") ? f.slice(0, -".test.ts".length) + ".ts" : undefined,
+ * ); // → true (recognized test of an in-scope source file)
+ *
+ * @example
+ * isFileInScopeForAnchors("docs/readme.md", ["src/a.ts"]); // → false (neither anchor nor test)
+ */
+export function isFileInScopeForAnchors(
+  file: string,
+  taskAnchors: string[],
+  deriveTestedSourcePath?: DeriveTestedSourcePath,
+): boolean {
+  if (anchorsOverlap([file], taskAnchors).overlaps) return true;
+  const testedSource = deriveTestedSourcePath?.(file);
+  return testedSource !== undefined && anchorsOverlap([testedSource], taskAnchors).overlaps;
+}
+
+/**
  * Compares a diff's changed-file set against a plan's declared task `file_anchors` and
  * returns a non-blocking warning when the diff looks too wide for that plan — a deterministic
  * FACTS comparison, never an LLM judgment (must not be confused with the judge's own
  * `scope_fidelity` dimension score).
  *
- * @invariant Returns `undefined` (no warning, not an error) when `taskAnchors` is empty —
- *   no task in the plan declared any file_anchors, so there is nothing to compare against;
- *   warning on an anchor-less plan would be pure noise (many older plans declare none).
- * @invariant Returns `undefined` when `diffFiles` is empty — nothing to compare.
- * @invariant Warns iff STRICTLY fewer than half of `diffFiles` intersect `taskAnchors`.
- *   Exactly half is NOT a mismatch (boundary-tested) — `intersecting_count >=
- *   diffFiles.length / 2` short-circuits to no warning.
+ * Classification rule (task-computescopemismatchwarning-cannot-distinguish-a-too-wide):
+ * every non-intersecting file is classified by {@link isFileInScopeForAnchors} BEFORE the
+ * ratio is applied — a file that is a recognized test beside a declared anchor is in-scope
+ * evidence, never counted as drift. This closes the false positive this function used to
+ * raise on every correctly-scoped plan whose tasks shipped more test files than source files
+ * (this repo's own six-dimension test mandate makes that the COMMON case, not the edge case;
+ * measured twice in the session that filed this task: 17 files/4 intersecting, and 8 files/2
+ * intersecting — both plans were correctly scoped, both warnings were false).
+ *
+ * ADR three-question review (`adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the`):
+ *   - **Proxy** — the ratio is a proxy for "this range matches the plan's own work", never
+ *     the property itself. Concrete input that satisfies the proxy while violating the
+ *     property: a plan whose declared anchors are unrelated to the diff, but whose diff
+ *     happens to also touch a same-named test file for one of those unrelated anchors —
+ *     {@link isFileInScopeForAnchors} counts it in-scope by coincidence. Accepted: bounded by
+ *     `anchorsOverlap`'s segment-exact semantics (no fuzzy/substring matching), and strictly
+ *     narrower than the false-positive gap this fix closes.
+ *   - **Silence** — the PRIOR implementation returned a bare `undefined` for THREE distinct
+ *     causes (no task declared anchors; the diff touched no files; measured and genuinely
+ *     fine) — all indistinguishable downstream. The first two now return
+ *     {@link ScopeMismatchNotMeasured}, a value distinct from both `undefined` (measured,
+ *     fine) and `ScopeMismatchWarning` (measured, mismatch).
+ *   - **Opt-in** — the check still only runs meaningfully for plans where ≥1 task declared
+ *     `file_anchors` (SPEC-042's opt-in anchor discipline) — that population boundary is
+ *     unchanged by this fix, but the exemption is now VISIBLE via
+ *     {@link ScopeMismatchNotMeasured} rather than silently absorbed into "no warning".
+ *
+ * @invariant Returns {@link ScopeMismatchNotMeasured} — never bare `undefined` — when
+ *   `taskAnchors` is empty (no task in the plan declared any file_anchors) or `diffFiles` is
+ *   empty (nothing to compare). Each carries its own distinct `reason` string; both are
+ *   distinct from the `undefined` returned by the "measured, no mismatch" path below.
+ * @invariant Returns `undefined` (measured; genuinely fine, no warning) iff at least half of
+ *   `diffFiles` are in-scope per {@link isFileInScopeForAnchors}. Exactly half is NOT a
+ *   mismatch (boundary-tested, byte-identical to the pre-fix behaviour).
  * @invariant `taskAnchors` is assumed already-normalized (the same precondition
  *   {@link anchorsOverlap} itself documents) — callers pass `extractFileAnchors(task)`
  *   output, which is written only through the sanctioned SPEC-042 anchor-mutation seams.
+ * @invariant Pure — `deriveTestedSourcePath`, if supplied, must itself be pure; this function
+ *   never reaches for IO to decide test-ness.
  *
  * @param diffFiles - {@link parseDiffFilePaths} output for the diff under assessment
  * @param taskAnchors - Union of every task-in-plan's declared `file_anchors` (may contain
  *   duplicates across tasks — harmless, `anchorsOverlap` treats it as a plain candidate set)
- * @returns `ScopeMismatchWarning` when the range looks too wide, else `undefined`
+ * @param deriveTestedSourcePath - Optional repo-specific test→source convention (see
+ *   {@link DeriveTestedSourcePath}). Omitted → no test-file reclassification is attempted
+ *   (every file scored by direct overlap only — the pre-fix scoring for that one file).
+ * @returns {@link ScopeMismatchWarning} when the range looks too wide,
+ *   {@link ScopeMismatchNotMeasured} when the comparison could not be attempted at all, or
+ *   `undefined` when it was attempted and found fine.
  *
  * @example
  * computeScopeMismatchWarning(["src/a.ts", "src/b.ts"], ["src/a.ts"]);
  * // → { diff_file_count: 2, intersecting_count: 1, message: "⚠ diff touches 2 files, ..." }
  *
  * @example
- * computeScopeMismatchWarning(["src/a.ts"], []); // → undefined (no task declares anchors)
+ * computeScopeMismatchWarning(["src/a.ts"], []);
+ * // → { status: "not-measured", reason: "not-measured: no task declares file_anchors" }
  *
  * @example
- * computeScopeMismatchWarning(["src/a.ts", "src/b.ts"], ["src/a.ts", "src/b/c.ts"]);
- * // → undefined (2 of 2 intersect — exactly half of 2 also passes here, both intersect)
+ * computeScopeMismatchWarning(
+ *   ["src/a.ts", "src/a.test.ts"], ["src/a.ts"],
+ *   (f) => (f.endsWith(".test.ts") ? f.slice(0, -".test.ts".length) + ".ts" : undefined),
+ * ); // → undefined (both files in-scope: one a direct anchor, one a recognized test of it)
  */
 export function computeScopeMismatchWarning(
   diffFiles: string[],
   taskAnchors: string[],
-): ScopeMismatchWarning | undefined {
-  if (taskAnchors.length === 0) return undefined;
-  if (diffFiles.length === 0) return undefined;
+  deriveTestedSourcePath?: DeriveTestedSourcePath,
+): ScopeMismatchWarning | ScopeMismatchNotMeasured | undefined {
+  if (taskAnchors.length === 0) {
+    return { status: "not-measured", reason: "not-measured: no task declares file_anchors" };
+  }
+  if (diffFiles.length === 0) {
+    return { status: "not-measured", reason: "not-measured: diff touched no files" };
+  }
 
-  const intersectingCount = diffFiles.filter((file) => anchorsOverlap([file], taskAnchors).overlaps).length;
+  const inScopeCount = diffFiles.filter((file) =>
+    isFileInScopeForAnchors(file, taskAnchors, deriveTestedSourcePath),
+  ).length;
 
-  if (intersectingCount >= diffFiles.length / 2) return undefined;
+  if (inScopeCount >= diffFiles.length / 2) return undefined;
 
   return {
     diff_file_count: diffFiles.length,
-    intersecting_count: intersectingCount,
+    intersecting_count: inScopeCount,
     message:
-      `⚠ diff touches ${diffFiles.length} files, only ${intersectingCount} intersect this plan's ` +
-      `task anchors — the range may be too wide; derive it from the plan's own task commits.`,
+      `⚠ diff touches ${diffFiles.length} files; only ${inScopeCount} are this plan's declared ` +
+      `task anchors or a recognized test of one — check whether this assess range matches ` +
+      `the plan's own task commits.`,
   };
 }
 
