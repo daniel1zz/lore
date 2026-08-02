@@ -17,9 +17,7 @@
  * history entry — visible via `lore log <task>`.
  *
  * Exit codes: 0 = success, 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase /
- *   no active claim / an uncommitted claim worktree / a no-worktree claim running
- *   inside a real git repo — TaskWorkflowService's uncommitted-worktree guard, see
- *   below), 5 = CLAIM_CONFLICT | STALE_VERSION.
+ *   no active claim), 5 = CLAIM_CONFLICT | STALE_VERSION.
  *
  * Zero-evidence advisory (spec claim-time-actor-identity-guard-zero-evidence-release-
  * advis, AC-RELEASE-ADVISORY): a release on a doc with NO `verification_evidence`
@@ -28,21 +26,8 @@
  * adds a `warnings[]` array to `data`. A release with >=1 evidence entry omits
  * `warnings[]` entirely — byte-identical to pre-AC-RELEASE-ADVISORY output.
  *
- * Uncommitted-worktree attestation guard (task-lore-evidence-and-lore-release-
- * accept-an-attestation-from) — a release used to clear the advisory lease cleanly
- * even while the claim's own recorded worktree sat uncommitted, which is what makes
- * that worktree eligible for the orchestrator's routine post-merge cleanup (the
- * doc's own framing: release is the MORE dangerous of the two, since evidence alone
- * never triggers cleanup). `releaseOpts.callerCwd` below is this process's own
- * `process.cwd()` — passed through to `TaskWorkflowService.release` ONLY to close an
- * opt-in hole (a claim recording NO worktree, from a call plainly running inside a
- * real git repo, refuses instead of silently passing); the primary whole-worktree
- * `git status --porcelain` predicate lives entirely in the service
- * (`task-workflow-service.ts`), keyed off the claim's own recorded worktree.
- *
  * Source: SPEC-025 §4 AC-WF-6; SPEC-056 §Design Decisions D2; spec claim-time-actor-
- *   identity-guard-zero-evidence-release-advis §AC-RELEASE-ADVISORY;
- *   task-lore-evidence-and-lore-release-accept-an-attestation-from
+ *   identity-guard-zero-evidence-release-advis §AC-RELEASE-ADVISORY
  */
 
 import { defineCommand } from "citty";
@@ -88,11 +73,6 @@ export default defineCommand({
         ...(typeof args.reason === "string" ? { reason: args.reason } : {}),
         force: args.force === true,
         source: app.callerSurface,
-        // reason: task-lore-evidence-and-lore-release-accept-an-attestation-
-        // from — see module header's "Uncommitted-worktree attestation guard"
-        // paragraph. A fresh subprocess per CLI invocation inherits the
-        // caller's real shell cwd.
-        callerCwd: process.cwd(),
       };
 
       let result = await app.taskWorkflowService.release(args.task as string, releaseOpts);

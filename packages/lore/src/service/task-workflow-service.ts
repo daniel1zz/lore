@@ -167,28 +167,8 @@
  *   sharing mutable fixture state can each pass individually under `-t` and fail
  *   when the file runs unfiltered — `knowledge-assessment-implementation-lore-ac-
  *   set-the-dangling-ac`'s finding).
- * @invariant `addEvidence` (self-reported `result: "pass"` only) and `release`
- *   (unconditionally) both refuse when the claim's recorded
- *   `extra.claim.worktree` has UNCOMMITTED tracked-file changes
- *   (task-lore-evidence-and-lore-release-accept-an-attestation-from) — a REAL
- *   `git status --porcelain` subprocess (`measureWorktreeCleanliness`,
- *   `checkUncommittedAttestationWorktree`), never an anchor-scoped proxy (see
- *   that section's own three-question review, immediately above the type
- *   `WorktreeCleanlinessStatus`, for why the narrower check was rejected).
- *   Absent preconditions (no recorded worktree; recorded path not a git
- *   working tree; `git` unavailable) are NEVER silently treated as clean —
- *   each is its own distinct `"not-measured-*"` status, and the call proceeds
- *   unaffected (no fabricated refusal). A claim recording NO worktree WHILE
- *   the calling CLI process is demonstrably inside a real git repository
- *   (`EvidenceInput.callerCwd`/`ReleaseOpts.callerCwd`, CLI-populated) is
- *   ALSO refused — the opt-in-hole close for `--worktree` being always
- *   explicit (SPEC-025/042).
  *
- * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry;
- *   `addEvidence`'s `result:"pass"` path and `release` additionally shell a
- *   real `git status`/`git rev-parse` subprocess against the claim's
- *   recorded worktree / the caller's cwd — see the invariant immediately
- *   above).
+ * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
  * Source: SPEC-025 §3 D2, D3, D5, D7, D8, D10; §4 AC-WF-1..11; §8.2, §8.3; SPEC-038 §4, §7 D4;
  *         SPEC-039 §2 D2, §4 AC-VRF-2; BUG-011 (anchor-overlap gate TOCTOU hardening);
  *         spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3;
@@ -198,7 +178,6 @@
  *         pass-as (the attested-pass floor + its audited escape hatch)
  */
 
-import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
@@ -290,24 +269,6 @@ export interface ReleaseOpts {
   force?: boolean;
   /** See {@link ClaimOpts.source}. */
   source?: string;
-  /**
-   * The CALLING process's own `process.cwd()` (task-lore-evidence-and-lore-
-   * release-accept-an-attestation-from, opt-in review Q3) — `commands/
-   * release.ts` is the sole production populator (a fresh CLI subprocess per
-   * invocation inherits the caller's real shell cwd, mirroring `commands/
-   * evidence.ts`'s identical `process.cwd()` precheck use). Used ONLY to
-   * detect the Q3 opt-in-hole mismatch: a claim recording NO `worktree` while
-   * THIS call plainly runs from inside a real git repository. Omitted (every
-   * pre-existing direct-service caller, incl. every unit test in this
-   * codebase) simply skips that ONE mismatch check — the primary whole-
-   * worktree cleanliness predicate below is COMPLETELY UNAFFECTED by this
-   * field's presence or absence, since it keys off the claim's OWN recorded
-   * `worktree`, never this one. Not read from `process.cwd()` internally by
-   * this service (mirrors `SeatService`'s explicit-`mainCwd`-over-ambient-read
-   * convention) so the mismatch path stays trivially unit-testable without
-   * mutating the real process's working directory.
-   */
-  callerCwd?: string;
 }
 
 /** Options for {@link TaskWorkflowService.done} / {@link PhaseWorkflowService.done}. */
@@ -390,8 +351,6 @@ export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation" | 
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /** See {@link ClaimOpts.source}. */
   source?: string;
-  /** See {@link ReleaseOpts.callerCwd} — same field, same Q3 mismatch use, `commands/evidence.ts` is this one's populator. Never persisted onto the written evidence entry (consumed pre-write only, see `_addEvidenceImpl`). */
-  callerCwd?: string;
 };
 
 /**
@@ -820,246 +779,6 @@ function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreErr
   });
 }
 
-// ─── Uncommitted-Worktree Attestation Guard ────────────────────────────────
-// task-lore-evidence-and-lore-release-accept-an-attestation-from — refuses a
-// self-reported `lore evidence --result pass` / `lore release` issued from a
-// claim whose recorded worktree carries uncommitted tracked-file changes, so
-// the corpus never records a verified-or-released task backed by no commit
-// (2026-08-01 incident: 7 evidence rows + a release recorded while
-// `git log main..<branch>` was EMPTY — the branch would have been deleted by
-// the orchestrator's routine post-merge cleanup with nothing to merge).
-//
-// adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the — the
-// three-question review THIS predicate answers:
-//
-//   Q1 Proxy — is `git status --porcelain` non-empty over the claim's
-//     recorded worktree a proxy, or the property itself? It IS the property
-//     ("is this attestation backed by committed state"), not a proxy for it.
-//     A REJECTED alternative: scoping the check to only the task's DECLARED
-//     `file_anchors`. Concrete input that satisfies that narrower check while
-//     violating the real property: a task anchoring file `A`, whose
-//     implementer actually edits UNDECLARED file `B` and leaves `B`
-//     uncommitted — `A` alone is clean, the anchor-scoped check passes, and
-//     the attestation is still backed by no commit (the exact
-//     `noAnchorOverlap` blindness one layer down). Declared anchors are used
-//     ONLY by {@link rankDirtyPathsByAnchors} to ORDER which paths a refusal
-//     message names first — never to narrow which paths count as dirty.
-//   Q2 Silence — three preconditions can be absent: no recorded
-//     `extra.claim.worktree`; the recorded path is not inside a git working
-//     tree; `git` itself is unavailable/times out. Each is recorded as a
-//     DISTINCT `"not-measured-*"` {@link WorktreeCleanlinessStatus} value,
-//     never silently folded into `"measured-clean"` — a caller scoring
-//     attestation quality can always tell "verified clean" from "never
-//     checked". The latter two preconditions share ONE value
-//     (`"not-measured-not-a-repo"`) — see that type's own doc for why a
-//     fourth value was not warranted.
-//   Q3 Opt-in — `--worktree` is ALWAYS explicit (SPEC-025/042); a claim taken
-//     WITHOUT one bypasses this predicate entirely by construction (the
-//     predicate has nothing to measure). Route taken: closed at the CALLING
-//     CLI layer, not left silent. `commands/evidence.ts`/`commands/
-//     release.ts` populate `EvidenceInput.callerCwd`/`ReleaseOpts.callerCwd`
-//     with their own `process.cwd()` (a fresh subprocess per invocation, so
-//     this is always the real caller's directory — the identical fact
-//     `commands/evidence.ts`'s own missing-oracle-file precheck already
-//     documents). When a claim recorded NO worktree AND the call is running
-//     from inside a REAL git repository, that mismatch is itself refused
-//     loud ({@link buildNoWorktreeMismatchRefusal}) rather than silently
-//     passed through as "nothing to check" — see `checkUncommittedAttestationWorktree`.
-//     `callerCwd` omitted (every direct-service test caller in this codebase,
-//     and any future non-CLI caller) simply skips this ONE escalation; the
-//     primary cleanliness predicate is unaffected either way, since it keys
-//     off the claim's own recorded worktree, never this field.
-
-/**
- * Distinct outcomes of measuring whether a claim's recorded worktree has
- * uncommitted tracked-file changes — see the module section header
- * immediately above for the full three-question review this type answers
- * (Q2 in particular: each value below is a DISTINCT, never-conflated state).
- */
-export type WorktreeCleanlinessStatus =
-  | "measured-clean"
-  | "measured-dirty"
-  | "not-measured-no-worktree"
-  | "not-measured-not-a-repo";
-
-/**
- * {@link measureWorktreeCleanliness}'s return shape. `paths` (git's raw
- * porcelain path column, one entry per dirty line, UNRANKED) is non-empty iff
- * `status === "measured-dirty"` — every other status carries `[]`.
- */
-export interface WorktreeCleanlinessCheck {
-  status: WorktreeCleanlinessStatus;
-  paths: string[];
-}
-
-/** Wall-clock budget for the `git` subprocesses this guard shells — generous enough for a cold-cache `status --porcelain` on a large tree, bounded so a hung/unreachable filesystem (e.g. a stale network mount) cannot hang an evidence/release call indefinitely. */
-const WORKTREE_GIT_TIMEOUT_MS = 10_000;
-
-/**
- * Measures whether `worktree` (a claim's recorded `extra.claim.worktree`, or
- * `undefined` when the claim never recorded one) has uncommitted tracked-file
- * changes, via a REAL `git status --porcelain` subprocess — no fake/mocked
- * git state; this predicate exists specifically because a mocked check would
- * be exactly the kind of proxy adr-lore-s-mechanisms-validate-a-proxy-for-
- * the-property-not-the warns against. NEVER throws — every failure mode
- * (worktree path missing/deleted, path exists but is not a git working tree,
- * `git` absent from PATH, a killed/timed-out subprocess) degrades to
- * `"not-measured-not-a-repo"` rather than propagating an exception into a
- * caller that expects a plain `Result`-returning method.
- *
- * @param worktree - `TaskClaim.worktree` as read from the resolved task's
- *   current claim; `undefined` when the claim recorded none at all.
- * @returns `{status, paths}` — see {@link WorktreeCleanlinessCheck}.
- * @example
- * measureWorktreeCleanliness(undefined);
- * // => { status: "not-measured-no-worktree", paths: [] }
- * @example
- * measureWorktreeCleanliness("/does/not/exist");
- * // => { status: "not-measured-not-a-repo", paths: [] }
- */
-export function measureWorktreeCleanliness(worktree: string | undefined): WorktreeCleanlinessCheck {
-  if (worktree === undefined) {
-    return { status: "not-measured-no-worktree", paths: [] };
-  }
-
-  try {
-    const result = spawnSync("git", ["status", "--porcelain"], {
-      cwd: worktree,
-      encoding: "utf8",
-      timeout: WORKTREE_GIT_TIMEOUT_MS,
-    });
-    if (result.error !== undefined || result.status !== 0) {
-      return { status: "not-measured-not-a-repo", paths: [] };
-    }
-
-    // reason: deliberately naive porcelain-line parsing — no shell/diff-
-    // grammar parser (mirrors evidence-precheck.ts's documented "no
-    // shell-grammar parser" posture for extractCdPrefixTarget). Each normal
-    // line is "XY <path>" (2 status chars + 1 space); a rename line is
-    // "XY <old> -> <new>" and is kept verbatim as ONE string rather than
-    // specially re-split — an acceptable narrow gap, not a silent one (the
-    // rename still surfaces in the refusal message, just not re-ranked
-    // against anchors as precisely as a plain path would be).
-    const lines = result.stdout.split("\n").filter((line) => line.trim().length > 0);
-    if (lines.length === 0) {
-      return { status: "measured-clean", paths: [] };
-    }
-    return { status: "measured-dirty", paths: lines.map((line) => line.slice(3).trim()) };
-  } catch {
-    return { status: "not-measured-not-a-repo", paths: [] };
-  }
-}
-
-/**
- * `true` iff `cwd` sits inside ANY git working tree (main checkout or linked
- * worktree) — used ONLY for the Q3 opt-in-hole mismatch signal (module
- * section header above), never for the primary cleanliness predicate above.
- * NEVER throws — every failure mode degrades to `false` ("cannot prove this
- * is a repo" reads identically to "not a repo" for this narrow purpose).
- */
-function isInsideGitRepo(cwd: string): boolean {
-  try {
-    const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-      cwd,
-      encoding: "utf8",
-      timeout: WORKTREE_GIT_TIMEOUT_MS,
-    });
-    return result.error === undefined && result.status === 0 && result.stdout.trim() === "true";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Orders `paths` (dirty entries from {@link measureWorktreeCleanliness}, in
- * git's own porcelain order) so any path overlapping one of the task's OWN
- * declared `file_anchors` is named FIRST in a refusal message — anchors rank
- * the message ONLY, they never narrow the predicate itself (Q1 above: the
- * predicate is whole-worktree porcelain, unconditionally). Reuses
- * {@link anchorsOverlap}'s already-tested segment-match (treating each dirty
- * path as a singleton anchor list) rather than re-deriving prefix-matching
- * logic — SSOT.
- *
- * @param paths - Dirty paths, in git's own porcelain order.
- * @param anchors - The task's `extractFileAnchors(task)` result; `[]` (an
- *   anchor-less task) is legal and returns `paths` completely unreordered.
- * @returns `paths` reordered: anchor-overlapping entries first (relative
- *   order preserved within each group), then every other entry.
- * @example
- * rankDirtyPathsByAnchors(["src/b.ts", "src/a.ts"], ["src/a.ts"]);
- * // => ["src/a.ts", "src/b.ts"]
- */
-export function rankDirtyPathsByAnchors(paths: string[], anchors: string[]): string[] {
-  if (anchors.length === 0) return paths;
-  const anchored: string[] = [];
-  const rest: string[] = [];
-  for (const path of paths) {
-    if (anchorsOverlap([path], anchors).overlaps) {
-      anchored.push(path);
-    } else {
-      rest.push(path);
-    }
-  }
-  return [...anchored, ...rest];
-}
-
-/**
- * How an operator repairs a `"measured-dirty"` refusal — appended verbatim so
- * the refusal always ends with the action, not just the diagnosis (house
- * rule). `-m` MUST precede `--`, or git reads the commit message itself as a
- * pathspec (an easy-to-mistype ordering, called out explicitly here rather
- * than left for the reader to discover the hard way).
- */
-function buildDirtyWorktreeRepairHint(worktree: string, paths: string[]): string {
-  const pathList = paths.join(" ");
-  return (
-    `From inside "${worktree}": \`git add ${pathList}\` then ` +
-    `\`git commit -m "<message>" -- ${pathList}\` (note: -m must precede -- , ` +
-    "or git reads the message as a pathspec) — then retry."
-  );
-}
-
-/** Builds the `"measured-dirty"` refusal — the primary predicate's refusal path. */
-function buildUncommittedWorktreeRefusal(opts: {
-  actionLabel: string;
-  taskSlug: string;
-  worktree: string;
-  rankedPaths: string[];
-}): LoreError {
-  return {
-    code: "VALIDATION_ERROR",
-    field: "extra.claim.worktree",
-    message:
-      `Refused: ${opts.actionLabel} for task "${opts.taskSlug}" — its claim's recorded ` +
-      `worktree "${opts.worktree}" has uncommitted change(s): ${opts.rankedPaths.join(", ")}. ` +
-      "This would record a verified/released task backed by no commit " +
-      "(task-lore-evidence-and-lore-release-accept-an-attestation-from). " +
-      buildDirtyWorktreeRepairHint(opts.worktree, opts.rankedPaths),
-    value: opts.rankedPaths,
-  };
-}
-
-/** Builds the Q3 opt-in-hole mismatch refusal — see the module section header's Q3 paragraph. */
-function buildNoWorktreeMismatchRefusal(opts: {
-  actionLabel: string;
-  taskSlug: string;
-  callerCwd: string;
-}): LoreError {
-  return {
-    code: "VALIDATION_ERROR",
-    field: "extra.claim.worktree",
-    message:
-      `Refused: ${opts.actionLabel} for task "${opts.taskSlug}" — its claim recorded NO ` +
-      `worktree, but this call is running from inside a git repository ("${opts.callerCwd}"). ` +
-      "SPEC-025/042 keep --worktree ALWAYS explicit, so a claim taken without it bypasses " +
-      "this task's uncommitted-worktree refusal entirely " +
-      "(task-lore-evidence-and-lore-release-accept-an-attestation-from, opt-in review Q3). " +
-      `Re-claim with \`lore claim ${opts.taskSlug} --worktree "$PWD"\` from the actual working ` +
-      "directory, then retry.",
-    value: opts.callerCwd,
-  };
-}
-
 // ─── TaskWorkflowService ───────────────────────────────────────────────────
 
 export class TaskWorkflowService {
@@ -1281,19 +1000,6 @@ export class TaskWorkflowService {
     // shared appendEvidenceEntry both addEvidence and recordVerifiedEvidence use).
     const placeholderCheck = rejectPlaceholderEvidenceCommand(entry.command);
     if (!placeholderCheck.ok) return placeholderCheck;
-
-    // task-lore-evidence-and-lore-release-accept-an-attestation-from — self-
-    // reported PASS ONLY (a fail/expected-fail row carries no "this is
-    // verified" claim that a commit needs to back). Reuses targetCheck.value
-    // (already resolved above) rather than a third store read.
-    if (entry.result === "pass") {
-      const worktreeError = this.checkUncommittedAttestationWorktree(
-        targetCheck.value,
-        "`lore evidence --result pass`",
-        entry.callerCwd,
-      );
-      if (worktreeError !== null) return err(worktreeError);
-    }
 
     return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
   }
@@ -1684,16 +1390,6 @@ export class TaskWorkflowService {
         age_minutes: ageMinutesBetween(nowIso, existingClaim.at),
       });
     }
-
-    // task-lore-evidence-and-lore-release-accept-an-attestation-from —
-    // UNCONDITIONAL (unlike addEvidence's `result === "pass"` scope, release
-    // carries no comparable field to scope on, and the doc's own framing
-    // calls release the MORE dangerous of the two: it is what makes the
-    // worktree eligible for the orchestrator's routine cleanup). Checked
-    // AFTER the holder/force authorization gate above — an unauthorized
-    // release attempt fails for THAT reason first.
-    const worktreeError = this.checkUncommittedAttestationWorktree(task, "`lore release`", opts.callerCwd);
-    if (worktreeError !== null) return err(worktreeError);
 
     const newExtra: Record<string, unknown> = { ...task.extra };
     delete newExtra["claim"];
@@ -2560,55 +2256,6 @@ export class TaskWorkflowService {
       });
     }
     return ok(doc);
-  }
-
-  /**
-   * Shared enforcement point for the uncommitted-worktree attestation guard
-   * (task-lore-evidence-and-lore-release-accept-an-attestation-from) — see
-   * the module section header above `WorktreeCleanlinessStatus` for the full
-   * three-question review. Called from BOTH `_addEvidenceImpl` (self-reported
-   * `result: "pass"` only) and `_releaseImpl` (unconditionally — the doc's
-   * own framing: release is the MORE dangerous of the two, since it is what
-   * makes the worktree eligible for cleanup).
-   *
-   * @param task - The already-resolved task DocRecord (never re-reads the
-   *   store — callers already hold it from their own `resolveTask` call).
-   * @param actionLabel - Rendered verbatim into the refusal message (e.g.
-   *   `` `lore evidence --result pass` `` / `` `lore release` ``) so the two
-   *   call sites never drift on wording independently.
-   * @param callerCwd - See {@link ReleaseOpts.callerCwd} — `undefined` skips
-   *   ONLY the Q3 mismatch escalation, never the primary predicate.
-   * @returns `null` when the call may proceed (measured-clean; not-measured,
-   *   either variant, per AC-3's "no fabricated refusal" control); a
-   *   `VALIDATION_ERROR` `LoreError` otherwise.
-   */
-  private checkUncommittedAttestationWorktree(
-    task: DocRecord,
-    actionLabel: string,
-    callerCwd: string | undefined,
-  ): LoreError | null {
-    const claim = readClaim(task);
-    const worktree = claim?.worktree;
-
-    if (worktree === undefined) {
-      // reason: Q3 opt-in-hole close — a claim recording NO worktree bypasses
-      // the primary predicate entirely (nothing to measure). Rather than a
-      // silent pass-through, escalate ONLY when this call is demonstrably
-      // running from inside a real git repository (callerCwd supplied AND
-      // it resolves as one) — that combination means --worktree was simply
-      // never passed at claim time, not that this corpus/session has nothing
-      // to do with git at all.
-      if (callerCwd !== undefined && isInsideGitRepo(callerCwd)) {
-        return buildNoWorktreeMismatchRefusal({ actionLabel, taskSlug: task.slug, callerCwd });
-      }
-      return null;
-    }
-
-    const check = measureWorktreeCleanliness(worktree);
-    if (check.status !== "measured-dirty") return null;
-
-    const ranked = rankDirtyPathsByAnchors(check.paths, extractFileAnchors(task));
-    return buildUncommittedWorktreeRefusal({ actionLabel, taskSlug: task.slug, worktree, rankedPaths: ranked });
   }
 
   /**
