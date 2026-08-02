@@ -126,6 +126,7 @@ import {
   buildAssessRetryPrompt,
   extractDeclaredAcceptanceCriteria,
   getAssessTemplate,
+  getAssessTemplateReproducibility,
   type AssessBudgets,
 } from "../ai/assess-template.js";
 import {
@@ -967,6 +968,21 @@ export class AIProviderService {
 
     const templateResult = getAssessTemplate(ASSESS_PROMPT_VERSION);
     if (!templateResult.ok) return templateResult;
+    // reason: task-getassesstemplatereproducibility-has-zero-production-callers — resolve
+    // `judgment.reproducible` from the EXACT SAME `ASSESS_PROMPT_VERSION` binding already
+    // used for `templateResult` and later stamped as `judgment.prompt_version` (see the
+    // `_finalizeAssessment` call sites below) — one read of the version, never two
+    // independent derivations, which is precisely how the two fields could otherwise drift
+    // apart. `getAssessTemplate`/`getAssessTemplateReproducibility` both key off the same
+    // `ASSESS_TEMPLATE_REGISTRY` (assess-template.ts), so an unregistered version here is a
+    // structural invariant violation, not a reachable per-request outcome — `templateResult`
+    // above would already have failed and returned first. It is still handled explicitly and
+    // loud (propagated as this call's own `err`, exactly like `templateResult`) rather than
+    // defaulted to `false`/omitted: silently coercing an internal registry-consistency defect
+    // into "not reproducible" or "not recorded" would recreate the exact proxy/silence
+    // conflation this task family exists to close (task's ADR three-question review, Q2).
+    const reproducibleResult = getAssessTemplateReproducibility(ASSESS_PROMPT_VERSION);
+    if (!reproducibleResult.ok) return reproducibleResult;
     const { prompt, truncated, declaredAcIds } = templateResult.value(
       bundle,
       opts?.diffText,
@@ -1024,6 +1040,7 @@ export class AIProviderService {
           sourceVersions,
           scopeWarning,
           opts?.commitDerivationUnverifiable ?? false,
+          reproducibleResult.value,
         ),
       );
     }
@@ -1059,6 +1076,7 @@ export class AIProviderService {
           sourceVersions,
           scopeWarning,
           opts?.commitDerivationUnverifiable ?? false,
+          reproducibleResult.value,
         ),
       );
     }
@@ -1489,6 +1507,15 @@ export class AIProviderService {
    *   grepping-task AC #3 — forces `scope_fidelity` out of the persisted `dimension_scores`
    *   (see `forceScopeFidelityUnverifiable`) regardless of the judge's own output, when
    *   the caller's commit-set derivation reported `"unverifiable_convention_mismatch"`.
+   * @param reproducible - task-getassesstemplatereproducibility-has-zero-production-callers
+   *   — the caller's ALREADY-RESOLVED `getAssessTemplateReproducibility(ASSESS_PROMPT_VERSION)`
+   *   value (same `ASSESS_PROMPT_VERSION` binding stamped as `judgment.prompt_version` below —
+   *   read once by the caller, never re-derived here). Stamped into `judgment.reproducible`
+   *   UNCONDITIONALLY (never spread-conditional like `reasoning_clipped`/`degraded_by_truncation`
+   *   above): `false` is an explicit, meaningful three-state value (SPEC per `judgmentSchema`'s
+   *   own JSDoc in `packages/core/src/assessment.ts`) that must always render, not a falsy
+   *   default that collapses into the LEGAL "absent = not recorded" state reserved for
+   *   assessments persisted before this field existed.
    */
   private _finalizeAssessment(
     parsed: LlmAssessmentOutput,
@@ -1501,6 +1528,7 @@ export class AIProviderService {
     sourceVersions: SourceVersionRef[],
     scopeWarning: ScopeMismatchWarning | undefined,
     commitDerivationUnverifiable: boolean,
+    reproducible: boolean,
   ): AssessmentResult {
     // reason: SPEC-040 D4 — grounding cross-check runs on the validated-but-not-yet-final
     // output; warnings are advisory-only and never fail the run.
@@ -1611,6 +1639,14 @@ export class AIProviderService {
         truncated,
         ...(clippedAcIds.length > 0 ? { reasoning_clipped: clippedAcIds } : {}),
         ...(degradedByTruncation ? { overall_confidence: "low" as const, degraded_by_truncation: true as const } : {}),
+        // reason: task-getassesstemplatereproducibility-has-zero-production-callers —
+        // UNCONDITIONAL stamp (unlike the two spreads above): `reproducible` is a genuine
+        // three-state field (true / false / absent-means-"not recorded", see judgmentSchema's
+        // JSDoc) and `false` must render exactly as visibly as `true`. A conditional spread
+        // keyed on truthiness would silently drop every `false` back into the "absent" bucket
+        // reserved for pre-existing legacy records — precisely the conflation this task exists
+        // to close.
+        reproducible,
       },
       facts,
       source_versions: sourceVersions,
