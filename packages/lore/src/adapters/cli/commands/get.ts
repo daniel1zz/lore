@@ -26,7 +26,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatNavigation } from "../utils.js";
+import { exitCode, formatError, formatNavigation, formatShortId } from "../utils.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
 import { renderDocMarkdown } from "../../../flows/feed-flow.js";
 
@@ -93,7 +93,7 @@ export default defineCommand({
 
       // Human-readable display
       const divider = "─".repeat(60);
-      console.log(`── ${doc.id.slice(0, 8)}… ${doc.title} ${divider.slice(0, 40)}`);
+      console.log(`── ${formatShortId(doc.id)} ${doc.title} ${divider.slice(0, 40)}`);
       console.log(
         `Type: ${doc.type} | Status: ${doc.status} | Priority: ${doc.priority} | v${doc.version}`,
       );

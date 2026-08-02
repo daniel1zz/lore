@@ -2,7 +2,8 @@
  * @spec_ref AC-CLI-001 SPEC-051
  * Tests for CLI adapter utilities.
  * Covers formatError, exitCode, formatTable, formatTree, formatNavigation,
- * relativeTime, resolveActorAlias (SPEC-051 D2).
+ * relativeTime, resolveActorAlias (SPEC-051 D2), formatShortId
+ * (task-short-id-rendering-truncates-ulids-to-8-chars-a-1024ms).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import {
   exitCode,
   formatError,
+  formatShortId,
   formatTable,
   formatTree,
   formatNavigation,
@@ -270,6 +272,64 @@ describe("formatTable", () => {
   });
 });
 
+// ─── formatShortId (task-short-id-rendering-truncates-ulids-to-8-chars-a-1024ms) ──
+
+describe("formatShortId", () => {
+  // A real-shape 26-char Crockford-base32 ULID (matches the task's own
+  // measured example, `01KYYDXH4SBSHGHAXNPKEY9SMB`).
+  const REAL_ULID = "01KYYDXH4SBSHGHAXNPKEY9SMB";
+
+  describe("HAPPY", () => {
+    it("renders head(8) + … + tail(5) for a full-length ULID", () => {
+      expect(formatShortId(REAL_ULID)).toBe("01KYYDXH…Y9SMB");
+    });
+
+    it("the rendered form is well-formed: exactly 8 head chars, the … separator, exactly 5 tail chars", () => {
+      const rendered = formatShortId(REAL_ULID);
+      const match = /^(.{8})…(.{5})$/.exec(rendered);
+      expect(match).not.toBeNull();
+      expect(match?.[1]).toBe(REAL_ULID.slice(0, 8));
+      expect(match?.[2]).toBe(REAL_ULID.slice(-5));
+    });
+
+    it("two DIFFERENT full-length ids sharing the SAME 8-char timestamp prefix (the 1024ms-window bug) render DIFFERENT short ids", () => {
+      // Same first 8 chars (same 1024ms window under the OLD .slice(0,8) bug) —
+      // this is the measured incident pair from the task doc, tail differs.
+      const idA = "01KYYDXH4SBSHGHAXNPKEY9SMB";
+      const idB = "01KYYDXHBF3GXDSDJ22Q2ZYWKJ";
+      expect(idA.slice(0, 8)).toBe(idB.slice(0, 8)); // pre-condition: old bug's collision case
+      expect(formatShortId(idA)).not.toBe(formatShortId(idB));
+    });
+  });
+
+  describe("BOUNDARY", () => {
+    it("an empty string renders as an empty string (no throw)", () => {
+      expect(formatShortId("")).toBe("");
+    });
+
+    it("a 6-char id (shorter than head+tail width) renders WHOLE, no … separator", () => {
+      expect(formatShortId("abcdef")).toBe("abcdef");
+    });
+
+    it("a 13-char id (exactly head+tail width) renders WHOLE, no … separator", () => {
+      const exactWidth = "0123456789ABC"; // 13 chars = headLen(8) + tailLen(5)
+      expect(formatShortId(exactWidth)).toBe(exactWidth);
+    });
+
+    it("a 14-char id (one over head+tail width) DOES render head+tail", () => {
+      const oneOver = "0123456789ABCD"; // 14 chars
+      expect(formatShortId(oneOver)).toBe("01234567…9ABCD");
+    });
+
+    it("never throws across a range of malformed lengths, including 0", () => {
+      for (const len of [0, 1, 5, 8, 12, 13, 14, 20, 26]) {
+        const id = "X".repeat(len);
+        expect(() => formatShortId(id)).not.toThrow();
+      }
+    });
+  });
+});
+
 // ─── formatTree ──────────────────────────────────────────────────────────
 
 describe("formatTree", () => {
@@ -330,6 +390,42 @@ describe("formatTree", () => {
     const lastChildLine = lines.find((l) => l.includes("Third"));
     expect(lastChildLine).toContain("└──");
   });
+
+  // ── formatShortId wiring (task-short-id-rendering-truncates-ulids-to-8-chars-a-1024ms) ──
+
+  it("HAPPY: renders the root label's id via formatShortId's head+tail form", () => {
+    const node = makeNode("01KYYDXH4SBSHGHAXNPKEY9SMB", "Root Doc");
+    const output = formatTree(node);
+    expect(output).toContain(formatShortId("01KYYDXH4SBSHGHAXNPKEY9SMB"));
+    expect(output).toContain("01KYYDXH…Y9SMB");
+  });
+
+  it("HAPPY: renders a CHILD's id via formatShortId's head+tail form (formatTreeChildren site)", () => {
+    const root = makeNode("ROOT0000000000000000000001ZZ", "Root", [
+      makeNode("01KYYDXHBF3GXDSDJ22Q2ZYWKJ", "Child A"),
+    ]);
+    const output = formatTree(root);
+    expect(output).toContain("01KYYDXH…ZYWKJ");
+  });
+
+  it("REGRESSION (AC1 unit-level): two docs sharing the OLD 8-char-collision timestamp prefix render DIFFERENT short ids as root vs child", () => {
+    // Pre-condition: both ids share the identical first 8 chars — the exact
+    // same-1024ms-window shape the old `.slice(0, 8)` rendering collapsed to
+    // one identical printed id.
+    const idA = "01KYYDXH4SBSHGHAXNPKEY9SMB";
+    const idB = "01KYYDXHBF3GXDSDJ22Q2ZYWKJ";
+    expect(idA.slice(0, 8)).toBe(idB.slice(0, 8));
+
+    const root = makeNode(idA, "Doc A", [makeNode(idB, "Doc B")]);
+    const output = formatTree(root);
+    const lines = output.split("\n");
+    const rootShort = lines[0]?.split(" ")[0];
+    const childLine = lines.find((l) => l.includes("Doc B"));
+    const childShort = childLine?.trim().split(" ")[1]; // after the "└── " connector
+    expect(rootShort).toBeDefined();
+    expect(childShort).toBeDefined();
+    expect(rootShort).not.toBe(childShort);
+  });
 });
 
 // ─── formatNavigation ────────────────────────────────────────────────────
@@ -382,6 +478,41 @@ describe("formatNavigation", () => {
     const output = formatNavigation(nav);
     expect(output).toContain("Related Doc");
     expect(output).toContain("informs");
+  });
+
+  // ── formatShortId wiring (task-short-id-rendering-truncates-ulids-to-8-chars-a-1024ms) ──
+
+  it("HAPPY: Parent/Siblings/Children/Related all render via formatShortId's head+tail form", () => {
+    const REAL_ULID = "01KYYDXH4SBSHGHAXNPKEY9SMB";
+    const expected = formatShortId(REAL_ULID);
+    const parent = makeSummary(REAL_ULID, "Parent Doc");
+    const sibling = makeSummary(REAL_ULID, "Sibling Doc");
+    const child = makeSummary(REAL_ULID, "Child Doc");
+    const related = { ...makeSummary(REAL_ULID, "Related Doc"), link_type: "informs" as const };
+    const nav = { parent, ancestors: [], siblings: [sibling], children: [child], related: [related] };
+    const output = formatNavigation(nav);
+    // 4 occurrences: Parent, Siblings, Children, Related lines.
+    const occurrences = output.split(expected).length - 1;
+    expect(occurrences).toBe(4);
+    expect(output).toContain("01KYYDXH…Y9SMB");
+  });
+
+  it("REGRESSION (AC1 unit-level): two docs sharing the OLD 8-char-collision timestamp prefix render DIFFERENT short ids as parent vs sibling", () => {
+    const idA = "01KYYDXH4SBSHGHAXNPKEY9SMB";
+    const idB = "01KYYDXHBF3GXDSDJ22Q2ZYWKJ";
+    expect(idA.slice(0, 8)).toBe(idB.slice(0, 8)); // pre-condition: old bug's collision case
+
+    const parent = makeSummary(idA, "Parent Doc");
+    const sibling = makeSummary(idB, "Sibling Doc");
+    const nav = { parent, ancestors: [], siblings: [sibling], children: [], related: [] };
+    const output = formatNavigation(nav);
+
+    const lines = output.split("\n");
+    const parentLine = lines.find((l) => l.startsWith("Parent:"));
+    const siblingLine = lines.find((l) => l.startsWith("Siblings:"));
+    expect(parentLine).toContain(formatShortId(idA));
+    expect(siblingLine).toContain(formatShortId(idB));
+    expect(formatShortId(idA)).not.toBe(formatShortId(idB));
   });
 });
 
