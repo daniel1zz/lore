@@ -219,3 +219,43 @@ describe("REGRESSION — no-ticket fallback carries neither boundary constant", 
     expect(feed).not.toContain(RESUME_COVERAGE_FLOOR);
   });
 });
+
+// ─── suppressFloor (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1) ──
+//
+// `renderResumeFeed`'s new second parameter — the render-layer half of the
+// same-session-authorship fix. `buildResumeFeed` (feed-flow.ts, tested
+// separately in feed-resume-same-session.test.ts) computes the boolean via
+// IO; this function stays pure, only consuming it.
+
+describe("HAPPY — suppressFloor omitted (default false): byte-identical to pre-task behavior", () => {
+  it("no second argument -> RESUME_COVERAGE_FLOOR still present on the single-record path (every pre-existing call site keeps today's behavior)", () => {
+    const feed = renderResumeFeed(FOUND_SINGLE);
+    expect(feed).toContain(RESUME_COVERAGE_FLOOR);
+  });
+});
+
+describe("HAPPY — suppressFloor: true withholds the floor on the single-record path", () => {
+  it("suppressFloor: true -> RESUME_COVERAGE_FLOOR absent, RESUME_SCOPE_CLOSURE still present, ticket content still present", () => {
+    const feed = renderResumeFeed(FOUND_SINGLE, true);
+
+    expect(feed).not.toContain(RESUME_COVERAGE_FLOOR);
+    expect(feed).toContain(RESUME_SCOPE_CLOSURE);
+    expect(feed).toContain(RECORD.handoff_slug);
+  });
+});
+
+describe("NEGATIVE — suppressFloor: true has no effect on the multi_actor branch", () => {
+  it("multi_actor result with suppressFloor: true -> STILL no RESUME_COVERAGE_FLOOR (D10, unaffected by this task's new parameter) and RESUME_SCOPE_CLOSURE still present", () => {
+    const feed = renderResumeFeed(FOUND_MULTI, true);
+
+    expect(feed).not.toContain(RESUME_COVERAGE_FLOOR);
+    expect(feed).toContain(RESUME_SCOPE_CLOSURE);
+  });
+});
+
+describe("BOUNDARY — suppressFloor: true has no effect on the not-found branch", () => {
+  it("not-found result with suppressFloor: true -> exact '(no handoff recorded)', unchanged", () => {
+    const feed = renderResumeFeed(NOT_FOUND, true);
+    expect(feed).toBe("(no handoff recorded)");
+  });
+});
