@@ -165,7 +165,9 @@ describe("HAPPY — clean worktree is unaffected; dirty worktree refuses evidenc
     const result = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") {
+      throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
+    }
     expect(result.error.message).toContain("src.ts");
     expect(result.error.message).toContain("uncommitted");
     expect(result.error.message).toContain("git add");
@@ -246,6 +248,9 @@ describe("BOUNDARY — rankDirtyPathsByAnchors orders anchor-matching paths firs
     const result = await taskWorkflowService.addEvidence(taskId, evidence());
     expect(result.ok).toBe(false);
     if (result.ok) return;
+    if (result.error.code !== "VALIDATION_ERROR") {
+      throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
+    }
     const paths = result.error.value as string[];
     // reason: "other.ts" is the declared anchor — it must be ranked BEFORE
     // "src.ts" in the refusal's path list, regardless of git's own porcelain
@@ -325,7 +330,9 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") {
+      throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
+    }
     expect(result.error.message).toContain("recorded NO");
     expect(result.error.message).toContain("--worktree");
   });
@@ -339,7 +346,9 @@ describe("STATE — Q3 opt-in-hole close: a no-worktree claim's fate depends on 
     const result = await taskWorkflowService.release(taskId, { by: "alice", callerCwd: realRepoCwd });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") {
+      throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
+    }
     expect(result.error.message).toContain("recorded NO");
   });
 
@@ -375,7 +384,9 @@ describe("REGRESSION — release's check is unconditional; pre-existing zero-evi
     const result = await taskWorkflowService.release(taskId, { by: "alice" });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") {
+      throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
+    }
     expect(result.error.message).toContain("src.ts");
   });
 
