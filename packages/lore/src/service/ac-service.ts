@@ -89,6 +89,7 @@ import {
 import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { isPlanMember } from "./plan-membership.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -475,15 +476,30 @@ export class AcService {
     return this.store.findMany({ parent_id: specId, type: "plan" });
   }
 
-  /** All tasks across a set of plans (flattened, one findMany per plan). */
+  /**
+   * All tasks across a set of plans — ONE corpus-wide `type: "task"` findMany
+   * (the store has no `extra.plan_id` filter — same accepted tradeoff
+   * `TaskWorkflowService.ready`/`computePlanNowFullyTerminal` already
+   * establish, task-plan-membership-is-extra-plan-id-but-the-last-task),
+   * membership decided per plan by {@link isPlanMember} — never a bare
+   * `t.parent_id === plan.id` (task-eight-more-plan-member-queries-still-
+   * key-on-parent-id). Segments are pushed in `plans` iteration order and
+   * each segment preserves the store's own `updated_at DESC, id ASC` relative
+   * order (a filter over an already-sorted array never reorders its
+   * survivors) — for the CONTROL case (every task's `parent_id ===
+   * extra.plan_id`) this is byte-identical to the pre-fix per-plan-findMany
+   * result, while now costing ONE store round trip instead of one PER plan.
+   */
   private async findTasksUnderPlans(plans: DocRecord[]): Promise<Result<DocRecord[], LoreError>> {
-    const allTasks: DocRecord[] = [];
+    if (plans.length === 0) return ok([]);
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    if (!allTasksResult.ok) return allTasksResult;
+    const allTasks = allTasksResult.value;
+    const collected: DocRecord[] = [];
     for (const plan of plans) {
-      const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
-      if (!tasksResult.ok) return tasksResult;
-      allTasks.push(...tasksResult.value);
+      collected.push(...allTasks.filter((t) => isPlanMember(t, plan.id)));
     }
-    return ok(allTasks);
+    return ok(collected);
   }
 
   /**

@@ -58,6 +58,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
+import { isPlanMember } from "./plan-membership.js";
 
 const defaultNow = (): string => new Date().toISOString();
 
@@ -758,22 +759,33 @@ export class SessionService {
     return ok({ ready, claimed, done });
   }
 
-  /** Fetches `planDoc`'s tasks + computes its readiness pointer for `resume`'s output. */
+  /**
+   * Fetches `planDoc`'s tasks + computes its readiness pointer for `resume`'s
+   * output (the `session-resume` feed, a frequently-run path). Membership is
+   * decided by {@link isPlanMember} (`extra.plan_id`), never a bare
+   * `parent_id` match (task-eight-more-plan-member-queries-still-key-on-
+   * parent-id) — this call site ALREADY fetches the whole corpus for
+   * `computeTaskCounts`'s blocker-status map, so deriving the plan's tasks
+   * from that SAME `findMany({})` result (filtered in memory) both fixes the
+   * membership bug AND removes a store round trip versus the pre-fix
+   * two-call shape, rather than adding a second corpus-wide scan.
+   */
   private async computeReadinessPointer(
     planDoc: DocRecord,
     nowIso: string,
   ): Promise<Result<ResumeReadinessPointer, LoreError>> {
-    const tasksResult = await this.store.findMany({ type: "task", parent_id: planDoc.id });
-    if (!tasksResult.ok) return tasksResult;
     const allDocsResult = await this.store.findMany({});
     if (!allDocsResult.ok) return allDocsResult;
+    const tasks = allDocsResult.value.filter(
+      (d) => d.type === "task" && isPlanMember(d, planDoc.id),
+    );
 
-    const countsResult = await this.computeTaskCounts(tasksResult.value, allDocsResult.value, nowIso);
+    const countsResult = await this.computeTaskCounts(tasks, allDocsResult.value, nowIso);
     if (!countsResult.ok) return countsResult;
 
     return ok({
       plan_slug: planDoc.slug,
-      total: tasksResult.value.length,
+      total: tasks.length,
       ...countsResult.value,
     });
   }
