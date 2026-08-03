@@ -1,8 +1,38 @@
 /**
  * lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual|other>
  *   --command "<cmd>" --result <pass|fail|expected-fail>
- *   [--output-tail <text> | --output-tail-file <path>] [--by <name>] [--ac <id>]
- *   [--checklist-ref <id>]
+ *   [--capture | --output-tail <text> | --output-tail-file <path>] [--by <name>]
+ *   [--ac <id>] [--checklist-ref <id>]
+ *
+ * --capture (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) —
+ * spawns `--command` itself (`node:child_process.spawnSync`, `shell: true`, this
+ * process's own `process.cwd()`, a fixed {@link CAPTURE_TIMEOUT_MS} timeout) and
+ * uses its OWN captured stdout+stderr (tail-truncated to 4000 chars, same as
+ * `--output-tail-file`) as `output_tail` — the agent never types or redirects
+ * anything; the tail IS the runner's real output. Cross-checks the spawn's actual
+ * exit code against the declared `--result` (`pass` requires exit 0; `fail`/
+ * `expected-fail` requires nonzero) and REFUSES on a mismatch, naming the real
+ * exit code observed — the same anti-lying property `lore verify` already gets
+ * from actually running commands itself. Stamps `capture_source: "runner"` on
+ * the written entry (`TaskWorkflowService`'s own forcing logic additionally
+ * re-derives this from `attestation` for `lore verify`-attested rows — see that
+ * service's module header). Mutually exclusive with `--output-tail`/
+ * `--output-tail-file` and with `--oracle manual` (nothing to spawn for a
+ * browser/visual check) — `../evidence-precheck.js::findCaptureFlagConflict`
+ * refuses both combinations before any spawn happens.
+ *
+ * A self-reported `--result pass` for `--oracle` `test`/`e2e` with NO `--capture`
+ * and no genuine `--output-tail`/`--output-tail-file` used to record cleanly with
+ * an EMPTY `output_tail` — two measurements this task's own doc records (a hand-
+ * authored prose tail satisfying the non-empty predicate; eight `pass` rows with
+ * `output_tail` length 0 recorded under an explicit dispatch instruction naming
+ * this exact defect). `TaskWorkflowService`'s `rejectMissingPassOutputTail` now
+ * refuses any `--result pass` self-report lacking a genuinely non-empty tail
+ * UNLESS `capture_source === "runner"` (i.e. `--capture` was used) — the
+ * PASS-side sibling of the pre-existing non-pass requirement
+ * (spec-evidence-output-tail-integrity-a-self-reported-non-pass). Every write
+ * this command makes stamps `capture_source: "self-report"` when `--capture` is
+ * NOT used — never omitted, never inferred from the tail's shape.
  *
  * `--result expected-fail` (spec-workflow-hardening-evidence-red-vocabulary-claim-
  * worktree §M1, AC-WH-1) records a deliberate RED-phase oracle run — a test that
@@ -51,14 +81,18 @@
  * (the field is doc-schema-legal on any evidence entry, `checklist_ref` is additive on
  * `evidenceEntrySchema`).
  *
- * Exit codes: 0 = success, 2 = argument error (both/neither output-tail flags
- *   given inconsistently), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase,
- *   50-entry cap reached, bad oracle/result value, unknown ac_ref/checklist_ref, OR
- *   a missing oracle file / an unproven filtered pass / a mixed-runner command per
- *   the three prechecks below, OR a `--result pass` from a claim whose recorded
- *   worktree is uncommitted / from a no-worktree claim running inside a real git
- *   repo — TaskWorkflowService's own uncommitted-worktree guard, see module header),
- *   5 = STALE_VERSION.
+ * Exit codes: 0 = success, 2 = argument error (both output-tail flags given at
+ *   once, or --output-tail-file names an unreadable path), 3 = DOC_NOT_FOUND,
+ *   4 = VALIDATION_ERROR (not a task/phase, 50-entry cap reached, bad
+ *   oracle/result value, unknown ac_ref/checklist_ref, `--capture` combined with
+ *   either output-tail flag or with `--oracle manual` (`findCaptureFlagConflict`),
+ *   a self-reported `--result pass` with no genuine tail and no `--capture`, a
+ *   `--capture` spawn whose observed exit code contradicts the declared
+ *   `--result`, OR a missing oracle file / an unproven filtered pass / a
+ *   mixed-runner command per the prechecks below, OR a `--result pass` from a
+ *   claim whose recorded worktree is uncommitted / from a no-worktree claim
+ *   running inside a real git repo — TaskWorkflowService's own uncommitted-
+ *   worktree guard, see module header), 5 = STALE_VERSION.
  *
  * Mixed-runner invocation guard (defect: task-vitest-run-silently-drops-a-bun-
  * test-ts-named-alongside-a) — a single `vitest run` invocation naming a
@@ -152,13 +186,16 @@
  *
  * Source: SPEC-025 §4 AC-WF-1, AC-WF-2; SPEC-038 §4, §7 D3; SPEC-056 §Design Decisions D8;
  *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the;
- *   task-lore-evidence-and-lore-release-accept-an-attestation-from
+ *   task-lore-evidence-and-lore-release-accept-an-attestation-from;
+ *   task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the (`--capture`,
+ *   the PASS-tail requirement, `capture_source`)
  */
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { defineCommand } from "citty";
-import { ORACLE_KINDS, tailChars, type LoreError, type OracleKind } from "@lore/core";
+import { ORACLE_KINDS, tailChars, type CaptureSource, type LoreError, type OracleKind } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
@@ -166,10 +203,29 @@ import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
   findMixedRunnerRefusal,
+  findCaptureFlagConflict,
   describePrecheckRoots,
 } from "../evidence-precheck.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
+
+/**
+ * Fixed timeout for `--capture`'s own child-process spawn (task-a-non-empty-
+ * output-tail-can-be-hand-authored-prose-and-the) — 10 minutes, matching this
+ * harness's own Bash-tool maximum. Deliberately NOT a CLI-configurable flag: a
+ * capture is meant for a single scoped oracle command (`bun run typecheck`, one
+ * `vitest run <file>` invocation), not a full test suite — `bun run test:changed`
+ * / individual test-file commands documented across this repo's own CLAUDE.md
+ * all comfortably finish well inside this window.
+ */
+const CAPTURE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** `spawnSync`'s own captured-buffer ceiling (CLAUDE.md standing lesson: a spawn
+ * capturing growing output MUST set an explicit `maxBuffer` — the 1 MiB Node
+ * default silently truncates). Generous relative to the 4000-char tail that
+ * actually gets persisted — this only bounds what `spawnSync` buffers in memory
+ * before `tailChars` trims it. */
+const CAPTURE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 
 export default defineCommand({
   meta: {
@@ -205,6 +261,13 @@ export default defineCommand({
       type: "string",
       description: "Path to a file whose last 4000 chars are recorded as output_tail",
     },
+    capture: {
+      type: "boolean",
+      description:
+        "Spawn --command itself and use ITS OWN captured stdout+stderr as output_tail " +
+        "(capture_source: runner); mutually exclusive with --output-tail/--output-tail-file " +
+        "and with --oracle manual",
+    },
     by: {
       type: "string",
       description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
@@ -233,8 +296,92 @@ export default defineCommand({
       return;
     }
 
+    const captureRequested = args.capture === true;
+
+    // reason: capture-flag conflict guard (see module header) — pure CLI-usage
+    // shape check, independent of `--result`, so it runs BEFORE any tail
+    // resolution or spawn happens. Rendered via the SAME formatError/exitCode
+    // pair every other precheck guard in this file uses (VALIDATION_ERROR, exit 4).
+    const captureConflict = findCaptureFlagConflict({
+      oracle: args.oracle as string,
+      capture: captureRequested,
+      ...(typeof args["output-tail"] === "string" ? { outputTail: args["output-tail"] } : {}),
+      ...(typeof args["output-tail-file"] === "string" ? { outputTailFile: args["output-tail-file"] } : {}),
+    });
+    if (captureConflict !== null) {
+      process.stderr.write(formatError(captureConflict) + "\n");
+      process.exitCode = exitCode(captureConflict);
+      return;
+    }
+
     let outputTail: string | undefined;
-    if (typeof args["output-tail"] === "string") {
+    // reason: task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the —
+    // capture_source is stamped on EVERY write (never omitted, never inferred
+    // from the tail's shape): "runner" only when --capture actually spawned
+    // --command and this process observed its real exit code; "self-report"
+    // for every other case (the two --output-tail flags, or no tail at all).
+    let captureSource: CaptureSource = "self-report";
+
+    if (captureRequested) {
+      const spawnResult = spawnSync(args.command as string, {
+        shell: true,
+        cwd: process.cwd(),
+        encoding: "utf8",
+        maxBuffer: CAPTURE_MAX_BUFFER_BYTES,
+        timeout: CAPTURE_TIMEOUT_MS,
+      });
+
+      if (spawnResult.error !== undefined) {
+        const captureError: LoreError = {
+          code: "VALIDATION_ERROR",
+          field: "capture",
+          message: `--capture failed to spawn --command: ${spawnResult.error.message}`,
+          value: args.command,
+        };
+        process.stderr.write(formatError(captureError) + "\n");
+        process.exitCode = exitCode(captureError);
+        return;
+      }
+      if (spawnResult.status === null) {
+        // reason: killed by a signal (incl. this spawn's own timeout) before
+        // exiting normally — there is no real exit code to cross-check the
+        // declared --result against, so this is refused the same way a spawn
+        // failure is, never silently treated as either pass or fail.
+        const captureError: LoreError = {
+          code: "VALIDATION_ERROR",
+          field: "capture",
+          message:
+            `--capture's spawn of --command was killed by signal ${spawnResult.signal ?? "unknown"} ` +
+            `(no exit code observed — possibly the ${CAPTURE_TIMEOUT_MS / 1000}s capture timeout). ` +
+            "Recorded nothing; narrow --command to a smaller scope and retry.",
+          value: args.command,
+        };
+        process.stderr.write(formatError(captureError) + "\n");
+        process.exitCode = exitCode(captureError);
+        return;
+      }
+
+      const declaredPass = args.result === "pass";
+      const observedPass = spawnResult.status === 0;
+      if (declaredPass !== observedPass) {
+        const captureError: LoreError = {
+          code: "VALIDATION_ERROR",
+          field: "result",
+          message:
+            `--capture ran --command and observed exit code ${spawnResult.status} — declared ` +
+            `--result "${args.result as string}" does not match (pass requires exit 0; fail/` +
+            "expected-fail requires nonzero). Recorded nothing; fix --result or --command and retry.",
+          value: { observed_exit_code: spawnResult.status, declared_result: args.result },
+        };
+        process.stderr.write(formatError(captureError) + "\n");
+        process.exitCode = exitCode(captureError);
+        return;
+      }
+
+      const combined = [spawnResult.stdout, spawnResult.stderr].filter((s) => s.length > 0).join("\n");
+      outputTail = tailChars(combined, 4000);
+      captureSource = "runner";
+    } else if (typeof args["output-tail"] === "string") {
       outputTail = tailChars(args["output-tail"], 4000);
     } else if (typeof args["output-tail-file"] === "string") {
       try {
@@ -346,6 +493,11 @@ export default defineCommand({
         // shell cwd (same fact this file's own missing-oracle-file precheck
         // already documents), so this is always correct here.
         callerCwd: process.cwd(),
+        // reason: task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the —
+        // ALWAYS stamped, never omitted, never inferred from the tail's shape (see
+        // this file's module header and TaskWorkflowService's own capture_source
+        // invariant for the full discriminator contract).
+        capture_source: captureSource,
         ...(outputTail !== undefined ? { output_tail: outputTail } : {}),
         ...(typeof args.ac === "string" ? { ac_ref: args.ac } : {}),
         ...(typeof args["checklist-ref"] === "string" ? { checklist_ref: args["checklist-ref"] } : {}),

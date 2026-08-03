@@ -371,6 +371,7 @@ describe("MCP lore_evidence_add refuses exactly what the CLI refuses (mixed-runn
       command: SPLIT_VITEST_COMMAND,
       result: "pass",
       recorded_by: "agent:parity",
+      output_tail: "ok",
     });
     expect(firstHalf.isError).toBeFalsy();
     expect(await readEvidenceCount(taskId)).toBe(1);
@@ -381,6 +382,7 @@ describe("MCP lore_evidence_add refuses exactly what the CLI refuses (mixed-runn
       command: SPLIT_BUN_COMMAND,
       result: "pass",
       recorded_by: "agent:parity",
+      output_tail: "ok",
     });
     expect(secondHalf.isError).toBeFalsy();
     const data = parseResult(secondHalf) as { doc: DocRecord };
@@ -397,6 +399,7 @@ describe("MCP lore_evidence_add refuses exactly what the CLI refuses (mixed-runn
       command: SPLIT_VITEST_COMMAND,
       result: "pass",
       recorded_by: "agent:parity",
+      output_tail: "ok",
     });
 
     expect(result.isError).toBeFalsy();

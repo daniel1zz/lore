@@ -214,7 +214,7 @@ describe("lore assess — AC-FRESH-4: non-blocking staleness advisory", () => {
     // Real task-evidence activity AFTER the first assessment — a genuine
     // `action: "evidence"` audit row (D2), via the real `lore evidence` write path.
     const evidence = runLore(
-      ["evidence", task.slug, "--oracle", "test", "--command", "true", "--result", "pass", "--by", "tester", "--json"],
+      ["evidence", task.slug, "--oracle", "test", "--command", "true", "--result", "pass", "--by", "tester", "--output-tail", "ok", "--json"],
       tmpDir,
     );
     expect(evidence.exitCode).toBe(0);

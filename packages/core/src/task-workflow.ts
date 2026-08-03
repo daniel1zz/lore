@@ -10,6 +10,11 @@
  *     `result` is `"pass" | "fail" | "inconclusive" | "expected-fail"` — the last
  *     two are non-green, non-special-cased-away values (see their own @invariant
  *     comments below) never counted as passing by any consumer
+ *   - CAPTURE_SOURCES / CaptureSource — `EvidenceEntry.capture_source`'s vocabulary
+ *     (`"runner" | "self-report"`, task-a-non-empty-output-tail-can-be-hand-
+ *     authored-prose-and-the) — the REQUIRED discriminator distinguishing a tail
+ *     the CLI itself spawned and captured from one the caller typed or read from
+ *     a self-authored file; see the field-level @invariant on evidenceEntrySchema
  *   - classifyEvidenceResult(value) — narrows an untrusted string to
  *     {@link EvidenceResult}, THROWING {@link UnknownEvidenceResultError} for any
  *     value outside the vocabulary — never a silent default bucket
@@ -131,6 +136,27 @@ export const EVIDENCE_RESULTS = ["pass", "fail", "inconclusive", "expected-fail"
 export type EvidenceResult = (typeof EVIDENCE_RESULTS)[number];
 
 /**
+ * `EvidenceEntry.capture_source` vocabulary (task-a-non-empty-output-tail-can-
+ * be-hand-authored-prose-and-the) — mirrors {@link ORACLE_KINDS}/{@link
+ * EVIDENCE_RESULTS}'s "tuple + derived type, no independent literal-array
+ * copies" precedent. `"runner"` means this row's `output_tail` came from an
+ * actual child-process spawn this exact call performed (`lore evidence
+ * --capture`) OR from a `recordVerifiedEvidence`-attested row (`lore verify`
+ * always spawns its own commands) — never from text the caller typed or read
+ * from a file it authored. `"self-report"` means the tail (if any) was
+ * supplied via `--output-tail`/`--output-tail-file` with no independent
+ * confirmation it reflects a real run. Deliberately a STRUCTURAL discriminator
+ * (which write path/mechanism produced the row), never inferred from the
+ * tail's own shape/content — a shape-based guess is exactly the proxy
+ * measured to fail twice (hand-authored prose containing a runner-summary-
+ * looking substring passed a shape check cleanly).
+ */
+export const CAPTURE_SOURCES = ["runner", "self-report"] as const;
+
+/** Derived TypeScript union for {@link EvidenceEntry.capture_source}. */
+export type CaptureSource = (typeof CAPTURE_SOURCES)[number];
+
+/**
  * One oracle verification record, appended to task.extra.verification_evidence.
  * Append-only — entries are never edited or removed, only added (up to the 50-entry cap
  * enforced by taskExtraSchema in schemas.ts).
@@ -210,6 +236,20 @@ export type EvidenceResult = (typeof EVIDENCE_RESULTS)[number];
  *   (REGRESSION, AC-063-5); a run under this change always sets both together, on
  *   EVERY resolution (including `"corpus_root"`), so the field's mere absence always
  *   means "recorded before SPEC-063," never "this run happened to use the corpus root."
+ * @invariant `capture_source` (task-a-non-empty-output-tail-can-be-hand-authored-
+ *   prose-and-the) is REQUIRED for every NEW self-reported write (`TaskWorkflowService.
+ *   _addEvidenceImpl` refuses a candidate lacking it) and ALWAYS forced to `"runner"`
+ *   for any attested write (`appendEvidenceEntry` overrides whatever the caller passed
+ *   whenever `attestation !== undefined` — an attested row is runner-captured by
+ *   construction, SPEC-039's trusted-runner boundary already proves it). Staying
+ *   `.optional()` HERE is load-bearing for the exact same reason `attestation` is
+ *   (see that field's own invariant above): `extractEvidence`/`readEvidence` parse the
+ *   WHOLE array in one call, so a required field would fail-close every array holding
+ *   one pre-this-change legacy entry, silently zeroing a task's entire evidence log.
+ *   A historical entry's ABSENT `capture_source` is read as `"self-report"` by any
+ *   consumer that needs a concrete value (never "unknown, therefore fine") — never
+ *   silently defaulted at the SCHEMA layer, only at the READ/aggregation layer that
+ *   actually needs to classify old rows.
  *
  * @example
  * evidenceEntrySchema.parse({
@@ -242,6 +282,8 @@ export const evidenceEntrySchema = z.object({
   ac_ref: z.string().optional(),
   /** Optional pointer to a phase checklist item id (SPEC-056 §Design Decisions D8) — see the field-level invariant above. */
   checklist_ref: z.string().optional(),
+  /** Discriminates a runner-captured tail from a self-reported one — see the field-level invariant above. */
+  capture_source: z.enum(CAPTURE_SOURCES).optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({

@@ -59,6 +59,7 @@ import {
   extractEvidence,
   ATTESTATION_RUNNERS,
   EVIDENCE_RESULTS,
+  CAPTURE_SOURCES,
   resolveTargetTask,
   isApprovedVerifyCommand,
   isEvidenceResult,
@@ -446,6 +447,109 @@ describe("evidenceEntrySchema.attestation", () => {
     expect(extracted[0]?.attestation).toBeUndefined();
     expect(extracted[1]?.attestation).toBeDefined();
     expect(extracted[1]?.attestation?.runner).toBe("lore-cli");
+  });
+});
+
+// ─── evidenceEntrySchema.capture_source (task-a-non-empty-output-tail-can-be- ─
+// ─── hand-authored-prose-and-the) ────────────────────────────────────────────
+//
+// Six-dimension coverage:
+//   HAPPY:      parses with capture_source "runner" and with "self-report"
+//   NEGATIVE:   an unrecognised capture_source value fails validation
+//   BOUNDARY:   absent capture_source still parses (legacy back-compat, same
+//               load-bearing optionality attestation itself has)
+//   STATE:      a MIXED array (one legacy entry with none, one new entry with
+//               each of the two values) parses as a whole
+//   REGRESSION: CAPTURE_SOURCES is locked to exactly ["runner", "self-report"]
+
+describe("evidenceEntrySchema.capture_source — HAPPY", () => {
+  it("parses an entry with capture_source \"runner\"", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "echo hi",
+      result: "pass",
+      recorded_at: "2026-08-01T10:00:00.000Z",
+      recorded_by: "agent:x",
+      capture_source: "runner",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.capture_source).toBe("runner");
+  });
+
+  it("parses an entry with capture_source \"self-report\"", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "echo hi",
+      result: "pass",
+      recorded_at: "2026-08-01T10:00:00.000Z",
+      recorded_by: "agent:x",
+      capture_source: "self-report",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.capture_source).toBe("self-report");
+  });
+});
+
+describe("evidenceEntrySchema.capture_source — NEGATIVE", () => {
+  it("rejects an unrecognised capture_source value", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "echo hi",
+      result: "pass",
+      recorded_at: "2026-08-01T10:00:00.000Z",
+      recorded_by: "agent:x",
+      capture_source: "hand-typed",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("evidenceEntrySchema.capture_source — BOUNDARY", () => {
+  it("still parses when capture_source is absent (legacy back-compat)", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "echo hi",
+      result: "pass",
+      recorded_at: "2026-08-01T10:00:00.000Z",
+      recorded_by: "agent:x",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.capture_source).toBeUndefined();
+  });
+});
+
+describe("evidenceEntrySchema.capture_source — STATE", () => {
+  it("REGRESSION: a MIXED array (no field, \"runner\", \"self-report\") parses as a WHOLE", () => {
+    const mixedArray = [
+      {
+        oracle: "tsc", command: "bun run typecheck", result: "pass",
+        recorded_at: "2026-07-01T00:00:00.000Z", recorded_by: "alice",
+      },
+      {
+        oracle: "test", command: "echo x", result: "pass",
+        recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "agent:x",
+        capture_source: "runner",
+      },
+      {
+        oracle: "manual", command: "checked browser", result: "pass",
+        recorded_at: "2026-08-01T00:00:01.000Z", recorded_by: "agent:x",
+        capture_source: "self-report", output_tail: "confirmed layout",
+      },
+    ];
+    const parsed = z.array(evidenceEntrySchema).safeParse(mixedArray);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data).toHaveLength(3);
+      expect(parsed.data[0]?.capture_source).toBeUndefined();
+      expect(parsed.data[1]?.capture_source).toBe("runner");
+      expect(parsed.data[2]?.capture_source).toBe("self-report");
+    }
+  });
+});
+
+describe("CAPTURE_SOURCES — REGRESSION (locked enum)", () => {
+  it("is locked to exactly [\"runner\", \"self-report\"]", () => {
+    expect(CAPTURE_SOURCES).toEqual(["runner", "self-report"]);
   });
 });
 

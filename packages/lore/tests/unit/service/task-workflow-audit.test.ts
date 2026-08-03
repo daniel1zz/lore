@@ -58,6 +58,7 @@ function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",
+    output_tail: "ok",
     ...overrides,
   };
 }

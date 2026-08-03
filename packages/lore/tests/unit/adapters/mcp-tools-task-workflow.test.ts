@@ -284,6 +284,7 @@ describe("lore_evidence_add", () => {
         command: "bun run typecheck",
         result: "pass",
         recorded_by: "alice",
+        output_tail: "ok",
       });
       expect(result.isError).toBeFalsy();
       const data = parseResult(result) as { doc: DocRecord };
@@ -300,6 +301,7 @@ describe("lore_evidence_add", () => {
         command: "cmd",
         result: "pass",
         recorded_by: "alice",
+        output_tail: "ok",
       });
       expect(result.isError).toBe(true);
       const error = parseResult(result) as { code: string };
@@ -344,6 +346,7 @@ describe("lore_evidence_add", () => {
           result: "pass",
           recorded_by: "alice",
           ac_ref: "AC-ACODE-8",
+          output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
         expect(spy.captured()?.ac_ref).toBe("AC-ACODE-8");
@@ -364,6 +367,7 @@ describe("lore_evidence_add", () => {
           command: "cmd",
           result: "pass",
           recorded_by: "alice",
+          output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
         const entry = spy.captured();
@@ -429,6 +433,7 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           command: `bunx vitest run ${EXISTING_TEST_FILE}`,
           result: "pass",
           recorded_by: "alice",
+          output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
         expect(spy.called()).toBe(true);
@@ -454,6 +459,7 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           command: `bunx vitest run ${MISSING_TEST_FILE}`,
           result: "pass",
           recorded_by: "alice",
+          output_tail: "ok",
         });
         expect(result.isError).toBe(true);
         expect(spy.called()).toBe(false);
@@ -487,6 +493,7 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           command: `bunx playwright test ${MISSING_TEST_FILE}`,
           result: "pass",
           recorded_by: "alice",
+          output_tail: "ok",
         });
         expect(result.isError).toBe(true);
         expect(spy.called()).toBe(false);
@@ -511,6 +518,7 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           command: `bunx vitest run ${MISSING_TEST_FILE}`,
           result: "pass",
           recorded_by: "alice",
+          output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
         expect(spy.called()).toBe(true);
@@ -552,6 +560,7 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           command: "bun run typecheck",
           result: "pass",
           recorded_by: "alice",
+          output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
         expect(spy.called()).toBe(true);
@@ -612,6 +621,7 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           result: "pass",
           recorded_by: "alice",
           caller_cwd: CALLER_CWD,
+          output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
         expect(spy.called()).toBe(true);
@@ -691,6 +701,7 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           command: `bunx vitest run ${EXISTING_FROM_REPO_ROOT}`,
           result: "pass",
           recorded_by: "alice",
+          output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
         expect(spy.called()).toBe(true);

@@ -165,6 +165,7 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "agent:alice",
+      output_tail: "ok",
     });
     expect(evidenceResult.ok).toBe(true);
 
@@ -187,6 +188,7 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "agent:alice",
+      output_tail: "ok",
     });
 
     const current = await corpusService.get(taskId);

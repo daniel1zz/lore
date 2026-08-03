@@ -22,7 +22,13 @@
  *                                             already-terminal task; ALSO refuses a
  *                                             `extra.red_first: true` task with no
  *                                             red evidence row (task-red-first-
- *                                             discipline-is-asked-for-in-prose-but-never)
+ *                                             discipline-is-asked-for-in-prose-but-never),
+ *                                             AND (opt-OUT default for every task that
+ *                                             never declares red_first) a declared-
+ *                                             ac_scope task with no red row and no
+ *                                             `noNewTestsReason` declaration (task-a-
+ *                                             non-empty-output-tail-can-be-hand-
+ *                                             authored-prose-and-the)
  *   declareRedFirst(idOrSlug, opts, now?)  → sets extra.red_first: true (`lore
  *                                             red-first <task>`) — the ONLY writer
  *                                             for that flag (task-red-first-
@@ -87,8 +93,38 @@
  *   runner-attested `fail` can legitimately carry an empty tail (silent nonzero
  *   exit, `--quiet` tool, or a timeout killed before flush), and binding this rule
  *   to the shared chokepoint would abort `lore verify` at that AC instead of
- *   reporting the failure. `"pass"` rows are never bound (that gap is
- *   `findFilteredPassRefusal`'s, `adapters/cli/evidence-precheck.ts`).
+ *   reporting the failure. `"pass"` rows were, until task-a-non-empty-output-tail-
+ *   can-be-hand-authored-prose-and-the, never bound (see the two invariants
+ *   immediately below for the fix — the PASS-side asymmetry this closed).
+ * @invariant addEvidence rejects a self-reported `result: "pass"` carrying no
+ *   `output_tail` UNLESS `capture_source === "runner"` (task-a-non-empty-output-
+ *   tail-can-be-hand-authored-prose-and-the, `rejectMissingPassOutputTail`) — the
+ *   asymmetry the predecessor spec left standing (see the invariant above): a
+ *   bare non-empty check was measured insufficient on its own (hand-authored prose
+ *   with real numbers embedded passes it cleanly), so the actual fix is the
+ *   `capture_source` discriminator immediately below, not a stronger shape check.
+ *   Oracle-agnostic — applies to `--oracle manual` exactly like every other kind
+ *   (a manual/visual check has no capturable stdout, so `--capture` is refused
+ *   for it at the CLI layer, but its pass row still needs an explicit non-empty
+ *   description — never a silently empty tail).
+ * @invariant `capture_source` (`"runner"` | `"self-report"`, @lore/core's
+ *   `CaptureSource`) is the discriminator distinguishing a runner-captured tail
+ *   from a self-reported one (task-a-non-empty-output-tail-can-be-hand-authored-
+ *   prose-and-the) — NEVER inferred from the tail's own shape/content (a
+ *   shape-based guess is exactly the proxy measured to fail: a hand-authored
+ *   summary containing a runner-summary-looking substring passes any shape check
+ *   cleanly). `commands/evidence.ts` (this fix's one wired call site) ALWAYS sets
+ *   it explicitly on every write, never omitting it — "required, never defaulted"
+ *   holds at that boundary. `appendEvidenceEntry` FORCES `"runner"` whenever
+ *   `attestation !== undefined` regardless of whatever the caller passed (an
+ *   attested row is runner-captured by construction — SPEC-039's trusted-runner
+ *   boundary already proves it); otherwise it falls back to `"self-report"` for
+ *   any caller that omits the field entirely — today, only the NOT-YET-updated
+ *   `lore_evidence_add` MCP tool (`adapters/mcp/tools.ts`, explicitly out of this
+ *   task's declared file anchors) — never silently claiming `"runner"` for that
+ *   gap. A historical (or MCP-originated) entry's ABSENT `capture_source` reads
+ *   as `"self-report"` at any consumption site, never as "unknown, therefore
+ *   fine" (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2).
  * @invariant addEvidence and recordVerifiedEvidence share ONE append implementation
  *   (private `appendEvidenceEntry`) — cap check, schema validation, ac_ref cross-entity
  *   validation, and the writeTaskExtra commit path are never duplicated between them.
@@ -152,10 +188,24 @@
  *   (never checked, never persisted) when an attested pass already satisfies the
  *   floor above — the escape hatch is for tasks that structurally cannot attest,
  *   not a blanket "always audit" switch.
+ * @invariant `done()`'s red-first floor is OPT-IN ONLY (`extra.red_first: true`,
+ *   set exclusively by `declareRedFirst`) — a task that never makes that call is
+ *   entirely unaffected by IT, but is instead governed by the FOURTH, INDEPENDENT
+ *   "no-new-tests" floor immediately below (task-a-non-empty-output-tail-can-be-
+ *   hand-authored-prose-and-the): the red-first discipline inverted to opt-OUT.
+ *   A task declaring `extra.ac_scope` (>= 1 AC) with zero `"expected-fail"`/`"fail"`
+ *   evidence rows and NO `extra.red_first: true` declaration cannot archive without
+ *   an explicit `DoneOpts.noNewTestsReason` (mandatory, non-blank, persisted
+ *   verbatim onto every step's audit `details` as `no_new_tests_reason` +
+ *   `no_new_tests_declared: true` — the SAME audited-escape shape as
+ *   `overrideReason`). Mutually exclusive with the red-first floor by construction
+ *   ({@link requiresNoNewTestsDeclaration} short-circuits `false` whenever
+ *   `extra.red_first` is declared), so a task that DOES opt in keeps working
+ *   BYTE-IDENTICALLY (AC6 control) — this floor never adds a SECOND requirement on
+ *   top of that one.
  * @invariant `done()` also refuses over an UNMET unfiltered-test-file-run floor
- *   (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested) — a THIRD,
- *   INDEPENDENT floor evaluated after the result:pass floor and the red-first floor
- *   above (so none of the three can mask another). For EVERY declared test-file
+ *   (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested) — a FIFTH,
+ *   INDEPENDENT floor evaluated after the four above (so none can mask another). For EVERY declared test-file
  *   anchor (`extra.file_anchors`, filtered to {@link isTestFileAnchor} — a
  *   directory-scoped anchor names no single file and is unaffected), at least one
  *   `oracle:"test"` `result:"pass"` evidence row must run that exact file with no
@@ -195,7 +245,11 @@
  *         task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested (the
  *         unfiltered-test-file-run floor); adr-lore-done-requires-a-runner-attested-
  *         pass-the-sixth-false / task-lore-done-accepts-an-unattested-self-reported-
- *         pass-as (the attested-pass floor + its audited escape hatch)
+ *         pass-as (the attested-pass floor + its audited escape hatch);
+ *         task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the (`capture_source`,
+ *         the PASS-tail requirement, and the no-new-tests opt-out floor) /
+ *         adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the (proxy/
+ *         silence/opt-in review this fix answers)
  */
 
 import { spawnSync } from "node:child_process";
@@ -227,6 +281,7 @@ import {
   type ReadyRecord,
   type BlockerInfo,
   type ReadySession,
+  type CaptureSource,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
@@ -338,6 +393,29 @@ export interface DoneOpts {
    * independent red-first / unfiltered-test-file-run floors below it.
    */
   overrideReason?: string;
+  /**
+   * Audited escape hatch for the NO-NEW-TESTS floor (task-a-non-empty-output-
+   * tail-can-be-hand-authored-prose-and-the) — the red-first discipline INVERTED
+   * to opt-OUT: a task declaring `extra.ac_scope` (>= 1 AC) with ZERO
+   * `"fail"`/`"expected-fail"` evidence rows and no `extra.red_first: true`
+   * declaration (that path is the PRE-EXISTING, unaffected opt-in floor, see
+   * {@link overrideReason}'s sibling check in `done()`'s JSDoc) cannot archive
+   * without this mandatory, non-blank, free-text justification for why no new
+   * RED test was recorded (CLI: `--declare-no-new-tests "<reason>"` — deliberately
+   * NOT `--no-new-tests`, which citty's mri parser would parse as a boolean
+   * negation and silently discard the value) — same audited shape as
+   * `overrideReason` above (`lore approve --override-judgment`/`lore outline
+   * exempt --reason`): written
+   * VERBATIM to every lifecycle step's audit entry as `details.no_new_tests_reason`
+   * (+ `details.no_new_tests_declared: true`), never silent, never defaulted, no
+   * env-var form. `commands/done.ts` refuses a blank/whitespace-only value as a
+   * CLI usage error (exit 2); `done()` refuses it too as a belt-and-suspenders
+   * check. IGNORED entirely when this floor does not apply (no ac_scope declared,
+   * red_first already declared, or a red evidence row already exists) — never a
+   * blanket "always audit" switch, mirroring {@link overrideReason}'s own
+   * ignored-when-unneeded contract.
+   */
+  noNewTestsReason?: string;
 }
 
 /**
@@ -429,6 +507,17 @@ export interface DoneResult {
  * claim-worktree §M1, AC-WH-1) — the opposite of `"inconclusive"`: a NORMAL self-reported
  * value (RED-phase evidence, fails by design), accepted here with no special guard, stored
  * verbatim, never counted as passing by any downstream consumer.
+ *
+ * `capture_source` (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the)
+ * stays `.optional()` here, inherited unchanged from the base schema — `commands/
+ * evidence.ts`, THIS task's fixed call site, ALWAYS sets it explicitly (never omits
+ * it), so "required, never defaulted" holds at the boundary this task actually
+ * controls. Widening it to a compile-time-required field would break the `lore_evidence_add`
+ * MCP tool (`adapters/mcp/tools.ts`, explicitly out of this task's declared file
+ * anchors — the dispatch note names it as deferred follow-up work, not something to
+ * silently break); `appendEvidenceEntry`'s own `?? "self-report"` fallback is what
+ * covers that ONE remaining caller honestly (never claims `"runner"` for it) until
+ * that follow-up lands.
  */
 export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation" | "result"> & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
@@ -589,6 +678,51 @@ function findMissingUnfilteredTestFileRuns(task: DocRecord, evidence: EvidenceEn
   return testFileAnchors.filter(
     (anchor) => !unfilteredPassingCommands.some((command) => commandRunsFileUnfiltered(command, anchor)),
   );
+}
+
+/**
+ * `done()`'s FOURTH, independent floor (task-a-non-empty-output-tail-can-be-hand-
+ * authored-prose-and-the) — the red-first floor's opt-IN behaviour, inverted to
+ * opt-OUT for every task that never opted in. A task with zero rows satisfying
+ * {@link isRedRunResult} and no explicit no-new-tests declaration cannot archive
+ * silently just because it never called `lore red-first` — the exact hole T6
+ * (this task's own motivating measurement) fell through.
+ *
+ * Deliberately MUTUALLY EXCLUSIVE with `readRedFirstDeclared`'s own floor
+ * (`done()`'s pre-existing check immediately above this function's call site) —
+ * a task that DID declare `extra.red_first: true` returns `false` here
+ * unconditionally, leaving that EXISTING floor as the sole authority for it
+ * (AC6 control: the opt-in path must keep working byte-identically, so this
+ * function must never add a SECOND requirement on top of it).
+ *
+ * Scoped to a task carrying >= 1 declared AC (`extra.ac_scope`, SPEC-038 §Design
+ * Decisions — the same declared-scope field `lore verify`'s declared-scope
+ * selection already consumes) — a task claiming no specific AC coverage has
+ * nothing this floor could meaningfully hold to a red-first standard, mirroring
+ * the sibling floors' own "nothing declared -> nothing to check" shape
+ * ({@link findMissingUnfilteredTestFileRuns}'s "no test-file anchors" boundary,
+ * the red-first floor's own "never sets the flag" boundary).
+ *
+ * @param task - The already-resolved task DocRecord
+ * @param evidence - `readEvidence(task)` — already read by the caller
+ * @returns `true` iff this floor applies AND is currently UNSATISFIED (an
+ *   explicit no-new-tests declaration, or a red evidence row, is required
+ *   before archiving); `false` when the floor doesn't apply (no declared AC
+ *   scope, or `extra.red_first: true` already governs this task) or is already
+ *   satisfied by a genuine red row
+ * @example
+ * requiresNoNewTestsDeclaration(
+ *   { extra: { ac_scope: ["AC-1"] } } as DocRecord,
+ *   [],
+ * ); // => true — declared AC, zero red rows, no red_first opt-in
+ * @example
+ * requiresNoNewTestsDeclaration({ extra: {} } as DocRecord, []); // => false — no declared AC scope
+ */
+function requiresNoNewTestsDeclaration(task: DocRecord, evidence: EvidenceEntry[]): boolean {
+  if (readRedFirstDeclared(task)) return false;
+  const acScope = extractDeclaredAcScope(task);
+  if (acScope === undefined || acScope.length === 0) return false;
+  return !evidence.some((e) => isRedRunResult(e.result));
 }
 
 /**
@@ -824,6 +958,76 @@ export function rejectMissingNonPassOutputTail(
       "runner-observed exit code, the tail is the only evidence this run actually failed. " +
       "Capture the real failure output and retry with --output-tail (or --output-tail-file; " +
       "MCP: output_tail).",
+    value: outputTail,
+  });
+}
+
+/**
+ * Rejects a self-reported `result: "pass"` row that lacks a genuine tail
+ * (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) — the
+ * ASYMMETRY the predecessor spec left standing: {@link rejectMissingNonPassOutputTail}
+ * already demands a non-empty tail for `"fail"`/`"expected-fail"`, but a `"pass"`
+ * row — the ONE result that unlocks `done()`'s archival floor — carried no such
+ * requirement at all. Two measurements (this task's own doc) showed a bare
+ * non-empty check would not have been enough on its own (hand-authored prose with
+ * real numbers embedded passes it cleanly) — the actual fix is `capture_source`:
+ * a row this call itself PROVED was runner-captured (`captureSource === "runner"`,
+ * `commands/evidence.ts`'s `--capture`, or any row where `attestation !== undefined`
+ * — see {@link TaskWorkflowService.appendEvidenceEntry}'s own forcing logic) is
+ * independently verified by its own captured exit code and is EXEMPT from this
+ * tail-non-emptiness requirement (mirrors {@link rejectMissingNonPassOutputTail}'s
+ * own exemption for a runner-attested `"fail"` that legitimately wrote nothing to
+ * stdout+stderr) — only the residual `"self-report"` path is bound.
+ *
+ * Deliberately oracle-agnostic — applies to `--oracle manual` exactly like every
+ * other oracle kind (task's own AC-4 BOUNDARY: a manual/visual check has no
+ * capturable stdout, so `--capture` is refused for it at the CLI layer, but its
+ * `--result pass` still needs an explicit, non-empty, hand-typed description of
+ * what was checked — "silently empty" is the one shape this guard exists to close,
+ * not manual checks themselves).
+ *
+ * SELF-REPORT PATH ONLY — called from `_addEvidenceImpl`, never from the shared
+ * `appendEvidenceEntry`/`recordVerifiedEvidence` chokepoint, mirroring {@link
+ * rejectMissingNonPassOutputTail}'s own documented split: a `recordVerifiedEvidence`
+ * pass is attested (`attestation !== undefined`), which this function's own
+ * `captureSource === "runner"` branch already exempts before ever reaching a
+ * hand-authored-tail concern.
+ *
+ * @param result - `EvidenceInput.result` as received (never `"inconclusive"`)
+ * @param outputTail - `EvidenceInput.output_tail` as received, `undefined` when omitted
+ * @param captureSource - `EvidenceInput.capture_source` as received — `undefined`
+ *   (an omitted-field caller, e.g. the not-yet-updated MCP surface) is treated
+ *   identically to `"self-report"`, never silently exempted the way `"runner"` is
+ * @returns `ok(undefined)` for any non-`"pass"` result (D2, unaffected — that's
+ *   {@link rejectMissingNonPassOutputTail}'s job), a `captureSource === "runner"` pass
+ *   (any tail, independently verified), or a self-reported pass with a genuinely
+ *   non-empty tail; `err(VALIDATION_ERROR)` naming `output_tail` otherwise
+ * @example
+ * rejectMissingPassOutputTail("pass", undefined, "self-report");
+ * // => err({ code: "VALIDATION_ERROR", field: "output_tail", ... })
+ * @example
+ * rejectMissingPassOutputTail("pass", undefined, "runner");
+ * // => ok(undefined) — a capture ran and produced nothing on stdout+stderr
+ * @example
+ * rejectMissingPassOutputTail("fail", undefined, "self-report"); // => ok(undefined) — not this guard's result
+ */
+export function rejectMissingPassOutputTail(
+  result: string,
+  outputTail: string | undefined,
+  captureSource: CaptureSource | undefined,
+): Result<void, LoreError> {
+  if (result !== "pass") return ok(undefined);
+  if (captureSource === "runner") return ok(undefined);
+  if (outputTail !== undefined && outputTail.trim().length > 0) return ok(undefined);
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "output_tail",
+    message:
+      'a self-reported result "pass" must carry a non-empty output_tail — a hand-authored ' +
+      "summary is not proof the command actually ran, and an empty tail is no evidence at " +
+      "all. Retry with `--capture` (spawns --command itself and captures its REAL output, " +
+      'exempt from this check), or supply a genuine --output-tail/--output-tail-file ' +
+      "(--oracle manual: describe exactly what was manually checked).",
     value: outputTail,
   });
 }
@@ -1365,6 +1569,13 @@ export class TaskWorkflowService {
     const tailCheck = rejectMissingNonPassOutputTail(entry.result, entry.output_tail);
     if (!tailCheck.ok) return tailCheck;
 
+    // task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the — the PASS-side
+    // sibling of the guard immediately above (see that task's own JSDoc for the
+    // asymmetry this closes). Exempts any row `capture_source: "runner"` already proved
+    // via an actual capture.
+    const passTailCheck = rejectMissingPassOutputTail(entry.result, entry.output_tail, entry.capture_source);
+    if (!passTailCheck.ok) return passTailCheck;
+
     // task-fix-ordering-regression-placeholder-command-guard-preempts — resolve
     // and doc-type-validate the target BEFORE the placeholder-command check so a
     // wrong-doc-type call (e.g. `lore evidence` against a PLAN) still surfaces
@@ -1418,6 +1629,17 @@ export class TaskWorkflowService {
    *   the version has been read (resolveTask) but BEFORE the write. `recordVerifiedEvidence`
    *   wraps its already-resolved `nowIso` string in a trivial `() => nowIso` thunk to
    *   satisfy this signature without changing its own public contract.
+   *
+   * @invariant `capture_source` is ALWAYS stamped on the written candidate — never
+   *   omitted for a NEW row (task-a-non-empty-output-tail-can-be-hand-authored-prose-
+   *   and-the). `entry.attestation !== undefined` forces `"runner"` regardless of
+   *   whatever `entry.capture_source` held (an attested row is runner-captured by
+   *   construction — `recordVerifiedEvidence`'s only production caller,
+   *   `VerifyRunnerService`, always spawns its own commands); otherwise the caller's
+   *   own `capture_source` is used, falling back to `"self-report"` only for a
+   *   HYPOTHETICAL untyped caller that bypassed `_addEvidenceImpl`'s own required-field
+   *   check above (never reachable through the public `addEvidence` surface, which
+   *   refuses first) — the safe direction to fail toward, never silently "runner".
    */
   private async appendEvidenceEntry(
     idOrSlug: string,
@@ -1440,12 +1662,15 @@ export class TaskWorkflowService {
     }
 
     const nowIso = now();
+    const captureSource: CaptureSource =
+      entry.attestation !== undefined ? "runner" : (entry.capture_source ?? "self-report");
     const candidate = {
       oracle: entry.oracle,
       command: entry.command,
       result: entry.result,
       recorded_at: nowIso,
       recorded_by: entry.recorded_by,
+      capture_source: captureSource,
       ...(entry.output_tail !== undefined ? { output_tail: entry.output_tail } : {}),
       ...(entry.ac_ref !== undefined ? { ac_ref: entry.ac_ref } : {}),
       ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
@@ -1843,10 +2068,23 @@ export class TaskWorkflowService {
    *     a SECOND, INDEPENDENT floor evaluated only for a task claiming red-first
    *     discipline, checked AFTER the `result:pass` floor above so neither floor can
    *     mask the other; a task that never sets the flag never reaches this check;
+   *   - the task declares `extra.ac_scope` (>= 1 AC) but NEITHER `extra.red_first: true`
+   *     NOR a `"expected-fail"`/`"fail"` evidence entry (task-a-non-empty-output-tail-
+   *     can-be-hand-authored-prose-and-the) — a FOURTH, INDEPENDENT floor: the red-first
+   *     floor above INVERTED to opt-OUT for every task that never called `lore
+   *     red-first`. Mutually exclusive with the red-first floor by construction (a task
+   *     WITH `extra.red_first: true` is governed by that floor alone — see
+   *     {@link requiresNoNewTestsDeclaration}'s own JSDoc), so neither floor can ever
+   *     double-fire on the same task. Bypasses via `opts.noNewTestsReason` ONLY (the
+   *     SAME audited-escape shape as `overrideReason` — mandatory, non-blank,
+   *     persisted verbatim); a task declaring no AC scope never reaches this check;
+   *   - `opts.noNewTestsReason` IS supplied but is blank/whitespace-only — refused here
+   *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
+   *     CLI usage error, exit 2, before this service is ever called);
    *   - a declared test-file anchor (task-every-ac-oracle-is-t-scoped-so-the-file-
    *     passes-is-attested) holds no `oracle:"test"` `result:"pass"` evidence entry
-   *     whose command runs that exact file with no case-name filter — a THIRD,
-   *     INDEPENDENT floor checked AFTER the two above, naming every unsatisfied
+   *     whose command runs that exact file with no case-name filter — a FIFTH,
+   *     INDEPENDENT floor checked AFTER the four above, naming every unsatisfied
    *     anchor; a task declaring no test-file anchors never reaches this check;
    *   - a FRESH claim (same `isClaimStale` freshness test `claim()`/`ready()` use) is
    *     held by a DIFFERENT actor than `opts.by` — a STALE claim, or a fresh claim held
@@ -1869,16 +2107,18 @@ export class TaskWorkflowService {
    * the freshly-read `task.status` each call).
    *
    * @param idOrSlug - Task document ULID or slug
-   * @param opts - `{ by, source?, overrideReason? }` — see {@link DoneOpts.overrideReason}
-   *   for the audited attestation-floor escape hatch
+   * @param opts - `{ by, source?, overrideReason?, noNewTestsReason? }` — see {@link
+   *   DoneOpts.overrideReason} for the audited attestation-floor escape hatch and
+   *   {@link DoneOpts.noNewTestsReason} for the audited no-new-tests escape hatch
    * @param now - Time seam (D10) — ONE reading shared by every step's timestamp
    * @returns `DoneResult` — see that type's own JSDoc
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task / no runner-attested passing
    *   evidence and no (or a blank) `overrideReason` / a red_first claim with no red
-   *   evidence row / an unsatisfied test-file-anchor unfiltered-run floor / fresh
-   *   foreign claim / illegal lifecycle step — the last one structurally unreachable
-   *   given `computeArchiveWalk`'s own base-graph-only steps, kept as a fail-loud guard
-   *   rather than a non-null assertion), STALE_VERSION
+   *   evidence row / a declared ac_scope with no red_first opt-in, no red evidence
+   *   row, and no (or a blank) `noNewTestsReason` / an unsatisfied test-file-anchor
+   *   unfiltered-run floor / fresh foreign claim / illegal lifecycle step — the last
+   *   one structurally unreachable given `computeArchiveWalk`'s own base-graph-only
+   *   steps, kept as a fail-loud guard rather than a non-null assertion), STALE_VERSION
    */
   async done(
     idOrSlug: string,
@@ -1977,6 +2217,44 @@ export class TaskWorkflowService {
       });
     }
 
+    // reason: the no-new-tests floor (task-a-non-empty-output-tail-can-be-hand-
+    // authored-prose-and-the) — the red-first floor's opt-IN behaviour, inverted
+    // to opt-OUT for every task that never called `lore red-first`. Mutually
+    // exclusive with the floor immediately above by construction (`readRedFirstDeclared`
+    // gates both — see `requiresNoNewTestsDeclaration`'s own JSDoc), so this can
+    // never mask or double-require against that one; AC6 control: a task that DID
+    // opt in keeps working byte-identically, since this branch returns false for it.
+    let noNewTestsReason: string | undefined;
+    if (requiresNoNewTestsDeclaration(task, evidence)) {
+      if (opts.noNewTestsReason === undefined || opts.noNewTestsReason.trim() === "") {
+        if (opts.noNewTestsReason !== undefined) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "noNewTestsReason",
+            message:
+              "--declare-no-new-tests requires a non-empty, non-whitespace reason — the CLI " +
+              "usage-error check (exit 2) should have caught this before reaching the " +
+              "service; a direct caller must supply a real reason too",
+            value: opts.noNewTestsReason,
+          });
+        }
+        const acScope = extractDeclaredAcScope(task) ?? [];
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.verification_evidence",
+          message:
+            `Task "${task.slug}" declares extra.ac_scope (${acScope.join(", ")}) with no ` +
+            `"expected-fail"/"fail" evidence entry and no extra.red_first opt-in — lore done ` +
+            "requires proof a test was actually run red before archiving, or an explicit " +
+            "declaration that this task legitimately adds no new test (record a red run via " +
+            `\`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result ` +
+            'expected-fail`, or use the audited `--declare-no-new-tests "<reason>"` escape hatch)',
+          value: evidence.map((e) => e.result),
+        });
+      }
+      noNewTestsReason = opts.noNewTestsReason;
+    }
+
     // reason: the unfiltered-test-file-run floor (task-every-ac-oracle-is-t-
     // scoped-so-the-file-passes-is-attested) — a THIRD, independent floor,
     // checked only after BOTH floors above already succeeded, so none of the
@@ -2028,7 +2306,16 @@ export class TaskWorkflowService {
         nowIso,
         opts.by,
         `lore done: ${task.status} → ${nextStatus}`,
-        overrideReason,
+        {
+          // reason: exactOptionalPropertyTypes — conditionally spread rather than
+          // pass `undefined` verbatim, since `overrideReason`/`noNewTestsReason`
+          // are locals typed `string | undefined` while writeTaskStatus's own
+          // optional fields reject an explicit `undefined` under this tsconfig
+          // (mirrors the pre-existing `additionalCwds`/`corpusRoot` spread
+          // precedent in evidence-precheck.ts).
+          ...(overrideReason !== undefined ? { overrideReason } : {}),
+          ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
+        },
       );
       if (!stepResult.ok) return stepResult;
       task = stepResult.value;
@@ -3031,13 +3318,22 @@ export class TaskWorkflowService {
    * `corpus-service.ts` for why the versions-row action and the audit-entry action can
    * diverge under this exact-version join.
    *
-   * `overrideReason` (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false) —
-   * present iff this `done()` call used the audited attestation-floor escape hatch;
-   * merged verbatim onto EVERY step's audit `details` this call produces as
+   * `escapes.overrideReason` (adr-lore-done-requires-a-runner-attested-pass-the-sixth-
+   * false) — present iff this `done()` call used the audited attestation-floor escape
+   * hatch; merged verbatim onto EVERY step's audit `details` this call produces as
    * `override_reason` + `attestation_overridden: true`, so a multi-step walk
    * (draft -> approved -> active -> archived) leaves the justification attached to
    * each individual audited step, not just the first. `undefined` (the common case —
    * an attested pass already satisfied the floor) adds neither key.
+   *
+   * `escapes.noNewTestsReason` (task-a-non-empty-output-tail-can-be-hand-authored-
+   * prose-and-the) — the SAME per-step, every-step persistence, independent of
+   * `overrideReason` (a walk can carry both, either, or neither key set, since the
+   * two floors are evaluated independently in `_doneImpl`): present iff this call
+   * used the audited no-new-tests escape hatch, merged onto every step's audit
+   * `details` as `no_new_tests_reason` + `no_new_tests_declared: true`. `undefined`
+   * (the common case — no declared AC scope, an opted-in red_first claim, or a
+   * genuine red evidence row already satisfied the floor) adds neither key.
    */
   private async writeTaskStatus(
     task: DocRecord,
@@ -3045,7 +3341,7 @@ export class TaskWorkflowService {
     nowIso: string,
     actor: string,
     changeSummary: string,
-    overrideReason?: string,
+    escapes: { overrideReason?: string; noNewTestsReason?: string } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const newVersion = task.version + 1;
     const updateResult = await this.store.update(
@@ -3082,8 +3378,11 @@ export class TaskWorkflowService {
         status_to: newStatus,
         version: newVersion,
         done: true,
-        ...(overrideReason !== undefined
-          ? { override_reason: overrideReason, attestation_overridden: true }
+        ...(escapes.overrideReason !== undefined
+          ? { override_reason: escapes.overrideReason, attestation_overridden: true }
+          : {}),
+        ...(escapes.noNewTestsReason !== undefined
+          ? { no_new_tests_reason: escapes.noNewTestsReason, no_new_tests_declared: true }
           : {}),
       },
     });

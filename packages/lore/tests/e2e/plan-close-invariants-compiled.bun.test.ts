@@ -328,7 +328,7 @@ function verifyAttested(dir: string, planSlug: string, taskSlug: string, acId: s
 /** Records SELF-REPORTED (never attested) evidence via `lore evidence`. */
 function evidenceSelfReported(dir: string, taskSlug: string, acId: string, command: string): RunResult {
   return runLore(
-    ["evidence", taskSlug, "--oracle", "other", "--command", command, "--result", "pass", "--ac", acId],
+    ["evidence", taskSlug, "--oracle", "other", "--command", command, "--result", "pass", "--ac", acId, "--output-tail", "ok"],
     dir,
   );
 }

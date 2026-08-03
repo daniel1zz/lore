@@ -301,7 +301,18 @@ describe("lore evidence", () => {
     const taskSlug = createTask(planSlug, "Evidenced Task");
 
     const result = runLore(
-      ["evidence", taskSlug, "--oracle", "tsc", "--command", "bun run typecheck", "--result", "pass"],
+      [
+        "evidence",
+        taskSlug,
+        "--oracle",
+        "tsc",
+        "--command",
+        "bun run typecheck",
+        "--result",
+        "pass",
+        "--output-tail",
+        "ok",
+      ],
       tmpDir,
     );
 
@@ -380,6 +391,8 @@ describe("lore evidence", () => {
         "pass",
         "--ac",
         "AC-ACODE-8",
+        "--output-tail",
+        "ok",
       ],
       tmpDir,
     );
@@ -410,6 +423,8 @@ describe("lore evidence", () => {
         "pass",
         "--ac",
         "AC-DOES-NOT-EXIST",
+        "--output-tail",
+        "ok",
       ],
       tmpDir,
     );
@@ -424,7 +439,7 @@ describe("lore evidence", () => {
     const taskSlug = createTask(planSlug, "No-AC Task");
 
     const result = runLore(
-      ["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass", "--json"],
+      ["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass", "--output-tail", "ok", "--json"],
       tmpDir,
     );
 
@@ -512,7 +527,10 @@ describe("lore tree / lore list — workflow badges (AC-WF-9)", () => {
   it("a task with passing evidence shows a ✔ badge in `lore list --type task`", () => {
     const planSlug = createPlan("Evidence Badge Plan");
     const taskSlug = createTask(planSlug, "Evidenced Badge Task");
-    runLore(["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass"], tmpDir);
+    runLore(
+      ["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass", "--output-tail", "ok"],
+      tmpDir,
+    );
 
     const result = runLore(["list", "--type", "task"], tmpDir);
     expect(result.exitCode).toBe(0);

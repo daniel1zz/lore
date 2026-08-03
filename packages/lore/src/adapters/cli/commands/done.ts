@@ -1,8 +1,9 @@
 /**
- * lore done <task> [--by <name>] [--override-attestation "<reason>"] — evidence-
- * validated, atomic-from-the-caller's-perspective lifecycle walk to `"archived"`
- * for a task OR phase document (spec-workflow-hardening-evidence-red-vocabulary-
- * claim-worktree §M3, AC-WH-3).
+ * lore done <task> [--by <name>] [--override-attestation "<reason>"]
+ *   [--declare-no-new-tests "<reason>"] — evidence-validated, atomic-from-the-
+ * caller's-perspective lifecycle walk to `"archived"` for a task OR phase
+ * document (spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3,
+ * AC-WH-3).
  *
  * Closes the gap the EXECUTE loop (claim → evidence → release) leaves: a released
  * task stays `draft` forever, which readiness's `blocks`-link computation never
@@ -45,15 +46,42 @@
  * automatically (service-layer predicate) and would need its OWN explicit
  * `overrideReason` tool argument, same audited-and-mandatory shape as here.
  *
- * PHASE DOCS ARE UNAFFECTED BY THIS ESCAPE HATCH: `PhaseWorkflowService.done`
+ * `--declare-no-new-tests "<reason>"` is the SAME audited-escape shape for a
+ * DIFFERENT, INDEPENDENT floor (task-a-non-empty-output-tail-can-be-hand-
+ * authored-prose-and-the): the red-first discipline inverted to opt-OUT. A
+ * task declaring `extra.ac_scope` (>= 1 AC) with zero `"expected-fail"`/`"fail"`
+ * evidence rows and no `extra.red_first: true` opt-in cannot archive without
+ * this mandatory free-text justification for why no new RED test was recorded
+ * — written verbatim to every lifecycle step's audit entry as
+ * `details.no_new_tests_reason` (+ `details.no_new_tests_declared: true`). A
+ * blank/whitespace-only reason is a CLI USAGE ERROR (exit 2), checked HERE the
+ * same way `--override-attestation` is, before `app` is even loaded; the
+ * service re-checks it too, defensively. IGNORED entirely when this floor does
+ * not apply (no declared ac_scope, an opted-in red_first claim, or a genuine
+ * red evidence row already satisfies it) — never a blanket "always audit"
+ * switch, and never a substitute for `--override-attestation` (the two escape
+ * hatches bypass two DIFFERENT floors and may both be supplied on the same
+ * call if both floors are unmet).
+ *
+ * ⛔ NAMED `--declare-no-new-tests`, NOT `--no-new-tests` — citty's underlying
+ * arg parser (mri) treats any flag whose OWN name starts with the literal
+ * prefix `no-` as a BOOLEAN NEGATION of the remainder (`--no-foo` -> `{foo:
+ * false}`), discarding a following value entirely regardless of whether `foo`
+ * is even a declared flag. `--no-new-tests "<reason>"` was measured to parse
+ * as `{"new-tests": false}` with the reason silently dropped — this flag's
+ * final name deliberately avoids the `no-` prefix so its value always survives
+ * parsing.
+ *
+ * PHASE DOCS ARE UNAFFECTED BY EITHER ESCAPE HATCH: `PhaseWorkflowService.done`
  * (a separate file, out of this feature's declared scope) still gates on the
  * pre-existing `result: "pass"` floor only — it never grew an attestation
- * requirement, so it has nothing to override. `--override-attestation` is
- * forwarded into the SAME `doneOpts` object used for the phase-fallback retry
- * below (see Target-type dispatch) purely because that object is shared; the
- * phase path silently ignores the extra field (`PhaseWorkflowService.done`'s own
- * `DoneOpts` consumption never reads `overrideReason`) — never any effect, never
- * an error either.
+ * requirement or a no-new-tests floor, so it has nothing to override.
+ * `--override-attestation`/`--declare-no-new-tests` are forwarded into the SAME
+ * `doneOpts` object used for the phase-fallback retry below (see Target-type
+ * dispatch) purely because that object is shared; the phase path silently
+ * ignores both extra fields (`PhaseWorkflowService.done`'s own `DoneOpts`
+ * consumption never reads `overrideReason`/`noNewTestsReason`) — never any
+ * effect, never an error either.
  *
  * Target-type dispatch (mirrors `commands/release.ts`/`commands/evidence.ts`'s SPEC-056
  * pattern exactly): `TaskWorkflowService.done` is ALWAYS tried FIRST, UNCHANGED — a
@@ -65,14 +93,17 @@
  * utils.ts::resolveActor.
  *
  * Exit codes: 0 = success (incl. idempotent no-op), 2 = CLI usage error
- *   (`--override-attestation` given with a blank/whitespace-only reason), 3 =
- *   DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a task/phase / no runner-attested
- *   passing evidence and no override / fresh foreign claim / illegal lifecycle
+ *   (`--override-attestation`/`--declare-no-new-tests` given with a blank/
+ *   whitespace-only reason), 3 = DOC_NOT_FOUND, 4 = VALIDATION_ERROR (not a
+ *   task/phase / no runner-attested passing evidence and no override / a
+ *   declared ac_scope with no red_first opt-in, no red evidence row, and no
+ *   `--declare-no-new-tests` reason / fresh foreign claim / illegal lifecycle
  *   step), 5 = STALE_VERSION.
  *
  * Source: spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3, AC-WH-3;
  *   adr-lore-done-requires-a-runner-attested-pass-the-sixth-false /
- *   task-lore-done-accepts-an-unattested-self-reported-pass-as
+ *   task-lore-done-accepts-an-unattested-self-reported-pass-as;
+ *   task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the (--declare-no-new-tests)
  */
 
 import { defineCommand } from "citty";
@@ -105,6 +136,16 @@ export default defineCommand({
         "structurally cannot perform. MANDATORY free-text reason as the flag's own value, written " +
         "verbatim to the audit trail. A blank/whitespace-only value is a usage error (exit 2).",
     },
+    "declare-no-new-tests": {
+      type: "string",
+      description:
+        "Audited escape hatch (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) — " +
+        "archive a task declaring extra.ac_scope with no red (expected-fail/fail) evidence row and " +
+        "no extra.red_first opt-in. MANDATORY free-text reason as the flag's own value, written " +
+        "verbatim to the audit trail. A blank/whitespace-only value is a usage error (exit 2). " +
+        "NOT named --no-new-tests: citty's mri parser treats a --no-<x> flag as a boolean " +
+        "negation, silently discarding a following value.",
+    },
     json: {
       type: "boolean",
       description: "Output result as JSON",
@@ -124,6 +165,16 @@ export default defineCommand({
       process.exit(2);
     }
 
+    // reason: task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the —
+    // the SAME CLI usage-error shape as --override-attestation immediately
+    // above, for the independent no-new-tests floor's own escape hatch.
+    const noNewTestsRaw = args["declare-no-new-tests"];
+    const hasNoNewTests = typeof noNewTestsRaw === "string";
+    if (hasNoNewTests && noNewTestsRaw.trim() === "") {
+      process.stderr.write("Error: --declare-no-new-tests requires a non-empty, non-whitespace reason.\n");
+      process.exit(2);
+    }
+
     const { app } = loadLoreApp();
     try {
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
@@ -131,6 +182,7 @@ export default defineCommand({
         by,
         source: app.callerSurface,
         ...(hasOverrideAttestation ? { overrideReason: overrideAttestationRaw } : {}),
+        ...(hasNoNewTests ? { noNewTestsReason: noNewTestsRaw } : {}),
       };
 
       // reason: SPEC-056-style target-type dispatch (see module header) — try

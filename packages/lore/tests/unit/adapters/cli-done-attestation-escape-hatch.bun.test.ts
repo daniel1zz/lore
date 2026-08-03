@@ -125,7 +125,10 @@ function createAdhocTask(cwd: string, title: string): string {
  *  CLI/MCP surface exists) passing evidence row — the exact shape every `lore evidence`
  *  write produces, and the shape this feature's floor now refuses as insufficient alone. */
 function recordSelfReportedPass(slug: string, cwd: string): void {
-  mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass"], cwd);
+  mustRun(
+    ["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
+    cwd,
+  );
 }
 
 let tmpDir: string;

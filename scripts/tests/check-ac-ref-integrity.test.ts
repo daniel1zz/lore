@@ -985,7 +985,7 @@ function buildFixture(cwd: string, opts: { forceRemove: boolean }): { taskSlug: 
   ]);
 
   const evidence = runLore(
-    ["evidence", task.id, "--oracle", "test", "--command", "true", "--result", "pass", "--ac", FIXTURE_AC_ID, "--by", ACTOR, "--json"],
+    ["evidence", task.id, "--oracle", "test", "--command", "true", "--result", "pass", "--ac", FIXTURE_AC_ID, "--by", ACTOR, "--output-tail", "ok", "--json"],
     cwd,
   );
   if (evidence.exitCode !== 0) {

@@ -258,6 +258,8 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
         "pass",
         "--by",
         "agent:wcr-happy",
+        "--output-tail",
+        "ok",
       ],
       worktreePath,
     );
@@ -311,6 +313,8 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
         "pass",
         "--by",
         "agent:wcr-regression",
+        "--output-tail",
+        "ok",
       ],
       repoRoot,
     );
