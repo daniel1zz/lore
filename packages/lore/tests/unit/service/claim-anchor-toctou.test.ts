@@ -26,11 +26,13 @@
  *               same-holder refresh in the presence of a foreign STALE overlapping
  *               sibling is never falsely rolled back (TTL semantics preserved); (3) a
  *               fresh claim held by the SAME actor IN THE SAME CAPTURED SESSION as an
- *               overlapping sibling is never falsely rolled back — on the PHASE
- *               channel, where no session id is captured yet, the mirror case asserts
- *               the explicit not-measured REFUSAL instead
+ *               overlapping sibling is never falsely rolled back — on BOTH the task and
+ *               the phase channel, each paired with its own NO-session control asserting
+ *               the explicit not-measured REFUSAL
  *               (task-two-concurrent-orchestrators-both-resolve-to-agent-main narrowed
- *               the same-`by` exemption to same-`by`-AND-same-session)
+ *               the same-`by` exemption to same-`by`-AND-same-session;
+ *               task-phaseworkflowservice-claim-captures-no-session-id-so-every added the
+ *               missing phase-side WRITER of that fact)
  *   BOUNDARY:   a task/phase never conflicts with itself — the candidate is excluded
  *               from its own sibling set even under the new post-write re-check
  *   REGRESSION: the interleaved race does NOT trigger a rollback when
@@ -363,7 +365,22 @@ async function mustInsert(store: InMemoryStore, doc: DocRecord): Promise<DocReco
   return result.value;
 }
 
-function makePhaseServices(config?: LoreConfig, withGate = true) {
+/**
+ * @param sessionEnv - The session env this service instance stands in for. Defaults
+ *   to {@link TOCTOU_SESSION_ENV} — ONE session claiming several phases, which is
+ *   what these TOCTOU cases model, and the same explicit-injection discipline
+ *   `makeTaskServices` above documents (never the ambient `process.env`, so the
+ *   verdicts are identical on a developer machine and in CI). Since
+ *   task-phaseworkflowservice-claim-captures-no-session-id-so-every,
+ *   `PhaseWorkflowService.claim` captures `extra.claim.session_id` from this env
+ *   exactly the way `TaskWorkflowService.claim` does; a case that wants the
+ *   NOT-MEASURED fail-safe passes `{}`.
+ */
+function makePhaseServices(
+  config?: LoreConfig,
+  withGate = true,
+  sessionEnv: Record<string, string | undefined> = { ...TOCTOU_SESSION_ENV },
+) {
   const store = new InMemoryStore();
   const corpusService = new CorpusService(store);
   const gate: GateDependencies | undefined = withGate
@@ -375,6 +392,7 @@ function makePhaseServices(config?: LoreConfig, withGate = true) {
     { claimTtlMinutes: 120 },
     undefined,
     gate,
+    sessionEnv,
   );
   return { store, phaseWorkflowService };
 }
@@ -426,23 +444,51 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     expect(phaseTwoDoc.value.extra["claim"]).toMatchObject({ by: "agent:p1" });
   });
 
-  // STATE — same-actor overlap on the PHASE channel, where the session instance is
-  // structurally unmeasured: `PhaseWorkflowService.claim` does not capture
-  // `extra.claim.session_id` (task-two-concurrent-orchestrators-both-resolve-to-agent-main
-  // declared `phase-workflow-service.ts` outside its file anchors), while the shared
-  // `noAnchorOverlap` predicate — reused VERBATIM by `checkpointRegistry["phase-claim"]`
-  // — now requires that captured fact before exempting a same-`by` overlap.
-  //
-  // ⛔ This asserts the CURRENT, deliberately fail-safe behavior, not a desired end
-  // state: the second claim is refused with the explicit not-measured marker rather
-  // than silently permitted (a permit is indistinguishable from a truthful
-  // no-conflict, the exact silence the governing ADR's Q2 forbids). The one-line
-  // follow-up is to capture the session id in `PhaseWorkflowService.claim` the way
-  // `TaskWorkflowService.claim` does, after which this case becomes the phase mirror
-  // of the task-side "SAME actor in the SAME session is not falsely rolled back"
-  // test above. `phase-claim-gate.test.ts` covers both halves at the pure layer.
-  it("STATE: a SAME-actor overlapping phase claim is refused as session-not-measured (phase capture is a pending follow-up)", async () => {
+  // STATE — same-actor overlap on the PHASE channel, now the phase mirror of the
+  // task-side "SAME actor in the SAME session is not falsely rolled back" case above:
+  // `PhaseWorkflowService.claim` captures `extra.claim.session_id` from its injected
+  // env through the SAME `resolveClaimSessionId` seam
+  // (task-phaseworkflowservice-claim-captures-no-session-id-so-every), so the shared
+  // `noAnchorOverlap` predicate — reused VERBATIM by
+  // `checkpointRegistry["phase-claim"]` — can finally reach its same-session
+  // exemption on this channel. The NOT-MEASURED control lives in the next test, so
+  // this green is not satisfiable by a blanket same-`by` exemption.
+  it("STATE: a fresh claim by the SAME actor in the SAME captured session is never falsely rolled back", async () => {
     const { store, phaseWorkflowService } = makePhaseServices();
+    await mustInsert(store, makePlanRecord());
+    const phaseOne = await mustInsert(store, makePhaseRecord({ extra: { file_anchors: ["src/a"] } }));
+    const phaseTwo = await mustInsert(
+      store,
+      makePhaseRecord({
+        id: "01HPHASETOCTOU000000000002",
+        slug: "phase-two",
+        title: "Phase Two",
+        extra: { file_anchors: ["src/a"] },
+      }),
+    );
+
+    const first = await phaseWorkflowService.claim(phaseTwo.slug, { by: "agent:p1" });
+    expect(first.ok).toBe(true);
+
+    const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1" });
+    expect(second.ok).toBe(true);
+
+    // BOTH claims live, both carrying the one captured session instance.
+    const doc = await store.find(phaseOne.id);
+    if (!doc.ok || doc.value === null) throw new Error("phase one not found");
+    expect(doc.value.extra["claim"]).toMatchObject({
+      by: "agent:p1",
+      session_id: "3de02220",
+    });
+  });
+
+  // STATE (control) — the SAME pair with NO session env is still refused with the
+  // explicit not-measured marker rather than silently permitted (a permit is
+  // indistinguishable from a truthful no-conflict — the exact silence the governing
+  // ADR's Q2 forbids). Without this control the test above would also pass under a
+  // restored blanket same-`by` exemption, the very proxy that was retired.
+  it("STATE: the same pair with NO measured session is still refused as session-not-measured", async () => {
+    const { store, phaseWorkflowService } = makePhaseServices(undefined, /* withGate */ true, {});
     await mustInsert(store, makePlanRecord());
     const phaseOne = await mustInsert(store, makePhaseRecord({ extra: { file_anchors: ["src/a"] } }));
     const phaseTwo = await mustInsert(

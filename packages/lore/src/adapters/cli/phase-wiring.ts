@@ -20,7 +20,10 @@
  * these guards never actually throw in the CLI/MCP binaries.
  *
  * Side-effect class: none (pure construction — no IO of its own; the constructed
- *   services themselves are IO, same as every other `app.ts`-composed service).
+ *   services themselves are IO, same as every other `app.ts`-composed service). ONE
+ *   ambient read: `process.env` is passed to `PhaseWorkflowService`'s `processEnv`
+ *   injection point, the composition-time env snapshot `app.ts` performs identically
+ *   for `TaskWorkflowService` (see that argument's own `reason` comment below).
  * Source: spec-spec-056-phase-execution-model-phase-doc-type-computed-comp
  *   §Module Boundary; task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence
  */
@@ -92,6 +95,20 @@ export function buildPhaseServices(
     { claimTtlMinutes },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+    // reason: task-phaseworkflowservice-claim-captures-no-session-id-so-every —
+    // `PhaseWorkflowService` defaults `processEnv` to `{}` so unit constructions stay
+    // machine-independent, which puts the ENTIRE production capture on this ONE
+    // argument (the exact shape `app.ts` uses for `TaskWorkflowService`). Read HERE
+    // rather than threaded from `app.ts` because THIS function is the composition
+    // site for every phase service — adding a parameter would only move the same
+    // ambient read into `app.ts`'s two call sites, widening a deliberately narrow
+    // diff surface (module header) for no gain in testability: the service itself
+    // takes the env by injection, which is where the seam belongs. Dropping this
+    // argument would fail SILENT (claims would simply record no `session_id` and the
+    // anchor mutex would degrade to the retired same-actor proxy) while every unit
+    // test stayed green — hence its own distribution oracle,
+    // `tests/integration/phase-claim-session-parity.bun.test.ts`.
+    process.env,
   );
   const phaseChecklistService = new PhaseChecklistService(store);
   const phaseMigrationService = new PhaseMigrationService(store);

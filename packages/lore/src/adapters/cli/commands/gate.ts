@@ -878,10 +878,12 @@ async function runPlanPromoteGate(
  * `resolveClaimSessionId` the service's claim path uses and threads it into
  * `buildAnchorGateContext`. Omitting it here would make the dry-run stricter than the
  * real command (every same-actor overlap would read as "session not measured"), i.e. a
- * pre-flight refusing what `lore claim` accepts. Note the ASYMMETRY with
- * `runPhaseClaimGate` below, which deliberately does NOT thread one: `PhaseWorkflowService.claim`
- * captures no session id, so its pre-flight must stay equally unmeasured to preserve
- * ITS parity.
+ * pre-flight refusing what `lore claim` accepts. {@link runPhaseClaimGate} below now
+ * does the IDENTICAL read for the IDENTICAL reason — the two surfaces are symmetric
+ * again (task-phaseworkflowservice-claim-captures-no-session-id-so-every §Required fix
+ * 4: pre-flight and claim must never be threaded differently). A previous revision of
+ * this paragraph documented a deliberate asymmetry, valid only while
+ * `PhaseWorkflowService.claim` captured nothing at all.
  *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param taskIdOrSlug - Task document ULID or slug to gate.
@@ -1034,6 +1036,16 @@ async function runTaskClaimGate(
  * CLI gate reuses the identical `workflow.gates."task-claim".anchor_overlap.enabled`
  * value the service-layer path already reads, keeping the two surfaces' verdicts in sync.
  *
+ * Session parity (task-phaseworkflowservice-claim-captures-no-session-id-so-every
+ * §Required fix 4, AC-4): `PhaseWorkflowService.claim` now CAPTURES the session instance
+ * from `$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`, so this pre-flight reads it
+ * through the SAME `resolveClaimSessionId` and threads it into `buildAnchorGateContext`
+ * — byte-for-byte what `runTaskClaimGate` above does. Threading it in only ONE of the
+ * two places is the failure mode this pairing exists to prevent: omit it here and every
+ * same-actor overlap would print a `ANCHOR_OVERLAP_SESSION_UNMEASURED` refusal the real
+ * `lore claim <phase>` does not produce (a dry-run contradicting the command it
+ * previews); pass it here while the service captured nothing would be the mirror lie.
+ *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param phaseIdOrSlug - Phase document ULID or slug to gate.
  * @param by - The actor attempting the claim (feeds `noAnchorOverlap`'s "different
@@ -1072,6 +1084,18 @@ async function runPhaseClaimGate(
   const nowIso = new Date().toISOString();
   const ttlMinutes = requirePhaseWorkflowService(app).claimTtlMinutes;
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
+  // reason: anchor-overlap PARITY with the real phase claim (this function's own header
+  // paragraph) — `PhaseWorkflowService.claim` captures the session instance from
+  // `process.env` and feeds it to `noAnchorOverlap`
+  // (task-phaseworkflowservice-claim-captures-no-session-id-so-every). Identical read,
+  // identical surfacing of an unusable id, as `runTaskClaimGate` above.
+  const sessionIdResult = resolveClaimSessionId(process.env);
+  if (!sessionIdResult.ok) {
+    process.stderr.write(formatError(sessionIdResult.error) + "\n");
+    process.exitCode = exitCode(sessionIdResult.error);
+    return;
+  }
+  const candidateSessionId = sessionIdResult.value;
 
   // reason: mirrors runTaskClaimGate's identical null-parent_id edge case (a phase's
   // parent_id is schema-required to be its plan — a null here can only happen on a
@@ -1081,7 +1105,7 @@ async function runPhaseClaimGate(
   if (phase.parent_id === null) {
     ctx = {
       ...buildUpstreamSpecContext(undefined),
-      ...buildAnchorGateContext(by, phase, [], nowIso, ttlMinutes),
+      ...buildAnchorGateContext(by, phase, [], nowIso, ttlMinutes, candidateSessionId),
       targetIdOrSlug: phaseIdOrSlug,
       anchorOverlapEnabled,
     };
@@ -1094,7 +1118,7 @@ async function runPhaseClaimGate(
     }
     ctx = {
       ...buildUpstreamSpecContext(bundleResult.value.spec),
-      ...buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, ttlMinutes),
+      ...buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, ttlMinutes, candidateSessionId),
       targetIdOrSlug: phaseIdOrSlug,
       anchorOverlapEnabled,
     };
