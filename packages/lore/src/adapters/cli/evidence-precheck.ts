@@ -264,7 +264,14 @@ const CD_SEGMENT_PATTERN = /^\s*cd\s+("[^"]*"|'[^']*'|\S+)\s*$/;
  *     inverse direction (proxy satisfied, property violated) is a `cd` this
  *     scan sees but the shell would not reach; it adds one candidate root, and
  *     is accepted for the same reason {@link findMissingOracleFiles} is
- *     already deliberately permissive about WHERE a file lives.
+ *     already deliberately permissive about WHERE a file lives. A THIRD,
+ *     narrower gap, named rather than fixed: successive RELATIVE cds are not
+ *     COMPOSED — `cd a && cd b` derives `b`, whereas a shell would sit in
+ *     `a/b`. This is what the task's own AC-5 pins ("resolve against the LAST
+ *     one … assert the derived target BY VALUE"), and composing them would
+ *     contradict it. The residual false-accept requires a file to exist at
+ *     `<base>/b` while the shell looks in `<base>/a/b`; no command shape this
+ *     repo emits chains relative cds at all, so it is accepted, not fixed.
  *   - **Silence** — none: the derived target (INCLUDING the "none" case) is
  *     named verbatim in the refusal message via
  *     {@link describeDerivedCdTarget}, so a future mismatch between "what the
