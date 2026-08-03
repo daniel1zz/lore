@@ -176,6 +176,7 @@ import {
   type GateCheckpoint,
   type GateContext,
 } from "../../../service/checkpoint-registry.js";
+import { resolveClaimSessionId } from "../../../service/task-workflow-service.js";
 import {
   runDeterministicChecks,
   resolveGateEnabled,
@@ -871,6 +872,17 @@ async function runPlanPromoteGate(
  * would silently disable this predicate for every ad-hoc task. See the inline `reason`
  * comment at that branch.
  *
+ * Session parity (task-two-concurrent-orchestrators-both-resolve-to-agent-main): the
+ * anchor mutex now compares the CAPTURED session instance, not the `by` string, so this
+ * pre-flight reads `$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID` through the SAME
+ * `resolveClaimSessionId` the service's claim path uses and threads it into
+ * `buildAnchorGateContext`. Omitting it here would make the dry-run stricter than the
+ * real command (every same-actor overlap would read as "session not measured"), i.e. a
+ * pre-flight refusing what `lore claim` accepts. Note the ASYMMETRY with
+ * `runPhaseClaimGate` below, which deliberately does NOT thread one: `PhaseWorkflowService.claim`
+ * captures no session id, so its pre-flight must stay equally unmeasured to preserve
+ * ITS parity.
+ *
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param taskIdOrSlug - Task document ULID or slug to gate.
  * @param by - The actor attempting the claim (feeds `noAnchorOverlap`'s "different
@@ -913,6 +925,21 @@ async function runTaskClaimGate(
   const nowIso = new Date().toISOString();
   const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
   const anchorOverlapEnabled = resolveAnchorOverlapGateEnabled(config);
+  // reason: anchor-overlap PARITY with the real claim (this function's own header
+  // invariant) — `TaskWorkflowService.claim` captures the session instance from
+  // `process.env` and feeds it to `noAnchorOverlap`
+  // (task-two-concurrent-orchestrators-both-resolve-to-agent-main). Without this
+  // read, the dry-run would evaluate the SAME pair as "session not measured" and
+  // print a refusal the real claim does not produce — a pre-flight that
+  // contradicts the command it previews is worse than no pre-flight. An unusable
+  // session id is surfaced here exactly as `claim()` surfaces it, never ignored.
+  const sessionIdResult = resolveClaimSessionId(process.env);
+  if (!sessionIdResult.ok) {
+    process.stderr.write(formatError(sessionIdResult.error) + "\n");
+    process.exitCode = exitCode(sessionIdResult.error);
+    return;
+  }
+  const candidateSessionId = sessionIdResult.value;
 
   // reason: a task's parent_id is schema-required to be its plan (createDocInputSchema
   // superRefine, @lore/core/schemas.ts) — a null parent_id here can only happen on a
@@ -931,7 +958,7 @@ async function runTaskClaimGate(
   if (task.parent_id === null) {
     ctx = {
       ...buildUpstreamSpecContext(undefined),
-      ...buildAnchorGateContext(by, task, [], nowIso, ttlMinutes),
+      ...buildAnchorGateContext(by, task, [], nowIso, ttlMinutes, candidateSessionId),
       targetIdOrSlug: taskIdOrSlug,
       anchorOverlapEnabled,
     };
@@ -965,14 +992,14 @@ async function runTaskClaimGate(
       }
       ctx = {
         ...buildUpstreamSpecContext(undefined),
-        ...buildAnchorGateContext(by, task, siblingsResult.value, nowIso, ttlMinutes),
+        ...buildAnchorGateContext(by, task, siblingsResult.value, nowIso, ttlMinutes, candidateSessionId),
         targetIdOrSlug: taskIdOrSlug,
         anchorOverlapEnabled,
       };
     } else {
       ctx = {
         ...buildUpstreamSpecContext(bundleResult.value.spec),
-        ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes),
+        ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes, candidateSessionId),
         targetIdOrSlug: taskIdOrSlug,
         anchorOverlapEnabled,
       };

@@ -138,6 +138,17 @@
  *   gate error a pre-write rejection would have. Two racing claims may both roll back
  *   (accepted residual — loud, retriable; see `rollbackClaim`'s JSDoc for why a
  *   deterministic tiebreak was rejected). No lock table / daemon / mutex row was added.
+ * @invariant `claim()` CAPTURES the session instance (`resolveClaimSessionId` over the
+ *   injected `processEnv` → `extra.claim.session_id`) for EVERY caller — CLI, MCP, and
+ *   HTTP alike, with no flag and no opt-in — and it is the ONLY method that does
+ *   (task-two-concurrent-orchestrators-both-resolve-to-agent-main). The capture is
+ *   independent of actor resolution and never merged into `by`: `resolveActor`'s session
+ *   TIER is suppressed whenever `$LORE_ACTOR` is set, which this project's own standing
+ *   discipline requires of every main-checkout run, so two concurrently-live
+ *   orchestrators legitimately share one actor string. `by` therefore answers "who",
+ *   `session_id` answers "which run", and `noAnchorOverlap` needs the second to be a
+ *   cross-session mutex at all. Never sourced from `ClaimOpts` — a caller-declarable
+ *   session id would be a forgeable proxy, the exact class of thing being retired.
  *
  * @invariant `done()` is the ONLY method that writes `status` (every other method here
  *   touches `extra` exclusively via `writeTaskExtra` — see that method's own
@@ -266,6 +277,7 @@ import {
   buildTaskClaim,
   renewClaimForEvidence,
   deriveSessions,
+  sessionIdDiscriminator,
   normalizeFileAnchors,
   extractFileAnchors,
   anchorsOverlap,
@@ -288,6 +300,7 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEv
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
+import { compareClaimSessions, type SessionComparison } from "./gate-predicates.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -552,6 +565,17 @@ export interface AnchorConflict {
   task_slug: string;
   holder: string;
   paths: string[];
+  /**
+   * Present ONLY when `holder` equals the conflicting task's OWN claim holder —
+   * i.e. the two claims share an actor string and the conflict rests on the
+   * SESSION dimension (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+   * `"different-session"` = two measured, provably different sessions;
+   * `"not-measured"` = at least one side recorded no session id, so this advisory
+   * reports an overlap it could NOT clear rather than staying silent (the gate
+   * refuses the same claim). ABSENT for an ordinary foreign-actor conflict, so
+   * every pre-existing consumer sees a byte-identical entry.
+   */
+  session_verdict?: SessionComparison;
 }
 
 /**
@@ -799,6 +823,74 @@ export function rejectBlankClaimWorktree(worktree: string | undefined): Result<v
     });
   }
   return ok(undefined);
+}
+
+/** The env var names carrying the current agent session's id, in precedence order. */
+const SESSION_ID_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;
+
+/**
+ * Captures the SESSION INSTANCE for a claim about to be written
+ * (task-two-concurrent-orchestrators-both-resolve-to-agent-main §Required fix 1)
+ * — the sanitized discriminator of `$CLAUDE_CODE_SESSION_ID` (falling back to
+ * `$CLAUDE_SESSION_ID`), read from an INJECTED env map so this stays a pure,
+ * directly-testable function.
+ *
+ * Why this is NOT actor resolution: `resolveActorWithSource` has a session TIER
+ * that is SKIPPED whenever `$LORE_ACTOR` is set, and every main-checkout run in
+ * this project is instructed to set it — so the only precedence tier carrying a
+ * per-session discriminator is suppressed by the very discipline that fixed the
+ * earlier OS-username collapse. Actor identity ("who") and session instance
+ * ("which run") are different facts; this captures the second one independently
+ * and never merges it into `by`.
+ *
+ * @param env - Environment map (`process.env` in production, injected at
+ *   construction time — see {@link TaskWorkflowService}'s `processEnv` ctor arg).
+ * @returns `ok(undefined)` when NO session id is present (unset, empty, or
+ *   whitespace-only) — an honest "not measured", which the `noAnchorOverlap`
+ *   gate treats as a refusal, never as "same session";
+ *   `ok(<discriminator>)` when one is present and usable;
+ *   `err(VALIDATION_ERROR)` when a session id IS set but sanitizes to the empty
+ *   string. That last case fails LOUD rather than degrading to `undefined`: a
+ *   silently-emptied capture would be indistinguishable from "no session env",
+ *   which is precisely the conflation this whole mechanism removes.
+ * @example
+ * resolveClaimSessionId({ CLAUDE_CODE_SESSION_ID: "3DE02220-5d69-4b5a" });
+ * // => { ok: true, value: "3de02220" }
+ * @example
+ * resolveClaimSessionId({}); // => { ok: true, value: undefined } (not measured)
+ * @example
+ * resolveClaimSessionId({ CLAUDE_SESSION_ID: "!!!" });
+ * // => { ok: false, error: { code: "VALIDATION_ERROR", field: "claim.session_id", … } }
+ */
+export function resolveClaimSessionId(
+  env: Record<string, string | undefined>,
+): Result<string | undefined, LoreError> {
+  let raw: string | undefined;
+  for (const name of SESSION_ID_ENV_VARS) {
+    const candidate = env[name];
+    if (candidate !== undefined && candidate.trim() !== "") {
+      raw = candidate;
+      break;
+    }
+  }
+  if (raw === undefined) return ok(undefined);
+  try {
+    return ok(sessionIdDiscriminator(raw));
+  } catch {
+    // reason: `sessionIdDiscriminator` is fail-loud by contract (an id with no
+    // [a-z0-9-] characters). Translated to a Result here — never swallowed to
+    // `undefined`, which would make an unusable session id indistinguishable
+    // from an absent one and quietly re-open the not-measured hole.
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "claim.session_id",
+      message:
+        `The session id in $${SESSION_ID_ENV_VARS.join(" / $")} (${JSON.stringify(raw)}) contains no ` +
+        "[a-z0-9-] characters, so it cannot be recorded as a session discriminator. Unset the " +
+        "variable to claim with an explicitly UNMEASURED session, or set it to a usable id.",
+      value: raw,
+    });
+  }
 }
 
 /**
@@ -1431,6 +1523,16 @@ export class TaskWorkflowService {
    *   `corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService)` (app.ts).
    *   Defaults to an always-refusing stub (see the field's own JSDoc) — every
    *   pre-existing bare construction that omits it keeps compiling unchanged.
+   * @param processEnv - Environment snapshot the claim path captures
+   *   `session_id` from (task-two-concurrent-orchestrators-both-resolve-to-agent-main),
+   *   wired to `process.env` at `app.ts` composition time — the SAME injected-env
+   *   discipline `VerifyRunnerService` uses. Defaults to `{}` (no session facts),
+   *   deliberately NOT to `process.env`: an ambient default would make every unit
+   *   test's gate verdict depend on whether the test process happens to run under
+   *   a Claude Code session, i.e. a machine-dependent oracle. A bare
+   *   `new TaskWorkflowService(store, telemetry, config)` therefore records no
+   *   `session_id` — byte-identical to pre-fix behavior, the same optional-DI
+   *   convention `gate` follows.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -1450,6 +1552,7 @@ export class TaskWorkflowService {
           "ac_ref validation for an --adhoc task requires the resolveAdhocGoverningAcIds port, " +
           "not wired on this TaskWorkflowService instance",
       }),
+    private readonly processEnv: Record<string, string | undefined> = {},
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
@@ -1808,6 +1911,14 @@ export class TaskWorkflowService {
     const worktreeCheck = rejectBlankClaimWorktree(opts.worktree);
     if (!worktreeCheck.ok) return worktreeCheck;
 
+    // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main —
+    // captured BEFORE resolveTask for the same reason the blank-worktree check is:
+    // an unusable session id is an environment defect, not a doc-lookup concern,
+    // and must persist nothing regardless of whether the target task exists.
+    const sessionIdResult = resolveClaimSessionId(this.processEnv);
+    if (!sessionIdResult.ok) return sessionIdResult;
+    const sessionId = sessionIdResult.value;
+
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
@@ -1818,7 +1929,7 @@ export class TaskWorkflowService {
     // the exact same "now", within one claim() call.
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(task, opts, nowIso);
+    const gateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
     if (!gateResult.ok) return gateResult;
 
     const existingClaim = readClaim(task);
@@ -1850,6 +1961,13 @@ export class TaskWorkflowService {
         ...(opts.branch !== undefined ? { branch: opts.branch } : {}),
         ...(opts.machine !== undefined ? { machine: opts.machine } : {}),
         ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
+        // reason: the session instance is captured HERE, from the injected env —
+        // never taken from `opts`, because no caller (CLI flag, MCP arg, HTTP
+        // body) may declare which session it is. A self-declared session id
+        // would be exactly the kind of opt-in, forgeable proxy this mechanism
+        // replaces (task-two-concurrent-orchestrators-both-resolve-to-agent-main
+        // §Opt-in). `buildTaskClaim` never carries it forward.
+        ...(sessionId !== undefined ? { session_id: sessionId } : {}),
       },
       carryForward,
     );
@@ -1890,7 +2008,7 @@ export class TaskWorkflowService {
     // caller observing success) — documented, not eliminated: closing it fully would
     // need a corpus-level lock/daemon, explicitly out of scope (task anchor: "⛔
     // 不引入 daemon/锁表/mutex 行").
-    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso);
+    const postWriteGateResult = await this.enforceClaimGate(task, opts, nowIso, sessionId);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -2908,8 +3026,17 @@ export class TaskWorkflowService {
    * `SessionService.bootstrap`'s corpus-wide scope).
    *
    * `anchor_conflicts`: for each task declaring ≥1 anchor, every OTHER task in
-   * `tasks` holding a FRESH claim by a DIFFERENT actor (different from the
-   * declaring task's OWN current holder, when it has one) whose anchors overlap.
+   * `tasks` holding a FRESH claim in a DIFFERENT SESSION (a different actor, or
+   * the same actor in a provably-different / unmeasurable session — see
+   * `compareClaimSessions`) whose anchors overlap.
+   *
+   * The session dimension is here, and not just in the gate, because this report
+   * and the `task-claim` gate must never disagree: an advisory that printed "no
+   * conflicts" while `lore claim` refused the very same pair would train
+   * operators to distrust the refusal
+   * (task-two-concurrent-orchestrators-both-resolve-to-agent-main). It reuses
+   * `compareClaimSessions` (`gate-predicates.ts`) rather than re-comparing the
+   * ids inline, so the two surfaces share ONE definition of "same session".
    *
    * `anchorless`: the SET of task slugs that hold a FRESH claim, declare NO
    * anchors themselves, while at least one OTHER task in `tasks` declares
@@ -2933,7 +3060,15 @@ export class TaskWorkflowService {
           const otherClaim = readClaim(other);
           if (otherClaim === undefined) continue;
           if (isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
-          if (taskClaim !== undefined && taskClaim.by === otherClaim.by) continue;
+          const sameActor = taskClaim !== undefined && taskClaim.by === otherClaim.by;
+          const sessionVerdict = sameActor
+            ? compareClaimSessions(taskClaim.session_id, otherClaim.session_id)
+            : undefined;
+          // reason: a shared actor string alone no longer clears the overlap —
+          // only a PROVEN shared session does. `sameActor` with a
+          // different/unmeasured session is reported, matching what the
+          // `task-claim` gate would refuse for the same pair.
+          if (sessionVerdict === "same-session") continue;
           const otherAnchors = extractFileAnchors(other);
           if (otherAnchors.length === 0) continue;
           const overlap = anchorsOverlap(taskAnchors, otherAnchors);
@@ -2942,6 +3077,7 @@ export class TaskWorkflowService {
               task_slug: task.slug,
               holder: otherClaim.by,
               paths: overlap.pairs.map(([a]) => a),
+              ...(sessionVerdict !== undefined ? { session_verdict: sessionVerdict } : {}),
             });
           }
         }
@@ -3154,11 +3290,18 @@ export class TaskWorkflowService {
    *   all read straight from `opts`, no extra IO.
    * @param nowIso - The SAME "now" `_claimImpl` resolved before calling this
    *   (D5 seam pinning) — drives sibling claim staleness, never re-resolved here.
+   * @param candidateSessionId - The session instance `_claimImpl` captured for
+   *   this claim (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+   *   Threaded rather than re-captured so the PRE-write check, the claim record
+   *   actually written, and the POST-write TOCTOU re-check all reason about ONE
+   *   captured value — a second capture could disagree with the persisted claim.
+   *   `undefined` ⇒ not measured, which makes a same-actor overlap a refusal.
    */
   private async enforceClaimGate(
     task: DocRecord,
     opts: ClaimOpts,
     nowIso: string,
+    candidateSessionId: string | undefined,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
@@ -3177,17 +3320,37 @@ export class TaskWorkflowService {
     let ctx: ReturnType<typeof buildUpstreamSpecContext> &
       Partial<ReturnType<typeof buildAnchorGateContext>>;
     if (task.parent_id === null) {
-      ctx = { ...buildUpstreamSpecContext(undefined), candidateBy: by, candidateAnchors: extractFileAnchors(task), siblingClaims: [] };
+      ctx = {
+        ...buildUpstreamSpecContext(undefined),
+        candidateBy: by,
+        candidateAnchors: extractFileAnchors(task),
+        siblingClaims: [],
+        ...(candidateSessionId !== undefined ? { candidateSessionId } : {}),
+      };
     } else {
       const bundleResult = await this.gate.getPlanBundle(task.parent_id);
       if (!bundleResult.ok) {
         if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
         const siblingsResult = await this.findAdhocSiblingTasks();
         if (!siblingsResult.ok) return siblingsResult;
-        const anchorCtx = buildAnchorGateContext(by, task, siblingsResult.value, nowIso, this.claimTtlMinutes);
+        const anchorCtx = buildAnchorGateContext(
+          by,
+          task,
+          siblingsResult.value,
+          nowIso,
+          this.claimTtlMinutes,
+          candidateSessionId,
+        );
         ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx };
       } else {
-        const anchorCtx = buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, this.claimTtlMinutes);
+        const anchorCtx = buildAnchorGateContext(
+          by,
+          task,
+          bundleResult.value.tasks,
+          nowIso,
+          this.claimTtlMinutes,
+          candidateSessionId,
+        );
         ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx };
       }
     }

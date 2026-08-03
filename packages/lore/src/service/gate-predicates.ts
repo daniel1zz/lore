@@ -43,6 +43,16 @@
  *   sourced exclusively from `attestationExemptKindSchema` (`@lore/core`,
  *   schemas.ts) — never a locally hardcoded literal union, same precedent as
  *   `specKindValid`/`SPEC_KINDS` above.
+ * @invariant `noAnchorOverlap`'s notion of "same writer" is the CAPTURED session
+ *   instance (`TaskClaim.session_id`) compared via `compareClaimSessions`, never
+ *   the `by` string alone: `by` is a proxy that two concurrently-live sessions
+ *   legitimately share, and this project's own discipline instructs operators to
+ *   produce exactly that collision
+ *   (task-two-concurrent-orchestrators-both-resolve-to-agent-main). `findAnchorOverlapConflict`
+ *   is the SOLE scan implementing those skip rules — `checkpoint-registry.ts`'s
+ *   feeding-pack renderer consumes it rather than re-deriving the offending
+ *   sibling, so the verdict and the message can never disagree about who
+ *   conflicts or why.
  */
 
 import {
@@ -416,6 +426,12 @@ export function acScopeRequiredAtCreate(
  * fields (`@lore/core`, SPEC-042 D2) — `undefined` when the sibling's own claim
  * never declared one (legacy claim, or an MCP caller that omitted it). Consumed
  * ONLY by `actorIdentityGuard` below; `noAnchorOverlap` never reads them.
+ *
+ * `session_id` mirrors `TaskClaim.session_id` (task-two-concurrent-orchestrators-
+ * both-resolve-to-agent-main) and is read ONLY by `noAnchorOverlap`/
+ * `findAnchorOverlapConflict` below — it is what makes the anchor mutex
+ * CROSS-SESSION rather than merely cross-actor. `undefined` when the sibling's
+ * claim predates the field or its holder had no session env.
  */
 export interface SiblingClaimInfo {
   slug: string;
@@ -426,57 +442,239 @@ export interface SiblingClaimInfo {
   anchors: string[];
   worktree?: string;
   machine?: string;
+  session_id?: string;
 }
 
-/** `noAnchorOverlap`'s single machine-readable failure reason. */
+/** `noAnchorOverlap`'s machine-readable failure reason for a MEASURED conflict (foreign actor, or a proven different session). */
 export const ANCHOR_OVERLAP_REASON = "ANCHOR_OVERLAP";
 
-/** The `PredicateResult.field` value `noAnchorOverlap`'s failure carries (SPEC-042 D5, review U4). */
-export const ANCHOR_OVERLAP_FIELD = "anchor-overlap";
+/**
+ * `noAnchorOverlap`'s explicit NOT-MEASURED marker
+ * (task-two-concurrent-orchestrators-both-resolve-to-agent-main §Required fix 4,
+ * §Silence): the anchors DO overlap a fresh same-actor sibling claim, and the
+ * session dimension could not be measured on at least one side, so the gate can
+ * neither prove a conflict nor prove same-session. It REFUSES and says which of
+ * the two it is — an unmeasurable precondition must never render as a permit,
+ * because a permit is indistinguishable from a truthful "no conflict"
+ * (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2).
+ */
+export const ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON = "ANCHOR_OVERLAP_SESSION_UNMEASURED";
 
 /**
- * `task-claim`'s worktree-mutex predicate (SPEC-042 §Design Decisions D5): the
+ * The `PredicateResult.field` value BOTH `noAnchorOverlap` failure reasons carry
+ * (SPEC-042 D5, review U4) — deliberately ONE field for two reasons, so every
+ * existing `field === ANCHOR_OVERLAP_FIELD` consumer (the `GateEnforcer` error
+ * discriminator `gate:task-claim:anchor-overlap`, `feedTaskOrPhaseClaim`'s
+ * message dispatch) keeps routing the new refusal without modification.
+ */
+export const ANCHOR_OVERLAP_FIELD = "anchor-overlap";
+
+/** The three-valued verdict {@link compareClaimSessions} returns — never a boolean. */
+export type SessionComparison = "same-session" | "different-session" | "not-measured";
+
+/**
+ * Compares two claims' captured session instances
+ * (`TaskClaim.session_id`) — the pure three-valued core of the anchor mutex's
+ * "is this the same run?" question.
+ *
+ * A boolean would be a lie: "not equal" and "not known" are different facts with
+ * OPPOSITE safe defaults, and collapsing them is exactly how the pre-fix gate
+ * treated two live orchestrators as one session
+ * (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+ *
+ * @param candidateSessionId - The claiming session's captured id, if any.
+ * @param siblingSessionId - The sibling claim's recorded id, if any.
+ * @returns `"same-session"` only when BOTH sides are present and equal;
+ *   `"different-session"` only when both are present and differ;
+ *   `"not-measured"` whenever either side is absent.
+ * @example
+ * compareClaimSessions("3de02220", "3de02220"); // => "same-session"
+ * @example
+ * compareClaimSessions("3de02220", "7ab19c04"); // => "different-session"
+ * @example
+ * compareClaimSessions("3de02220", undefined); // => "not-measured" (never "different")
+ */
+export function compareClaimSessions(
+  candidateSessionId: string | undefined,
+  siblingSessionId: string | undefined,
+): SessionComparison {
+  if (candidateSessionId === undefined || siblingSessionId === undefined) {
+    return "not-measured";
+  }
+  return candidateSessionId === siblingSessionId ? "same-session" : "different-session";
+}
+
+/**
+ * Why an anchor overlap is a conflict — the discriminated outcome
+ * {@link findAnchorOverlapConflict} reports.
+ *
+ * - `"foreign-actor"`: the sibling's `by` differs (SPEC-042 D5's original case).
+ * - `"foreign-session"`: same `by`, PROVEN different session instance — foreign
+ *   for mutex purposes, since cross-session exclusion is the whole point and
+ *   same-actor is not evidence of same-session (§Required fix 3).
+ * - `"session-not-measured"`: same `by`, session instance unmeasurable on at
+ *   least one side (§Required fix 4).
+ */
+export type AnchorOverlapConflictKind = "foreign-actor" | "foreign-session" | "session-not-measured";
+
+/** One offending sibling claim, with the overlapping path pairs and WHY it conflicts. */
+export interface AnchorOverlapConflict {
+  sibling: SiblingClaimInfo;
+  /** `anchorsOverlap`'s overlapping `[candidateAnchor, siblingAnchor]` pairs. */
+  pairs: [string, string][];
+  kind: AnchorOverlapConflictKind;
+}
+
+/**
+ * THE single anchor-overlap conflict scan — shared by {@link noAnchorOverlap}
+ * (the verdict) and `checkpoint-registry.ts::feedAnchorOverlap` (the message).
+ *
+ * It exists as one function because the renderer previously re-implemented the
+ * skip rules and drifted the instant the predicate's rules changed: its
+ * `sibling.by === candidateBy → skip` copy would have printed "no specific
+ * conflicting sibling could be identified" for every refusal this task adds —
+ * a refusal that names nothing is a refusal nobody can repair.
+ *
+ * Skips (no conflict) exactly as before, plus the same-session case:
+ * a stale sibling, a sibling declaring no anchors, non-overlapping anchors, or a
+ * sibling whose claim is PROVEN to belong to the candidate's own session.
+ *
+ * @param candidateBy - The actor attempting the claim.
+ * @param candidateAnchors - The target's own declared (normalized) anchors.
+ * @param siblingClaims - Every OTHER task in scope holding a claim (fresh or
+ *   stale — staleness is filtered HERE, not by the caller).
+ * @param candidateSessionId - The claiming session's captured
+ *   `TaskClaim.session_id`, when the caller measured one.
+ * @returns The FIRST conflicting sibling in `siblingClaims` order, or
+ *   `undefined` when none conflicts.
+ * @example
+ * findAnchorOverlapConflict("agent:main", ["src/a"], [
+ *   { slug: "task-1", title: "T1", by: "agent:main", at: "T0", stale: false,
+ *     anchors: ["src/a"], session_id: "7ab19c04" },
+ * ], "3de02220");
+ * // => { sibling: …, pairs: [["src/a","src/a"]], kind: "foreign-session" }
+ */
+export function findAnchorOverlapConflict(
+  candidateBy: string | undefined,
+  candidateAnchors: string[] | undefined,
+  siblingClaims: readonly SiblingClaimInfo[] | undefined,
+  candidateSessionId?: string,
+): AnchorOverlapConflict | undefined {
+  const anchors = candidateAnchors ?? [];
+  if (anchors.length === 0) return undefined;
+  for (const sibling of siblingClaims ?? []) {
+    if (sibling.stale) continue;
+    if (sibling.anchors.length === 0) continue;
+    const overlap = anchorsOverlap(anchors, sibling.anchors);
+    if (!overlap.overlaps) continue;
+    if (sibling.by !== candidateBy) {
+      return { sibling, pairs: overlap.pairs, kind: "foreign-actor" };
+    }
+    // reason: same `by` is NOT evidence of same session — the project's own
+    // dispatch discipline instructs every main-checkout run to export the
+    // IDENTICAL `LORE_ACTOR=agent:main-orchestrator`, so the pre-fix
+    // same-actor exemption exempted precisely the population it needed to
+    // serialize (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+    // The exemption now requires the captured fact, not the proxy.
+    switch (compareClaimSessions(candidateSessionId, sibling.session_id)) {
+      case "same-session":
+        continue;
+      case "different-session":
+        return { sibling, pairs: overlap.pairs, kind: "foreign-session" };
+      case "not-measured":
+        return { sibling, pairs: overlap.pairs, kind: "session-not-measured" };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * `task-claim`'s worktree-mutex predicate (SPEC-042 §Design Decisions D5,
+ * extended by task-two-concurrent-orchestrators-both-resolve-to-agent-main): the
  * candidate claim's declared `file_anchors` must not overlap a FRESH sibling
- * claim held by a DIFFERENT actor, within the same plan.
+ * claim belonging to a DIFFERENT SESSION, within the same plan.
+ *
+ * "Different session" — not "different actor". The mutex serializes concurrent
+ * WRITERS on source files, and two writers can share an actor string: this repo's
+ * standing discipline mandates `LORE_ACTOR=agent:main-orchestrator` for every
+ * main-checkout run, so the original same-actor exemption silently disabled the
+ * gate for exactly the concurrent-orchestrator case it was built for (measured
+ * 2026-08-02; consequence chain realised twice, incl. an orchestrator removing a
+ * live agent's worktree).
  *
  * Vacuous pass (no ERROR path — `anchorsOverlap`'s precondition-only contract
  * extends to this predicate) when: the candidate declares no anchors, a sibling
- * is stale, a sibling is held by the SAME actor as the candidate, a sibling
- * declares no anchors itself, or no sibling's anchors overlap the candidate's.
+ * is stale, a sibling declares no anchors itself, no sibling's anchors overlap
+ * the candidate's, or a sibling's claim is PROVEN to belong to the candidate's
+ * own session (equal `session_id`).
+ *
+ * ⛔ Three-questions record (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the):
+ *   1. **Proxy** — `(by, session_id)` is still a proxy for "one writer". Concrete
+ *      input satisfying the proxy while violating the property: TWO worktrees
+ *      driven from ONE Claude Code session under one `LORE_ACTOR` — identical
+ *      `by`, identical `session_id`, different `worktree` — still permits the
+ *      overlap. ACCEPTED here and named, not silently ignored: `worktree` is
+ *      `actorIdentityGuard`'s dimension (it fires on the os-fallback tier), and
+ *      widening this predicate to refuse on differing worktrees would refuse the
+ *      legitimate single-session sequential-claim case this gate deliberately
+ *      permits. Escalate only with a measured instance.
+ *   2. **Silence** — an unmeasurable session dimension REFUSES with its own
+ *      {@link ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON}, never a `{ok:true}`.
+ *      A permit and a truthful no-conflict were previously the same value.
+ *   3. **Opt-in** — nothing here is opt-in: `session_id` is captured for every
+ *      claim by `TaskWorkflowService.claim` with no flag, and this predicate
+ *      runs unconditionally (subject only to the pre-existing
+ *      `workflow.gates."task-claim".anchor_overlap.enabled` kill switch).
  *
  * @param candidateBy - The actor attempting the claim.
  * @param candidateAnchors - The target task's own declared (normalized) anchors.
  * @param siblingClaims - Every OTHER task in the same plan holding a claim
  *   (fresh or stale — staleness is filtered HERE, not by the caller).
- * @returns `{ok: true}` when no fresh, foreign, overlapping sibling exists;
- *   `{ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap"}` otherwise.
+ * @param candidateSessionId - The claiming session's captured
+ *   `TaskClaim.session_id`. Omitted ⇒ this side was never measured, which makes
+ *   every same-actor overlap `not-measured` (a refusal), never a permit.
+ * @returns `{ok: true}` when no conflicting sibling exists;
+ *   `{ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap"}` for a
+ *   MEASURED conflict (foreign actor, or proven foreign session);
+ *   `{ok: false, reason: "ANCHOR_OVERLAP_SESSION_UNMEASURED", field: "anchor-overlap"}`
+ *   when the overlap is real but the session dimension is unmeasurable.
  * @example
  * noAnchorOverlap("agent:t2", ["src/a"], [
  *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a/"] },
  * ]); // => { ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap" }
  * @example
  * noAnchorOverlap("agent:t1", ["src/a"], [
+ *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false,
+ *     anchors: ["src/a"], session_id: "3de02220" },
+ * ], "3de02220"); // => { ok: true } — same actor AND proven same session
+ * @example
+ * noAnchorOverlap("agent:t1", ["src/a"], [
  *   { slug: "task-1", title: "T1", by: "agent:t1", at: "T0", stale: false, anchors: ["src/a"] },
- * ]); // => { ok: true } — same actor, not a conflict
+ * ], "3de02220");
+ * // => { ok: false, reason: "ANCHOR_OVERLAP_SESSION_UNMEASURED", … } — sibling
+ * //    predates the captured field; "same actor" is not evidence of one session
  */
 export function noAnchorOverlap(
   candidateBy: string | undefined,
   candidateAnchors: string[] | undefined,
   siblingClaims: readonly SiblingClaimInfo[] | undefined,
+  candidateSessionId?: string,
 ): PredicateResult {
-  const anchors = candidateAnchors ?? [];
-  if (anchors.length === 0) {
-    return { ok: true };
-  }
-  for (const sibling of siblingClaims ?? []) {
-    if (sibling.stale) continue;
-    if (sibling.by === candidateBy) continue;
-    if (sibling.anchors.length === 0) continue;
-    if (anchorsOverlap(anchors, sibling.anchors).overlaps) {
-      return { ok: false, reason: ANCHOR_OVERLAP_REASON, field: ANCHOR_OVERLAP_FIELD };
-    }
-  }
-  return { ok: true };
+  const conflict = findAnchorOverlapConflict(
+    candidateBy,
+    candidateAnchors,
+    siblingClaims,
+    candidateSessionId,
+  );
+  if (conflict === undefined) return { ok: true };
+  return {
+    ok: false,
+    reason:
+      conflict.kind === "session-not-measured"
+        ? ANCHOR_OVERLAP_SESSION_UNMEASURED_REASON
+        : ANCHOR_OVERLAP_REASON,
+    field: ANCHOR_OVERLAP_FIELD,
+  };
 }
 
 /** `actorIdentityGuard`'s single machine-readable failure reason. */

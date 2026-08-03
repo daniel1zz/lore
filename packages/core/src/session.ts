@@ -23,8 +23,15 @@
  *     NEVER doc body content (IoC ADR boundary 2: pointers + summaries, never full dump)
  *   - readySessionSchema / ReadySession — one derived session grouping (SPEC-042 D1)
  *   - deriveSessions(tasks, nowIso, ttlMinutes) — groups FRESH claims by
- *     `(by, machine, worktree)`; the pure computation behind both `lore ready`'s
- *     per-plan `sessions[]` and `lore bootstrap`'s corpus-wide `active_sessions`
+ *     `(by, machine, worktree, session_id)`; the pure computation behind both
+ *     `lore ready`'s per-plan `sessions[]` and `lore bootstrap`'s corpus-wide
+ *     `active_sessions`. `session_id` joined the key in
+ *     task-two-concurrent-orchestrators-both-resolve-to-agent-main: `by` is a
+ *     PROXY for the session instance, and two concurrently-live sessions in one
+ *     checkout legitimately share it (this project's own discipline mandates
+ *     `LORE_ACTOR=agent:main-orchestrator`), so the pre-fix triple reported ONE
+ *     session where two existed — and the `noAnchorOverlap` mutex, reading the
+ *     same proxy, permitted an overlap it exists to refuse
  *   - deriveLastActivityAt(plan, tasks) — max `updated_at` across a plan and its
  *     child tasks; populates each `bootstrap.active_plans[]` entry's required
  *     `last_activity_at` (SPEC-069 §Design Decisions D6, D7)
@@ -478,15 +485,31 @@ export const bootstrapCorpusStatsSchema = z.object({
  */
 /**
  * One derived session — the group of FRESH claims sharing the composite key
- * `(by, machine, worktree)` (SPEC-042 D1). An absent `machine`/`worktree` is a
- * valid, stable grouping key equal to itself — legacy machine-less claims by one
- * actor group into ONE session, distinguishable from captured values only by the
- * field's absence (review S7).
+ * `(by, machine, worktree, session_id)` (SPEC-042 D1, extended by
+ * task-two-concurrent-orchestrators-both-resolve-to-agent-main). An absent
+ * `machine`/`worktree`/`session_id` is a valid, stable grouping key equal to
+ * itself — legacy machine-less claims by one actor group into ONE session,
+ * distinguishable from captured values only by the field's absence (review S7).
+ *
+ * @invariant A row with NO `session_id` is a row whose session instance was
+ *   never measured — it may therefore aggregate SEVERAL real sessions that
+ *   happened to share `(by, machine, worktree)`. That is exactly the collapse
+ *   that let an orchestrator read a too-short `active_sessions` and remove a
+ *   live agent's worktree. Absence here is not a claim of solitude; a consumer
+ *   deciding anything destructive off this list must treat a `session_id`-less
+ *   row as "unknown cardinality", never as "exactly one session".
  */
 export const readySessionSchema = z.object({
   by: z.string(),
   machine: z.string().optional(),
   worktree: z.string().optional(),
+  /**
+   * The group's captured session instance (`TaskClaim.session_id`) — present iff
+   * every member claim recorded one (they all recorded the SAME one, by
+   * construction of the grouping key). Absent ⇒ not measured, see the schema's
+   * own invariant above.
+   */
+  session_id: z.string().optional(),
   /** Distinct `branch` values across this session's member claims, insertion order. */
   branches: z.array(z.string()),
   /** Task slugs this session currently holds a fresh claim on, insertion order. */
@@ -500,9 +523,17 @@ export type ReadySession = z.infer<typeof readySessionSchema>;
 
 /**
  * Groups `tasks`' FRESH (non-stale) claims into sessions by the composite key
- * `(by, machine, worktree)` (SPEC-042 D1). Pure — no IO, no wall-clock reads;
- * staleness is computed against the caller-supplied `nowIso`/`ttlMinutes`, the
- * same D10 time-seam discipline `evaluateReadiness` (task-workflow.ts) uses.
+ * `(by, machine, worktree, session_id)` (SPEC-042 D1 +
+ * task-two-concurrent-orchestrators-both-resolve-to-agent-main §Required fix 2).
+ * Pure — no IO, no wall-clock reads; staleness is computed against the
+ * caller-supplied `nowIso`/`ttlMinutes`, the same D10 time-seam discipline
+ * `evaluateReadiness` (task-workflow.ts) uses.
+ *
+ * `session_id` is in the key because `by` is a proxy for "which session", not
+ * the fact: two concurrently-live sessions in one checkout legitimately share an
+ * actor string (this project's own discipline mandates one), and the pre-fix
+ * `(by, machine, worktree)` triple was byte-identical for them — one row where
+ * two sessions existed.
  *
  * All-stale input (every task's claim, if any, has aged past `ttlMinutes`)
  * produces `[]` — a stale claim contributes NO session row (SPEC-042 AC-S3-6
@@ -513,8 +544,8 @@ export type ReadySession = z.infer<typeof readySessionSchema>;
  *   corpus-wide scope).
  * @param nowIso - Caller-supplied current time (D10 — never Date.now() here).
  * @param ttlMinutes - Claim TTL in minutes, forwarded to `isClaimStale`.
- * @returns One `ReadySession` per distinct `(by, machine, worktree)` key present
- *   among `tasks`' fresh claims, in first-seen order.
+ * @returns One `ReadySession` per distinct `(by, machine, worktree, session_id)`
+ *   key present among `tasks`' fresh claims, in first-seen order.
  *
  * @example
  * deriveSessions(
@@ -523,12 +554,22 @@ export type ReadySession = z.infer<typeof readySessionSchema>;
  *   "2026-07-11T10:00:00.000Z", 120,
  * );
  * // => two sessions — same machine, distinct worktree still discriminates (D1)
+ *
+ * @example
+ * deriveSessions(
+ *   [taskA, taskB], // both: claim{by:"agent:main-orchestrator", machine:"mbp"}
+ *                    // taskA session_id "3de02220", taskB session_id "7ab19c04"
+ *   "2026-08-03T10:00:00.000Z", 120,
+ * );
+ * // => TWO sessions — identical by/machine/(absent)worktree, distinct session
+ * //    instance (the observed two-orchestrator case; ONE row before the fix)
  */
 export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: number): ReadySession[] {
   interface MutableGroup {
     by: string;
     machine?: string;
     worktree?: string;
+    session_id?: string;
     branches: string[];
     branchSeen: Set<string>;
     task_slugs: string[];
@@ -544,10 +585,19 @@ export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: n
     if (isClaimStale(claim, nowIso, ttlMinutes)) continue;
 
     // reason: `null` is used as the absent-field placeholder (never a legal
-    // machine/worktree value) so JSON.stringify produces a stable, distinct key
-    // per (by, machine, worktree) triple — including the "both absent" case,
-    // which must equal itself across different tasks/claims (review S7).
-    const key = JSON.stringify([claim.by, claim.machine ?? null, claim.worktree ?? null]);
+    // machine/worktree/session_id value) so JSON.stringify produces a stable,
+    // distinct key per (by, machine, worktree, session_id) tuple — including the
+    // "all absent" case, which must equal itself across different tasks/claims
+    // (review S7). `session_id` is the fourth component because `by` alone is a
+    // proxy for the session, not the session
+    // (task-two-concurrent-orchestrators-both-resolve-to-agent-main): two live
+    // sessions sharing one mandated actor string produced ONE row here.
+    const key = JSON.stringify([
+      claim.by,
+      claim.machine ?? null,
+      claim.worktree ?? null,
+      claim.session_id ?? null,
+    ]);
 
     let group = groups.get(key);
     if (group === undefined) {
@@ -555,6 +605,7 @@ export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: n
         by: claim.by,
         ...(claim.machine !== undefined ? { machine: claim.machine } : {}),
         ...(claim.worktree !== undefined ? { worktree: claim.worktree } : {}),
+        ...(claim.session_id !== undefined ? { session_id: claim.session_id } : {}),
         branches: [],
         branchSeen: new Set<string>(),
         task_slugs: [],
@@ -580,6 +631,7 @@ export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: n
       by: g.by,
       ...(g.machine !== undefined ? { machine: g.machine } : {}),
       ...(g.worktree !== undefined ? { worktree: g.worktree } : {}),
+      ...(g.session_id !== undefined ? { session_id: g.session_id } : {}),
       branches: g.branches,
       task_slugs: g.task_slugs,
       newest_at: g.newest_at,

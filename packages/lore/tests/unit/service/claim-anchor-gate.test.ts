@@ -13,9 +13,12 @@
  *   NEGATIVE:   n/a beyond the above blocked cases
  *   BOUNDARY:   either side anchor-less → pass; disjoint anchors → pass
  *   ERROR:      n/a — noAnchorOverlap has no ERROR path by design (D4)
- *   STATE:      stale foreign claim → pass; same-actor overlap → pass; overlap
- *               in a DIFFERENT plan → pass; --steal does not bypass an anchor
- *               conflict; release-then-retry succeeds (AC-S3-11)
+ *   STATE:      stale foreign claim → pass; same-actor overlap in a PROVEN same
+ *               session → pass, while the same pair with an UNMEASURED session is
+ *               refused (task-two-concurrent-orchestrators-both-resolve-to-agent-main
+ *               retired the bare same-`by` exemption); overlap in a DIFFERENT plan
+ *               → pass; --steal does not bypass an anchor conflict;
+ *               release-then-retry succeeds (AC-S3-11)
  *   REGRESSION: upstream-approval failure alone still reports the BASE
  *               `gate:task-claim` field (discriminator separation, AC-S3-3);
  *               a same-holder refresh keep-alive does not fragment the D1
@@ -207,15 +210,40 @@ describe("checkpointRegistry['task-claim'] — noAnchorOverlap (pure, SPEC-042 D
     expect(isCheckpointBlocked(def.check(ctx))).toBe(false);
   });
 
-  // STATE — same-actor overlap → pass
-  it("a sibling claim held by the SAME actor as the candidate never blocks", () => {
+  // STATE — same-actor overlap in a PROVEN same session → pass.
+  // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main retired
+  // the bare same-`by` exemption — `by` is a proxy two concurrently-live sessions
+  // legitimately share (this project mandates `LORE_ACTOR=agent:main-orchestrator`
+  // for every main-checkout run), so the exemption now requires the CAPTURED
+  // session instance on both sides. The original intent of this case ("one actor
+  // working two tasks does not block itself") is preserved by supplying that fact;
+  // the case immediately below pins what happens when it is absent, so this pair
+  // cannot both pass under a blanket-permit OR a blanket-refuse regression.
+  it("a sibling claim held by the SAME actor in the SAME measured session never blocks", () => {
     const ctx: GateContext = {
       candidateBy: "agent:t1",
+      candidateSessionId: "3de02220",
       candidateAnchors: ["src/a"],
-      siblingClaims: [overlappingSibling], // also by agent:t1
+      siblingClaims: [{ ...overlappingSibling, session_id: "3de02220" }], // also by agent:t1
       hasSpecParent: false,
     };
     expect(isCheckpointBlocked(def.check(ctx))).toBe(false);
+  });
+
+  // STATE — same actor, session instance UNMEASURED (the legacy claim-record shape)
+  // → refused with the explicit not-measured reason, never permitted.
+  it("a sibling claim held by the SAME actor with NO recorded session is refused as not-measured", () => {
+    const ctx: GateContext = {
+      candidateBy: "agent:t1",
+      candidateSessionId: "3de02220",
+      candidateAnchors: ["src/a"],
+      siblingClaims: [overlappingSibling], // same actor, no session_id recorded
+      hasSpecParent: false,
+    };
+    const failures = selectFailures(def.check(ctx));
+    expect(isCheckpointBlocked(def.check(ctx))).toBe(true);
+    expect(failures[0]?.field).toBe(ANCHOR_OVERLAP_FIELD);
+    expect(failures[0]?.reason).toBe("ANCHOR_OVERLAP_SESSION_UNMEASURED");
   });
 
   // REGRESSION — AC-S3-3: plan with NO spec ancestor + fresh foreign overlap → still blocked

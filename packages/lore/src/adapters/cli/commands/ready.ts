@@ -13,8 +13,13 @@
  * single advisory warning line is printed once (human mode) after the task list.
  *
  * SPEC-042 D7 additionally renders `sessions` (fresh claims grouped by
- * `(by, machine, worktree)`, this plan's scope only) and `anchor_conflicts`
- * (fresh, foreign, anchor-overlapping sibling pairs) — both computed
+ * `(by, machine, worktree, session_id)`, this plan's scope only — the session
+ * instance joined that key in
+ * task-two-concurrent-orchestrators-both-resolve-to-agent-main, and each line
+ * PRINTS it, including an explicit `(not measured)`) and `anchor_conflicts`
+ * (fresh, anchor-overlapping sibling pairs from a different session — a
+ * different actor, or the same actor in a different/unmeasured session, in which
+ * case the line names the session verdict) — both computed
  * SERVICE-SIDE by `TaskWorkflowService.ready` (returning `ReadyReport`); this
  * command only renders them, it never recomputes anchor overlap or session
  * grouping itself. `--json` prints the full `ReadyReport` under `data.ready`
@@ -135,12 +140,28 @@ function formatSessionLine(session: ReadySession): string {
       ? ` @${session.machine ?? "?"}:${session.worktree ?? "?"}`
       : "";
   const branches = session.branches.length > 0 ? ` [${session.branches.join(", ")}]` : "";
-  return `  - ${session.by}${location}${branches} tasks: ${session.task_slugs.join(", ")} (newest ${session.newest_at})`;
+  // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main — two
+  // concurrently-live sessions legitimately share one `by` (and, in a main
+  // checkout, one machine and NO worktree), so without the session instance these
+  // lines render byte-identically and a reader cannot tell one session from two.
+  // The unmeasured case is printed EXPLICITLY rather than omitted: an absent field
+  // would be indistinguishable from a truthful single-session report, which is how
+  // an orchestrator came to treat this list as proof it was alone.
+  const session_id = ` session:${session.session_id ?? "(not measured)"}`;
+  return `  - ${session.by}${location}${session_id}${branches} tasks: ${session.task_slugs.join(", ")} (newest ${session.newest_at})`;
 }
 
-/** Render one anchor-conflict advisory line. */
+/**
+ * Render one anchor-conflict advisory line. `session_verdict` is present only when
+ * the holder shares the conflicting task's own actor string — without it, a
+ * same-actor conflict reads as a self-contradiction ("conflicts with myself")
+ * rather than as the cross-session collision it is
+ * (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+ */
 function formatAnchorConflictLine(conflict: AnchorConflict): string {
-  return `  - ${conflict.task_slug} conflicts with ${conflict.holder} on: ${conflict.paths.join(", ")}`;
+  const session =
+    conflict.session_verdict !== undefined ? ` (same actor, session: ${conflict.session_verdict})` : "";
+  return `  - ${conflict.task_slug} conflicts with ${conflict.holder}${session} on: ${conflict.paths.join(", ")}`;
 }
 
 export default defineCommand({

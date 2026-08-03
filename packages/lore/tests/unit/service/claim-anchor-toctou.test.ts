@@ -25,8 +25,12 @@
  *               (the core red-then-green scenario for both doc types); (2) a
  *               same-holder refresh in the presence of a foreign STALE overlapping
  *               sibling is never falsely rolled back (TTL semantics preserved); (3) a
- *               fresh claim held by the SAME actor as an overlapping sibling is never
- *               falsely rolled back
+ *               fresh claim held by the SAME actor IN THE SAME CAPTURED SESSION as an
+ *               overlapping sibling is never falsely rolled back — on the PHASE
+ *               channel, where no session id is captured yet, the mirror case asserts
+ *               the explicit not-measured REFUSAL instead
+ *               (task-two-concurrent-orchestrators-both-resolve-to-agent-main narrowed
+ *               the same-`by` exemption to same-`by`-AND-same-session)
  *   BOUNDARY:   a task/phase never conflicts with itself — the candidate is excluded
  *               from its own sibling set even under the new post-write re-check
  *   REGRESSION: the interleaved race does NOT trigger a rollback when
@@ -82,13 +86,32 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
   return result.value;
 }
 
+/**
+ * The fixed session env every `TaskWorkflowService` in this file is constructed
+ * with — one session claiming several tasks, which is what these TOCTOU cases
+ * model. reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main —
+ * `claim()` captures `extra.claim.session_id` from its INJECTED env, and the
+ * `noAnchorOverlap` same-actor exemption now requires that captured fact on both
+ * sides. Injected explicitly (never left to default/ambient `process.env`) so
+ * these verdicts are identical on a developer machine and in CI.
+ */
+const TOCTOU_SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-toctou" } as const;
+
 function makeTaskServices(config?: LoreConfig, withGate = true) {
   const store = new InMemoryStore();
   const corpusService = new CorpusService(store);
   const gate: GateDependencies | undefined = withGate
     ? { enforcer: new GateEnforcer(config), getPlanBundle: corpusService.getPlanBundle.bind(corpusService) }
     : undefined;
-  const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }, undefined, gate);
+  const taskWorkflowService = new TaskWorkflowService(
+    store,
+    undefined,
+    { claimTtlMinutes: 120 },
+    undefined,
+    gate,
+    undefined,
+    { ...TOCTOU_SESSION_ENV },
+  );
   return { store, corpusService, taskWorkflowService };
 }
 
@@ -195,10 +218,13 @@ describe("TaskWorkflowService.claim — BUG-011 TOCTOU hardening", () => {
     expect(doc.value.extra["claim"]).toMatchObject({ by: "agent:t1" });
   });
 
-  // STATE — a fresh claim held by the SAME actor on an overlapping sibling never
-  // falsely rolls back (noAnchorOverlap's own same-actor exemption, now also proven
-  // to hold under the post-write re-check, not just the pre-write one).
-  it("STATE: an overlapping sibling claim held by the SAME actor is not falsely rolled back", async () => {
+  // STATE — a fresh claim held by the SAME actor IN THE SAME SESSION on an
+  // overlapping sibling never falsely rolls back (noAnchorOverlap's same-actor
+  // exemption — now narrowed to same-actor-AND-same-captured-session by
+  // task-two-concurrent-orchestrators-both-resolve-to-agent-main — proven to hold
+  // under the post-write re-check, not just the pre-write one). Both claims below
+  // come from ONE service instance, i.e. one captured `session_id`.
+  it("STATE: an overlapping sibling claim held by the SAME actor in the SAME session is not falsely rolled back", async () => {
     const { store, corpusService, taskWorkflowService } = makeTaskServices();
     const planId = await createTopLevelPlan(corpusService);
     const taskOne = await createTask(corpusService, planId, "Task One", ["src/a"]);
@@ -400,8 +426,22 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     expect(phaseTwoDoc.value.extra["claim"]).toMatchObject({ by: "agent:p1" });
   });
 
-  // STATE — same-actor overlap never falsely rolled back.
-  it("STATE: an overlapping sibling claim held by the SAME actor is not falsely rolled back", async () => {
+  // STATE — same-actor overlap on the PHASE channel, where the session instance is
+  // structurally unmeasured: `PhaseWorkflowService.claim` does not capture
+  // `extra.claim.session_id` (task-two-concurrent-orchestrators-both-resolve-to-agent-main
+  // declared `phase-workflow-service.ts` outside its file anchors), while the shared
+  // `noAnchorOverlap` predicate — reused VERBATIM by `checkpointRegistry["phase-claim"]`
+  // — now requires that captured fact before exempting a same-`by` overlap.
+  //
+  // ⛔ This asserts the CURRENT, deliberately fail-safe behavior, not a desired end
+  // state: the second claim is refused with the explicit not-measured marker rather
+  // than silently permitted (a permit is indistinguishable from a truthful
+  // no-conflict, the exact silence the governing ADR's Q2 forbids). The one-line
+  // follow-up is to capture the session id in `PhaseWorkflowService.claim` the way
+  // `TaskWorkflowService.claim` does, after which this case becomes the phase mirror
+  // of the task-side "SAME actor in the SAME session is not falsely rolled back"
+  // test above. `phase-claim-gate.test.ts` covers both halves at the pure layer.
+  it("STATE: a SAME-actor overlapping phase claim is refused as session-not-measured (phase capture is a pending follow-up)", async () => {
     const { store, phaseWorkflowService } = makePhaseServices();
     await mustInsert(store, makePlanRecord());
     const phaseOne = await mustInsert(store, makePhaseRecord({ extra: { file_anchors: ["src/a"] } }));
@@ -419,11 +459,15 @@ describe("PhaseWorkflowService.claim — BUG-011 TOCTOU hardening (mirrors TaskW
     expect(first.ok).toBe(true);
 
     const second = await phaseWorkflowService.claim(phaseOne.slug, { by: "agent:p1" });
-    expect(second.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect((second.error as { field?: string }).field).toBe("gate:phase-claim:anchor-overlap");
+    expect(JSON.stringify(second.error)).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
 
+    // The refused claim persisted nothing — phase one is still unclaimed.
     const doc = await store.find(phaseOne.id);
     if (!doc.ok || doc.value === null) throw new Error("phase one not found");
-    expect(doc.value.extra["claim"]).toMatchObject({ by: "agent:p1" });
+    expect(doc.value.extra["claim"]).toBeUndefined();
   });
 
   // BOUNDARY — self never conflicts with self.

@@ -53,12 +53,19 @@ function makeServices() {
   const store = new InMemoryStore();
   const corpusService = new CorpusService(store);
   const enforcer = new GateEnforcer(undefined);
+  // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main — the 7th
+  // ctor arg is the env `claim()` captures `extra.claim.session_id` from, and the
+  // same-actor anchor-overlap exemption now requires that captured fact on both
+  // sides. Injected with a FIXED value (never the ambient `process.env` default) so
+  // the same-actor cases below model ONE session deterministically, on any machine.
   const taskWorkflowService = new TaskWorkflowService(
     store,
     undefined,
     { claimTtlMinutes: 120 },
     undefined,
     { enforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+    undefined,
+    { CLAUDE_CODE_SESSION_ID: "3de02220-adhoc" },
   );
   return { store, corpusService, taskWorkflowService };
 }
@@ -131,8 +138,9 @@ describe("TaskWorkflowService.claim — ad-hoc task (SPEC-069 gap fix)", () => {
     expect((second.error as { field?: string }).field).toBe("gate:task-claim:anchor-overlap");
   });
 
-  // STATE — same-actor overlap across two ad-hoc tasks never blocks.
-  it("a same-actor overlapping claim between two ad-hoc tasks never blocks", async () => {
+  // STATE — same-actor, same-session overlap across two ad-hoc tasks never blocks
+  // (both claims come from one service instance, i.e. one captured session id).
+  it("a same-actor same-session overlapping claim between two ad-hoc tasks never blocks", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     await createRootPrd(corpusService);
     const taskOneId = await createAdhocTask(corpusService, "Adhoc Same Actor One", ["src/shared.ts"]);

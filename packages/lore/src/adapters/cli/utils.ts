@@ -419,6 +419,21 @@ export function currentRetryCommandLine(): string {
  * forgets `$LORE_ACTOR` → every claim collapses onto one OS username →
  * `noAnchorOverlap` can never fire" failure class (SPEC-104 §Overview).
  *
+ * ⛔ **Actor resolution does NOT carry session distinctness, and no tier ordering
+ * here can give it one** (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+ * The session tier is the only tier with a per-session discriminator, and it is
+ * SKIPPED whenever `$LORE_ACTOR` is set — which this project's own standing
+ * discipline requires of every main-checkout run. Two concurrently-live sessions
+ * therefore resolve to one BYTE-IDENTICAL actor string by design, and that is
+ * legitimate: a constant literal is no more session-distinguishing than the
+ * constant OS username the SPEC-104 tier was added to escape. The session
+ * INSTANCE is consequently captured as its own claim field
+ * (`TaskClaim.session_id`, `TaskWorkflowService.claim` →
+ * `resolveClaimSessionId`), never smuggled into the identity string. Do NOT
+ * "fix" a session-collapse report by reordering these tiers or by prescribing a
+ * more unique `$LORE_ACTOR`: `by` answers WHO, `session_id` answers WHICH RUN,
+ * and `noAnchorOverlap`/`deriveSessions` read the second for exactly that reason.
+ *
  * This module now defines its OWN `resolveActorWithSource` (shadowing, not
  * re-exporting, `@lore/core/node`'s function of the same name) plus its OWN
  * wider `ActorSource`/`ResolvedActor` types (a superset of the core module's,
@@ -577,7 +592,10 @@ export function resetActorFallbackWarningForTests(): void {
  *   3. session tier (`$CLAUDE_CODE_SESSION_ID` / `$CLAUDE_SESSION_ID` — SPEC-069
  *      F1 — mapped to `agent:session-<8-char sanitized id prefix>`; a value
  *      that sanitizes to empty falls through to the OS-username tier instead
- *      of throwing, see the try/catch in `resolveActorWithSource` above)
+ *      of throwing, see the try/catch in `resolveActorWithSource` above.
+ *      ⛔ SUPPRESSED by tier 2 — so this is NOT where session distinctness
+ *      comes from; see the module-level note above `ActorSource` and
+ *      `TaskClaim.session_id`)
  *   4. worktree-derived `agent:<branch>` (SPEC-104 — see
  *      `detectWorktreeDerivedActor`'s doc above)
  *   5. OS username (os.userInfo().username)
