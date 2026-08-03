@@ -9,7 +9,7 @@
  * (the SHARED implementation, extracted from this file by task-mcp-lore-evidence-
  * add-cannot-set-capture-source-and-has-no so `lore_evidence_add` over MCP can
  * reach the same mechanism; `shell: true`, this process's own `process.cwd()`
- * passed EXPLICITLY as the spawn cwd, a fixed `CAPTURE_TIMEOUT_MS` timeout) and
+ * passed EXPLICITLY as the spawn cwd, and the capture window described below) and
  * uses its OWN captured stdout+stderr (tail-truncated to 4000 chars, same as
  * `--output-tail-file`) as `output_tail` — the agent never types or redirects
  * anything; the tail IS the runner's real output. Cross-checks the spawn's actual
@@ -23,6 +23,34 @@
  * `--output-tail-file` and with `--oracle manual` (nothing to spawn for a
  * browser/visual check) — `../evidence-precheck.js::findCaptureFlagConflict`
  * refuses both combinations before any spawn happens.
+ *
+ * Capture window (task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a) —
+ * `--capture`'s spawn is bounded by `workflow.evidence.capture_timeout_ms` from this
+ * project's `.lore/config.yaml` (default 600000 ms, byte-identical to the module
+ * constant it replaced, so an upgrading consumer that sets nothing sees no change).
+ * It was previously the hard-coded `CAPTURE_TIMEOUT_MS`, which fused two unrelated
+ * facts — how long a HUNG child is tolerated versus how long an HONEST oracle may
+ * take — into one number. The second grows with the test suite, and it outgrew the
+ * constant: this repo's own mandated worktree oracle `bun run test:changed <base>`
+ * measured ~624s against the 600s window, which made `--capture` (the ONLY producer
+ * of a `capture_source: "runner"` row, and the only class `lore done`'s
+ * attested-pass floor accepts) unreachable for a legitimately-scoped run and pushed
+ * the author onto `--output-tail-file`, i.e. into the WEAKER `"self-report"` class.
+ * ⛔ Raising the number was explicitly rejected as the fix — it relocates the cliff
+ * instead of removing the class. Exceeding the window is now a FAILED capture: a
+ * loud refusal (exit 4) naming the configured window, the measured elapsed time,
+ * and this knob, with NOTHING recorded — never a quiet downgrade to a self-reported
+ * row. The detection and wording live in `../../evidence-capture.js`, shared with
+ * MCP; its `CaptureRequest.timeoutMs` JSDoc names the one residual (MCP does not
+ * yet pass a config-resolved window).
+ *
+ * A SUCCESSFUL `--capture` additionally appends ` [captured in <n>ms of a <m>ms
+ * window]` to the human success line — the margin was previously invisible until the
+ * run that crossed it, and reporting elapsed-vs-window on every capture is the whole
+ * mechanism for that (a proactive "approaching the window" warning was deliberately
+ * NOT built: it needs a second, uncalibrated threshold). The suffix is appended ONLY
+ * on the capture path and ONLY to the human line — `--json`'s payload is a consumed
+ * shape and is untouched, and a non-`--capture` write's line stays byte-identical.
  *
  * A self-reported `--result pass` for `--oracle` `test`/`e2e` with NO `--capture`
  * and no genuine `--output-tail`/`--output-tail-file` used to record cleanly with
@@ -202,8 +230,15 @@
 import { existsSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { defineCommand } from "citty";
-import { ORACLE_KINDS, tailChars, type CaptureSource, type LoreError, type OracleKind } from "@lore/core";
-import { loadLoreApp } from "../loader.js";
+import {
+  ORACLE_KINDS,
+  resolveCaptureTimeoutMs,
+  tailChars,
+  type CaptureSource,
+  type LoreError,
+  type OracleKind,
+} from "@lore/core";
+import { loadLoreApp, loadProjectConfig } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import {
@@ -312,6 +347,8 @@ export default defineCommand({
     // --command and this process observed its real exit code; "self-report"
     // for every other case (the two --output-tail flags, or no tail at all).
     let captureSource: CaptureSource = "self-report";
+    /** Non-empty only on a successful `--capture` — see the assignment site's reason. */
+    let captureMargin = "";
 
     if (captureRequested) {
       // reason: task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no
@@ -325,10 +362,30 @@ export default defineCommand({
       // `cwd` is passed EXPLICITLY rather than defaulted inside the helper: for
       // the CLI it is correct by construction (a fresh subprocess inherits the
       // agent's real shell cwd), whereas MCP must supply a caller-declared one.
+      // reason: task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a —
+      // the capture window is the operator's, read from this project's own
+      // `.lore/config.yaml` (`workflow.evidence.capture_timeout_ms`), not a
+      // module constant. `loadProjectConfig()` rather than `loadLoreApp()`'s
+      // `config` DELIBERATELY: `loadLoreApp` is called further down, AFTER this
+      // spawn, and hoisting it would reorder DB discovery ahead of both this
+      // capture and the `--output-tail-file` read — turning a usage error (exit
+      // 2) in a corpus-less directory into a "no .lore/lore.db" exit 1. This
+      // read is confined to the `--capture` path, so every other invocation is
+      // byte-identical to pre-change behavior.
+      //
+      // ⛔ Known residual, NOT introduced here: `loadProjectConfig` degrades a
+      // MALFORMED config to `undefined`, so a typo'd or out-of-range
+      // `capture_timeout_ms` silently yields the default window rather than
+      // failing loud. That fallback is `loader.ts`'s documented, pre-existing
+      // behavior for every non-`ai` config section (an explicit SPEC-030
+      // non-goal); fixing it belongs there and would change every section's
+      // semantics at once, not just this key's.
+      const captureTimeoutMs = resolveCaptureTimeoutMs(loadProjectConfig());
       const captured = captureOracleCommand({
         command: args.command as string,
         cwd: process.cwd(),
         declaredResult: args.result as string,
+        timeoutMs: captureTimeoutMs,
       });
       if (!captured.ok) {
         process.stderr.write(formatError(captured.error) + "\n");
@@ -337,6 +394,13 @@ export default defineCommand({
       }
       outputTail = captured.value.outputTail;
       captureSource = captured.value.captureSource;
+      // reason: margin observability (the governing task's "Silence (b)") — the
+      // window closing was invisible until the run that crossed it. Reporting
+      // elapsed-vs-window on EVERY successful capture is what makes it visible,
+      // and it is deliberately the whole mechanism: a proactive "you are at 90%"
+      // warning would need a second threshold nobody has calibrated. Appended to
+      // the human line only (never the --json payload, which is a consumed shape).
+      captureMargin = ` [captured in ${captured.value.elapsedMs}ms of a ${captureTimeoutMs}ms window]`;
     } else if (typeof args["output-tail"] === "string") {
       outputTail = tailChars(args["output-tail"], 4000);
     } else if (typeof args["output-tail-file"] === "string") {
@@ -485,7 +549,7 @@ export default defineCommand({
       }
 
       console.log(
-        `Recorded ${args.oracle as string} evidence (${args.result as string}) on ${result.value.slug} (v${result.value.version})`,
+        `Recorded ${args.oracle as string} evidence (${args.result as string}) on ${result.value.slug} (v${result.value.version})${captureMargin}`,
       );
     } finally {
       app.close();

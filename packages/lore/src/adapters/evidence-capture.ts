@@ -43,13 +43,33 @@
  *     combination) and the declared/observed exit-code agreement (cross-checked
  *     below, mismatch → refusal, nothing recorded).
  *   Q2 Silence — what happens when the capture cannot be measured? Never a
- *     silent downgrade to `"self-report"` and never a recorded row: a spawn
- *     failure, a signal kill (including this module's own timeout, where NO
- *     exit code was ever observed), and a declared-vs-observed exit-code
- *     mismatch each return an explicit `LoreError` and the caller records
- *     NOTHING. An empty captured output is preserved as the empty string
- *     rather than being replaced by a placeholder, so "the command really
- *     printed nothing" stays distinguishable from "we did not capture".
+ *     silent downgrade to `"self-report"` and never a recorded row: a TIMEOUT
+ *     (its own measured outcome, see below), a spawn failure, an EXTERNAL signal
+ *     kill, and a declared-vs-observed exit-code mismatch each return an explicit
+ *     `LoreError` and the caller records NOTHING. An empty captured output is
+ *     preserved as the empty string rather than being replaced by a placeholder,
+ *     so "the command really printed nothing" stays distinguishable from "we did
+ *     not capture".
+ *
+ *     ⛔ This clause used to fold the timeout into the signal-kill case ("a signal
+ *     kill (including this module's own timeout, where NO exit code was ever
+ *     observed)"). Measurement disproved both halves of that parenthesis, and
+ *     task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a is the
+ *     correction: node's `spawnSync` sets `error.code = "ETIMEDOUT"` on a timeout,
+ *     so a timeout never reached the signal-kill branch at all — it was rendered as
+ *     `"--capture failed to spawn --command"`, a spawn FAILURE — and a timed-out
+ *     child that traps SIGTERM exits with a real status (measured: 0 and 3), so "no
+ *     exit code" was never a property of timeouts either. The timeout is now
+ *     MEASURED (ETIMEDOUT or monotonic elapsed ≥ the window), checked FIRST, and
+ *     reported as a distinct outcome naming the window, the elapsed time, and the
+ *     config knob. The window itself is no longer a constant — see {@link
+ *     DEFAULT_CAPTURE_TIMEOUT_MS} and {@link CaptureRequest.timeoutMs}.
+ *
+ *     The residual silence this does NOT close: an operator may set a window so
+ *     large that a genuinely hung child is tolerated for hours. That is their trade
+ *     to make, and it is why elapsed time is reported on EVERY capture ({@link
+ *     CaptureSuccess.elapsedMs}), not only on refusal — the margin stays visible
+ *     instead of becoming observable only on the day it is crossed.
  *   Q3 Opt-in — capture is opt-in per call (`--capture` / `capture: true`) and
  *     that is intentional: `--oracle manual` has no command whose exit code
  *     means anything, and a `fail`/`expected-fail` row is often recorded for a
@@ -62,18 +82,32 @@
 
 import { spawnSync } from "node:child_process";
 
-import { tailChars, type CaptureSource, type LoreError } from "@lore/core";
+import { resolveCaptureTimeoutMs, tailChars, type CaptureSource, type LoreError } from "@lore/core";
 
 /**
- * Fixed timeout for the capture spawn (task-a-non-empty-output-tail-can-be-
- * hand-authored-prose-and-the) — 10 minutes, matching this harness's own
- * Bash-tool maximum. Deliberately NOT caller-configurable on either adapter: a
- * capture is meant for a single scoped oracle command (`bun run typecheck`, one
- * `vitest run <file>` invocation), not a full test suite — `bun run
- * test:changed` / individual test-file commands documented across this repo's
- * own CLAUDE.md all comfortably finish well inside this window.
+ * Default capture window in ms, DERIVED from the config schema rather than
+ * restated here (task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a).
+ *
+ * The predecessor was `CAPTURE_TIMEOUT_MS = 10 * 60 * 1000`, a module constant
+ * whose JSDoc asserted a capture is "always a single scoped oracle command" and
+ * that "`bun run test:changed` / individual test-file commands ... all comfortably
+ * finish well inside this window". Measurement falsified exactly that sentence:
+ * `bun run test:changed <base>` — this repo's OWN mandated worktree oracle — ran
+ * ~624s after a `@lore/core` edit pulled 482 files into transitive reverse-dep
+ * selection. Because `--capture` is the ONLY producer of a `capture_source:
+ * "runner"` row, and `lore done`'s attested-pass floor accepts nothing else, the
+ * disciplined path became structurally unreachable and the honest fallback
+ * (`--output-tail-file` with the real log) records the WEAKER `"self-report"`
+ * class. One constant had fused a hang detector (roughly fixed) with an honest
+ * oracle's runtime (grows with the suite); {@link resolveCaptureTimeoutMs} now
+ * gives the second half to the operator.
+ *
+ * ⛔ `600_000` is NOT written here — `resolveCaptureTimeoutMs(undefined)` reads the
+ * Zod default from `workflow.evidence.capture_timeout_ms`, keeping ONE number in
+ * ONE place. A literal here would be the dual-write this repo's config module
+ * explicitly warns against.
  */
-export const CAPTURE_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEFAULT_CAPTURE_TIMEOUT_MS = resolveCaptureTimeoutMs(undefined);
 
 /**
  * `spawnSync`'s own captured-buffer ceiling (CLAUDE.md standing lesson: a spawn
@@ -104,6 +138,20 @@ export interface CaptureRequest {
   cwd: string;
   /** The `--result` / `result` the caller declared, cross-checked against the real exit code. */
   declaredResult: string;
+  /**
+   * Capture window in ms. Omitted → {@link DEFAULT_CAPTURE_TIMEOUT_MS}, i.e. the
+   * `workflow.evidence.capture_timeout_ms` schema default — so a caller that
+   * passes nothing behaves byte-identically to the pre-config constant.
+   *
+   * The CLI resolves this from the project's own `.lore/config.yaml`
+   * (`cli/commands/evidence.ts`). ⛔ Named residual: the MCP adapter
+   * (`mcp/tools.ts`) does not yet pass it, so `lore_evidence_add {capture: true}`
+   * still runs at the default window regardless of config. That file is owned by a
+   * concurrent task wave and was deliberately left untouched; wiring it is a
+   * one-line change (`timeoutMs: resolveCaptureTimeoutMs(config)`) once free. The
+   * timeout DETECTION half below is shared, so MCP already gets the loud outcome.
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -117,6 +165,16 @@ export interface CaptureSuccess {
   observedExitCode: number;
   /** Echoed back so a caller (and its tests) can assert WHERE the command actually ran. */
   cwd: string;
+  /**
+   * Monotonic wall-clock duration of the spawn, in ms.
+   *
+   * Reported on EVERY successful capture so the margin to the window is
+   * observable rather than invisible until the day it is crossed — the governing
+   * task's "Silence (b)". A proactive "you are at 90% of the window" warning was
+   * considered and deliberately NOT built: it needs a second threshold nobody has
+   * calibrated, and the elapsed figure gives a reader the same signal without one.
+   */
+  elapsedMs: number;
 }
 
 /** Discriminated capture outcome — never a partial or silently-degraded value. */
@@ -133,24 +191,94 @@ export type CaptureOutcome = { ok: true; value: CaptureSuccess } | { ok: false; 
  * cannot drift between adapters). It therefore names the CLI's flags — the
  * established convention for this family of shared refusals.
  *
- * @param request - command, explicit cwd, and the caller's declared result
- * @returns `{ ok: true }` with a runner-labelled tail, or `{ ok: false }` with a
- *   `VALIDATION_ERROR` — on which the caller MUST record nothing at all
+ * Four refusal outcomes, deliberately DISTINCT from one another (a collapsed pair
+ * would leave an operator guessing at the cause): a TIMEOUT, a spawn failure, an
+ * EXTERNAL signal kill, and a declared-vs-observed exit-code mismatch.
+ *
+ * @param request - command, explicit cwd, the caller's declared result, and
+ *   optionally the capture window (`timeoutMs`; omitted → {@link
+ *   DEFAULT_CAPTURE_TIMEOUT_MS})
+ * @returns `{ ok: true }` with a runner-labelled tail plus the measured
+ *   `elapsedMs`, or `{ ok: false }` with a `VALIDATION_ERROR` — on which the caller
+ *   MUST record nothing at all
  * @example
  * captureOracleCommand({ command: "true", cwd: "/repo", declaredResult: "pass" });
- * // => { ok: true, value: { captureSource: "runner", observedExitCode: 0, … } }
+ * // => { ok: true, value: { captureSource: "runner", observedExitCode: 0, elapsedMs: 4, … } }
  * @example
  * captureOracleCommand({ command: "false", cwd: "/repo", declaredResult: "pass" });
  * // => { ok: false, error: VALIDATION_ERROR on field "result" (exit 1 vs declared pass) }
+ * @example
+ * captureOracleCommand({ command: "sleep 5", cwd: "/repo", declaredResult: "pass", timeoutMs: 300 });
+ * // => { ok: false, error: VALIDATION_ERROR on field "capture" — timed out, names
+ * //      the 300ms window, the elapsed ms, and workflow.evidence.capture_timeout_ms }
  */
 export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
+  const timeoutMs = request.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS;
+
+  // reason: performance.now() is MONOTONIC — Date.now() is wall-clock and an NTP
+  // step during a long oracle could manufacture a phantom timeout (or mask a real
+  // one) on the elapsed conjunct below.
+  const startedAt = performance.now();
   const spawnResult = spawnSync(request.command, {
     shell: true,
     cwd: request.cwd,
     encoding: "utf8",
     maxBuffer: CAPTURE_MAX_BUFFER_BYTES,
-    timeout: CAPTURE_TIMEOUT_MS,
+    timeout: timeoutMs,
   });
+  const elapsedMs = Math.round(performance.now() - startedAt);
+
+  // reason: THE TIMEOUT IS MEASURED, AND CHECKED FIRST (task-lore-evidence-capture-
+  // has-a-hard-coded-600s-window-that-a). Both facts below were measured against
+  // node's spawnSync with `shell: true` and a 300ms timeout, and both contradict
+  // the pre-fix code:
+  //
+  //   `sleep 5`                            → status null, SIGTERM, code ETIMEDOUT
+  //   `trap 'exit 0' TERM; sleep 5 & wait` → status 0,    null,    code ETIMEDOUT
+  //   `trap 'exit 3' TERM; sleep 5 & wait` → status 3,    null,    code ETIMEDOUT
+  //
+  // (1) `error` is ALWAYS set on a timeout, so the generic spawn-error branch below
+  // used to swallow EVERY timeout and render it as "--capture failed to spawn
+  // --command: ... ETIMEDOUT" — a spawn FAILURE, which tells the operator their
+  // command is malformed and names neither the window, the elapsed time, nor any
+  // repair. That misdirection is what pushed agents onto --output-tail-file, i.e.
+  // into the weaker `capture_source: "self-report"` class. It also made the
+  // `status === null` branch's "possibly the 600s capture timeout" wording
+  // UNREACHABLE for a real timeout: the hedge was dead code.
+  // (2) A timed-out child can still exit 0 or 3 (rows 2/3 — it may trap SIGTERM),
+  // so `status === null` is not a sound timeout predicate: row 2 declared `pass`
+  // would have matched exit 0 and recorded a runner-attested PASS for an oracle
+  // that never finished.
+  //
+  // Hence two INDEPENDENT conditions rather than one signal (this repo's standing
+  // lone-signal/contiguous-substring lesson): the ETIMEDOUT code, OR the monotonic
+  // elapsed reaching the window. The elapsed conjunct is what covers row 3 and
+  // survives a platform that stops setting ETIMEDOUT; the code conjunct catches a
+  // kill that somehow lands marginally under the measured window. A command that
+  // legitimately finishes at the very boundary is refused rather than recorded —
+  // spawnSync's own timer was already firing, and refusing is the safe side of a
+  // race whose other side would be a fabricated row.
+  const errorCode = (spawnResult.error as { code?: string } | undefined)?.code;
+  if (errorCode === "ETIMEDOUT" || elapsedMs >= timeoutMs) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        field: "capture",
+        message:
+          `--capture timed out: --command ran for ${elapsedMs}ms, reaching the configured ` +
+          `${timeoutMs}ms capture window. A timed-out capture is a FAILED capture — recorded ` +
+          "NOTHING, and deliberately NOT downgraded to a self-reported row. Raise " +
+          "workflow.evidence.capture_timeout_ms in .lore/config.yaml to fit this oracle, or " +
+          "narrow --command's scope.",
+        value: {
+          command: request.command,
+          elapsed_ms: elapsedMs,
+          capture_timeout_ms: timeoutMs,
+        },
+      },
+    };
+  }
 
   if (spawnResult.error !== undefined) {
     return {
@@ -165,10 +293,18 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
   }
 
   if (spawnResult.status === null) {
-    // reason: killed by a signal (incl. this spawn's own timeout) before
-    // exiting normally — there is no real exit code to cross-check the
-    // declared --result against, so this is refused the same way a spawn
-    // failure is, never silently treated as either pass or fail.
+    // reason: killed by a signal that was NOT this capture's own timeout — the
+    // timeout branch above already returned for that case, so this is now
+    // exclusively an EXTERNAL kill (operator SIGINT, the OOM killer, a CI
+    // harness reaping the process tree). There is no real exit code to
+    // cross-check --result against, so it is refused exactly like a spawn
+    // failure, never silently treated as pass or fail.
+    //
+    // The retired wording hedged here — "no exit code observed, possibly the
+    // 600s capture timeout" — and that guess is precisely what this fix
+    // removes: the runner MEASURES whether it timed out (above) and no longer
+    // speculates. Elapsed time is still reported, because "killed at 3ms" and
+    // "killed at 580s" call for completely different investigations.
     return {
       ok: false,
       error: {
@@ -176,9 +312,15 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
         field: "capture",
         message:
           `--capture's spawn of --command was killed by signal ${spawnResult.signal ?? "unknown"} ` +
-          `(no exit code observed — possibly the ${CAPTURE_TIMEOUT_MS / 1000}s capture timeout). ` +
-          "Recorded nothing; narrow --command to a smaller scope and retry.",
-        value: request.command,
+          `after ${elapsedMs}ms, without reaching the configured ${timeoutMs}ms capture window ` +
+          "(so this is an EXTERNAL kill, not a capture timeout) and without ever reporting an " +
+          "exit code. Recorded nothing; re-run --command and investigate what killed it.",
+        value: {
+          command: request.command,
+          signal: spawnResult.signal ?? "unknown",
+          elapsed_ms: elapsedMs,
+          capture_timeout_ms: timeoutMs,
+        },
       },
     };
   }
@@ -208,6 +350,7 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
       captureSource: "runner",
       observedExitCode: spawnResult.status,
       cwd: request.cwd,
+      elapsedMs,
     },
   };
 }
