@@ -9,8 +9,9 @@
  * Public surface:
  *   - extractTestFileTokens(command) — pull test-file-like path tokens out of
  *     a shell command string
- *   - extractCdPrefixTarget(command) — detect a leading `cd <path> && ...`
- *     (or `cd <path>; ...`) prefix, if present
+ *   - extractCdPrefixTarget(command) — derive the working directory a command's
+ *     test-file tokens resolve against: the LAST `cd <path>` segment of the
+ *     `&&`/`;` chain that precedes the test invocation, if any
  *   - findMissingOracleFiles(command, opts) — compose both extractors with an
  *     injected existence port to report which extracted tokens resolve to no
  *     file anywhere plausible
@@ -25,6 +26,9 @@
  *     for refusal-message construction (defect: task-lore-evidence-s-oracle-
  *     file-precheck-resolves-against-the — the pre-fix refusal named no root
  *     at all)
+ *   - describeDerivedCdTarget(command) — names the cd target the chain scan
+ *     derived, the WHY clause beside describePrecheckRoots's WHERE clause
+ *     (defect: task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a)
  *   - findFilteredPassProofGap(input) / findFilteredPassRefusal(input) —
  *     the SECOND self-report guard hosted here (SPEC-061 AC-061-11..14, 17): a
  *     `--result pass` whose `--command` carries a `-t` case filter must arrive
@@ -141,27 +145,217 @@ function stripWrappingQuotes(token: string): string {
 }
 
 /**
- * Detects a leading `cd <path> && ...` (or `cd <path>; ...`) prefix at the
- * START of a command string and returns the cd target, quotes stripped. Only
- * recognizes a SINGLE leading `cd` — `foo && cd bar && baz` does not count
- * (the `cd` is not first): this is a narrow "cd-prefix" recognizer for the
- * common `cd <dir> && <oracle command>` shape recorded by evidence commands,
- * not a general shell-command interpreter.
+ * Splits a command chain into its `&&`/`;`-separated segments, IGNORING
+ * separators that sit inside a quoted run (`"…"`, `'…'`, `` `…` ``).
+ *
+ * Quote awareness is load-bearing, not polish: a naive `split(/&&|;/)` breaks
+ * `cd "weird;dir" && bun test f.test.ts` (the `;` inside the quoted target
+ * would split the cd segment in half and yield the garbage target `"weird`),
+ * a case the pre-chain-scan regex handled correctly via its `"[^"]*"`
+ * alternative. Splitting here preserves that.
+ *
+ * Deliberately NOT a shell grammar: `||`, single `|`, `&`, newlines, subshell
+ * `(…)`, and backslash escapes are NOT treated as separators or quote escapes.
+ * Every one of those makes a `cd` INVISIBLE to {@link extractCdPrefixTarget},
+ * which subtracts a candidate root and therefore biases toward a LOUD refusal
+ * — never toward a false accept (see that function's Proxy/Silence notes).
+ *
+ * Quote characters are kept in the emitted segment text so the cd-segment
+ * matcher's own quote alternatives still see (and strip) them.
  *
  * @param command - the exact command string recorded via `lore evidence --command`
- * @returns the cd target (quotes stripped), or `null` when the command has no
- *   leading cd-prefix
+ * @returns the segments in source order; a command with no separator yields
+ *   exactly one segment (never `[]`, even for an empty command)
+ */
+function splitCommandSegments(command: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let openQuote: string | null = null;
+
+  for (let index = 0; index < command.length; index += 1) {
+    // reason: the `as string` is a bounds assertion, not a fallback — `index <
+    // command.length` guarantees the read. Do NOT "harden" it into `?? ""`:
+    // under noUncheckedIndexedAccess an empty-string default would silently
+    // append a phantom character instead of failing, which is exactly the
+    // no-silent-fallback rule's target.
+    const char = command[index] as string;
+
+    if (openQuote !== null) {
+      if (char === openQuote) openQuote = null;
+      current += char;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      openQuote = char;
+      current += char;
+      continue;
+    }
+    if (char === ";") {
+      segments.push(current);
+      current = "";
+      continue;
+    }
+    if (char === "&" && command[index + 1] === "&") {
+      segments.push(current);
+      current = "";
+      index += 1;
+      continue;
+    }
+    current += char;
+  }
+
+  segments.push(current);
+  return segments;
+}
+
+/**
+ * Matches a segment that consists of NOTHING BUT `cd <target>` — the target
+ * being a double-quoted, single-quoted, or bare run. Anchored at BOTH ends on
+ * purpose: `cd a b` is not a recognized cd segment (the pre-chain-scan regex
+ * likewise refused it, since it required a separator immediately after the
+ * single target token), and neither is a segment that merely CONTAINS the word
+ * `cd`.
+ */
+const CD_SEGMENT_PATTERN = /^\s*cd\s+("[^"]*"|'[^']*'|\S+)\s*$/;
+
+/**
+ * Derives the working directory a command's test-file tokens resolve against:
+ * the LAST `cd <dir>` segment of the `&&`/`;` chain that PRECEDES the first
+ * segment naming a test file, quotes stripped.
+ *
+ * Scanning the whole chain — rather than only its first segment — is the fix
+ * for task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a. The
+ * previous regex was anchored at `^`, so this repo's OWN mandated compiled-e2e
+ * form (`bun run build && cd packages/lore && bun test <e2e file>`) and its
+ * mandated fresh-worktree form (`bun install && cd … && …`) derived no cd
+ * target at all; the precheck then resolved the test path against the repo
+ * root and REFUSED a correct command naming an existing file. The measured
+ * harm was second-order: the cheapest escape from that refusal is
+ * `--oracle manual`, which skips file checking entirely, so a false refusal
+ * converted verifiable rows into unverifiable ones as the path of least
+ * resistance.
+ *
+ * "LAST one that precedes the test invocation" is shell semantics: a later
+ * `cd` overrides an earlier one, and a `cd` AFTER the runner has already
+ * resolved its paths does not apply at all. The trailing-`cd` bound is what
+ * keeps this fix from widening into "any `cd` anywhere", which would add a
+ * candidate root capable only of a FALSE ACCEPT.
+ *
+ * // reason: when the command names NO test-file token, the scan falls back to
+ * // the last `cd` in the whole chain (there is no invocation to bound it).
+ * // That branch is unreachable from this module's own consumers —
+ * // `findMissingOracleFiles` and `describePrecheckRoots` both short-circuit
+ * // on zero tokens before ever asking for a cd target — and exists solely so
+ * // a direct caller keeps the historical answer for a token-free command like
+ * // `cd packages/lore && bun run typecheck`. Do not "simplify" it into
+ * // returning null: that would silently change this function's contract for
+ * // every non-test command.
+ *
+ * Per adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the:
+ *   - **Proxy** — "the last pre-invocation `cd` segment of an `&&`/`;` chain"
+ *     is a proxy for "the shell's cwd when the runner resolves the path".
+ *     Concrete input satisfying the property while violating the proxy:
+ *     `cd a || cd b && bun test f.test.ts` (`||` is not a recognized
+ *     separator, so `cd a || cd b` is one unmatched segment → `null`), and
+ *     `cd $TARGET && bun test f.test.ts` (an unexpanded variable is returned
+ *     literally and joins to a root that cannot exist). Accepted: both
+ *     subtract a candidate root, so both can only produce a LOUD refusal
+ *     naming the roots and the derived target — never a false accept. The
+ *     inverse direction (proxy satisfied, property violated) is a `cd` this
+ *     scan sees but the shell would not reach; it adds one candidate root, and
+ *     is accepted for the same reason {@link findMissingOracleFiles} is
+ *     already deliberately permissive about WHERE a file lives. A THIRD,
+ *     narrower gap, named rather than fixed: successive RELATIVE cds are not
+ *     COMPOSED — `cd a && cd b` derives `b`, whereas a shell would sit in
+ *     `a/b`. This is what the task's own AC-5 pins ("resolve against the LAST
+ *     one … assert the derived target BY VALUE"), and composing them would
+ *     contradict it. The residual false-accept requires a file to exist at
+ *     `<base>/b` while the shell looks in `<base>/a/b`; no command shape this
+ *     repo emits chains relative cds at all, so it is accepted, not fixed.
+ *   - **Silence** — none: the derived target (INCLUDING the "none" case) is
+ *     named verbatim in the refusal message via
+ *     {@link describeDerivedCdTarget}, so a future mismatch between "what the
+ *     author meant" and "what this derived" is diagnosable from the message
+ *     alone, without reading this source.
+ *   - **Opt-in** — n/a: unconditional for every command the precheck examines;
+ *     there is no flag that turns the chain scan off.
+ *
+ * @param command - the exact command string recorded via `lore evidence --command`
+ * @returns the cd target (quotes stripped), or `null` when no `cd` segment
+ *   precedes the named test file(s)
  * @example
  *   extractCdPrefixTarget("cd packages/lore && bun test tests/foo.bun.test.ts")
  *   // => "packages/lore"
+ * @example
+ *   extractCdPrefixTarget("bun run build && cd packages/lore && bun test tests/e2e/x.bun.test.ts")
+ *   // => "packages/lore" — the defect case: this used to be null
+ * @example
+ *   extractCdPrefixTarget("cd a && cd b && bun test f.test.ts")
+ *   // => "b" — a later cd overrides an earlier one
+ * @example
+ *   extractCdPrefixTarget("bun test f.test.ts && cd packages/lore")
+ *   // => null — the cd runs AFTER the path is resolved
+ * @example
  *   extractCdPrefixTarget("bunx vitest run foo.test.ts")
  *   // => null
  */
 export function extractCdPrefixTarget(command: string): string | null {
-  const match = /^\s*cd\s+("[^"]*"|'[^']*'|\S+)\s*(?:&&|;)/.exec(command);
-  if (!match || match[1] === undefined) return null;
-  const target = stripWrappingQuotes(match[1]);
-  return target.length > 0 ? target : null;
+  const segments = splitCommandSegments(command);
+  const invocationIndex = segments.findIndex(
+    (segment) => extractTestFileTokens(segment).length > 0,
+  );
+  const scanEnd = invocationIndex === -1 ? segments.length : invocationIndex;
+
+  for (let index = scanEnd - 1; index >= 0; index -= 1) {
+    // reason: `as string` is a bounds assertion — `scanEnd <= segments.length`
+    // and `index >= 0` guarantee the read (same rationale as
+    // splitCommandSegments's own cast).
+    const match = CD_SEGMENT_PATTERN.exec(segments[index] as string);
+    if (match?.[1] === undefined) continue;
+    const target = stripWrappingQuotes(match[1]);
+    if (target.length > 0) return target;
+  }
+  return null;
+}
+
+/**
+ * Names the cd target {@link extractCdPrefixTarget} derived from `command`, as
+ * a ready-to-append clause of the "Oracle file(s) not found" refusal — the
+ * companion to {@link describePrecheckRoots}'s roots clause (required by
+ * task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a: the roots
+ * alone say WHERE the check looked, not WHY it looked there, so a future
+ * cd-derivation mismatch would again need a source read to diagnose).
+ *
+ * // reason: deliberately adapter-NEUTRAL wording — no `--command`/`--oracle`
+ * // (CLI spelling) and no `"command"`/`oracle: "manual"` (MCP spelling), so
+ * // both evidence-write surfaces can append the identical string without
+ * // rendering a flag name that does not exist on their own interface. This is
+ * // the same anti-drift shape `findMixedRunnerRefusal` uses by returning a
+ * // fully-formed error instead of a boolean each adapter phrases itself.
+ *
+ * @param command - the exact command string recorded via `lore evidence --command`
+ * @returns a non-empty sentence naming the derived target, or stating that
+ *   none was derived — never an empty string, so the clause is always present
+ *   in the refusal and its absence can never be mistaken for "not measured"
+ * @example
+ *   describeDerivedCdTarget("bun run build && cd packages/lore && bun test tests/x.bun.test.ts")
+ *   // => "Derived cd target: packages/lore (…)"
+ * @example
+ *   describeDerivedCdTarget("bunx vitest run x.test.ts")
+ *   // => "Derived cd target: none (…)"
+ */
+export function describeDerivedCdTarget(command: string): string {
+  const target = extractCdPrefixTarget(command);
+  if (target === null) {
+    return (
+      "Derived cd target: none — no `cd <dir>` segment precedes the named test " +
+      "file(s) in this command chain, so each root above is a base directory as-is."
+    );
+  }
+  return (
+    `Derived cd target: ${target} — the last \`cd\` segment preceding the named ` +
+    "test file(s); each cd-joined root above is that target resolved onto a base directory."
+  );
 }
 
 /** Injectable filesystem-existence check — see this module's header. */
@@ -241,8 +435,8 @@ function computeCandidateRoots(
 
 /**
  * Reports which test-file tokens extracted from `command` resolve to no
- * existing file under ANY plausible root: the cd-prefix target (if the
- * command starts with `cd <dir> &&`/`cd <dir>; `), `opts.cwd` (and any
+ * existing file under ANY plausible root: the cd target derived from the
+ * command's `&&`/`;` chain ({@link extractCdPrefixTarget}), `opts.cwd` (and any
  * `opts.additionalCwds`), and `opts.corpusRoot` (when distinct from every
  * cwd candidate). A token already absolute is checked as-is (no root
  * candidates). A token counts as "missing" only when it fails EVERY

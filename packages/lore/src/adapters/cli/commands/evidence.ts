@@ -163,7 +163,12 @@
  * describePrecheckRoots` recomputes the SAME candidate roots
  * `findMissingOracleFilesForEvidence` just tried (SSOT, never drifts) so an
  * author reading "Oracle file(s) not found" can tell "your file is genuinely
- * missing" from "the precheck looked in the wrong tree". This CLI surface's
+ * missing" from "the precheck looked in the wrong tree". The message also names
+ * the cd target the precheck DERIVED from the command chain
+ * (`describeDerivedCdTarget`, task-evidence-precheck-only-sees-a-cd-in-the-
+ * first-segment-of-a) — the roots say WHERE it looked, the derived target says
+ * WHY, so a future cd-derivation mismatch is diagnosable from the message
+ * alone. This CLI surface's
  * `cwd` is always correct by construction (a fresh subprocess per invocation
  * inherits the caller's real shell cwd) — the MCP surface (`../../mcp/tools.js`)
  * is where a long-lived stdio server's own `process.cwd()` can differ from
@@ -205,6 +210,7 @@ import {
   findMixedRunnerRefusal,
   findCaptureFlagConflict,
   describePrecheckRoots,
+  describeDerivedCdTarget,
 } from "../evidence-precheck.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
@@ -430,6 +436,7 @@ export default defineCommand({
           message:
             `Oracle file(s) not found: ${missing.join(", ")}. ` +
             `Checked root(s): ${checkedRoots.join(", ")}. ` +
+            `${describeDerivedCdTarget(args.command as string)} ` +
             "Author the oracle file or fix the path in --command; " +
             "use --oracle manual for genuinely manual checks.",
           value: args.command,
