@@ -124,8 +124,17 @@ describe("AcService.findTasksUnderPlans (task-eight-more-plan-member-queries-sti
     const acService = new AcService(store);
     const prd = await createPrd(corpusService, "PRD Ac1");
     const spec = await createSpec(corpusService, prd.id, "Spec Ac1", [AC1]);
+    // reason: P4 must be OUTSIDE spec's own child-plan set (a second spec's plan, not
+    // spec's own) — findTasksUnderPlans loops over findChildPlans(spec.id)'s result,
+    // so a P4 that WAS also a child of `spec` would accidentally recover T6 via the
+    // aggregate union across sibling plans regardless of this fix (measured: an
+    // earlier version of this fixture parented P4 under `spec` too and stayed GREEN
+    // pre-fix — a false negative). P4 living under an unrelated spec is what makes
+    // "T6 filed at P4" genuinely invisible to a parent_id-keyed per-plan loop that
+    // only ever visits spec's OWN child plans.
+    const otherSpec = await createSpec(corpusService, prd.id, "Other Spec Ac1", []);
     const p3 = await createPlan(corpusService, spec.id, "P3");
-    const p4 = await createPlan(corpusService, spec.id, "P4");
+    const p4 = await createPlan(corpusService, otherSpec.id, "P4");
     await createTask(corpusService, p3.id, p3.id, "T5 undiverged P3 member", {
       verification_evidence: [passEvidence("AC-1")],
     });
