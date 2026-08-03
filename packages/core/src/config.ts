@@ -410,6 +410,59 @@ const WorkflowConfigSchema = z
       .strict()
       .default({}),
     /**
+     * `lore evidence --capture` / `lore_evidence_add {capture: true}` runner-capture
+     * knobs (task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a).
+     *
+     * `capture_timeout_ms` is THE ONLY place the capture window's number exists.
+     * It was previously the module constant `CAPTURE_TIMEOUT_MS` in
+     * `packages/lore/src/adapters/evidence-capture.ts`, documented there as
+     * "Deliberately NOT caller-configurable" on the assumption that a capture is
+     * always a single small oracle. That assumption was falsified by measurement:
+     * this repo's OWN mandated worktree oracle (`bun run test:changed <base>`) ran
+     * ~624s against the 600s constant after a `@lore/core` edit pulled 482 files
+     * into transitive reverse-dep selection, making `--capture` — the ONLY path
+     * that produces a `capture_source: "runner"` row, and therefore the only path
+     * `lore done`'s attested-pass floor accepts — structurally unreachable for a
+     * legitimately-scoped run. Two unrelated facts had been fused into one
+     * constant: how long a HUNG child should be tolerated (a hang detector, roughly
+     * fixed) and how long an HONEST oracle may take (a property of the project's
+     * suite, which grows). Only the second belongs to the operator, and this key is
+     * where it now lives.
+     *
+     * ⛔ The fix is NOT "a bigger number" — a larger constant has the identical
+     * failure mode one suite-growth later. What removes the class is ownership
+     * (this key) plus a LOUD, distinguishable timeout outcome
+     * (`captureOracleCommand`, which records nothing on a timeout and never
+     * degrades to the weaker `capture_source: "self-report"` class).
+     *
+     * @invariant Nested under `workflow` (not a top-level `evidence` section, and
+     *   deliberately NOT folded into `verify.default_timeout_ms`) — `lore evidence`
+     *   is a task-workflow verb whose sibling knobs (`claim_ttl_minutes`,
+     *   `attestation.min_ratio`) already live here. Reusing
+     *   `verify.default_timeout_ms` was rejected outright: it is a PER-AC-SCRIPT
+     *   default of 300s, so adopting it would silently HALVE the capture window for
+     *   every existing consumer on upgrade.
+     * @invariant Default 600000 ms — byte-identical to the retired constant, so no
+     *   consumer's behavior changes on upgrade unless they set this key. Absence of
+     *   the whole `workflow` section, or of `evidence` within it, both resolve to
+     *   this default (`resolveCaptureTimeoutMs` is the sole seam).
+     * @invariant Unit is MILLISECONDS, matching its closest sibling
+     *   `verify.default_timeout_ms` (the other spawn-and-attest timeout) and
+     *   consumed by `spawnSync`'s own `timeout` option with no conversion — a
+     *   seconds-based key would introduce a rounding seam for nothing.
+     */
+    evidence: z
+      .object({
+        /**
+         * Wall-clock ceiling in ms for a `--capture` spawn. Exceeding it is a FAILED
+         * capture: loud refusal, nothing recorded — never a quiet downgrade to a
+         * self-reported row.
+         */
+        capture_timeout_ms: z.number().int().positive().default(600_000),
+      })
+      .strict()
+      .default({}),
+    /**
      * `lore feed task-start <task>`'s per-section character budgets (SPEC-070
      * §Design Decisions D5) — the FIRST feed-pack budget config actually wired end
      * to end (the `phase_feed` precedent's equivalent comment was aspirational and
@@ -1241,6 +1294,39 @@ export function resolveTraceRetentionDays(config: LoreConfig | undefined): numbe
  */
 export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): number {
   return (config?.verify ?? VerifyConfigSchema.parse({})).default_timeout_ms;
+}
+
+/**
+ * Resolve the effective `lore evidence --capture` window (ms) from an optional
+ * LoreConfig (task-lore-evidence-capture-has-a-hard-coded-600s-window-that-a).
+ *
+ * This is the SOLE seam through which the capture window is read — the number
+ * itself exists ONLY as `WorkflowConfigSchema.evidence.capture_timeout_ms`'s Zod
+ * default, so `packages/lore/src/adapters/evidence-capture.ts` derives its
+ * `DEFAULT_CAPTURE_TIMEOUT_MS` by calling this with `undefined` rather than
+ * restating `600_000` (the anti-dual-write shape `context.memory_files` documents:
+ * "zod defaults ONLY; config.yaml overrides").
+ *
+ * Callers MUST NOT reach into `config.workflow.evidence` directly: `config.workflow`
+ * being present is NOT proof `config.workflow.evidence` is (tests and internal
+ * callers construct `workflow: {...}` literals that never pass through
+ * `WorkflowConfigSchema.parse`), so the `?.`-chain plus schema-default fallback
+ * below is load-bearing — the same hazard {@link resolveLedgerAutoApprove}
+ * documents.
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns Effective `workflow.evidence.capture_timeout_ms` value in milliseconds
+ * @example
+ *   resolveCaptureTimeoutMs(undefined) // => 600000 (the pre-config constant, preserved)
+ *   resolveCaptureTimeoutMs({ ..., workflow: { evidence: { capture_timeout_ms: 1_800_000 } } })
+ *   // => 1800000
+ *   resolveCaptureTimeoutMs({ ..., workflow: { gates: {} } } as LoreConfig) // => 600000 (no throw)
+ */
+export function resolveCaptureTimeoutMs(config: LoreConfig | undefined): number {
+  return (
+    config?.workflow?.evidence?.capture_timeout_ms ??
+    WorkflowConfigSchema.parse({}).evidence.capture_timeout_ms
+  );
 }
 
 /**
