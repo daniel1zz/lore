@@ -201,8 +201,12 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
     expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("CONTROL: an UNFILTERED pass on the same task writes exactly one row, no tail required", () => {
-    const accepted = recordEvidence(dir, taskSlug, ["--command", UNFILTERED_COMMAND]);
+  // reason: SUPERSEDED title (task-a-non-empty-output-tail-can-be-hand-authored-
+  // prose-and-the) — "no tail required" was true only for the FILTERED-pass
+  // guard this describe block is about; the SEPARATE pass-tail guard now
+  // requires SOME non-empty tail for every self-reported pass, filtered or not.
+  it("CONTROL: an UNFILTERED pass is exempt from the FILTERED-pass guard specifically (still needs a tail for the separate pass-tail guard)", () => {
+    const accepted = recordEvidence(dir, taskSlug, ["--command", UNFILTERED_COMMAND, "--output-tail", "ok"]);
 
     expect(accepted.exitCode).toBe(0);
     expect(accepted.stderr).not.toContain(MATCHED_COUNT_WORDING);

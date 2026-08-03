@@ -26,6 +26,7 @@ import {
   extractTestFileTokens,
   extractCdPrefixTarget,
   findMissingOracleFiles,
+  findCaptureFlagConflict,
 } from "../../../src/adapters/cli/evidence-precheck.js";
 
 // ─── extractTestFileTokens — HAPPY ──────────────────────────────────────────
@@ -219,5 +220,107 @@ describe("findMissingOracleFiles — STATE", () => {
         { cwd: "/repo", fileExists },
       ),
     ).toEqual(["absent.test.ts"]);
+  });
+});
+
+// ─── findCaptureFlagConflict — task-a-non-empty-output-tail-can-be-hand- ────
+// ─── authored-prose-and-the ──────────────────────────────────────────────
+//
+// Six-dimension coverage:
+//   HAPPY:      --capture alone (no tail flags, non-manual oracle) is legal
+//   NEGATIVE:   --capture not requested → always null, regardless of other flags
+//   BOUNDARY:   --capture + --output-tail-file (not just --output-tail) conflicts;
+//               --oracle "manual" (exact match) conflicts, a similar-but-different
+//               oracle string does not
+//   ERROR:      --capture + --output-tail together is refused, naming the flag
+//   STATE:      both conflicts present at once still returns the output-tail
+//               conflict first (checked before the oracle-manual conflict)
+//   REGRESSION: --capture with neither output-tail flag and a non-manual oracle
+//               stays legal across the oracle enum's other members
+
+describe("findCaptureFlagConflict — HAPPY", () => {
+  it("returns null for --capture alone with a non-manual oracle", () => {
+    expect(
+      findCaptureFlagConflict({ oracle: "test", capture: true }),
+    ).toBeNull();
+  });
+});
+
+describe("findCaptureFlagConflict — NEGATIVE", () => {
+  it("returns null when --capture was not requested, even with tail flags present", () => {
+    expect(
+      findCaptureFlagConflict({
+        oracle: "test",
+        capture: false,
+        outputTail: "some prose",
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null when --capture was not requested and oracle is manual", () => {
+    expect(
+      findCaptureFlagConflict({ oracle: "manual", capture: false }),
+    ).toBeNull();
+  });
+});
+
+describe("findCaptureFlagConflict — BOUNDARY", () => {
+  it("conflicts on --capture + --output-tail-file (not just --output-tail)", () => {
+    const result = findCaptureFlagConflict({
+      oracle: "test",
+      capture: true,
+      outputTailFile: "/tmp/some-log.txt",
+    });
+    expect(result?.code).toBe("VALIDATION_ERROR");
+    if (result?.code !== "VALIDATION_ERROR") return;
+    expect(result.field).toBe("capture");
+  });
+
+  it("conflicts on --oracle manual exactly", () => {
+    const result = findCaptureFlagConflict({ oracle: "manual", capture: true });
+    expect(result?.code).toBe("VALIDATION_ERROR");
+    if (result?.code !== "VALIDATION_ERROR") return;
+    expect(result.message).toContain("--oracle manual");
+  });
+
+  it("does not conflict on an oracle string merely containing 'manual' as a substring", () => {
+    expect(
+      findCaptureFlagConflict({ oracle: "manually-run-e2e", capture: true }),
+    ).toBeNull();
+  });
+});
+
+describe("findCaptureFlagConflict — ERROR", () => {
+  it("refuses --capture combined with --output-tail, naming the capture field", () => {
+    const result = findCaptureFlagConflict({
+      oracle: "test",
+      capture: true,
+      outputTail: "hand-typed text",
+    });
+    expect(result).not.toBeNull();
+    if (result?.code !== "VALIDATION_ERROR") throw new Error("expected VALIDATION_ERROR");
+    expect(result.field).toBe("capture");
+    expect(result.message).toContain("--output-tail");
+  });
+});
+
+describe("findCaptureFlagConflict — STATE", () => {
+  it("reports the output-tail conflict first when BOTH conflicts are present", () => {
+    const result = findCaptureFlagConflict({
+      oracle: "manual",
+      capture: true,
+      outputTail: "hand-typed text",
+    });
+    if (result?.code !== "VALIDATION_ERROR") throw new Error("expected VALIDATION_ERROR");
+    expect(result.message).toContain("--output-tail");
+    expect(result.message).not.toContain("--oracle manual");
+  });
+});
+
+describe("findCaptureFlagConflict — REGRESSION", () => {
+  it("stays legal for --capture across every non-manual oracle kind", () => {
+    for (const oracle of ["tsc", "test", "lint", "build", "e2e", "other"]) {
+      expect(findCaptureFlagConflict({ oracle, capture: true })).toBeNull();
+    }
   });
 });

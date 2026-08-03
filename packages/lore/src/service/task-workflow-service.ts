@@ -401,8 +401,11 @@ export interface DoneOpts {
    * declaration (that path is the PRE-EXISTING, unaffected opt-in floor, see
    * {@link overrideReason}'s sibling check in `done()`'s JSDoc) cannot archive
    * without this mandatory, non-blank, free-text justification for why no new
-   * RED test was recorded — same audited shape as `overrideReason` above (`lore
-   * approve --override-judgment`/`lore outline exempt --reason`): written
+   * RED test was recorded (CLI: `--declare-no-new-tests "<reason>"` — deliberately
+   * NOT `--no-new-tests`, which citty's mri parser would parse as a boolean
+   * negation and silently discard the value) — same audited shape as
+   * `overrideReason` above (`lore approve --override-judgment`/`lore outline
+   * exempt --reason`): written
    * VERBATIM to every lifecycle step's audit entry as `details.no_new_tests_reason`
    * (+ `details.no_new_tests_declared: true`), never silent, never defaulted, no
    * env-var form. `commands/done.ts` refuses a blank/whitespace-only value as a
@@ -2229,7 +2232,7 @@ export class TaskWorkflowService {
             code: "VALIDATION_ERROR",
             field: "noNewTestsReason",
             message:
-              "--no-new-tests requires a non-empty, non-whitespace reason — the CLI " +
+              "--declare-no-new-tests requires a non-empty, non-whitespace reason — the CLI " +
               "usage-error check (exit 2) should have caught this before reaching the " +
               "service; a direct caller must supply a real reason too",
             value: opts.noNewTestsReason,
@@ -2245,7 +2248,7 @@ export class TaskWorkflowService {
             "requires proof a test was actually run red before archiving, or an explicit " +
             "declaration that this task legitimately adds no new test (record a red run via " +
             `\`lore evidence ${task.slug} --oracle <kind> --command "<cmd>" --result ` +
-            'expected-fail`, or use the audited `--no-new-tests "<reason>"` escape hatch)',
+            'expected-fail`, or use the audited `--declare-no-new-tests "<reason>"` escape hatch)',
           value: evidence.map((e) => e.result),
         });
       }

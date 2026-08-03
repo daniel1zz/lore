@@ -295,7 +295,7 @@ describe("lore anchor rm — STATE (AC-S3-5 regression)", () => {
     const claimResult = runLore(["claim", taskSlug, "--by", "alice", "--branch", "wt-x"], tmpDir);
     expect(claimResult.exitCode).toBe(0);
     const evidenceResult = runLore(
-      ["evidence", taskSlug, "--oracle", "tsc", "--command", "bun run typecheck", "--result", "pass"],
+      ["evidence", taskSlug, "--oracle", "tsc", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
     expect(evidenceResult.exitCode).toBe(0);

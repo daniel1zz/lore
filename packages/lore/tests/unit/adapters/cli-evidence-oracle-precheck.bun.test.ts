@@ -169,6 +169,7 @@ describe("lore evidence oracle precheck — HAPPY", () => {
           command: "bunx vitest run tests/foo.test.ts",
           result: "pass",
           by: "alice",
+          "output-tail": "ok",
         },
       });
 
@@ -195,6 +196,7 @@ describe("lore evidence oracle precheck — NEGATIVE", () => {
           command: "bun run typecheck",
           result: "pass",
           by: "alice",
+          "output-tail": "ok",
         },
       });
 
@@ -337,6 +339,7 @@ describe("lore evidence oracle precheck — REGRESSION", () => {
           command: "bunx vitest run does-not-exist.test.ts",
           result: "pass",
           by: "alice",
+          "output-tail": "ok",
         },
       });
 

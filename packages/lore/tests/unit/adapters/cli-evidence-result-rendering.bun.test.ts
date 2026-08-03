@@ -247,7 +247,14 @@ describe("lore evidence --result rendering — REGRESSION", () => {
 
     try {
       await cmd.run({
-        args: { task: taskSlug, oracle: "tsc", command: "bun run typecheck", result: "pass", by: "alice" },
+        args: {
+          task: taskSlug,
+          oracle: "tsc",
+          command: "bun run typecheck",
+          result: "pass",
+          by: "alice",
+          "output-tail": "ok",
+        },
       });
 
       const successLine = log.lines().find((l) => l.startsWith("Recorded"));

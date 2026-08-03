@@ -506,7 +506,15 @@ describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refus
     expect(await readEvidenceCount(taskId)).toBe(1);
   });
 
-  it("AC-061-17 CONTROL: an UNFILTERED pass records through MCP with no output_tail at all", async () => {
+  // reason: SUPERSEDED (task-a-non-empty-output-tail-can-be-hand-authored-
+  // prose-and-the) — this test originally proved an UNFILTERED pass records
+  // with NO output_tail at all, i.e. that `findFilteredPassRefusal`'s guard
+  // does not widen into unfiltered commands. That remains true, but EVERY
+  // self-reported pass (filtered or not) now ALSO needs a genuinely non-empty
+  // tail via the separate `rejectMissingPassOutputTail` guard — this test
+  // still proves the unfiltered-command exemption from the FILTERED-pass
+  // guard specifically, now with a tail supplied to satisfy the other one.
+  it("AC-061-17 CONTROL: an UNFILTERED pass is exempt from the filtered-pass guard (still needs SOME tail, per the separate pass-tail guard)", async () => {
     const taskId = await createTaskDoc();
 
     const result = await call()({
@@ -515,6 +523,7 @@ describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refus
       command: UNFILTERED_COMMAND,
       result: "pass",
       recorded_by: "agent:parity",
+      output_tail: "ok",
     });
 
     expect(result.isError).toBeFalsy();

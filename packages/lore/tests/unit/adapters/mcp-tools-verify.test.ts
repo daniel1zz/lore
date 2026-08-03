@@ -413,6 +413,7 @@ describe("lore_evidence_add — forged attestation is inert (AC-VRF-2 adapter ha
         command: "bun run typecheck",
         result: "pass",
         recorded_by: "alice",
+        output_tail: "ok",
         // reason: forged past the type system — the SDK's real runtime schema
         // validation would strip this before the handler ever ran; calling the
         // handler directly (bypassing SDK-level parse, per this suite's

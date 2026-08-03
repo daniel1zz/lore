@@ -234,7 +234,7 @@ function createFixtureChain(dir: string): { planSlug: string } {
   // Self-reported-only evidence — a plain `lore evidence` call, never run
   // through `lore verify`, so this entry carries zero runner attestation.
   const evidenceResult = runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--command", "bun test", "--result", "pass"],
+    ["evidence", taskSlug, "--oracle", "test", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
     dir,
   );
   expect(evidenceResult.exitCode).toBe(0);

@@ -289,6 +289,7 @@ describe("STATE — shared fail-first AC coverage precedence (F3/AC-070-12)", ()
       result: "pass",
       ac_ref: "AC-X-1",
       recorded_by: "agent:wiring-test",
+      output_tail: "ok",
     });
     expect(passResult.ok).toBe(true);
     const failResult = await app.taskWorkflowService.addEvidence(task.slug, {

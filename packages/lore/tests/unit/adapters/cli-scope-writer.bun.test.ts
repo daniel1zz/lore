@@ -179,7 +179,7 @@ function seedFixture(cwd: string): void {
     cwd,
   );
   mustRun(
-    ["evidence", "task-migration-source", "--oracle", "test", "--command", "bun test AC-SC-1", "--result", "pass", "--ac", "AC-SC-1", "--by", "agent:fixture"],
+    ["evidence", "task-migration-source", "--oracle", "test", "--command", "bun test AC-SC-1", "--result", "pass", "--ac", "AC-SC-1", "--by", "agent:fixture", "--output-tail", "ok"],
     cwd,
   );
   mustRun(["migrate", "tasks-to-phases"], cwd);
@@ -215,7 +215,7 @@ function createTask(
 
   if (opts.evidenceAc !== undefined) {
     mustRun(
-      ["evidence", slug, "--oracle", "test", "--command", `bun test ${opts.evidenceAc}`, "--result", "pass", "--ac", opts.evidenceAc, "--by", "agent:fixture"],
+      ["evidence", slug, "--oracle", "test", "--command", `bun test ${opts.evidenceAc}`, "--result", "pass", "--ac", opts.evidenceAc, "--by", "agent:fixture", "--output-tail", "ok"],
       cwd,
     );
   }

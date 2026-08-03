@@ -205,6 +205,7 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
         command: "bun run typecheck",
         result: "pass",
         recorded_by: "alice",
+        output_tail: "ok",
       });
       expect(evidenceResult.ok).toBe(true);
       if (!evidenceResult.ok) return;

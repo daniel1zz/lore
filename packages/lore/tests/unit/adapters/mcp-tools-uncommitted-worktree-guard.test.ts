@@ -231,6 +231,7 @@ describe("HAPPY — a clean recorded worktree is unaffected via MCP", () => {
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
     });
     expect(result.isError).toBeFalsy();
   });
@@ -260,6 +261,7 @@ describe("NEGATIVE — a no-worktree claim with NO caller_cwd declared is unaffe
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
       // caller_cwd omitted
     });
     expect(result.isError).toBeFalsy();
@@ -290,6 +292,7 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
       caller_cwd: realRepoCwd,
     });
     expect(result.isError).toBe(true);
@@ -328,6 +331,7 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
       caller_cwd: nonRepoCwd,
     });
     expect(result.isError).toBeFalsy();
@@ -362,6 +366,7 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
     });
     expect(result.isError).toBeFalsy();
   });
@@ -384,6 +389,7 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
       command: `bunx vitest run ${EXISTING_TEST_FILE_FROM_PACKAGE_DIR}`,
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
       caller_cwd: CALLER_CWD_AS_PACKAGE_DIR,
     });
     // reason: the precheck finds the file (no VALIDATION_ERROR naming "Oracle
@@ -408,6 +414,7 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
       command: `bunx vitest run ${EXISTING_TEST_FILE_FROM_PACKAGE_DIR}`,
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
       caller_cwd: CALLER_CWD_AS_PACKAGE_DIR,
     });
     expect(result.isError).toBeFalsy();
@@ -432,6 +439,7 @@ describe("REGRESSION — control: the primary predicate is completely independen
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
       // caller_cwd deliberately omitted — proves this refusal does NOT depend on it.
     });
     expect(result.isError).toBe(true);

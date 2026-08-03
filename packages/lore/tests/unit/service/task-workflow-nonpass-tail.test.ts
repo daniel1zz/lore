@@ -11,14 +11,23 @@
  * `task-test-changed-cannot-see-the-whole-integration-cli-tier-the`, all 6
  * rows) recorded `tail bytes: 0` on red-first evidence — a claim resting on
  * nothing observed. This file proves the new guard closes that hole while
- * leaving the two adjacent, deliberately-untouched paths open:
- *   - AC-ETI-4: a self-reported `pass` (D2 — owned by the separate
- *     `findFilteredPassRefusal` guard, never this one)
+ * leaving one adjacent, deliberately-untouched path open:
  *   - AC-ETI-5: a runner-ATTESTED `fail` via `recordVerifiedEvidence` (the
  *     shared `appendEvidenceEntry` chokepoint this guard deliberately does
  *     NOT bind — a silent/timed-out run can legitimately yield `""`)
  *
- * @spec_ref AC-ETI-1, AC-ETI-2, AC-ETI-3, AC-ETI-4, AC-ETI-5
+ * ⛔ SUPERSEDED (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-
+ * the): AC-ETI-4 originally pinned a self-reported `pass` as OUT OF SCOPE for
+ * any tail requirement (D2 — that gap belonged solely to the separate
+ * `findFilteredPassRefusal` guard). That asymmetry — the PASS row, the one
+ * that unlocks `done()`'s archival floor, carried no tail requirement at all
+ * — was measured and closed: `rejectMissingPassOutputTail` now binds
+ * self-reported `pass` rows identically to this file's `fail`/`expected-fail`
+ * cases, exempting only `capture_source: "runner"` rows (`lore evidence
+ * --capture`). AC-ETI-4's test below now asserts the CORRECTED behavior, not
+ * its original one.
+ *
+ * @spec_ref AC-ETI-1, AC-ETI-2, AC-ETI-3, AC-ETI-4 (superseded), AC-ETI-5
  */
 
 import { describe, it, expect } from "vitest";
@@ -174,11 +183,11 @@ describe("AC-ETI-3 — expected-fail with no output_tail rejected on the same pr
   });
 });
 
-// ─── AC-ETI-4 (CONTROL) ───────────────────────────────────────────────────────
+// ─── AC-ETI-4 (SUPERSEDED — now closes the PASS-side asymmetry) ──────────────
 
-describe("AC-ETI-4 — CONTROL: pass with unfiltered command and no output_tail is still accepted (D2)", () => {
-  it("AC-ETI-4: result=pass, unfiltered command, output_tail omitted — accepted, new predicate does not widen into the pass path", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
+describe("AC-ETI-4 — a self-reported pass with no output_tail is now REJECTED (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the)", () => {
+  it("AC-ETI-4: result=pass, unfiltered command, output_tail omitted — REFUSED, naming the --capture repair", async () => {
+    const { store, corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
@@ -187,9 +196,58 @@ describe("AC-ETI-4 — CONTROL: pass with unfiltered command and no output_tail 
       evidence({ oracle: "tsc", command: "bun run typecheck", result: "pass" }),
     );
 
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("output_tail");
+    expect((result.error as { message: string }).message).toContain("--capture");
+
+    const after = await store.find(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value?.version).toBe(1);
+    expect(after.value?.extra["verification_evidence"]).toBeUndefined();
+  });
+
+  it("AC-ETI-4 CONTROL: the SAME pass row WITH a genuine non-empty output_tail is accepted", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "tsc",
+        command: "bun run typecheck",
+        result: "pass",
+        output_tail: "tsc exited 0, no diagnostics",
+      }),
+    );
+
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.version).toBe(2);
+    expect(result.value.extra["verification_evidence"]).toHaveLength(1);
+  });
+
+  it("AC-ETI-4 CONTROL: the SAME pass row with capture_source \"runner\" and NO tail is accepted (independently verified by the capture)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "tsc",
+        command: "bun run typecheck",
+        result: "pass",
+        capture_source: "runner",
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(result.value.extra["verification_evidence"]).toHaveLength(1);
   });
 });

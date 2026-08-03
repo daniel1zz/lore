@@ -147,7 +147,7 @@ describe("HAPPY — lore red-first declares the flag and lore done accepts a pro
       tmpDir,
     );
     mustRun(
-      ["evidence", slug, "--oracle", "test", "--command", "bunx vitest run --grep new-feature-again", "--result", "pass"],
+      ["evidence", slug, "--oracle", "test", "--command", "bunx vitest run --grep new-feature-again", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
 
@@ -166,7 +166,7 @@ describe("NEGATIVE — lore done refuses a red_first task holding only a pass ro
   it("exit 4, naming the task slug and the missing expected-fail/fail row", () => {
     const slug = createAdhocTask(tmpDir, "Unproven Red First");
     mustRun(["red-first", slug], tmpDir);
-    mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass"], tmpDir);
+    mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"], tmpDir);
 
     // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — the
     // escape hatch clears the ATTESTATION floor (this fixture's evidence is
@@ -205,7 +205,7 @@ describe("ERROR — lore red-first on a nonexistent task", () => {
 describe("STATE — a plain task (no red-first declared) is unaffected by THIS feature", () => {
   it("lore done archives a plain task exactly as before red-first existed, once the (unrelated) attestation floor is satisfied", () => {
     const slug = createAdhocTask(tmpDir, "Plain Task");
-    mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass"], tmpDir);
+    mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"], tmpDir);
 
     // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
     // self-reported pass alone no longer suffices for ANY task, red-first or not

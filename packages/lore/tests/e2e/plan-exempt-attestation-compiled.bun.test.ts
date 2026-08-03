@@ -194,7 +194,7 @@ function createDeniedPlan(dir: string): { planSlug: string } {
   // Self-reported-only evidence — never runner-attested.
   expect(
     runLore(
-      ["evidence", parseSlug(task.stdout), "--oracle", "test", "--command", "bun test", "--result", "pass"],
+      ["evidence", parseSlug(task.stdout), "--oracle", "test", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
       dir,
     ).exitCode,
   ).toBe(0);

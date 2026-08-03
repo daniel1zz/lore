@@ -245,7 +245,7 @@ function createFullChain(dir: string): {
   expect(failEvidence.exitCode).toBe(0);
 
   const passEvidence = runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--command", "bun test", "--result", "pass", "--ac", "AC-T1-1"],
+    ["evidence", taskSlug, "--oracle", "test", "--command", "bun test", "--result", "pass", "--ac", "AC-T1-1", "--output-tail", "ok"],
     dir,
   );
   expect(passEvidence.exitCode).toBe(0);

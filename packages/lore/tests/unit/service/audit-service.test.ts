@@ -341,6 +341,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
     });
     expect(evidenceResult.ok).toBe(true);
 

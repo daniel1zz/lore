@@ -247,7 +247,7 @@ describe("SPEC-056 CLI phase surfaces — dispatch against an existing wrong-typ
     const planSlug = createPlan("Evidence Regression Plan");
 
     const result = runLore(
-      ["evidence", planSlug, "--oracle", "test", "--command", "x", "--result", "pass", "--by", "tester"],
+      ["evidence", planSlug, "--oracle", "test", "--command", "x", "--result", "pass", "--by", "tester", "--output-tail", "ok"],
       tmpDir,
     );
     expect(result.exitCode).toBe(4);

@@ -270,6 +270,7 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
       result: "pass",
       recorded_by: "alice",
       checklist_ref: "CHK-1",
+      output_tail: "ok",
     });
     expect(result.isError).toBeFalsy();
     const data = parseResult(result) as { doc: DocRecord };
@@ -289,6 +290,7 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
       result: "pass",
       recorded_by: "alice",
       checklist_ref: "CHK-UNKNOWN",
+      output_tail: "ok",
     });
     expect(result.isError).toBe(true);
     const error = parseResult(result) as { code: string; field: string };
@@ -306,6 +308,7 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      output_tail: "ok",
     });
     expect(result.isError).toBeFalsy();
     const data = parseResult(result) as { doc: DocRecord };

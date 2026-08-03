@@ -135,12 +135,25 @@ async function createTask(
   return result.value.id;
 }
 
+/**
+ * Default `output_tail: "captured output"` (task-a-non-empty-output-tail-can-
+ * be-hand-authored-prose-and-the) — every self-reported `result: "pass"` row
+ * now requires a genuinely non-empty tail (`rejectMissingPassOutputTail`,
+ * mirroring the pre-existing non-pass requirement this same fixture already
+ * satisfied via callers explicitly overriding `result`). Tests exercising
+ * OTHER concerns (cap, ac_ref, placeholder-command, telemetry, …) never cared
+ * about tail CONTENT — this default keeps them green without changing their
+ * intent. Tests that specifically exercise the pass-tail guard itself
+ * construct their own candidate object (see the `rejectMissingPassOutputTail`/
+ * `capture_source` describe blocks below) rather than relying on this helper.
+ */
 function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
   return {
     oracle: "tsc",
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",
+    output_tail: "captured output",
     ...overrides,
   };
 }

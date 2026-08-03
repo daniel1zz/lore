@@ -129,7 +129,7 @@ function readEvidenceCount(dir: string, taskSlug: string): number {
 
 function recordEvidence(dir: string, taskSlug: string, command: string): RunResult {
   return runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--result", "pass", "--command", command],
+    ["evidence", taskSlug, "--oracle", "test", "--result", "pass", "--command", command, "--output-tail", "ok"],
     dir,
   );
 }
