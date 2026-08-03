@@ -37,7 +37,17 @@ Registers 33 `lore_*` tools plus a small set of MCP resources against
   callers are always agents).
 - **`attestation` is never an accepted field on `lore_evidence_add`'s
   schema** — `lore_verify` is the only MCP-reachable path to attested
-  evidence.
+  evidence. `capture: true` does NOT change this: it yields
+  `capture_source: "runner"`, which is strictly weaker than an `attestation`,
+  so a captured MCP row still cannot satisfy `lore done`'s runner-attested
+  floor.
+- **`capture_source` is DERIVED, never an input.** No adapter exposes it as a
+  field — `lore_evidence_add` stamps `"runner"` only on the path where this
+  server actually spawned the command, `"self-report"` on every other write.
+  A caller-settable value was explicitly rejected as a self-report wearing a
+  runner's label (task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no).
+  `TaskWorkflowService.appendEvidenceEntry` additionally FORCES `"runner"` for
+  any row carrying an `attestation`, whatever the adapter passed.
 
 ## Patterns
 
@@ -60,7 +70,7 @@ Registers 33 `lore_*` tools plus a small set of MCP resources against
 ## Tools (one line each — mechanism/spec detail via `lore search <tool>` or the frozen snapshot)
 
 - `lore_create/get/set/search/list/tree/link/pending/approve` — core CRUD, mirrors CLI. `lore_create` also takes optional `file_anchors`/`supersedes`.
-- `lore_claim/release/evidence_add/ready` (SPEC-025) — task workflow; `by` required. `evidence_add` runs the oracle-file-existence precheck before dispatch, supports `ac_ref`/`checklist_ref`.
+- `lore_claim/release/evidence_add/ready` (SPEC-025) — task workflow; `by` required. `evidence_add` runs the oracle-file-existence precheck before dispatch, supports `ac_ref`/`checklist_ref`, and takes `capture: boolean` — the MCP peer of the CLI's `lore evidence --capture` (task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no): the server runs `command` itself via the shared `../evidence-capture.ts::captureOracleCommand`, cross-checks the real exit code against `result`, and records the child's real stdout+stderr as `output_tail`. `capture: true` REQUIRES `caller_cwd` (refused when absent — this server's own `process.cwd()` was fixed at startup and is not the caller's directory); mutually exclusive with `output_tail` and `oracle: "manual"` via the CLI's own `findCaptureFlagConflict`.
 - `lore_assess` (SPEC-026) — plan-outcome AI judge; no non-AI mode, `summary` Markdown digest via `assess-render.ts`.
 - `lore_audit` (SPEC-035) — filtered audit query; `verify: true` runs the versions⋈audit completeness oracle.
 - `lore_review` (SPEC-034) — single-doc structured review judgment; deterministic pre-checks short-circuit before the AI provider.
@@ -82,6 +92,6 @@ Registers 33 `lore_*` tools plus a small set of MCP resources against
 
 ## Links
 
-- Depends on: [`@lore/core`](../../../../../core/src/CLAUDE.md), [`../../service`](../../service/CLAUDE.md) (via App).
+- Depends on: [`@lore/core`](../../../../../core/src/CLAUDE.md), [`../../service`](../../service/CLAUDE.md) (via App), `../evidence-capture.ts` (runner-capture SSOT, shared with the CLI), `../cli/evidence-precheck.ts` (shared self-report refusals).
 - Entry points: `../../index.ts` (`--mcp-server`) and [`../cli`](../cli/CLAUDE.md) `lore agent`.
 - Full mechanism history (per-spec narratives, byproducts, review fixes): frozen snapshot `knowledge-module-claude-md-snapshot-packages-lore-src-adapters-2`; ongoing detail lives in each spec doc (`lore get SPEC-0NN`).

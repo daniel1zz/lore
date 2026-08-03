@@ -47,7 +47,15 @@
  *   ERROR:      AC-7 control — a task with NO claim recorded AT ALL (never
  *               claimed) is unaffected regardless of caller_cwd being
  *               omitted; this is the literal "absence of a claim" case the
- *               governing task explicitly says must NOT be widened.
+ *               governing task explicitly says must NOT be widened. Extended
+ *               by task-two-independent-copies-of-does-this-task-have-a-claim-
+ *               now with the cases the adapter's deleted `hasRecordedTaskClaim`
+ *               used to handle: no claim at all WITH a real (and separately, a
+ *               DIRTY) git-repo caller_cwd, proving the MCP surface inherits
+ *               the service's `hasRecordedClaim` short-circuit instead of
+ *               re-deriving it — plus the measured fact that `lore_release`
+ *               cannot reach the Q3 escalation for a never-claimed task at all
+ *               (the ordinary no-claim refusal precedes it).
  *   STATE:      the SAME caller_cwd field now serves TWO purposes on
  *               lore_evidence_add (the pre-existing oracle-file-existence
  *               precheck AND this new worktree-guard use) without either
@@ -370,6 +378,90 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
     });
     expect(result.isError).toBeFalsy();
   });
+
+  // reason: task-two-independent-copies-of-does-this-task-have-a-claim-now —
+  // the THREE cases below are the ones the adapter's now-deleted
+  // `hasRecordedTaskClaim` pre-check existed to handle. They pin that the MCP
+  // surface inherits the SERVICE's no-claim short-circuit
+  // (`hasRecordedClaim` in task-workflow-service.ts) rather than re-deriving
+  // "is there a claim" a second time in `tools.ts`.
+  //
+  // Why an EXPLICIT pin when the behavior is already exercised: before this,
+  // the only MCP coverage of "never-claimed task + a REAL git-repo
+  // caller_cwd" was INCIDENTAL — `mcp-tools-task-workflow.test.ts`'s
+  // "AC-2.H1 (GREEN)", whose title and purpose are the oracle-file-existence
+  // precheck's caller_cwd escape hatch, not the worktree guard. Its
+  // `caller_cwd` happens to be a real working tree, so it happens to prove
+  // this. Retitling or rescoping that test would delete this coverage with
+  // nothing going red — the incidental-coverage half of the
+  // AC-statement-drift hazard. These cases name the property they measure.
+  //
+  // A DIRTY repo is used in the second case deliberately: it proves the
+  // short-circuit returns BEFORE any git inspection of `callerCwd` happens,
+  // not merely that a clean tree passes the inspection.
+  it("REGRESSION (lore_evidence_add): NO claim at all + caller_cwd IS a real git repo → accepted, not refused", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    // No lore_claim call at all — and a caller_cwd that IS a real repo, the
+    // exact combination that produced a FALSE refusal before the service
+    // learned to tell "no claim" from "a claim recording no worktree".
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "tsc",
+      command: "bun run typecheck",
+      result: "pass",
+      recorded_by: "alice",
+      output_tail: "ok",
+      caller_cwd: makeCleanRepo(),
+    });
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result) as { doc: DocRecord };
+    expect(data.doc.extra["verification_evidence"]).toHaveLength(1);
+  });
+
+  it("REGRESSION (lore_evidence_add): NO claim at all + caller_cwd is a DIRTY real git repo → still accepted (short-circuit precedes any git inspection)", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "tsc",
+      command: "bun run typecheck",
+      result: "pass",
+      recorded_by: "alice",
+      output_tail: "ok",
+      caller_cwd: makeDirtyRepo(),
+    });
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result) as { doc: DocRecord };
+    expect(data.doc.extra["verification_evidence"]).toHaveLength(1);
+  });
+
+  // MEASURED, not assumed (this was the RED that corrected this test's own
+  // first draft): `lore_release` on a NEVER-CLAIMED task cannot reach the
+  // worktree guard's Q3 escalation at all — the ordinary "nothing to release"
+  // refusal fires first. So the assertion here is a NEGATIVE CONDITION,
+  // independent of the positive one: the refusal that fires must be the
+  // pre-existing `extra.claim` one, and must NOT be the Q3 mismatch on
+  // `extra.claim.worktree`, even though `caller_cwd` IS a real git repo.
+  // Asserting only "isError" would have passed for either reason — the
+  // proxy-vs-property distinction this suite's governing ADR is about.
+  it("REGRESSION (lore_release): NO claim at all + caller_cwd IS a real git repo → refused for the ordinary no-claim reason, NEVER the Q3 worktree mismatch", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+    const result = await getToolHandler(server, "lore_release")({
+      id_or_slug: taskId,
+      by: "alice",
+      force: true,
+      caller_cwd: makeCleanRepo(),
+    });
+    expect(result.isError).toBe(true);
+    const error = parseResult(result) as { code: string; field: string; message: string };
+    expect(error.field).toBe("extra.claim");
+    expect(error.message).toContain("no active claim to release");
+    // The independent negative condition — the guard did not fire.
+    expect(error.field).not.toBe("extra.claim.worktree");
+    expect(error.message).not.toContain("recorded NO");
+  });
 });
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
@@ -378,7 +470,13 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
   const EXISTING_TEST_FILE_FROM_PACKAGE_DIR = "tests/unit/adapters/mcp-tools-uncommitted-worktree-guard.test.ts";
   const CALLER_CWD_AS_PACKAGE_DIR = `${process.cwd()}/packages/lore`;
 
-  it("a caller_cwd that resolves the precheck's file AND is a real repo (no claim recorded) → BOTH concerns satisfied, still refused for the Q3 mismatch", async () => {
+  // reason: this title used to say "(no claim recorded)", which the body has
+  // NEVER matched — line below claims the task (recording NO worktree). Since
+  // task-the-uncommitted-worktree-guard-treats-no-claim-at-all-as-a landed,
+  // "no claim recorded" is precisely the case that is ACCEPTED, so the stale
+  // title asserted the exact opposite of current behavior while staying green
+  // (the AC-statement-drift shape: a true body under a false statement).
+  it("a caller_cwd that resolves the precheck's file AND is a real repo (claim recorded NO worktree) → BOTH concerns satisfied, still refused for the Q3 mismatch", async () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
