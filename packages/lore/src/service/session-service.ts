@@ -243,12 +243,19 @@ export class SessionService {
     // input per-task internally, so passing the full cross-plan batch to each
     // plan's computeTaskCounts call is safe; no manual per-plan slice needed.
     const plans = allDocs.filter((d) => d.type === "plan");
-    const activePlanIds = new Set<DocId>();
     const activePlanEntries: Array<{ plan: DocRecord; tasks: DocRecord[] }> = [];
     for (const plan of plans) {
       if (plan.status === "archived" || plan.status === "deprecated") continue;
-      activePlanIds.add(plan.id);
-      const tasks = allDocs.filter((d) => d.type === "task" && d.parent_id === plan.id);
+      // reason: membership is `extra.plan_id` ({@link isPlanMember}), NEVER the
+      // `parent_id` proxy — `lore create task --plan-id P --parent Q` (P !== Q)
+      // is a SUPPORTED shape (SPEC-065 D4), and keying this listing on the proxy
+      // silently dropped such a member from its OWN plan's `active_plans` entry
+      // in the session-start injection every consumer session reads first
+      // (task-the-eleventh-plan-member-site-found-by-enumeration; the same
+      // conversion `computeReadinessPointer` below already carries). Do NOT
+      // re-inline the comparison here — `bun run check:plan-member-sites`
+      // reports it.
+      const tasks = allDocs.filter((d) => d.type === "task" && isPlanMember(d, plan.id));
       activePlanEntries.push({ plan, tasks });
     }
 
@@ -278,11 +285,30 @@ export class SessionService {
     // Corpus-wide derived sessions over every ACTIVE plan's tasks (SPEC-042 D8) —
     // a fresh session learns who else is working BEFORE it claims. Reuses the
     // SAME `deriveSessions` pure fn `TaskWorkflowService.ready`'s plan-scoped
-    // `sessions[]` uses, just over the union of every active plan's children
+    // `sessions[]` uses, just over the union of every active plan's members
     // instead of one plan's.
-    const activeTasks = allDocs.filter(
-      (d) => d.type === "task" && d.parent_id !== null && activePlanIds.has(d.parent_id),
-    );
+    //
+    // reason: PROJECTED from `allActiveTaskIds` — the ids of the member sets
+    // `isPlanMember` already decided in the loop above — instead of asking the
+    // membership question a second time here. The pre-fix form keyed on the
+    // `parent_id` proxy AND on `activePlanIds`, so a task whose `--parent`
+    // legitimately diverges from its `--plan-id` (SPEC-065 D4) had its LIVE
+    // claim missing from `active_sessions`, the field a fresh session reads to
+    // learn who else is working BEFORE it claims
+    // (task-the-eleventh-plan-member-site-found-by-enumeration). Two
+    // independent derivations of "this plan's tasks" is how that proxy survived
+    // here after nine sibling sites were converted, so there is exactly ONE
+    // membership decision with two consumers now — nothing left to drift.
+    // The ACTIVE-ness half of the question is UNCHANGED and stays where it
+    // was: the archived/deprecated `continue` above, which is what keeps a
+    // non-active plan's own member out of this set (membership decides WHICH
+    // plan a task belongs to, never WHICH PLANS COUNT — REGRESSION-pinned in
+    // tests/integration/bootstrap-plan-membership.bun.test.ts).
+    // Filtering `allDocs` rather than flattening `activePlanEntries` preserves
+    // the corpus ordering the pre-fix filter produced, keeping `deriveSessions`'
+    // group order and per-group `task_slugs` order byte-identical.
+    const activeTaskIds = new Set<DocId>(allActiveTaskIds);
+    const activeTasks = allDocs.filter((doc) => activeTaskIds.has(doc.id));
     const activeSessions = deriveSessions(activeTasks, nowIso, this.deps.claimTtlMinutes);
 
     // Pending review queue — same `status: "draft"` filter ReviewService.pending uses.
