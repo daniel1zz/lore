@@ -21,10 +21,13 @@
  *               and always returns [] (fail-open, never blocks an unrelated command)
  */
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
 import {
   extractTestFileTokens,
   extractCdPrefixTarget,
+  describeDerivedCdTarget,
+  describePrecheckRoots,
   findMissingOracleFiles,
   findCaptureFlagConflict,
 } from "../../../src/adapters/cli/evidence-precheck.js";
@@ -118,10 +121,221 @@ describe("extractCdPrefixTarget — BOUNDARY", () => {
     ).toBe("packages/lore");
   });
 
-  it("does not recognize cd when it is not the first command in the chain", () => {
+  it("recognizes a cd that is NOT the first command in the chain", () => {
+    // reason: this exact case was the defect
+    // (task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a). The
+    // pre-fix regex was anchored at `^`, so it returned null here and the
+    // precheck resolved the test path against the repo root — a FALSE refusal
+    // of a correct command. Do not re-anchor this at the start of the string.
     expect(
       extractCdPrefixTarget("echo hi && cd packages/lore && bun test x.test.ts"),
+    ).toBe("packages/lore");
+  });
+});
+
+// ─── extractCdPrefixTarget — chain scanning (task-evidence-precheck-only- ────
+// ─── sees-a-cd-in-the-first-segment-of-a) ────────────────────────────────
+//
+// Six-dimension coverage for the multi-segment scan:
+//   HAPPY:      this repo's own mandated `bun run build && cd packages/lore &&
+//               bun test <e2e file>` form derives `packages/lore`
+//   NEGATIVE:   a chain with no cd segment at all still derives null; a bare
+//               `cd` with no target derives null; `cd` inside a quoted filter
+//               value is not a cd segment
+//   BOUNDARY:   two cd segments resolve to the LAST (by value); a cd AFTER the
+//               test invocation is NOT applied (shell semantics); a separator
+//               inside a quoted cd target does not split the segment
+//   ERROR:      a `cd` segment carrying extra words (`cd a b`) is not a
+//               recognized cd segment (same as pre-fix)
+//   STATE:      last-cd-wins across MIXED `&&`/`;` separators
+//   REGRESSION: the leading-cd and no-cd forms keep their pre-fix values;
+//               the module imports no Node builtin
+
+describe("extractCdPrefixTarget — chain scanning HAPPY", () => {
+  it("derives the cd target from this repo's mandated build-then-cd e2e form", () => {
+    expect(
+      extractCdPrefixTarget(
+        "bun run build && cd packages/lore && bun test tests/e2e/resume-coverage-compiled.bun.test.ts",
+      ),
+    ).toBe("packages/lore");
+  });
+
+  it("derives the cd target from the mandated fresh-worktree install-then-cd form", () => {
+    expect(
+      extractCdPrefixTarget(
+        "bun install && cd packages/lore && bun test tests/unit/store/sqlite-store.bun.test.ts",
+      ),
+    ).toBe("packages/lore");
+  });
+});
+
+describe("extractCdPrefixTarget — chain scanning NEGATIVE", () => {
+  it("returns null for a multi-segment chain carrying no cd segment", () => {
+    expect(
+      extractCdPrefixTarget("bun run build && bun test tests/x.bun.test.ts"),
     ).toBeNull();
+  });
+
+  it("returns null for a bare `cd` with no target", () => {
+    expect(extractCdPrefixTarget("cd && bun test x.test.ts")).toBeNull();
+  });
+
+  it("does not treat `cd` inside a quoted filter value as a cd segment", () => {
+    expect(
+      extractCdPrefixTarget('bunx vitest run -t "cd packages/lore" x.test.ts'),
+    ).toBeNull();
+  });
+});
+
+describe("extractCdPrefixTarget — chain scanning BOUNDARY", () => {
+  it("resolves two cd segments against the LAST one, by value", () => {
+    expect(extractCdPrefixTarget("cd a && cd b && bun test f.test.ts")).toBe("b");
+  });
+
+  it("resolves three cd segments against the LAST one, by value", () => {
+    expect(
+      extractCdPrefixTarget("cd a && cd b && cd c && bun test f.test.ts"),
+    ).toBe("c");
+  });
+
+  it("does NOT apply a cd that comes AFTER the test invocation", () => {
+    // reason: shell semantics — the runner resolves `f.test.ts` before the
+    // trailing `cd` ever executes, so that cd is not the file's base
+    // directory. Without this bound the fix would widen into "any cd
+    // anywhere", adding a candidate root that can only produce a FALSE
+    // ACCEPT (the task's own AC-4 anti-degradation control).
+    expect(extractCdPrefixTarget("bun test f.test.ts && cd packages/lore")).toBeNull();
+  });
+
+  it("keeps a separator inside a quoted cd target from splitting the segment", () => {
+    expect(
+      extractCdPrefixTarget('cd "weird;dir" && bun test f.test.ts'),
+    ).toBe("weird;dir");
+  });
+
+  it("keeps a quoted `&&` inside a filter value from splitting the segment", () => {
+    expect(
+      extractCdPrefixTarget(
+        'cd packages/lore && bunx vitest run -t "a && b" f.test.ts',
+      ),
+    ).toBe("packages/lore");
+  });
+});
+
+describe("extractCdPrefixTarget — chain scanning ERROR", () => {
+  it("does not recognize a cd segment carrying extra words", () => {
+    expect(
+      extractCdPrefixTarget("cd a b && bun test f.test.ts"),
+    ).toBeNull();
+  });
+});
+
+describe("extractCdPrefixTarget — chain scanning STATE", () => {
+  it("applies last-cd-wins across MIXED && and ; separators", () => {
+    expect(extractCdPrefixTarget("cd a; cd b && bun test f.test.ts")).toBe("b");
+  });
+
+  it("treats `;` separators exactly like `&&` in a multi-segment chain", () => {
+    expect(
+      extractCdPrefixTarget(
+        "bun run build; cd packages/lore; bun test tests/e2e/x.bun.test.ts",
+      ),
+    ).toBe("packages/lore");
+  });
+});
+
+describe("extractCdPrefixTarget — chain scanning REGRESSION", () => {
+  it("keeps the pre-fix value for the leading-cd and no-cd forms", () => {
+    expect(
+      extractCdPrefixTarget("cd packages/lore && bun test tests/foo.bun.test.ts"),
+    ).toBe("packages/lore");
+    expect(extractCdPrefixTarget("bunx vitest run foo.test.ts")).toBeNull();
+  });
+
+  it("keeps the module free of Node builtins so it stays vitest-importable", () => {
+    // reason: the module header promises "pure (no IO, no fs, no process
+    // access) — vitest-safe". A `node:fs`/`node:path` import added for
+    // convenience would break every vitest consumer of this file, so the
+    // promise gets a grep-shaped oracle rather than only prose.
+    const source = readFileSync(
+      new URL("../../../src/adapters/cli/evidence-precheck.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(/from\s+"node:/);
+    expect(source).not.toMatch(/require\(/);
+  });
+});
+
+// ─── describeDerivedCdTarget ────────────────────────────────────────────────
+//
+// Six-dimension coverage:
+//   HAPPY:      names the derived target
+//   NEGATIVE:   says "none" when no cd segment precedes the named test file
+//   BOUNDARY:   names the LAST target of a multi-cd chain, not the first
+//   ERROR:      a command with no extractable target still yields a non-empty
+//               diagnosable sentence (never an empty string)
+//   STATE:      the sentence tracks the same value extractCdPrefixTarget derives
+//   REGRESSION: adapter-neutral wording — no CLI-only or MCP-only flag spelling,
+//               so both refusal surfaces can append it verbatim
+
+describe("describeDerivedCdTarget — HAPPY", () => {
+  it("names the derived cd target", () => {
+    expect(
+      describeDerivedCdTarget(
+        "bun run build && cd packages/lore && bun test tests/e2e/x.bun.test.ts",
+      ),
+    ).toContain("packages/lore");
+  });
+});
+
+describe("describeDerivedCdTarget — NEGATIVE", () => {
+  it("says none when no cd segment precedes the named test file", () => {
+    const described = describeDerivedCdTarget("bunx vitest run foo.test.ts");
+    expect(described).toContain("none");
+    expect(described).not.toContain("packages/lore");
+  });
+});
+
+describe("describeDerivedCdTarget — BOUNDARY", () => {
+  it("names the LAST cd target of a multi-cd chain, not the first", () => {
+    const described = describeDerivedCdTarget("cd first && cd second && bun test f.test.ts");
+    expect(described).toContain("second");
+    expect(described).not.toContain("first");
+  });
+});
+
+describe("describeDerivedCdTarget — ERROR", () => {
+  it("returns a non-empty diagnosable sentence even with an empty command", () => {
+    expect(describeDerivedCdTarget("").trim().length).toBeGreaterThan(0);
+  });
+});
+
+describe("describeDerivedCdTarget — STATE", () => {
+  it("tracks the same value extractCdPrefixTarget derives, for every shape", () => {
+    for (const command of [
+      "bun run build && cd packages/lore && bun test tests/x.bun.test.ts",
+      "cd a; cd b && bun test f.test.ts",
+      "bunx vitest run foo.test.ts",
+      "bun test f.test.ts && cd trailing",
+    ]) {
+      const target = extractCdPrefixTarget(command);
+      const described = describeDerivedCdTarget(command);
+      if (target === null) expect(described).toContain("none");
+      else expect(described).toContain(target);
+    }
+  });
+});
+
+describe("describeDerivedCdTarget — REGRESSION", () => {
+  it("stays adapter-neutral so both refusal surfaces can append it verbatim", () => {
+    // reason: the CLI refusal spells flags `--command`/`--oracle manual` while
+    // the MCP one spells them `"command"`/`oracle: "manual"`. This clause is
+    // shared SSOT between both, so it must name NEITHER spelling — otherwise
+    // one surface renders wording that does not exist on its own interface.
+    const described = describeDerivedCdTarget("cd packages/lore && bun test f.test.ts");
+    expect(described).not.toContain("--command");
+    expect(described).not.toContain("--oracle");
+    expect(described).not.toContain('oracle: "manual"');
   });
 });
 
@@ -220,6 +434,128 @@ describe("findMissingOracleFiles — STATE", () => {
         { cwd: "/repo", fileExists },
       ),
     ).toEqual(["absent.test.ts"]);
+  });
+});
+
+// ─── findMissingOracleFiles / describePrecheckRoots — multi-segment cd ──────
+// ─── (task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a) ───
+//
+// The composition-level half of the same six dimensions: the parser fix only
+// matters if it changes which ROOTS the existence check actually probes.
+//   HAPPY:      the mandated build-then-cd form resolves under the cd target
+//   NEGATIVE:   a no-cd command's root list is unchanged
+//   BOUNDARY:   a two-cd chain probes the LAST target's root, by value
+//   ERROR:      a cd-prefixed command naming a nonexistent file is STILL refused
+//   STATE:      the cd-joined root is ordered before the bare cwd root
+//   REGRESSION: the leading-cd root list is byte-identical to its pre-fix value
+
+describe("findMissingOracleFiles — multi-segment cd HAPPY", () => {
+  it("accepts the mandated build-then-cd e2e form when the file exists under the cd target", () => {
+    const fileExists = vi.fn(
+      (p: string) => p === "/repo/packages/lore/tests/e2e/x.bun.test.ts",
+    );
+    const missing = findMissingOracleFiles(
+      "bun run build && cd packages/lore && bun test tests/e2e/x.bun.test.ts",
+      { cwd: "/repo", fileExists },
+    );
+    expect(missing).toEqual([]);
+    expect(fileExists).toHaveBeenCalledWith(
+      "/repo/packages/lore/tests/e2e/x.bun.test.ts",
+    );
+  });
+});
+
+describe("findMissingOracleFiles — multi-segment cd NEGATIVE", () => {
+  it("leaves a no-cd command's candidate roots exactly as they were", () => {
+    expect(
+      describePrecheckRoots("bunx vitest run tests/x.test.ts", {
+        cwd: "/repo",
+        corpusRoot: "/main",
+      }),
+    ).toEqual(["/repo", "/main"]);
+  });
+});
+
+describe("findMissingOracleFiles — multi-segment cd BOUNDARY", () => {
+  it("probes the LAST cd target's root, by value", () => {
+    expect(
+      describePrecheckRoots("cd a && cd b && bun test f.test.ts", {
+        cwd: "/repo",
+      }),
+    ).toEqual(["/repo/b", "/repo"]);
+  });
+
+  it("treats `;` separators exactly like `&&` at the composition level", () => {
+    expect(
+      describePrecheckRoots(
+        "bun run build; cd packages/lore; bun test tests/x.bun.test.ts",
+        { cwd: "/repo" },
+      ),
+    ).toEqual(["/repo/packages/lore", "/repo"]);
+  });
+});
+
+describe("findMissingOracleFiles — multi-segment cd ERROR", () => {
+  it("STILL refuses a cd-prefixed command naming a genuinely nonexistent file", () => {
+    // reason: the anti-degradation control (task's own AC-4) — a fix that
+    // widened cd recognition must not turn the precheck into "always accept".
+    // fileExists resolves a DIFFERENT real file, so this is not the trivial
+    // always-false case: the port is live and still finds nothing for the
+    // named token under ANY candidate root.
+    const fileExists = vi.fn(
+      (p: string) => p === "/repo/packages/lore/tests/e2e/present.bun.test.ts",
+    );
+    expect(
+      findMissingOracleFiles(
+        "bun run build && cd packages/lore && bun test tests/e2e/absent.bun.test.ts",
+        { cwd: "/repo", corpusRoot: "/main", fileExists },
+      ),
+    ).toEqual(["tests/e2e/absent.bun.test.ts"]);
+    expect(fileExists).toHaveBeenCalledWith(
+      "/repo/packages/lore/tests/e2e/absent.bun.test.ts",
+    );
+  });
+
+  it("STILL refuses when only a trailing cd could have rescued the path", () => {
+    // reason: the trailing cd is not applied (shell semantics), so a file that
+    // exists ONLY under it must stay refused — the false-accept direction the
+    // chain scan must not open.
+    const fileExists = vi.fn((p: string) => p === "/repo/packages/lore/f.test.ts");
+    expect(
+      findMissingOracleFiles("bun test f.test.ts && cd packages/lore", {
+        cwd: "/repo",
+        fileExists,
+      }),
+    ).toEqual(["f.test.ts"]);
+  });
+});
+
+describe("findMissingOracleFiles — multi-segment cd STATE", () => {
+  it("orders the cd-joined root before the bare cwd root", () => {
+    const roots = describePrecheckRoots(
+      "bun install && cd packages/lore && bun test tests/x.bun.test.ts",
+      { cwd: "/repo", corpusRoot: "/main" },
+    );
+    expect(roots).toEqual(["/repo/packages/lore", "/repo", "/main"]);
+  });
+});
+
+describe("findMissingOracleFiles — multi-segment cd REGRESSION", () => {
+  it("keeps the leading-cd root list byte-identical to its pre-fix value", () => {
+    expect(
+      describePrecheckRoots("cd packages/lore && bun test tests/x.bun.test.ts", {
+        cwd: "/repo",
+        corpusRoot: "/main",
+      }),
+    ).toEqual(["/repo/packages/lore", "/repo", "/main"]);
+  });
+
+  it("keeps naming no roots at all when the command extracts no test-file token", () => {
+    expect(
+      describePrecheckRoots("cd packages/lore && bun run typecheck", {
+        cwd: "/repo",
+      }),
+    ).toEqual([]);
   });
 });
 
