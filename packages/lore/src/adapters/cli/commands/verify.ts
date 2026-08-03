@@ -115,15 +115,16 @@
  * (declared-scope selection, M2 approval, execution, attested evidence write)
  * is the IDENTICAL shared pipeline `<PLAN>`-mode runs — a GENUINE runner
  * attestation (real command execution, real `attestation.runner`/`exit_code`/
- * `duration_ms`), NOT a synthesized marker. ONE known, NAMED gap remains: the
- * recorded evidence omits `ac_ref` (see `VerifyRunnerService._runVerification`'s
- * `recordAcRef` param JSDoc) — `TaskWorkflowService.appendEvidenceEntry`'s
- * cross-entity `ac_ref` check independently requires `task.parent_id` to
- * resolve to a `plan`, which is structurally impossible for an ad-hoc task;
- * closing that needs a `task-workflow-service.ts`/`corpus-service.ts` change
- * outside this task's file anchors (see the completion report for the
- * follow-up shape) — so an ad-hoc task's attested evidence does not (yet)
- * contribute to AC-coverage aggregation, though it IS genuinely attested.
+ * `duration_ms`), NOT a synthesized marker. The recorded evidence is now
+ * SHAPE-IDENTICAL to the plan-owned path, `ac_ref` included:
+ * `TaskWorkflowService.appendEvidenceEntry`'s cross-entity check no longer
+ * walks a plan-only `parent_id` for an ad-hoc task — it branches on
+ * `extra.adhoc` and resolves declared ids through the injected
+ * `CorpusService.resolveDeclaredAcIdsForAdhocTask` port (wired in `app.ts`),
+ * so an ad-hoc task's attested evidence DOES contribute to AC-coverage
+ * aggregation (`AcService.listCriteria`). Oracle:
+ * `tests/integration/cli/verify.test.ts`'s ad-hoc GREEN case asserts
+ * `attestation.runner` AND `ac_ref` on the same recorded entry.
  * Omitting `<PLAN>` with no `--task`, or naming a non-ad-hoc task, is a usage
  * error (exit 2) naming the requirement explicitly — never the internal
  * `getPlanBundle` leak. The `<PLAN>`-given path is BYTE-IDENTICAL to

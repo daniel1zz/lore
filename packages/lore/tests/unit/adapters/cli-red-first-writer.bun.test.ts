@@ -84,10 +84,19 @@ function getDoc(slug: string, cwd: string): DocJson {
   return (JSON.parse(result.stdout) as { data: { doc: DocJson } }).data.doc;
 }
 
-/** Creates a planless (`--adhoc`) task and returns its slug. */
+/**
+ * Creates a planless (`--adhoc`) task and returns its slug.
+ *
+ * `--ac-scope ""` is REQUIRED on the ad-hoc branch (task-an-ad-hoc-task-can-
+ * never-reach-the-attestation-path-that) — an ad-hoc creation without it now
+ * exits 4. The EMPTY form is the right one for this fixture: it preserves the
+ * "no declared AC" shape every assertion below depends on (an empty ac_scope
+ * leaves `requiresNoNewTestsDeclaration` inapplicable, so `lore done`'s
+ * behaviour here stays byte-identical), while making the claim explicit.
+ */
 function createAdhocTask(cwd: string, title: string): string {
   const created = mustRun(
-    ["create", "task", "--title", title, "--adhoc", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     cwd,
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;

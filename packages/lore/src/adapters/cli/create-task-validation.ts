@@ -28,6 +28,10 @@
  *     `--adhoc` is mutually exclusive with `--plan-id`/`--phase` (a planless
  *     task can declare neither) and with `--linkage` (one says "no plan",
  *     the other justifies the plan chosen) — SPEC-069 D2/D3.
+ *   - isAdhocAcScopeDeclarationMissing / formatAdhocAcScopeMissingError —
+ *     the ad-hoc branch of `--ac-scope` requiredness (task-an-ad-hoc-task-can-
+ *     never-reach-the-attestation-path-that), exit 4 rather than exit 2 for
+ *     parity with the plan branch's `task-create` gate denial.
  *   - inferTaskParentId — `--parent` when explicitly passed, else the
  *     resolved `--plan-id` (the dominant shape — a task parented elsewhere
  *     passes `--parent` explicitly). Unaffected by `--adhoc`: an ad-hoc task
@@ -154,6 +158,84 @@ export function formatTaskCreateMissingFlagsError(missing: string[]): string {
     );
   }
   return lines.join("\n");
+}
+
+/**
+ * Whether an `--adhoc` task creation is missing the `--ac-scope` DECLARATION —
+ * the ad-hoc branch of `--ac-scope` requiredness (task-an-ad-hoc-task-can-never-
+ * reach-the-attestation-path-that).
+ *
+ * The plan branch is enforced service-side by the `task-create` gate
+ * (`acScopeRequiredAtCreate`, `service/gate-predicates.ts`), whose trigger is
+ * "the task's parent plan resolves a spec-tier ancestor declaring >= 1
+ * script-mode AC". `--adhoc` is DEFINED as having no parent plan, so that
+ * trigger can never evaluate true for an ad-hoc task — while
+ * `VerifyRunnerService.verifyAdhocTask` resolves an ad-hoc task's governing
+ * spec THROUGH `extra.ac_scope`. With the key absent, the one flag that unlocks
+ * the shipped ad-hoc attestation path was gated on the one condition `--adhoc`
+ * guarantees is absent, so `lore done --override-attestation` became the routine
+ * archival route for the dominant task shape (and `lore done`'s red-first floor,
+ * keyed on the same key's presence, never fired either).
+ *
+ * This lives at the CLI layer, not in the gate predicate, because the predicate
+ * is fed a resolved PLAN LINEAGE and an ad-hoc task has none to feed it — the
+ * requirement here is keyed on the AUTHOR'S FLAG, which only this layer sees.
+ * `acScopeRequiredAtCreate`'s D3 vacuous pass is therefore unchanged: it still
+ * never fires for an ad-hoc task, and this check refuses one step earlier.
+ *
+ * ⛔ The declaration is never DERIVED from the corpus: guessing which spec
+ * governs a task is exactly what `verifyAdhocTask` refuses to do (zero or
+ * multiple matches refuse loud, never guessed), and deriving it at create time
+ * would move that guess one layer earlier.
+ *
+ * @param flags - the caller's raw flag values; only `adhoc` is read.
+ * @param acScopePassed - {@link ResolvedAcScope.passed} for this invocation —
+ *   whether `--ac-scope` appeared AT ALL, which is the bit that matters:
+ *   `--ac-scope ""` (an empty but EXPLICIT claim) satisfies the requirement,
+ *   an omitted flag does not.
+ * @returns `true` iff `--adhoc` was set and `--ac-scope` was never passed;
+ *   `false` for every non-ad-hoc creation (the plan branch keeps its
+ *   pre-existing gate-side behaviour, byte-identical).
+ * @example
+ * isAdhocAcScopeDeclarationMissing({ planId: undefined, parent: undefined, adhoc: true }, false); // => true
+ * @example
+ * isAdhocAcScopeDeclarationMissing({ planId: undefined, parent: undefined, adhoc: true }, true);  // => false — `--ac-scope ""` counts
+ * @example
+ * isAdhocAcScopeDeclarationMissing({ planId: "plan-x", parent: "plan-x" }, false);                // => false — plan branch, gate's business
+ */
+export function isAdhocAcScopeDeclarationMissing(
+  flags: TaskCreateFlags,
+  acScopePassed: boolean,
+): boolean {
+  if (flags.adhoc !== true) return false;
+  return acScopePassed === false;
+}
+
+/**
+ * Formats {@link isAdhocAcScopeDeclarationMissing}'s refusal — the exit-4
+ * message `lore create task --adhoc` prints when no `--ac-scope` was passed.
+ *
+ * Names BOTH legal forms verbatim (a real id list AND the explicit-empty
+ * `--ac-scope ""`), because an author who genuinely claims no criterion must be
+ * able to say so without guessing the syntax — an empty declaration does not
+ * make the task verifiable, it makes the author's claim AUDITABLE, which is a
+ * different and achievable goal. Points at `lore ac list <spec>` for legal ids
+ * rather than enumerating any spec's criteria: this layer runs before the store
+ * is opened and, unlike the plan branch's `feedTaskCreate`, has no resolved
+ * governing spec to enumerate from.
+ */
+export function formatAdhocAcScopeMissingError(): string {
+  return [
+    "Error: --adhoc requires an explicit --ac-scope declaration.",
+    "  An ad-hoc task has no parent plan, so `lore verify --task <slug>` resolves its",
+    "  governing spec THROUGH extra.ac_scope. With that key absent the task can never",
+    "  reach a runner-attested pass, leaving `lore done --override-attestation` as its",
+    "  only archival route.",
+    "  Declare the criterion ids this task claims (legal ids: lore ac list <spec>):",
+    "    --ac-scope <AC-ID> [--ac-scope <AC-ID> ...]",
+    "  Or declare explicitly that it claims NONE — an auditable decision, not a silence:",
+    '    --ac-scope ""',
+  ].join("\n");
 }
 
 /**
