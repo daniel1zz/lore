@@ -249,7 +249,11 @@ function getDivergedFixture(): DivergedFixture {
     "--plan-id",
     activePlanSlug,
   ]);
-  const adhocTaskSlug = createDoc(dir, "task", "Planless Adhoc", ["--adhoc"]);
+  // reason: `--ac-scope ""` is REQUIRED on the --adhoc branch since
+  //   task-an-ad-hoc-task-can-never-reach-the-attestation-path-that (merge 3b20514) — the
+  //   explicit-empty declaration, distinct from absent. This fixture was authored on a branch
+  //   that predated that rule, so the two merged green-in-isolation and red together.
+  const adhocTaskSlug = createDoc(dir, "task", "Planless Adhoc", ["--adhoc", "--ac-scope", ""]);
 
   // draft → approved → deprecated: the ONLY non-terminal→non-active path a plan
   // can walk without the plan-close gate (VALID_TRANSITIONS, schemas.ts).
