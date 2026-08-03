@@ -16,6 +16,17 @@
  *     known summary line is present.
  *   - commandHasCaseFilter(command) — detects a `-t`/`--testNamePattern` case
  *     filter on the command (task "verify trust extensions" Part B).
+ *   - extractCaseFilterPatterns(command) — the VALUES of those same flags (the
+ *     text the runner compiles as a regex), read from the SAME two flag sets
+ *     `commandHasCaseFilter` uses so detection and extraction cannot disagree.
+ *   - findRegexMetacharacters(pattern) / escapeCaseFilterPattern(pattern) /
+ *     REGEX_METACHARACTERS_DESCRIPTION — the literal-vs-regex analysis and
+ *     repair for a filter pasted from a test title
+ *     (task-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles: a `-t` value is
+ *     a REGULAR EXPRESSION, so this repo's own AC titles — `AC-2.H1 (GREEN)`,
+ *     `all + caller_cwd` — select ZERO cases while the runner exits 0).
+ *     Consumed by `lore evidence`'s filtered-pass guard
+ *     (`adapters/cli/evidence-precheck.ts`).
  *   - CASE_FILTER_FLAGS_DESCRIPTION / RUNNER_SUMMARY_FORMATS_DESCRIPTION — the
  *     human-facing spelling of what the two rules above recognise, colocated
  *     with them so a consumer's error message never retypes (and drifts from)
@@ -239,6 +250,159 @@ export function commandHasCaseFilter(command: string): boolean {
   return tokens.some(
     (token) => CASE_FILTER_TOKENS.has(token) || token.startsWith(CASE_FILTER_EQUALS_PREFIX),
   );
+}
+
+/**
+ * Extracts the VALUE of every case-filter flag in `command` — the pattern text
+ * the runner will compile as a REGULAR EXPRESSION.
+ *
+ * Lives here, beside {@link commandHasCaseFilter} and the
+ * {@link CASE_FILTER_TOKENS}/{@link CASE_FILTER_EQUALS_PREFIX} sets it shares
+ * verbatim, for the same single-definition reason
+ * {@link CASE_FILTER_FLAGS_DESCRIPTION} does (SPEC-061 AC-061-14 fails on any
+ * re-spelling of the flag name in `packages/lore/src` executable code). A
+ * consumer that needs the pattern therefore never re-tokenizes the command
+ * itself, and detection ("is there a filter") can never disagree with
+ * extraction ("what is it") — both read the SAME two sets.
+ *
+ * @param command - The full shell command string.
+ * @returns Every case-filter value found, in source order, de-duplicated;
+ *   `[]` when the command carries no case filter (or carries one with no
+ *   value token — see the fail-open note below).
+ *
+ * // reason: a flag whose following token itself starts with `-` yields NO
+ * // extracted pattern (skipped), rather than treating the next flag as the
+ * // value. Both an argv parser (`-t --reporter x` → `-t` boolean) and this
+ * // extractor would be guessing; extracting nothing means a consumer's
+ * // diagnosis stays silent for that shape instead of naming a pattern the
+ * // runner never received. This is a deliberate fail-open in the SAME
+ * // direction as `countExplicitPathArgs`'s flag-value heuristic: it can only
+ * // ever withhold a diagnosis, never fabricate one.
+ *
+ * @example
+ * extractCaseFilterPatterns("bunx vitest run a.test.ts -t 'AC-2.H1 (GREEN)'")
+ * // => ["AC-2.H1 (GREEN)"]
+ *
+ * @example
+ * extractCaseFilterPatterns("bunx vitest run --testNamePattern=AC-1 a.test.ts")
+ * // => ["AC-1"]
+ *
+ * @example
+ * extractCaseFilterPatterns("bunx vitest run a.test.ts") // => []
+ */
+export function extractCaseFilterPatterns(command: string): string[] {
+  const tokens = tokenizeCommand(command);
+  const patterns: string[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (pattern: string): void => {
+    if (pattern.length === 0 || seen.has(pattern)) return;
+    seen.add(pattern);
+    patterns.push(pattern);
+  };
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined) continue;
+    if (token.startsWith(CASE_FILTER_EQUALS_PREFIX)) {
+      pushUnique(token.slice(CASE_FILTER_EQUALS_PREFIX.length));
+      continue;
+    }
+    if (!CASE_FILTER_TOKENS.has(token)) continue;
+    const value = tokens[index + 1];
+    if (value === undefined || value.startsWith("-")) continue;
+    pushUnique(value);
+  }
+  return patterns;
+}
+
+// ─── Literal-vs-Regex Case-Filter Analysis ──────────────────────────────────
+
+/**
+ * Every character that carries special meaning inside a JavaScript regular
+ * expression, and therefore every character whose presence in a PASTED TEST
+ * TITLE silently changes what a `-t` filter selects
+ * (task-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles: this repo's own
+ * AC-naming convention — `AC-2.H1 (GREEN)`, `AC-VS-9 (BOUNDARY)`, `all +
+ * caller_cwd` — puts two or three of them in almost every title an author
+ * would paste, and the resulting filter matched ZERO cases while the runner
+ * exited 0).
+ *
+ * The set is the full RegExp-syntax set, not the three that happened to bite:
+ * a subset would be another contiguous-substring-class matcher whose misses
+ * are silent (root CLAUDE.md, *Contiguous-substring assumption*). Ordered
+ * `\` first so a reader sees the escape character is itself escaped.
+ */
+const REGEX_METACHARACTERS: readonly string[] = [
+  "\\",
+  "^",
+  "$",
+  ".",
+  "|",
+  "?",
+  "*",
+  "+",
+  "(",
+  ")",
+  "[",
+  "]",
+  "{",
+  "}",
+];
+
+/**
+ * Human-facing spelling of {@link REGEX_METACHARACTERS}, colocated with the
+ * set for the same anti-drift reason as {@link CASE_FILTER_FLAGS_DESCRIPTION}
+ * — a consumer's refusal message never retypes (and so can never under-state)
+ * which characters are checked.
+ */
+export const REGEX_METACHARACTERS_DESCRIPTION = REGEX_METACHARACTERS.join(" ");
+
+/**
+ * Reports which {@link REGEX_METACHARACTERS} occur in `pattern`.
+ *
+ * @param pattern - a case-filter value (see {@link extractCaseFilterPatterns})
+ * @returns the metacharacters present, de-duplicated, in
+ *   {@link REGEX_METACHARACTERS} order — `[]` for a pattern that is already a
+ *   pure literal
+ * @example
+ * findRegexMetacharacters("AC-2.H1 (GREEN)") // => [".", "(", ")"]
+ * @example
+ * findRegexMetacharacters("AC-1 happy path") // => []
+ */
+export function findRegexMetacharacters(pattern: string): string[] {
+  return REGEX_METACHARACTERS.filter((metacharacter) => pattern.includes(metacharacter));
+}
+
+/**
+ * Escapes every {@link REGEX_METACHARACTERS} occurrence in `pattern` so the
+ * result, compiled as a regular expression, matches `pattern` LITERALLY —
+ * the repair for a filter pasted from a test title.
+ *
+ * @invariant `new RegExp(escapeCaseFilterPattern(p)).test(p) === true` for
+ *   every string `p`. This is the property a consumer relies on, and it is
+ *   what makes the escaped form safe to hand an operator as a ready-to-run
+ *   replacement (pinned per-metacharacter in this module's tests).
+ *
+ * Implemented as a per-character scan rather than a `String.replace` with a
+ * character-class regex: escaping the escape character correctly is the one
+ * place a regex-based escaper classically gets wrong, and a scan makes the
+ * `\` → `\\` case ordinary instead of special.
+ *
+ * @param pattern - the literal text to match (typically a test-case title)
+ * @returns the escaped pattern; a metacharacter-free `pattern` is returned
+ *   CHARACTER-IDENTICAL (never gratuitously quoted or wrapped)
+ * @example
+ * escapeCaseFilterPattern("AC-2.H1 (GREEN)") // => "AC-2\\.H1 \\(GREEN\\)"
+ * @example
+ * escapeCaseFilterPattern("AC-1 happy path") // => "AC-1 happy path"
+ */
+export function escapeCaseFilterPattern(pattern: string): string {
+  let escaped = "";
+  for (const character of pattern) {
+    if (REGEX_METACHARACTERS.includes(character)) escaped += "\\";
+    escaped += character;
+  }
+  return escaped;
 }
 
 // ─── Executed-Unit Parsing ───────────────────────────────────────────────────
