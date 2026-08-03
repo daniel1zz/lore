@@ -38,12 +38,22 @@
  *     OTHER named file is dropped with exit 0 and no warning, because vitest's
  *     own "no test files found" loud refusal is evaluated over the WHOLE
  *     invocation, not per named argument
+ *   - findCaptureFlagConflict(input) — the FOURTH self-report guard hosted here
+ *     (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the): a CLI
+ *     usage-shape check over `--capture`'s two structural conflicts — combined
+ *     with an explicit `--output-tail`/`--output-tail-file` (redundant: capture
+ *     IS the tail), or combined with `--oracle manual` (nothing capturable —
+ *     there is no command to spawn for a browser/visual check)
  *
- * All three guards are ADJACENT but INDEPENDENT: the first asks "does the
+ * All FOUR guards are ADJACENT but INDEPENDENT: the first asks "does the
  * file this command names exist at all", the second asks "did the filter this
  * command carries match anything", the third asks "would this command's OWN
- * invoked runner actually run every file it names". They share only the
- * oracle/result scope gate (`isSelfReportedPassInScope`).
+ * invoked runner actually run every file it names", the fourth asks "does
+ * --capture even make sense for this invocation's other flags". They share
+ * only the oracle/result scope gate (`isSelfReportedPassInScope`) — except the
+ * fourth, which is a pure CLI-usage shape check independent of `result`
+ * entirely (a malformed `--capture` combination is nonsensical regardless of
+ * what `--result` claims).
  *
  * Design: token EXTRACTION and existence-port CHECKING both live here so the
  * whole precheck is unit-testable with a fake `fileExists` — no real
@@ -711,4 +721,83 @@ export function findFilteredPassRefusal(input: {
       `so this pass is unproven. ${MATCHED_COUNT_REPAIR_HINT}`,
     value: input.command,
   };
+}
+
+// ─── Capture-Flag Conflict Guard (task-a-non-empty-output-tail-can-be-hand- ─
+// ─── authored-prose-and-the) ─────────────────────────────────────────────
+
+/**
+ * The FOURTH self-report guard hosted here — a pure CLI-usage-shape check over
+ * `--capture` (`commands/evidence.ts`'s own child-process-spawn mechanism,
+ * task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) combined
+ * with either of its two structural conflicts:
+ *
+ *   - `--output-tail`/`--output-tail-file` ALSO supplied — redundant and
+ *     ambiguous: `--capture` spawns `--command` itself and uses that real
+ *     stdout+stderr AS the tail, so a second, caller-supplied tail can only
+ *     ever be ignored (silently) or contradict the captured one. Refused
+ *     loudly instead so the caller picks exactly one evidentiary source.
+ *   - `--oracle manual` ALSO supplied — a manual/visual check has, by
+ *     definition, no command whose exit code proves anything (task's own
+ *     AC-4 BOUNDARY); there is nothing for `--capture` to spawn that would
+ *     mean what a browser/visual check means. The legitimate path for a
+ *     manual pass row is an explicit, non-empty, hand-typed description via
+ *     `--output-tail`/`--output-tail-file` — the residual self-report path
+ *     this task's design review deliberately keeps open, never deleted.
+ *
+ * Independent of `result` entirely (unlike every other guard in this module)
+ * — a malformed `--capture` combination is nonsensical regardless of what
+ * `--result` claims, so this runs BEFORE the oracle/result scope gate the
+ * other three guards share.
+ *
+ * @param input.oracle - the oracle kind as received (untyped `string`, same
+ *   adapter-agnostic reasoning as this module's other guards)
+ * @param input.capture - whether `--capture` was passed
+ * @param input.outputTail - `--output-tail` as received, `undefined` when omitted
+ * @param input.outputTailFile - `--output-tail-file` as received, `undefined` when omitted
+ * @returns a `VALIDATION_ERROR` (exit code 4 via `utils.ts::exitCode`) naming the
+ *   conflicting flag combination, or `null` when the combination is legal
+ * @example
+ * findCaptureFlagConflict({ oracle: "test", capture: true, outputTail: "x" });
+ * // => VALIDATION_ERROR naming the --output-tail conflict
+ * @example
+ * findCaptureFlagConflict({ oracle: "manual", capture: true });
+ * // => VALIDATION_ERROR naming the --oracle manual conflict
+ * @example
+ * findCaptureFlagConflict({ oracle: "test", capture: true }); // => null — legal
+ */
+export function findCaptureFlagConflict(input: {
+  oracle: string;
+  capture: boolean;
+  outputTail?: string;
+  outputTailFile?: string;
+}): LoreError | null {
+  if (!input.capture) return null;
+
+  if (input.outputTail !== undefined || input.outputTailFile !== undefined) {
+    return {
+      code: "VALIDATION_ERROR",
+      field: "capture",
+      message:
+        "--capture is mutually exclusive with --output-tail/--output-tail-file — " +
+        "--capture spawns --command itself and uses ITS OWN captured stdout+stderr " +
+        "as the tail; supply exactly one evidentiary source, not both.",
+      value: true,
+    };
+  }
+
+  if (input.oracle === "manual") {
+    return {
+      code: "VALIDATION_ERROR",
+      field: "capture",
+      message:
+        "--capture cannot be used with --oracle manual — a manual/visual check has no " +
+        "command whose exit code proves anything. Describe what was manually verified " +
+        "via --output-tail/--output-tail-file instead (a non-empty description is " +
+        "still required for a manual --result pass).",
+      value: true,
+    };
+  }
+
+  return null;
 }
