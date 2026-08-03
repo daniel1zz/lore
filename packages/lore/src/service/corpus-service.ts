@@ -232,6 +232,87 @@ function findDroppedStructuredExtraField(
 /** Time seam (D3/D10 convention) — never `Date.now()` read directly in method bodies. */
 const defaultNow = (): string => new Date().toISOString();
 
+// ─── Task phase namespace, resolved by PLAN MEMBERSHIP ───────────────────────
+
+/**
+ * Which plan's declared `extra.phases[]` govern a task's `extra.phase` — resolved
+ * by MEMBERSHIP (`extra.plan_id`, via {@link isPlanMember}), never by the
+ * `parent_id` proxy.
+ *
+ * `lore create task --plan-id P --parent Q` with `P !== Q` is a SUPPORTED shape
+ * (SPEC-065 D4; `--parent` merely DEFAULTS to `--plan-id`), and every
+ * phase-scoped READ already resolves the namespace by membership
+ * (`PhaseService.findTasksByPhase`). A `parent_id`-keyed write-time check
+ * therefore validated a diverged member's phase name against the FILING parent's
+ * namespace while every later read looked it up in the OWNING plan's — the tenth
+ * site of this codebase's plan-membership family, and its first on a write path
+ * (`task-the-tenth-plan-member-site-is-a-write-path-create-time`).
+ *
+ * Three distinct states, deliberately NOT collapsed into one "invalid phase"
+ * outcome: each needs a different repair, and a single message could not name it.
+ */
+type TaskPhaseNamespace =
+  /**
+   * The task declares no `extra.plan_id`, so it is a member of no plan and has NO
+   * phase namespace to check against. Reached by an `--adhoc` task (planless BY
+   * DESIGN — SPEC-069 D2) and by a `set` patch whose wholesale-replaced `extra`
+   * omits the field.
+   */
+  | { readonly kind: "no-membership" }
+  /**
+   * `extra.plan_id` is declared but matches no live plan in this corpus — e.g. a
+   * slug or short prefix where the canonical ULID belongs. ⛔ Deliberately NOT
+   * repaired by running the value through `resolve()`: every phase-scoped READ
+   * compares `extra.plan_id` to a plan id verbatim ({@link isPlanMember}), so a
+   * non-canonical value makes the task a member of nothing no matter what a
+   * write-time resolver would have accepted. Widening here would re-create the
+   * write/read namespace split this type exists to close.
+   */
+  | { readonly kind: "unresolvable-membership"; readonly declaredPlanId: string }
+  /** Resolved: `plan.extra.phases[]` IS the namespace the phase name is checked against. */
+  | { readonly kind: "owning-plan"; readonly plan: DocRecord };
+
+/**
+ * Inert `task`-shaped record whose ONLY use is to satisfy {@link isPlanMember}'s
+ * `DocRecord` parameter when no stored row is available to pass.
+ *
+ * reason: the shared predicate (`plan-membership.ts` — the codebase's ONLY
+ * definition, pinned by `isplanmember-single-definition.test.ts` and
+ * `bun run check:plan-member-sites`) reads exactly one field, `extra`, but is
+ * typed over the whole `DocRecord`. Both write paths need the answer BEFORE such
+ * a record exists: `create` has not inserted the row yet, and `set` must judge
+ * the PATCH's `extra` — not the stored one — because `extra` is replaced
+ * wholesale, so the stored `plan_id` may be about to disappear. Spreading this
+ * shell with the candidate `extra` bag is a predicate ADAPTER; re-implementing
+ * `extra.plan_id === planId` inline instead is exactly the drift that produced
+ * three byte-identical copies of the predicate and ten one-at-a-time site fixes.
+ *
+ * ⛔ Never persisted, never returned, never compared against a stored row: the
+ * only consumer is {@link CorpusService._resolveTaskPhaseNamespace}, which reads
+ * back nothing but the predicate's boolean. The non-`extra` fields are inert
+ * placeholders (empty ids, `version: 0`) precisely so a copy that ever escaped
+ * would be obviously unreal rather than plausibly a row.
+ */
+const PLAN_MEMBERSHIP_PROBE_TASK: DocRecord = Object.freeze({
+  id: "",
+  slug: "",
+  type: "task",
+  role: "plan",
+  title: "",
+  status: "draft",
+  priority: "medium",
+  content: "",
+  parent_id: null,
+  created_at: "",
+  updated_at: "",
+  created_by: "",
+  version: 0,
+  deleted_at: null,
+  tags: [],
+  extra: {},
+  ordinal: null,
+});
+
 /**
  * @deprecated `resolve_mdx` is accepted for backward-compatibility with existing callers
  * (CLI `get`, MCP `lore_get`) but is intentionally NOT read by `CorpusService.get()`.
@@ -792,46 +873,17 @@ export class CorpusService {
       resolvedParentMarkdown = rootPrd.content;
     }
 
-    // Cross-entity phase validation for tasks with extra.phase (AC-PHASE-3, SPEC-023 §4).
-    // reason: Zod cannot express cross-document constraints — must be enforced in service layer.
-    // Three sub-cases: (1) parent has no phases → VALIDATION_ERROR, (2) phase name not found
-    // → VALIDATION_ERROR, (3) phase found → proceed. Tasks without extra.phase bypass this check.
-    if (data.type === "task" && resolvedParentId !== null) {
-      const taskPhase =
-        typeof data.extra?.["phase"] === "string" ? (data.extra["phase"] as string) : undefined;
-      if (taskPhase !== undefined) {
-        const parentForPhaseResult = await this.store.find(resolvedParentId);
-        if (!parentForPhaseResult.ok) return parentForPhaseResult;
-        const parentForPhase = parentForPhaseResult.value;
-        if (parentForPhase !== null) {
-          const declaredPhases = parentForPhase.extra["phases"];
-          const phasesArray = Array.isArray(declaredPhases) ? declaredPhases : null;
-          if (!phasesArray || phasesArray.length === 0) {
-            return err({
-              code: "VALIDATION_ERROR",
-              field: "extra.phase",
-              message: `task references phase "${taskPhase}" but parent plan declares no phases`,
-              value: taskPhase,
-            });
-          }
-          const match = phasesArray.find(
-            (p): p is { name: string; description?: string } =>
-              typeof p === "object" && p !== null && (p as Record<string, unknown>)["name"] === taskPhase,
-          );
-          if (!match) {
-            const knownNames = phasesArray
-              .filter((p): p is { name: string } => typeof p === "object" && p !== null)
-              .map((p) => (p as { name: string }).name)
-              .join(", ");
-            return err({
-              code: "VALIDATION_ERROR",
-              field: "extra.phase",
-              message: `unknown phase "${taskPhase}"; parent plan declares: [${knownNames}]`,
-              value: taskPhase,
-            });
-          }
-        }
-      }
+    // Cross-entity phase validation for tasks with extra.phase (AC-PHASE-3, SPEC-023 §4),
+    // resolved against the plan this task is a MEMBER of — see
+    // `_validateTaskPhase`/`_resolveTaskPhaseNamespace` for the whole rule and the
+    // membership-vs-`parent_id` history. Deliberately NOT gated on
+    // `resolvedParentId !== null`: where the task is FILED has no bearing on which
+    // phase namespace governs it, and the old parent gate is exactly what made a
+    // supported `--plan-id P --parent Q` task read Q's phases. Tasks without
+    // `extra.phase` short-circuit inside the helper.
+    if (data.type === "task") {
+      const phaseValidation = await this._validateTaskPhase(data.extra ?? {});
+      if (!phaseValidation.ok) return phaseValidation;
     }
 
     // Cross-entity ac_scope validation for plans (SPEC-040 §T2 D5).
@@ -1695,43 +1747,16 @@ export class CorpusService {
       });
     }
 
-    // Cross-entity phase validation when updating a task's extra.phase (AC-PHASE-3, SPEC-023 §4).
-    // reason: same constraint as create — must validate phase against parent plan at write time.
+    // Cross-entity phase validation when updating a task's extra.phase (AC-PHASE-3,
+    // SPEC-023 §4) — the SAME `_validateTaskPhase` call `_createImpl` makes, against
+    // the PATCH's `extra` because `extra` is replaced wholesale (a patch can move the
+    // task's declared membership, or drop it, in the same write that sets the phase).
+    // reason: one shared method, not a second copy — the two copies this replaced were
+    // already drifting in their gate condition (`resolvedParentId` vs
+    // `existing.parent_id`), which is how a create/`set` disagreement would arrive.
     if (existing.type === "task" && parsedPatch.data.extra !== undefined) {
-      const newPhase = parsedPatch.data.extra["phase"];
-      if (typeof newPhase === "string" && existing.parent_id !== null) {
-        const parentForPhaseResult = await this.store.find(existing.parent_id);
-        if (!parentForPhaseResult.ok) return parentForPhaseResult;
-        const parentForPhase = parentForPhaseResult.value;
-        if (parentForPhase !== null) {
-          const declaredPhases = parentForPhase.extra["phases"];
-          const phasesArray = Array.isArray(declaredPhases) ? declaredPhases : null;
-          if (!phasesArray || phasesArray.length === 0) {
-            return err({
-              code: "VALIDATION_ERROR",
-              field: "extra.phase",
-              message: `task references phase "${newPhase}" but parent plan declares no phases`,
-              value: newPhase,
-            });
-          }
-          const match = phasesArray.find(
-            (p): p is { name: string; description?: string } =>
-              typeof p === "object" && p !== null && (p as Record<string, unknown>)["name"] === newPhase,
-          );
-          if (!match) {
-            const knownNames = phasesArray
-              .filter((p): p is { name: string } => typeof p === "object" && p !== null)
-              .map((p) => (p as { name: string }).name)
-              .join(", ");
-            return err({
-              code: "VALIDATION_ERROR",
-              field: "extra.phase",
-              message: `unknown phase "${newPhase}"; parent plan declares: [${knownNames}]`,
-              value: newPhase,
-            });
-          }
-        }
-      }
+      const phaseValidation = await this._validateTaskPhase(parsedPatch.data.extra);
+      if (!phaseValidation.ok) return phaseValidation;
     }
 
     // Cross-entity ac_scope validation when updating a plan's extra.ac_scope (SPEC-040 §T2 D5).
@@ -3455,6 +3480,179 @@ export class CorpusService {
     if (!parsed.success) return ok(null);
 
     return ok(new Set(parsed.data.map((c) => c.id)));
+  }
+
+  /**
+   * Resolve which plan's phase namespace governs a task, from the `extra` bag
+   * that is ABOUT TO BE PERSISTED — by membership, via {@link isPlanMember}.
+   *
+   * Scans the plan set and asks the shared predicate, which is the SAME shape
+   * every other plan-scoped query in this codebase uses (`getPlanBundle`,
+   * `PhaseService.findTasksByPhase`, `PhaseMigrationService.migrateTasks`) — so
+   * write-time and read-time can never disagree about who owns a task. ⛔ Do not
+   * "optimise" this into a direct `store.find(extra.plan_id)`: the id lookup that
+   * replaces it reads as an innocent `plan.id === someLocalConst` comparison
+   * which `bun run check:plan-member-sites` cannot see, so the membership rule
+   * would silently leave the shared predicate behind again.
+   *
+   * @param candidateExtra - The task's post-write `extra` bag: `data.extra` on
+   *   create, and the PATCH's `extra` on `set` (which replaces wholesale, so the
+   *   stored bag is not the one that will govern the doc after the write).
+   * @returns The resolved {@link TaskPhaseNamespace} — a FACT, never an error:
+   *   "this task has no membership" and "its declared membership matches no plan"
+   *   are both legitimate resolutions whose consequences the caller decides.
+   *   `err` only propagates a store failure.
+   * @example
+   * // task created with `--plan-id P --parent Q`:
+   * await this._resolveTaskPhaseNamespace({ plan_id: P, phase: "Phase A" });
+   * // => { kind: "owning-plan", plan: <P> }   (never Q, whatever parent_id says)
+   */
+  private async _resolveTaskPhaseNamespace(
+    candidateExtra: Record<string, unknown>,
+  ): Promise<Result<TaskPhaseNamespace, LoreError>> {
+    // reason: a READ of the declared field (to report it and to bound the scan),
+    // never a membership comparison — the comparison is isPlanMember's alone.
+    // Same read `PhaseMigrationService.computeDeclinedTaskWarnings` makes for its
+    // `planIdLabel`, adjudicated there for the identical reason.
+    const declaredPlanId = candidateExtra["plan_id"];
+    if (typeof declaredPlanId !== "string" || declaredPlanId.length === 0) {
+      return ok({ kind: "no-membership" });
+    }
+
+    const plansResult = await this.store.findMany({ type: "plan" });
+    if (!plansResult.ok) return plansResult;
+
+    const membershipProbe: DocRecord = { ...PLAN_MEMBERSHIP_PROBE_TASK, extra: candidateExtra };
+    const owningPlan = plansResult.value.find((plan) => isPlanMember(membershipProbe, plan.id));
+    if (owningPlan === undefined) {
+      return ok({ kind: "unresolvable-membership", declaredPlanId });
+    }
+    return ok({ kind: "owning-plan", plan: owningPlan });
+  }
+
+  /**
+   * Cross-entity `extra.phase` validation for a task, shared verbatim by
+   * `_createImpl` and {@link set} (AC-PHASE-3, SPEC-023 §4). Zod cannot express a
+   * cross-document constraint, so it lives here; both write paths call THIS one
+   * method so a phase name can never be accepted at create and refused by an
+   * otherwise-identical `set`, or vice versa.
+   *
+   * Every refusal names WHICH plan's namespace was consulted — the Silence
+   * requirement of `task-the-tenth-plan-member-site-is-a-write-path-create-time`:
+   * the pre-fix message quoted phases the author had never referenced (the filing
+   * parent's), with nothing on the surface to say a different plan had been read.
+   *
+   * ⛔ An UNDECLARED phase name is refused only for a task whose owning plan is
+   * resolvable and does not declare it. Nothing here refuses a phase TITLE that
+   * exists in the corpus but no plan declares — `PhaseMigrationService.buildGroups`
+   * creates exactly those by design (its one-group-per-task fallback), and this
+   * check never runs over migration output.
+   *
+   * ## Retroactive policy (armed 2026-08-03)
+   *
+   * This is a WRITE-path predicate change, so it re-judges the back-catalogue at
+   * each doc's NEXT write, not at arming time — the shape
+   * `knowledge-retro-a-newly-built-gate-leaves-every-pre-existing` records. The
+   * scope was therefore MEASURED before the change, over all 599 task docs in this
+   * repo's corpus (`lore list --type task --json --include-invalid`, incl.
+   * archived + invalidated):
+   *
+   * - `parent_id !== extra.plan_id` (diverged, non-adhoc): **0**
+   * - diverged AND carrying `extra.phase`: **0**  ← the affected set, asserted EMPTY
+   * - non-adhoc tasks with no `extra.plan_id`: **0**
+   * - `--adhoc` tasks carrying `extra.phase`: **0** of 147 adhoc tasks
+   * - undiverged tasks carrying `extra.phase`: **340** — all validated against the
+   *   plan that is simultaneously their parent, so byte-identical either way
+   * - non-adhoc tasks whose `extra.plan_id` resolves to NO live plan: **0** (all 340
+   *   phase-carrying tasks resolve, against 114 live plans) — the separate scope of
+   *   the `unresolvable-membership` refusal, which the divergence count above does
+   *   NOT cover and which an earlier reading of this task's scope missed
+   *
+   * DECISION: **no sweep, and no per-doc exemption is needed** — the affected set is
+   * empty, so every existing doc validates identically before and after. The
+   * measurement (not the absence of a report) is the evidence: the same predicate
+   * run inverted reported 452 agreements, and an injected synthetic diverged doc was
+   * detected, so the empty result came from a live query rather than a dead one.
+   * Should a diverged phase-carrying task ever be authored against a corpus whose
+   * plans have since renamed a phase, the refusal above names the owning plan and
+   * its declared names — repair the DOC (`lore create task --phase` /
+   * `lore phase rename`), never this predicate.
+   *
+   * @param candidateExtra - The task's post-write `extra` bag (see
+   *   {@link _resolveTaskPhaseNamespace}).
+   * @returns `ok(null)` when there is nothing to check (no `extra.phase` string)
+   *   or the name is declared by the owning plan; `VALIDATION_ERROR` on
+   *   `field: "extra.phase"` otherwise.
+   */
+  private async _validateTaskPhase(
+    candidateExtra: Record<string, unknown>,
+  ): Promise<Result<null, LoreError>> {
+    const taskPhase = candidateExtra["phase"];
+    if (typeof taskPhase !== "string") return ok(null);
+
+    const namespaceResult = await this._resolveTaskPhaseNamespace(candidateExtra);
+    if (!namespaceResult.ok) return namespaceResult;
+    const namespace = namespaceResult.value;
+
+    if (namespace.kind === "no-membership") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.phase",
+        message:
+          `task references phase "${taskPhase}" but declares no extra.plan_id, so it is a member ` +
+          "of no plan and has no phase namespace to validate against. Plan membership IS " +
+          "extra.plan_id (never parent_id) — declare it, or drop extra.phase. An --adhoc task " +
+          "is planless by design and can never carry a phase.",
+        value: taskPhase,
+      });
+    }
+
+    if (namespace.kind === "unresolvable-membership") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.phase",
+        message:
+          `task references phase "${taskPhase}" but its declared extra.plan_id ` +
+          `"${namespace.declaredPlanId}" matches no plan in this corpus, so the phase namespace ` +
+          "to validate against cannot be resolved. extra.plan_id must be a plan's canonical " +
+          "ULID — a slug or short prefix makes the task a member of nothing at every " +
+          "phase-scoped read too, so it is not accepted here either.",
+        value: taskPhase,
+      });
+    }
+
+    const owningPlan = namespace.plan;
+    const declaredPhases = owningPlan.extra["phases"];
+    const phasesArray = Array.isArray(declaredPhases) ? declaredPhases : null;
+    if (!phasesArray || phasesArray.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "extra.phase",
+        message:
+          `task references phase "${taskPhase}" but its plan ${owningPlan.slug} ` +
+          `(${owningPlan.id}) declares no phases`,
+        value: taskPhase,
+      });
+    }
+
+    const match = phasesArray.find(
+      (p): p is { name: string; description?: string } =>
+        typeof p === "object" && p !== null && (p as Record<string, unknown>)["name"] === taskPhase,
+    );
+    if (match) return ok(null);
+
+    const knownNames = phasesArray
+      .filter((p): p is { name: string } => typeof p === "object" && p !== null)
+      .map((p) => (p as { name: string }).name)
+      .join(", ");
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "extra.phase",
+      message:
+        `unknown phase "${taskPhase}"; its plan ${owningPlan.slug} (${owningPlan.id}) declares: ` +
+        `[${knownNames}]`,
+      value: taskPhase,
+    });
   }
 
   /**
