@@ -59,6 +59,37 @@
  * That is the cheaper failure — a commented-out copy cannot change a query
  * result, and the loud-zero check below still proves each rule is live.
  *
+ * ## Scope: exit 0 means "no COMPARISON-shaped site", never "the family is closed"
+ * (task-plan-member-sites-twelve-and-thirteen-both-structurally)
+ *
+ * All three rules above match a syntactic COMPARISON (`===`/`!==`) or a
+ * DEFINITION. Three shapes carry the exact same defect — a plan-scoped query
+ * that answers from `parent_id` instead of `extra.plan_id` — while being
+ * structurally invisible to every rule here, and each was measured and
+ * deliberately NOT mechanized rather than silently left uncovered:
+ *
+ *   - **Map/Set lookup** (`slugById.get(task.parent_id)`,
+ *     `activePlanIds.has(d.parent_id)`) — no `===`/`!==` token exists to match.
+ *     Widening R3 to catch the `.has()` shape was measured and REJECTED: it
+ *     flags legitimate `knowledge`/handoff groupings whose plan link genuinely
+ *     IS `parent_id` (see R3's own JSDoc below), and because allowlisting here
+ *     is BY FILE, admitting them would blind R3 to a real violation
+ *     reintroduced in the same file.
+ *   - **Store filter key** (`filters["parent_id"] = <a resolved plan id>`) —
+ *     `lore list --plan-id`'s pre-fix shape (site 13). A key ASSIGNMENT, not a
+ *     comparison; no rule here parses object literals or property writes.
+ *   - **Store lookup by parent** (`store.find(task.parent_id)`) — site 10's
+ *     shape. Measured at ~4% precision (11 tree-wide hits, 10 legitimate
+ *     non-task parent resolutions: phase→plan, plan→spec, spec→prd, tree
+ *     walks) — a rule at that precision would generate more allowlist entries
+ *     than real findings.
+ *
+ * A reader who sees this script exit 0 and concludes "plan membership is
+ * fully guarded" is trusting a scope this script never claimed. It closes the
+ * residual `plan-membership.ts`'s own JSDoc names ("a second predicate
+ * definition in disguise, or a raw comparison outside the shared module") —
+ * nothing more.
+ *
  * ## Loud-zero
  *
  * A path typo, a renamed field, or an over-aggressive comment strip must never
@@ -254,8 +285,9 @@ const RULE_RAW_MEMBERSHIP_COMPARISON: PlanMembershipRule = {
 
 /**
  * A plan-scoped resolution keyed on the `parent_id` PROXY. This is the shape of
- * the eight-site sweep, the ninth site, and (measured 2026-08-03) one live
- * unfixed site in `session-service.ts`'s `bootstrap`.
+ * the eight-site sweep, the ninth site, and (measured 2026-08-03, since fixed
+ * by task-the-eleventh-plan-member-site-found-by-enumeration) the eleventh
+ * site in `session-service.ts`'s `bootstrap`.
  *
  * ## Why the right-hand side is anchored at an identifier STARTING with `plan`
  *
@@ -266,10 +298,15 @@ const RULE_RAW_MEMBERSHIP_COMPARISON: PlanMembershipRule = {
  * those docs are `knowledge`/handoff docs, and a handoff has no
  * `extra.plan_id` — its `parent_id` IS its plan link (stated in
  * `packages/core/src/archive-candidates.ts`'s header). Since allowlisting is
- * BY FILE, admitting those three would require exempting `session-service.ts`,
- * which would blind this rule to the one REAL violation in the very same file
- * (`bootstrap`'s `d.parent_id === plan.id`). A narrower rule that reports the
- * true site beats a wider rule whose allowlist hides it.
+ * BY FILE, admitting those three would have required exempting
+ * `session-service.ts` WHOLESALE, which at measurement time would have blinded
+ * this rule to the one REAL violation then present in that same file
+ * (`bootstrap`'s `d.parent_id === plan.id`, since fixed by
+ * task-the-eleventh-plan-member-site-found-by-enumeration). The risk is not
+ * merely historical: a by-file allowlist blinds this rule to ANY
+ * comparison-shaped violation reintroduced in that same file for as long as
+ * the exemption stands, which is why a narrower rule that reports the true
+ * site still beats a wider rule whose allowlist hides it.
  *
  * Accepted residual (documented, not silent): a task-membership comparison
  * against a plan variable NOT named `plan…` (e.g. `owningPlan.id`, `p.id`) is

@@ -516,25 +516,30 @@ export class PhaseMigrationService {
    * marker #2).
    *
    * ⛔ Grouping deliberately does NOT validate `extra.phase` against `plan`'s own
-   * declared `extra.phases[]`, and a diverged member makes that visible: a task's
-   * `extra.phase` is validated at CREATE time against the plan resolved from its
-   * `parent_id` (`CorpusService._createImpl`/`set`), not from `extra.plan_id`, so
-   * a member of P3 filed at P4 had its phase name checked against P4's phase
-   * namespace while THIS function — correctly, per the membership invariant —
-   * groups it under P3. It can therefore produce a phase doc under P3 whose title
-   * P3 never declared. That is NOT a new failure mode this fix introduced: an
-   * undeclared group name was already reachable pre-fix for any task whose plan
-   * renamed or removed a phase after the task was written, and P7's own
-   * one-group-per-task fallback creates undeclared titles by design. Widening a
-   * phase name into an error here would make the one-shot migration REFUSE data
-   * it can losslessly carry, which is the opposite of the drop this task exists
-   * to close. The create-time asymmetry itself is the TENTH site of the
-   * membership family (`extra.phase` is looked up per plan MEMBERSHIP by
-   * `PhaseService.findTasksByPhase`, so the namespace it is validated against
-   * should be the member plan's, not the filing parent's) — it lives in
-   * `corpus-service.ts`/`phase-service.ts`, outside this task's file anchors, and
-   * changing it changes a WRITE-path validation outcome, so it is reported as a
-   * follow-up rather than smuggled in here.
+   * declared `extra.phases[]`. An undeclared group name is still reachable
+   * today for two INDEPENDENT reasons, neither this function's job to close:
+   * (1) a plan that renamed or removed a declared phase AFTER a task's
+   * `extra.phase` was written and validated — a later rename orphans the
+   * already-persisted string, since validation only ever runs at THAT write;
+   * (2) P7's own one-group-per-task fallback creates undeclared titles by
+   * design whenever neither `extra.phase` nor `extra.legacy_phase` is present.
+   * Widening a phase name into an error here would make the one-shot migration
+   * REFUSE data it can losslessly carry, which is the opposite of the drop
+   * this task exists to close.
+   *
+   * CLOSED (was the TENTH site of the membership family): create-time
+   * `extra.phase` validation used to resolve the governing plan from a task's
+   * `parent_id` (`CorpusService._createImpl`/`set`), not `extra.plan_id` — a
+   * member of P3 filed at P4 had its phase name checked against P4's phase
+   * namespace while THIS function, correctly, grouped it under P3, so it could
+   * produce a phase doc under P3 whose title P3 never declared.
+   * `task-the-tenth-plan-member-site-is-a-write-path-create-time` (`4f8e1b0`)
+   * fixed `CorpusService._resolveTaskPhaseNamespace`/`_validateTaskPhase` to
+   * resolve the owning plan via the SAME shared `isPlanMember` predicate this
+   * function uses, so create-time validation and this grouping can no longer
+   * disagree about which plan's namespace governs a task's phase name — the
+   * two residual reasons above are what remains, and neither is create/list
+   * disagreement.
    */
   private buildGroups(
     plan: DocRecord,

@@ -324,12 +324,27 @@ export class SessionService {
       if (task.type !== "task") continue;
       const claim = extractClaim(task);
       if (claim === undefined || claim.by !== by) continue;
+      // reason: plan membership is `extra.plan_id` — the DECLARED property
+      // {@link isPlanMember} reads — NEVER `task.parent_id`. SPEC-065 D4's
+      // `--plan-id P --parent Q` (P !== Q) shape means the filing parent can
+      // legitimately diverge from the plan a task is a MEMBER of; keying this
+      // report on `parent_id` reported the filing parent's slug for a diverged
+      // task, and the root PRD's slug for an `--adhoc` task (which has no plan
+      // by design, SPEC-069 D2) instead of "no plan"
+      // (task-plan-member-sites-twelve-and-thirteen-both-structurally, site 12).
+      // Not routed through `isPlanMember` itself: this is a Map LOOKUP keyed by
+      // the declared id, not a boolean membership comparison against a
+      // candidate plan — the same distinction `_resolveTaskPhaseNamespace`'s
+      // own `declaredPlanId` read draws (corpus-service.ts). `declaredPlanId`
+      // not resolving to a known doc (broken ref / hard delete / adhoc) is a
+      // data-integrity edge case, not a reason to fail the whole bootstrap
+      // snapshot — degrades to a placeholder, never silently a wrong slug.
+      const declaredPlanId = task.extra["plan_id"];
+      const planSlug =
+        typeof declaredPlanId === "string" ? (slugById.get(declaredPlanId) ?? "(unknown)") : "(unknown)";
       myClaims.push({
         task_slug: task.slug,
-        // reason: task.parent_id not resolving to a known doc (broken ref / hard
-        // delete) is a data-integrity edge case, not a reason to fail the whole
-        // bootstrap snapshot — degrades to a placeholder, never silently a wrong slug.
-        plan_slug: task.parent_id !== null ? (slugById.get(task.parent_id) ?? "(unknown)") : "(unknown)",
+        plan_slug: planSlug,
         claimed_at: claim.at,
         stale: isClaimStale(claim, nowIso, this.deps.claimTtlMinutes),
       });
