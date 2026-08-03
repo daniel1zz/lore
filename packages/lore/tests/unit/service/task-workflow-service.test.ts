@@ -154,6 +154,11 @@ function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
     result: "pass",
     recorded_by: "alice",
     output_tail: "captured output",
+    // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+    // now a compile-time-required field on EvidenceInput; "self-report" mirrors
+    // this fixture's pre-existing implicit behaviour (a hand-typed, non-captured
+    // tail) byte-for-byte. Tests exercising the discriminator itself override it.
+    capture_source: "self-report",
     ...overrides,
   };
 }
@@ -178,6 +183,13 @@ function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedE
     result: "pass",
     recorded_by: "runner",
     attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+    // now a compile-time-required field on VerifiedEvidenceInput; "runner" is
+    // the value this fixture's real-world caller (VerifyRunnerService, which
+    // always spawns its own commands) actually proves — appendEvidenceEntry
+    // would also force "runner" from `attestation` alone, but this documents
+    // the caller's own provenance claim rather than leaning on that override.
+    capture_source: "runner",
     ...overrides,
   };
 }
@@ -1420,6 +1432,7 @@ describe("HAPPY — recordVerifiedEvidence persists attestation verbatim (SPEC-0
         command: "bun test",
         result: "pass",
         recorded_by: "runner",
+        capture_source: "runner",
         attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1234, timed_out: false },
       },
       nowIso,
@@ -1435,6 +1448,7 @@ describe("HAPPY — recordVerifiedEvidence persists attestation verbatim (SPEC-0
         command: "bun run lint",
         result: "fail",
         recorded_by: "runner",
+        capture_source: "runner",
         attestation: { runner: "lore-cli", exit_code: 1, duration_ms: 5678, timed_out: false },
       },
       nowIso,
@@ -1473,6 +1487,7 @@ describe("BOUNDARY — recordVerifiedEvidence enforces the identical 50-entry ca
           command: `run ${i}`,
           result: "pass",
           recorded_by: "runner",
+          capture_source: "runner",
           attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
         },
         nowIso,
@@ -1493,6 +1508,7 @@ describe("BOUNDARY — recordVerifiedEvidence enforces the identical 50-entry ca
         command: "run 50",
         result: "pass",
         recorded_by: "runner",
+        capture_source: "runner",
         attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
       },
       nowIso,
@@ -1524,6 +1540,7 @@ describe("REGRESSION — recordVerifiedEvidence shares ac_ref cross-entity valid
         command: "bun test",
         result: "pass",
         recorded_by: "runner",
+        capture_source: "runner",
         ac_ref: "AC-VRF-1",
         attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
       },
@@ -1549,6 +1566,7 @@ describe("REGRESSION — recordVerifiedEvidence shares ac_ref cross-entity valid
         command: "bun test",
         result: "pass",
         recorded_by: "runner",
+        capture_source: "runner",
         ac_ref: "AC-VRF-1",
         attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
       },
@@ -1579,6 +1597,7 @@ describe("REGRESSION — recordVerifiedEvidence telemetry emits meta.attested ==
         command: "bun test",
         result: "pass",
         recorded_by: "runner",
+        capture_source: "runner",
         attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
       },
       "2026-07-08T10:00:00.000Z",
@@ -2588,6 +2607,7 @@ describe("BOUNDARY — an ATTESTED non-pass result never satisfies the floor (AC
     await taskWorkflowService.recordVerifiedEvidence(
       taskId,
       { oracle: "test", command: "bun test", result, output_tail, recorded_by: "runner",
+        capture_source: "runner",
         attestation: { runner: "lore-cli", exit_code: 1, duration_ms: 1, timed_out: false } },
       "2026-07-27T09:00:00.000Z",
     );
@@ -2610,6 +2630,7 @@ describe("BOUNDARY — an ATTESTED non-pass result never satisfies the floor (AC
         command: "bun test",
         result: "inconclusive",
         recorded_by: "runner",
+        capture_source: "runner",
         attestation: {
           runner: "lore-cli",
           exit_code: 0,

@@ -330,6 +330,7 @@ describe("lore_anchor_set — REGRESSION (task target, byte-identical to pre-SPE
       recorded_by: "agent:mcp",
       source: "mcp",
       output_tail: "ok",
+      capture_source: "self-report",
     });
     expect(evidenceResult.ok).toBe(true);
 

@@ -745,6 +745,15 @@ export class VerifyRunnerService {
           command: criterion.verify.command,
           result: verifyResult,
           recorded_by: opts.by,
+          // reason: task-capture-source-is-optional-at-the-evidence-write-boundary
+          // AC-3 — this service SPAWNS `criterion.verify.command` itself (step ③,
+          // `executor`), so "runner" is the value this call site can actually PROVE,
+          // not merely the value `appendEvidenceEntry` would force from `attestation`
+          // being present a few lines below. Passing it explicitly documents the
+          // caller's own provenance claim rather than leaning on that downstream
+          // override, and satisfies `VerifiedEvidenceInput`'s compile-time-required
+          // field either way.
+          capture_source: "runner",
           // reason: see this method's `recordAcRef` param JSDoc — both call
           // sites (verifyPlan, verifyAdhocTask) now pass `true` (AC-069-15), so
           // every runner-attested entry carries `ac_ref` equal to the executed

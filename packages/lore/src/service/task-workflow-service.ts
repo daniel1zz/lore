@@ -113,18 +113,19 @@
  *   prose-and-the) — NEVER inferred from the tail's own shape/content (a
  *   shape-based guess is exactly the proxy measured to fail: a hand-authored
  *   summary containing a runner-summary-looking substring passes any shape check
- *   cleanly). `commands/evidence.ts` (this fix's one wired call site) ALWAYS sets
- *   it explicitly on every write, never omitting it — "required, never defaulted"
- *   holds at that boundary. `appendEvidenceEntry` FORCES `"runner"` whenever
- *   `attestation !== undefined` regardless of whatever the caller passed (an
- *   attested row is runner-captured by construction — SPEC-039's trusted-runner
- *   boundary already proves it); otherwise it falls back to `"self-report"` for
- *   any caller that omits the field entirely — today, only the NOT-YET-updated
- *   `lore_evidence_add` MCP tool (`adapters/mcp/tools.ts`, explicitly out of this
- *   task's declared file anchors) — never silently claiming `"runner"` for that
- *   gap. A historical (or MCP-originated) entry's ABSENT `capture_source` reads
- *   as `"self-report"` at any consumption site, never as "unknown, therefore
- *   fine" (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2).
+ *   cleanly). REQUIRED on both {@link EvidenceInput} and {@link VerifiedEvidenceInput}
+ *   (task-capture-source-is-optional-at-the-evidence-write-boundary) — every
+ *   caller (`commands/evidence.ts`, `adapters/mcp/tools.ts`, `VerifyRunnerService`,
+ *   `PhaseWorkflowService`) passes the value it can actually PROVE; omission is a
+ *   compile error, not a runtime default. `appendEvidenceEntry` additionally
+ *   FORCES `"runner"` whenever `attestation !== undefined` regardless of whatever
+ *   the caller passed (an attested row is runner-captured by construction —
+ *   SPEC-039's trusted-runner boundary already proves it) — a correctness
+ *   override on a value the caller DID supply, not a fallback for one it omitted.
+ *   Only a PRE-existing stored row (written before this invariant armed) can lack
+ *   the field at all; such a row's ABSENT `capture_source` reads as `"self-report"`
+ *   at any consumption site, never as "unknown, therefore fine"
+ *   (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2).
  * @invariant addEvidence and recordVerifiedEvidence share ONE append implementation
  *   (private `appendEvidenceEntry`) — cap check, schema validation, ac_ref cross-entity
  *   validation, and the writeTaskExtra commit path are never duplicated between them.
@@ -531,18 +532,25 @@ export interface DoneResult {
  * verbatim, never counted as passing by any downstream consumer.
  *
  * `capture_source` (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the)
- * stays `.optional()` here, inherited unchanged from the base schema — `commands/
- * evidence.ts`, THIS task's fixed call site, ALWAYS sets it explicitly (never omits
- * it), so "required, never defaulted" holds at the boundary this task actually
- * controls. Widening it to a compile-time-required field would break the `lore_evidence_add`
- * MCP tool (`adapters/mcp/tools.ts`, explicitly out of this task's declared file
- * anchors — the dispatch note names it as deferred follow-up work, not something to
- * silently break); `appendEvidenceEntry`'s own `?? "self-report"` fallback is what
- * covers that ONE remaining caller honestly (never claims `"runner"` for it) until
- * that follow-up lands.
+ * is REQUIRED here (task-capture-source-is-optional-at-the-evidence-write-boundary) —
+ * `Omit<…, "capture_source"> & { capture_source: CaptureSource }`, not inherited
+ * `.optional()` from the base schema. Omission is now a compile error: the ONLY
+ * way this field is silently missing is data written before this invariant armed
+ * (read tolerance, `evidenceEntrySchema.capture_source` itself stays `.optional()`
+ * — see that field's own JSDoc). Both production adapters (`commands/evidence.ts`,
+ * `adapters/mcp/tools.ts`) already derive and pass a real value on every write —
+ * the fix that used to defer this to "follow-up work" (a nullish-coalescing
+ * self-report default in `appendEvidenceEntry`) is exactly the mechanism this
+ * task removes: a required-for-correctness field defaulted to its own SAFE
+ * value looks harmless and is exactly why it survived.
  */
-export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation" | "result"> & {
+export type EvidenceInput = Omit<
+  EvidenceEntry,
+  "recorded_at" | "attestation" | "result" | "capture_source"
+> & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
+  /** REQUIRED — see this type's own header comment. The value the caller can actually PROVE, never a convenient default. */
+  capture_source: CaptureSource;
   /** See {@link ClaimOpts.source}. */
   source?: string;
   /** See {@link ReleaseOpts.callerCwd} — same field, same Q3 mismatch use, `commands/evidence.ts` is this one's populator. Never persisted onto the written evidence entry (consumed pre-write only, see `_addEvidenceImpl`). */
@@ -552,9 +560,18 @@ export type EvidenceInput = Omit<EvidenceEntry, "recorded_at" | "attestation" | 
 /**
  * Evidence input for {@link TaskWorkflowService.recordVerifiedEvidence} — the ONLY shape
  * that may carry `attestation` (SPEC-039 §2 D2). Never exported to any CLI/MCP surface;
- * `VerifyRunnerService.verifyPlan` is the sole production caller.
+ * `VerifyRunnerService.verifyPlan` is the sole production caller. `capture_source` is
+ * REQUIRED here too (task-capture-source-is-optional-at-the-evidence-write-boundary) —
+ * mirrors {@link EvidenceInput}'s own requiredness so `appendEvidenceEntry`'s shared
+ * chokepoint never needs a fallback for either incoming shape. `VerifyRunnerService`
+ * always spawns its own commands, so it passes `"runner"` — the value it can prove —
+ * even though `appendEvidenceEntry` would additionally force `"runner"` from
+ * `attestation` alone; the explicit pass documents the caller's own provenance claim
+ * rather than relying on that downstream override.
  */
-export type VerifiedEvidenceInput = Omit<EvidenceEntry, "recorded_at">;
+export type VerifiedEvidenceInput = Omit<EvidenceEntry, "recorded_at" | "capture_source"> & {
+  capture_source: CaptureSource;
+};
 
 /** Options for {@link TaskWorkflowService.setAnchors}/`addAnchors`/`removeAnchors` (SPEC-042 D3). */
 export interface AnchorMutationOpts {
@@ -1081,9 +1098,13 @@ export function rejectMissingNonPassOutputTail(
  *
  * @param result - `EvidenceInput.result` as received (never `"inconclusive"`)
  * @param outputTail - `EvidenceInput.output_tail` as received, `undefined` when omitted
- * @param captureSource - `EvidenceInput.capture_source` as received — `undefined`
- *   (an omitted-field caller, e.g. the not-yet-updated MCP surface) is treated
- *   identically to `"self-report"`, never silently exempted the way `"runner"` is
+ * @param captureSource - `EvidenceInput.capture_source` as received — REQUIRED on
+ *   `EvidenceInput` (task-capture-source-is-optional-at-the-evidence-write-boundary),
+ *   so a live caller never actually supplies `undefined`; the parameter type stays
+ *   `CaptureSource | undefined` only for defensive robustness as a pure, independently
+ *   exported function. Any non-`"runner"` value (including a hypothetical `undefined`)
+ *   is treated identically to `"self-report"`, never silently exempted the way
+ *   `"runner"` is
  * @returns `ok(undefined)` for any non-`"pass"` result (D2, unaffected — that's
  *   {@link rejectMissingNonPassOutputTail}'s job), a `captureSource === "runner"` pass
  *   (any tail, independently verified), or a self-reported pass with a genuinely
@@ -1729,14 +1750,17 @@ export class TaskWorkflowService {
    *
    * @invariant `capture_source` is ALWAYS stamped on the written candidate — never
    *   omitted for a NEW row (task-a-non-empty-output-tail-can-be-hand-authored-prose-
-   *   and-the). `entry.attestation !== undefined` forces `"runner"` regardless of
-   *   whatever `entry.capture_source` held (an attested row is runner-captured by
+   *   and-the; requiredness on `entry` itself pinned by
+   *   task-capture-source-is-optional-at-the-evidence-write-boundary, `EvidenceInput`/
+   *   `VerifiedEvidenceInput` both make it a compile-time-required field, so `entry
+   *   .capture_source` is NEVER `undefined` here — no nullish-coalescing self-report
+   *   default exists at this chokepoint, by construction, not by convention).
+   *   `entry.attestation !== undefined` forces `"runner"` regardless of whatever
+   *   `entry.capture_source` held (an attested row is runner-captured by
    *   construction — `recordVerifiedEvidence`'s only production caller,
-   *   `VerifyRunnerService`, always spawns its own commands); otherwise the caller's
-   *   own `capture_source` is used, falling back to `"self-report"` only for a
-   *   HYPOTHETICAL untyped caller that bypassed `_addEvidenceImpl`'s own required-field
-   *   check above (never reachable through the public `addEvidence` surface, which
-   *   refuses first) — the safe direction to fail toward, never silently "runner".
+   *   `VerifyRunnerService`, always spawns its own commands and passes `"runner"`
+   *   itself anyway) — a correctness override on a value the caller DID supply,
+   *   never a default standing in for one it omitted.
    */
   private async appendEvidenceEntry(
     idOrSlug: string,
@@ -1759,8 +1783,14 @@ export class TaskWorkflowService {
     }
 
     const nowIso = now();
-    const captureSource: CaptureSource =
-      entry.attestation !== undefined ? "runner" : (entry.capture_source ?? "self-report");
+    // reason: NO fallback here by design (task-capture-source-is-optional-at-the-
+    // evidence-write-boundary) — `entry.capture_source` is compile-time REQUIRED on
+    // both `EvidenceInput` and `VerifiedEvidenceInput`, so this is a correctness
+    // OVERRIDE for an attested row (proven runner-captured by construction), never a
+    // default standing in for an omitted value. Reaching for a nullish-coalescing
+    // self-report default here again reopens the exact silent-fallback defect this
+    // task removed — the type refusing omission is the point, not an inconvenience.
+    const captureSource: CaptureSource = entry.attestation !== undefined ? "runner" : entry.capture_source;
     const candidate = {
       oracle: entry.oracle,
       command: entry.command,

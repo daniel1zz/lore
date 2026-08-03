@@ -188,6 +188,7 @@ describe("HAPPY — surrogate-safe output_tail clipping (F1/AC-070-10)", () => {
       result: "fail",
       output_tail: outputTail,
       recorded_by: "agent:wiring-test",
+      capture_source: "self-report",
     });
     expect(evidenceResult.ok).toBe(true);
 
@@ -290,6 +291,7 @@ describe("STATE — shared fail-first AC coverage precedence (F3/AC-070-12)", ()
       ac_ref: "AC-X-1",
       recorded_by: "agent:wiring-test",
       output_tail: "ok",
+      capture_source: "self-report",
     });
     expect(passResult.ok).toBe(true);
     const failResult = await app.taskWorkflowService.addEvidence(task.slug, {
@@ -299,6 +301,7 @@ describe("STATE — shared fail-first AC coverage precedence (F3/AC-070-12)", ()
       ac_ref: "AC-X-1",
       recorded_by: "agent:wiring-test",
       output_tail: "AssertionError: expected 1 to equal 2",
+      capture_source: "self-report",
     });
     expect(failResult.ok).toBe(true);
 

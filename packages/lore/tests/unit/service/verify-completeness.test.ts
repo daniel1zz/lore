@@ -364,6 +364,9 @@ function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",
+    // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+    // now compile-time-required on EvidenceInput.
+    capture_source: "self-report",
     ...overrides,
   };
 }

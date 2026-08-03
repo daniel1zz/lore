@@ -193,7 +193,14 @@ async function recordEvidenceAt(
 ): Promise<DocRecord> {
   const result = await tw.addEvidence(
     task.id,
-    { oracle: "test", command: "bun test", result: "pass", recorded_by: "agent:t", output_tail: "ok" },
+    {
+      oracle: "test",
+      command: "bun test",
+      result: "pass",
+      recorded_by: "agent:t",
+      output_tail: "ok",
+      capture_source: "self-report",
+    },
     () => atIso,
   );
   if (!result.ok) throw new Error(`addEvidence failed: ${JSON.stringify(result.error)}`);

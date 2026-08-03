@@ -206,6 +206,7 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
         result: "pass",
         recorded_by: "alice",
         output_tail: "ok",
+        capture_source: "self-report",
       });
       expect(evidenceResult.ok).toBe(true);
       if (!evidenceResult.ok) return;

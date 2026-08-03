@@ -246,6 +246,10 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
+      // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+      // now compile-time-required on EvidenceInput; "self-report" mirrors this
+      // fixture's pre-existing implicit behaviour.
+      capture_source: "self-report",
       ...overrides,
     };
   }
@@ -263,6 +267,10 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "runner",
+      // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+      // now compile-time-required on VerifiedEvidenceInput; "runner" is the
+      // value the real-world caller (VerifyRunnerService) actually proves.
+      capture_source: "runner",
       attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
       ...overrides,
     };
