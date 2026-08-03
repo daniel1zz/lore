@@ -495,6 +495,36 @@ function readClaim(task: DocRecord): TaskClaim | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
+/**
+ * Whether `task` has ANY recorded claim at all (`extra.claim` is a non-null
+ * value), independent of whether that claim parses as a valid {@link
+ * TaskClaim} or records a `worktree` — task-the-uncommitted-worktree-guard-
+ * treats-no-claim-at-all-as-a. This is the RAW presence check
+ * `checkUncommittedAttestationWorktree` needs to tell "no claim was ever
+ * taken" apart from "a claim exists but never recorded `--worktree`": both
+ * states collapse to `readClaim(task)?.worktree === undefined`, which is
+ * exactly the proxy collapse that shipped the defect (a task with NO claim
+ * at all was treated as if it were "a claim that declined to declare a
+ * worktree", firing the Q3 opt-in-hole mismatch refusal on every unclaimed
+ * task called from inside a git repo — the orchestrator's routine post-merge
+ * re-verification path). Deliberately checks the RAW `extra.claim` field,
+ * not `readClaim(task) !== undefined` — a malformed claim object still means
+ * "a claim was recorded" for this narrow purpose (there IS something in
+ * `extra.claim`, even if it fails schema validation), so this predicate must
+ * not itself re-collapse malformed-claim into no-claim.
+ *
+ * @param task - The already-resolved task DocRecord.
+ * @returns `true` iff `task.extra.claim` is present and non-null.
+ * @example
+ * hasRecordedClaim({ extra: {} } as DocRecord); // => false
+ * @example
+ * hasRecordedClaim({ extra: { claim: { by: "alice", at: "…" } } } as DocRecord); // => true
+ */
+function hasRecordedClaim(task: DocRecord): boolean {
+  const raw = task.extra["claim"];
+  return raw !== undefined && raw !== null;
+}
+
 /** Reads and validates task.extra.verification_evidence. Returns [] when absent or malformed. */
 function readEvidence(task: DocRecord): EvidenceEntry[] {
   const raw = task.extra["verification_evidence"];
@@ -928,6 +958,22 @@ function rejectPlaceholderEvidenceCommand(command: string): Result<void, LoreErr
 //     and any future non-CLI caller) simply skips this ONE escalation; the
 //     primary cleanliness predicate is unaffected either way, since it keys
 //     off the claim's own recorded worktree, never this field.
+//
+//   ⛔ CORRECTED 2026-08-02 (task-the-uncommitted-worktree-guard-treats-no-
+//     claim-at-all-as-a) — the Q3 escalation above was ORIGINALLY keyed off
+//     `readClaim(task)?.worktree === undefined` alone, which is `true` for
+//     BOTH "a claim exists but recorded no worktree" (the intended Q3
+//     target) AND "there is no claim at all" (a task nobody has ever
+//     claimed, or one that was already released). That collapse fired the
+//     Q3 mismatch refusal on every `lore evidence --result pass` issued
+//     against an unclaimed task from inside a git repo — the orchestrator's
+//     standard post-merge re-verification path — asserting a fact about a
+//     claim that did not exist and prescribing a repair (re-claim the task)
+//     that was wrong for that caller. Fixed by checking {@link
+//     hasRecordedClaim} (the RAW `extra.claim` presence) FIRST: no claim at
+//     all now returns `null` (proceed) unconditionally, before the Q3
+//     mismatch check ever runs — the escalation below is reachable ONLY
+//     when a claim genuinely exists and genuinely recorded no worktree.
 
 /**
  * Distinct outcomes of measuring whether a claim's recorded worktree has
@@ -2661,9 +2707,9 @@ export class TaskWorkflowService {
    *   call sites never drift on wording independently.
    * @param callerCwd - See {@link ReleaseOpts.callerCwd} — `undefined` skips
    *   ONLY the Q3 mismatch escalation, never the primary predicate.
-   * @returns `null` when the call may proceed (measured-clean; not-measured,
-   *   either variant, per AC-3's "no fabricated refusal" control); a
-   *   `VALIDATION_ERROR` `LoreError` otherwise.
+   * @returns `null` when the call may proceed (no claim at all; measured-
+   *   clean; not-measured, either variant, per AC-3's "no fabricated
+   *   refusal" control); a `VALIDATION_ERROR` `LoreError` otherwise.
    */
   private checkUncommittedAttestationWorktree(
     task: DocRecord,
@@ -2674,13 +2720,25 @@ export class TaskWorkflowService {
     const worktree = claim?.worktree;
 
     if (worktree === undefined) {
-      // reason: Q3 opt-in-hole close — a claim recording NO worktree bypasses
-      // the primary predicate entirely (nothing to measure). Rather than a
-      // silent pass-through, escalate ONLY when this call is demonstrably
-      // running from inside a real git repository (callerCwd supplied AND
-      // it resolves as one) — that combination means --worktree was simply
-      // never passed at claim time, not that this corpus/session has nothing
-      // to do with git at all.
+      // reason: task-the-uncommitted-worktree-guard-treats-no-claim-at-all-
+      // as-a — `claim?.worktree === undefined` is ALSO true when there is no
+      // claim at all (never claimed, or already released). Check the RAW
+      // claim presence FIRST: with nothing recorded, there is nothing to
+      // measure and nothing to escalate — this is the fix, not a proxy for
+      // it (hasRecordedClaim reads task.extra.claim directly, never through
+      // readClaim's schema-validated result, so a malformed claim object
+      // still counts as "recorded" here rather than re-collapsing into
+      // no-claim).
+      if (!hasRecordedClaim(task)) {
+        return null;
+      }
+      // reason: Q3 opt-in-hole close — a claim that DOES exist but recorded
+      // NO worktree bypasses the primary predicate entirely (nothing to
+      // measure). Rather than a silent pass-through, escalate ONLY when this
+      // call is demonstrably running from inside a real git repository
+      // (callerCwd supplied AND it resolves as one) — that combination means
+      // --worktree was simply never passed at claim time, not that this
+      // corpus/session has nothing to do with git at all.
       if (callerCwd !== undefined && isInsideGitRepo(callerCwd)) {
         return buildNoWorktreeMismatchRefusal({ actionLabel, taskSlug: task.slug, callerCwd });
       }
