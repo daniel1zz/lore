@@ -2,7 +2,9 @@
  * Plan-membership predicate — the SHARED, single-source rule for "does this
  * task belong to this plan", consumed by every plan-scoped task query in
  * `AcService`, `CorpusService`, `VerificationProjectionService`,
- * `PhaseService`, `OutlineService`, and `SessionService`.
+ * `PhaseService`, `OutlineService`, `SessionService`,
+ * `PhaseMigrationService`, `TaskWorkflowService`, and `PhaseWorkflowService`
+ * — NINE modules, zero private copies.
  *
  * `extra.plan_id` IS plan membership — the DECLARED property, mandatory for
  * every non-adhoc task (`createDocInputSchema`'s task branch, `@lore/core`)
@@ -17,19 +19,34 @@
  * (task-plan-membership-is-extra-plan-id-but-the-last-task,
  * task-eight-more-plan-member-queries-still-key-on-parent-id).
  *
- * SSOT note — this is NOT the only copy in the codebase: `TaskWorkflowService`
- * and `PhaseWorkflowService` each carry their OWN private, byte-identical
- * one-line predicate (`task-workflow-service.ts`, `phase-workflow-service.ts`)
- * predating this module. This module does not replace those — this file's
- * module boundary (`service/CLAUDE.md`: "Service per concern, no
- * cross-service imports") forbids either this module or those two services
- * importing each other's private symbols, and neither of those two files is
- * anchored to the task that created this module
- * (task-eight-more-plan-member-queries-still-key-on-parent-id), so a
- * three-copies-into-one consolidation is a NAMED FOLLOW-UP, not resolved
- * here. This module exists so the SIX services above share exactly ONE copy
- * between themselves rather than each re-implementing the one-line rule
- * independently (eight independent copies is how the next divergence hides).
+ * SSOT note — this file holds the codebase's ONLY definition of the
+ * predicate: `grep -rl 'function isPlanMember' packages/lore/src/` prints
+ * exactly this path, and nothing else. It did not always. Until
+ * task-three-byte-identical-copies-of-isplanmember-survive,
+ * `TaskWorkflowService` and `PhaseWorkflowService` each carried a private,
+ * byte-identical one-line duplicate, and the reason recorded HERE for leaving
+ * them alone was factually WRONG: it claimed this file's module boundary
+ * (`service/CLAUDE.md`: "Service per concern, no cross-service imports")
+ * stopped those two services from importing this module. It does not.
+ * `plan-membership.ts` is **not a service** — no store dependency, no class,
+ * no service surface, no `Result`-returning method — it is a pure predicate
+ * module, exactly the shared infrastructure that pattern exists to permit.
+ * The disproof was already in the tree when the claim was written: SIX modules
+ * imported this one and violated no boundary (seven by the time it was
+ * retired). Importing `./plan-membership.js` from a workflow service is
+ * therefore the SAME import those seven already make, not a cross-service
+ * import. All three copies are now consolidated onto this file.
+ *
+ * fence: do NOT re-derive that retired blocker. The "no cross-service
+ * imports" pattern scopes SERVICES — store-holding classes composed in
+ * `app.ts` — and this module is neither. Nor is "the consumer isn't anchored
+ * to this module's originating task"
+ * (task-eight-more-plan-member-queries-still-key-on-parent-id) a reason for a
+ * copy to exist: that was a scoping fact about ONE past slice, not a property
+ * of the code. Re-adding a private copy anywhere under `packages/lore/src/`
+ * is a regression pinned by
+ * `tests/unit/service/isplanmember-single-definition.test.ts`; to justify one,
+ * you would first have to show this module IS a service.
  *
  * Proxy / Silence / Opt-in review
  * (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the):
@@ -39,13 +56,24 @@
  *   because membership is DEFINED by that field — mirrors the parent fix's
  *   own Q1 answer verbatim (task-plan-membership-is-extra-plan-id-but-the-
  *   last-task).
+ *   Stated RESIDUAL on the SSOT note above: `function isPlanMember` counts
+ *   DEFINITION SITES, so an arrow-const or differently-named inline
+ *   `t.extra["plan_id"] === planId` would satisfy the count while violating
+ *   the property. The wider grep for the raw comparison,
+ *   `grep -rn 'extra\["plan_id"\] ===' packages/lore/src/`, is the companion
+ *   check; as of 2026-08-03 its ONLY hit outside this file is
+ *   `export-docs-service.ts`'s `typeof doc.extra["plan_id"] === "string"`,
+ *   which is adjudicated NOT a membership test and must stay as it is: it has
+ *   no `planId` to compare against — it narrows a task's declared plan id to
+ *   a string so it can be used as an `index.mappings` key. Routing it through
+ *   this predicate would be a type error, not a de-duplication.
  * - **Silence** — N/A at this layer. This predicate has no failure mode of
  *   its own (a pure boolean read of one field, never empty/error) — whether
  *   an empty resulting member set needs a distinct "disagreement" signal is
  *   a per-CALLER decision (see each call site's own JSDoc), not something
  *   this shared predicate can decide on their behalf.
- * - **Opt-in** — none. Every call site in the six services above invokes
- *   this unconditionally.
+ * - **Opt-in** — none. Every call site in the nine modules above invokes this
+ *   unconditionally; there is no flag, config key, or env var gating it.
  *
  * Side-effect class: pure (no IO, no store dependency).
  */

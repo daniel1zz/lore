@@ -299,6 +299,15 @@ import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+// invariant: every plan-scoped task query in this file goes through the SHARED
+//   `isPlanMember` predicate, never a bare `t.parent_id === planId` —
+//   `extra.plan_id` is the DECLARED property, `parent_id` only a proxy a task's
+//   `--parent` may deliberately diverge from (SPEC-065 D4;
+//   task-plan-membership-is-extra-plan-id-but-the-last-task). This file used to
+//   carry its own private byte-identical copy; that copy's retirement rationale
+//   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
+//   (task-three-byte-identical-copies-of-isplanmember-survive).
+import { isPlanMember } from "./plan-membership.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import { compareClaimSessions, type SessionComparison } from "./gate-predicates.js";
 import type { GateDependencies } from "./gate-enforcer.js";
@@ -941,21 +950,6 @@ export function computeArchiveWalk(from: DocStatus): DocStatus[] {
  *  read-only fact computation, not the drift detector. */
 function isTerminalStatus(status: DocStatus): boolean {
   return status === "archived" || status === "deprecated";
-}
-
-/**
- * Plan-membership predicate keyed on `extra.plan_id` — the DECLARED property of plan
- * membership (mandatory for every non-adhoc task; `--plan-id` is the flag that writes
- * it, `createDocInputSchema`'s task branch enforces its presence). `parent_id` is a
- * PROXY a task's `--parent` may deliberately diverge from (SPEC-065 D4 — "a task
- * parented somewhere OTHER than its own plan passes --parent explicitly"), so a
- * `parent_id`-keyed query silently drops a diverged member from ITS OWN plan and
- * attributes it to whatever plan it happens to be filed under instead
- * (task-plan-membership-is-extra-plan-id-but-the-last-task). Every plan-scoped task
- * query in this file goes through this predicate, never a bare `t.parent_id === planId`.
- */
-function isPlanMember(task: DocRecord, planId: DocId): boolean {
-  return task.extra["plan_id"] === planId;
 }
 
 /**
