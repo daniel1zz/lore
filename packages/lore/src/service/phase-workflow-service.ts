@@ -83,6 +83,20 @@
  *   `TaskWorkflowService.claim` on task docs) — this service instead runs the ADDITIVE
  *   `phase-claim` checkpoint (SPEC-056 D2/D7), registered in `checkpoint-registry.ts`
  *   reusing the SAME checkpoint-agnostic predicate functions `task-claim` uses.
+ * @invariant `claim()` CAPTURES the session instance (`extra.claim.session_id`) from this
+ *   service's INJECTED `processEnv` for EVERY caller, through the SAME exported
+ *   `resolveClaimSessionId` seam `TaskWorkflowService.claim` uses — no flag, no
+ *   `ClaimOpts` field, no config key, and no second copy of the sanitize rule (that
+ *   lives once in `@lore/core::sessionIdDiscriminator`). The captured value is threaded
+ *   into BOTH the pre-write and post-write `phase-claim` gate calls AND persisted on the
+ *   claim record, so the fact the shared `noAnchorOverlap` predicate READS is the fact
+ *   this service WRITES. Before task-phaseworkflowservice-claim-captures-no-session-id-so-every
+ *   this path captured nothing while the predicate already required it, so EVERY
+ *   same-actor overlapping phase claim hit the `ANCHOR_OVERLAP_SESSION_UNMEASURED`
+ *   fail-safe with no way to satisfy it. ⛔ That fail-safe is NOT weakened by the fix: an
+ *   absent session id on either side still refuses (a gate that cannot measure must
+ *   refuse, not permit), and an env var present but sanitizing to empty still fails LOUD
+ *   (`VALIDATION_ERROR`, `field: "claim.session_id"`) before anything is written.
  * @invariant `claim()` is write-then-verify, not just gate-then-write (BUG-011 TOCTOU
  *   hardening, mirrors `TaskWorkflowService.claim`'s identical fix) — a post-write
  *   re-check of the SAME gate against a fresh sibling-claim read self-rolls-back
@@ -161,6 +175,17 @@ import {
   rejectBlankClaimWorktree,
   computeArchiveWalk,
   rejectMissingNonPassOutputTail,
+  // reason: task-phaseworkflowservice-claim-captures-no-session-id-so-every
+  // §Required fix 1/2 — the session-instance capture is SHARED with
+  // `TaskWorkflowService.claim`, never mirrored here. `resolveClaimSessionId`
+  // already owns the env-var precedence (`$CLAUDE_CODE_SESSION_ID` >
+  // `$CLAUDE_SESSION_ID`), the "absent means NOT MEASURED" answer, and the
+  // fail-loud translation of `@lore/core::sessionIdDiscriminator`'s
+  // sanitize-to-empty throw. A second copy of any of those three rules is
+  // exactly how the two claim paths would diverge again — the same
+  // SSOT-export precedent `rejectBlankClaimWorktree`/`computeArchiveWalk`
+  // above already set for this file.
+  resolveClaimSessionId,
 } from "./task-workflow-service.js";
 
 /**
@@ -457,6 +482,19 @@ export class PhaseWorkflowService {
    *   When present, `claim` runs the `phase-claim` checkpoint (SPEC-056 D2/D7) before
    *   writing the lease. Absent (the default) → ungated, byte-identical shape to
    *   TaskWorkflowService's own optional-gate constructor param.
+   * @param processEnv - Environment snapshot the claim path captures `session_id`
+   *   from (task-phaseworkflowservice-claim-captures-no-session-id-so-every), wired
+   *   to `process.env` by `adapters/cli/phase-wiring.ts` at composition time — the
+   *   SAME injected-env discipline `TaskWorkflowService`'s own `processEnv` arg
+   *   documents. Defaults to `{}` (no session facts), deliberately NOT to
+   *   `process.env`: an ambient default would make every unit test's gate verdict
+   *   depend on whether the test process happens to run under a Claude Code session,
+   *   i.e. a machine-dependent oracle. A bare
+   *   `new PhaseWorkflowService(store, telemetry, config)` therefore records no
+   *   `session_id` — byte-identical to pre-fix behavior, the same optional-DI
+   *   convention `gate` follows. The consequence of that default is that the
+   *   PRODUCTION capture rests on one argument at the wiring site, so it has its own
+   *   distribution oracle: `tests/integration/phase-claim-session-parity.bun.test.ts`.
    */
   constructor(
     private readonly store: StoreInterface,
@@ -466,6 +504,7 @@ export class PhaseWorkflowService {
       planId: string,
     ) => Promise<Result<Set<string> | null, LoreError>> = async () => ok(null),
     private readonly gate?: GateDependencies,
+    private readonly processEnv: Record<string, string | undefined> = {},
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
@@ -778,6 +817,17 @@ export class PhaseWorkflowService {
     const worktreeCheck = rejectBlankClaimWorktree(opts.worktree);
     if (!worktreeCheck.ok) return worktreeCheck;
 
+    // reason: task-phaseworkflowservice-claim-captures-no-session-id-so-every —
+    // captured BEFORE resolvePhase for the same reason the blank-worktree check is
+    // (and at the byte-identical position `TaskWorkflowService._claimImpl` captures
+    // it): an unusable session id is an ENVIRONMENT defect, not a doc-lookup
+    // concern, and must persist nothing regardless of whether the target phase
+    // exists. Never read from `opts` — see the `buildTaskClaim` call below for why
+    // no caller may declare which session it is.
+    const sessionIdResult = resolveClaimSessionId(this.processEnv);
+    if (!sessionIdResult.ok) return sessionIdResult;
+    const sessionId = sessionIdResult.value;
+
     const phaseResult = await this.resolvePhase(idOrSlug);
     if (!phaseResult.ok) return phaseResult;
     const phase = phaseResult.value;
@@ -787,7 +837,7 @@ export class PhaseWorkflowService {
     // existing-claim staleness check below share the exact same "now".
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(phase, opts.by, nowIso);
+    const gateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId);
     if (!gateResult.ok) return gateResult;
 
     const existingClaim = readClaim(phase);
@@ -815,6 +865,15 @@ export class PhaseWorkflowService {
         ...(opts.branch !== undefined ? { branch: opts.branch } : {}),
         ...(opts.machine !== undefined ? { machine: opts.machine } : {}),
         ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
+        // reason: the session instance is captured HERE, from the injected env —
+        // never taken from `opts`, because no caller (CLI flag, MCP arg, HTTP
+        // body) may declare which session it is. A self-declared session id
+        // would be exactly the kind of opt-in, forgeable proxy this mechanism
+        // replaces (task-phaseworkflowservice-claim-captures-no-session-id-so-every
+        // §Opt-in: "None, deliberately"). `buildTaskClaim` never carries it
+        // forward on a refresh — inheriting it would fabricate same-session
+        // evidence for a run that never measured one.
+        ...(sessionId !== undefined ? { session_id: sessionId } : {}),
       },
       carryForward,
     );
@@ -838,7 +897,7 @@ export class PhaseWorkflowService {
     // serialization ⇒ the LATER committer's post-write re-check always observes the
     // earlier committer's already-persisted claim ⇒ at least one side always
     // self-rolls-back; both may roll back on close timing — accepted, loud, retriable).
-    const postWriteGateResult = await this.enforceClaimGate(phase, opts.by, nowIso);
+    const postWriteGateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -1499,11 +1558,22 @@ export class PhaseWorkflowService {
    * task-claim-gate's phase-doc-typed sibling checkpoint, registered additively in
    * `checkpoint-registry.ts` reusing the SAME checkpoint-agnostic predicate functions).
    * Mirrors `TaskWorkflowService.enforceClaimGate` exactly except for the checkpoint id.
+   *
+   * @param sessionId - The claiming run's CAPTURED session discriminator (from
+   *   {@link resolveClaimSessionId} over this service's injected `processEnv`), or
+   *   `undefined` when this run genuinely has none. Threaded as a PARAMETER, never
+   *   read ambiently here, so the predicate compares the SAME fact `_claimImpl` is
+   *   about to persist — `noAnchorOverlap` exempts a same-`by` sibling only on a
+   *   PROVEN-equal session and refuses `ANCHOR_OVERLAP_SESSION_UNMEASURED` when
+   *   either side lacks one, so a `undefined` passed here still reaches the
+   *   fail-safe refusal by design
+   *   (task-phaseworkflowservice-claim-captures-no-session-id-so-every AC-3).
    */
   private async enforceClaimGate(
     phase: DocRecord,
     by: string,
     nowIso: string,
+    sessionId?: string,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
@@ -1521,11 +1591,22 @@ export class PhaseWorkflowService {
         candidateBy: by,
         candidateAnchors: extractFileAnchors(phase),
         siblingClaims: [],
+        // reason: omitted (never `undefined`-valued) when this run measured no
+        // session — `exactOptionalPropertyTypes`, and the SAME present-iff-measured
+        // shape `buildAnchorGateContext` produces for the populated branch below.
+        ...(sessionId !== undefined ? { candidateSessionId: sessionId } : {}),
       };
     } else {
       const bundleResult = await this.gate.getPlanBundle(phase.parent_id);
       if (!bundleResult.ok) return bundleResult;
-      const anchorCtx = buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, this.claimTtlMinutes);
+      const anchorCtx = buildAnchorGateContext(
+        by,
+        phase,
+        bundleResult.value.tasks,
+        nowIso,
+        this.claimTtlMinutes,
+        sessionId,
+      );
       ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx };
     }
 
