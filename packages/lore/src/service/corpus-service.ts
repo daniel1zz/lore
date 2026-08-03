@@ -92,6 +92,7 @@ import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
+import { isPlanMember } from "./plan-membership.js";
 
 /**
  * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
@@ -2398,7 +2399,25 @@ export class CorpusService {
     nowIso: string,
     actor: string,
   ): Promise<PlanCloseCascadeResult> {
-    const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
+    // reason: task-eight-more-plan-member-queries-still-key-on-parent-id — a
+    // `parent_id`-keyed query here is a WRITE-PATH defect, not a cosmetic one:
+    // it would ARCHIVE a non-member (a task merely parented under this closing
+    // plan via `--parent`, whose `extra.plan_id` points elsewhere) and STRAND
+    // a real diverged member (whose `extra.plan_id === plan.id` but whose
+    // `parent_id` points elsewhere, so a `parent_id`-keyed fetch never even
+    // sees it). `isPlanMember` (`extra.plan_id`, the DECLARED property — see
+    // its own JSDoc) replaces the `parent_id` proxy so every real member is
+    // archived and every non-member is left alone; no disagreement-reporting
+    // signal is needed here (unlike the parent task's `computePlanNowFullyTerminal`
+    // site) because this is a plain correct-field READ, not a computation that
+    // can be silently satisfied by an empty set — the store has no
+    // `extra.plan_id` filter, so this is a corpus-wide `type: "task"` findMany
+    // (same accepted tradeoff as `TaskWorkflowService.ready`/
+    // `computePlanNowFullyTerminal`), filtered in memory.
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    const tasksResult = allTasksResult.ok
+      ? ok(allTasksResult.value.filter((t) => isPlanMember(t, plan.id)))
+      : allTasksResult;
     const handoffsResult = await this.store.findMany({ parent_id: plan.id, type: "knowledge" });
     if (!tasksResult.ok || !handoffsResult.ok) {
       // reason: an enumeration failure here is a store-level fault, not a per-doc
@@ -2892,7 +2911,23 @@ export class CorpusService {
     // not just this one call site) but now POPULATES from both doc types. Two
     // type-filtered `findMany` calls (the store interface has no multi-type filter),
     // never a single unfiltered scan of the plan's children.
-    const tasksResult = await this.store.findMany({ parent_id: plan.id, type: "task" });
+    //
+    // reason: task-eight-more-plan-member-queries-still-key-on-parent-id — the task
+    // half is member-filtered via `isPlanMember` (`extra.plan_id`), never a bare
+    // `parent_id` match. This `tasks[]` feeds `checkpoint-registry.ts::
+    // buildAnchorGateContext`'s `siblingClaims` (via `task-workflow-service.ts`'s
+    // `task-claim` gate check), so a `parent_id`-keyed miss here is not cosmetic: a
+    // diverged member's OWN claim/anchors would be invisible to `noAnchorOverlap`,
+    // silently admitting an anchor-conflicting claim the gate exists to block — and a
+    // task merely PARENTED here (but belonging to a different plan) would wrongly
+    // appear as this plan's sibling. The `phase` half stays `parent_id`-keyed
+    // unchanged: phase docs have no `extra.plan_id` field at all (SPEC-023), so
+    // `parent_id` is the ONLY structural link for them — this task's defect is
+    // task-membership-specific, not a general `parent_id` ban.
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    const tasksResult = allTasksResult.ok
+      ? ok(allTasksResult.value.filter((t) => isPlanMember(t, plan.id)))
+      : allTasksResult;
     if (!tasksResult.ok) return tasksResult;
     const phasesResult = await this.store.findMany({ parent_id: plan.id, type: "phase" });
     if (!phasesResult.ok) return phasesResult;
@@ -3080,7 +3115,16 @@ export class CorpusService {
     const newestAssessmentResult = await this.resolveNewestAssessmentAt(planId);
     if (!newestAssessmentResult.ok) return newestAssessmentResult;
 
-    const tasksResult = await this.store.findMany({ parent_id: planId, type: "task" });
+    // reason: task-eight-more-plan-member-queries-still-key-on-parent-id — this feeds
+    // the `assessmentFreshness` gate-predicate advisory (non-blocking); a
+    // `parent_id`-keyed miss on a diverged member would silently under-report task
+    // activity, making a plan with genuinely-recent diverged-member work read as
+    // stale. `isPlanMember` (`extra.plan_id`) replaces the proxy; the `phase` query
+    // stays `parent_id`-keyed (phase docs carry no `extra.plan_id`, SPEC-023).
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    const tasksResult = allTasksResult.ok
+      ? ok(allTasksResult.value.filter((t) => isPlanMember(t, planId)))
+      : allTasksResult;
     if (!tasksResult.ok) return tasksResult;
     const phasesResult = await this.store.findMany({ parent_id: planId, type: "phase" });
     if (!phasesResult.ok) return phasesResult;

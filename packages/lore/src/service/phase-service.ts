@@ -27,6 +27,7 @@ import type { PlanPhase } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { isPlanMember } from "./plan-membership.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -356,17 +357,25 @@ export class PhaseService {
   // ── Private Helpers ───────────────────────────────────────────────────────
 
   /**
-   * Find all child tasks of a plan that have extra.phase === phaseName.
-   * Used by removePhase (guard) and renamePhase (bulk-update).
+   * Find all of a PLAN's member tasks (never a bare `parent_id` match — see
+   * {@link isPlanMember}) that have `extra.phase === phaseName`. Used by
+   * `removePhase` (guard: refuses removal while any member still references
+   * the phase) AND `renamePhase` (bulk-update: WRITES `extra.phase` on every
+   * matched task). The `renamePhase` consumer makes this a WRITE-adjacent
+   * site, not merely a read (task-eight-more-plan-member-queries-still-key-
+   * on-parent-id): a `parent_id`-keyed miss on a diverged member would leave
+   * that task's `extra.phase` referencing a name the plan's own `phases[]`
+   * no longer has, post-rename — an orphaned reference `removePhase`'s own
+   * guard could then never find either.
    */
   private async findTasksByPhase(
     planId: DocId,
     phaseName: string,
   ): Promise<Result<DocRecord[], LoreError>> {
-    const allChildrenResult = await this.store.findMany({ parent_id: planId, type: "task" });
-    if (!allChildrenResult.ok) return allChildrenResult;
-    const matched = allChildrenResult.value.filter(
-      (doc) => doc.extra["phase"] === phaseName,
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    if (!allTasksResult.ok) return allTasksResult;
+    const matched = allTasksResult.value.filter(
+      (doc) => isPlanMember(doc, planId) && doc.extra["phase"] === phaseName,
     );
     return ok(matched);
   }

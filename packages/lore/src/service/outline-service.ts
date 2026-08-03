@@ -63,6 +63,7 @@ import {
   type AcCoverageFact,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { isPlanMember } from "./plan-membership.js";
 
 /** Time seam (D3 convention) — never `Date.now()` read directly in method bodies. */
 const defaultNow = (): string => new Date().toISOString();
@@ -796,12 +797,17 @@ export class OutlineService {
    * rather than throwing.
    *
    * Coverage is computed over EVERY task under EVERY plan parented directly under this
-   * spec (`store.findMany({type:"plan", parent_id: doc.id})`, then per-plan
-   * `{type:"task", parent_id: plan.id}`) — a spec with no plan yields an empty task set,
-   * which `computeAcCoverage` turns into `{pass:0, fail:0}` for every criterion (renders
-   * as the "·" undetermined prefix, matching AC-ACODE-9's "无 plan 时全部 ·" rule without
-   * a separate branch). All store errors propagate immediately (same policy as
-   * `resolveComponent`'s call sites above).
+   * spec (`store.findMany({type:"plan", parent_id: doc.id})`, then task MEMBERSHIP per
+   * plan via {@link isPlanMember} — `extra.plan_id`, never a bare `parent_id` match,
+   * task-eight-more-plan-member-queries-still-key-on-parent-id) — a spec with no plan
+   * yields an empty task set, which `computeAcCoverage` turns into `{pass:0, fail:0}`
+   * for every criterion (renders as the "·" undetermined prefix, matching AC-ACODE-9's
+   * "无 plan 时全部 ·" rule without a separate branch). All store errors propagate
+   * immediately (same policy as `resolveComponent`'s call sites above). The store has
+   * no `extra.plan_id` filter, so tasks are fetched ONCE corpus-wide (`type: "task"`)
+   * and split per plan in memory — mirrors `AcService.findTasksUnderPlans`'s identical
+   * shape one tier over, preserving this method's own per-plan iteration order for
+   * byte-identical CONTROL output.
    */
   private async resolveAcceptanceProjection(
     doc: DocRecord,
@@ -821,12 +827,16 @@ export class OutlineService {
 
     const plansResult = await this.store.findMany({ type: "plan", parent_id: doc.id });
     if (!plansResult.ok) return plansResult;
+    if (plansResult.value.length === 0) {
+      return ok({ criteria, coverage: computeAcCoverage(criteria, []) });
+    }
+
+    const allTasksResult = await this.store.findMany({ type: "task" });
+    if (!allTasksResult.ok) return allTasksResult;
 
     const tasks: DocRecord[] = [];
     for (const plan of plansResult.value) {
-      const tasksResult = await this.store.findMany({ type: "task", parent_id: plan.id });
-      if (!tasksResult.ok) return tasksResult;
-      tasks.push(...tasksResult.value);
+      tasks.push(...allTasksResult.value.filter((t) => isPlanMember(t, plan.id)));
     }
 
     return ok({ criteria, coverage: computeAcCoverage(criteria, tasks) });

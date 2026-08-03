@@ -47,6 +47,7 @@ import {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { isPlanMember } from "./plan-membership.js";
 
 /**
  * Reads a spec's declared `extra.acceptance_criteria`, schema-validated via
@@ -82,14 +83,27 @@ function extractSpecCriteria(spec: DocRecord): AcceptanceCriterion[] {
  * @example
  * resolvePlanTasks(store, migratedPlanWithPhaseChildren.id);
  * // => err({code: "VALIDATION_ERROR", field: "plan_id", ...})
+ *
+ * @remarks task-eight-more-plan-member-queries-still-key-on-parent-id: task
+ *   membership is decided by {@link isPlanMember} (`extra.plan_id`), never a
+ *   bare `parent_id` match — this is the DASHBOARD Evidence-tab projection,
+ *   a frequently-run read path (SPEC-075), so the store-wide `type: "task"`
+ *   findMany + in-memory filter shape is used deliberately rather than a
+ *   per-plan store-level filter: the store has no `extra.plan_id` filter
+ *   capability today (same accepted tradeoff `TaskWorkflowService.ready`/
+ *   `CorpusService.getPlanBundle` already establish) and adding one is a
+ *   cross-cutting `StoreInterface` change outside this task's anchors, not a
+ *   projection-layer decision. The `phase` half stays `parent_id`-keyed
+ *   unchanged — phase docs carry no `extra.plan_id` (SPEC-023).
  */
 async function resolvePlanTasks(
   store: StoreInterface,
   planId: DocId,
 ): Promise<Result<DocRecord[], LoreError>> {
-  const tasksResult = await store.findMany({ parent_id: planId, type: "task" });
-  if (!tasksResult.ok) return tasksResult;
-  if (tasksResult.value.length > 0) return ok(tasksResult.value);
+  const allTasksResult = await store.findMany({ type: "task" });
+  if (!allTasksResult.ok) return allTasksResult;
+  const tasksValue = allTasksResult.value.filter((t) => isPlanMember(t, planId));
+  if (tasksValue.length > 0) return ok(tasksValue);
 
   // reason: SPEC-075 D9 — an empty task[] is ambiguous by itself. Check whether
   // this plan has been migrated onto phase docs (SPEC-056) before accepting
