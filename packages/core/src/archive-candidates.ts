@@ -12,8 +12,10 @@
  *     §Design Decisions D1 — "the SAME function backs the sweep verb and the
  *     injection count").
  *   - computePlanCloseCascadeTargets(children, nowIso, claimTtlMinutes) — the
- *     CASCADE rule (R1): a plan's direct child tasks/handoffs to archive when
- *     the plan itself closes. Deliberately a SEPARATE, simpler function from
+ *     CASCADE rule (R1): a plan's member tasks + child handoffs to archive when
+ *     the plan itself closes (the caller selects each half by its OWN key —
+ *     `extra.plan_id` for tasks, `parent_id` for handoffs; see that function's
+ *     own doc comment). Deliberately a SEPARATE, simpler function from
  *     `computeArchiveCandidates` — R1 is unconditional ("their purpose is
  *     definitionally complete" the moment the parent plan closes), never
  *     age/supersession-gated the way R2/R3 are, so folding it into the same
@@ -294,20 +296,32 @@ export interface PlanCloseCascadePlan {
 }
 
 /**
- * The CASCADE rule (R1): given a plan's DIRECT children (its `task` children
- * plus its `knowledge`/`sub_type: "handoff"` children — both filtered by the
- * CALLER via `parent_id === plan.id`, this function never re-derives
- * parentage), determines which are archived immediately and which are
- * skipped. Unconditional for handoffs (a plan-parented handoff's purpose is
+ * The CASCADE rule (R1): given a plan's children — its member `task` docs plus
+ * its `knowledge`/`sub_type: "handoff"` children, both selected by the CALLER,
+ * which this function never re-derives — determines which are archived
+ * immediately and which are skipped.
+ *
+ * ⛔ The two halves are selected by DIFFERENT keys, and the caller owns that
+ * choice: task membership is `extra.plan_id` (`CorpusService.cascadeArchiveOnPlanClose`
+ * filters a corpus-wide `type: "task"` read through the shared `isPlanMember`
+ * predicate, task-eight-more-plan-member-queries-still-key-on-parent-id), while
+ * handoffs are genuinely `parent_id`-keyed (a handoff carries no `extra.plan_id`
+ * — `parent_id` IS its plan link). A `parent_id === plan.id` filter on the TASK
+ * half would both strand a real member filed elsewhere via `--parent` and
+ * ARCHIVE a non-member merely filed here, so do not reintroduce it: this
+ * function is handed a member set, not a parentage set.
+ *
+ * Unconditional for handoffs (a plan-parented handoff's purpose is
  * definitionally complete once the plan closes — no age/supersession check,
  * unlike R2/R3). For tasks, ONLY a task holding a FRESH claim is skipped
  * (`isClaimStale` reused verbatim, never hand-rolled) — an already-terminal
  * task/handoff (archived/deprecated) is silently omitted from both lists
  * (nothing to do, not a failure).
  *
- * @param children - The plan's direct `task`/`handoff` children (pre-filtered
- *   by the caller — see module header for why this stays a separate,
- *   simpler function from {@link computeArchiveCandidates}).
+ * @param children - The plan's `task` members plus its `handoff` children,
+ *   already selected by the caller under the two different keys documented
+ *   above — see the module header for why this stays a separate, simpler
+ *   function from {@link computeArchiveCandidates}.
  * @param nowIso - Caller-supplied current time (D10).
  * @param claimTtlMinutes - `workflow.claim_ttl_minutes`, forwarded to `isClaimStale`.
  * @returns `{toArchive, skipped}` — `toArchive` in `children` order;
