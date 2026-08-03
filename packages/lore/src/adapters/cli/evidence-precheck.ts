@@ -33,6 +33,16 @@
  *     the SECOND self-report guard hosted here (SPEC-061 AC-061-11..14, 17): a
  *     `--result pass` whose `--command` carries a `-t` case filter must arrive
  *     with the runner's own summary line as matched-count proof
+ *   - findLiteralFilterMismatches(command) — the SECOND guard's cause analysis
+ *     (task-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles): a `-t` value
+ *     is a REGULAR EXPRESSION, so a title pasted from this repo's own AC
+ *     convention (`AC-2.H1 (GREEN)`, `all + caller_cwd`) compiles into a
+ *     pattern that cannot match the title it came from — zero cases selected,
+ *     exit 0, indistinguishable from a pass. Reported per offending filter
+ *     with the metacharacters found and the ESCAPED replacement value, and
+ *     folded into `findFilteredPassRefusal`'s message + `field` so a
+ *     filter-caused zero-match is machine-distinguishable from a test that
+ *     genuinely does not exist
  *   - findCrossRunnerTokens(command) / findMixedRunnerRefusal(input) — the
  *     THIRD self-report guard hosted here (defect: task-vitest-run-silently-
  *     drops-a-bun-test-ts-named-alongside-a): a single `vitest run` invocation
@@ -51,7 +61,8 @@
  *
  * All FOUR guards are ADJACENT but INDEPENDENT: the first asks "does the
  * file this command names exist at all", the second asks "did the filter this
- * command carries match anything", the third asks "would this command's OWN
+ * command carries match anything — and, when it did not, is the filter itself
+ * lexically incapable of matching the title it was pasted from", the third asks "would this command's OWN
  * invoked runner actually run every file it names", the fourth asks "does
  * --capture even make sense for this invocation's other flags". They share
  * only the oracle/result scope gate (`isSelfReportedPassInScope`) — except the
@@ -76,13 +87,19 @@
  *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the
  *   (MCP `caller_cwd` escape hatch + roots-named refusal message);
  *   task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a (mixed-
- *   runner invocation guard)
+ *   runner invocation guard);
+ *   task-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles (the literal-vs-
+ *   regex filter diagnosis folded into the filtered-pass guard)
  */
 
 import {
   CASE_FILTER_FLAGS_DESCRIPTION,
+  REGEX_METACHARACTERS_DESCRIPTION,
   RUNNER_SUMMARY_FORMATS_DESCRIPTION,
   commandHasCaseFilter,
+  escapeCaseFilterPattern,
+  extractCaseFilterPatterns,
+  findRegexMetacharacters,
   parseExecutedUnits,
   type LoreError,
 } from "@lore/core";
@@ -747,6 +764,136 @@ export function findMixedRunnerRefusal(input: {
   };
 }
 
+// ─── Literal-Title Case-Filter Diagnosis (task-a-t-filter-is-a-regex-so- ────
+// ─── this-repo-s-own-ac-titles) ─────────────────────────────────────────────
+
+/**
+ * One case-filter value that provably cannot match the literal text it was
+ * pasted from — the measured defect
+ * (task-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles).
+ *
+ * @property pattern - the filter value exactly as it appears in `--command`
+ * @property metacharacters - the regex metacharacters it contains
+ * @property escaped - the same text escaped so it matches LITERALLY; the
+ *   ready-to-run repair (`escapeCaseFilterPattern`'s round-trip invariant)
+ * @property compiles - `false` when the pattern is not even a valid regular
+ *   expression (an unbalanced `(` / `[`, a trailing `\`), so the runner cannot
+ *   compile it at all; `true` when it compiles but selects the wrong thing
+ */
+export interface LiteralFilterMismatch {
+  pattern: string;
+  metacharacters: string[];
+  escaped: string;
+  compiles: boolean;
+}
+
+/**
+ * Reports every case filter in `command` whose value, compiled as the REGULAR
+ * EXPRESSION the runner will actually compile, cannot match its own literal
+ * text — i.e. every filter that was pasted from a test title and silently
+ * turned into something else.
+ *
+ * The predicate is `new RegExp(p).test(p)`, not "contains a metacharacter":
+ *
+ *   - `AC-2.H1 (GREEN)` → the parens become a group, so the regex needs
+ *     `AC-2?H1 GREEN` WITHOUT parens; the literal title has them → MISMATCH
+ *     (measured instance 1: 0 matched, exit 0, read as a pass).
+ *   - `…all + caller_cwd` → `+` quantifies the preceding space, so the regex
+ *     needs two spaces where the title has ` + ` → MISMATCH (instance 2).
+ *   - `AC-1.H1` → the `.` matches the literal `.`; the filter still selects
+ *     the intended case → NOT a mismatch, never reported. A
+ *     "contains a metacharacter" check would have refused this, and `.`
+ *     appears in essentially every AC id this repo writes.
+ *   - `AC-1 {a}` → `{a}` is not a valid quantifier, so JS treats it as literal
+ *     text and the filter still matches → NOT a mismatch.
+ *
+ * That exactness is what keeps DELIBERATE regex use possible: it is only
+ * combined with a missing/zero matched-count proof by
+ * {@link findFilteredPassRefusal}, never used to refuse on its own — see that
+ * function's Proxy note.
+ *
+ * @param command - the exact command string recorded via `lore evidence --command`
+ * @returns one entry per distinct offending filter value, in command order;
+ *   `[]` when the command carries no case filter, carries only
+ *   metacharacter-free filters, or carries filters that DO match their own
+ *   literal text
+ *
+ * @example
+ * findLiteralFilterMismatches("bunx vitest run a.test.ts -t 'AC-2.H1 (GREEN)'")
+ * // => [{ pattern: "AC-2.H1 (GREEN)", metacharacters: [".", "(", ")"],
+ * //       escaped: "AC-2\\.H1 \\(GREEN\\)", compiles: true }]
+ *
+ * @example
+ * findLiteralFilterMismatches("bunx vitest run a.test.ts -t 'AC-1 happy path'")
+ * // => [] — a pure literal, unaffected
+ */
+export function findLiteralFilterMismatches(command: string): LiteralFilterMismatch[] {
+  const mismatches: LiteralFilterMismatch[] = [];
+  for (const pattern of extractCaseFilterPatterns(command)) {
+    const metacharacters = findRegexMetacharacters(pattern);
+    if (metacharacters.length === 0) continue;
+
+    // reason: a pattern the RegExp constructor rejects is NOT swallowed — it is
+    // classified as `compiles: false` and reported, which is a STRONGER form of
+    // the same finding (the runner cannot compile it either, so it can match
+    // nothing at all). The subject of `.test` is the pattern itself: operator-
+    // authored, and as short as a test title, so this cannot become an
+    // untrusted-input backtracking surface.
+    let compiles = true;
+    let matchesOwnLiteral = false;
+    try {
+      matchesOwnLiteral = new RegExp(pattern).test(pattern);
+    } catch {
+      compiles = false;
+    }
+    if (compiles && matchesOwnLiteral) continue;
+
+    mismatches.push({
+      pattern,
+      metacharacters,
+      escaped: escapeCaseFilterPattern(pattern),
+      compiles,
+    });
+  }
+  return mismatches;
+}
+
+/**
+ * Renders {@link findLiteralFilterMismatches}'s findings as the clause appended
+ * to a filtered-pass refusal: what the filter really means, why no output tail
+ * can ever rescue it, and the escaped value to re-run with.
+ *
+ * // reason: names the flags via the imported `CASE_FILTER_FLAGS_DESCRIPTION`
+ * // instead of spelling one, so this message can never state a narrower flag
+ * // set than the extractor actually reads (SPEC-061 AC-061-14's single-
+ * // definition rule). Adapter-neutral in the same way
+ * // `describeDerivedCdTarget` is — no CLI-only flag spelling beyond the
+ * // shared descriptions.
+ *
+ * @param mismatches - a NON-EMPTY findings list
+ * @returns the clause, ending in the action; `""` for an empty list so a caller
+ *   can concatenate unconditionally
+ */
+function describeLiteralFilterMismatches(mismatches: readonly LiteralFilterMismatch[]): string {
+  if (mismatches.length === 0) return "";
+  const rendered = mismatches
+    .map((mismatch) => {
+      const cause = mismatch.compiles
+        ? `contains regex metacharacter(s) ${mismatch.metacharacters.join(" ")} that make it unable to match its own literal text`
+        : `contains regex metacharacter(s) ${mismatch.metacharacters.join(" ")} that do not even form a valid regular expression, so the runner cannot compile it at all`;
+      return `"${mismatch.pattern}" ${cause} — escaped, literal-matching value: ${mismatch.escaped}`;
+    })
+    .join("; ");
+  return (
+    `ALSO — the cause is lexical, not a missing tail: a ${CASE_FILTER_FLAGS_DESCRIPTION} value is a ` +
+    `REGULAR EXPRESSION, and this --command's filter ${rendered}. ` +
+    "Pasting a test title verbatim therefore selects ZERO cases while the runner still exits 0, so " +
+    "no output tail will ever show a match until the FILTER changes. Re-run with the escaped value " +
+    "above (single-quote it in the shell so the backslashes survive), or drop the filter and run the " +
+    `whole file unfiltered — never route around this with a manual oracle. Metacharacters checked: ${REGEX_METACHARACTERS_DESCRIPTION}.`
+  );
+}
+
 // ─── Filtered-Pass Matched-Count Proof (SPEC-061 AC-061-11..14, 17) ─────────
 
 /**
@@ -882,7 +1029,33 @@ const GAP_DIAGNOSIS: Readonly<Record<FilteredPassProofGap, string>> = {
  * // where the command's filter is arguably at fault. The field names the
  * // input the caller must CHANGE to make the write legal, which is the tail
  * // in every case — a `zero_match` is repaired by re-running and supplying a
- * // tail that shows matches, never by deleting the tail.
+ * // tail that shows matches, never by deleting the tail. The ONE exception is
+ * // a literal-vs-regex filter mismatch ({@link findLiteralFilterMismatches}):
+ * // there the tail provably CANNOT be repaired — the regex cannot match the
+ * // title under any run — so the field names `command`, making the two
+ * // outcomes machine-distinguishable ("your filter is broken" vs "this test
+ * // genuinely does not exist") rather than one undifferentiated refusal.
+ *
+ * Per adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the:
+ *   - **Proxy** — the mismatch clause is combined with the gap by AND, never
+ *     used to refuse on its own. Input satisfying the proxy while violating the
+ *     property: a DELIBERATE regex (`AC-(1|2)`), which also cannot match its
+ *     own literal text. Because a proven non-zero matched count returns `null`
+ *     BEFORE the clause is ever computed, deliberate regex use stays fully
+ *     available with no opt-out flag and nothing extra to record in the
+ *     evidence row — the task's Opt-in requirement is satisfied by needing no
+ *     opt-in at all. Named, accepted residual in the other direction: a
+ *     metacharacter-corrupted pattern that matched some OTHER case (e.g. a
+ *     title containing `a+b` matching a different test named `ab`) reports a
+ *     non-zero count and is NOT refused, so the intended case still went
+ *     unrun. Distinguishing it from deliberate regex needs author INTENT,
+ *     which no lexical check has; refusing it would require exactly the
+ *     recorded safety-check opt-out this design avoids.
+ *   - **Silence** — none added: every mismatch is named verbatim in the
+ *     refusal, with the metacharacters found and the escaped replacement, so a
+ *     zero-match can no longer be diagnosed as "the test does not exist".
+ *   - **Opt-in** — n/a: unconditional for every filtered pass already lacking
+ *     matched-count proof.
  *
  * @param input - same shape as {@link findFilteredPassProofGap}
  * @returns a `VALIDATION_ERROR` (exit code 4 via `utils.ts::exitCode`) naming
@@ -895,6 +1068,15 @@ const GAP_DIAGNOSIS: Readonly<Record<FilteredPassProofGap, string>> = {
  *   outputTail: "Test Files  1 passed (1)\nTests  3 passed (3)\n",
  * })
  * // => null — three cases genuinely matched
+ *
+ * @example
+ * findFilteredPassRefusal({
+ *   oracle: "test", result: "pass",
+ *   command: "bunx vitest run a.test.ts -t 'AC-2.H1 (GREEN)'",
+ *   outputTail: "Test Files  1 skipped (1)\nTests  56 skipped (56)\n",
+ * })
+ * // => VALIDATION_ERROR on field "command", naming ". ( )" and the escaped
+ * //    value "AC-2\\.H1 \\(GREEN\\)"
  */
 export function findFilteredPassRefusal(input: {
   oracle: string;
@@ -905,14 +1087,18 @@ export function findFilteredPassRefusal(input: {
   const gap = findFilteredPassProofGap(input);
   if (gap === null) return null;
 
+  const mismatches = findLiteralFilterMismatches(input.command);
+  const mismatchClause = describeLiteralFilterMismatches(mismatches);
+
   return {
     code: "VALIDATION_ERROR",
-    field: "output_tail",
+    field: mismatches.length > 0 ? "command" : "output_tail",
     message:
       `Filtered --result pass without matched-count proof: --command carries a ` +
       `case-name filter (${CASE_FILTER_FLAGS_DESCRIPTION}) and ${GAP_DIAGNOSIS[gap]}. ` +
       "A filter that matches nothing still exits 0 with every test reported skipped, " +
-      `so this pass is unproven. ${MATCHED_COUNT_REPAIR_HINT}`,
+      `so this pass is unproven. ${MATCHED_COUNT_REPAIR_HINT}` +
+      (mismatchClause.length > 0 ? ` ${mismatchClause}` : ""),
     value: input.command,
   };
 }
