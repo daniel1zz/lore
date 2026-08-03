@@ -132,6 +132,18 @@ import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+// invariant: this service's ONLY use of the shared `isPlanMember` predicate is
+//   the LEGACY flat `task` doc under a plan — `extra.plan_id` is that tier's
+//   DECLARED membership property, `parent_id` only a proxy `--parent` may
+//   deliberately diverge from (SPEC-065 D4;
+//   task-plan-membership-is-extra-plan-id-but-the-last-task). Deliberately NOT
+//   used for `phase`-typed docs: see `fetchPlanChildren`'s own comment for why
+//   no divergence is structurally possible there. This file used to carry a
+//   private byte-identical copy justified by "no cross-service imports"; that
+//   justification was wrong (plan-membership.ts is not a service) and its
+//   retirement is recorded in that module's SSOT note
+//   (task-three-byte-identical-copies-of-isplanmember-survive).
+import { isPlanMember } from "./plan-membership.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import type {
@@ -219,24 +231,6 @@ function readAcScope(doc: DocRecord): string[] {
 /** Computes age in whole minutes between two ISO timestamps (nowIso - atIso). */
 function ageMinutesBetween(nowIso: string, atIso: string): number {
   return Math.floor((new Date(nowIso).getTime() - new Date(atIso).getTime()) / 60_000);
-}
-
-/**
- * Plan-membership predicate keyed on `extra.plan_id` — mirrors
- * `TaskWorkflowService`'s identical private helper of the same name (cross-service
- * imports are forbidden by this codebase's architecture — service/CLAUDE.md — so
- * this tiny pure predicate is duplicated here, same precedent as
- * `computeAnchorAdvisories` below, "ported unchanged"). `extra.plan_id` is the
- * DECLARED property of plan membership for a LEGACY flat `task` doc under a plan
- * (mandatory at creation, mirrors the task tier); `parent_id` is a proxy a task's
- * `--parent` may deliberately diverge from (SPEC-065 D4). A `parent_id`-keyed query
- * silently drops a diverged legacy task from its own plan
- * (task-plan-membership-is-extra-plan-id-but-the-last-task). NOT used for `phase`-
- * typed docs — see `fetchPlanChildren`'s own comment for why no divergence is
- * structurally possible there.
- */
-function isPlanMember(task: DocRecord, planId: DocId): boolean {
-  return task.extra["plan_id"] === planId;
 }
 
 /**
