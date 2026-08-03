@@ -25,7 +25,10 @@
  *     bucket (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc)
  *   - ATTESTATION_RUNNERS / AttestationRunner — enum of trusted runners allowed to
  *     write `EvidenceEntry.attestation` (SPEC-039 §2 D1)
- *   - taskClaimSchema / TaskClaim — advisory execution lease {by, at, branch?}
+ *   - taskClaimSchema / TaskClaim — advisory execution lease
+ *     {by, at, branch?, machine?, worktree?, session_id?} — `session_id` is the
+ *     captured SESSION INSTANCE, a peer of machine/worktree and never part of
+ *     `by` (task-two-concurrent-orchestrators-both-resolve-to-agent-main)
  *   - isClaimStale(claim, nowIso, ttlMinutes) — pure staleness check
  *   - resolveTargetTask(tasks, opts) — pure host-task resolution for `lore verify`:
  *     explicit override > sole fresh claim > ambiguity error (SPEC-039 §2 D4)
@@ -473,11 +476,21 @@ export function tallyEvidenceResults(rows: readonly { result: string }[]): Evide
  *   by this schema or by {@link buildTaskClaim}. An honest absent field beats a
  *   confidently-wrong captured value (review U2). Legacy claims written before
  *   this field existed remain valid (both optional).
+ * @invariant `session_id` is the SESSION INSTANCE ("which run"), a THIRD captured
+ *   execution fact beside `machine`/`worktree` — never a component of `by`
+ *   ("who"). It exists because two concurrently-live sessions in ONE checkout
+ *   legitimately share an actor string (this project's own discipline instructs
+ *   operators to export `LORE_ACTOR=agent:main-orchestrator`), which used to
+ *   collapse them into one derived session and disable `noAnchorOverlap`
+ *   entirely (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
+ *   ABSENT is legal and load-bearing: every claim written before this field
+ *   existed has none, and absence must read as NOT-MEASURED — never as
+ *   "same session" (see `gate-predicates.ts::compareClaimSessions`).
  *
  * @example
  * taskClaimSchema.parse({
  *   by: "alice", at: "2026-07-02T10:00:00.000Z", branch: "feat/x",
- *   machine: "alices-mbp", worktree: "/repo/.worktrees/t1",
+ *   machine: "alices-mbp", worktree: "/repo/.worktrees/t1", session_id: "3de02220",
  * });
  */
 export const taskClaimSchema = z.object({
@@ -488,6 +501,14 @@ export const taskClaimSchema = z.object({
   machine: z.string().optional(),
   /** ALWAYS explicit — never auto-captured from `process.cwd()` (SPEC-042 D2, review U2). */
   worktree: z.string().optional(),
+  /**
+   * Sanitized session discriminator (`sessionIdDiscriminator`, `session-actor.ts`)
+   * of `$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`, captured at claim time by
+   * `TaskWorkflowService.claim` for EVERY caller with no flag or opt-in. Absent
+   * ⇒ this claim's session was never measured (legacy row, or a caller with no
+   * session env) — NOT "the same session as yours".
+   */
+  session_id: z.string().optional(),
 });
 
 /** Derived TypeScript type for a task claim lease. */
@@ -500,6 +521,8 @@ export interface ClaimCaptureInput {
   branch?: string;
   machine?: string;
   worktree?: string;
+  /** See {@link taskClaimSchema}'s `session_id` — NEVER carried forward (see {@link buildTaskClaim}). */
+  session_id?: string;
 }
 
 /**
@@ -520,10 +543,20 @@ export interface ClaimCaptureInput {
  * — this function has no wall-clock access and cannot compute staleness itself
  * (module invariant: no IO, no wall-clock reads).
  *
+ * `session_id` is the ONE field EXEMPT from carry-forward, in BOTH directions of
+ * the `carryForward` flag: the result carries `input.session_id` or nothing.
+ * Inheriting it would fabricate the exact evidence the field exists to supply —
+ * a second session refreshing a same-`by` claim (the observed two-orchestrator
+ * topology) would silently adopt the FIRST session's id and read back as "same
+ * session" to `noAnchorOverlap`, re-opening the hole
+ * (task-two-concurrent-orchestrators-both-resolve-to-agent-main §Silence). A
+ * same-session refresh loses nothing: the capture re-reads the same env var and
+ * re-supplies the identical id.
+ *
  * @param previous - The task's current claim, or `undefined` if none.
  * @param input - The new claim-capture attempt.
  * @param carryForward - Whether to merge `previous`'s branch/machine/worktree
- *   forward when `input` omits them.
+ *   forward when `input` omits them. Never applies to `session_id`.
  * @returns The `TaskClaim` to persist.
  *
  * @example
@@ -543,6 +576,15 @@ export interface ClaimCaptureInput {
  *   false,
  * );
  * // => { by: "alice", at: "T1" }
+ *
+ * @example
+ * // session_id is never inherited, even on a same-holder fresh refresh
+ * buildTaskClaim(
+ *   { by: "alice", at: "T0", session_id: "aaaa1111" },
+ *   { by: "alice", at: "T1" },
+ *   true,
+ * );
+ * // => { by: "alice", at: "T1" } — the refreshing session measured none, so none is recorded
  */
 export function buildTaskClaim(
   previous: TaskClaim | undefined,
@@ -553,6 +595,10 @@ export function buildTaskClaim(
   const branch = input.branch ?? base?.branch;
   const machine = input.machine ?? base?.machine;
   const worktree = input.worktree ?? base?.worktree;
+  // reason: deliberately NOT `input.session_id ?? base?.session_id` — see the
+  // carry-forward exemption paragraph in this function's own doc. A future
+  // session "fixing the inconsistency" by adding the `??` re-opens the defect.
+  const sessionId = input.session_id;
 
   return {
     by: input.by,
@@ -560,6 +606,7 @@ export function buildTaskClaim(
     ...(branch !== undefined ? { branch } : {}),
     ...(machine !== undefined ? { machine } : {}),
     ...(worktree !== undefined ? { worktree } : {}),
+    ...(sessionId !== undefined ? { session_id: sessionId } : {}),
   };
 }
 
@@ -612,9 +659,13 @@ export function isClaimStale(claim: TaskClaim, nowIso: string, ttlMinutes: numbe
  *   instant (SPEC-069 §Module Boundary: "F2 must reuse the already-captured
  *   nowIso — never invoke the now() thunk twice").
  * @returns A NEW `TaskClaim` object with `at` set to `nowIso` — `branch`/
- *   `machine`/`worktree` preserved verbatim from `claim` — on a same-holder
- *   match; `null` when the claim is absent or held by a different actor.
- *   Never mutates `claim`.
+ *   `machine`/`worktree`/`session_id` preserved verbatim from `claim` — on a
+ *   same-holder match; `null` when the claim is absent or held by a different
+ *   actor. Never mutates `claim`. An evidence append deliberately does NOT
+ *   re-capture the session instance: this renews an EXISTING lease (whose
+ *   recorded session is whoever acquired it) rather than acquiring a new one —
+ *   only `claim()` captures `session_id`
+ *   (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
  *
  * @example
  * renewClaimForEvidence({ by: "alice", at: "T0", branch: "b1" }, "alice", "T1");
