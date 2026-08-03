@@ -2,10 +2,38 @@
  * lore list — list documents with optional filters.
  *
  * New in SPEC-023:
- *   --plan-id <id|slug>  Filter by parent plan (resolves slug → ULID, maps to parent_id filter).
+ *   --plan-id <id|slug>  Filter tasks by PLAN MEMBERSHIP (extra.plan_id, via the
+ *                        shared isPlanMember predicate) — the SAME property
+ *                        `lore create task --plan-id` writes, never `parent_id`.
  *   --phase <name>       Filter tasks by extra.phase name (requires --type task or --plan-id).
  *                        Client-side filter — applied after store fetch since StoreFilters
  *                        has no extra-field index. Only useful with --type task.
+ *
+ * ## `--plan-id`'s contract — JUDGMENT recorded here
+ * (task-plan-member-sites-twelve-and-thirteen-both-structurally, site 13)
+ *
+ * `--plan-id` used to resolve to a `parent_id` filter — its own help text said so
+ * verbatim ("resolves to parent_id"). That silently excluded the SUPPORTED
+ * divergent shape SPEC-065 D4 describes (`lore create task --plan-id P --parent
+ * Q`, P !== Q): a task legitimately a MEMBER of P but filed at Q never appeared
+ * under `lore list --plan-id P`. Two fixes were available — change this flag's
+ * contract to membership, or leave it alone and add a second, differently-named
+ * membership flag beside it. CHOSEN: change the contract, because `--plan-id`
+ * ALREADY means membership (`extra.plan_id`) everywhere else this CLI accepts
+ * it — `create.ts`'s own `--plan-id` writes `extra.plan_id`, with `--parent` as
+ * the SEPARATE flag for filing location (SPEC-065 D4's own vocabulary). A flag
+ * whose name means one property at `create` time and a DIFFERENT property at
+ * `list` time is a footgun independent of the divergence defect; a second flag
+ * would leave that cross-command inconsistency standing forever. No test in
+ * this tree pins the old parent_id contract as distinct from membership — the
+ * one incidental `list --plan-id` usage (`list-paging.test.ts`) passes a task
+ * whose `--parent` and `--plan-id` are the SAME value, so it cannot tell the
+ * two contracts apart, and passes under either. `extra.plan_id` exists only on
+ * `task` docs, so the filter is `doc.type === "task" && isPlanMember(doc,
+ * resolvedPlanId)`; StoreFilters has no index for it, so — like `--phase` — it
+ * is applied CLIENT-SIDE after a full DocRecord fetch (`passesPlanMembership`
+ * below), composing with `--phase`/`--type task`/`--include-invalid` rather
+ * than duplicating each of their branches.
  *
  * --governed-by is exclusive of every other filter flag (--type/--status/--author/
  * --since/--tag/--plan-id/--phase): combining them fails loud (exit 2, naming the
@@ -15,14 +43,15 @@
  * --limit <n> / --offset <n> — optional paging (pagination hardening, unbounded-payload
  * review). BOTH omitted → current unbounded behavior, byte-identical (backward-compatible
  * default for human CLI usage). Every branch below sources its own list from ONE of two
- * stances: (a) branches whose result set is exactly what the store returned (default,
- * --type task, --include-invalid) push `limit`/`offset` straight into the `StoreFilters`
+ * stances: (a) branches whose result set is exactly what the store returned AND no
+ * --plan-id filter is active push `limit`/`offset` straight into the `StoreFilters`
  * object via `withPaging()`, so the DB itself bounds the row count; (b) branches that
  * ALREADY narrow the store's result set client-side (--phase's extra.phase filter,
- * --governed-by's link-table result) apply `limit`/`offset` via `.slice()` AFTER that
- * narrowing — pushing paging into the store call there would apply the page boundary
- * BEFORE the narrowing filter runs, silently truncating or misaligning pages (same
- * class of bug `StoreInterface.findMany`'s own `tags`-filter-vs-paging guard avoids).
+ * --plan-id's membership filter, --governed-by's link-table result) apply
+ * `limit`/`offset` via `.slice()` AFTER that narrowing — pushing paging into the store
+ * call there would apply the page boundary BEFORE the narrowing filter runs, silently
+ * truncating or misaligning pages (same class of bug `StoreInterface.findMany`'s own
+ * `tags`-filter-vs-paging guard avoids).
  */
 
 import { defineCommand } from "citty";
@@ -36,7 +65,9 @@ import {
   parsePositiveIntArg,
   relativeTime,
 } from "../utils.js";
-import type { DocType, DocStatus } from "@lore/core";
+import { isPlanMember } from "../../../service/plan-membership.js";
+import { ok } from "@lore/core";
+import type { DocRecord, DocType, DocStatus, LoreError, Result } from "@lore/core";
 
 export default defineCommand({
   meta: {
@@ -66,7 +97,10 @@ export default defineCommand({
     },
     "plan-id": {
       type: "string",
-      description: "Filter by parent plan ID or slug (resolves to parent_id). Useful with --type task.",
+      description:
+        "Filter tasks by PLAN MEMBERSHIP (extra.plan_id, the same property `lore create task " +
+        "--plan-id` writes — never parent_id). Includes a task filed elsewhere via --parent " +
+        "(SPEC-065 D4 divergence). Useful with --type task.",
     },
     phase: {
       type: "string",
@@ -199,7 +233,13 @@ export default defineCommand({
       const includeInvalid = args["include-invalid"] === true;
       if (includeInvalid) filters["include_invalid"] = true;
 
-      // Resolve --plan-id slug or ULID → parent_id ULID filter.
+      // Resolve --plan-id slug or ULID → the plan's own DocId, used as a
+      // MEMBERSHIP filter (extra.plan_id via isPlanMember) — see this file's
+      // header for the contract decision. Deliberately NOT written into
+      // `filters`: StoreFilters has no extra.plan_id column, so this is a
+      // client-side predicate applied after a full DocRecord fetch, same as
+      // --phase below.
+      let planMemberId: string | undefined;
       if (args["plan-id"] !== undefined) {
         const resolveResult = await app.corpusService.resolve(args["plan-id"]);
         if (!resolveResult.ok) {
@@ -207,7 +247,39 @@ export default defineCommand({
           process.exitCode = exitCode(resolveResult.error);
           return;
         }
-        filters["parent_id"] = resolveResult.value;
+        planMemberId = resolveResult.value;
+      }
+      // reason: extra.plan_id exists only on `task` docs (createDocInputSchema's
+      // task branch) — `isPlanMember` itself does not check `type` (its own
+      // JSDoc: callers are expected to have already narrowed to type ===
+      // "task"), so this guard is drawn HERE rather than trusting a non-task
+      // doc's `extra.plan_id` (which should never be set, but extra is an
+      // unvalidated Record<string, unknown> at the type level) to compare false
+      // on its own.
+      function passesPlanMembership(doc: DocRecord): boolean {
+        // reason: aliased to a local const so the `undefined` narrowing below
+        // is sound regardless of how TS treats the outer `let` capture.
+        const requiredPlanId = planMemberId;
+        if (requiredPlanId === undefined) return true;
+        return doc.type === "task" && isPlanMember(doc, requiredPlanId);
+      }
+      const planFilterDesc = (): string => (planMemberId !== undefined ? ` --plan-id ${args["plan-id"]}` : "");
+
+      // reason: three branches below (--type task, --include-invalid, and the
+      // plan-membership-only fallback) all need "full DocRecords matching
+      // `filters`, membership-narrowed and paged" — this is the ONE place that
+      // decides (a) store-level paging via `withPaging` (no client-side
+      // narrowing active) vs (b) client-side narrow-then-slice via
+      // `pageInMemory` (planMemberId active), so the (a)/(b) split this file's
+      // header documents can never diverge between call sites.
+      async function fetchFullDocsForListing(): Promise<Result<{ docs: DocRecord[]; total: number }, LoreError>> {
+        if (planMemberId === undefined) {
+          return app.corpusService.listFull(withPaging(filters));
+        }
+        const fullResult = await app.corpusService.listFull(filters);
+        if (!fullResult.ok) return fullResult;
+        const narrowed = pageInMemory(fullResult.value.docs.filter((doc) => passesPlanMembership(doc)));
+        return ok({ docs: narrowed, total: narrowed.length });
       }
 
       // When --phase filter is active, we need full DocRecord rows (extra.phase is not in DocSummary).
@@ -221,10 +293,13 @@ export default defineCommand({
           process.exitCode = exitCode(fullResult.error);
           return;
         }
-        // reason: extra.phase is a client-side filter (see file header) — paging must
-        // apply AFTER it narrows the set, never before (header comment's (b) stance).
+        // reason: extra.phase AND --plan-id's membership filter (see file header) are
+        // both client-side — paging must apply AFTER both narrow the set, never
+        // before (header comment's (b) stance).
         const filtered = pageInMemory(
-          fullResult.value.docs.filter((doc) => doc.extra["phase"] === phaseFilter),
+          fullResult.value.docs.filter(
+            (doc) => doc.extra["phase"] === phaseFilter && passesPlanMembership(doc),
+          ),
         );
         const total = filtered.length;
 
@@ -251,7 +326,7 @@ export default defineCommand({
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
-        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter})`);
+        console.log(`\n${total} document${total === 1 ? "" : "s"} (filter: --phase ${phaseFilter}${planFilterDesc()})`);
         return;
       }
 
@@ -259,7 +334,7 @@ export default defineCommand({
       // (AC-WF-9). This requires the full DocRecord (extra.claim / extra.verification_evidence
       // are not in DocSummary) — mirrors the --phase branch's listFull usage above.
       if (filters["type"] === "task") {
-        const fullResult = await app.corpusService.listFull(withPaging(filters));
+        const fullResult = await fetchFullDocsForListing();
         if (!fullResult.ok) {
           process.stderr.write(formatError(fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
@@ -287,7 +362,7 @@ export default defineCommand({
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
-        console.log(`\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --type task)`);
+        console.log(`\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --type task${planFilterDesc()})`);
         return;
       }
 
@@ -296,7 +371,7 @@ export default defineCommand({
       // badge, mirroring the --phase/--type task branches' listFull usage above.
       // Source: SPEC-043 D3/D4.
       if (includeInvalid) {
-        const fullResult = await app.corpusService.listFull(withPaging(filters));
+        const fullResult = await fetchFullDocsForListing();
         if (!fullResult.ok) {
           process.stderr.write(formatError(fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
@@ -323,7 +398,52 @@ export default defineCommand({
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
-        console.log(`\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --include-invalid)`);
+        console.log(
+          `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --include-invalid${planFilterDesc()})`,
+        );
+        return;
+      }
+
+      // reason: --plan-id is a membership filter with no StoreFilters column
+      // (see file header) — when it is the ONLY reason a full-record fetch is
+      // needed (no --phase / --type task / --include-invalid triggered one of
+      // the branches above), this is the fallback that still narrows via
+      // isPlanMember instead of falling through to the DocSummary-based
+      // `list()` call below, which cannot see `extra.plan_id` at all.
+      if (planMemberId !== undefined) {
+        const fullResult = await fetchFullDocsForListing();
+        if (!fullResult.ok) {
+          process.stderr.write(formatError(fullResult.error) + "\n");
+          process.exitCode = exitCode(fullResult.error);
+          return;
+        }
+        const { docs: fullDocs, total: fullTotal } = fullResult.value;
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: { docs: fullDocs, total: fullTotal } }, null, 2));
+          return;
+        }
+        if (fullTotal === 0) {
+          console.log(`No documents found with plan membership "${args["plan-id"]}".`);
+          return;
+        }
+
+        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const rows = fullDocs.map((d) => [
+          d.id.slice(0, 10),
+          d.type,
+          d.title.slice(0, 35),
+          d.status,
+          relativeTime(d.updated_at),
+        ]);
+        console.log(formatTable(headers, rows));
+        const otherFilterDesc = Object.entries(filters)
+          .map(([k, v]) => `--${k} ${Array.isArray(v) ? v.join(",") : String(v)}`)
+          .join(" ");
+        console.log(
+          `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter:${planFilterDesc()}` +
+            `${otherFilterDesc ? ` ${otherFilterDesc}` : ""})`,
+        );
         return;
       }
 
