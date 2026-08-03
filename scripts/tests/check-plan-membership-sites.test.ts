@@ -23,19 +23,22 @@
  * ## Why the real-tree assertion pins a SET rather than exit 0
  *
  * The oracle's first real-tree run found a LIVE, unfixed site
- * (`session-service.ts:251` — `bootstrap`'s active-plan task listing keys on
+ * (`session-service.ts:251` — `bootstrap`'s active-plan task listing keyed on
  * `d.parent_id === plan.id`; the eight-site sweep fixed `computeReadinessPointer`
- * in the same file and its table mislabelled that one "bootstrap"). Fixing it is
- * a production behaviour change owned by its own task, so this suite pins the
- * EXACT open set via {@link KNOWN_OPEN_SITES}.
+ * in the same file and its table mislabelled that one "bootstrap"). Fixing it was
+ * a production behaviour change owned by its own task
+ * (`task-the-eleventh-plan-member-site-found-by-enumeration`), and that task
+ * landed: {@link KNOWN_OPEN_SITES} is now EMPTY and the arming assertion below is
+ * a plain `expect(main()).toBe(0)`. The set-equality shape is KEPT, because it is
+ * what makes a NEW site fail here by construction.
  *
  * ⛔ {@link KNOWN_OPEN_SITES} is a TEST-LEVEL LEDGER, never an allowlist. The
- * oracle itself still reports the site and still exits 3 — `bun run
+ * oracle itself still reports every site it finds and still exits 3 — `bun run
  * check:plan-member-sites` names it on every run. The ledger only pins "the open
- * set is exactly this, and no larger": an ELEVENTH site fails this suite, and so
- * does fixing a listed one (which forces the ledger to retire with the defect
- * instead of outliving it). Adding an entry here to quiet a NEW finding would
- * defeat the guard.
+ * set is exactly this, and no larger": a NEW site fails this suite, and so does
+ * fixing a listed one (which forces the ledger to retire with the defect
+ * instead of outliving it — as it just did). Adding an entry here to quiet a NEW
+ * finding would defeat the guard.
  *
  * Coverage (six dimensions):
  *   HAPPY — each of the three rules flags its canonical form; a clean fixture
@@ -59,6 +62,7 @@
  * @spec_ref task-plan-membership-has-ten-known-sites-and-no-enumeration
  * @spec_ref task-the-tenth-plan-member-site-is-a-write-path-create-time
  * @spec_ref task-three-byte-identical-copies-of-isplanmember-survive
+ * @spec_ref task-the-eleventh-plan-member-site-found-by-enumeration
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -85,26 +89,27 @@ const R1 = "second-predicate-definition";
 const R2 = "raw-membership-comparison";
 const R3 = "plan-scope-on-parent-id-proxy";
 
+/** One ledger row: the identity triple `checkLedger`-style matching compares, nothing more. */
+interface KnownOpenSite {
+  readonly file: string;
+  readonly line: number;
+  readonly rule: string;
+}
+
 /**
  * The COMPLETE set of plan-membership sites this oracle reports on the real
- * tree today, measured 2026-08-03 on `main @ 23bb6bf`.
+ * tree today: **EMPTY**, measured 2026-08-03 after
+ * `task-the-eleventh-plan-member-site-found-by-enumeration` converted BOTH of
+ * `bootstrap`'s proxy-keyed derivations to {@link isPlanMember} — the R3
+ * comparison at `session-service.ts:251` (the single row this ledger ever
+ * carried) and its `.has()`-shaped `active_sessions` sibling, which R3
+ * structurally cannot see. With the ledger empty, the real-tree assertions below
+ * say "this tree is clean", which is the state the oracle exists to hold.
  *
  * ⛔ A ledger, NOT an allowlist — see this file's header. Remove an entry only
  * when its site is genuinely fixed; never add one to quiet a new finding.
  */
-const KNOWN_OPEN_SITES = [
-  {
-    file: "packages/lore/src/service/session-service.ts",
-    line: 251,
-    rule: R3,
-    // owner: no task filed at authoring time — `bootstrap`'s active-plan task
-    // listing (`allDocs.filter((d) => d.type === "task" && d.parent_id === plan.id)`).
-    // The eight-site sweep (task-eight-more-plan-member-queries-still-key-on-parent-id)
-    // listed `session-service.ts:766` as "bootstrap active-plan task listing", but
-    // :766 is `computeReadinessPointer` (the `resume` path, now membership-keyed);
-    // `bootstrap`'s own listing was never converted.
-  },
-] as const;
+const KNOWN_OPEN_SITES: readonly KnownOpenSite[] = [];
 
 // ─── Legacy-mechanism mirror ────────────────────────────────────────────────
 
@@ -484,15 +489,16 @@ describe("check-plan-membership-sites: real repo tree (task oracle)", () => {
     for (const rule of RULES) expect(counts[rule.name]).toBeGreaterThanOrEqual(1);
   });
 
-  it("the real-tree open set is EXACTLY the known ledger — an eleventh site fails here", () => {
+  it("the real-tree open set is EXACTLY the known ledger — a NEW site fails here", () => {
     const found = scanRepo().violations.map((v) => ({ file: v.file, line: v.line, rule: v.rule }));
     expect(found).toEqual(KNOWN_OPEN_SITES.map((site) => ({ file: site.file, line: site.line, rule: site.rule })));
   });
 
-  it("main() with NO injected root reports the exit code the ledger implies", () => {
-    // 3 while any known site is open; 0 the moment the ledger empties — so the
-    // ledger is the single knob and cannot silently outlive the defect.
-    expect(main()).toBe(KNOWN_OPEN_SITES.length > 0 ? 3 : 0);
+  it("main() with NO injected root reports a CLEAN tree", () => {
+    // The ledger retired with its defect (see this file's header), so the real
+    // tree must scan clean: 0 — never 3 (a live site) and never 4 (a scan that
+    // could not measure what it claims).
+    expect(main()).toBe(0);
   });
 
   it("CONTROL: the shared predicate module itself is never reported", () => {

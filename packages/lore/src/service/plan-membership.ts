@@ -59,14 +59,33 @@
  *   Stated RESIDUAL on the SSOT note above: `function isPlanMember` counts
  *   DEFINITION SITES, so an arrow-const or differently-named inline
  *   `t.extra["plan_id"] === planId` would satisfy the count while violating
- *   the property. The wider grep for the raw comparison,
- *   `grep -rn 'extra\["plan_id"\] ===' packages/lore/src/`, is the companion
- *   check; as of 2026-08-03 its ONLY hit outside this file is
- *   `export-docs-service.ts`'s `typeof doc.extra["plan_id"] === "string"`,
- *   which is adjudicated NOT a membership test and must stay as it is: it has
- *   no `planId` to compare against — it narrows a task's declared plan id to
- *   a string so it can be used as an `index.mappings` key. Routing it through
- *   this predicate would be a type error, not a de-duplication.
+ *   the property. That residual is closed by a SHIPPED, EXECUTABLE oracle:
+ *   `bun run check:plan-member-sites` (`scripts/check-plan-membership-sites.ts`)
+ *   walks `packages/**` + `scripts/**` and reports three rules — a second
+ *   predicate definition in ANY form (R1), a raw `extra.plan_id` comparison
+ *   outside this module (R2), and a plan-scoped resolution keyed on the
+ *   `parent_id` proxy (R3) — exiting 3 on any hit and 4, never 0, when it
+ *   cannot measure what it claims. Its test
+ *   (`scripts/tests/check-plan-membership-sites.test.ts`) asserts the real
+ *   tree's open set equals an EXACT ledger, so a NEW site fails by
+ *   construction instead of waiting for the next reader's attention; that
+ *   ledger is empty as of 2026-08-03. `export-docs-service.ts`'s `typeof
+ *   doc.extra["plan_id"] === "string"` is an R2 ALLOWLIST entry, not an open
+ *   site — adjudicated NOT a membership test and it must stay as it is: it has
+ *   no `planId` to compare against, it narrows a task's declared plan id to a
+ *   string so it can be used as an `index.mappings` key, and routing it
+ *   through this predicate would be a type error, not a de-duplication.
+ *   Machine-visibility residual (documented, deliberately NOT widened): R3
+ *   matches a COMPARISON, so a plan scope written as
+ *   `activePlanIds.has(task.parent_id)` stays invisible to it. Admitting the
+ *   `.has()` shape was measured and REJECTED while the guard was built — it
+ *   flags legitimate `knowledge`/handoff groupings whose plan link genuinely IS
+ *   `parent_id`, and because allowlisting is BY FILE the exemption would blind
+ *   R3 to real violations inside that same file. `bootstrap`'s `active_sessions`
+ *   derivation was exactly such an invisible site until
+ *   task-the-eleventh-plan-member-site-found-by-enumeration converted it; the
+ *   comparison-shaped sibling site in the same function is the one the oracle
+ *   caught.
  * - **Silence** — N/A at this layer. This predicate has no failure mode of
  *   its own (a pure boolean read of one field, never empty/error) — whether
  *   an empty resulting member set needs a distinct "disagreement" signal is
