@@ -141,6 +141,7 @@ import {
   type AcceptanceCriterion,
   type PhaseCompletionState,
   type AcCoverageFact,
+  type CaptureSource,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
@@ -654,6 +655,16 @@ export class PhaseWorkflowService {
    * live here exactly once. Mirrors `TaskWorkflowService.appendEvidenceEntry`'s
    * time-seam ordering (`now` invoked AFTER resolvePhase + the cap check, immediately
    * before building the candidate) for the same STALE_VERSION test-recipe reason.
+   *
+   * @invariant `capture_source` is ALWAYS stamped on the written candidate, mirroring
+   *   `TaskWorkflowService.appendEvidenceEntry`'s identical invariant
+   *   (task-capture-source-is-optional-at-the-evidence-write-boundary) — `entry
+   *   .capture_source` is compile-time REQUIRED on both `EvidenceInput` and
+   *   `VerifiedEvidenceInput` (imported verbatim from `task-workflow-service.js`), so
+   *   this is never a default standing in for an omitted value. `entry.attestation
+   *   !== undefined` forces `"runner"` regardless of whatever `entry.capture_source`
+   *   held (an attested row is runner-captured by construction) — a correctness
+   *   override on a supplied value, same as the task-doc sibling.
    */
   private async appendEvidenceEntry(
     idOrSlug: string,
@@ -676,12 +687,18 @@ export class PhaseWorkflowService {
     }
 
     const nowIso = now();
+    // reason: see this method's own @invariant above — `entry.capture_source` is
+    // compile-time required, so this is a correctness override for an attested row,
+    // never a fallback for an omitted one (task-capture-source-is-optional-at-the-
+    // evidence-write-boundary, mirroring TaskWorkflowService.appendEvidenceEntry).
+    const captureSource: CaptureSource = entry.attestation !== undefined ? "runner" : entry.capture_source;
     const candidate = {
       oracle: entry.oracle,
       command: entry.command,
       result: entry.result,
       recorded_at: nowIso,
       recorded_by: entry.recorded_by,
+      capture_source: captureSource,
       ...(entry.output_tail !== undefined ? { output_tail: entry.output_tail } : {}),
       ...(entry.ac_ref !== undefined ? { ac_ref: entry.ac_ref } : {}),
       ...(entry.checklist_ref !== undefined ? { checklist_ref: entry.checklist_ref } : {}),

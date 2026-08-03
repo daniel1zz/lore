@@ -214,6 +214,7 @@ describe("lore_anchor_set — declarative replace, preserves claim/evidence (SPE
       result: "pass",
       recorded_by: "agent:t1",
       output_tail: "ok",
+      capture_source: "self-report",
     });
     if (!evidenceResult.ok) throw new Error(JSON.stringify(evidenceResult.error));
 

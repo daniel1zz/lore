@@ -342,6 +342,7 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
       result: "pass",
       recorded_by: "alice",
       output_tail: "ok",
+      capture_source: "self-report",
     });
     expect(evidenceResult.ok).toBe(true);
 

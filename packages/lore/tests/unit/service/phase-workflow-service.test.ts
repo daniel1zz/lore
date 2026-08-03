@@ -235,6 +235,7 @@ describe("PhaseWorkflowService — HAPPY: claim/evidence/release/ready round-tri
       command: "bun test",
       result: "pass",
       recorded_by: "agent:p1",
+      capture_source: "self-report",
     });
     expect(evidenced.ok).toBe(true);
     if (!evidenced.ok) return;
@@ -385,6 +386,7 @@ describe("PhaseWorkflowService — REGRESSION §3: legacy task doc read toleranc
       command: "bun test",
       result: "pass",
       recorded_by: "agent:p1",
+      capture_source: "self-report",
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -550,6 +552,7 @@ describe("PhaseWorkflowService — HAPPY: done() walks a released phase doc to a
       command: "bun test",
       result: "pass",
       recorded_by: "agent:p1",
+      capture_source: "self-report",
     });
 
     const doneResult = await service.done("phase-one", { by: "agent:p1" });
@@ -588,6 +591,7 @@ describe("PhaseWorkflowService — NEGATIVE: done() refuses without passing evid
       command: "bun test",
       result: "pass",
       recorded_by: "agent:p1",
+      capture_source: "self-report",
     });
     await service.claim("phase-one", { by: "agent:p2" });
 
@@ -606,6 +610,7 @@ describe("PhaseWorkflowService — NEGATIVE: done() refuses without passing evid
       command: "bun test",
       result: "pass",
       recorded_by: "agent:p1",
+      capture_source: "self-report",
     });
     await service.done("phase-one", { by: "agent:p1" });
 

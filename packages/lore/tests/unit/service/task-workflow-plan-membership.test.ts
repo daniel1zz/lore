@@ -83,6 +83,9 @@ function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",
+    // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+    // now compile-time-required on EvidenceInput.
+    capture_source: "self-report",
     ...overrides,
   };
 }
@@ -97,6 +100,10 @@ function attestedPass(overrides: Partial<VerifiedEvidenceInput> = {}): VerifiedE
     result: "pass",
     recorded_by: "runner",
     attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+    // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+    // now compile-time-required on VerifiedEvidenceInput; "runner" is the value
+    // the real-world caller (VerifyRunnerService) actually proves.
+    capture_source: "runner",
     ...overrides,
   };
 }

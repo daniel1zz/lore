@@ -166,6 +166,7 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
       result: "pass",
       recorded_by: "agent:alice",
       output_tail: "ok",
+      capture_source: "self-report",
     });
     expect(evidenceResult.ok).toBe(true);
 
@@ -189,6 +190,7 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
       result: "pass",
       recorded_by: "agent:alice",
       output_tail: "ok",
+      capture_source: "self-report",
     });
 
     const current = await corpusService.get(taskId);

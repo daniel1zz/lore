@@ -218,6 +218,7 @@ describe("CorpusService.getAssessmentFreshness (task-eight-more-plan-member-quer
       // fixture predates that floor — its subject is plan membership, not tail integrity.
       output_tail: "manual check performed, no defects observed",
       recorded_by: "alice",
+      capture_source: "self-report",
     });
     expect(evidenceResult.ok).toBe(true);
 

@@ -70,6 +70,9 @@ function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
     command: "bunx vitest run some.test.ts",
     result: "fail",
     recorded_by: "alice",
+    // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+    // now compile-time-required on EvidenceInput.
+    capture_source: "self-report",
     ...overrides,
   };
 }
@@ -269,6 +272,7 @@ describe("AC-ETI-5 — CONTROL: a runner-attested fail with an empty output_tail
         result: "fail",
         recorded_by: "lore-verify",
         output_tail: "",
+        capture_source: "runner",
         attestation: { runner: "lore-cli", exit_code: 1, duration_ms: 42, timed_out: false },
       },
       nowIso,
@@ -296,6 +300,7 @@ describe("AC-ETI-5 — CONTROL: a runner-attested fail with an empty output_tail
         command: "bun test timed-out.bun.test.ts",
         result: "fail",
         recorded_by: "lore-verify",
+        capture_source: "runner",
         attestation: { runner: "lore-cli", exit_code: 1, duration_ms: 30000, timed_out: true },
       },
       nowIso,

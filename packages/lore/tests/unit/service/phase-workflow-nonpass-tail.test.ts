@@ -89,6 +89,9 @@ function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
     command: "bunx vitest run some.test.ts",
     result: "fail",
     recorded_by: "alice",
+    // reason: task-capture-source-is-optional-at-the-evidence-write-boundary —
+    // now compile-time-required on EvidenceInput.
+    capture_source: "self-report",
     ...overrides,
   };
 }
