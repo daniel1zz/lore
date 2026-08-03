@@ -227,12 +227,28 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     await createRootPrd();
     const { taskSlug } = await createAdhocTask("Adhoc Task Feed Start");
 
+    // `feed.ts` calls the zero-arg `resolveActor()` unconditionally (SPEC-102 trace
+    // recording), so its result — and, on an OS-fallback resolution, an stderr
+    // ADVISORY — depends on the full `--by` > `$LORE_ACTOR` > session-tier
+    // (`$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`) > worktree > OS-username
+    // precedence chain (task-a-test-s-green-depends-on-an-ambient-claude-code-session
+    // sibling finding: this test's `expect(stderr).toBe("")` silently depended on the
+    // invoking shell's ambient session var routing resolution through the QUIET
+    // session tier; absent it, resolution falls through to the OS-fallback tier,
+    // which prints the advisory this assertion does not expect). Pin `$LORE_ACTOR`
+    // explicitly — it outranks the session tier — so the actor tier, and therefore
+    // the empty-stderr assertion, is constructed rather than inherited.
+    const originalLoreActor = process.env["LORE_ACTOR"];
+    process.env["LORE_ACTOR"] = "agent:adhoc-claim-and-feed-test";
+
     const feedCmd = await importDefaultCommand("../../src/adapters/cli/commands/feed.js");
     const output = captureOutput();
     try {
       await feedCmd.run({ args: { checkpoint: "task-start", target: taskSlug } });
     } finally {
       output.restore();
+      if (originalLoreActor === undefined) delete process.env["LORE_ACTOR"];
+      else process.env["LORE_ACTOR"] = originalLoreActor;
     }
 
     expect(process.exitCode).toBe(0);
