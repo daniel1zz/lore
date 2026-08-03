@@ -125,10 +125,36 @@ let tmpDir: string;
 let originalCwd: string;
 let originalEnv: string | undefined;
 
+/**
+ * Ambient-state hygiene (task-a-test-s-green-depends-on-an-ambient-claude-code-session):
+ * `lore gate task-claim`'s CLI dry-run (`runTaskClaimGate`, `commands/gate.ts`) and
+ * `TaskWorkflowService.claim` (via `createApp`'s `processEnv: process.env` wiring, `app.ts`)
+ * both read `$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID` from `process.env` DIRECTLY —
+ * production code that is correct and must not change (SPEC-042 D5's same-session
+ * exemption needs a REAL env read to mean anything, and the dry-run must read the SAME
+ * variable the real claim does for parity). Neither call site accepts an injectable env
+ * argument, so the injection model (`phase-claim-session-capture.test.ts`) does not apply
+ * here — this file follows `claim-session-capture-app-wiring.bun.test.ts`'s save/delete/
+ * restore model instead: `beforeEach` snapshots the ambient value and clears it, so every
+ * case starts from a CONTROLLED absence rather than whatever the invoking shell happens to
+ * carry; `afterEach` restores the ambient value so this file never leaks env state into
+ * whatever else shares the test process. The two AC-P2-ANCHOR REGRESSION cases below then
+ * call `setSessionEnv` explicitly when the session fact is what the case is testing.
+ */
+const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;
+const originalSessionEnv = new Map<string, string | undefined>();
+
+function setSessionEnv(variable: (typeof SESSION_ENV_VARS)[number] | null, value?: string): void {
+  for (const name of SESSION_ENV_VARS) delete process.env[name];
+  if (variable !== null && value !== undefined) process.env[variable] = value;
+}
+
 beforeEach(() => {
   process.exitCode = 0;
   originalEnv = process.env["LORE_GATE_BYPASS"];
   delete process.env["LORE_GATE_BYPASS"];
+  for (const name of SESSION_ENV_VARS) originalSessionEnv.set(name, process.env[name]);
+  setSessionEnv(null); // controlled absence by default — never an inherited ambient value
   tmpDir = resolve(mkdtempSync(join(tmpdir(), "lore-gate-p2-cross-tier-test-")));
   const loreDir = join(tmpDir, ".lore");
   mkdirSync(loreDir, { recursive: true });
@@ -144,6 +170,11 @@ afterEach(() => {
   process.exitCode = 0;
   if (originalEnv === undefined) delete process.env["LORE_GATE_BYPASS"];
   else process.env["LORE_GATE_BYPASS"] = originalEnv;
+  for (const name of SESSION_ENV_VARS) {
+    const original = originalSessionEnv.get(name);
+    if (original === undefined) delete process.env[name];
+    else process.env[name] = original;
+  }
   process.chdir(originalCwd);
   try {
     rmSync(tmpDir, { recursive: true, force: true });
@@ -798,18 +829,35 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     expect(process.exitCode).not.toBe(4);
   });
 
-  it("REGRESSION: a fresh claim by the SAME actor does not conflict, even with overlapping anchors", async () => {
-    const { planId } = await createPrdParentedPlan();
-    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor Task A", [
-      "src/shared.ts",
-    ]);
-    const { taskSlug: taskBSlug } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor Task B", [
-      "src/shared.ts",
-    ]);
+  // The following pair replaces a single test that asserted only the exempt branch —
+  // that assertion's truth silently depended on whichever ambient
+  // $CLAUDE_CODE_SESSION_ID the invoking shell happened to carry
+  // (task-a-test-s-green-depends-on-an-ambient-claude-code-session): present → both
+  // sides captured the SAME id and were exempted (exit 0); absent → both captured
+  // NOTHING and the fail-safe correctly refused (exit 4), which read as a failure
+  // instead of as the SECOND case it actually is. Both branches are now constructed
+  // and asserted explicitly, independent of the ambient environment.
 
+  it("REGRESSION: a fresh claim by the SAME actor, in the SAME measured session, does not conflict, even with overlapping anchors", async () => {
+    const { planId } = await createPrdParentedPlan();
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor Same-Session Task A", [
+      "src/shared.ts",
+    ]);
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(
+      planId,
+      "Anchor Gate Same-Actor Same-Session Task B",
+      ["src/shared.ts"],
+    );
+
+    // Both `claimTask` (via `TaskWorkflowService.claim`) and the gate's dry-run
+    // (`runTaskClaimGate`) read the session id from `process.env` at their own call
+    // time — set the SAME value explicitly before each so "one measured session" is a
+    // constructed fact, never an inherited ambient one.
+    setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
     await claimTask(taskAId, "agent:a");
 
     const cmd = await importGateSubCommand("task-claim");
+    setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
     const output = captureOutput();
     try {
       await cmd.run({ args: { task: taskBSlug, by: "agent:a" } });
@@ -819,6 +867,37 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
 
     expect(process.exitCode).toBe(0);
     expect(output.stdout.join("\n")).toContain("gate: pass");
+  });
+
+  it("REGRESSION: a fresh claim by the SAME actor with NO measured session on either side refuses as ANCHOR_OVERLAP_SESSION_UNMEASURED — the fail-safe branch of the case above", async () => {
+    const { planId } = await createPrdParentedPlan();
+    const { taskId: taskAId } = await createTaskWithAnchors(planId, "Anchor Gate Same-Actor No-Session Task A", [
+      "src/shared.ts",
+    ]);
+    const { taskSlug: taskBSlug } = await createTaskWithAnchors(
+      planId,
+      "Anchor Gate Same-Actor No-Session Task B",
+      ["src/shared.ts"],
+    );
+
+    // Explicitly ABSENT on both sides (mirrors `beforeEach`'s default, restated here
+    // so the fact under test is visible at the call site, not merely inherited). "Same
+    // actor" alone is never evidence of "one session" — without a measured session id
+    // on both sides the mutex must refuse, not silently permit.
+    setSessionEnv(null);
+    await claimTask(taskAId, "agent:a");
+
+    const cmd = await importGateSubCommand("task-claim");
+    setSessionEnv(null);
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { task: taskBSlug, by: "agent:a" } });
+    } finally {
+      output.restore();
+    }
+
+    expect(process.exitCode).toBe(4);
+    expect(output.stdout.join("\n")).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
   });
 
   it("BOUNDARY: disjoint anchors between fresh siblings → gate: pass", async () => {
