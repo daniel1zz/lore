@@ -261,9 +261,24 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
     const p3 = await createPlan(cs, spec.id, "P3 Mig Orphan", ["core"]);
     // Filed at P3 (so the PRE-FIX parent_id query WOULD have swept it up and archived
     // it under a plan it does not belong to) but owned by a plan that does not exist.
-    const orphan = await createTask(cs, p3.id, MISSING_PLAN_ID, "T8 orphaned membership", {
+    //
+    // reason: built in TWO steps, not one `createTask(cs, p3.id, MISSING_PLAN_ID, …)`
+    // call. `CorpusService.create` now resolves a task's phase namespace by MEMBERSHIP
+    // and REFUSES a phase whose declared `extra.plan_id` matches no plan
+    // (task-the-tenth-plan-member-site-is-a-write-path-create-time), so this state is
+    // no longer AUTHORABLE — it is only ARRIVED AT, exactly as it is in production:
+    // the plan existed when the task was written and does not any more. Creating the
+    // task legally and then re-pointing the stored `plan_id` reproduces that history
+    // instead of asking the write path to accept what it now correctly rejects.
+    const orphan = await createTask(cs, p3.id, p3.id, "T8 orphaned membership", {
       phase: "core",
     });
+    const orphanExtra = { ...orphan.extra, plan_id: MISSING_PLAN_ID };
+    const orphanUpdate = await store.update(orphan.id, {
+      extra: orphanExtra,
+      updated_at: "2026-08-02T00:00:00.000Z",
+    });
+    expect(orphanUpdate.ok, "the orphaning store.update must land, or this test proves nothing").toBe(true);
 
     const svc = new PhaseMigrationService(store);
     const result = await svc.migrateTasks({ dryRun: false });

@@ -293,14 +293,14 @@ describe("PhaseService.findTasksByPhase (task-eight-more-plan-member-queries-sti
     const p4 = await createPlan(corpusService, null, "P4 Phase");
     const addResult = await phaseService.addPhase(p3.id, "Track A");
     expect(addResult.ok).toBe(true);
-    // reason: task creation's cross-entity phase validation (corpus-service.ts
-    // `_createImpl`) checks `extra.phase` against the PARENT's (parent_id's)
-    // declared phases — a deliberate, orthogonal design (validates "is this a
-    // real phase name where the task is FILED", unrelated to plan MEMBERSHIP,
-    // which this fix's `findTasksByPhase` governs). P4 must therefore ALSO
-    // declare "Track A" for T6's creation to pass that gate; the two plans
-    // coincidentally sharing a phase name is what T6 needs to exist at all.
-    await phaseService.addPhase(p4.id, "Track A");
+    // reason: P4 deliberately declares NOTHING. It used to need `addPhase(p4, "Track
+    // A")` because create-time `extra.phase` validation resolved the plan from
+    // `parent_id`, and the comment here called that "a deliberate, orthogonal design".
+    // It was not: it was the TENTH site of this very membership family, closed by
+    // task-the-tenth-plan-member-site-is-a-write-path-create-time — `_createImpl` now
+    // resolves the namespace by MEMBERSHIP (`isPlanMember`), the same key
+    // `findTasksByPhase` uses. Removing that workaround makes this test a real
+    // discriminator: T6 can only be created at all if P3's namespace was consulted.
     await createTask(corpusService, p4.id, p3.id, "T6 diverged P3 member (filed at P4)", { phase: "Track A" });
 
     const removeResult = await phaseService.removePhase(p3.id, "Track A");
@@ -317,7 +317,7 @@ describe("PhaseService.findTasksByPhase (task-eight-more-plan-member-queries-sti
     const p3 = await createPlan(corpusService, null, "P3 Phase Rename");
     const p4 = await createPlan(corpusService, null, "P4 Phase Rename");
     await phaseService.addPhase(p3.id, "Track A");
-    await phaseService.addPhase(p4.id, "Track A"); // see HAPPY test's `reason:` for why P4 needs this too
+    // P4 declares nothing — see the HAPPY test's `reason:` for why it no longer has to.
     const t6 = await createTask(corpusService, p4.id, p3.id, "T6 diverged P3 member (filed at P4)", {
       phase: "Track A",
     });
@@ -341,6 +341,12 @@ describe("PhaseService.findTasksByPhase (task-eight-more-plan-member-queries-sti
     const p3 = await createPlan(corpusService, null, "P3 Phase Negative");
     const p4 = await createPlan(corpusService, null, "P4 Phase Negative");
     await phaseService.addPhase(p3.id, "Track A");
+    // reason: the roles are REVERSED here — T7 BELONGS to P4 and is merely filed at P3 —
+    // so P4 is the plan whose namespace governs T7's `extra.phase`, and it must declare
+    // "Track A" for T7 to exist. This is not the retired parent_id workaround (see the
+    // HAPPY test's `reason:`); it is the membership rule stating the requirement
+    // correctly: a task may only reference a phase ITS OWN plan declares.
+    await phaseService.addPhase(p4.id, "Track A");
     const t7 = await createTask(corpusService, p3.id, p4.id, "T7 real P4 member, filed at P3", {
       phase: "Track A",
     });
