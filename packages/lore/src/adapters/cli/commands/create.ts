@@ -19,6 +19,14 @@
  *               --linkage (which JUSTIFIES a CHOSEN plan attachment — SPEC-069
  *               D3 — the opposite of "no plan"), checked in the SAME
  *               single-pass validation (`checkTaskCreateAdhocConflicts`).
+ *               --adhoc DOES require an explicit --ac-scope (exit 4 without
+ *               one, `isAdhocAcScopeDeclarationMissing`): the plan branch's
+ *               requiredness is enforced service-side by the `task-create`
+ *               gate off the parent plan's spec lineage, which --adhoc
+ *               guarantees is absent, so the ad-hoc branch is keyed on the
+ *               author's flag here instead. `--ac-scope ""` is the legal
+ *               "claims nothing" declaration. Source:
+ *               task-an-ad-hoc-task-can-never-reach-the-attestation-path-that.
  *
  * Type-specific OPTIONAL flags:
  *   spec      → --kind (feature|tech|design); defaults to "feature" when omitted
@@ -63,9 +71,11 @@ import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flo
 import {
   checkTaskCreateAdhocConflicts,
   checkTaskCreateRequiredFlags,
+  formatAdhocAcScopeMissingError,
   formatTaskCreateAdhocConflictError,
   formatTaskCreateMissingFlagsError,
   inferTaskParentId,
+  isAdhocAcScopeDeclarationMissing,
   resolveAcScopeForCreate,
   type ResolvedAcScope,
 } from "../create-task-validation.js";
@@ -202,7 +212,7 @@ export default defineCommand({
     "ac-scope": {
       type: "string",
       description:
-        "[task only, repeatable] Declare an extra.ac_scope entry — an acceptance-criterion id on the governing spec that THIS task claims (e.g. AC-VS-9). Pass an explicit empty value (--ac-scope \"\") to declare this task claims NONE, storing an empty array (distinct from omitting the flag entirely). Required (may be empty) when the parent plan's spec declares >= 1 script-mode AC (spec-declaring-ac-scope-is-required-at-task-creation-so-the). Consumed by `lore verify`'s declared-scope intersection; edit later with `lore scope add|rm` (there is no `lore set --ac-scope`).",
+        "[task only, repeatable] Declare an extra.ac_scope entry — an acceptance-criterion id on the governing spec that THIS task claims (e.g. AC-VS-9). Pass an explicit empty value (--ac-scope \"\") to declare this task claims NONE, storing an empty array (distinct from omitting the flag entirely). Required (may be empty) on BOTH task branches: when the parent plan's spec declares >= 1 script-mode AC (spec-declaring-ac-scope-is-required-at-task-creation-so-the), and ALWAYS with --adhoc, whose absent plan lineage that first trigger can never see (task-an-ad-hoc-task-can-never-reach-the-attestation-path-that). Consumed by `lore verify`'s declared-scope intersection — for an --adhoc task it is also how `lore verify --task` finds the governing spec at all; edit later with `lore scope add|rm` (there is no `lore set --ac-scope`).",
     },
     "code-anchor": {
       type: "string",
@@ -319,6 +329,12 @@ export default defineCommand({
       }
     }
 
+    // Resolved ONCE here (pure fn, no IO) and consumed twice: by the ad-hoc
+    // --ac-scope requiredness check inside the task block below, and by
+    // `buildExtra` further down — the absent-vs-explicitly-empty bit must be
+    // the SAME fact in both places.
+    const acScope = resolveAcScopeForCreate(args["ac-scope"] as string | string[] | undefined);
+
     // SPEC-065 D4 (extended by SPEC-069 D2/D3/D4): single-pass validation —
     // reports every --adhoc mutual-exclusion conflict AND every missing
     // required flag together, never a two-round-trip discovery (P1-5 dogfood
@@ -342,6 +358,20 @@ export default defineCommand({
       if (missingTaskFlags.length > 0) {
         process.stderr.write(formatTaskCreateMissingFlagsError(missingTaskFlags) + "\n");
         process.exit(2);
+      }
+      // The ad-hoc branch of --ac-scope requiredness (task-an-ad-hoc-task-can-
+      // never-reach-the-attestation-path-that). Checked AFTER the two exit-2
+      // usage families above so an --adhoc + --plan-id caller learns about the
+      // mutual exclusion first, and BEFORE loadLoreApp() so a refusal can never
+      // write a doc.
+      //
+      // Exit 4, not 2: the plan branch's identical requirement is denied
+      // service-side by the `task-create` gate as a VALIDATION_ERROR (exit 4),
+      // and a caller must not need to know which branch it is on to detect an
+      // ac-scope requiredness refusal.
+      if (isAdhocAcScopeDeclarationMissing(taskCreateFlags, acScope.passed)) {
+        process.stderr.write(formatAdhocAcScopeMissingError() + "\n");
+        process.exit(4);
       }
     }
 
@@ -507,7 +537,7 @@ export default defineCommand({
         args["requires-uat"] as boolean | undefined,
         args.adhoc as boolean | undefined,
         args.linkage as string | undefined,
-        resolveAcScopeForCreate(args["ac-scope"] as string | string[] | undefined),
+        acScope,
       );
 
       // SPEC-065 D4: --parent defaults to the (already-resolved) --plan-id when

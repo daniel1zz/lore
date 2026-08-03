@@ -112,10 +112,19 @@ function getAuditEntries(slug: string, cwd: string): AuditEntryJson[] {
   return (JSON.parse(result.stdout) as { data: { entries: AuditEntryJson[] } }).data.entries;
 }
 
-/** Creates a planless (`--adhoc`) task and returns its slug. */
+/**
+ * Creates a planless (`--adhoc`) task and returns its slug.
+ *
+ * `--ac-scope ""` is REQUIRED on the ad-hoc branch (task-an-ad-hoc-task-can-
+ * never-reach-the-attestation-path-that) — an ad-hoc creation without it now
+ * exits 4. The EMPTY form keeps this fixture's "structurally unattestable, no
+ * declared AC" shape intact (an empty ac_scope leaves the red-first
+ * no-new-tests floor inapplicable), which is exactly what makes
+ * `--override-attestation` the only archival route it can take.
+ */
 function createAdhocTask(cwd: string, title: string): string {
   const created = mustRun(
-    ["create", "task", "--title", title, "--adhoc", "--content", "body", "--no-ai", "--json"],
+    ["create", "task", "--title", title, "--adhoc", "--ac-scope", "", "--content", "body", "--no-ai", "--json"],
     cwd,
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;

@@ -2,6 +2,11 @@
  * adhoc-task.test.ts — SPEC-069 D2/D3/D4: ad-hoc (planless) task channel.
  *
  * Covers:
+ *   - task-an-ad-hoc-task-can-never-reach-the-attestation-path-that: the
+ *     ad-hoc branch of `--ac-scope` requiredness — pure predicate +
+ *     refusal-message coverage (`isAdhocAcScopeDeclarationMissing`); the
+ *     end-to-end exit-code/store-effect wiring lives in
+ *     `tests/integration/cli/create-task-ac-scope.test.ts`.
  *   - AC-069-5: `--adhoc` succeeds with no `--plan-id`/`--parent`, sets
  *     `extra.adhoc === true`, parents to the root PRD; `--adhoc` + `--plan-id`
  *     is a single-pass mutual-exclusion conflict (CLI-layer, exit-2 shape).
@@ -30,7 +35,10 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import {
   checkTaskCreateAdhocConflicts,
   checkTaskCreateRequiredFlags,
+  formatAdhocAcScopeMissingError,
   formatTaskCreateAdhocConflictError,
+  isAdhocAcScopeDeclarationMissing,
+  resolveAcScopeForCreate,
 } from "../../../src/adapters/cli/create-task-validation.js";
 import { computeAssessmentFacts } from "@lore/core";
 import type { CreateDocInput, PlanBundle } from "@lore/core";
@@ -186,6 +194,75 @@ describe("AC-069-5: create task --adhoc — CLI single-pass validation (pure)", 
       "--parent",
     ]);
     expect(checkTaskCreateAdhocConflicts({ planId: "plan-x", parent: undefined })).toEqual([]);
+  });
+});
+
+// ─── The ad-hoc branch of --ac-scope requiredness (pure) ─────────────────────
+//
+// task-an-ad-hoc-task-can-never-reach-the-attestation-path-that. The plan
+// branch's requiredness is a service-side gate predicate keyed on the parent
+// plan's spec lineage; `--adhoc` guarantees that lineage is absent, so the
+// ad-hoc branch is keyed on the author's flag at the CLI layer instead.
+
+describe("isAdhocAcScopeDeclarationMissing — ad-hoc --ac-scope requiredness (pure)", () => {
+  const adhoc = { planId: undefined, parent: undefined, adhoc: true };
+
+  // ── NEGATIVE (the refusal this exists for) ────────────────────────────────
+
+  it("NEGATIVE: --adhoc with --ac-scope never passed is missing its declaration", () => {
+    expect(isAdhocAcScopeDeclarationMissing(adhoc, false)).toBe(true);
+  });
+
+  // ── HAPPY ────────────────────────────────────────────────────────────────
+
+  it("HAPPY: --adhoc with --ac-scope passed satisfies the requirement", () => {
+    expect(isAdhocAcScopeDeclarationMissing(adhoc, true)).toBe(false);
+  });
+
+  // ── BOUNDARY ─────────────────────────────────────────────────────────────
+
+  it("BOUNDARY: the bit read is PASSED, not non-empty — `--ac-scope \"\"` (passed, zero ids) satisfies it", () => {
+    // resolveAcScopeForCreate("") => { passed: true, ids: [] }: an explicitly
+    // empty declaration is an auditable claim, distinct from an absent key.
+    expect(isAdhocAcScopeDeclarationMissing(adhoc, resolveAcScopeForCreate("").passed)).toBe(false);
+    expect(isAdhocAcScopeDeclarationMissing(adhoc, resolveAcScopeForCreate(undefined).passed)).toBe(true);
+  });
+
+  it("BOUNDARY: --adhoc=false (falsy) behaves exactly like --adhoc omitted — no requirement", () => {
+    expect(isAdhocAcScopeDeclarationMissing({ planId: undefined, parent: undefined, adhoc: false }, false)).toBe(
+      false,
+    );
+  });
+
+  // ── STATE ────────────────────────────────────────────────────────────────
+
+  it("STATE: the check reads ONLY the adhoc flag — --phase/--linkage/--plan-id never affect it", () => {
+    // (those are the mutual-exclusion family's business, reported first and
+    // separately, so the two concerns can never double-report)
+    expect(
+      isAdhocAcScopeDeclarationMissing(
+        { planId: "plan-x", parent: "plan-x", adhoc: true, phase: "P1", linkage: "why" },
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  // ── REGRESSION (the plan branch stays byte-identical) ────────────────────
+
+  it("REGRESSION: a plan-parented task with no --ac-scope is NOT refused here — the gate predicate still owns it", () => {
+    expect(isAdhocAcScopeDeclarationMissing({ planId: "plan-x", parent: "plan-x" }, false)).toBe(false);
+    expect(isAdhocAcScopeDeclarationMissing({ planId: undefined, parent: "spec-x" }, false)).toBe(false);
+  });
+
+  // ── ERROR (the message an author acts on) ─────────────────────────────────
+
+  it("ERROR: the refusal message names both legal forms — real ids AND the explicit-empty declaration", () => {
+    const message = formatAdhocAcScopeMissingError();
+    expect(message).toContain("--adhoc");
+    expect(message).toContain("--ac-scope");
+    expect(message).toContain('--ac-scope ""');
+    // names the reason, so the author learns WHY rather than just obeying
+    expect(message).toContain("lore verify");
   });
 });
 
