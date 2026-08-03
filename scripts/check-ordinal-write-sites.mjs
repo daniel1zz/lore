@@ -36,18 +36,38 @@
  * composite, or a new StoreInterface impl) can extend it with one line —
  * see the inline note below.
  *
+ * ## Public surface / why `main` returns instead of exiting
+ *
+ * `isScannableSourceFile` and `collectViolationsInFile` are pure (path/text in,
+ * decision/violations out). `main(repoRoot)` is the IO shell: it walks the tree
+ * under `repoRoot`, prints a report, and RETURNS the process exit code — it
+ * never calls `process.exit` itself, and nothing at module scope has a side
+ * effect, so importing this file scans nothing. The `import.meta.main` block at
+ * the bottom is the only place that exits.
+ *
+ * That shape is what makes the guard ARMABLE (`task-three-of-five-static-
+ * checkers-are-inert-no-exported-main`). Until it landed, `main()` was neither
+ * exported nor return-based AND ran at module scope, so no test could import
+ * this file at all — combined with no CI and a `hooks/pre-push` that runs only
+ * `lore` checks, the guard had never once executed against this checkout.
+ * `scripts/tests/check-ordinal-write-sites.test.ts` now calls `main()` with no
+ * injected root on every `bun run test`; `repoRoot` is injectable so the same
+ * tests can prove the scan actually FAILS on a fixture tree that violates the
+ * rules (a guard proven only by its green is not proven at all).
+ *
  * Usage:
  *   node scripts/check-ordinal-write-sites.mjs        # scan, exit 0/3
  *   bun run check:ordinal-sites                        # npm script wrapper
  *
- * Exit codes:
+ * Exit codes (unchanged by the arming refactor — callers read these):
  *   0 — no violations found outside the allowlist.
  *   3 — one or more violations found; each printed as `file:line: <rule> — <text>`.
- *   4 — the scan itself failed (unreadable path etc.) — never silent.
+ *   4 — the scan itself failed (unreadable path etc.) — never silent. `main`
+ *       THROWS in this case; the entry block below is what maps it to 4.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -127,8 +147,14 @@ const ALL_RULES = [
   RULE_SQL_INSERT_ORDINAL,
 ];
 
-/** True for source `.ts` files we want to scan — excludes tests and generated code. */
-function isScannableSourceFile(relPath) {
+/**
+ * True for source `.ts`/`.mts`/`.cts` files we want to scan — excludes tests,
+ * declaration files, generated code and vendored dependencies. Pure.
+ *
+ * @param {string} relPath - repo-root-relative POSIX path
+ * @returns {boolean}
+ */
+export function isScannableSourceFile(relPath) {
   if (!relPath.endsWith(".ts") && !relPath.endsWith(".mts") && !relPath.endsWith(".cts")) {
     return false;
   }
@@ -142,8 +168,18 @@ function isScannableSourceFile(relPath) {
   return true;
 }
 
-/** Recursively walks `dir`, returning repo-root-relative POSIX paths of scannable files. */
-function walkSourceFiles(dir) {
+/**
+ * Recursively walks `dir`, returning `repoRoot`-relative POSIX paths of scannable
+ * files. `repoRoot` is threaded explicitly (rather than read from the module-level
+ * constant) so an injected fixture tree's paths are relativised against ITS root —
+ * the allowlist compares repo-root-relative keys, so a walker hard-wired to the
+ * real repo root would emit paths that could never match.
+ *
+ * @param {string} dir - absolute directory to walk
+ * @param {string} repoRoot - absolute root the returned paths are relative to
+ * @returns {string[]}
+ */
+function walkSourceFiles(dir, repoRoot) {
   const out = [];
   let entries;
   try {
@@ -155,20 +191,35 @@ function walkSourceFiles(dir) {
     const abs = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git") continue;
-      out.push(...walkSourceFiles(abs));
+      out.push(...walkSourceFiles(abs, repoRoot));
     } else if (entry.isFile()) {
-      const rel = relative(REPO_ROOT, abs).split(sep).join("/");
+      const rel = relative(repoRoot, abs).split(sep).join("/");
       if (isScannableSourceFile(rel)) out.push(rel);
     }
   }
   return out;
 }
 
-/** Every `packages/*\/src` root that currently exists in this repo. */
-function findPackageSrcRoots() {
-  const packagesDir = join(REPO_ROOT, "packages");
+/**
+ * Every `packages/*\/src` root that currently exists under `repoRoot`.
+ *
+ * @param {string} repoRoot - absolute repo (or fixture) root
+ * @returns {string[]} absolute `src` directory paths
+ */
+function findPackageSrcRoots(repoRoot) {
+  const packagesDir = join(repoRoot, "packages");
   const roots = [];
-  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+  let packageEntries;
+  try {
+    packageEntries = readdirSync(packagesDir, { withFileTypes: true });
+  } catch (e) {
+    // Loud, with the path: an unreadable/absent packages dir means this oracle
+    // scanned NOTHING, which must never be reported as a clean tree.
+    throw new Error(
+      `cannot read packages directory ${packagesDir}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  for (const entry of packageEntries) {
     if (!entry.isDirectory()) continue;
     const srcDir = join(packagesDir, entry.name, "src");
     try {
@@ -189,7 +240,18 @@ function lineNumberAt(content, index) {
   return line;
 }
 
-function collectViolationsInFile(relPath, content) {
+/**
+ * Every rule violation in one file's text, in rule order. Pure — no IO, and no
+ * regex `lastIndex` leaks between calls (each rule's index is reset on entry),
+ * so the same input always yields the same result.
+ *
+ * @param {string} relPath - repo-root-relative POSIX path, echoed into each violation
+ * @param {string} content - the file's full text
+ * @returns {{file: string, line: number, rule: "ordinal-allocation-arithmetic" | "ordinal-direct-sql-write", snippet: string}[]}
+ *   — the typed surface TypeScript callers see is `check-ordinal-write-sites.d.mts`;
+ *   keep the two in sync.
+ */
+export function collectViolationsInFile(relPath, content) {
   const violations = [];
   for (const rule of ALL_RULES) {
     rule.pattern.lastIndex = 0;
@@ -204,14 +266,26 @@ function collectViolationsInFile(relPath, content) {
   return violations;
 }
 
-function main() {
-  const srcRoots = findPackageSrcRoots();
-  const files = srcRoots.flatMap((root) => walkSourceFiles(root));
+/**
+ * Scans every `packages/*\/src` tree under `repoRoot`, prints a report, and
+ * RETURNS the process exit code (0 clean / 3 violations found). Never calls
+ * `process.exit` — the `import.meta.main` block below is the only place that
+ * does — so this stays directly callable from a test (mirrors
+ * `check-test-budgets.ts::main` and `check-no-nul-bytes.ts::main`).
+ *
+ * @param {string} [repoRoot] - root to scan; defaults to this checkout's own root
+ * @returns {number} 0 (clean) or 3 (violations found)
+ * @throws {Error} when the scan itself cannot run (unreadable directory) — the
+ *   caller maps this to exit 4; it is never reported as a clean tree
+ */
+export function main(repoRoot = REPO_ROOT) {
+  const srcRoots = findPackageSrcRoots(repoRoot);
+  const files = srcRoots.flatMap((root) => walkSourceFiles(root, repoRoot));
 
   const violations = [];
   for (const relPath of files) {
     if (SANCTIONED_SET.has(relPath)) continue;
-    const abs = join(REPO_ROOT, relPath);
+    const abs = join(repoRoot, relPath);
     const content = readFileSync(abs, "utf8");
     violations.push(...collectViolationsInFile(relPath, content));
   }
@@ -229,19 +303,31 @@ function main() {
         `\n\nEither move the logic into one of the sanctioned files above, or — if this is a genuinely new` +
         ` sanctioned write site — add it to SANCTIONED_ORDINAL_WRITE_FILES in scripts/check-ordinal-write-sites.mjs.`,
     );
-    process.exit(3);
+    return 3;
   }
 
   console.log(
     `check-ordinal-write-sites: OK — ordinal-allocation arithmetic and direct SQL writes to 'ordinal' are` +
       ` confined to the ${SANCTIONED_ORDINAL_WRITE_FILES.length} sanctioned file(s). Scanned ${files.length} source file(s).`,
   );
-  process.exit(0);
+  return 0;
 }
 
-try {
-  main();
-} catch (e) {
-  console.error(`check-ordinal-write-sites: scan failed — ${e instanceof Error ? e.message : String(e)}`);
-  process.exit(4);
+/**
+ * `import.meta.main` is Node >= 24.2 (and every Bun release). Guarding on it
+ * ALONE would leave this CLI silently INERT under an older Node — no output,
+ * exit 0, indistinguishable from a clean scan, which is the precise failure this
+ * script's own arming task exists to eliminate. The portable `process.argv[1]`
+ * comparison is therefore the fallback whenever the property is absent
+ * (`undefined`), never when it is a real `false` (an import).
+ */
+const isDirectRun = import.meta.main ?? resolve(process.argv[1] ?? "") === __filename;
+
+if (isDirectRun) {
+  try {
+    process.exit(main());
+  } catch (e) {
+    console.error(`check-ordinal-write-sites: scan failed — ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(4);
+  }
 }
