@@ -213,6 +213,10 @@ describe("CorpusService.getAssessmentFreshness (task-eight-more-plan-member-quer
       oracle: "manual",
       command: "manual check",
       result: "pass",
+      // reason: a self-reported `pass` must carry a non-empty output_tail since
+      // task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the (82157f3). This
+      // fixture predates that floor — its subject is plan membership, not tail integrity.
+      output_tail: "manual check performed, no defects observed",
       recorded_by: "alice",
     });
     expect(evidenceResult.ok).toBe(true);
