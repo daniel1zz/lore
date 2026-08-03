@@ -5,8 +5,11 @@
  *   [--ac <id>] [--checklist-ref <id>]
  *
  * --capture (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) —
- * spawns `--command` itself (`node:child_process.spawnSync`, `shell: true`, this
- * process's own `process.cwd()`, a fixed {@link CAPTURE_TIMEOUT_MS} timeout) and
+ * spawns `--command` itself via `../../evidence-capture.js::captureOracleCommand`
+ * (the SHARED implementation, extracted from this file by task-mcp-lore-evidence-
+ * add-cannot-set-capture-source-and-has-no so `lore_evidence_add` over MCP can
+ * reach the same mechanism; `shell: true`, this process's own `process.cwd()`
+ * passed EXPLICITLY as the spawn cwd, a fixed `CAPTURE_TIMEOUT_MS` timeout) and
  * uses its OWN captured stdout+stderr (tail-truncated to 4000 chars, same as
  * `--output-tail-file`) as `output_tail` — the agent never types or redirects
  * anything; the tail IS the runner's real output. Cross-checks the spawn's actual
@@ -191,7 +194,6 @@
  *   the PASS-tail requirement, `capture_source`)
  */
 
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { defineCommand } from "citty";
@@ -206,26 +208,9 @@ import {
   findCaptureFlagConflict,
   describePrecheckRoots,
 } from "../evidence-precheck.js";
+import { captureOracleCommand } from "../../evidence-capture.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
-
-/**
- * Fixed timeout for `--capture`'s own child-process spawn (task-a-non-empty-
- * output-tail-can-be-hand-authored-prose-and-the) — 10 minutes, matching this
- * harness's own Bash-tool maximum. Deliberately NOT a CLI-configurable flag: a
- * capture is meant for a single scoped oracle command (`bun run typecheck`, one
- * `vitest run <file>` invocation), not a full test suite — `bun run test:changed`
- * / individual test-file commands documented across this repo's own CLAUDE.md
- * all comfortably finish well inside this window.
- */
-const CAPTURE_TIMEOUT_MS = 10 * 60 * 1000;
-
-/** `spawnSync`'s own captured-buffer ceiling (CLAUDE.md standing lesson: a spawn
- * capturing growing output MUST set an explicit `maxBuffer` — the 1 MiB Node
- * default silently truncates). Generous relative to the 4000-char tail that
- * actually gets persisted — this only bounds what `spawnSync` buffers in memory
- * before `tailChars` trims it. */
-const CAPTURE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 
 export default defineCommand({
   meta: {
@@ -323,64 +308,29 @@ export default defineCommand({
     let captureSource: CaptureSource = "self-report";
 
     if (captureRequested) {
-      const spawnResult = spawnSync(args.command as string, {
-        shell: true,
+      // reason: task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no
+      // — the spawn/cross-check/tail-truncate body used to live INLINE here,
+      // which is precisely why the MCP surface could not reach it and an agent
+      // using lore through MCP could not produce a runner-captured row at all.
+      // It now lives in `../../evidence-capture.js` and is shared VERBATIM by
+      // both adapters, so `capture_source: "runner"` means the same measured
+      // thing on either surface (a second copy would be the divergence hazard
+      // task-two-independent-copies-of-does-this-task-have-a-claim-now names).
+      // `cwd` is passed EXPLICITLY rather than defaulted inside the helper: for
+      // the CLI it is correct by construction (a fresh subprocess inherits the
+      // agent's real shell cwd), whereas MCP must supply a caller-declared one.
+      const captured = captureOracleCommand({
+        command: args.command as string,
         cwd: process.cwd(),
-        encoding: "utf8",
-        maxBuffer: CAPTURE_MAX_BUFFER_BYTES,
-        timeout: CAPTURE_TIMEOUT_MS,
+        declaredResult: args.result as string,
       });
-
-      if (spawnResult.error !== undefined) {
-        const captureError: LoreError = {
-          code: "VALIDATION_ERROR",
-          field: "capture",
-          message: `--capture failed to spawn --command: ${spawnResult.error.message}`,
-          value: args.command,
-        };
-        process.stderr.write(formatError(captureError) + "\n");
-        process.exitCode = exitCode(captureError);
+      if (!captured.ok) {
+        process.stderr.write(formatError(captured.error) + "\n");
+        process.exitCode = exitCode(captured.error);
         return;
       }
-      if (spawnResult.status === null) {
-        // reason: killed by a signal (incl. this spawn's own timeout) before
-        // exiting normally — there is no real exit code to cross-check the
-        // declared --result against, so this is refused the same way a spawn
-        // failure is, never silently treated as either pass or fail.
-        const captureError: LoreError = {
-          code: "VALIDATION_ERROR",
-          field: "capture",
-          message:
-            `--capture's spawn of --command was killed by signal ${spawnResult.signal ?? "unknown"} ` +
-            `(no exit code observed — possibly the ${CAPTURE_TIMEOUT_MS / 1000}s capture timeout). ` +
-            "Recorded nothing; narrow --command to a smaller scope and retry.",
-          value: args.command,
-        };
-        process.stderr.write(formatError(captureError) + "\n");
-        process.exitCode = exitCode(captureError);
-        return;
-      }
-
-      const declaredPass = args.result === "pass";
-      const observedPass = spawnResult.status === 0;
-      if (declaredPass !== observedPass) {
-        const captureError: LoreError = {
-          code: "VALIDATION_ERROR",
-          field: "result",
-          message:
-            `--capture ran --command and observed exit code ${spawnResult.status} — declared ` +
-            `--result "${args.result as string}" does not match (pass requires exit 0; fail/` +
-            "expected-fail requires nonzero). Recorded nothing; fix --result or --command and retry.",
-          value: { observed_exit_code: spawnResult.status, declared_result: args.result },
-        };
-        process.stderr.write(formatError(captureError) + "\n");
-        process.exitCode = exitCode(captureError);
-        return;
-      }
-
-      const combined = [spawnResult.stdout, spawnResult.stderr].filter((s) => s.length > 0).join("\n");
-      outputTail = tailChars(combined, 4000);
-      captureSource = "runner";
+      outputTail = captured.value.outputTail;
+      captureSource = captured.value.captureSource;
     } else if (typeof args["output-tail"] === "string") {
       outputTail = tailChars(args["output-tail"], 4000);
     } else if (typeof args["output-tail-file"] === "string") {

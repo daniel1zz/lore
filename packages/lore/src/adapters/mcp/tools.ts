@@ -141,7 +141,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
-import type { LoreError, LoreConfig } from "@lore/core";
+import type { LoreError, LoreConfig, CaptureSource } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
@@ -185,8 +185,10 @@ import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
   findMixedRunnerRefusal,
+  findCaptureFlagConflict,
   describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
+import { captureOracleCommand } from "../evidence-capture.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
 import { existsSync } from "node:fs";
@@ -549,8 +551,38 @@ export const LoreEvidenceAddSchema = z.object({
    * release-accept-an-attestation-from) — the SAME caller-declared value,
    * reused for a SECOND, orthogonal purpose rather than a second field,
    * since both readings are "the calling agent's own real directory".
+   *
+   * THIRD use (task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no):
+   * when {@link LoreEvidenceAddSchema.capture} is `true` this is the working
+   * directory the server spawns `command` in — and it becomes REQUIRED for that
+   * path specifically (refused when absent, never defaulted to the server's own
+   * cwd). See `capture`'s JSDoc directly below.
    */
   caller_cwd: z.string().optional(),
+  /**
+   * Opt in to RUNNER CAPTURE (task-mcp-lore-evidence-add-cannot-set-capture-
+   * source-and-has-no) — the MCP peer of the CLI's `lore evidence --capture`.
+   * When `true`, the server runs `command` ITSELF via the shared
+   * `../evidence-capture.js::captureOracleCommand`, cross-checks the real exit
+   * code against the declared `result`, and records the child's real
+   * stdout+stderr as `output_tail` with `capture_source: "runner"`.
+   *
+   * ⛔ There is deliberately NO `capture_source` input field on this schema.
+   * `capture_source` is DERIVED — `"runner"` only on the path where this server
+   * actually ran the command, `"self-report"` otherwise — because a
+   * caller-settable label is a self-report wearing a runner's badge (option (a)
+   * of the governing task, rejected by its own design review). The ONLY way a
+   * caller reaches `"runner"` is by letting lore execute the command.
+   *
+   * Requires `caller_cwd`: this is a long-lived stdio server whose
+   * `process.cwd()` was fixed at startup and is NOT where the calling agent is
+   * working (the same fact that forced `caller_cwd` to exist at all), so a
+   * `capture: true` without it is REFUSED rather than silently spawned in an
+   * arbitrary directory. Mutually exclusive with `output_tail` and with
+   * `oracle: "manual"` — the SAME `findCaptureFlagConflict` refusals the CLI
+   * applies, shared verbatim so the wording cannot drift.
+   */
+  capture: z.boolean().optional(),
 });
 
 /** Input schema for lore_phase_status (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence). */
@@ -1622,6 +1654,78 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   // non-phase target, REGRESSION); retry via phaseWorkflowService ONLY on its own
   // {field: "type", value: "phase"} rejection.
   registerToolWithArgs(server, "lore_evidence_add", "Append an oracle verification record to a task or phase", LoreEvidenceAddSchema, async (args) => {
+    // reason: runner capture (task-mcp-lore-evidence-add-cannot-set-capture-
+    // source-and-has-no) — resolved FIRST, in the same order the CLI's
+    // `commands/evidence.ts` uses (conflict guard → spawn → missing-oracle-file
+    // → mixed-runner → filtered-pass), so the downstream guards below see the
+    // CAPTURED tail rather than an absent one and neither surface can gate on a
+    // different value than the other.
+    //
+    // `capture_source` is DERIVED here and stamped on EVERY write below, never
+    // read from an input field: there is no `capture_source` on this tool's
+    // schema, because a caller-settable label asserts what nothing measured
+    // (the governing task's rejected option (a)). "runner" is reachable only by
+    // letting lore execute the command.
+    const captureRequested = args.capture === true;
+
+    // reason: the SAME shared guard the CLI applies (`findCaptureFlagConflict`),
+    // returning a fully-formed LoreError so scope/code/field/wording cannot
+    // drift between the two surfaces — the identical sharing rationale the
+    // sibling mixed-runner and filtered-pass guards below already document.
+    const captureConflict = findCaptureFlagConflict({
+      oracle: args.oracle,
+      capture: captureRequested,
+      ...(args.output_tail !== undefined ? { outputTail: args.output_tail } : {}),
+    });
+    if (captureConflict !== null) {
+      return errorContent(captureConflict);
+    }
+
+    let capturedTail: string | undefined;
+    // Absence stamps "self-report" EXPLICITLY (never omitted, never inferred
+    // from the tail's shape) — same invariant the CLI holds.
+    let captureSource: CaptureSource = "self-report";
+
+    if (captureRequested) {
+      // reason: MCP-SPECIFIC refusal with no CLI counterpart — a fresh CLI
+      // subprocess's `process.cwd()` IS the agent's real directory, but this
+      // server's was fixed when the stdio process started and is almost always
+      // SOME unrelated real path. Spawning there would run the oracle in the
+      // wrong tree and still label the row "runner", which is worse than not
+      // offering capture at all. So this fails LOUD rather than defaulting —
+      // the no-silent-fallback rule applied to a directory.
+      if (args.caller_cwd === undefined) {
+        return errorContent({
+          code: "VALIDATION_ERROR",
+          field: "caller_cwd",
+          message:
+            'capture: true requires caller_cwd — this MCP server\'s own process.cwd() is fixed at ' +
+            "startup and is not the directory the calling agent is working in, so there is no safe " +
+            "default to spawn command in. Pass caller_cwd (the absolute path the command should run " +
+            "from, normally your worktree root) and retry.",
+          value: true,
+        });
+      }
+      const captured = captureOracleCommand({
+        command: args.command,
+        // The declared directory, passed EXPLICITLY — asserted by this fix's
+        // own test suite via a relative read that resolves nowhere else.
+        cwd: args.caller_cwd,
+        declaredResult: args.result,
+      });
+      if (!captured.ok) {
+        return errorContent(captured.error);
+      }
+      capturedTail = captured.value.outputTail;
+      captureSource = captured.value.captureSource;
+    }
+
+    // reason: from here down, `effectiveOutputTail` is the ONE tail every
+    // downstream guard and the persisted row share — the captured output when
+    // capture ran, the caller's own value otherwise (the two are mutually
+    // exclusive by the conflict guard above, so this can never silently pick).
+    const effectiveOutputTail = capturedTail ?? args.output_tail;
+
     // reason: missing-oracle-file precheck (defect: task-mcp-lore-evidence-add-
     // bypasses-the-oracle-file-existence) — this handler used to call the
     // TaskWorkflowService/PhaseWorkflowService directly, never routing through
@@ -1705,7 +1809,10 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       oracle: args.oracle,
       result: args.result,
       command: args.command,
-      ...(args.output_tail !== undefined ? { outputTail: args.output_tail } : {}),
+      // reason: the CAPTURED tail when capture ran — the CLI feeds this guard
+      // its post-capture tail too, so a `--capture`d filtered run proves its
+      // matched count from real output on both surfaces identically.
+      ...(effectiveOutputTail !== undefined ? { outputTail: effectiveOutputTail } : {}),
     });
     if (filteredPassRefusal !== null) {
       return errorContent(filteredPassRefusal);
@@ -1717,7 +1824,15 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       result: args.result,
       recorded_by: args.recorded_by,
       source: "mcp",
-      ...(args.output_tail !== undefined ? { output_tail: args.output_tail } : {}),
+      ...(effectiveOutputTail !== undefined ? { output_tail: effectiveOutputTail } : {}),
+      // reason: task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no
+      // — stamped on EVERY MCP write, exactly as the CLI stamps it, so the two
+      // surfaces are no longer asymmetric about provenance. Derived above from
+      // whether THIS server ran the command; never a caller-supplied value.
+      // `appendEvidenceEntry` still overrides this to "runner" for any row
+      // carrying an `attestation` (unreachable from this tool by design — see
+      // this module's "attestation is never an accepted field" invariant).
+      capture_source: captureSource,
       ...(args.ac_ref !== undefined ? { ac_ref: args.ac_ref } : {}),
       ...(args.checklist_ref !== undefined ? { checklist_ref: args.checklist_ref } : {}),
       // reason: task-lore-evidence-add-and-lore-release-over-mcp-get-no —
