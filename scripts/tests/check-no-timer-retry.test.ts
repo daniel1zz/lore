@@ -29,9 +29,14 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   extractD3Targets,
   MIN_DECLARED_PATHS,
+  MIN_DECLARED_TOKENS,
   NoTimerRetryCheckError,
   scanSource,
 } from "../check-no-timer-retry.js";
@@ -155,4 +160,98 @@ describe("check-no-timer-retry: source scan (AC-IC-3)", () => {
     expect(scanSource("x.ts", "await Bun.sleep(1);", [])).toEqual([]);
     expect(scanSource("x.ts", "", tokens)).toEqual([]);
   });
+});
+
+// ─── Arming: the real repo tree (task oracle) ────────────────────────────────
+//
+// task-three-of-five-static-checkers-are-inert-no-exported-main: everything
+// above this line exercises the PURE parsers, so until now nothing ever ran this
+// oracle against this checkout — no CI exists, `hooks/pre-push` runs only `lore`
+// checks, and no test called `main()`. A guard that never executes is
+// indistinguishable from a guard that passes.
+//
+// `main()` is exported and already returns its exit code (it never calls
+// process.exit), but it CANNOT be called from vitest: it resolves D3's target
+// list out of the corpus, and `await import("bun:sqlite")` inside a vitest
+// worker fails with `Cannot find package 'bun:sqlite'` — measured this task, not
+// assumed (the same wall documented in check-ac-ref-integrity-core.ts's header;
+// the lazy import defers it but cannot remove it). The real CLI entry is
+// therefore driven as a SUBPROCESS, which is the same `bun run
+// check:no-timer-retry` code path with no injected root, and IS executed by
+// `bun run test` — the property this task is about.
+
+const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
+const CHECKER_SCRIPT = join(REPO_ROOT, "scripts", "check-no-timer-retry.ts");
+
+/** One `  ok  <path> (<n> match(es))` report line from the checker's own stdout. */
+interface ScannedPathReport {
+  readonly path: string;
+  readonly matches: number;
+}
+
+/**
+ * Parses the checker's per-path report lines out of its stdout. Keyed on lone
+ * tokens (`ok`/`FAIL`, the digit group, the `match` word) rather than a
+ * remembered contiguous phrase — per this repo's contiguous-substring lesson, a
+ * phrase matcher that silently stops matching degrades to "no match + exit 0",
+ * which is indistinguishable from a pass.
+ */
+function parseScannedPaths(stdout: string): ScannedPathReport[] {
+  return [...stdout.matchAll(/^\s*(?:ok|FAIL)\s+(\S+)\s+\((\d+)\s+match/gm)].map((match) => ({
+    path: match[1] as string,
+    matches: Number(match[2]),
+  }));
+}
+
+describe("check-no-timer-retry: real repo tree (task oracle)", () => {
+  it(
+    "HAPPY: the real CLI exits 0 against THIS checkout, having actually parsed D3 from the corpus and scanned every declared path",
+    () => {
+      const result = spawnSync("bun", [CHECKER_SCRIPT], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        // Explicit maxBuffer per this repo's spawnSync-truncation discipline.
+        maxBuffer: 20 * 1024 * 1024,
+      });
+
+      expect(result.status).toBe(0);
+
+      // Not a bare exit-0 assertion: an oracle that returned 0 without measuring
+      // anything (or whose D3 parse silently narrowed to zero paths) would print
+      // none of these lines. The counts below come from the run's OWN output.
+      const scanned = parseScannedPaths(result.stdout);
+      expect(scanned.length).toBeGreaterThanOrEqual(MIN_DECLARED_PATHS);
+      expect(scanned.filter((report) => report.matches !== 0)).toEqual([]);
+
+      // The banned-token list reached the run from the live corpus (D3 is the
+      // SSOT); asserted as independent lone tokens, never one remembered phrase.
+      const tokenLine = result.stdout.split("\n").find((line) => line.includes("banned tokens")) ?? "";
+      const quotedTokens = tokenLine.slice(tokenLine.indexOf(":") + 1).split(",");
+      expect(quotedTokens.length).toBeGreaterThanOrEqual(MIN_DECLARED_TOKENS);
+      expect(tokenLine).toContain("setTimeout");
+      expect(tokenLine).toContain("sleep");
+      expect(tokenLine).toContain("backoff");
+    },
+    30000,
+  );
+
+  it("CONTROL: every path that run reported as clean is a REAL, non-empty file whose content scanSource genuinely matches over — so `0 match(es)` is a measurement, not an empty scan", () => {
+    const result = spawnSync("bun", [CHECKER_SCRIPT], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+    });
+    const scanned = parseScannedPaths(result.stdout);
+    expect(scanned.length).toBeGreaterThanOrEqual(MIN_DECLARED_PATHS);
+
+    for (const report of scanned) {
+      const source = readFileSync(join(REPO_ROOT, report.path), "utf8");
+      expect(source.length).toBeGreaterThan(0);
+      // A control token that IS present in every real enforcement file. If the
+      // scan machinery were inert over these files, this would find nothing
+      // either — which is exactly what distinguishes "scanned real content and
+      // found zero banned tokens" from "scanned nothing and reported zero".
+      expect(scanSource(report.path, source, ["export"]).length).toBeGreaterThan(0);
+    }
+  }, 30000);
 });
