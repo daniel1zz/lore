@@ -8,38 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Lore** — AI-native shared knowledge/memory platform for AI-first teams (3-5 people + multiple AI agents). Single binary (`lore`) with three adapters: citty CLI (default), MCP server (`--mcp-server`), and HTTP server (`lore serve`). Storage is local SQLite via `bun:sqlite` by default; with `sync.enabled` it switches to a Turso embedded replica (`@libsql/client`) for multi-machine visibility. Delivers a typed, navigable corpus of PRDs, specs, ADRs, plans, knowledge, and tasks, with MDX placeholder resolution, version history, review workflow, tree-structure conformance checks, telemetry, and v1 migration.
 
-## Dogfooding: Skill/Tool Eval Log
-
-Building Lore is itself run **through** the Lore-governed workflow (corpus chain + skills + gates). Dogfooding is our credibility source: if we don't follow best practice while building the tool that enforces best practice, we can't claim other teams should trust it.
-
-**⛔ Consciously eval every skill/tool we depend on — never assume it is already optimal.** A broken, misleading, or sub-optimal skill/hook/agent/gate is a defect: fix it immediately (or course-correct + record the correct path).
-
-**⛔ Boundary rule (2026-07-22)**: new findings are recorded ONLY in the lore corpus (`lore create knowledge --sub-type retro`), plus at most a one-line standing lesson below. CLAUDE.md never carries full incident narratives — they go stale (proven: a "not yet built" status here outlived the mechanism being built). `docs/claude-md-archive/` is a FROZEN pre-2026-07-22 snapshot — never append to it.
-
-**⛔ A lore defect is fixed at its MECHANISM ROOT and verified from a FRESH consumer install — never patched on whichever surface happened to expose it.** Two questions gate every lore fix: (1) *what mechanism made this possible?* — prose that "should have been followed" is not a mechanism, and a defect already covered by existing prose is proof that the prose layer is the wrong layer; (2) *would a project that just ran `lore init` + `lore setup` still hit this?* — if yes, it is not fixed (BUT a fresh install cannot REACH convergence/diff-shaped defects — removal, retirement, pruning: the probe must construct BOTH ends of the diff plus a live control, else it vacuously passes; `knowledge-retro-a-fresh-install-probe-vacuously-passes`). The fix MUST land on a surface that SHIPS (binary-side output/payload, or `assets/` SSOT + manifest), never only in this repo's own files, this machine's `~/.claude/` copy, or a hand-edited consumer config (see the distribution-first lesson below).
-
-**Standing lessons** (full 33-row history: `docs/claude-md-archive/dogfood-eval-log.md`; several also as lore knowledge docs):
-
-- **False oracles** — exit-code-true ≠ measured-the-right-thing. Six known vectors; four mechanized in `lore verify`, two NOT: a silently-inert flag (only the AC can assert its SIDE EFFECT, plus a live-interceptor control) and the self-report path. Standing residual: a same-runner unfiltered multi-file pass records unproven. `knowledge-retro-a-silently-inert-cli-flag-is-the-fifth-false`, `spec-evidence-output-tail-integrity-a-self-reported-non-pass`, `task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a`
-- **Contiguous-substring assumption**: matchers/filters built from remembered phrases silently degrade to no-match ("no match + exit 0" is indistinguishable from "passed"); key on lone tokens + independent negative conditions.
-- **SSOT↔installed asset pairs** need content-parity or content-invariant assertions — manifest presence alone makes "fixed in both copies" unverifiable (bidirectional divergence observed).
-- **Consumer/end-to-end audits**: a writer whose reader was retired, a reader without a writer, a roster map with renamed types — all fail SILENT. Every distribution pipe and every gate-read field needs an install→visible / author→trip end-to-end oracle.
-- **Worktree dispatch**: `bun install` FIRST in any fresh worktree (module resolution silently walks up into the main checkout — oracles test stale source); verify `git log` on the branch BEFORE merge+cleanup ("Already up to date" on a branch that should carry work = STOP, recover first).
-- **The global `lore` is a symlink into the MAIN CHECKOUT's `dist/`** — `bun run build` hot-swaps the CLI under every live agent (⛔ never rebuild while one runs), and until it IS rebuilt every CLI fix stays inert for agents, hooks, and its own author (merging ≠ releasing). Rebuild exactly once, after the last agent, before the authoritative full-suite run. `knowledge-the-global-lore-is-a-symlink-into-the-main-checkout-s`
-- **`subagent-stop-commit-guard.mjs` has ONE known gap**: a LIVE background child at hook-fire time can slip past it (harness timing, not guard logic — probed sound; do NOT "fix" it), so the git-log-before-merge backstop above stays necessary.
-- **Static discipline belongs in CLAUDE.md layers, never in a hook** — a hook carries only dynamic, computed state.
-- **Escalation ≠ build**: a twice-recommended mechanization triggers a VERIFICATION pass first, not a build pass — check whether the underlying tool already enforces the invariant (verify found the guard already built — wired only to `--force`).
-- **`spawnSync` capturing a growing `--json` payload MUST set explicit `maxBuffer`** (1 MiB default silently truncates); never discard stderr on batch corpus writes; pass multi-arg lore calls as explicit quoted args, never pair-strings. **`set -e` is INERT in the agent shell** (measured: a bare `false` aborts nothing, subshell or top level) — a multi-command batch runs to completion past any failure, so a corpus-write batch is silently partial. Chain with `&&`, or assert the resulting state (e.g. the AC id set) after every batch.
-- **`mode-$0.md` skill pattern**: pass the mode name as the FIRST token; skills must validate the mode against the known set BEFORE any `Read`.
-- **Checklists are a floor, not a ceiling**: after judging every listed invariant, ask what uncatalogued problem this session has (structured-checklist tunnel vision underperforms an unstructured reviewer on unlisted omissions).
-- **`lore assess --diff`**: derive the range from the plan's own first task commit — a too-wide range silently converts unrelated work into false scope-drift findings.
-- **Main-checkout oracle runs need actor identity** (`LORE_ACTOR=agent:main-orchestrator`) — the resolveActor OS-fallback warning is ADVISORY only (exit stays 0, actor still resolves), and SPEC-104's worktree tier structurally cannot fire in a main checkout, so nothing enforces this.
-- **Distribution-first fixes** — an improvement landed only on a machine-local surface (`~/.claude/*`, installed copies, a dev symlink) does not exist for consumers; every discipline/hook/skill/prose/number change MUST name its delivery surface before it counts as done. `adr-distribution-first-every-improvement-names-its-consumer`
-- **Spec close-outs write NOTHING to CLAUDE.md** — not even one-line index entries (a measured bloat attractor); the corpus is the only spec index. `adr-claude-md-specs-section-is-pointer-only-per-spec-index`
-- **In a shared checkout, commit PATH-SCOPED** (`git commit -- <paths>`) — a bare `git commit` after a targeted `git add` also commits whatever ANOTHER live session has staged (observed: a one-line CLAUDE.md edit carried in a co-resident session's file rename under this session's message). No lore invariant catches this: it is neither an anchor collision nor a worktree-dispatch fault.
-- **A full-suite verdict requires a CLEAN tree at a named commit** — `git status --porcelain` empty (or run it in an isolated worktree). A dirty concurrent checkout turns another session's in-flight edits and a missing/stale `dist/lore` into phantom regressions of your own: same commit measured 20+ failures dirty vs 4 (all foreign RED tests) clean.
-- **A new deterministic gate retroactively invalidates the whole back-catalog** — its predicate evaluates at close time against data authored under the old rules. Budget the one-time sweep AND an explicit retroactive policy in the SAME slice; prefer a written exemption over synthesizing the artifact the predicate looks for. `knowledge-retro-a-newly-built-gate-leaves-every-pre-existing`
-
 ## Commands
 
 ```bash
@@ -144,38 +112,49 @@ Whitelisted components resolved at read time: `ChildrenOf`, `RecentDecisions`, `
 
 Enforced via Zod `superRefine` in `packages/core/src/schemas.ts`.
 
-## Specs
+### Dogfooding: Skill/Tool Eval Log
 
-The corpus is the ONLY spec index — resolve by ordinal (`lore get SPEC-0NN`), full-text search (`lore search "<topic>"`), enumeration (`lore list --type spec`), or grep the exported mirrors under `docs/requirements/spec/`. When implementing or changing behaviour in a module, read the governing spec first.
+Building Lore is itself run **through** the Lore-governed workflow (corpus chain + skills + gates). Dogfooding is our credibility source: if we don't follow best practice while building the tool that enforces best practice, we can't claim other teams should trust it.
 
-⛔ Pointer-only section (per `adr-claude-md-specs-section-is-pointer-only-per-spec-index`): NO per-spec index lines here, ever — spec close-outs write NOTHING to this file. The retired 73-line index is reconstructible from the corpus and preserved in git history.
+**⛔ Consciously eval every skill/tool we depend on — never assume it is already optimal.** A broken, misleading, or sub-optimal skill/hook/agent/gate is a defect: fix it immediately (or course-correct + record the correct path).
 
-## AI Default Behavior by Caller Surface (SPEC-024)
+**⛔ Boundary rule (2026-07-22)**: new findings are recorded ONLY in the lore corpus (`lore create knowledge --sub-type retro`), plus at most a one-line standing lesson below. CLAUDE.md never carries full incident narratives — they go stale (proven: a "not yet built" status here outlived the mechanism being built). `docs/claude-md-archive/` is a FROZEN pre-2026-07-22 snapshot — never append to it.
 
-Lore detects which "caller surface" is invoking it and selects a sensible AI default:
+**⛔ A lore defect is fixed at its MECHANISM ROOT and verified from a FRESH consumer install — never patched on whichever surface happened to expose it.** Two questions gate every lore fix: (1) *what mechanism made this possible?* — prose that "should have been followed" is not a mechanism, and a defect already covered by existing prose is proof that the prose layer is the wrong layer; (2) *would a project that just ran `lore init` + `lore setup` still hit this?* — if yes, it is not fixed (BUT a fresh install cannot REACH convergence/diff-shaped defects — removal, retirement, pruning: the probe must construct BOTH ends of the diff plus a live control, else it vacuously passes; `knowledge-retro-a-fresh-install-probe-vacuously-passes`). The fix MUST land on a surface that SHIPS (binary-side output/payload, or `assets/` SSOT + manifest), never only in this repo's own files, this machine's `~/.claude/` copy, or a hand-edited consumer config (see the distribution-first lesson below).
 
-| Surface | How Detected | AI Default | Why |
-|---|---|---|---|
-| `cli` | None of the agent signals below | **on** | Human in a terminal — SPEC-017 default preserved |
-| `agent` | `CLAUDECODE=1` or `CI=true` or `LORE_AI_DEFAULT=off` | **off** | AI-invoked; skip claude-on-claude nesting |
-| `mcp` | In-process flag set by `startMcpServer()` | **off** | MCP callers are always AI agents |
-| `http_cookie` | Cookie session from `lore dashboard` | **on** | Human browser session |
-| `http_token` | Bearer API token | **off** | Agent-issued token |
+**Standing lessons** — one line each, scope only. Full text: `knowledge-retired-from-root-claude-md-the-19-dogfooding`; pre-2026-07-22 history: `docs/claude-md-archive/dogfood-eval-log.md` (FROZEN).
 
-AI agents using the Lore CLI should export one of `CLAUDECODE=1` / `CI=true` / `LORE_AI_DEFAULT=off` so `lore create` never triggers a nested Claude call. Override per call with `--ai` / `--no-ai` (mutually exclusive; both → exit 2), or per surface via `ai.default_per_surface.<surface>` in `.lore/config.yaml`. `lore status --json` exposes the resolved `ai_defaults`.
+- False oracles — exit-code-true ≠ measured-the-right-thing; six vectors, four mechanized, two open. `knowledge-retro-a-silently-inert-cli-flag-is-the-fifth-false`
+- Contiguous-substring matchers degrade silently to no-match — key on lone tokens + independent negative conditions.
+- SSOT↔installed asset pairs need content-parity assertions; manifest presence proves nothing.
+- Every distribution pipe and gate-read field needs an install→visible / author→trip end-to-end oracle.
+- Worktree dispatch: `bun install` FIRST; verify `git log` on the branch BEFORE merge+cleanup.
+- The global `lore` symlinks into the main checkout's `dist/` — ⛔ never rebuild while an agent runs; merging ≠ releasing. `knowledge-the-global-lore-is-a-symlink-into-the-main-checkout-s`
+- `subagent-stop-commit-guard.mjs` has one known harness-timing gap — probed sound, do NOT "fix" it.
+- Static discipline belongs in CLAUDE.md layers, never in a hook (hooks carry computed state only).
+- Escalation ≠ build: a twice-recommended mechanization triggers a VERIFICATION pass first.
+- `spawnSync` on a growing `--json` payload needs explicit `maxBuffer`; ⛔ `set -e` is INERT in the agent shell — chain with `&&` and assert resulting state after every batch.
+- `mode-$0.md` skills validate the mode against the known set BEFORE any `Read`.
+- Checklists are a floor, not a ceiling — also ask what uncatalogued problem this session has.
+- `lore assess --diff`: derive the range from the plan's own first task commit.
+- Main-checkout oracle runs need `LORE_ACTOR=agent:main-orchestrator` — nothing enforces it.
+- Distribution-first: name the delivery surface or it does not exist for consumers. `adr-distribution-first-every-improvement-names-its-consumer`
+- Spec close-outs write NOTHING to this file. `adr-claude-md-specs-section-is-pointer-only-per-spec-index`
+- In a shared checkout, commit PATH-SCOPED (`git commit -m "<msg>" -- <paths>`).
+- A full-suite verdict requires a CLEAN tree at a named commit.
+- A new deterministic gate retroactively invalidates the back-catalog — budget the sweep + a written exemption in the SAME slice. `knowledge-retro-a-newly-built-gate-leaves-every-pre-existing`
+- A backgrounded oracle's completion notice reports the SHELL's exit code — persist `$?` and read it back; a ceiling kill reports 143. `knowledge-a-backgrounded-command-s-completion-notice-reports`
+- Human renders are lossy projections: `lore get` omits structured `extra`, and list columns truncate — key on the ID. `knowledge-lore-get-s-human-view-hides-extra-issue-report-so-a`
 
-## Implementation Status
+### AI Default Behavior by Caller Surface (SPEC-024)
 
-Phase 1 (core + CLI + service layer) and Phase 2 (MCP, HTTP, Turso sync, telemetry, tree conformance, eval) are landed; active work is incremental hardening. Full mechanism subsections are archived verbatim in `docs/claude-md-archive/spec-implementation-notes.md` (§Implementation Status); per-spec SSOT via `lore get <spec-slug>`. Operational essentials:
+AI is ON for human surfaces (`cli`, `http_cookie`) and OFF for agent surfaces (`agent` — signalled by `CLAUDECODE=1` / `CI=true` / `LORE_AI_DEFAULT=off` —, `mcp`, `http_token`), so `lore create` never nests a Claude call. Override per call with `--ai` / `--no-ai` (both → exit 2), or per surface via `ai.default_per_surface.<surface>` in `.lore/config.yaml`; resolved values in `lore status --json`. Full detection table: `lore get SPEC-024`.
 
-- **Service-layer gate enforcement is ON by default** — `GateEnforcer` runs the same `checkpointRegistry` predicates as `lore gate` inside `CorpusService.create`/`set`, `ReviewService.approve`, `TaskWorkflowService.claim` — so CLI, MCP, and HTTP dashboard writes are gated identically. Per-checkpoint knob: `workflow.gates.<checkpoint>.enabled: false`. Optional DI: bare `new CorpusService(store)` test constructions stay ungated.
-- **Plan phases (SPEC-023)**: `lore phase add/list/rm/rename <plan>`, `lore create task --phase`, `lore tree` groups by phase; `extra.phase` is validated against the MEMBER plan's `extra.phases[]` (`extra.plan_id` via `isPlanMember`, never the `parent_id` proxy) at write time (unknown → `VALIDATION_ERROR`).
-- **Task workflow (SPEC-025)**: `extra.verification_evidence` (append-only, max 50 entries, `output_tail` ≤ 4000) + `extra.claim` advisory lease (expiry computed read-side vs `workflow.claim_ttl_minutes`, default 120; no daemon) — both owned exclusively by `TaskWorkflowService`, never `CorpusService`. `lore claim` (foreign fresh claim → exit 5 `CLAIM_CONFLICT` unless `--steal`; `--worktree` ALWAYS explicit) / `lore release` (non-holder needs `--force`) / `lore evidence` / `lore ready` (computed over `blocks` links, never stored) / `lore done` (needs a RUNNER-ATTESTED pass — a self-reported `lore evidence` row no longer archives; audited `--override-attestation "<reason>"` escape — spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3). Actor resolution: `--by` > `$LORE_ACTOR` > OS username; MCP tools require `by` explicitly.
-- **Sessions + file anchors (SPEC-042)**: a "session" is DERIVED, never stored — claims grouped by `(by, machine, worktree, session_id)`; `lore ready` (`sessions[]`/`anchor_conflicts[]`) is plan-scoped/fresh-only, `lore bootstrap` (`active_sessions`) is corpus-wide and FLAGS `stale` (⛔ ≠ death). `extra.file_anchors` authored via `lore create task --anchor` / `lore anchor add|rm|list` — deliberately NO `lore set --anchor` (`set` replaces `extra` wholesale). **`by` answers WHO, `extra.claim.session_id` answers WHICH RUN** — `TaskWorkflowService.claim` captures it from the env for every caller, no flag, because actor resolution structurally cannot carry session distinctness. `noAnchorOverlap` runs UNCONDITIONALLY and exempts a same-`by` sibling ONLY on a PROVEN same `session_id`; a different one is FOREIGN, an ABSENT one refuses with `ANCHOR_OVERLAP_SESSION_UNMEASURED`. ⛔ A session-collapse report is NEVER fixed by prescribing a more unique `LORE_ACTOR`; distinct `LORE_ACTOR=agent:<branch-or-slug>` still matters for AUDIT attribution, and claims are made BY THE IMPLEMENTER from inside its own worktree. Undeclared anchors are invisible to the gate — manual queueing stays defense-in-depth. `PhaseWorkflowService.claim` + `lore gate phase-claim` thread it identically (`phase-wiring.ts`).
-- **Invalidation (SPEC-043)**: `ValidityService.invalidate` is the SOLE validity writer (`CorpusService.set` rejects validity patches, naming `lore invalidate`); direct-address reads (get/feed/tree/export) ALWAYS show the banner; `--supersedes` half-failure is LOUD with the exact repair command. ⛔ A listed doc is NOT proven live — validity is authoritative only by direct address.
-- **Staleness probes (SPEC-044)** are on-demand, report-only (never auto-invalidate); **`lore assess` (SPEC-026)** has no non-AI mode and one corrective JSON retry — details in the archive.
+### Implementation Status
 
-The v1 predecessor at `/Users/apple/.claude/docman-mcp` remains frozen. Do not carry over its schema or API shape — v2 is greenfield.
+Phase 1 (core + CLI + service layer) and Phase 2 (MCP, HTTP, Turso sync, telemetry, tree conformance, eval) are landed; active work is incremental hardening. Per-spec SSOT: `lore get SPEC-0NN`. Retired verbatim text: `knowledge-retired-from-root-claude-md-the-implementation-status`; pre-2026-07-22 mechanism subsections: `docs/claude-md-archive/spec-implementation-notes.md` (FROZEN).
+
+Cross-cutting rules extracted from it: gates run in the SERVICE layer so CLI/MCP/HTTP writes are gated identically (per-checkpoint knob `workflow.gates.<checkpoint>.enabled`); `extra.phase` validates against the MEMBER plan via `extra.plan_id`, ⛔ never the `parent_id` proxy; `--worktree` is ALWAYS explicit on `lore claim`; `lore done` needs a RUNNER-ATTESTED pass (audited `--override-attestation` escape); `lore ready`'s `sessions[]` is plan-scoped/fresh-only while `lore bootstrap`'s `active_sessions` is corpus-wide and FLAGS `stale` (⛔ ≠ death); ⛔ a session-collapse report is NEVER fixed by prescribing a more unique `LORE_ACTOR`; ⛔ a listed doc is NOT proven live — validity is authoritative only by direct address. The v1 predecessor at `~/.claude/docman-mcp` is frozen — do not carry over its schema or API shape.
 
 <!-- auto:module-index -->
 ## Module Index
@@ -204,4 +183,5 @@ Lore is itself the knowledge store — query it through its own CLI rather than 
 - `lore pending` — list docs awaiting review
 - `lore log <id-or-slug>` — version history; `lore diff <id> --from N --to M` for unified diff
 - `lore status` — corpus-level health snapshot
+- ⛔ The corpus is the ONLY spec index — read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/spec/`.
 <!-- /auto:dynamic-context -->
