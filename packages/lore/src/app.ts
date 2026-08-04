@@ -89,6 +89,7 @@ import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
+import { resolveDoc } from "./service/resolve.js";
 // reason: SPEC-056 phase execution model DI — construction lives in phase-wiring.ts,
 // NOT inline here, to minimize this file's diff surface against the concurrently-
 // dispatched app.ts-wiring task (see phase-wiring.ts's module header).
@@ -778,10 +779,14 @@ function buildAppFromSqlite(
     // fields, which were gate-read with no authoring surface before it existed.
     planExemptionService: new PlanExemptionService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
-    // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
+    // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
+    // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not
+    // `corpusService.resolve`, which projects away `.type`) because
+    // task-lore-uat-record-bu-jiao-yan-mu-biao-doc-lei-xing-verdict's fix needs the
+    // target's actual type to refuse a non-plan target before any doc/link is created.
     uatService: new UatService({
       createUatDoc: corpusService.createUatDoc.bind(corpusService),
-      resolveDocId: corpusService.resolve.bind(corpusService),
+      resolveTarget: (idOrSlug: string) => resolveDoc(store, idOrSlug),
       addLink: store.addLink.bind(store),
       now: () => new Date().toISOString(),
     }),
@@ -1104,10 +1109,14 @@ function buildAppFromTurso(
     // fields, which were gate-read with no authoring surface before it existed.
     planExemptionService: new PlanExemptionService(store),
     // reason: UatService takes narrow injected ports (SPEC-054) — the guarded
-    // createUatDoc seam, resolve, and store.addLink — never the full CorpusService.
+    // createUatDoc seam, the shared resolveDoc helper, and store.addLink — never the
+    // full CorpusService. `resolveTarget` is bound to `resolveDoc` (not
+    // `corpusService.resolve`, which projects away `.type`) because
+    // task-lore-uat-record-bu-jiao-yan-mu-biao-doc-lei-xing-verdict's fix needs the
+    // target's actual type to refuse a non-plan target before any doc/link is created.
     uatService: new UatService({
       createUatDoc: corpusService.createUatDoc.bind(corpusService),
-      resolveDocId: corpusService.resolve.bind(corpusService),
+      resolveTarget: (idOrSlug: string) => resolveDoc(store, idOrSlug),
       addLink: store.addLink.bind(store),
       now: () => new Date().toISOString(),
     }),

@@ -22,7 +22,13 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 const recordCommand = defineCommand({
   meta: { name: "record", description: "Record a structured UAT verdict for a plan (SPEC-054)" },
   args: {
-    plan: { type: "positional", description: "Plan doc id/slug the verdict accepts/rejects" },
+    plan: {
+      type: "positional",
+      description:
+        "Plan doc id/slug the verdict accepts/rejects — MUST resolve to a 'plan' doc; " +
+        "UatService.record refuses any other type (the plan-close checkpoint is the sole " +
+        "reader and only reads a verdict linked to a plan)",
+    },
     "json-file": {
       type: "string",
       description: "Path to a uatVerdictSchema-valid JSON file — the file IS the extra.uat payload",
@@ -75,7 +81,7 @@ const recordCommand = defineCommand({
 const showCommand = defineCommand({
   meta: { name: "show", description: "Show a plan's latest linked UAT verdict (SPEC-054)" },
   args: {
-    plan: { type: "positional", description: "Plan doc id/slug" },
+    plan: { type: "positional", description: "Plan doc id/slug (reads its latest informs-linked UAT verdict)" },
     json: { type: "boolean", description: "Output result as JSON" },
   },
   async run({ args }) {
