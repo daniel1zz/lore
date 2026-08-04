@@ -606,6 +606,53 @@ describe("assets-ssot — BOUNDARY", () => {
     expect(content).toContain("Re-verify your own input first");
   });
 
+  // task-corpus-workflow-injection-labels-lore-release-as-done-and (AC-1, AC-2):
+  // the EXECUTE section used to end at `lore release` with zero mentions of
+  // `lore done`, so every implementer that followed the injected text believed
+  // its own worktree action archived the task — it never does, so the task
+  // stayed in the ready set forever (measured: 13/13 agents on one plan).
+  // AC-1 is a lone contiguous-substring check, deliberately paired with AC-2's
+  // proximity assertions below so it can never vacuously pass alone (a stray
+  // "lore done" mention elsewhere, unrelated to the two-party split, would
+  // still satisfy AC-1 but not AC-2).
+  it("corpus-workflow.md AC-1: EXECUTE section names lore done at least once", () => {
+    const content = readRequiredFile(GOVERNANCE_PATH);
+    const count = (content.match(/lore done/g) ?? []).length;
+    expect(count).toBeGreaterThanOrEqual(1);
+  });
+
+  it("corpus-workflow.md AC-1: the lore-done mention lives inside the EXECUTE section, not FEED/PRODUCE/CLOSE", () => {
+    const content = readRequiredFile(GOVERNANCE_PATH);
+    const executeStart = content.indexOf("## EXECUTE");
+    const closeStart = content.indexOf("## CLOSE");
+    expect(executeStart).toBeGreaterThanOrEqual(0);
+    expect(closeStart).toBeGreaterThan(executeStart);
+    const executeSection = content.slice(executeStart, closeStart);
+    expect(executeSection).toContain("lore done");
+  });
+
+  // AC-2: two independent lone-token proximity checks, never one remembered
+  // sentence — `done` sits near an `archiv*` token (it IS the archiving verb)
+  // and `release` sits near an explicit negation of archival (it is NOT the
+  // archiving verb). Either half alone would pass on `grep -c "lore done"`
+  // wording tweaks that lose the actual two-party semantics.
+  it("corpus-workflow.md AC-2: 'done' sits near an 'archiv*' token — lore done is named as the archiving step", () => {
+    const content = readRequiredFile(GOVERNANCE_PATH);
+    expect(/done[^\n]{0,200}archiv/i.test(content)).toBe(true);
+  });
+
+  it("corpus-workflow.md AC-2: 'release' sits near an explicit negation of archival — release does not archive", () => {
+    const content = readRequiredFile(GOVERNANCE_PATH);
+    expect(/release[^\n]{0,200}does not archive/i.test(content)).toBe(true);
+  });
+
+  it("corpus-workflow.md AC-2 REGRESSION control: the negation-proximity assertion is not vacuous — a synthetic string missing the negation fails the identical regex", () => {
+    const missingNegation = "lore release <task> archives the task immediately.";
+    expect(/release[^\n]{0,200}does not archive/i.test(missingNegation)).toBe(false);
+    // and the positive form the real asset satisfies is reachable at all:
+    expect(/release[^\n]{0,200}does not archive/i.test("lore release drops the lease — it does not archive anything.")).toBe(true);
+  });
+
   it.each(SKILL_MD_FILES)("%s starts with --- frontmatter", (relPath) => {
     const content = readRequiredFile(join(ASSETS_ROOT, relPath));
     expect(content.startsWith("---")).toBe(true);
@@ -869,5 +916,29 @@ describe("assets-ssot — DISTRIBUTION (AC-GS-6: argument-aware git-safety-gate 
     // D2: probeDirtyTree's argument-blindness is correct and must NOT have been
     // "fixed" — its `_inner` signature is the one that stays.
     expect(content).toContain("function probeDirtyTree(_inner");
+  });
+});
+
+// ─── DISTRIBUTION (task-corpus-workflow-injection-labels-lore-release-as-done-and) ──
+// Same two-independent-halves shape as AC-GS-6 above, applied to the lore-done
+// fix: sha parity alone (manifest entry == on-disk bytes) is satisfied equally
+// by a stale-but-internally-consistent manifest and a freshly regenerated one,
+// so it is paired with an explicit "differs from the measured pre-fix value"
+// assertion — the exact sha256 the orchestrator measured on `main @ 6788989`
+// before this fix landed.
+describe("assets-ssot — DISTRIBUTION (corpus-workflow.md manifest freshness after the lore-done fix)", () => {
+  const PRE_FIX_SHA256 = "1bc6107144914ae357d7b661f53356c5a288f8d3e88ab50e9e63577db7dbbd65";
+
+  it("the embedded manifest sha256 for governance/corpus-workflow.md equals the sha256 of its bytes under assets/ on disk", () => {
+    const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === GOVERNANCE_REL);
+    expect(entry, `${GOVERNANCE_REL} must be declared in the embedded manifest`).toBeDefined();
+    const onDisk = createHash("sha256").update(readFileSync(GOVERNANCE_PATH)).digest("hex");
+    expect((entry as { sha256: string }).sha256).toBe(onDisk);
+  });
+
+  it("the embedded manifest sha256 for governance/corpus-workflow.md differs from the measured pre-fix value", () => {
+    const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === GOVERNANCE_REL);
+    expect(entry, `${GOVERNANCE_REL} must be declared in the embedded manifest`).toBeDefined();
+    expect((entry as { sha256: string }).sha256).not.toBe(PRE_FIX_SHA256);
   });
 });

@@ -53,7 +53,7 @@ lore get <spec-slug>            # governing spec (from dispatch bundle's Spec Re
 lore ac list <spec-slug>        # structured acceptance criteria
   → implement → write/adjust tests → run SCOPED oracles (see Oracle Scope below)
 lore evidence <task-slug> --oracle <tsc|test|lint|build|e2e> --command "<cmd>" --result <pass|fail> [--ac <ac-id>] --by $LORE_ACTOR
-lore release <task-slug> --by $LORE_ACTOR
+lore release <task-slug> --by $LORE_ACTOR   # drops YOUR lease only — it does not archive; lore done (approved→active→archived) is a separate step owned by whoever can assert the merge, never you
 ```
 
 - ⛔ Evidence results come from the ORACLE's exit status — never self-asserted. A failing oracle is recorded as `--result fail`, then fixed, then re-recorded.
