@@ -62,7 +62,7 @@ Full pre-compression mechanism walkthroughs (per-spec design decisions, byproduc
 | `ProjectSetupService` | Thin wrapper over `scaffoldProject` — per-repo `lore setup --project` scaffold |
 | `GateEnforcer` | `enforce(checkpoint, ctx)` — service-layer runner for the six `lore gate` checkpoints |
 | `RequirementService` | add/list/removeRequirement on `prd.extra.requirements`; mirrors `AcService` one tier up |
-| `UatService` | `record` — sole write orchestrator for a structured UAT verdict, informs-links it to the plan |
+| `UatService` | `record` — sole UAT-verdict write orchestrator; informs-links to the plan; refuses a non-plan target BEFORE createUatDoc (no orphan doc, no `--force` escape) |
 | `DriftCheckService` | `checkDrift` — doc-code drift oracle over declared `extra.code_anchors`; also owns spec-target anchor RMW verbs (`addCodeAnchors`/`removeCodeAnchors`/`setCodeAnchors`) |
 | `VerificationProjectionService` | `evidencePanel` — dashboard adjudication workbench projection; zero local derivation math, all coverage/ratio math imported from `@lore/core` |
 
