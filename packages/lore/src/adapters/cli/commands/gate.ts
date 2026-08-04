@@ -82,6 +82,19 @@
  * `gate bypass NOT audited: <reason>` stderr line and STILL exits 0 — the escape
  * hatch's reliability contract is unchanged, only its silence is removed.
  *
+ * ⛔ Scope boundary (task-lore-gate-bypass-honored-by-lore-gate-subcommands-but,
+ * Design Decision Option B): `LORE_GATE_BYPASS=1` is scoped to THIS command alone —
+ * it has NO effect on the identical checkpoint predicates `GateEnforcer.enforce`
+ * (`../../../service/gate-enforcer.js`) runs inline inside `CorpusService.create`/
+ * `set`, `ReviewService.approve`, and `TaskWorkflowService.claim` (CLI writes, MCP,
+ * and the HTTP dashboard all go through that path, never through this file). A
+ * caller who exports this variable and then hits one of those write paths still
+ * gets denied if the checkpoint fails — but as of this task, that denial's message
+ * explicitly says so (see `GateEnforcer`'s module header, "Design Decision — the
+ * LORE_GATE_BYPASS=1 write-path boundary"), naming the actually-supported write-path
+ * escape hatch (`workflow.gates.<checkpoint>.enabled: false`) instead of leaving the
+ * reader to infer why a "bypass" did not bypass anything.
+ *
  * `.lore/config.yaml`'s `workflow.gates.<checkpoint>.enabled` is a SEPARATE gate-skip
  * mechanism (mechanism `"config_disabled"`) with its OWN, service-layer-shared audit
  * trace — see `GateEnforcer.enforce`'s config-disabled branch
