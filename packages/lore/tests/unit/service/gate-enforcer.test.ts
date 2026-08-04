@@ -14,8 +14,8 @@
  * @spec_ref retro follow-up item 8
  */
 
-import { describe, it, expect } from "vitest";
-import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { GateEnforcer, describeBypassBoundaryNote } from "../../../src/service/gate-enforcer.js";
 import type { LoreConfig } from "@lore/core";
 
 describe("GateEnforcer", () => {
@@ -308,6 +308,130 @@ describe("GateEnforcer", () => {
         "lore release task-sibling-in-flight --by agent:sibling-holder --force",
       );
       expect(message.endsWith("\n")).toBe(false);
+    });
+  });
+
+  // task-lore-gate-bypass-honored-by-lore-gate-subcommands-but — Design Decision
+  // Option B (module header): `LORE_GATE_BYPASS=1` never changes whether `enforce()`
+  // blocks; it only annotates an already-blocked message. Pure-function coverage for
+  // `describeBypassBoundaryNote` (no env mutation needed — it takes `env` as an
+  // explicit parameter), plus `enforce()`-level coverage using the REAL
+  // `process.env` (its one actual call site).
+  describe("describeBypassBoundaryNote (pure formatter)", () => {
+    // HAPPY
+    it("returns the boundary note naming both LORE_GATE_BYPASS and the config knob when env var is exactly \"1\"", () => {
+      const note = describeBypassBoundaryNote("spec-create", { LORE_GATE_BYPASS: "1" });
+      expect(note).toContain("LORE_GATE_BYPASS");
+      expect(note).toContain("workflow.gates.spec-create.enabled: false");
+      expect(note).toContain("lore gate spec-create");
+      expect(note.startsWith("\n\n")).toBe(true);
+    });
+
+    // NEGATIVE / REGRESSION (AC-4) — variable absent entirely.
+    it("returns empty string when the variable is absent from env", () => {
+      expect(describeBypassBoundaryNote("task-claim", {})).toBe("");
+    });
+
+    // BOUNDARY — a value that is not exactly "1" (mirrors gate.ts's own `=== "1"`
+    // check) must NOT trigger the note.
+    it("returns empty string for a truthy-looking but non-\"1\" value", () => {
+      expect(describeBypassBoundaryNote("plan-promote", { LORE_GATE_BYPASS: "true" })).toBe("");
+      expect(describeBypassBoundaryNote("plan-promote", { LORE_GATE_BYPASS: "0" })).toBe("");
+      expect(describeBypassBoundaryNote("plan-promote", { LORE_GATE_BYPASS: "" })).toBe("");
+    });
+
+    // STATE — the checkpoint id is threaded into BOTH the `lore gate <checkpoint>`
+    // reference and the `workflow.gates.<checkpoint>.enabled` config key, per
+    // checkpoint (not a hardcoded example).
+    it("names the SPECIFIC checkpoint passed in, not a fixed example", () => {
+      const note = describeBypassBoundaryNote("task-claim", { LORE_GATE_BYPASS: "1" });
+      expect(note).toContain("lore gate task-claim");
+      expect(note).toContain("workflow.gates.task-claim.enabled: false");
+      expect(note).not.toContain("spec-create");
+    });
+  });
+
+  describe("enforce — LORE_GATE_BYPASS write-path boundary note wiring (real process.env)", () => {
+    const ENV_VAR = "LORE_GATE_BYPASS";
+    let original: string | undefined;
+
+    beforeEach(() => {
+      original = process.env[ENV_VAR];
+      delete process.env[ENV_VAR];
+    });
+
+    afterEach(() => {
+      if (original === undefined) delete process.env[ENV_VAR];
+      else process.env[ENV_VAR] = original;
+    });
+
+    // REGRESSION (AC-4) — variable unset: message byte-identical to the pre-task
+    // NEGATIVE test above (same input, same assertions), no note appended.
+    it("variable unset: blocked message is unchanged, no note appended", () => {
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("spec-create", {
+        parentType: "prd",
+        specKind: "feature",
+        content: "no heading here",
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message.startsWith('Gate "spec-create" blocked: MISSING_SKELETON')).toBe(true);
+      expect(message).not.toContain("LORE_GATE_BYPASS");
+    });
+
+    // NEGATIVE + AC-1 + AC-2 — variable set to "1": enforce() STILL returns
+    // err (never silently passes), and the message grows the boundary note with
+    // two independent lone tokens.
+    it("variable set to \"1\": enforce() still blocks, message grows the boundary note", () => {
+      process.env[ENV_VAR] = "1";
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("spec-create", {
+        parentType: "prd",
+        specKind: "feature",
+        content: "no heading here",
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect((result.error as { code?: string }).code).toBe("VALIDATION_ERROR");
+      expect((result.error as { field?: string }).field).toBe("gate:spec-create");
+      expect((result.error as { value?: unknown }).value).toEqual(["MISSING_SKELETON"]);
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain("MISSING_SKELETON");
+      expect(message).toContain("LORE_GATE_BYPASS");
+      expect(message).toContain("workflow.gates.spec-create.enabled: false");
+    });
+
+    // STATE — a PASSING checkpoint with the variable set: no message exists at all
+    // to annotate (ok result), so nothing changes — proves the note is wired ONLY
+    // into the blocked branch, never touches the pass branch.
+    it("variable set to \"1\" but checkpoint PASSES: result unaffected (ok(undefined), same as unset)", () => {
+      process.env[ENV_VAR] = "1";
+      const enforcer = new GateEnforcer(undefined);
+      const result = enforcer.enforce("spec-create", {
+        parentType: "prd",
+        specKind: "feature",
+        content: "## Overview\n\nBody.",
+      });
+      expect(result).toEqual({ ok: true, value: undefined });
+    });
+
+    // STATE (AC-5) — precedence: a config-disabled checkpoint short-circuits to
+    // ok(undefined) BEFORE the predicates (and therefore before the boundary-note
+    // branch) ever run, so the env var being ALSO set changes nothing.
+    it("variable set to \"1\" AND checkpoint disabled by config: still passes vacuously, unaffected by the env var", () => {
+      process.env[ENV_VAR] = "1";
+      const config = {
+        project: { name: "x", author: "y" },
+        workflow: { claim_ttl_minutes: 120, gates: { "spec-create": { enabled: false } } },
+      } as unknown as LoreConfig;
+      const enforcer = new GateEnforcer(config);
+      const result = enforcer.enforce("spec-create", {
+        parentType: "task", // would otherwise fail INVALID_PARENT_TYPE
+        content: "",
+      });
+      expect(result).toEqual({ ok: true, value: undefined });
     });
   });
 });

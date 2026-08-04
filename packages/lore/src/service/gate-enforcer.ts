@@ -61,7 +61,41 @@
  *   `VALIDATION_ERROR` to exit code 4 — the SAME exit code `lore gate`'s blocked path
  *   already returns for this class of failure.
  *
- * Source: retro follow-up item 8; IoC vertical-slice tech-spec §4.1/§5.1/§11.
+ * Design Decision — the `LORE_GATE_BYPASS=1` write-path boundary (task-lore-gate-
+ * bypass-honored-by-lore-gate-subcommands-but). `LORE_GATE_BYPASS=1` short-circuits
+ * ALL FIVE `lore gate <checkpoint>` subcommands (`../adapters/cli/commands/gate.ts`)
+ * before this class ever runs, but — until this task — the identical env var was
+ * silently IGNORED by `enforce()` itself, so a caller who exported it and then called
+ * `CorpusService.create`/`set`, `ReviewService.approve`, or `TaskWorkflowService.claim`
+ * (directly, via MCP, or via the HTTP dashboard) still got denied with no indication
+ * the variable had any relevance there. Two candidate fixes were weighed:
+ *   - Option A ("honor it here too, one variable one meaning") was REJECTED. Safely
+ *     scoping it would require threading a caller-surface signal (SPEC-024's
+ *     `cli`/`agent`/`mcp`/`http_cookie`/`http_token`) into `enforce()` and its
+ *     constructor wiring in `app.ts` and every calling service — none of which are in
+ *     this task's file anchors — and even fully wired, a bare env var governs an
+ *     entire OS process: a long-lived `lore serve` cannot tell "bypass for the human
+ *     who exported this for one debugging session" from "bypass for every concurrent
+ *     `http_cookie`/`http_token`/MCP caller sharing this process's environment".
+ *     Honoring it unscoped would silently disarm every remote write while a single
+ *     local CLI invocation intended to bypass just its own one-off check — the exact
+ *     blast-radius growth the task's own "Against" column warned about.
+ *   - Option B ("keep write-path enforcement unconditional, make the boundary LOUD")
+ *     was CHOSEN. `enforce()`'s checkpoint predicates still run unconditionally
+ *     regardless of this env var (defense-in-depth, AC-4: byte-identical behavior with
+ *     the variable unset) — but when it IS set (`"1"`) and the checkpoint denies, the
+ *     returned `LoreError.message` now names the variable, states plainly that it does
+ *     not apply to this call, and points at the ACTUAL supported write-path escape
+ *     hatch (`workflow.gates.<checkpoint>.enabled: false`) — see
+ *     {@link describeBypassBoundaryNote} and its one call site in `enforce()`. No
+ *     `gate_skipped` audit row is written for this branch (AC-3) — the checkpoint was
+ *     NOT skipped, it was evaluated and blocked; only a bypassed (config-disabled OR
+ *     `lore gate`'s own env-bypass) checkpoint ever produces that row.
+ * Net effect: no caller can set `LORE_GATE_BYPASS`, observe a write-path denial, and
+ * come away unable to tell whether the variable applied there.
+ *
+ * Source: retro follow-up item 8; IoC vertical-slice tech-spec §4.1/§5.1/§11;
+ *         task-lore-gate-bypass-honored-by-lore-gate-subcommands-but (Option B).
  */
 
 import {
@@ -108,11 +142,14 @@ import type { TraceRecorder } from "./trace-recorder.js";
  * `"config_disabled"` when `workflow.gates.<checkpoint>.enabled === false` short-
  * circuited `GateEnforcer.enforce()` (this module); `"env_bypass"` when
  * `LORE_GATE_BYPASS=1` short-circuited `../adapters/cli/commands/gate.ts` BEFORE it
- * ever reached this class (the CLI's own escape hatch — `GateEnforcer` never honors
- * `LORE_GATE_BYPASS` itself, see this module's header). Both mechanisms share this
+ * ever reached this class (the CLI's own escape hatch). Both mechanisms share this
  * one entry shape (`buildGateSkipAuditEntry` below) so a `lore audit` reader never
  * has to reconcile two independently-drifting `details` shapes for "a gate was
- * skipped."
+ * skipped." `GateEnforcer` still never SKIPS a checkpoint because of
+ * `LORE_GATE_BYPASS` (this module's Design Decision above, Option B) — it only
+ * INSPECTS the var to annotate an already-blocked denial's message, so no THIRD
+ * `GateSkipMechanism` member exists for that case; a write-path denial with the
+ * variable set is not a skip, and produces no audit row of this shape at all.
  */
 export type GateSkipMechanism = "config_disabled" | "env_bypass";
 
@@ -356,6 +393,59 @@ export function describeLoreError(error: LoreError): string {
 }
 
 /**
+ * Env var name for the CLI-only `lore gate <checkpoint>` escape hatch
+ * (`../adapters/cli/commands/gate.ts`, SPEC-080 D3). Named as its own constant
+ * (rather than an inline string literal at every read site) so `grep
+ * LORE_GATE_BYPASS_ENV_VAR` finds every place this module reasons about the
+ * variable, matching this file's `GATE_SKIP_AUDIT_SESSION_ID`-style constant
+ * convention above.
+ */
+const LORE_GATE_BYPASS_ENV_VAR = "LORE_GATE_BYPASS";
+
+/**
+ * Formats the Design-Decision-B boundary note (this module's header, "Design
+ * Decision — the `LORE_GATE_BYPASS=1` write-path boundary") appended to a
+ * BLOCKED `enforce()` denial's message when the CLI-only bypass variable is set
+ * in the CALLING process's environment. This function never changes whether a
+ * checkpoint blocks — `enforce()`'s ONE call site (below) invokes it only AFTER
+ * `isCheckpointBlocked(results)` is already `true`, purely to enrich the
+ * message text of a verdict already decided. Returns `""` (no note at all) when
+ * the variable is unset or not exactly `"1"`, so a caller that never exported it
+ * sees a byte-for-byte unchanged denial (AC-4 REGRESSION).
+ *
+ * @param checkpoint - The checkpoint that just denied — named in both the
+ *   `lore gate <checkpoint>` reference and the `workflow.gates.<checkpoint>
+ *   .enabled: false` config key the note points at, so a reader can copy the
+ *   exact supported alternative without substituting a placeholder themselves.
+ * @param env - The process environment to read the variable from — an explicit
+ *   parameter (never a bare top-level `process.env` read inside this function)
+ *   so it stays a pure function of its arguments, testable without mutating
+ *   global state; `enforce()`'s own call site passes the real `process.env`.
+ * @returns The note text (leading `\n\n`, no trailing newline) or `""`.
+ * @example
+ * describeBypassBoundaryNote("spec-create", { LORE_GATE_BYPASS: "1" });
+ *   // => "\n\nNote: LORE_GATE_BYPASS=1 is set, but it does not apply here — ..."
+ * @example
+ * describeBypassBoundaryNote("spec-create", {});
+ *   // => ""
+ */
+export function describeBypassBoundaryNote(
+  checkpoint: GateCheckpoint,
+  env: Record<string, string | undefined>,
+): string {
+  if (env[LORE_GATE_BYPASS_ENV_VAR] !== "1") return "";
+  return (
+    `\n\nNote: ${LORE_GATE_BYPASS_ENV_VAR}=1 is set, but it does not apply here — ` +
+    `it only short-circuits the \`lore gate ${checkpoint}\` pre-flight command (a ` +
+    `diagnostic surface, ../adapters/cli/commands/gate.ts), never a write path like ` +
+    `this one (CLI create/set, MCP, or the HTTP dashboard) — an env var on a long-lived ` +
+    `\`lore serve\` process would otherwise disarm gates for every remote caller ` +
+    `sharing that process's environment. To disable "${checkpoint}" for real writes ` +
+    `instead, set \`workflow.gates.${checkpoint}.enabled: false\` in .lore/config.yaml.`
+  );
+}
+
+/**
  * The gate-related constructor dependency bundle for `ReviewService` and
  * `TaskWorkflowService` — the two services that gate a checkpoint (`plan-promote` /
  * `task-claim`) needing an ancestor spec's data, not just the doc already in hand.
@@ -421,6 +511,11 @@ export class GateEnforcer {
    *   (checkpoint disabled by config — the SAME knob `lore gate` honors) or every
    *   predicate passes; `err(VALIDATION_ERROR)` — `field: "gate:<checkpoint>"`,
    *   `value` the array of machine-readable failure reasons — when at least one fails.
+   *   `LORE_GATE_BYPASS=1` (the CLI-only `lore gate` escape hatch) is NEVER consulted
+   *   to decide pass/block here (Design Decision Option B, module header) — it only
+   *   appends a boundary note to an already-blocked `message` when set
+   *   ({@link describeBypassBoundaryNote}); with it unset, this method's behavior is
+   *   byte-identical to before this task.
    * @example
    * enforcer.enforce("task-claim", { hasSpecParent: false });
    *   // => { ok: true, value: undefined } — vacuous pass, no spec-tier ancestor
@@ -496,6 +591,12 @@ export class GateEnforcer {
     // by convention. A trailing newline (spec-promote's `feed` ends with one) is
     // trimmed so the `\n\n`-separated pack block never grows a blank third line.
     const feedText = checkpointDef.feed(ctx, failures).replace(/\n+$/, "");
+    // reason: task-lore-gate-bypass-honored-by-lore-gate-subcommands-but, Design
+    // Decision Option B (this module's header) — the boundary note is appended ONLY
+    // when the CLI-only `LORE_GATE_BYPASS=1` escape hatch is set in THIS process's
+    // env, and ONLY on this already-blocked branch; it never influences whether the
+    // checkpoint blocks, and stays "" (no message growth at all) when unset (AC-4).
+    const bypassBoundaryNote = describeBypassBoundaryNote(checkpoint, process.env);
     // reason: SPEC-102 D7 — service-layer deny, layer="service" (disambiguates
     // from the hook-layer `lore gate` CLI deny path, which fires its own
     // `recordGateDeny(..., "hook")` call — the two layers see different
@@ -510,7 +611,7 @@ export class GateEnforcer {
     return err({
       code: "VALIDATION_ERROR",
       field,
-      message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}\n\n${feedText}`,
+      message: `Gate "${checkpoint}" blocked: ${reasons.join(", ")}\n\n${feedText}${bypassBoundaryNote}`,
       value: reasons,
     });
   }

@@ -556,3 +556,214 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
     }
   });
 });
+
+// ── task-lore-gate-bypass-honored-by-lore-gate-subcommands-but ──────────────
+//
+// Proves the CHOSEN semantics (Design Decision Option B, `gate-enforcer.ts`'s module
+// header): `LORE_GATE_BYPASS=1` NEVER changes whether a REAL write path (here,
+// `CorpusService.create`/`ReviewService.approve`, exercised through the SAME real
+// `createApp()` composition root the rest of this file uses) blocks — only whether a
+// resulting denial's message names the boundary. AC-1 (four cases minimum, this
+// file's half of the pair — `gate-spec-create.bun.test.ts` covers the `lore gate`
+// pre-flight half unchanged), AC-2 (two independent lone tokens), AC-3 (no
+// gate_skipped audit row for this branch — it is a DENIAL, not a skip), AC-4
+// (variable unset ⇒ byte-identical to every OTHER describe block above), AC-5
+// (composes with the config knob: config-disable is still evaluated FIRST and
+// short-circuits to a pass before the env var is ever consulted).
+describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-gate-bypass-honored-by-lore-gate-subcommands-but)", () => {
+  const ENV_VAR = "LORE_GATE_BYPASS";
+  let originalBypassEnv: string | undefined;
+
+  beforeEach(() => {
+    originalBypassEnv = process.env[ENV_VAR];
+    delete process.env[ENV_VAR];
+  });
+
+  afterEach(() => {
+    if (originalBypassEnv === undefined) delete process.env[ENV_VAR];
+    else process.env[ENV_VAR] = originalBypassEnv;
+  });
+
+  async function createSkeletonlessSpecPrd(app: App): Promise<string> {
+    const prd = await app.corpusService.create({
+      type: "prd",
+      title: "Bypass-Boundary Root PRD",
+      content: "PRD body",
+    } as CreateDocInput);
+    if (!prd.ok) throw new Error(`prd create failed: ${JSON.stringify(prd.error)}`);
+    return prd.value.id;
+  }
+
+  // REGRESSION (AC-4) — variable UNSET: a non-compliant spec-create denial carries
+  // NO boundary note at all, byte-identical to the base "NEGATIVE" describe block's
+  // assertion far above in this same file.
+  it("REGRESSION: LORE_GATE_BYPASS unset — spec-create denial message contains no boundary note", async () => {
+    const app = openApp();
+    try {
+      const parentId = await createSkeletonlessSpecPrd(app);
+      const spec = await app.corpusService.create({
+        type: "spec",
+        title: "No-Bypass-Env Spec",
+        parent_id: parentId,
+        content: "no heading here",
+      } as CreateDocInput);
+
+      expect(spec.ok).toBe(false);
+      if (spec.ok) return;
+      const message = (spec.error as { message?: string }).message ?? "";
+      expect(message).toContain("MISSING_SKELETON");
+      expect(message).not.toContain("LORE_GATE_BYPASS");
+      expect(message).not.toContain("workflow.gates");
+    } finally {
+      app.close();
+    }
+  });
+
+  // NEGATIVE + AC-1 + AC-2 — variable SET to "1": the write path STILL denies (the
+  // checkpoint predicates ran unconditionally — Option B), but the message now names
+  // BOTH the variable itself and the config knob that DOES apply here, as two
+  // independent lone tokens (never one remembered sentence — contiguous-substring
+  // rule).
+  it("NEGATIVE: LORE_GATE_BYPASS=1 — spec-create STILL denies, message names the boundary via two independent lone tokens", async () => {
+    process.env[ENV_VAR] = "1";
+    const app = openApp();
+    try {
+      const parentId = await createSkeletonlessSpecPrd(app);
+      const spec = await app.corpusService.create({
+        type: "spec",
+        title: "Bypass-Env-Set Spec",
+        parent_id: parentId,
+        content: "no heading here",
+      } as CreateDocInput);
+
+      expect(spec.ok).toBe(false);
+      if (spec.ok) return;
+      expect((spec.error as { code?: string }).code).toBe("VALIDATION_ERROR");
+      const message = (spec.error as { message?: string }).message ?? "";
+      expect(message).toContain("MISSING_SKELETON");
+      // Two INDEPENDENT lone tokens, not one contiguous remembered phrase.
+      expect(message).toContain("LORE_GATE_BYPASS");
+      expect(message).toContain("workflow.gates");
+      // Names the exact supported per-checkpoint alternative.
+      expect(message).toContain("workflow.gates.spec-create.enabled: false");
+    } finally {
+      app.close();
+    }
+  });
+
+  // BOUNDARY — an env value that is NOT exactly "1" (mirrors gate.ts's own
+  // `=== "1"` check) never triggers the note — a truthy-looking string like "true"
+  // must not be treated as the bypass being set.
+  it("BOUNDARY: LORE_GATE_BYPASS=true (not exactly \"1\") — no boundary note", async () => {
+    process.env[ENV_VAR] = "true";
+    const app = openApp();
+    try {
+      const parentId = await createSkeletonlessSpecPrd(app);
+      const spec = await app.corpusService.create({
+        type: "spec",
+        title: "Bypass-Env-Truthy Spec",
+        parent_id: parentId,
+        content: "no heading here",
+      } as CreateDocInput);
+
+      expect(spec.ok).toBe(false);
+      if (spec.ok) return;
+      const message = (spec.error as { message?: string }).message ?? "";
+      expect(message).not.toContain("LORE_GATE_BYPASS");
+    } finally {
+      app.close();
+    }
+  });
+
+  // AC-1 second write-path case — spec-promote (ReviewService.approve) on a 0-AC
+  // spec, mirroring the task doc's own suggested "OR lore set --status approved on
+  // a 0-AC spec" example.
+  it("NEGATIVE: LORE_GATE_BYPASS=1 — approving a 0-AC spec STILL denies, message names the boundary", async () => {
+    process.env[ENV_VAR] = "1";
+    const app = openApp(JUDGMENT_NOT_REQUIRED_CONFIG);
+    try {
+      const parentId = await createSkeletonlessSpecPrd(app);
+      const spec = await app.corpusService.create({
+        type: "spec",
+        title: "Bypass-Env-Approve Spec",
+        parent_id: parentId,
+        content: "## Overview\n\nBody.\n",
+      } as CreateDocInput);
+      if (!spec.ok) throw new Error(`spec create failed: ${JSON.stringify(spec.error)}`);
+
+      const result = await app.reviewService.approve(spec.value.id);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      const message = (result.error as { message?: string }).message ?? "";
+      expect(message).toContain("NO_ACCEPTANCE_CRITERIA");
+      expect(message).toContain("LORE_GATE_BYPASS");
+      expect(message).toContain("workflow.gates.spec-promote.enabled: false");
+    } finally {
+      app.close();
+    }
+  });
+
+  // AC-3 — the audit trail: a write-path denial with the variable set is NOT a
+  // skip (the checkpoint ran and blocked) — zero `gate_skipped` rows of ANY
+  // mechanism are recorded for this call, unlike a genuine config-disabled skip.
+  it("AC-3: a write-path denial under LORE_GATE_BYPASS=1 writes NO gate_skipped audit row", async () => {
+    process.env[ENV_VAR] = "1";
+    const app = openApp();
+    try {
+      const parentId = await createSkeletonlessSpecPrd(app);
+      const spec = await app.corpusService.create({
+        type: "spec",
+        title: "Bypass-Env-Audit Spec",
+        parent_id: parentId,
+        content: "no heading here",
+      } as CreateDocInput);
+      expect(spec.ok).toBe(false);
+
+      const auditResult = await app.auditService.query({ action: "gate_skipped" });
+      expect(auditResult.ok).toBe(true);
+      if (!auditResult.ok) return;
+      expect(auditResult.value).toEqual([]);
+    } finally {
+      app.close();
+    }
+  });
+
+  // STATE (AC-5) — precedence: the per-checkpoint config knob is evaluated BEFORE
+  // any predicate runs (this module's pre-existing `resolveGateEnabled` early
+  // return), so a config-disabled checkpoint passes regardless of the env var, and
+  // the env var never gets a chance to annotate anything (there is no denial to
+  // annotate). This is the documented precedence made explicit by assertion.
+  it("STATE: workflow.gates.spec-create.enabled=false + LORE_GATE_BYPASS=1 together — still passes (config-disable precedes the env var)", async () => {
+    process.env[ENV_VAR] = "1";
+    const config = {
+      project: { name: "x", author: "y" },
+      workflow: { claim_ttl_minutes: 120, gates: { "spec-create": { enabled: false } } },
+    } as unknown as LoreConfig;
+    const app = openApp(config);
+    try {
+      const parentId = await createSkeletonlessSpecPrd(app);
+      const spec = await app.corpusService.create({
+        type: "spec",
+        title: "Bypass-Env-And-Config-Disabled Spec",
+        parent_id: parentId,
+        content: "no heading here", // would otherwise fail MISSING_SKELETON
+      } as CreateDocInput);
+
+      expect(spec.ok).toBe(true);
+
+      // Exactly ONE gate_skipped row (this test's single spec-create call), and its
+      // mechanism is `config_disabled` — never `env_bypass` — because this write
+      // path never even reads LORE_GATE_BYPASS on a config-disabled checkpoint (the
+      // early return in `enforce()` precedes that read entirely).
+      const auditResult = await app.auditService.query({ action: "gate_skipped" });
+      expect(auditResult.ok).toBe(true);
+      if (!auditResult.ok) return;
+      expect(auditResult.value).toHaveLength(1);
+      expect((auditResult.value[0]?.details as { mechanism?: string } | undefined)?.mechanism).toBe(
+        "config_disabled",
+      );
+    } finally {
+      app.close();
+    }
+  });
+});
