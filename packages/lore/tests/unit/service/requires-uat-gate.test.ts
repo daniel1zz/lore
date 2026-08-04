@@ -34,6 +34,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { UatService } from "../../../src/service/uat-service.js";
+import { resolveDoc } from "../../../src/service/resolve.js";
 import type { CreateDocInput, DocRecord, LoreConfig, UatVerdict } from "@lore/core";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ function makeHarness(config?: LoreConfig) {
   });
   const uatService = new UatService({
     createUatDoc: corpusService.createUatDoc.bind(corpusService),
-    resolveDocId: corpusService.resolve.bind(corpusService),
+    resolveTarget: (idOrSlug: string) => resolveDoc(store, idOrSlug),
     addLink: store.addLink.bind(store),
     now: () => "2026-07-19T00:00:00.000Z",
   });

@@ -24,7 +24,9 @@ import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { DocRecord } from "@lore/core";
+import type { DocRecord, UatVerdict } from "@lore/core";
+import { UatService } from "../../../src/service/uat-service.js";
+import { resolveDoc } from "../../../src/service/resolve.js";
 
 // ─── Test Infrastructure ─────────────────────────────────────────────────────
 
@@ -827,6 +829,113 @@ describe("lore_pending", () => {
   // ERROR: N/A — InMemoryStore does not fail
   // STATE: N/A — read-only query
   // REGRESSION: N/A
+});
+
+// ─── lore_uat_record (SPEC-054 / task-lore-uat-record-bu-jiao-yan-mu-biao-doc-lei-xing-verdict) ───
+//
+// AC-5 SURFACE PARITY: proves the non-plan-target refusal fixed in UatService.record
+// (packages/lore/src/service/uat-service.ts) reaches the MCP `lore_uat_record` tool
+// WITHOUT any edit to `mcp/tools.ts` — that file still does nothing but the pre-existing
+// thin pipe (`app.uatService.record(args.plan, args.verdict, { by: args.by })`, unchanged
+// by this task). `makeApp()` above never wires a real `uatService` (stays `undefined`,
+// tripping the tool's own "not available" branch), so this block builds ITS OWN app with
+// a real `UatService` sharing one `InMemoryStore` with `corpusService` — the same DI shape
+// `app.ts` wires in production, just constructed locally for the test.
+
+const UAT_ACCEPT_VERDICT: UatVerdict = {
+  verdict: "accept",
+  tier_results: [{ tier: "P0", accepted: 2, rejected: 0, unverified: 0 }],
+  requirement_coverage: { total: 2, covered: 2, uncovered_p0: [] },
+  uiux: { blocker_count: 0, min_dimension_score: 4 },
+  run_meta: { at: "2026-08-04T00:00:00.000Z", by: "agent:uat" },
+};
+
+function makeAppWithUatService(): { app: App; store: InMemoryStore } {
+  const store = new InMemoryStore();
+  const corpusService = new CorpusService(store);
+  const uatService = new UatService({
+    createUatDoc: corpusService.createUatDoc.bind(corpusService),
+    resolveTarget: (idOrSlug: string) => resolveDoc(store, idOrSlug),
+    addLink: store.addLink.bind(store),
+    now: () => "2026-08-04T00:00:00.000Z",
+  });
+  return { app: { ...makeApp(), corpusService, uatService }, store };
+}
+
+describe("lore_uat_record", () => {
+  it("AC-1/HAPPY: recording against a plan through MCP still creates the knowledge/uat doc + informs link, unchanged", async () => {
+    const { app: uatApp, store } = makeAppWithUatService();
+    const localServer = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(localServer, uatApp);
+
+    const planResult = await uatApp.corpusService.create({ type: "plan", title: "Test plan", content: "body", extra: {} });
+    if (!planResult.ok) throw new Error("fixture plan create failed");
+
+    const call = getToolHandler(localServer, "lore_uat_record");
+    const result = await call({ plan: planResult.value.slug, verdict: UAT_ACCEPT_VERDICT, by: "agent:uat" });
+    expect(result.isError).toBeFalsy();
+    const data = parseResult(result) as { doc: DocRecord };
+    expect(data.doc.type).toBe("knowledge");
+    expect((data.doc.extra as Record<string, unknown>)["sub_type"]).toBe("uat");
+
+    const links = await store.findLinks(planResult.value.id, "in");
+    expect(links.ok).toBe(true);
+    if (!links.ok) return;
+    expect(links.value.some((l) => l.link_type === "informs" && l.from_id === data.doc.id)).toBe(true);
+  });
+
+  it("AC-5/NEGATIVE: refuses a non-plan target through the SAME MCP path — proves the fix lives in the service layer, not mcp/tools.ts", async () => {
+    const { app: uatApp } = makeAppWithUatService();
+    const localServer = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(localServer, uatApp);
+
+    const adrResult = await uatApp.corpusService.create({
+      type: "adr",
+      title: "Test adr",
+      content: "body",
+      extra: { decision_status: "accepted" },
+    });
+    if (!adrResult.ok) throw new Error("fixture adr create failed");
+
+    const call = getToolHandler(localServer, "lore_uat_record");
+    const result = await call({ plan: adrResult.value.slug, verdict: UAT_ACCEPT_VERDICT, by: "agent:uat" });
+    expect(result.isError).toBe(true);
+    const error = parseResult(result) as { code: string; message?: string };
+    expect(error.code).toBe("VALIDATION_ERROR");
+    expect(error.message).toContain("adr");
+    expect(error.message).toContain("plan-close");
+  });
+
+  it("AC-4/ORDERING (MCP surface): the refused MCP call creates NO knowledge/uat doc and NO link", async () => {
+    const { app: uatApp, store } = makeAppWithUatService();
+    const localServer = new McpServer({ name: "test", version: "0.0.0" });
+    registerTools(localServer, uatApp);
+
+    const adrResult = await uatApp.corpusService.create({
+      type: "adr",
+      title: "Test adr",
+      content: "body",
+      extra: { decision_status: "accepted" },
+    });
+    if (!adrResult.ok) throw new Error("fixture adr create failed");
+
+    const beforeDocs = await uatApp.corpusService.list({ type: "knowledge" });
+    const beforeLinks = await store.findLinks(adrResult.value.id, "in");
+    if (!beforeDocs.ok || !beforeLinks.ok) throw new Error("fixture count read failed");
+
+    const call = getToolHandler(localServer, "lore_uat_record");
+    await call({ plan: adrResult.value.slug, verdict: UAT_ACCEPT_VERDICT, by: "agent:uat" });
+
+    const afterDocs = await uatApp.corpusService.list({ type: "knowledge" });
+    const afterLinks = await store.findLinks(adrResult.value.id, "in");
+    if (!afterDocs.ok || !afterLinks.ok) throw new Error("fixture count read failed");
+    expect(afterDocs.value.total).toBe(beforeDocs.value.total);
+    expect(afterLinks.value.length).toBe(beforeLinks.value.length);
+  });
+
+  // BOUNDARY/STATE/REGRESSION for this tool are covered by uat-service.test.ts's direct
+  // UatService.record suite (AC-2/AC-6/AC-7/AC-8) — this block's sole job is AC-5 surface
+  // parity, so it does not re-derive every dimension against the MCP transport.
 });
 
 // ─── Tool Registration Completeness ──────────────────────────────────────────
