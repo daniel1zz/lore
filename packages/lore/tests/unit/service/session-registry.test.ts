@@ -19,7 +19,21 @@
  *               ZERO store writes; bootstrapReportSchema.parse round-trips a
  *               report WITH active_sessions populated (Zod-strip regression, S6)
  *
+ * ADDENDUM (task-active-sessions-derives-only-over-active-plans-tasks-with):
+ * `SessionService.bootstrap`'s `active_sessions` is now CORPUS-GLOBAL — it no
+ * longer intersects with `activePlanIds` at all, so a claim under an
+ * archived/deprecated PLAN now appears (only a task's OWN terminal status
+ * excludes it — see the updated test below, and the dedicated coverage in
+ * `session-active-sessions-corpus-wide.test.ts` for the full Oracle:
+ * zero-active-plans + adhoc, archived-plan NEGATIVE, the `stale`-flagged
+ * REQUIRED #2 decision, STATE release/archive exclusion, a broken parent_id
+ * BOUNDARY, and the CONTROL proving the assertions can fail).
+ * `TaskWorkflowService.ready`'s plan-scoped `sessions[]` (this file's OTHER
+ * describe block, above) is UNCHANGED by that task — the NEGATIVE "both
+ * stale → []" test above still describes `ready()`, not `bootstrap()`.
+ *
  * @spec_ref SPEC-042 AC-S3-6, AC-S3-10
+ * @spec_ref task-active-sessions-derives-only-over-active-plans-tasks-with
  */
 
 import { describe, it, expect } from "vitest";
@@ -290,8 +304,12 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
     expect(result.value.active_sessions).toHaveLength(2);
   });
 
-  // STATE — an archived plan's claims are EXCLUDED from active_sessions
-  it("a claim on an ARCHIVED plan's task is excluded from active_sessions", async () => {
+  // REGRESSION (updated by task-active-sessions-derives-only-over-active-plans-tasks-with):
+  // active_sessions is corpus-global — a claim on a NON-terminal task under an
+  // ARCHIVED plan now DOES appear. Pre-fix, this asserted the opposite
+  // (`toEqual([])`), which was the exact `activePlanIds` intersection bug this
+  // task measured and closed (NEGATIVE bullet 2 of that task's own Oracle).
+  it("a claim on a non-terminal task under an ARCHIVED plan DOES appear in active_sessions", async () => {
     const { corpusService, taskWorkflowService, sessionService } = makeServices();
     const planId = await createPlan(corpusService, "Archived Plan");
     const taskId = await createTask(corpusService, planId, "Task");
@@ -306,10 +324,20 @@ describe("SessionService.bootstrap — active_sessions (SPEC-042 D8)", () => {
     const archiveResult = await corpusService.set(planId, { status: "archived" });
     expect(archiveResult.ok).toBe(true);
 
+    const taskDocResult = await corpusService.get(taskId);
+    expect(taskDocResult.ok).toBe(true);
+    if (!taskDocResult.ok) return;
+    const taskSlug = taskDocResult.value.doc.slug;
+
     const result = await sessionService.bootstrap("alice");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.active_sessions).toEqual([]);
+    // The TASK itself is still "draft" (only its PLAN was archived) — active_sessions
+    // keys on the task's own status, never its parent plan's.
+    expect(result.value.active_sessions).toHaveLength(1);
+    expect(result.value.active_sessions[0]?.by).toBe("agent:t1");
+    expect(result.value.active_sessions[0]?.task_slugs).toContain(taskSlug);
+    expect(result.value.active_sessions[0]?.stale).toBeUndefined();
   });
 
   // REGRESSION — bootstrap() performs zero store mutations (mirrors session-readonly.test.ts)

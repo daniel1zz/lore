@@ -21,8 +21,21 @@
  *   (service/CLAUDE.md "Service per concern, no cross-service calls").
  * @invariant Stateless — the only state is the injected `StoreInterface` + the scalar
  *   config bundle passed at construction. All persistent state lives in the store.
+ * @invariant `bootstrap`'s `active_sessions` is CORPUS-GLOBAL — derived over
+ *   every claim-bearing task regardless of parent type or plan status
+ *   (task-active-sessions-derives-only-over-active-plans-tasks-with Required
+ *   #1; measured pre-fix: unconditionally `[]` in a corpus with zero active
+ *   plans, and never included an `--adhoc` task, SPEC-069 D2). A group whose
+ *   own freshest claim activity has aged past the ttl is still REPORTED,
+ *   flagged `stale: true` (Required #2's recorded decision — candidate (a);
+ *   see `bootstrap()`'s own inline comment for the full weighing against (b)
+ *   claim-refresh-on-evidence and (c) an explicit "unknown" marker). Staleness
+ *   is NEVER treated as death here — a `stale: true` row still names a
+ *   claimant a consumer must not act destructively against on timestamp alone.
+ *   `TaskWorkflowService.ready`'s plan-scoped `sessions[]` is UNTOUCHED by any
+ *   of this — it stays keyed to one plan's own members, unchanged.
  *
- * Source: SPEC-041 §3 D1-D5.
+ * Source: SPEC-041 §3 D1-D5; task-active-sessions-derives-only-over-active-plans-tasks-with.
  */
 
 import {
@@ -52,6 +65,7 @@ import type {
   HandoffPointer,
   LinkRecord,
   LoreError,
+  ReadySession,
   Result,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -282,34 +296,108 @@ export class SessionService {
       });
     }
 
-    // Corpus-wide derived sessions over every ACTIVE plan's tasks (SPEC-042 D8) —
-    // a fresh session learns who else is working BEFORE it claims. Reuses the
-    // SAME `deriveSessions` pure fn `TaskWorkflowService.ready`'s plan-scoped
-    // `sessions[]` uses, just over the union of every active plan's members
-    // instead of one plan's.
+    // Corpus-wide derived sessions over EVERY task carrying a claim — NOT the
+    // `allActiveTaskIds` set above, which stays active-plan-scoped for
+    // `active_plans`' own per-plan counts only
+    // (task-active-sessions-derives-only-over-active-plans-tasks-with,
+    // Required #1). The shipped bootstrap contract documents this field as a
+    // "corpus-global snapshot spanning every plan, every actor, and every
+    // concurrent session" (`BOOTSTRAP_SCOPE_DECLARATION`) — the pre-fix form
+    // intersected with `activePlanIds`, so this field read `[]` in ANY corpus
+    // with zero active plans (measured: 114 archived / 0 active here) AND
+    // never included an `--adhoc` task (SPEC-069 D2 parents these to the root
+    // PRD, never a plan, and adhoc is now the dominant task shape in this
+    // corpus) — a fresh session read that `[]` as "nobody is working" and
+    // removed a live agent's worktree. Scoping this field to active-plan
+    // membership was the bug, not a feature to preserve.
     //
-    // reason: PROJECTED from `allActiveTaskIds` — the ids of the member sets
-    // `isPlanMember` already decided in the loop above — instead of asking the
-    // membership question a second time here. The pre-fix form keyed on the
-    // `parent_id` proxy AND on `activePlanIds`, so a task whose `--parent`
-    // legitimately diverges from its `--plan-id` (SPEC-065 D4) had its LIVE
-    // claim missing from `active_sessions`, the field a fresh session reads to
-    // learn who else is working BEFORE it claims
-    // (task-the-eleventh-plan-member-site-found-by-enumeration). Two
-    // independent derivations of "this plan's tasks" is how that proxy survived
-    // here after nine sibling sites were converted, so there is exactly ONE
-    // membership decision with two consumers now — nothing left to drift.
-    // The ACTIVE-ness half of the question is UNCHANGED and stays where it
-    // was: the archived/deprecated `continue` above, which is what keeps a
-    // non-active plan's own member out of this set (membership decides WHICH
-    // plan a task belongs to, never WHICH PLANS COUNT — REGRESSION-pinned in
-    // tests/integration/bootstrap-plan-membership.bun.test.ts).
-    // Filtering `allDocs` rather than flattening `activePlanEntries` preserves
-    // the corpus ordering the pre-fix filter produced, keeping `deriveSessions`'
-    // group order and per-group `task_slugs` order byte-identical.
-    const activeTaskIds = new Set<DocId>(allActiveTaskIds);
-    const activeTasks = allDocs.filter((doc) => activeTaskIds.has(doc.id));
-    const activeSessions = deriveSessions(activeTasks, nowIso, this.deps.claimTtlMinutes);
+    // `TaskWorkflowService.ready`'s plan-scoped `sessions[]` is DELIBERATELY
+    // LEFT UNCHANGED and is NOT the defect — it answers "who's on THIS plan",
+    // this field answers "who's working AT ALL, anywhere" — the two stay two
+    // independent call sites over the shared `deriveSessions` pure fn rather
+    // than being collapsed into one helper with a scope flag (this task's own
+    // boundary rule; a shared-helper fix risks widening BOTH derivations at
+    // once, which is exactly what the Oracle's REGRESSION bullet guards
+    // against). `ready()`'s own call, one method below, is untouched.
+    //
+    // Terminal-status tasks (archived/deprecated) are EXCLUDED — `lore done`'s
+    // `writeTaskStatus` only ever changes `status`/`updated_at`/`version`, it
+    // never clears `extra.claim`, so an archived task can still carry a claim
+    // that has not yet aged past `claimTtlMinutes`. Without this filter, the
+    // widening above would "resurrect" a just-completed task into
+    // `active_sessions` for the remainder of its stale claim's TTL window
+    // (STATE dimension, dispatch addendum). `release()` already deletes
+    // `extra.claim` outright (`_releaseImpl` above), so a released task needs
+    // no explicit check here — it has no claim left to be picked up at all.
+    //
+    // reason: deliberately does NOT ALSO filter `isInvalidated` (retracted)
+    // tasks — that is a SEPARATE, already-filed defect in this SAME derivation
+    // (`knowledge-handoff-agent-main-orchestrator-71` NS3: a retracted task's
+    // claim is not excluded here). Fixing it silently as a side effect of this
+    // task was explicitly forbidden by its own dispatch — `ready()` already
+    // excludes retracted tasks via its own `isInvalidated` filter
+    // (task-a-task-cannot-be-retracted-supersedes-emits-a-repair AC3); this
+    // site does not, exactly as before this fix (no new regression — it was
+    // never filtered here either).
+    const claimBearingTasks = allDocs.filter(
+      (d) => d.type === "task" && d.status !== "archived" && d.status !== "deprecated",
+    );
+
+    // reason: Required #2's RECORDED decision (dispatch addendum — "do not
+    // silently pick one"). Chosen: candidate (a) — keep reporting a stale
+    // claim in `active_sessions`, flagged, rather than silently dropping it —
+    // the incident's own minimum viable fix. Weighed against:
+    //   (b) claim.at ALREADY refreshes on evidence writes (SPEC-069 D4/D5's
+    //       `renewClaimForEvidence`, wired into `appendEvidenceEntry`) — but
+    //       that leaves the ENTIRE pre-first-evidence working phase
+    //       unrefreshed, which is EXACTLY the incident's own window (the
+    //       agent's claim.at was ~20h old while it was still implementing,
+    //       having recorded no evidence yet — age 1203 min against a 120 min
+    //       ttl, `stale: true` ten times over, while the process was
+    //       demonstrably alive per `git reflog`). (b) alone would still have
+    //       produced this incident's exact reading.
+    //   (c) an explicit `liveness: "unknown"` marker — rejected because it
+    //       still requires deciding whether the ROW itself survives; "unknown"
+    //       on a row that vanished is no different from `[]` to a reader in a
+    //       hurry. (a) subsumes it: a `stale: true` row already tells a reader
+    //       "liveness unconfirmed" without inventing a second vocabulary.
+    // Lengthening `claim_ttl_minutes` was explicitly out of scope (task doc,
+    // "Second half") — it moves the false-death threshold without making
+    // staleness mean liveness, and delays genuine lease reclamation.
+    //
+    // Mechanically: `deriveSessions` is called with an EFFECTIVELY UNBOUNDED
+    // ttl so nothing is filtered out during grouping (fresh AND what would
+    // otherwise be "stale" group together uniformly, by the SAME pure
+    // function `ready()` uses, called here an EXTRA time rather than
+    // modified — `deriveSessions` itself is untouched, so `ready()`'s
+    // behavior stays byte-identical). Each returned group is then
+    // independently re-checked: `stale: true` iff that group's OWN freshest
+    // signal (`newest_at`, already the max `claim.at` across every member
+    // task) has itself aged past the REAL ttl — mirrors this same module's
+    // `deriveLastActivityAt` "over-reporting is the safe direction"
+    // precedent. `stale` is present-iff-true (never `false`), so a genuinely
+    // fresh session's shape stays BYTE-IDENTICAL to pre-this-decision output.
+    //
+    // `stale: true` means "no fresher activity signal has been recorded for
+    // this claimant" — it does NOT mean dead (see `readySessionSchema`'s own
+    // `stale` field JSDoc). A consumer must treat it as "claimant exists,
+    // liveness unconfirmed" — the same non-solitude caveat this schema
+    // already states for an absent `session_id` — never as sole grounds for
+    // a destructive action against the claimant's worktree. That is the
+    // exact failure this whole task exists to close.
+    const UNBOUNDED_TTL_MINUTES = Number.POSITIVE_INFINITY;
+    const activeSessions: ReadySession[] = deriveSessions(
+      claimBearingTasks,
+      nowIso,
+      UNBOUNDED_TTL_MINUTES,
+    ).map((session) => {
+      const groupIsStale = isClaimStale(
+        { by: session.by, at: session.newest_at },
+        nowIso,
+        this.deps.claimTtlMinutes,
+      );
+      return groupIsStale ? { ...session, stale: true } : session;
+    });
 
     // Pending review queue — same `status: "draft"` filter ReviewService.pending uses.
     const pendingDrafts = allDocs.filter((d) => d.status === "draft").sort(byCreatedAtAsc);

@@ -21,11 +21,18 @@
  *   - bootstrapReportSchema / BootstrapReport — the S1 pointer-set `SessionService.bootstrap`
  *     returns (SPEC-041 §3 D2) — every field is a slug/title/count/timestamp pointer,
  *     NEVER doc body content (IoC ADR boundary 2: pointers + summaries, never full dump)
- *   - readySessionSchema / ReadySession — one derived session grouping (SPEC-042 D1)
- *   - deriveSessions(tasks, nowIso, ttlMinutes) — groups FRESH claims by
- *     `(by, machine, worktree, session_id)`; the pure computation behind both
- *     `lore ready`'s per-plan `sessions[]` and `lore bootstrap`'s corpus-wide
- *     `active_sessions`. `session_id` joined the key in
+ *   - readySessionSchema / ReadySession — one derived session grouping (SPEC-042 D1).
+ *     `stale` (optional, present-iff-true) is NEVER set by `deriveSessions` itself —
+ *     only `SessionService.bootstrap`'s post-processing sets it, over an
+ *     unbounded-ttl call (task-active-sessions-derives-only-over-active-plans-tasks-with
+ *     Required #2; see that schema field's own JSDoc and `session-service.ts`'s
+ *     `bootstrap()` for the full rationale)
+ *   - deriveSessions(tasks, nowIso, ttlMinutes) — groups FRESH (per the PASSED-IN
+ *     ttl) claims by `(by, machine, worktree, session_id)`; the pure computation
+ *     behind both `lore ready`'s per-plan `sessions[]` (called with the real
+ *     ttl, unchanged) and `lore bootstrap`'s corpus-wide `active_sessions`
+ *     (called with an unbounded ttl, then post-processed — see above).
+ *     `session_id` joined the key in
  *     task-two-concurrent-orchestrators-both-resolve-to-agent-main: `by` is a
  *     PROXY for the session instance, and two concurrently-live sessions in one
  *     checkout legitimately share it (this project's own discipline mandates
@@ -498,6 +505,18 @@ export const bootstrapCorpusStatsSchema = z.object({
  *   live agent's worktree. Absence here is not a claim of solitude; a consumer
  *   deciding anything destructive off this list must treat a `session_id`-less
  *   row as "unknown cardinality", never as "exactly one session".
+ * @invariant `stale` is NEVER set by {@link deriveSessions} itself — that
+ *   function's own staleness filter (below) still `continue`s past a stale
+ *   claim entirely, unchanged, so `TaskWorkflowService.ready`'s plan-scoped
+ *   `sessions[]` (the SAME function, SAME call shape) stays byte-identical to
+ *   before this field existed. `stale` is populated ONLY by
+ *   `SessionService.bootstrap`'s corpus-wide `active_sessions`, which calls
+ *   `deriveSessions` with an unbounded ttl (so nothing is filtered out) and
+ *   then marks a returned group `stale: true` when its OWN freshest signal
+ *   (`newest_at`) has, separately, aged past the real ttl — Required #2's
+ *   recorded decision, task-active-sessions-derives-only-over-active-plans-tasks-with
+ *   (see that file's `bootstrap()` JSDoc for the full rationale). Present-iff-true
+ *   (never `false`), the same convention `seat_unresolved` already uses.
  */
 export const readySessionSchema = z.object({
   by: z.string(),
@@ -516,6 +535,16 @@ export const readySessionSchema = z.object({
   task_slugs: z.array(z.string()),
   /** The most recent `claim.at` among this session's member claims. */
   newest_at: z.string(),
+  /**
+   * `true` iff this group's OWN freshest claim activity (`newest_at`) has
+   * itself aged past the consumer's ttl — i.e. even the most recently active
+   * member of this session looks stale by the timestamp alone. Staleness is
+   * NOT death (task doc "Second half"): a consumer must read this as
+   * "no fresher activity signal recorded for this claimant", never as
+   * grounds alone for a destructive action. Absent (never `false`) for any
+   * group that is NOT stale — present-iff-true.
+   */
+  stale: z.boolean().optional(),
 });
 
 /** Derived TypeScript type for one session grouping (SPEC-042 D1). */

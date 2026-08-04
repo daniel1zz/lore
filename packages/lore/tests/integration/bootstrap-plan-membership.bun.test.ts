@@ -42,14 +42,26 @@
  *                `active_plans` entry (site 251) and its live claim appears in
  *                `active_sessions` (site 284).
  *   NEGATIVE   — a planless `--adhoc` task holding a LIVE claim is never
- *                dragged into any plan's listing or session set (its claim's
- *                existence is proven in the same payload via `my_claims`, so
- *                the absence is not vacuous).
- *   BOUNDARY   — a member of a DEPRECATED plan keeps its live claim OUT of
- *                `active_sessions`: membership decides WHICH plan a task
- *                belongs to, `active`-ness still decides WHICH plans count.
- *                This is the guard against "fixing" site 284 by dropping the
- *                active-plan filter altogether.
+ *                dragged into any plan's `active_plans` LISTING (it belongs to
+ *                no plan, so it inflates no plan's counts) — but IS now
+ *                present in `active_sessions` (updated by
+ *                task-active-sessions-derives-only-over-active-plans-tasks-with
+ *                Required #1: an adhoc task's SPEC-069 D2 root-PRD parent
+ *                could never satisfy `activePlanIds.has(parent_id)` under the
+ *                pre-fix intersection, which is exactly the second of the two
+ *                independently-sufficient defects that task's doc measured).
+ *   BOUNDARY   — a member of a DEPRECATED plan's live claim DOES appear in
+ *                `active_sessions` (updated by
+ *                task-active-sessions-derives-only-over-active-plans-tasks-with:
+ *                that task's own Required #1 removed the active-plan-status
+ *                filter from this site entirely — `active_sessions` is now
+ *                CORPUS-GLOBAL, keyed only on a task's OWN terminal status,
+ *                never its parent plan's. Membership still decides WHICH
+ *                plan's `active_plans`/`task_counts` entry a task's activity
+ *                rolls up into (site 251, untouched) — but active-ness no
+ *                longer gates `active_sessions` membership at all. The
+ *                pre-fix assertion here was the intersection-with-
+ *                `activePlanIds` bug that task's own doc measured and fixed).
  *   ERROR      — every fixture CLI step asserts exit 0 and surfaces stderr
  *                (`runLoreOk`); a malformed `--json` payload fails the
  *                `bootstrapReportSchema.parse` below rather than being
@@ -64,8 +76,17 @@
  *                aligned shape" means for a fixture whose ULIDs/timestamps are
  *                minted fresh on every run.
  *
+ * ADDENDUM (task-active-sessions-derives-only-over-active-plans-tasks-with):
+ * the "Site 284" describe block below was updated, not this file's own
+ * fixtures — that task removed the active-plan-status filter from
+ * `active_sessions` ENTIRELY (it is now corpus-global), so the two
+ * assertions that used to pin "excluded because its plan isn't active" as
+ * correct behavior now pin the opposite. Site 251 (`active_plans` membership)
+ * is untouched by that task and its assertions are unchanged.
+ *
  * @spec_ref task-the-eleventh-plan-member-site-found-by-enumeration
  * @spec_ref task-eight-more-plan-member-queries-still-key-on-parent-id
+ * @spec_ref task-active-sessions-derives-only-over-active-plans-tasks-with
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
@@ -368,9 +389,12 @@ describe("bootstrap plan membership: fixture preconditions", () => {
       expect(diverged.parent_id).toBe(fixture.deprecatedPlanId);
       expect(diverged.parent_id).not.toBe(diverged.extra["plan_id"]);
 
-      // The parent plan must NOT be an active plan — otherwise the
-      // `active_sessions` site (284) is structurally unreachable and its test
-      // below would pass for the wrong reason.
+      // The parent plan is DEPRECATED (non-active) — this is what makes the
+      // site-284 test below a genuine test of the corpus-global fix
+      // (task-active-sessions-derives-only-over-active-plans-tasks-with): a
+      // claim under a non-active plan's member must now STILL appear in
+      // `active_sessions`, since that field no longer gates on plan status at
+      // all (only site 251's `active_plans` membership still cares).
       expect(readDoc(fixture.dir, fixture.deprecatedPlanSlug).status).toBe("deprecated");
       expect(readDoc(fixture.dir, fixture.activePlanSlug).status).toBe("draft");
 
@@ -447,13 +471,20 @@ describe("bootstrap active_sessions keys on declared membership (session-service
   );
 
   it(
-    "BOUNDARY: a member of the DEPRECATED plan keeps its live claim OUT of active_sessions",
+    // Updated by task-active-sessions-derives-only-over-active-plans-tasks-with:
+    // this used to assert the OPPOSITE (claim excluded) as the "correct,
+    // guarded" behavior — that was precisely the corpus-global-scope defect
+    // that task's own doc measured and fixed (NEGATIVE bullet 2: "a fresh
+    // claim on a task under an archived plan also appears. Today it does
+    // not." — this fixture's plan is DEPRECATED rather than ARCHIVED, but
+    // `session-service.ts` treated both identically pre-fix, so this exact
+    // fixture reproduces that same shape).
+    "REGRESSION: a member of the DEPRECATED plan's live claim DOES appear in active_sessions (corpus-global scope)",
     () => {
       const fixture = getDivergedFixture();
       const report = readBootstrap(fixture.dir, DEPRECATED_PLAN_HOLDER);
 
-      // Live control: the claim exists and is fresh — proven in the SAME payload,
-      // so its absence from active_sessions below cannot be a vacuous pass.
+      // Live control: the claim exists and is fresh — proven in the SAME payload.
       expect(report.my_claims).toEqual([
         {
           task_slug: fixture.deprecatedPlanMemberTaskSlug,
@@ -463,13 +494,33 @@ describe("bootstrap active_sessions keys on declared membership (session-service
         },
       ]);
 
-      // Membership decides WHICH plan a task belongs to; ACTIVE-ness still
-      // decides which plans count. A fix that dropped the active-plan filter
-      // would surface this row.
-      expect(report.active_sessions.map((session) => session.by)).not.toContain(DEPRECATED_PLAN_HOLDER);
-      for (const session of report.active_sessions) {
-        expect(session.task_slugs).not.toContain(fixture.deprecatedPlanMemberTaskSlug);
+      // `active_sessions` is corpus-global — a task's OWN status (not its
+      // parent plan's) is what would exclude it, and this task's own status
+      // is "draft" (never archived/deprecated itself), so its live claim
+      // appears regardless of its plan's terminal status.
+      const session = report.active_sessions.find((s) => s.by === DEPRECATED_PLAN_HOLDER);
+      if (session === undefined) {
+        throw new Error(
+          `no active_sessions row for ${DEPRECATED_PLAN_HOLDER} — rows: ${JSON.stringify(report.active_sessions)}`,
+        );
       }
+      expect(session.task_slugs).toContain(fixture.deprecatedPlanMemberTaskSlug);
+      expect(session.stale).toBeUndefined();
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    // Site 251 (`active_plans` membership) is UNAFFECTED by this task — a
+    // task's own status still governs `active_sessions`, but its PLAN's
+    // active-ness still governs whether it rolls up into any `active_plans`
+    // entry at all (there is none for a deprecated plan, per site-251's own
+    // BOUNDARY test above).
+    "REGRESSION: the DEPRECATED plan itself still contributes no active_plans entry (site 251 unaffected)",
+    () => {
+      const fixture = getDivergedFixture();
+      const report = readBootstrap(fixture.dir, DEPRECATED_PLAN_HOLDER);
+      expect(report.active_plans.map((plan) => plan.slug)).not.toContain(fixture.deprecatedPlanSlug);
     },
     TEST_TIMEOUT_MS,
   );
@@ -479,7 +530,7 @@ describe("bootstrap active_sessions keys on declared membership (session-service
 
 describe("bootstrap plan membership: controls", () => {
   it(
-    "NEGATIVE: a planless --adhoc task with a LIVE claim is never dragged into a plan's listing or session set",
+    "NEGATIVE: a planless --adhoc task with a LIVE claim is never dragged into any plan's active_plans listing",
     () => {
       const fixture = getDivergedFixture();
       const report = readBootstrap(fixture.dir, ADHOC_HOLDER);
@@ -488,11 +539,11 @@ describe("bootstrap plan membership: controls", () => {
       expect(report.my_claims.map((claim) => claim.task_slug)).toContain(fixture.adhocTaskSlug);
       expect(report.my_claims.every((claim) => !claim.stale)).toBe(true);
 
-      // …yet it belongs to no plan, so it appears in no session row.
-      for (const session of report.active_sessions) {
-        expect(session.task_slugs).not.toContain(fixture.adhocTaskSlug);
+      // It belongs to no plan (extra.plan_id absent, SPEC-069 D2), so it
+      // inflates no plan's active_plans task_counts.
+      for (const plan of report.active_plans) {
+        expect(plan.slug).not.toBe(fixture.adhocTaskSlug);
       }
-      expect(report.active_sessions.map((session) => session.by)).not.toContain(ADHOC_HOLDER);
 
       // reason: "it also inflates no plan's counts" is pinned by the site-251
       // test's EXACT `task_counts` equality ({ready:2, claimed:1, done:0} — the
@@ -500,6 +551,30 @@ describe("bootstrap plan membership: controls", () => {
       // would read as `{ready:3, claimed:2}` there. Asserting it here too would
       // make this control fail before the fix for a reason that has nothing to do
       // with ad-hoc tasks, destroying its value as a both-sides control.
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    // Updated by task-active-sessions-derives-only-over-active-plans-tasks-with
+    // Required #1 — an adhoc task's claim now DOES appear in active_sessions,
+    // since that field is corpus-global and no longer requires a `plan_id` at
+    // all. This is the exact second defect the task doc measured: "adhoc tasks
+    // are parented to the root PRD, never a plan... can never satisfy
+    // activePlanIds.has(parent_id)".
+    "REGRESSION: a planless --adhoc task's LIVE claim DOES appear in active_sessions (corpus-global scope)",
+    () => {
+      const fixture = getDivergedFixture();
+      const report = readBootstrap(fixture.dir, ADHOC_HOLDER);
+
+      const session = report.active_sessions.find((s) => s.by === ADHOC_HOLDER);
+      if (session === undefined) {
+        throw new Error(
+          `no active_sessions row for ${ADHOC_HOLDER} — rows: ${JSON.stringify(report.active_sessions)}`,
+        );
+      }
+      expect(session.task_slugs).toContain(fixture.adhocTaskSlug);
+      expect(session.stale).toBeUndefined();
     },
     TEST_TIMEOUT_MS,
   );
