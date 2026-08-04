@@ -58,7 +58,7 @@ Concurrent dispatch respected: rebase/HEAD-freshness before worktree creation; f
 When work LANDED (spec implemented, plan finished, knowledge disproven), the CLOSE-phase steps ran — these are the most-skipped discipline because the session "feels done" once code is merged and tests are green, so the feedback-loop/memory-hygiene steps get dropped silently. **Why**: an un-armed drift oracle, a stale spec status, and un-invalidated wrong knowledge each rot the corpus for every future session, invisibly. This invariant is the one most likely to be MISSED by a reviewer mechanically checking I1–I10 and stopping — a clean execution can still have a dirty close.
 - Sub-checks (each PASS/VIOLATION/N/A on its own):
   - **spec landed → `lore anchor add <spec> <impl-path[#Symbol]>`** declared, arming the doc-code drift oracle (a merged spec impl with no anchor add is a VIOLATION, not N/A).
-  - **spec implemented → its status/`## Specs` entry updated** to reflect the landing (living-snapshot discipline).
+  - **spec implemented → the SPEC DOC's own status updated** to reflect the landing (living-snapshot discipline). ⛔ This is a corpus write, NEVER a CLAUDE.md edit — spec close-outs write NOTHING to CLAUDE.md, not even an index line (`adr-claude-md-specs-section-is-pointer-only-per-spec-index`). A reviewer that flags a missing CLAUDE.md entry here is enforcing a retired rule.
   - **plan fully done → `lore assess <plan>`** ran (LLM-as-judge feedback loop closed).
   - **knowledge the session DISPROVED → `lore invalidate`d** (not left standing to mislead) — overlaps I8's honesty axis but I11 is about the corpus-hygiene ACTION, not the doc-sync claim.
 - Evidence: `lore anchor list`, `lore assess` audit row, spec doc version bump, `lore invalidate` audit row.

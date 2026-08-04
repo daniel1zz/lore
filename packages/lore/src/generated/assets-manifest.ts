@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "3b5aa604de00625c52e8c47bbcea01b667b7d6aeb0e88164427d8bd85521c932",
+  tree_digest: "3aab282b587cbb4156f18290f2691fd28203c784405d03cdd37faaba1a9a5609",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "9007eda7ceb89ada4a686d6707da02589930e7b1b15baa218039f4f11c0a8eab" },
@@ -302,7 +302,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-session-capture/SKILL.md", kind: "skill", ownership: "managed", sha256: "1b0181f49f52c299a4744e2e2ec2c8ae3555400a0768fea1dfcf09bd86c0cb3c" },
   { path: "skills/lore-session-capture/references/knowledge-types.md", kind: "skill", ownership: "managed", sha256: "6233c1e477537afe7b32586ca64bf3fa7881fa8e177855f449a04b7c2b756396" },
   { path: "skills/lore-session-review/SKILL.md", kind: "skill", ownership: "managed", sha256: "1a0457232dd9bafc6c6167c7960a20eb0de53c51d87610710f66d8202b047835" },
-  { path: "skills/lore-session-review/references/invariants.md", kind: "skill", ownership: "managed", sha256: "7b907902b4e79d632c9234d807845932cc166e40ada61c39c2684718f33547f1" },
+  { path: "skills/lore-session-review/references/invariants.md", kind: "skill", ownership: "managed", sha256: "e0f4a14c7660f0b38dc43523b8141d8e80028a0f57541f5c564d29effd6958d9" },
   { path: "skills/lore-tdd/SKILL.md", kind: "skill", ownership: "managed", sha256: "3548b4129232ad48377a7d2beceda0bb712aa462550da9df6ee9f02733665e66" },
   { path: "skills/lore-tdd/deep-modules.md", kind: "skill", ownership: "managed", sha256: "f2123700bf953db1740625686c75bdd145efd486357c47c6818c869fee657a32" },
   { path: "skills/lore-tdd/interface-design.md", kind: "skill", ownership: "managed", sha256: "764c5ff0e3fa6b4ab7095eb65ccc7201e090baf19fa16051dfdb72c06d27417d" },
