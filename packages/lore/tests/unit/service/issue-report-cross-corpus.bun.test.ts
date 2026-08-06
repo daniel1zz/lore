@@ -310,11 +310,23 @@ describe("AC-072-1: round-trip lands a draft ad-hoc task with all 7 issue_report
     // the doc's own fields live one level deeper than `lore create`'s flatter shape.
     const doc = runJson<{
       ok: true;
-      data: { doc: { status: string; extra: { adhoc: boolean; issue_report: Record<string, unknown> } } };
+      data: {
+        doc: {
+          status: string;
+          extra: { adhoc: boolean; ac_scope?: unknown; issue_report: Record<string, unknown> };
+        };
+      };
     }>(["get", upstreamDocId], { cwd: upstream.root });
     expect(doc.result.exitCode).toBe(0);
     expect(doc.data.data.doc.status).toBe("draft");
     expect(doc.data.data.doc.extra.adhoc).toBe(true);
+    // task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed (face 2): this
+    // write site reaches `extra.adhoc: true` WITHOUT the CLI `--adhoc` flag the
+    // ad-hoc `--ac-scope` requiredness is keyed on, so a filed report used to land
+    // with the key ABSENT. Asserted on the STORED value read back through the real
+    // CLI — the `--json` payload, never the human render (which omits structured
+    // extra) and never the builder's return value in-process.
+    expect(doc.data.data.doc.extra.ac_scope).toStrictEqual([]);
     const issueReport = doc.data.data.doc.extra.issue_report;
     for (const field of [
       "reporter_project",
