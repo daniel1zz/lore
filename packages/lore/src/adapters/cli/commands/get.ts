@@ -22,6 +22,27 @@
  * Human-readable AND `--json` output both get this stderr surface (the JSON body
  * itself is unchanged — warnings are a diagnostic side-channel, not response data).
  * `--raw` skips this entirely (no resolution attempted, REGRESSION).
+ *
+ * Structured-`extra` loss notice
+ * (task-lore-get-s-default-render-silently-omits-structured-extra): this render is a
+ * PROJECTION of the record, and until now a lossy one with no loss marker — `content`
+ * + Navigation printed, every structured `extra` value (`issue_report`'s
+ * `expected`/`actual`/`repro_command`, `file_anchors`, `verification_evidence`, …)
+ * dropped with NOTHING indicating a field was withheld, so a doc with no `extra` was
+ * indistinguishable from a doc whose `extra` was not shown. `formatStructuredExtraNotice`
+ * (`../get-render.js`) now announces every withheld field's key, shape and child key
+ * NAMES plus the exact `--json` command that shows the values. Design fork: Option B
+ * (announce the loss) over Option A (render the values) — full reasoning in that
+ * module's header; it is key-agnostic, so a future `extra` key needs no edit here.
+ * ⛔ Three placement rules, each pinned by a test in
+ * `tests/unit/adapters/get-structured-extra-notice.test.ts`:
+ *   1. AFTER the `args.json` early return — so the `--json` payload gains no byte
+ *      (REGRESSION), the notice being a human-view affordance only.
+ *   2. NOT gated on `args.raw` — a `--raw` reader is equally blind, and under `--raw`
+ *      MORE is withheld (no banner, no MDX projections), which is why the exclusion set
+ *      is computed from the resolution facts rather than a static key list.
+ *   3. BEFORE `formatNavigation` — the notice is about the body just printed, so it sits
+ *      adjacent to it, and Navigation stays the footer.
  */
 
 import { defineCommand } from "citty";
@@ -29,6 +50,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatNavigation, formatShortId } from "../utils.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
 import { renderDocMarkdown } from "../../../flows/feed-flow.js";
+import { formatStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
 
 export default defineCommand({
   meta: {
@@ -68,10 +90,18 @@ export default defineCommand({
       // are still valuable output even if placeholder data couldn't be fetched.
       let displayBody = doc.content;
       let resolvedComponents: ResolvedComponent[] | undefined;
+      let acceptanceCriteriaProjected = false;
+      let codeAnchorsProjected = false;
       if (!args.raw) {
         const resolveResult = await app.outlineService.resolve(doc);
         if (resolveResult.ok) {
           resolvedComponents = resolveResult.value.resolvedComponents;
+          // The projection's OWN verdict on whether it appended its block (SPEC-038
+          // `## Acceptance Criteria (structured)` / SPEC-045 `## Code anchors`) — the
+          // loss notice must never re-derive it from `doc.type` + a second schema parse,
+          // or the two would drift and the notice would claim a loss that did not happen.
+          acceptanceCriteriaProjected = resolveResult.value.acceptanceCriteria !== undefined;
+          codeAnchorsProjected = resolveResult.value.codeAnchors !== undefined;
           for (const warning of resolveResult.value.warnings) {
             process.stderr.write(`Warning: ${warning.message}\n`);
           }
@@ -106,6 +136,19 @@ export default defineCommand({
       console.log("");
       console.log(displayBody || "(no content)");
       console.log("");
+      // Loss notice (placement rules 1-3 in the module header): reached only on the
+      // human path, never gated on --raw, printed adjacent to the body it describes.
+      const renderedBodyFacts: RenderedBodyFacts = {
+        mdxResolved: !args.raw,
+        acceptanceCriteriaProjected,
+        codeAnchorsProjected,
+        nowIso: new Date().toISOString(),
+      };
+      const extraNotice = formatStructuredExtraNotice(doc, renderedBodyFacts);
+      if (extraNotice !== undefined) {
+        console.log(extraNotice);
+        console.log("");
+      }
       console.log(formatNavigation(navigation));
     } finally {
       app.close();
