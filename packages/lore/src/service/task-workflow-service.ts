@@ -725,6 +725,130 @@ function isRedRunResult(result: EvidenceEntry["result"]): boolean {
 }
 
 /**
+ * Classifies one stored row against the CAPTURE axis — the axis
+ * {@link buildAttestationFloorRefusal} must describe truthfully, and the axis a
+ * reader of the old refusal was wrongly sent to inspect.
+ *
+ * An ABSENT `capture_source` (only reachable on a row written before that field
+ * became required — see the module @invariant) reads as `"self-report"`, NEVER as
+ * "unknown, therefore runner-captured": the weaker class is the safe reading, and
+ * the refusal must not credit a legacy row with a provenance nobody recorded.
+ */
+function isRunnerCaptured(entry: EvidenceEntry): boolean {
+  return entry.capture_source === "runner";
+}
+
+/**
+ * The two repairs `done()`'s attestation floor accepts, with each one's OWN
+ * reachability precondition stated.
+ *
+ * ⛔ Shared by BOTH arms of {@link buildAttestationFloorRefusal} on purpose (SSOT):
+ * the two arms previously duplicated this sentence, and a duplicated remedy is how
+ * one arm silently keeps prescribing a route the other arm has learned is wrong.
+ *
+ * Repair (1) is stated WITH its precondition rather than unconditionally
+ * (task-lore-done-s-attestation-refusal-calls-a-capture-source, Defect B measured
+ * 2026-08-06): `lore verify <plan>` needs a plan, and the `--adhoc` branch
+ * (`lore verify --task`) needs a NON-EMPTY `extra.ac_scope` to resolve a governing
+ * spec from (`VerifyRunnerService`'s own two pre-flight refusals). For the task
+ * class that hits this floor most often — an `--adhoc` task created with
+ * `--ac-scope ""` — NEITHER is reachable, so repair (2) is its only route, and a
+ * message that named only repair (1) sent that reader down a path that exits 4.
+ * ⛔ Naming the limitation is WORDING; CLOSING it is not this text's job and is
+ * tracked separately (task-an-ad-hoc-task-can-never-reach-the-attestation-path-that)
+ * — do NOT "fix" that gap by weakening this floor.
+ */
+const ATTESTATION_FLOOR_REPAIRS =
+  "Two repairs: (1) `lore verify <plan>` — the SOLE issuer of `attestation` — runs the " +
+  "plan's declared script-mode acceptance criteria itself and attests the pass; for an " +
+  "`--adhoc` task (no plan) the equivalent is `lore verify --task <task>`, which needs a " +
+  "NON-EMPTY `extra.ac_scope` to resolve a governing spec from, so a task declaring an " +
+  'EMPTY `ac_scope` can reach neither. (2) `lore done --override-attestation "<reason>"`, ' +
+  "the audited escape hatch for verification `lore verify` structurally CANNOT perform " +
+  "(a manual/browser oracle, or any task with no script-mode AC to bind to) — for the " +
+  "EMPTY-`ac_scope` case above it is the only available route.";
+
+/**
+ * `done()`'s attestation-floor refusal message — the FIRST floor's text, for a task
+ * holding no row that is BOTH `result: "pass"` AND `attestation !== undefined`
+ * (adr-lore-done-requires-a-runner-attested-pass-the-sixth-false).
+ *
+ * ⛔ WORDING ONLY. This function decides NOTHING about whether a call is refused —
+ * its caller already made that decision from the same predicate as before. Two
+ * orthogonal axes exist and the message's ONE job is to keep them apart:
+ *
+ * | axis       | field            | what it proves                                        |
+ * |------------|------------------|-------------------------------------------------------|
+ * | capture    | `capture_source` | lore SPAWNED this command and cross-checked its exit  |
+ * |            |                  | code against the declared result (`--capture`)         |
+ * | provenance | `attestation`    | the COMMAND itself was runner-derived and approved    |
+ * |            |                  | (SPEC-039's trusted-runner boundary; `lore verify`)    |
+ *
+ * The predecessor text called EVERY unattested row "SELF-REPORTED". Measured
+ * 2026-08-03 and 10 further times since: the reader held rows whose stored
+ * `capture_source` was `"runner"`, so the message named a value the rows did not
+ * carry, and two full investigation rounds went into `capture_source` and
+ * `dist/lore`'s mtime before the reader found the predicate reads a DIFFERENT
+ * field. A confident wrong pointer is worse than a silence — it TERMINATES the
+ * investigation instead of inviting one.
+ *
+ * Therefore the population is COUNTED from the rows themselves and only the
+ * sub-populations that actually exist are named. An all-runner-captured task is
+ * never told the word "self-report"; an all-self-reported task still is (deleting
+ * the word would have fixed the misdirection by destroying true information);
+ * a mixed task is told the mix, with per-population counts.
+ *
+ * @param slug - The task's slug, quoted verbatim into the message
+ * @param evidence - Every stored row, already read+validated by `readEvidence`
+ * @returns The refusal message. Callers own the `code`/`field`/`value` fields —
+ *   those are the predicate's identity and this function must never influence them
+ */
+export function buildAttestationFloorRefusal(slug: string, evidence: readonly EvidenceEntry[]): string {
+  const passRows = evidence.filter((e) => e.result === "pass");
+
+  // ARM 2 — nothing to describe on the capture axis: the task holds no pass row
+  // at all, so naming `capture_source` here would invent a population. Names the
+  // shape it lacks and the field that shape must additionally carry.
+  if (passRows.length === 0) {
+    return (
+      `Task "${slug}" holds no \`result:"pass"\` evidence row at all (${evidence.length} row(s) ` +
+      `total; "expected-fail", "fail" and "inconclusive" never count, however many exist) — ` +
+      "`lore done` requires at least one row that is BOTH `result:\"pass\"` AND carries " +
+      "`attestation`, the runner-issued provenance record. " +
+      ATTESTATION_FLOOR_REPAIRS
+    );
+  }
+
+  const runnerCaptured = passRows.filter(isRunnerCaptured).length;
+  const selfReported = passRows.length - runnerCaptured;
+  const population =
+    runnerCaptured > 0 && selfReported > 0
+      ? `${runnerCaptured} runner-captured (\`capture_source:"runner"\`) + ` +
+        `${selfReported} self-reported (\`capture_source:"self-report"\`)`
+      : runnerCaptured > 0
+        ? `all ${runnerCaptured} runner-captured (\`capture_source:"runner"\`)`
+        : `all ${selfReported} self-reported (\`capture_source:"self-report"\`)`;
+
+  // The WHY clause is emitted ONLY when the task actually holds a runner-captured
+  // row — for an all-self-reported population there is no `--capture` claim to
+  // disambiguate, and asserting one would be the same defect mirrored.
+  const whyRunnerCaptureIsNotEnough =
+    runnerCaptured > 0
+      ? " ⛔ `attestation` is a DIFFERENT field from `capture_source`, so a " +
+        '`capture_source:"runner"` row here is expected and is NOT the gap: `--capture` proves ' +
+        "the exit code of a command the CALLER supplied (and a caller can supply one that " +
+        "necessarily exits 0), while `attestation` proves that command's PROVENANCE — `lore " +
+        "verify` derives the command from declared scope instead of accepting it."
+      : "";
+
+  return (
+    `Task "${slug}" holds ${passRows.length} \`result:"pass"\` evidence row(s) — ${population} — ` +
+    "but NOT ONE carries `attestation`, the runner-issued provenance record `lore done` " +
+    `requires before archiving.${whyRunnerCaptureIsNotEnough} ${ATTESTATION_FLOOR_REPAIRS}`
+  );
+}
+
+/**
  * The task's declared test-file anchors (task-every-ac-oracle-is-t-scoped-
  * so-the-file-passes-is-attested) still lacking an attested UNFILTERED
  * `result:pass` run — `done()`'s THIRD, independent evidence floor. Mirrors
@@ -2385,22 +2509,17 @@ export class TaskWorkflowService {
             value: opts.overrideReason,
           });
         }
-        const hasSelfReportedPass = evidence.some((e) => e.result === "pass");
+        // reason: the message is built by ONE pure function over the SAME rows
+        // this predicate just read (task-lore-done-s-attestation-refusal-calls-a-
+        // capture-source). `code`/`field`/`value` are the predicate's identity and
+        // stay here, unchanged and unreachable from the builder — a wording fix
+        // must not be able to move the error a caller matches on. `value` keeps
+        // the per-row `{result, attested}` pair so a programmatic caller never has
+        // to parse prose for what the message states in words.
         return err({
           code: "VALIDATION_ERROR",
           field: "extra.verification_evidence",
-          message: hasSelfReportedPass
-            ? `Task "${task.slug}" holds only SELF-REPORTED result:pass evidence (no ` +
-              `runner attestation) — lore done requires a runner-attested pass before ` +
-              `archiving; run \`lore verify <plan>\` to attest it, or use the audited ` +
-              `--override-attestation "<reason>" escape hatch for verification lore ` +
-              `verify structurally cannot perform`
-            : `Task "${task.slug}" holds no result:pass evidence entry — lore done ` +
-              `requires at least one RUNNER-ATTESTED passing oracle verification before ` +
-              `archiving ("expected-fail", "fail", and "inconclusive" entries never ` +
-              `count); run \`lore verify <plan>\` to attest one, or use the audited ` +
-              `--override-attestation "<reason>" escape hatch for verification lore ` +
-              `verify structurally cannot perform`,
+          message: buildAttestationFloorRefusal(task.slug, evidence),
           value: evidence.map((e) => ({ result: e.result, attested: e.attestation !== undefined })),
         });
       }
