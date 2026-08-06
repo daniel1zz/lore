@@ -803,6 +803,13 @@ export type SetupConfig = z.infer<typeof SetupConfigSchema>;
  *   rather than silently ignoring them.
  * @invariant Two metrics per role (`max_lines` primary + `max_bytes`
  *   backstop, spec §D2) — a role's block is never bytes-only or lines-only.
+ * @invariant THREE ordered bands per metric, governed by two fractions of the
+ *   same ceiling: `warn_threshold_fraction` (advisory) <
+ *   `evict_threshold_fraction` (deterministic) <= 1. The superRefine below
+ *   REFUSES an inverted or equal pair rather than clamping it, because an
+ *   `evict` at or below `warn` makes the advisory band empty and unreachable —
+ *   a silent semantic inversion, the exact failure class this project's
+ *   no-silent-fallback rule exists to prevent.
  */
 export const contextConfigSchema = z
   .object({
@@ -843,8 +850,53 @@ export const contextConfigSchema = z
          * `claude-md-guard.sh` hook's hard denial.
          */
         warn_threshold_fraction: z.number().min(0).max(1).default(0.9),
+        /**
+         * Fraction (0–1) of a ceiling at which a memory file stops being
+         * merely "approaching" and becomes a DETERMINISTIC, exit-relevant
+         * `eviction_required` finding from `lintMemoryFiles`
+         * (`packages/lore/src/service/claude-md-check.ts`) — the recurrence
+         * rule for
+         * task-a-module-claude-md-at-its-byte-ceiling-silently-relocates.
+         *
+         * The advisory band above was not enough: four module docs sat in it
+         * for an unknown number of sessions and the count went UP, not down —
+         * `packages/lore/src/service/CLAUDE.md` was compressed to 10548 bytes
+         * and was back at 16374/16384 (10 bytes of runway) ten days later. At
+         * zero runway the ceiling guard blocks the one CORRECT write —
+         * recording a new service module in the service doc — so the fact is
+         * recorded in a NEIGHBOURING module's doc instead, which no mechanism
+         * anywhere reports. An advisory nobody is obligated to act on is what
+         * produced that state, so this band blocks.
+         *
+         * Default `0.97`, chosen so the block lands while the file is still
+         * WRITABLE: it leaves ~3% of runway (≈491 bytes at the module byte
+         * ceiling), measurably more than one module-index entry, so whoever
+         * trips it can still land their entry and then evict, and is never
+         * cornered into the displacement that motivated this field. A value
+         * near 1.0 would reproduce that corner; a low value would turn the
+         * ordinary near-ceiling band into a block.
+         *
+         * ⛔ Raising `max_bytes`/`max_lines` is NOT the remedy for a file that
+         * trips this — the ceiling exists because an unbounded memory file is
+         * itself the failure mode, and raising it converts a loud block into a
+         * slow silent regression. The remedy is eviction: move a block to the
+         * corpus and leave a one-line pointer (`lore governance claude-md`).
+         */
+        evict_threshold_fraction: z.number().min(0).max(1).default(0.97),
       })
       .strict()
+      .superRefine((value, ctx) => {
+        if (value.evict_threshold_fraction <= value.warn_threshold_fraction) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["evict_threshold_fraction"],
+            message:
+              `evict_threshold_fraction (${value.evict_threshold_fraction}) must be strictly greater than ` +
+              `warn_threshold_fraction (${value.warn_threshold_fraction}) — an equal or inverted pair leaves the ` +
+              `advisory band empty, so a file would jump from silent straight to a deterministic block`,
+          });
+        }
+      })
       .default({}),
   })
   .strict();
