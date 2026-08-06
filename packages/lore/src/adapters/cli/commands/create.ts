@@ -65,9 +65,11 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
-import type { DocType, JudgeIdentity, KnowledgeSubType, LoreError, Priority } from "@lore/core";
-import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS } from "@lore/core";
+import type { DocRecord, DocType, JudgeIdentity, KnowledgeSubType, LoreError, Priority } from "@lore/core";
+import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, extractFileAnchors } from "@lore/core";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
+import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
+import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 import {
   checkTaskCreateAdhocConflicts,
   checkTaskCreateRequiredFlags,
@@ -207,7 +209,7 @@ export default defineCommand({
     anchor: {
       type: "string",
       description:
-        "[task only, repeatable] Declare a file_anchors entry (repo-relative POSIX path; trailing '/' = directory scope). Validated + normalized by CorpusService (SPEC-042 D3).",
+        "[task only, repeatable] Declare a file_anchors entry (repo-relative POSIX path; trailing '/' = directory scope). Validated + normalized by CorpusService (SPEC-042 D3). A path that does not resolve on disk is ADVISED on stderr, never refused — a task may anchor a file it is about to create.",
     },
     "ac-scope": {
       type: "string",
@@ -677,6 +679,22 @@ export default defineCommand({
       const orphanAdvisory = (doc as { orphan_advisory?: string }).orphan_advisory;
       if (typeof orphanAdvisory === "string") {
         process.stderr.write(`⚠ ${orphanAdvisory}\n`);
+      }
+
+      // Non-resolving `file_anchors` advisory (task-a-mistyped-task-file-anchor-
+      // is-stored-and-consulted, Required #1). Reads the STORED, normalized
+      // anchors off the created doc — never the raw `--anchor` strings — so what
+      // is probed is exactly what the `noAnchorOverlap` gate will consult.
+      // Non-blocking by construction: stderr only (the --json payload above is
+      // already printed and stays uncorrupted), exit code untouched, and the
+      // anchor is stored either way — a task legitimately anchors a file it is
+      // about to create (see collectFileAnchorResolution's module header).
+      const declaredAnchors = extractFileAnchors(doc as DocRecord);
+      if (declaredAnchors.length > 0) {
+        const report = collectFileAnchorResolution(declaredAnchors, buildFileAnchorProbeContext());
+        for (const line of renderFileAnchorAdvisory(report, { subject: doc.slug })) {
+          process.stderr.write(line + "\n");
+        }
       }
     } finally {
       app.close();

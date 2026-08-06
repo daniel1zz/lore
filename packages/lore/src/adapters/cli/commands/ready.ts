@@ -23,9 +23,17 @@
  * SERVICE-SIDE by `TaskWorkflowService.ready` (returning `ReadyReport`); this
  * command only renders them, it never recomputes anchor overlap or session
  * grouping itself. `--json` prints the full `ReadyReport` under `data.ready`
- * (an object `{records, sessions, anchor_conflicts}`, NOT the pre-SPEC-042
- * flat array — see `ReadyReport`'s own JSDoc for why a wrapper object was
- * chosen over bolting extra properties onto an array).
+ * (an object `{records, sessions, anchor_conflicts, anchor_resolution}`, NOT the
+ * pre-SPEC-042 flat array — see `ReadyReport`'s own JSDoc for why a wrapper
+ * object was chosen over bolting extra properties onto an array).
+ *
+ * task-a-mistyped-task-file-anchor-is-stored-and-consulted adds
+ * `anchor_resolution`: this command is the surface that INJECTS the fs port
+ * (`buildFileAnchorProbeContext()`, rooted at cwd), so a dispatcher sees which
+ * declared anchors do not resolve — and therefore protect nothing — BEFORE
+ * assigning concurrent work. `--json` carries the union verbatim, so
+ * `{probed: false}` (no port injected, e.g. the MCP/HTTP `ready` surfaces) can
+ * never be mistaken for `{probed: true, unresolved: []}`.
  *
  * `--adhoc` mode (SPEC-069 §Design Decisions D2, AC-069-7): mutually
  * exclusive with `<plan>` (a corpus-wide, plan-less listing has no plan
@@ -48,6 +56,8 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import type { ReadyRecord, ReadySession } from "@lore/core";
 import type { AnchorConflict } from "../../../service/task-workflow-service.js";
+import { renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
+import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 
 /** The literal set `ReadyRecord.latest_evidence.result` can hold (@lore/core task-workflow.ts). */
 type EvidenceResult = NonNullable<ReadyRecord["latest_evidence"]>["result"];
@@ -225,7 +235,16 @@ export default defineCommand({
         return;
       }
 
-      const result = await app.taskWorkflowService.ready(args.plan as string);
+      // task-a-mistyped-task-file-anchor-is-stored-and-consulted (Required #2):
+      // the fs port is built HERE, in the adapter, and injected per call — the
+      // service never opens an fs seam. Rooted at cwd, the same assumption
+      // `--check-drift` makes (see buildFileAnchorProbeContext's JSDoc for why
+      // NOT the corpus root).
+      const result = await app.taskWorkflowService.ready(
+        args.plan as string,
+        undefined,
+        buildFileAnchorProbeContext(),
+      );
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
@@ -288,6 +307,21 @@ export default defineCommand({
         console.log("");
         console.log(`⚠ Anchor conflicts (${report.anchor_conflicts.length}):`);
         for (const conflict of report.anchor_conflicts) console.log(formatAnchorConflictLine(conflict));
+      }
+
+      // task-a-mistyped-task-file-anchor-is-stored-and-consulted — non-resolving
+      // declared anchors. Rendered through the SHARED advisory renderer every
+      // write surface uses (one wording, one place), qualified per task since
+      // this report spans the whole plan. Silent when everything resolves; a
+      // `{probed: false}` report renders nothing here BUT is still visible
+      // verbatim in `--json`, so "not probed" never masquerades as "clean".
+      const anchorAdvisory = renderFileAnchorAdvisory(report.anchor_resolution, {
+        subject: args.plan as string,
+        rowLabel: (row) => `${row.task_slug} → ${row.anchor}`,
+      });
+      if (anchorAdvisory.length > 0) {
+        console.log("");
+        for (const line of anchorAdvisory) console.log(line);
       }
     } finally {
       app.close();

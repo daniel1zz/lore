@@ -361,7 +361,19 @@ describe("lore_ready — REGRESSION: MCP payload deep-equals a direct service ca
     const directResult = await taskWorkflowService.ready(plan.slug);
     if (!directResult.ok) throw new Error(JSON.stringify(directResult.error));
 
-    expect(mcpData.ready).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
-    expect(directResult.value).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
+    // task-a-mistyped-task-file-anchor-is-stored-and-consulted — NEITHER side
+    // injects a filesystem port here (MCP `lore_ready` never does; this direct
+    // call passes none), so both report "not probed" rather than an empty
+    // finding list. That the two sides agree on the DISCRIMINANT is the point of
+    // this parity oracle: a surface that silently reported `{probed:true,
+    // unresolved:[]}` without probing would diverge here.
+    const notProbed = { probed: false, reason: "no-fs-probe" };
+    expect(mcpData.ready).toEqual({ records: [], sessions: [], anchor_conflicts: [], anchor_resolution: notProbed });
+    expect(directResult.value).toEqual({
+      records: [],
+      sessions: [],
+      anchor_conflicts: [],
+      anchor_resolution: notProbed,
+    });
   });
 });

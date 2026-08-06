@@ -133,6 +133,7 @@ import {
   computeAcScopeEdit,
   extractDeclaredAcScope,
   tallyEvidenceResults,
+  unprobedFileAnchors,
   type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
@@ -1264,7 +1265,14 @@ export class PhaseWorkflowService {
     if (!childrenResult.ok) return childrenResult;
     const children = childrenResult.value;
 
-    if (children.length === 0) return ok({ records: [], sessions: [], anchor_conflicts: [] });
+    if (children.length === 0) {
+      return ok({
+        records: [],
+        sessions: [],
+        anchor_conflicts: [],
+        anchor_resolution: unprobedFileAnchors("no-fs-probe"),
+      });
+    }
 
     const nowIso = now();
 
@@ -1300,6 +1308,16 @@ export class PhaseWorkflowService {
       records,
       sessions: deriveSessions(children, nowIso, this.claimTtlMinutes),
       anchor_conflicts: anchorConflicts,
+      // reason: task-a-mistyped-task-file-anchor-is-stored-and-consulted — the
+      // PHASE tier does not (yet) probe its `extra.file_anchors` against the
+      // working tree: no caller injects a filesystem port here (this method has
+      // no production call site; `lore ready <plan>` runs the TASK tier). It says
+      // so STRUCTURALLY rather than returning `{probed: true, unresolved: []}`,
+      // which would claim a clean scan that never happened — precisely the
+      // silence the field exists to eliminate. Wiring a probe here is a mechanical
+      // extension: pass a `FileAnchorProbeContext` down and reuse
+      // `collectFileAnchorResolution`, exactly as `TaskWorkflowService.ready` does.
+      anchor_resolution: unprobedFileAnchors("no-fs-probe"),
     });
   }
 

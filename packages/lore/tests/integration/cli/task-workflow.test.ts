@@ -499,7 +499,19 @@ describe("lore ready — JSON shape", () => {
       data?: { ready?: { records?: unknown[]; sessions?: unknown[]; anchor_conflicts?: unknown[] } };
     };
     expect(parsed.ok).toBe(true);
-    expect(parsed.data?.ready).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
+    // task-a-mistyped-task-file-anchor-is-stored-and-consulted — the CLI is the
+    // surface that DOES inject a filesystem probe, so an empty plan reports a
+    // genuinely PROBED empty result (`probed: true`), not the "not probed" value
+    // MCP/HTTP return. `root` is the spawned process's real cwd; its exact value
+    // is pinned in `tests/unit/adapters/cli-anchor-resolution.bun.test.ts`
+    // (macOS realpaths `/var` → `/private/var`), so this exhaustive-shape
+    // assertion matches its type instead of its text.
+    expect(parsed.data?.ready).toEqual({
+      records: [],
+      sessions: [],
+      anchor_conflicts: [],
+      anchor_resolution: { probed: true, root: expect.any(String), unresolved: [] },
+    });
   });
 
   it("AC-WF-7.CLI.N1: ready against a non-plan doc → exit 4 (VALIDATION_ERROR)", () => {

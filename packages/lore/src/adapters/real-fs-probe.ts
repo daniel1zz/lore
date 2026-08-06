@@ -10,6 +10,9 @@
  * Public surface:
  *   buildRealFsProbe(repoRoot?) — constructs an `FsProbe` rooted at `repoRoot`
  *     (default `process.cwd()`).
+ *   buildFileAnchorProbeContext(repoRoot?) — the SAME probe paired with its root,
+ *     for the task `file_anchors` resolution advisory
+ *     (task-a-mistyped-task-file-anchor-is-stored-and-consulted).
  *
  * @invariant `stat()` NEVER throws for a GENUINE stat failure — every ordinary
  *   failure (ENOENT, EACCES, a symlink resolving to neither a file nor a
@@ -54,6 +57,7 @@
 import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, sep } from "node:path";
 import type { FsProbe } from "../service/drift-check-service.js";
+import type { FileAnchorProbeContext } from "../service/anchor-resolution.js";
 
 /**
  * Resolves `path` (repo-relative) against `repoRoot` and returns its REAL
@@ -149,4 +153,27 @@ export function buildRealFsProbe(repoRoot: string = process.cwd()): FsProbe {
       }
     },
   };
+}
+
+/**
+ * Pairs {@link buildRealFsProbe} with the root it resolves against — the ONE
+ * construction site for the task `file_anchors` resolution advisory's port
+ * (task-a-mistyped-task-file-anchor-is-stored-and-consulted, Required #3: reuse
+ * the fs port `code-anchors`/`--check-drift` already probes through, never open
+ * a second one).
+ *
+ * @param repoRoot - Absolute root every repo-relative anchor resolves against.
+ *   Defaults to `process.cwd()`, the SAME assumption `--check-drift` makes.
+ *   ⛔ Deliberately NOT the corpus root (`.lore/`'s parent): inside a linked git
+ *   worktree, `findLoreDbPath` falls back to the MAIN checkout's corpus, so a
+ *   corpus-rooted probe would answer for a tree the operator is not working in.
+ *   cwd is the tree whose files the task will actually touch, and the report
+ *   NAMES this root so a wrong-directory run stays distinguishable from a typo.
+ * @returns `{ probe, root }` for `collectFileAnchorResolution` /
+ *   `TaskWorkflowService.ready`.
+ * @example
+ * const report = collectFileAnchorResolution(anchors, buildFileAnchorProbeContext());
+ */
+export function buildFileAnchorProbeContext(repoRoot: string = process.cwd()): FileAnchorProbeContext {
+  return { probe: buildRealFsProbe(repoRoot), root: repoRoot };
 }

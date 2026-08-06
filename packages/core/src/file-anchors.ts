@@ -11,10 +11,19 @@
  *     ALREADY-NORMALIZED anchor lists (D4)
  *   - extractFileAnchors(task) — defensive read accessor, mirrors
  *     task-workflow.ts's extractClaim/extractEvidence shape
+ *   - fileAnchorProbePath / classifyFileAnchorResolution / unprobedFileAnchors —
+ *     the RESOLUTION-classification half (task-a-mistyped-task-file-anchor-is-
+ *     stored-and-consulted): given filesystem observations COLLECTED ELSEWHERE,
+ *     name the declared anchors that do not resolve. Advisory only — see
+ *     `classifyFileAnchorResolution`'s JSDoc for why a missing path is never a
+ *     refusal at any layer.
  *
  * Invariants:
  *   - No IO, no wall-clock reads — this module has nothing to do with staleness;
- *     that's task-workflow.ts's isClaimStale.
+ *     that's task-workflow.ts's isClaimStale. The resolution half takes
+ *     ALREADY-COLLECTED probe results (the same shape `computeDrift` takes),
+ *     because `@lore/core` is browser-safe and must never import `fs`: the fs
+ *     port lives in `packages/lore/src/service/anchor-resolution.ts`.
  *   - normalizeFileAnchors is the SINGLE validation gate for anchor entries —
  *     CorpusService._createImpl (create-time `--anchor`) and every
  *     TaskWorkflowService anchor-mutation verb (setAnchors/addAnchors/
@@ -261,4 +270,221 @@ export function extractFileAnchors(task: DocRecord): string[] {
   const raw = safeTaskExtra(task)["file_anchors"];
   if (!Array.isArray(raw)) return [];
   return raw.filter((entry): entry is string => typeof entry === "string");
+}
+
+// ─── Resolution Classification (task-a-mistyped-task-file-anchor-is-stored-and-consulted) ──
+
+/**
+ * The four ways a DECLARED file anchor can fail to resolve on the working tree.
+ *
+ * Deliberately a SUBSET of `code-anchors.ts`'s `DRIFT_KINDS` with the same
+ * spellings — a reader who has learned one vocabulary reads the other. The two
+ * kinds omitted are meaningless for a task anchor: `symbol_missing` (a task
+ * anchor has no `#Symbol` grammar — `rejectHashInTaskAnchors` refuses `#`
+ * outright) and `dir_empty` (an EMPTY directory is a perfectly good anchor for a
+ * task that is about to add the first file to it).
+ */
+export const FILE_ANCHOR_NONRESOLUTION_KINDS = [
+  "file_missing",
+  "dir_missing",
+  "node_type_mismatch",
+  "probe_error",
+] as const;
+
+/** Derived classification for one non-resolving declared file anchor. */
+export type FileAnchorNonResolutionKind = (typeof FILE_ANCHOR_NONRESOLUTION_KINDS)[number];
+
+/**
+ * One already-collected filesystem observation for ONE distinct anchor path —
+ * the narrow task-anchor counterpart of `code-anchors.ts`'s `AnchorProbe`
+ * (deliberately narrower: no `children`/`content`, since neither directory
+ * emptiness nor exported symbols mean anything for a task's file anchors).
+ *
+ * Both fields are optional because a probe may fail at any stage:
+ *   - `error` set → the probe could not affirmatively look (e.g. the
+ *     symlink-escape refusal `buildRealFsProbe` throws). NEVER treated as
+ *     "resolves" — a probe that could not look reports `probe_error`.
+ *   - `stat` absent while `error` is absent too → the collector recorded nothing
+ *     usable; classified as missing rather than resolved (same safe direction).
+ */
+export interface FileAnchorProbeResult {
+  /** `FsProbe.stat(path)` result, when the call succeeded. */
+  stat?: "file" | "dir" | "missing";
+  /** Set iff the probe call for this path threw or refused. */
+  error?: string;
+}
+
+/** One declared anchor that failed to resolve, plus why. */
+export interface NonResolvingFileAnchor {
+  /** The anchor EXACTLY as declared/stored (directory scope keeps its trailing `/`). */
+  anchor: string;
+  kind: FileAnchorNonResolutionKind;
+  /** Human-readable detail — populated for `probe_error` only. */
+  detail?: string;
+}
+
+/** Why a resolution report carries no findings *because nothing was probed*. */
+export const FILE_ANCHOR_UNPROBED_REASONS = ["no-fs-probe"] as const;
+
+/** Derived reason type for {@link UnprobedFileAnchors}. */
+export type FileAnchorUnprobedReason = (typeof FILE_ANCHOR_UNPROBED_REASONS)[number];
+
+/**
+ * "No filesystem probe was performed" — structurally distinct from a probed
+ * report that found nothing. ⛔ Never collapse the two: `unresolved: []` means
+ * "every declared anchor resolves"; THIS means "we do not know", and the whole
+ * defect this type exists for was a silence that read like the former.
+ */
+export interface UnprobedFileAnchors {
+  probed: false;
+  reason: FileAnchorUnprobedReason;
+}
+
+/** A completed probe of a declared anchor set, rooted at `root`. */
+export interface ProbedFileAnchors<Row = NonResolvingFileAnchor> {
+  probed: true;
+  /** Absolute directory every anchor was resolved against — names WHERE we looked, so a wrong-cwd run is distinguishable from a typo. */
+  root: string;
+  /** Every declared anchor that failed to resolve, in declaration order. `[]` = all good. */
+  unresolved: Row[];
+}
+
+/**
+ * Discriminated union carried by every surface that reports anchor resolution
+ * (CLI write advisories, MCP payloads, `ReadyReport.anchor_resolution`).
+ * Generic over the row so the plan-scoped `lore ready` variant can widen it with
+ * `task_slug` without a second, drift-prone copy of the union.
+ *
+ * @example
+ * // Consumers MUST branch on the discriminant, never on `unresolved.length`:
+ * if (!report.probed) console.log("not probed"); else console.log(report.unresolved.length);
+ */
+export type FileAnchorResolutionReport<Row = NonResolvingFileAnchor> =
+  | UnprobedFileAnchors
+  | ProbedFileAnchors<Row>;
+
+/**
+ * Constructs the {@link UnprobedFileAnchors} value. A function (not a shared
+ * constant) so no caller can mutate a singleton, and so the `reason` is always
+ * stated explicitly rather than defaulted into silence.
+ *
+ * @param reason - Why no probe ran (currently only `"no-fs-probe"`: the caller
+ *   supplied no filesystem port — e.g. MCP `lore_ready`/HTTP `/ready`, which
+ *   answer for a caller whose cwd this process cannot speak for).
+ * @returns `{ probed: false, reason }`
+ * @example
+ * unprobedFileAnchors("no-fs-probe"); // => { probed: false, reason: "no-fs-probe" }
+ */
+export function unprobedFileAnchors(reason: FileAnchorUnprobedReason): UnprobedFileAnchors {
+  return { probed: false, reason };
+}
+
+/**
+ * The filesystem path a declared anchor is probed at — the anchor minus its
+ * directory-scope marker.
+ *
+ * A trailing `/` is `anchorsOverlap`'s directory-scope MARKER (D4), not part of
+ * the path: `statSync("some/file.ts/")` fails with ENOTDIR, which would
+ * misreport a file-vs-directory mismatch as "missing". Stripping it here keeps
+ * the probe key and the classification honest, and lets two spellings of the
+ * same path (`"a"` and `"a/"`) share ONE probe call.
+ *
+ * @param anchor - One NORMALIZED anchor entry (`normalizeFileAnchors` output).
+ * @returns The repo-relative path to stat.
+ * @example
+ * fileAnchorProbePath("src/service/"); // => "src/service"
+ * fileAnchorProbePath("src/a.ts");     // => "src/a.ts"
+ */
+export function fileAnchorProbePath(anchor: string): string {
+  return anchor.endsWith("/") ? anchor.slice(0, -1) : anchor;
+}
+
+/**
+ * Classifies every declared anchor against already-collected probe results —
+ * pure, unit-testable with hand-built maps, no filesystem access (the IO lives
+ * in `packages/lore/src/service/anchor-resolution.ts`, which drives the SAME
+ * injected `FsProbe` port `lore status --check-drift` probes through).
+ *
+ * ⛔ This is an ADVISORY computation, not validation. A non-resolving anchor is
+ * NEVER a refusal at any layer, and `normalizeFileAnchors` deliberately gains no
+ * existence check: a spec's `code_anchors` are declared AFTER the code lands (so
+ * their referent must exist), while a task's `file_anchors` are declared BEFORE
+ * the work — a task creating a new module legitimately anchors a path that does
+ * not exist yet, and refusing it would make the worktree mutex unusable for
+ * exactly the highest-risk case (two agents both creating the same new file).
+ *
+ * ⛔ "The path resolves" is a PROXY for "this anchor names the file this task
+ * will touch", and the filesystem can only ever speak to part of it. Two
+ * accepted gaps, both known: a typo that lands on a DIFFERENT real file
+ * (`session-service.ts` → `sessions.ts`) satisfies the proxy while violating the
+ * property and stays silent here; a to-be-created file violates the proxy while
+ * satisfying the property, which is why this is an advisory. Binding:
+ * `adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the`.
+ *
+ * ⛔ Scope, stated so no future reader overclaims: anchors are themselves
+ * opt-in. An UNDECLARED anchor is invisible to `noAnchorOverlap` entirely, so
+ * probing declared anchors only makes the DECLARED set more trustworthy — it
+ * does nothing about the undeclared set, and manual intersection queueing
+ * remains necessary as defense-in-depth. Nothing here closes the anchor-mutex
+ * hole. Separately: a peer session concluded that anchor-SCOPED predicates are
+ * the wrong shape for verifying worktree state (its fix was re-specified from
+ * anchor-scoped to whole-worktree `git status` porcelain). That conclusion is
+ * about trusting anchors as a SCOPE; this function improves the anchors
+ * themselves. They do not conflict — but this function is NOT evidence that
+ * anchor-scoped predicates are safe.
+ *
+ * Classification order per anchor (first match wins):
+ *   1. no probe entry for its path, or `error` set → `probe_error`
+ *   2. `stat` absent or `"missing"` → `dir_missing` (directory scope) / `file_missing`
+ *   3. directory scope but `stat === "file"` → `node_type_mismatch`
+ *   4. plain anchor but `stat === "dir"` → `node_type_mismatch`
+ *   5. otherwise → resolves (no row)
+ *
+ * @param anchors - Declared, NORMALIZED anchors (`extractFileAnchors` output).
+ * @param probes - Observations keyed by {@link fileAnchorProbePath} (one entry
+ *   per DISTINCT path — probe-level dedup is the collector's job).
+ * @returns One row per non-resolving anchor, in declaration order; `[]` when
+ *   every declared anchor resolves (the CONTROL: a resolving anchor is SILENT).
+ * @example
+ * classifyFileAnchorResolution(["src/gone.ts"], new Map([["src/gone.ts", { stat: "missing" }]]));
+ * // => [{ anchor: "src/gone.ts", kind: "file_missing" }]
+ */
+export function classifyFileAnchorResolution(
+  anchors: readonly string[],
+  probes: ReadonlyMap<string, FileAnchorProbeResult>,
+): NonResolvingFileAnchor[] {
+  const rows: NonResolvingFileAnchor[] = [];
+
+  for (const anchor of anchors) {
+    const isDir = anchor.endsWith("/");
+    const path = fileAnchorProbePath(anchor);
+    const probe = probes.get(path);
+
+    if (probe === undefined) {
+      rows.push({
+        anchor,
+        kind: "probe_error",
+        detail: `no probe result recorded for path "${path}"`,
+      });
+      continue;
+    }
+    if (probe.error !== undefined) {
+      rows.push({ anchor, kind: "probe_error", detail: probe.error });
+      continue;
+    }
+    if (probe.stat === undefined || probe.stat === "missing") {
+      rows.push({ anchor, kind: isDir ? "dir_missing" : "file_missing" });
+      continue;
+    }
+    if (isDir && probe.stat === "file") {
+      rows.push({ anchor, kind: "node_type_mismatch" });
+      continue;
+    }
+    if (!isDir && probe.stat === "dir") {
+      rows.push({ anchor, kind: "node_type_mismatch" });
+      continue;
+    }
+  }
+
+  return rows;
 }

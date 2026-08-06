@@ -738,12 +738,24 @@ describe("lore_ready", () => {
   });
 
   describe("boundary values", () => {
-    it("an empty plan (no tasks) returns { ready: { records: [], sessions: [], anchor_conflicts: [] } }, not an error", async () => {
+    it("an empty plan (no tasks) returns an empty ReadyReport (records/sessions/anchor_conflicts all [], anchor_resolution not-probed), not an error", async () => {
       const planId = await createPlan("Empty Plan");
       const result = await call()({ plan_id_or_slug: planId });
       expect(result.isError).toBeFalsy();
       const data = parseResult(result) as { ready: { records: unknown[]; sessions: unknown[]; anchor_conflicts: unknown[] } };
-      expect(data.ready).toEqual({ records: [], sessions: [], anchor_conflicts: [] });
+      expect(data.ready).toEqual({
+        records: [],
+        sessions: [],
+        anchor_conflicts: [],
+        // task-a-mistyped-task-file-anchor-is-stored-and-consulted — `lore_ready`
+        // deliberately injects no filesystem port (an MCP caller's cwd is not
+        // this process's to speak for), so the field states "not probed" instead
+        // of the indistinguishable-looking `{probed:true, unresolved:[]}`. The
+        // CLI `lore ready`, which DOES probe, is covered by
+        // `tests/integration/cli/task-workflow.test.ts` +
+        // `tests/unit/adapters/cli-anchor-resolution.bun.test.ts`.
+        anchor_resolution: { probed: false, reason: "no-fs-probe" },
+      });
     });
   });
 

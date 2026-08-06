@@ -77,7 +77,7 @@ Registers 33 `lore_*` tools plus a small set of MCP resources against
 - `lore_verify` (SPEC-039) — attested script-AC runner; `allow_new_commands` replaces the CLI's TTY approval prompt (MCP is non-interactive).
 - `lore_feed` (SPEC-041/070) — checkpoint dispatch: gate / `session-resume` / `phase-start` / `task-start`, see Patterns above.
 - `lore_bootstrap` / `lore_handoff` (SPEC-041) — session pointer-set (read-only) + sole non-CLI handoff writer.
-- `lore_anchor_set` (SPEC-042/045) — declarative REPLACE of anchors; task vs spec dispatch DIVERGES from the CLI's incremental `anchor add`/`rm`.
+- `lore_anchor_set` (SPEC-042/045) — declarative REPLACE of anchors; task vs spec dispatch DIVERGES from the CLI's incremental `anchor add`/`rm`. On a TASK target it (and `lore_create` with `file_anchors`) returns a non-blocking `anchor_resolution` payload field naming each stored anchor that does not resolve on disk — MCP callers read no stderr, so the advisory travels in the payload; never `isError`, never a refusal (`service/anchor-resolution.ts`). ⛔ `lore_ready` deliberately injects NO probe: it reports `{probed:false, reason}` rather than claim a clean scan for a caller whose cwd this process cannot speak for.
 - `lore_invalidate` (SPEC-043) — sole MCP write path for `extra.validity`.
 - `lore_staleness_probe` (SPEC-044) — batch / single-doc / list-only staleness scan; `by` also used as the audit-row actor.
 - `lore_uat_record` (SPEC-054), `lore_requirement_add` (SPEC-055), `lore_phase_status` (SPEC-056) — thin pipes over their respective services, same construction the CLI equivalents use.
