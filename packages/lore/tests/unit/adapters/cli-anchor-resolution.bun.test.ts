@@ -44,7 +44,7 @@
  */
 
 import { describe, expect, it, beforeAll, beforeEach, afterEach, setDefaultTimeout } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, appendFileSync } from "fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
@@ -258,7 +258,11 @@ describe("STATE — lore ready <plan> --json surfaces it for the dispatcher", ()
 
     expect(resolution.probed).toBe(true);
     if (!resolution.probed) throw new Error("expected a probed report");
-    expect(resolution.root).toBe(tmpDir);
+    // The reported root is the spawned process's REAL cwd — on macOS `mkdtemp`'s
+    // `/var/folders/...` is a symlink to `/private/var/folders/...`, and the
+    // binary reports the resolved location (which is the honest answer for a
+    // reader checking whether they ran from the right directory).
+    expect(resolution.root).toBe(realpathSync(tmpDir));
     expect(resolution.unresolved).toEqual([
       { task_slug: slug, anchor: "src/gone.ts", kind: "file_missing" },
     ]);

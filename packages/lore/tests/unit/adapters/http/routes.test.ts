@@ -997,6 +997,12 @@ describe("GET /api/ready/:planIdOrSlug", () => {
         records: [],
         sessions: [],
         anchor_conflicts: [],
+        // task-a-mistyped-task-file-anchor-is-stored-and-consulted — the HTTP
+        // surface injects NO filesystem port (it answers for a remote caller
+        // whose working tree this process cannot speak for), so it reports
+        // "not probed" EXPLICITLY rather than `{probed:true, unresolved:[]}`,
+        // which would claim a clean scan that never ran.
+        anchor_resolution: { probed: false, reason: "no-fs-probe" },
         claim_ttl_minutes: app.taskWorkflowService.claimTtlMinutes,
       });
     });
