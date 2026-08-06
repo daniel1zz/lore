@@ -13,8 +13,9 @@
  * Public surface:
  *   - lintMemoryFiles(files, budgets) — the full ceiling oracle: for every
  *     file, measures line count AND `Buffer.byteLength` and reports every
- *     ceiling breach (never short-circuits after the first). DETERMINISTIC,
- *     exit-relevant (`kind: "max_lines" | "max_bytes"`).
+ *     ceiling breach (never short-circuits after the first) PLUS every metric
+ *     that has crossed the eviction floor below the ceiling. DETERMINISTIC,
+ *     exit-relevant (`kind: "max_lines" | "max_bytes" | "eviction_required"`).
  *   - checkReferenceExistence(content, fileExists) — DETERMINISTIC,
  *     exit-relevant (`kind: "reference_missing"`): extracts backtick-quoted,
  *     repo-relative-looking path candidates from `content` and reports the
@@ -40,10 +41,39 @@
  *     ever decides breach/exit-code (mirrors the `detectNarrativeSmells`
  *     advisory/deterministic split, spec §D7).
  *
+ * Three ordered bands per metric (task-a-module-claude-md-at-its-byte-ceiling-
+ * silently-relocates). Both fractions come from `budgets`, never from a
+ * constant here:
+ *   used < ceiling*warn                  → silent
+ *   ceiling*warn  <= used < ceiling*evict → ADVISORY `headroom_warning`
+ *                                          (`computeHeadroomWarnings`, never
+ *                                          exit-relevant)
+ *   ceiling*evict <= used <= ceiling      → DETERMINISTIC `eviction_required`
+ *   used > ceiling                        → DETERMINISTIC `max_lines`/`max_bytes`
+ * The last two are mutually exclusive PER METRIC: a breach suppresses the
+ * eviction row for that same metric, so a file over its ceiling reports
+ * exactly the historical breach finding and never double-reports. WHY a third
+ * band at all: the advisory band alone was measured to be ignorable — four
+ * module docs sat in it for an unknown number of sessions and the count went
+ * UP. At zero runway the ceiling guard blocks the one CORRECT write (recording
+ * a new module in its OWN module doc), so the fact lands in a NEIGHBOURING
+ * module's doc, which no mechanism reports at all
+ * (`service/anchor-resolution.ts` was documented in three other module docs
+ * and absent from service's own). The floor blocks while the file is still
+ * writable, so eviction is always a reachable option.
+ *
  * Invariants:
  *   - `budgets.enabled === false` short-circuits `lintMemoryFiles` to zero
  *     findings for every input, regardless of content (spec §D1: the check
  *     is a global opt-out, never a per-file one).
+ *   - `eviction_required` is emitted from `lintMemoryFiles` and NOWHERE else,
+ *     ON PURPOSE: that one function is the seam `lore status
+ *     --check-claude-md`'s exit code, `assets/hooks/claude-md-guard.sh`'s
+ *     PostToolUse block, `hooks/pre-push`, and `flows/context-flow.ts`'s
+ *     `runContextRefresh` pre-write admission ALL already consume. Adding a
+ *     second entry point (a separate `lintEvictionFloor` folded in by each
+ *     caller) would have made the rule opt-in per surface — the property this
+ *     task exists to remove.
  *   - Both `lintMemoryFiles` metrics are ALWAYS measured for every file,
  *     independently — a file over both ceilings produces two findings
  *     (`max_lines` AND `max_bytes`), never just the first one hit (spec §D2:
@@ -120,14 +150,16 @@ export interface MemoryFileRecord {
 // ─── Finding ────────────────────────────────────────────────────────────────
 
 /**
- * Which check a {@link MemoryFileFinding} reports a breach of. `max_lines`
- * and `max_bytes` come from `lintMemoryFiles`; `reference_missing` comes from
- * `checkReferenceExistence` (spec §D6/D7) — all three are DETERMINISTIC and
- * exit-relevant. Narrative smells are NOT a `MemoryFileFindingKind` — they
+ * Which check a {@link MemoryFileFinding} reports a breach of. `max_lines`,
+ * `max_bytes` and `eviction_required` come from `lintMemoryFiles`;
+ * `reference_missing` comes from `checkReferenceExistence` (spec §D6/D7) — all
+ * four are DETERMINISTIC and exit-relevant. `eviction_required` is the only
+ * one that fires while the file is still WITHIN its ceiling (see the module
+ * header's three-band table). Narrative smells are NOT a `MemoryFileFindingKind` — they
  * are a wholly separate `AdvisoryFinding`/`AdvisoryFindingKind` family
  * (spec §D7: advisory never shares a shape with deterministic findings).
  */
-export type MemoryFileFindingKind = "max_lines" | "max_bytes" | "reference_missing";
+export type MemoryFileFindingKind = "max_lines" | "max_bytes" | "reference_missing" | "eviction_required";
 
 /**
  * One deterministic, exit-relevant admission-check finding — flat and
@@ -183,16 +215,71 @@ function countLines(content: string): number {
 
 // ─── Lint ───────────────────────────────────────────────────────────────────
 
+/** The metric name a finding reports on — used verbatim in messages so a reader can map a finding back to its config knob. */
+type MetricName = "max_lines" | "max_bytes";
+
+/**
+ * Decides the DETERMINISTIC verdict for ONE metric of ONE file: a ceiling
+ * breach, an eviction-floor crossing, or neither. Returns `undefined` for the
+ * silent and advisory-only bands (the latter belongs to
+ * {@link computeHeadroomWarnings}, not here).
+ *
+ * The two branches are mutually exclusive BY CONSTRUCTION (`>` ceiling versus
+ * `<=` ceiling), which is what keeps a breach from also reporting an eviction
+ * row for the same metric.
+ */
+function judgeMetric(
+  file: MemoryFileRecord,
+  metric: MetricName,
+  measured: number,
+  ceiling: number,
+  evictThresholdFraction: number,
+): MemoryFileFinding | undefined {
+  if (measured > ceiling) {
+    return {
+      path: file.path,
+      role: file.role,
+      kind: metric,
+      measured,
+      ceiling,
+      message: `${file.path} is ${measured} ${metric === "max_lines" ? "lines" : "bytes"}, exceeding the ${file.role} ${metric} ceiling of ${ceiling}`,
+    };
+  }
+
+  // Cross-multiplied rather than divided, mirroring `buildMetricHeadroom`'s
+  // convention for the sibling advisory band.
+  if (measured >= ceiling * evictThresholdFraction) {
+    return {
+      path: file.path,
+      role: file.role,
+      kind: "eviction_required",
+      measured,
+      ceiling,
+      message:
+        `${file.path} is ${measured}/${ceiling} against the ${file.role} ${metric} ceiling ` +
+        `(${ceiling - measured} remaining), at or past the eviction floor of ` +
+        `${evictThresholdFraction} — evict a block to the corpus and leave a one-line pointer ` +
+        `before adding to this file. ⛔ Do NOT record the displaced fact in another module's doc, ` +
+        `do NOT trade lines for bytes, and do NOT raise the ceiling (\`lore governance claude-md\`)`,
+    };
+  }
+
+  return undefined;
+}
+
 /**
  * Lints every memory file's line count and UTF-8 byte size against its
- * role's ceiling pair.
+ * role's ceiling pair AND its eviction floor (module header's three-band
+ * table).
  *
  * @param files - Discovered memory files (see {@link MemoryFileRecord}).
- * @param budgets - Corpus-governed ceilings, resolved via
- *   `resolveMemoryFileBudgets` (`@lore/core`) — never hardcoded here.
- * @returns One {@link MemoryFileFinding} per breached ceiling. Empty array
- *   when `budgets.enabled` is `false`, `files` is empty, or every file is
- *   within both ceilings for its role.
+ * @param budgets - Corpus-governed ceilings + `evict_threshold_fraction`,
+ *   resolved via `resolveMemoryFileBudgets` (`@lore/core`) — never hardcoded
+ *   here.
+ * @returns One {@link MemoryFileFinding} per metric that breached its ceiling
+ *   OR crossed its eviction floor — never both for the same metric. Empty
+ *   array when `budgets.enabled` is `false`, `files` is empty, or every file
+ *   is below both floors for its role.
  * @example
  * lintMemoryFiles(
  *   [{ path: "CLAUDE.md", role: "root", content: "..." }],
@@ -211,29 +298,25 @@ export function lintMemoryFiles(
   for (const file of files) {
     const ceilings = budgets[file.role];
 
-    const lineCount = countLines(file.content);
-    if (lineCount > ceilings.max_lines) {
-      findings.push({
-        path: file.path,
-        role: file.role,
-        kind: "max_lines",
-        measured: lineCount,
-        ceiling: ceilings.max_lines,
-        message: `${file.path} is ${lineCount} lines, exceeding the ${file.role} max_lines ceiling of ${ceilings.max_lines}`,
-      });
-    }
+    // Both metrics ALWAYS judged, independently (spec §D2) — each catches a
+    // bloat class the other misses, so neither short-circuits the other.
+    const lines = judgeMetric(
+      file,
+      "max_lines",
+      countLines(file.content),
+      ceilings.max_lines,
+      budgets.evict_threshold_fraction,
+    );
+    if (lines !== undefined) findings.push(lines);
 
-    const byteCount = Buffer.byteLength(file.content, "utf8");
-    if (byteCount > ceilings.max_bytes) {
-      findings.push({
-        path: file.path,
-        role: file.role,
-        kind: "max_bytes",
-        measured: byteCount,
-        ceiling: ceilings.max_bytes,
-        message: `${file.path} is ${byteCount} bytes, exceeding the ${file.role} max_bytes ceiling of ${ceilings.max_bytes}`,
-      });
-    }
+    const bytes = judgeMetric(
+      file,
+      "max_bytes",
+      Buffer.byteLength(file.content, "utf8"),
+      ceilings.max_bytes,
+      budgets.evict_threshold_fraction,
+    );
+    if (bytes !== undefined) findings.push(bytes);
   }
 
   return findings;
