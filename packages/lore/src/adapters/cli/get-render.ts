@@ -208,6 +208,11 @@ export function findHiddenStructuredExtra(
   for (const [key, value] of Object.entries(extra)) {
     if (alreadyRenderedKeys.includes(key)) continue;
 
+    // reason: both casts below are narrowings already PROVEN by `classifyExtraValue` —
+    // "array" is returned only after `Array.isArray`, and "object" only after the
+    // `value === null` / array branches are exhausted. Do NOT "simplify" them into a
+    // second inline `typeof`/`Array.isArray` test: that would be a duplicate classifier
+    // free to disagree with the one the notice's kind labels come from.
     const kind = classifyExtraValue(value);
     if (kind === "array") {
       const items = value as readonly unknown[];
