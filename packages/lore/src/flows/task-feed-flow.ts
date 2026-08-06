@@ -62,13 +62,57 @@
  * `PHASE_START_CHECKPOINT`) to call `buildTaskStartPack` directly, since a generic
  * `buildFeed` call has no notion of a task-scoped bundle.
  *
- * Side-effect class: none (pure over the injected `TaskFeedFlowDeps` — no direct IO)
+ * ## A RETRACTED task is REFUSED, not annotated
+ * (task-validity-landed-on-lore-list-only-the-dispatch-surface, Required #2)
+ *
+ * MEASURED on `main @ 074df1cd`: `lore feed task-start <retracted task>` returned a
+ * complete, confident, entirely normal-looking eight-section work order and exit 0 —
+ * total silence on the one surface that DISPATCHES. `lore list`'s D3 exclusion removed
+ * the ENUMERATION half of that defect; this module is the other half, and the worse
+ * one: a listing is read by something that goes on to check, whereas this pack exists
+ * precisely so its reader does NOT have to check.
+ *
+ * ⛔ REFUSAL was chosen over an in-band announcement, and the reasoning is not
+ * interchangeable with the file-anchor advisory precedent (`anchor add`'s non-blocking
+ * stderr note) — three independent reasons:
+ *   1. A retracted task has NO legitimate "not yet" reading. A mistyped file anchor may
+ *      name a path the implementer is about to create; a retracted task is work someone
+ *      explicitly withdrew. There is no state of the world in which starting it is right.
+ *   2. Every in-band channel here is DROPPABLE. Section text is subject to this module's
+ *      own per-section char budgets, and a consumer legitimately reads a SUBSET of
+ *      `sections` (`task-feed-render.ts` prints all eight; an agent grepping
+ *      `sections.acceptance` reads one). A refusal has no field to miss: there is no
+ *      pack, and the non-zero exit code / `ok: false` is structural.
+ *   3. It cannot be opted out of. The task's binding constraint was "⛔ no opt-in — a
+ *      validity signal a caller must ask for is the inert `--include-invalid` flag all
+ *      over again", and a refusal is the one shape with no flag to forget.
+ * The escape is NOT a bypass flag: `lore get <task>` shows a retracted doc by design
+ * (SPEC-043's deliberate list-hides / direct-address-shows asymmetry), and
+ * `lore invalidate <task> --undo` is the write that makes it dispatchable again. Both
+ * are named in the refusal message itself.
+ *
+ * ⛔ The verdict comes from `service/validity-service.ts`'s `projectValidityStatus` —
+ * the SSOT read-surface projection — never from a local re-derivation over
+ * `task.extra.validity`. A surface that re-derives it is the divergence that makes the
+ * next inconsistency invisible.
+ *
+ * A SEPARATE, non-refusing case: validity metadata that EXISTS but does not parse. The
+ * SSOT projection degrades that to "live" (its documented contract) and flags it
+ * `metadata_unreadable`; `renderConstraints` announces it in the pack rather than
+ * serving a doc whose retraction status could not be established in silence.
+ *
+ * Side-effect class: PURE given an injected `now`. The DEFAULT `now` performs exactly
+ * one wall-clock read per call (the time-seam convention every service here uses); no
+ * other IO — every domain fact still arrives on `TaskBundle`.
  * Source: spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
- *   §Design D1-D4, D9; §Acceptance Criteria AC-070-1..7
+ *   §Design D1-D4, D9; §Acceptance Criteria AC-070-1..7;
+ *   SPEC-043 §Design Decisions D3/D4;
+ *   task-validity-landed-on-lore-list-only-the-dispatch-surface Required #1, #2
  */
 
-import { ok, truncateSection } from "@lore/core";
+import { ok, err, truncateSection } from "@lore/core";
 import type { AcVerifyMode, LoreError, DocRecord, Result } from "@lore/core";
+import { projectValidityStatus, type ValidityStatus } from "../service/validity-service.js";
 import type { KnowledgePointer, HandoffPointer } from "./feed-shared-types.js";
 
 /** Re-exported for import-compat — see `feed-shared-types.ts` for the authoritative shapes. */
@@ -251,6 +295,9 @@ export const DEFAULT_TASK_START_BUDGETS: TaskStartBudgets = {
 /** Cap on how many linked-knowledge pointers are requested per pack assembly. */
 const KNOWLEDGE_POINTER_LIMIT = 20;
 
+/** Default time seam for {@link buildTaskStartPack}'s `now` parameter (D3 convention). */
+const defaultNow = (): string => new Date().toISOString();
+
 /**
  * The `"task-start"` checkpoint literal (SPEC-070 D1) — registered in
  * `feed-flow.ts`'s `CHECKPOINT_PRODUCED_TYPE` SSOT map; `commands/feed.ts`
@@ -287,6 +334,50 @@ const SCOPED_ORACLE_DISCIPLINE_LINE =
 function describeError(error: LoreError): string {
   const message = "message" in error && typeof error.message === "string" ? error.message : error.code;
   return `${error.code}: ${message}`;
+}
+
+/**
+ * The refusal a retracted task produces instead of a pack — see this module's header
+ * for why refusal (not annotation) is the chosen shape.
+ *
+ * ⛔ TWO tokens are emitted UNCONDITIONALLY — the literal `RETRACTED` and the
+ * `invalid_at=` key — because a machine consumer matching on one of them must not be
+ * defeated by a retraction that recorded no successor and no reason. `superseded_by`
+ * and `reason` are appended only when stored (a fabricated placeholder for either would
+ * be a made-up fact about the retraction).
+ *
+ * @param task - The retracted task, verbatim from the bundle (its `slug` is the stable
+ *   identity carried on `value`, never the caller's raw id-or-slug input)
+ * @param validity - The SSOT projection's verdict for this task
+ * @returns A `VALIDATION_ERROR` on `extra.validity` → CLI exit 4, MCP `isError: true`
+ */
+function retractedTaskRefusal(task: DocRecord, validity: ValidityStatus): LoreError {
+  // reason: an `invalidated: true` verdict entails a stored `invalid_at` (the projection's
+  // own contract), so the fallback branch is unreachable — it is spelled out LOUDLY
+  // rather than defaulted to a blank/`??`-ed value so the token can never silently
+  // vanish from the message if that entailment ever breaks.
+  const instant =
+    validity.invalid_at !== undefined
+      ? validity.invalid_at
+      : "(contract violation: retracted with no recorded instant)";
+  const details = [
+    `invalid_at=${instant}`,
+    ...(validity.superseded_by !== undefined ? [`superseded_by=${validity.superseded_by}`] : []),
+    ...(validity.reason !== undefined ? [`reason="${validity.reason}"`] : []),
+  ].join("; ");
+
+  return {
+    code: "VALIDATION_ERROR",
+    field: "extra.validity",
+    message:
+      `RETRACTED task "${task.slug}" — refusing to assemble a task-start dispatch pack ` +
+      `(${details}). A retracted task is work that was explicitly withdrawn, so there is ` +
+      `no pack to serve and nothing to start. Read the document itself with ` +
+      `\`lore get ${task.slug}\` — direct address always shows a retracted doc, by design. ` +
+      `If the retraction was itself wrong, \`lore invalidate ${task.slug} --undo --by <actor>\` ` +
+      `restores the task and this command with it.`,
+    value: task.slug,
+  };
 }
 
 // ─── Section renderers (pure — every fact already sits on `TaskBundle`) ────
@@ -326,7 +417,7 @@ function renderFailure(f: FailureSummary): string {
   return `- [${f.oracle}] ${f.command}\n  ${f.tail}`;
 }
 
-function renderConstraints(bundle: TaskBundle): string {
+function renderConstraints(bundle: TaskBundle, validity: ValidityStatus): string {
   const lines: string[] = [];
   lines.push(
     bundle.priorFailures.length === 0
@@ -336,6 +427,18 @@ function renderConstraints(bundle: TaskBundle): string {
   if (bundle.unparseableEvidenceCount > 0) {
     lines.push(
       `⚠ (${bundle.unparseableEvidenceCount} evidence entries unparseable — history may be incomplete)`,
+    );
+  }
+  // reason: an UNREADABLE `extra.validity` degrades to the "live" verdict by the SSOT
+  // projection's documented contract, which is the right verdict (a read surface must
+  // not invent a retraction) but the WRONG silence — this task is served on the
+  // strength of metadata nobody could parse. Announced here rather than refused: unlike
+  // a recorded retraction, unparseable metadata carries no withdrawal decision to obey.
+  if (validity.metadata_unreadable === true) {
+    lines.push(
+      "⛔ validity metadata on this task is present but UNREADABLE — its retraction status " +
+        "could NOT be established. Verify with `lore get` before starting, and repair the " +
+        "field via `lore invalidate` (its sole writer).",
     );
   }
   if (bundle.upstreamSpecApproved === false) {
@@ -410,10 +513,22 @@ function renderHandoffSection(result: Result<HandoffPointer | null, LoreError>):
  * Assembles the task-start deterministic pack for `taskId`. See module header for
  * the full fatal/non-fatal failure contract and truncation semantics.
  *
+ * ⛔ REFUSES a RETRACTED task (see this module's header for why refusal, not annotation):
+ * `err(VALIDATION_ERROR)` on `extra.validity`, no pack, non-zero exit at both call sites.
+ * The check runs BEFORE any section render and before the three auxiliary port calls —
+ * a refused dispatch must not cost three store round trips, and no partially-assembled
+ * pack must exist for a caller to salvage.
+ *
  * @param deps - Narrow injected port bundle.
  * @param taskId - The target task's id or slug (forwarded to `deps.getTaskBundle` untouched).
  * @param budgets - Optional partial override merged over `DEFAULT_TASK_START_BUDGETS`.
- * @returns `ok(TaskStartPack)`, or `err(LoreError)` propagated verbatim from a fatal `getTaskBundle` failure.
+ * @param now - Time seam (SPEC-043 D3 convention) for the bi-temporal retraction verdict;
+ *   defaults to one wall-clock read. Injected by tests so a FUTURE-dated `invalid_at`
+ *   (correctly still live) is assertable. ⛔ Never echoed into the pack — the returned
+ *   payload stays byte-identical across repeat runs (`list-plan-membership.test.ts`'s
+ *   read-idempotence contract, and the `--json` deep-equal foundation of AC-070-1).
+ * @returns `ok(TaskStartPack)`; `err(LoreError)` propagated verbatim from a fatal
+ *   `getTaskBundle` failure; or `err(VALIDATION_ERROR)` when the task is retracted.
  * @example
  * const result = await buildTaskStartPack(deps, "task-implement-cli-slice");
  * const objectiveText = result.ok ? result.value.sections.objective : null;
@@ -422,10 +537,19 @@ export async function buildTaskStartPack(
   deps: TaskFeedFlowDeps,
   taskId: string,
   budgets?: Partial<TaskStartBudgets>,
+  now: () => string = defaultNow,
 ): Promise<Result<TaskStartPack, LoreError>> {
   const bundleResult = await deps.getTaskBundle(taskId);
   if (!bundleResult.ok) return bundleResult;
   const bundle = bundleResult.value;
+
+  // ONE instant for the whole assembly — the verdict and the pack can never straddle
+  // two "now"s. `bundle.task` is a full `DocRecord`, so the SSOT projection reads
+  // `extra.validity` off the ONE fetch the wiring already made (no new dep port).
+  const validity = projectValidityStatus(bundle.task, now());
+  if (validity.invalidated) {
+    return err(retractedTaskRefusal(bundle.task, validity));
+  }
 
   const resolvedBudgets: TaskStartBudgets = { ...DEFAULT_TASK_START_BUDGETS, ...budgets };
 
@@ -438,7 +562,7 @@ export async function buildTaskStartPack(
   const rawSections = {
     objective: renderObjective(bundle),
     acceptance: renderAcceptance(bundle),
-    constraints: renderConstraints(bundle),
+    constraints: renderConstraints(bundle, validity),
     boundaries: renderBoundaries(bundle),
     claim: renderClaim(bundle),
     plan_state: renderPlanState(planStateResult),

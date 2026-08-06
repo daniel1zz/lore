@@ -935,7 +935,18 @@ export default defineCommand({
 
       console.log("Corpus Status");
       console.log("─".repeat(40));
-      console.log(`Total documents:  ${status.total_docs}`);
+      console.log(`Total documents:  ${status.total_docs} (live)`);
+      // reason: printed UNCONDITIONALLY, including the `0` case — unlike the
+      // `open_stale_candidates` / `code_anchor_specs` lines below, which are advisories
+      // that only matter when non-zero. This one is a COUNT RECONCILIATION: the line
+      // above used to include retracted docs, so a reader needs to see, on every run,
+      // that an exclusion was applied and by how much
+      // (task-validity-landed-on-lore-list-only-the-dispatch-surface, Required #3 —
+      // "an omitted count is the same silence class this whole family is about").
+      console.log(
+        `Retracted:        ${status.invalid_docs} (excluded from the counts above; ` +
+          `see them with \`lore list --include-invalid\`)`,
+      );
       console.log(
         `Last updated:     ${status.last_updated.slice(0, 19).replace("T", " ")}`,
       );
