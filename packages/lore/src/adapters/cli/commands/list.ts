@@ -43,15 +43,52 @@
  * --limit <n> / --offset <n> — optional paging (pagination hardening, unbounded-payload
  * review). BOTH omitted → current unbounded behavior, byte-identical (backward-compatible
  * default for human CLI usage). Every branch below sources its own list from ONE of two
- * stances: (a) branches whose result set is exactly what the store returned AND no
- * --plan-id filter is active push `limit`/`offset` straight into the `StoreFilters`
- * object via `withPaging()`, so the DB itself bounds the row count; (b) branches that
- * ALREADY narrow the store's result set client-side (--phase's extra.phase filter,
- * --plan-id's membership filter, --governed-by's link-table result) apply
- * `limit`/`offset` via `.slice()` AFTER that narrowing — pushing paging into the store
- * call there would apply the page boundary BEFORE the narrowing filter runs, silently
- * truncating or misaligning pages (same class of bug `StoreInterface.findMany`'s own
- * `tags`-filter-vs-paging guard avoids).
+ * stances: (a) the DocSummary fallback branch — whose result set is exactly what the
+ * store returned AND no --plan-id filter is active — pushes `limit`/`offset` straight
+ * into the `StoreFilters` object via `withPaging()`, so the DB itself bounds the row
+ * count; (b) EVERY full-record branch (--type task / --phase / --plan-id /
+ * --include-invalid) applies `limit`/`offset` via `.slice()` AFTER its client-side
+ * narrowing — pushing paging into the store call there would apply the page boundary
+ * BEFORE the narrowing filter runs, silently truncating or misaligning pages (same
+ * class of bug `StoreInterface.findMany`'s own `tags`-filter-vs-paging guard avoids).
+ * Since the SPEC-043 D3 validity exclusion below is ITSELF a client-side narrowing that
+ * every full-record branch now applies, stance (b) is unconditional there — there is no
+ * longer a "store-paged full-record branch" case to keep in sync.
+ *
+ * ## Validity is DATA here, not decoration — SPEC-043 D3
+ * (task-an-invalidated-doc-is-indistinguishable-from-a-live-one-in)
+ *
+ * MEASURED before this fix, on a throwaway corpus with one retracted doc per eligible
+ * type: `lore list --type task` SHOWED the retracted task, `--include-invalid` changed
+ * NOTHING (identical row count, identical slug set, no badge), and no `--json` record on
+ * any type carried a validity-bearing key. Only knowledge/adr got the D3 exclusion, and
+ * only because those two fall through to the `CorpusService.list()` (DocSummary) branch,
+ * which applies the exclusion internally. `CorpusService.listFull()` — the fetch every
+ * OTHER branch uses, by documented design — strips `include_invalid` and applies no
+ * exclusion at all, so the `--type task`, `--phase` and `--plan-id` branches were all
+ * validity-blind, and the flag documented to control that visibility was inert.
+ *
+ * Fix, in the order the defect requires: (1) DATA — `fetchGatedFullDocs()` attaches an
+ * explicit `validity_status` (`../../../service/validity-service.js`) to every full
+ * record, so a `--json` consumer can decide without a second call per doc; (2) FILTER —
+ * the same function applies `selectLiveDocs` unless `--include-invalid`, making the
+ * default exclusion real and the flag's effect measurable as a row-count DIFFERENCE;
+ * (3) BADGE — every full-record branch renders `formatValidityBadge` unconditionally
+ * (not only the --include-invalid branch, the pre-fix arrangement that let the
+ * --type task branch render a workflow badge and no validity badge), plus a dedicated
+ * `Validity` column under `--include-invalid` so presence never reads as validity.
+ *
+ * ⛔ `fetchGatedFullDocs()` is the ONE gate. A new branch that calls
+ * `app.corpusService.listFull()` directly re-opens exactly this defect: `listFull`
+ * ignores `include_invalid` on purpose (its JSDoc pins that), so the exclusion has to be
+ * applied by the reader.
+ *
+ * ⛔ NAMED RESIDUAL — `--governed-by` is NOT validity-gated: `CorpusService.listGovernedBy`
+ * returns `DocSummary` rows (no `extra`), so neither the exclusion nor the projection is
+ * computable here, and fabricating a "live" verdict for them is the exact silence this
+ * task removed. Fixing it requires that service method to return full records or carry
+ * validity itself — out of this task's declared anchors, deliberately left visible rather
+ * than papered over.
  */
 
 import { defineCommand } from "citty";
@@ -66,8 +103,18 @@ import {
   relativeTime,
 } from "../utils.js";
 import { isPlanMember } from "../../../service/plan-membership.js";
+import {
+  selectLiveDocs,
+  withPreGatedLiveStatus,
+  withValidityStatus,
+  type WithValidityStatus,
+} from "../../../service/validity-service.js";
 import { ok } from "@lore/core";
 import type { DocRecord, DocType, DocStatus, LoreError, Result } from "@lore/core";
+
+/** A full corpus row as this command emits it — every `--json` record carries its
+ *  evaluated validity verdict (SPEC-043 D3's data half; see this file's header). */
+type ListedDoc = WithValidityStatus<DocRecord>;
 
 export default defineCommand({
   meta: {
@@ -130,6 +177,12 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      // reason: ONE wall-clock read for the whole command — every validity verdict,
+      // badge and `checked_at` stamp below must agree on the same instant, and the
+      // pre-fix code took a fresh `new Date().toISOString()` per branch. A
+      // bi-temporal verdict evaluated at two different "now"s inside one listing is
+      // not reproducible from its own output.
+      const nowIso = new Date().toISOString();
       // BUG-006/007 audit: a NaN --limit/--offset used to reach `.slice(0, NaN)`
       // (silently empty results) or a store-level `LIMIT ?`/`OFFSET ?` bind (a
       // bare bun:sqlite "datatype mismatch" throw) — validate both up front.
@@ -265,39 +318,62 @@ export default defineCommand({
       }
       const planFilterDesc = (): string => (planMemberId !== undefined ? ` --plan-id ${args["plan-id"]}` : "");
 
-      // reason: three branches below (--type task, --include-invalid, and the
-      // plan-membership-only fallback) all need "full DocRecords matching
-      // `filters`, membership-narrowed and paged" — this is the ONE place that
-      // decides (a) store-level paging via `withPaging` (no client-side
-      // narrowing active) vs (b) client-side narrow-then-slice via
-      // `pageInMemory` (planMemberId active), so the (a)/(b) split this file's
-      // header documents can never diverge between call sites.
-      async function fetchFullDocsForListing(): Promise<Result<{ docs: DocRecord[]; total: number }, LoreError>> {
-        if (planMemberId === undefined) {
-          return app.corpusService.listFull(withPaging(filters));
-        }
+      // reason: THE single validity gate for every full-record branch (see this
+      // file's header). Order is load-bearing and must stay: fetch UNPAGED →
+      // exclude invalidated unless --include-invalid → attach the explicit
+      // `validity_status`. Paging is deliberately NOT applied here — each caller
+      // narrows further (plan membership, extra.phase) and pages LAST, because a
+      // page taken before a narrowing filter is a short or misaligned page.
+      // ⛔ Do not "optimise" this back into `listFull(withPaging(filters))` when
+      // --include-invalid is set: one fetch shape for all four branches is what
+      // keeps the exclusion from being silently skipped on one of them again.
+      async function fetchGatedFullDocs(): Promise<Result<ListedDoc[], LoreError>> {
         const fullResult = await app.corpusService.listFull(filters);
         if (!fullResult.ok) return fullResult;
-        const narrowed = pageInMemory(fullResult.value.docs.filter((doc) => passesPlanMembership(doc)));
+        const live = includeInvalid ? fullResult.value.docs : selectLiveDocs(fullResult.value.docs, nowIso);
+        return ok(withValidityStatus(live, nowIso));
+      }
+
+      /** Gated full records, narrowed by plan membership and paged — the shape the
+       *  --type task / --include-invalid / --plan-id branches all render. */
+      async function fetchListing(): Promise<Result<{ docs: ListedDoc[]; total: number }, LoreError>> {
+        const gatedResult = await fetchGatedFullDocs();
+        if (!gatedResult.ok) return gatedResult;
+        const narrowed = pageInMemory(gatedResult.value.filter((doc) => passesPlanMembership(doc)));
         return ok({ docs: narrowed, total: narrowed.length });
       }
+
+      // reason: the Validity column exists ONLY under --include-invalid — the one
+      // mode where a retracted row can appear at all. Its purpose is AC-4's
+      // "presence never reads as validity": the row is in the table because the
+      // caller asked for retracted docs, and this cell is the independent fact
+      // saying which ones they are. `superseded_by`'s ULID prefix is carried
+      // because "what do I read instead" is the next question, and `resolveDoc`
+      // accepts a unique short prefix verbatim.
+      const validityHeaders = (): string[] => (includeInvalid ? ["Validity"] : []);
+      const validityCells = (d: ListedDoc): string[] => {
+        if (!includeInvalid) return [];
+        if (!d.validity_status.invalidated) return ["valid"];
+        const successor = d.validity_status.superseded_by;
+        return [successor !== undefined ? `invalid→${successor.slice(0, 10)}` : "invalid"];
+      };
 
       // When --phase filter is active, we need full DocRecord rows (extra.phase is not in DocSummary).
       // reason: StoreFilters has no extra-field index; client-side filter is applied after fetch.
       // Source: SPEC-023 §4 AC-PHASE-7
       const phaseFilter = args.phase;
       if (phaseFilter !== undefined) {
-        const fullResult = await app.corpusService.listFull(filters);
-        if (!fullResult.ok) {
-          process.stderr.write(formatError(fullResult.error) + "\n");
-          process.exitCode = exitCode(fullResult.error);
+        const gatedResult = await fetchGatedFullDocs();
+        if (!gatedResult.ok) {
+          process.stderr.write(formatError(gatedResult.error) + "\n");
+          process.exitCode = exitCode(gatedResult.error);
           return;
         }
         // reason: extra.phase AND --plan-id's membership filter (see file header) are
-        // both client-side — paging must apply AFTER both narrow the set, never
-        // before (header comment's (b) stance).
+        // both client-side, as is the validity exclusion already applied above —
+        // paging must apply AFTER all of them, never before (header (b) stance).
         const filtered = pageInMemory(
-          fullResult.value.docs.filter(
+          gatedResult.value.filter(
             (doc) => doc.extra["phase"] === phaseFilter && passesPlanMembership(doc),
           ),
         );
@@ -314,14 +390,14 @@ export default defineCommand({
         // reason: workflow badge (claim/evidence, AC-WF-9) is only meaningful for task
         // rows; --phase filtering only applies to tasks in practice (SPEC-023), so we
         // always compute it here rather than branching on d.type.
-        const nowIso = new Date().toISOString();
         const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
-        const headers = ["ID", "Type", "Title", "Status", "Phase", "Updated"];
+        const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Phase", "Updated"];
         const rows = filtered.map((d) => [
           d.id.slice(0, 10),
           d.type,
-          `${d.title.slice(0, 30)}${formatWorkflowBadge(d, nowIso, ttlMinutes)}`,
+          `${d.title.slice(0, 30)}${formatValidityBadge(d, nowIso)}${formatWorkflowBadge(d, nowIso, ttlMinutes)}`,
           d.status,
+          ...validityCells(d),
           String(d.extra["phase"] ?? ""),
           relativeTime(d.updated_at),
         ]);
@@ -334,7 +410,7 @@ export default defineCommand({
       // (AC-WF-9). This requires the full DocRecord (extra.claim / extra.verification_evidence
       // are not in DocSummary) — mirrors the --phase branch's listFull usage above.
       if (filters["type"] === "task") {
-        const fullResult = await fetchFullDocsForListing();
+        const fullResult = await fetchListing();
         if (!fullResult.ok) {
           process.stderr.write(formatError(fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
@@ -351,27 +427,36 @@ export default defineCommand({
           return;
         }
 
-        const nowIso = new Date().toISOString();
         const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
-        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
+        // reason: the validity badge is rendered UNCONDITIONALLY, not only under
+        // --include-invalid. Pre-fix, this branch rendered the workflow badge alone,
+        // so a retracted task that leaked past the (then-missing) exclusion looked
+        // exactly like live work. Keeping the badge here means a future exclusion
+        // regression shows up as a visible `[invalid]` row instead of silence.
         const rows = fullDocs.map((d) => [
           d.id.slice(0, 10),
           d.type,
-          `${d.title.slice(0, 35)}${formatWorkflowBadge(d, nowIso, ttlMinutes)}`,
+          `${d.title.slice(0, 35)}${formatValidityBadge(d, nowIso)}${formatWorkflowBadge(d, nowIso, ttlMinutes)}`,
           d.status,
+          ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
-        console.log(`\n${fullTotal} document${fullTotal === 1 ? "" : "s"} (filter: --type task${planFilterDesc()})`);
+        const taskFilterDesc = includeInvalid ? " --include-invalid" : "";
+        console.log(
+          `\n${fullTotal} document${fullTotal === 1 ? "" : "s"} ` +
+            `(filter: --type task${planFilterDesc()}${taskFilterDesc})`,
+        );
         return;
       }
 
       // reason: DocSummary (list()'s return shape) carries no validity signal — when
       // --include-invalid is passed we need full DocRecords to compute the [invalid]
-      // badge, mirroring the --phase/--type task branches' listFull usage above.
-      // Source: SPEC-043 D3/D4.
+      // badge AND the `validity_status` payload, mirroring the --phase/--type task
+      // branches' gated fetch above. Source: SPEC-043 D3/D4.
       if (includeInvalid) {
-        const fullResult = await fetchFullDocsForListing();
+        const fullResult = await fetchListing();
         if (!fullResult.ok) {
           process.stderr.write(formatError(fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
@@ -388,13 +473,13 @@ export default defineCommand({
           return;
         }
 
-        const nowIso = new Date().toISOString();
-        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
         const rows = fullDocs.map((d) => [
           d.id.slice(0, 10),
           d.type,
           `${d.title.slice(0, 35)}${formatValidityBadge(d, nowIso)}`,
           d.status,
+          ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
@@ -411,7 +496,7 @@ export default defineCommand({
       // isPlanMember instead of falling through to the DocSummary-based
       // `list()` call below, which cannot see `extra.plan_id` at all.
       if (planMemberId !== undefined) {
-        const fullResult = await fetchFullDocsForListing();
+        const fullResult = await fetchListing();
         if (!fullResult.ok) {
           process.stderr.write(formatError(fullResult.error) + "\n");
           process.exitCode = exitCode(fullResult.error);
@@ -428,12 +513,13 @@ export default defineCommand({
           return;
         }
 
-        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
         const rows = fullDocs.map((d) => [
           d.id.slice(0, 10),
           d.type,
-          d.title.slice(0, 35),
+          `${d.title.slice(0, 35)}${formatValidityBadge(d, nowIso)}`,
           d.status,
+          ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
@@ -447,7 +533,14 @@ export default defineCommand({
         return;
       }
 
-      const result = await app.corpusService.list(withPaging(filters));
+      // reason: the `now` seam is injected (rather than left to `list()`'s internal
+      // default) so this command KNOWS the instant the D3 exclusion was evaluated at
+      // — that is what makes the `validity_status` stamp below an entailment of the
+      // query contract instead of an assumption. `includeInvalid` is false on every
+      // path that reaches here (it short-circuits into the gated branch above), so
+      // `list()` is guaranteed to have applied `!isInvalidated(doc, nowIso)` to every
+      // returned row.
+      const result = await app.corpusService.list(withPaging(filters), () => nowIso);
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
@@ -458,7 +551,12 @@ export default defineCommand({
       const { docs, total } = result.value;
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { docs, total } }, null, 2));
+        // reason: DocSummary has no `extra`, so validity is NOT re-derivable from
+        // these rows — `withValidityStatus` would report every one of them as live on
+        // absent-metadata grounds even if the exclusion above had regressed. The
+        // pre-gated stamp names that dependency at the call site instead; see
+        // `withPreGatedLiveStatus`'s JSDoc for the contract it rests on.
+        console.log(JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total } }, null, 2));
         return;
       }
 
