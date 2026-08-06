@@ -288,6 +288,7 @@ import {
   commandRunsFileUnfiltered,
   UNFILTERED_RUN_CASE_FILTER_DESCRIPTION,
   isInvalidated,
+  unprobedFileAnchors,
   type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
@@ -295,6 +296,8 @@ import {
   type BlockerInfo,
   type ReadySession,
   type CaptureSource,
+  type FileAnchorResolutionReport,
+  type NonResolvingFileAnchor,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
@@ -311,6 +314,7 @@ import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import { compareClaimSessions, type SessionComparison } from "./gate-predicates.js";
+import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -605,6 +609,27 @@ export interface AnchorConflict {
 }
 
 /**
+ * One non-resolving declared anchor in {@link ReadyReport.anchor_resolution},
+ * qualified by the task that declared it (task-a-mistyped-task-file-anchor-is-
+ * stored-and-consulted, Required #2). The write-time advisory is seen by the
+ * anchor's AUTHOR; this is what the DISPATCHER assigning concurrent work reads,
+ * which is the half that addresses the actual failure mode.
+ */
+export interface TaskAnchorNonResolution extends NonResolvingFileAnchor {
+  task_slug: string;
+}
+
+/**
+ * `ready()`'s anchor-resolution report — a DISCRIMINATED UNION, never a bare
+ * array, so `{probed: false}` (no filesystem port was supplied: MCP `lore_ready`,
+ * HTTP `/ready`) can never be read as `{probed: true, unresolved: []}` (probed,
+ * everything resolves). Keeping those two apart is the point: before this field,
+ * "the gate found no conflict" was indistinguishable from "the gate could not
+ * have found one".
+ */
+export type ReadyAnchorResolution = FileAnchorResolutionReport<TaskAnchorNonResolution>;
+
+/**
  * `TaskWorkflowService.ready`'s return shape (SPEC-042 D7) — the pre-SPEC-042
  * flat `ReadyRecord[]` becomes `.records` (D7's "keep ReadyRecord flat-array
  * contract intact" is about EACH record staying flat/non-nested, not about the
@@ -620,6 +645,13 @@ export interface ReadyReport {
   records: ReadyRecord[];
   sessions: ReadySession[];
   anchor_conflicts: AnchorConflict[];
+  /**
+   * Every declared anchor across this plan's tasks that does NOT resolve on the
+   * working tree — or an explicit "not probed" value when the caller supplied no
+   * filesystem port. REQUIRED (never an absent key): an omitted field would
+   * reintroduce exactly the silence this reports.
+   */
+  anchor_resolution: ReadyAnchorResolution;
 }
 
 // ─── Internal Helpers ──────────────────────────────────────────────────────
@@ -2844,15 +2876,29 @@ export class TaskWorkflowService {
    * sibling pairs) — both PLAN-SCOPED, zero extra store IO (reuses the SAME `tasks`
    * array already fetched below).
    *
+   * task-a-mistyped-task-file-anchor-is-stored-and-consulted additionally derives
+   * `anchor_resolution` — every declared anchor across this plan's tasks that does
+   * not resolve on the working tree — but ONLY when the caller injects an
+   * `anchorProbe`; without one the field says `{probed: false}` rather than
+   * pretending a clean scan. That advisory is the DISPATCHER's read of the same
+   * fact the write-time CLI/MCP advisory shows the anchor's author.
+   *
    * @param planIdOrSlug - Plan document ULID or slug
    * @param now - Time seam (D10) — drives claim staleness computation
-   * @returns `ReadyReport` — `{records, sessions, anchor_conflicts}` (see that
-   *   type's JSDoc for why the pre-SPEC-042 flat array became `.records`)
+   * @param anchorProbe - OPTIONAL filesystem port + root, injected PER CALL by the
+   *   adapter (the SAME placement `DriftCheckService.checkDrift`'s `probe`
+   *   argument uses — this service must never construct one, it holds no fs seam).
+   *   Omitted ⇒ `anchor_resolution` is `{probed: false, reason: "no-fs-probe"}`;
+   *   an absent probe is REPORTED, never silently rendered as "nothing found".
+   * @returns `ReadyReport` — `{records, sessions, anchor_conflicts,
+   *   anchor_resolution}` (see that type's JSDoc for why the pre-SPEC-042 flat
+   *   array became `.records`)
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a plan)
    */
   async ready(
     planIdOrSlug: string,
     now: () => string = defaultNow,
+    anchorProbe?: FileAnchorProbeContext,
   ): Promise<Result<ReadyReport, LoreError>> {
     const planResult = await resolveDoc(this.store, planIdOrSlug);
     if (!planResult.ok) return planResult;
@@ -2899,7 +2945,17 @@ export class TaskWorkflowService {
       (t) => isPlanMember(t, plan.id) && !isInvalidated(t, nowIso),
     );
 
-    if (tasks.length === 0) return ok({ records: [], sessions: [], anchor_conflicts: [] });
+    if (tasks.length === 0) {
+      return ok({
+        records: [],
+        sessions: [],
+        anchor_conflicts: [],
+        // reason: a task-less plan declares no anchors, so a supplied probe
+        // legitimately found nothing — that is a PROBED empty result, distinct
+        // from the no-probe case, which must still say so.
+        anchor_resolution: this.computeAnchorResolution([], anchorProbe),
+      });
+    }
 
     const taskIds = tasks.map((t) => t.id);
     const linksResult = await this.store.findLinksByToIds(taskIds, "blocks");
@@ -2940,7 +2996,51 @@ export class TaskWorkflowService {
       records: recordsWithAnchorless,
       sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes),
       anchor_conflicts: anchorConflicts,
+      anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),
     });
+  }
+
+  /**
+   * Derives {@link ReadyReport.anchor_resolution} over a plan's tasks
+   * (task-a-mistyped-task-file-anchor-is-stored-and-consulted, Required #2).
+   *
+   * Probes the UNION of every task's declared anchors exactly once (dedup lives in
+   * `collectFileAnchorResolution`), then re-attributes each finding to every task
+   * that declared it — two tasks anchoring the same missing path each get their own
+   * row, because the dispatcher's question is per-task, while the filesystem
+   * question is per-path.
+   *
+   * ⛔ Reports on EVERY task's anchors, not only claimed ones: the whole point is to
+   * be read BEFORE concurrent work is assigned, and a claim is exactly what has not
+   * happened yet at that moment.
+   *
+   * @param tasks - This plan's member tasks, already fetched by `ready()` (zero
+   *   extra store IO — same discipline as `computeAnchorAdvisories`).
+   * @param anchorProbe - Injected port; `undefined` ⇒ an explicit unprobed report.
+   * @returns The discriminated {@link ReadyAnchorResolution}.
+   */
+  private computeAnchorResolution(
+    tasks: DocRecord[],
+    anchorProbe: FileAnchorProbeContext | undefined,
+  ): ReadyAnchorResolution {
+    if (anchorProbe === undefined) return unprobedFileAnchors("no-fs-probe");
+
+    const declaredByTask = tasks.map((task) => ({ task, anchors: extractFileAnchors(task) }));
+    const distinctAnchors = [...new Set(declaredByTask.flatMap((entry) => entry.anchors))];
+    const collected = collectFileAnchorResolution(distinctAnchors, anchorProbe);
+    const findingByAnchor = new Map<string, NonResolvingFileAnchor>(
+      collected.unresolved.map((row) => [row.anchor, row]),
+    );
+
+    const unresolved: TaskAnchorNonResolution[] = [];
+    for (const { task, anchors } of declaredByTask) {
+      for (const anchor of anchors) {
+        const finding = findingByAnchor.get(anchor);
+        if (finding !== undefined) unresolved.push({ task_slug: task.slug, ...finding });
+      }
+    }
+
+    return { probed: true, root: collected.root, unresolved };
   }
 
   /**

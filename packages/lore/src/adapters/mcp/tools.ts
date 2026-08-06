@@ -146,7 +146,7 @@ import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import { ORACLE_KINDS, runDeterministicChecks } from "@lore/core";
-import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES } from "@lore/core";
+import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFileAnchors } from "@lore/core";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
@@ -177,7 +177,8 @@ import {
 } from "../../flows/staleness-flow.js";
 import { buildDriftFlowDeps, buildListSpecs, countArmedSpecs, runDrift } from "../../flows/drift-flow.js";
 import { loadTreeBlueprint } from "../../flows/blueprint-flow.js";
-import { buildRealFsProbe } from "../real-fs-probe.js";
+import { buildFileAnchorProbeContext, buildRealFsProbe } from "../real-fs-probe.js";
+import { collectFileAnchorResolution } from "../../service/anchor-resolution.js";
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
@@ -1304,6 +1305,17 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     // parent-to-root) — non-blocking, present only when CorpusService.create computed
     // one; never affects `isError`/the response's other fields.
     if (orphan_advisory !== undefined) payload["orphan_advisory"] = orphan_advisory;
+    // Non-resolving `file_anchors` advisory (task-a-mistyped-task-file-anchor-is-
+    // stored-and-consulted, Required #1). An MCP caller has no stderr channel it
+    // reads, so the advisory travels IN the payload — same non-blocking contract
+    // as `orphan_advisory` above: never sets `isError`, never blocks the write,
+    // and the anchor is stored regardless (a task legitimately anchors a file it
+    // is about to create). Probes the STORED, normalized anchors, so what is
+    // reported is exactly what `noAnchorOverlap` will consult.
+    const createdAnchors = extractFileAnchors(result.value);
+    if (createdAnchors.length > 0) {
+      payload["anchor_resolution"] = collectFileAnchorResolution(createdAnchors, buildFileAnchorProbeContext());
+    }
     return textContent(payload);
   });
 
@@ -1901,7 +1913,17 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
           source: "mcp",
         });
         if (!result.ok) return errorContent(result.error);
-        return textContent({ doc: result.value });
+        // task-a-mistyped-task-file-anchor-is-stored-and-consulted (Required #1):
+        // the write SUCCEEDED and the anchors are stored; `anchor_resolution`
+        // reports which of them do not resolve on disk and therefore protect
+        // nothing. Advisory only — never `isError`, never a refusal. The stored
+        // (normalized) set is probed, not the raw `args.anchors`.
+        const storedAnchors = extractFileAnchors(result.value);
+        const payload: Record<string, unknown> = { doc: result.value };
+        if (storedAnchors.length > 0) {
+          payload["anchor_resolution"] = collectFileAnchorResolution(storedAnchors, buildFileAnchorProbeContext());
+        }
+        return textContent(payload);
       }
 
       if (target.type === "spec") {

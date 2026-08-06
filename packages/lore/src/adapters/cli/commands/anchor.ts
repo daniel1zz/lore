@@ -23,6 +23,12 @@
  * `extra.verification_evidence`, AC-S3-5 regression; spec: `extra.spec_kind`/
  * `extra.acceptance_criteria`).
  *
+ * `add` on a TASK target additionally prints the non-resolving-anchor advisory to
+ * stderr (task-a-mistyped-task-file-anchor-is-stored-and-consulted) — see
+ * `emitFileAnchorAdvisory` below for the stderr/stdout split, why the FULL
+ * resulting set is probed, and why `rm` is deliberately excluded. It is an
+ * advisory: the exit code is untouched and the anchor is stored regardless.
+ *
  * There is deliberately NO `lore set --anchor` full-replace flag (D3 — a
  * wholesale-`extra` replace would silently delete other services' owned state);
  * use `lore anchor add`/`rm` for incremental changes, or pass every anchor to
@@ -48,6 +54,8 @@ import { defineCommand } from "citty";
 import type { DocRecord, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
+import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 
 /**
  * Reads every trailing positional argument beyond the `skip` leading ones
@@ -65,6 +73,33 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 function collectVariadicPositionals(args: Record<string, unknown>, skip: number): string[] {
   const all = (args as { _?: unknown[] })._ ?? [];
   return all.slice(skip).map(String);
+}
+
+/**
+ * Writes the non-resolving-anchor advisory for a task's RESULTING declared
+ * anchor set to stderr (task-a-mistyped-task-file-anchor-is-stored-and-consulted,
+ * Required #1). Non-blocking: never touches `process.exitCode`, never returns a
+ * value the caller branches on.
+ *
+ * stderr, not stdout, so `--json` stays a clean machine payload. Probes the FULL
+ * resulting list rather than only the just-added entries: what the
+ * `noAnchorOverlap` gate will consult is the whole set, and re-naming a
+ * previously-declared broken anchor is the correct amount of noise for a command
+ * that just changed that set.
+ *
+ * ⛔ Deliberately NOT wired into `anchor rm`: removal can only SHRINK the declared
+ * set, and every surviving entry was already advised at its own write. Adding it
+ * there would print an advisory about anchors the operator did not just touch.
+ *
+ * @param anchors - The task's resulting `extra.file_anchors` (already normalized).
+ * @param subject - The task slug, rendered into the advisory header.
+ */
+function emitFileAnchorAdvisory(anchors: string[], subject: string): void {
+  if (anchors.length === 0) return;
+  const report = collectFileAnchorResolution(anchors, buildFileAnchorProbeContext());
+  for (const line of renderFileAnchorAdvisory(report, { subject })) {
+    process.stderr.write(line + "\n");
+  }
 }
 
 /** Render a numbered list of declared anchors. */
@@ -163,6 +198,7 @@ export default defineCommand({
             }
 
             const anchors = (result.value.extra["file_anchors"] as string[] | undefined) ?? [];
+            emitFileAnchorAdvisory(anchors, result.value.slug);
             if (args.json) {
               console.log(JSON.stringify({ ok: true, data: { doc: result.value, anchors } }, null, 2));
               return;
