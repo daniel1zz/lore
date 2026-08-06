@@ -1994,7 +1994,15 @@ describe("BOUNDARY — the pre-existing result:pass floor and the new red-first 
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
     if (doneResult.error.code !== "VALIDATION_ERROR") return;
     // The PASS floor's own message — proves it, not the new floor, is what fired.
-    expect(doneResult.error.message).toContain("holds no result:pass evidence entry");
+    // UPDATED (task-lore-done-s-attestation-refusal-calls-a-capture-source): the
+    // single remembered sentence this used to match was reflowed by that wording
+    // fix. Re-keyed on TWO independent lone tokens PLUS a negative condition (the
+    // red-first floor's own marker must be ABSENT), which is what actually
+    // establishes WHICH floor fired — a contiguous-substring match on one
+    // sentence could only ever degrade to a silent no-match.
+    expect(doneResult.error.message).toContain("evidence row at all");
+    expect(doneResult.error.message).toContain("runner-issued provenance record");
+    expect(doneResult.error.message).not.toContain("extra.red_first");
   });
 });
 
@@ -2363,8 +2371,14 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
     if (doneResult.error.code !== "VALIDATION_ERROR") return;
-    // The result:pass floor's own message — proves it fired, not red-first or the new floor.
-    expect(doneResult.error.message).toContain("holds no result:pass evidence entry");
+    // The result:pass floor's own message — proves it fired, not red-first or the
+    // new floor. Same re-keying as the AC4 case above (task-lore-done-s-
+    // attestation-refusal-calls-a-capture-source): two lone tokens + the
+    // ABSENCE of the other two floors' markers.
+    expect(doneResult.error.message).toContain("evidence row at all");
+    expect(doneResult.error.message).toContain("runner-issued provenance record");
+    expect(doneResult.error.message).not.toContain("extra.red_first");
+    expect(doneResult.error.message).not.toContain("UNFILTERED");
   });
 
   it("red_first:true + a pass row + an unmet unfiltered-file floor, NO red row → the red-first floor fires (not the new floor)", async () => {
@@ -2569,7 +2583,16 @@ describe("NEGATIVE — done() refuses a self-reported-only pass, naming both rep
     if (doneResult.ok) return;
     expect(doneResult.error.code).toBe("VALIDATION_ERROR");
     if (doneResult.error.code !== "VALIDATION_ERROR") return;
-    expect(doneResult.error.message).toContain("SELF-REPORTED");
+    // UPDATED (task-lore-done-s-attestation-refusal-calls-a-capture-source): the
+    // shouted "SELF-REPORTED" was retired because it was applied to EVERY
+    // unattested row, including `capture_source:"runner"` ones it demonstrably
+    // misdescribed. THIS fixture's row genuinely IS self-reported, so the word
+    // must still appear for it — with the discriminating FIELD named, and without
+    // the other population's label. Full population/mix coverage lives in
+    // `done-attestation-refusal-wording.test.ts`.
+    expect(doneResult.error.message.toLowerCase()).toContain("self-report");
+    expect(doneResult.error.message).toContain("capture_source");
+    expect(doneResult.error.message).not.toContain("runner-captured");
     expect(doneResult.error.message).toContain("lore verify");
     expect(doneResult.error.message).toContain("--override-attestation");
 
