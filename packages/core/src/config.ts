@@ -1314,6 +1314,34 @@ export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): n
  * below is load-bearing — the same hazard {@link resolveLedgerAutoApprove}
  * documents.
  *
+ * Two residuals of the capture-window slice are DELIBERATELY NOT FIXED. Recorded
+ * here, at the resolver a reader consults when either one surprises them, rather
+ * than left as a silence (task-the-ac-scope-re-keying-left-the-red-first-floor-
+ * unarmed, faces 3.2 and 3.3):
+ *
+ *   1. A MALFORMED `capture_timeout_ms` (bad YAML, wrong type, out of range)
+ *      degrades to the default SILENTLY, because the CLI's `loadProjectConfig`
+ *      returns `undefined` on any parse failure and this resolver cannot
+ *      distinguish "no config file" from "a config file that failed to parse".
+ *      That is PRE-EXISTING behaviour for every non-`ai` config section (a
+ *      documented SPEC-030 non-goal), so fixing it here would fix one key while
+ *      leaving its siblings degrading — it is a config-loader-WIDE decision that
+ *      must change every section in one deliberate slice, NOT a capture-window
+ *      one. It is pinned meanwhile by test `CAPCLI-E1`
+ *      (`packages/lore/tests/unit/adapters/cli-evidence-capture-window.bun.test.ts`),
+ *      which asserts the degradation as MEASURED behaviour — so a future
+ *      loader-wide fix flips a failing test rather than changing semantics
+ *      silently. ⛔ Do not "fix" it for this key alone.
+ *
+ *   2. `assets/project/lore-config-template.yaml` deliberately does NOT seed this
+ *      key. The number ships in the Zod default above, so every consumer honours
+ *      the knob whether or not their `.lore/config.yaml` mentions it, and the
+ *      `--capture` timeout refusal names both the knob and the file at the exact
+ *      moment an author needs them — seeding it would buy nothing but an
+ *      assets-manifest regeneration for a key most consumers never touch. ⛔ If a
+ *      future slice DOES add it to that template, regenerate the assets manifest
+ *      in the SAME commit: `assets/` SSOT↔installed pairs are parity-pinned.
+ *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
  * @returns Effective `workflow.evidence.capture_timeout_ms` value in milliseconds
  * @example

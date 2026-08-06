@@ -145,7 +145,7 @@ import type { LoreError, LoreConfig, CaptureSource } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
-import { ORACLE_KINDS, runDeterministicChecks } from "@lore/core";
+import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs } from "@lore/core";
 import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFileAnchors } from "@lore/core";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
@@ -1724,6 +1724,20 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         // own test suite via a relative read that resolves nowhere else.
         cwd: args.caller_cwd,
         declaredResult: args.result,
+        // reason: task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed
+        // (face 3, item 1) — this argument was MISSING, so an MCP capture always
+        // ran at the schema default while the CLI honoured the operator's
+        // `workflow.evidence.capture_timeout_ms`. The loud-timeout half is
+        // shared, so the surface already refused correctly; only the
+        // configurability was absent, which is exactly a silently inert knob on
+        // this surface (an exit-code-only check passed before and after).
+        // `getConfig?.()` is called HERE, per invocation, for the SAME reason the
+        // "task-start" branch does: a long-lived stdio server must observe a
+        // mid-session `.lore/config.yaml` edit rather than a value frozen at
+        // registration. An omitted getter yields `undefined`, which
+        // `resolveCaptureTimeoutMs` resolves to the schema default — byte-identical
+        // to the pre-fix behaviour for every caller that configures nothing.
+        timeoutMs: resolveCaptureTimeoutMs(getConfig?.()),
       });
       if (!captured.ok) {
         return errorContent(captured.error);

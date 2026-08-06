@@ -170,21 +170,49 @@ export function countOpenReports(
  * `UpstreamPort.createDraft` writes. Pure structural wrap — every field of
  * `p` is carried verbatim; no defaulting, no derived fields.
  *
+ * ⛔ `ac_scope: []` is written EXPLICITLY here, and that is a policy decision
+ * rather than a formality (task-the-ac-scope-re-keying-left-the-red-first-floor-
+ * unarmed, face 2). This is a SECOND writer of `extra.adhoc: true`: the CLI's
+ * `--adhoc` branch REQUIRES an `--ac-scope` declaration
+ * (`isAdhocAcScopeDeclarationMissing`, `adapters/cli/create-task-validation.ts`),
+ * but that requiredness is keyed on the author's FLAG, which only the CLI sees —
+ * so this write site reached the same field by another route and inbound consumer
+ * bug reports used to land with the key ABSENT. That is the identical shape as
+ * the defect the re-keying closed (a requiredness keyed on one writer's surface
+ * while a second writer reaches the field another way — the third such pair in
+ * this corpus, after the `isPlanMember` copies and the two claim writers'
+ * `session_id`), so it is closed HERE, at the shared write site, rather than left
+ * as a policy made by omission.
+ *
+ * ⛔ EMPTY, never derived. A reporting project structurally cannot know the
+ * upstream's AC ids, and guessing which spec governs a task is exactly what
+ * `VerifyRunnerService.verifyAdhocTask` refuses to do (zero or multiple matches
+ * refuse loud, never guessed). An empty declaration does not make the report
+ * verifiable — it makes the claim AUDITABLE, which is the achievable goal and
+ * the same standard `lore create task --adhoc --ac-scope ""` now holds a human
+ * author to. Consequence, deliberately accepted: the declared key ARMS `lore
+ * done`'s no-new-tests floor for a filed report, so an upstream maintainer
+ * closing one must record a red evidence row or the audited
+ * `--declare-no-new-tests "<reason>"` — which is the correct standard for a bug
+ * fix, and reachable either way.
+ *
  * @param p - the fully-assembled report payload
- * @returns `{adhoc: true, issue_report: {...p}}` — `adhoc: true` marks the
- *   task as SPEC-069's ad-hoc dispatch shape (excluded from `lore ready
- *   --adhoc` output until approved, per AC-072-1)
+ * @returns `{adhoc: true, ac_scope: [], issue_report: {...p}}` — `adhoc: true`
+ *   marks the task as SPEC-069's ad-hoc dispatch shape (excluded from `lore
+ *   ready --adhoc` output until approved, per AC-072-1); `ac_scope: []` is the
+ *   explicit no-criterion-claimed declaration described above
  * @example
  *   buildIssueReportExtra({
  *     reporter_project: "consumer-a", reporter_actor: "agent:x",
  *     lore_version: "0.5.0", expected: "exit 0", actual: "exit 4",
  *     reported_at: "2026-07-24T00:00:00.000Z", possible_duplicates: [],
  *   })
- *   // => {adhoc: true, issue_report: {reporter_project: "consumer-a", ...}}
+ *   // => {adhoc: true, ac_scope: [], issue_report: {reporter_project: "consumer-a", ...}}
  */
 export function buildIssueReportExtra(p: IssueReportPayload): Record<string, unknown> {
   return {
     adhoc: true,
+    ac_scope: [],
     issue_report: { ...p },
   };
 }

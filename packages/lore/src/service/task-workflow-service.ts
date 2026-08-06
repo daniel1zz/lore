@@ -205,7 +205,9 @@
  *   entirely unaffected by IT, but is instead governed by the FOURTH, INDEPENDENT
  *   "no-new-tests" floor immediately below (task-a-non-empty-output-tail-can-be-
  *   hand-authored-prose-and-the): the red-first discipline inverted to opt-OUT.
- *   A task declaring `extra.ac_scope` (>= 1 AC) with zero `"expected-fail"`/`"fail"`
+ *   A task that has DECLARED `extra.ac_scope` at all — keyed on the declaration's
+ *   PRESENCE, so an EXPLICITLY EMPTY `[]` arms it too (task-the-ac-scope-re-keying-
+ *   left-the-red-first-floor-unarmed) — with zero `"expected-fail"`/`"fail"`
  *   evidence rows and NO `extra.red_first: true` declaration cannot archive without
  *   an explicit `DoneOpts.noNewTestsReason` (mandatory, non-blank, persisted
  *   verbatim onto every step's audit `details` as `no_new_tests_reason` +
@@ -423,7 +425,9 @@ export interface DoneOpts {
   /**
    * Audited escape hatch for the NO-NEW-TESTS floor (task-a-non-empty-output-
    * tail-can-be-hand-authored-prose-and-the) — the red-first discipline INVERTED
-   * to opt-OUT: a task declaring `extra.ac_scope` (>= 1 AC) with ZERO
+   * to opt-OUT: a task that has DECLARED `extra.ac_scope` at all (an EXPLICITLY
+   * EMPTY `[]` included — task-the-ac-scope-re-keying-left-the-red-first-floor-
+   * unarmed) with ZERO
    * `"fail"`/`"expected-fail"` evidence rows and no `extra.red_first: true`
    * declaration (that path is the PRE-EXISTING, unaffected opt-in floor, see
    * {@link overrideReason}'s sibling check in `done()`'s JSDoc) cannot archive
@@ -437,8 +441,8 @@ export interface DoneOpts {
    * (+ `details.no_new_tests_declared: true`), never silent, never defaulted, no
    * env-var form. `commands/done.ts` refuses a blank/whitespace-only value as a
    * CLI usage error (exit 2); `done()` refuses it too as a belt-and-suspenders
-   * check. IGNORED entirely when this floor does not apply (no ac_scope declared,
-   * red_first already declared, or a red evidence row already exists) — never a
+   * check. IGNORED entirely when this floor does not apply (no `ac_scope` KEY at
+   * all, red_first already declared, or a red evidence row already exists) — never a
    * blanket "always audit" switch, mirroring {@link overrideReason}'s own
    * ignored-when-unneeded contract.
    */
@@ -777,20 +781,45 @@ function findMissingUnfilteredTestFileRuns(task: DocRecord, evidence: EvidenceEn
  * (AC6 control: the opt-in path must keep working byte-identically, so this
  * function must never add a SECOND requirement on top of it).
  *
- * Scoped to a task carrying >= 1 declared AC (`extra.ac_scope`, SPEC-038 §Design
- * Decisions — the same declared-scope field `lore verify`'s declared-scope
- * selection already consumes) — a task claiming no specific AC coverage has
- * nothing this floor could meaningfully hold to a red-first standard, mirroring
- * the sibling floors' own "nothing declared -> nothing to check" shape
- * ({@link findMissingUnfilteredTestFileRuns}'s "no test-file anchors" boundary,
- * the red-first floor's own "never sets the flag" boundary).
+ * Scoped to a task that has DECLARED an `extra.ac_scope` at all (SPEC-038
+ * §Design Decisions — the same declared-scope field `lore verify`'s
+ * declared-scope selection already consumes), keyed on the DECLARATION'S
+ * PRESENCE and never on the array's LENGTH. An absent key means no AC decision
+ * has been made yet, which mirrors the sibling floors' own "nothing declared ->
+ * nothing to check" shape ({@link findMissingUnfilteredTestFileRuns}'s "no
+ * test-file anchors" boundary, the red-first floor's own "never sets the flag"
+ * boundary).
+ *
+ * ⛔ An EXPLICITLY EMPTY scope (`[]`) ARMS this floor — do not "simplify" the
+ * guard below back to `acScope === undefined || acScope.length === 0`
+ * (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed). Measured
+ * history: this predicate originally short-circuited on both shapes, and then
+ * `--ac-scope` became REQUIRED on the `--adhoc` branch (task-an-ad-hoc-task-can-
+ * never-reach-the-attestation-path-that) with `--ac-scope ""` as the explicit-
+ * empty declaration — making `[]` the DOMINANT ad-hoc shape and leaving this
+ * floor unarmed for precisely the shape that re-keying created. Seven live tasks
+ * were in that state when it was measured.
+ *
+ * The keying decision, recorded so it is not re-litigated blind: an empty scope
+ * genuinely claims no criterion, so "which ACs went red" has no answer for it —
+ * but this floor's question is "was this work done red-first AT ALL", which is
+ * answerable either way, and an author who typed `--ac-scope ""` has already
+ * been asked one AC question and answered it explicitly. The alternative the
+ * governing task offered — keying on "this task touched source files" via
+ * `extra.file_anchors` — was REJECTED: anchors are declared BEFORE the work and
+ * are opt-in, a doc-only task legitimately anchors `.md` files, and it would arm
+ * the floor for every absent-scope task at once (a far wider retroactive
+ * refusal than the shape actually measured as broken). ⛔ Also rejected outright:
+ * making `--ac-scope ""` synthesize a placeholder criterion — a fabricated id
+ * would corrupt `lore verify`'s spec resolution to buy a predicate's
+ * convenience.
  *
  * @param task - The already-resolved task DocRecord
  * @param evidence - `readEvidence(task)` — already read by the caller
  * @returns `true` iff this floor applies AND is currently UNSATISFIED (an
  *   explicit no-new-tests declaration, or a red evidence row, is required
- *   before archiving); `false` when the floor doesn't apply (no declared AC
- *   scope, or `extra.red_first: true` already governs this task) or is already
+ *   before archiving); `false` when the floor doesn't apply (no `ac_scope` key
+ *   at all, or `extra.red_first: true` already governs this task) or is already
  *   satisfied by a genuine red row
  * @example
  * requiresNoNewTestsDeclaration(
@@ -798,12 +827,15 @@ function findMissingUnfilteredTestFileRuns(task: DocRecord, evidence: EvidenceEn
  *   [],
  * ); // => true — declared AC, zero red rows, no red_first opt-in
  * @example
- * requiresNoNewTestsDeclaration({ extra: {} } as DocRecord, []); // => false — no declared AC scope
+ * requiresNoNewTestsDeclaration({ extra: { ac_scope: [] } } as DocRecord, []);
+ * // => true — an EXPLICITLY EMPTY declaration is a decision, and it arms this floor
+ * @example
+ * requiresNoNewTestsDeclaration({ extra: {} } as DocRecord, []); // => false — no ac_scope key at all
  */
 function requiresNoNewTestsDeclaration(task: DocRecord, evidence: EvidenceEntry[]): boolean {
   if (readRedFirstDeclared(task)) return false;
   const acScope = extractDeclaredAcScope(task);
-  if (acScope === undefined || acScope.length === 0) return false;
+  if (acScope === undefined) return false;
   return !evidence.some((e) => isRedRunResult(e.result));
 }
 
@@ -2242,16 +2274,20 @@ export class TaskWorkflowService {
    *     a SECOND, INDEPENDENT floor evaluated only for a task claiming red-first
    *     discipline, checked AFTER the `result:pass` floor above so neither floor can
    *     mask the other; a task that never sets the flag never reaches this check;
-   *   - the task declares `extra.ac_scope` (>= 1 AC) but NEITHER `extra.red_first: true`
-   *     NOR a `"expected-fail"`/`"fail"` evidence entry (task-a-non-empty-output-tail-
-   *     can-be-hand-authored-prose-and-the) — a FOURTH, INDEPENDENT floor: the red-first
-   *     floor above INVERTED to opt-OUT for every task that never called `lore
-   *     red-first`. Mutually exclusive with the red-first floor by construction (a task
-   *     WITH `extra.red_first: true` is governed by that floor alone — see
-   *     {@link requiresNoNewTestsDeclaration}'s own JSDoc), so neither floor can ever
-   *     double-fire on the same task. Bypasses via `opts.noNewTestsReason` ONLY (the
-   *     SAME audited-escape shape as `overrideReason` — mandatory, non-blank,
-   *     persisted verbatim); a task declaring no AC scope never reaches this check;
+   *   - the task has DECLARED `extra.ac_scope` (the KEY being present is the trigger —
+   *     an EXPLICITLY EMPTY `[]` arms this floor exactly as a populated array does,
+   *     task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed) but NEITHER
+   *     `extra.red_first: true` NOR a `"expected-fail"`/`"fail"` evidence entry
+   *     (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) — a FOURTH,
+   *     INDEPENDENT floor: the red-first floor above INVERTED to opt-OUT for every task
+   *     that never called `lore red-first`. Mutually exclusive with the red-first floor
+   *     by construction (a task WITH `extra.red_first: true` is governed by that floor
+   *     alone — see {@link requiresNoNewTestsDeclaration}'s own JSDoc), so neither floor
+   *     can ever double-fire on the same task. Bypasses via `opts.noNewTestsReason` ONLY
+   *     (the SAME audited-escape shape as `overrideReason` — mandatory, non-blank,
+   *     persisted verbatim); a task with NO `ac_scope` key at all never reaches this
+   *     check, and the refusal message distinguishes the empty declaration from a
+   *     populated one rather than rendering an empty id list;
    *   - `opts.noNewTestsReason` IS supplied but is blank/whitespace-only — refused here
    *     as a defense-in-depth check (`commands/done.ts` already refuses this shape as a
    *     CLI usage error, exit 2, before this service is ever called);
@@ -2413,11 +2449,23 @@ export class TaskWorkflowService {
           });
         }
         const acScope = extractDeclaredAcScope(task) ?? [];
+        // reason: the EMPTY declaration needs its own rendering (task-the-ac-
+        // scope-re-keying-left-the-red-first-floor-unarmed) — the id-list form
+        // would print `extra.ac_scope ()`, which reads like a rendering bug and
+        // tells the author nothing about which of the two shapes fired. The
+        // empty branch also has to answer the reasonable objection ("I declared
+        // no criterion, why am I being asked about ACs?") at the moment it is
+        // raised, so the refusal itself carries the floor's actual question.
+        const scopeClause =
+          acScope.length === 0
+            ? "declares an EMPTY extra.ac_scope ([] — an explicit \"no criterion claimed\", " +
+              "which is a decision and not a silence)"
+            : `declares extra.ac_scope (${acScope.join(", ")})`;
         return err({
           code: "VALIDATION_ERROR",
           field: "extra.verification_evidence",
           message:
-            `Task "${task.slug}" declares extra.ac_scope (${acScope.join(", ")}) with no ` +
+            `Task "${task.slug}" ${scopeClause} with no ` +
             `"expected-fail"/"fail" evidence entry and no extra.red_first opt-in — lore done ` +
             "requires proof a test was actually run red before archiving, or an explicit " +
             "declaration that this task legitimately adds no new test (record a red run via " +
@@ -3619,7 +3667,7 @@ export class TaskWorkflowService {
    * two floors are evaluated independently in `_doneImpl`): present iff this call
    * used the audited no-new-tests escape hatch, merged onto every step's audit
    * `details` as `no_new_tests_reason` + `no_new_tests_declared: true`. `undefined`
-   * (the common case — no declared AC scope, an opted-in red_first claim, or a
+   * (the common case — no `ac_scope` KEY at all, an opted-in red_first claim, or a
    * genuine red evidence row already satisfied the floor) adds neither key.
    */
   private async writeTaskStatus(

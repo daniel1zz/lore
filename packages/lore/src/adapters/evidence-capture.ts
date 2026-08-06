@@ -143,13 +143,17 @@ export interface CaptureRequest {
    * `workflow.evidence.capture_timeout_ms` schema default — so a caller that
    * passes nothing behaves byte-identically to the pre-config constant.
    *
-   * The CLI resolves this from the project's own `.lore/config.yaml`
-   * (`cli/commands/evidence.ts`). ⛔ Named residual: the MCP adapter
-   * (`mcp/tools.ts`) does not yet pass it, so `lore_evidence_add {capture: true}`
-   * still runs at the default window regardless of config. That file is owned by a
-   * concurrent task wave and was deliberately left untouched; wiring it is a
-   * one-line change (`timeoutMs: resolveCaptureTimeoutMs(config)`) once free. The
-   * timeout DETECTION half below is shared, so MCP already gets the loud outcome.
+   * BOTH surfaces resolve it from the project's own `.lore/config.yaml` via
+   * `resolveCaptureTimeoutMs`: the CLI in `cli/commands/evidence.ts`, and the MCP
+   * adapter in `mcp/tools.ts`'s `lore_evidence_add` handler — the latter calling
+   * its injected config GETTER per invocation so a long-lived stdio server
+   * observes a mid-session config edit (the residual that closed in
+   * task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed, face 3 item 1;
+   * behavioural oracle: the `CAPMCP-*` group in
+   * `tests/unit/adapters/mcp-evidence-capture.test.ts`, which asserts both
+   * directions of the knob plus a no-getter control). ⛔ A THIRD caller must pass
+   * it too — omitting it is silent and indistinguishable from a working knob on
+   * an exit-code-only check, which is exactly how the MCP gap survived.
    */
   timeoutMs?: number;
 }

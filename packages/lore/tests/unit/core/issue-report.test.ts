@@ -158,7 +158,7 @@ describe("countOpenReports", () => {
 // still exercised — pins the payload-assembly contract without diluting the
 // grouped matched counts, since it names none of the four required tokens) ──
 describe("buildIssueReportExtra", () => {
-  it("wraps the payload verbatim under extra.issue_report with adhoc: true", () => {
+  it("wraps the payload verbatim under extra.issue_report with adhoc: true and an EXPLICIT empty ac_scope", () => {
     const payload: IssueReportPayload = {
       reporter_project: "consumer-project-a",
       reporter_actor: "agent:x",
@@ -169,10 +169,35 @@ describe("buildIssueReportExtra", () => {
       possible_duplicates: ["01ABC"],
     };
     const extra = buildIssueReportExtra(payload);
-    expect(extra).toStrictEqual({ adhoc: true, issue_report: payload });
+    // reason: task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed face 2 —
+    // this write site reaches `extra.adhoc: true` WITHOUT the CLI `--adhoc` flag
+    // the ad-hoc `--ac-scope` requiredness is keyed on, so a report used to land
+    // with the key ABSENT. It now declares the empty scope explicitly: a
+    // reporting project genuinely claims no upstream criterion, and saying so is
+    // an auditable decision rather than a silence.
+    expect(extra).toStrictEqual({ adhoc: true, ac_scope: [], issue_report: payload });
+    // Asserted as its own fact, independent of the whole-object comparison
+    // above: an empty ARRAY, never `undefined` and never a synthesized fake id.
+    expect(extra["ac_scope"]).toStrictEqual([]);
+    expect(extra["ac_scope"]).not.toBeUndefined();
     // and it's a deep copy, not the same object reference (mutating input after
     // the call must not affect the built extra)
     expect(extra["issue_report"]).not.toBe(payload);
+  });
+
+  it("the declared scope is EMPTY, never derived from the payload — a reporting project cannot know the upstream's AC ids", () => {
+    const extra = buildIssueReportExtra({
+      reporter_project: "consumer-project-b",
+      reporter_actor: "agent:y",
+      lore_version: "0.5.0",
+      // A description-shaped field that mentions an AC id must NOT be mined for one.
+      expected: "AC-072-6 to hold",
+      actual: "it did not",
+      reported_at: "2026-07-24T00:00:00.000Z",
+      possible_duplicates: [],
+    });
+    expect(extra["ac_scope"]).toStrictEqual([]);
+    expect((extra["ac_scope"] as string[]).length).toBe(0);
   });
 
   it("carries repro_command through when present, and omits it when absent (optional field)", () => {

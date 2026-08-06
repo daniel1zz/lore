@@ -365,6 +365,23 @@ export const AC_SCOPE_REQUIRED_FIELD = "ac-scope-required";
  *      `verifyAdhocTask` resolves its governing spec THROUGH that field — the
  *      predicate simply never fires for it, it does not waive a requirement
  *      that would otherwise apply.
+ *
+ *      ⛔ The ad-hoc branch is NOT unconstrained, and reading only the sentence
+ *      above is how a reader concluded that it was (task-the-ac-scope-re-keying-
+ *      left-the-red-first-floor-unarmed, face 4). TWO sibling mechanisms bind it,
+ *      neither of them this predicate: (a) `isAdhocAcScopeDeclarationMissing`
+ *      (`adapters/cli/create-task-validation.ts`) refuses an `--adhoc` creation
+ *      that passed no `--ac-scope` AT ALL, one layer earlier and keyed on the
+ *      AUTHOR'S FLAG — which is the only signal that distinguishes the ad-hoc
+ *      branch and which this predicate, fed a resolved PLAN LINEAGE, never sees;
+ *      and (b) `TaskWorkflowService`'s no-new-tests floor
+ *      (`requiresNoNewTestsDeclaration`) arms at `lore done` on the DECLARATION'S
+ *      PRESENCE, so the explicit-empty `--ac-scope ""` form — the dominant ad-hoc
+ *      shape — still owes a red evidence row or an audited
+ *      `--declare-no-new-tests` reason. This predicate's D3 vacuous pass is
+ *      unchanged by either: it is the CLI layer and the archival floor that hold
+ *      that branch, deliberately, and this paragraph exists so the next reader
+ *      finds them without having to measure the gap first.
  *   2. A spec ancestor declaring ONLY `ai`/`human`-mode criteria, or none at
  *      all (`parentSpecScriptAcCount < 1`) — nothing runner-attestable exists
  *      to declare a scope against, so demanding one would be friction with no
