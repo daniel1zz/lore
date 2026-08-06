@@ -163,10 +163,24 @@ interface HeadroomReportJson {
   bytes: HeadroomMetricJson;
 }
 
+/**
+ * The `findings[]` fields these scenarios actually read. Narrowed from the
+ * original `unknown[]` so a case can assert WHICH kind was reported (the
+ * eviction floor added a second exit-relevant kind alongside the ceiling
+ * breaches, and "exit 3" alone no longer says which boundary tripped).
+ * Deliberately partial — this is a CLI-output assertion helper, not a mirror of
+ * `MemoryFileFinding`, which stays owned by `service/claude-md-check.ts`.
+ */
+interface ClaudeMdFindingJson {
+  kind: string;
+  path: string;
+  message: string;
+}
+
 interface CheckClaudeMdJson {
   data?: {
     claude_md?: {
-      findings?: unknown[];
+      findings?: ClaudeMdFindingJson[];
       headroom?: HeadroomReportJson[];
       warnings?: Array<{ kind: string; measured: number; message: string }>;
     };
