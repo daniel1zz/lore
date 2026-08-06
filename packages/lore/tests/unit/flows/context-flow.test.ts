@@ -144,34 +144,52 @@ describe("runContextRefresh", () => {
     }
   }
 
-  it("BOUNDARY: a splice landing exactly at the root max_lines ceiling still writes; one line past it is refused", async () => {
-    // Side A — exactly at the ceiling (300 lines): allowed, byte-identical to
-    // pre-change behavior. Already green under current src on its own (today
-    // there is no ceiling check at all) — this half is a non-regression
-    // anchor, not a RED signal by itself.
-    const atCeilingFs = new InMemoryFsPort({});
-    await runContextInit({ fs: atCeilingFs }, "", {});
-    await growModuleIndex(atCeilingFs, 285);
-    const atCeilingResult = await runContextRefresh({ fs: atCeilingFs }, "");
-    expect(atCeilingResult.ok).toBe(true);
-    if (atCeilingResult.ok) {
-      const atCeilingContent = await atCeilingFs.readFile("CLAUDE.md");
-      expect(atCeilingContent).not.toBeNull();
-      expect(countLines(atCeilingContent as string)).toBe(300);
+  it("BOUNDARY: a splice landing one line under the root eviction floor still writes; at the floor it is refused", async () => {
+    // task-a-module-claude-md-at-its-byte-ceiling-silently-relocates moved the
+    // lowest DETERMINISTIC admission boundary from the ceiling down to the
+    // eviction floor (`evict_threshold_fraction`, default 0.97 -> 291 lines of
+    // the 300-line root ceiling). The proposition this case pins is unchanged —
+    // one unit under the lowest refusing boundary writes, at it refuses — only
+    // the boundary itself moved. Derived from config, never a literal, so a
+    // config change moves the fixture with it.
+    const budgets = resolveMemoryFileBudgets(undefined);
+    const lineFloor = Math.ceil(budgets.root.max_lines * budgets.evict_threshold_fraction);
+    // `renderModuleIndexBody` adds exactly one line per top-level module dir on
+    // top of the 15-line zero-module baseline (measured against current src).
+    const BASELINE_LINES = 15;
+    const modulesForLines = (lines: number): number => lines - BASELINE_LINES;
+
+    // Side A — one line under the floor: allowed.
+    const underFloorFs = new InMemoryFsPort({});
+    await runContextInit({ fs: underFloorFs }, "", {});
+    await growModuleIndex(underFloorFs, modulesForLines(lineFloor - 1));
+    const underFloorResult = await runContextRefresh({ fs: underFloorFs }, "");
+    expect(underFloorResult.ok).toBe(true);
+    if (underFloorResult.ok) {
+      const underFloorContent = await underFloorFs.readFile("CLAUDE.md");
+      expect(underFloorContent).not.toBeNull();
+      expect(countLines(underFloorContent as string)).toBe(lineFloor - 1);
     }
 
-    // Side B — one line past the ceiling (301 lines): must be refused with NO
-    // write. RED under current src: today's refresh writes unconditionally
-    // and returns ok:true here too (verified against current src: n=286 ->
-    // refresh.ok=true, afterLines=301, unchanged=false).
+    // Side B — exactly AT the floor: must be refused with NO write.
+    const atFloorFs = new InMemoryFsPort({});
+    await runContextInit({ fs: atFloorFs }, "", {});
+    const beforeAtFloor = await atFloorFs.readFile("CLAUDE.md");
+    await growModuleIndex(atFloorFs, modulesForLines(lineFloor));
+    const atFloorResult = await runContextRefresh({ fs: atFloorFs }, "");
+    expect(atFloorResult.ok).toBe(false);
+    const afterAtFloor = await atFloorFs.readFile("CLAUDE.md");
+    expect(afterAtFloor).toBe(beforeAtFloor);
+
+    // Side C (REGRESSION) — one line past the CEILING is still refused, so
+    // arming the floor did not replace the ceiling check with a weaker one.
     const overCeilingFs = new InMemoryFsPort({});
     await runContextInit({ fs: overCeilingFs }, "", {});
     const beforeOverCeiling = await overCeilingFs.readFile("CLAUDE.md");
-    await growModuleIndex(overCeilingFs, 286);
+    await growModuleIndex(overCeilingFs, modulesForLines(budgets.root.max_lines + 1));
     const overCeilingResult = await runContextRefresh({ fs: overCeilingFs }, "");
     expect(overCeilingResult.ok).toBe(false);
-    const afterOverCeiling = await overCeilingFs.readFile("CLAUDE.md");
-    expect(afterOverCeiling).toBe(beforeOverCeiling);
+    expect(await overCeilingFs.readFile("CLAUDE.md")).toBe(beforeOverCeiling);
   });
 
   it("NEGATIVE: a would-be ceiling breach names the findings in a non-ok Result and performs NO write", async () => {

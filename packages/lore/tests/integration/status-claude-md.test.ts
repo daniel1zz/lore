@@ -276,16 +276,23 @@ describe("lore status --check-claude-md: headroom reporting (the incident fixtur
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("--json reports headroom.bytes.remaining=5, warn=true, and a headroom_warning — exit code stays 0 (not a breach)", () => {
+  it("--json reports headroom.bytes.remaining=5, warn=true, and a headroom_warning — and now ALSO an eviction_required finding (exit 3)", () => {
     // Root byte ceiling default is 30720 (D3) — 5 bytes under it, mirroring
     // the exact reproduction (24571/24576 in the repo's own real ceiling).
     writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
 
     const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
 
-    expect(result.exitCode).toBe(0);
+    // task-a-module-claude-md-at-its-byte-ceiling-silently-relocates: this
+    // fixture sits at 99.98% used, which is now PAST the deterministic
+    // eviction floor, so exit 3 is the correct verdict. The advisory-only
+    // proposition this case used to carry (a near-ceiling file never changes
+    // the exit code) did NOT disappear — it moved to the advisory-band case
+    // below, which is where it is now actually true.
+    expect(result.exitCode).toBe(3);
     const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
-    expect(parsed.data?.claude_md?.findings).toEqual([]);
+    const findings = parsed.data?.claude_md?.findings ?? [];
+    expect(findings.map((f) => f.kind)).toEqual(["eviction_required"]);
 
     const headroom = parsed.data?.claude_md?.headroom ?? [];
     expect(headroom).toHaveLength(1);
@@ -300,14 +307,30 @@ describe("lore status --check-claude-md: headroom reporting (the incident fixtur
     expect(warnings.some((w) => w.kind === "headroom_warning" && w.message.includes("CLAUDE.md"))).toBe(true);
   });
 
-  it("non-JSON stdout names the remaining count and an approaching-ceiling advisory, without changing the exit code", () => {
+  it("non-JSON stdout names the remaining count and an approaching-ceiling advisory", () => {
     writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
 
     const result = runLore(["status", "--check-claude-md"], tmpDir);
 
-    expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("5 remaining");
     expect(result.stdout.toLowerCase()).toContain("approaching ceiling");
+  });
+
+  it("ADVISORY BAND (the surviving no-exit-change proposition): a file in [warn, evict) warns but exits 0", () => {
+    // Between the 0.9 advisory threshold and the 0.97 eviction floor: the band
+    // that is still purely advisory. Without this case, arming the floor would
+    // have silently deleted the "an advisory never changes the exit code"
+    // guarantee rather than relocating it.
+    const bytes = Math.ceil(30720 * 0.93);
+    writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(bytes));
+
+    const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
+    expect(parsed.data?.claude_md?.findings).toEqual([]);
+    expect(parsed.data?.claude_md?.headroom?.[0]?.bytes.warn).toBe(true);
+    expect((parsed.data?.claude_md?.warnings ?? []).length).toBeGreaterThan(0);
   });
 });
 
@@ -357,9 +380,15 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
 
   it("a threshold raised to 0.999999 silences the warning on the incident fixture (99.98% used, below the raised threshold)", () => {
     mkdirSync(join(tmpDir, ".lore"), { recursive: true });
+    // task-a-module-claude-md-at-its-byte-ceiling-silently-relocates: the two
+    // fractions are now band-ORDERED (`warn < evict <= 1`), so raising `warn`
+    // above the default eviction floor requires raising `evict` with it — a
+    // lone `warn: 0.999999` is an inverted pair and is refused at parse time.
+    // Raising both is what this case has always been about: proving the
+    // boundary is READ FROM CONFIG rather than baked into the check.
     writeFileSync(
       join(tmpDir, ".lore", "config.yaml"),
-      "context:\n  memory_files:\n    warn_threshold_fraction: 0.999999\n",
+      "context:\n  memory_files:\n    warn_threshold_fraction: 0.999999\n    evict_threshold_fraction: 1\n",
     );
     writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(30720 - 5));
 
@@ -368,8 +397,27 @@ describe("lore status --check-claude-md: warn_threshold_fraction is a config kno
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
     expect(parsed.data?.claude_md?.warnings).toEqual([]);
+    expect(parsed.data?.claude_md?.findings).toEqual([]);
     // Headroom numbers themselves are still reported — only the warn flag moved.
     expect(parsed.data?.claude_md?.headroom?.[0]?.bytes.remaining).toBe(5);
+  });
+
+  it("CONFIGURATION (the floor is a knob too): lowering evict_threshold_fraction makes a mid-sized file a deterministic finding", () => {
+    // The mirror of the case above, in the other direction: the same fixture
+    // that exits 0 under the default floor exits 3 under a lowered one — so
+    // the floor is provably read from config, not a module constant.
+    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
+    writeFileSync(
+      join(tmpDir, ".lore", "config.yaml"),
+      "context:\n  memory_files:\n    warn_threshold_fraction: 0.2\n    evict_threshold_fraction: 0.3\n",
+    );
+    writeFileSync(join(tmpDir, "CLAUDE.md"), nByteBody(Math.ceil(30720 * 0.5)));
+
+    const result = runLore(["status", "--check-claude-md", "--json"], tmpDir);
+
+    expect(result.exitCode).toBe(3);
+    const parsed = JSON.parse(result.stdout) as CheckClaudeMdJson;
+    expect((parsed.data?.claude_md?.findings ?? []).map((f) => f.kind)).toContain("eviction_required");
   });
 
   it("a threshold lowered to 0.01 makes even the CONTROL (comfortably-small) fixture warn", () => {
