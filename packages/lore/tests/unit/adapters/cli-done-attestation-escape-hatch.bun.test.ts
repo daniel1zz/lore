@@ -118,9 +118,17 @@ function getAuditEntries(slug: string, cwd: string): AuditEntryJson[] {
  * `--ac-scope ""` is REQUIRED on the ad-hoc branch (task-an-ad-hoc-task-can-
  * never-reach-the-attestation-path-that) — an ad-hoc creation without it now
  * exits 4. The EMPTY form keeps this fixture's "structurally unattestable, no
- * declared AC" shape intact (an empty ac_scope leaves the red-first
- * no-new-tests floor inapplicable), which is exactly what makes
+ * declared AC" shape intact, which is exactly what makes
  * `--override-attestation` the only archival route it can take.
+ *
+ * ⛔ That explicit-empty declaration also ARMS `lore done`'s INDEPENDENT
+ * no-new-tests floor (task-the-ac-scope-re-keying-left-the-red-first-floor-
+ * unarmed: the floor keys on the declaration's PRESENCE, not the array's
+ * length), so every archiving call below carries {@link NO_NEW_TESTS_REASON}
+ * alongside `--override-attestation`. The two are DIFFERENT floors with
+ * DIFFERENT escapes; needing both here is the correct outcome for a fixture
+ * that neither attests a pass nor records a red run, and this suite's subject
+ * remains the attestation escape alone.
  */
 function createAdhocTask(cwd: string, title: string): string {
   const created = mustRun(
@@ -129,6 +137,14 @@ function createAdhocTask(cwd: string, title: string): string {
   );
   return (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 }
+
+/**
+ * The no-new-tests escape this suite's fixtures need for the reason documented
+ * on {@link createAdhocTask} — deliberately a DISTINCT string from every
+ * `--override-attestation` reason below, so an assertion about one escape's
+ * audit key can never be satisfied by the other's value.
+ */
+const NO_NEW_TESTS_REASON = "escape-hatch fixture: no new test, this suite asserts the attestation escape";
 
 /** Records one SELF-REPORTED (never attested — no `lore verify`/`recordVerifiedEvidence`
  *  CLI/MCP surface exists) passing evidence row — the exact shape every `lore evidence`
@@ -171,7 +187,14 @@ describe("HAPPY — --override-attestation archives an otherwise-blocked self-re
     recordSelfReportedPass(slug, tmpDir);
 
     const result = mustRun(
-      ["done", slug, "--override-attestation", "manual browser check: verified in staging"],
+      [
+        "done",
+        slug,
+        "--override-attestation",
+        "manual browser check: verified in staging",
+        "--declare-no-new-tests",
+        NO_NEW_TESTS_REASON,
+      ],
       tmpDir,
     );
     expect(result.exitCode).toBe(0);
@@ -210,11 +233,14 @@ describe("BOUNDARY — a reason with internal whitespace round-trips byte-for-by
     recordSelfReportedPass(slug, tmpDir);
     const REASON = "manual browser check: verified in staging, screenshot attached to PR #123";
 
-    mustRun(["done", slug, "--override-attestation", REASON], tmpDir);
+    mustRun(["done", slug, "--override-attestation", REASON, "--declare-no-new-tests", NO_NEW_TESTS_REASON], tmpDir);
 
     const doneSteps = getAuditEntries(slug, tmpDir).filter((e) => e.details?.["done"] === true);
     expect(doneSteps.length).toBeGreaterThan(0);
     expect(doneSteps.every((e) => e.details?.["override_reason"] === REASON)).toBe(true);
+    // The two escapes stay distinguishable on the SAME row — neither key adopts
+    // the other's value now that this fixture legitimately needs both.
+    expect(doneSteps.every((e) => e.details?.["no_new_tests_reason"] === NO_NEW_TESTS_REASON)).toBe(true);
   });
 });
 
@@ -224,7 +250,7 @@ describe("STATE — the audit side effect is real, with a CONTROL run proving it
     recordSelfReportedPass(slug, tmpDir);
     const REASON = "verified via manual QA session 2026-08-01";
 
-    mustRun(["done", slug, "--override-attestation", REASON], tmpDir);
+    mustRun(["done", slug, "--override-attestation", REASON, "--declare-no-new-tests", NO_NEW_TESTS_REASON], tmpDir);
 
     const doneSteps = getAuditEntries(slug, tmpDir).filter((e) => e.details?.["done"] === true);
     expect(doneSteps.length).toBeGreaterThan(0);
@@ -277,7 +303,17 @@ describe("REGRESSION — an already-archived task stays an idempotent no-op even
   it("a second `lore done --override-attestation <reason>` on an already-archived task exits 0 without a new audit row", () => {
     const slug = createAdhocTask(tmpDir, "Already Archived Task");
     recordSelfReportedPass(slug, tmpDir);
-    mustRun(["done", slug, "--override-attestation", "first pass, legitimately overridden"], tmpDir);
+    mustRun(
+      [
+        "done",
+        slug,
+        "--override-attestation",
+        "first pass, legitimately overridden",
+        "--declare-no-new-tests",
+        NO_NEW_TESTS_REASON,
+      ],
+      tmpDir,
+    );
     const auditCountAfterFirst = getAuditEntries(slug, tmpDir).length;
 
     const second = runLore(

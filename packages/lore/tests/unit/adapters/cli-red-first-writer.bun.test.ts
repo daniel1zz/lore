@@ -28,12 +28,17 @@
  *               both times)
  *   ERROR:      `lore red-first` on a nonexistent task → exit 3
  *   STATE:      a plain task's `lore done` (no red-first declared) is
- *               UNAFFECTED — succeeds on a pass-only evidence log exactly as
- *               before this feature existed (AC3 control)
+ *               UNAFFECTED by red_first itself (AC3 control), and — added by
+ *               task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed —
+ *               an `--ac-scope ""` task with no red row is REFUSED (exit 4)
+ *               while the identical shape archives under the audited
+ *               `--declare-no-new-tests` declaration: the author→trip oracle
+ *               for the opt-OUT floor, asserted in BOTH directions
  *   REGRESSION: `lore set --red-first` is refused at the strict-flag seam
  *               (exit 2) — there is deliberately no such flag
  *
  * @spec_ref task-red-first-discipline-is-asked-for-in-prose-but-never
+ * @spec_ref task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed
  */
 
 import { describe, expect, it, beforeAll, afterAll, beforeEach, afterEach, setDefaultTimeout } from "bun:test";
@@ -76,6 +81,8 @@ function mustRun(args: string[], cwd: string): RunResult {
 
 interface DocJson {
   readonly slug: string;
+  /** Read by the empty-scope floor probe below — a refusal must leave it `draft`. */
+  readonly status: string;
   readonly extra: Record<string, unknown>;
 }
 
@@ -90,9 +97,16 @@ function getDoc(slug: string, cwd: string): DocJson {
  * `--ac-scope ""` is REQUIRED on the ad-hoc branch (task-an-ad-hoc-task-can-
  * never-reach-the-attestation-path-that) — an ad-hoc creation without it now
  * exits 4. The EMPTY form is the right one for this fixture: it preserves the
- * "no declared AC" shape every assertion below depends on (an empty ac_scope
- * leaves `requiresNoNewTestsDeclaration` inapplicable, so `lore done`'s
- * behaviour here stays byte-identical), while making the claim explicit.
+ * "no declared AC" shape every assertion below depends on, while making the
+ * claim explicit.
+ *
+ * ⛔ That explicit-empty declaration ARMS `requiresNoNewTestsDeclaration`
+ * (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed — the floor keys
+ * on the declaration's PRESENCE, not the array's length). It is therefore
+ * INVISIBLE for every `red_first`-declaring fixture below (that flag short-
+ * circuits the floor, which is the mutual exclusion the two floors are built on)
+ * and VISIBLE for the plain-task STATE case, which now carries
+ * `--declare-no-new-tests` — see that test's own comment.
  */
 function createAdhocTask(cwd: string, title: string): string {
   const created = mustRun(
@@ -212,7 +226,7 @@ describe("ERROR — lore red-first on a nonexistent task", () => {
 });
 
 describe("STATE — a plain task (no red-first declared) is unaffected by THIS feature", () => {
-  it("lore done archives a plain task exactly as before red-first existed, once the (unrelated) attestation floor is satisfied", () => {
+  it("lore done archives a plain task exactly as before red-first existed, once the (unrelated) attestation and no-new-tests floors are satisfied", () => {
     const slug = createAdhocTask(tmpDir, "Plain Task");
     mustRun(["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"], tmpDir);
 
@@ -222,12 +236,74 @@ describe("STATE — a plain task (no red-first declared) is unaffected by THIS f
     // the only way this --adhoc/no-declared-AC fixture can reach exit 0 at all;
     // the assertion this test actually cares about is red_first staying
     // undefined/unaffected, not the attestation floor itself.
+    //
+    // reason: --declare-no-new-tests is the SECOND escape this fixture now needs
+    // (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed): its
+    // `--ac-scope ""` declaration arms the opt-OUT no-new-tests floor precisely
+    // because this task never declared red_first. That is this file's own
+    // demonstration of the two floors' mutual exclusion from the other side.
     const result = runLore(
-      ["done", slug, "--override-attestation", "red-first-writer fixture: self-reported only"],
+      [
+        "done",
+        slug,
+        "--override-attestation",
+        "red-first-writer fixture: self-reported only",
+        "--declare-no-new-tests",
+        "red-first-writer fixture: plain-task control, no new test",
+      ],
       tmpDir,
     );
     expect(result.exitCode).toBe(0);
     expect(getDoc(slug, tmpDir).extra["red_first"]).toBeUndefined();
+  });
+
+  // ─── task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed ──────────
+  // The author→trip end-to-end oracle for the newly-armed floor, through the
+  // COMPILED binary: an `--ac-scope ""` ad-hoc task (the dominant shape the
+  // re-keying created) can no longer archive silently, and BOTH outcomes are
+  // asserted — the refusal AND, on the very same fixture shape, the archival
+  // under the audited declaration. Asserting only one direction would pass
+  // against the pre-fix silent behaviour.
+  it("an --ac-scope \"\" task with NO red row is REFUSED (exit 4) and stays draft; the same shape archives once the declaration is supplied", () => {
+    const refusedSlug = createAdhocTask(tmpDir, "Empty Scope Unarmed Probe");
+    mustRun(
+      ["evidence", refusedSlug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
+      tmpDir,
+    );
+
+    // --override-attestation clears the FIRST floor, so what fires here is the
+    // no-new-tests floor — the one that used to be inapplicable for `[]`.
+    const refusal = runLore(
+      ["done", refusedSlug, "--override-attestation", "red-first-writer fixture: self-reported only"],
+      tmpDir,
+    );
+    expect(refusal.exitCode).toBe(4);
+    // Two INDEPENDENT lone tokens rather than one remembered sentence.
+    expect(refusal.stderr).toContain("ac_scope");
+    expect(refusal.stderr).toContain("--declare-no-new-tests");
+    expect(getDoc(refusedSlug, tmpDir).status).toBe("draft");
+
+    // The OTHER branch on the identical fixture shape: with the audited
+    // declaration the same task archives, and the reason is on the audit rows.
+    const declaredSlug = createAdhocTask(tmpDir, "Empty Scope Declared Probe");
+    mustRun(
+      ["evidence", declaredSlug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
+      tmpDir,
+    );
+    const declaredReason = "empty-scope probe: docs-only, covered by a grep oracle";
+    const archived = runLore(
+      [
+        "done",
+        declaredSlug,
+        "--override-attestation",
+        "red-first-writer fixture: self-reported only",
+        "--declare-no-new-tests",
+        declaredReason,
+      ],
+      tmpDir,
+    );
+    expect(archived.exitCode).toBe(0);
+    expect(getDoc(declaredSlug, tmpDir).status).toBe("archived");
   });
 });
 

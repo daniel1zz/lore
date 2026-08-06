@@ -41,8 +41,9 @@
  * loud refusal (exit 4) naming the configured window, the measured elapsed time,
  * and this knob, with NOTHING recorded — never a quiet downgrade to a self-reported
  * row. The detection and wording live in `../../evidence-capture.js`, shared with
- * MCP; its `CaptureRequest.timeoutMs` JSDoc names the one residual (MCP does not
- * yet pass a config-resolved window).
+ * MCP — which resolves the SAME config knob through its own injected getter as of
+ * task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed (face 3 item 1), so
+ * the two surfaces no longer differ in window OR outcome.
  *
  * A SUCCESSFUL `--capture` additionally appends ` [captured in <n>ms of a <m>ms
  * window]` to the human success line — the margin was previously invisible until the

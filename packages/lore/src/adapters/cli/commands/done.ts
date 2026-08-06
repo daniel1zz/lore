@@ -49,7 +49,9 @@
  * `--declare-no-new-tests "<reason>"` is the SAME audited-escape shape for a
  * DIFFERENT, INDEPENDENT floor (task-a-non-empty-output-tail-can-be-hand-
  * authored-prose-and-the): the red-first discipline inverted to opt-OUT. A
- * task declaring `extra.ac_scope` (>= 1 AC) with zero `"expected-fail"`/`"fail"`
+ * task that has DECLARED `extra.ac_scope` — keyed on the KEY'S PRESENCE, so the
+ * explicit-empty `--ac-scope ""` form arms it too (task-the-ac-scope-re-keying-
+ * left-the-red-first-floor-unarmed) — with zero `"expected-fail"`/`"fail"`
  * evidence rows and no `extra.red_first: true` opt-in cannot archive without
  * this mandatory free-text justification for why no new RED test was recorded
  * — written verbatim to every lifecycle step's audit entry as
@@ -57,7 +59,7 @@
  * blank/whitespace-only reason is a CLI USAGE ERROR (exit 2), checked HERE the
  * same way `--override-attestation` is, before `app` is even loaded; the
  * service re-checks it too, defensively. IGNORED entirely when this floor does
- * not apply (no declared ac_scope, an opted-in red_first claim, or a genuine
+ * not apply (no `ac_scope` KEY at all, an opted-in red_first claim, or a genuine
  * red evidence row already satisfies it) — never a blanket "always audit"
  * switch, and never a substitute for `--override-attestation` (the two escape
  * hatches bypass two DIFFERENT floors and may both be supplied on the same
@@ -140,7 +142,8 @@ export default defineCommand({
       type: "string",
       description:
         "Audited escape hatch (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) — " +
-        "archive a task declaring extra.ac_scope with no red (expected-fail/fail) evidence row and " +
+        "archive a task declaring extra.ac_scope (an EXPLICITLY EMPTY declaration, i.e. --ac-scope " +
+        '"", counts too) with no red (expected-fail/fail) evidence row and ' +
         "no extra.red_first opt-in. MANDATORY free-text reason as the flag's own value, written " +
         "verbatim to the audit trail. A blank/whitespace-only value is a usage error (exit 2). " +
         "NOT named --no-new-tests: citty's mri parser treats a --no-<x> flag as a boolean " +
