@@ -6,6 +6,10 @@
  *
  * Public surface:
  *   invalidate(idOrSlug, opts, now?) → mark a doc invalid (or clear it via opts.undo)
+ *   projectValidityStatus / selectLiveDocs / withValidityStatus /
+ *   withPreGatedLiveStatus → the READ-surface counterparts (D3's data half): pure,
+ *   store-free helpers a read surface applies so validity is carried as DATA on every
+ *   emitted record instead of being re-derived (or forgotten) per command.
  *
  * @invariant `VALIDITY_ELIGIBLE_TYPES` amended (task-a-task-cannot-be-retracted-
  *   supersedes-emits-a-repair, Defect 2) to ALSO accept `task` — a task had no
@@ -53,8 +57,18 @@
  *   calibration record confirming the probe (`maybeRecordStalenessCalibration`). Bare
  *   `new ValidityService(store)` (no port) writes NONE and never errors — same
  *   optional-DI shape as `GateEnforcer`/`resolveDeclaredAcIds` elsewhere in this codebase.
+ * @invariant The read-surface helpers below are PURE and store-free (side-effect class:
+ *   pure), unlike the class. They live here — beside the sole WRITE path for
+ *   `extra.validity` — because the defect they fix
+ *   (task-an-invalidated-doc-is-indistinguishable-from-a-live-one-in) was exactly that
+ *   validity had a write path and a single human RENDER site but no shared DATA
+ *   projection, so every list-shaped read surface either forgot the D3 exclusion or
+ *   emitted records with no validity-bearing field at all. Keeping the projection in
+ *   the same module as the writer makes "what a read surface must carry" impossible to
+ *   miss when the write shape changes.
  *
- * Side-effect class: IO (reads/writes via StoreInterface; emits telemetry).
+ * Side-effect class: IO for the class (reads/writes via StoreInterface; emits
+ * telemetry); PURE for the four read-surface helpers.
  * Source: SPEC-043 §Design Decisions D1, D2, D5; §Acceptance Criteria AC-MH-2, AC-MH-3,
  *         AC-MH-4, AC-MH-10; SPEC-044 §Design Decisions D12, §Acceptance Criteria AC-SP-9
  */
@@ -64,6 +78,7 @@ import {
   ok,
   extractValidity,
   extractClaim,
+  isInvalidated,
   validitySchema,
   type DocRecord,
   type DocStatus,
@@ -72,6 +87,7 @@ import {
   type ReviewJudgment,
   type Telemetry,
   type TelemetryEvent,
+  type ValidityCarrier,
 } from "@lore/core";
 import { NoOpTelemetry } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -94,6 +110,171 @@ export const VALIDITY_ELIGIBLE_TYPES: ReadonlySet<DocRecord["type"]> = new Set([
   "adr",
   "task",
 ]);
+
+// ─── Read-surface projection (SPEC-043 D3's DATA half) ──────────────────────
+//
+// task-an-invalidated-doc-is-indistinguishable-from-a-live-one-in measured that a
+// RETRACTED doc was byte-identical to a live one in `lore list` (human AND --json),
+// and that `--include-invalid` was SILENTLY INERT there (604 rows both ways, identical
+// slug sets, zero validity-bearing key on any record). Root cause: validity was a
+// RENDERING concern (one human banner in `lore get`) instead of a DATA concern, so
+// (a) a read surface that fetched full records could silently skip the D3 exclusion,
+// and (b) a machine consumer had no field to filter on even when it wanted to.
+// These four helpers are the shared answer: a read surface SELECTS live docs with one
+// named predicate and CARRIES the verdict on every record it emits.
+
+/**
+ * The evaluated validity verdict a read surface attaches to every doc record it
+ * emits — the machine-readable counterpart of `renderValidityBanner`'s human line.
+ *
+ * ⛔ An ABSENT `validity_status` on a payload and a PRESENT one with
+ * `invalidated: false` are DIFFERENT facts: absent means "this surface never probed
+ * validity" (the pre-fix state of every list payload), present means "probed at
+ * `checked_at`, and the answer was live". Never collapse the two — a consumer that
+ * cannot tell them apart is back to guessing, which is the whole defect.
+ */
+export interface ValidityStatus {
+  /** The SSOT `isInvalidated(doc, checked_at)` verdict — never a re-derivation. */
+  invalidated: boolean;
+  /**
+   * The exact instant the verdict was evaluated at (the caller-injected `nowIso`,
+   * never a second wall-clock read). Bi-temporal validity is time-relative, so a
+   * verdict without its instant is unfalsifiable: `invalid_at` in the future means
+   * "live now, invalidated later", and only `checked_at` says which "now" was used.
+   */
+  checked_at: string;
+  /** Present iff `invalidated` — the stored `extra.validity.invalid_at`. */
+  invalid_at?: string;
+  /**
+   * Present iff `invalidated` AND a successor was recorded — the ULID stored in
+   * `extra.validity.invalidated_by`. Named `superseded_by` on this projection (not
+   * `invalidated_by`) because that is the question a consumer asks of a dead doc:
+   * "what do I read instead?". Resolve it with `lore get <ulid>`.
+   */
+  superseded_by?: string;
+  /** Present iff `invalidated` AND a reason was recorded. */
+  reason?: string;
+  /**
+   * Present (`true`) iff `extra.validity` EXISTS but does not parse against
+   * `validitySchema`. The `invalidated` verdict above then rests on unreadable
+   * metadata, not on absent metadata — `extractValidity`'s documented
+   * degrade-to-undefined contract makes those two indistinguishable otherwise, and
+   * a corrupted row silently reading as "live" is the same silence class this whole
+   * projection exists to remove. Advisory only: it never changes the verdict (that
+   * would fork the SSOT predicate), it names it.
+   */
+  metadata_unreadable?: true;
+}
+
+/** A record of type `T` carrying its evaluated {@link ValidityStatus}. */
+export type WithValidityStatus<T> = T & { validity_status: ValidityStatus };
+
+/**
+ * Projects one doc's evaluated validity verdict. Pure — `nowIso` is always injected
+ * (same convention as `isInvalidated`, whose verdict this wraps verbatim).
+ *
+ * @param carrier - A DocRecord-shaped (`extra.validity` nested) or SearchHit-shaped
+ *   (`validity` hoisted) input — the same union {@link isInvalidated} accepts
+ * @param nowIso - The instant to evaluate against; echoed back as `checked_at`
+ * @returns The verdict plus, when invalidated, the stored successor/reason
+ * @example
+ * projectValidityStatus({ extra: {} }, "2026-08-06T00:00:00.000Z");
+ * // => { invalidated: false, checked_at: "2026-08-06T00:00:00.000Z" }
+ * @example
+ * projectValidityStatus(
+ *   { extra: { validity: { invalid_at: "2026-08-01T00:00:00.000Z", invalidated_by: "01K…", reason: "retracted" } } },
+ *   "2026-08-06T00:00:00.000Z",
+ * );
+ * // => { invalidated: true, checked_at: "2026-08-06T…", invalid_at: "2026-08-01T…",
+ * //      superseded_by: "01K…", reason: "retracted" }
+ */
+export function projectValidityStatus(carrier: ValidityCarrier, nowIso: string): ValidityStatus {
+  const validity = carrier.validity !== undefined ? carrier.validity : extractValidity({ extra: carrier.extra ?? {} });
+  // reason: distinguishes "no metadata" from "metadata present but unparseable" —
+  // `extractValidity` returns undefined for BOTH (its documented defensive
+  // contract), so the raw field has to be consulted directly to tell them apart.
+  const rawValidity = carrier.extra?.["validity"];
+  const metadataUnreadable = validity === undefined && rawValidity !== undefined && rawValidity !== null;
+
+  const invalidated = isInvalidated(carrier, nowIso);
+  return {
+    invalidated,
+    checked_at: nowIso,
+    // reason: the three detail fields are emitted ONLY for an invalidated doc — a
+    // live doc's record must not carry a half-populated retraction payload that a
+    // consumer could mistake for a retraction (`invalid_at` alone is legal on a
+    // FUTURE-dated invalidation, which `isInvalidated` correctly reads as live).
+    ...(invalidated && validity?.invalid_at !== undefined ? { invalid_at: validity.invalid_at } : {}),
+    ...(invalidated && validity?.invalidated_by !== undefined ? { superseded_by: validity.invalidated_by } : {}),
+    ...(invalidated && validity?.reason !== undefined ? { reason: validity.reason } : {}),
+    ...(metadataUnreadable ? { metadata_unreadable: true as const } : {}),
+  };
+}
+
+/**
+ * The D3 default exclusion as ONE named predicate application — returns only the docs
+ * that are live at `nowIso`, preserving input order.
+ *
+ * ⛔ Apply this BEFORE paging, never after: `limit`/`offset` pushed into the store and
+ * then filtered here yields a short page (the store bounded the row count before the
+ * exclusion ran). `CorpusService.list`'s own JSDoc documents that residual for its
+ * summary path; a full-record read surface has no reason to inherit it.
+ *
+ * @param docs - Records carrying validity (DocRecord- or SearchHit-shaped)
+ * @param nowIso - The instant to evaluate against
+ * @returns A new array (never mutated in place) of the live records
+ * @example
+ * selectLiveDocs([liveDoc, retractedDoc], nowIso); // => [liveDoc]
+ */
+export function selectLiveDocs<T extends ValidityCarrier>(docs: readonly T[], nowIso: string): T[] {
+  return docs.filter((doc) => !isInvalidated(doc, nowIso));
+}
+
+/**
+ * Attaches the COMPUTED {@link ValidityStatus} to each record — for records that
+ * actually carry the metadata (`extra.validity` or a hoisted `validity`).
+ *
+ * ⛔ Never call this on a projection that CANNOT carry validity (e.g. `DocSummary`,
+ * which has no `extra`): every such record would silently project as
+ * `invalidated: false` on absent-metadata grounds, manufacturing exactly the false
+ * "this is live" signal this projection exists to prevent. Use
+ * {@link withPreGatedLiveStatus} for those, which says in its name that the caller —
+ * not this function — established liveness.
+ *
+ * @param docs - Records carrying validity metadata
+ * @param nowIso - The instant to evaluate against; echoed as each `checked_at`
+ * @returns New objects, spread-copied, each with `validity_status` added
+ */
+export function withValidityStatus<T extends ValidityCarrier>(
+  docs: readonly T[],
+  nowIso: string,
+): WithValidityStatus<T>[] {
+  return docs.map((doc) => ({ ...doc, validity_status: projectValidityStatus(doc, nowIso) }));
+}
+
+/**
+ * Stamps `{ invalidated: false, checked_at: nowIso }` on records a validity-EXCLUDING
+ * query already gated at that SAME instant — the narrow case where the verdict is
+ * sound but the record shape cannot prove it.
+ *
+ * Sole legitimate caller: a surface reading `CorpusService.list(filters, () => nowIso)`
+ * WITHOUT `include_invalid`, whose returned `DocSummary` rows have no `extra` to
+ * re-derive from. That call applies `!isInvalidated(doc, nowIso)` to every row it
+ * returns, so "live at `nowIso`" is entailed by the query contract, not guessed —
+ * but the entailment lives at the CALL SITE, which is why this function is named for
+ * the assumption instead of hiding it inside {@link withValidityStatus}.
+ *
+ * ⛔ Passing records from a query that did NOT exclude invalidated docs makes this
+ * function lie. If you cannot name the excluding query, use
+ * {@link withValidityStatus} on full records instead.
+ *
+ * @param docs - Records already filtered to "live at `nowIso`" by the caller's query
+ * @param nowIso - The SAME instant that query's exclusion was evaluated at
+ * @returns New objects, spread-copied, each with a live `validity_status`
+ */
+export function withPreGatedLiveStatus<T>(docs: readonly T[], nowIso: string): WithValidityStatus<T>[] {
+  return docs.map((doc) => ({ ...doc, validity_status: { invalidated: false, checked_at: nowIso } }));
+}
 
 /** `doc.status` values that were already terminal (workflow-closed) BEFORE an
  *  invalidate call — used only for the task-scoped `task_already_terminal`
