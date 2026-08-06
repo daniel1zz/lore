@@ -247,10 +247,17 @@ describe("repo state — the four anchored module docs", () => {
     const content = readFileSync(join(REPO_ROOT, relPath), "utf8");
     const used = Buffer.byteLength(content, "utf8");
     const floor = moduleByteFloor(budgets);
+    const advisory = Math.ceil(budgets.module.max_bytes * budgets.warn_threshold_fraction);
 
-    // Asserted on the NUMBER, so the failure message names the real margin.
-    expect({ path: relPath, used, floor, ceiling: budgets.module.max_bytes }).toMatchObject({ path: relPath });
+    // Asserted on the per-doc BYTE NUMBER, never on a "0 findings" summary —
+    // the summary was already green while the defect was live.
+    expect(used).toBeGreaterThan(0);
     expect(used).toBeLessThan(floor);
+
+    // "Runway to spare" means below the ADVISORY band too, not merely below the
+    // block: a doc parked between warn and evict is one edit from blocking, and
+    // that is the state this task found four docs in.
+    expect(used).toBeLessThan(advisory);
 
     // ...and the deterministic oracle agrees, from the same measurement seam.
     expect(lintMemoryFiles([{ path: relPath, role: "module", content }], budgets)).toEqual([]);
