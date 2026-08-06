@@ -97,7 +97,7 @@ approved → deprecated
 active → archived | deprecated
 ```
 
-Editing content/title on an `approved` doc resets it to `draft` automatically.
+Editing content/title on an `approved` doc resets it to `draft` automatically — except the ledger knowledge sub-types (`assessment | retro | handoff | uat`), which are re-fast-tracked to `approved` in the SAME write, so an edit logs two versions at one timestamp and never enters the review queue.
 
 ### MDX Placeholder Components (OutlineService)
 
