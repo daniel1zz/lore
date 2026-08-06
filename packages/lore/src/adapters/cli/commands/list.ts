@@ -556,9 +556,7 @@ export default defineCommand({
         // absent-metadata grounds even if the exclusion above had regressed. The
         // pre-gated stamp names that dependency at the call site instead; see
         // `withPreGatedLiveStatus`'s JSDoc for the contract it rests on.
-        console.log(
-          JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs, nowIso), total } }, null, 2),
-        );
+        console.log(JSON.stringify({ ok: true, data: { docs: withPreGatedLiveStatus(docs), total } }, null, 2));
         return;
       }
 

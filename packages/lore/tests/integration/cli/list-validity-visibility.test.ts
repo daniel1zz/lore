@@ -152,7 +152,6 @@ afterAll(() => {
 
 interface ValidityStatusPayload {
   invalidated: boolean;
-  checked_at: string;
   invalid_at?: string;
   superseded_by?: string;
   reason?: string;
@@ -218,8 +217,7 @@ describe("lore list — HAPPY: the default view omits retracted docs and carries
     expect(data.docs.length).toBeGreaterThan(0);
     for (const doc of data.docs) {
       expect(doc.validity_status).toBeDefined();
-      expect(doc.validity_status?.invalidated).toBe(false);
-      expect(typeof doc.validity_status?.checked_at).toBe("string");
+      expect(doc.validity_status).toEqual({ invalidated: false });
     }
   });
 
@@ -383,6 +381,18 @@ describe("lore list / lore get — REGRESSION", () => {
     const paged = listJson(["--type", "task", "--include-invalid", "--limit", String(pageSize)]).docs;
 
     expect(paged).toHaveLength(pageSize);
+  });
+
+  it("two consecutive --json reads over an untouched corpus are BYTE-IDENTICAL", () => {
+    // reason: an earlier revision echoed the evaluation instant onto every record,
+    // which broke this read-idempotence contract (already pinned for --plan-id in
+    // list-plan-membership.test.ts). Pinned HERE too, on the surface that grew the
+    // field, so re-adding a wall-clock stamp fails loudly instead of silently.
+    const first = runLore(["list", "--type", "task", "--include-invalid", "--json"]);
+    const second = runLore(["list", "--type", "task", "--include-invalid", "--json"]);
+
+    expect(first.exitCode).toBe(0);
+    expect(first.stdout).toBe(second.stdout);
   });
 
   it("the default listing's row count equals the corpus count minus the retracted docs", () => {

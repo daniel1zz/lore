@@ -15,16 +15,17 @@
  *               `superseded_by` + `reason`; a live one projects `invalidated: false`
  *   NEGATIVE:   a live record NEVER carries retraction detail fields, and a
  *               FUTURE-dated `invalid_at` reads as live (with no detail leakage)
- *   BOUNDARY:   `invalid_at === checked_at` flips to invalidated (SSOT boundary);
+ *   BOUNDARY:   `invalid_at === nowIso` flips to invalidated (SSOT boundary);
  *               empty input arrays return empty arrays, never undefined
  *   ERROR:      a MALFORMED `extra.validity` is flagged `metadata_unreadable`
  *               instead of silently reading as an ordinary live doc
  *   STATE:      SearchHit-shaped (hoisted `validity`) and DocRecord-shaped
  *               (`extra.validity`) carriers project identically; a
  *               supersede-then-undo shape reports live again
- *   REGRESSION: the helpers never mutate their inputs; `checked_at` is the
- *               INJECTED instant (never a fresh wall-clock read); `validity_status`
- *               is ABSENT-vs-`invalidated:false` distinguishable
+ *   REGRESSION: the helpers never mutate their inputs; the projection carries NO
+ *               wall-clock instant (a `checked_at` field made `lore list --json`
+ *               differ between two consecutive reads); `validity_status` is
+ *               ABSENT-vs-`invalidated:false` distinguishable
  *
  * @spec_ref SPEC-043 §Design Decisions D3;
  *   task-an-invalidated-doc-is-indistinguishable-from-a-live-one-in AC-1, AC-6
@@ -75,17 +76,15 @@ describe("projectValidityStatus — HAPPY", () => {
     const status = projectValidityStatus(retractedDoc("task-dead"), NOW);
 
     expect(status.invalidated).toBe(true);
-    expect(status.checked_at).toBe(NOW);
     expect(status.invalid_at).toBe(EARLIER);
     expect(status.superseded_by).toBe(SUCCESSOR_ID);
     expect(status.reason).toBe("retracted by probe");
   });
 
-  it("projects a live doc as invalidated:false, stamped with the checked instant", () => {
+  it("projects a live doc as invalidated:false and nothing else", () => {
     const status = projectValidityStatus(liveDoc("task-live"), NOW);
 
-    expect(status.invalidated).toBe(false);
-    expect(status.checked_at).toBe(NOW);
+    expect(status).toEqual({ invalidated: false });
   });
 });
 
@@ -123,7 +122,7 @@ describe("projectValidityStatus — NEGATIVE", () => {
 // ─── BOUNDARY ───────────────────────────────────────────────────────────────
 
 describe("projection — BOUNDARY", () => {
-  it("invalid_at exactly equal to checked_at counts as invalidated", () => {
+  it("invalid_at exactly equal to the evaluated instant counts as invalidated", () => {
     const status = projectValidityStatus(retractedDoc("task-edge", { invalid_at: NOW }), NOW);
 
     expect(status.invalidated).toBe(true);
@@ -135,13 +134,13 @@ describe("projection — BOUNDARY", () => {
     const status = projectValidityStatus(retractedDoc("task-edge", { invalid_at: NOW }), justBefore);
 
     expect(status.invalidated).toBe(false);
-    expect(status.checked_at).toBe(justBefore);
+    expect(status.invalid_at).toBeUndefined();
   });
 
   it("empty inputs return empty arrays from every array helper", () => {
     expect(selectLiveDocs([], NOW)).toEqual([]);
     expect(withValidityStatus([], NOW)).toEqual([]);
-    expect(withPreGatedLiveStatus([], NOW)).toEqual([]);
+    expect(withPreGatedLiveStatus([])).toEqual([]);
   });
 
   it("an invalidated doc with NO successor and NO reason still reports invalidated", () => {
@@ -230,18 +229,23 @@ describe("projection — REGRESSION", () => {
 
     selectLiveDocs(docs, NOW);
     withValidityStatus(docs, NOW);
-    withPreGatedLiveStatus(docs, NOW);
+    withPreGatedLiveStatus(docs);
 
     expect(JSON.stringify(docs)).toBe(snapshot);
     expect(Object.keys(docs[0] ?? {})).not.toContain("validity_status");
   });
 
-  it("checked_at is the INJECTED instant, never a fresh wall-clock read", () => {
-    const pinned = "2020-01-01T00:00:00.000Z";
-    const attached = withValidityStatus([liveDoc("a")], pinned);
+  it("carries NO wall-clock instant — two projections of the same doc are deep-equal", () => {
+    // reason: an echoed evaluation instant made `lore list --json` differ between
+    // two consecutive reads over an untouched corpus, breaking the read-idempotence
+    // contract `list-plan-membership.test.ts` pins. The verdict is instant-INJECTED,
+    // never instant-STAMPED.
+    const first = withValidityStatus([liveDoc("a")], NOW)[0]?.validity_status;
+    const second = withValidityStatus([liveDoc("a")], "2031-05-05T00:00:00.000Z")[0]?.validity_status;
 
-    expect(attached[0]?.validity_status.checked_at).toBe(pinned);
-    expect(withPreGatedLiveStatus([liveDoc("b")], pinned)[0]?.validity_status.checked_at).toBe(pinned);
+    expect(first).toEqual(second);
+    expect(Object.keys(first ?? {})).toEqual(["invalidated"]);
+    expect(withPreGatedLiveStatus([liveDoc("b")])[0]?.validity_status).toEqual({ invalidated: false });
   });
 
   it("ABSENT validity_status and PRESENT-with-invalidated:false are distinguishable values", () => {
@@ -251,14 +255,14 @@ describe("projection — REGRESSION", () => {
     const probed = withValidityStatus([liveDoc("a")], NOW)[0];
 
     expect("validity_status" in unprobed).toBe(false);
-    expect(probed?.validity_status).toEqual({ invalidated: false, checked_at: NOW });
+    expect(probed?.validity_status).toEqual({ invalidated: false });
   });
 
   it("withPreGatedLiveStatus stamps a live verdict without inventing detail fields", () => {
     const summaryShaped = { id: "01KZ", slug: "knowledge-x", title: "X" };
-    const stamped = withPreGatedLiveStatus([summaryShaped], NOW);
+    const stamped = withPreGatedLiveStatus([summaryShaped]);
 
-    expect(stamped[0]?.validity_status).toEqual({ invalidated: false, checked_at: NOW });
+    expect(stamped[0]?.validity_status).toEqual({ invalidated: false });
     expect(stamped[0]?.slug).toBe("knowledge-x");
   });
 });

@@ -129,20 +129,24 @@ export const VALIDITY_ELIGIBLE_TYPES: ReadonlySet<DocRecord["type"]> = new Set([
  *
  * ⛔ An ABSENT `validity_status` on a payload and a PRESENT one with
  * `invalidated: false` are DIFFERENT facts: absent means "this surface never probed
- * validity" (the pre-fix state of every list payload), present means "probed at
- * `checked_at`, and the answer was live". Never collapse the two — a consumer that
- * cannot tell them apart is back to guessing, which is the whole defect.
+ * validity" (the pre-fix state of every list payload), present means "probed, and the
+ * answer was live". The field's PRESENCE is the probe signal. Never collapse the two —
+ * a consumer that cannot tell them apart is back to guessing, which is the whole defect.
+ *
+ * ⛔ There is deliberately NO `checked_at`/evaluation-instant field here, and adding
+ * one is a REGRESSION, not an improvement. It was measured: a wall-clock instant echoed
+ * onto every record made `lore list --json` differ between two consecutive runs over an
+ * untouched corpus, breaking the read-idempotence contract pinned by
+ * `tests/integration/cli/list-plan-membership.test.ts` ("two consecutive runs … are
+ * byte-identical"). That determinism is load-bearing for every diff-, cache- and
+ * oracle-shaped consumer. The instant stays an INJECTED PARAMETER of the projection
+ * (never a second clock read) and the stored `invalid_at` travels on the record, so a
+ * consumer that needs to re-evaluate at a different "now" already has everything it
+ * needs — without paying nondeterminism on every read.
  */
 export interface ValidityStatus {
-  /** The SSOT `isInvalidated(doc, checked_at)` verdict — never a re-derivation. */
+  /** The SSOT `isInvalidated(doc, nowIso)` verdict — never a re-derivation. */
   invalidated: boolean;
-  /**
-   * The exact instant the verdict was evaluated at (the caller-injected `nowIso`,
-   * never a second wall-clock read). Bi-temporal validity is time-relative, so a
-   * verdict without its instant is unfalsifiable: `invalid_at` in the future means
-   * "live now, invalidated later", and only `checked_at` says which "now" was used.
-   */
-  checked_at: string;
   /** Present iff `invalidated` — the stored `extra.validity.invalid_at`. */
   invalid_at?: string;
   /**
@@ -175,18 +179,18 @@ export type WithValidityStatus<T> = T & { validity_status: ValidityStatus };
  *
  * @param carrier - A DocRecord-shaped (`extra.validity` nested) or SearchHit-shaped
  *   (`validity` hoisted) input — the same union {@link isInvalidated} accepts
- * @param nowIso - The instant to evaluate against; echoed back as `checked_at`
+ * @param nowIso - The instant to evaluate against. NOT echoed into the result — see
+ *   {@link ValidityStatus}'s no-`checked_at` invariant for the measured reason.
  * @returns The verdict plus, when invalidated, the stored successor/reason
  * @example
  * projectValidityStatus({ extra: {} }, "2026-08-06T00:00:00.000Z");
- * // => { invalidated: false, checked_at: "2026-08-06T00:00:00.000Z" }
+ * // => { invalidated: false }
  * @example
  * projectValidityStatus(
  *   { extra: { validity: { invalid_at: "2026-08-01T00:00:00.000Z", invalidated_by: "01K…", reason: "retracted" } } },
  *   "2026-08-06T00:00:00.000Z",
  * );
- * // => { invalidated: true, checked_at: "2026-08-06T…", invalid_at: "2026-08-01T…",
- * //      superseded_by: "01K…", reason: "retracted" }
+ * // => { invalidated: true, invalid_at: "2026-08-01T…", superseded_by: "01K…", reason: "retracted" }
  */
 export function projectValidityStatus(carrier: ValidityCarrier, nowIso: string): ValidityStatus {
   const validity = carrier.validity !== undefined ? carrier.validity : extractValidity({ extra: carrier.extra ?? {} });
@@ -199,7 +203,6 @@ export function projectValidityStatus(carrier: ValidityCarrier, nowIso: string):
   const invalidated = isInvalidated(carrier, nowIso);
   return {
     invalidated,
-    checked_at: nowIso,
     // reason: the three detail fields are emitted ONLY for an invalidated doc — a
     // live doc's record must not carry a half-populated retraction payload that a
     // consumer could mistake for a retraction (`invalid_at` alone is legal on a
@@ -242,7 +245,8 @@ export function selectLiveDocs<T extends ValidityCarrier>(docs: readonly T[], no
  * not this function — established liveness.
  *
  * @param docs - Records carrying validity metadata
- * @param nowIso - The instant to evaluate against; echoed as each `checked_at`
+ * @param nowIso - The instant to evaluate every record against (one injected instant
+ *   for the whole batch, so a single listing can never straddle two "now"s)
  * @returns New objects, spread-copied, each with `validity_status` added
  */
 export function withValidityStatus<T extends ValidityCarrier>(
@@ -253,27 +257,30 @@ export function withValidityStatus<T extends ValidityCarrier>(
 }
 
 /**
- * Stamps `{ invalidated: false, checked_at: nowIso }` on records a validity-EXCLUDING
- * query already gated at that SAME instant — the narrow case where the verdict is
- * sound but the record shape cannot prove it.
+ * Stamps `{ invalidated: false }` on records a validity-EXCLUDING query already gated —
+ * the narrow case where the verdict is sound but the record shape cannot prove it.
  *
  * Sole legitimate caller: a surface reading `CorpusService.list(filters, () => nowIso)`
  * WITHOUT `include_invalid`, whose returned `DocSummary` rows have no `extra` to
  * re-derive from. That call applies `!isInvalidated(doc, nowIso)` to every row it
- * returns, so "live at `nowIso`" is entailed by the query contract, not guessed —
- * but the entailment lives at the CALL SITE, which is why this function is named for
- * the assumption instead of hiding it inside {@link withValidityStatus}.
+ * returns, so "live" is ENTAILED by the query contract, not guessed — but the
+ * entailment lives at the CALL SITE, which is why this function is named for the
+ * assumption instead of hiding it inside {@link withValidityStatus}.
  *
  * ⛔ Passing records from a query that did NOT exclude invalidated docs makes this
  * function lie. If you cannot name the excluding query, use
  * {@link withValidityStatus} on full records instead.
  *
- * @param docs - Records already filtered to "live at `nowIso`" by the caller's query
- * @param nowIso - The SAME instant that query's exclusion was evaluated at
+ * ⛔ Takes no instant BY DESIGN: it has no verdict to compute (the caller's query
+ * already did), and echoing one would only re-introduce the nondeterminism
+ * {@link ValidityStatus} documents. The caller still pins the exclusion's instant by
+ * injecting it into the query itself.
+ *
+ * @param docs - Records already filtered to "live" by the caller's excluding query
  * @returns New objects, spread-copied, each with a live `validity_status`
  */
-export function withPreGatedLiveStatus<T>(docs: readonly T[], nowIso: string): WithValidityStatus<T>[] {
-  return docs.map((doc) => ({ ...doc, validity_status: { invalidated: false, checked_at: nowIso } }));
+export function withPreGatedLiveStatus<T>(docs: readonly T[]): WithValidityStatus<T>[] {
+  return docs.map((doc) => ({ ...doc, validity_status: { invalidated: false } }));
 }
 
 /** `doc.status` values that were already terminal (workflow-closed) BEFORE an
