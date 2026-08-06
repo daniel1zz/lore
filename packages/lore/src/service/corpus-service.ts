@@ -93,6 +93,18 @@ import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import { isPlanMember } from "./plan-membership.js";
+// reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
+// rule scopes "service" to a store-holding class composed in `app.ts`. These four are
+// the STORE-FREE pure read-surface projection helpers that module also exports, and they
+// are the declared SSOT for "how a read surface carries validity"
+// (task-an-invalidated-doc-is-indistinguishable-from-a-live-one-in). Re-deriving the
+// projection here instead would be the exact SSOT fork that rule's own carve-out warns
+// about ("two JSDocs cited this line to justify duplicating a predicate instead").
+import {
+  selectLiveDocs,
+  withValidityStatus,
+  type WithValidityStatus,
+} from "./validity-service.js";
 
 /**
  * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
@@ -419,9 +431,33 @@ export interface TreeNode {
 }
 
 export interface CorpusStatus {
+  /**
+   * LIVE (non-retracted, non-deleted) document count — see {@link CorpusService.status}'s
+   * own JSDoc for why retracted docs are excluded here and counted in
+   * {@link CorpusStatus.invalid_docs} instead.
+   */
   total_docs: number;
+  /**
+   * How many non-deleted docs are currently RETRACTED (invalidated at the snapshot
+   * instant) and therefore excluded from `total_docs`/`by_type`/`by_status`
+   * (task-validity-landed-on-lore-list-only-the-dispatch-surface, Required #3).
+   *
+   * ⛔ ALWAYS present, `0` when nothing is retracted — never omitted. An omitted count
+   * is the same silence class as the uncounted-retraction defect this field closes, and
+   * it also makes the exclusion PROVABLE from one payload: `total_docs + invalid_docs`
+   * is the count this field's absence used to report. Same "empty is a fact, not absent
+   * data" convention as `invalidated_feeding_source_warnings` below.
+   */
+  invalid_docs: number;
+  /** Live-doc counts per type (retracted docs excluded — see `total_docs`). */
   by_type: Record<string, number>;
+  /** Live-doc counts per workflow status (retracted docs excluded — see `total_docs`). */
   by_status: Record<string, number>;
+  /**
+   * The most recent `updated_at` across ALL non-deleted docs, retracted INCLUDED — this
+   * answers "when did the corpus last change", and a retraction is a change (see
+   * {@link CorpusService.status}'s JSDoc).
+   */
   last_updated: string;
   db_size_bytes: number;
   /**
@@ -2754,16 +2790,42 @@ export class CorpusService {
    * silently excluded from the result rather than erroring the whole query — a single
    * dangling link must not make the entire governed-artifact list unusable.
    *
+   * ## Validity is gated HERE, not at each reader
+   * (task-validity-landed-on-lore-list-only-the-dispatch-surface, Required #6)
+   *
+   * This method used to return `DocSummary` rows, which carry no `extra` — so neither
+   * SPEC-043 D3's default exclusion nor the `validity_status` projection was COMPUTABLE
+   * by its readers, and `lore list --governed-by` was left as the one ungated branch
+   * while every other `lore list` branch was fixed (that residual was named verbatim in
+   * `commands/list.ts`'s header). It now returns FULL records carrying the projection,
+   * and applies the exclusion itself.
+   *
+   * ⛔ The gate lives in this method, not in `commands/list.ts` + `mcp/tools.ts`
+   * separately: those are TWO consumers of one traversal, and a fix landed on one
+   * consumer while the shared seam kept the old behaviour is the exact failure this
+   * whole task family is about. The `include_invalid` opt mirrors {@link list}'s and
+   * {@link search}'s escape so all three read surfaces have ONE shape.
+   *
    * @param skillIdOrSlug - ID or slug of the governing skill doc
-   * @returns `ok({docs, total})` — empty when the skill has no `governs` links, or
-   *   `skillIdOrSlug` doesn't resolve → `DOC_NOT_FOUND`
+   * @param opts - `include_invalid: true` restores retracted governed artifacts
+   *   (excluded by default), mirroring {@link ListFilters.include_invalid}
+   * @param now - Time seam (D3 convention) driving the exclusion AND the projection —
+   *   one injected instant per call, so a single listing can never straddle two "now"s
+   * @returns `ok({docs, total})` where every record carries `validity_status` — empty
+   *   when the skill has no `governs` links; `DOC_NOT_FOUND` when `skillIdOrSlug`
+   *   doesn't resolve
    * @example
    * const result = await corpusService.listGovernedBy("knowledge-write-spec-rules");
    * if (result.ok) console.log(result.value.docs.map((d) => d.slug));
+   * @example
+   * // retracted artifacts too, each flagged `validity_status.invalidated: true`
+   * await corpusService.listGovernedBy("knowledge-write-spec-rules", { include_invalid: true });
    */
   async listGovernedBy(
     skillIdOrSlug: string,
-  ): Promise<Result<{ docs: DocSummary[]; total: number }, LoreError>> {
+    opts?: { include_invalid?: boolean },
+    now: () => string = defaultNow,
+  ): Promise<Result<{ docs: WithValidityStatus<DocRecord>[]; total: number }, LoreError>> {
     const startMs = Date.now();
     const resolveResult = await this.resolve(skillIdOrSlug);
     if (!resolveResult.ok) return resolveResult;
@@ -2775,13 +2837,20 @@ export class CorpusService {
       .filter((link) => link.link_type === "governs")
       .map((link) => link.to_id);
 
-    const docs: DocSummary[] = [];
+    const found: DocRecord[] = [];
     for (const docId of governedIds) {
       const docResult = await this.store.find(docId);
       if (docResult.ok && docResult.value !== null && docResult.value.deleted_at === null) {
-        docs.push(this.toSummary(docResult.value));
+        found.push(docResult.value);
       }
     }
+
+    // Order is load-bearing and mirrors `commands/list.ts::fetchGatedFullDocs`: EXCLUDE
+    // first (unless opted out), then CARRY the verdict on whatever survives. Both steps
+    // come from the shipped SSOT helpers — never a local `extra.validity` inspection.
+    const nowIso = now();
+    const visible = opts?.include_invalid === true ? found : selectLiveDocs(found, nowIso);
+    const docs = withValidityStatus(visible, nowIso);
 
     const result = ok({ docs, total: docs.length });
     this.recordTelemetryEvent("list", startMs, result, {
@@ -4138,8 +4207,28 @@ export class CorpusService {
   /**
    * Aggregate corpus statistics.
    *
-   * @param now - Time seam (D8/D3 convention) — drives the invalidated-feeding-source
-   *   warning below; defaults to `() => new Date().toISOString()`.
+   * ## The counts are LIVE counts, and the retracted count is reported, not dropped
+   * (task-validity-landed-on-lore-list-only-the-dispatch-surface, Required #3)
+   *
+   * MEASURED before this fix: `total_docs`/`by_type`/`by_status` counted RETRACTED docs
+   * as live work. A corpus-health number that silently overstates live work is the same
+   * shape as the readiness inflation this repo has already measured once — and health
+   * numbers are exactly what a team reads to decide whether the corpus is in order.
+   *
+   * ⛔ The retracted docs are EXCLUDED from the three counts and their number is
+   * reported as {@link CorpusStatus.invalid_docs}, never simply dropped: an omitted
+   * count is the same silence class as an uncounted retraction. `invalid_docs` is
+   * ALWAYS present (`0` when nothing is retracted), following
+   * `invalidated_feeding_source_warnings`'s "empty is a fact, not absent data" precedent.
+   *
+   * ⛔ `last_updated` deliberately still spans ALL non-deleted docs, retracted included:
+   * it answers "when did this corpus last CHANGE", and a retraction is a change. Scoping
+   * it to live docs would report a stale instant right after the very write that
+   * retracted the newest doc.
+   *
+   * @param now - Time seam (D8/D3 convention) — drives the live/retracted split of every
+   *   count below AND the invalidated-feeding-source warning, from ONE instant;
+   *   defaults to `() => new Date().toISOString()`.
    */
   async status(now: () => string = defaultNow): Promise<Result<CorpusStatus, LoreError>> {
     const allDocsResult = await this.store.findMany({ exclude_deleted: false });
@@ -4148,10 +4237,20 @@ export class CorpusService {
     const allDocs = allDocsResult.value;
     const activeDocs = allDocs.filter((d) => d.deleted_at === null);
 
+    // ONE instant for the whole snapshot — the count split below and the D8 warning
+    // further down must agree on it (two reads would let a doc be retracted for one and
+    // live for the other within a single `lore status`).
+    const nowIso = now();
+    // The SSOT exclusion helper, not a local `extra.validity` inspection — same predicate
+    // `list`/`search`/`listGovernedBy`/`ready` apply, so "what counts as live" has one
+    // definition across every read surface.
+    const liveDocs = selectLiveDocs(activeDocs, nowIso);
+    const invalidDocs = activeDocs.length - liveDocs.length;
+
     const by_type: Record<string, number> = {};
     const by_status: Record<string, number> = {};
 
-    for (const doc of activeDocs) {
+    for (const doc of liveDocs) {
       by_type[doc.type] = (by_type[doc.type] ?? 0) + 1;
       by_status[doc.status] = (by_status[doc.status] ?? 0) + 1;
     }
@@ -4173,7 +4272,9 @@ export class CorpusService {
     // service's own optional gateEnforcer for per-checkpoint enablement, when wired —
     // absent (bare unit-test construction) degrades to "everything enabled", the same
     // default GateEnforcer/SessionService already apply.
-    const nowIso = now();
+    // reason: keyed over activeDocs (NOT liveDocs) on purpose — the whole point of this
+    // warning is to name a feeding source that IS retracted, so filtering retracted docs
+    // out of the lookup map would make it structurally unable to ever fire.
     const bySlug = new Map(activeDocs.map((d) => [d.slug, d] as const));
     const approvedSkillDocs = activeDocs
       .filter((d) => d.type === "knowledge" && d.status === "approved")
@@ -4208,7 +4309,8 @@ export class CorpusService {
       .map((d) => ({ slug: d.slug }));
 
     return ok({
-      total_docs: activeDocs.length,
+      total_docs: liveDocs.length,
+      invalid_docs: invalidDocs,
       by_type,
       by_status,
       last_updated: lastUpdated,

@@ -83,12 +83,17 @@
  * ignores `include_invalid` on purpose (its JSDoc pins that), so the exclusion has to be
  * applied by the reader.
  *
- * ⛔ NAMED RESIDUAL — `--governed-by` is NOT validity-gated: `CorpusService.listGovernedBy`
- * returns `DocSummary` rows (no `extra`), so neither the exclusion nor the projection is
- * computable here, and fabricating a "live" verdict for them is the exact silence this
- * task removed. Fixing it requires that service method to return full records or carry
- * validity itself — out of this task's declared anchors, deliberately left visible rather
- * than papered over.
+ * ⛔ RESIDUAL CLOSED (task-validity-landed-on-lore-list-only-the-dispatch-surface,
+ * Required #6) — `--governed-by` IS validity-gated now, but NOT by this file.
+ * `CorpusService.listGovernedBy` used to return `DocSummary` rows (no `extra`), so neither
+ * the exclusion nor the projection was computable here; it now returns FULL records
+ * carrying `validity_status` and applies the exclusion ITSELF, behind an `include_invalid`
+ * opt this branch forwards from `--include-invalid`.
+ * ⛔ The gate deliberately lives in the SERVICE method, not here: `lore list` and MCP
+ * `lore_list` are two consumers of one link traversal, and gating only this one would
+ * leave the shared seam carrying the old behaviour. Do NOT "simplify" it back by applying
+ * `selectLiveDocs` in this branch — that would make the exclusion run twice on the CLI
+ * path and zero times on the MCP path if the service call were ever reverted.
  */
 
 import { defineCommand } from "citty";
@@ -226,6 +231,27 @@ export default defineCommand({
         const start = offset ?? 0;
         return limit !== undefined ? docs.slice(start, start + limit) : docs.slice(start);
       }
+      const includeInvalid = args["include-invalid"] === true;
+
+      // reason: the Validity column exists ONLY under --include-invalid — the one
+      // mode where a retracted row can appear at all. Its purpose is AC-4's
+      // "presence never reads as validity": the row is in the table because the
+      // caller asked for retracted docs, and this cell is the independent fact
+      // saying which ones they are. `superseded_by`'s ULID prefix is carried
+      // because "what do I read instead" is the next question, and `resolveDoc`
+      // accepts a unique short prefix verbatim.
+      // ⛔ Declared HERE, above the --governed-by short-circuit, so that branch renders
+      // the SAME badge and the SAME cell as every other full-record branch — before
+      // Required #6 it rendered neither, which under --include-invalid meant a retracted
+      // row appeared in the table with no marker at all.
+      const validityHeaders = (): string[] => (includeInvalid ? ["Validity"] : []);
+      const validityCells = (d: ListedDoc): string[] => {
+        if (!includeInvalid) return [];
+        if (!d.validity_status.invalidated) return ["valid"];
+        const successor = d.validity_status.superseded_by;
+        return [successor !== undefined ? `invalid→${successor.slice(0, 10)}` : "invalid"];
+      };
+
       // --governed-by is a link-table reverse query (skill --governs--> artifact),
       // not a StoreFilters column predicate — it short-circuits to its own dedicated
       // service method (CorpusService.listGovernedBy) rather than joining the
@@ -245,7 +271,13 @@ export default defineCommand({
           return;
         }
 
-        const governedResult = await app.corpusService.listGovernedBy(args["governed-by"]);
+        // reason: `include_invalid` is FORWARDED, never applied here — the service method
+        // owns the exclusion so MCP `lore_list --governed-by` inherits it (Required #6).
+        // ⛔ Forwarding it is what keeps `--include-invalid` from being SILENTLY INERT on
+        // this branch, which is this repo's named fifth false-oracle vector.
+        const governedResult = await app.corpusService.listGovernedBy(args["governed-by"], {
+          include_invalid: includeInvalid,
+        });
         if (!governedResult.ok) {
           process.stderr.write(formatError(governedResult.error) + "\n");
           process.exitCode = exitCode(governedResult.error);
@@ -264,12 +296,13 @@ export default defineCommand({
           console.log(`No documents governed by "${args["governed-by"]}".`);
           return;
         }
-        const headers = ["ID", "Type", "Title", "Status", "Updated"];
+        const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
         const rows = docs.map((d) => [
           d.id.slice(0, 10),
           d.type,
-          d.title.slice(0, 35),
+          `${d.title.slice(0, 35)}${formatValidityBadge(d, nowIso)}`,
           d.status,
+          ...validityCells(d),
           relativeTime(d.updated_at),
         ]);
         console.log(formatTable(headers, rows));
@@ -283,7 +316,8 @@ export default defineCommand({
       if (args.author !== undefined) filters["created_by"] = args.author;
       if (args.since !== undefined) filters["since"] = args.since;
       if (args.tag !== undefined) filters["tags"] = [args.tag];
-      const includeInvalid = args["include-invalid"] === true;
+      // reason: `includeInvalid` itself is declared ABOVE the --governed-by short-circuit
+      // (see its comment there) so that branch shares the same validity renderers.
       if (includeInvalid) filters["include_invalid"] = true;
 
       // Resolve --plan-id slug or ULID → the plan's own DocId, used as a
@@ -342,21 +376,6 @@ export default defineCommand({
         const narrowed = pageInMemory(gatedResult.value.filter((doc) => passesPlanMembership(doc)));
         return ok({ docs: narrowed, total: narrowed.length });
       }
-
-      // reason: the Validity column exists ONLY under --include-invalid — the one
-      // mode where a retracted row can appear at all. Its purpose is AC-4's
-      // "presence never reads as validity": the row is in the table because the
-      // caller asked for retracted docs, and this cell is the independent fact
-      // saying which ones they are. `superseded_by`'s ULID prefix is carried
-      // because "what do I read instead" is the next question, and `resolveDoc`
-      // accepts a unique short prefix verbatim.
-      const validityHeaders = (): string[] => (includeInvalid ? ["Validity"] : []);
-      const validityCells = (d: ListedDoc): string[] => {
-        if (!includeInvalid) return [];
-        if (!d.validity_status.invalidated) return ["valid"];
-        const successor = d.validity_status.superseded_by;
-        return [successor !== undefined ? `invalid→${successor.slice(0, 10)}` : "invalid"];
-      };
 
       // When --phase filter is active, we need full DocRecord rows (extra.phase is not in DocSummary).
       // reason: StoreFilters has no extra-field index; client-side filter is applied after fetch.

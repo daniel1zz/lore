@@ -1384,7 +1384,14 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     // listGovernedBy has no store-level limit/offset param, so paging (incl. the
     // truncation probe) is applied in-memory to its already-fetched result.
     if (governed_by !== undefined) {
-      const governedResult = await corpusService.listGovernedBy(governed_by);
+      // SPEC-043 D3 / task-validity-landed-on-lore-list-only-the-dispatch-surface
+      // Required #6 — `include_invalid` is FORWARDED to the service method, which owns
+      // both the default exclusion and the `validity_status` projection. This branch
+      // applies neither itself: gating it here instead would leave the CLI's
+      // `--governed-by` and this tool derived from one traversal but two policies.
+      const governedResult = await corpusService.listGovernedBy(governed_by, {
+        include_invalid: include_invalid === true,
+      });
       if (!governedResult.ok) return errorContent(governedResult.error);
       const windowed = governedResult.value.docs.slice(offset ?? 0, (offset ?? 0) + probeLimit);
       const truncated = windowed.length > effectiveLimit;

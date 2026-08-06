@@ -15,12 +15,24 @@
  * queue forever. `--include-invalid` restores them, badged `[invalid]` on the
  * Title column (`../pending-render.js::buildPendingTableRows`, the SAME
  * `formatValidityBadge` renderer `lore list --include-invalid` uses).
+ *
+ * Machine-readable validity (task-validity-landed-on-lore-list-only-the-dispatch-surface,
+ * Required #5): the FILTER was already correct here; the DATA was partial — a `--json`
+ * consumer saw a queue whose rows carried a raw `validity` field on some docs and nothing
+ * on others, with no evaluated verdict. Every `--json` record now carries the same
+ * explicit `validity_status` `lore list --json` records carry, via `withValidityStatus`
+ * (`../../../service/validity-service.js`, the SSOT projection).
+ * ⛔ `withValidityStatus`, NOT `withPreGatedLiveStatus`: `PendingDoc` HOISTS `validity`
+ * (see its declaration), so the verdict is genuinely COMPUTABLE per row — which matters
+ * precisely in the `--include-invalid` mode, where the pre-gated helper would stamp every
+ * restored retracted doc as live.
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable } from "../utils.js";
 import { PENDING_TABLE_HEADERS, buildPendingTableRows } from "../pending-render.js";
+import { withValidityStatus } from "../../../service/validity-service.js";
 import type { DocType, ReviewJudgment } from "@lore/core";
 import type { PendingDoc } from "../../../service/review-service.js";
 
@@ -120,13 +132,17 @@ export default defineCommand({
         : docs;
 
       if (args.json) {
+        // reason: ONE instant for the whole queue — a single listing must never straddle
+        // two "now"s (the same rule `lore list`'s single `nowIso` read enforces).
+        const nowIso = new Date().toISOString();
+        const withValidity = withValidityStatus(visibleDocs, nowIso);
         console.log(
           JSON.stringify(
             {
               ok: true,
               data: {
-                docs: visibleDocs.map((d) => ({ ...d, judgment: judgments.get(d.id) ?? null })),
-                total: visibleDocs.length,
+                docs: withValidity.map((d) => ({ ...d, judgment: judgments.get(d.id) ?? null })),
+                total: withValidity.length,
               },
             },
             null,

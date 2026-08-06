@@ -9,6 +9,30 @@
  *   Falls back to flat tree rendering for plans without phases, and for all
  *   non-plan root documents.
  *
+ * ## Validity travels on the `--json` payload too, not only the human badge
+ * (task-validity-landed-on-lore-list-only-the-dispatch-surface, Required #4)
+ *
+ * `lore tree` deliberately does NOT filter retracted docs — a tree is a STRUCTURE view,
+ * and silently dropping a node would misrepresent the hierarchy (SPEC-043 D4: tree
+ * marks, list/search filter). But the mark existed only in the HUMAN render: a
+ * `--json` consumer got a node payload with no validity-bearing key at all, i.e. the
+ * same blindness the parent task removed from `lore list`.
+ *
+ * `buildValidityIndex` is now the ONE derivation for both: it fetches the corpus ONCE
+ * and computes `projectValidityStatus` (`../../../service/validity-service.js` — the
+ * SSOT read-surface projection) per doc. The human badge and the `--json`
+ * `validity_status` key are read off the SAME map, so they can never disagree.
+ *
+ * ⛔ Two properties of that index are load-bearing:
+ *   1. It is corpus-WIDE and type-AGNOSTIC (one `listFull({})`, not three type-scoped
+ *      calls as before). The SSOT predicate never branches on `doc.type`, so scoping the
+ *      index to knowledge/adr/task would have made the tree's verdict differ from the
+ *      predicate's for any other type — and it is strictly FEWER store round trips.
+ *   2. A node whose id is ABSENT from the index gets NO `validity_status` key, never a
+ *      fabricated `{invalidated: false}`. Absent means "this surface never probed it",
+ *      which is a different fact from "probed, and live" — collapsing the two is the
+ *      exact silence this key exists to remove.
+ *
  * Exit codes:
  *   Normal: 0 = success, non-zero on error
  *   --orphans: 0 = no orphans, 3 = orphans found
@@ -24,7 +48,12 @@ import {
   formatWorkflowBadge,
   parsePositiveIntArg,
 } from "../utils.js";
+import {
+  projectValidityStatus,
+  type ValidityStatus,
+} from "../../../service/validity-service.js";
 import type { TreeBlueprint, PlanPhase, DocRecord } from "@lore/core";
+import type { TreeNode } from "../../../service/corpus-service.js";
 
 // ─── Phase Grouping Helpers ───────────────────────────────────────────────────
 
@@ -116,35 +145,65 @@ const ORPHAN_DETECTION_BLUEPRINT: TreeBlueprint = {
 };
 
 /**
- * Builds a DocId → " [invalid]" badge map covering every invalidated
- * knowledge/adr/task doc in the corpus (SPEC-043 D3/D4 — `lore tree` never
- * filters invalidated docs, but must always mark them, unlike search/list
- * which filter by default; `task` added by
- * task-a-task-cannot-be-retracted-supersedes-emits-a-repair, mirroring
- * `ValidityService.VALIDITY_ELIGIBLE_TYPES`). Three `listFull` calls
- * (knowledge + adr + task) regardless of the tree's root type — cheap
- * relative to store round trips this command already makes, and correct for
- * any root (an invalidated node of any of these three types can appear
- * anywhere in the tree, not only under a plan).
+ * The corpus-wide validity index this command's HUMAN badges and its `--json`
+ * `validity_status` key are both read from — two projections of ONE evaluation, so the
+ * rendered table and the machine payload can never disagree.
  */
-async function buildValidityBadges(
+interface ValidityIndex {
+  /** DocId → the SSOT-projected verdict, for every doc the fetch returned. */
+  readonly statusById: Map<string, ValidityStatus>;
+  /** DocId → `" [invalid]"`, containing ONLY the retracted docs (`formatValidityBadge`). */
+  readonly badgeById: Map<string, string>;
+}
+
+/**
+ * Builds the {@link ValidityIndex} (see this file's header for why it is corpus-wide and
+ * type-agnostic, and why an absent entry must stay absent).
+ *
+ * One `listFull({})` — unfiltered because the SSOT projection never branches on
+ * `doc.type`, and a node of ANY type can sit anywhere in the tree. Both outputs are
+ * computed in the SAME pass, off the SAME full `DocRecord` and the SAME instant.
+ *
+ * @param app - The wired App (one `corpusService.listFull` call)
+ * @param nowIso - The single instant every verdict in this command is evaluated against
+ * @returns Both maps; EMPTY when the fetch fails — the tree still renders (a validity
+ *   lookup failure must not abort a structure view) and no node then claims a probed
+ *   verdict, which is honest rather than a fabricated "live"
+ */
+async function buildValidityIndex(
   app: ReturnType<typeof loadLoreApp>["app"],
   nowIso: string,
-): Promise<Map<string, string>> {
-  const badges = new Map<string, string>();
-  const [knowledgeResult, adrResult, taskResult] = await Promise.all([
-    app.corpusService.listFull({ type: "knowledge" }),
-    app.corpusService.listFull({ type: "adr" }),
-    app.corpusService.listFull({ type: "task" }),
-  ]);
-  for (const listResult of [knowledgeResult, adrResult, taskResult]) {
-    if (!listResult.ok) continue;
-    for (const doc of listResult.value.docs) {
-      const badge = formatValidityBadge(doc, nowIso);
-      if (badge !== "") badges.set(doc.id, badge);
-    }
+): Promise<ValidityIndex> {
+  const statusById = new Map<string, ValidityStatus>();
+  const badgeById = new Map<string, string>();
+  const listResult = await app.corpusService.listFull({});
+  if (!listResult.ok) return { statusById, badgeById };
+  for (const doc of listResult.value.docs) {
+    statusById.set(doc.id, projectValidityStatus(doc, nowIso));
+    const badge = formatValidityBadge(doc, nowIso);
+    if (badge !== "") badgeById.set(doc.id, badge);
   }
-  return badges;
+  return { statusById, badgeById };
+}
+
+/**
+ * Returns a structural copy of `node` with each doc carrying its `validity_status` —
+ * the `--json` half of Required #4. Pure; the input tree is never mutated.
+ *
+ * @param node - A `CorpusService.tree` node (its `doc` is a `DocSummary`, which carries
+ *   no `extra`, which is exactly why the verdict must arrive from `index`)
+ * @param index - {@link buildValidityIndex}'s output
+ * @returns The same shape, plus `doc.validity_status` on every node the index knows
+ */
+function withTreeValidity(
+  node: TreeNode,
+  index: Map<string, ValidityStatus>,
+): Record<string, unknown> {
+  const status = index.get(node.doc.id);
+  return {
+    doc: status !== undefined ? { ...node.doc, validity_status: status } : { ...node.doc },
+    children: node.children.map((child) => withTreeValidity(child, index)),
+  };
 }
 
 export default defineCommand({
@@ -263,8 +322,10 @@ export default defineCommand({
       // separately; this is one extra O(1) store read, acceptable for a CLI command.
       const nowIso = new Date().toISOString();
       const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
-      // SPEC-043 D4 — always-shown [invalid] badges, merged into every badges map below.
-      const validityBadges = await buildValidityBadges(app, nowIso);
+      // SPEC-043 D4 — always-shown [invalid] badges AND (Required #4) the `--json`
+      // `validity_status` key, both read off this ONE evaluation.
+      const validity = await buildValidityIndex(app, nowIso);
+      const validityBadges = validity.badgeById;
 
       if (args.root) {
         const fullPlanResult = await app.corpusService.get(args.root);
@@ -286,7 +347,7 @@ export default defineCommand({
                   {
                     ok: true,
                     data: {
-                      ...result.value,
+                      ...withTreeValidity(result.value, validity.statusById),
                       phases: phases.map((phase) => ({
                         name: phase.name,
                         description: phase.description,
@@ -298,6 +359,12 @@ export default defineCommand({
                             title: t.title,
                             status: t.status,
                             updated_at: t.updated_at,
+                            // reason: these rows are hand-built (not `TreeNode`s), so the
+                            // recursive stamper above does not reach them — and they are
+                            // the ONLY view of a plan's tasks a phase-declaring plan's
+                            // `--json` consumer gets. `t` is a full DocRecord here, so the
+                            // verdict is computed from its own `extra`, not looked up.
+                            validity_status: projectValidityStatus(t, nowIso),
                           })),
                       })),
                     },
@@ -328,7 +395,9 @@ export default defineCommand({
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+        console.log(
+          JSON.stringify({ ok: true, data: withTreeValidity(result.value, validity.statusById) }, null, 2),
+        );
         return;
       }
 

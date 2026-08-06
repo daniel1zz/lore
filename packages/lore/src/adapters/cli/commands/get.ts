@@ -43,11 +43,27 @@
  *      is computed from the resolution facts rather than a static key list.
  *   3. BEFORE `formatNavigation` — the notice is about the body just printed, so it sits
  *      adjacent to it, and Navigation stays the footer.
+ *
+ * Machine-readable validity (task-validity-landed-on-lore-list-only-the-dispatch-surface,
+ * Required #4): the `--json` payload carries a top-level `validity_status` — the SAME key
+ * `lore list --json` records carry, from the SAME SSOT projection
+ * (`../../../service/validity-service.js`). Before this, a `--json` consumer of `lore get`
+ * had to parse the rendered banner out of `data.doc.content`'s neighbourhood, or re-derive
+ * validity from `extra` itself.
+ * ⛔ TWO placement rules, deliberately the mirror image of the loss notice's:
+ *   1. The DEFAULT HUMAN render is UNCHANGED — not one byte. SPEC-043's asymmetry (list
+ *      hides, direct address SHOWS) is deliberate and already satisfied for humans by
+ *      `renderDocMarkdown`'s banner; this key is purely the machine half. A test asserts
+ *      the human stdout never contains the literal `validity_status`.
+ *   2. It is stamped INSIDE the `args.json` branch, on the payload — never gated on
+ *      `--raw`, which only controls MDX/banner projection of the BODY and has nothing to
+ *      say about whether a machine may know the doc is retracted.
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatNavigation, formatShortId } from "../utils.js";
+import { projectValidityStatus } from "../../../service/validity-service.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
 import { renderDocMarkdown } from "../../../flows/feed-flow.js";
 import { formatStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
@@ -114,9 +130,13 @@ export default defineCommand({
       }
 
       if (args.json) {
+        // reason: ONE wall-clock read, taken here rather than reused from a wider scope —
+        // this is the only validity evaluation in this command, and `--raw` must not
+        // change it (see placement rule 2 in this file's header).
+        const validityStatus = projectValidityStatus(doc, new Date().toISOString());
         const data = resolvedComponents !== undefined
-          ? { ...result.value, resolved_components: resolvedComponents }
-          : result.value;
+          ? { ...result.value, validity_status: validityStatus, resolved_components: resolvedComponents }
+          : { ...result.value, validity_status: validityStatus };
         console.log(JSON.stringify({ ok: true, data }, null, 2));
         return;
       }
