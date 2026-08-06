@@ -287,6 +287,14 @@ function requireRecordById<T extends JsonDocLike>(records: readonly T[], id: str
  */
 const RETRACTED_FIXTURE_COUNT = 4;
 
+/**
+ * Explicit per-case timeout for the cases below that spawn the CLI three or more times
+ * (`scripts/check-test-budgets.ts`, spec-a-test-case-s-timeout-budget-must-be-declared-
+ * when-its D1 — that oracle judges the DECLARATION, never the number). Sized for four to
+ * five cold `bun run src/index.ts` starts with headroom for a loaded machine.
+ */
+const MULTI_SPAWN_TIMEOUT_MS = 60_000;
+
 const PACK_SECTION_HEADINGS = [
   "## Objective",
   "## Acceptance",
@@ -345,17 +353,21 @@ describe("lore feed task-start — HAPPY control: a LIVE task is served unchange
     expect(r.stdout).not.toContain("invalid_at");
   });
 
-  it("is byte-identical across two consecutive runs (human AND --json)", () => {
-    const humanA = runLore(["feed", "task-start", live.task]);
-    const humanB = runLore(["feed", "task-start", live.task]);
-    expect(humanA.exitCode).toBe(0);
-    expect(humanA.stdout).toBe(humanB.stdout);
+  it(
+    "is byte-identical across two consecutive runs (human AND --json)",
+    () => {
+      const humanA = runLore(["feed", "task-start", live.task]);
+      const humanB = runLore(["feed", "task-start", live.task]);
+      expect(humanA.exitCode).toBe(0);
+      expect(humanA.stdout).toBe(humanB.stdout);
 
-    const jsonA = runLore(["feed", "task-start", live.task, "--json"]);
-    const jsonB = runLore(["feed", "task-start", live.task, "--json"]);
-    expect(jsonA.exitCode).toBe(0);
-    expect(jsonA.stdout).toBe(jsonB.stdout);
-  });
+      const jsonA = runLore(["feed", "task-start", live.task, "--json"]);
+      const jsonB = runLore(["feed", "task-start", live.task, "--json"]);
+      expect(jsonA.exitCode).toBe(0);
+      expect(jsonA.stdout).toBe(jsonB.stdout);
+    },
+    MULTI_SPAWN_TIMEOUT_MS,
+  );
 });
 
 describe("lore feed task-start — ERROR: an unresolvable target is NOT a retraction", () => {
@@ -381,6 +393,10 @@ function statusJson(): StatusPayload {
 }
 
 describe("lore status — BOUNDARY: counts EXCLUDE retracted docs and report them separately", () => {
+  // reason: five CLI spawns behind the `statusJson`/`invalidate` helpers — the budget
+  // oracle counts DIRECT spawn-helper calls only, so it does not flag this case; the
+  // declaration is made anyway because the underlying fact (this case spawns five times)
+  // is what the rule is about.
   it("total_docs moves by EXACTLY the retracted count across a real invalidate, and back on --undo", () => {
     const before = statusJson();
 
@@ -405,7 +421,7 @@ describe("lore status — BOUNDARY: counts EXCLUDE retracted docs and report the
     expect(restored.total_docs).toBe(before.total_docs);
     expect(restored.invalid_docs).toBe(before.invalid_docs);
     expect(restored.by_type["knowledge"]).toBe(before.by_type["knowledge"]);
-  });
+  }, MULTI_SPAWN_TIMEOUT_MS);
 
   it("invalid_docs equals the number of docs actually retracted in this corpus", () => {
     const status = statusJson();
