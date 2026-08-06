@@ -154,11 +154,18 @@ function cjkFixture(charCount: number): string {
 describe("lintMemoryFiles boundary suite (RED — packages/lore/src/service/claude-md-check.ts does not exist yet)", () => {
   const budgets: MemoryFileBudgets = resolveMemoryFileBudgets(undefined);
 
-  it("BOUNDARY (under, both metrics): root file at exactly max_lines-1 lines and max_bytes-1 bytes -> zero findings", async () => {
+  it("BOUNDARY (under, both metrics): root file one unit under BOTH eviction floors -> zero findings", async () => {
     const lintMemoryFiles = await loadLintMemoryFiles();
 
-    const lineCount = budgets.root.max_lines - 1;
-    const byteCount = budgets.root.max_bytes - 1;
+    // task-a-module-claude-md-at-its-byte-ceiling-silently-relocates moved the
+    // lowest DETERMINISTIC boundary down from the ceiling to the eviction
+    // floor, so "under" now means under the floor. The old fixture
+    // (max_lines-1 / max_bytes-1) is retained as the eviction-band control in
+    // `claude-md-eviction-floor.test.ts`; the proposition THIS case pins —
+    // a file below every deterministic boundary produces no findings at all —
+    // is unchanged, only its boundary moved.
+    const lineCount = Math.ceil(budgets.root.max_lines * budgets.evict_threshold_fraction) - 1;
+    const byteCount = Math.ceil(budgets.root.max_bytes * budgets.evict_threshold_fraction) - 1;
     const content = buildFixture(lineCount, byteCount);
     // Self-check: the fixture actually sits at the intended boundary, not
     // some other value the builder silently drifted to.

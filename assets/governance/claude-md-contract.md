@@ -27,6 +27,62 @@ lapses. Passing the ceiling check is not the same as meeting the target —
 treat every ceiling pass as a prompt to look again, not a clean bill of
 health.
 
+## The Eviction Rule — what happens as a file fills up
+
+Every metric has **three bands**, not two. `lore status --check-claude-md`
+prints which band each file is in, and the two band boundaries are config
+values — as with the ceiling, this contract does not repeat the numbers.
+
+| Band | Signal | Who acts |
+|---|---|---|
+| Below the advisory threshold | silent | nobody |
+| Advisory (approaching) | a warning; exit code unaffected | whoever is editing, at their discretion |
+| At or past the **eviction floor** | a deterministic finding; non-zero exit | **the author of the edit that trips it, in that same change** |
+| Over the ceiling | a deterministic breach; non-zero exit | same, but you are now out of room |
+
+**The eviction floor is an obligation, not a notification.** It fails the
+check, the pre-push hook, and the post-edit guard. It fires while the file is
+still *writable*, on purpose: you can land the entry you came to write and
+then evict, so you are never forced to choose between blocking and putting
+the fact somewhere it does not belong.
+
+**Why a third band exists at all.** An advisory nobody is obligated to act on
+does not get acted on. Measured on this repo: four module files sat in the
+advisory band for an unknown number of sessions and the count went *up*, not
+down; one of them had been compressed to two-thirds of its ceiling ten days
+earlier. When a file reaches zero runway, the guard blocks the one *correct*
+write — recording a module's own fact in that module's own file — so the fact
+gets recorded in a *neighbouring* file instead, where nothing reports it as
+misplaced. That is a silent SSOT violation manufactured by the budget itself.
+
+### How to evict
+
+1. Pick a block that the table above already assigns to the corpus —
+   mechanism walkthroughs, per-change narratives, measurements, rejected
+   alternatives. Not the rule it illustrates.
+2. Move it, verbatim, into a corpus doc
+   (`lore create knowledge --sub-type reference`).
+3. Leave **one line** in the memory file: what was evicted, and the slug
+   that now holds it. That pointer must resolve — a pointer to a doc that
+   does not exist is the same defect class as a dangling code anchor.
+4. Keep the rule, drop the story. If a block is load-bearing discipline,
+   compress it to the ⛔ rule and evict the narrative that motivated it.
+
+### What is never the fix
+
+- ⛔ **Do not raise the ceiling or the floor.** The ceiling exists because an
+  unbounded memory file is itself the failure mode; raising it converts a
+  loud block into a slow silent regression.
+- ⛔ **Do not reflow long lines into short ones.** Bytes and lines are
+  measured independently, and files approach the limit on bytes; splitting
+  lines makes the binding metric worse.
+- ⛔ **Do not record the fact in another module's file.** A module's own
+  facts belong in that module's own file. Displacement is invisible to every
+  check here — the check measures saturation, never relocation — so it is
+  the one failure this mechanism cannot catch for you.
+- ⛔ **Do not disable the check for the file you are editing.** The opt-out
+  is global and deliberate; there is no per-file exemption.
+
 ## What Goes In vs What Stays Out
 
 | Category | Example | Home |
@@ -103,10 +159,17 @@ leave the pointer.
 ## Enforcement
 
 `lore status --check-claude-md` is the deterministic oracle for this
-contract's ceiling half — it walks the repo's memory files, measures lines
-and bytes, and reports any file over its ceiling with an exit code a hook can
-act on. It is wired into the pre-push check pair. It does not and cannot
-judge the content boundary above; that half stays advisory, reviewed by
-whoever reads and writes the file.
+contract's budget half — it walks the repo's memory files, measures lines and
+bytes, and reports every file over its ceiling **or past its eviction floor**
+with an exit code a hook can act on. It is wired into the pre-push check pair
+and into the post-edit guard, so a memory-file edit that trips either
+boundary is reported at the moment it happens, not at review time.
+
+It does not and cannot judge the content boundary above, and it cannot detect
+**displacement** — a fact recorded in the wrong module's file measures as
+perfectly healthy on both files. That half stays advisory, reviewed by whoever
+reads and writes the file. When you are blocked from adding to a file, the
+question to ask is "what should leave this file", never "where else could this
+go".
 
 </claude-md-contract>

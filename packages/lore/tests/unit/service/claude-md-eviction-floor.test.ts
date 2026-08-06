@@ -140,8 +140,12 @@ describe("lintMemoryFiles — eviction floor (deterministic, exit-relevant)", ()
 
   it("BOUNDARY: the floor is measured per METRIC — a line-only saturation reports lines, bytes stay silent", () => {
     const lineFloor = Math.ceil(budgets.module.max_lines * budgets.evict_threshold_fraction);
-    // Lines in the eviction band, bytes deliberately far below their own floor.
-    const content = buildFixture(lineFloor, Math.ceil(budgets.module.max_bytes * 0.5));
+    // Lines in the eviction band, bytes deliberately below their own floor
+    // (0.75 of the byte ceiling still comfortably accommodates `lineFloor`
+    // rows of filler, which 0.5 does not).
+    const byteTarget = Math.ceil(budgets.module.max_bytes * 0.75);
+    expect(byteTarget).toBeLessThan(moduleByteFloor(budgets));
+    const content = buildFixture(lineFloor, byteTarget);
     const findings = lintMemoryFiles([{ path: "m/CLAUDE.md", role: "module", content }], budgets);
 
     expect(findings).toHaveLength(1);

@@ -51,6 +51,9 @@ const DEFAULT_BUDGETS = {
   root: { max_lines: 300, max_bytes: 30720 },
   module: { max_lines: 200, max_bytes: 16384 },
   warn_threshold_fraction: 0.9,
+  // task-a-module-claude-md-at-its-byte-ceiling-silently-relocates: the third
+  // band. Advisory (0.9) < deterministic eviction floor (0.97) <= ceiling.
+  evict_threshold_fraction: 0.97,
 };
 
 // ─── HAPPY ──────────────────────────────────────────────────────────────────
@@ -75,6 +78,7 @@ describe("resolveMemoryFileBudgets — HAPPY", () => {
           root: { max_lines: 500, max_bytes: 51200 },
           module: { max_lines: 250, max_bytes: 20480 },
           warn_threshold_fraction: 0.75,
+          evict_threshold_fraction: 0.88,
         },
       },
     });
@@ -84,6 +88,7 @@ describe("resolveMemoryFileBudgets — HAPPY", () => {
       root: { max_lines: 500, max_bytes: 51200 },
       module: { max_lines: 250, max_bytes: 20480 },
       warn_threshold_fraction: 0.75,
+      evict_threshold_fraction: 0.88,
     });
   });
 });
@@ -96,18 +101,30 @@ describe("resolveMemoryFileBudgets — warn_threshold_fraction", () => {
     expect(resolved.warn_threshold_fraction).toBe(0.9);
   });
 
-  it("BOUNDARY: 0 and 1 are both accepted (inclusive range)", () => {
+  it("BOUNDARY: 0 is accepted; the upper bound is now the eviction floor, not 1", () => {
     const lowParsed = LoreConfigSchema.parse({
       project: MINIMAL_PROJECT,
       context: { memory_files: { warn_threshold_fraction: 0 } },
     });
     expect(resolveMemoryFileBudgets(lowParsed).warn_threshold_fraction).toBe(0);
 
-    const highParsed = LoreConfigSchema.parse({
+    // task-a-module-claude-md-at-its-byte-ceiling-silently-relocates: `1` was
+    // accepted while `warn` was the only fraction. It is now refused, because
+    // the band-ordering invariant requires `warn < evict <= 1` — a `warn` of 1
+    // would sit ABOVE the deterministic eviction floor, making the advisory
+    // band unreachable and letting a file jump from silent straight to a block.
+    // (A `warn` of 1 was already a useless setting: it warns only at 100% used,
+    // which is precisely the no-runway-signal state the field was added to fix.)
+    const atOne = contextConfigSchema.safeParse({ memory_files: { warn_threshold_fraction: 1 } });
+    expect(atOne.success).toBe(false);
+
+    // Positive control: the real upper bound is "strictly below evict", so a
+    // high `warn` IS accepted when the floor is raised to match.
+    const highPaired = LoreConfigSchema.parse({
       project: MINIMAL_PROJECT,
-      context: { memory_files: { warn_threshold_fraction: 1 } },
+      context: { memory_files: { warn_threshold_fraction: 0.99, evict_threshold_fraction: 1 } },
     });
-    expect(resolveMemoryFileBudgets(highParsed).warn_threshold_fraction).toBe(1);
+    expect(resolveMemoryFileBudgets(highPaired).warn_threshold_fraction).toBe(0.99);
   });
 
   it("NEGATIVE: a value outside [0, 1] is rejected by contextConfigSchema", () => {
