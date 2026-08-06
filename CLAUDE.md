@@ -144,7 +144,8 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - A full-suite verdict requires a CLEAN tree at a named commit.
 - A new deterministic gate retroactively invalidates the back-catalog — budget the sweep + a written exemption in the SAME slice. `knowledge-retro-a-newly-built-gate-leaves-every-pre-existing`
 - A backgrounded oracle's completion notice reports the SHELL's exit code — persist `$?` and read it back; a ceiling kill reports 143. `knowledge-a-backgrounded-command-s-completion-notice-reports`
-- Human renders are lossy projections: `lore get` omits structured `extra`, and list columns truncate — key on the ID. `knowledge-lore-get-s-human-view-hides-extra-issue-report-so-a`
+- Human renders are lossy projections, and announcing the loss at ONE consumer leaves the shared seam lossy; list columns also truncate — key on the ID. `knowledge-lore-get-s-human-view-hides-extra-issue-report-so-a`
+- Marker censuses over a self-documenting corpus over-match: anchor structurally + require a second independent condition. `knowledge-the-substring-matcher-lesson-has-a-mirror-face-over`
 
 ### AI Default Behavior by Caller Surface (SPEC-024)
 
