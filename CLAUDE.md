@@ -148,6 +148,8 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - Marker censuses over a self-documenting corpus over-match: anchor structurally + require a second independent condition. `knowledge-the-substring-matcher-lesson-has-a-mirror-face-over`
 - Before blaming a red suite on the diff: timeouts ≠ assertion mismatches, check isolation, read MEMORY not load average. `knowledge-load-average-is-the-wrong-instrument-for-is-this-red`
 - A threshold armed by one agent is calibrated against ITS base — a concurrent peer merge invalidates it, so re-run every armed gate on the merged tree AFTER the rebuild. `knowledge-a-newly-armed-threshold-is-calibrated-against-the`
+- ⛔ An EMPTY output artifact is the same shape as a clean one — assert a positive trace of execution, and never put a `cd` in front of a measurement (zoxide shims it; `&&` then short-circuits silently). Seventh false-oracle vector. `knowledge-three-of-lore-s-own-outputs-misled-this-session-a`
+- ⛔ `lore set <plan> --status archived` evaluates NO gate and cascade-archives non-terminal children irreversibly — `lore done`'s hint that it does is false. Same doc.
 
 ### AI Default Behavior by Caller Surface (SPEC-024)
 
