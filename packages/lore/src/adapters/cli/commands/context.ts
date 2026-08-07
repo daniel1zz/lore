@@ -166,10 +166,10 @@ function buildRealFsPort(repoRoot: string): FsWritePort {
  * skeleton placeholder" (D3).
  *
  * @param budgets - This invocation's already-resolved
- *   {@link resolveContextMemoryFileBudgets} value — threaded in rather than
- *   re-resolved here so a single `lore context init` call has exactly ONE
- *   budgets resolution locus (AC-CTX-8), shared with the `runContextInit`
- *   call this function's caller makes right after.
+ *   `resolveMemoryFileBudgetsFromConfigResult(...).budgets` value — threaded
+ *   in rather than re-resolved here so a single `lore context init` call has
+ *   exactly ONE budgets resolution locus (AC-CTX-8), shared with the
+ *   `runContextInit` call this function's caller makes right after.
  */
 async function resolveInitNarrative(
   fsPort: FsWritePort,
@@ -278,7 +278,8 @@ export default defineCommand({
     // ONE config load + budgets resolution per invocation (AC-CTX-8) — reused
     // below by `init`'s AI-orchestration config needs (`config?.ai?.*`) as well
     // as by both verbs' `ContextFlowDeps.budgets` and `resolveInitNarrative`'s
-    // facts collection. See `resolveContextMemoryFileBudgets`'s own doc.
+    // facts collection. Resolution rules live in `@lore/core`'s
+    // `resolveMemoryFileBudgetsFromConfigResult` — see its doc.
     const configResult = loadConfig(repoRoot);
     const config = configResult.ok ? configResult.value : undefined;
     const budgetResolution = resolveMemoryFileBudgetsFromConfigResult(configResult);
