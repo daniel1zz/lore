@@ -1,12 +1,20 @@
 /**
- * @spec_ref task-a-task-cannot-be-retracted-supersedes-emits-a-repair, Defect 1
+ * @spec_ref task-a-task-cannot-be-retracted-supersedes-emits-a-repair, Defect 1;
+ *   task-mcp-lore-create-supersedes-still-creates-then-fails-the (precheck later
+ *   hoisted out of this command and into the shared flow — see below)
  *
  * Tests for `lore create <type> --supersedes <target>`'s up-front type
- * precondition (`commands/create.ts`'s `SUPERSEDE_CREATE_ELIGIBLE_TYPES`
- * check) — the pre-fix bug measured a doc CREATED then a repair command
+ * precondition — the pre-fix bug measured a doc CREATED then a repair command
  * naming the exact invalidate call that had just failed for a structural
  * reason (target type outside knowledge/adr) no retry could change. The fix
- * validates the target's type BEFORE any write.
+ * validates the target's type BEFORE any write. That check (the
+ * `SUPERSEDE_CREATE_ELIGIBLE_TYPES` constant) originally lived in
+ * `commands/create.ts` itself; task-mcp-lore-create-supersedes-still-creates-
+ * then-fails-the moved it into `flows/supersede-flow.ts`'s `createWithSupersedes`
+ * (the CLI's local copy meant MCP, which already called that shared function
+ * directly, never inherited the check) — this file's assertions are unaffected
+ * (still CLI-surface exit-code + doc-count behavior), only the constant's home
+ * moved.
  *
  * Strategy mirrors `cli-create.bun.test.ts`: run the real `create.js`
  * command's `run()` handler in-process against a throwaway `.lore/lore.db`
@@ -26,8 +34,8 @@
  *   ERROR:      the refusal names the offending type in stderr
  *   STATE:      doc count is asserted via a real second App read, not a
  *               parsed stdout heuristic
- *   REGRESSION: an ADR target ALSO still works (SUPERSEDE_CREATE_ELIGIBLE_TYPES
- *               covers BOTH knowledge and adr, not just one)
+ *   REGRESSION: an ADR target ALSO still works (the eligible-types set covers
+ *               BOTH knowledge and adr, not just one)
  */
 
 import { describe, it, expect, vi } from "vitest";
