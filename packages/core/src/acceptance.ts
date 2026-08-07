@@ -9,13 +9,18 @@
  *     carries an optional `timeout_ms`, consumed by `lore verify`'s spawn executor —
  *     SPEC-039 §2 D9)
  *   - specAcceptanceCriteriaSchema — spec.extra.acceptance_criteria array (max 50, unique id)
- *   - computeAcCoverage(criteria, tasks) — pure pass/fail(+attested) aggregation over
- *     tasks' evidence (single-pass over tasks/evidence — SPEC-070 AC-070-17, review
+ *   - computeAcCoverage(criteria, tasks) — pure pass/fail/falsified(+attested) aggregation
+ *     over tasks' evidence (single-pass over tasks/evidence — SPEC-070 AC-070-17, review
  *     finding F10: evidence is extracted+bucketed by ac_ref ONCE, not re-walked once
- *     per criterion)
+ *     per criterion; `falsified` is the fourth coverage dimension added by
+ *     spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1, computed in
+ *     the SAME pass, no second traversal)
  *   - AcCoverageFact / EvidenceRefLite — computeAcCoverage's output row shapes
  *   - deriveAcCoverageState(fact) — the ONE fail-first coverage-precedence derivation
- *     (SPEC-070 AC-070-12, review finding F3) every rendering consumer shares
+ *     (SPEC-070 AC-070-12, review finding F3) every rendering consumer shares, now
+ *     including `pass_unfalsified` (spec-oracle-tier-falsifiability-a-criterion-never-
+ *     observed-red M1) inserted between `attested_pass` and `pass` so an attested pass
+ *     never degrades
  *   - isAcInDeclaredScope(declaredScope, acId) — the ONE declared-`ac_scope`
  *     membership predicate (adr-lore-verify-s-attested-evidence-scope-belongs-to-the-task
  *     §Public Interface), consumed by `lore verify`'s selection + refusals
@@ -231,6 +236,44 @@ export interface AcCoverageFact {
   attested_pass: number;
   /** Subset of `fail` whose evidence carries runner attestation (SPEC-039 §2 D8). */
   attested_fail: number;
+  /**
+   * The fourth coverage dimension (spec-oracle-tier-falsifiability-a-criterion-never-
+   * observed-red M1, governed by adr-falsifiability-moves-from-the-task-tier-to-the-
+   * oracle-tier): count of `ac_ref` rows whose `result` is `"expected-fail"` or
+   * `"fail"` — i.e. this oracle was, at least once, OBSERVED to be able to go red.
+   * Computed in the same single pass over `refs` that derives `pass`/`fail`/
+   * `attested_pass`/`attested_fail` above — no second traversal, no new store
+   * round-trip. Always present (never omitted), including `0` for a criterion with
+   * evidence but no red observation, and for a criterion with no evidence at all
+   * (matching the "always-present" convention `pass`/`fail`/`attested_*` already use).
+   *
+   * This mechanism answers the three questions
+   * adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the requires every new
+   * deterministic mechanism to answer in its own doc or JSDoc:
+   *
+   * - **Proxy**: `falsified > 0` proves this oracle CAN go red — a proxy for, not
+   *   proof of, "this oracle correctly discriminates the feature it claims to test".
+   *   Concrete input satisfying the proxy while violating the property: an author
+   *   records one `expected-fail` row against a throwaway, unrelated-to-the-criterion
+   *   assertion (e.g. `expect(false).toBe(true)`), then restores the real assertion —
+   *   `falsified` reads `1`, yet the real oracle body was never shown to be able to
+   *   fail. Named, load-bearing, and explicitly ACCEPTED by the governing ADR ("M1
+   *   proves an oracle CAN fail, never that it fails on the RIGHT input... Mutation-
+   *   based discrimination proof was considered and rejected for this slice").
+   * - **Silence**: `falsified === 0` is a real, computed zero — never conflated with
+   *   "not measured". It renders as a state DISTINCT from plain `"pass"` (see
+   *   {@link deriveAcCoverageState}'s `"pass_unfalsified"`) rather than silently
+   *   collapsing into the same value as a criterion that WAS observed red. An absent
+   *   `refs` array (`pass === 0`) and a present-but-never-red one (`pass > 0`,
+   *   `falsified === 0`) are two different, distinguishable readings.
+   * - **Opt-in**: unconditional — every criterion with ≥1 evidence entry gets a
+   *   `falsified` count with no author action required, and the derived state is
+   *   REPORT-ONLY (governing ADR §"Report-only first…"): nothing gates or blocks on
+   *   it, so it binds the whole corpus (82.0% of 700 criteria measured
+   *   `pass_unfalsified` on 2026-08-07) without constraining anyone who hasn't opted
+   *   into a future blocking form.
+   */
+  falsified: number;
 }
 
 /**
@@ -244,8 +287,8 @@ export interface AcCoverageFact {
  * @param tasks - Task documents whose `extra.verification_evidence[]` may carry
  *   `ac_ref` pointers into `criteria` (typically a plan's child tasks)
  * @returns One {@link AcCoverageFact} per input criterion, in input order. An empty
- *   `tasks` array yields `{pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0}`
- *   for every criterion — never throws, never omits a declared criterion.
+ *   `tasks` array yields `{pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0,
+ *   falsified: 0}` for every criterion — never throws, never omits a declared criterion.
  *
  * @example
  * computeAcCoverage(
@@ -254,7 +297,7 @@ export interface AcCoverageFact {
  * );
  * // => [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0,
  * //      refs: [{ task_id: "...", result: "pass", attested: true }],
- * //      attested_pass: 1, attested_fail: 0 }]
+ * //      attested_pass: 1, attested_fail: 0, falsified: 0 }]
  *
  * @remarks Single-pass over `tasks`/their evidence (SPEC-070 AC-070-17, review
  *   finding F10) — the PREVIOUS implementation re-called `extractEvidence(task)`
@@ -265,7 +308,10 @@ export interface AcCoverageFact {
  *   output is unchanged (same refs, same order: tasks then their evidence entries,
  *   in input order) for every criterion, declared or not — an `ac_ref` naming an
  *   UNDECLARED id still lands in the map but is never read back out (D6's "silently
- *   excluded from every AcCoverageFact" contract, preserved).
+ *   excluded from every AcCoverageFact" contract, preserved). `falsified` (the
+ *   fourth coverage dimension, spec-oracle-tier-falsifiability-a-criterion-never-
+ *   observed-red M1) is read from the SAME per-criterion `refs` bucket the other
+ *   four counts already read — no additional pass over `tasks`.
  */
 export function computeAcCoverage(
   criteria: AcceptanceCriterion[],
@@ -298,6 +344,7 @@ export function computeAcCoverage(
       refs,
       attested_pass: refs.filter((r) => r.result === "pass" && r.attested === true).length,
       attested_fail: refs.filter((r) => r.result === "fail" && r.attested === true).length,
+      falsified: refs.filter((r) => r.result === "expected-fail" || r.result === "fail").length,
     };
   });
 }
@@ -315,6 +362,12 @@ export function computeAcCoverage(
  * FAIL-FIRST (the deliberate semantic fix this function codifies, not a
  * refactor-only extraction): a criterion with BOTH failing AND passing evidence is
  * `"fail"` — a loud failure signal always wins over any pass, attested or not.
+ * `"pass_unfalsified"` (spec-oracle-tier-falsifiability-a-criterion-never-observed-red
+ * M1) is checked AFTER `attested_pass` and BEFORE the plain `"pass"` fallback — so a
+ * criterion with an attested pass NEVER degrades to `"pass_unfalsified"` even when it
+ * was also never observed red (AC-FALS-3); only a NON-attested pass with zero
+ * falsified evidence reads as `"pass_unfalsified"` instead of plain `"pass"`
+ * (AC-FALS-2).
  * Before this function existed, two INDEPENDENT precedence implementations
  * disagreed: `commands/ac.ts`'s `coverageBadge` was already fail-first (checked
  * `fact.fail > 0` before `fact.pass > 0`), but `task-feed-wiring.ts`'s
@@ -324,16 +377,28 @@ export function computeAcCoverage(
  *
  * @param fact - One {@link computeAcCoverage} output row for a single criterion.
  * @returns `"fail"` (`fact.fail > 0`) \> `"attested_pass"` (no fail, `fact.attested_pass > 0`)
- *   \> `"pass"` (no fail, `fact.pass > 0`, no attested pass) \> `"none"` (no evidence at all).
+ *   \> `"pass_unfalsified"` (no fail, no attested pass, `fact.pass > 0` AND
+ *   `fact.falsified === 0` — green, but never observed to be able to go red;
+ *   spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1)
+ *   \> `"pass"` (no fail, no attested pass, `fact.pass > 0`, `fact.falsified > 0`)
+ *   \> `"none"` (no evidence at all).
  * @example
- * deriveAcCoverageState({ ac_id: "AC-1", mode: "script", pass: 1, fail: 1, refs: [], attested_pass: 0, attested_fail: 0 });
+ * deriveAcCoverageState({ ac_id: "AC-1", mode: "script", pass: 1, fail: 1, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 });
  * // => "fail" — a fail always wins, even alongside a pass
+ * @example
+ * deriveAcCoverageState({ ac_id: "AC-2", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 });
+ * // => "pass_unfalsified" — green, but this oracle was never observed to be able to fail
+ * @example
+ * deriveAcCoverageState({ ac_id: "AC-3", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 1, attested_fail: 0, falsified: 0 });
+ * // => "attested_pass" — an attested pass never degrades to "pass_unfalsified" (AC-FALS-3),
+ * //    even though falsified is also 0 here — attested_pass is checked first
  */
 export function deriveAcCoverageState(
   fact: AcCoverageFact,
-): "fail" | "attested_pass" | "pass" | "none" {
+): "fail" | "attested_pass" | "pass_unfalsified" | "pass" | "none" {
   if (fact.fail > 0) return "fail";
   if (fact.attested_pass > 0) return "attested_pass";
+  if (fact.pass > 0 && fact.falsified === 0) return "pass_unfalsified";
   if (fact.pass > 0) return "pass";
   return "none";
 }

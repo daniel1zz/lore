@@ -30,6 +30,15 @@
  *   fail open on any undocumented verdict.
  * With --json: output check result(s) as a JSON envelope.
  *
+ * The PLAIN run (no --check-* flag) additionally reports, UNCONDITIONALLY and
+ * report-only (spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1
+ * surfacing, AC-FALS-6/10): a corpus-wide `pass_unfalsified_count` (criteria that
+ * are green but were never once observed able to go red — `deriveAcCoverageState`,
+ * `@lore/core`), and an `unclaimed_oracle` report (M3 — a `-t`/`--testNamePattern`
+ * value present in a repo test file that no declared AC binds, via `scripts/check-
+ * unclaimed-oracle.ts`'s exported pure functions). ⛔ NEITHER may change
+ * `process.exitCode` — see `collectFalsifiabilitySignals`'s own JSDoc.
+ *
  * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
  * early-exits the process anymore; both are value-returning, combined at the end):
  *
@@ -54,8 +63,12 @@
  */
 
 import { defineCommand } from "citty";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
+import type { AcService } from "../../../service/ac-service.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
 import {
@@ -70,6 +83,7 @@ import {
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import {
+  deriveAcCoverageState,
   formatMemoryFileBudgetSubstitution,
   ok,
   resolveDriftEnabled,
@@ -450,6 +464,181 @@ function renderHeadroomLine(report: HeadroomReport): void {
  */
 function resolveClaudeMdBudgets(cwd: string): MemoryFileBudgetResolution {
   return resolveMemoryFileBudgetsFromConfigResult(loadConfig(cwd));
+}
+
+// ── Falsifiability surfacing (spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1 surfacing) ──
+
+/**
+ * `App.acService` is typed optional only to keep pre-existing hand-built App test
+ * stubs compiling — mirrors `commands/ac.ts::requireAcService`'s own JSDoc.
+ * `loadLoreApp()` (this command's only App source) always returns a fully-wired
+ * App from `createApp`, so this assertion never actually fires in the CLI.
+ */
+function requireAcServiceForStatus(app: ReturnType<typeof loadLoreApp>["app"]): AcService {
+  if (app.acService === undefined) {
+    throw new Error("Internal error: AcService not wired on App");
+  }
+  return app.acService;
+}
+
+/**
+ * Corpus-wide `pass_unfalsified` coverage-state count (AC-FALS-6) PLUS every
+ * declared script-mode AC command (fed to {@link runUnclaimedOracleCheck} below) —
+ * ONE spec iteration serves both, since `AcService.listCriteria` already returns
+ * both `criteria` (declared, always present) and `coverage` (evidence facts,
+ * `null` when no plan / no ad-hoc-governed task exists at all) per spec.
+ *
+ * ⛔ Consumes `deriveAcCoverageState` (`@lore/core`) — the SAME SSOT
+ * `commands/ac.ts::coverageBadge` reads — never re-derives the fail-first
+ * precedence or re-counts `falsified` here; that is the ONE precedence site this
+ * codebase shares (see `acceptance.ts`'s own module header) and a second copy is
+ * exactly the SSOT fork this codebase has been bitten by before.
+ *
+ * Report-only (governing spec's §Out-of-scope "Blocking on pass_unfalsified" —
+ * 574/700 existing criteria are grandfathered by that WRITTEN exemption, never by
+ * a synthesized red run): the caller MUST NOT let either returned number influence
+ * `process.exitCode`.
+ */
+async function collectFalsifiabilitySignals(
+  app: ReturnType<typeof loadLoreApp>["app"],
+): Promise<Result<{ passUnfalsifiedCount: number; declaredScriptCommands: string[] }, LoreError>> {
+  const acService = requireAcServiceForStatus(app);
+  const specsResult = await app.corpusService.list({ type: "spec" });
+  if (!specsResult.ok) return specsResult;
+
+  let passUnfalsifiedCount = 0;
+  const declaredScriptCommands: string[] = [];
+
+  for (const specSummary of specsResult.value.docs) {
+    const listResult = await acService.listCriteria(specSummary.slug);
+    if (!listResult.ok) return listResult;
+
+    for (const criterion of listResult.value.criteria) {
+      if (criterion.verify.mode === "script") {
+        declaredScriptCommands.push(criterion.verify.command);
+      }
+    }
+
+    if (listResult.value.coverage !== null) {
+      for (const fact of listResult.value.coverage) {
+        if (deriveAcCoverageState(fact) === "pass_unfalsified") {
+          passUnfalsifiedCount += 1;
+        }
+      }
+    }
+  }
+
+  return ok({ passUnfalsifiedCount, declaredScriptCommands });
+}
+
+/**
+ * Narrow hand-typed surface of `scripts/check-unclaimed-oracle.ts`'s exports this
+ * command consumes — the SAME two functions `tests/unit/service/unclaimed-
+ * oracle.test.ts` already imports this exact way (a dynamic import with a
+ * NON-literal specifier, see {@link resolveUnclaimedOracleScriptPath}'s own
+ * JSDoc for why a static `import` cannot be used here).
+ */
+type UnclaimedOracleCheckModule = {
+  collectRepoTestFiles: (repoRoot: string) => Array<{ path: string; content: string }>;
+  findUnclaimedOracleValues: (
+    testFiles: readonly { path: string; content: string }[],
+    declaredCommands: readonly string[],
+  ) => {
+    readonly scannedTestFiles: number;
+    readonly scannedCandidateValues: number;
+    readonly scannedDeclaredCommands: number;
+    readonly scannedClaimedBindings: number;
+    readonly findings: readonly { readonly file: string; readonly value: string }[];
+  };
+};
+
+/**
+ * Locates `scripts/check-unclaimed-oracle.ts` on disk relative to however THIS
+ * command's own module is currently running:
+ *  - SOURCE entry (`bun run packages/lore/src/index.ts ...`) — `import.meta.url` is
+ *    a real file path; walk up from this file's own directory to the repo root.
+ *  - COMPILED `dist/lore` binary — `import.meta.url` resolves to a synthetic
+ *    `bunfs://`-shaped path, unusable for relative resolution; `process.execPath`
+ *    instead gives the REAL on-disk path of the running executable, and this
+ *    project's own `bun run build` always lays it out at `<repoRoot>/dist/lore` —
+ *    empirically confirmed a compiled bun binary CAN `await import()` an external
+ *    sibling `.ts` file resolved this way (no bundling required; resolved fresh
+ *    off disk at runtime, so no staleness risk either).
+ *
+ * Returns `undefined` when NEITHER candidate exists on disk — e.g. a `lore`
+ * install with no companion source checkout — so the caller degrades gracefully
+ * instead of throwing: M3 is a lore-monorepo-only dogfooding mechanism (it scans
+ * THIS repo's OWN `packages/*\/tests/**` convention), opt-in by presence, never a
+ * hard requirement for `lore status` to run.
+ */
+function resolveUnclaimedOracleScriptPath(): string | undefined {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sourceCandidate = join(here, "..", "..", "..", "..", "..", "..", "scripts", "check-unclaimed-oracle.ts");
+  if (existsSync(sourceCandidate)) return sourceCandidate;
+
+  const compiledCandidate = join(dirname(dirname(process.execPath)), "scripts", "check-unclaimed-oracle.ts");
+  if (existsSync(compiledCandidate)) return compiledCandidate;
+
+  return undefined;
+}
+
+/** `lore status --json`'s `unclaimed_oracle` payload shape (AC-FALS-10). */
+interface UnclaimedOracleStatusPayload {
+  available: boolean;
+  scanned_test_files: number;
+  scanned_candidate_values: number;
+  scanned_declared_commands: number;
+  scanned_claimed_bindings: number;
+  findings: Array<{ file: string; value: string }>;
+}
+
+/**
+ * Runs the M3 unclaimed-oracle cross-reference (AC-FALS-8/10) against
+ * `declaredScriptCommands` (every spec-declared script-mode AC command in the
+ * CURRENT corpus, gathered by {@link collectFalsifiabilitySignals}) and every test
+ * file under `process.cwd()`'s own `packages/*\/tests/**`/`scripts/**` convention.
+ *
+ * ⛔ Consumes `collectRepoTestFiles`/`findUnclaimedOracleValues` from
+ * `scripts/check-unclaimed-oracle.ts` verbatim — never re-implements the file scan
+ * or the cross-reference match. Loaded via a NON-literal dynamic `import()`
+ * specifier (the SAME technique `tests/unit/service/unclaimed-oracle.test.ts`
+ * already establishes): `scripts/` sits outside `packages/lore/tsconfig.json`'s
+ * declared `rootDir` ("src"), so a STATIC import fails `tsc --noEmit -p
+ * packages/lore/tsconfig.json` with TS6059 — empirically confirmed a computed
+ * (non-literal) specifier sidesteps tsc's static module-graph inclusion entirely.
+ *
+ * Report-only, never throws: `declaredCommands` is supplied by the caller from the
+ * ALREADY-open corpus (never re-fetched via a `lore` subprocess), so this function
+ * never reaches that module's own `LoreInvocationError` path
+ * (`collectDeclaredAcCommands`-only, unused here).
+ */
+async function runUnclaimedOracleCheck(
+  declaredScriptCommands: readonly string[],
+): Promise<UnclaimedOracleStatusPayload> {
+  const scriptPath = resolveUnclaimedOracleScriptPath();
+  if (scriptPath === undefined) {
+    return {
+      available: false,
+      scanned_test_files: 0,
+      scanned_candidate_values: 0,
+      scanned_declared_commands: 0,
+      scanned_claimed_bindings: 0,
+      findings: [],
+    };
+  }
+
+  const mod = (await import(scriptPath)) as UnclaimedOracleCheckModule;
+  const testFiles = mod.collectRepoTestFiles(process.cwd());
+  const report = mod.findUnclaimedOracleValues(testFiles, declaredScriptCommands);
+
+  return {
+    available: true,
+    scanned_test_files: report.scannedTestFiles,
+    scanned_candidate_values: report.scannedCandidateValues,
+    scanned_declared_commands: report.scannedDeclaredCommands,
+    scanned_claimed_bindings: report.scannedClaimedBindings,
+    findings: report.findings.map((f) => ({ file: f.file, value: f.value })),
+  };
 }
 
 export default defineCommand({
@@ -947,6 +1136,20 @@ export default defineCommand({
       // SPEC-058 §Scope — discoverability for existing corpora (config-only, no IO).
       const verificationProfileKinds = configuredVerificationProfileKinds(config);
 
+      // spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1 surfacing
+      // (AC-FALS-6/10) — corpus-wide pass_unfalsified count + the M3 unclaimed-oracle
+      // report. REPORT-ONLY: neither number below may influence process.exitCode —
+      // 574/700 existing criteria are grandfathered by the governing spec's WRITTEN
+      // exemption, never by a synthesized red run.
+      const falsifiabilitySignalsResult = await collectFalsifiabilitySignals(app);
+      if (!falsifiabilitySignalsResult.ok) {
+        process.stderr.write(formatError(falsifiabilitySignalsResult.error) + "\n");
+        process.exitCode = exitCode(falsifiabilitySignalsResult.error);
+        return;
+      }
+      const { passUnfalsifiedCount, declaredScriptCommands } = falsifiabilitySignalsResult.value;
+      const unclaimedOracle = await runUnclaimedOracleCheck(declaredScriptCommands);
+
       if (args.json) {
         console.log(
           JSON.stringify(
@@ -961,6 +1164,8 @@ export default defineCommand({
                   configured: verificationProfileKinds.length > 0,
                   kinds: verificationProfileKinds,
                 },
+                pass_unfalsified_count: passUnfalsifiedCount,
+                unclaimed_oracle: unclaimedOracle,
               },
             },
             null,
@@ -1030,6 +1235,26 @@ export default defineCommand({
           ? `\nVerification profiles: configured (kinds: ${verificationProfileKinds.join(", ")})`
           : "\nVerification profiles: not configured",
       );
+
+      // spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1
+      // surfacing (AC-FALS-6) — printed UNCONDITIONALLY (including 0), same
+      // "never a silent count" discipline as `Retracted:` above: this is the
+      // corpus's own baseline falsifiability metric, not a per-run advisory.
+      // REPORT-ONLY — never affects exit code (see the computation site's comment).
+      console.log(
+        `Pass-unfalsified criteria: ${passUnfalsifiedCount} (green, never observed able to fail — ` +
+          "report-only, see spec-oracle-tier-falsifiability-a-criterion-never-observed-red)",
+      );
+
+      // M3 (AC-FALS-10) — same "only when > 0" discipline as open_stale_candidates/
+      // codeAnchorSpecs above; silent when unavailable (no companion source
+      // checkout, e.g. an external `lore` install) or when the scan found nothing.
+      if (unclaimedOracle.available && unclaimedOracle.findings.length > 0) {
+        console.log(
+          `\nUnclaimed oracle values: ${unclaimedOracle.findings.length} (a test-name filter value ` +
+            "present in a test file, bound by NO declared AC — run `bun scripts/check-unclaimed-oracle.ts` for detail)",
+        );
+      }
 
       // SPEC-043 D8 — invalidated-feeding-source warning (computed via the SAME
       // armed-gate helper SessionService.bootstrap uses; see CorpusService.status).

@@ -10,7 +10,10 @@
  *     local coverage math (that's `computeAcCoverage`'s job, `@lore/core`).
  *   - Per-row coverage state is `deriveAcCoverageState(fact)` (`@lore/core`,
  *     `acceptance.ts`) — the SAME fail-first precedence `lore ac list`'s CLI
- *     badge and `lore feed task-start`'s pack use; never a second ordering.
+ *     badge and `lore feed task-start`'s pack use; never a second ordering. That
+ *     precedence can return `"pass_unfalsified"` (spec-oracle-tier-falsifiability-
+ *     a-criterion-never-observed-red M1 surfacing) — see `stateVariant`'s own
+ *     JSDoc for the deliberately neutral badge color chosen for it.
  *   - `panel.coverage` is guaranteed 1:1 index-aligned with `panel.criteria`
  *     (`computeAcCoverage`'s documented contract: "one AcCoverageFact per
  *     input criterion, in input order, never omits a declared criterion") —
@@ -34,9 +37,37 @@ export interface SpecAcCoveragePanelProps {
   panel: SpecEvidencePanelProjection;
 }
 
-type CoverageState = "fail" | "attested_pass" | "pass" | "none";
+type CoverageState = "fail" | "attested_pass" | "pass" | "pass_unfalsified" | "none";
 
-/** Badge color per fail-first coverage state (mirrors `commands/ac.ts::coverageBadge`'s color intent). */
+/**
+ * Badge color per fail-first coverage state (mirrors `commands/ac.ts::coverageBadge`'s
+ * color intent).
+ *
+ * `pass_unfalsified` (spec-oracle-tier-falsifiability-a-criterion-never-observed-red
+ * M1 surfacing) — a real, measured, always-positive fact: green, but never once
+ * observed able to go red. Measured 2026-08-07: 574 of 700 corpus criteria (82.0%)
+ * render this state — a majority, not an edge case. It maps to `"outline"`
+ * (bordered, `text-foreground`, no fill) — the SAME neutral treatment `"none"`
+ * already uses, and DELIBERATELY NOT `"destructive"` (red would misread a real pass
+ * as an error) or `"secondary"`/`"default"` (either would make it visually
+ * indistinguishable from — or MORE confident than — a criterion that HAS been
+ * falsified, inverting the signal this whole mechanism exists to surface). Two
+ * candidates were considered for this exact spot:
+ *   (A, CHOSEN) reuse `"outline"` verbatim, zero new styling — the row's own visible
+ *       text is still the state NAME (`"pass_unfalsified"` vs `"none"`), so the two
+ *       states are never confused despite sharing a border treatment; this is also
+ *       the least visually assertive of the four variants this badge component
+ *       ships, which is exactly the property wanted for a state that will render on
+ *       a majority of every row a viewer scans.
+ *   (B, REJECTED) `"outline"` PLUS a one-off custom className (e.g. a faint
+ *       `text-muted-foreground` tint) to visually separate it from `"none"` for a
+ *       viewer scanning by color alone — rejected: `Badge`'s variant set is a closed
+ *       CVA enum (`components/ui/badge.tsx`, out of this task's file anchors); a
+ *       parallel ad-hoc className path would fork the "how does a coverage state
+ *       get its color" decision into two mechanisms (the `variant` prop here, a
+ *       bespoke class there) for marginal benefit over the label text already
+ *       carrying the distinction.
+ */
 function stateVariant(state: CoverageState): "destructive" | "default" | "secondary" | "outline" {
   switch (state) {
     case "fail":
@@ -45,6 +76,8 @@ function stateVariant(state: CoverageState): "destructive" | "default" | "second
       return "default";
     case "pass":
       return "secondary";
+    case "pass_unfalsified":
+      return "outline";
     case "none":
       return "outline";
   }

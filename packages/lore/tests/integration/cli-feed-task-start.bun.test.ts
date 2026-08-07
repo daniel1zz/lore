@@ -406,10 +406,14 @@ describe("HAPPY — lore feed task-start <task> against a real corpus (AC-070-7)
     expect(result.stdout).toContain(specSlug);
     expect(result.stdout).toContain("exercise the task-start pack");
 
-    // acceptance: declared AC id + its script command + a pass coverage badge
+    // acceptance: declared AC id + its script command + a pass coverage badge.
+    // A single self-reported pass with zero falsified evidence renders
+    // "pass_unfalsified", not plain "pass" (spec-oracle-tier-falsifiability-a-
+    // criterion-never-observed-red M1, AC-FALS-2) — this AC was never observed
+    // able to go red.
     expect(result.stdout).toContain("AC-T1-1");
     expect(result.stdout).toContain("command: bun test");
-    expect(result.stdout).toContain("[pass]");
+    expect(result.stdout).toContain("[pass_unfalsified]");
 
     // constraints: the fail-evidence entry, oracle+command+tail
     expect(result.stdout).toContain("[test] bun test");
