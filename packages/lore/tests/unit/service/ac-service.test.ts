@@ -532,7 +532,9 @@ describe("STATE — expected-fail evidence never counted as passing by AC-covera
     expect(fact?.fail).toBe(0);
     expect(fact?.attested_pass).toBe(0);
     expect(fact?.attested_fail).toBe(0);
-    expect(fact?.refs).toEqual([{ task_id: taskId, result: "expected-fail" }]);
+    expect(fact?.refs).toEqual([
+      { task_id: taskId, result: "expected-fail", recorded_at: expect.any(String) },
+    ]);
   });
 
   it("a real pass entry alongside an expected-fail entry on the same AC counts exactly one pass, never two (no accidental match)", async () => {
@@ -601,7 +603,9 @@ describe("HAPPY — an ad-hoc task's evidence flips coverage from null to non-nu
     const fact = result.value.coverage?.find((f) => f.ac_id === "AC-ADHOC-1");
     expect(fact?.pass).toBe(1);
     expect(fact?.fail).toBe(0);
-    expect(fact?.refs).toEqual([{ task_id: taskId, result: "pass" }]);
+    expect(fact?.refs).toEqual([
+      { task_id: taskId, result: "pass", recorded_at: expect.any(String) },
+    ]);
   });
 });
 
