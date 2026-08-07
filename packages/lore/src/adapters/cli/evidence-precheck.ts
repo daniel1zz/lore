@@ -58,13 +58,29 @@
  *     with an explicit `--output-tail`/`--output-tail-file` (redundant: capture
  *     IS the tail), or combined with `--oracle manual` (nothing capturable —
  *     there is no command to spawn for a browser/visual check)
+ *   - commandHasUnsafePipe(command) / findPipeRefusal(input) — the FIFTH
+ *     self-report guard hosted here (task-refuse-a-self-reported-evidence-
+ *     command-containing-a-shell, SPEC oracle-tier-falsifiability M2): a
+ *     self-reported `--result pass` whose `--command` contains an unquoted,
+ *     non-`||` shell pipe is refused, because `$?` observed after a pipe
+ *     belongs to the LAST stage of the pipeline, never the oracle the call
+ *     means to assert about — a THIRD recurrence of this exact trap in this
+ *     repo (handoff-71 KD2 twice, then `bun run test:changed <base> 2>&1 |
+ *     tail -100`, which would have recorded a pass sourced from `tail`'s exit
+ *     code). `input.capture` is the load-bearing escape (see that function's
+ *     own Opt-in note) — `--capture` measures the real exit code itself, so
+ *     the pipe hazard does not apply there (an explicit non-goal of the
+ *     governing spec). ⛔ NOT YET WIRED into either adapter's call sequence —
+ *     see that function's own header for the exact two call-site diffs needed.
  *
- * All FOUR guards are ADJACENT but INDEPENDENT: the first asks "does the
+ * All FIVE guards are ADJACENT but INDEPENDENT: the first asks "does the
  * file this command names exist at all", the second asks "did the filter this
  * command carries match anything — and, when it did not, is the filter itself
  * lexically incapable of matching the title it was pasted from", the third asks "would this command's OWN
  * invoked runner actually run every file it names", the fourth asks "does
- * --capture even make sense for this invocation's other flags". They share
+ * --capture even make sense for this invocation's other flags", the fifth
+ * asks "does this command's own `$?` even belong to the oracle being
+ * asserted about, or did a pipe hand it off to something else". They share
  * only the oracle/result scope gate (`isSelfReportedPassInScope`) — except the
  * fourth, which is a pure CLI-usage shape check independent of `result`
  * entirely (a malformed `--capture` combination is nonsensical regardless of
@@ -89,7 +105,11 @@
  *   task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a (mixed-
  *   runner invocation guard);
  *   task-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles (the literal-vs-
- *   regex filter diagnosis folded into the filtered-pass guard)
+ *   regex filter diagnosis folded into the filtered-pass guard);
+ *   task-refuse-a-self-reported-evidence-command-containing-a-shell (SPEC
+ *   oracle-tier-falsifiability-a-criterion-never-observed-red M2, ADR
+ *   falsifiability-moves-from-the-task-tier-to-the-oracle-tier — the pipe-
+ *   refusal guard, `commandHasUnsafePipe`/`findPipeRefusal`)
  */
 
 import {
@@ -1180,4 +1200,207 @@ export function findCaptureFlagConflict(input: {
   }
 
   return null;
+}
+
+// ─── Pipe-Refusal Guard (task-refuse-a-self-reported-evidence-command- ─────
+// ─── containing-a-shell — SPEC oracle-tier-falsifiability M2) ──────────────
+
+/**
+ * Detects an unquoted, non-`||` shell PIPE operator (`|`) anywhere in
+ * `command` — the exact hazard {@link findPipeRefusal} exists for: `$?`
+ * observed after a pipe belongs to the LAST stage of the pipeline, so a
+ * self-reported `--result` recorded from it was never actually measured
+ * against the stage the caller means to assert about. THIRD recurrence of
+ * this trap in this repo (handoff-71 KD2 recorded two; a third occurred when
+ * an implementer's oracle command was `bun run test:changed <base> 2>&1 |
+ * tail -100`, which would have recorded a `pass` sourced from `tail`'s exit
+ * code regardless of what the actual test run did).
+ *
+ * Quote-aware in the SAME way {@link splitCommandSegments} is (a char-by-char
+ * scan tracking one open `"`/`'`/`` ` `` run at a time) — a `|` inside a
+ * quoted string (`grep 'a|b' file.ts`) is a LITERAL character being searched
+ * for, not a shell operator, and reporting it would refuse a command that
+ * never actually pipes anything.
+ *
+ * A `||` (logical OR — run the right side only if the left FAILS) is
+ * deliberately NOT reported: `$?` after `a || b` is unambiguously EITHER a's
+ * exit code (left succeeded) or b's (left failed) — a single, well-defined
+ * status belonging to whichever branch actually executed, never one stage's
+ * status silently substituted for a different stage's the way a `|` pipeline
+ * substitutes the last stage's exit code for every earlier stage's.
+ *
+ * @param command - the exact command string recorded via `lore evidence --command`
+ * @returns `true` iff an unquoted, non-`||` `|` is present anywhere in `command`
+ * @example
+ *   commandHasUnsafePipe("bun run test:changed abc 2>&1 | tail -100")
+ *   // => true
+ * @example
+ *   commandHasUnsafePipe("grep 'a|b' file.ts")
+ *   // => false — the pipe is inside a quoted run, a literal character
+ * @example
+ *   commandHasUnsafePipe("bun run lint || bun run lint:fix")
+ *   // => false — logical OR, not a pipeline; `$?` belongs to whichever
+ *   // branch actually ran
+ */
+export function commandHasUnsafePipe(command: string): boolean {
+  let openQuote: string | null = null;
+  for (let index = 0; index < command.length; index += 1) {
+    // reason: `as string` is a bounds assertion — `index < command.length`
+    // guarantees the read (same rationale as this module's other char scans,
+    // e.g. splitCommandSegments's own cast).
+    const char = command[index] as string;
+
+    if (openQuote !== null) {
+      if (char === openQuote) openQuote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      openQuote = char;
+      continue;
+    }
+    if (char === "|") {
+      const prev = index > 0 ? command[index - 1] : undefined;
+      const next = index + 1 < command.length ? command[index + 1] : undefined;
+      // reason: either neighbour being the OTHER half of a `||` pair means
+      // THIS `|` belongs to a logical-OR operator, not a standalone pipe.
+      // Both characters of a `||` pair are skipped this way (each sees the
+      // other as its "other half"), so a `||` never registers as unsafe.
+      if (prev === "|" || next === "|") continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * How an operator repairs a self-reported command a shell pipe was refused
+ * on — appended verbatim so the refusal always ends with the action.
+ */
+const PIPE_REPAIR_HINT =
+  "Either re-run with --capture (lore spawns --command itself and cross-checks the REAL " +
+  "observed exit code against --result — the pipe hazard does not apply there), or record " +
+  "the piped-to command's own outcome honestly instead (run the oracle alone, or split the " +
+  "pipeline into two separate lore evidence recordings, one per stage).";
+
+/**
+ * The FIFTH self-report guard hosted in this module — refuses a self-reported
+ * `--result pass` for a `test`/`e2e` oracle whose `--command` contains an
+ * unquoted, non-`||` shell pipe ({@link commandHasUnsafePipe}), because `$?`
+ * after a pipe belongs to the LAST stage, not the oracle the caller means to
+ * assert about (see that function's header for the full defect history —
+ * governing spec: spec-oracle-tier-falsifiability-a-criterion-never-observed-
+ * red M2; governing ADR: adr-falsifiability-moves-from-the-task-tier-to-the-
+ * oracle-tier).
+ *
+ * `input.capture` is the load-bearing escape, and it is NOT a silencing flag
+ * — see this function's own Opt-in note below. Composes the SAME
+ * oracle/result scope gate the other self-report guards in this module share
+ * ({@link isSelfReportedPassInScope}), checked after the capture
+ * short-circuit (a `--capture` call with an out-of-scope oracle/result still
+ * short-circuits to `null` for the same reason: nothing to check either way).
+ *
+ * ⛔ NOT YET WIRED into either adapter's call sequence
+ * (`commands/evidence.ts`'s CLI adapter; `../mcp/tools.ts`'s
+ * `lore_evidence_add` MCP handler). Both currently call
+ * `findMissingOracleFilesForEvidence` / `findMixedRunnerRefusal` /
+ * `findFilteredPassRefusal` / `findCaptureFlagConflict` individually and each
+ * needs ONE new call to this function — `capture: <the same boolean already
+ * resolved at that call site>` — positioned after the missing-oracle-file and
+ * mixed-runner guards (a nonexistent file or a dropped-runner file is a more
+ * fundamental fault); ordering against the filtered-pass guard is immaterial,
+ * the two conditions are independent. This function is hosted here, alongside
+ * its four siblings, specifically so BOTH adapters share ONE definition the
+ * moment they are wired — never a second, parallel entry point per surface.
+ *
+ * Per adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the:
+ *   - **Proxy** — "an unquoted, non-`||` `|` is present" is a proxy for "the
+ *     recorded `$?` was NOT genuinely measured against the stage the caller
+ *     means to assert about". Property violated while the proxy does NOT
+ *     trigger (accepted false negative, the SAME "cannot be checked, so it is
+ *     not blocked" posture this module's other guards already have):
+ *     `bun run typecheck > out.log 2>&1; tail -100 out.log` — `;` sequences
+ *     two SEPARATE statements, so `$?` after the whole chain is STILL
+ *     `tail`'s exit code, yet no `|` character appears anywhere. This guard
+ *     is deliberately narrow to the PIPE shape the governing task names
+ *     (M2's own scope is literally "a shell pipe", not a general
+ *     "last-executed-command owns `$?`" detector) — the broader form is a
+ *     DIFFERENT defect this guard does not claim to close. Property
+ *     SATISFIED while the proxy DOES trigger (accepted false positive, biased
+ *     toward refusal — the SAME direction {@link extractCdPrefixTarget}'s own
+ *     Proxy note is biased in): a command preceded by `set -o pipefail`
+ *     (bash-only; makes `$?` reflect the FIRST failing stage, not the last)
+ *     would be a genuinely-measured result this guard cannot distinguish from
+ *     an unprotected pipe — `set -o pipefail` is typically set once, earlier,
+ *     in a different shell/script, and is invisible to a per-invocation
+ *     string scan. Refusing a technically-safe pipe is the safe direction to
+ *     be wrong in.
+ *   - **Silence** — none: the refusal names the exact command string carrying
+ *     the pipe and states the last-stage-exit-code mechanism by name, so a
+ *     future reader never has to guess why a seemingly-passing command was
+ *     refused (mirrors {@link findMixedRunnerRefusal}'s own no-silence
+ *     posture).
+ *   - **Opt-in** — `input.capture` is the only escape, and it does not
+ *     SILENCE this check the way a bypass flag would: it changes WHICH
+ *     mechanism produces the recorded result. Under `--capture`, lore spawns
+ *     `--command` itself and cross-checks its OWN observed exit code against
+ *     the declared `--result`
+ *     (`../../evidence-capture.js::captureOracleCommand`) — the result is
+ *     measured, not self-reported, so the property this guard protects (a
+ *     genuinely-measured result) is independently satisfied a DIFFERENT way.
+ *     The governing spec names this explicitly as an out-of-scope non-goal
+ *     ("Changing `--capture`'s behaviour… there lore spawns the command
+ *     itself, so the pipe hazard does not apply"). There is no OTHER opt-in
+ *     of any kind — unconditional for every other self-reported test/e2e pass.
+ *
+ * @param input.oracle - untyped `string`, same adapter-agnostic reasoning as
+ *   this module's other guards
+ * @param input.result - result as received
+ * @param input.command - the exact command string
+ * @param input.capture - whether `--capture` was passed for this call;
+ *   `true` short-circuits to `null` unconditionally (see Opt-in above) —
+ *   REQUIRED, not optional, so a caller can never accidentally omit it and
+ *   silently lose the escape
+ * @returns a `VALIDATION_ERROR` (exit code 4 via `utils.ts::exitCode`) naming
+ *   the pipe and the repair, or `null` when the write may proceed
+ * @example
+ * findPipeRefusal({
+ *   oracle: "test", result: "pass",
+ *   command: "bun run test:changed abc 2>&1 | tail -100",
+ *   capture: false,
+ * })
+ * // => VALIDATION_ERROR naming the pipe
+ * @example
+ * findPipeRefusal({
+ *   oracle: "test", result: "pass",
+ *   command: "bun run test:changed abc 2>&1 | tail -100",
+ *   capture: true,
+ * })
+ * // => null — --capture measures the real exit code itself
+ * @example
+ * findPipeRefusal({
+ *   oracle: "test", result: "pass",
+ *   command: "grep 'a|b' file.ts", capture: false,
+ * })
+ * // => null — the pipe is inside a quoted run, never a shell operator
+ */
+export function findPipeRefusal(input: {
+  oracle: string;
+  result: string;
+  command: string;
+  capture: boolean;
+}): LoreError | null {
+  if (input.capture) return null;
+  if (!isSelfReportedPassInScope(input)) return null;
+  if (!commandHasUnsafePipe(input.command)) return null;
+
+  return {
+    code: "VALIDATION_ERROR",
+    field: "command",
+    message:
+      `Self-reported --result pass with a shell pipe in --command: "${input.command}". ` +
+      "$? observed after a pipe belongs to the LAST stage of the pipeline, not the oracle " +
+      "this call means to assert about, so the recorded result cannot have been measured " +
+      `against it. ${PIPE_REPAIR_HINT}`,
+    value: input.command,
+  };
 }
