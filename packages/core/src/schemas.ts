@@ -364,7 +364,7 @@ export const taskExtraSchema = z
      * Deliberately NOT reachable via `lore create task --supersedes` (the
      * create-time compose flag stays scoped to knowledge/adr, SPEC-043 D11's
      * original intent — see `SUPERSEDE_CREATE_ELIGIBLE_TYPES`,
-     * `adapters/cli/commands/create.ts`) — a task is retracted via the
+     * `packages/lore/src/flows/supersede-flow.ts`) — a task is retracted via the
      * two-step `lore create task` + `lore invalidate <old> --superseded-by
      * <new>` flow instead, matching how this task's own real-world fixture
      * was actually retracted (the replacement task was created FIRST, as an

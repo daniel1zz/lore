@@ -27,7 +27,7 @@
  *   implementation. Deliberately NOT reachable via the `--supersedes` CREATE-time
  *   compose flag, which stays scoped to knowledge/adr by its OWN, narrower,
  *   independently-declared constant (`SUPERSEDE_CREATE_ELIGIBLE_TYPES`,
- *   `adapters/cli/commands/create.ts`) — see that constant's doc comment for why
+ *   `flows/supersede-flow.ts`) — see that constant's doc comment for why
  *   the two sets are intentionally different, not an accidental SSOT fork.
  * @invariant `CorpusService.set` closes the OTHER side door onto `extra.validity`
  *   (D10) — this service is the only path that may CHANGE it; `set` rejects any patch
