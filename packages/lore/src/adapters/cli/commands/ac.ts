@@ -29,6 +29,11 @@
  *                                   entries additionally carry that same derived `state`
  *                                   string per criterion (AC-FALS-4), alongside the raw
  *                                   `falsified` count `AcCoverageFact` already provides.
+ *                                   A criterion superseded by a strictly-newer attested
+ *                                   pass (M4) renders `✘S`, distinct from plain `✘`; one
+ *                                   whose `falsified` fails runtime well-formedness (M5)
+ *                                   renders `⚠` (AC-FALS-19) — see `coverageBadge`'s own
+ *                                   JSDoc for the full rationale.
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
  *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
@@ -63,7 +68,9 @@
  *   SPEC-061 §Scope D5 (inconclusive badge); SPEC-070 AC-070-12 (shared fail-first
  *   precedence via @lore/core's deriveAcCoverageState); spec-workflow-hardening-
  *   evidence-red-vocabulary-claim-worktree §M1 AC-WH-1 (expected-fail badge);
- *   spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6 (`set` subcommand)
+ *   spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6 (`set` subcommand);
+ *   spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1/M4/M5
+ *   (pass_unfalsified/fail_superseded/not_measured badges, AC-FALS-2/5/19)
  */
 
 import { defineCommand } from "citty";
@@ -563,6 +570,30 @@ function describeVerify(verify: AcceptanceCriterion["verify"]): string {
  * checks below and rendered a misleading `·`/`⚑?`/`⚑R` for what is actually a real,
  * unattested pass — the exact bug this task's own file anchors were opened to fix.
  *
+ * spec-oracle-tier-falsifiability-a-criterion-never-observed-red M4/M5 surfacing
+ * (AC-FALS-19) — the SAME class of bug M1's fix above already named, now repeated
+ * for the two states M4/M5 add to `deriveAcCoverageState`'s return union. Both get
+ * their OWN explicit, distinct branch — checked BEFORE the inconclusive/expected-fail/
+ * `·` residual tail — so neither ever reaches it:
+ *   - `"fail_superseded"` renders `✘S(pass/fail[, n attested])` — same shape as the
+ *     plain `✘` fail badge (this criterion DOES still have real fail evidence, and
+ *     `falsified` counts it forever), with a distinguishing `S` for "superseded":
+ *     a strictly-newer runner-attested pass exists, so this is not the SAME kind of
+ *     red as an un-superseded `"fail"`. Deliberately visually distinct from BOTH
+ *     plain `✘` (this criterion) and `✔`/`⚑✔` (an attested_pass would never route
+ *     here — `deriveAcCoverageState` only returns `"fail_superseded"` when
+ *     `fact.fail > 0`, which ALWAYS outranks `attested_pass` in the precedence).
+ *   - `"not_measured"` renders `⚠(pass/fail)` — this criterion's OWN `falsified`
+ *     count is malformed at runtime (M5: `undefined`/`NaN`/negative despite the
+ *     type claiming `number`), so this badge deliberately does NOT reuse the plain
+ *     `✔` prefix `"pass"`/`"pass_unfalsified"`/`"attested_pass"` share: a real,
+ *     measured pass and "the falsifiability dimension itself could not be read"
+ *     are different facts, and collapsing them would silently upgrade a data
+ *     defect into an ordinary green badge. Also distinct from `⚑?` (inconclusive —
+ *     an oracle ran and produced no trustworthy result) and `⚑R` (expected-fail —
+ *     a self-declared RED pin): neither of those describes "the pass count is
+ *     real but its falsifiability bookkeeping isn't."
+ *
  * Exported (unlike this file's other render helpers) so its deterministic formatting is
  * directly vitest-unit-testable without spawning the CLI or a real store (SPEC-039 §6).
  */
@@ -575,10 +606,17 @@ export function coverageBadge(coverage: AcListResult["coverage"], acId: string):
     const attestedNote = fact.attested_fail > 0 ? `, ${fact.attested_fail} attested` : "";
     return `✘(${fact.pass}/${fact.fail}${attestedNote})`;
   }
+  if (state === "fail_superseded") {
+    const attestedNote = fact.attested_fail > 0 ? `, ${fact.attested_fail} attested` : "";
+    return `✘S(${fact.pass}/${fact.fail}${attestedNote})`;
+  }
   if (state === "attested_pass" || state === "pass" || state === "pass_unfalsified") {
     const prefix = state === "attested_pass" ? "⚑✔" : "✔";
     const attestedNote = fact.attested_pass > 0 ? `, ${fact.attested_pass} attested` : "";
     return `${prefix}(${fact.pass}/${fact.fail}${attestedNote})`;
+  }
+  if (state === "not_measured") {
+    return `⚠(${fact.pass}/${fact.fail})`;
   }
   const inconclusiveCount = fact.refs.filter((r) => r.result === "inconclusive").length;
   if (inconclusiveCount > 0) {

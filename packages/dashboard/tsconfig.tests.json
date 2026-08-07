@@ -1,7 +1,16 @@
 {
+  // reason: `extends` does NOT reset `exclude` — tsconfig.json's own
+  // `exclude: ["node_modules", "dist", "tests"]` is inherited verbatim, and
+  // `exclude` filters `include`, so without this override this project resolved
+  // ZERO files under tests/** despite declaring "tests/**/*" in `include` (measured
+  // 2026-08-07: `bunx tsc -p packages/dashboard/tsconfig.tests.json --noEmit
+  // --listFilesOnly` returned 648 files, 0 under packages/dashboard/tests/). Its
+  // exit 0 was the exit code of checking nothing. This project's own `exclude`
+  // must NOT swallow "tests" the way the base config's does.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "."
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist"]
 }

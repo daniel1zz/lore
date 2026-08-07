@@ -822,13 +822,24 @@ export function derivePlanCloseChipStatus(
 }
 
 /**
- * The `task`/`spec`/`other`-branch precedence over a full {@link EvidenceResultTally}
- * (mirrors `acceptance.ts::deriveAcCoverageState`'s "a fail always wins" rule,
- * extended to the two non-green values): FAIL > PASS > INCONCLUSIVE >
- * EXPECTED-FAIL > NONE. Inconclusive outranks expected-fail for the SAME reason
- * `commands/ac.ts::coverageBadge` orders its own residual checks that way — an
- * oracle that genuinely ran but produced no trustworthy signal is a more urgent,
- * unexplained state than a self-declared, already-understood RED pin.
+ * The `task`/`spec`/`other`-branch precedence over a full {@link EvidenceResultTally}:
+ * FAIL > PASS > INCONCLUSIVE > EXPECTED-FAIL > NONE. Inconclusive outranks
+ * expected-fail for the SAME reason `commands/ac.ts::coverageBadge` orders its own
+ * residual checks that way — an oracle that genuinely ran but produced no
+ * trustworthy signal is a more urgent, unexplained state than a self-declared,
+ * already-understood RED pin.
+ *
+ * ⛔ CORRECTED (spec-oracle-tier-falsifiability-a-criterion-never-observed-red M4):
+ * this JSDoc previously claimed this precedence "mirrors `acceptance.ts::
+ * deriveAcCoverageState`'s 'a fail always wins' rule" — that claim is now FALSE.
+ * Since M4, `deriveAcCoverageState` can read a `fail`-carrying fact as
+ * `"fail_superseded"` when a strictly-newer runner-attested pass exists; a fail no
+ * longer always wins THERE. It still always wins HERE — `deriveEvidenceTallyStatus`
+ * is a DIFFERENT function over a DIFFERENT input (a flat {@link EvidenceResultTally}
+ * bucket count with no per-ref `recorded_at` to compare, not a fact whose refs
+ * carry timestamps) and its own behaviour is UNCHANGED by M4/M5: FAIL still ranks
+ * first, unconditionally. The two functions' rankings simply no longer describe
+ * each other — each is now independently documented, not "mirrored."
  *
  * @param tally - {@link tallyEvidenceResults}' exhaustive 4-bucket count.
  * @returns The single status this bucket set reduces to.

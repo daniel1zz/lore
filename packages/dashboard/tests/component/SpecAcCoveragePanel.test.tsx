@@ -35,6 +35,22 @@
  *   REGRESSION (adversarial — defeats a stub that maps every state to "outline"):
  *     - "pass_unfalsified" renders a visually distinct badge (no "border-transparent")
  *       from "fail" (which does carry "border-transparent" + "bg-destructive")
+ *
+ * Added coverage — `fail_superseded`/`not_measured` (M4/M5, AC-FALS-20/AC-FALS-21):
+ *   HAPPY:
+ *     - a fail fact whose only fail ref is older than a strictly-newer attested pass
+ *       ref renders "fail_superseded"
+ *     - a pass-only fact whose falsified is genuinely ABSENT at runtime (deleted,
+ *       defeating the type system on purpose) renders "not_measured"
+ *   BOUNDARY (AC-FALS-20):
+ *     - "fail_superseded", "not_measured", and "pass_unfalsified" render three
+ *       MUTUALLY distinct badge variants in the same render
+ *   REGRESSION (AC-FALS-21 — proves makeFact's default falsified is load-bearing,
+ *   not cosmetic; no expectation in this file could have been green only because
+ *   the field was absent):
+ *     - makeFact() with no override yields a fact whose falsified is typeof "number"
+ *     - the SAME fact with falsified deleted renders a DIFFERENT coverage state
+ *       than the defaulted one ("not_measured" vs "pass_unfalsified")
  */
 
 import "@testing-library/jest-dom/vitest";
@@ -52,8 +68,51 @@ function makeCriterion(overrides: Partial<AcceptanceCriterion> = {}): Acceptance
   };
 }
 
+/**
+ * Builds a fact whose `falsified` is genuinely ABSENT at runtime — the exact
+ * shape M5 (spec-oracle-tier-falsifiability-a-criterion-never-observed-red)
+ * defends against: `AcCoverageFact.falsified` is typed `number` (required), but
+ * that is a COMPILE-TIME claim only, and a hand-built fixture is precisely where
+ * the runtime does not honor it. The `as unknown as AcCoverageFact` cast is
+ * DELIBERATE, not sloppy — defeating the type system on purpose is the whole
+ * point of this fixture (AC-FALS-21), never used for a "real" fact elsewhere in
+ * this file.
+ */
+function makeFactWithoutFalsified(overrides: Partial<Omit<AcCoverageFact, "falsified">> = {}): AcCoverageFact {
+  const withoutFalsified: Record<string, unknown> = {
+    ac_id: "AC-1",
+    mode: "script",
+    pass: 0,
+    fail: 0,
+    refs: [],
+    attested_pass: 0,
+    attested_fail: 0,
+    ...overrides,
+  };
+  return withoutFalsified as unknown as AcCoverageFact;
+}
+
+// reason: `falsified: 0` is an explicit DEFAULT, not an omission (spec-oracle-tier-
+// falsifiability-a-criterion-never-observed-red M5) — before this fix, this helper's
+// return literal never mentioned `falsified` at all, which `tsc` correctly rejected
+// once the field became required-but-actually-unenforced-at-runtime (M5's own
+// premise): every pre-existing call site in this file that overrode `pass`/`fail`
+// but not `falsified` was GREEN for the wrong reason, since `falsified` was simply
+// absent from the object rather than a real `0`. AC-FALS-21 (below) pins that a
+// DELETED `falsified` now renders a DIFFERENT state (`not_measured`) than this
+// default (`pass_unfalsified`), proving the default is load-bearing, not cosmetic.
 function makeFact(overrides: Partial<AcCoverageFact> = {}): AcCoverageFact {
-  return { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, ...overrides };
+  return {
+    ac_id: "AC-1",
+    mode: "script",
+    pass: 0,
+    fail: 0,
+    refs: [],
+    attested_pass: 0,
+    attested_fail: 0,
+    falsified: 0,
+    ...overrides,
+  };
 }
 
 describe("SpecAcCoveragePanel", () => {
@@ -73,13 +132,25 @@ describe("SpecAcCoveragePanel", () => {
       expect(screen.getByText("script")).toBeInTheDocument();
     });
 
-    it("renders a pass-only fact as the 'pass' coverage state", () => {
+    it("renders a pass-only fact WITH falsified evidence as the 'pass' coverage state", () => {
+      // ⛔ CORRECTED (spec-oracle-tier-falsifiability-a-criterion-never-observed-red
+      // M5): this test previously called `makeFact({ pass: 1 })` with NO
+      // `falsified` override, back when the helper's own return literal omitted
+      // the field entirely. That absence — not a real `falsified: 0` — is EXACTLY
+      // what made `deriveAcCoverageState` read `"pass"` before M5: an ABSENT
+      // `falsified` fell through the old two-branch check (`falsified === 0` is
+      // false for `undefined`) into the plain-pass fallback, the same optimistic
+      // misread M5 exists to close. Once `makeFact`'s default became a REAL `0`
+      // (this file's own fix, above), the identical call site correctly reads
+      // `"pass_unfalsified"` instead — this test was GREEN FOR THE WRONG REASON.
+      // `falsified: 1` makes the fixture genuinely mean what its title claims: a
+      // pass that WAS observed able to go red at least once.
       render(
         <SpecAcCoveragePanel
           panel={{
             doc_type: "spec",
             criteria: [makeCriterion()],
-            coverage: [makeFact({ pass: 1 })],
+            coverage: [makeFact({ pass: 1, falsified: 1 })],
             task_count: 1,
           }}
         />,
@@ -246,6 +317,125 @@ describe("SpecAcCoveragePanel", () => {
       // text-destructive-foreground shadow hover:bg-destructive/80".
       expect(failBadge.className).toContain("border-transparent");
       expect(failBadge.className).toContain("bg-destructive");
+    });
+  });
+
+  // ─── fail_superseded / not_measured states — spec-oracle-tier-falsifiability-
+  // a-criterion-never-observed-red M4/M5 (AC-FALS-20/AC-FALS-21). ──────────────
+  describe("fail_superseded / not_measured states (AC-FALS-20)", () => {
+    it("HAPPY: renders 'fail_superseded' for a fail fact whose only fail ref is older than a strictly-newer attested pass ref", () => {
+      render(
+        <SpecAcCoveragePanel
+          panel={{
+            doc_type: "spec",
+            criteria: [makeCriterion()],
+            coverage: [
+              makeFact({
+                pass: 1,
+                fail: 1,
+                attested_pass: 1,
+                falsified: 1,
+                refs: [
+                  { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+                  { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-02T00:00:00.000Z" },
+                ],
+              }),
+            ],
+            task_count: 1,
+          }}
+        />,
+      );
+      expect(screen.getByText("fail_superseded")).toBeInTheDocument();
+      expect(screen.queryByText("fail")).not.toBeInTheDocument();
+    });
+
+    it("HAPPY: renders 'not_measured' for a pass-only fact whose falsified is genuinely absent at runtime", () => {
+      render(
+        <SpecAcCoveragePanel
+          panel={{
+            doc_type: "spec",
+            criteria: [makeCriterion()],
+            coverage: [makeFactWithoutFalsified({ pass: 1, fail: 0, attested_pass: 0 })],
+            task_count: 1,
+          }}
+        />,
+      );
+      expect(screen.getByText("not_measured")).toBeInTheDocument();
+    });
+
+    it("BOUNDARY: new-coverage-states — 'fail_superseded', 'not_measured', and 'pass_unfalsified' render three MUTUALLY distinct badge variants in the same render (AC-FALS-20)", () => {
+      render(
+        <SpecAcCoveragePanel
+          panel={{
+            doc_type: "spec",
+            criteria: [
+              makeCriterion({ id: "AC-SUPERSEDED" }),
+              makeCriterion({ id: "AC-NOTMEASURED" }),
+              makeCriterion({ id: "AC-UNFALSIFIED" }),
+            ],
+            coverage: [
+              makeFact({
+                ac_id: "AC-SUPERSEDED",
+                pass: 1,
+                fail: 1,
+                attested_pass: 1,
+                falsified: 1,
+                refs: [
+                  { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+                  { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-02T00:00:00.000Z" },
+                ],
+              }),
+              makeFactWithoutFalsified({ ac_id: "AC-NOTMEASURED", pass: 1, fail: 0, attested_pass: 0 }),
+              makeFact({ ac_id: "AC-UNFALSIFIED", pass: 1, fail: 0, attested_pass: 0, falsified: 0 }),
+            ],
+            task_count: 1,
+          }}
+        />,
+      );
+      const supersededBadge = screen.getByText("fail_superseded");
+      const notMeasuredBadge = screen.getByText("not_measured");
+      const unfalsifiedBadge = screen.getByText("pass_unfalsified");
+
+      // Three pairwise-distinct className signatures (badge.tsx CVA: "secondary" has
+      // "border-transparent bg-secondary", "destructive" has "border-transparent
+      // bg-destructive", "outline" has neither and carries "text-foreground" alone).
+      expect(supersededBadge.className).not.toBe(notMeasuredBadge.className);
+      expect(supersededBadge.className).not.toBe(unfalsifiedBadge.className);
+      expect(notMeasuredBadge.className).not.toBe(unfalsifiedBadge.className);
+    });
+  });
+
+  describe("makeFact's default falsified is load-bearing (AC-FALS-21)", () => {
+    it("REGRESSION: makefact-falsified-required — makeFact() with no override yields a fact whose falsified is typeof number, and the SAME fact with falsified deleted renders a DIFFERENT coverage state", () => {
+      const defaulted = makeFact({ pass: 1 });
+      // Runtime assertion on the fixture itself — not just the rendered text —
+      // so this test cannot pass merely because deriveAcCoverageState happens to
+      // tolerate an absent field for THIS particular pass/fail combination.
+      expect(typeof defaulted.falsified).toBe("number");
+
+      const withoutFalsified = makeFactWithoutFalsified({ pass: 1 });
+      expect("falsified" in withoutFalsified).toBe(false);
+
+      render(
+        <SpecAcCoveragePanel
+          panel={{
+            doc_type: "spec",
+            criteria: [makeCriterion({ id: "AC-DEFAULTED" }), makeCriterion({ id: "AC-NOFALSIFIED" })],
+            coverage: [
+              { ...defaulted, ac_id: "AC-DEFAULTED" },
+              { ...withoutFalsified, ac_id: "AC-NOFALSIFIED" },
+            ],
+            task_count: 1,
+          }}
+        />,
+      );
+      // The defaulted fact (falsified: 0) reads "pass_unfalsified"; the identical
+      // fact with falsified deleted reads "not_measured" — a DIFFERENT state. No
+      // expectation elsewhere in this file could have been green only because
+      // makeFact's `falsified` field happened to be absent, because absence and
+      // presence now provably diverge.
+      expect(screen.getByText("pass_unfalsified")).toBeInTheDocument();
+      expect(screen.getByText("not_measured")).toBeInTheDocument();
     });
   });
 });

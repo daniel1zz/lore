@@ -1,14 +1,17 @@
 /**
  * Tests for @lore/core acceptance.ts's fourth coverage dimension — `falsified`
- * (computeAcCoverage) and the `pass_unfalsified` state (deriveAcCoverageState).
- * Pure functions, no IO.
+ * (computeAcCoverage) and the `pass_unfalsified`/`fail_superseded`/`not_measured`
+ * states (deriveAcCoverageState). Pure functions, no IO.
  *
- * Governed by spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1
- * and adr-falsifiability-moves-from-the-task-tier-to-the-oracle-tier. This is the
- * DERIVATION half only — surfacing (`lore ac list`, `lore status`) is a separate
- * task with its own anchors.
+ * Governed by spec-oracle-tier-falsifiability-a-criterion-never-observed-red
+ * (M1: `falsified` + `pass_unfalsified`; M4: `fail_superseded`, the recency
+ * semantics `state` was missing over an append-only log; M5: `not_measured`,
+ * closing M1's fail-open on a `falsified` that fails runtime well-formedness)
+ * and adr-falsifiability-moves-from-the-task-tier-to-the-oracle-tier. This is
+ * the DERIVATION half only — surfacing (`lore ac list`, `lore status`) is a
+ * separate task with its own anchors.
  *
- * Six-dimension coverage for this file:
+ * Six-dimension coverage for this file (M1, AC-FALS-1/2/3):
  *   HAPPY:      an `expected-fail` ac_ref row yields falsified:1; an all-pass
  *               criterion yields falsified:0 (AC-FALS-1, same test, "falsified-count")
  *   NEGATIVE:   deriveAcCoverageState returns something OTHER than pass_unfalsified
@@ -26,8 +29,23 @@
  *               including the empty-tasks/empty-criteria degenerate cases already
  *               pinned for pass/fail/attested_pass/attested_fail in acceptance.test.ts
  *
+ * Added coverage (M4/M5, AC-FALS-14..18) — `-t`-selectable token per the spec's
+ * own declared oracle commands, each token named EXACTLY once in this file:
+ *   supersession-recency             (AC-FALS-14) — fail_superseded / fail /
+ *                                     attested_pass, three mutually distinct
+ *                                     readings from one recency ordering
+ *   supersession-falsified-invariant (AC-FALS-15) — falsified stays exactly 1
+ *                                     for BOTH the superseded and control fixture,
+ *                                     computed via computeAcCoverage (not hand-set)
+ *   supersession-fail-closed         (AC-FALS-16) — the three fail-closed tie-breaks
+ *   absent-falsified                 (AC-FALS-17) — six falsified inputs, three
+ *                                     mutually distinct readings
+ *   falsified-branch-scope           (AC-FALS-18) — not_measured shadows only its
+ *                                     own branch, never fail/attested_pass/none
+ *
  * @spec_ref spec-oracle-tier-falsifiability-a-criterion-never-observed-red
- *   AC-FALS-1, AC-FALS-2, AC-FALS-3
+ *   AC-FALS-1, AC-FALS-2, AC-FALS-3, AC-FALS-14, AC-FALS-15, AC-FALS-16,
+ *   AC-FALS-17, AC-FALS-18
  */
 
 import { describe, it, expect } from "vitest";
@@ -245,5 +263,172 @@ describe("deriveAcCoverageState — attested_pass precedence (AC-FALS-3)", () =>
     expect(deriveAcCoverageState(fact({ pass: 1, attested_pass: 1, falsified: 1 }))).toBe("attested_pass");
     expect(deriveAcCoverageState(fact({ pass: 1, falsified: 1 }))).toBe("pass");
     expect(deriveAcCoverageState(fact({ falsified: 0 }))).toBe("none");
+  });
+});
+
+// ─── AC-FALS-14: fail_superseded — the recency read (M4) ─────────────────────
+
+describe("deriveAcCoverageState — fail_superseded recency (AC-FALS-14)", () => {
+  it("HAPPY: supersession-recency — fail_superseded when the fail ref is older than an attested pass ref, fail when reversed, attested_pass when there is no fail ref at all — three mutually distinct readings", () => {
+    const olderFailNewerAttestedPass = fact({
+      pass: 1,
+      fail: 1,
+      attested_pass: 1,
+      falsified: 1,
+      refs: [
+        { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+        { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-02T00:00:00.000Z" },
+      ],
+    });
+    const newerFailOlderAttestedPass = fact({
+      pass: 1,
+      fail: 1,
+      attested_pass: 1,
+      falsified: 1,
+      refs: [
+        { task_id: "t1", result: "fail", recorded_at: "2026-08-02T00:00:00.000Z" },
+        { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-01T00:00:00.000Z" },
+      ],
+    });
+    const noFailRefAtAll = fact({
+      pass: 1,
+      fail: 0,
+      attested_pass: 1,
+      falsified: 0,
+      refs: [{ task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-02T00:00:00.000Z" }],
+    });
+
+    const supersededState = deriveAcCoverageState(olderFailNewerAttestedPass);
+    const failState = deriveAcCoverageState(newerFailOlderAttestedPass);
+    const attestedPassState = deriveAcCoverageState(noFailRefAtAll);
+
+    expect(supersededState).toBe("fail_superseded");
+    expect(failState).toBe("fail");
+    expect(attestedPassState).toBe("attested_pass");
+    // Anti-vacuity: a constant return could not satisfy all three plus distinctness.
+    expect(new Set([supersededState, failState, attestedPassState]).size).toBe(3);
+  });
+});
+
+// ─── AC-FALS-15: falsified counting is untouched by supersession (M4) ────────
+
+describe("computeAcCoverage/deriveAcCoverageState — supersession does not alter falsified (AC-FALS-15)", () => {
+  it("STATE: supersession-falsified-invariant — falsified equals exactly 1 for BOTH the fail_superseded fixture and the fail control fixture, computed via computeAcCoverage (not hand-set on the fact)", () => {
+    const criteria = [scriptAc("AC-1")];
+    const attestation = { runner: "lore-cli" as const, exit_code: 0, duration_ms: 1, timed_out: false };
+
+    const supersededTask = makeTask({
+      extra: {
+        plan_id: "p",
+        verification_evidence: [
+          { oracle: "test", command: "bun test", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "alice", ac_ref: "AC-1" },
+          { oracle: "test", command: "bun test", result: "pass", recorded_at: "2026-08-02T00:00:00.000Z", recorded_by: "bob", ac_ref: "AC-1", attestation },
+        ],
+      },
+    });
+    const controlTask = makeTask({
+      extra: {
+        plan_id: "p",
+        verification_evidence: [
+          { oracle: "test", command: "bun test", result: "fail", recorded_at: "2026-08-02T00:00:00.000Z", recorded_by: "alice", ac_ref: "AC-1" },
+          { oracle: "test", command: "bun test", result: "pass", recorded_at: "2026-08-01T00:00:00.000Z", recorded_by: "bob", ac_ref: "AC-1", attestation },
+        ],
+      },
+    });
+
+    const supersededCoverage = computeAcCoverage(criteria, [supersededTask])[0]!;
+    const controlCoverage = computeAcCoverage(criteria, [controlTask])[0]!;
+
+    // Both asserted as an exact NUMBER (never "truthy"/"nonzero") — the AC's own
+    // anti-vacuity requirement.
+    expect(supersededCoverage.falsified).toBe(1);
+    expect(controlCoverage.falsified).toBe(1);
+    // The states DO diverge — proving the supersession rule changed `state`
+    // without touching `falsified`'s own historical count.
+    expect(deriveAcCoverageState(supersededCoverage)).toBe("fail_superseded");
+    expect(deriveAcCoverageState(controlCoverage)).toBe("fail");
+  });
+});
+
+// ─── AC-FALS-16: the three fail-closed supersession tie-breaks (M4) ──────────
+
+describe("deriveAcCoverageState — supersession fails closed (AC-FALS-16)", () => {
+  it("BOUNDARY: supersession-fail-closed — an equal-timestamp attested pass, an attested pass with no recorded_at, and an unattested strictly-newer pass all still yield fail", () => {
+    const equalTimestamps = fact({
+      pass: 1,
+      fail: 1,
+      attested_pass: 1,
+      falsified: 1,
+      refs: [
+        { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+        { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-01T00:00:00.000Z" },
+      ],
+    });
+    const attestedPassMissingRecordedAt = fact({
+      pass: 1,
+      fail: 1,
+      attested_pass: 1,
+      falsified: 1,
+      refs: [
+        { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+        { task_id: "t2", result: "pass", attested: true },
+      ],
+    });
+    const unattestedStrictlyNewerPass = fact({
+      pass: 1,
+      fail: 1,
+      attested_pass: 0,
+      falsified: 1,
+      refs: [
+        { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+        { task_id: "t2", result: "pass", recorded_at: "2026-08-05T00:00:00.000Z" },
+      ],
+    });
+
+    expect(deriveAcCoverageState(equalTimestamps)).toBe("fail");
+    expect(deriveAcCoverageState(attestedPassMissingRecordedAt)).toBe("fail");
+    expect(deriveAcCoverageState(unattestedStrictlyNewerPass)).toBe("fail");
+  });
+});
+
+// ─── AC-FALS-17: not_measured over a malformed falsified (M5) ────────────────
+
+describe("deriveAcCoverageState — not_measured over a malformed falsified (AC-FALS-17)", () => {
+  it("BOUNDARY: absent-falsified — undefined/null/NaN/negative falsified all read not_measured, while 0 reads pass_unfalsified and 1 reads pass — six inputs, three mutually distinct readings", () => {
+    const undefinedState = deriveAcCoverageState(fact({ pass: 1, falsified: undefined as unknown as number }));
+    const nullState = deriveAcCoverageState(fact({ pass: 1, falsified: null as unknown as number }));
+    const nanState = deriveAcCoverageState(fact({ pass: 1, falsified: NaN }));
+    const negativeState = deriveAcCoverageState(fact({ pass: 1, falsified: -1 }));
+    const zeroState = deriveAcCoverageState(fact({ pass: 1, falsified: 0 }));
+    const oneState = deriveAcCoverageState(fact({ pass: 1, falsified: 1 }));
+
+    expect(undefinedState).toBe("not_measured");
+    expect(nullState).toBe("not_measured");
+    expect(nanState).toBe("not_measured");
+    expect(negativeState).toBe("not_measured");
+    expect(zeroState).toBe("pass_unfalsified");
+    expect(oneState).toBe("pass");
+
+    // Six inputs, three distinct readings — proves the four malformed inputs
+    // collapse to the SAME reading as each other, and that reading is neither
+    // of the two well-formed readings.
+    const distinctReadings = new Set([undefinedState, nullState, nanState, negativeState, zeroState, oneState]);
+    expect(distinctReadings.size).toBe(3);
+  });
+});
+
+// ─── AC-FALS-18: not_measured shadows only its own branch (M5) ───────────────
+
+describe("deriveAcCoverageState — not_measured branch scope (AC-FALS-18)", () => {
+  it("REGRESSION: falsified-branch-scope — with falsified malformed, a fail fact still yields fail, an attested-pass fact still yields attested_pass, and a no-evidence fact still yields none", () => {
+    const malformedFalsified = undefined as unknown as number;
+
+    const failFact = fact({ pass: 1, fail: 1, falsified: malformedFalsified });
+    const attestedPassFact = fact({ pass: 1, fail: 0, attested_pass: 1, falsified: malformedFalsified });
+    const noEvidenceFact = fact({ pass: 0, fail: 0, falsified: malformedFalsified });
+
+    expect(deriveAcCoverageState(failFact)).toBe("fail");
+    expect(deriveAcCoverageState(attestedPassFact)).toBe("attested_pass");
+    expect(deriveAcCoverageState(noEvidenceFact)).toBe("none");
   });
 });

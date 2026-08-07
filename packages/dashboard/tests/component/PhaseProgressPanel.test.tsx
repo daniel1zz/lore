@@ -125,9 +125,37 @@ describe("PhaseProgressPanel", () => {
               phase_title: "Rollout",
               task_count: 4,
               evidence: { pass: 3, fail: 1 },
+              // reason: `falsified` is REQUIRED on AcCoverageFact (spec-oracle-tier-
+              // falsifiability-a-criterion-never-observed-red M1/M5) — these two
+              // literals previously omitted it entirely, which `tsc` correctly
+              // rejected once the field's runtime-unenforced-ness (M5) made the
+              // omission visible. Values reflect what a real aggregator would
+              // compute for each ref set (AC-1: an attested pass with no fail/
+              // expected-fail ref → 0; AC-2: a fail ref → 1) — neither changes the
+              // rendered state below (`attested_pass`/`fail` both outrank
+              // `falsified` in the precedence, so these two expectations were
+              // never "green for the wrong reason"; only the TYPE was unenforced).
               ac_coverage: [
-                { ac_id: "AC-1", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 1, attested_fail: 0 },
-                { ac_id: "AC-2", mode: "script", pass: 0, fail: 1, refs: [], attested_pass: 0, attested_fail: 1 },
+                {
+                  ac_id: "AC-1",
+                  mode: "script",
+                  pass: 1,
+                  fail: 0,
+                  refs: [],
+                  attested_pass: 1,
+                  attested_fail: 0,
+                  falsified: 0,
+                },
+                {
+                  ac_id: "AC-2",
+                  mode: "script",
+                  pass: 0,
+                  fail: 1,
+                  refs: [],
+                  attested_pass: 0,
+                  attested_fail: 1,
+                  falsified: 1,
+                },
               ],
             }),
           ]}

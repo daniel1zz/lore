@@ -17,10 +17,14 @@
  *     the SAME pass, no second traversal)
  *   - AcCoverageFact / EvidenceRefLite — computeAcCoverage's output row shapes
  *   - deriveAcCoverageState(fact) — the ONE fail-first coverage-precedence derivation
- *     (SPEC-070 AC-070-12, review finding F3) every rendering consumer shares, now
- *     including `pass_unfalsified` (spec-oracle-tier-falsifiability-a-criterion-never-
- *     observed-red M1) inserted between `attested_pass` and `pass` so an attested pass
- *     never degrades
+ *     (SPEC-070 AC-070-12, review finding F3) every rendering consumer shares. Widened
+ *     to SEVEN states by spec-oracle-tier-falsifiability-a-criterion-never-observed-red
+ *     M1 (`pass_unfalsified`, between `attested_pass` and `pass`, so an attested pass
+ *     never degrades), M4 (`fail_superseded` — a `fail` whose only red evidence is
+ *     strictly older than a runner-attested pass, by `recorded_at`), and M5
+ *     (`not_measured` — a pass-only fact whose `falsified` fails runtime well-
+ *     formedness, closing M1's fail-open on an absent/malformed count). See this
+ *     function's own JSDoc for the complete seven-row table.
  *   - isAcInDeclaredScope(declaredScope, acId) — the ONE declared-`ac_scope`
  *     membership predicate (adr-lore-verify-s-attested-evidence-scope-belongs-to-the-task
  *     §Public Interface), consumed by `lore verify`'s selection + refusals
@@ -214,11 +218,24 @@ export const specAcceptanceCriteriaSchema = z
  *   property below — an `"expected-fail"` ref is counted in NEITHER bucket,
  *   NO special-casing required, and is NEVER counted as passing/green by this
  *   or any other consumer of the evidence log.
+ * @invariant `recorded_at` (spec-oracle-tier-falsifiability-a-criterion-never-
+ *   observed-red M4) is OPTIONAL, not required — a required field would repeat
+ *   exactly the mistake `not_measured` (M5) exists to fix: a compile-time claim
+ *   the runtime cannot actually guarantee, especially for hand-built test
+ *   fixtures. `computeAcCoverage` populates it unconditionally from the source
+ *   `EvidenceEntry.recorded_at` (itself schema-required — `task-workflow.ts`'s
+ *   `evidenceEntrySchema`), so every ref built by the real aggregator carries
+ *   one; `deriveAcCoverageState`'s supersession check (`fail_superseded`)
+ *   defends itself against a ref that does not, per the three fail-closed
+ *   tie-breaks in that function's own JSDoc. Same ISO 8601 string convention
+ *   `EvidenceEntry.recorded_at` uses (string comparison, no `Date` parsing —
+ *   mirrors `session.ts::deriveLastActivityAt`'s `updated_at` comparison).
  */
 export interface EvidenceRefLite {
   task_id: string;
   result: "pass" | "fail" | "inconclusive" | "expected-fail";
   attested?: boolean;
+  recorded_at?: string;
 }
 
 /**
@@ -266,6 +283,23 @@ export interface AcCoverageFact {
    *   collapsing into the same value as a criterion that WAS observed red. An absent
    *   `refs` array (`pass === 0`) and a present-but-never-red one (`pass > 0`,
    *   `falsified === 0`) are two different, distinguishable readings.
+   *   ⛔ CORRECTED (M5, spec-oracle-tier-falsifiability-a-criterion-never-observed-red):
+   *   this bullet, as written above, claimed there were only TWO distinguishable
+   *   readings of a pass-only fact — that claim is FALSE, and M5 is the measured
+   *   proof. `falsified` is typed `number` (required, never optional) on
+   *   {@link AcCoverageFact}, but a type annotation is a compile-time claim the
+   *   runtime does not enforce — a hand-built fixture (a test's own fact literal,
+   *   never `computeAcCoverage`'s own output, which always computes a well-formed
+   *   non-negative integer) can carry `falsified: undefined`/`null`/`NaN`/a negative
+   *   number despite the type. Before M5, that malformed value satisfied neither
+   *   `falsified === 0` NOR `falsified > 0`'s exhaustive-looking pair, so it fell
+   *   through {@link deriveAcCoverageState}'s pass-only branch into `"pass"` — the
+   *   SAME optimistic misread the `"none"` vs `"pass_unfalsified"` split exists to
+   *   prevent, just on the field this dimension itself owns. `deriveAcCoverageState`
+   *   now reads THREE distinguishable pass-only states, not two: a genuine zero
+   *   (`"pass_unfalsified"`), a genuine positive count (`"pass"`), and a malformed
+   *   count (`"not_measured"`) — see that function's own JSDoc for the well-formedness
+   *   predicate and its rank in the precedence.
    * - **Opt-in**: unconditional — every criterion with ≥1 evidence entry gets a
    *   `falsified` count with no author action required, and the derived state is
    *   REPORT-ONLY (governing ADR §"Report-only first…"): nothing gates or blocks on
@@ -321,7 +355,14 @@ export function computeAcCoverage(
   for (const task of tasks) {
     for (const entry of extractEvidence(task)) {
       if (entry.ac_ref === undefined) continue;
-      const ref: EvidenceRefLite = { task_id: task.id, result: entry.result };
+      // reason: `recorded_at` is populated unconditionally in this SAME pass (M4,
+      // spec-oracle-tier-falsifiability-a-criterion-never-observed-red) — the
+      // source EvidenceEntry.recorded_at is schema-required, so this is never a
+      // second traversal or a new store round-trip, just one more field read off
+      // the entry already in hand. `EvidenceRefLite.recorded_at` stays OPTIONAL on
+      // the TYPE (defending hand-built fixtures, per that field's own JSDoc) even
+      // though this real aggregator always supplies it.
+      const ref: EvidenceRefLite = { task_id: task.id, result: entry.result, recorded_at: entry.recorded_at };
       if (entry.attestation !== undefined) {
         ref.attested = true;
       }
@@ -361,13 +402,13 @@ export function computeAcCoverage(
  *
  * FAIL-FIRST (the deliberate semantic fix this function codifies, not a
  * refactor-only extraction): a criterion with BOTH failing AND passing evidence is
- * `"fail"` — a loud failure signal always wins over any pass, attested or not.
- * `"pass_unfalsified"` (spec-oracle-tier-falsifiability-a-criterion-never-observed-red
- * M1) is checked AFTER `attested_pass` and BEFORE the plain `"pass"` fallback — so a
- * criterion with an attested pass NEVER degrades to `"pass_unfalsified"` even when it
- * was also never observed red (AC-FALS-3); only a NON-attested pass with zero
- * falsified evidence reads as `"pass_unfalsified"` instead of plain `"pass"`
- * (AC-FALS-2).
+ * `"fail"` (or its M4 sibling `"fail_superseded"`, below) — a loud failure signal
+ * always wins over any pass, attested or not. `"pass_unfalsified"`
+ * (spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1) is checked
+ * AFTER `attested_pass` and BEFORE the plain `"pass"` fallback — so a criterion with
+ * an attested pass NEVER degrades to `"pass_unfalsified"` even when it was also
+ * never observed red (AC-FALS-3); only a NON-attested pass with zero falsified
+ * evidence reads as `"pass_unfalsified"` instead of plain `"pass"` (AC-FALS-2).
  * Before this function existed, two INDEPENDENT precedence implementations
  * disagreed: `commands/ac.ts`'s `coverageBadge` was already fail-first (checked
  * `fact.fail > 0` before `fact.pass > 0`), but `task-feed-wiring.ts`'s
@@ -375,16 +416,65 @@ export function computeAcCoverage(
  * attested pass AND a later fail silently rendered `"attested_pass"` in the
  * task-start pack, masking the real failure behind a green badge.
  *
+ * ⛔ **The complete SEVEN-row precedence table (M4 + M5, binding — see the
+ * governing spec's Design section, §"The seven-value precedence, after M4 and M5",
+ * for the authoritative statement this function implements verbatim). Read TOP TO
+ * BOTTOM; the FIRST matching row wins:**
+ *
+ * | # | State | Condition |
+ * |---|---|---|
+ * | 1 | `"fail"` | `fail > 0` AND NOT superseded |
+ * | 2 | `"fail_superseded"` | `fail > 0` AND superseded (see below) |
+ * | 3 | `"attested_pass"` | `fail === 0` AND `attested_pass > 0` |
+ * | 4 | `"not_measured"` | `fail === 0`, `attested_pass === 0`, `pass > 0`, `falsified` NOT a well-formed non-negative integer |
+ * | 5 | `"pass_unfalsified"` | `fail === 0`, `attested_pass === 0`, `pass > 0`, `falsified === 0` |
+ * | 6 | `"pass"` | `fail === 0`, `attested_pass === 0`, `pass > 0`, `falsified > 0` |
+ * | 7 | `"none"` | `pass === 0` AND `fail === 0` |
+ *
+ * This is the COMPLETE return set — `"inconclusive"`/`"expected-fail"` are
+ * badge-layer residuals `commands/ac.ts::coverageBadge` derives from `fact.refs`
+ * ONLY after THIS function has already returned `"none"` (rendering `⚑?`/`⚑R`);
+ * they are never members of this function's own return type.
+ *
+ * **M4 — `"fail_superseded"` (rank 2)**: SUPERSEDED means the newest ATTESTED pass
+ * ref is STRICTLY newer than the newest `"fail"` ref, by `recorded_at`. Reduces an
+ * APPEND-ONLY LOG (evidence rows accumulate forever) into a precedence built for a
+ * SIMULTANEOUS SET — without this, one honest historical `fail` row pinned a
+ * criterion to `"fail"` permanently, even after a later attested pass proved the
+ * defect fixed (`task-one-honest-historical-fail-row-pins-a-criterion-to-state`).
+ * `falsified`'s OWN counting is UNTOUCHED — it answers a different, deliberately
+ * historical question ("was this oracle ever observed able to go red") and stays
+ * monotonic; only `state`'s time semantics change (AC-FALS-15). Three fail-closed
+ * tie-breaks, delegated to {@link isSupersededByNewerAttestedPass} — each one a
+ * deliberate choice toward `"fail"` whenever the comparison is ambiguous:
+ *   - Equal `recorded_at` does NOT supersede (a tie keeps `"fail"`).
+ *   - A `"fail"` ref with an absent/non-string `recorded_at` is UNUSABLE and treated
+ *     as the NEWEST possible fail (cannot be superseded by anything).
+ *   - A `"pass"` ref with an absent/non-string `recorded_at` is UNUSABLE and treated
+ *     as the OLDEST possible pass (cannot supersede anything); an UNATTESTED pass
+ *     never supersedes, however new — only `attested === true` refs are considered.
+ * Named residual: a criterion whose `fail` is real and current, followed by an
+ * attested pass produced against a DIFFERENT tree, still reads `"fail_superseded"`
+ * — supersession proves recency, never that the same code was under test (the same
+ * class of proxy gap `falsified`'s own governing ADR names and accepts).
+ *
+ * **M5 — `"not_measured"` (rank 4, NOT above `"fail"`/`"attested_pass"`)**: a
+ * malformed `falsified` (`undefined`/`null`/`NaN`/negative — a hand-built test
+ * fixture is exactly where a `number`-typed field's runtime guarantee does not
+ * hold; {@link computeAcCoverage}'s own output is always well-formed) invalidates
+ * EXACTLY the discrimination `falsified` powers, and nothing else — ranks 1-3 and 7
+ * never read the field, so their inputs stay independently valid. Ranking it higher
+ * would suppress a true `"fail"` behind a fixture defect, inverting the fail-first
+ * rule M4 preserves. `"not_measured"` is also NOT more favourable than `"pass"`: it
+ * is a distinct non-committal reading, never a silent substitution for either
+ * neighbour — rows 4-6 are TOTAL over every possible `falsified` value (no input
+ * with `pass > 0` and no fail/attested-pass falls through to `"none"`).
+ *
  * @param fact - One {@link computeAcCoverage} output row for a single criterion.
- * @returns `"fail"` (`fact.fail > 0`) \> `"attested_pass"` (no fail, `fact.attested_pass > 0`)
- *   \> `"pass_unfalsified"` (no fail, no attested pass, `fact.pass > 0` AND
- *   `fact.falsified === 0` — green, but never observed to be able to go red;
- *   spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1)
- *   \> `"pass"` (no fail, no attested pass, `fact.pass > 0`, `fact.falsified > 0`)
- *   \> `"none"` (no evidence at all).
+ * @returns One of the seven states in the precedence table above.
  * @example
- * deriveAcCoverageState({ ac_id: "AC-1", mode: "script", pass: 1, fail: 1, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 });
- * // => "fail" — a fail always wins, even alongside a pass
+ * deriveAcCoverageState({ ac_id: "AC-1", mode: "script", pass: 1, fail: 1, refs: [], attested_pass: 0, attested_fail: 0, falsified: 1 });
+ * // => "fail" — a fail wins over a pass, and there is no attested pass to supersede it
  * @example
  * deriveAcCoverageState({ ac_id: "AC-2", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 });
  * // => "pass_unfalsified" — green, but this oracle was never observed to be able to fail
@@ -392,15 +482,107 @@ export function computeAcCoverage(
  * deriveAcCoverageState({ ac_id: "AC-3", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 1, attested_fail: 0, falsified: 0 });
  * // => "attested_pass" — an attested pass never degrades to "pass_unfalsified" (AC-FALS-3),
  * //    even though falsified is also 0 here — attested_pass is checked first
+ * @example
+ * deriveAcCoverageState({
+ *   ac_id: "AC-4", mode: "script", pass: 1, fail: 1, attested_pass: 1, attested_fail: 0, falsified: 1,
+ *   refs: [
+ *     { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+ *     { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-02T00:00:00.000Z" },
+ *   ],
+ * });
+ * // => "fail_superseded" (M4) — the attested pass is strictly newer than the fail
+ * @example
+ * deriveAcCoverageState({ ac_id: "AC-5", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: undefined as unknown as number });
+ * // => "not_measured" (M5) — falsified fails runtime well-formedness despite the type claim
  */
 export function deriveAcCoverageState(
   fact: AcCoverageFact,
-): "fail" | "attested_pass" | "pass_unfalsified" | "pass" | "none" {
-  if (fact.fail > 0) return "fail";
+): "fail" | "fail_superseded" | "attested_pass" | "not_measured" | "pass_unfalsified" | "pass" | "none" {
+  if (fact.fail > 0) {
+    return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
+  }
   if (fact.attested_pass > 0) return "attested_pass";
-  if (fact.pass > 0 && fact.falsified === 0) return "pass_unfalsified";
-  if (fact.pass > 0) return "pass";
+  if (fact.pass > 0) {
+    if (!isWellFormedFalsifiedCount(fact.falsified)) return "not_measured";
+    return fact.falsified === 0 ? "pass_unfalsified" : "pass";
+  }
   return "none";
+}
+
+/**
+ * Runtime well-formedness check for {@link AcCoverageFact.falsified} (M5,
+ * spec-oracle-tier-falsifiability-a-criterion-never-observed-red) — a POSITIVE test
+ * ("is this usable") rather than a list of bad values, deliberately: a "not a
+ * finite number" phrasing was rejected during the governing spec's review because
+ * it leaves a finite NEGATIVE `falsified` matching no row of the precedence table
+ * at all (still `pass > 0`, which also excludes `"none"`) — the exact fail-open
+ * shape M5 exists to close. `Number.isInteger` accepts `unknown` at the type level
+ * ({@link https://www.typescriptlang.org/} lib.es2015.core.d.ts), so this compiles
+ * and behaves correctly even though `falsified`'s declared type is the non-optional
+ * `number` — the whole point being that a hand-built fixture's ACTUAL runtime value
+ * can violate that declared type.
+ *
+ * @param falsified - `AcCoverageFact.falsified`, declared `number` but not
+ *   runtime-guaranteed to BE one (M5's own premise).
+ * @returns `true` for any non-negative integer (`0`, `1`, `2`, …); `false` for
+ *   `undefined`, `null`, `NaN`, a non-integer, or a negative number.
+ */
+function isWellFormedFalsifiedCount(falsified: number): boolean {
+  return Number.isInteger(falsified) && falsified >= 0;
+}
+
+/**
+ * Whether a `fail > 0` fact's failing evidence has been SUPERSEDED by a
+ * strictly-newer runner-attested pass (M4, spec-oracle-tier-falsifiability-
+ * a-criterion-never-observed-red) — see {@link deriveAcCoverageState}'s own JSDoc
+ * for the three fail-closed tie-breaks this function implements. Only called when
+ * `fact.fail > 0` (the caller's contract), so an empty `refs`/no fail refs at all
+ * would be a caller-contract violation, not a real input this function special-
+ * cases — it degrades to `false` (not superseded) rather than throwing, matching
+ * every other defensive read in this module.
+ *
+ * @param refs - `AcCoverageFact.refs` — the full evidence-reference list for one
+ *   criterion.
+ * @returns `true` iff the newest ATTESTED pass ref's `recorded_at` is strictly
+ *   greater (plain string comparison — the same "ISO 8601 compares chronologically
+ *   as a string" convention `session.ts::deriveLastActivityAt` already uses, no
+ *   `Date` parsing) than the newest fail ref's `recorded_at`.
+ */
+function isSupersededByNewerAttestedPass(refs: readonly EvidenceRefLite[]): boolean {
+  const failRefs = refs.filter((r) => r.result === "fail");
+  // A fail ref with an unusable recorded_at is treated as the newest possible
+  // fail (tie-break 2) — one such ref makes supersession impossible regardless
+  // of any other fail ref's timestamp, so short-circuit immediately.
+  if (failRefs.some((r) => !isUsableRecordedAt(r.recorded_at))) return false;
+  const newestFailAt = maxRecordedAt(failRefs);
+  if (newestFailAt === null) return false; // defensive: caller-contract violation, never real data
+
+  // An unusable-timestamp attested pass is EXCLUDED entirely (tie-break 3),
+  // never substituted with a sentinel — the same effect, since an excluded ref
+  // can never win the max. An unattested pass never enters this filter at all
+  // (tie-break 4).
+  const attestedPassRefs = refs.filter(
+    (r) => r.result === "pass" && r.attested === true && isUsableRecordedAt(r.recorded_at),
+  );
+  const newestAttestedPassAt = maxRecordedAt(attestedPassRefs);
+  if (newestAttestedPassAt === null) return false;
+
+  return newestAttestedPassAt > newestFailAt; // strict: equal timestamps do NOT supersede (tie-break 1)
+}
+
+/** Type guard: `recorded_at` is USABLE for the M4 supersession comparison iff it is a string (absent/non-string is the documented UNUSABLE case). */
+function isUsableRecordedAt(value: string | undefined): value is string {
+  return typeof value === "string";
+}
+
+/** Max `recorded_at` (plain string comparison) across refs with a usable one; `null` when none qualify. */
+function maxRecordedAt(refs: readonly EvidenceRefLite[]): string | null {
+  let latest: string | null = null;
+  for (const ref of refs) {
+    if (!isUsableRecordedAt(ref.recorded_at)) continue;
+    if (latest === null || ref.recorded_at > latest) latest = ref.recorded_at;
+  }
+  return latest;
 }
 
 // ─── Declared-Scope Membership (adr-lore-verify-s-attested-evidence-scope…) ──
