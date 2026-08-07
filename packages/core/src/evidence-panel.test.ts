@@ -352,6 +352,7 @@ describe("deriveAttestationSummary", () => {
         refs: [{ task_id: "task-a", result: "pass", attested: true }],
         attested_pass: 1,
         attested_fail: 0,
+        falsified: 0,
       },
       {
         ac_id: "AC-2",
@@ -361,6 +362,7 @@ describe("deriveAttestationSummary", () => {
         refs: [{ task_id: "task-b", result: "pass" }],
         attested_pass: 0,
         attested_fail: 0,
+        falsified: 0,
       },
     ];
     const summary = deriveAttestationSummary(infos, 0.5, acCoverage);
@@ -384,6 +386,7 @@ function acFact(overrides: Partial<AcCoverageFact> & { ac_id: string }): AcCover
     refs: [],
     attested_pass: 0,
     attested_fail: 0,
+    falsified: 0,
     ...overrides,
   };
 }
@@ -682,6 +685,7 @@ describe("summarizeForAdjudicationBar", () => {
         ],
         attested_pass: 1,
         attested_fail: 0,
+        falsified: 0,
       },
       {
         ac_id: "AC-2",
@@ -691,6 +695,7 @@ describe("summarizeForAdjudicationBar", () => {
         refs: [{ task_id: "t3", result: "fail", attested: true }],
         attested_pass: 0,
         attested_fail: 1,
+        falsified: 1,
       },
     ];
     const criteria: AcceptanceCriterion[] = [];
@@ -886,6 +891,7 @@ describe("summarizeForAdjudicationBar", () => {
         refs: [{ task_id: "t1", result: "expected-fail" }],
         attested_pass: 0,
         attested_fail: 0,
+        falsified: 1,
       },
     ];
     const panel: EvidencePanelProjection = { doc_type: "spec", criteria: [], coverage, task_count: 1 };

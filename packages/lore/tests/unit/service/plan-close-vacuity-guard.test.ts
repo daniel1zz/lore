@@ -91,6 +91,7 @@ const AC1_ATTESTED: readonly AcCoverageFact[] = [
     refs: [{ task_id: "task-legacy-1", result: "pass", attested: true }],
     attested_pass: 1,
     attested_fail: 0,
+    falsified: 0,
   },
 ];
 
@@ -210,6 +211,7 @@ describe("plan-close blocks an undeclared scope that carries evidence (PCI-17)",
             refs: [],
             attested_pass: 0,
             attested_fail: 0,
+            falsified: 0,
           },
         ],
       }),

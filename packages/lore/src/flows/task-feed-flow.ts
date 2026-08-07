@@ -132,12 +132,14 @@ export interface AcceptanceView {
   /** Present only for `mode: "script"` criteria — the declared oracle command. */
   readonly command?: string;
   /**
-   * Pre-aggregated coverage verdict: `"attested_pass"` (runner-attested pass
-   * evidence exists) > `"pass"` (self-reported pass) > `"fail"` (no pass, at
-   * least one fail) > `"none"` (no evidence at all) — precedence resolved by the
-   * wiring, never here.
+   * Pre-aggregated coverage verdict, fail-first precedence: `"fail"` (at least
+   * one fail) > `"attested_pass"` (runner-attested pass evidence exists) >
+   * `"pass_unfalsified"` (self-reported pass, never observed to be able to go
+   * red — `falsified === 0`) > `"pass"` (self-reported pass that WAS observed
+   * able to fail) > `"none"` (no evidence at all) — precedence resolved by the
+   * wiring (`deriveAcCoverageState`, `@lore/core`), never here.
    */
-  readonly coverage: "attested_pass" | "pass" | "fail" | "none";
+  readonly coverage: "attested_pass" | "pass_unfalsified" | "pass" | "fail" | "none";
   /**
    * `true` when the parent plan declares NO `ac_scope` (nothing is "out of
    * scope", so every criterion counts as in-scope) OR the plan's `ac_scope`
