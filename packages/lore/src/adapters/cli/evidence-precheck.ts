@@ -70,8 +70,9 @@
  *     code). `input.capture` is the load-bearing escape (see that function's
  *     own Opt-in note) — `--capture` measures the real exit code itself, so
  *     the pipe hazard does not apply there (an explicit non-goal of the
- *     governing spec). ⛔ NOT YET WIRED into either adapter's call sequence —
- *     see that function's own header for the exact two call-site diffs needed.
+ *     governing spec). LIVE at both call sites since
+ *     task-wire-findpiperefusal-into-the-live-lore-evidence-and-mcp — grep
+ *     `findPipeRefusal` in `commands/evidence.ts` and `../mcp/tools.ts`.
  *
  * All FIVE guards are ADJACENT but INDEPENDENT: the first asks "does the
  * file this command names exist at all", the second asks "did the filter this
@@ -1299,18 +1300,25 @@ const PIPE_REPAIR_HINT =
  * short-circuit (a `--capture` call with an out-of-scope oracle/result still
  * short-circuits to `null` for the same reason: nothing to check either way).
  *
- * ⛔ NOT YET WIRED into either adapter's call sequence
- * (`commands/evidence.ts`'s CLI adapter; `../mcp/tools.ts`'s
- * `lore_evidence_add` MCP handler). Both currently call
- * `findMissingOracleFilesForEvidence` / `findMixedRunnerRefusal` /
- * `findFilteredPassRefusal` / `findCaptureFlagConflict` individually and each
- * needs ONE new call to this function — `capture: <the same boolean already
- * resolved at that call site>` — positioned after the missing-oracle-file and
- * mixed-runner guards (a nonexistent file or a dropped-runner file is a more
+ * WIRED at both call sites (`commands/evidence.ts`'s CLI adapter and
+ * `../mcp/tools.ts`'s `lore_evidence_add` MCP handler) by
+ * task-wire-findpiperefusal-into-the-live-lore-evidence-and-mcp: each calls
+ * this function once, immediately after its own `mixedRunnerRefusal` block and
+ * before its `filteredPassRefusal` computation, passing `capture: <the same
+ * boolean already resolved at that call site>`. To verify mechanically rather
+ * than by trusting this sentence: grep `findPipeRefusal` in both files — each
+ * carries an `import` of it and a `const pipeRefusal = findPipeRefusal({` call
+ * site (⛔ no hit COUNT is stated here; a count goes stale the moment a comment
+ * mentions the symbol). Note also that AC-FALS-9's oracle spawns a REAL
+ * `lore evidence` process and asserts exit 4 without `--capture` / exit 0 with
+ * it, so a silently-unwired regression fails that test rather than passing.
+ *
+ * ⛔ The guard's position after the missing-oracle-file and mixed-runner guards
+ * is deliberate (a nonexistent file or a dropped-runner file is a more
  * fundamental fault); ordering against the filtered-pass guard is immaterial,
  * the two conditions are independent. This function is hosted here, alongside
- * its four siblings, specifically so BOTH adapters share ONE definition the
- * moment they are wired — never a second, parallel entry point per surface.
+ * its four siblings, so BOTH adapters share ONE definition — ⛔ never a second,
+ * parallel entry point per surface.
  *
  * Per adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the:
  *   - **Proxy** — "an unquoted, non-`||` `|` is present" is a proxy for "the

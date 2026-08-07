@@ -121,10 +121,26 @@
  *   a self-reported `--result pass` with no genuine tail and no `--capture`, a
  *   `--capture` spawn whose observed exit code contradicts the declared
  *   `--result`, OR a missing oracle file / an unproven filtered pass / a
- *   mixed-runner command per the prechecks below, OR a `--result pass` from a
- *   claim whose recorded worktree is uncommitted / from a no-worktree claim
- *   running inside a real git repo — TaskWorkflowService's own uncommitted-
- *   worktree guard, see module header), 5 = STALE_VERSION.
+ *   mixed-runner command / a piped self-reported command per the prechecks
+ *   below, OR a `--result pass` from a claim whose recorded worktree is
+ *   uncommitted / from a no-worktree claim running inside a real git repo —
+ *   TaskWorkflowService's own uncommitted-worktree guard, see module header),
+ *   5 = STALE_VERSION.
+ *
+ * Pipe-refusal guard (SPEC oracle-tier-falsifiability-a-criterion-never-
+ * observed-red M2; ADR falsifiability-moves-from-the-task-tier-to-the-oracle-
+ * tier) — a self-reported `--result pass` for `--oracle test`/`e2e` whose
+ * `--command` contains an unquoted, non-`||` shell pipe used to record
+ * cleanly even though `$?` after a pipe belongs to the LAST stage of the
+ * pipeline, never the oracle the call means to assert about (THIRD measured
+ * recurrence of this exact trap in this repo). Runs AFTER the missing-
+ * oracle-file and mixed-runner guards above (a nonexistent file or a
+ * dropped-runner file is a more fundamental fault); ordering against the
+ * filtered-pass guard below is immaterial, the two conditions are
+ * independent. `--capture` is the load-bearing escape — it measures the
+ * real exit code itself, so the pipe hazard does not apply there. The
+ * decision itself lives in `../evidence-precheck.js::findPipeRefusal`,
+ * shared verbatim with the MCP `lore_evidence_add` handler.
  *
  * Mixed-runner invocation guard (defect: task-vitest-run-silently-drops-a-bun-
  * test-ts-named-alongside-a) — a single `vitest run` invocation naming a
@@ -225,7 +241,10 @@
  *   task-lore-evidence-s-oracle-file-precheck-resolves-against-the;
  *   task-lore-evidence-and-lore-release-accept-an-attestation-from;
  *   task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the (`--capture`,
- *   the PASS-tail requirement, `capture_source`)
+ *   the PASS-tail requirement, `capture_source`);
+ *   task-wire-findpiperefusal-into-the-live-lore-evidence-and-mcp (spec
+ *   oracle-tier-falsifiability-a-criterion-never-observed-red M2 — wires
+ *   the pre-existing `findPipeRefusal` guard into this call sequence)
  */
 
 import { existsSync, readFileSync } from "fs";
@@ -247,6 +266,7 @@ import {
   findFilteredPassRefusal,
   findMixedRunnerRefusal,
   findCaptureFlagConflict,
+  findPipeRefusal,
   describePrecheckRoots,
   describeDerivedCdTarget,
 } from "../evidence-precheck.js";
@@ -476,6 +496,30 @@ export default defineCommand({
       if (mixedRunnerRefusal !== null) {
         process.stderr.write(formatError(mixedRunnerRefusal) + "\n");
         process.exitCode = exitCode(mixedRunnerRefusal);
+        return;
+      }
+
+      // reason: pipe-refusal guard (see module header; SPEC oracle-tier-
+      // falsifiability M2) — runs AFTER the missing-oracle-file and
+      // mixed-runner guards above (a nonexistent file or a dropped-runner
+      // file is a more fundamental fault than a pipe hazard); ordering
+      // against the filtered-pass guard below is immaterial, the two
+      // conditions are independent (`findPipeRefusal`'s own header). The
+      // decision itself lives in `../evidence-precheck.js` and is shared
+      // verbatim with the MCP `lore_evidence_add` handler, so neither
+      // surface can drift. `capture: captureRequested` is the SAME boolean
+      // already resolved above (governs whether this call spawned
+      // `--command` itself) — a captured run's exit code is measured
+      // directly, so the pipe hazard does not apply there.
+      const pipeRefusal = findPipeRefusal({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        command: args.command as string,
+        capture: captureRequested,
+      });
+      if (pipeRefusal !== null) {
+        process.stderr.write(formatError(pipeRefusal) + "\n");
+        process.exitCode = exitCode(pipeRefusal);
         return;
       }
 

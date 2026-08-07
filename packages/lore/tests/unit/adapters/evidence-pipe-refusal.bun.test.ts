@@ -18,15 +18,16 @@
  * adapters/cli/utils.ts` (imported, unedited) applied to `findPipeRefusal`'s
  * OWN return value — the exact function BOTH adapters (`commands/
  * evidence.ts`'s CLI command, `../mcp/tools.ts`'s `lore_evidence_add` MCP
- * handler) would call at their shared precheck sequence point once wired
- * (see `findPipeRefusal`'s own module-header note: this guard is authored and
- * exported, but not yet wired into either adapter's call sequence — that is
- * a necessary follow-up outside this task's file anchors, named in its
- * completion report). `exitCode(refusal)` is therefore the SAME numeric
- * answer `process.exitCode` would carry the moment either adapter adds its
- * one new call — this file measures the decision function directly rather
- * than a real subprocess exit code, but through the identical mapping
- * function the real CLI surface uses.
+ * handler) DO call at their shared precheck sequence point — wired by
+ * task-wire-findpiperefusal-into-the-live-lore-evidence-and-mcp; grep
+ * `findPipeRefusal` in both files to confirm rather than trusting this line.
+ * `exitCode(refusal)` is therefore the SAME numeric answer `process.exitCode`
+ * carries at those live call sites. This file deliberately measures the
+ * decision function DIRECTLY rather than a real subprocess: the live-process
+ * assertion is AC-FALS-9's own oracle
+ * (`evidence-pipe-wiring.bun.test.ts`, which spawns a real `lore evidence`),
+ * so the two files split unit-level branch coverage from the wiring proof
+ * instead of duplicating it.
  *
  * ⛔ Load-bearing CONTROL (per this task's own dispatch instructions): a
  * "refuse every piped command unconditionally" implementation would ALSO
