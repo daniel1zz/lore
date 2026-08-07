@@ -276,3 +276,38 @@ describe("coverageBadge — AC-WH-1 expected-fail badge — REGRESSION", () => {
     expect(coverageBadge(coverage, "AC-1")).toBe("⚑?(1)");
   });
 });
+
+// ─── spec-oracle-tier-falsifiability-a-criterion-never-observed-red M4/M5 —
+//     fail_superseded / not_measured badges (AC-FALS-19). ────────────────────
+
+describe("coverageBadge — M4/M5 new-state badges", () => {
+  it("badge-new-states: fail_superseded and not_measured each render their own explicit marker, distinct from each other and from every pre-existing/residual badge shape", () => {
+    const supersededFact = fact({
+      pass: 1,
+      fail: 1,
+      attested_pass: 1,
+      falsified: 1,
+      refs: [
+        { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+        { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-02T00:00:00.000Z" },
+      ],
+    });
+    // NaN is a well-typed `number` value that fails deriveAcCoverageState's
+    // runtime well-formedness check (M5) — no unsafe cast needed to construct
+    // this fixture, unlike the "genuinely absent" fixtures elsewhere.
+    const notMeasuredFact = fact({ pass: 1, fail: 0, attested_pass: 0, falsified: NaN, refs: [] });
+
+    const supersededBadge = coverageBadge([supersededFact], "AC-1");
+    const notMeasuredBadge = coverageBadge([notMeasuredFact], "AC-1");
+
+    expect(supersededBadge).toBe("✘S(1/1)");
+    expect(notMeasuredBadge).toBe("⚠(1/0)");
+
+    // Neither falls through the if-chain to a residual/pre-existing marker, and
+    // the two new badges are distinct from EACH OTHER too.
+    const otherBadgeShapes = ["·", "⚑?(1)", "⚑R(1)", "✘(1/1)", "✔(1/0)", "⚑✔(1/0, 1 attested)"];
+    expect(otherBadgeShapes).not.toContain(supersededBadge);
+    expect(otherBadgeShapes).not.toContain(notMeasuredBadge);
+    expect(supersededBadge).not.toBe(notMeasuredBadge);
+  });
+});

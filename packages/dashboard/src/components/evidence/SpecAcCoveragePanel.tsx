@@ -10,10 +10,15 @@
  *     local coverage math (that's `computeAcCoverage`'s job, `@lore/core`).
  *   - Per-row coverage state is `deriveAcCoverageState(fact)` (`@lore/core`,
  *     `acceptance.ts`) — the SAME fail-first precedence `lore ac list`'s CLI
- *     badge and `lore feed task-start`'s pack use; never a second ordering. That
- *     precedence can return `"pass_unfalsified"` (spec-oracle-tier-falsifiability-
- *     a-criterion-never-observed-red M1 surfacing) — see `stateVariant`'s own
- *     JSDoc for the deliberately neutral badge color chosen for it.
+ *     badge and `lore feed task-start`'s pack use; never a second ordering. This
+ *     module's local `CoverageState` alias is `ReturnType<typeof
+ *     deriveAcCoverageState>` (spec-oracle-tier-falsifiability-a-criterion-never-
+ *     observed-red M4/M5), never a hand-widened copy of the union — a hand-
+ *     maintained duplicate IS the SSOT defect M4/M5 measured (this exact file was
+ *     one of the two consumers `tsc` caught drifted before that fix landed). That
+ *     precedence can return `"pass_unfalsified"` (M1 surfacing) — see
+ *     `stateVariant`'s own JSDoc for the deliberately neutral badge color chosen
+ *     for it, and for `"fail_superseded"`/`"not_measured"` (M4/M5).
  *   - `panel.coverage` is guaranteed 1:1 index-aligned with `panel.criteria`
  *     (`computeAcCoverage`'s documented contract: "one AcCoverageFact per
  *     input criterion, in input order, never omits a declared criterion") —
@@ -37,7 +42,17 @@ export interface SpecAcCoveragePanelProps {
   panel: SpecEvidencePanelProjection;
 }
 
-type CoverageState = "fail" | "attested_pass" | "pass" | "pass_unfalsified" | "none";
+/**
+ * DERIVED from `deriveAcCoverageState`'s own return type (spec-oracle-tier-
+ * falsifiability-a-criterion-never-observed-red M4/M5) — never a hand-widened
+ * copy of the union. Before this fix, this alias was a hand-maintained literal
+ * union (`"fail" | "attested_pass" | "pass" | "pass_unfalsified" | "none"`) that
+ * `tsc` correctly rejected the moment `deriveAcCoverageState`'s return type grew
+ * two more members: the type error was the SIGNAL that a hand-copied SSOT had
+ * drifted, and re-widening it by hand (adding the two new literals here) would
+ * have re-created the identical defect for the NEXT state this derivation grows.
+ */
+type CoverageState = ReturnType<typeof deriveAcCoverageState>;
 
 /**
  * Badge color per fail-first coverage state (mirrors `commands/ac.ts::coverageBadge`'s
@@ -67,13 +82,49 @@ type CoverageState = "fail" | "attested_pass" | "pass" | "pass_unfalsified" | "n
  *       get its color" decision into two mechanisms (the `variant` prop here, a
  *       bespoke class there) for marginal benefit over the label text already
  *       carrying the distinction.
+ *
+ * M4/M5 additions (spec-oracle-tier-falsifiability-a-criterion-never-observed-red)
+ * — `fail_superseded` and `not_measured` — chosen against the SAME closed 4-variant
+ * CVA enum (`badge.tsx`, out of this task's file anchors, per the rejected-option
+ * (B) above): no fifth variant exists to introduce, so both new states reuse an
+ * existing one and rely on the row's own visible text (the state NAME) to stay
+ * distinguishable, exactly like `"pass_unfalsified"`/`"none"` already do.
+ *
+ * `"fail_superseded"` → `"secondary"`. Constraint (task's own file anchors):
+ * visually distinct from BOTH `"fail"` (`"destructive"`) and `"attested_pass"`
+ * (`"default"`) — this criterion DOES carry real fail evidence (unlike a plain
+ * pass), so reusing `"outline"` (this file's most neutral treatment, already
+ * `"pass_unfalsified"`/`"none"`'s) would UNDERSTATE it; `"secondary"` is the one
+ * remaining slot that is neither an alarm color nor the neutral default.
+ *
+ * `"not_measured"` → `"destructive"`. Candidates considered:
+ *   (A, CHOSEN) `"destructive"` — satisfies "must not read as more confident than
+ *       `pass`" (`"secondary"`) trivially: `"destructive"` is not a confident-
+ *       POSITIVE color at all, so it cannot be read as a STRONGER green than
+ *       plain `"pass"`. It also correctly signals "something needs attention
+ *       here" (a well-formedness defect in this criterion's OWN evidence
+ *       bookkeeping) — a reader distinguishes it from a genuine `"fail"` by the
+ *       badge's own text, the SAME mechanism this file already relies on
+ *       elsewhere (see the `CoverageState` alias's own precedent).
+ *   (B, REJECTED) `"default"` — the MOST confident-positive variant (already
+ *       `"attested_pass"`'s); would directly violate "not more confident than
+ *       pass," the exact inversion M5 exists to prevent.
+ *   (C, REJECTED) `"outline"`/`"secondary"` — both already claimed by
+ *       `"pass_unfalsified"`/`"none"` and `"fail_superseded"`/`"pass"`
+ *       respectively; AC-FALS-20 requires `"fail_superseded"`, `"not_measured"`,
+ *       and `"pass_unfalsified"` to render three MUTUALLY distinct variants in
+ *       one test, which a fourth reuse of either would violate.
  */
 function stateVariant(state: CoverageState): "destructive" | "default" | "secondary" | "outline" {
   switch (state) {
     case "fail":
       return "destructive";
+    case "fail_superseded":
+      return "secondary";
     case "attested_pass":
       return "default";
+    case "not_measured":
+      return "destructive";
     case "pass":
       return "secondary";
     case "pass_unfalsified":

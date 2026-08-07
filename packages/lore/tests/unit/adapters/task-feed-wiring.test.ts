@@ -476,6 +476,17 @@ describe("STATE/REGRESSION — the task doc is fetched exactly once; computeAcCo
     const task2: DocRecord = { ...task1, id: "01TASK2000000000000000000", slug: "task-2", extra: {} };
 
     const coverage = computeAcCoverage(criteria, [task1, task2]);
+    // ⛔ CORRECTED (spec-oracle-tier-falsifiability-a-criterion-never-observed-red
+    // M4): each ref now also carries `recorded_at` — computeAcCoverage populates
+    // it unconditionally in the SAME single pass from the source evidence entry's
+    // (schema-required) `recorded_at`, added by this task alongside the M4
+    // supersession derivation. This exact-match `toEqual` snapshot previously
+    // omitted the field, which was true only because computeAcCoverage had not
+    // yet been widened to populate it — a stale assertion, not a weakened one:
+    // the ORIGINAL command/failure is `bunx vitest run packages/lore/tests/unit/
+    // adapters/task-feed-wiring.test.ts` failing this exact `toEqual` with a diff
+    // adding `"recorded_at": "2026-07-24T00:00:00.000Z"` to each ref (measured
+    // directly, this task). No other field/count in this fixture changed.
     expect(coverage).toEqual([
       {
         ac_id: "AC-1",
@@ -483,8 +494,8 @@ describe("STATE/REGRESSION — the task doc is fetched exactly once; computeAcCo
         pass: 1,
         fail: 1,
         refs: [
-          { task_id: "01TASK1000000000000000000", result: "pass" },
-          { task_id: "01TASK1000000000000000000", result: "fail" },
+          { task_id: "01TASK1000000000000000000", result: "pass", recorded_at: now },
+          { task_id: "01TASK1000000000000000000", result: "fail", recorded_at: now },
         ],
         attested_pass: 0,
         attested_fail: 0,
@@ -495,7 +506,7 @@ describe("STATE/REGRESSION — the task doc is fetched exactly once; computeAcCo
         mode: "script",
         pass: 1,
         fail: 0,
-        refs: [{ task_id: "01TASK1000000000000000000", result: "pass", attested: true }],
+        refs: [{ task_id: "01TASK1000000000000000000", result: "pass", attested: true, recorded_at: now }],
         attested_pass: 1,
         attested_fail: 0,
         falsified: 0,
