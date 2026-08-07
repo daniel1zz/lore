@@ -1704,6 +1704,188 @@ export function resolveMemoryFileBudgets(config: LoreConfig | undefined): Memory
   return (config?.context ?? contextConfigSchema.parse({})).memory_files;
 }
 
+/**
+ * Where a resolved {@link MemoryFileBudgets} actually came from — the channel
+ * {@link resolveMemoryFileBudgets}'s plain-value return does not have.
+ *
+ * THREE of these five routes end at the very same schema defaults, and only
+ * ONE of them is a substitution the operator must hear about. A boolean
+ * `usedDefaults` flag would collapse exactly the distinction that matters, so
+ * the discriminant is the state itself (`state-as-data`), and the one route
+ * that must speak cannot be constructed without its `reason`.
+ *
+ * - `config` — the whole `LoreConfig` parsed. The budgets are the operator's,
+ *   including the case where they authored no `context:` block at all (a
+ *   valid config without one resolves to the schema defaults BY the
+ *   operator's own choice).
+ * - `context-salvage` — the config failed whole-`LoreConfig` validation
+ *   somewhere else (classically: a hand-authored `.lore/config.yaml` carrying
+ *   only a `context:` block, no `lore init` run yet), but the `context`
+ *   sub-tree re-validated on its own. The operator's numbers ARE in effect;
+ *   nothing was substituted.
+ * - `no-config` — no `.lore/config.yaml` on disk. The legitimate zero-config
+ *   case: defaults are the answer, and announcing here would train operators
+ *   to ignore the notice.
+ * - `no-context-section` — the config is invalid elsewhere AND never authored
+ *   a `context:` key. Still not a substitution: a VALID config without
+ *   `context` resolves to these identical defaults, so no operator choice is
+ *   being ignored.
+ * - `substituted-defaults` — a `context:` block WAS authored (or the file
+ *   exists but its contents are unreadable/unparseable, so whether one was
+ *   authored is unknowable) and the budgets in effect are NOT it. ⛔ This is
+ *   the only route that may not be silent.
+ *
+ * Source: task-lore-status-check-claude-md-silently-runs-on-schema.
+ */
+export type MemoryFileBudgetResolution =
+  | { readonly source: "config"; readonly budgets: MemoryFileBudgets }
+  | { readonly source: "context-salvage"; readonly budgets: MemoryFileBudgets }
+  | { readonly source: "no-config"; readonly budgets: MemoryFileBudgets }
+  | { readonly source: "no-context-section"; readonly budgets: MemoryFileBudgets }
+  | { readonly source: "substituted-defaults"; readonly budgets: MemoryFileBudgets; readonly reason: string };
+
+/** Renders a `ZodError`'s issues as `path: message` pairs — keeps the offending FIELD NAME in the relayed text. */
+function formatContextIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+    .join("; ");
+}
+
+/** True for the one fs failure that means "the operator simply has no config file". */
+function isFileNotFoundCause(cause: Error | undefined): boolean {
+  return cause !== undefined && (cause as { code?: unknown }).code === "ENOENT";
+}
+
+/**
+ * Resolve `context.memory_files.*` budgets from an ALREADY-ATTEMPTED
+ * `loadConfig` result, reporting WHERE they came from
+ * (spec-project-claude-md-content-contract-governance-injected §D1/D8).
+ *
+ * ⛔ This is the single admission seam for budget resolution. Its predecessor
+ * shape — two byte-identical private copies in
+ * `adapters/cli/commands/status.ts` and `adapters/cli/commands/context.ts`,
+ * both ending in a bare `return resolveMemoryFileBudgets(undefined)` — let
+ * `lore status --check-claude-md` print per-doc numbers and exit 0/3 against
+ * thresholds the operator never chose and could not tell had been
+ * substituted. The mechanism root was the plain-value return type, not the
+ * code path: with no channel to report provenance, the silence was structural
+ * and would return the next time a `context` field was added. Callers get the
+ * provenance whether they want it or not, and
+ * {@link formatMemoryFileBudgetSubstitution} is the shared renderer both CLI
+ * consumers use so the operator-facing wording cannot drift between them.
+ *
+ * ⛔ The `context-salvage` branch is deliberate and load-bearing (spec Module
+ * Boundary invariant 2): `--check-claude-md` must work "config-only",
+ * independent of whether the rest of `LoreConfig` has ever been validated, so
+ * a hand-authored `.lore/config.yaml` holding ONLY a `context:` block is
+ * honoured rather than ignored. Do not simplify it away.
+ *
+ * ⛔ The fix for an unparseable `context` block is to repair the config, NEVER
+ * to loosen `contextConfigSchema`. The ordered warn/evict pair refusal is
+ * correct; the defect was that its refusal got swallowed downstream.
+ *
+ * @param configResult - The already-attempted `loadConfig(dir)` result. Taken
+ *   as a value (not a directory) so this stays pure and browser-safe — file IO
+ *   lives in `config-node.ts` — and so a caller that already loaded the config
+ *   for other reasons performs exactly one filesystem read per invocation.
+ * @returns A {@link MemoryFileBudgetResolution} — always usable `budgets`,
+ *   plus the `source` that produced them.
+ * @example
+ *   resolveMemoryFileBudgetsFromConfigResult(loadConfig(cwd))
+ *   // => { source: "config", budgets: {...} }
+ *   // => { source: "substituted-defaults", budgets: {...schema defaults}, reason: "…evict_threshold_fraction…" }
+ */
+export function resolveMemoryFileBudgetsFromConfigResult(
+  configResult: Result<LoreConfig, LoreError>,
+): MemoryFileBudgetResolution {
+  if (configResult.ok) {
+    return { source: "config", budgets: resolveMemoryFileBudgets(configResult.value) };
+  }
+
+  const schemaDefaults = resolveMemoryFileBudgets(undefined);
+  const { error } = configResult;
+
+  if (error.code === "STORE_ERROR") {
+    if (isFileNotFoundCause(error.cause)) return { source: "no-config", budgets: schemaDefaults };
+    // The file is there and we could not read it, so whether it configured
+    // budgets is UNKNOWABLE — the honest verdict is a substitution, never a
+    // silent default.
+    return {
+      source: "substituted-defaults",
+      budgets: schemaDefaults,
+      reason: `.lore/config.yaml exists but could not be read (${error.message}), so whether it configured \`context.memory_files\` is UNKNOWN`,
+    };
+  }
+
+  if (error.code === "VALIDATION_ERROR" && typeof error.value === "object" && error.value !== null) {
+    const contextCandidate = (error.value as Record<string, unknown>)["context"];
+
+    // No `context:` key authored at all — a VALID config without one resolves
+    // to these same defaults, so there is no operator choice being overridden.
+    if (contextCandidate === undefined) return { source: "no-context-section", budgets: schemaDefaults };
+
+    const contextParse = contextConfigSchema.safeParse(contextCandidate);
+    if (contextParse.success) return { source: "context-salvage", budgets: contextParse.data.memory_files };
+
+    return {
+      source: "substituted-defaults",
+      budgets: schemaDefaults,
+      reason: `.lore/config.yaml's \`context\` section was refused by its own schema — ${formatContextIssues(contextParse.error)}`,
+    };
+  }
+
+  // Malformed YAML, or YAML parsing to a scalar: `error.value` is the raw TEXT
+  // (or absent), so the `context` key cannot even be looked at.
+  return {
+    source: "substituted-defaults",
+    budgets: schemaDefaults,
+    reason: `.lore/config.yaml could not be parsed (${error.code === "VALIDATION_ERROR" ? `${error.field}: ${error.message}` : error.code}), so whether it configured \`context.memory_files\` is UNKNOWN`,
+  };
+}
+
+/**
+ * The operator-facing notice for a {@link MemoryFileBudgetResolution} — the
+ * ONE renderer both CLI budget consumers (`lore status --check-claude-md` and
+ * `lore context init|refresh`) write to stderr, so the wording cannot drift
+ * between them.
+ *
+ * Returns `undefined` for every source that did NOT substitute, which makes
+ * the correct call site trivially `const notice = …; if (notice !== undefined)
+ * write(notice)` — a caller cannot accidentally announce a legitimate default.
+ *
+ * ⛔ Warn-and-proceed, not refuse. `lore status --check-claude-md`'s exit code
+ * has exactly two documented verdicts at its two shipped consumers:
+ * `assets/hooks/claude-md-guard.sh` maps `0 → allow`, `3 → block`, and every
+ * OTHER code to "undocumented verdict — failing open", while `hooks/pre-push`
+ * blocks the push on any non-zero. A refusal exit code would therefore
+ * silently convert "measured against the wrong budgets" into "not measured at
+ * all" at the guard hook — a strictly worse silence at the surface whose whole
+ * purpose is to block an over-ceiling write. The notice is the signal; the
+ * exit code stays a measurement of the files. `lore status --check-claude-md
+ * --json` additionally carries the provenance in its payload, since a stderr
+ * line is invisible to a `--json` consumer.
+ *
+ * @param resolution - The provenance from {@link resolveMemoryFileBudgetsFromConfigResult}.
+ * @param configDir - Directory the `.lore/config.yaml` was resolved from — named
+ *   in the notice so an operator running from a subdirectory knows WHICH file to repair.
+ * @returns The multi-line notice, or `undefined` when nothing was substituted.
+ * @example
+ *   formatMemoryFileBudgetSubstitution({ source: "no-config", budgets }, "/repo") // => undefined
+ */
+export function formatMemoryFileBudgetSubstitution(
+  resolution: MemoryFileBudgetResolution,
+  configDir: string,
+): string | undefined {
+  if (resolution.source !== "substituted-defaults") return undefined;
+
+  return (
+    `Warning: SUBSTITUTED schema-default memory-file budgets — the ceilings in effect are NOT the ones ${configDir} configured.\n` +
+    `  cause: ${resolution.reason}\n` +
+    "  fix: repair .lore/config.yaml (run `lore governance claude-md` for the content contract), then re-run. " +
+    "Do NOT loosen the schema — the refusal above is correct."
+  );
+}
+
 // ─── Pure Parse Helpers ────────────────────────────────────────────────────
 
 /**
