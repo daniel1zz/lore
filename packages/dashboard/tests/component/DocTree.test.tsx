@@ -43,6 +43,8 @@ const leafNode = (id: string, title: string): TreeNode => ({
     type: "spec",
     status: "active",
     updated_at: "2024-01-01T00:00:00.000Z",
+    tags: [],
+    priority: "medium",
   },
   children: [],
 });
@@ -55,6 +57,8 @@ const parentNode: TreeNode = {
     type: "prd",
     status: "active",
     updated_at: "2024-01-01T00:00:00.000Z",
+    tags: [],
+    priority: "medium",
   },
   children: [leafNode("child-1", "Child Spec A"), leafNode("child-2", "Child Spec B")],
 };
@@ -188,6 +192,8 @@ describe("DocTree", () => {
           type: "prd",
           status: "active",
           updated_at: "2024-01-01T00:00:00.000Z",
+          tags: [],
+          priority: "medium",
         },
         children: [leafNode("a", "Alpha"), leafNode("b", "Beta")],
       };

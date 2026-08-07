@@ -50,15 +50,18 @@ function makeDocRecord(overrides?: Partial<DocRecord>): DocRecord {
     slug: "prd-test-doc",
     title: "Test Doc",
     type: "prd",
+    role: "intent",
     status: "draft",
+    priority: "medium",
     content: "content",
     version: 1,
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
-    created_by: null,
+    created_by: "alice",
     parent_id: null,
     tags: [],
     extra: {},
+    deleted_at: null,
     ...overrides,
   };
 }
@@ -88,6 +91,24 @@ function capturedHeaders(): Record<string, string> {
   return headers as Record<string, string>;
 }
 
+/**
+ * Returns the Nth recorded `global.fetch` call ([url, init]). `mock.calls[n]`
+ * is possibly `undefined` under `noUncheckedIndexedAccess` (correctly so — a
+ * test asserting on a call that never happened is a real bug, not a type-
+ * checker false positive); the honest fix throws loudly here so the failure
+ * points at "fetch wasn't called that many times" instead of a `!`-silenced
+ * `undefined` flowing into a `.method`/`.credentials` access several lines
+ * down with no assertion message at all.
+ */
+function nthFetchCall(index: number): any[] {
+  const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+  const call = calls[index];
+  if (call === undefined) {
+    throw new Error(`expected fetch to have been called at index ${index}, but it was called ${calls.length} time(s)`);
+  }
+  return call;
+}
+
 // ─── HAPPY paths ──────────────────────────────────────────────────────────────
 
 describe("apiCreateDoc — happy path", () => {
@@ -109,7 +130,7 @@ describe("apiCreateDoc — happy path", () => {
 
     await apiCreateDoc(null, { type: "prd", title: "My New PRD" });
 
-    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = nthFetchCall(0);
     expect(call[0]).toBe("/api/dashboard/docs");
     expect(call[1]?.method).toBe("POST");
     expect(call[1]?.credentials).toBe("include");
@@ -172,7 +193,7 @@ describe("apiPatchDoc — header dispatch", () => {
 
     await apiPatchDoc(null, "my-doc-id", { content: "updated" }, { version: 1 });
 
-    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = nthFetchCall(0);
     expect(call[0]).toContain("/api/dashboard/docs/");
     expect(call[0]).toContain("my-doc-id");
     expect(call[1]?.method).toBe("PATCH");
@@ -291,7 +312,12 @@ describe("apiCreateDoc — 422 → DashboardApiError (AC-DASH-WRITE-10)", () => 
 
     let threw: Error | null = null;
     try {
-      // @ts-expect-error — intentionally passing empty title to test validation
+      // Empty string satisfies `title: string` at the TYPE level (Zod's runtime
+      // `.min(1)` — or its absence, per the DEFECT DETECTION note above — is
+      // what's under test here, never a compile-time constraint), so no
+      // `@ts-expect-error` belongs on this call — one WAS here and had gone
+      // stale (`error TS2578: Unused '@ts-expect-error' directive`), silently
+      // proving nothing about either the schema or the response type.
       await apiCreateDoc(null, { type: "prd", title: "" });
     } catch (e) {
       threw = e as Error;
@@ -394,7 +420,7 @@ describe("apiDeleteDoc — happy path (AC-DH-6)", () => {
 
     await apiDeleteDoc(null, "01JTEST");
 
-    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = nthFetchCall(0);
     expect(call[0]).toBe("/api/dashboard/docs/01JTEST?confirm=true");
     expect(call[1]?.method).toBe("DELETE");
     expect(call[1]?.credentials).toBe("include");
@@ -407,7 +433,7 @@ describe("apiDeleteDoc — happy path (AC-DH-6)", () => {
 
     await apiDeleteDoc(null, "prd-a/b");
 
-    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = nthFetchCall(0);
     expect(call[0]).toBe(`/api/dashboard/docs/${encodeURIComponent("prd-a/b")}?confirm=true`);
   });
 });
@@ -459,7 +485,7 @@ describe("apiRestoreVersion — happy path (AC-DH-7)", () => {
 
     await apiRestoreVersion(null, "01JTEST", 1);
 
-    const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const call = nthFetchCall(0);
     expect(call[0]).toBe("/api/dashboard/docs/01JTEST/restore?confirm=true");
     expect(call[1]?.method).toBe("POST");
     expect(call[1]?.credentials).toBe("include");
@@ -565,7 +591,7 @@ describe("apiPostRouteView", () => {
 
       await apiPostRouteView(null, { route_id: "/docs/abc", doc_type: "task" });
 
-      const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const call = nthFetchCall(0);
       expect(call[0]).toBe("/api/dashboard/telemetry/route-view");
       expect(call[1]?.method).toBe("POST");
       expect(call[1]?.credentials).toBe("include");
@@ -584,7 +610,7 @@ describe("apiPostRouteView", () => {
     it("omits doc_type from the body when not supplied", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(null, { status: 204 }));
       await apiPostRouteView(null, { route_id: "/library" });
-      const call = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const call = nthFetchCall(0);
       const sentBody = JSON.parse((call[1] as RequestInit).body as string) as Record<string, unknown>;
       expect(sentBody).toEqual({ route_id: "/library" });
     });

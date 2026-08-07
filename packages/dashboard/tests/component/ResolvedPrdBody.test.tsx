@@ -53,6 +53,8 @@ function makeDoc(overrides: Partial<DocSummary> & { id: string; title: string })
     type: "spec",
     status: "active",
     updated_at: "2026-07-01T00:00:00.000Z",
+    tags: [],
+    priority: "medium",
     ...overrides,
   };
 }

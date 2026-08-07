@@ -70,6 +70,7 @@ function makeIssueDoc(overrides: Partial<DocRecord> = {}): DocWithNavigation {
     slug: "task-issue-report",
     title: "Bug: something broke",
     type: "task",
+    role: "plan",
     status: "in-review",
     priority: "medium",
     content: "It broke.",
@@ -80,6 +81,7 @@ function makeIssueDoc(overrides: Partial<DocRecord> = {}): DocWithNavigation {
     tags: [],
     extra: { issue_report: { reported_at: "2026-07-01T00:00:00Z" } },
     version: 1,
+    deleted_at: null,
     ...overrides,
   };
   return {
@@ -88,7 +90,11 @@ function makeIssueDoc(overrides: Partial<DocRecord> = {}): DocWithNavigation {
   };
 }
 
-function renderDetail(project?: string | null) {
+// reason: `project` defaults to `null` (never `undefined`) — this IS the
+// documented "registry-less mode ... defaults null" behavior above, not a
+// type workaround: `IssueDetailProps.project?: string | null` never widens
+// to accept an explicit `undefined` under `exactOptionalPropertyTypes`.
+function renderDetail(project: string | null = null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
     <QueryClientProvider client={client}>
