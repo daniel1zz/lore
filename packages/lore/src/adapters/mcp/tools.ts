@@ -269,7 +269,10 @@ export const LoreCreateSchema = z.object({
    * (SPEC-043 §Design Decisions D11) — composes `CorpusService.create` THEN
    * `ValidityService.invalidate(supersedes, {supersededBy: newDoc.id, by})` via
    * the shared `createWithSupersedes` orchestration (`flows/supersede-flow.ts`),
-   * the SAME function the CLI's `lore create --supersedes` uses. Requires `by`
+   * the SAME function the CLI's `lore create --supersedes` uses. The target's type
+   * is validated BEFORE any write, inside that shared orchestration: a non-
+   * knowledge/adr target (e.g. a task) returns `isError` and creates NOTHING
+   * (task-mcp-lore-create-supersedes-still-creates-then-fails-the). Requires `by`
    * (below) — omitting `by` while `supersedes` is set is a VALIDATION_ERROR.
    */
   supersedes: z.string().optional(),
@@ -1259,7 +1262,11 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     // SPEC-043 §Design Decisions D11 — `supersedes` composes create() THEN
     // ValidityService.invalidate() via the SAME shared orchestration the CLI's
     // `lore create --supersedes` uses (flows/supersede-flow.ts) — never a second,
-    // divergent implementation of the half-failure handling.
+    // divergent implementation of the half-failure handling. That orchestration also
+    // owns the target-type eligibility precheck (task-mcp-lore-create-supersedes-
+    // still-creates-then-fails-the) — it resolves `supersedes` and refuses BEFORE
+    // `corpusService.create` runs, via the injected `get` port below, so this handler
+    // never re-implements (or omits) that predicate.
     if (supersedes !== undefined) {
       if (by === undefined || by.trim() === "") {
         return errorContent({
@@ -1274,6 +1281,7 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       }
       const orchResult = await createWithSupersedes(
         {
+          get: corpusService.get.bind(corpusService),
           create: corpusService.create.bind(corpusService),
           invalidate: app.validityService.invalidate.bind(app.validityService),
         },
