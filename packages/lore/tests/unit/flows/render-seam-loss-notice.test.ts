@@ -273,7 +273,7 @@ describe("renderDocMarkdown — STATE (exclusions derive from what THIS render s
     const out = await renderDocMarkdown(stubApp({ banner: "⚠ INVALIDATED probe banner" }), doc, () => NOW_ISO);
 
     // The retraction banner keeps SPEC-043's lead — the notice never displaces it.
-    expect(out.indexOf("INVALIDATED")).toBe(0);
+    expect(out.startsWith("⚠ INVALIDATED probe banner")).toBe(true);
     expect(out.indexOf(NOTICE_COMMAND_TOKEN)).toBeGreaterThan(out.indexOf("INVALIDATED"));
     expect(out.indexOf(NOTICE_COMMAND_TOKEN)).toBeLessThan(out.indexOf("Body sentinel."));
 
@@ -319,12 +319,29 @@ describe("renderDocBodyWithoutLossNotice — REGRESSION (the one non-announcing 
   });
 });
 
+/**
+ * Drops comment-only lines so a source-text wiring assertion keys on CODE.
+ *
+ * reason: these modules document their own invariants by quoting the identifiers under
+ * test (`… contains no renderDocMarkdown( call …`), so a raw whole-file match would trip
+ * on the very prose asserting the rule — a self-inflicted false RED.
+ */
+function codeLinesOf(source: string): string {
+  return source
+    .split("\n")
+    .filter((line) => {
+      const trimmed = line.trimStart();
+      return !trimmed.startsWith("*") && !trimmed.startsWith("//") && !trimmed.startsWith("/*");
+    })
+    .join("\n");
+}
+
 describe("wiring — REGRESSION (no consumer double-announces)", () => {
   const feedFlowSource = readFileSync(FEED_FLOW_PATH, "utf8");
-  const getSource = readFileSync(GET_COMMAND_PATH, "utf8");
+  const getSource = codeLinesOf(readFileSync(GET_COMMAND_PATH, "utf8"));
 
   it("the seam produces the notice from the ONE shipped formatter, never a second copy", () => {
-    expect(feedFlowSource).toContain("composeWithStructuredExtraNotice");
+    expect(codeLinesOf(feedFlowSource)).toContain("composeWithStructuredExtraNotice");
     expect(feedFlowSource).toContain("get-render.js");
     // A second implementation of the invariant is the SSOT violation this task exists to close.
     expect(feedFlowSource).not.toContain("field(s) present, values NOT shown");

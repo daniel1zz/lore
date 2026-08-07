@@ -204,9 +204,14 @@ afterAll(() => {
 describe("fixture identity", () => {
   it("the two probe PRDs are DISTINCT docs whose ULIDs share a long prefix", () => {
     expect(prdWithExtraId).not.toBe(prdPlainId);
-    // Burst-created ULIDs are time-ordered: a truncated column would collide. This is
-    // why every identity assertion in this file compares the FULL parsed `id`.
-    expect(prdWithExtraId.slice(0, 8)).toBe(prdPlainId.slice(0, 8));
+    // Burst-created ULIDs are time-ordered, so a TRUNCATED column would collide — which
+    // is why every identity assertion in this file compares the FULL parsed `id`, never a
+    // rendered column. Bound is 6 chars, not a measured value: ULID timestamp char 6
+    // advances roughly every 17 minutes, so it cannot flake inside one fixture build,
+    // while chars 7+ turn over in seconds and MUST NOT be asserted equal.
+    let shared = 0;
+    while (shared < prdWithExtraId.length && prdWithExtraId[shared] === prdPlainId[shared]) shared += 1;
+    expect(shared).toBeGreaterThanOrEqual(6);
   });
 });
 
@@ -239,9 +244,11 @@ describe("lore feed spec-create — HAPPY (the pack announces withheld structure
   it("--json carries the same announced pack in its feed field", () => {
     const result = runLore(["feed", "spec-create", "--parent", prdWithExtra, "--json"], tmpDir);
     expect(result.exitCode).toBe(0);
+    // `lore feed --json` emits the FeedOutcome at the top level (no ok/data envelope).
     const payload = JSON.parse(result.stdout);
-    expect(payload.data.feed).toContain(NOTICE_COMMAND_TOKEN);
-    expect(parentSlice(payload.data.feed)).toContain("requirements");
+    expect(payload.checkpoint).toBe("spec-create");
+    expect(payload.feed).toContain(NOTICE_COMMAND_TOKEN);
+    expect(parentSlice(payload.feed)).toContain("requirements");
   });
 });
 
