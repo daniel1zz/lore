@@ -81,6 +81,20 @@
  * the rest. Same shared-decision CLI/MCP split as the two guards above
  * (`findMixedRunnerRefusal`, `../cli/evidence-precheck.js`).
  *
+ * `lore_evidence_add` gains the pipe-refusal guard (task-wire-findpiperefusal-
+ * into-the-live-lore-evidence-and-mcp, SPEC oracle-tier-falsifiability-a-
+ * criterion-never-observed-red M2, ADR falsifiability-moves-from-the-task-
+ * tier-to-the-oracle-tier) — a self-reported `oracle: "test"|"e2e"`,
+ * `result: "pass"` call whose `command` contains an unquoted, non-`||` shell
+ * pipe now returns `isError` `VALIDATION_ERROR`: `$?` observed after a pipe
+ * belongs to the LAST stage of the pipeline, never the oracle the call means
+ * to assert about. `capture: true` is the load-bearing escape — a captured
+ * run's exit code is measured directly by this server, so the pipe hazard
+ * does not apply. Same shared-decision CLI/MCP split as the guards above
+ * (`findPipeRefusal`, `../cli/evidence-precheck.js`) — `findPipeRefusal`
+ * itself was authored and tested earlier but NEITHER adapter called it until
+ * this fix, so the guard was dormant on both surfaces.
+ *
  * `lore_evidence_add` and `lore_release` now thread `caller_cwd` through to
  * `TaskWorkflowService.addEvidence`/`release`'s uncommitted-worktree
  * attestation guard (defect: task-lore-evidence-add-and-lore-release-over-
@@ -187,6 +201,7 @@ import {
   findFilteredPassRefusal,
   findMixedRunnerRefusal,
   findCaptureFlagConflict,
+  findPipeRefusal,
   describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
 import { captureOracleCommand } from "../evidence-capture.js";
@@ -1835,6 +1850,29 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     });
     if (mixedRunnerRefusal !== null) {
       return errorContent(mixedRunnerRefusal);
+    }
+
+    // reason: pipe-refusal guard (SPEC oracle-tier-falsifiability-a-
+    // criterion-never-observed-red M2; ADR falsifiability-moves-from-the-
+    // task-tier-to-the-oracle-tier) — gate PARITY with the CLI is
+    // structural: both surfaces call the SAME `findPipeRefusal`, which
+    // returns the fully-formed LoreError rather than a boolean, so
+    // scope/code/field/wording cannot drift between them. Runs after the
+    // missing-oracle-file and mixed-runner guards above (a nonexistent file
+    // or a dropped-runner file is a more fundamental fault than a pipe
+    // hazard); ordering against the filtered-pass guard below is
+    // immaterial — the two conditions are independent (`findPipeRefusal`'s
+    // own header). `capture: captureRequested` is the SAME boolean already
+    // resolved above — a captured run's exit code is measured directly by
+    // this server, so the pipe hazard does not apply there.
+    const pipeRefusal = findPipeRefusal({
+      oracle: args.oracle,
+      result: args.result,
+      command: args.command,
+      capture: captureRequested,
+    });
+    if (pipeRefusal !== null) {
+      return errorContent(pipeRefusal);
     }
 
     // reason: filtered-pass matched-count guard (SPEC-061 AC-061-17) — gate
