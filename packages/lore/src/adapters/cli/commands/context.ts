@@ -27,11 +27,16 @@
  * is read directly via `@lore/core/node`'s `loadConfig`, ONCE per invocation
  * (both topics — `refresh` included, not just `init`): for `init`'s own
  * `ai.*` section `--ai` orchestration needs, AND (AC-CTX-8) to resolve the
- * effective `context.memory_files.*` budgets via
- * `resolveContextMemoryFileBudgets` — the SAME config-aware resolution
- * `commands/status.ts`'s `--check-claude-md` uses — threaded into both
+ * effective `context.memory_files.*` budgets via `@lore/core`'s
+ * `resolveMemoryFileBudgetsFromConfigResult` — literally the same seam
+ * `commands/status.ts`'s `--check-claude-md` calls — threaded into both
  * `runContextRefresh`/`runContextInit`'s `ContextFlowDeps.budgets` and
  * `resolveInitNarrative`'s own facts collection, never re-resolved inline.
+ * When that seam reports substituted defaults (an unparseable `context:`
+ * block), this command writes the shared stderr notice before doing any work
+ * — it WRITES CLAUDE.md against those budgets, so a silent substitution would
+ * bake the wrong sizing into the file
+ * (task-lore-status-check-claude-md-silently-runs-on-schema).
  *
  * Public surface: default export, a citty `CommandDef`.
  *
@@ -69,7 +74,11 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineCommand } from "citty";
-import { AiConfigSchema, contextConfigSchema, resolveMemoryFileBudgets } from "@lore/core";
+import {
+  AiConfigSchema,
+  formatMemoryFileBudgetSubstitution,
+  resolveMemoryFileBudgetsFromConfigResult,
+} from "@lore/core";
 import type { CallerSurface, FsWritePort, LoreError, MemoryFileBudgets } from "@lore/core";
 import { loadConfig } from "@lore/core/node";
 import { exitCode, findLoreDbPath, formatError } from "../utils.js";
@@ -103,42 +112,17 @@ function detectContextCliSurface(): CallerSurface {
   return "cli";
 }
 
-/**
- * Resolves the effective `context.memory_files.*` budgets for this `lore
- * context` invocation from an already-attempted `loadConfig(repoRoot)`
- * result — mirrors `commands/status.ts`'s own private
- * `resolveClaudeMdBudgets` verbatim (SAME config-only tolerance: a
- * `.lore/config.yaml` that fails whole-`LoreConfig` validation everywhere
- * else, e.g. no `lore init` run yet, still yields its own `context:` block
- * — re-validated via `contextConfigSchema` — before falling back to schema
- * defaults). Duplicated here rather than imported: `status.ts` doesn't
- * export its helper, and this command has its own already-loaded
- * `configResult` to reuse (a re-import would either re-read the file or
- * force `status.ts` to export a private-by-design helper for one caller).
- *
- * AC-CTX-8 (spec-context-verb-family-two-zone-claude-md-anatomy-lore): this
- * is the ONE resolution locus per `lore context` invocation — its result is
- * threaded into `runContextRefresh`/`runContextInit`'s `ContextFlowDeps` AND
- * into {@link resolveInitNarrative}'s own facts collection, never
- * re-resolved inline anywhere else in this module.
- *
- * @param configResult - The already-attempted `loadConfig(repoRoot)` result
- *   for this invocation (never re-read here — one fs read per invocation).
- * @returns The resolved budgets — schema defaults when no config was found
- *   or usable.
- */
-function resolveContextMemoryFileBudgets(configResult: ReturnType<typeof loadConfig>): MemoryFileBudgets {
-  if (configResult.ok) return resolveMemoryFileBudgets(configResult.value);
-
-  const { error } = configResult;
-  if (error.code === "VALIDATION_ERROR" && typeof error.value === "object" && error.value !== null) {
-    const contextCandidate = (error.value as Record<string, unknown>)["context"];
-    const contextParse = contextConfigSchema.safeParse(contextCandidate);
-    if (contextParse.success) return contextParse.data.memory_files;
-  }
-
-  return resolveMemoryFileBudgets(undefined);
-}
+// reason: the budget-resolution rules this command used to carry as a private
+// `resolveContextMemoryFileBudgets` (a byte-identical copy of
+// `commands/status.ts`'s own private helper) now live in `@lore/core`'s
+// `resolveMemoryFileBudgetsFromConfigResult`. Both copies ended in a bare
+// `resolveMemoryFileBudgets(undefined)`, so an unparseable `context:` block
+// silently handed BOTH commands schema defaults; consolidating them was the
+// fix, because announcing at only one consumer leaves the other lying
+// (task-lore-status-check-claude-md-silently-runs-on-schema). ⛔ Do not
+// re-inline a local copy here. AC-CTX-8 still holds: the ONE resolution locus
+// per invocation is the `run` handler below, whose result is threaded into
+// both flows' `ContextFlowDeps` and into `resolveInitNarrative`.
 
 /**
  * Builds a real `node:fs`-backed `FsWritePort` rooted at `repoRoot` — the
@@ -297,7 +281,14 @@ export default defineCommand({
     // facts collection. See `resolveContextMemoryFileBudgets`'s own doc.
     const configResult = loadConfig(repoRoot);
     const config = configResult.ok ? configResult.value : undefined;
-    const budgets = resolveContextMemoryFileBudgets(configResult);
+    const budgetResolution = resolveMemoryFileBudgetsFromConfigResult(configResult);
+    const budgets = budgetResolution.budgets;
+    // reason: this command WRITES CLAUDE.md against these budgets, so running
+    // on silently substituted ceilings would bake the wrong Zone-1 sizing into
+    // the file itself. Emitted before any write, on stderr so `--json` stdout
+    // stays a clean payload.
+    const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, repoRoot);
+    if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
 
     if (topic === "refresh") {
       const result = await runContextRefresh({ fs: fsPort, budgets }, "");

@@ -18,6 +18,16 @@
  *   its ceiling as "within budget"), and emits an advisory (never
  *   exit-affecting) warning once a metric crosses
  *   `context.memory_files.warn_threshold_fraction` of its ceiling.
+ *   ALSO reports WHOSE ceilings those are: when `.lore/config.yaml` cannot be
+ *   parsed and its `context` sub-tree cannot be salvaged either, the check
+ *   runs on schema defaults and says so — a stderr notice plus
+ *   `budget_source`/`budget_substitution` in `--json`
+ *   (task-lore-status-check-claude-md-silently-runs-on-schema; it used to
+ *   substitute them in total silence, so exit 0 could mean "within the
+ *   defaults" while the operator's own stricter budget was breached). ⛔ The
+ *   exit code deliberately does NOT change for a substitution — see
+ *   `formatMemoryFileBudgetSubstitution`'s doc for the two shipped hooks that
+ *   fail open on any undocumented verdict.
  * With --json: output check result(s) as a JSON envelope.
  *
  * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
@@ -60,16 +70,23 @@ import {
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import {
-  contextConfigSchema,
+  formatMemoryFileBudgetSubstitution,
   ok,
   resolveDriftEnabled,
-  resolveMemoryFileBudgets,
+  resolveMemoryFileBudgetsFromConfigResult,
   resolveStaleAfterDays,
   SPEC_KINDS,
   outlineEntrySchema,
   outlineBudgetSchema,
 } from "@lore/core";
-import type { CallerSurface, LoreConfig, LoreError, MemoryFileBudgets, OutlineBudget, Result } from "@lore/core";
+import type {
+  CallerSurface,
+  LoreConfig,
+  LoreError,
+  MemoryFileBudgetResolution,
+  OutlineBudget,
+  Result,
+} from "@lore/core";
 import { z } from "zod";
 import {
   checkPrdBudget,
@@ -414,36 +431,25 @@ function renderHeadroomLine(report: HeadroomReport): void {
 
 /**
  * Resolves the effective `context.memory_files.*` budgets for
- * `--check-claude-md` from `<cwd>/.lore/config.yaml`, tolerating a config
- * file that is invalid EVERYWHERE ELSE (spec-project-claude-md-content-
- * contract-governance-injected Module Boundary invariant 2 — this check must
- * work "config-only", independent of whether the rest of `LoreConfig` has
- * ever been validated, e.g. via `lore init`). `loadConfig` validates the
- * WHOLE `LoreConfig` (requires `project.name`/`project.author`); a caller
- * who has hand-authored a `.lore/config.yaml` containing ONLY a `context:`
- * block (no `lore init` run yet) would otherwise have that section silently
- * ignored. On a `VALIDATION_ERROR` whose `value` still carries the raw
- * parsed YAML object (a schema violation — never a malformed-YAML string or
- * a missing-file `STORE_ERROR`, neither of which carries a usable `value`),
- * this re-validates JUST the `context` sub-tree via `contextConfigSchema`
- * before falling back to the schema defaults.
+ * `--check-claude-md` from `<cwd>/.lore/config.yaml`, WITH their provenance.
+ *
+ * ⛔ Thin pipe by design — every resolution rule (including the deliberate
+ * "config-only" tolerance of a `.lore/config.yaml` that is invalid everywhere
+ * except its `context:` block) lives in `@lore/core`'s
+ * {@link resolveMemoryFileBudgetsFromConfigResult}, the single admission seam
+ * shared with `commands/context.ts`. This function previously held a private
+ * copy of those rules ending in a bare `resolveMemoryFileBudgets(undefined)`,
+ * and `commands/context.ts` held a byte-identical second copy — so a config
+ * whose `context` sub-tree failed to parse handed BOTH commands schema
+ * defaults with no signal at all. ⛔ Do not re-inline the rules here: two
+ * copies is how the silence survived a fix at one consumer
+ * (task-lore-status-check-claude-md-silently-runs-on-schema).
  *
  * @param cwd - Directory to resolve `.lore/config.yaml` from.
- * @returns The resolved budgets — schema defaults when no config was found
- *   or usable (root 300L/30720B, module 200L/16384B, `enabled: true`).
+ * @returns The resolved budgets plus the `source` that produced them.
  */
-function resolveClaudeMdBudgets(cwd: string): MemoryFileBudgets {
-  const configResult = loadConfig(cwd);
-  if (configResult.ok) return resolveMemoryFileBudgets(configResult.value);
-
-  const { error } = configResult;
-  if (error.code === "VALIDATION_ERROR" && typeof error.value === "object" && error.value !== null) {
-    const contextCandidate = (error.value as Record<string, unknown>)["context"];
-    const contextParse = contextConfigSchema.safeParse(contextCandidate);
-    if (contextParse.success) return contextParse.data.memory_files;
-  }
-
-  return resolveMemoryFileBudgets(undefined);
+function resolveClaudeMdBudgets(cwd: string): MemoryFileBudgetResolution {
+  return resolveMemoryFileBudgetsFromConfigResult(loadConfig(cwd));
 }
 
 export default defineCommand({
@@ -508,7 +514,16 @@ export default defineCommand({
     // check-tree/check-drift/check-requirements/check-prd-budget/check-issues
     // branch and returns before that branch is ever reached.
     if (checkClaudeMdRequested) {
-      const budgets = resolveClaudeMdBudgets(process.cwd());
+      const budgetResolution = resolveClaudeMdBudgets(process.cwd());
+      const budgets = budgetResolution.budgets;
+      // reason: emitted BEFORE any measurement is printed, so an operator
+      // reading the numbers below already knows whose ceilings they are. On
+      // stderr (never stdout) so it cannot corrupt the --json payload, which
+      // carries the same fact in `budget_source`/`budget_substitution` for
+      // consumers that never see stderr.
+      const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, process.cwd());
+      if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
+
       const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
       const findings = lintMemoryFiles(files, budgets);
       // Headroom/warnings are a REPORTING layer alongside `lintMemoryFiles` —
@@ -519,7 +534,29 @@ export default defineCommand({
       const warnings = computeHeadroomWarnings(headroom);
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: { claude_md: { findings, headroom, warnings } } }, null, 2));
+        // `budget_source`/`budget_substitution` are ALWAYS present (`null`
+        // included) — same convention as `invalid_docs`: an omitted key would
+        // let a consumer read "absent" as "nothing was substituted", which is
+        // the exact silence this branch exists to end.
+        console.log(
+          JSON.stringify(
+            {
+              ok: true,
+              data: {
+                claude_md: {
+                  findings,
+                  headroom,
+                  warnings,
+                  budget_source: budgetResolution.source,
+                  budget_substitution:
+                    budgetResolution.source === "substituted-defaults" ? budgetResolution.reason : null,
+                },
+              },
+            },
+            null,
+            2,
+          ),
+        );
       } else {
         if (findings.length === 0) {
           console.log("CLAUDE.md: within budget (0 findings).");
