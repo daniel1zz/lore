@@ -197,12 +197,23 @@ describe("lintAcQuantifiability — dogfood-self-application", () => {
   });
 });
 
-// ─── AC-ACQ-7: false-positive bound ─────────────────────────────────────────
+// ─── Pre-existing false-positive fixture (SPEC-059 byte-identical regression) ──
 
 describe("lintAcQuantifiability — false-positive-bound", () => {
   // Representative, real-shaped oracle-bound / already-quantified AC statements —
   // the kind already declared across this corpus's specs (SPEC-025/039/045/048/050
   // style exit-code and threshold language). None of these should ever be flagged.
+  //
+  // NOT AC-ACQ-7's bound oracle — see the "hyphen-adjacency-bound" describe
+  // block below for that. 7 of these 9 fixtures are `script`-mode, which
+  // `lintAcQuantifiability` skips before the wordlist scan ever runs (see
+  // ac-quality.ts's own module-header invariant); a statement population
+  // dominated by that skip cannot bound a false-positive RATE, since the skip
+  // rule guarantees the outcome independent of statement content. This
+  // describe/it pair stays byte-identical (file-header "pre-SPEC-059 fixture"
+  // comment above) — task
+  // task-ac-acq-7-is-vacuous-by-construction-and-its-oracle-never left it
+  // unmodified rather than repurposing it for the hyphen-adjacency fix.
   const representativeCorpusAcs: AcceptanceCriterion[] = [
     script("AC-FP-1", "the CLI exits 0 on success and 2 on a usage error"),
     script("AC-FP-2", "P95 API latency stays < 200ms under 100 concurrent users"),
@@ -223,6 +234,30 @@ describe("lintAcQuantifiability — false-positive-bound", () => {
     const findings = lintAcQuantifiability(representativeCorpusAcs);
     const blocks: AcQualityFinding[] = findings.filter((f) => f.severity === "block");
     expect(blocks).toHaveLength(0);
+  });
+});
+
+// ─── AC-ACQ-7: hyphen-adjacency false-positive bound ───────────────────────
+
+describe("lintStatement — hyphen-adjacency-bound (AC-ACQ-7)", () => {
+  // task-ac-acq-7-is-vacuous-by-construction-and-its-oracle-never, fault (b):
+  // `\b` fires at a `-` boundary, so a bare AC_ABSTRACT_WORDS entry ("fast",
+  // "best") false-positived inside a hyphenated compound this codebase
+  // actually uses ("fast-track", "best-effort"). All five assertions live in
+  // ONE test so a matcher degraded to "matches nothing" cannot read as green:
+  // two must-clear hyphenated compounds, one must-still-block standalone
+  // control, and the two pre-existing suffix-collision controls
+  // ("breakfast", "faster").
+  it("clears hyphen-adjacent compounds while the standalone word still blocks and suffix collisions stay clear", () => {
+    expect(lintStatement("the fast-track path is audited")).toEqual([]);
+    expect(lintStatement("a best-effort audit is written")).toEqual([]);
+    expect(
+      lintStatement("the dashboard loads fast").some(
+        (f) => f.word === "fast" && f.severity === "block",
+      ),
+    ).toBe(true);
+    expect(lintStatement("breakfast is served")).toEqual([]);
+    expect(lintStatement("the run is faster")).toEqual([]);
   });
 });
 

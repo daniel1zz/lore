@@ -42,10 +42,32 @@
  *     statement text (not `AC_ABSTRACT_WORDS` declaration order).
  *   - ASCII wordlist entries match case-insensitively on a `\b`-delimited word
  *     boundary (so "class" never matches inside "classifier", and "fast" never
- *     matches inside "breakfast"/"faster"). CJK entries have no regex word-
- *     boundary concept in a Unicode-unaware engine, so they match as a plain
- *     case-sensitive substring — the intended, documented behavior for this list
- *     (see module design note above).
+ *     matches inside "breakfast"/"faster" — `\b` never fires between two word
+ *     characters) AND `findWordIndex` additionally rejects a match whose
+ *     immediately-adjacent character (either side) is `-` (so "fast" never
+ *     matches inside "fast-track", nor "best" inside "best-effort" — `\b`
+ *     DOES fire at a `-` boundary, so the suffix rule alone lets these
+ *     hyphenated compounds through; task
+ *     task-ac-acq-7-is-vacuous-by-construction-and-its-oracle-never fault (b)).
+ *     A wordlist entry that itself CONTAINS a hyphen ("user-friendly",
+ *     "high-quality") is unaffected — the adjacency check only inspects
+ *     characters OUTSIDE the matched span, never the hyphen inside it. CJK
+ *     entries have no regex word-boundary concept in a Unicode-unaware
+ *     engine, so they match as a plain case-sensitive substring — the
+ *     intended, documented behavior for this list (see module design note
+ *     above).
+ *   - KNOWN RESIDUAL false positive, accepted rather than fixed: a bare
+ *     AC_ABSTRACT_WORDS entry with no adjacent hyphen and no measurable token
+ *     still blocks even when it names a fully oracle-bound claim — e.g. the
+ *     literal statement "Typecheck clean" blocks on "clean" although `tsc`
+ *     exiting 0 is completely measurable. The hyphen-adjacency rule above
+ *     does not (and structurally cannot) suppress this, since "clean" here
+ *     has no adjacent `-`. Mitigation in production: `verify.mode ===
+ *     "script"` (an oracle command already bound) skips the wordlist scan
+ *     entirely, see `lintAcQuantifiability` below — a `human`/`ai`-mode AC
+ *     that types "Typecheck clean" without binding a script oracle is
+ *     expected to reword to a measurable statement (e.g. "tsc exits 0"),
+ *     not have this lint special-cased for one wordlist entry.
  *
  * Side-effect class: pure
  *
@@ -159,17 +181,36 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * Finds the earliest match index of `word` inside `statement`, or `-1` if
- * absent. ASCII words match case-insensitively on a `\b`-delimited boundary
- * (rejecting substring hits inside a larger word, e.g. "fast" inside
- * "breakfast"); non-ASCII (CJK) words match as a plain substring, since `\b`
- * has no meaning for characters the regex engine doesn't classify as `\w`.
+ * Finds the earliest NON-hyphen-adjacent match index of `word` inside
+ * `statement`, or `-1` if no such match exists. ASCII words match
+ * case-insensitively on a `\b`-delimited boundary (rejecting substring hits
+ * inside a larger word, e.g. "fast" inside "breakfast"/"faster") AND are
+ * rejected when the character immediately before the match start or
+ * immediately after the match end is `-` (rejecting hyphenated-compound
+ * hits, e.g. "fast" inside "fast-track", "best" inside "best-effort" — `\b`
+ * fires at a `-` boundary, so the suffix rule alone is not enough). A
+ * wordlist entry that itself contains a hyphen ("user-friendly",
+ * "high-quality") is unaffected: the adjacency check only inspects
+ * characters OUTSIDE the matched span. Iterates every `\b`-bounded
+ * occurrence (not just the first) so a word appearing both hyphen-adjacent
+ * and standalone in the same statement (e.g. "fast-track it fast") still
+ * returns the standalone occurrence's index. Non-ASCII (CJK) words match as
+ * a plain substring, since `\b` has no meaning for characters the regex
+ * engine doesn't classify as `\w`.
  */
 function findWordIndex(statement: string, word: string): number {
   if (isAsciiWord(word)) {
-    const pattern = new RegExp(`\\b${escapeRegExp(word)}\\b`, "i");
-    const match = pattern.exec(statement);
-    return match ? match.index : -1;
+    const pattern = new RegExp(`\\b${escapeRegExp(word)}\\b`, "gi");
+    let match = pattern.exec(statement);
+    while (match !== null) {
+      const before = statement[match.index - 1];
+      const after = statement[match.index + match[0].length];
+      if (before !== "-" && after !== "-") {
+        return match.index;
+      }
+      match = pattern.exec(statement);
+    }
+    return -1;
   }
   return statement.indexOf(word);
 }
