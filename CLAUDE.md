@@ -146,6 +146,8 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - A backgrounded oracle's completion notice reports the SHELL's exit code — persist `$?` and read it back; a ceiling kill reports 143. `knowledge-a-backgrounded-command-s-completion-notice-reports`
 - Human renders are lossy projections, and announcing the loss at ONE consumer leaves the shared seam lossy; list columns also truncate — key on the ID. `knowledge-lore-get-s-human-view-hides-extra-issue-report-so-a`
 - Marker censuses over a self-documenting corpus over-match: anchor structurally + require a second independent condition. `knowledge-the-substring-matcher-lesson-has-a-mirror-face-over`
+- Before blaming a red suite on the diff: timeouts ≠ assertion mismatches, check isolation, read MEMORY not load average. `knowledge-load-average-is-the-wrong-instrument-for-is-this-red`
+- A threshold armed by one agent is calibrated against ITS base — a concurrent peer merge invalidates it, so re-run every armed gate on the merged tree AFTER the rebuild. `knowledge-a-newly-armed-threshold-is-calibrated-against-the`
 
 ### AI Default Behavior by Caller Surface (SPEC-024)
 
