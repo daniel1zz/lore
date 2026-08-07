@@ -72,7 +72,12 @@ const mockDocRecord: DocRecord = {
   content: "# Overview\n\nThis is a test PRD.",
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-06-01T00:00:00Z",
-  created_by: "alice",
+  // reason: NOT "alice" — the SPEC-037 D3 task-Execution-section test below
+  // sets `extra.claim.by: "alice"` on a doc built from this same fixture and
+  // asserts `getByText("alice")` matches exactly ONE element (the rendered
+  // claim); this doc's OWN "Author" row (created_by) must be a different
+  // name or that assertion sees two matches.
+  created_by: "carol",
   parent_id: null,
   tags: [],
   extra: {},
@@ -300,7 +305,21 @@ describe("DocDetail", () => {
 
   describe("regression", () => {
     it("does not render author row when created_by is null", () => {
-      render(<DocDetail docWithNav={mockDocWithNav} />);
+      // reason: `DocRecord.created_by` is typed as always-`string` (the
+      // shared `mockDocRecord` above now carries a real value, "alice" —
+      // required so ITS OWN literal type-checks), but `DocDetail`'s
+      // `doc.created_by !== null` guard (defensive against a pre-migration
+      // row, or an API response never re-validated with Zod client-side)
+      // is still real production code this test exists to exercise. Naming
+      // the wider shape explicitly and casting DOWN to `DocRecord` — never
+      // `as any` / `as unknown as` — keeps this a real, checked cast:
+      // `DocRecord` is itself assignable to `LegacyDocRecordShape` (its
+      // `created_by: string` satisfies `string | null`), which is exactly
+      // what makes the reverse `as DocRecord` valid without an `unknown`
+      // detour.
+      type LegacyDocRecordShape = Omit<DocRecord, "created_by"> & { created_by: string | null };
+      const legacyDoc: LegacyDocRecordShape = { ...mockDocRecord, created_by: null };
+      render(<DocDetail docWithNav={{ ...mockDocWithNav, doc: legacyDoc as DocRecord }} />);
       expect(screen.queryByText("Author")).not.toBeInTheDocument();
     });
 
