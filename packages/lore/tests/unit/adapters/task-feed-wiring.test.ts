@@ -270,11 +270,13 @@ describe("NEGATIVE — per-entry tolerant fail-evidence extraction (F2/AC-070-11
 
 describe("STATE — shared fail-first AC coverage precedence (F3/AC-070-12)", () => {
   it("deriveAcCoverageState (the shared @lore/core helper) is fail-first: pass>0 AND fail>0 -> \"fail\"", () => {
-    const base: AcCoverageFact = { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 };
+    const base: AcCoverageFact = { ac_id: "AC-1", mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 };
     expect(deriveAcCoverageState({ ...base, pass: 1, fail: 1 })).toBe("fail");
     expect(deriveAcCoverageState({ ...base, pass: 1, fail: 1, attested_pass: 1 })).toBe("fail");
     expect(deriveAcCoverageState({ ...base, pass: 1, attested_pass: 1 })).toBe("attested_pass");
-    expect(deriveAcCoverageState({ ...base, pass: 1 })).toBe("pass");
+    // falsified: 0 (never observed red) + a self-reported pass -> "pass_unfalsified",
+    // not plain "pass" (spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1, AC-FALS-2).
+    expect(deriveAcCoverageState({ ...base, pass: 1 })).toBe("pass_unfalsified");
     expect(deriveAcCoverageState(base)).toBe("none");
   });
 
@@ -486,6 +488,7 @@ describe("STATE/REGRESSION — the task doc is fetched exactly once; computeAcCo
         ],
         attested_pass: 0,
         attested_fail: 0,
+        falsified: 1,
       },
       {
         ac_id: "AC-2",
@@ -495,6 +498,7 @@ describe("STATE/REGRESSION — the task doc is fetched exactly once; computeAcCo
         refs: [{ task_id: "01TASK1000000000000000000", result: "pass", attested: true }],
         attested_pass: 1,
         attested_fail: 0,
+        falsified: 0,
       },
     ]);
   });

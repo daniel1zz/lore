@@ -83,6 +83,7 @@ describe("feedAttestationFloor — per-claimed-AC diagnostics (AC-PCI-9)", () =>
           refs: [{ task_id: "task-1", result: "pass" }],
           attested_pass: 0,
           attested_fail: 0,
+          falsified: 0,
         },
       ],
     });
@@ -102,6 +103,7 @@ describe("feedAttestationFloor — per-claimed-AC diagnostics (AC-PCI-9)", () =>
           refs: [{ task_id: "task-1", result: "pass" }],
           attested_pass: 0,
           attested_fail: 0,
+          falsified: 0,
         },
         {
           ac_id: "AC-UNATTESTED-2",
@@ -111,6 +113,7 @@ describe("feedAttestationFloor — per-claimed-AC diagnostics (AC-PCI-9)", () =>
           refs: [{ task_id: "task-1", result: "fail" }],
           attested_pass: 0,
           attested_fail: 0,
+          falsified: 1,
         },
         {
           ac_id: "AC-ATTESTED-1",
@@ -120,6 +123,7 @@ describe("feedAttestationFloor — per-claimed-AC diagnostics (AC-PCI-9)", () =>
           refs: [{ task_id: "task-1", result: "pass", attested: true }],
           attested_pass: 1,
           attested_fail: 0,
+          falsified: 0,
         },
       ],
     });
@@ -144,6 +148,7 @@ describe("feedAttestationFloor — per-claimed-AC diagnostics (AC-PCI-9)", () =>
           refs: [{ task_id: "task-1", result: "pass", attested: true }],
           attested_pass: 1,
           attested_fail: 0,
+          falsified: 0,
         },
       ],
     });
@@ -166,6 +171,7 @@ describe("feedAttestationFloor — per-claimed-AC diagnostics (AC-PCI-9)", () =>
           refs: [{ task_id: "task-1", result: "pass" }],
           attested_pass: 0,
           attested_fail: 0,
+          falsified: 0,
         },
       ],
     });

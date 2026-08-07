@@ -117,16 +117,16 @@ beforeAll(async () => {
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 function attestedCoverage(acId: string, pass = 1, fail = 0): AcCoverageFact {
-  return { ac_id: acId, mode: "script", pass, fail, refs: [], attested_pass: pass, attested_fail: fail };
+  return { ac_id: acId, mode: "script", pass, fail, refs: [], attested_pass: pass, attested_fail: fail, falsified: 0 };
 }
 
 /** Self-reported pass only — NOT runner-attested. Must NOT satisfy the AC. */
 function selfReportedCoverage(acId: string): AcCoverageFact {
-  return { ac_id: acId, mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 };
+  return { ac_id: acId, mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 };
 }
 
 function noCoverage(acId: string): AcCoverageFact {
-  return { ac_id: acId, mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0 };
+  return { ac_id: acId, mode: "script", pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 };
 }
 
 function manualItem(id: string, checked: boolean): ChecklistItemLike {

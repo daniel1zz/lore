@@ -62,6 +62,7 @@ function fact(overrides: Partial<AcCoverageFact>): AcCoverageFact {
     refs: [],
     attested_pass: 0,
     attested_fail: 0,
+    falsified: 0,
     ...overrides,
   };
 }
