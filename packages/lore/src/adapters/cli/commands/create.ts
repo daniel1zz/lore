@@ -85,24 +85,14 @@ import {
 const VALID_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
 /**
- * Doc types `--supersedes` (this command's CREATE-time compose flag) may
- * target — DELIBERATELY NARROWER than `ValidityService.VALIDITY_ELIGIBLE_TYPES`
- * (which, since task-a-task-cannot-be-retracted-supersedes-emits-a-repair,
- * also accepts `task` for the STANDALONE `lore invalidate <task>` retraction
- * path). This is an intentional, independently-declared constant — NOT a
- * re-derivation of ValidityService's set that happened to drift — because
- * `--supersedes` composes "create a NEW doc that replaces an OLD one," a
- * forward-looking gesture that fits knowledge/adr (SPEC-043 D11's original
- * scope). A task is typically retracted RETROSPECTIVELY, after its correct
- * replacement already exists as an independent `lore create task` call —
- * exactly the shape this task's own real-world fixture took
- * (task-check-ac-ref-integrity-re-implements-governing-spec created FIRST,
- * task-lore-evidence-ac-accepts-an-ac-ref-on-an-ad-hoc-task-that retracted
- * SECOND, as two separate commands). A caller retracting a task always uses
- * the two-step `lore create task` + `lore invalidate <old> --superseded-by
- * <new>` flow, never this atomic compose.
+ * `--supersedes` target-type eligibility (`SUPERSEDE_CREATE_ELIGIBLE_TYPES`) is no
+ * longer declared or checked here. It moved to `flows/supersede-flow.ts`, checked
+ * INSIDE `createWithSupersedes` before `deps.create` ever runs
+ * (task-mcp-lore-create-supersedes-still-creates-then-fails-the) — this command used
+ * to precheck it locally, one layer above that shared seam, which is exactly why the
+ * MCP surface (calling the same shared function directly) never inherited the check.
+ * See that module's doc comment for the eligibility rationale.
  */
-const SUPERSEDE_CREATE_ELIGIBLE_TYPES: ReadonlySet<DocType> = new Set(["knowledge", "adr"]);
 
 const ADR_DECISION_STATUSES = ["proposed", "accepted", "deprecated", "superseded"] as const;
 type AdrDecisionStatus = (typeof ADR_DECISION_STATUSES)[number];
@@ -582,35 +572,15 @@ export default defineCommand({
           return;
         }
 
-        // Defect 1 fix (task-a-task-cannot-be-retracted-supersedes-emits-a-
-        // repair): validate the target's type BEFORE any write. The
-        // precondition is knowable up front — the target already exists, so
-        // its type is a plain read — so refusing AFTER creating the new doc
-        // (the pre-fix behavior) named a repair command
-        // (`lore invalidate <target> --superseded-by <new>`) that failed
-        // IDENTICALLY on retry for a type-ineligible target. Nothing is
-        // created when this check refuses (assert-doc-count-unchanged, AC1).
-        const supersedeTargetResult = await app.corpusService.get(args.supersedes);
-        if (!supersedeTargetResult.ok) {
-          process.stderr.write(formatError(supersedeTargetResult.error) + "\n");
-          process.exitCode = exitCode(supersedeTargetResult.error);
-          return;
-        }
-        const supersedeTargetType = supersedeTargetResult.value.doc.type;
-        if (!SUPERSEDE_CREATE_ELIGIBLE_TYPES.has(supersedeTargetType)) {
-          process.stderr.write(
-            `Error: --supersedes target '${args.supersedes}' has type '${supersedeTargetType}'; ` +
-              `only ${[...SUPERSEDE_CREATE_ELIGIBLE_TYPES].join("/")} documents can be targeted by ` +
-              `--supersedes. A ${supersedeTargetType} is retracted via the two-step ` +
-              `'lore create ${supersedeTargetType} ...' + 'lore invalidate <old> --superseded-by <new>' ` +
-              `flow instead (see 'lore invalidate --help').\n`,
-          );
-          process.exitCode = 4;
-          return;
-        }
-
+        // task-mcp-lore-create-supersedes-still-creates-then-fails-the: the target-type
+        // eligibility precheck now lives INSIDE createWithSupersedes (flows/supersede-
+        // flow.ts) — it resolves args.supersedes and refuses BEFORE calling deps.create,
+        // so nothing is created on refusal (assert-doc-count-unchanged, AC1) and CLI/MCP
+        // can never diverge on this predicate again (the prior fix lived one layer above
+        // this call, in this command, which is exactly how the MCP surface missed it).
         const orchResult = await createWithSupersedes(
           {
+            get: app.corpusService.get.bind(app.corpusService),
             create: app.corpusService.create.bind(app.corpusService),
             invalidate: app.validityService.invalidate.bind(app.validityService),
           },
