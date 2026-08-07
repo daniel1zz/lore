@@ -9,9 +9,9 @@
  * cross-import, so the splice must happen here, not inside CorpusService.
  *
  * Invalidation banner (SPEC-043 D4): the displayed body itself is produced by
- * `renderDocMarkdown` (`../../../flows/feed-flow.js`) — the SAME shared function
- * `lore feed`'s pack uses — rather than a second `renderResolvedToMarkdown` call
- * here, so the banner format (and its wiring) can never drift between the two
+ * `renderDocBodyWithoutLossNotice` (`../../../flows/feed-flow.js`) — the SAME shared
+ * render pass `lore feed`'s pack uses — rather than a second `renderResolvedToMarkdown`
+ * call here, so the banner format (and its wiring) can never drift between the two
  * sites. `--raw` skips this branch entirely — raw output is always the stored
  * bytes, banner never included (REGRESSION).
  *
@@ -44,6 +44,19 @@
  *   3. BEFORE `formatNavigation` — the notice is about the body just printed, so it sits
  *      adjacent to it, and Navigation stays the footer.
  *
+ * ⛔ WHY THIS COMMAND WELDS THE NOTICE ITSELF, off the announcing seam
+ * (task-the-shared-renderdocmarkdown-seam-still-drops-structured): the loss notice now
+ * lives ON the shared seam (`flows/feed-flow.ts::renderDocMarkdown`), so `lore feed` and
+ * a `lore gate` DENIAL pack inherit it and a future fourth consumer inherits it with no
+ * edit. This command deliberately calls the seam's NON-announcing entry point and welds
+ * the notice via the SAME `../get-render.js` joiner, because two of its concerns cannot
+ * be served from inside the seam:
+ *   a. `(no content)` must be substituted for an empty body BEFORE the notice is welded,
+ *      or an empty-bodied doc carrying structured `extra` would lose the placeholder;
+ *   b. `--raw` never enters the resolved branch at all, yet must still announce.
+ * Calling `renderDocMarkdown` here instead would print the notice TWICE. A wiring
+ * REGRESSION test asserts this file contains no `renderDocMarkdown(` call at all.
+ *
  * Machine-readable validity (task-validity-landed-on-lore-list-only-the-dispatch-surface,
  * Required #4): the `--json` payload carries a top-level `validity_status` — the SAME key
  * `lore list --json` records carry, from the SAME SSOT projection
@@ -65,8 +78,8 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatNavigation, formatShortId } from "../utils.js";
 import { projectValidityStatus } from "../../../service/validity-service.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
-import { renderDocMarkdown } from "../../../flows/feed-flow.js";
-import { formatStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
+import { renderDocBodyWithoutLossNotice } from "../../../flows/feed-flow.js";
+import { composeWithStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
 
 export default defineCommand({
   meta: {
@@ -122,11 +135,14 @@ export default defineCommand({
             process.stderr.write(`Warning: ${warning.message}\n`);
           }
         }
-        // SPEC-043 D4 — banner-prefixed, MDX-spliced body via the SAME shared
-        // renderDocMarkdown `lore feed`'s pack uses (T2 wiring site 1/3) — never a
-        // second banner-format implementation. --raw NEVER carries the banner
-        // (raw = stored bytes, REGRESSION).
-        displayBody = await renderDocMarkdown(app, doc);
+        // SPEC-043 D4 — banner-prefixed, MDX-spliced body from the SAME shared seam
+        // `lore feed`'s pack uses (T2 wiring site 1/3) — never a second banner-format
+        // implementation. --raw NEVER carries the banner (raw = stored bytes,
+        // REGRESSION). ⛔ Deliberately the loss-notice-FREE entry point: this command
+        // welds the notice itself a few lines below, so `(no content)` can sit between
+        // the body and the notice and so `--raw` (which never reaches here) is covered
+        // too. Calling the announcing `renderDocMarkdown` here would double-announce.
+        displayBody = await renderDocBodyWithoutLossNotice(app, doc);
       }
 
       if (args.json) {
@@ -154,21 +170,20 @@ export default defineCommand({
         console.log(`Tags: ${doc.tags.join(", ")}`);
       }
       console.log("");
-      console.log(displayBody || "(no content)");
-      console.log("");
-      // Loss notice (placement rules 1-3 in the module header): reached only on the
-      // human path, never gated on --raw, printed adjacent to the body it describes.
+      // Loss notice (placement rules 1-3 in the module header): reached only on the human
+      // path, never gated on --raw, welded directly onto the body it describes via the
+      // SHARED joiner. `(no content)` is substituted BEFORE the weld, so an empty-bodied
+      // doc carrying structured `extra` still prints the placeholder above the notice.
       const renderedBodyFacts: RenderedBodyFacts = {
         mdxResolved: !args.raw,
         acceptanceCriteriaProjected,
         codeAnchorsProjected,
         nowIso: new Date().toISOString(),
       };
-      const extraNotice = formatStructuredExtraNotice(doc, renderedBodyFacts);
-      if (extraNotice !== undefined) {
-        console.log(extraNotice);
-        console.log("");
-      }
+      console.log(
+        composeWithStructuredExtraNotice(displayBody || "(no content)", doc, renderedBodyFacts, "below-body"),
+      );
+      console.log("");
       console.log(formatNavigation(navigation));
     } finally {
       app.close();

@@ -250,7 +250,14 @@ describe("renderDocMarkdown — ERROR (malformed extra.validity)", () => {
     await expect(renderDocMarkdown(app, doc, () => NOW_ISO)).resolves.not.toThrow;
     const rendered = await renderDocMarkdown(app, doc, () => NOW_ISO);
     expect(rendered).not.toContain("INVALIDATED");
-    expect(rendered).toBe(doc.content);
+    expect(rendered).toContain(doc.content);
+    // ⛔ The BANNER is what this case gates on, and no banner rendered. The seam
+    // (task-the-shared-renderdocmarkdown-seam-still-drops-structured) therefore ANNOUNCES
+    // `validity` as withheld — correctly: its exclusion set derives from what this render
+    // actually surfaced, and an unparseable `validity` surfaced nothing. A whole-string
+    // `toBe(doc.content)` here would re-pin the pre-fix lossy contract.
+    expect(rendered).toContain("validity");
+    expect(rendered).toContain("show values");
   });
 });
 
@@ -326,7 +333,13 @@ describe("renderDocMarkdown — REGRESSION (valid doc)", () => {
     );
 
     const rendered = await renderDocMarkdown(app, doc, () => NOW_ISO);
-    expect(rendered).toBe(doc.content);
+    expect(rendered).not.toContain("INVALIDATED"); // only invalid_at gates the banner
+    expect(rendered).toContain(doc.content);
+    // ⛔ Same reasoning as the malformed-`invalid_at` case above: no banner rendered, so
+    // `extra.validity` really IS withheld and the seam announces it. The banner-gating
+    // invariant this test exists for is the `not.toContain("INVALIDATED")` line.
+    expect(rendered).toContain("validity");
+    expect(rendered).toContain("show values");
   });
 });
 

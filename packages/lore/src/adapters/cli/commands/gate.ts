@@ -149,6 +149,19 @@
  * share exactly one MDX-rendering and parent-resolution implementation — see that
  * module's header for the P4 slice this enables.
  *
+ * STRUCTURED-`extra` LOSS NOTICE — THIS IS THE SHARP END
+ * (task-the-shared-renderdocmarkdown-seam-still-drops-structured). A denial's feeding
+ * pack exists to tell an agent how to fix its REJECTED write; that is the moment a
+ * structured `extra` (`issue_report`, `verification_evidence`, `claim`, `ac_scope`) is
+ * most load-bearing and least substitutable, because the agent is mid-write and acting on
+ * the pack alone. Until that task, BOTH of this file's `renderDocMarkdown` call sites —
+ * the `--parent`/`parent_id` slice and `findFeedingSkill`'s "active feeding rule source"
+ * slice — handed back a projection that dropped every such value in silence. This file
+ * adds NO wiring: `renderDocMarkdown` announces at the SEAM, so both slices inherit it,
+ * and so does any future call site. ⛔ Never re-introduce a per-call-site notice here.
+ * ⛔ The notice is placed ABOVE the body precisely so `../../../service/gate-feeding.js`'s
+ * 800-char LEADING-slice truncation cannot swallow it on a real (multi-KB) doc.
+ *
  * `emitGateReportIssueHint` (SPEC-073) is called from all FIVE `isCheckpointBlocked`
  * branches (spec-create, spec-promote, plan-promote, task-claim, phase-claim) right
  * after each checkpoint's own feeding-pack output, appending a one-line "file this

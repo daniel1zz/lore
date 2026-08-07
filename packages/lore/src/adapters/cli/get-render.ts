@@ -1,12 +1,42 @@
 /**
- * Pure render helpers for `lore get`'s HUMAN view — currently the structured-`extra`
- * loss notice.
+ * Pure render helpers for EVERY human/machine-facing markdown projection of a
+ * `DocRecord` — the structured-`extra` loss notice and its placement.
  *
- * Purpose: make `lore get`'s lossy projection SELF-ANNOUNCING. Public surface:
+ * Purpose: make a lossy doc projection SELF-ANNOUNCING. Public surface:
  * {@link findExtraKeysAlreadyRendered} + {@link findHiddenStructuredExtra} (queries),
  * {@link classifyExtraValue} (classifier), {@link formatStructuredExtraNotice}
- * (formatter). Side-effect class: PURE — no IO, no store access, no `process.*`, no
- * clock read (`nowIso` is injected); the caller (`commands/get.ts`) does the printing.
+ * (formatter), {@link composeWithStructuredExtraNotice} (the ONE joiner every surface
+ * calls). Side-effect class: PURE — no IO, no store access, no `process.*`, no clock
+ * read (`nowIso` is injected); callers do the printing.
+ *
+ * ── This module is the SSOT for TWO surfaces, not one
+ * (task-the-shared-renderdocmarkdown-seam-still-drops-structured)
+ * It shipped serving `lore get` alone. The shared seam those consumers reuse —
+ * `flows/feed-flow.ts::renderDocMarkdown` — kept returning an UNANNOTATED projection,
+ * so `lore feed`'s advisory pack and (the sharp end) the feeding pack pushed back with
+ * a GATE DENIAL both dropped structured `extra` in silence, to a reader that is a
+ * MACHINE mid-write acting on the pack alone. The seam now composes its notice from
+ * THIS module. ⛔ Do not grow a second notice implementation for a new surface — two
+ * implementations of one invariant is precisely what made the first divergence
+ * invisible.
+ *
+ * ── Why placement is an explicit discriminant ({@link ExtraNoticePlacement})
+ * The two surfaces put the notice on opposite sides of the body, for reasons that are
+ * MEASURED, not stylistic:
+ *   - `lore get` prints the WHOLE body and has always closed with the notice, directly
+ *     above the Navigation footer (`"below-body"`). That placement is frozen: this
+ *     task's REGRESSION oracle is a captured byte-for-byte before/after of `lore get`.
+ *   - A feeding pack quotes a LEADING SLICE truncated to
+ *     `service/gate-feeding.ts::DEFAULT_FEEDING_MAX_CHARS` (800 chars). A trailing
+ *     notice is therefore CUT from every doc longer than that — i.e. from essentially
+ *     every real spec/PRD, including the 5.6 KB one in the originating incident. A
+ *     bottom-placed notice would have passed a short-fixture test and stayed silent in
+ *     production: the same false-oracle shape this task exists to close. The seam
+ *     places it `"above-body"` (right after the SPEC-043 banner, the other meta
+ *     annotation that leads for the same reason) so truncation cannot swallow it.
+ * The discriminant changes ONE preposition and WHICH SIDE the joiner welds to. The
+ * detector, the inventory, and the `--json` pointer line are shared — there is exactly
+ * one implementation of "what is withheld".
  *
  * ── Why this module exists (task-lore-get-s-default-render-silently-omits-structured-extra)
  * `lore get <slug>` printed `content` + Navigation and DROPPED every structured `extra`
@@ -236,11 +266,24 @@ export function findHiddenStructuredExtra(
 }
 
 /**
- * Formats the loss notice `lore get` prints below the body when structured `extra` exists
- * but was not rendered.
+ * Which side of the rendered body the notice sits on — see the module header for why
+ * this is an explicit discriminant rather than a per-surface constant.
+ *
+ * - `"below-body"` — `lore get`'s frozen placement (whole body printed, notice closes it).
+ * - `"above-body"` — every TRUNCATED projection (feeding packs), where a trailing notice
+ *   would be cut off the end of any doc longer than the slice budget.
+ */
+export type ExtraNoticePlacement = "below-body" | "above-body";
+
+/**
+ * Formats the loss notice a surface prints alongside the body when structured `extra`
+ * exists but was not rendered.
  *
  * @param doc - The document being displayed; only `slug` and `extra` are read.
  * @param facts - What the body render actually did on this invocation.
+ * @param placement - Which side of the body the caller will weld this to. Defaults to
+ *   `"below-body"`, the placement shipped first and pinned byte-for-byte by `lore get`'s
+ *   REGRESSION capture; the seam passes `"above-body"` explicitly.
  * @returns The notice block, or `undefined` when nothing is withheld — the caller then
  *   prints nothing at all (AC-2's negative control: a doc with no structured `extra` must
  *   emit no marker, or an always-printing implementation would satisfy the positive case
@@ -257,16 +300,47 @@ export function findHiddenStructuredExtra(
 export function formatStructuredExtraNotice(
   doc: Pick<DocRecord, "slug" | "extra">,
   facts: RenderedBodyFacts,
+  placement: ExtraNoticePlacement = "below-body",
 ): string | undefined {
   const fields = findHiddenStructuredExtra(doc.extra, findExtraKeysAlreadyRendered(doc, facts));
   if (fields.length === 0) return undefined;
 
+  const direction = placement === "above-body" ? "below" : "above";
   const keyColumnWidth = Math.max(...fields.map((field) => field.key.length));
   return [
-    `⚠ ${fields.length} structured \`extra\` field(s) present, values NOT shown above:`,
+    `⚠ ${fields.length} structured \`extra\` field(s) present, values NOT shown ${direction}:`,
     ...fields.map((field) => `    ${field.key.padEnd(keyColumnWidth)}  ${formatFieldShape(field)}`),
     `  → show values: lore get ${doc.slug} --json`,
   ].join("\n");
+}
+
+/**
+ * Welds {@link formatStructuredExtraNotice}'s output onto `body` on the side `placement`
+ * names — the ONE joiner every surface calls, so no caller re-derives the separator or
+ * the empty-body handling.
+ *
+ * @param body - The already-rendered markdown body (may be empty).
+ * @param doc - The document being displayed; only `slug` and `extra` are read.
+ * @param facts - What the body render actually did on this invocation.
+ * @param placement - Which side to weld to. REQUIRED (no default) so a new surface must
+ *   state which projection shape it is — a caller that silently inherited `"below-body"`
+ *   into a truncated pack is exactly the failure the module header describes.
+ * @returns `body` UNCHANGED when nothing is withheld; the notice alone when `body` is
+ *   empty; otherwise the two joined by one blank line, notice on the `placement` side.
+ * @example
+ * composeWithStructuredExtraNotice("Body.", doc, facts, "above-body");
+ * // "⚠ 1 structured `extra` field(s) present, values NOT shown below:\n…\n\nBody."
+ */
+export function composeWithStructuredExtraNotice(
+  body: string,
+  doc: Pick<DocRecord, "slug" | "extra">,
+  facts: RenderedBodyFacts,
+  placement: ExtraNoticePlacement,
+): string {
+  const notice = formatStructuredExtraNotice(doc, facts, placement);
+  if (notice === undefined) return body;
+  if (body === "") return notice;
+  return placement === "above-body" ? `${notice}\n\n${body}` : `${body}\n\n${notice}`;
 }
 
 /**

@@ -329,14 +329,21 @@ describe("formatStructuredExtraNotice — AC-5 STATE (banner keys never double-r
 describe("commands/get.ts wiring — AC-4 REGRESSION (json path untouched, navigation last)", () => {
   const source = readFileSync(GET_COMMAND_PATH, "utf8");
 
-  it("AC-4 imports the notice formatter from the pure sibling module", () => {
-    expect(source).toContain("formatStructuredExtraNotice");
+  // ⛔ The wiring moved in task-the-shared-renderdocmarkdown-seam-still-drops-structured:
+  // the notice is now produced at the SHARED seam (`flows/feed-flow.ts::renderDocMarkdown`)
+  // so `lore feed` and a `lore gate` DENIAL pack inherit it. `commands/get.ts` calls the
+  // seam's NON-announcing entry point and welds the notice itself through THIS module's
+  // `composeWithStructuredExtraNotice`, because `(no content)` has to sit between body and
+  // notice and because `--raw` never reaches the seam. AC-4's three properties below are
+  // UNCHANGED — only the identifier they key on moved.
+  it("AC-4 imports the notice joiner from the pure sibling module", () => {
+    expect(source).toContain("composeWithStructuredExtraNotice");
     expect(source).toContain("get-render.js");
   });
 
   it("AC-4 the notice is emitted AFTER the args.json early return and BEFORE formatNavigation", () => {
     const jsonBranchIndex = source.indexOf("if (args.json)");
-    const noticeCallIndex = source.indexOf("formatStructuredExtraNotice(doc");
+    const noticeCallIndex = source.indexOf("composeWithStructuredExtraNotice(displayBody");
     const navigationIndex = source.indexOf("formatNavigation(navigation)");
 
     expect(jsonBranchIndex).toBeGreaterThan(-1);
@@ -350,7 +357,21 @@ describe("commands/get.ts wiring — AC-4 REGRESSION (json path untouched, navig
 
   it("AC-4 the notice sits inside no args.raw conditional — a raw read is equally blind", () => {
     const humanRenderSection = source.slice(source.indexOf("if (args.json)"), source.indexOf("formatNavigation(navigation)"));
-    expect(humanRenderSection).toContain("formatStructuredExtraNotice");
+    expect(humanRenderSection).toContain("composeWithStructuredExtraNotice");
     expect(humanRenderSection).not.toMatch(/if\s*\(\s*!?\s*args\.raw\s*\)/);
+  });
+
+  it("AC-4 get.ts uses the loss-notice-FREE seam entry point — never the announcing one", () => {
+    // Calling `renderDocMarkdown` here would print the notice twice. Comment lines are
+    // dropped first: this file's own header documents the rule by quoting the identifier.
+    const codeOnly = source
+      .split("\n")
+      .filter((line) => {
+        const trimmed = line.trimStart();
+        return !trimmed.startsWith("*") && !trimmed.startsWith("//") && !trimmed.startsWith("/*");
+      })
+      .join("\n");
+    expect(codeOnly).toContain("renderDocBodyWithoutLossNotice");
+    expect(codeOnly).not.toMatch(/\brenderDocMarkdown\s*\(/);
   });
 });

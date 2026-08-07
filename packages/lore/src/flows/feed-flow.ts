@@ -20,7 +20,14 @@
  * gate" — exit 0 (CLI) / a non-`isError` content block (MCP), always.
  *
  * Public surface:
- *   renderDocMarkdown(app, doc)              — MDX-splice a DocRecord's content
+ *   renderDocMarkdown(app, doc)              — MDX-splice a DocRecord's content,
+ *                                               banner-prefixed and structured-`extra`
+ *                                               loss-ANNOUNCING (see its own doc)
+ *   renderDocBodyWithoutLossNotice(app, doc) — the same MINUS the loss notice; ⛔ ONE
+ *                                               legitimate caller (`commands/get.ts`),
+ *                                               which welds the notice itself so its
+ *                                               `(no content)` placeholder and `--raw`
+ *                                               path stay byte-identical
  *   resolveParentDoc(app, idOrSlug)          — resolve an id/slug to a DocRecord,
  *                                               `null` on any failure (absent input,
  *                                               unresolvable, or store error)
@@ -161,41 +168,119 @@ import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js"
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
 import { formatError, resolveActor } from "../adapters/cli/utils.js";
+import {
+  composeWithStructuredExtraNotice,
+  type RenderedBodyFacts,
+} from "../adapters/cli/get-render.js";
 import { PHASE_START_CHECKPOINT } from "./phase-feed-flow.js";
 import { TASK_START_CHECKPOINT } from "./task-feed-flow.js";
 
 /** Time seam (SPEC-043 D3/D4 convention) — never `Date.now()` read directly. */
 const defaultNow = (): string => new Date().toISOString();
 
+/** One MDX-splice pass: the body, plus the facts the loss notice's exclusion set derives from. */
+interface RenderedDocBody {
+  /** The MDX-spliced body — `doc.content` verbatim when resolution failed. */
+  readonly body: string;
+  /** The SPEC-043 D4 invalidation banner, or `undefined` when `doc` is live. */
+  readonly banner: string | undefined;
+  /** What this render actually surfaced — never a hardcoded key-name guess. */
+  readonly facts: RenderedBodyFacts;
+}
+
 /**
- * Renders `doc.content` with MDX placeholders spliced in (`OutlineService.resolve` →
- * `renderResolvedToMarkdown`), mirroring `get.ts`'s `--raw`-off pattern. A resolution
- * failure degrades to the raw, unspliced body rather than aborting the caller — every
- * consumer of this function (the gate's violation feed, `lore feed`'s advisory pull)
- * treats the fed content as advisory context, not a hard dependency on placeholder
- * resolution succeeding.
+ * The ONE MDX-splice + banner pass both public entry points share, so they can never
+ * disagree about the body OR about which `extra` keys this render already surfaced.
  *
- * Prepends the SPEC-043 D4 invalidation banner (via
- * `OutlineService.resolveValidityBanner`, the SAME shared renderer CLI `get`/
- * `export-docs` use, T2) when `doc` is currently invalidated — the THIRD D4 wiring
- * site (AC-MH-12): `lore feed <checkpoint>`'s discovered feeding-skill doc, when
- * invalidated, must never be handed to a caller as an unmarked feeding pack.
+ * `facts.mdxResolved` is unconditionally `true` here: unlike `lore get --raw`, this path
+ * always attempts resolution AND always evaluates the banner, so the banner's presence is
+ * exactly `isInvalidated(doc, nowIso)` — the same predicate
+ * `findExtraKeysAlreadyRendered` re-applies to decide whether `validity` was surfaced.
+ */
+async function renderDocBodyPass(app: App, doc: DocRecord, nowIso: string): Promise<RenderedDocBody> {
+  const resolveResult = await app.outlineService.resolve(doc);
+  const body = resolveResult.ok ? renderResolvedToMarkdown(resolveResult.value) : doc.content;
+  const banner = await app.outlineService.resolveValidityBanner(doc, () => nowIso);
+  return {
+    body,
+    banner,
+    facts: {
+      mdxResolved: true,
+      // The projection's OWN verdict on whether it appended its SPEC-038 / SPEC-045
+      // block. ⛔ Never re-derived from `doc.type` + a second schema parse: the two
+      // would drift and the notice would claim a loss that did not happen. A FAILED
+      // resolve surfaced neither block, so both are `false` and both keys are announced.
+      acceptanceCriteriaProjected: resolveResult.ok && resolveResult.value.acceptanceCriteria !== undefined,
+      codeAnchorsProjected: resolveResult.ok && resolveResult.value.codeAnchors !== undefined,
+      nowIso,
+    },
+  };
+}
+
+/**
+ * The SHARED doc→markdown seam every feeding-pack surface routes through: MDX-spliced
+ * body (`OutlineService.resolve` → `renderResolvedToMarkdown`), SPEC-043 D4 invalidation
+ * banner, and the structured-`extra` LOSS NOTICE. A resolution failure degrades to the
+ * raw, unspliced body rather than aborting the caller — every consumer treats the fed
+ * content as advisory context, not a hard dependency on placeholder resolution.
+ *
+ * ⛔ THE LOSS NOTICE IS PART OF THIS SEAM'S CONTRACT, not a per-consumer add-on
+ * (task-the-shared-renderdocmarkdown-seam-still-drops-structured). The notice first
+ * shipped on ONE consumer (`commands/get.ts`), leaving `lore feed`'s advisory pack and
+ * the feeding pack pushed back with a GATE DENIAL silently dropping every structured
+ * `extra` value — `issue_report`, `verification_evidence`, `claim`, `ac_scope` — to a
+ * reader that is a MACHINE mid-write, acting on the pack alone. Producing it HERE means a
+ * FUTURE fourth consumer inherits it with no edit, and there is no per-consumer opt-in to
+ * forget. It is composed from `adapters/cli/get-render.ts`'s already-shipped key-agnostic
+ * formatter — ⛔ never a second implementation.
+ *
+ * Output order is `banner → notice → body`, both meta annotations LEADING. That is not
+ * cosmetic: `service/gate-feeding.ts` quotes a LEADING SLICE capped at
+ * `DEFAULT_FEEDING_MAX_CHARS` (800), so a trailing notice is cut from every doc longer
+ * than that — which is essentially every real spec/PRD. A bottom-placed notice would pass
+ * a short-fixture test and stay silent in production.
  *
  * @param app - Wired `App` providing `outlineService`.
  * @param doc - The document whose content should be MDX-resolved.
  * @param now - Time seam (D3) — defaults to `() => new Date().toISOString()`.
- * @returns The MDX-spliced markdown body (banner-prefixed when invalidated), or
- *   `doc.content` unchanged (banner still prefixed) on any resolution failure.
+ * @returns The banner-prefixed, notice-annotated, MDX-spliced markdown.
  */
 export async function renderDocMarkdown(
   app: App,
   doc: DocRecord,
   now: () => string = defaultNow,
 ): Promise<string> {
-  const nowIso = now();
-  const resolveResult = await app.outlineService.resolve(doc);
-  const body = resolveResult.ok ? renderResolvedToMarkdown(resolveResult.value) : doc.content;
-  const banner = await app.outlineService.resolveValidityBanner(doc, () => nowIso);
+  const { body, banner, facts } = await renderDocBodyPass(app, doc, now());
+  const annotated = composeWithStructuredExtraNotice(body, doc, facts, "above-body");
+  return banner !== undefined ? `${banner}\n\n${annotated}` : annotated;
+}
+
+/**
+ * The SAME render as {@link renderDocMarkdown} MINUS the structured-`extra` loss notice.
+ *
+ * ⛔ ONE legitimate caller: `adapters/cli/commands/get.ts`. It is NOT exempt from
+ * announcing — it announces via the SAME `get-render.ts` formatter — but it must weld the
+ * notice itself, for two reasons the seam cannot serve:
+ *   1. it substitutes `(no content)` for an empty body, and that placeholder has to sit
+ *      BETWEEN the body and the notice to keep `lore get`'s output byte-identical;
+ *   2. its `--raw` path never calls this seam at all, yet a `--raw` reader is equally
+ *      blind, so the notice has to be welded outside the resolved branch.
+ * Calling this from anywhere else silently reintroduces the exact defect
+ * task-the-shared-renderdocmarkdown-seam-still-drops-structured closed — the name says
+ * so out loud precisely so a future caller cannot pick it by accident. A wiring
+ * REGRESSION test pins the caller set.
+ *
+ * @param app - Wired `App` providing `outlineService`.
+ * @param doc - The document whose content should be MDX-resolved.
+ * @param now - Time seam (D3) — defaults to `() => new Date().toISOString()`.
+ * @returns The banner-prefixed, MDX-spliced markdown body, with NO loss notice.
+ */
+export async function renderDocBodyWithoutLossNotice(
+  app: App,
+  doc: DocRecord,
+  now: () => string = defaultNow,
+): Promise<string> {
+  const { body, banner } = await renderDocBodyPass(app, doc, now());
   return banner !== undefined ? `${banner}\n\n${body}` : body;
 }
 

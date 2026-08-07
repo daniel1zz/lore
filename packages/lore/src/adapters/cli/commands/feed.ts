@@ -14,6 +14,18 @@
  * the two can never drift on how a rule doc's (or a `--parent` doc's) markdown gets
  * rendered into a feeding-pack slice.
  *
+ * STRUCTURED-`extra` LOSS NOTICE (task-the-shared-renderdocmarkdown-seam-still-drops-structured):
+ * this command adds NO wiring for it and must not — `renderDocMarkdown` announces at the
+ * SEAM, so both the rule slice and the `--parent` slice carry the notice by construction,
+ * on the CLI and MCP surfaces alike. Before that fix, a `lore feed` pack silently dropped
+ * every structured `extra` value on a doc it quoted, to a reader that is a MACHINE about
+ * to write. ⛔ Do not add a per-consumer notice here: a surface that must remember to ask
+ * is the prose layer that let the original one-consumer fix ship as "done".
+ * ⛔ Residual (measured, out of this command's reach): `task-start` / `phase-start` do NOT
+ * route through `renderDocMarkdown` — they render their own sections and each drops or
+ * partially renders a DIFFERENT structured-key set. See
+ * `../../../flows/task-feed-flow.ts` / `phase-feed-flow.ts`.
+ *
  * DISPATCH (SPEC-070 D1 — refactored from an if/else chain to a checkpoint→handler
  * table): `SPECIAL_CHECKPOINT_HANDLERS` maps the three checkpoints with a dedicated
  * assembly (`session-resume`, `phase-start`, `task-start`) to their own handler
