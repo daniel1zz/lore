@@ -97,7 +97,7 @@ approved → deprecated
 active → archived | deprecated
 ```
 
-Editing content/title on an `approved` doc resets it to `draft` automatically — except the ledger knowledge sub-types (`assessment | retro | handoff | uat`), which are re-fast-tracked to `approved` in the SAME write, so an edit logs two versions at one timestamp and never enters the review queue.
+Editing an `approved` doc resets it to `draft` automatically — content/title AND `extra`, so `lore ac add`/`ac set` reset a spec too (measured 2026-08-07) — except the ledger knowledge sub-types (`assessment | retro | handoff | uat`), which are re-fast-tracked to `approved` in the SAME write, so an edit logs two versions at one timestamp and never enters the review queue.
 
 ### MDX Placeholder Components (OutlineService)
 
@@ -150,6 +150,8 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - A threshold armed by one agent is calibrated against ITS base — a concurrent peer merge invalidates it, so re-run every armed gate on the merged tree AFTER the rebuild. `knowledge-a-newly-armed-threshold-is-calibrated-against-the`
 - ⛔ An EMPTY output artifact is the same shape as a clean one — assert a positive trace of execution, and never put a `cd` in front of a measurement (zoxide shims it; `&&` then short-circuits silently). Seventh false-oracle vector. `knowledge-three-of-lore-s-own-outputs-misled-this-session-a`
 - ⛔ `lore set <plan> --status archived` evaluates NO gate and cascade-archives non-terminal children irreversibly — `lore done`'s hint that it does is false. Same doc.
+- ⛔ Tightening an AC (`lore ac add`/`ac set`) drops the spec to `draft` and hard-blocks EVERY descendant claim — re-read the spec's status immediately before each dispatch, never from a batch-start snapshot. Same doc.
+- ⛔ A literal corpus count inside a governance doc is a claim with no oracle — cite the `lore status --json` field instead. A `pass_unfalsified` figure justifying a decision was off 20x. Same doc.
 
 ### AI Default Behavior by Caller Surface (SPEC-024)
 
