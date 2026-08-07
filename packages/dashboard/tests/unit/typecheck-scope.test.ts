@@ -248,12 +248,18 @@ describe("typecheck chain wiring (AC-FALS-24)", () => {
         break;
       }
     }
-    expect(dashboardTestsProject).toBeDefined();
+    // `expect(...).toBeDefined()` does not narrow for TypeScript's control
+    // flow — `definedOrThrow` both asserts AND narrows, so the next line
+    // never needs an `as string`/`!` to silence the possibly-undefined type.
+    const foundProject = definedOrThrow(
+      dashboardTestsProject,
+      "no tsc project reachable from the typecheck chain has a file list covering packages/dashboard/tests/",
+    );
 
     // That SAME project reports zero errors under a real, full type-check —
     // not just "some project's file list happens to mention tests/", but
     // "the project the chain actually runs is clean".
-    const checked = runTsc(["-p", dashboardTestsProject as string, "--noEmit"]);
+    const checked = runTsc(["-p", foundProject, "--noEmit"]);
     expect(checked.status).toBe(0);
   });
 });
