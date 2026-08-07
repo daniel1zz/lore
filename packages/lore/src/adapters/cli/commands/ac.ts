@@ -16,7 +16,19 @@
  *                                   `expected-fail` evidence renders `⚑R` (spec-
  *                                   workflow-hardening-evidence-red-vocabulary-claim-
  *                                   worktree §M1, AC-WH-1) — distinct from both `·`
- *                                   and `⚑?`; NEVER counted as green.
+ *                                   and `⚑?`; NEVER counted as green. A criterion whose
+ *                                   derived state is `pass_unfalsified` (spec-oracle-
+ *                                   tier-falsifiability-a-criterion-never-observed-red
+ *                                   M1 surfacing, AC-FALS-2/5) renders the SAME `✔`
+ *                                   badge as a plain pass (never a distinct color/glyph
+ *                                   there — 82% of this corpus's criteria measure this
+ *                                   state, so the badge itself stays neutral) plus a
+ *                                   trailing ` [pass_unfalsified]` line marker, ABSENT
+ *                                   once the criterion has falsified evidence (a real
+ *                                   `expected-fail`/`fail` ref). `--json`'s `coverage[]`
+ *                                   entries additionally carry that same derived `state`
+ *                                   string per criterion (AC-FALS-4), alongside the raw
+ *                                   `falsified` count `AcCoverageFact` already provides.
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
  *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
@@ -58,7 +70,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { deriveAcCoverageState } from "@lore/core";
-import type { AcceptanceCriterion } from "@lore/core";
+import type { AcceptanceCriterion, AcCoverageFact } from "@lore/core";
 import type { AcService, AcListResult, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
 
@@ -179,7 +191,13 @@ export default defineCommand({
           }
 
           if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+            console.log(
+              JSON.stringify(
+                { ok: true, data: { ...result.value, coverage: withCoverageState(result.value.coverage) } },
+                null,
+                2,
+              ),
+            );
             return;
           }
 
@@ -442,17 +460,46 @@ function buildSetPatch(args: Record<string, unknown>): SetCriterionPatch | null 
  * `⚑?` means one DID run but couldn't attest a real result (an under/zero-matched
  * test-oracle command). Conflating the two would hide the fact that a verification
  * attempt actually happened and produced no trustworthy signal.
+ *
+ * spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1 surfacing
+ * (AC-FALS-5): a criterion whose derived state is `pass_unfalsified` gets a trailing
+ * ` [pass_unfalsified]` line marker (see {@link passUnfalsifiedMarker}) — the badge
+ * itself is untouched (stays plain `✔`, see {@link coverageBadge}'s own JSDoc for why).
  */
 function renderCriteriaList(result: AcListResult): void {
   for (const criterion of result.criteria) {
     const badge = result.coverage !== null ? `${coverageBadge(result.coverage, criterion.id)} ` : "";
-    console.log(`  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]`);
+    const marker = passUnfalsifiedMarker(result.coverage, criterion.id);
+    console.log(`  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}`);
   }
   if (result.dangling.length > 0) {
     console.log(
       `\nDangling ac_ref (evidence references ids no longer declared): ${result.dangling.join(", ")}`,
     );
   }
+}
+
+/**
+ * Trailing human-table marker (spec-oracle-tier-falsifiability-a-criterion-never-
+ * observed-red M1 surfacing, AC-FALS-5) for a criterion whose derived coverage state
+ * is EXACTLY `"pass_unfalsified"` — green, but never once observed able to go red.
+ * Absent for every OTHER state, INCLUDING a plain `"pass"` (a criterion that DOES
+ * carry falsified evidence) — a reader can tell "this pass carries no falsifiability
+ * proof" from "this pass was, at least once, shown able to go red" without decoding
+ * the badge's own count numbers. Deliberately a SEPARATE line annotation rather than
+ * a change to {@link coverageBadge}'s own returned string: that function's rendering
+ * for `pass_unfalsified` is intentionally BYTE-IDENTICAL to plain `pass` (82.0% of
+ * this corpus's criteria measure `pass_unfalsified` — a distinct color/glyph on the
+ * compact count badge itself would turn the majority of every `lore ac list` run into
+ * visual noise the reader learns to ignore; see `commands/ac.ts`'s own module header
+ * and the governing spec's §Design). Delegates the state derivation to
+ * `deriveAcCoverageState` (`@lore/core`) — the SAME SSOT {@link coverageBadge} reads —
+ * never a second derivation.
+ */
+function passUnfalsifiedMarker(coverage: AcListResult["coverage"], acId: string): string {
+  const fact = coverage?.find((f) => f.ac_id === acId);
+  if (fact === undefined) return "";
+  return deriveAcCoverageState(fact) === "pass_unfalsified" ? " [pass_unfalsified]" : "";
 }
 
 function describeVerify(verify: AcceptanceCriterion["verify"]): string {
@@ -505,6 +552,17 @@ function describeVerify(verify: AcceptanceCriterion["verify"]): string {
  * `·` is reserved for TRUE zero-evidence (no `fact`, or `fact.refs` entirely empty) —
  * never conflated with "ran but inconclusive" or "ran, expected-fail".
  *
+ * spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1 surfacing
+ * (AC-FALS-2/5): `deriveAcCoverageState` can now ALSO return `"pass_unfalsified"`
+ * (green, but never observed able to go red) — this function renders it with the
+ * SAME plain `✔` prefix as `"pass"` (byte-identical count formatting; no distinct
+ * color/glyph on the badge itself, see this function's caller {@link
+ * renderCriteriaList} and {@link passUnfalsifiedMarker} for the line-level marker
+ * that DOES distinguish it in the human table). Before this branch existed, a
+ * `pass_unfalsified` fact fell all the way through to the inconclusive/expected-fail
+ * checks below and rendered a misleading `·`/`⚑?`/`⚑R` for what is actually a real,
+ * unattested pass — the exact bug this task's own file anchors were opened to fix.
+ *
  * Exported (unlike this file's other render helpers) so its deterministic formatting is
  * directly vitest-unit-testable without spawning the CLI or a real store (SPEC-039 §6).
  */
@@ -517,7 +575,7 @@ export function coverageBadge(coverage: AcListResult["coverage"], acId: string):
     const attestedNote = fact.attested_fail > 0 ? `, ${fact.attested_fail} attested` : "";
     return `✘(${fact.pass}/${fact.fail}${attestedNote})`;
   }
-  if (state === "attested_pass" || state === "pass") {
+  if (state === "attested_pass" || state === "pass" || state === "pass_unfalsified") {
     const prefix = state === "attested_pass" ? "⚑✔" : "✔";
     const attestedNote = fact.attested_pass > 0 ? `, ${fact.attested_pass} attested` : "";
     return `${prefix}(${fact.pass}/${fact.fail}${attestedNote})`;
@@ -531,4 +589,30 @@ export function coverageBadge(coverage: AcListResult["coverage"], acId: string):
     return `⚑R(${expectedFailCount})`;
   }
   return "·";
+}
+
+/**
+ * Augments each raw {@link AcCoverageFact} in `coverage` with its DERIVED `state`
+ * string (spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1
+ * surfacing, AC-FALS-4) for the `--json` payload. `falsified` is already a raw
+ * field on `AcCoverageFact` (M1, `@lore/core`) — serialized verbatim, untouched
+ * here. `state` is NOT stored anywhere on the fact itself; it is always computed
+ * via `deriveAcCoverageState` (`@lore/core`), the SAME SSOT {@link coverageBadge}
+ * reads — never a second derivation.
+ *
+ * `coverage: null` (no child plan / no ad-hoc-governed task at all — see {@link
+ * AcListResult}'s own JSDoc) passes through UNCHANGED: there is no fact to derive a
+ * state FROM, and fabricating one would conflate "declared but no coverage
+ * infrastructure exists" with "observed, and never seen able to fail".
+ *
+ * @param coverage - `AcListResult.coverage`, straight from `AcService.listCriteria`.
+ * @returns Each fact plus its `state`, in the SAME order (one entry per declared
+ *   criterion, `computeAcCoverage`'s own "never omits a declared criterion"
+ *   contract, preserved) — or `null` unchanged.
+ */
+function withCoverageState(
+  coverage: AcListResult["coverage"],
+): Array<AcCoverageFact & { state: ReturnType<typeof deriveAcCoverageState> }> | null {
+  if (coverage === null) return null;
+  return coverage.map((fact) => ({ ...fact, state: deriveAcCoverageState(fact) }));
 }
