@@ -1251,7 +1251,7 @@ export default defineCommand({
       // checkout, e.g. an external `lore` install) or when the scan found nothing.
       if (unclaimedOracle.available && unclaimedOracle.findings.length > 0) {
         console.log(
-          `\nUnclaimed oracle values: ${unclaimedOracle.findings.length} (a -t/--testNamePattern value ` +
+          `\nUnclaimed oracle values: ${unclaimedOracle.findings.length} (a test-name filter value ` +
             "present in a test file, bound by NO declared AC — run `bun scripts/check-unclaimed-oracle.ts` for detail)",
         );
       }
