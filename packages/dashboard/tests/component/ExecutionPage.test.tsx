@@ -89,7 +89,7 @@ describe("ExecutionPage", () => {
   describe("happy path (AC-077-1)", () => {
     it("renders the plan selector populated from active plans", async () => {
       mockedApiList.mockResolvedValue({ docs: [makePlan()], total: 1 });
-      renderWithClient(<ExecutionPage planParam={undefined} onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
+      renderWithClient(<ExecutionPage onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
       expect(await screen.findByRole("option", { name: "Plan A" })).toBeInTheDocument();
     });
 
@@ -121,7 +121,7 @@ describe("ExecutionPage", () => {
   describe("negative", () => {
     it("renders 'No active plans.' and no panel sections for zero active plans", async () => {
       mockedApiList.mockResolvedValue({ docs: [], total: 0 });
-      renderWithClient(<ExecutionPage planParam={undefined} onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
+      renderWithClient(<ExecutionPage onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
       expect(await screen.findByText("No active plans.")).toBeInTheDocument();
       expect(screen.queryByText("Ready Tasks")).not.toBeInTheDocument();
     });
@@ -143,7 +143,7 @@ describe("ExecutionPage", () => {
         docs: [makePlan({ id: "plan-a-id", title: "Plan A" }), makePlan({ id: "plan-b-id", slug: "plan-b", title: "Plan B" })],
         total: 2,
       });
-      renderWithClient(<ExecutionPage planParam={undefined} onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
+      renderWithClient(<ExecutionPage onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />);
       await screen.findByRole("option", { name: "Plan A" });
       expect(mockedApiGetReadyReport).toHaveBeenCalledWith(null, "plan-a-id");
     });
@@ -172,7 +172,7 @@ describe("ExecutionPage", () => {
     it("renders a loading skeleton while the active-plans query is pending", () => {
       mockedApiList.mockReturnValue(new Promise(() => {})); // never resolves
       const { container } = renderWithClient(
-        <ExecutionPage planParam={undefined} onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />,
+        <ExecutionPage onPlanChange={vi.fn()} onNavigateToDoc={vi.fn()} />,
       );
       expect(container.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
     });

@@ -42,16 +42,18 @@ function makeTaskDoc(extra: Record<string, unknown>): DocRecord {
     slug: "task-fixture",
     title: "Task Fixture",
     type: "task",
+    role: "plan",
     status: "draft",
     priority: "medium",
     content: "",
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
-    created_by: null,
+    created_by: "alice",
     parent_id: "01HPLAN0000000000000000001",
     tags: [],
     extra,
     version: 1,
+    deleted_at: null,
   };
 }
 

@@ -63,10 +63,9 @@ function makeListResponse(docs: ListResponse["docs"]): ListResponse {
 function makeDocWithNavigation(overrides: Partial<DocWithNavigation["doc"]> & { id: string }): DocWithNavigation {
   return {
     doc: {
-      id: overrides.id,
       slug: `slug-${overrides.id}`,
       type: "knowledge",
-      role: "supporting",
+      role: "knowledge",
       title: "Untitled in-review",
       status: "in-review",
       priority: "medium",

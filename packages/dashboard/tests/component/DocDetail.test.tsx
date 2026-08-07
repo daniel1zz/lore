@@ -66,16 +66,18 @@ const mockDocRecord: DocRecord = {
   slug: "prd-test",
   title: "Test PRD",
   type: "prd",
+  role: "intent",
   status: "active",
   priority: "medium",
   content: "# Overview\n\nThis is a test PRD.",
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-06-01T00:00:00Z",
-  created_by: null,
+  created_by: "alice",
   parent_id: null,
   tags: [],
   extra: {},
   version: 1,
+  deleted_at: null,
 };
 
 const mockDocWithNav: DocWithNavigation = {

@@ -78,6 +78,7 @@ function makeHit(overrides: Partial<SearchHit> = {}): SearchHit {
     score: 1.0,
     type: "spec",
     status: "active",
+    created_at: "2024-01-01T00:00:00.000Z",
     ...overrides,
   };
 }

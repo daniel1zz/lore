@@ -97,7 +97,14 @@ vi.mock("@/lib/use-route-telemetry", () => ({
 
 import { Route } from "@/routes/__root";
 
-const RootLayout = Route.component as () => React.ReactElement;
+// reason: the REAL `createRootRoute`'s public type never exposes `.component`
+// (it's stored internally); the mock above (`opts => opts`, an identity
+// passthrough) makes it reachable at RUNTIME by returning the raw options
+// object verbatim. An intersection cast — never `as any`/`as unknown as` —
+// describes exactly the extra property the MOCK's shape carries beyond the
+// real type, so `tsc` still catches a genuine shape mismatch on `Route`
+// itself while accepting this one deliberate, documented widening.
+const RootLayout = (Route as typeof Route & { component: () => React.ReactElement }).component;
 
 function renderRootLayout() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -46,6 +46,7 @@ const mockHit: SearchHit = {
   score: 1.23,
   type: "prd",
   status: "active",
+  created_at: "2024-01-01T00:00:00.000Z",
 };
 
 describe("SearchResultCard", () => {
@@ -118,6 +119,7 @@ describe("SearchResultCard", () => {
         score: 0,
         type: "knowledge",
         status: "draft",
+        created_at: "2024-01-01T00:00:00.000Z",
       };
       render(<SearchResultCard hit={minimalHit} />);
       expect(screen.getByText("Minimal Hit")).toBeInTheDocument();
