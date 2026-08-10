@@ -228,7 +228,17 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       }
     });
 
-    it("NEGATIVE + no feeding skill in the corpus: message degrades to [source: unknown] but still lists Missing reasons", async () => {
+    // reason: spec-governance-visibility-an-armed-gate-that-vacuously-passes §B3 —
+    // this used to assert the corpus-empty case degraded all the way to a bare
+    // `[source: unknown]` discriminator with an empty rule slice (byte-identical
+    // to what every fresh `lore init` corpus produced, since it starts with zero
+    // approved `knowledge/skill` docs). `CorpusService._createImpl` now falls back
+    // to a compiled-in rule slice (`FALLBACK_SPEC_CREATE_RULE_SOURCE`/`_MARKDOWN`)
+    // instead — the assertions below were updated in the SAME change that shipped
+    // the fallback, not loosened independently; the RED this test produced before
+    // that fix landed was `expect(message).not.toContain("[source: unknown")`
+    // failing because the message DID still contain it.
+    it("NEGATIVE + no feeding skill in the corpus: message falls back to the compiled-in rule slice, never [source: unknown]", async () => {
       const app = openApp();
       try {
         const prd = await app.corpusService.create({
@@ -248,9 +258,14 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         expect(spec.ok).toBe(false);
         if (spec.ok) return;
         const message = (spec.error as { message?: string }).message ?? "";
-        expect(message).toContain("[source: unknown");
+        expect(message).not.toContain("[source: unknown");
+        expect(message).toContain("[source: built-in fallback (no seeded rule doc), trust: team-authored]");
         expect(message).toContain("Missing:");
         expect(message).toContain("MISSING_SKELETON");
+        // The fallback rule slice itself must be genuinely present, not just a
+        // non-"unknown" source label with an empty body.
+        expect(message).toContain("## Rules a candidate spec must satisfy");
+        expect(message).toContain("Legal parent.");
       } finally {
         app.close();
       }
