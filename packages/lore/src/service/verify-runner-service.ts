@@ -1,7 +1,9 @@
 /**
  * VerifyRunnerService — orchestrates `lore verify`: runs a plan's script-mode
  * acceptance criteria for real and records the outcome as runner-attested evidence
- * (SPEC-039 §2; §M2 trust-hardening; SPEC-061 attestation-completeness guard).
+ * (SPEC-039 §2; §M2 trust-hardening; SPEC-061 attestation-completeness guard;
+ * spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2
+ * discovery-refusal guard).
  *
  * Public surface:
  *   verifyPlan(planIdOrSlug, opts) → runs every (or a filtered subset of) script-mode
@@ -29,6 +31,21 @@
  *   ③ injected `executor` — runs the spawn spec (bound to
  *      `verify-executor.ts::executeVerifySpawnSpec` in production), with a
  *      pre-resolved env map (`resolveVerifyEnv`, computed ONCE per run — SPEC-039 §M2)
+ *   ③.3 discovery-refusal guard (core `findDiscoveryRefusal`, pure;
+ *      spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2) —
+ *      for an `oracle: "test"` AC whose command exited NONZERO (and did not
+ *      time out), checks whether the captured output is a test-runner
+ *      DISCOVERY REFUSAL (found no matching test file — a zero-execution
+ *      event) rather than a genuine assertion failure; every runner this
+ *      repo uses returns the SAME exit code for both, so exit code alone
+ *      cannot distinguish them. A match downgrades the about-to-be-recorded
+ *      result from `"fail"` to `"inconclusive"` PLUS a `warnings` entry
+ *      naming the matched runner and its verbatim refusal line (closes the
+ *      defect where a mistyped/not-yet-existing test path minted a
+ *      permanent, indistinguishable-from-a-real-red `"fail"`). No match
+ *      leaves `verifyResult` exactly as `deriveVerifyResult` already
+ *      computed it — every other oracle kind, and any exit-0 or timed-out
+ *      run, skips this step entirely.
  *   ③.4 build-freshness precheck (core `commandReferencesCompiledBinary` /
  *      `judgeBinaryFreshness`, both pure) — for ANY AC (regardless of oracle kind)
  *      whose command exited 0 and whose command string spawns the compiled
@@ -149,6 +166,7 @@ import {
   commandHasCaseFilter,
   commandReferencesCompiledBinary,
   judgeBinaryFreshness,
+  findDiscoveryRefusal,
   type AcVerifyMode,
   type CompletenessVerdict,
   type BinaryFreshnessVerdict,
@@ -685,6 +703,37 @@ export class VerifyRunnerService {
       // see the combined-signal REGRESSION test in this file's sibling suite).
       const executedSuccessfully = verifyResult === "pass";
 
+      // ③.3 spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2
+      // — discovery-refusal guard. A test-runner process that exits nonzero
+      // because it found NO matching test file (never because anything it ran
+      // FAILED) is a ZERO-EXECUTION event, not a genuine red — every runner
+      // this repo uses returns the SAME exit code (1) for both cases, so exit
+      // code alone cannot tell them apart (§M6.1's whole premise). Runs on the
+      // branch that would otherwise ALREADY be "fail" from a plain nonzero
+      // exit (excludes a timeout deliberately — a watchdog kill is a
+      // categorically different signal than "found nothing", even if the
+      // truncated tail happens to contain a matching phrase by coincidence)
+      // AND ONLY for the "test" oracle family, mirroring the SAME scope the
+      // completeness guard below uses. A match downgrades to "inconclusive"
+      // (never silently stays "fail", and never "pass" — §Design D3) so a
+      // mistyped/not-yet-written test path can no longer mint a permanent,
+      // indistinguishable-from-a-real-red `fail` (the defect this task
+      // fixes). No match (including every genuine assertion-failure tail,
+      // which never carries one of these phrases — see
+      // `findDiscoveryRefusal`'s own mutual-exclusion invariant) leaves
+      // `verifyResult` exactly as `deriveVerifyResult` already computed it.
+      if (!executedSuccessfully && !timedOut && criterion.verify.oracle === "test") {
+        const refusal = findDiscoveryRefusal(outputTail);
+        if (refusal !== null) {
+          verifyResult = "inconclusive";
+          warnings.push(
+            `AC "${criterion.id}": ${refusal.runner} reported a discovery refusal ` +
+              `("${refusal.evidence}") — no test ran, so exit code ${exitCode} cannot be ` +
+              "recorded as a fail. Fix the command's test path/filter and re-verify.",
+          );
+        }
+      }
+
       // ③.4 build-freshness precheck (Part A, "verify trust extensions" task) —
       // applies to ANY oracle kind (not just "test") whose command spawns the
       // compiled binary; a command that doesn't reference it never even calls
@@ -706,19 +755,36 @@ export class VerifyRunnerService {
         }
       }
 
-      // SPEC-061 §Scope D3 — attestation-completeness guard. Runs ONLY when the
-      // process actually exited 0 (a nonzero exit/timeout is already "fail",
-      // completeness is irrelevant to it — §Design; gated on `executedSuccessfully`,
-      // NOT the possibly-already-downgraded `verifyResult`, so a Part-A freshness
-      // downgrade never suppresses this independent check) AND ONLY for the "test"
-      // oracle family (tsc/lint/build/e2e/other have different zero-work-green
-      // modes and are explicitly OUT of this guard's scope). A zero/under-match
-      // downgrades the recorded result to "inconclusive" — NEVER "pass" — so a
-      // wrong test-path filter that silently matched fewer files than declared
-      // can never masquerade as a real attested pass again (the AC-060-7
-      // incident this guard closes). Part B extends this with a `-t`/
-      // `--testNamePattern` matched-CASE check (`hasCaseFilter`) — a filterless
-      // command's `judgeCompleteness` call is byte-identical to pre-Part-B.
+      // SPEC-061 §Scope D3 — attestation-completeness guard. Runs ONLY when
+      // the process actually exited 0 (gated on `executedSuccessfully`,
+      // computed BEFORE the ③.3 discovery-refusal check above could have
+      // downgraded `verifyResult` — so a discovery refusal never reaches this
+      // guard at all, never mind gets asked "how many files ran"). Also NOT
+      // the possibly-already-downgraded `verifyResult` for the SAME reason
+      // Part A's freshness check isn't, either — one downgrade must never
+      // suppress a sibling's own independent check.
+      //
+      // HISTORICAL — this comment used to assert, unconditionally, "a nonzero
+      // exit/timeout is already fail, completeness is irrelevant to it".
+      // THAT assumption was itself the defect
+      // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a fixes
+      // (§M6.2): a discovery refusal is a ZERO-EXECUTION nonzero exit for
+      // which "how many files ran" is not merely irrelevant, it is
+      // UNANSWERABLE — and it must never be recorded as the SAME "fail" a
+      // genuine assertion failure earns. The corrected, narrower statement:
+      // a nonzero exit/timeout that ③.3 did NOT recognise as a discovery
+      // refusal is still "fail", and completeness is still irrelevant to
+      // THAT (now correctly scoped) case.
+      //
+      // Scoped ONLY to the "test" oracle family (tsc/lint/build/e2e/other
+      // have different zero-work-green modes and are explicitly OUT of this
+      // guard's scope). A zero/under-match downgrades the recorded result to
+      // "inconclusive" — NEVER "pass" — so a wrong test-path filter that
+      // silently matched fewer files than declared can never masquerade as a
+      // real attested pass again (the AC-060-7 incident this guard closes).
+      // Part B extends this with a `-t`/`--testNamePattern` matched-CASE
+      // check (`hasCaseFilter`) — a filterless command's `judgeCompleteness`
+      // call is byte-identical to pre-Part-B.
       let completeness: CompletenessVerdict | undefined;
       let executedFiles: number | undefined;
       let declaredPaths: number | undefined;

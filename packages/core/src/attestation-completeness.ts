@@ -59,6 +59,14 @@
  *     the (broader) flag set {@link commandRunsFileUnfiltered} recognises,
  *     colocated for the same anti-drift reason as
  *     {@link CASE_FILTER_FLAGS_DESCRIPTION}.
+ *   - findDiscoveryRefusal(outputTail) — detects whether a NONZERO-exit
+ *     command's captured output is a test-runner DISCOVERY REFUSAL (found no
+ *     matching test file — a zero-execution event) rather than a genuine
+ *     assertion failure, by matching one of three runner-specific phrases
+ *     (vitest/bun/playwright — spec-oracle-executability-a-runner-s-discovery-
+ *     refusal-is-not-a §M6.1). Consumed by `VerifyRunnerService`'s attested
+ *     call site (§M6.2) to downgrade such a run's result to `"inconclusive"`
+ *     instead of the `"fail"` a bare exit-code read would otherwise record.
  *
  * Invariants:
  *   - Referentially transparent: same input in → same output, always.
@@ -68,6 +76,11 @@
  *     (see {@link judgeCompleteness}'s `declaredPaths === 0` short-circuit).
  *   - `parseExecutedUnits` never throws on arbitrary/garbled stdout — an
  *     unrecognised tail degrades to `null`, not an exception.
+ *   - `findDiscoveryRefusal`'s three phrases are mutually exclusive with
+ *     every `parseExecutedUnits`-recognised runner-summary line by
+ *     construction (§M6.1) — a genuinely-executed-and-failed run can never
+ *     match one, so this function can only ever WITHHOLD a downgrade
+ *     (returning `null`), never wrongly grant one to a real failure.
  *   - `judgeCompleteness`'s `hasCaseFilter` case-count branch is CONSULTED
  *     ONLY when `hasCaseFilter === true` AND `executedUnits.tests !== undefined`
  *     — a filterless command (the pre-existing SPEC-061 call shape, no third
@@ -103,7 +116,9 @@
  *   vitest "-t matches 0 cases but every test is reported `skipped`, not
  *   `passed`" miss — SPEC-075 T1-stage incident); task
  *   task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested (the
- *   unfiltered-file-run detector, §"Unfiltered-File-Run Detection" below)
+ *   unfiltered-file-run detector, §"Unfiltered-File-Run Detection" below);
+ *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.1
+ *   (the discovery-refusal primitive, §"Discovery-Refusal Detection" below)
  */
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
@@ -999,4 +1014,99 @@ export function commandRunsFileUnfiltered(command: string, filePath: string): bo
     if (normalizeForComparison(joined) === target) return true;
   }
   return false;
+}
+
+// ─── Discovery-Refusal Detection (M6.1) ─────────────────────────────────────
+//
+// A test-runner process that exits nonzero because it found NO test file
+// matching its declared path/filter (a "discovery refusal") is a
+// ZERO-EXECUTION event — structurally different from a genuine assertion
+// failure, which always carries a runner-summary line
+// ({@link parseExecutedUnits} recognises it). `lore verify` reads only the
+// exit code, and every runner this repo uses returns exit 1 for BOTH cases,
+// so they are indistinguishable by exit code alone. This section supplies
+// the ONE primitive that tells them apart, by the runner's own words —
+// never by exit code, which is the very ambiguity being fixed.
+//
+// reason: task-consume-finddiscoveryrefusal-on-the-attested-exit-nonzero
+// implements this primitive against the interface pinned by
+// spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.1,
+// ahead of the sibling task that owns its FULL landing (§M6.1's own AC-OX-1/
+// AC-OX-5 — live-runner-captured phrases, exhaustive per-pattern-deletion
+// coverage) — this task's own scope is §M6.2, the ATTESTED CALL SITE that
+// consumes this function, which cannot compile or be tested without it
+// existing somewhere in `@lore/core` first (D1 — this primitive belongs in
+// `@lore/core`, never duplicated into `packages/lore`).
+
+/**
+ * One recognised test-runner discovery refusal — a runner exiting nonzero
+ * because it found no matching test file, never because anything it ran
+ * failed.
+ */
+export interface DiscoveryRefusal {
+  readonly runner: "vitest" | "bun" | "playwright";
+  /** The verbatim line that proved it — quotes the runner, never paraphrases. */
+  readonly evidence: string;
+}
+
+/**
+ * The exact phrases each runner emits ONLY on a discovery refusal (captured
+ * verbatim 2026-08-10 against a real nonexistent-path invocation of each
+ * runner — see the governing spec's §M6.1 capture table). Each is mutually
+ * exclusive with every runner-summary line {@link parseExecutedUnits}
+ * recognises: a run that genuinely executed and failed always carries a
+ * `Test Files ... (N)` / `Ran N tests across M files` line, never one of
+ * these phrases, so a real assertion failure can never be misread as "found
+ * nothing" through this predicate.
+ */
+const DISCOVERY_REFUSAL_PATTERNS: ReadonlyArray<{
+  runner: DiscoveryRefusal["runner"];
+  pattern: RegExp;
+}> = [
+  { runner: "vitest", pattern: /No test files found/ },
+  { runner: "bun", pattern: /did not match any test files/ },
+  { runner: "playwright", pattern: /Error: No tests found\./ },
+];
+
+/**
+ * Returns the full line (trimmed) containing the character at `index` within
+ * `text` — used to quote the runner's OWN wording back as
+ * {@link DiscoveryRefusal.evidence} rather than paraphrasing it.
+ */
+function extractMatchedLine(text: string, index: number): string {
+  const lineStart = text.lastIndexOf("\n", index) + 1;
+  const nextNewline = text.indexOf("\n", index);
+  const lineEnd = nextNewline === -1 ? text.length : nextNewline;
+  return text.slice(lineStart, lineEnd).trim();
+}
+
+/**
+ * Detects whether `outputTail` carries one of the three known test-runner
+ * discovery-refusal phrases (see {@link DISCOVERY_REFUSAL_PATTERNS}). Never
+ * throws — arbitrary or garbled stdout that matches none degrades to `null`,
+ * mirroring {@link parseExecutedUnits}'s own fail-open contract.
+ *
+ * @param outputTail - Captured process output (the same tail-truncated text
+ *   `parseExecutedUnits` reads).
+ * @returns The matched {@link DiscoveryRefusal} (naming the runner and the
+ *   verbatim line that matched), or `null` when no known refusal phrase is
+ *   present — including a tail carrying a genuine runner-summary line (the
+ *   two shapes are mutually exclusive by construction, see
+ *   {@link DISCOVERY_REFUSAL_PATTERNS}'s own doc).
+ *
+ * @example
+ * findDiscoveryRefusal("No test files found, exiting with code 1\n")
+ * // => { runner: "vitest", evidence: "No test files found, exiting with code 1" }
+ *
+ * @example
+ * findDiscoveryRefusal("Test Files  3 failed | 4 passed (7)\n") // => null
+ */
+export function findDiscoveryRefusal(outputTail: string): DiscoveryRefusal | null {
+  for (const { runner, pattern } of DISCOVERY_REFUSAL_PATTERNS) {
+    const match = pattern.exec(outputTail);
+    if (match !== null) {
+      return { runner, evidence: extractMatchedLine(outputTail, match.index) };
+    }
+  }
+  return null;
 }
