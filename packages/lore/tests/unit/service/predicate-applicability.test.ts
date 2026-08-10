@@ -382,6 +382,56 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
     });
   });
 
+  // COVERAGE-RESTORE (task-assert-the-plan-close-vacuity-discriminator-on-the-
+  // render finding 2) — every OTHER fixture in this describe block (and the two
+  // T8-Part-2 blocks below) sets `assessmentFreshnessExempt: true` specifically so
+  // the newly-visible assessment-freshness `notApplicable("no-evidence")` entry
+  // stays OUT of their verdict counts. The comments explaining why are honest, but
+  // the net effect is that the suites most focused on COUNTING gate verdicts never
+  // exercised that entry at all — this is the ONE fixture in this file that does
+  // NOT set the exempt flag, so the new path has positive coverage somewhere in a
+  // verdict-counting suite. Real, floor-meeting evidence (attestationFloor passes
+  // measured, never notApplicable) isolates the assertion to assessmentFreshness's
+  // own vacuous case specifically.
+  it("COVERAGE-RESTORE: an UNEXEMPTED plan with real evidence but no assessment/task-activity data audits the assessment-freshness no-evidence entry too", () => {
+    const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
+    const enforcer = new GateEnforcer(undefined, recordGateSkip);
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-coverage-restore",
+      attestationMinRatio: null,
+      planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
+      planClaimedAcCoverage: NO_DECLARED_ACS,
+      planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
+      // reason: deliberately OMITTED — this is the ONE fixture in this file that
+      // does NOT exempt assessmentFreshness, so its own notApplicable("no-evidence")
+      // verdict actually runs and gets counted.
+    };
+
+    const results = planClose.check(ctx);
+    // attestationFloor's real pass PLUS assessmentFreshness's vacuous entry —
+    // both present, never collapsed into one another.
+    expect(results).toHaveLength(2);
+    expect(results.some((r) => JSON.stringify(r) === JSON.stringify({ ok: true }))).toBe(true);
+    const notApplicableEntries = results.filter(isNotApplicable);
+    expect(notApplicableEntries).toHaveLength(1);
+    expect(notApplicableEntries[0]).toEqual({
+      notApplicable: true,
+      reason: "no-evidence",
+      referent: "plan-coverage-restore",
+    });
+
+    const result = enforcer.enforce("plan-close", ctx);
+    expect(result).toEqual({ ok: true, value: undefined });
+    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    const entry = recordGateSkip.mock.calls[0]![0];
+    expect(entry.action).toBe("gate_not_applicable");
+    expect(entry.details).toMatchObject({
+      checkpoint: "plan-close",
+      kind: "attestation-not-applicable",
+      referent: "plan-coverage-restore",
+    });
+  });
+
   // STATE — a NORMAL (no not-applicable verdicts) enforce() call never touches
   // the not-applicable audit path at all.
   it("STATE: a plan-close call with no not-applicable verdicts never fires the not-applicable audit", () => {

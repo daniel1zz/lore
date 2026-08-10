@@ -778,6 +778,35 @@ export function describeCheckpointVacuity(
 }
 
 /**
+ * The `extra` key a closing PLAN doc carries {@link describeCheckpointVacuity}'s
+ * `"plan-close"` notice under (task-assert-the-plan-close-vacuity-discriminator-
+ * on-the-render, spec-governance-visibility-an-armed-gate-that-vacuously-passes
+ * §AC-GV-6) — the RENDER-SURFACE half of the discriminator B1.1/AC-GV-1 covered
+ * only on `checkPlanClose`'s returned verdict objects, never on a surface a
+ * human or a `--json` consumer actually reads. `warnVacuousCheckpoint`
+ * (`gate-enforcer.ts`) already prints this SAME notice to stderr on every
+ * `enforce("plan-close", …)` call — that pre-existing mechanism IS the human-
+ * render half; this field is the one new thing, closing the `--json` payload
+ * half, which had NO discriminator at all (a vacuous and a satisfied close
+ * both serialized to `"extra": {}"` before this field existed — measured via a
+ * live probe against a throwaway corpus, not assumed).
+ *
+ * The SOLE writer is `CorpusService.set`'s plan-close gate block, which
+ * recomputes the SAME `checkpointRegistry["plan-close"].check(planCloseCtx)` +
+ * `describeCheckpointVacuity` call `enforce()` already ran internally — a
+ * read of the SAME predicate results via the SAME exported pure functions,
+ * never a second, divergent implementation of the discriminator. The SOLE
+ * reader is `commands/set.ts`'s human-render branch (the `--json` branch needs
+ * no reader — `doc.extra` is serialized verbatim). Written ONLY when the
+ * checkpoint was fully vacuous (mirrors `formatAttestationExemptionNotice`'s
+ * "silence when it doesn't apply" shape) — a genuinely satisfied close, or a
+ * fully-exempted one (already announced via the separate attestation-
+ * exemption notice), never gains this key at all, so every PRE-EXISTING
+ * satisfied-close test fixture's `extra` shape stays byte-identical.
+ */
+export const PLAN_CLOSE_VACUITY_NOTICE_FIELD = "plan_close_vacuity_notice";
+
+/**
  * spec-create's three predicates (`parentLegal` / `specKindValid` / `hasSkeleton`,
  * `gate-predicates.ts`), lifted unchanged (same order, same inputs) from `gate.ts`'s
  * former inline `runSpecCreateGate` checks array.
@@ -1550,6 +1579,23 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
     // checkpoint (`commands/assess.ts`'s non-blocking staleness advisory) are
     // UNCHANGED — that surface only ever reads `.ok`, and a vacuous "nothing
     // to compare" has always meant "don't warn" there too.
+    //
+    // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render
+    // finding 4 — CONFIRMED ACCEPTABLE, not scoped out. This notApplicable push
+    // reaches `GateEnforcer.recordNotApplicable`, adding ONE best-effort,
+    // fire-and-forget `gate_not_applicable` audit row for every assessment-less
+    // (or activity-less) closing plan — a NEW row for a case that previously
+    // recorded nothing at all. That is not an incidental side effect; it IS
+    // §B1.1's entire purpose (the spec this task closes: "an armed gate that
+    // vacuously passes lends its authority to everything it waves through" —
+    // the fix is making a vacuous pass auditable, not silencing it). The
+    // mechanism is the SAME one `attestationFloor`'s/`prdOutlineSynced`'s own
+    // not-applicable pushes already exercise (D1/D2's "observability never
+    // changes the outcome" — a throwing/rejecting audit port can never alter
+    // `enforce()`'s returned `Result`, `gate-enforcer.ts::fireAndForgetAudit`),
+    // so this adds no new failure mode, no new blocking behavior, and no new
+    // audit-table growth CLASS — only more instances of a class that already
+    // exists in production for the sibling predicates.
     if (ctx.newestAssessmentAt === undefined || ctx.newestTaskActivityAt === undefined) {
       results.push({
         notApplicable: true,

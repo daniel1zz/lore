@@ -108,6 +108,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import { formatAttestationExemptionNotice } from "../plan-exempt-validation.js";
+import { PLAN_CLOSE_VACUITY_NOTICE_FIELD } from "../../../service/checkpoint-registry.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
 import { SPEC_KINDS } from "@lore/core";
 import {
@@ -669,6 +670,20 @@ export default defineCommand({
         if (doc.type === "plan" && doc.status === "archived") {
           const exemptionNotice = formatAttestationExemptionNotice(doc.extra);
           if (exemptionNotice !== null) console.log(exemptionNotice);
+          // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render
+          // (spec-governance-visibility-an-armed-gate-that-vacuously-passes
+          // §AC-GV-6) — `CorpusService.set`'s plan-close block writes this key
+          // ONLY when the checkpoint was fully vacuous (see
+          // `PLAN_CLOSE_VACUITY_NOTICE_FIELD`'s own JSDoc); mirrors the
+          // exemption-notice branch immediately above, printing nothing at all
+          // for a genuinely satisfied close. The SAME text also already went to
+          // stderr from inside `GateEnforcer.enforce` (`warnVacuousCheckpoint`)
+          // — this is the stdout/human-summary echo of that fact, read back off
+          // the doc that was just persisted, never re-derived.
+          const vacuityNotice = doc.extra[PLAN_CLOSE_VACUITY_NOTICE_FIELD];
+          if (typeof vacuityNotice === "string") {
+            console.log(`  (${vacuityNotice})`);
+          }
         }
       }
     } finally {

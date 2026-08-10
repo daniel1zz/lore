@@ -299,7 +299,17 @@ describe("gate-feeding fresh-install both-ends probe", () => {
       try {
         const initResult = runLore(["init"], freshDir);
         expect(initResult.exitCode).toBe(0);
-  
+        // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render
+        // finding 3 (root CLAUDE.md's "an EMPTY output artifact is the same shape
+        // as a clean one" lesson) — exit 0 alone does not prove `lore init`
+        // actually ran and produced real state; a probe end that silently
+        // no-op'd would still leave `initResult.exitCode` at 0. Asserting the
+        // fresh corpus's OWN db path exists on disk is the positive trace: it
+        // can only be true if the `lore init` subprocess genuinely executed
+        // against `freshDir`, mirroring the SAME `existsSync(controlDbPath)`
+        // check END 2 already applies to its own corpus below.
+        expect(existsSync(join(freshDir, ".lore", "lore.db"))).toBe(true);
+
         const prdResult = runLore(
           ["create", "prd", "--title", "Fresh Root PRD", "--content", "# Fresh Root\n\nBody.", "--json"],
           freshDir,
