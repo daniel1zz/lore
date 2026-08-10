@@ -263,7 +263,7 @@ describe("export-covers-corpus: AC-FR-6 end-to-end against the REAL package.json
     () => {
       const exportResult = runMirrorScript([]);
       expect(exportResult.exitCode).toBe(0);
-      expect(exportResult.stdout).toContain("OK — mirror matches the corpus exactly.");
+      expect(exportResult.stdout).toContain("OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).");
 
       // Independent, fresh re-derivation — never trusts the script's own self-report.
       const { specs, mappings, fileCountOnDisk, fileExists } = measureLiveParity();
@@ -324,11 +324,11 @@ describe("drift-check-is-separate: AC-FR-7 end-to-end against the REAL script + 
 
       const first = runMirrorScript(["--check"]);
       expect(first.exitCode).toBe(0);
-      expect(first.stdout).toContain("OK — mirror matches the corpus exactly.");
+      expect(first.stdout).toContain("OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).");
 
       const second = runMirrorScript(["--check"]);
       expect(second.exitCode).toBe(0);
-      expect(second.stdout).toContain("OK — mirror matches the corpus exactly.");
+      expect(second.stdout).toContain("OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).");
     },
     30000,
   );
