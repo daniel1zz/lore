@@ -19,6 +19,15 @@
  *   - formatGitDiffEnobufsMessage(range, maxBufferBytes, maxDiffChars) — the
  *     ENOBUFS-specific refusal message naming this call site's own buffer ceiling
  *     instead of blaming git.
+ *   - computeCaptureSourceDistribution(bundle) / formatCaptureSourceLine(dist,
+ *     attestedRatio) (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+ *     own, AC-FR-5, G4) — the corpus-wide-for-this-plan runner-vs-self-report
+ *     evidence tally, and its one-line human render printed alongside the
+ *     pre-existing `attested_evidence_ratio`. Moved here (not left inline in
+ *     `commands/assess.ts`) for the SAME reason every other export in this
+ *     module was extracted: `commands/assess.ts` transitively imports
+ *     `loader.ts` (`bun:sqlite`), unreachable from vitest, and AC-FR-5's own
+ *     oracle is a vitest file.
  *
  * Invariants:
  *   - No IO, no wall-clock reads — pure string assembly over an already-computed
@@ -34,11 +43,67 @@
  * Side-effect class: pure
  *
  * Source: SPEC-026 §8.3; SPEC-040 §T3 D3, AC-ADF-13;
- * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1
+ * task-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-diff-over-1;
+ * task-raise-the-evidence-tail-guard-s-predicate-to-its-own AC-FR-5
  */
 
-import type { AssessmentResult } from "@lore/core";
+import { extractEvidence, type AssessmentResult, type PlanBundle } from "@lore/core";
 import { formatTable } from "./utils.js";
+
+/**
+ * Corpus-wide-for-this-plan `capture_source` distribution (task-raise-the-
+ * evidence-tail-guard-s-predicate-to-its-own, AC-FR-5, G4) — every evidence
+ * entry across `bundle.tasks`, bucketed into `"runner"` vs everything else
+ * (an ABSENT `capture_source` on a legacy row reads as self-report, never as
+ * "unknown, therefore fine" — the same convention this repo's `capture_source`
+ * invariant applies everywhere else it is consumed). Computed directly from
+ * the ALREADY-loaded `PlanBundle` — deterministic, zero additional AI call,
+ * zero additional store read.
+ *
+ * @param bundle - The plan bundle already fetched for this assessment run.
+ * @returns `{runnerCount, selfReportCount, ratio}` — `ratio` is
+ *   `runnerCount / (runnerCount + selfReportCount)`, `0` when there is no
+ *   evidence at all (never `NaN`), mirroring `attested_evidence_ratio`'s own
+ *   documented zero-evidence convention.
+ */
+export function computeCaptureSourceDistribution(
+  bundle: PlanBundle,
+): { runnerCount: number; selfReportCount: number; ratio: number } {
+  let runnerCount = 0;
+  let selfReportCount = 0;
+  for (const task of bundle.tasks) {
+    for (const entry of extractEvidence(task)) {
+      if (entry.capture_source === "runner") {
+        runnerCount += 1;
+      } else {
+        selfReportCount += 1;
+      }
+    }
+  }
+  const total = runnerCount + selfReportCount;
+  return { runnerCount, selfReportCount, ratio: total === 0 ? 0 : runnerCount / total };
+}
+
+/**
+ * One-line human render of {@link computeCaptureSourceDistribution}'s result,
+ * printed ALONGSIDE `result.facts.regression.attested_evidence_ratio` (the
+ * pre-existing attested ratio `lore assess` already prints/emits) — AC-FR-5's
+ * own "beside the attested ratio it already prints" requirement.
+ *
+ * @param distribution - {@link computeCaptureSourceDistribution}'s return value.
+ * @param attestedRatio - `result.facts?.regression.attested_evidence_ratio`,
+ *   `undefined` for a legacy pre-SPEC-040 result (additive, never thrown).
+ */
+export function formatCaptureSourceLine(
+  distribution: { runnerCount: number; selfReportCount: number; ratio: number },
+  attestedRatio: number | undefined,
+): string {
+  return (
+    `Evidence trust: capture_source ${distribution.runnerCount} runner / ` +
+    `${distribution.selfReportCount} self-report (ratio ${distribution.ratio.toFixed(2)})` +
+    (attestedRatio !== undefined ? `, attested_evidence_ratio ${attestedRatio.toFixed(2)}` : "")
+  );
+}
 
 /**
  * Worst-case UTF-8 bytes per JS string length unit, used to size `spawnSync`'s

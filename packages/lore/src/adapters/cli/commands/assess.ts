@@ -84,7 +84,13 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { isAssessAiBraked } from "../../../ai/resolve-ai.js";
 import { renderAssessmentContent } from "@lore/core";
-import { formatAssessmentSummary, computeGitDiffMaxBuffer, formatGitDiffEnobufsMessage } from "../assess-render.js";
+import {
+  formatAssessmentSummary,
+  computeGitDiffMaxBuffer,
+  formatGitDiffEnobufsMessage,
+  computeCaptureSourceDistribution,
+  formatCaptureSourceLine,
+} from "../assess-render.js";
 import { assessmentFreshness } from "../../../service/gate-predicates.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
 
@@ -373,6 +379,11 @@ export default defineCommand({
         process.stderr.write(`✓ Assessment complete: ${result.verdict} (${scoreLabel})\n`);
       }
 
+      // ─── Step 5.5: capture_source distribution (AC-FR-5, G4) ──────────────────
+      // reason: computed BEFORE persistence — deterministic, from the
+      // already-loaded bundle, never touching the AI judge's own `result`.
+      const captureSourceDistribution = computeCaptureSourceDistribution(bundle);
+
       // ─── Step 6: persist as a knowledge doc, linked to the plan ────────────────
       const dateStr = new Date().toISOString().slice(0, 10);
       const createResult = await app.corpusService.create({
@@ -411,7 +422,21 @@ export default defineCommand({
           JSON.stringify(
             {
               ok: true,
-              data: { assessment: assessmentDoc, result, scope_warning: result.scope_warning, diff_source: diffSource },
+              data: {
+                assessment: assessmentDoc,
+                result,
+                scope_warning: result.scope_warning,
+                diff_source: diffSource,
+                // reason: AC-FR-5/G4 — printed ALONGSIDE result.facts.regression
+                // .attested_evidence_ratio (the pre-existing attested ratio this
+                // envelope already carries), a top-level sibling key so a
+                // consumer never needs to know the attested one lives nested.
+                capture_source: {
+                  runner_count: captureSourceDistribution.runnerCount,
+                  self_report_count: captureSourceDistribution.selfReportCount,
+                  ratio: captureSourceDistribution.ratio,
+                },
+              },
             },
             null,
             2,
@@ -426,6 +451,11 @@ export default defineCommand({
         console.log(result.scope_warning.message);
       }
       console.log("");
+      // reason: AC-FR-5/G4 — printed alongside result.facts.regression
+      // .attested_evidence_ratio, when present (a legacy pre-SPEC-040 result
+      // would carry no `facts` at all — additive, never a thrown error).
+      const attestedRatio = result.facts?.regression.attested_evidence_ratio;
+      console.log(formatCaptureSourceLine(captureSourceDistribution, attestedRatio));
       console.log(formatDiffSourceLine(diffSource));
       console.log(`Saved as ${assessmentDoc.slug} (linked to ${bundle.plan.slug} via informs)`);
     } finally {

@@ -58,13 +58,21 @@
  * an EMPTY `output_tail` — two measurements this task's own doc records (a hand-
  * authored prose tail satisfying the non-empty predicate; eight `pass` rows with
  * `output_tail` length 0 recorded under an explicit dispatch instruction naming
- * this exact defect). `TaskWorkflowService`'s `rejectMissingPassOutputTail` now
- * refuses any `--result pass` self-report lacking a genuinely non-empty tail
- * UNLESS `capture_source === "runner"` (i.e. `--capture` was used) — the
- * PASS-side sibling of the pre-existing non-pass requirement
- * (spec-evidence-output-tail-integrity-a-self-reported-non-pass). Every write
- * this command makes stamps `capture_source: "self-report"` when `--capture` is
- * NOT used — never omitted, never inferred from the tail's shape.
+ * this exact defect). `TaskWorkflowService`'s `rejectMissingPassOutputTail` used
+ * to refuse any `--result pass` self-report lacking a genuinely non-empty tail
+ * UNLESS `capture_source === "runner"` (i.e. `--capture` was used) — but a bare
+ * non-empty check was ITSELF measured insufficient (task-raise-the-evidence-
+ * tail-guard-s-predicate-to-its-own, spec-falsifiability-reachability-a-
+ * feedable-checkpoint-an §D5): 2 of 3 dispatched agents satisfied "non-empty"
+ * by hand-typing a summary that LOOKS like a real runner's, and both passed.
+ * The predicate is now RAISED to match its own message: a self-reported
+ * `--result pass` is refused for EVERY oracle kind (any tail, empty or not)
+ * UNLESS `capture_source === "runner"` OR `--oracle manual` (the one kind
+ * `--capture` structurally can never reach — nothing to spawn for a visual
+ * check — so it keeps the prior "genuinely non-empty description" floor as
+ * ITS proof instead). Every write this command makes stamps `capture_source:
+ * "self-report"` when `--capture` is NOT used — never omitted, never inferred
+ * from the tail's shape.
  *
  * `--result expected-fail` (spec-workflow-hardening-evidence-red-vocabulary-claim-
  * worktree §M1, AC-WH-1) records a deliberate RED-phase oracle run — a test that
@@ -118,8 +126,9 @@
  *   4 = VALIDATION_ERROR (not a task/phase, 50-entry cap reached, bad
  *   oracle/result value, unknown ac_ref/checklist_ref, `--capture` combined with
  *   either output-tail flag or with `--oracle manual` (`findCaptureFlagConflict`),
- *   a self-reported `--result pass` with no genuine tail and no `--capture`, a
- *   `--capture` spawn whose observed exit code contradicts the declared
+ *   a self-reported `--result pass` with no `--capture` and no `--oracle manual`
+ *   escape (D5's raised predicate — ANY tail, empty or hand-authored, no longer
+ *   suffices for a capturable oracle), a `--capture` spawn whose observed exit code contradicts the declared
  *   `--result`, OR a missing oracle file / an unproven filtered pass / a
  *   mixed-runner command / a piped self-reported command per the prechecks
  *   below, OR a `--result pass` from a claim whose recorded worktree is
@@ -244,7 +253,10 @@
  *   the PASS-tail requirement, `capture_source`);
  *   task-wire-findpiperefusal-into-the-live-lore-evidence-and-mcp (spec
  *   oracle-tier-falsifiability-a-criterion-never-observed-red M2 — wires
- *   the pre-existing `findPipeRefusal` guard into this call sequence)
+ *   the pre-existing `findPipeRefusal` guard into this call sequence);
+ *   task-raise-the-evidence-tail-guard-s-predicate-to-its-own (spec-
+ *   falsifiability-reachability-a-feedable-checkpoint-an §D5 — raises
+ *   `rejectMissingPassOutputTail`'s predicate to match its own message)
  */
 
 import { existsSync, readFileSync } from "fs";
