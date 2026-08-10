@@ -1,6 +1,6 @@
 /**
  * lore verify <plan> [--ac <id> repeatable] [--task <t>] [--json] [--by]
- *   [--allow-new-commands|--yes] [--execution-root <path>]
+ *   [--allow-new-commands|--yes] [--execution-root <path>] [--falsify <AC-ID>]
  *
  * Trusted runner (SPEC-039): actually EXECUTES a plan's declared script-mode
  * acceptance criteria (via `VerifyRunnerService.verifyPlan`) and records the
@@ -8,6 +8,25 @@
  * exit code, not a caller assertion (contrast `lore evidence`, which is
  * self-reported). Thin pipe only: this file resolves args, calls the service,
  * renders the per-AC outcome table, and maps the result to an exit code.
+ *
+ * `--falsify <AC-ID>` (spec-falsifiability-reachability-a-feedable-checkpoint-an
+ * §D2/D3/D4) is the ATTESTED-RED runner — a SEPARATE code path (see `run`'s own
+ * early-return branch below), landed on THIS command rather than a sibling
+ * subcommand because every piece of context it needs (plan/spec/task
+ * resolution, the M2 env-allowlist, the injected `executor` port) is already
+ * resolved here, and a sibling would have had to re-derive all of it. It
+ * creates a SCRATCH git worktree off the corpus repo's `HEAD`
+ * (`VerifyRunnerService.verifyFalsifier` → `createFalsifierScratchWorktree`),
+ * applies the named AC's declared `verify.falsifier` mutation there (NEVER the
+ * caller's working tree), runs the AC's command in that isolated copy, and
+ * records a runner-issued `result: "expected-fail"` / `capture_source: "runner"`
+ * evidence row ONLY when the observed exit code equals the falsifier's
+ * declared value exactly — a mismatch or a missing/stale declaration refuses
+ * loud (exit per `exitCode(error)`) and records NOTHING. Requires the PLAN
+ * positional (refuses `--task`-only ad-hoc invocations, exit 2) and skips the
+ * ordinary four-step pipeline's M2 approval gate and execution-root resolution
+ * entirely (neither applies to a scratch-worktree run — see the branch's own
+ * inline comment).
  *
  * `--ac <id>` may repeat (citty collapses repeated `--ac` flags into a string
  * array at the raw-args layer — see `normalizeRepeatableFlag` below) to
@@ -132,7 +151,9 @@
  * pre-existing suite passes unmodified).
  *
  * Source: SPEC-039 §2, §3, §4 AC-VRF-10; §M2; SPEC-061 §Scope D3; SPEC-063
- *   §Design Decisions D1-D4; SPEC-069 §Design Decisions D2
+ *   §Design Decisions D1-D4; SPEC-069 §Design Decisions D2;
+ *   spec-falsifiability-reachability-a-feedable-checkpoint-an §D2/D3/D4 AC-FR-2/3
+ *   (`--falsify` attested-red runner)
  */
 
 import { spawnSync } from "node:child_process";
@@ -354,6 +375,17 @@ export default defineCommand({
         "D4) — bypasses the linked-worktree inference entirely and always prints the resolved " +
         "execution root",
     },
+    falsify: {
+      type: "string",
+      description:
+        "ATTESTED-RED runner (spec-falsifiability-reachability-a-feedable-checkpoint-an §D2/D3/D4): " +
+        "restrict this run to the named AC id and drive it through its DECLARED falsifier instead " +
+        "of the ordinary green-path command — creates a SCRATCH git worktree, applies the mutation " +
+        "there (never the working tree), runs the command, and records a runner-issued " +
+        "result:\"expected-fail\" row ONLY when the observed exit code matches the falsifier's " +
+        "declared value exactly. Requires the PLAN positional (not the ad-hoc --task path) and an " +
+        "AC that actually declares a falsifier (see `lore ac add --falsifier-*`).",
+    },
   },
   async run({ args }) {
     const { app } = loadLoreApp();
@@ -409,6 +441,64 @@ export default defineCommand({
       // guaranteed string.
       const planArg = typeof args.plan === "string" ? args.plan : undefined;
       const taskArg = typeof args.task === "string" ? args.task : undefined;
+
+      // ATTESTED-RED runner (spec-falsifiability-reachability-a-feedable-checkpoint-an
+      // §D2/D3/D4) — a SEPARATE, wholly distinct code path from the four-step
+      // pipeline below: no execution-root resolution (the scratch worktree IS this
+      // run's root, by construction), no M2 command-provenance gate (a falsifier run
+      // always executes a MUTATED tree, so "already-seen command" never applies).
+      // Returns EARLY — `FalsifierRunResult` is a different shape from
+      // `VerifyPlanResult`, rendered here rather than threaded through the shared
+      // per-AC table below.
+      const falsifyAcId = typeof args.falsify === "string" ? args.falsify : undefined;
+      if (falsifyAcId !== undefined) {
+        if (planArg === undefined) {
+          process.stderr.write(
+            "Error: --falsify requires the PLAN positional (the attested-red runner is not " +
+              "reachable from the ad-hoc --task path).\n",
+          );
+          process.exitCode = 2;
+          return;
+        }
+        const falsifyResult = await requireVerifyRunnerService(app).verifyFalsifier(planArg, falsifyAcId, {
+          ...(taskArg !== undefined ? { explicitTaskIdOrSlug: taskArg } : {}),
+          by,
+          nowIso: new Date().toISOString(),
+        });
+        if (!falsifyResult.ok) {
+          process.stderr.write(formatError(falsifyResult.error) + "\n");
+          process.exitCode = exitCode(falsifyResult.error);
+          return;
+        }
+        const { task, ac_id, expected_exit_code, exit_code: observedExitCode, output_tail } =
+          falsifyResult.value;
+        if (args.json) {
+          console.log(
+            JSON.stringify(
+              {
+                ok: true,
+                data: {
+                  task,
+                  ac_id,
+                  expected_exit_code,
+                  exit_code: observedExitCode,
+                  output_tail,
+                  result: "expected-fail",
+                },
+              },
+              null,
+              2,
+            ),
+          );
+        } else {
+          console.log(
+            `Attested red recorded for ${ac_id} (task ${task.slug}): exit ${observedExitCode} ` +
+              `(declared ${expected_exit_code}) — result:expected-fail, capture_source:runner.`,
+          );
+        }
+        process.exitCode = 0;
+        return;
+      }
 
       let result: Result<VerifyPlanResult, LoreError>;
       let planArgForHeader: string;

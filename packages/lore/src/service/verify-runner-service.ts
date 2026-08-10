@@ -8,6 +8,20 @@
  * Public surface:
  *   verifyPlan(planIdOrSlug, opts) → runs every (or a filtered subset of) script-mode
  *     AC declared on the plan's parent spec against the resolved target task
+ *   verifyFalsifier(planIdOrSlug, acId, opts) → spec-falsifiability-reachability-
+ *     a-feedable-checkpoint-an §D2/D3/D4's ATTESTED-RED runner: applies ONE
+ *     declared AC's `verify.falsifier` mutation inside a SCRATCH git worktree
+ *     (never the working tree — see the "Attested-Red Falsifier Runner"
+ *     section below), runs the AC's command there, and records a
+ *     runner-issued `result: "expected-fail"` evidence row ONLY when the
+ *     observed exit code equals the falsifier's declared value exactly.
+ *     Wholly separate from the four-step pipeline below — no M2 approval
+ *     gate, no completeness/freshness guards (those all reason about the
+ *     CHECKED-IN tree, which this path never executes against).
+ *
+ * createFalsifierScratchWorktree / removeFalsifierScratchWorktree /
+ * applyFalsifierMutation (plain exported functions, not class methods — see
+ * their own JSDoc for why) are `verifyFalsifier`'s three real-IO primitives.
  *
  * Four-step pipeline, fully delegated (SPEC-039 §2), with an M2 pre-execution gate
  * inserted into step ③ and a SPEC-061 post-execution guard inserted into step ④:
@@ -127,14 +141,19 @@
  *     incl. `app.ts`'s existing 4-arg construction) falls back to a private
  *     `node:fs`-based real check (`newestTsMtimeMs` scan of `packages/{lore,core}/src`
  *     vs `<repoRoot>/dist/lore`'s mtime, mirroring
- *     `tests/integration/helpers/assert-fresh-binary.ts`'s algorithm) — this is the
- *     ONE place this class does direct filesystem IO itself, deliberately scoped to
- *     production use (every test in this class's suite injects a fake, per the
- *     `executor`/`getPlanBundle` precedent).
+ *     `tests/integration/helpers/assert-fresh-binary.ts`'s algorithm) — one of TWO
+ *     places this class does direct filesystem IO itself (the other is the
+ *     falsifier runner's scratch-worktree primitives below), both deliberately
+ *     scoped to production use (every test in the MAIN `verifyPlan`/`verifyAdhocTask`
+ *     suite injects a fake, per the `executor`/`getPlanBundle` precedent — the
+ *     falsifier primitives are NOT injectable at all, by design, see the
+ *     "Attested-Red Falsifier Runner" section below).
  *
- * Side-effect class: IO (delegates all IO to injected ports, EXCEPT the default
+ * Side-effect class: IO (delegates all IO to injected ports, EXCEPT (a) the default
  *   `checkBinaryFreshness` fallback described above, which does direct `node:fs`
- *   reads when no port is injected)
+ *   reads when no port is injected, and (b) `createFalsifierScratchWorktree` /
+ *   `removeFalsifierScratchWorktree` / `applyFalsifierMutation`, which ALWAYS do
+ *   real `git`/`node:fs` IO — never injectable, see their own JSDoc)
  *
  * Source: SPEC-039 §2 D2, D3, D4, D6, D9; §3; §4 AC-VRF-3; §M2 (trust-hardening: env
  *   allowlist + command-provenance approval + annotation); SPEC-061 §Scope D3;
@@ -142,13 +161,16 @@
  *   (build-freshness precheck + -t matched-case count guard), AC-061-9
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { err, ok } from "@lore/core";
 import type {
   Result,
   LoreError,
   AcceptanceCriterion,
+  AcFalsifier,
   DocId,
   DocRecord,
   PlanBundle,
@@ -167,6 +189,7 @@ import {
   commandReferencesCompiledBinary,
   judgeBinaryFreshness,
   findDiscoveryRefusal,
+  tailChars,
   type AcVerifyMode,
   type CompletenessVerdict,
   type BinaryFreshnessVerdict,
@@ -314,6 +337,240 @@ export interface VerifyPlanResult {
   readonly skipped: VerifySkippedAc[];
   /** Advisory notes (e.g. "parent spec not approved") — never affects `results`. */
   readonly warnings: string[];
+}
+
+// ─── Attested-Red Falsifier Runner (spec-falsifiability-reachability-a-
+//     feedable-checkpoint-an §D2/D3/D4) ─────────────────────────────────────
+//
+// Closes the structural gap named in the governing spec's G2: ordinary
+// `lore verify` execution (`verifyPlan`/`verifyAdhocTask`, `_runVerification`
+// above) runs an AC's command against the CHECKED-IN tree — producing a red
+// there would require the tree to be temporarily BROKEN, which no attested
+// evidence-recording path can ever do. `VerifyRunnerService.verifyFalsifier`
+// (below the class-opening comment) is the SEPARATE entry point that can: it
+// creates a SCRATCH git worktree (never the caller's working tree — D3),
+// applies the AC's own DECLARED `falsifier` mutation (D2) there, runs the
+// AC's command in that isolated copy, and records a runner-issued
+// `result: "expected-fail"` evidence row (`capture_source: "runner"`) ONLY
+// when the observed exit code equals the EXACT value the falsifier declares
+// (D4 — never "non-zero"). A mismatch, a missing declaration, or a
+// mutation-apply failure (stale `find` text, a nonexistent `path`) all
+// refuse loud and record NOTHING — this path never mints a passing red.
+//
+// The three functions below are PLAIN EXPORTED functions (not private class
+// methods, and NOT constructor-injected ports like `executor`/`getPlanBundle`)
+// so `attested-red.test.ts` can drive each step directly and prove isolation
+// even for a run that never reaches the class's own cleanup `finally` block
+// (a genuine crash mid-run, AC-FR-3's RED case) — see each function's own
+// JSDoc for why they are deliberately NOT mockable.
+
+/**
+ * Cap for the falsifier run's recorded `output_tail` — same 4000-char budget
+ * `verify-executor.ts`'s `OUTPUT_TAIL_MAX_CHARS` uses. Kept as its OWN local
+ * constant here rather than imported: that one lives in the bun-only
+ * executor module this class must never import (class-level Invariants).
+ */
+const FALSIFIER_OUTPUT_TAIL_MAX_CHARS = 4000;
+
+/**
+ * A scratch git worktree created by {@link createFalsifierScratchWorktree} —
+ * `worktreeDir` is where a falsifier's mutation is applied and the AC's
+ * command is spawned from; `parentDir` is its throwaway container (both
+ * removed together by {@link removeFalsifierScratchWorktree}).
+ */
+export interface FalsifierScratchWorktree {
+  readonly worktreeDir: string;
+  readonly parentDir: string;
+}
+
+/** Result of one {@link VerifyRunnerService.verifyFalsifier} call. */
+export interface FalsifierRunResult {
+  readonly task: { id: DocId; slug: string };
+  readonly ac_id: string;
+  /** The falsifier's declared value (echoed back for the caller's own reporting). */
+  readonly expected_exit_code: number;
+  /** The mutated command's ACTUAL observed exit code. */
+  readonly exit_code: number;
+  readonly output_tail: string;
+}
+
+/**
+ * Creates an isolated SCRATCH git worktree off `repoRoot`'s current `HEAD`
+ * (D3 — "attested reds run in an isolated worktree, never the working
+ * tree"). Real IO: shells `git worktree add --detach` via `execFileSync`.
+ * Deliberately NOT injectable (unlike this class's `executor`/`getPlanBundle`
+ * constructor ports) — the isolation guarantee AC-FR-3 exists to prove is
+ * exactly that this is REAL, never a test double standing in for it; a fake
+ * port here would let the whole mechanism ship untested against the one
+ * property that matters.
+ *
+ * ⛔ NAMED SCOPE LIMIT (measured 2026-08-10, stated rather than hidden): this
+ * branches from `repoRoot`'s `HEAD` — i.e. `VerifyRunnerService.config.repoRoot`,
+ * which for an agent running `lore verify --falsify` from INSIDE a linked git
+ * worktree resolves to the MAIN checkout (SPEC-063's `findLoreDbPath` fallback,
+ * since a linked worktree carries no `.lore/` of its own), NOT that agent's own
+ * worktree branch/uncommitted changes. Unlike the ordinary green-path pipeline
+ * (`_runVerification`), `verifyFalsifier` does NOT consult
+ * `opts.executionRoot`/`resolveVerifyExecutionRoot` (SPEC-063) at all — an
+ * agent whose falsifiable code lives only on their own linked worktree (this
+ * task's own dogfood run used a wholly separate throwaway repo, which sidesteps
+ * this gap entirely rather than closing it) must COMMIT to a ref `config.repoRoot`
+ * can resolve before `--falsify` will see it. A real integration with SPEC-063's
+ * resolution is a NAMED follow-up, not silently assumed solved.
+ *
+ * @param repoRoot - The git repository to branch a scratch worktree from
+ *   (`VerifyRunnerService`'s own `config.repoRoot` in production).
+ * @returns The created worktree's paths, or `STORE_ERROR` when the scratch
+ *   temp directory can't be created, or `git worktree add` itself fails (a
+ *   non-git `repoRoot`, a missing `git` binary, an unclean `HEAD`, etc.) —
+ *   the caller never proceeds to apply a mutation without a confirmed-real
+ *   worktree.
+ *
+ * @example
+ * const result = createFalsifierScratchWorktree("/path/to/repo");
+ * // result.ok && result.value.worktreeDir → e.g. "/tmp/lore-attested-red-xxxx/wt"
+ */
+export function createFalsifierScratchWorktree(
+  repoRoot: string,
+): Result<FalsifierScratchWorktree, LoreError> {
+  let parentDir: string;
+  try {
+    parentDir = mkdtempSync(join(tmpdir(), "lore-attested-red-"));
+  } catch (error) {
+    return err({
+      code: "STORE_ERROR",
+      message: `attested-red runner could not create a scratch temp directory: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+  // reason: `git worktree add <path>` REQUIRES `<path>` to not already exist
+  // — `mkdtempSync` already created `parentDir` itself, so the worktree
+  // target is a NOT-YET-EXISTING child of it (`wt`), never `parentDir`
+  // directly (git would refuse an existing, non-empty directory).
+  const worktreeDir = join(parentDir, "wt");
+  try {
+    execFileSync("git", ["worktree", "add", "--detach", worktreeDir, "HEAD"], {
+      cwd: repoRoot,
+      stdio: "pipe",
+    });
+  } catch (error) {
+    // reason: best-effort — `git worktree add` itself failed, so nothing is
+    // checked out at `worktreeDir` yet; only the empty `parentDir` needs
+    // cleanup. Swallowing THIS cleanup failure is safe: at worst it leaks an
+    // empty temp directory, never the original repo's tree.
+    try {
+      rmSync(parentDir, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup of an empty scratch dir */
+    }
+    return err({
+      code: "STORE_ERROR",
+      message: `attested-red runner could not create a scratch git worktree from "${repoRoot}": ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+  return ok({ worktreeDir, parentDir });
+}
+
+/**
+ * Removes a scratch worktree created by {@link createFalsifierScratchWorktree}.
+ * BEST-EFFORT and never throws: a removal failure leaves an ORPHANED scratch
+ * directory (wasted disk) but can NEVER retroactively corrupt the original
+ * repo's tracked files or index — `git worktree add`/`remove` only ever
+ * write under `.git/worktrees/<id>/` (administrative metadata disjoint from
+ * the working tree `git status --porcelain` inspects) plus the scratch
+ * directory itself, never `repoRoot`'s own checked-out files. AC-FR-3's
+ * isolation guarantee holds independently of whether this cleanup ever runs
+ * at all (a genuine crash between {@link applyFalsifierMutation} and this
+ * call leaves the scratch worktree orphaned, never the original tree
+ * touched — see that function's own JSDoc for where the mutation actually
+ * lands).
+ *
+ * @param repoRoot - The SAME repo passed to {@link createFalsifierScratchWorktree}.
+ * @param scratch - The handle that call returned.
+ */
+export function removeFalsifierScratchWorktree(
+  repoRoot: string,
+  scratch: FalsifierScratchWorktree,
+): void {
+  try {
+    execFileSync("git", ["worktree", "remove", "--force", scratch.worktreeDir], {
+      cwd: repoRoot,
+      stdio: "pipe",
+    });
+  } catch {
+    // reason: best-effort — see this function's own JSDoc for why a failure
+    // here is a disk leak, never a working-tree correctness issue.
+  }
+  try {
+    rmSync(scratch.parentDir, { recursive: true, force: true });
+  } catch {
+    /* best-effort — same reasoning as above */
+  }
+}
+
+/**
+ * Applies a DECLARED falsifier's mutation INSIDE `worktreeDir` — a literal
+ * find/replace against the file at `worktreeDir/<falsifier.path>`. Never
+ * reads or writes ANY path outside `worktreeDir` (D3's isolation guarantee:
+ * the caller always passes a SCRATCH worktree's own directory here, never
+ * the real working tree — this function has no way to reach the latter, it
+ * takes NO `repoRoot` parameter at all, by construction).
+ *
+ * Refuses loud (never a silent no-op) when the declared `path` doesn't exist
+ * in the worktree, or exists but no longer contains the declared `find` text
+ * — both are declaration bugs (a stale falsifier whose target file changed
+ * since it was authored), and recording a red anyway would misattribute the
+ * mutation's actual effect.
+ *
+ * @param worktreeDir - A scratch worktree's own directory (`.worktreeDir`
+ *   from {@link createFalsifierScratchWorktree}'s return value) — NEVER a
+ *   repo's real working tree.
+ * @param falsifier - The declared mutation (`AcceptanceCriterion.verify.falsifier`,
+ *   `acFalsifierSchema` in `@lore/core`).
+ * @returns `ok(undefined)` once the file is mutated on disk; `VALIDATION_ERROR`
+ *   naming the missing path/text, or `STORE_ERROR` on a write failure.
+ *
+ * @example
+ * applyFalsifierMutation("/tmp/lore-attested-red-xxxx/wt", {
+ *   path: "src/target.txt",
+ *   find: "MAGIC_MARKER",
+ *   replace: "",
+ *   expected_exit_code: 7,
+ * });
+ */
+export function applyFalsifierMutation(
+  worktreeDir: string,
+  falsifier: AcFalsifier,
+): Result<void, LoreError> {
+  const targetPath = join(worktreeDir, falsifier.path);
+  let content: string;
+  try {
+    content = readFileSync(targetPath, "utf8");
+  } catch (error) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "falsifier.path",
+      message: `declared falsifier path "${falsifier.path}" does not exist inside the scratch worktree: ${error instanceof Error ? error.message : String(error)}`,
+      value: falsifier.path,
+    });
+  }
+  if (!content.includes(falsifier.find)) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "falsifier.find",
+      message: `declared falsifier 'find' text was not found in "${falsifier.path}" — the declaration is stale (the file no longer contains it). Refused rather than silently applying nothing.`,
+      value: falsifier.find,
+    });
+  }
+  const mutated = content.replace(falsifier.find, falsifier.replace);
+  try {
+    writeFileSync(targetPath, mutated, "utf8");
+  } catch (error) {
+    return err({
+      code: "STORE_ERROR",
+      message: `attested-red runner could not write the mutated file "${falsifier.path}": ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+  return ok(undefined);
 }
 
 // ─── VerifyRunnerService ───────────────────────────────────────────────────
@@ -1119,5 +1376,258 @@ export class VerifyRunnerService {
 
     // recordAcRef: true — BYTE-IDENTICAL to pre-SPEC-069 behavior (REGRESSION).
     return this._runVerification(selectionResult.value, task, spec, opts, true);
+  }
+
+  /**
+   * Attested-red runner (spec-falsifiability-reachability-a-feedable-
+   * checkpoint-an §D2/D3/D4) — drives ONE declared AC's `verify.falsifier` to
+   * a runner-attested `"expected-fail"`. See this file's "Attested-Red
+   * Falsifier Runner" section header for the full mechanism; this method is
+   * resolution orchestration only (mirrors `verifyPlan`'s steps ①② for
+   * bundle/task resolution), delegating the mutate/spawn/compare/record
+   * sequence to {@link _runFalsifier}:
+   *   1. Resolve the plan bundle + target task (SAME steps `verifyPlan`
+   *      uses — a falsifier run still records evidence against a real
+   *      claimed task, never a synthetic one).
+   *   2. Look up `acId` on the spec's declared criteria; refuse loud if it's
+   *      missing, not script-mode, or carries no `falsifier` (D2 — never
+   *      fabricate one; declaring a falsifier is the AC author's job).
+   *
+   * @param planIdOrSlug - Plan document ULID or slug (same resolution
+   *   `verifyPlan` uses).
+   * @param acId - The declared criterion id to falsify (its `verify.falsifier`
+   *   must be present — see `lore ac add/set --falsifier-*`).
+   * @param opts - `{ explicitTaskIdOrSlug?, by, nowIso }`. Deliberately NOT
+   *   the full `VerifyPlanOpts` — no M2 command-provenance gate applies here:
+   *   a falsifier run executes a MUTATED tree every time, so "don't
+   *   re-prompt for a command already seen" (M2's whole premise) doesn't
+   *   hold; no execution-root override either, since the scratch worktree
+   *   IS this run's execution root by construction.
+   * @returns {@link FalsifierRunResult} on a genuine, recorded attested red.
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (no parent spec / no structured
+   *   ACs / unknown acId / not script-mode / no declared falsifier / an exit
+   *   code that doesn't match the falsifier's declared value / a stale
+   *   mutation), STORE_ERROR (scratch worktree creation failed / command
+   *   launch failed), STALE_VERSION (a concurrent evidence writer raced this
+   *   run's `recordVerifiedEvidence` call)
+   */
+  async verifyFalsifier(
+    planIdOrSlug: string,
+    acId: string,
+    opts: { explicitTaskIdOrSlug?: string; by: string; nowIso: string },
+  ): Promise<Result<FalsifierRunResult, LoreError>> {
+    // ① bundle — same port `verifyPlan` uses.
+    const bundleResult = await this.getPlanBundle(planIdOrSlug);
+    if (!bundleResult.ok) return bundleResult;
+    const { plan, spec, tasks } = bundleResult.value;
+
+    if (spec === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "spec",
+        message: `plan "${plan.slug}" has no parent spec — nothing to falsify`,
+        value: plan.id,
+      });
+    }
+
+    const criteriaParsed = specAcceptanceCriteriaSchema.safeParse(
+      spec.extra["acceptance_criteria"],
+    );
+    if (!criteriaParsed.success || criteriaParsed.data.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "acceptance_criteria",
+        message: `spec "${spec.slug}" has no structured acceptance_criteria declared — nothing to falsify`,
+        value: spec.id,
+      });
+    }
+
+    const criterion = criteriaParsed.data.find((c) => c.id === acId);
+    if (criterion === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "acId",
+        message: `unknown AC id "${acId}" — not declared on spec "${spec.slug}"`,
+        value: acId,
+      });
+    }
+    if (criterion.verify.mode !== "script") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "verify.mode",
+        message:
+          `AC "${acId}" is not script-mode (verify.mode is "${criterion.verify.mode}") — ` +
+          "an attested-red run requires a script command to mutate-and-run",
+        value: criterion.verify.mode,
+      });
+    }
+    const falsifier = criterion.verify.falsifier;
+    if (falsifier === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "verify.falsifier",
+        message:
+          `AC "${acId}" declares no falsifier — declare one first ('lore ac add/set ` +
+          "<spec> <id> --falsifier-path <path> --falsifier-find <text> --falsifier-replace " +
+          "<text> --falsifier-exit-code <n>') before running the attested-red path",
+        value: acId,
+      });
+    }
+
+    // ② resolve target task — same core, pure `resolveTargetTask` `verifyPlan` uses.
+    const targetResult = resolveTargetTask(tasks, {
+      ...(opts.explicitTaskIdOrSlug !== undefined
+        ? { explicitTaskIdOrSlug: opts.explicitTaskIdOrSlug }
+        : {}),
+      nowIso: opts.nowIso,
+      ttlMinutes: this.config.claimTtlMinutes,
+    });
+    if (!targetResult.ok) return targetResult;
+    const task = targetResult.value;
+
+    // reason: `criterion.verify.mode !== "script"` was already checked above
+    // (early-returned otherwise) — this cast documents that narrowing rather
+    // than relying on TS to propagate it through the `criteriaParsed.data.find(...)`
+    // call boundary into `_runFalsifier`'s parameter type.
+    return this._runFalsifier(criterion as ScriptAcceptanceCriterion, falsifier, task, opts);
+  }
+
+  /**
+   * The mutate/spawn/compare/record sequence behind {@link verifyFalsifier}
+   * (steps 3-8 of that method's own class-level walkthrough) — split out so
+   * `verifyFalsifier`'s bundle/criterion resolution stays readable. Assumes
+   * ALL of that resolution already succeeded (criterion is script-mode and
+   * carries `falsifier`, target task resolved).
+   *
+   *   3. {@link createFalsifierScratchWorktree} off `config.repoRoot`.
+   *   4. {@link applyFalsifierMutation} inside the scratch worktree.
+   *   5. Spawn the AC's `verify.command` from the SCRATCH worktree (via the
+   *      SAME injected `executor` port `verifyPlan` uses — `buildVerifySpawnSpec`
+   *      with `repoRoot: scratch.worktreeDir`).
+   *   6. Compare the observed exit code to `falsifier.expected_exit_code`
+   *      EXACTLY (D4) — a mismatch refuses loud, recording NOTHING (never a
+   *      passing red for a declaration that doesn't match reality).
+   *   7. On a match, append a runner-composed annotation naming the AC id
+   *      and the mutation to the REAL captured `output_tail` (never
+   *      REPLACING it — "a token naming what failed" alongside the genuine
+   *      command output, not instead of it) and record ONE
+   *      `result: "expected-fail"` / `capture_source: "runner"` evidence row
+   *      via the injected `recordVerifiedEvidence` port.
+   *   8. {@link removeFalsifierScratchWorktree} in a `finally` — best-effort;
+   *      see that function's own JSDoc for why its failure (or never running
+   *      at all, on a genuine crash between step 4 and step 8) can't corrupt
+   *      the original tree (D3 holds independently of whether this step
+   *      ever runs).
+   */
+  private async _runFalsifier(
+    criterion: ScriptAcceptanceCriterion,
+    falsifier: AcFalsifier,
+    task: DocRecord,
+    opts: { by: string; nowIso: string },
+  ): Promise<Result<FalsifierRunResult, LoreError>> {
+    const repoRoot = this.config.repoRoot;
+    const createResult = createFalsifierScratchWorktree(repoRoot);
+    if (!createResult.ok) return createResult;
+    const scratch = createResult.value;
+
+    try {
+      const mutateResult = applyFalsifierMutation(scratch.worktreeDir, falsifier);
+      if (!mutateResult.ok) return mutateResult;
+
+      // SPEC-039 §M2 — env resolved the SAME way `_runVerification` resolves
+      // it for the ordinary green-path run (allowlist filter still applies
+      // to a falsifier run's spawned command).
+      const resolvedEnv = resolveVerifyEnv(this.config.processEnv, {
+        allowlist: this.config.envAllowlist,
+        passthroughAll: this.config.envPassthroughAll,
+      });
+      const spawnSpec = buildVerifySpawnSpec(criterion, {
+        repoRoot: scratch.worktreeDir,
+        defaultTimeoutMs: this.config.defaultTimeoutMs,
+        ...(resolvedEnv !== undefined ? { env: resolvedEnv } : {}),
+        acRef: criterion.id,
+      });
+
+      const execResult = await this.executor(spawnSpec);
+      if (!execResult.ok) {
+        const detail =
+          "message" in execResult.error ? execResult.error.message : execResult.error.code;
+        return err({
+          code: "STORE_ERROR",
+          message:
+            `attested-red run for AC "${criterion.id}" aborted — falsifier command failed ` +
+            `to launch (${detail}). No evidence recorded.`,
+        });
+      }
+
+      const { exitCode, outputTail, durationMs, timedOut } = execResult.value;
+      const matched = !timedOut && exitCode === falsifier.expected_exit_code;
+      // reason: D4 — "output MUST contain a token naming what failed",
+      // guaranteed regardless of the mutated command's own wording. The
+      // REAL captured stdout+stderr is preserved verbatim; this annotation
+      // is APPENDED after it, never a replacement (step 7 of this method's
+      // own JSDoc).
+      const annotation =
+        `[attested-red] AC "${criterion.id}": falsifier mutated "${falsifier.path}" — ` +
+        `declared exit ${falsifier.expected_exit_code}, observed exit ${exitCode}` +
+        `${timedOut ? " (timed out)" : ""}.`;
+      const combinedOutputTail = tailChars(
+        outputTail.length > 0 ? `${outputTail}\n${annotation}` : annotation,
+        FALSIFIER_OUTPUT_TAIL_MAX_CHARS,
+      );
+
+      if (!matched) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "falsifier.expected_exit_code",
+          message:
+            `AC "${criterion.id}"'s declared falsifier claims exit code ` +
+            `${falsifier.expected_exit_code}, but the mutated command actually exited ` +
+            `${exitCode}${timedOut ? " (timed out)" : ""} — the declaration does not match ` +
+            "reality. Nothing recorded; fix the declared expected_exit_code (or the mutation) " +
+            "and retry.",
+          value: { declared: falsifier.expected_exit_code, observed: exitCode, timed_out: timedOut },
+        });
+      }
+
+      const recordResult = await this.recordVerifiedEvidence(
+        task.id,
+        {
+          oracle: criterion.verify.oracle,
+          command: criterion.verify.command,
+          result: "expected-fail",
+          recorded_by: opts.by,
+          capture_source: "runner",
+          ac_ref: criterion.id,
+          output_tail: combinedOutputTail,
+          attestation: {
+            runner: "lore-cli",
+            exit_code: exitCode,
+            duration_ms: durationMs,
+            timed_out: timedOut,
+            // SPEC-063 §Design Decisions D2/D3 shape — a falsifier run's
+            // execution root IS the scratch worktree, by construction.
+            execution_root: scratch.worktreeDir,
+            execution_mode: "worktree",
+          },
+        },
+        opts.nowIso,
+      );
+      if (!recordResult.ok) return recordResult;
+
+      return ok({
+        task: { id: task.id, slug: task.slug },
+        ac_id: criterion.id,
+        expected_exit_code: falsifier.expected_exit_code,
+        exit_code: exitCode,
+        output_tail: combinedOutputTail,
+      });
+    } finally {
+      // D3 — best-effort; see removeFalsifierScratchWorktree's own JSDoc for
+      // why the isolation guarantee never depends on this call succeeding
+      // (or even running at all, on a genuine crash before this `finally`
+      // itself gets to execute).
+      removeFalsifierScratchWorktree(repoRoot, scratch);
+    }
   }
 }

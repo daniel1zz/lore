@@ -17,6 +17,18 @@
  *                  matching human-view line) reports how many such
  *                  declarations still name an absent path — it drops as soon
  *                  as the file is created, no further command needed.
+ *                  [--falsifier-path <p> --falsifier-find <text> --falsifier-replace
+ *                  <text> --falsifier-exit-code <n>] — a DECLARED falsifier
+ *                  (spec-falsifiability-reachability-a-feedable-checkpoint-an
+ *                  §D2): a named source-file mutation this AC's author
+ *                  asserts will make `--command` fail with EXACTLY the given
+ *                  exit code. All four flags are required together (a
+ *                  partial set fails schema validation naming the missing
+ *                  field) — consumed ONLY by the attested-red runner
+ *                  (`lore verify --falsify`, `VerifyRunnerService.verifyFalsifier`),
+ *                  never by ordinary green-path `lore verify`. NOT (yet)
+ *                  wired onto `ac set` — see this file's own header note on
+ *                  that scope limit.
  *          ai:     --rubric <text>
  *          human:  --note <text>  (optional)
  *   list <spec> [--json]           List declared criteria (+ per-AC coverage when
@@ -68,6 +80,15 @@
  *                                   documents above — re-checked against the (possibly
  *                                   untouched) resulting command on every `set`, per
  *                                   `AcService.setCriterion`'s own JSDoc.
+ *                                   NOTE: `--falsifier-*` (documented on `add` above) is
+ *                                   deliberately NOT wired here — `SetCriterionPatch`/
+ *                                   `AcService.setCriterion` (`service/ac-service.ts`) sit
+ *                                   outside this task's file anchors, so changing a
+ *                                   falsifier on an already-declared AC currently requires
+ *                                   `ac rm --force` then `ac add --falsifier-*` again. A
+ *                                   NAMED follow-up gap, not an oversight — reported
+ *                                   explicitly (task-build-the-attested-red-runner-a-
+ *                                   declared-falsifier-applied's own final report).
  *
  * `add`/`set` additionally print the approved->draft demotion an edit MAY trigger
  * (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2, AC-GV-4) —
@@ -104,7 +125,9 @@
  *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8 +
  *   task-wire-allow-missing-path-and-the-unredeemed-declaration (`--allow-missing-path`
  *   PRODUCTION wiring — the D8 escape was service-layer-only and unit-tested but
- *   unreachable from a real `lore ac add`/`ac set` invocation until this task)
+ *   unreachable from a real `lore ac add`/`ac set` invocation until this task);
+ *   spec-falsifiability-reachability-a-feedable-checkpoint-an §D2 (`--falsifier-*`
+ *   on `add` — declared-falsifier authoring)
  */
 
 import { defineCommand } from "citty";
@@ -189,6 +212,29 @@ export default defineCommand({
           description:
             "D8 escape: REQUIRED non-empty reason to declare a script-mode --command naming a test path " +
             "not yet on disk (e.g. a red-first AC). Empty/absent reason is refused when a path is missing.",
+        },
+        "falsifier-path": {
+          type: "string",
+          description:
+            "script mode only: DECLARED falsifier (spec-falsifiability-reachability §D2) — repo-relative " +
+            "path to the file --falsifier-find/--falsifier-replace mutate. Required together with the " +
+            "other three --falsifier-* flags.",
+        },
+        "falsifier-find": {
+          type: "string",
+          description:
+            "script mode only: literal substring that MUST be present in --falsifier-path's content at " +
+            "attested-red run time — a stale falsifier is refused loud, never silently skipped.",
+        },
+        "falsifier-replace": {
+          type: "string",
+          description: "script mode only: replacement text for --falsifier-find's FIRST occurrence.",
+        },
+        "falsifier-exit-code": {
+          type: "string",
+          description:
+            "script mode only: the EXACT exit code (never \"non-zero\") this mutation is declared to " +
+            "produce when --command runs against the mutated file.",
         },
         json: {
           type: "boolean",
@@ -455,10 +501,12 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
   const mode = args.mode as string;
   let verify: Record<string, unknown>;
   if (mode === "script") {
+    const falsifier = buildFalsifierCandidate(args);
     verify = {
       mode: "script",
       ...(typeof args.oracle === "string" ? { oracle: args.oracle } : {}),
       ...(typeof args.command === "string" ? { command: args.command } : {}),
+      ...(falsifier !== undefined ? { falsifier } : {}),
     };
   } else if (mode === "ai") {
     verify = {
@@ -490,6 +538,48 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
     statement: args.statement as string,
     verify,
     ...(requirement_refs !== undefined ? { requirement_refs } : {}),
+  };
+}
+
+/**
+ * Assemble a candidate `falsifier` object from raw CLI args (spec-
+ * falsifiability-reachability-a-feedable-checkpoint-an §D2) — deliberately
+ * untyped, same rationale {@link buildCriterionCandidate}'s own JSDoc states:
+ * `acFalsifierSchema` (via `acceptanceCriterionSchema`'s script branch,
+ * `@lore/core`) is the single source of truth for whether all four fields
+ * are present and well-formed. This function only shapes the object; a
+ * PARTIAL set of `--falsifier-*` flags (e.g. `--falsifier-path` with no
+ * `--falsifier-exit-code`) is passed through as-is and fails schema
+ * validation naming the missing field — never silently dropped or defaulted.
+ *
+ * @returns `undefined` when NONE of the four flags were passed (the common
+ *   case — a script-mode AC with no falsifier declared); a shaped candidate
+ *   object otherwise, keyed by `--falsifier-path`'s presence (the flag every
+ *   other one is documented as "required together with").
+ */
+function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
+  const path = args["falsifier-path"];
+  const find = args["falsifier-find"];
+  const replace = args["falsifier-replace"];
+  const exitCodeRaw = args["falsifier-exit-code"];
+  if (
+    typeof path !== "string" &&
+    typeof find !== "string" &&
+    typeof replace !== "string" &&
+    typeof exitCodeRaw !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    ...(typeof path === "string" ? { path } : {}),
+    ...(typeof find === "string" ? { find } : {}),
+    ...(typeof replace === "string" ? { replace } : {}),
+    // reason: citty yields every flag as a string; `acFalsifierSchema.expected_exit_code`
+    // is `z.number().int()` — a non-numeric string (e.g. "abc") becomes `NaN`, which
+    // Zod's `z.number()` REJECTS (NaN is not a valid `number` per Zod's own check),
+    // so a malformed value fails loud through schema validation rather than silently
+    // coercing to 0.
+    ...(typeof exitCodeRaw === "string" ? { expected_exit_code: Number(exitCodeRaw) } : {}),
   };
 }
 
