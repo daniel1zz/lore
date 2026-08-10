@@ -157,8 +157,16 @@ function addScriptAc(dir: string, specSlug: string): void {
       "script",
       "--oracle",
       "test",
+      // reason: token-less on purpose (task-wire-allow-missing-path-and-the-
+      // unredeemed-declaration) — `commands/ac.ts` now runs the D8
+      // declaration-time path-existence check on every real `ac add`
+      // invocation. A `.test.ts`-suffixed path here would need to actually
+      // exist on disk (or an --allow-missing-path reason); this fixture only
+      // needs SOME script-mode AC to exist, so it uses the same token-less
+      // "bun test" form every other fixture in this repo already uses for
+      // the identical reason (see e.g. cli-plan-promote-advisory.bun.test.ts).
       "--command",
-      "bun test parser.test.ts",
+      "bun test",
     ],
     dir,
   );

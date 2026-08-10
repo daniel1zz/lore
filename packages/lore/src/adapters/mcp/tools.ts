@@ -125,6 +125,24 @@
  * gone; the service handles the no-claim case unconditionally, for every
  * adapter, without this file computing it a second time.
  *
+ * ⛔ NO AC-DECLARING TOOL EXISTS ON THIS SURFACE (measured while wiring D8's
+ * `--allow-missing-path` escape into production, task-wire-allow-missing-
+ * path-and-the-unredeemed-declaration, spec-oracle-executability-a-runner-s-
+ * discovery-refusal-is-not-a §D8) — there is no `lore_ac_add`/`lore_ac_set`
+ * registered anywhere below (grep `"lore_ac` in this file: zero hits). `lore
+ * ac add`/`ac set` (`../cli/commands/ac.ts`) are the ONLY writers of
+ * `spec.extra.acceptance_criteria`; `lore_set` cannot reach them either — it
+ * replaces `extra` wholesale (this module's own Key Invariants), the same
+ * reason `extra.file_anchors`/`extra.ac_scope`/etc. all have dedicated
+ * writers instead. This is a PRE-EXISTING gap, not introduced by the D8
+ * wiring — recorded explicitly here per that task's own instruction ("if MCP
+ * genuinely has no AC-declaring tool, say so rather than silently skipping")
+ * rather than fabricating a tool this task was not scoped to design. An MCP
+ * caller therefore cannot exercise the D8 escape at all today; the CLI/MCP
+ * gate-parity invariant this module's CLAUDE.md documents ("gates run in the
+ * SERVICE layer so CLI/MCP/HTTP writes are gated identically") does not (yet)
+ * apply to D8, because MCP has no write path to be gated in the first place.
+ *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)
  *   2. Immediately patches `_registeredTools[name].inputSchema = schema` on the registered tool

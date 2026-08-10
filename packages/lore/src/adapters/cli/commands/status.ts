@@ -36,8 +36,13 @@
  * are green but were never once observed able to go red — `deriveAcCoverageState`,
  * `@lore/core`), and an `unclaimed_oracle` report (M3 — a `-t`/`--testNamePattern`
  * value present in a repo test file that no declared AC binds, via `scripts/check-
- * unclaimed-oracle.ts`'s exported pure functions). ⛔ NEITHER may change
- * `process.exitCode` — see `collectFalsifiabilitySignals`'s own JSDoc.
+ * unclaimed-oracle.ts`'s exported pure functions), and an
+ * `unredeemed_allow_missing_path_count` (spec-oracle-executability-a-runner-
+ * s-discovery-refusal-is-not-a §D8, AC-OX-10 — D8 `--allow-missing-path`
+ * escape declarations whose declared script-mode command still names a path
+ * absent from disk, via `AcService.countUnredeemedAllowMissingPath`). ⛔ NONE
+ * of the three may change `process.exitCode` — see `collectFalsifiabilitySignals`'s
+ * and `countUnredeemedAllowMissingPathDeclarations`'s own JSDoc.
  *
  * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
  * early-exits the process anymore; both are value-returning, combined at the end):
@@ -479,6 +484,42 @@ function requireAcServiceForStatus(app: ReturnType<typeof loadLoreApp>["app"]): 
     throw new Error("Internal error: AcService not wired on App");
   }
   return app.acService;
+}
+
+/**
+ * Corpus-wide count of UNREDEEMED `--allow-missing-path` D8 escape
+ * declarations (spec-oracle-executability-a-runner-s-discovery-refusal-is-
+ * not-a §D8, task-wire-allow-missing-path-and-the-unredeemed-declaration) —
+ * an AC that exercised the D8 escape at declaration time (`lore ac add`/
+ * `ac set --allow-missing-path`) whose declared script-mode command STILL
+ * names a path absent from disk. PRODUCTION wiring for
+ * `AcService.countUnredeemedAllowMissingPath`, which landed service-layer-
+ * only and unit-tested (task-promote-the-oracle-file-existence-primitives-
+ * into-lore) but was unreachable from a real `lore status --json` invocation
+ * until this call site started supplying its REQUIRED filesystem context.
+ *
+ * This function only supplies the REAL `fs.existsSync`/cwd/corpusRoot
+ * context — the SAME shape `commands/ac.ts::buildDeclarePathOpts` passes at
+ * declaration time (`corpusRoot` derived identically: `dbPath` is always
+ * `<corpusRoot>/.lore/lore.db`, two directories up) — and delegates the
+ * count itself entirely to the service, which recomputes fresh from the live
+ * filesystem on every call (never cached): creating the previously-missing
+ * file drops this count on the very next `lore status` run, no further
+ * command needed.
+ *
+ * @param app - Wired App instance.
+ * @param dbPath - The discovered `.lore/lore.db` path `loadLoreApp()` returns.
+ */
+async function countUnredeemedAllowMissingPathDeclarations(
+  app: ReturnType<typeof loadLoreApp>["app"],
+  dbPath: string,
+): Promise<Result<number, LoreError>> {
+  const acService = requireAcServiceForStatus(app);
+  return acService.countUnredeemedAllowMissingPath({
+    fileExists: existsSync,
+    cwd: process.cwd(),
+    corpusRoot: dirname(dirname(dbPath)),
+  });
 }
 
 /**
@@ -1096,7 +1137,7 @@ export default defineCommand({
     }
 
     // ── normal status branch ─────────────────────────────────────────────────
-    const { app, config } = loadLoreApp();
+    const { app, config, dbPath } = loadLoreApp();
     try {
       const result = await app.corpusService.status();
 
@@ -1150,6 +1191,21 @@ export default defineCommand({
       const { passUnfalsifiedCount, declaredScriptCommands } = falsifiabilitySignalsResult.value;
       const unclaimedOracle = await runUnclaimedOracleCheck(declaredScriptCommands);
 
+      // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
+      // task-wire-allow-missing-path-and-the-unredeemed-declaration (AC-OX-10) —
+      // corpus-wide count of D8 `--allow-missing-path` escape declarations whose
+      // declared path is STILL absent from disk. REPORT-ONLY, same discipline as
+      // `pass_unfalsified_count`/`unclaimed_oracle` above: never influences
+      // `process.exitCode` — a dangling declaration is a promise to redeem, not a
+      // corpus-integrity breach the CI gate should block on.
+      const unredeemedResult = await countUnredeemedAllowMissingPathDeclarations(app, dbPath);
+      if (!unredeemedResult.ok) {
+        process.stderr.write(formatError(unredeemedResult.error) + "\n");
+        process.exitCode = exitCode(unredeemedResult.error);
+        return;
+      }
+      const unredeemedAllowMissingPathCount = unredeemedResult.value;
+
       if (args.json) {
         console.log(
           JSON.stringify(
@@ -1166,6 +1222,7 @@ export default defineCommand({
                 },
                 pass_unfalsified_count: passUnfalsifiedCount,
                 unclaimed_oracle: unclaimedOracle,
+                unredeemed_allow_missing_path_count: unredeemedAllowMissingPathCount,
               },
             },
             null,
@@ -1244,6 +1301,20 @@ export default defineCommand({
       console.log(
         `Pass-unfalsified criteria: ${passUnfalsifiedCount} (green, never observed able to fail — ` +
           "report-only, see spec-oracle-tier-falsifiability-a-criterion-never-observed-red)",
+      );
+
+      // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
+      // task-wire-allow-missing-path-and-the-unredeemed-declaration (AC-OX-10) —
+      // printed UNCONDITIONALLY (including 0), same "never a silent count"
+      // discipline as `Retracted:`/`Pass-unfalsified criteria:` above: a
+      // declaration that exercised the D8 escape and never got its file
+      // created IS a dangling promise (D8's own "make the ambiguity visible
+      // and attributable" resolution), so it must stay visible even at zero.
+      // REPORT-ONLY — never affects exit code.
+      console.log(
+        `Unredeemed allow-missing-path declarations: ${unredeemedAllowMissingPathCount} ` +
+          "(a lore ac add/set --allow-missing-path escape whose declared path still does not exist — " +
+          "creating the file drops this on the next run, report-only)",
       );
 
       // M3 (AC-FALS-10) — same "only when > 0" discipline as open_stale_candidates/

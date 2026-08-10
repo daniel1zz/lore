@@ -120,8 +120,16 @@ describe("BOUNDARY — `lore ac set` with zero field flags (AC-ACS-3)", () => {
         "script",
         "--oracle",
         "test",
+        // reason: token-less on purpose (task-wire-allow-missing-path-and-the-
+        // unredeemed-declaration) — `commands/ac.ts` now runs the D8
+        // declaration-time path-existence check on every real `ac add`
+        // invocation, and `x.test.ts` never exists on disk in this throwaway
+        // corpus. This fixture only needs SOME script-mode AC to exist (the
+        // AC under test is `ac set`'s zero-field-flag usage error), so it
+        // uses the same token-less "bun test" form every other fixture in
+        // this repo already uses for the identical reason.
         "--command",
-        "bunx vitest run x.test.ts",
+        "bun test",
       ],
       tmpDir,
     );
