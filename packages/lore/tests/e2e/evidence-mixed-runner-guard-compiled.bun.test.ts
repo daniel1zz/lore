@@ -27,15 +27,23 @@
  * source): `beforeAll` calls `assertFreshBinary`. Run `bun run build` (repo
  * root) first.
  *
- * Coverage (sequential scenarios over ONE task, each asserting the
- * evidence-row count it leaves behind — the write is the state, so counting
- * it is how "refused" is distinguished from "recorded"):
+ * ⛔ SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own,
+ * spec-falsifiability-reachability-a-feedable-checkpoint-an §D5): a
+ * self-reported oracle-"test" `--result pass` is now refused by the SEPARATE,
+ * later-running `rejectMissingPassOutputTail` guard regardless of tail
+ * content — clearing THIS mixed-runner guard is necessary but no longer
+ * sufficient. Scenarios 3-4 below now assert THIS guard's own verdict (via
+ * MIXED_RUNNER_WORDING's absence) while the overall write is refused by D5
+ * (naming --capture); row counts stay flat at 0 throughout.
+ *
+ * Coverage (sequential scenarios over ONE task):
  *   1. a single `vitest run` command naming BOTH a real vitest file and a
  *      real `.bun.test.ts` file → exit 4, 0 rows, mixed-runner wording
  *   2. the symmetric `bun test` command naming BOTH files → exit 4, 0 rows
- *   3. the same file set split into two separate recordings → exit 0 twice,
- *      2 rows total
- *   4. a plain unfiltered single-runner pass on a fresh file → exit 0, 3rd row
+ *   3. the same file set split into two separate recordings → clears THIS
+ *      guard both times, refused by D5 instead, 0 rows
+ *   4. a plain unfiltered single-runner pass → clears THIS guard, refused by
+ *      D5, 0 rows
  *
  * @spec_ref task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a
  */
@@ -219,22 +227,35 @@ describe("compiled lore evidence refuses a mixed-runner --command", () => {
     expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("the same file set split into two separate recordings is accepted both times", () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5) —
+  // clearing THIS mixed-runner guard is now necessary but no longer
+  // sufficient: `rejectMissingPassOutputTail` separately refuses EVERY
+  // self-reported oracle-"test" pass without --capture, regardless of tail
+  // content. `--oracle manual` is not usable here (it would skip the guard
+  // this file exists to test). Both calls below now clear THIS guard (proven
+  // by MIXED_RUNNER_WORDING's absence) but are refused by D5 instead (naming
+  // --capture); row counts stay flat at 0.
+  it("the same file set split into two separate recordings clears the mixed-runner guard both times, but D5 still refuses without --capture", () => {
     const first = recordEvidence(dir, taskSlug, SPLIT_VITEST_COMMAND);
-    expect(first.exitCode).toBe(0);
+    expect(first.exitCode).toBe(4);
     expect(first.stderr).not.toContain(MIXED_RUNNER_WORDING);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(1);
+    expect(first.stderr).toContain("--capture");
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
 
     const second = recordEvidence(dir, taskSlug, SPLIT_BUN_COMMAND);
-    expect(second.exitCode).toBe(0);
+    expect(second.exitCode).toBe(4);
     expect(second.stderr).not.toContain(MIXED_RUNNER_WORDING);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(2);
+    expect(second.stderr).toContain("--capture");
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("CONTROL: an unrelated unfiltered single-runner pass keeps recording unaffected", () => {
+  it("CONTROL: an unrelated unfiltered single-runner pass clears the mixed-runner guard, but D5 still refuses without --capture", () => {
     const accepted = recordEvidence(dir, taskSlug, SPLIT_VITEST_COMMAND);
 
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(3);
+    expect(accepted.exitCode).toBe(4);
+    expect(accepted.stderr).not.toContain(MIXED_RUNNER_WORDING);
+    expect(accepted.stderr).toContain("--capture");
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 });

@@ -286,8 +286,13 @@ describe("STATE — shared fail-first AC coverage precedence (F3/AC-070-12)", ()
     const plan = await createPlan(spec.id);
     const task = await createTask(plan.id);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "test" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed. This test only checks fail-first
+    // coverage precedence, not capture_source or oracle-kind semantics.
     const passResult = await app.taskWorkflowService.addEvidence(task.slug, {
-      oracle: "test",
+      oracle: "manual",
       command: "bun test",
       result: "pass",
       ac_ref: "AC-X-1",

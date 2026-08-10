@@ -23,18 +23,30 @@
  * silently validates stale compiled logic against current source): `beforeAll`
  * calls `assertFreshBinary`. Run `bun run build` (repo root) first.
  *
- * Coverage (sequential scenarios over ONE task, each asserting the evidence-row
- * count it leaves behind — the write is the state, so counting it is how
- * "refused" is distinguished from "recorded"):
+ * ⛔ SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own,
+ * spec-falsifiability-reachability-a-feedable-checkpoint-an §D5): a
+ * self-reported oracle-"test" `--result pass` is now refused by the SEPARATE,
+ * later-running `rejectMissingPassOutputTail` guard regardless of tail
+ * content — clearing THIS file's own filtered-pass guard is necessary but no
+ * longer sufficient for a row to be stored. Every scenario below now asserts
+ * this guard's own verdict (via MATCHED_COUNT_WORDING's presence/absence)
+ * while the overall write is refused by D5 (naming --capture); row counts
+ * stay flat at 0 throughout.
+ *
+ * Coverage (sequential scenarios over ONE task):
  *   1. filtered `--result pass`, NO output tail  → exit 4, 0 rows (AC-061-16)
- *   2. UNFILTERED pass, no tail                  → exit 0, exactly 1 row (AC-061-16 control)
- *   3. filtered pass + proving `--output-tail`   → exit 0, 2 rows
- *   4. filtered pass + `--output-tail-file`      → exit 0, 3 rows
- * Scenarios 3-4 prove the refusal is about the PROOF and not about the mere
- * presence of a `-t` flag (a guard that blocked every filtered pass would pass
- * scenarios 1-2 just as happily), and that BOTH tail-supplying flags satisfy it
- * — the CLI resolves `--output-tail-file` into the same `outputTail` the guard
- * reads, an ordering a unit test on the pure function cannot reach.
+ *   2. UNFILTERED pass, no tail                  → clears THIS guard (AC-061-16
+ *      control), refused by D5 instead, 0 rows
+ *   3. filtered pass + proving `--output-tail`   → clears THIS guard, refused
+ *      by D5, 0 rows
+ *   4. filtered pass + `--output-tail-file`      → clears THIS guard, refused
+ *      by D5, 0 rows
+ * Scenarios 3-4 prove clearing this guard is about the PROOF and not about the
+ * mere presence of a `-t` flag (a guard that blocked every filtered pass would
+ * clear scenarios 1-2 just as happily — proven by MATCHED_COUNT_WORDING's
+ * absence), and that BOTH tail-supplying flags satisfy it — the CLI resolves
+ * `--output-tail-file` into the same `outputTail` the guard reads, an ordering
+ * a unit test on the pure function cannot reach.
  *
  * @spec_ref AC-061-16; adr-lore-evidence-proves-a-filtered-pass-with-the-runner-s-own;
  *   task-lore-evidence-must-refuse-a-t-filtered-pass-with-no
@@ -205,25 +217,38 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
   // prose-and-the) — "no tail required" was true only for the FILTERED-pass
   // guard this describe block is about; the SEPARATE pass-tail guard now
   // requires SOME non-empty tail for every self-reported pass, filtered or not.
-  it("CONTROL: an UNFILTERED pass is exempt from the FILTERED-pass guard specifically (still needs a tail for the separate pass-tail guard)", () => {
+  // reason: SUPERSEDED again (task-raise-the-evidence-tail-guard-s-predicate-
+  // to-its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
+  // — clearing the FILTERED-pass guard (or being exempt from it) is now
+  // necessary but no longer sufficient: `rejectMissingPassOutputTail`
+  // separately refuses EVERY self-reported oracle-"test" pass without
+  // --capture, regardless of tail content. `--oracle manual` is not usable
+  // here — it would skip the guard this file exists to test. Each scenario
+  // below now asserts the ORIGINAL guard's own verdict (via the absence/
+  // presence of MATCHED_COUNT_WORDING) while the overall call is refused by
+  // D5 (naming --capture) — row counts stay flat at 0 throughout.
+  it("CONTROL: an UNFILTERED pass is exempt from the FILTERED-pass guard specifically, but D5's separate pass-tail guard still refuses without --capture", () => {
     const accepted = recordEvidence(dir, taskSlug, ["--command", UNFILTERED_COMMAND, "--output-tail", "ok"]);
 
-    expect(accepted.exitCode).toBe(0);
+    expect(accepted.exitCode).toBe(4);
     expect(accepted.stderr).not.toContain(MATCHED_COUNT_WORDING);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(1);
+    expect(accepted.stderr).toContain("--capture");
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("a filtered pass carrying a proving --output-tail is accepted", () => {
+  it("a filtered pass carrying a proving --output-tail clears the FILTERED-pass guard, but D5 still refuses without --capture", () => {
     const accepted = recordEvidence(dir, taskSlug, [
       "--command", FILTERED_COMMAND,
       "--output-tail", PROVING_TAIL,
     ]);
 
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(2);
+    expect(accepted.exitCode).toBe(4);
+    expect(accepted.stderr).not.toContain(MATCHED_COUNT_WORDING);
+    expect(accepted.stderr).toContain("--capture");
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
-  it("a filtered pass whose proof arrives via --output-tail-file is accepted", () => {
+  it("a filtered pass whose proof arrives via --output-tail-file clears the FILTERED-pass guard, but D5 still refuses without --capture", () => {
     const tailPath = join(dir, "run-output.txt");
     writeFileSync(tailPath, `some earlier noise\n${PROVING_TAIL}`);
 
@@ -232,8 +257,10 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
       "--output-tail-file", tailPath,
     ]);
 
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(3);
+    expect(accepted.exitCode).toBe(4);
+    expect(accepted.stderr).not.toContain(MATCHED_COUNT_WORDING);
+    expect(accepted.stderr).toContain("--capture");
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
   it("a filtered pass whose tail reports every case skipped is refused, naming zero_match", () => {
@@ -245,7 +272,8 @@ describe("AC-061-16 — compiled lore evidence refuses an unproven filtered pass
     expect(refused.exitCode).toBe(4);
     expect(refused.stderr).toContain("zero_match");
     expect(refused.stderr).not.toContain(MISSING_FILE_WORDING);
-    // Unchanged from the previous scenario — the refusal wrote nothing.
-    expect(readEvidenceCount(dir, taskSlug)).toBe(3);
+    // Unchanged from the previous scenario — no scenario in this file ever
+    // reaches a stored row under D5 (see the note above this describe block).
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 });

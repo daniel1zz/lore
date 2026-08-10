@@ -235,7 +235,12 @@ describe("HAPPY — a clean recorded worktree is unaffected via MCP", () => {
 
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -265,7 +270,12 @@ describe("NEGATIVE — a no-worktree claim with NO caller_cwd declared is unaffe
     await getToolHandler(server, "lore_claim")({ id_or_slug: taskId, by: "alice" }); // no worktree
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -296,7 +306,12 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
     await getToolHandler(server, "lore_claim")({ id_or_slug: taskId, by: "alice" }); // no worktree
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -335,7 +350,12 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
     await getToolHandler(server, "lore_claim")({ id_or_slug: taskId, by: "alice" });
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -370,7 +390,12 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
 
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -407,7 +432,12 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
     // learned to tell "no claim" from "a claim recording no worktree".
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -424,7 +454,12 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
     const taskId = await createTask(corpusService, planId);
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -483,7 +518,9 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
     await getToolHandler(server, "lore_claim")({ id_or_slug: taskId, by: "alice" }); // no worktree
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "test",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): see
+      // the identical reasoning at this file's other superseded oracle overrides.
+      oracle: "manual",
       command: `bunx vitest run ${EXISTING_TEST_FILE_FROM_PACKAGE_DIR}`,
       result: "pass",
       recorded_by: "alice",
@@ -508,7 +545,9 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
     await getToolHandler(server, "lore_claim")({ id_or_slug: taskId, by: "alice", worktree: cleanDir });
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "test",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): see
+      // the identical reasoning at this file's other superseded oracle overrides.
+      oracle: "manual",
       command: `bunx vitest run ${EXISTING_TEST_FILE_FROM_PACKAGE_DIR}`,
       result: "pass",
       recorded_by: "alice",
@@ -533,7 +572,12 @@ describe("REGRESSION — control: the primary predicate is completely independen
     await getToolHandler(server, "lore_claim")({ id_or_slug: taskId, by: "alice", worktree: dirtyDir });
     const result = await getToolHandler(server, "lore_evidence_add")({
       id_or_slug: taskId,
-      oracle: "tsc",
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): "tsc"
+      // self-report is now refused by rejectMissingPassOutputTail's D5 raise BEFORE
+      // this file's own worktree-guard checks ever run; "manual" is the one oracle
+      // that still lets a genuinely non-empty self-reported tail proceed past it, so
+      // the worktree guard this file actually tests is what fires/passes instead.
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",

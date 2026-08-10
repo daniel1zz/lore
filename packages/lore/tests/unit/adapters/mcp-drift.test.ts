@@ -323,8 +323,13 @@ describe("lore_anchor_set — REGRESSION (task target, byte-identical to pre-SPE
 
     const claimResult = await taskWorkflowService.claim(taskId, { by: "agent:mcp", source: "mcp" });
     expect(claimResult.ok).toBe(true);
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "test" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed. This test only checks anchor-set
+    // preserves evidence, not capture_source semantics.
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, {
-      oracle: "test",
+      oracle: "manual",
       command: "bun test",
       result: "pass",
       recorded_by: "agent:mcp",

@@ -154,13 +154,22 @@ function captureStderr(): { text: () => string; restore: () => void } {
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
 describe("lore evidence oracle precheck — HAPPY", () => {
-  it("AC-2.H1: test + pass + an existing referenced file records normally", async () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5) — the
+  // oracle-file precheck this file exists to test still clears this call
+  // (proven by addEvidence being REACHED at all — a precheck refusal would
+  // short-circuit before ever calling it), but D5 separately raises
+  // rejectMissingPassOutputTail to refuse EVERY self-reported oracle-"test"
+  // pass without --capture. `--oracle manual` is not usable here (it would
+  // skip the precheck this file exists to test).
+  it("AC-2.H1 SUPERSEDED: test + pass + an existing referenced file clears the precheck, but is now refused by D5 without --capture", async () => {
     const taskSlug = await seedTask();
     mkdirSync(join(tmpDir, "tests"), { recursive: true });
     writeFileSync(join(tmpDir, "tests", "foo.test.ts"), "// exists\n");
 
     const cmd = await importEvidenceCommand();
     const spy = spyOnAddEvidence();
+    const stderr = captureStderr();
     try {
       await cmd.run({
         args: {
@@ -174,9 +183,13 @@ describe("lore evidence oracle precheck — HAPPY", () => {
       });
 
       expect(spy.called()).toBe(true);
-      expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+      expect(process.exitCode).toBe(4);
+      expect(stderr.text()).toContain("--capture");
+      expect(stderr.text()).not.toContain("not found");
     } finally {
       spy.restore();
+      stderr.restore();
+      process.exitCode = undefined;
     }
   });
 });
@@ -184,10 +197,15 @@ describe("lore evidence oracle precheck — HAPPY", () => {
 // ─── NEGATIVE ────────────────────────────────────────────────────────────────
 
 describe("lore evidence oracle precheck — NEGATIVE", () => {
-  it("AC-2.N1: test + pass + no extractable test-file token records normally (fail-open)", async () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, D5) — the precheck's fail-open behavior for "no extractable token"
+  // is STILL true (addEvidence is reached), but D5 separately refuses this
+  // self-reported oracle-"test" pass regardless.
+  it("AC-2.N1 SUPERSEDED: test + pass + no extractable test-file token stays fail-open at the precheck, but is now refused by D5", async () => {
     const taskSlug = await seedTask();
     const cmd = await importEvidenceCommand();
     const spy = spyOnAddEvidence();
+    const stderr = captureStderr();
     try {
       await cmd.run({
         args: {
@@ -201,9 +219,13 @@ describe("lore evidence oracle precheck — NEGATIVE", () => {
       });
 
       expect(spy.called()).toBe(true);
-      expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
+      expect(process.exitCode).toBe(4);
+      expect(stderr.text()).toContain("--capture");
+      expect(stderr.text()).not.toContain("not found");
     } finally {
       spy.restore();
+      stderr.restore();
+      process.exitCode = undefined;
     }
   });
 });

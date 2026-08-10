@@ -984,8 +984,14 @@ function buildFixture(cwd: string, opts: { forceRemove: boolean }): { taskSlug: 
     FIXTURE_AC_ID,
   ]);
 
+  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+  // predicate-to-its-own) — "test" self-report is now refused regardless of
+  // tail content; "manual" is the one oracle that still lets a genuinely
+  // non-empty self-reported tail succeed. This fixture only needs a
+  // successful evidence row referencing FIXTURE_AC_ID, not a specific
+  // oracle kind.
   const evidence = runLore(
-    ["evidence", task.id, "--oracle", "test", "--command", "true", "--result", "pass", "--ac", FIXTURE_AC_ID, "--by", ACTOR, "--output-tail", "ok", "--json"],
+    ["evidence", task.id, "--oracle", "manual", "--command", "true", "--result", "pass", "--ac", FIXTURE_AC_ID, "--by", ACTOR, "--output-tail", "ok", "--json"],
     cwd,
   );
   if (evidence.exitCode !== 0) {

@@ -52,9 +52,15 @@ async function createTask(cs: CorpusService, planId: string, title = "Audit Work
   return result.value.id;
 }
 
+// reason: SUPERSEDED default oracle (task-raise-the-evidence-tail-guard-s-
+// predicate-to-its-own, D5) — was "tsc", now "manual". rejectMissingPass
+// OutputTail's D5 raise refuses a self-reported "pass" for every OTHER
+// oracle kind regardless of tail content; "manual" is the one kind that
+// still lets a genuinely non-empty self-reported tail succeed, which is all
+// this fixture's callers need (none of them test the tail guard itself).
 function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
   return {
-    oracle: "tsc",
+    oracle: "manual",
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",
@@ -140,7 +146,10 @@ describe("HAPPY — addEvidence appends one audit entry with action 'evidence' a
     // proves the details aren't a fixed/hardcoded literal.
     const second = await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "e2e", command: "playwright test", result: "pass" }),
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own):
+      // oracle "e2e" self-report is now refused; this test checks field
+      // fidelity only, not capture_source semantics.
+      evidence({ oracle: "e2e", command: "playwright test", result: "pass", capture_source: "runner" }),
     );
     expect(second.ok).toBe(true);
     const auditAfterSecond = await store.queryAudit({ doc_id: taskId, action: "evidence" });

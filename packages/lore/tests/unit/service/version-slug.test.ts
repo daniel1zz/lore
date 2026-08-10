@@ -200,8 +200,13 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
       if (!task.ok) return;
       const taskSlug = task.value.slug;
 
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — "tsc" self-report is now refused regardless of
+      // tail content; "manual" is the one oracle that still lets a genuinely
+      // non-empty self-reported tail succeed. This test only checks the
+      // version row's slug capture, not capture_source semantics.
       const evidenceResult = await taskWorkflowService.addEvidence(task.value.id, {
-        oracle: "tsc",
+        oracle: "manual",
         command: "bun run typecheck",
         result: "pass",
         recorded_by: "alice",

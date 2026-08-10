@@ -150,8 +150,13 @@ const NO_NEW_TESTS_REASON = "escape-hatch fixture: no new test, this suite asser
  *  CLI/MCP surface exists) passing evidence row — the exact shape every `lore evidence`
  *  write produces, and the shape this feature's floor now refuses as insufficient alone. */
 function recordSelfReportedPass(slug: string, cwd: string): void {
+  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+  // to-its-own) — "test" self-report is now refused regardless of tail
+  // content; "manual" is the one oracle that still lets a genuinely
+  // non-empty self-reported tail succeed while staying self-reported
+  // (unattested) for this suite's own attestation-floor assertions.
   mustRun(
-    ["evidence", slug, "--oracle", "test", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
+    ["evidence", slug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
     cwd,
   );
 }

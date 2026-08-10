@@ -36,19 +36,33 @@
  * source): `beforeAll` calls `assertFreshBinary`. Run `bun run build` (repo
  * root) first.
  *
- * Six-dimension coverage (sequential scenarios over ONE task, each asserting
- * the evidence-row count it leaves behind — the write is the state, so
- * counting it is how "refused" is distinguished from "recorded"):
+ * ⛔ SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own,
+ * spec-falsifiability-reachability-a-feedable-checkpoint-an §D5): a
+ * self-reported oracle-"test" `--result pass` is now refused by the SEPARATE,
+ * later-running `rejectMissingPassOutputTail` guard regardless of tail
+ * content or whether THIS precheck accepted it — `--oracle manual` remains
+ * unusable here (it would skip the cd-derivation precheck this file exists
+ * to test, exactly the "cheapest escape" measured harm called out above), so
+ * every "accepts"/"REGRESSION" scenario below now asserts the precheck's OWN
+ * acceptance (absence of MISSING_FILE_WORDING) while the OVERALL call is
+ * refused by D5's tail guard (naming --capture) — row counts stay flat at 0
+ * throughout, never advancing, since D5 leaves no self-reported oracle-"test"
+ * path to a stored row at all.
+ *
+ * Six-dimension coverage (sequential scenarios over ONE task):
  *   HAPPY:      the mandated `bun run build && cd <dir> && bun test <file>`
- *               form is ACCEPTED and records a row
+ *               form clears the cd-derivation precheck (proven by the absent
+ *               MISSING_FILE_WORDING), though the overall write is refused by
+ *               D5 (see the note above)
  *   NEGATIVE:   a no-cd command still resolves against cwd, and its refusal
  *               reports "Derived cd target: none"
  *   BOUNDARY:   a two-cd chain's refusal names the LAST target by value
  *   ERROR:      a cd-prefixed command naming an absent file is STILL refused,
  *               exit 4, no row
- *   STATE:      row counts advance only on acceptance
- *   REGRESSION: the pre-existing leading-cd form keeps working, and `;`
- *               separators behave exactly like `&&`
+ *   STATE:      row counts stay flat (0) throughout — no self-reported
+ *               oracle-"test" path reaches a stored row under D5
+ *   REGRESSION: the pre-existing leading-cd form's precheck derivation keeps
+ *               working, and `;` separators behave exactly like `&&`
  *
  * @spec_ref task-evidence-precheck-only-sees-a-cd-in-the-first-segment-of-a
  */
@@ -232,41 +246,101 @@ describe("compiled lore evidence derives a cd target from ANY chain segment", ()
     // The pre-fix binary exited 4 here with MISSING_FILE_WORDING, naming a file
     // that exists — the defect. Assert the wording's ABSENCE too, so a future
     // regression cannot hide behind some other exit-0 path.
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
+    // — the cd-derivation precheck this file exists to test still ACCEPTS
+    // (proven by the ABSENCE of MISSING_FILE_WORDING below — the precheck
+    // never fired its own refusal), but D5 separately raises
+    // rejectMissingPassOutputTail to refuse EVERY self-reported oracle-"test"
+    // pass without --capture, regardless of tail content. `--oracle manual`
+    // is not usable here (it would skip the cd-derivation precheck entirely —
+    // exactly the "cheapest escape" this file's own module header calls a
+    // measured harm), so the correct, D5-consistent outcome is: precheck
+    // passes, the raised tail guard is what refuses.
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(1);
+    expect(accepted.stderr).toContain("--capture");
+    expect(accepted.exitCode).toBe(4);
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
   it("accepts the mandated fresh-worktree `bun install && cd <dir> && ...` form", () => {
     const accepted = recordEvidence(dir, taskSlug, MANDATED_INSTALL_THEN_CD);
 
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
+    // — the cd-derivation precheck this file exists to test still ACCEPTS
+    // (proven by the ABSENCE of MISSING_FILE_WORDING below — the precheck
+    // never fired its own refusal), but D5 separately raises
+    // rejectMissingPassOutputTail to refuse EVERY self-reported oracle-"test"
+    // pass without --capture, regardless of tail content. `--oracle manual`
+    // is not usable here (it would skip the cd-derivation precheck entirely —
+    // exactly the "cheapest escape" this file's own module header calls a
+    // measured harm), so the correct, D5-consistent outcome is: precheck
+    // passes, the raised tail guard is what refuses.
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(2);
+    expect(accepted.stderr).toContain("--capture");
+    expect(accepted.exitCode).toBe(4);
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
   it("REGRESSION: the pre-existing leading-cd form keeps working", () => {
     const accepted = recordEvidence(dir, taskSlug, LEADING_CD);
 
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
+    // — the cd-derivation precheck this file exists to test still ACCEPTS
+    // (proven by the ABSENCE of MISSING_FILE_WORDING below — the precheck
+    // never fired its own refusal), but D5 separately raises
+    // rejectMissingPassOutputTail to refuse EVERY self-reported oracle-"test"
+    // pass without --capture, regardless of tail content. `--oracle manual`
+    // is not usable here (it would skip the cd-derivation precheck entirely —
+    // exactly the "cheapest escape" this file's own module header calls a
+    // measured harm), so the correct, D5-consistent outcome is: precheck
+    // passes, the raised tail guard is what refuses.
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(3);
+    expect(accepted.stderr).toContain("--capture");
+    expect(accepted.exitCode).toBe(4);
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
   it("REGRESSION: `;` separators behave exactly like `&&`", () => {
     const accepted = recordEvidence(dir, taskSlug, SEMICOLON_CHAIN);
 
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
+    // — the cd-derivation precheck this file exists to test still ACCEPTS
+    // (proven by the ABSENCE of MISSING_FILE_WORDING below — the precheck
+    // never fired its own refusal), but D5 separately raises
+    // rejectMissingPassOutputTail to refuse EVERY self-reported oracle-"test"
+    // pass without --capture, regardless of tail content. `--oracle manual`
+    // is not usable here (it would skip the cd-derivation precheck entirely —
+    // exactly the "cheapest escape" this file's own module header calls a
+    // measured harm), so the correct, D5-consistent outcome is: precheck
+    // passes, the raised tail guard is what refuses.
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(4);
+    expect(accepted.stderr).toContain("--capture");
+    expect(accepted.exitCode).toBe(4);
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
   it("CONTROL: a no-cd command still resolves against cwd exactly as before", () => {
     const accepted = recordEvidence(dir, taskSlug, NO_CD);
 
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
+    // — the cd-derivation precheck this file exists to test still ACCEPTS
+    // (proven by the ABSENCE of MISSING_FILE_WORDING below — the precheck
+    // never fired its own refusal), but D5 separately raises
+    // rejectMissingPassOutputTail to refuse EVERY self-reported oracle-"test"
+    // pass without --capture, regardless of tail content. `--oracle manual`
+    // is not usable here (it would skip the cd-derivation precheck entirely —
+    // exactly the "cheapest escape" this file's own module header calls a
+    // measured harm), so the correct, D5-consistent outcome is: precheck
+    // passes, the raised tail guard is what refuses.
     expect(accepted.stderr).not.toContain(MISSING_FILE_WORDING);
-    expect(accepted.exitCode).toBe(0);
-    expect(readEvidenceCount(dir, taskSlug)).toBe(5);
+    expect(accepted.stderr).toContain("--capture");
+    expect(accepted.exitCode).toBe(4);
+    expect(readEvidenceCount(dir, taskSlug)).toBe(0);
   });
 
   it("ERROR: the SAME mandated shape naming an ABSENT file is still refused, writing no row", () => {

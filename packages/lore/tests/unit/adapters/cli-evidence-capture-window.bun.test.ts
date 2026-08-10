@@ -214,6 +214,13 @@ async function runCapture(
 }
 
 /** Records evidence WITHOUT `--capture` — the control for the success-line shape. */
+// reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+// to-its-own) — "tsc" self-report is now refused regardless of tail content;
+// "manual" is the one oracle that still lets a genuinely non-empty
+// self-reported tail succeed. This helper's caller asserts on the rendered
+// success line's SHAPE (no capture-margin suffix leaking onto self-report),
+// not on the "tsc" oracle name specifically — the call site below updates its
+// expected substring to match.
 async function runSelfReport(taskSlug: string): Promise<string> {
   const cmd = await importEvidenceCommand();
   const logLines: string[] = [];
@@ -224,7 +231,7 @@ async function runSelfReport(taskSlug: string): Promise<string> {
     await cmd.run({
       args: {
         task: taskSlug,
-        oracle: "tsc",
+        oracle: "manual",
         command: "bun run typecheck",
         result: "pass",
         by: "alice",
@@ -426,7 +433,7 @@ describe("lore evidence --capture window — REGRESSION", () => {
 
     const line = await runSelfReport(taskSlug);
 
-    expect(line).toContain("Recorded tsc evidence (pass)");
+    expect(line).toContain("Recorded manual evidence (pass)");
     // ⛔ Key on the SUFFIX MARKER, not on the bare word "window": the fixture task's
     // own slug is `task-capture-window-test-task`, so a `not.toContain("window")`
     // assertion fails against the doc's own name — a false positive manufactured by

@@ -192,9 +192,14 @@ function createDeniedPlan(dir: string): { planSlug: string } {
   expect(task.exitCode).toBe(0);
 
   // Self-reported-only evidence — never runner-attested.
+  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+  // predicate-to-its-own) — "test" self-report is now refused regardless of
+  // tail content; "manual" is the one oracle that still lets a genuinely
+  // non-empty self-reported tail succeed while staying UNATTESTED (this
+  // fixture's own point, per the comment above).
   expect(
     runLore(
-      ["evidence", parseSlug(task.stdout), "--oracle", "test", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
+      ["evidence", parseSlug(task.stdout), "--oracle", "manual", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
       dir,
     ).exitCode,
   ).toBe(0);

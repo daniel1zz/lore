@@ -191,10 +191,16 @@ async function recordEvidenceAt(
   task: DocRecord,
   atIso: string,
 ): Promise<DocRecord> {
+  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+  // to-its-own) — "test" self-report is now refused regardless of tail
+  // content; "manual" is the one oracle that still lets a genuinely
+  // non-empty self-reported tail succeed. This fixture only needs a
+  // successful self-reported pass row at an exact timestamp, not a
+  // specific oracle kind.
   const result = await tw.addEvidence(
     task.id,
     {
-      oracle: "test",
+      oracle: "manual",
       command: "bun test",
       result: "pass",
       recorded_by: "agent:t",

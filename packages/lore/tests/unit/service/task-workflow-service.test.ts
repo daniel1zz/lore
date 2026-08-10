@@ -146,10 +146,22 @@ async function createTask(
  * intent. Tests that specifically exercise the pass-tail guard itself
  * construct their own candidate object (see the `rejectMissingPassOutputTail`/
  * `capture_source` describe blocks below) rather than relying on this helper.
+ *
+ * ⛔ SUPERSEDED default `oracle` (task-raise-the-evidence-tail-guard-s-
+ * predicate-to-its-own, D5): was `"tsc"`, now `"manual"`. `rejectMissingPass
+ * OutputTail`'s D5 raise refuses a self-reported `"pass"` for EVERY oracle
+ * kind except `"manual"` (the one kind `--capture` structurally can never
+ * reach), regardless of tail content — so a self-reported default row for any
+ * OTHER oracle would now be refused outright, breaking every test below that
+ * relies on this helper purely as SETUP (not testing the tail guard itself).
+ * `"manual"` keeps `capture_source: "self-report"` genuinely self-reported
+ * (load-bearing for the "done() refuses a self-reported-only pass" describe
+ * block below, which asserts on the word "self-report" in done()'s refusal
+ * message) while still satisfying the raised guard's one surviving escape.
  */
 function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
   return {
-    oracle: "tsc",
+    oracle: "manual",
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",
@@ -254,7 +266,12 @@ describe("HAPPY — claim → evidence → release → ready round-trip (AC-WF-1
 
     const r2 = await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "e2e", command: "playwright test", result: "pass" }),
+      // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+      // its-own) — oracle "e2e" self-report is now refused by the D5 raise;
+      // this test only checks field fidelity, not capture_source, so an
+      // explicit "runner" override is the cheaper correct fix (not testing
+      // the guard itself, not the self-report-only done() test below).
+      evidence({ oracle: "e2e", command: "playwright test", result: "pass", capture_source: "runner" }),
     );
     expect(r2.ok).toBe(true);
     if (!r2.ok) return;
@@ -2191,11 +2208,15 @@ describe("HAPPY — done() accepts a test-file anchor with a genuine unfiltered 
 
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
+      // "test" self-report is now refused by the D5 raise regardless of tail content;
+      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
+      // so an explicit "runner" override is the cheaper correct fix.
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE}`, result: "pass" }),
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE}`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2215,7 +2236,11 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
 
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
+      // "test" self-report is now refused by the D5 raise regardless of tail content;
+      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
+      // so an explicit "runner" override is the cheaper correct fix.
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2245,11 +2270,11 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
     // FILE_A gets a genuine unfiltered pass; FILE_B only ever gets a -t-scoped one.
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE_A}`, result: "pass" }),
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE_A}`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE_B} -t "some case"`, result: "pass" }),
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE_B} -t "some case"`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2270,7 +2295,7 @@ describe("NEGATIVE — done() refuses a test-file anchor backed ONLY by -t-scope
 
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} --test-name-pattern=alpha`, result: "pass" }),
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} --test-name-pattern=alpha`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2397,7 +2422,11 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     // red-first) is satisfied too — otherwise IT would fire first instead.
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
+      // "test" self-report is now refused by the D5 raise regardless of tail content;
+      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
+      // so an explicit "runner" override is the cheaper correct fix.
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2429,7 +2458,11 @@ describe("BOUNDARY — the three done() evidence floors are independent; none ma
     );
     await taskWorkflowService.addEvidence(
       taskId,
-      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass" }),
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
+      // "test" self-report is now refused by the D5 raise regardless of tail content;
+      // this describe block tests done()'s UNFILTERED-file floor, not capture_source,
+      // so an explicit "runner" override is the cheaper correct fix.
+      evidence({ oracle: "test", command: `bunx vitest run ${FILE} -t "AC-1"`, result: "pass", capture_source: "runner" }),
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
 
@@ -2474,10 +2507,14 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
 
     await taskWorkflowService.addEvidence(
       taskId,
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
+      // "test" self-report is now refused by the D5 raise regardless of tail content;
+      // this describe block tests done()'s UNFILTERED-file floor, not capture_source.
       evidence({
         oracle: "test",
         command: `bunx vitest run ${FIXTURE} -t "first bumps the shared counter to one"`,
         result: "pass",
+        capture_source: "runner",
       }),
     );
     await taskWorkflowService.addEvidence(
@@ -2486,6 +2523,7 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
         oracle: "test",
         command: `bunx vitest run ${FIXTURE} -t "second assumes it is the only test touching the counter"`,
         result: "pass",
+        capture_source: "runner",
       }),
     );
     await taskWorkflowService.recordVerifiedEvidence(taskId, attestedPass(), "2026-07-27T09:00:00.000Z");
@@ -2507,10 +2545,14 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
 
     await taskWorkflowService.addEvidence(
       taskId,
+      // SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-own): oracle
+      // "test" self-report is now refused by the D5 raise regardless of tail content;
+      // this describe block tests done()'s UNFILTERED-file floor, not capture_source.
       evidence({
         oracle: "test",
         command: `bunx vitest run ${FIXTURE} -t "first bumps the shared counter to one"`,
         result: "pass",
+        capture_source: "runner",
       }),
     );
     await taskWorkflowService.addEvidence(
@@ -2519,6 +2561,7 @@ describe("REGRESSION — the interaction the floor exists to catch: two tests, e
         oracle: "test",
         command: `bunx vitest run ${FIXTURE} -t "second assumes it is the only test touching the counter"`,
         result: "pass",
+        capture_source: "runner",
       }),
     );
     // The genuine unfiltered run, recorded verbatim as observed — real exit

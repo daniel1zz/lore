@@ -294,8 +294,13 @@ describe("lore anchor rm — STATE (AC-S3-5 regression)", () => {
 
     const claimResult = runLore(["claim", taskSlug, "--by", "alice", "--branch", "wt-x"], tmpDir);
     expect(claimResult.exitCode).toBe(0);
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed. This test only checks anchor
+    // removal preserves claim+evidence, not oracle-kind semantics.
     const evidenceResult = runLore(
-      ["evidence", taskSlug, "--oracle", "tsc", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
+      ["evidence", taskSlug, "--oracle", "manual", "--command", "bun run typecheck", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
     expect(evidenceResult.exitCode).toBe(0);

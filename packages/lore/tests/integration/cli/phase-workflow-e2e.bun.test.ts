@@ -246,8 +246,14 @@ describe("SPEC-056 CLI phase surfaces — dispatch against an existing wrong-typ
   it("BOUNDARY/REGRESSION: lore evidence against a PLAN doc stays 'Expected a task document' (never retries into phase dispatch)", () => {
     const planSlug = createPlan("Evidence Regression Plan");
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — with "test" the D5 raise would refuse this call
+    // BEFORE the target-type dispatch this test means to exercise ever runs
+    // (VALIDATION_ERROR on output_tail, not on type). "manual" satisfies the
+    // raised guard so the call proceeds to resolveTask, which is what
+    // actually produces "Expected a task document" here.
     const result = runLore(
-      ["evidence", planSlug, "--oracle", "test", "--command", "x", "--result", "pass", "--by", "tester", "--output-tail", "ok"],
+      ["evidence", planSlug, "--oracle", "manual", "--command", "x", "--result", "pass", "--by", "tester", "--output-tail", "ok"],
       tmpDir,
     );
     expect(result.exitCode).toBe(4);

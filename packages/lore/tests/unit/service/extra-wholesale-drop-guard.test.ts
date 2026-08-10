@@ -160,8 +160,13 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
     const planId = await createPlanWithPhases(corpusService, phaseService, []);
     const taskId = await createTask(corpusService, planId);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed. This test only checks the
+    // wholesale-drop guard, not capture_source semantics.
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, {
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "agent:alice",
@@ -184,8 +189,10 @@ describe("CorpusService.set — task.extra.claim / verification_evidence wholesa
     const taskId = await createTask(corpusService, planId);
 
     await taskWorkflowService.claim(taskId, { by: "agent:alice" });
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — see the NEGATIVE test above in this file.
     await taskWorkflowService.addEvidence(taskId, {
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "agent:alice",

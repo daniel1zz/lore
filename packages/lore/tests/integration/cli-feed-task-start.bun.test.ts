@@ -244,8 +244,13 @@ function createFullChain(dir: string): {
   );
   expect(failEvidence.exitCode).toBe(0);
 
+  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+  // to-its-own) — "test" self-report is now refused regardless of tail
+  // content; "manual" is the one oracle that still lets a genuinely
+  // non-empty self-reported tail succeed. This fixture only needs a
+  // successful pass row referencing AC-T1-1, not a specific oracle kind.
   const passEvidence = runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--command", "bun test", "--result", "pass", "--ac", "AC-T1-1", "--output-tail", "ok"],
+    ["evidence", taskSlug, "--oracle", "manual", "--command", "bun test", "--result", "pass", "--ac", "AC-T1-1", "--output-tail", "ok"],
     dir,
   );
   expect(passEvidence.exitCode).toBe(0);

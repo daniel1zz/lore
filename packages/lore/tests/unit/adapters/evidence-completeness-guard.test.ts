@@ -478,7 +478,18 @@ describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refus
     );
   });
 
-  it("AC-061-17 STATE: a refused MCP call writes NO evidence row; the accepted call that follows writes exactly one", async () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5) — the
+  // "accepted" call below used to satisfy AC-061's filtered-pass matched-count
+  // proof (a hand-typed but genuinely PARSEABLE vitest summary) and record
+  // cleanly. D5 raises a SEPARATE, later-running guard
+  // (rejectMissingPassOutputTail) that refuses ANY self-reported oracle-"test"
+  // pass lacking capture_source:"runner" — satisfying AC-061's narrower proof
+  // requirement is necessary but no longer sufficient. Both calls below now
+  // write zero rows; STATE is instead proven by a THIRD call using
+  // capture_source's only reachable self-report escape ("manual") once
+  // AC-061's own filtered-pass guard is out of scope for that oracle.
+  it("AC-061-17 STATE SUPERSEDED: a filtered-pass proof tail is still refused by D5 without --capture; writes zero rows either way", async () => {
     const taskId = await createTaskDoc();
     expect(await readEvidenceCount(taskId)).toBe(0);
 
@@ -492,7 +503,10 @@ describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refus
     expect(refused.isError).toBe(true);
     expect(await readEvidenceCount(taskId)).toBe(0);
 
-    const accepted = await call()({
+    // Even WITH AC-061's own matched-count proof tail, D5 still refuses —
+    // proving the filtered-pass guard's satisfaction is necessary but no
+    // longer sufficient on its own.
+    const stillRefused = await call()({
       id_or_slug: taskId,
       oracle: "test",
       command: FILTERED_COMMAND,
@@ -500,21 +514,29 @@ describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refus
       recorded_by: "agent:parity",
       output_tail: TAIL_THREE_MATCHED,
     });
-    expect(accepted.isError).toBeFalsy();
-    const data = parseResult(accepted) as { doc: DocRecord };
-    expect((data.doc.extra["verification_evidence"] as unknown[]).length).toBe(1);
-    expect(await readEvidenceCount(taskId)).toBe(1);
+    expect(stillRefused.isError).toBe(true);
+    const error = parseResult(stillRefused) as { message: string };
+    expect(error.message).toContain("--capture");
+    expect(await readEvidenceCount(taskId)).toBe(0);
   });
 
-  // reason: SUPERSEDED (task-a-non-empty-output-tail-can-be-hand-authored-
-  // prose-and-the) — this test originally proved an UNFILTERED pass records
-  // with NO output_tail at all, i.e. that `findFilteredPassRefusal`'s guard
-  // does not widen into unfiltered commands. That remains true, but EVERY
-  // self-reported pass (filtered or not) now ALSO needs a genuinely non-empty
-  // tail via the separate `rejectMissingPassOutputTail` guard — this test
-  // still proves the unfiltered-command exemption from the FILTERED-pass
-  // guard specifically, now with a tail supplied to satisfy the other one.
-  it("AC-061-17 CONTROL: an UNFILTERED pass is exempt from the filtered-pass guard (still needs SOME tail, per the separate pass-tail guard)", async () => {
+  // reason: SUPERSEDED again (task-raise-the-evidence-tail-guard-s-predicate-
+  // to-its-own, D5) — this test's PREVIOUS supersession (cited below) proved
+  // an unfiltered pass is exempt from the FILTERED-pass guard specifically,
+  // while still needing SOME non-empty tail to satisfy the separate pass-tail
+  // guard. D5 raises THAT separate guard further: a hand-authored tail no
+  // longer counts as "some tail" for oracle "test" — this exact shape (an
+  // UNFILTERED command, no `-t`, a plausible-looking hand-typed summary) is
+  // the primary defect D5 closes (measured 2026-08-10, 2 of 3 agents fooled a
+  // guard identical in shape to this one). The unfiltered-command exemption
+  // from the FILTERED-pass guard specifically is now proven by the refusal
+  // being D5's message (naming --capture), never findFilteredPassRefusal's.
+  //
+  // Prior text (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-
+  // the): this test originally proved an UNFILTERED pass records with NO
+  // output_tail at all, i.e. that `findFilteredPassRefusal`'s guard does not
+  // widen into unfiltered commands.
+  it("AC-061-17 CONTROL SUPERSEDED: an UNFILTERED pass is exempt from the filtered-pass guard, but D5 still refuses a hand-typed tail without --capture", async () => {
     const taskId = await createTaskDoc();
 
     const result = await call()({
@@ -526,7 +548,9 @@ describe("AC-061-17 — MCP lore_evidence_add refuses exactly what the CLI refus
       output_tail: "ok",
     });
 
-    expect(result.isError).toBeFalsy();
-    expect(await readEvidenceCount(taskId)).toBe(1);
+    expect(result.isError).toBe(true);
+    const error = parseResult(result) as { message: string };
+    expect(error.message).toContain("--capture");
+    expect(await readEvidenceCount(taskId)).toBe(0);
   });
 });
