@@ -176,6 +176,14 @@ describe("checkPlanClose — never a fail on an absent domain doc (AC-PCI-2)", (
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
+      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+      // this group's fixtures never populate newestAssessmentAt/
+      // newestTaskActivityAt, and now that the vacuous case pushes its own
+      // notApplicable("no-evidence") entry (mirrors this file's own
+      // Amendment-A/NO_DECLARED_ACS isolation precedent above), an
+      // unexempted fixture here would trip a THIRD conjunct these
+      // prd-sync-focused assertions never anticipated.
+      assessmentFreshnessExempt: true,
       ...overrides,
     };
   }
@@ -239,6 +247,10 @@ describe("checkPlanClose — never a fail on an absent domain doc (AC-PCI-2)", (
       planClaimedAcCoverage: NO_DECLARED_ACS,
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
+      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+      // see `baseCtx`'s identical comment above; this fixture is built
+      // directly but carries the same isolation intent explicitly.
+      assessmentFreshnessExempt: true,
     };
     const results = planClose.check(ctx);
 
@@ -287,6 +299,11 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       prdSyncEnabled: true,
       prdSyncSynced: null,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
+      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+      // this describe block counts audit rows for the prd-sync not-applicable
+      // path specifically; an unexempted fixture would also trip the newly
+      // visible assessment-freshness notApplicable("no-evidence") entry.
+      assessmentFreshnessExempt: true,
     };
   }
 
@@ -341,7 +358,17 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   it("BOUNDARY: a zero-evidence plan is audited with the attestation-not-applicable kind", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(undefined, recordGateSkip);
-    const ctx: GateContext = { targetIdOrSlug: "plan-y", attestationMinRatio: 0.5, planTasksAttestation: [] };
+    // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+    // this test counts audit rows for attestationFloor's own zero-evidence
+    // not-applicable case specifically; assessmentFreshnessExempt keeps the
+    // newly-visible assessment-freshness notApplicable("no-evidence") entry
+    // from adding a second row this assertion never anticipated.
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-y",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [],
+      assessmentFreshnessExempt: true,
+    };
 
     const result = enforcer.enforce("plan-close", ctx);
 
@@ -372,6 +399,11 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       // verdict, which is exactly what this test asserts never fires.
       planClaimedAcCoverage: NO_DECLARED_ACS,
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
+      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+      // this fixture's whole point is "no not-applicable verdicts at all";
+      // without this, the newly-visible assessment-freshness vacuous case
+      // would fire one, which is exactly what this test asserts never happens.
+      assessmentFreshnessExempt: true,
     };
 
     const result = enforcer.enforce("plan-close", ctx);
@@ -437,6 +469,11 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
       prdSyncEnabled: true,
       prdSyncSynced: null,
       parentSpecPointer: { slug: "spec-y", title: "Spec Y", status: "approved" },
+      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+      // this test counts audit rows for the TWO "referent-absent" producers
+      // specifically; assessmentFreshnessExempt keeps the newly-visible
+      // assessment-freshness "no-evidence" entry from adding a third row.
+      assessmentFreshnessExempt: true,
     };
 
     const result = enforcer.enforce("plan-close", ctx);
@@ -468,6 +505,11 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 }],
       planClaimedAcCoverage: NO_DECLARED_ACS,
       planDeclaredScopeCoverage: UNRESOLVED_DECLARED_SCOPE,
+      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+      // this test counts exactly ONE audit row for the scope-undeclared
+      // not-applicable case; assessmentFreshnessExempt keeps the newly-visible
+      // assessment-freshness "no-evidence" entry from adding a second row.
+      assessmentFreshnessExempt: true,
     };
 
     const result = enforcer.enforce("plan-close", ctx);
@@ -490,7 +532,16 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
   it("NEGATIVE: attestationFloor's zero-evidence not-applicable still maps to attestation-not-applicable", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(undefined, recordGateSkip);
-    const ctx: GateContext = { targetIdOrSlug: "plan-y", attestationMinRatio: 0.5, planTasksAttestation: [] };
+    // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+    // this test counts exactly ONE audit row for attestationFloor's own
+    // zero-evidence case; assessmentFreshnessExempt keeps the newly-visible
+    // assessment-freshness "no-evidence" entry from adding a second row.
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-y",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [],
+      assessmentFreshnessExempt: true,
+    };
 
     enforcer.enforce("plan-close", ctx);
 
