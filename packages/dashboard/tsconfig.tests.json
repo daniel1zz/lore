@@ -12,16 +12,17 @@
     "rootDir": "."
   },
   "include": ["src/**/*", "tests/**/*"],
-  // "tests/e2e" excluded: its two `.ts` helpers (mint-machine-dashboard-key.ts,
+  // "tests/e2e" excluded: two of its `.ts` helpers (mint-machine-dashboard-key.ts,
   // multi-project-server.ts) import from packages/lore/src/**, outside this
   // project's rootDir "." — tsc then drags 100+ cross-package files into the
   // program and reports every one as TS6059 "not under rootDir" (measured
   // 2026-08-07: 102 TS6059 + 7 TS2307 + 8 TS2868, zero of it a fixture defect).
   // Playwright specs are `.pw.ts` and run under Playwright's own pipeline, not
-  // this project. ⛔ Named residual: with this exclude, those two helper .ts
-  // files are typechecked by NOTHING in `bun run typecheck` (not a regression —
-  // the whole tests tree was excluded before this project existed — but a real
-  // remaining blind spot). Closing it needs a separate e2e project without
-  // `rootDir`; out of scope here.
+  // this project. Named residual (measured 2026-08-10: 8 `.pw.ts` + 6 `.spec.ts`
+  // + 13 other `.ts` = 27 total `.ts` files under tests/e2e/) was typechecked by
+  // NOTHING in `bun run typecheck` (not a regression — the whole tests tree was
+  // excluded before this project existed — but a real blind spot). Closed by
+  // `tsconfig.e2e.json` (no `rootDir`, wired into `bun run typecheck` as
+  // `typecheck:dashboard-e2e`) — this project's own exclude stays as-is.
   "exclude": ["node_modules", "dist", "tests/e2e"]
 }
