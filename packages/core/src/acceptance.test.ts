@@ -30,9 +30,11 @@ import {
   acceptanceCriterionSchema,
   specAcceptanceCriteriaSchema,
   computeAcCoverage,
+  deriveAcCoverageState,
   AC_VERIFY_MODES,
   SCRIPT_ORACLES,
   type AcceptanceCriterion,
+  type AcCoverageFact,
 } from "./acceptance.js";
 import { evidenceEntrySchema, ORACLE_KINDS } from "./task-workflow.js";
 import { specExtraSchema, createDocInputSchema } from "./schemas.js";
@@ -481,6 +483,44 @@ describe("computeAcCoverage", () => {
     expect(selfReportedPassRef).toBeDefined();
     expect(selfReportedPassRef?.attested).toBeUndefined();
     expect("attested" in (selfReportedPassRef as object)).toBe(false);
+  });
+});
+
+// ─── deriveAcCoverageState precedence (AC-OX-8) ──────────────────────────────
+//
+// spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2 moves
+// ONLY the RECORDING layer (VerifyRunnerService downgrades a discovery-refusal
+// exit-nonzero run to "inconclusive" before it is ever written as evidence) —
+// this DERIVATION, which turns an already-recorded {pass, fail, ...} fact into
+// one of the seven coverage states, is explicitly OUT OF SCOPE (§Out of
+// scope: "Changing deriveAcCoverageState's precedence"). This test pins that
+// boundary: a hand-built fact with fail:1/pass:0 must still resolve to "fail"
+// after this task's change, protecting the corpus's 58 fail_superseded and
+// 590 attested_pass criteria from silent reclassification.
+
+function coverageFact(overrides: Partial<AcCoverageFact> = {}): AcCoverageFact {
+  return {
+    ac_id: "AC-1",
+    mode: "script",
+    pass: 0,
+    fail: 0,
+    refs: [],
+    attested_pass: 0,
+    attested_fail: 0,
+    falsified: 0,
+    ...overrides,
+  };
+}
+
+describe("deriveAcCoverageState precedence-unchanged (AC-OX-8)", () => {
+  it("REGRESSION: a hand-built fact with fail 1, pass 0 still resolves to 'fail' — the M6.2 recording-layer change never touches this DERIVATION", () => {
+    const fact = coverageFact({ fail: 1, falsified: 1 });
+    expect(deriveAcCoverageState(fact)).toBe("fail");
+  });
+
+  it("REGRESSION: fail still wins over attested_pass/pass in the SAME fact (fail-first precedence untouched)", () => {
+    const fact = coverageFact({ pass: 1, fail: 1, attested_pass: 1, falsified: 1 });
+    expect(deriveAcCoverageState(fact)).toBe("fail");
   });
 });
 

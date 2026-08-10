@@ -600,6 +600,87 @@ describe("STATE — a non-binary-referencing command never invokes checkBinaryFr
   });
 });
 
+// ─── M6.2 discovery-refusal guard (task-consume-finddiscoveryrefusal-on-the-
+// attested-exit-nonzero, spec-oracle-executability-a-runner-s-discovery-
+// refusal-is-not-a §M6.2) ────────────────────────────────────────────────────
+//
+// Before this task: `VerifyRunnerService` gated its whole completeness block
+// on `executedSuccessfully` (exit 0), reasoning "a nonzero exit/timeout is
+// already fail, completeness is irrelevant to it". That reasoning is the
+// defect — a test-runner discovery refusal (found no matching test file) is a
+// ZERO-EXECUTION event that exits nonzero, indistinguishable BY EXIT CODE
+// ALONE from a genuine assertion failure. AC-OX-2 pins the fix (a refusal
+// downgrades to "inconclusive", never "fail"); AC-OX-3 is the counterweight
+// pinning that a GENUINE failure tail is UNAFFECTED — the fail path is
+// narrowed, never removed.
+
+describe("AC-OX-2 refusal-inconclusive — a discovery-refusal exit-nonzero tail records inconclusive, never fail", () => {
+  it("exit 1 + a vitest discovery-refusal tail ('No test files found, exiting with code 1') -> result inconclusive, NOT fail", async () => {
+    const spec = makeSpec([testAc("AC-1", "bunx vitest run packages/core/tests/does-not-exist.test.ts")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({
+        exitCode: 1,
+        outputTail: "No test files found, exiting with code 1\n",
+        durationMs: 40,
+        timedOut: false,
+      }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.results).toHaveLength(1);
+    expect(result.value.results[0]).toMatchObject({
+      ac_id: "AC-1",
+      result: "inconclusive",
+      exit_code: 1,
+    });
+    expect(result.value.results[0]?.result).not.toBe("fail");
+
+    // The evidence actually recorded (what a caller would see via `lore ac
+    // list`) must carry "inconclusive", NEVER "fail" — the whole point of the
+    // guard: a mistyped/not-yet-written test path must not mint a permanent,
+    // indistinguishable-from-a-real-red "fail".
+    expect(recorder.calls).toHaveLength(1);
+    expect(recorder.calls[0]?.entry.result).toBe("inconclusive");
+    expect(recorder.calls[0]?.entry.attestation?.exit_code).toBe(1);
+  });
+});
+
+describe("AC-OX-3 genuine-failure-still-fail — REGRESSION: a genuine failure tail still records fail (the fail path is narrowed, never removed)", () => {
+  it("exit 1 + a GENUINE vitest failure tail ('Test Files 1 failed (1)') -> result stays fail", async () => {
+    const spec = makeSpec([testAc("AC-1", "bunx vitest run packages/core/tests/a.test.ts")]);
+    const plan = makePlan();
+    const task = taskWithFreshClaim("task-1");
+    const bundle: PlanBundle = { plan, spec, tasks: [task] };
+    const { fn: getPlanBundle } = makeGetPlanBundle(bundle);
+    const executor = makeExecutor([
+      ok({
+        exitCode: 1,
+        outputTail: "FAIL  packages/core/tests/a.test.ts\nTest Files  1 failed (1)\n",
+        durationMs: 120,
+        timedOut: false,
+      }),
+    ]);
+    const recorder = makeRecordVerifiedEvidence();
+    const service = new VerifyRunnerService(getPlanBundle, recorder.fn, executor.fn, config);
+
+    const result = await service.verifyPlan("plan-1", { by: "runner", nowIso: NOW });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.results[0]).toMatchObject({ ac_id: "AC-1", result: "fail", exit_code: 1 });
+    expect(recorder.calls[0]?.entry.result).toBe("fail");
+  });
+});
+
 describe("REGRESSION — omitting the 5th constructor argument entirely is byte-identical for a non-binary command", () => {
   it("no checkBinaryFreshness passed at all -> unaffected (pre-Part-A call shape)", async () => {
     const spec = makeSpec([testAc("AC-1", "bunx vitest run packages/core/tests/a.test.ts")]);
