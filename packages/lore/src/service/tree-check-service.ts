@@ -177,10 +177,23 @@ export class TreeCheckService {
       drifts.push({
         kind: "plan-terminality",
         actual: { id: d.id, slug: d.slug, type: d.type, parent_id: d.parent_id },
+        // reason: this used to read "The plan-close gate never evaluated it" —
+        // false under the default config. `corpus-service.ts:2029` reads
+        // `this.gateEnforcer.isEnabled("plan-close")`, and `resolveGateEnabled`
+        // (packages/core/src/config.ts:1115) returns `!== false`, so the
+        // `plan-close` checkpoint DOES evaluate on the very command this
+        // message tells you to run — measured 2026-08-10,
+        // spec-governance-visibility-an-armed-gate-that-vacuously-passes §B1.
+        // The command below is deliberately unchanged; only the justification
+        // for it is corrected.
         detail:
           `Plan ${d.slug} has all ${childTasks.length} child task(s) terminal ` +
-          `(archived/deprecated) but the plan itself is still "${d.status}". ` +
-          `The plan-close gate never evaluated it. Run: lore set ${d.slug} --status archived`,
+          `(archived/deprecated) but the plan itself is still "${d.status}" — ` +
+          `it was never walked through VALID_TRANSITIONS to close. Run: ` +
+          `lore set ${d.slug} --status archived (the plan-close gate WILL ` +
+          `evaluate this transition unless explicitly disabled in config; the ` +
+          `archival cascade that follows is a separate, deliberately ungated ` +
+          `data-integrity mechanism).`,
       });
     }
 

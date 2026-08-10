@@ -881,3 +881,60 @@ describe("TreeCheckService.reconcile — D-RECONCILE", () => {
     expect(hit?.link_table_parent).toBe(prdId);
   });
 });
+
+// ─── plan-close hint wording (spec-governance-visibility B1.2) ─────────────
+
+describe("TreeCheckService.checkTree — plan-close hint wording", () => {
+  it("plan-close-hint-wording: plan-terminality drift no longer claims the gate never evaluated, and the suggested command's justification matches its real gate behaviour", async () => {
+    // Measured 2026-08-10 (spec-governance-visibility-an-armed-gate-that-
+    // vacuously-passes §B1): corpus-service.ts:2029 reads
+    // `this.gateEnforcer.isEnabled("plan-close")`, and `resolveGateEnabled`
+    // (packages/core/src/config.ts:1115) returns `!== false` — the
+    // `plan-close` checkpoint EVALUATES on `lore set <plan> --status
+    // archived` unless a config explicitly disables it. The prior wording
+    // ("The plan-close gate never evaluated it") was false under that
+    // default and is the exact sentence B1.2 requires removed.
+    const store = new InMemoryStore();
+    const svc = new TreeCheckService(store);
+
+    const prdId = makeId("PRD100");
+    const specId = makeId("SPC100");
+    const planId = makeId("PLN100");
+    const taskId = makeId("TSK100");
+    const planSlug = "plan-hint-wording-fixture";
+
+    await seedDoc(store, { id: prdId, type: "prd" });
+    await seedDoc(store, { id: specId, type: "spec", parent_id: prdId });
+    await seedDoc(store, { id: planId, type: "plan", parent_id: specId, slug: planSlug });
+    await seedDoc(store, { id: taskId, type: "task", parent_id: planId });
+    // seedDoc hardcodes status "draft" — flip the child task to a terminal
+    // status directly via the store so the plan-terminality predicate
+    // (every child task terminal, plan itself not) actually fires.
+    const archived = await store.update(taskId, { status: "archived" });
+    if (!archived.ok) throw new Error(JSON.stringify(archived.error));
+
+    const result = await svc.checkTree(prdSpecPlanBlueprint());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const terminalityDrifts = result.value.drifts.filter((d) => d.kind === "plan-terminality");
+    expect(terminalityDrifts).toHaveLength(1);
+    const detail = terminalityDrifts[0]!.detail;
+
+    // RED: the retired sentence asserted the gate had never evaluated the
+    // doc AT ALL — false under the default config.
+    expect(detail).not.toContain("gate never evaluated");
+
+    // The suggested remediation command is UNCHANGED — a sibling
+    // integration test (check-tree.test.ts
+    // AC-CLOSURE-2.plan-terminality.check) asserts this exact substring in
+    // `lore status --check-tree` stdout, so B1.2's "correct the command it
+    // suggests" is about the command's JUSTIFICATION, not its literal text.
+    expect(detail).toContain(`lore set ${planSlug} --status archived`);
+
+    // The justification must now describe what that command actually does:
+    // the plan-close gate WILL evaluate the transition (unless disabled),
+    // matching corpus-service.ts:2029's real predicate.
+    expect(detail).toMatch(/plan-close gate (will |WILL )?evaluat/i);
+  });
+});
