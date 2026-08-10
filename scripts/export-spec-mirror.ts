@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Spec-mirror export + drift check (`bun run mirror:export` / `bun run mirror:check`) —
+ * Spec-mirror export + drift check (`bun run mirror:export` / `bun run check:spec-mirror`) —
  * `spec-falsifiability-reachability-a-feedable-checkpoint-an` D6, AC-FR-6/AC-FR-7 (G5).
  *
  * Root CLAUDE.md tells readers "exported mirrors live under `docs/requirements/spec/`", but
@@ -16,10 +16,24 @@
  *     never reimplements corpus->markdown projection. Missing files are (re)created; existing
  *     clean files are left untouched. ALSO prunes orphaned mirror files afterward — without that,
  *     exact file-count parity (AC-FR-6) is unreachable no matter how many times the exporter runs.
- *   - `bun run mirror:check` (`--check` flag, this file's other mode) — READ-ONLY. Never calls
- *     `exportDocs`, never writes a byte. A run that finds drift reports the SAME drift on every
- *     subsequent run until something else (a real export) fixes it — see D6's own text: "a check
- *     that regenerates what it is checking can never fail."
+ *     Deliberately NOT wired into any script chain — it is the explicit repair action a human (or
+ *     a release step) takes after `check:spec-mirror` reports drift, never something a routine
+ *     verification command (`bun run build`, `bun run test`) triggers as a side effect. An earlier
+ *     revision of this file wired `mirror:export` into `build`; that was reverted (2026-08-10, same
+ *     task) because `bun run build` is a routine post-merge verification step and rewriting
+ *     `docs/requirements/spec/**` + `.lore/export-index.json` every time it runs leaves a dirty
+ *     tree, which breaks this repo's own "a full-suite verdict requires a CLEAN tree" standing rule
+ *     — the same failure shape `lore assess` already flagged elsewhere as "a check command with a
+ *     write side effect surprises callers and CI."
+ *   - `bun run check:spec-mirror` (`--check` flag, this file's other mode) — READ-ONLY. Never
+ *     calls `exportDocs`, never writes a byte. A run that finds drift reports the SAME drift on
+ *     every subsequent run until something else (a real export) fixes it — see D6's own text: "a
+ *     check that regenerates what it is checking can never fail." THIS is the mode wired into the
+ *     `test` script chain (`package.json`) — see AC-FR-6's own oracle
+ *     (`scripts/tests/spec-mirror-export.test.ts`), which asserts the chain reaches THIS FILE
+ *     (`export-spec-mirror.ts`, the script AC-FR-6 names), never a specific mode-flag string —
+ *     `check:spec-mirror` invokes this exact file, so the criterion holds while the wired command
+ *     stays read-only.
  *
  * ## Why the pure/fs-only logic lives in a sibling `-core.ts` module
  *

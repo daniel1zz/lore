@@ -229,7 +229,9 @@ const SCRIPT_REF_RE = /\b(?:bun|npm|npx|yarn)\s+run\s+([A-Za-z0-9:_-]+)/g;
  * being REACHED from `rootScriptName`.
  *
  * @param scripts the raw `package.json` `"scripts"` map (script name -> shell command string).
- * @param rootScriptName the entry point to start the walk from (e.g. `"build"`).
+ * @param rootScriptName the entry point to start the walk from (e.g. `"test"` — the chain
+ *   `check:spec-mirror` is wired into, per this task's own D6 revision; NOT `"build"`, which was
+ *   reverted because it made a routine post-merge verification step rewrite the mirror on disk).
  * @param targetSubstring the literal substring identifying the target script's own invocation
  *   (e.g. a file path like `"export-spec-mirror.ts"`, or an npm script name it's invoked by).
  * @param visited internal cycle guard — callers never need to pass this.

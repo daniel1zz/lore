@@ -84,7 +84,7 @@ function runLore(args: string[]): RunResult {
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 
-/** Spawns the REAL `export-spec-mirror.ts` — the exact `bun run mirror:export` / `bun run mirror:check` path, driven directly (mirrors `check-ac-ref-integrity.test.ts`'s `runDetector`). */
+/** Spawns the REAL `export-spec-mirror.ts` — the exact `bun run mirror:export` / `bun run check:spec-mirror` path, driven directly (mirrors `check-ac-ref-integrity.test.ts`'s `runDetector`). */
 function runMirrorScript(args: string[]): RunResult {
   const result = spawnSync("bun", ["run", MIRROR_SCRIPT, ...args], {
     cwd: REPO_ROOT,
@@ -204,26 +204,27 @@ describe("computeMirrorParity (pure, no IO)", () => {
 
 describe("scriptChainReachesTarget (pure, no IO)", () => {
   it("HAPPY: a script's own value directly containing the target substring is reachable from itself", () => {
-    const scripts = { build: "bun scripts/export-spec-mirror.ts" };
-    expect(scriptChainReachesTarget(scripts, "build", "export-spec-mirror.ts")).toBe(true);
+    const scripts = { "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check" };
+    expect(scriptChainReachesTarget(scripts, "check:spec-mirror", "export-spec-mirror.ts")).toBe(true);
   });
 
   it("HAPPY: one level of `bun run <name>` indirection to a script whose value contains the target is reachable", () => {
     const scripts = {
-      build: "bun run scripts/build.ts && bun run mirror:export",
-      "mirror:export": "bun scripts/export-spec-mirror.ts",
+      test: "bun run test:vitest && bun run test:bun && bun run check:spec-mirror",
+      "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check",
     };
-    expect(scriptChainReachesTarget(scripts, "build", "export-spec-mirror.ts")).toBe(true);
+    expect(scriptChainReachesTarget(scripts, "test", "export-spec-mirror.ts")).toBe(true);
   });
 
-  it("NEGATIVE (export-covers-corpus, RED a — in-memory control): a build chain with the mirror:export reference removed does not reach the export script", () => {
+  it("NEGATIVE (export-covers-corpus, RED a — in-memory control): a test chain with the check:spec-mirror reference removed does not reach the export script", () => {
     // Simulates exactly the AC-FR-6 RED(a) mutation ("remove the script from the chain") without
-    // touching the real package.json — the mutated fixture mirrors the pre-fix `build` script.
+    // touching the real package.json — the mutated fixture mirrors the pre-fix `test` script
+    // (before this task's own D6 revision wired check:spec-mirror into it).
     const mutatedScripts = {
-      build: "bun run scripts/build.ts",
-      "mirror:export": "bun scripts/export-spec-mirror.ts",
+      test: "bun run test:vitest && bun run test:bun",
+      "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check",
     };
-    expect(scriptChainReachesTarget(mutatedScripts, "build", "export-spec-mirror.ts")).toBe(false);
+    expect(scriptChainReachesTarget(mutatedScripts, "test", "export-spec-mirror.ts")).toBe(false);
   });
 
   it("BOUNDARY: a cyclic script chain (A -> B -> A) terminates and returns false when the target is unreachable", () => {
@@ -238,19 +239,23 @@ describe("scriptChainReachesTarget (pure, no IO)", () => {
 
   it("REGRESSION: a target existing as its OWN standalone, never-referenced script entry is NOT reachable from an unrelated root — existing is not the same as being wired (this repo's own prior check:* antipattern)", () => {
     const scripts = {
-      build: "bun run scripts/build.ts",
-      "mirror:export": "bun scripts/export-spec-mirror.ts",
+      test: "bun run test:vitest && bun run test:bun",
+      "check:spec-mirror": "bun scripts/export-spec-mirror.ts --check",
     };
-    expect(scriptChainReachesTarget(scripts, "build", "export-spec-mirror.ts")).toBe(false);
+    expect(scriptChainReachesTarget(scripts, "test", "export-spec-mirror.ts")).toBe(false);
   });
 });
 
 // ─── export-covers-corpus: AC-FR-6 end-to-end ────────────────────────────────
 
 describe("export-covers-corpus: AC-FR-6 end-to-end against the REAL package.json + REAL live corpus", () => {
-  it("export-covers-corpus: HAPPY — the REAL root package.json's build chain reaches export-spec-mirror.ts, proving the export script is WIRED, not merely present", () => {
+  it("export-covers-corpus: HAPPY — the REAL root package.json's test chain reaches export-spec-mirror.ts (via check:spec-mirror), proving the export script is WIRED, not merely present", () => {
+    // AC-FR-6 names the SCRIPT ("export-spec-mirror.ts"), never a specific mode-flag string —
+    // `check:spec-mirror` invokes this exact file (with --check), so the criterion holds while
+    // the chain-wired command itself stays read-only (D6; see export-spec-mirror.ts's own header
+    // for why `mirror:export`, the WRITE mode, is deliberately NOT chain-wired).
     const scripts = readRealPackageScripts();
-    expect(scriptChainReachesTarget(scripts, "build", "export-spec-mirror.ts")).toBe(true);
+    expect(scriptChainReachesTarget(scripts, "test", "export-spec-mirror.ts")).toBe(true);
   });
 
   it(
