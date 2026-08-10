@@ -27,10 +27,22 @@
  * sources) or fails loud naming a recovery command — never the silent
  * 24-error misdirection.
  *
- * ⛔ Never leaves the tree mutated: the generated file is moved to a system
- * temp dir (survives even a crash mid-test), and a `finally` block restores
- * it — or removes the regenerated copy if it did not exist beforehand —
- * before the byte-identical assertion runs.
+ * ⛔ Never leaves the tree mutated: the generated file is renamed aside into
+ * an `mkdtempSync`-created system-temp directory (`backupDir`/`backupPath`
+ * below) BEFORE the script under test runs. Restoration, in the `finally`
+ * block below, READS THAT ON-DISK BACKUP BACK (`readFileSync(backupPath)`) —
+ * it does not restore from the in-memory `originalBytes` capture, so the
+ * backup is load-bearing, not a discarded copy; the STATE assertion after the
+ * `finally` block proves this independently by comparing the disk-restored
+ * bytes against `originalBytes`, which was captured from the file BEFORE the
+ * rename and never touches `backupPath`. This guarantees restoration across
+ * any in-process exception between the move and the restore (a `finally`
+ * block always runs after a thrown JS exception, including a failing
+ * `expect(...)` above it). It does NOT protect against a hard process kill
+ * (e.g. `kill -9`) between the rename and the restore, because `finally`
+ * never executes after that either — recovery in that case is manual: the
+ * pre-move bytes remain at the `backupDir` path printed by `mkdtempSync`
+ * until an operator (or a later run's own cleanup) removes it.
  *
  * Six-dimension coverage:
  *   HAPPY:      routeTree.gen.ts absent -> `typecheck:dashboard-tests` exits
@@ -77,18 +89,19 @@ describe("typecheck:dashboard-tests script contract (AC-TC-3)", () => {
       const originalBytes = existedBefore ? readFileSync(ROUTE_TREE_PATH) : null;
 
       // Move the generated file ASIDE to a system temp dir (never delete it
-      // outright) — survives even if this test process crashes mid-run.
+      // outright) — the bytes are recoverable from `backupPath` on disk for
+      // as long as `backupDir` exists (removed only at the very end of the
+      // `finally` block below, after restoration has already read from it).
       const backupDir = mkdtempSync(join(tmpdir(), "routetree-gen-backup-"));
       const backupPath = join(backupDir, "routeTree.gen.ts");
       if (existedBefore) {
         renameSync(ROUTE_TREE_PATH, backupPath);
       }
 
-      let result: ReturnType<typeof spawnSync>;
       try {
         expect(existsSync(ROUTE_TREE_PATH)).toBe(false);
 
-        result = spawnSync("bun", ["run", "typecheck:dashboard-tests"], {
+        const result = spawnSync("bun", ["run", "typecheck:dashboard-tests"], {
           cwd: REPO_ROOT,
           encoding: "utf8",
           // Explicit maxBuffer per this repo's spawnSync-truncation discipline.
@@ -112,11 +125,15 @@ describe("typecheck:dashboard-tests script contract (AC-TC-3)", () => {
         }
       } finally {
         // Restore to exactly the pre-test state, whatever the outcome above.
+        // Reads the ON-DISK backup back (not `originalBytes`) so the
+        // mkdtemp/rename backup is the actual restoration source — see the
+        // header comment above for exactly what this does and does not
+        // guarantee.
         if (existsSync(ROUTE_TREE_PATH)) {
           unlinkSync(ROUTE_TREE_PATH);
         }
-        if (existedBefore && originalBytes) {
-          writeFileSync(ROUTE_TREE_PATH, originalBytes);
+        if (existedBefore) {
+          writeFileSync(ROUTE_TREE_PATH, readFileSync(backupPath));
         }
         rmSync(backupDir, { recursive: true, force: true });
       }
