@@ -35,6 +35,11 @@
  *     multiple matches. Shared by `VerifyRunnerService.verifyAdhocTask` and
  *     `CorpusService.resolveDeclaredAcIdsForAdhocTask` so the two surfaces can
  *     never disagree about which spec governs a given ad-hoc task.
+ *   - acFalsifierSchema / AcFalsifier — a DECLARED falsifier on a script-mode
+ *     criterion (spec-falsifiability-reachability-a-feedable-checkpoint-an
+ *     §D2) — a repo-relative path + literal find/replace + the EXACT exit
+ *     code the mutation is declared to produce. Consumed ONLY by
+ *     `VerifyRunnerService.verifyFalsifier`'s attested-red path.
  *
  * Invariants:
  *   - `id` format is `^AC-[A-Z0-9]+(-[A-Z0-9]+)*$` — matches every corpus-observed
@@ -103,6 +108,50 @@ type _ScriptOraclesCoverAllButManual = [OracleKind] extends [ScriptOracle | "man
 const _scriptOraclesCoverAllButManual: _ScriptOraclesCoverAllButManual = true;
 void _scriptOraclesCoverAllButManual;
 
+// ─── Declared Falsifier (spec-falsifiability-reachability-a-feedable-
+//     checkpoint-an §D2/D3/D4) ─────────────────────────────────────────────
+
+/**
+ * A DECLARED falsifier for a script-mode acceptance criterion — a named
+ * source-file mutation the AC's author asserts will make `verify.command`
+ * fail with an EXACT exit code (D4 — never "non-zero"). Declared via `lore ac
+ * add`/`ac set --falsifier-*`, validated by the SAME `specAcceptanceCriteriaSchema`
+ * call every other AC field goes through (D2 — "declared, not described in
+ * prose").
+ *
+ * Consumed ONLY by the attested-red runner (`VerifyRunnerService.verifyFalsifier`,
+ * `service/verify-runner-service.ts`) — ordinary `lore verify` execution
+ * (`verifyPlan`/`verifyAdhocTask`) never reads this field, so declaring one
+ * has zero effect on a criterion's normal green-path behavior.
+ *
+ * @invariant `path` is REPO-RELATIVE. The runner resolves it against a
+ *   SCRATCH git worktree it creates for the run, never against the caller's
+ *   `cwd` or the real working tree (D3) — an absolute path here would defeat
+ *   that isolation by construction, so the runner always treats it as
+ *   relative regardless of leading-slash shape.
+ * @invariant `find` must be a literal substring actually present in `path`'s
+ *   content at APPLY time. The runner refuses loud (never silently no-ops)
+ *   when it is missing — a stale falsifier (the file changed since it was
+ *   declared) is a declaration bug, not a pass.
+ *
+ * @example
+ * acFalsifierSchema.parse({
+ *   path: "packages/lore/tests/unit/service/attested-red.test.ts",
+ *   find: "MAGIC_MARKER",
+ *   replace: "",
+ *   expected_exit_code: 7,
+ * });
+ */
+export const acFalsifierSchema = z.object({
+  path: z.string().min(1),
+  find: z.string().min(1),
+  replace: z.string(),
+  expected_exit_code: z.number().int(),
+});
+
+/** Derived TypeScript type for one declared falsifier. */
+export type AcFalsifier = z.infer<typeof acFalsifierSchema>;
+
 // ─── Acceptance Criterion Schema ───────────────────────────────────────────
 
 /**
@@ -142,6 +191,16 @@ export const acceptanceCriterionSchema = z.object({
        * remain out of scope for this reservation (SPEC-039 §2).
        */
       timeout_ms: z.number().int().positive().optional(),
+      /**
+       * A DECLARED falsifier (spec-falsifiability-reachability-a-feedable-
+       * checkpoint-an §D2) — see {@link acFalsifierSchema}'s own JSDoc.
+       * Optional and additive: a criterion with no `falsifier` parses
+       * byte-identically to pre-this-field behavior (REGRESSION) and simply
+       * cannot be run through the attested-red path
+       * (`VerifyRunnerService.verifyFalsifier` refuses loud, naming the
+       * missing declaration, rather than silently no-op'ing).
+       */
+      falsifier: acFalsifierSchema.optional(),
     }),
     z.object({
       mode: z.literal("ai"),
