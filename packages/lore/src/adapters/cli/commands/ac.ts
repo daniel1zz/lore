@@ -4,6 +4,19 @@
  * Subcommands:
  *   add  <spec> <id> --statement <s> --mode <script|ai|human>
  *          script: --oracle <tsc|test|lint|build|e2e|other> --command <cmd>
+ *                  [--allow-missing-path <reason>] — D8 escape (spec-oracle-
+ *                  executability-a-runner-s-discovery-refusal-is-not-a §D8,
+ *                  task-wire-allow-missing-path-and-the-unredeemed-declaration):
+ *                  a `--command` naming a test-file-like path that does not
+ *                  exist on disk is REFUSED (exit 4) unless this flag supplies
+ *                  a non-empty reason — a red-first AC may legitimately name a
+ *                  test not yet written. An empty string (`--allow-missing-path
+ *                  ""`) is treated as NO reason and still refuses. The
+ *                  declaration is tracked; `lore status --json`'s
+ *                  `unredeemed_allow_missing_path_count` field (and the
+ *                  matching human-view line) reports how many such
+ *                  declarations still name an absent path — it drops as soon
+ *                  as the file is created, no further command needed.
  *          ai:     --rubric <text>
  *          human:  --note <text>  (optional)
  *   list <spec> [--json]           List declared criteria (+ per-AC coverage when
@@ -37,7 +50,7 @@
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
  *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
- *        [--note <n>] [--covers <req-id>]
+ *        [--note <n>] [--covers <req-id>] [--allow-missing-path <reason>]
  *                                   In-place edit of ONE declared criterion
  *                                   (spec-lore-ac-set-in-place-edit-of-a-declared-
  *                                   acceptance D1-D6). `id`/`mode` are NOT editable —
@@ -51,6 +64,10 @@
  *                                   like a content/title edit (D2). `--covers` REPLACES
  *                                   `requirement_refs` wholesale across repeated flags in
  *                                   one call; `--covers ""` clears it to `[]`.
+ *                                   `--allow-missing-path` is the SAME D8 escape `add`
+ *                                   documents above — re-checked against the (possibly
+ *                                   untouched) resulting command on every `set`, per
+ *                                   `AcService.setCriterion`'s own JSDoc.
  *
  * `add`/`set` additionally print the approved->draft demotion an edit MAY trigger
  * (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2, AC-GV-4) —
@@ -72,7 +89,9 @@
  *   3 = DOC_NOT_FOUND (spec not found)
  *   4 = VALIDATION_ERROR (malformed criterion, duplicate id, 50-entry cap, unknown
  *       id on rm/set naming the declared ids, evidence blocking rm without --force,
- *       a mode-inconsistent flag on set naming the flag and the actual mode)
+ *       a mode-inconsistent flag on set naming the flag and the actual mode, a
+ *       script-mode --command naming a path that does not exist with no non-empty
+ *       --allow-missing-path reason — D8)
  *   5 = STALE_VERSION
  *
  * Source: SPEC-038 §4, §6 AC-ACODE-7; SPEC-039 §2 D8 (attested coverage annotation);
@@ -81,15 +100,21 @@
  *   evidence-red-vocabulary-claim-worktree §M1 AC-WH-1 (expected-fail badge);
  *   spec-lore-ac-set-in-place-edit-of-a-declared-acceptance D1-D6 (`set` subcommand);
  *   spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1/M4/M5
- *   (pass_unfalsified/fail_superseded/not_measured badges, AC-FALS-2/5/19)
+ *   (pass_unfalsified/fail_superseded/not_measured badges, AC-FALS-2/5/19);
+ *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8 +
+ *   task-wire-allow-missing-path-and-the-unredeemed-declaration (`--allow-missing-path`
+ *   PRODUCTION wiring — the D8 escape was service-layer-only and unit-tested but
+ *   unreachable from a real `lore ac add`/`ac set` invocation until this task)
  */
 
 import { defineCommand } from "citty";
+import { existsSync } from "fs";
+import { dirname } from "path";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
-import type { AcService, AcListResult, SetCriterionPatch } from "../../../service/ac-service.js";
+import type { AcService, AcListResult, DeclarePathOpts, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
 // reason: `isPlanMember` is SHARED, store-less predicate infrastructure (its own
 // module header: "not a service... exactly the shared infrastructure that pattern
@@ -159,18 +184,28 @@ export default defineCommand({
           type: "string",
           description: "[repeatable] PRD requirement id this AC covers, e.g. R-1 (SPEC-055)",
         },
+        "allow-missing-path": {
+          type: "string",
+          description:
+            "D8 escape: REQUIRED non-empty reason to declare a script-mode --command naming a test path " +
+            "not yet on disk (e.g. a red-first AC). Empty/absent reason is refused when a path is missing.",
+        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
         },
       },
       async run({ args }) {
-        const { app } = loadLoreApp();
+        const { app, dbPath } = loadLoreApp();
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
 
           const criterion = buildCriterionCandidate(args);
-          const result = await requireAcService(app).addCriterion(args.spec as string, criterion);
+          const result = await requireAcService(app).addCriterion(
+            args.spec as string,
+            criterion,
+            buildDeclarePathOpts(args, dbPath),
+          );
 
           if (!result.ok) {
             process.stderr.write(formatError(result.error) + "\n");
@@ -336,6 +371,12 @@ export default defineCommand({
           description:
             "[repeatable] replace covered PRD requirement ids wholesale (mode-agnostic); pass '' to clear to []",
         },
+        "allow-missing-path": {
+          type: "string",
+          description:
+            "D8 escape: REQUIRED non-empty reason to declare a script-mode command naming a test path not yet " +
+            "on disk. Empty/absent reason is refused when the (possibly untouched) resulting command is missing.",
+        },
         mode: {
           type: "string",
           description: "NOT editable — exits 2; use `ac rm --force` then `ac add --mode <new>` instead",
@@ -367,11 +408,16 @@ export default defineCommand({
           return;
         }
 
-        const { app } = loadLoreApp();
+        const { app, dbPath } = loadLoreApp();
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
 
-          const result = await requireAcService(app).setCriterion(args.spec as string, args.id as string, patch);
+          const result = await requireAcService(app).setCriterion(
+            args.spec as string,
+            args.id as string,
+            patch,
+            buildDeclarePathOpts(args, dbPath),
+          );
 
           if (!result.ok) {
             process.stderr.write(formatError(result.error) + "\n");
@@ -444,6 +490,48 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
     statement: args.statement as string,
     verify,
     ...(requirement_refs !== undefined ? { requirement_refs } : {}),
+  };
+}
+
+/**
+ * PRODUCTION wiring for `AcService.addCriterion`/`setCriterion`'s D8
+ * declaration-time path-existence check (spec-oracle-executability-a-runner-
+ * s-discovery-refusal-is-not-a §D8, task-wire-allow-missing-path-and-the-
+ * unredeemed-declaration) — the mechanism landed service-layer-only and
+ * unit-tested (task-promote-the-oracle-file-existence-primitives-into-lore)
+ * but was UNREACHABLE from a real `lore ac add`/`ac set` invocation until
+ * this call site started supplying it.
+ *
+ * `pathContext` is ALWAYS supplied (unlike `DeclarePathOpts`'s own opt-in
+ * default) — a real CLI invocation's `process.cwd()` is correct by
+ * construction (a fresh subprocess per invocation inherits the caller's real
+ * shell cwd; same rationale `commands/evidence.ts`'s own precheck
+ * construction documents for its identical `existsSync`/cwd/corpusRoot
+ * shape). `corpusRoot` is derived the SAME way that precheck derives it:
+ * `dbPath` is always `<corpusRoot>/.lore/lore.db`, so the corpus root sits
+ * two directories up.
+ *
+ * `allowMissingPath` is read from `--allow-missing-path` VERBATIM — an
+ * explicitly empty string (`--allow-missing-path ""`) is passed through
+ * unchanged, not normalized to `undefined` here: `checkDeclaredPathExistence`
+ * (`ac-service.ts`) is the SINGLE place that decides an empty/whitespace-only
+ * reason is "no reason supplied" (`.trim().length === 0`), so the refusal
+ * message stays byte-identical whether the caller is this CLI or a future
+ * second adapter — this function does not pre-judge that decision.
+ *
+ * @param args - raw citty args (the same untyped `Record<string, unknown>`
+ *   shape {@link buildCriterionCandidate}/`buildSetPatch` already accept)
+ * @param dbPath - the discovered `.lore/lore.db` path `loadLoreApp()` returns
+ */
+function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string): DeclarePathOpts {
+  const reason = args["allow-missing-path"];
+  return {
+    pathContext: {
+      fileExists: existsSync,
+      cwd: process.cwd(),
+      corpusRoot: dirname(dirname(dbPath)),
+    },
+    ...(typeof reason === "string" ? { allowMissingPath: reason } : {}),
   };
 }
 
