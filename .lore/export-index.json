@@ -2688,6 +2688,174 @@
     "01KYEK2WWA8SRETJVYVTBNSTNE": {
       "human_id": "ADR-12",
       "file_path": "docs/requirements/adr/ADR-012-dashboard-cookie-session-writes-attribute-author-v.md"
+    },
+    "01KZNFQE28253DR50G2Y1JQGQ7": {
+      "human_id": "SPEC-133",
+      "file_path": "docs/requirements/spec/SPEC-133-falsifiability-reachability-a-feedable-checkpoint.md"
+    },
+    "01KZN3RWQ236CSKJRPNJ1TD78A": {
+      "human_id": "SPEC-130",
+      "file_path": "docs/requirements/spec/SPEC-130-oracle-executability-a-runner-s-discovery-refusal.md"
+    },
+    "01KZN48NS4DD3K8TM6MDM8KGYQ": {
+      "human_id": "SPEC-131",
+      "file_path": "docs/requirements/spec/SPEC-131-governance-visibility-an-armed-gate-that-vacuously.md"
+    },
+    "01KZN48PJ42TEERKC0E9TBTPQB": {
+      "human_id": "SPEC-132",
+      "file_path": "docs/requirements/spec/SPEC-132-typecheck-coverage-two-named-blind-spots-and-the-s.md"
+    },
+    "01KZDJZVK2WQ7KA2YFTMM2KSDN": {
+      "human_id": "SPEC-129",
+      "file_path": "docs/requirements/spec/SPEC-129-oracle-tier-falsifiability-a-criterion-never-obser.md"
+    },
+    "01KYXN0M5NE54WS43KJVTHN70C": {
+      "human_id": "SPEC-124",
+      "file_path": "docs/requirements/spec/SPEC-124-declaring-ac-scope-is-required-at-task-creation-so.md"
+    },
+    "01KYYAWGZPGQEW33988SV227DY": {
+      "human_id": "SPEC-127",
+      "file_path": "docs/requirements/spec/SPEC-127-evidence-output-tail-integrity-a-self-reported-row.md"
+    },
+    "01KYXNCZ2ZC09ZW7H0A59SQBV6": {
+      "human_id": "SPEC-125",
+      "file_path": "docs/requirements/spec/SPEC-125-lore-ac-set-in-place-edit-of-a-declared-acceptance.md"
+    },
+    "01KYYAYWM72EEDBNBY99BXPJWN": {
+      "human_id": "SPEC-128",
+      "file_path": "docs/requirements/spec/SPEC-128-lore-assess-project-evidence-rows-instead-of-embed.md"
+    },
+    "01KYY2461Q0J2F546AF4BFCJH8": {
+      "human_id": "SPEC-126",
+      "file_path": "docs/requirements/spec/SPEC-126-resume-coverage-floor-the-satisfaction-boundaries.md"
+    },
+    "01KYV0VX73BKQHT26EZC3QZW29": {
+      "human_id": "SPEC-115",
+      "file_path": "docs/requirements/spec/SPEC-115-report-issue-has-no-specified-concurrency-contract.md"
+    },
+    "01KYV0VWKHTKEGHJNTAXX8J2Z1": {
+      "human_id": "SPEC-114",
+      "file_path": "docs/requirements/spec/SPEC-114-a-test-case-s-timeout-budget-must-be-declared-when.md"
+    },
+    "01KYXJF8E07CZHHZ0ESNW8TT3A": {
+      "human_id": "SPEC-123",
+      "file_path": "docs/requirements/spec/SPEC-123-resume-ticket-coverage-floor-blocking-channel-armi.md"
+    },
+    "01KYV0YMJ0V16C84HQ33NVNYT7": {
+      "human_id": "SPEC-116",
+      "file_path": "docs/requirements/spec/SPEC-116-declared-scope-attestation-contract-task-owned-ac.md"
+    },
+    "01KYW6V5S2CF0T65HYKZVX5VFH": {
+      "human_id": "SPEC-121",
+      "file_path": "docs/requirements/spec/SPEC-121-an-escalate-blocks-approval-for-every-doc-type-and.md"
+    },
+    "01KYW6V5ZTR5KG804DE22E499Y": {
+      "human_id": "SPEC-122",
+      "file_path": "docs/requirements/spec/SPEC-122-superseded-handoff-archival-has-no-recency-guard.md"
+    },
+    "01KYS10K740CGRVNH1NSJH432Y": {
+      "human_id": "SPEC-111",
+      "file_path": "docs/requirements/spec/SPEC-111-plan-close-predicates-measure-invariants-an-applic.md"
+    },
+    "01KYVDQV2T2JK2384ZHTH6M5Z4": {
+      "human_id": "SPEC-119",
+      "file_path": "docs/requirements/spec/SPEC-119-eager-libsql-load-makes-every-command-depend-on-a.md"
+    },
+    "01KYV0P4JWFPGN5TSF0J7E4XVH": {
+      "human_id": "SPEC-113",
+      "file_path": "docs/requirements/spec/SPEC-113-adr-decision-status-has-a-create-surface-and-no-cl.md"
+    },
+    "01KYVE0160XZ712CS4NCPXDG8C": {
+      "human_id": "SPEC-120",
+      "file_path": "docs/requirements/spec/SPEC-120-git-safety-gate-probes-report-the-wrong-blast-radi.md"
+    },
+    "01KYV1MQM4VDR2NZSQFJD21100": {
+      "human_id": "SPEC-117",
+      "file_path": "docs/requirements/spec/SPEC-117-lore-setup-deletes-repo-source-through-dev-symlink.md"
+    },
+    "01KYV2B75H6HPEHK1QQE48ZJG4": {
+      "human_id": "SPEC-118",
+      "file_path": "docs/requirements/spec/SPEC-118-dispatch-isolation-must-be-enforced-by-a-gate-and.md"
+    },
+    "01KYS2TZC5CV06WZDWBB5JVCTN": {
+      "human_id": "SPEC-112",
+      "file_path": "docs/requirements/spec/SPEC-112-resume-ticket-coverage-a-shipped-upper-bound-left.md"
+    },
+    "01KYRC3F2GPJ4BJ33KQ3KSARQ3": {
+      "human_id": "SPEC-110",
+      "file_path": "docs/requirements/spec/SPEC-110-context-provenance-injected-corpus-global-state-an.md"
+    },
+    "01KYPT9AT9FCFT26P5T9BNASRM": {
+      "human_id": "SPEC-109",
+      "file_path": "docs/requirements/spec/SPEC-109-issue-closure-loop-computed-resolution-agent-reach.md"
+    },
+    "01KYM0MCW8YAKN0YD03J4A0KBQ": {
+      "human_id": "SPEC-105",
+      "file_path": "docs/requirements/spec/SPEC-105-dashboard-production-packaging-one-command-lore-da.md"
+    },
+    "01KYP8NJPZ85DYSZEVW4K8DZ72": {
+      "human_id": "SPEC-108",
+      "file_path": "docs/requirements/spec/SPEC-108-out-of-box-reporting-channel-report-issue-self-pro.md"
+    },
+    "01KYMFJ3SZASA970ACADQFBW61": {
+      "human_id": "SPEC-107",
+      "file_path": "docs/requirements/spec/SPEC-107-plan-closure-must-be-loud-terminality-divergence-s.md"
+    },
+    "01KYMFB6KCDSZR0YG0DZ5D3RQ0": {
+      "human_id": "SPEC-106",
+      "file_path": "docs/requirements/spec/SPEC-106-assessment-freshness-plan-close-denies-a-stale-ass.md"
+    },
+    "01KYKX5FY8G5MENTK4B99N54PA": {
+      "human_id": "SPEC-103",
+      "file_path": "docs/requirements/spec/SPEC-103-tiered-review-ledger-fast-track-judgment-required.md"
+    },
+    "01KYKWFF34P2EP76QY6AGNEQ8S": {
+      "human_id": "SPEC-102",
+      "file_path": "docs/requirements/spec/SPEC-102-trace-layer-read-deny-observability-table-default.md"
+    },
+    "01KYKX9PB8PR5VVXV0TVWM3XKJ": {
+      "human_id": "SPEC-104",
+      "file_path": "docs/requirements/spec/SPEC-104-worktree-derived-actor-identity-agent-branch-as.md"
+    },
+    "01KYKJJM54MSSTTFJMDACPCZHN": {
+      "human_id": "SPEC-101",
+      "file_path": "docs/requirements/spec/SPEC-101-two-runner-changed-test-selection-deterministic-te.md"
+    },
+    "01KYKCYWPEHSHB4D7KYSBA8NEK": {
+      "human_id": "SPEC-100",
+      "file_path": "docs/requirements/spec/SPEC-100-verify-reachability-plan-promote-early-warning.md"
+    },
+    "01KYHREBH7JMD4T8R4AH4792D6": {
+      "human_id": "SPEC-99",
+      "file_path": "docs/requirements/spec/SPEC-99-workflow-hardening-evidence-red-vocabulary-claim-w.md"
+    },
+    "01KYH9580C7NQ20XV8J7M6JCYR": {
+      "human_id": "SPEC-98",
+      "file_path": "docs/requirements/spec/SPEC-98-context-verb-family-two-zone-claude-md-anatomy-lor.md"
+    },
+    "01KYGRQMKA3N22Y50NBS484AQP": {
+      "human_id": "SPEC-95",
+      "file_path": "docs/requirements/spec/SPEC-95-project-claude-md-content-contract-governance-inje.md"
+    },
+    "01KYF1NXCQ78C4SSJ34HKJBYAW": {
+      "human_id": "SPEC-84",
+      "file_path": "docs/requirements/spec/SPEC-84-corpus-allocated-ordinal-identity-store-atomic-spe.md"
+    },
+    "01KYH29FA0GJ3EYZ28WRBCYWMG": {
+      "human_id": "SPEC-97",
+      "file_path": "docs/requirements/spec/SPEC-97-lifecycle-archival-plan-close-cascade-deterministi.md"
+    },
+    "01KYGTX80F15JJA576ZPFPDZSJ": {
+      "human_id": "SPEC-96",
+      "file_path": "docs/requirements/spec/SPEC-96-session-start-handoff-neutrality-injection-drops-r.md"
+    },
+    "01KYFA8Y8YBF8VNP9YR30H9EX9": {
+      "human_id": "SPEC-83",
+      "file_path": "docs/requirements/spec/SPEC-83-governance-prose-runtime-injection-retire-the-inst.md"
+    },
+    "01KYFDNCN2R7NPVW9T71AJY62S": {
+      "human_id": "SPEC-85",
+      "file_path": "docs/requirements/spec/SPEC-85-seat-briefing-runtime-injection-retire-the-install.md"
     }
   }
 }
