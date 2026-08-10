@@ -63,6 +63,8 @@
  *                                   references it, unless --force).
  *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
  *        [--note <n>] [--covers <req-id>] [--allow-missing-path <reason>]
+ *        [--falsifier-path <p> --falsifier-find <text> --falsifier-replace <text>
+ *         --falsifier-exit-code <n>]
  *                                   In-place edit of ONE declared criterion
  *                                   (spec-lore-ac-set-in-place-edit-of-a-declared-
  *                                   acceptance D1-D6). `id`/`mode` are NOT editable —
@@ -80,15 +82,22 @@
  *                                   documents above — re-checked against the (possibly
  *                                   untouched) resulting command on every `set`, per
  *                                   `AcService.setCriterion`'s own JSDoc.
- *                                   NOTE: `--falsifier-*` (documented on `add` above) is
- *                                   deliberately NOT wired here — `SetCriterionPatch`/
- *                                   `AcService.setCriterion` (`service/ac-service.ts`) sit
- *                                   outside this task's file anchors, so changing a
- *                                   falsifier on an already-declared AC currently requires
- *                                   `ac rm --force` then `ac add --falsifier-*` again. A
- *                                   NAMED follow-up gap, not an oversight — reported
- *                                   explicitly (task-build-the-attested-red-runner-a-
- *                                   declared-falsifier-applied's own final report).
+ *                                   `--falsifier-*` (task-make-lore-ac-set-accept-the-
+ *                                   falsifier-flags-its-own-error) is NOW wired here too —
+ *                                   editing a declared falsifier no longer requires the
+ *                                   destructive `ac rm --force` + `ac add --falsifier-*`
+ *                                   round-trip the previous revision of this header
+ *                                   documented as a NAMED gap. All four flags are
+ *                                   REQUIRED TOGETHER, exactly like `add` (a partial set
+ *                                   fails schema validation naming the missing field) —
+ *                                   REPLACES the whole `verify.falsifier` object; passing
+ *                                   NONE of the four leaves an existing falsifier
+ *                                   untouched (`SetCriterionPatch.falsifier`'s own JSDoc,
+ *                                   `service/ac-service.ts`, documents the
+ *                                   require-all-four-together partial-update contract and
+ *                                   why a field-level merge onto a stale value was
+ *                                   rejected); exits 4 against a non-script-mode criterion
+ *                                   (D5, same shape as `--oracle`/`--command`).
  *
  * `add`/`set` additionally print the approved->draft demotion an edit MAY trigger
  * (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2, AC-GV-4) —
@@ -127,7 +136,10 @@
  *   PRODUCTION wiring — the D8 escape was service-layer-only and unit-tested but
  *   unreachable from a real `lore ac add`/`ac set` invocation until this task);
  *   spec-falsifiability-reachability-a-feedable-checkpoint-an §D2 (`--falsifier-*`
- *   on `add` — declared-falsifier authoring)
+ *   declared-falsifier authoring, now on BOTH `add` and `set`);
+ *   task-make-lore-ac-set-accept-the-falsifier-flags-its-own-error (`set` wiring +
+ *   the suggested-command-integrity scanner, AC-FR-9,
+ *   scripts/tests/error-message-commands-executable.test.ts)
  */
 
 import { defineCommand } from "citty";
@@ -423,6 +435,30 @@ export default defineCommand({
             "D8 escape: REQUIRED non-empty reason to declare a script-mode command naming a test path not yet " +
             "on disk. Empty/absent reason is refused when the (possibly untouched) resulting command is missing.",
         },
+        "falsifier-path": {
+          type: "string",
+          description:
+            "script mode only: REPLACE the declared falsifier's repo-relative path (spec-falsifiability-" +
+            "reachability §D2). Required together with the other three --falsifier-* flags — a partial set " +
+            "fails schema validation naming the missing field, same as `ac add`. Passing NONE of the four " +
+            "leaves an existing falsifier untouched (no field-level merge — see AcService.SetCriterionPatch).",
+        },
+        "falsifier-find": {
+          type: "string",
+          description: "script mode only: REPLACE the falsifier's literal find-text. Required together with the " +
+            "other three --falsifier-* flags.",
+        },
+        "falsifier-replace": {
+          type: "string",
+          description: "script mode only: REPLACE the falsifier's replacement text for --falsifier-find's FIRST " +
+            "occurrence. Required together with the other three --falsifier-* flags.",
+        },
+        "falsifier-exit-code": {
+          type: "string",
+          description:
+            "script mode only: REPLACE the EXACT exit code (never \"non-zero\") the mutation is declared to " +
+            "produce. Required together with the other three --falsifier-* flags.",
+        },
         mode: {
           type: "string",
           description: "NOT editable — exits 2; use `ac rm --force` then `ac add --mode <new>` instead",
@@ -448,7 +484,8 @@ export default defineCommand({
         const patch = buildSetPatch(args);
         if (patch === null) {
           process.stderr.write(
-            "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, --note, --covers\n",
+            "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, " +
+              "--rubric, --note, --covers, --falsifier-path/-find/-replace/-exit-code\n",
           );
           process.exitCode = 2;
           return;
@@ -552,10 +589,18 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
  * `--falsifier-exit-code`) is passed through as-is and fails schema
  * validation naming the missing field — never silently dropped or defaulted.
  *
+ * Shared VERBATIM by BOTH `add`'s {@link buildCriterionCandidate} and `set`'s
+ * `buildSetPatch` (task-make-lore-ac-set-accept-the-falsifier-flags-its-own-error)
+ * — one assembly function, never a second copy for `set`. On `set`, `undefined`
+ * here means "no `--falsifier-*` flag at all", which `AcService.setCriterion`
+ * (`SetCriterionPatch.falsifier`) treats as "leave the existing falsifier
+ * untouched" — never as "clear it".
+ *
  * @returns `undefined` when NONE of the four flags were passed (the common
- *   case — a script-mode AC with no falsifier declared); a shaped candidate
- *   object otherwise, keyed by `--falsifier-path`'s presence (the flag every
- *   other one is documented as "required together with").
+ *   case — a script-mode AC with no falsifier declared, or a `set` call not
+ *   touching the falsifier at all); a shaped candidate object otherwise, keyed
+ *   by `--falsifier-path`'s presence (the flag every other one is documented
+ *   as "required together with").
  */
 function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
   const path = args["falsifier-path"];
@@ -638,6 +683,14 @@ function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string): De
  *   to `set` (D1): a SINGLE occurrence of the empty string (`--covers ""`) is the
  *   documented "clear to `[]`" sentinel, distinct from `add`'s "no `--covers` at all
  *   means no `requirement_refs` field" (there is no prior value to clear on `add`).
+ * @remarks `--falsifier-*` reuses {@link buildFalsifierCandidate} VERBATIM — the SAME
+ *   assembly function `add` already uses, never a second copy. That function returns
+ *   `undefined` only when NONE of the four flags were passed (leaves the patch field
+ *   absent, so `AcService.setCriterion` leaves any existing falsifier untouched);
+ *   otherwise it shapes WHATEVER subset was passed — a partial set is NOT rejected
+ *   here, it is passed through to fail `specAcceptanceCriteriaSchema` naming the
+ *   missing field(s), the require-all-four-together contract `SetCriterionPatch.falsifier`'s
+ *   own JSDoc documents.
  */
 function buildSetPatch(args: Record<string, unknown>): SetCriterionPatch | null {
   const patch: SetCriterionPatch = {};
@@ -653,6 +706,9 @@ function buildSetPatch(args: Record<string, unknown>): SetCriterionPatch | null 
   } else if (Array.isArray(coversRaw)) {
     patch.covers = coversRaw as string[];
   }
+
+  const falsifier = buildFalsifierCandidate(args);
+  if (falsifier !== undefined) patch.falsifier = falsifier;
 
   return Object.keys(patch).length === 0 ? null : patch;
 }

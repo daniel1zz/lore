@@ -15,8 +15,11 @@
  *   setCriterion(specIdOrSlug, acId, patch)        → AcceptanceCriterion[] (updated list) —
  *     in-place edit of ONE declared criterion (spec-lore-ac-set-in-place-edit-of-a-declared-
  *     acceptance, D1-D6). `id`/`mode` are immutable; `statement`/`covers` are mode-agnostic;
- *     `oracle`/`command` (script) / `rubric` (ai) / `note` (human) are mode-specific and
- *     rejected as VALIDATION_ERROR when passed against a criterion of a different mode (D5).
+ *     `oracle`/`command`/`falsifier` (script) / `rubric` (ai) / `note` (human) are mode-specific
+ *     and rejected as VALIDATION_ERROR when passed against a criterion of a different mode (D5).
+ *     `falsifier` (task-make-lore-ac-set-accept-the-falsifier-flags-its-own-error) REPLACES the
+ *     whole `verify.falsifier` object — see {@link SetCriterionPatch.falsifier}'s own JSDoc for
+ *     the require-all-four-together partial-update contract.
  *
  * @invariant All methods return Promise<Result<T, LoreError>> — no thrown exceptions.
  * @invariant `addCriterion` validates the FULL candidate array (existing + new) via
@@ -135,13 +138,33 @@ export interface RemoveCriterionOpts {
  *
  * @invariant `statement` and `covers` are mode-agnostic — every criterion has a
  *   statement, and any criterion may declare covered PRD requirement ids.
- * @invariant `oracle`/`command` apply only to a `mode: "script"` criterion, `rubric`
- *   only to `"ai"`, `note` only to `"human"` — passing one against a criterion of a
- *   different mode is VALIDATION_ERROR (D5), never silently accepted-and-dropped.
+ * @invariant `oracle`/`command`/`falsifier` apply only to a `mode: "script"`
+ *   criterion, `rubric` only to `"ai"`, `note` only to `"human"` — passing one
+ *   against a criterion of a different mode is VALIDATION_ERROR (D5), never
+ *   silently accepted-and-dropped.
  * @invariant `covers`, when present, REPLACES `requirement_refs` wholesale — an
  *   empty array (`[]`) clears it. `undefined` (the field omitted) leaves the
  *   existing `requirement_refs` untouched. The caller (CLI `commands/ac.ts`) is
  *   responsible for turning a bare `--covers ""` into `[]` before calling here.
+ * @invariant `falsifier` — **REQUIRE-ALL-FOUR-TOGETHER partial-update contract**
+ *   (task-make-lore-ac-set-accept-the-falsifier-flags-its-own-error): when present,
+ *   it REPLACES the criterion's ENTIRE `verify.falsifier` object; `undefined` (no
+ *   `--falsifier-*` flag passed at all) leaves any existing falsifier untouched.
+ *   There is NO field-level merge onto a previously-stored falsifier — a caller
+ *   supplying only SOME of the four `--falsifier-*` flags produces a PARTIAL
+ *   candidate object here (assembled by the CLI's `buildFalsifierCandidate`,
+ *   shared with `add`), which then fails `specAcceptanceCriteriaSchema`'s
+ *   `acFalsifierSchema` (`@lore/core`) naming the missing field(s) — the SAME
+ *   all-four-or-fail-loud shape `add` already documents on itself. This was a
+ *   deliberate choice between two defensible options (either is fine; an
+ *   UNDOCUMENTED half-write is not, per this task's own mandate): a field-level
+ *   merge would let a caller change ONLY `expected_exit_code` while silently
+ *   keeping a now-stale `find`/`replace` pair pointed at content that may no
+ *   longer exist — exactly the kind of half-write CLAUDE.md's "governance `set`
+ *   commands... silently swallow" standing rule warns about. Requiring all four
+ *   together makes every `set`-edited falsifier as fully re-declared, and
+ *   therefore as trustworthy, as one created via `add` — never a blend of new
+ *   and stale values a reader would have to reconstruct by hand.
  */
 export interface SetCriterionPatch {
   statement?: string;
@@ -150,6 +173,14 @@ export interface SetCriterionPatch {
   rubric?: string;
   note?: string;
   covers?: string[];
+  /**
+   * Untyped candidate `AcFalsifier` shape — same rationale as `buildCriterionCandidate`'s
+   * `verify` field in `commands/ac.ts`: `specAcceptanceCriteriaSchema` (via `acFalsifierSchema`)
+   * is the single source of truth for whether all four sub-fields (`path`/`find`/`replace`/
+   * `expected_exit_code`) are present and well-formed. This field only carries the shaped
+   * candidate through; it is never itself validated here.
+   */
+  falsifier?: unknown;
 }
 
 // ─── D8 Declaration-Time Path-Existence Check ──────────────────────────────
@@ -464,13 +495,15 @@ export class AcService {
       patch.command !== undefined ||
       patch.rubric !== undefined ||
       patch.note !== undefined ||
-      patch.covers !== undefined;
+      patch.covers !== undefined ||
+      patch.falsifier !== undefined;
     if (!hasAnyField) {
       return err({
         code: "VALIDATION_ERROR",
         field: "patch",
         message:
-          "lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, --note, --covers",
+          "lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, " +
+          "--note, --covers, --falsifier-path/-find/-replace/-exit-code",
         value: patch,
       });
     }
@@ -505,6 +538,9 @@ export class AcService {
     }
     if (patch.command !== undefined && mode !== "script") {
       return err(modeMismatchError(acId, "--command", mode));
+    }
+    if (patch.falsifier !== undefined && mode !== "script") {
+      return err(modeMismatchError(acId, "--falsifier-*", mode));
     }
     if (patch.rubric !== undefined && mode !== "ai") {
       return err(modeMismatchError(acId, "--rubric", mode));
@@ -972,6 +1008,17 @@ function buildVerifyCandidate(
         oracle: patch.oracle ?? existingVerify.oracle,
         command: patch.command ?? existingVerify.command,
         ...(existingVerify.timeout_ms !== undefined ? { timeout_ms: existingVerify.timeout_ms } : {}),
+        // reason: REQUIRE-ALL-FOUR-TOGETHER partial-update contract (see
+        // SetCriterionPatch.falsifier's own JSDoc) — `patch.falsifier` REPLACES
+        // the whole object wholesale when present (a partial candidate fails
+        // `acFalsifierSchema` naming the missing field, never a silent
+        // field-level merge onto `existingVerify.falsifier`); absent leaves the
+        // existing falsifier (if any) untouched.
+        ...(patch.falsifier !== undefined
+          ? { falsifier: patch.falsifier }
+          : existingVerify.falsifier !== undefined
+            ? { falsifier: existingVerify.falsifier }
+            : {}),
       };
     case "ai":
       return { mode: "ai", rubric: patch.rubric ?? existingVerify.rubric };
@@ -1005,7 +1052,7 @@ function modeMismatchError(acId: string, flag: string, actualMode: AcVerifyMode)
 
 /** The verify mode a given mode-specific flag belongs to (for modeMismatchError's message). */
 function modeFieldName(flag: string): AcVerifyMode {
-  if (flag === "--oracle" || flag === "--command") return "script";
+  if (flag === "--oracle" || flag === "--command" || flag === "--falsifier-*") return "script";
   if (flag === "--rubric") return "ai";
   return "human";
 }
