@@ -85,8 +85,11 @@ import type { GateContext } from "./checkpoint-registry.js";
 import {
   computeArmedGates,
   buildUpstreamSpecContext,
+  checkpointRegistry,
   countScriptModeAcceptanceCriteria,
+  describeCheckpointVacuity,
   isNonPlanParentError,
+  PLAN_CLOSE_VACUITY_NOTICE_FIELD,
 } from "./checkpoint-registry.js";
 import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
@@ -2315,6 +2318,45 @@ export class CorpusService {
 
       const gateResult = this.gateEnforcer.enforce("plan-close", planCloseCtx);
       if (!gateResult.ok) return gateResult;
+
+      // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render
+      // (spec-governance-visibility-an-armed-gate-that-vacuously-passes §AC-GV-6)
+      // — `enforce()` above already ran `checkpointRegistry["plan-close"].check`
+      // internally and, via `warnVacuousCheckpoint`, already prints THIS SAME
+      // notice to stderr when the run was fully vacuous — that pre-existing
+      // mechanism is the human-render half of the discriminator. Nothing put
+      // the fact anywhere a `--json` consumer could read: measured directly
+      // (throwaway-corpus probe, not assumed) that a vacuous and a satisfied
+      // close both serialized to `"extra": {}"` before this line existed. This
+      // recomputes the SAME pure check via the SAME exported functions
+      // `enforce()` used (never a second, divergent implementation) purely to
+      // READ the verdict back out, since `enforce()`'s own signature returns
+      // only ok/err on all seven checkpoints and widening it would ripple into
+      // every other call site's pinned `Result<void, LoreError>` return type.
+      // Written to `extra` ONLY when vacuous — a satisfied close, or a
+      // fully-exempted one (already announced via
+      // `formatAttestationExemptionNotice`), gets no new key at all, so every
+      // pre-existing satisfied-close fixture's `extra` shape stays untouched.
+      //
+      // reason: `planCloseCheckpointDef` is provably defined here — the
+      // `enforce("plan-close", …)` call two lines above already resolved this
+      // SAME registry key and would have thrown its own "checkpoint not
+      // registered" internal-invariant error otherwise (checkpoint-registry.ts's
+      // second module invariant: all `GateCheckpoint` members are registered).
+      // The check is still explicit, never a `!` assertion, so a future
+      // registry edit that broke that invariant fails loud HERE too, not only
+      // inside `enforce()`.
+      const planCloseCheckpointDef = checkpointRegistry["plan-close"];
+      if (planCloseCheckpointDef === undefined) {
+        throw new Error('Internal error: gate checkpoint "plan-close" not registered');
+      }
+      const planCloseVacuityNotice = describeCheckpointVacuity(
+        "plan-close",
+        planCloseCheckpointDef.check(planCloseCtx),
+      );
+      if (planCloseVacuityNotice !== null) {
+        docPatch.extra = { ...effectiveExtra, [PLAN_CLOSE_VACUITY_NOTICE_FIELD]: planCloseVacuityNotice };
+      }
     }
 
     // BUG-002 (audit finding) — update + version snapshot + update audit entry as
