@@ -1,0 +1,27 @@
+{
+  // reason: C1 (spec-typecheck-coverage-two-named-blind-spots-and-the-stale) — a
+  // dedicated project for packages/dashboard/tests/e2e/** (27 .ts files), deliberately
+  // WITHOUT a `rootDir` override. tsconfig.tests.json sets `rootDir: "."` to admit
+  // tests/** alongside src/**, but two of the 27 files here
+  // (mint-machine-dashboard-key.ts, multi-project-server.ts) import from
+  // packages/lore/src/**, outside any rootDir rooted at packages/dashboard/ — under
+  // an explicit rootDir that drags 100+ cross-package files into the program and
+  // reports every one as TS6059 "not under rootDir" (measured 2026-08-07 via
+  // tsconfig.tests.json: 102 TS6059 + 7 TS2307 + 8 TS2868, none of it a real
+  // defect). Omitting rootDir here lets tsc infer it from the resolved file set
+  // instead of validating against a fixed one, so the cross-package imports
+  // typecheck cleanly. Do NOT add a rootDir override to this file — that
+  // reintroduces the exact storm this project exists to avoid.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // reason: the e2e helpers import packages/lore/src/**, which uses Bun globals
+    // (`Bun`, `bun:sqlite`) — the parent tsconfig.json narrows "types" to ["node"]
+    // for the browser-safe dashboard src/, so this project restores "bun-types"
+    // alongside it (measured: without this, the program resolves cleanly but
+    // reports 17 errors — TS2307 on `bun:sqlite`/`bun`, TS2868 on the `Bun`
+    // global, TS7006 implicit-any on Bun-typed callback params).
+    "types": ["node", "bun-types"]
+  },
+  "include": ["tests/e2e/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
