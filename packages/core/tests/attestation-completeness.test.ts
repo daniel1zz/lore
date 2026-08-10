@@ -25,7 +25,12 @@
  * @spec_ref SPEC-061 §Scope D1; §Acceptance Criteria AC-061-1, AC-061-2,
  *   AC-061-3, AC-061-9, AC-061-10; task
  *   task-fix-spec-061-miss-vitest-t-zero-matched-case-run-recorded (vitest
- *   "-t matches 0 cases" false-oracle miss fix)
+ *   "-t matches 0 cases" false-oracle miss fix); spec
+ *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.1,
+ *   AC-OX-1 (`findDiscoveryRefusal` — the final `describe` block below;
+ *   its live-capture regression sibling is
+ *   packages/lore/tests/e2e/discovery-refusal-live-capture.bun.test.ts,
+ *   AC-OX-5)
  */
 
 import { describe, it, expect } from "vitest";
@@ -38,6 +43,7 @@ import {
   judgeBinaryFreshness,
   isTestFileAnchor,
   commandRunsFileUnfiltered,
+  findDiscoveryRefusal,
 } from "../src/attestation-completeness.js";
 
 describe("countExplicitPathArgs", () => {
@@ -544,5 +550,90 @@ describe("commandRunsFileUnfiltered", () => {
 
   it("REGRESSION: a selective/derived-set command (test:changed) never counts, however plausible the file ran", () => {
     expect(commandRunsFileUnfiltered("bun run test:changed main", FILE)).toBe(false);
+  });
+});
+
+// ─── findDiscoveryRefusal (SPEC-OX M6.1, discovery-refusal) ────────────────
+//
+// The three phrases below were CAPTURED verbatim from live runner spawns
+// against a nonexistent path on 2026-08-10 (see AC-OX-5's
+// discovery-refusal-live-capture.bun.test.ts, which re-captures them by
+// SPAWNING each runner rather than trusting this hand-copied string) — never
+// recalled from memory. None of them carries a `parseExecutedUnits`-shaped
+// summary line, which is exactly why a discovery refusal was indistinguishable
+// from a genuine `fail` before this function existed.
+describe("findDiscoveryRefusal (discovery-refusal)", () => {
+  const VITEST_REFUSAL_TAIL =
+    "\n RUN  v3.2.6 /repo\n\nNo test files found, exiting with code 1\n\n" +
+    "filter: packages/core/tests/does-not-exist.test.ts\n";
+  const BUN_REFUSAL_TAIL =
+    'bun test v1.3.10 (30e609e0)\nThe following filters did not match any test files in --cwd="/repo/packages/lore":\n' +
+    " tests/unit/does-not-exist.test.ts\n861 files were searched [7.00ms]\n\n" +
+    'note: Tests need ".test", "_test_", ".spec" or "_spec_" in the filename (ex: "MyApp.test.ts")\n';
+  const PLAYWRIGHT_REFUSAL_TAIL =
+    "Error: No tests found.\nMake sure that arguments are regular expressions matching test files.\n" +
+    'You may need to escape symbols like "$" or "*" and quote the arguments.\n';
+  const GENUINE_VITEST_FAILURE_TAIL =
+    "\n Test Files  3 failed | 4 passed (7)\n      Tests  12 failed | 46 passed (58)\n";
+
+  it("HAPPY: recognises vitest's discovery-refusal phrase, naming the runner", () => {
+    const verdict = findDiscoveryRefusal(VITEST_REFUSAL_TAIL);
+    expect(verdict).not.toBeNull();
+    expect(verdict?.runner).toBe("vitest");
+    expect(verdict?.evidence).toContain("No test files found, exiting with code 1");
+  });
+
+  it("HAPPY: recognises bun test's discovery-refusal phrase, naming the runner", () => {
+    const verdict = findDiscoveryRefusal(BUN_REFUSAL_TAIL);
+    expect(verdict).not.toBeNull();
+    expect(verdict?.runner).toBe("bun");
+    expect(verdict?.evidence).toContain("did not match any test files");
+  });
+
+  it("HAPPY: recognises playwright's discovery-refusal phrase, naming the runner", () => {
+    const verdict = findDiscoveryRefusal(PLAYWRIGHT_REFUSAL_TAIL);
+    expect(verdict).not.toBeNull();
+    expect(verdict?.runner).toBe("playwright");
+    expect(verdict?.evidence).toContain("Error: No tests found.");
+  });
+
+  it("NEGATIVE: a tail carrying a real vitest failure summary line is never mistaken for a refusal", () => {
+    expect(findDiscoveryRefusal(GENUINE_VITEST_FAILURE_TAIL)).toBeNull();
+  });
+
+  it("BOUNDARY: an empty tail matches nothing and returns null, never throws", () => {
+    expect(() => findDiscoveryRefusal("")).not.toThrow();
+    expect(findDiscoveryRefusal("")).toBeNull();
+  });
+
+  it("ERROR: arbitrary unrelated stdout never throws, degrades to null", () => {
+    expect(() => findDiscoveryRefusal("some unrelated tool output\n")).not.toThrow();
+    expect(findDiscoveryRefusal("some unrelated tool output\n")).toBeNull();
+  });
+
+  it("STATE: is referentially transparent — repeated calls on the same input agree", () => {
+    expect(findDiscoveryRefusal(VITEST_REFUSAL_TAIL)).toEqual(findDiscoveryRefusal(VITEST_REFUSAL_TAIL));
+  });
+
+  it("REGRESSION: deleting the vitest pattern must not let its phrase silently match the bun/playwright runner instead", () => {
+    // Pinned as a same-file regression: if a future edit merges the three
+    // patterns into one over-broad regex, this assertion is what would
+    // catch the runner mislabelling (vitest's phrase must resolve to
+    // "vitest", never fall through to "bun" or "playwright").
+    const verdict = findDiscoveryRefusal(VITEST_REFUSAL_TAIL);
+    expect(verdict?.runner).not.toBe("bun");
+    expect(verdict?.runner).not.toBe("playwright");
+  });
+
+  it("REGRESSION: a discovery-refusal tail never ALSO parses as an executed-units summary (mutual exclusivity with parseExecutedUnits)", () => {
+    // bun test's refusal tail contains "861 files were searched" — this must
+    // never be misread as either runner's own summary shape
+    // (parseExecutedUnits recognises neither vitest's "Test Files ... (N)"
+    // nor bun's "Ran N tests across M files" lines here), confirming
+    // findDiscoveryRefusal's phrase-based detection covers a case
+    // parseExecutedUnits structurally cannot.
+    expect(parseExecutedUnits(BUN_REFUSAL_TAIL)).toBeNull();
+    const verdict = findDiscoveryRefusal(BUN_REFUSAL_TAIL);
+    expect(verdict?.runner).toBe("bun");
   });
 });

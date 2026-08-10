@@ -59,6 +59,18 @@
  *     the (broader) flag set {@link commandRunsFileUnfiltered} recognises,
  *     colocated for the same anti-drift reason as
  *     {@link CASE_FILTER_FLAGS_DESCRIPTION}.
+ *   - findDiscoveryRefusal(outputTail) — recognises one of the three known
+ *     runners' (vitest / bun test / playwright) discovery-refusal phrases —
+ *     the wording printed when a runner's path filter(s) matched ZERO test
+ *     files, an exit-1 outcome otherwise indistinguishable from a genuine
+ *     assertion failure. Returns a {@link DiscoveryRefusal} naming the runner
+ *     and the verbatim matched phrase, or `null` for any genuine run outcome
+ *     or unrecognised input. spec-oracle-executability-a-runner-s-discovery-
+ *     refusal-is-not-a §M6.1 — the missing primitive that makes
+ *     `verify-runner-service.ts`'s completeness guard usable on the exit != 0
+ *     branch (M6.2, consumed there, not in this module).
+ *   - DiscoveryRefusal — the verdict shape `findDiscoveryRefusal` returns:
+ *     `{runner: "vitest" | "bun" | "playwright", evidence: string}`.
  *
  * Invariants:
  *   - Referentially transparent: same input in → same output, always.
@@ -103,7 +115,10 @@
  *   vitest "-t matches 0 cases but every test is reported `skipped`, not
  *   `passed`" miss — SPEC-075 T1-stage incident); task
  *   task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested (the
- *   unfiltered-file-run detector, §"Unfiltered-File-Run Detection" below)
+ *   unfiltered-file-run detector, §"Unfiltered-File-Run Detection" below);
+ *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.1,
+ *   AC-OX-1 (`findDiscoveryRefusal`, §"Discovery-Refusal Detection" below —
+ *   task-add-finddiscoveryrefusal-to-lore-core-with-a-live-runner)
  */
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
@@ -999,4 +1014,106 @@ export function commandRunsFileUnfiltered(command: string, filePath: string): bo
     if (normalizeForComparison(joined) === target) return true;
   }
   return false;
+}
+
+// ─── Discovery-Refusal Detection (SPEC-OX M6.1) ─────────────────────────────
+//
+// A runner that finds ZERO matching test files exits 1 — the SAME exit code
+// as a genuine assertion failure — but this repo's three runners each print
+// a distinct, stable phrase that appears ONLY on a discovery refusal and
+// NEVER alongside a real run summary (`parseExecutedUnits`'s two patterns).
+// This is the missing primitive spec-oracle-executability-a-runner-s-
+// discovery-refusal-is-not-a §M6.1 names: without it, dropping the
+// `executedSuccessfully` gate on the exit != 0 branch (the "obvious fix") is
+// a no-op, because `parseExecutedUnits` returns `null` for all three phrases
+// and `judgeCompleteness` already fails open to `unknown_runner` on `null` —
+// this module needs a DIFFERENT signal than "no summary line", namely "the
+// runner said, in its own words, that it found nothing".
+
+/**
+ * One recognised runner's exact discovery-refusal wording, captured VERBATIM
+ * from a live spawn against a nonexistent path (2026-08-10) — never
+ * paraphrased, so a consumer's message can quote the runner rather than
+ * describe it secondhand.
+ */
+const VITEST_DISCOVERY_REFUSAL_PATTERN = /No test files found, exiting with code 1/;
+const BUN_DISCOVERY_REFUSAL_PATTERN = /The following filters did not match any test files/;
+const PLAYWRIGHT_DISCOVERY_REFUSAL_PATTERN = /Error: No tests found\./;
+
+/**
+ * The verdict {@link findDiscoveryRefusal} returns for a recognised
+ * discovery-refusal phrase.
+ */
+export type DiscoveryRefusal = {
+  /** Which of the three runners this repo uses produced the refusal. */
+  readonly runner: "vitest" | "bun" | "playwright";
+  /**
+   * The verbatim matched substring that proved it — quotes the runner,
+   * never paraphrases (see {@link findDiscoveryRefusal}'s JSDoc for why this
+   * matters to a consumer's operator-facing message).
+   */
+  readonly evidence: string;
+};
+
+/**
+ * Recognises whether `outputTail` carries one of the three known runners'
+ * discovery-refusal phrases — the wording a runner prints when its path
+ * filter(s) matched ZERO test files, as opposed to a genuine run (of any
+ * outcome) that always carries a `parseExecutedUnits`-shaped summary line.
+ *
+ * Detection is by RUNNER TEXT, never by exit code: every runner this repo
+ * uses returns the SAME exit code (1) for "found nothing" as for "ran and at
+ * least one assertion failed" — only the runner's own words separate the two.
+ * A tail carrying a genuine failure summary (e.g. vitest's `"Test Files 3
+ * failed | 4 passed (7)"`) never matches any of the three patterns below,
+ * because a runner that actually loaded and executed a file never ALSO
+ * prints "found nothing" — the two phrasings are mutually exclusive by
+ * construction of each runner's own CLI, independently confirmed against a
+ * live spawn of all three (see
+ * `packages/lore/tests/e2e/discovery-refusal-live-capture.bun.test.ts`,
+ * AC-OX-5 — the sibling oracle that re-captures these phrases by SPAWNING
+ * each runner rather than trusting this hand-copied set of patterns to
+ * never drift from what the runner actually prints).
+ *
+ * @param outputTail - Captured process output (stdout+stderr concatenated),
+ *   the same shape {@link parseExecutedUnits} consumes.
+ * @returns The matching {@link DiscoveryRefusal}, or `null` when `outputTail`
+ *   carries none of the three known phrases (including every genuine run
+ *   outcome, and arbitrary/garbled/empty input — never throws).
+ *
+ * @example
+ * findDiscoveryRefusal("No test files found, exiting with code 1\n")
+ * // => { runner: "vitest", evidence: "No test files found, exiting with code 1" }
+ *
+ * @example
+ * findDiscoveryRefusal(
+ *   'The following filters did not match any test files in --cwd="/repo":\n' +
+ *     " tests/x.test.ts\n861 files were searched [7.00ms]\n",
+ * )
+ * // => { runner: "bun", evidence: "The following filters did not match any test files" }
+ *
+ * @example
+ * findDiscoveryRefusal("Error: No tests found.\n")
+ * // => { runner: "playwright", evidence: "Error: No tests found." }
+ *
+ * @example
+ * findDiscoveryRefusal("Test Files  3 failed | 4 passed (7)\n") // => null — a genuine run, however it exits, never carries this phrasing
+ */
+export function findDiscoveryRefusal(outputTail: string): DiscoveryRefusal | null {
+  const vitestMatch = VITEST_DISCOVERY_REFUSAL_PATTERN.exec(outputTail);
+  if (vitestMatch !== null) {
+    return { runner: "vitest", evidence: vitestMatch[0] };
+  }
+
+  const bunMatch = BUN_DISCOVERY_REFUSAL_PATTERN.exec(outputTail);
+  if (bunMatch !== null) {
+    return { runner: "bun", evidence: bunMatch[0] };
+  }
+
+  const playwrightMatch = PLAYWRIGHT_DISCOVERY_REFUSAL_PATTERN.exec(outputTail);
+  if (playwrightMatch !== null) {
+    return { runner: "playwright", evidence: playwrightMatch[0] };
+  }
+
+  return null;
 }
