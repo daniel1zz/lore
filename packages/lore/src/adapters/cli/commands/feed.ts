@@ -76,14 +76,21 @@
  * renderTaskStartPack` (D7 — vitest-testable, reusable by a future claim-time print
  * or dashboard surface without touching this file).
  *
- * Exit code: for the generic `CHECKPOINT_PRODUCED_TYPE`-driven path, ALWAYS 0 — feed
- * is advisory context, never a gate (module header, task objective). For
+ * Exit code: for the generic REGISTERED-checkpoint path (any name accepted by
+ * `../../../service/checkpoint-registry.js::isRegisteredCheckpoint`), ALWAYS 0 —
+ * feed is advisory context, never a gate (module header, task objective). For
  * `session-resume`, `phase-start`, AND `task-start`, 0 on success — a resolution
  * failure maps through the normal `exitCode()`/`formatError()` pipeline instead, since
  * an unresolvable target is a caller input error, not an advisory-degrade case.
+ * ⛔ AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make): a
+ * checkpoint name that is NEITHER special NOR registered in `checkpointRegistry`
+ * exits EXACTLY 2 — never 0. Before this task every unrecognized name silently
+ * exited 0 with a one-line "unknown checkpoint" note, so `lore feed <typo> &&
+ * <next step>` proceeded as though a pack had actually been delivered.
  *
  * Source: IoC vertical-slice tech-spec §4.1/§11, P4 slice; SPEC-041 §3 D5;
- *   SPEC-056 §Design Decisions D5; SPEC-070 §Design Decisions D1, D7
+ *   SPEC-056 §Design Decisions D5; SPEC-070 §Design Decisions D1, D7;
+ *   task-derive-lore-feed-s-checkpoint-set-from-the-registry-make
  */
 
 import { defineCommand } from "citty";
@@ -100,6 +107,7 @@ import {
 import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../../flows/phase-feed-flow.js";
 import type { PhaseStartPack } from "../../../flows/phase-feed-flow.js";
 import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../../flows/task-feed-flow.js";
+import { isRegisteredCheckpoint } from "../../../service/checkpoint-registry.js";
 import { buildPhaseFeedFlowDeps } from "../phase-wiring.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../task-feed-wiring.js";
 import { renderTaskStartPack } from "../task-feed-render.js";
@@ -301,6 +309,21 @@ export default defineCommand({
           const target = typeof args.target === "string" ? [args.target] : [];
           recordFeedTrace(app, checkpointName, target);
         }
+        return;
+      }
+
+      // D1/AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make):
+      // `checkpointRegistry` is the SSOT for the generic path's accepted checkpoint
+      // names. An UNREGISTERED name refuses loud (exit 2, matching the arity errors
+      // the special handlers above already return for a missing target) instead of
+      // the pre-fix silent-success `buildFeed` advisory note (exit 0) — a script
+      // running `lore feed <typo> && <next step>` used to proceed as though a pack
+      // had actually been delivered. `isRegisteredCheckpoint` is the EXACT predicate
+      // `checkpointRegistry`'s own module invariant already prescribes — never a
+      // second hand-maintained list of valid names.
+      if (!isRegisteredCheckpoint(checkpointName)) {
+        process.stderr.write(`Error: unknown checkpoint "${checkpointName}" — not registered as a lore gate checkpoint.\n`);
+        process.exitCode = 2;
         return;
       }
 

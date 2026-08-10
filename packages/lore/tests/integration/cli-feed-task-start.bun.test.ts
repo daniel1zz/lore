@@ -555,10 +555,15 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
     expect(result.stdout).toBe(expected);
   });
 
-  it("an unknown checkpoint still falls through to the generic advisory note, exit 0", () => {
+  // reason: AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-
+  // make) — an UNREGISTERED checkpoint name now exits EXACTLY 2, never the
+  // pre-fix silent-success 0. `checkpointRegistry` (not the special-dispatch
+  // table this file otherwise exercises) is the SSOT for this refusal.
+  it("an unregistered checkpoint exits EXACTLY 2, never the pre-fix silent-success 0", () => {
     const result = runLore(["feed", "totally-unknown-checkpoint"], tmpDir);
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe("unknown checkpoint: totally-unknown-checkpoint");
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout.trim()).toBe("");
+    expect(result.stderr).toContain("totally-unknown-checkpoint");
   });
 
   it("REGRESSION (AC-CP-4, CLI stdout): the derivation-path call (no --handoff flag) carries RESUME_SCOPE_CLOSURE verbatim once a ticket is found", () => {

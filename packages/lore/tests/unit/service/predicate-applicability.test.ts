@@ -308,15 +308,16 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   }
 
   // HAPPY — the pinned contract: enforce() returns ok (never a deny) AND
-  // records exactly one best-effort audit row naming the absent referent.
-  it("HAPPY: enforce returns ok and records one audit row naming the absent referent", () => {
+  // records exactly one best-effort audit row naming the absent referent
+  // (PLUS, AC-FR-8/D7, one gate_passed row — the checkpoint was NOT blocked).
+  it("HAPPY: enforce returns ok and records one gate_not_applicable row naming the absent referent, plus one gate_passed row", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(undefined, recordGateSkip);
 
     const result = enforcer.enforce("plan-close", notApplicableCtx());
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    expect(recordGateSkip).toHaveBeenCalledTimes(2);
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.action).toBe("gate_not_applicable");
     expect(entry.details).toMatchObject({
@@ -324,6 +325,9 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       kind: "prd-sync-domain-doc",
       referent: "spec-x",
     });
+    const passEntry = recordGateSkip.mock.calls[1]![0];
+    expect(passEntry.action).toBe("gate_passed");
+    expect(passEntry.details).toEqual({ checkpoint: "plan-close", verdict: "pass" });
   });
 
   // ERROR — the pinned contract: a throwing (synchronous) audit writer leaves
@@ -373,13 +377,16 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
     const result = enforcer.enforce("plan-close", ctx);
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    // reason: AC-FR-8/D7 — 1 gate_not_applicable row PLUS 1 gate_passed row
+    // (the checkpoint was not blocked).
+    expect(recordGateSkip).toHaveBeenCalledTimes(2);
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.details).toMatchObject({
       checkpoint: "plan-close",
       kind: "attestation-not-applicable",
       referent: "plan-y",
     });
+    expect(recordGateSkip.mock.calls[1]![0].action).toBe("gate_passed");
   });
 
   // COVERAGE-RESTORE (task-assert-the-plan-close-vacuity-discriminator-on-the-
@@ -422,7 +429,8 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
 
     const result = enforcer.enforce("plan-close", ctx);
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    // reason: AC-FR-8/D7 — 1 gate_not_applicable row PLUS 1 gate_passed row.
+    expect(recordGateSkip).toHaveBeenCalledTimes(2);
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.action).toBe("gate_not_applicable");
     expect(entry.details).toMatchObject({
@@ -433,8 +441,9 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   });
 
   // STATE — a NORMAL (no not-applicable verdicts) enforce() call never touches
-  // the not-applicable audit path at all.
-  it("STATE: a plan-close call with no not-applicable verdicts never fires the not-applicable audit", () => {
+  // the not-applicable audit path, but DOES fire exactly one gate_passed row
+  // (AC-FR-8/D7 — a genuine, non-vacuous pass is no longer silent).
+  it("STATE: a plan-close call with no not-applicable verdicts fires gate_passed only, never gate_not_applicable", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(undefined, recordGateSkip);
     const ctx: GateContext = {
@@ -459,7 +468,10 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
     const result = enforcer.enforce("plan-close", ctx);
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(recordGateSkip).not.toHaveBeenCalled();
+    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    const entry = recordGateSkip.mock.calls[0]![0];
+    expect(entry.action).toBe("gate_passed");
+    expect(entry.details).toEqual({ checkpoint: "plan-close", verdict: "pass" });
   });
 
   // REGRESSION — the PRE-EXISTING config-disabled `gate_skipped` mechanism is
@@ -529,7 +541,8 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
     const result = enforcer.enforce("plan-close", ctx);
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(recordGateSkip).toHaveBeenCalledTimes(2);
+    // reason: AC-FR-8/D7 — 2 gate_not_applicable rows PLUS 1 gate_passed row.
+    expect(recordGateSkip).toHaveBeenCalledTimes(3);
     const details = recordGateSkip.mock.calls.map(
       (call) => call[0]!.details as { kind: string; referent: string },
     );
@@ -565,7 +578,8 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
     const result = enforcer.enforce("plan-close", ctx);
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    // reason: AC-FR-8/D7 — 1 gate_not_applicable row PLUS 1 gate_passed row.
+    expect(recordGateSkip).toHaveBeenCalledTimes(2);
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.action).toBe("gate_not_applicable");
     expect(entry.details).toMatchObject({
@@ -573,6 +587,7 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
       kind: "attestation-not-applicable",
       referent: "plan-undeclared",
     });
+    expect(recordGateSkip.mock.calls[1]![0].action).toBe("gate_passed");
   });
 
   // NEGATIVE — attestationFloor's OWN zero-evidence not-applicable case
@@ -595,7 +610,8 @@ describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-refere
 
     enforcer.enforce("plan-close", ctx);
 
-    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    // reason: AC-FR-8/D7 — 1 gate_not_applicable row PLUS 1 gate_passed row.
+    expect(recordGateSkip).toHaveBeenCalledTimes(2);
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.details).toMatchObject({ kind: "attestation-not-applicable", referent: "plan-y" });
   });

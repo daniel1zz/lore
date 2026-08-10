@@ -65,7 +65,13 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
 
     const result = enforcer.enforce("spec-promote", {
       acceptanceCriteriaCount: 0,
-      specIdOrSlug: "spec-x",
+      // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
+      // registry-make) — `specIdOrSlug` (display-only, usually a slug) is
+      // DELIBERATELY a DIFFERENT string from `targetDocId` (the REAL id) here,
+      // so an assertion keyed on the real id could not accidentally pass by
+      // reading the wrong field. `recordSkip` must read `targetDocId` only.
+      specIdOrSlug: "spec-x-slug",
+      targetDocId: "01SPECXREALID",
     });
 
     expect(result).toEqual({ ok: true, value: undefined });
@@ -76,11 +82,11 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.action).toBe("gate_skipped");
     expect(entry.actor).toBe("test-actor-gate-skip");
-    expect(entry.doc_id).toBe("spec-x");
+    expect(entry.doc_id).toBe("01SPECXREALID");
     expect(entry.details).toEqual({
       checkpoint: "spec-promote",
       mechanism: "config_disabled",
-      target: "spec-x",
+      target: "01SPECXREALID",
     });
     expect(typeof entry.timestamp).toBe("string");
     expect(entry.session_id).toBe("gate-skip");
@@ -89,8 +95,11 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
     expect(stderrSpy).not.toHaveBeenCalled();
   });
 
-  // HAPPY — task-claim's targetIdOrSlug field is also picked up as the target.
-  it("resolves target from ctx.targetIdOrSlug when specIdOrSlug is absent (task-claim shape)", () => {
+  // HAPPY — task-claim's target resolves from ctx.targetDocId — NEVER from the
+  // display-only ctx.targetIdOrSlug, even when the latter is present too
+  // (AC-FR-8/D7: the two must never be conflated, see GateContext.targetDocId's
+  // own JSDoc, checkpoint-registry.ts).
+  it("resolves target from ctx.targetDocId, never the display-only ctx.targetIdOrSlug (task-claim shape)", () => {
     const config = {
       project: { name: "x", author: "y" },
       workflow: { claim_ttl_minutes: 120, gates: { "task-claim": { enabled: false } } },
@@ -98,12 +107,16 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(config, recordGateSkip);
 
-    enforcer.enforce("task-claim", { hasSpecParent: false, targetIdOrSlug: "task-y" });
+    enforcer.enforce("task-claim", {
+      hasSpecParent: false,
+      targetIdOrSlug: "task-y-slug",
+      targetDocId: "01TASKYREALID",
+    });
 
     expect(recordGateSkip).toHaveBeenCalledTimes(1);
     const entry = recordGateSkip.mock.calls[0]![0];
-    expect(entry.doc_id).toBe("task-y");
-    expect(entry.details).toMatchObject({ checkpoint: "task-claim", target: "task-y" });
+    expect(entry.doc_id).toBe("01TASKYREALID");
+    expect(entry.details).toMatchObject({ checkpoint: "task-claim", target: "01TASKYREALID" });
   });
 
   // BOUNDARY — no target available at all (spec-create gates a not-yet-created
@@ -202,16 +215,22 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
     expect(stderrSpy.mock.calls[0]![0] as string).toContain("boom");
   });
 
-  // STATE — an ENABLED checkpoint that passes normally never calls recordGateSkip:
-  // the port fires ONLY on the config-disabled skip branch, never on a live pass.
-  it("does not call recordGateSkip when the checkpoint is enabled and passes", () => {
+  // STATE — an ENABLED checkpoint that passes normally calls recordGateSkip
+  // exactly once, but with a `gate_passed` entry, NEVER `gate_skipped` — the
+  // pre-AC-FR-8 version of this test asserted zero calls; the whole point of
+  // AC-FR-8 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make)
+  // is that a genuinely passing evaluation is no longer silent.
+  it("calls recordGateSkip with a gate_passed (never gate_skipped) entry when the checkpoint is enabled and passes", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(undefined, recordGateSkip);
 
     const result = enforcer.enforce("plan-promote", { hasSpecParent: false });
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(recordGateSkip).not.toHaveBeenCalled();
+    expect(recordGateSkip).toHaveBeenCalledTimes(1);
+    const entry = recordGateSkip.mock.calls[0]![0];
+    expect(entry.action).toBe("gate_passed");
+    expect(entry.details).toEqual({ checkpoint: "plan-promote", verdict: "pass" });
   });
 
   // STATE — an ENABLED checkpoint that BLOCKS also never calls recordGateSkip (a

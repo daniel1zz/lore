@@ -29,7 +29,16 @@
  *   addition doesn't have to touch this type — callers still SHOULD branch on
  *   `checkpointRegistry[cp] !== undefined` (or use `requireCheckpoint`-style lookups
  *   only where compile-time-known to already be populated) rather than assuming the
- *   partiality can never return.
+ *   partiality can never return. `isRegisteredCheckpoint` (below, next to
+ *   `checkpointRegistry`'s own definition) is that exact branch, exported as a named
+ *   predicate so `lore feed`'s CLI dispatch and its coverage test consult the SAME
+ *   membership check the registry itself defines (task-derive-lore-feed-s-checkpoint-
+ *   set-from-the-registry-make, D1) — never a second hand-maintained checkpoint list.
+ * @invariant `GateContext.targetDocId` (see that field's own JSDoc) is the ONLY
+ *   `GateContext` field this module's `check`/`feed` functions deliberately never
+ *   read — it exists solely for `GateEnforcer`'s own audit-trace write on a passing
+ *   evaluation (AC-FR-8/D7), and must never be conflated with the display-only
+ *   `specIdOrSlug`/`targetIdOrSlug` fields those functions DO read.
  * @invariant `plan-promote` encodes "no spec-tier ancestor ⇒ PASS" via
  *   `ctx.hasSpecParent === false` short-circuiting `check()` to an empty
  *   `PredicateResult[]` BEFORE its predicate runs — `isCheckpointBlocked([])` is
@@ -623,6 +632,29 @@ export interface GateContext {
    * none, which is the same state `[]` describes.
    */
   readonly reviewJudgmentBlockingQuestions?: readonly string[];
+
+  // -- ENFORCER-ONLY (every checkpoint) — never read by check()/feed() --
+  /**
+   * The candidate/target doc's REAL resolved id (`DocRecord.id`, a ULID) —
+   * populated by the CALLER for every checkpoint that has one
+   * (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make, AC-FR-8/D7).
+   * Consumed ONLY by `GateEnforcer`'s own audit-trace write on a PASSING
+   * evaluation (`gate_passed`'s `doc_id`) — no `check`/`feed` function in this
+   * module reads it, and it MUST NEVER be conflated with `specIdOrSlug`/
+   * `targetIdOrSlug` above: those are "as the caller supplied it" DISPLAY
+   * strings (in production, always the doc's SLUG, e.g. `existing.slug`/
+   * `doc.slug`), never guaranteed to be the doc's real id. `lore audit <doc>
+   * --json` resolves `<doc>` to its real id (`CorpusService.resolve`, ALWAYS
+   * `.id`, never the slug — verified empirically) before filtering by exact
+   * `doc_id` match; a `doc_id` column holding a slug would never match that
+   * filter, silently making the audited trace unreachable from the exact
+   * surface AC-FR-8 requires it be queryable from. For `spec-create`/
+   * `task-create` (a not-yet-persisted candidate), this is the id the caller
+   * already generated for the row it is about to insert — a real id from the
+   * moment `enforce()` returns `ok`, since the caller only proceeds to
+   * actually create the doc after a passing verdict.
+   */
+  readonly targetDocId?: string;
 }
 
 /**
@@ -2500,6 +2532,29 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   // task's anchors don't cover).
   "review-judgment": { id: "review-judgment", check: checkReviewJudgment, feed: feedReviewJudgment },
 };
+
+/**
+ * Whether `name` is a checkpoint CURRENTLY populated in {@link checkpointRegistry}
+ * — the ONE membership predicate `lore feed`'s CLI dispatch
+ * (`adapters/cli/commands/feed.ts`) and this task's coverage test both consult,
+ * so "is this checkpoint feedable" is DERIVED from the same object a checkpoint
+ * is registered into, never a second hand-maintained list of names (D1 —
+ * task-derive-lore-feed-s-checkpoint-set-from-the-registry-make). A checkpoint
+ * added to `checkpointRegistry` in the future becomes feedable the moment this
+ * predicate sees it — no second edit required anywhere else.
+ *
+ * @param name - Any string a caller supplied as a `lore feed <checkpoint>`
+ *   argument (or the MCP `lore_feed` tool's `checkpoint` field) — never assumed
+ *   to already be a `GateCheckpoint`.
+ * @returns `true` (narrowing `name` to `GateCheckpoint`) iff
+ *   `checkpointRegistry[name]` is populated.
+ * @example
+ * isRegisteredCheckpoint("spec-promote"); // => true
+ * isRegisteredCheckpoint("totally-unknown-checkpoint"); // => false
+ */
+export function isRegisteredCheckpoint(name: string): name is GateCheckpoint {
+  return checkpointRegistry[name as GateCheckpoint] !== undefined;
+}
 
 // ─── Armed Gates (SPEC-041 §3 bootstrap; SPEC-043 §Design Decisions D8) ────
 
