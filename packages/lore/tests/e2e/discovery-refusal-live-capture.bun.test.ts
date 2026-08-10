@@ -40,7 +40,12 @@
  *               future pattern merge that widens one runner's regex to
  *               swallow another's phrase would collapse this); each
  *               `evidence` field is asserted to be a verbatim substring of
- *               the actual captured output, never a paraphrase
+ *               the actual captured output, never a paraphrase; separately,
+ *               this suite's own playwright spawn is asserted to leave
+ *               `REPO_ROOT` free of a `test-results/` directory — see
+ *               `PLAYWRIGHT_OUTPUT_DIR`'s doc comment for the reverse-control
+ *               probe (this exact assertion, run with `--output=` dropped)
+ *               that proves the guard is live, not merely a green run
  *
  * Playwright is deliberately spawned from the REPO ROOT, never from
  * `packages/dashboard` — that package's `playwright.config.ts` declares a
@@ -77,13 +82,31 @@ const VITEST_BIN = join(REPO_ROOT, "node_modules", ".bin", "vitest");
 const PLAYWRIGHT_BIN = join(REPO_ROOT, "node_modules", ".bin", "playwright");
 
 /**
- * Playwright's default `--output` (artifacts folder, e.g. `.last-run.json`)
- * is relative to CWD — spawning from `REPO_ROOT` with no override would
- * write a `test-results/` directory into the repo tree on every run of this
- * suite, by anyone. Isolated to a throwaway tmpdir instead (removed in
- * `afterAll`) so this suite never leaves untracked artifacts behind.
+ * Playwright's `--last-failed-file` default is `<outputDir>/.last-run.json`
+ * (`playwright test --help`), and `--output <dir>` IS what sets `outputDir` —
+ * VERIFIED by direct inspection, not assumed: with `--output=<X>` passed,
+ * `<X>/.last-run.json` is written and nothing appears at `cwd`; with the flag
+ * removed (a deliberate reverse-control probe run while hardening this
+ * file), a literal `test-results/.last-run.json` appears at `cwd` instead —
+ * exactly `{"status":"failed","failedTests":[]}`, the discovery-refusal
+ * signature. Playwright resolves `outputDir` from ITS OWN config/CLI-flag
+ * layer, never from Node's `process.cwd()` alone — the `--output` override
+ * below is therefore both necessary (omitting it lets `outputDir` default to
+ * `test-results` under whatever `cwd` was passed to `runAndCapture`, i.e.
+ * `REPO_ROOT`) and sufficient (redirecting `outputDir` redirects
+ * `.last-run.json` with it, confirmed above). Isolated to a throwaway tmpdir
+ * (removed in `afterAll`) so this suite never leaves untracked artifacts
+ * behind; the "REGRESSION: playwright's live spawn leaves the repo tree
+ * clean" scenario below pins this mechanically rather than relying on manual
+ * re-verification.
  */
 const PLAYWRIGHT_OUTPUT_DIR = mkdtempSync(join(tmpdir(), "lore-e2e-discovery-refusal-pw-output-"));
+
+/** `outputDir`'s default basename (Playwright's own `--help`) — the exact
+ * directory name that would appear at `REPO_ROOT` if {@link PLAYWRIGHT_OUTPUT_DIR}'s
+ * `--output` override were ever dropped. Colocated with the regression
+ * scenario that asserts its absence, so the two can never drift apart. */
+const PLAYWRIGHT_DEFAULT_OUTPUT_DIR_NAME = "test-results";
 
 /**
  * A path that does not exist under any of the three runners' search roots.
@@ -148,7 +171,11 @@ describe("findDiscoveryRefusal — live runner capture (AC-OX-5)", () => {
       ["test", `${NONEXISTENT_BASENAME}.spec.ts`, `--output=${PLAYWRIGHT_OUTPUT_DIR}`],
       REPO_ROOT,
     );
-  });
+  }, 90_000); // three sequential spawns, each with its own 30s spawnSync timeout — bun test's 5s
+  // default hook timeout was observed to fire under this repo's documented concurrent-worktree
+  // load (measured load average 77 while authoring this fix), well before any individual spawn
+  // hung — a false timeout, not a real regression (root CLAUDE.md: "load average is the wrong
+  // instrument for is-this-red").
 
   afterAll(() => {
     rmSync(PLAYWRIGHT_OUTPUT_DIR, { recursive: true, force: true });
@@ -197,5 +224,17 @@ describe("findDiscoveryRefusal — live runner capture (AC-OX-5)", () => {
     const runners = [vitestVerdict?.runner, bunVerdict?.runner, playwrightVerdict?.runner];
     expect(new Set(runners).size).toBe(3);
     expect(runners).toEqual(["vitest", "bun", "playwright"]);
+  });
+
+  it("REGRESSION: playwright's live spawn leaves the repo tree clean — no test-results/ (or .last-run.json) landed at REPO_ROOT", () => {
+    // Mechanises the reverse-control finding documented on PLAYWRIGHT_OUTPUT_DIR
+    // above: dropping `--output=` makes Playwright default `outputDir` to
+    // `test-results` UNDER THE CWD THIS SUITE PASSES IT (REPO_ROOT), which
+    // would dirty the shared checkout on every run, by anyone. Asserting
+    // non-existence here (rather than only the manual check performed while
+    // authoring this fix) means a future edit that drops or misspells
+    // `--output=` fails THIS test the next time the suite runs, instead of
+    // silently reintroducing the leak.
+    expect(existsSync(join(REPO_ROOT, PLAYWRIGHT_DEFAULT_OUTPUT_DIR_NAME))).toBe(false);
   });
 });
