@@ -290,6 +290,11 @@ export class ReviewService {
         acQuantifiableEnabled: this.gate.enforcer.isAcQuantifiableEnabled("spec-promote"),
         verificationProfile: this.gate.enforcer.resolveVerificationProfile(specKind),
         oracleCoverageEnabled: this.gate.enforcer.isOracleCoverageEnabled(),
+        // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
+        // registry-make) — `doc.id` is the RESOLVED doc's real id, threaded ONLY
+        // for `GateEnforcer.enforce`'s own `gate_passed` audit `doc_id` (never read
+        // by `checkSpecPromote`/`feedSpecPromote`; see `GateContext.targetDocId`).
+        targetDocId: doc.id,
       });
       if (!enforceResult.ok) return enforceResult;
       // reason: M1's early-warning advisory is a `plan-promote`-only signal
@@ -357,6 +362,9 @@ export class ReviewService {
         requiresUatEnabled: this.gate.enforcer.isRequiresUatEnabled(),
         prdSyncEnabled,
         ...(prdSyncDomainDocResolved !== undefined ? { prdSyncDomainDocResolved } : {}),
+        // reason: AC-FR-8/D7 — see this file's spec-promote gate block's identical
+        // note; `doc.id` is the RESOLVED plan's real id, never its slug.
+        targetDocId: doc.id,
       };
       const enforceResult = this.gate.enforcer.enforce("plan-promote", planPromoteCtx);
       if (!enforceResult.ok) return enforceResult;
@@ -474,6 +482,9 @@ export class ReviewService {
       reviewJudgmentDecisions: policyScopedDecisions,
       reviewJudgmentProvenanceCollision: provenanceCollision,
       reviewJudgmentBlockingQuestions: blockingQuestions,
+      // reason: AC-FR-8/D7 — see this file's spec-promote gate block's identical
+      // note; `doc.id` is the RESOLVED doc's real id, never its slug.
+      targetDocId: doc.id,
     };
     const enforceResult = this.gate.enforcer.enforce("review-judgment", ctx);
     if (enforceResult.ok || typeIsGated) return enforceResult;

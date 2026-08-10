@@ -370,6 +370,73 @@ export function buildNotApplicableAuditEntry(
   };
 }
 
+/** Audit `session_id` sentinel for every `gate_passed` row — mirrors
+ *  {@link GATE_SKIP_AUDIT_SESSION_ID}'s "own identity, not conflated with a
+ *  different event class" rationale. */
+const GATE_PASSED_AUDIT_SESSION_ID = "gate-passed";
+
+/**
+ * Audit action string stamped on every passing-evaluation audit row
+ * (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make, AC-FR-8/D7) —
+ * a DISTINCT event class from `gate_skipped` (the checkpoint's predicates never
+ * ran at all) and `gate_not_applicable` (one PREDICATE within a checkpoint found
+ * its referent absent — the checkpoint can still be genuinely blocked by a
+ * DIFFERENT predicate on the same run). `gate_passed` fires exactly once per
+ * `enforce()` call that reaches the `!isCheckpointBlocked(results)` branch —
+ * whether every predicate measured a real pass, or every predicate was
+ * not-applicable (a vacuous pass, `describeCheckpointVacuity`'s own concern) —
+ * so a PASS is distinguishable from a checkpoint that never ran, at the ONE
+ * surface (`lore audit <doc> --json`) AC-FR-8 requires it be queryable from.
+ */
+const GATE_PASSED_AUDIT_ACTION = "gate_passed";
+
+/**
+ * Pure builder for a `gate_passed` audit entry (AC-FR-8, D7 — emitted where the
+ * VERDICT IS PRODUCED, the enforcer, never at each service call site so a
+ * newly registered checkpoint is traced BY CONSTRUCTION, the same derivation
+ * principle `isRegisteredCheckpoint` applies to feedability, checkpoint-
+ * registry.ts). Mirrors {@link buildGateSkipAuditEntry}/
+ * {@link buildNotApplicableAuditEntry}'s exact shape so `lore audit <doc>
+ * --json` never has to reconcile a THIRD independently-shaped
+ * gate-observability row.
+ *
+ * ⛔ `target`/`doc_id` here is `ctx.targetDocId` (the doc's REAL id), NEVER
+ * `ctx.specIdOrSlug`/`ctx.targetIdOrSlug` (display-only, usually a slug) — see
+ * `GateContext.targetDocId`'s own JSDoc (checkpoint-registry.ts) for why that
+ * distinction is load-bearing for this row's queryability.
+ *
+ * @param checkpoint - Which checkpoint's predicates ran and did not block.
+ * @param nowIso - ISO 8601 timestamp, resolved by the caller.
+ * @param actor - Resolved actor identity.
+ * @param target - The target doc's REAL id, when the calling checkpoint's
+ *   `GateContext` supplied one via `targetDocId` — absent for a checkpoint
+ *   evaluated with no resolvable target (e.g. a bare test fixture).
+ * @example
+ * buildGatePassedAuditEntry("spec-promote", "2026-08-10T00:00:00.000Z", "alice", "01ABC");
+ *   // => { timestamp: "2026-08-10T00:00:00.000Z", actor: "alice",
+ *   //      session_id: "gate-passed", action: "gate_passed", doc_id: "01ABC",
+ *   //      details: { checkpoint: "spec-promote", verdict: "pass", target: "01ABC" } }
+ */
+export function buildGatePassedAuditEntry(
+  checkpoint: GateCheckpoint,
+  nowIso: string,
+  actor: string,
+  target?: string,
+): AuditEntry {
+  return {
+    timestamp: nowIso,
+    actor,
+    session_id: GATE_PASSED_AUDIT_SESSION_ID,
+    action: GATE_PASSED_AUDIT_ACTION,
+    ...(target !== undefined ? { doc_id: target } : {}),
+    details: {
+      checkpoint,
+      verdict: "pass",
+      ...(target !== undefined ? { target } : {}),
+    },
+  };
+}
+
 /**
  * Formats an unknown thrown/rejected value as a human-readable one-line reason —
  * shared by this module's `recordSkip()` and the CLI's `LORE_GATE_BYPASS=1` bypass
@@ -482,12 +549,15 @@ export class GateEnforcer {
    *   single stored config reference lets one `GateEnforcer` instance serve all five
    *   checkpoints without re-deriving anything at construction.
    * @param recordGateSkip - OPTIONAL SPEC-080 G4 port for auditing a config-disabled
-   *   skip — wired ONLY in `app.ts`'s production composition root
-   *   (`store.appendAuditEntry.bind(store)`, the exact `RecordGateSkip` shape).
-   *   Every pre-existing bare `new GateEnforcer(config)` construction (every unit
-   *   test in this codebase) omits it, so `enforce()`'s config-disabled branch stays
-   *   a zero-IO synchronous early return, byte-identical to pre-SPEC-080 behavior —
-   *   see `recordSkip()`'s own doc comment and this class's SPEC-080 module invariant.
+   *   skip, a not-applicable predicate verdict, AND (AC-FR-8/D7) a genuinely
+   *   PASSING evaluation — one shared "append one audit row" port for all three
+   *   gate-observability event classes, wired ONLY in `app.ts`'s production
+   *   composition root (`store.appendAuditEntry.bind(store)`, the exact
+   *   `RecordGateSkip` shape). Every pre-existing bare `new GateEnforcer(config)`
+   *   construction (every unit test in this codebase) omits it, so `enforce()`'s
+   *   config-disabled branch AND its passing-evaluation branch both stay a
+   *   zero-IO synchronous return, byte-identical to pre-SPEC-080/pre-AC-FR-8
+   *   behavior — see `recordSkip()`/`recordPass()`'s own doc comments.
    * @param traceRecorder - OPTIONAL SPEC-102 read/deny-instrumentation port — when
    *   present, a BLOCKED `enforce()` call fires a fire-and-forget `kind="gate_deny"`
    *   trace row (`layer: "service"`) via `TraceRecorder.recordGateDeny`. Absent (the
@@ -563,6 +633,17 @@ export class GateEnforcer {
     // code — an observation, never an outcome, exactly like `recordSkip`.
     this.warnVacuousCheckpoint(checkpoint, results);
     if (!isCheckpointBlocked(results)) {
+      // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
+      // registry-make) — the ONE thing that, before this task, left NO trace
+      // anywhere for ANY checkpoint: a genuinely-reached, non-blocked
+      // evaluation. `gate_skipped` already covers the config-disabled early
+      // return above; `gate_not_applicable` already covers a not-applicable
+      // predicate; a denial already writes both an audit row (via the
+      // calling service) and a `gate_deny` trace event below. Fired here,
+      // generically, for EVERY checkpoint — never a per-call-site addition,
+      // which is exactly how `plan-close` became the only checkpoint with
+      // ANY observability before this task.
+      this.recordPass(checkpoint, ctx);
       return ok(undefined);
     }
 
@@ -681,19 +762,26 @@ export class GateEnforcer {
    * SPEC-080 G4 — best-effort, fire-and-forget `gate_skipped` audit write for a
    * config-disabled checkpoint skip. A no-op (zero IO, no wall-clock/`process.env`
    * read) when `recordGateSkip` was not wired at construction. Otherwise resolves
-   * the target doc id/slug the calling checkpoint's `ctx` has in hand
-   * (`specIdOrSlug` for `spec-promote`, `targetIdOrSlug` for `plan-promote`/
-   * `task-claim`/`phase-claim`/`plan-close` — `undefined` for `spec-create`, which
-   * gates a not-yet-created candidate with no id of its own yet) and the current
-   * actor via the SAME `resolveActorWithSource` chain `CorpusService`'s SPEC-079 G2
-   * writes use, builds the entry via the shared pure `buildGateSkipAuditEntry`, and
-   * fires the write via {@link fireAndForgetAudit} — `enforce()` must stay
-   * synchronous (see the class's SPEC-080 module invariant).
+   * the current actor via the SAME `resolveActorWithSource` chain `CorpusService`'s
+   * SPEC-079 G2 writes use, builds the entry via the shared pure
+   * `buildGateSkipAuditEntry`, and fires the write via {@link fireAndForgetAudit} —
+   * `enforce()` must stay synchronous (see the class's SPEC-080 module invariant).
+   *
+   * ⛔ AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make)
+   * — reads `ctx.targetDocId` (the doc's REAL id), NEVER `ctx.specIdOrSlug`/
+   * `ctx.targetIdOrSlug` (display-only, usually a slug). This method previously
+   * read the display-only fields, which meant a `gate_skipped` row's `doc_id` was
+   * usually a SLUG — silently unreachable via `lore audit <doc> --json` (which
+   * resolves `<doc>` to the real id before filtering, exactly like
+   * `gate_passed`'s own row would have been had `recordPass` made the identical
+   * mistake; see `GateContext.targetDocId`'s own JSDoc, checkpoint-registry.ts).
+   * `undefined` for `spec-create`'s pre-D7-callers-that-never-set-it case is now
+   * unreachable — every `enforce()` call site threads `targetDocId`.
    *
    * @param checkpoint - Which checkpoint was skipped.
    * @param ctx - The `GateContext` the caller built for this `enforce()` call —
-   *   read only for its optional target-id fields, never for predicate state
-   *   (the checkpoint's predicates never even ran on this branch).
+   *   read only for `targetDocId`, never for predicate state (the checkpoint's
+   *   predicates never even ran on this branch).
    * @param mechanism - Always `"config_disabled"` from this class's one call site
    *   (`enforce()`'s early return) — parameterized rather than hardcoded so this
    *   method and `buildGateSkipAuditEntry` share one signature shape with the CLI
@@ -704,11 +792,40 @@ export class GateEnforcer {
     const port = this.recordGateSkip;
     if (port === undefined) return;
 
-    const target = ctx.specIdOrSlug ?? ctx.targetIdOrSlug;
     const nowIso = new Date().toISOString();
     const actor = resolveActorWithSource(undefined, process.env).actor;
-    const entry = buildGateSkipAuditEntry(checkpoint, mechanism, nowIso, actor, target);
+    const entry = buildGateSkipAuditEntry(checkpoint, mechanism, nowIso, actor, ctx.targetDocId);
     this.fireAndForgetAudit(port, entry, (reason) => this.warnAuditWriteFailure(checkpoint, "gate-skip", reason));
+  }
+
+  /**
+   * AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make)
+   * — best-effort, fire-and-forget `gate_passed` audit write for a checkpoint
+   * that ran its predicates and did NOT block. A no-op (zero IO) when
+   * `recordGateSkip` was not wired at construction — mirrors {@link recordSkip}'s
+   * identical "absent in bare tests, present in production" shape (this port is
+   * reused for all three gate-observability event classes: skip, not-applicable,
+   * and now pass — there is no separate "record a pass" port to wire).
+   *
+   * ⛔ Reads `ctx.targetDocId` — the doc's REAL id — NEVER `ctx.specIdOrSlug`/
+   * `ctx.targetIdOrSlug` (display-only, usually a slug; see
+   * `GateContext.targetDocId`'s own JSDoc, checkpoint-registry.ts, for why using
+   * the display string here would silently make this row unreachable via
+   * `lore audit <doc> --json`, the exact surface AC-FR-8 requires).
+   *
+   * @param checkpoint - Which checkpoint's predicates ran and did not block.
+   * @param ctx - The `GateContext` the caller built for this `enforce()` call —
+   *   read only for `targetDocId`, never for predicate state (the predicates
+   *   already ran; this call cannot change or re-derive their verdict).
+   */
+  private recordPass(checkpoint: GateCheckpoint, ctx: GateContext): void {
+    const port = this.recordGateSkip;
+    if (port === undefined) return;
+
+    const nowIso = new Date().toISOString();
+    const actor = resolveActorWithSource(undefined, process.env).actor;
+    const entry = buildGatePassedAuditEntry(checkpoint, nowIso, actor, ctx.targetDocId);
+    this.fireAndForgetAudit(port, entry, (reason) => this.warnAuditWriteFailure(checkpoint, "gate-pass", reason));
   }
 
   /**
@@ -725,9 +842,12 @@ export class GateEnforcer {
    * NEVER alter `enforce()`'s returned `Result` (D1's "observability never
    * changes the outcome", extended to this new event class).
    *
+   * ⛔ AC-FR-8/D7 — reads `ctx.targetDocId` (the doc's REAL id), NEVER
+   * `ctx.specIdOrSlug`/`ctx.targetIdOrSlug` — see `recordSkip`'s identical note.
+   *
    * @param checkpoint - Which checkpoint's predicate produced the verdict(s).
    * @param ctx - The `GateContext` the caller built for this `enforce()` call —
-   *   read only for its optional target-id fields.
+   *   read only for `targetDocId`.
    * @param notApplicable - The not-applicable subset of `checkpointDef.check(ctx)`'s
    *   result — `[]` is the common case (zero IO in that case).
    */
@@ -739,7 +859,7 @@ export class GateEnforcer {
     const port = this.recordGateSkip;
     if (port === undefined || notApplicable.length === 0) return;
 
-    const target = ctx.specIdOrSlug ?? ctx.targetIdOrSlug;
+    const target = ctx.targetDocId;
     const nowIso = new Date().toISOString();
     const actor = resolveActorWithSource(undefined, process.env).actor;
 
@@ -793,14 +913,14 @@ export class GateEnforcer {
 
   /**
    * Single stderr-warning formatter for a failed best-effort audit write
-   * (SPEC-080 D1) — kept as one method so every failure branch across BOTH
-   * `recordSkip()` and `recordNotApplicable()` prints a consistently-shaped
-   * message, disambiguated by `auditKind` so a reader can tell which event
-   * class failed to record.
+   * (SPEC-080 D1) — kept as one method so every failure branch across
+   * `recordSkip()`, `recordNotApplicable()`, AND `recordPass()` (AC-FR-8/D7)
+   * prints a consistently-shaped message, disambiguated by `auditKind` so a
+   * reader can tell which event class failed to record.
    */
   private warnAuditWriteFailure(
     checkpoint: GateCheckpoint,
-    auditKind: "gate-skip" | "gate-not-applicable",
+    auditKind: "gate-skip" | "gate-not-applicable" | "gate-pass",
     reason: string,
   ): void {
     process.stderr.write(

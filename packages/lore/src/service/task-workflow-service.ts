@@ -3698,6 +3698,11 @@ export class TaskWorkflowService {
       ...(opts.identitySource !== undefined ? { candidateIdentitySource: opts.identitySource } : {}),
       ...(opts.worktree !== undefined ? { candidateWorktree: opts.worktree } : {}),
       ...(opts.machine !== undefined ? { candidateMachine: opts.machine } : {}),
+      // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
+      // registry-make) — `task.id` is the RESOLVED task doc's real id, threaded
+      // ONLY for `GateEnforcer.enforce`'s own `gate_passed` audit `doc_id` (never
+      // read by `checkTaskClaim`/`feedTaskClaim`; see `GateContext.targetDocId`).
+      targetDocId: task.id,
     });
   }
 

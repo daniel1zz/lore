@@ -1656,6 +1656,11 @@ export class PhaseWorkflowService {
       // isPhaseClaimAnchorOverlapEnabled() on GateEnforcer if that granularity is
       // ever needed.
       anchorOverlapEnabled: this.gate.enforcer.isTaskClaimAnchorOverlapEnabled(),
+      // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
+      // registry-make) — `phase.id` is the RESOLVED phase doc's real id, threaded
+      // ONLY for `GateEnforcer.enforce`'s own `gate_passed` audit `doc_id` (never
+      // read by `checkTaskClaim`/`feedPhaseClaim`; see `GateContext.targetDocId`).
+      targetDocId: phase.id,
     });
   }
 

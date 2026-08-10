@@ -31,11 +31,19 @@
  *   resolveParentDoc(app, idOrSlug)          — resolve an id/slug to a DocRecord,
  *                                               `null` on any failure (absent input,
  *                                               unresolvable, or store error)
- *   CHECKPOINT_PRODUCED_TYPE                 — checkpoint → produced-doc-type map;
- *                                               extend here when a new checkpoint
- *                                               gains a feed (this slice only wires
- *                                               `spec-create`)
- *   buildFeed(app, checkpoint, parentIdOrSlug?) — the full composition
+ *   CHECKPOINT_PRODUCED_TYPE                 — checkpoint → CURATED produced-doc-type
+ *                                               map; extend here when a checkpoint's
+ *                                               feed should discover a skill scoped by
+ *                                               a doc TYPE rather than its own name
+ *                                               (this slice only wires `spec-create`).
+ *                                               A checkpoint absent here but present in
+ *                                               `checkpointRegistry` still gets a real
+ *                                               `buildFeed` discovery pass — scoped by
+ *                                               its OWN name — task-derive-lore-feed-
+ *                                               s-checkpoint-set-from-the-registry-make.
+ *   buildFeed(app, checkpoint, parentIdOrSlug?) — the full composition; accepted-set
+ *                                               is `CHECKPOINT_PRODUCED_TYPE` keys
+ *                                               UNION `checkpointRegistry` keys (D1)
  *   SESSION_RESUME_CHECKPOINT                — the `"session-resume"` checkpoint
  *                                               literal (SPEC-041 §3 D5)
  *   renderResumeFeed(resume, suppressFloor?, authorshipUndeterminedNote?) — pure
@@ -165,6 +173,7 @@ import {
   RESUME_SCOPE_CLOSURE,
 } from "@lore/core";
 import { buildFeedingPack, renderFeedingPack } from "../service/gate-feeding.js";
+import { isRegisteredCheckpoint } from "../service/checkpoint-registry.js";
 import { renderResolvedToMarkdown } from "../service/outline-service.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../service/session-service.js";
 import { formatError, resolveActor } from "../adapters/cli/utils.js";
@@ -348,47 +357,47 @@ export interface FeedOutcome {
 }
 
 /**
- * Assembles the feed-before-produce advisory pack for `checkpoint`: derives the
- * produced-type, discovers its approved governing skill
- * (`app.corpusService.findFeedingSkill`, the SAME discovery call `lore gate
- * spec-create` uses), and — when found — renders a `buildFeedingPack`/
- * `renderFeedingPack` block with `missing: []` (module header). When `--parent` /
- * `parentIdOrSlug` resolves to a doc, its MDX-resolved summary is included as the
- * pack's parent slice, via the SAME `renderDocMarkdown` helper the gate uses for its
- * own parent slice.
- *
- * Never fails: an unknown checkpoint, no approved skill, a lookup error, or an
- * unresolvable parent all degrade to an advisory note in `feed` (module invariant).
+ * The discovery+render pass shared by every `buildFeed` branch that has SOME
+ * `applies_to` discovery scope to try — `discoveryScope` equals
+ * `CHECKPOINT_PRODUCED_TYPE[checkpoint]` for a CURATED checkpoint (today: only
+ * `"spec-create"` reaches this from `buildFeed`; `"phase-start"`/`"task-start"`
+ * hold curated entries too but never reach here in production — module
+ * invariant above), or the checkpoint's OWN NAME, unchanged, for a checkpoint
+ * registered in `checkpointRegistry` with no curated produced-type mapping
+ * (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make, D1 — the same
+ * derivation principle as `isRegisteredCheckpoint`: no second hand-maintained
+ * scope list). `FeedOutcome.type` is always set to `discoveryScope` — for
+ * `spec-create` this is byte-identical to before that task; for every OTHER
+ * registered checkpoint it is the checkpoint's own name, since no doc-type-
+ * scoped produced-type mapping exists for it (yet — a team may seed one by
+ * approving a `knowledge/skill` doc with `extra.skill.applies_to:
+ * "<checkpoint-name>"`, discovered here exactly the same way `spec-create`'s
+ * `applies_to: "spec"` already is).
  *
  * @param app - Wired `App`.
- * @param checkpoint - The checkpoint argument, e.g. `"spec-create"`.
+ * @param checkpoint - The checkpoint argument, as the caller supplied it.
+ * @param discoveryScope - The `extra.skill.applies_to` scope to discover a
+ *   governing skill doc by.
  * @param parentIdOrSlug - Optional `--parent` doc id/slug to include a summary of.
- * @returns A `FeedOutcome` — always resolves, never rejects.
- * @example
- * const outcome = await buildFeed(app, "spec-create", "prd-my-feature");
- * // outcome.feed starts with "[source: <skill-slug>, trust: team-authored]"
+ * @returns A `FeedOutcome` — always resolves, never rejects (module invariant).
  */
-export async function buildFeed(
+async function buildDiscoveredFeed(
   app: App,
   checkpoint: string,
+  discoveryScope: string,
   parentIdOrSlug?: string,
 ): Promise<FeedOutcome> {
-  const type = CHECKPOINT_PRODUCED_TYPE[checkpoint] ?? null;
-  if (type === null) {
-    return { checkpoint, type: null, skill: null, feed: `unknown checkpoint: ${checkpoint}` };
-  }
-
-  const discoveryResult = await app.corpusService.findFeedingSkill(type);
+  const discoveryResult = await app.corpusService.findFeedingSkill(discoveryScope);
   if (!discoveryResult.ok) {
     return {
       checkpoint,
-      type,
+      type: discoveryScope,
       skill: null,
-      feed: `no approved governing skill for ${type} (lookup failed: ${formatError(discoveryResult.error)})`,
+      feed: `no approved governing skill for ${discoveryScope} (lookup failed: ${formatError(discoveryResult.error)})`,
     };
   }
   if (discoveryResult.value === null) {
-    return { checkpoint, type, skill: null, feed: `no approved governing skill for ${type}` };
+    return { checkpoint, type: discoveryScope, skill: null, feed: `no approved governing skill for ${discoveryScope}` };
   }
 
   const skillDoc = discoveryResult.value;
@@ -406,10 +415,64 @@ export async function buildFeed(
 
   return {
     checkpoint,
-    type,
+    type: discoveryScope,
     skill: { slug: skillDoc.slug, title: skillDoc.title },
     feed: renderFeedingPack(pack),
   };
+}
+
+/**
+ * Assembles the feed-before-produce advisory pack for `checkpoint`: derives the
+ * discovery scope, discovers its approved governing skill
+ * (`app.corpusService.findFeedingSkill`, the SAME discovery call `lore gate
+ * spec-create` uses), and — when found — renders a `buildFeedingPack`/
+ * `renderFeedingPack` block with `missing: []` (module header). When `--parent` /
+ * `parentIdOrSlug` resolves to a doc, its MDX-resolved summary is included as the
+ * pack's parent slice, via the SAME `renderDocMarkdown` helper the gate uses for its
+ * own parent slice.
+ *
+ * ⛔ D1 (task-derive-lore-feed-s-checkpoint-set-from-the-registry-make): the
+ * accepted-checkpoint set for the "real, feedable" branch is
+ * `CHECKPOINT_PRODUCED_TYPE`'s keys UNION `checkpointRegistry`'s keys — DERIVED
+ * from those two SSOTs, never a THIRD hand-maintained list. A checkpoint absent
+ * from BOTH degrades to the pre-existing `type: null` / `"unknown checkpoint:
+ * ..."` advisory note (unchanged — see this module's own invariant above and
+ * the MCP `lore_feed` regression pinning that exact text for an unrecognized
+ * name); `commands/feed.ts`'s CLI dispatch additionally refuses that same case
+ * with exit 2 BEFORE ever calling this function (AC-FR-1's sharper half) — this
+ * function itself stays advisory-only and never fails, for MCP's "always
+ * succeeds" contract.
+ *
+ * Never fails: an unknown checkpoint, no approved skill, a lookup error, or an
+ * unresolvable parent all degrade to an advisory note in `feed` (module invariant).
+ *
+ * @param app - Wired `App`.
+ * @param checkpoint - The checkpoint argument, e.g. `"spec-create"`.
+ * @param parentIdOrSlug - Optional `--parent` doc id/slug to include a summary of.
+ * @returns A `FeedOutcome` — always resolves, never rejects.
+ * @example
+ * const outcome = await buildFeed(app, "spec-create", "prd-my-feature");
+ * // outcome.feed starts with "[source: <skill-slug>, trust: team-authored]"
+ * @example
+ * const outcome = await buildFeed(app, "spec-promote");
+ * // outcome.type === "spec-promote" — no curated CHECKPOINT_PRODUCED_TYPE
+ * // entry, so discovery scope defaults to the checkpoint's own name.
+ */
+export async function buildFeed(
+  app: App,
+  checkpoint: string,
+  parentIdOrSlug?: string,
+): Promise<FeedOutcome> {
+  const curatedType = CHECKPOINT_PRODUCED_TYPE[checkpoint];
+  if (curatedType !== undefined) {
+    return buildDiscoveredFeed(app, checkpoint, curatedType, parentIdOrSlug);
+  }
+
+  if (isRegisteredCheckpoint(checkpoint)) {
+    return buildDiscoveredFeed(app, checkpoint, checkpoint, parentIdOrSlug);
+  }
+
+  return { checkpoint, type: null, skill: null, feed: `unknown checkpoint: ${checkpoint}` };
 }
 
 // ─── SPEC-041 S2: session-resume dispatch (D5) ─────────────────────────────

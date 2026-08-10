@@ -26,9 +26,17 @@
  *                gate's violation output for the same corpus.
  *   NEGATIVE   — AC-P4-2: no approved skill → "no approved governing skill for spec"
  *                note, exit 0 (never an error).
- *   BOUNDARY   — unknown checkpoint → exit 0, one-line note naming the checkpoint
- *                (never a crash — extensibility contract).
- *   ERROR      — n/a (feed has no failure mode by design — every scenario asserts exit 0).
+ *   BOUNDARY   — an UNREGISTERED checkpoint name (absent from BOTH
+ *                `CHECKPOINT_PRODUCED_TYPE` and `checkpointRegistry`) exits
+ *                EXACTLY 2, never a crash and never 0 (AC-FR-1,
+ *                task-derive-lore-feed-s-checkpoint-set-from-the-registry-make
+ *                — before that task this exited 0 with a one-line note,
+ *                letting a script proceed as though a pack had been
+ *                delivered; `buildFeed` ITSELF still never fails — this is a
+ *                CLI-dispatch-level refusal in `commands/feed.ts`, checked
+ *                BEFORE `buildFeed` is ever called).
+ *   ERROR      — n/a (feed's OWN advisory composition has no failure mode by
+ *                design; every REGISTERED-checkpoint scenario asserts exit 0).
  *   STATE      — a DRAFT (unapproved) skill doc is invisible, same as no skill at all.
  *   REGRESSION — `--json` output matches the FeedOutcome shape; feed never mutates the corpus.
  */
@@ -61,14 +69,25 @@ async function importGateSpecCreate(): Promise<RunnableCommand> {
 
 function captureOutput() {
   const stdout: string[] = [];
+  const stderr: string[] = [];
   const origConsoleLog = console.log.bind(console);
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
   console.log = (...args: unknown[]) => {
     stdout.push(args.join(" "));
   };
+  // reason: AC-FR-1's unregistered-checkpoint refusal (commands/feed.ts) writes
+  // directly to `process.stderr`, never through `console.log` — this capture
+  // must intercept BOTH channels or a stderr-only refusal reads as silent.
+  process.stderr.write = ((chunk: unknown) => {
+    stderr.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write;
   return {
     stdout,
+    stderr,
     restore: () => {
       console.log = origConsoleLog;
+      process.stderr.write = origStderrWrite;
     },
   };
 }
@@ -192,7 +211,11 @@ async function runFeed(args: { checkpoint: string; parent?: string; json?: boole
   } finally {
     output.restore();
   }
-  return { exitCode: process.exitCode, stdout: output.stdout.join("\n") };
+  return {
+    exitCode: process.exitCode,
+    stdout: output.stdout.join("\n"),
+    stderr: output.stderr.join("\n"),
+  };
 }
 
 async function runGateSpecCreate(payload: Record<string, unknown>) {
@@ -267,12 +290,17 @@ describe("lore feed <checkpoint> — feed-before-produce PULL (P4)", () => {
     expect(result.stdout).toBe("no approved governing skill for spec");
   });
 
-  // BOUNDARY — unknown checkpoint never crashes; still exit 0.
-  it("unknown checkpoint → exit 0, one-line note naming the checkpoint", async () => {
+  // BOUNDARY — AC-FR-1 (task-derive-lore-feed-s-checkpoint-set-from-the-
+  // registry-make): an UNREGISTERED checkpoint name exits EXACTLY 2, never a
+  // crash and never the pre-fix silent-success 0. Before that task this
+  // exited 0 with a one-line note, so `lore feed <typo> && <next step>`
+  // proceeded as though a pack had actually been delivered.
+  it("unregistered checkpoint → exit 2, naming the checkpoint on stderr, never a silent-success 0", async () => {
     const result = await runFeed({ checkpoint: "totally-unknown-checkpoint" });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("unknown checkpoint: totally-unknown-checkpoint");
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("totally-unknown-checkpoint");
   });
 
   // STATE — a draft (unapproved) skill doc is invisible to discovery.

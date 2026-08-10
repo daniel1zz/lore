@@ -1215,6 +1215,12 @@ export class CorpusService {
         ...(resolvedParentMarkdown !== null ? { parentMarkdown: resolvedParentMarkdown } : {}),
         ...(acceptanceCriteriaParsed.success ? { acceptanceCriteria: acceptanceCriteriaParsed.data } : {}),
         acQuantifiableEnabled: this.gateEnforcer.isAcQuantifiableEnabled("spec-create"),
+        // reason: AC-FR-8/D7 (task-derive-lore-feed-s-checkpoint-set-from-the-
+        // registry-make) — `id` (generated above) is the row this candidate will
+        // actually get once this gate passes; threaded ONLY for
+        // `GateEnforcer.enforce`'s own `gate_passed` audit `doc_id` (never read by
+        // `checkSpecCreate`/`feedSpecCreate`, see `GateContext.targetDocId`'s JSDoc).
+        targetDocId: id,
       };
       const gateResult = this.gateEnforcer.enforce("spec-create", gateCtx);
       if (!gateResult.ok) return gateResult;
@@ -1261,6 +1267,8 @@ export class CorpusService {
         ...upstreamCtx,
         candidateAcScopeDeclared: Array.isArray(data.extra?.["ac_scope"]),
         targetIdOrSlug: slug,
+        // reason: AC-FR-8/D7 — see the spec-create gate block above's identical note.
+        targetDocId: id,
       });
       if (!taskCreateGateResult.ok) return taskCreateGateResult;
     }
@@ -2063,6 +2071,9 @@ export class CorpusService {
         acQuantifiableEnabled: this.gateEnforcer.isAcQuantifiableEnabled("spec-promote"),
         verificationProfile: this.gateEnforcer.resolveVerificationProfile(effectiveSpecKind),
         oracleCoverageEnabled: this.gateEnforcer.isOracleCoverageEnabled(),
+        // reason: AC-FR-8/D7 — see corpus-service.ts's spec-create gate block's
+        // identical note; `existing.id` is the RESOLVED doc's real id, never its slug.
+        targetDocId: existing.id,
       });
       if (!gateResult.ok) return gateResult;
     }
@@ -2150,7 +2161,9 @@ export class CorpusService {
         assessmentFreshnessExemptReason.trim().length > 0;
       // ─── END PLAN-CLOSE GATE-READ EXTRA FIELDS ────────────────────────────
 
-      let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug };
+      // reason: AC-FR-8/D7 — see corpus-service.ts's spec-create gate block's
+      // identical note; `existing.id` is the RESOLVED plan's real id, never its slug.
+      let planCloseCtx: GateContext = { targetIdOrSlug: existing.slug, targetDocId: existing.id };
 
       if (requiresUat) {
         const uatResult = await this.getLatestUatVerdict(existing.id);
