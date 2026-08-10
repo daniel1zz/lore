@@ -701,3 +701,188 @@ describe("REGRESSION — zero plans AND zero ad-hoc tasks still yields coverage:
     expect(result.value.coverage).toBeNull();
   });
 });
+
+// ─── D8 declaration-time path-existence check (task-promote-the-oracle-file- ─
+// ─── existence-primitives-into-lore, spec-oracle-executability-a-runner-s- ──
+// ─── discovery-refusal-is-not-a §M6.3/D8, AC-OX-4 / AC-OX-9) ────────────────
+
+/**
+ * The FIVE measured `pass_unfalsified` script-mode commands (2026-08-10
+ * corpus measurement, spec §M6.3) carrying NO extractable test-file token at
+ * all — `extractTestFileTokens`/`findMissingOracleFiles` (`@lore/core`)
+ * return `[]`/no-missing for every one of these regardless of what
+ * `fileExists` says, which is the ASSERTED structural blind spot AC-OX-4
+ * pins by name rather than hiding behind a green run.
+ */
+const FIVE_TOKEN_LESS_COMMANDS = [
+  "bun run test",
+  "bun run typecheck",
+  'test $(grep -rln "TODO" packages/lore/src | wc -l) -eq 0',
+  "bun run dev -- setup --dry-run --claude-dir /tmp/lore-setup-probe",
+  "diff <(shasum assets/hooks/pre-push) <(shasum hooks/pre-push)",
+];
+
+describe("NEGATIVE/BOUNDARY — addCriterion declared-path-existence (AC-OX-4)", () => {
+  it("refuses a script-mode command naming a nonexistent test path when pathContext is supplied", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+
+    const result = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: { mode: "script", oracle: "test", command: "bunx vitest run packages/x/ghost.test.ts" },
+      }),
+      { pathContext: { fileExists: () => false, cwd: "/repo" } },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toContain("packages/x/ghost.test.ts");
+  });
+
+  it("RED control — the refusal must NOT fire when the declared path resolves", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+
+    const result = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: { mode: "script", oracle: "test", command: "bunx vitest run packages/x/real.test.ts" },
+      }),
+      { pathContext: { fileExists: (p) => p.endsWith("packages/x/real.test.ts"), cwd: "/repo" } },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(FIVE_TOKEN_LESS_COMMANDS)(
+    "accepts unchanged the measured token-less command %s even when fileExists always returns false",
+    async (command) => {
+      const { corpusService, acService } = makeServices();
+      const prdId = await createPrd(corpusService);
+      const specId = await createSpec(corpusService, prdId);
+
+      const result = await acService.addCriterion(
+        specId,
+        criterion({ verify: { mode: "script", oracle: "other", command } }),
+        { pathContext: { fileExists: () => false, cwd: "/repo" } },
+      );
+      expect(result.ok).toBe(true);
+    },
+  );
+
+  it("BOUNDARY — no pathContext supplied at all is a complete no-op (existing callers unaffected)", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+
+    const result = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: { mode: "script", oracle: "test", command: "bunx vitest run packages/x/ghost.test.ts" },
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("STATE — allow-missing-path-unredeemed: the D8 escape is tracked until the file exists (AC-OX-9)", () => {
+  it("addCriterion refuses --allow-missing-path with an absent or whitespace-only reason", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    const pathContext = { fileExists: () => false, cwd: "/repo" };
+    const scriptVerify = {
+      mode: "script" as const,
+      oracle: "test" as const,
+      command: "bunx vitest run packages/x/new.test.ts",
+    };
+
+    const absentReason = await acService.addCriterion(specId, criterion({ verify: scriptVerify }), {
+      pathContext,
+    });
+    expect(absentReason.ok).toBe(false);
+
+    const whitespaceReason = await acService.addCriterion(specId, criterion({ verify: scriptVerify }), {
+      pathContext,
+      allowMissingPath: "   ",
+    });
+    expect(whitespaceReason.ok).toBe(false);
+  });
+
+  it("a non-empty reason unlocks the escape and the declaration counts as unredeemed while the file is absent", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    const pathContext = { fileExists: () => false, cwd: "/repo" };
+
+    const added = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: { mode: "script", oracle: "test", command: "bunx vitest run packages/x/new.test.ts" },
+      }),
+      { pathContext, allowMissingPath: "red-first — test not written yet" },
+    );
+    expect(added.ok).toBe(true);
+
+    const countResult = await acService.countUnredeemedAllowMissingPath(pathContext);
+    expect(countResult.ok).toBe(true);
+    if (!countResult.ok) return;
+    expect(countResult.value).toBe(1);
+  });
+
+  it("creating the previously-missing file drops the unredeemed count on the next read, with no further command", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    let fileExistsNow = false;
+    const pathContext = { fileExists: () => fileExistsNow, cwd: "/repo" };
+
+    const added = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: { mode: "script", oracle: "test", command: "bunx vitest run packages/x/new.test.ts" },
+      }),
+      { pathContext, allowMissingPath: "red-first — test not written yet" },
+    );
+    expect(added.ok).toBe(true);
+
+    const before = await acService.countUnredeemedAllowMissingPath(pathContext);
+    expect(before.ok).toBe(true);
+    if (!before.ok) return;
+    expect(before.value).toBe(1);
+
+    // The file comes into existence — NO further AcService command records this;
+    // the count MUST be re-derived fresh from the live filesystem on the next read.
+    fileExistsNow = true;
+
+    const after = await acService.countUnredeemedAllowMissingPath(pathContext);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value).toBe(0);
+  });
+
+  it("REGRESSION — a declaration for a REMOVED criterion is excluded from the count (removal resolves it)", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    const pathContext = { fileExists: () => false, cwd: "/repo" };
+
+    await acService.addCriterion(
+      specId,
+      criterion({
+        verify: { mode: "script", oracle: "test", command: "bunx vitest run packages/x/new.test.ts" },
+      }),
+      { pathContext, allowMissingPath: "red-first — test not written yet" },
+    );
+    const removed = await acService.removeCriterion(specId, "AC-X-1");
+    expect(removed.ok).toBe(true);
+
+    const countResult = await acService.countUnredeemedAllowMissingPath(pathContext);
+    expect(countResult.ok).toBe(true);
+    if (!countResult.ok) return;
+    expect(countResult.value).toBe(0);
+  });
+});

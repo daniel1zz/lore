@@ -82,9 +82,11 @@ import {
   extractDeclaredAcScope,
   resolveGoverningSpecByAcScope,
   resolveStatusAfterContractEdit,
+  findMissingOracleFiles,
   type AcceptanceCriterion,
   type AcCoverageFact,
   type AcVerifyMode,
+  type FileExistsPort,
 } from "@lore/core";
 import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
@@ -150,6 +152,75 @@ export interface SetCriterionPatch {
   covers?: string[];
 }
 
+// ─── D8 Declaration-Time Path-Existence Check ──────────────────────────────
+// (task-promote-the-oracle-file-existence-primitives-into-lore,
+//  spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.3/D8)
+
+/**
+ * Injected filesystem context for {@link AcService.addCriterion}/
+ * {@link AcService.setCriterion}'s D8 declaration-time path-existence check,
+ * and for {@link AcService.countUnredeemedAllowMissingPath}'s corpus-wide
+ * count. Mirrors `DriftCheckService`'s `FsProbe`/`anchor-resolution.ts`'s
+ * per-CALL injection shape (never a constructor default): the check is a
+ * complete no-op whenever a caller omits it, so every pre-existing 2/3-arg
+ * `addCriterion`/`setCriterion` call site across the repo (CLI `commands/
+ * ac.ts`, every other test file) keeps compiling and behaving byte-
+ * identically until a CLI/MCP surface is wired to pass a real one.
+ */
+export interface OraclePathContext {
+  /** Real caller: `fs.existsSync`; tests inject a fake — never a real filesystem read here. */
+  fileExists: FileExistsPort;
+  /** Absolute current working directory the declared command's path token(s) resolve against. */
+  cwd: string;
+  /** Absolute discovered `.lore/` corpus root, when distinct from `cwd`. */
+  corpusRoot?: string;
+}
+
+/**
+ * Options for {@link AcService.addCriterion}/{@link AcService.setCriterion}'s
+ * D8 declaration-time path-existence check.
+ *
+ * @invariant The check runs ONLY when `pathContext` is supplied — see
+ *   {@link OraclePathContext}'s own doc for why this is opt-in rather than a
+ *   service-owned default.
+ * @invariant `allowMissingPath` is the D8 escape: a non-empty reason unlocks
+ *   a script-mode command naming a test-file path not yet on disk (a
+ *   red-first AC legitimately names a test not yet written —
+ *   `~/.claude/skills/shared/verification-discipline.md`'s mandatory
+ *   red-first discipline). An empty/whitespace-only/absent reason is
+ *   REFUSED whenever a missing path was actually found — "refuse by
+ *   default, with ONE explicit, audited escape" (D8). Supplying it when NO
+ *   path is missing is harmless: nothing is declared (there is nothing to
+ *   redeem).
+ */
+export interface DeclarePathOpts {
+  pathContext?: OraclePathContext;
+  allowMissingPath?: string;
+}
+
+/**
+ * One tracked D8 escape-hatch exercise — an AC whose declaration named a
+ * script-mode command path that did not exist on disk AT DECLARATION TIME,
+ * with the reason the caller supplied. Stored in
+ * `spec.extra.allow_missing_path_declarations` (a key `acceptance.ts`'s
+ * `specAcceptanceCriteriaSchema` never validates or strips — deliberately
+ * NOT a field on the criterion's own `verify` object, which WOULD be
+ * silently stripped by that schema's default "strip unknown keys" `z.object`
+ * behavior).
+ *
+ * @invariant Whether a given declaration is currently UNREDEEMED is NEVER
+ *   cached here — it is recomputed fresh from the live filesystem every time
+ *   {@link AcService.countUnredeemedAllowMissingPath} runs, by re-extracting
+ *   the OWNING criterion's current `command` and re-checking it. A cached
+ *   boolean would make the escape an untracked silent fallback the moment it
+ *   went stale — the exact defect D8 exists to prevent.
+ */
+export interface AllowMissingPathDeclaration {
+  ac_id: string;
+  reason: string;
+  declared_at: string;
+}
+
 // ─── AcService ─────────────────────────────────────────────────────────────
 
 export class AcService {
@@ -169,9 +240,12 @@ export class AcService {
    * @param specIdOrSlug - Spec document ULID or slug
    * @param criterion - Untrusted candidate criterion (validated here, not by the caller —
    *   CLI/MCP callers pass raw flag-assembled objects)
+   * @param opts - D8 declaration-time path-existence check options (see
+   *   {@link DeclarePathOpts}) — omitted entirely, the check is a no-op
    * @returns Updated criteria array after appending
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / malformed criterion / duplicate
-   *   id / 51st entry), STALE_VERSION
+   *   id / 51st entry / a script-mode command naming a path that does not exist and no
+   *   non-empty `--allow-missing-path` reason was supplied), STALE_VERSION
    *
    * @example
    * await acService.addCriterion("spec-my-feature", {
@@ -183,6 +257,7 @@ export class AcService {
   async addCriterion(
     specIdOrSlug: string,
     criterion: unknown,
+    opts: DeclarePathOpts = {},
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const specResult = await this.resolveSpec(specIdOrSlug);
     if (!specResult.ok) return specResult;
@@ -224,7 +299,23 @@ export class AcService {
       }
     }
 
-    const writeResult = await this.writeCriteria(spec, parsed.data, "add");
+    // D8 — declaration-time path-existence check (task-promote-the-oracle-file-
+    // existence-primitives-into-lore). `newCriterion` is the schema-VALIDATED
+    // form (never raw `criterion`) so `checkDeclaredPathExistence` always reads
+    // a well-shaped `verify` union.
+    let declaration: AllowMissingPathDeclaration | undefined;
+    if (newCriterion !== undefined) {
+      const pathCheck = checkDeclaredPathExistence(newCriterion, opts);
+      if (!pathCheck.ok) return pathCheck;
+      if (pathCheck.value.declaration !== null) declaration = pathCheck.value.declaration;
+    }
+
+    const writeResult = await this.writeCriteria(
+      spec,
+      parsed.data,
+      "add",
+      declaration !== undefined ? { declaration } : {},
+    );
     if (!writeResult.ok) return writeResult;
     return ok(parsed.data);
   }
@@ -347,10 +438,14 @@ export class AcService {
    *   completely-empty patch is VALIDATION_ERROR here as defense in depth, though the
    *   CLI already refuses it pre-service at exit 2, argv-decidable, before this method
    *   is ever called — D5a)
+   * @param opts - D8 declaration-time path-existence check options (see
+   *   {@link DeclarePathOpts}) — omitted entirely, the check is a no-op
    * @returns Updated criteria array (all entries, target replaced in place)
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / empty patch / unknown id,
    *   naming the declared ids (D4) / a mode-inconsistent flag, naming the flag and the
-   *   criterion's actual mode (D5) / malformed resulting shape), STALE_VERSION
+   *   criterion's actual mode (D5) / malformed resulting shape / a script-mode command
+   *   naming a path that does not exist and no non-empty `--allow-missing-path` reason
+   *   was supplied), STALE_VERSION
    *
    * @example
    * await acService.setCriterion("spec-my-feature", "AC-ACODE-1", {
@@ -361,6 +456,7 @@ export class AcService {
     specIdOrSlug: string,
     acId: string,
     patch: SetCriterionPatch,
+    opts: DeclarePathOpts = {},
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const hasAnyField =
       patch.statement !== undefined ||
@@ -440,6 +536,20 @@ export class AcService {
       });
     }
 
+    // D8 — declaration-time path-existence check (task-promote-the-oracle-file-
+    // existence-primitives-into-lore). Checked against `parsed.data[index]` (the
+    // schema-VALIDATED edited entry), so an edit that only touches `--statement`/
+    // `--covers` on a script-mode criterion still re-checks the (possibly
+    // untouched) command — cheap and correct: a re-check of an unmodified,
+    // already-existing path is a guaranteed no-op.
+    const editedCriterion = parsed.data[index];
+    let declaration: AllowMissingPathDeclaration | undefined;
+    if (editedCriterion !== undefined) {
+      const pathCheck = checkDeclaredPathExistence(editedCriterion, opts);
+      if (!pathCheck.ok) return pathCheck;
+      if (pathCheck.value.declaration !== null) declaration = pathCheck.value.declaration;
+    }
+
     // D2 — the SHARED demotion rule (`@lore/core`, beside VALID_TRANSITIONS; the
     // same function CorpusService.set calls — see class invariant above): an
     // approved spec demotes to draft on this edit, a non-approved spec's status is
@@ -448,9 +558,70 @@ export class AcService {
     // (D3) — and every editable field on a criterion is governing contract content.
     const newStatus = resolveStatusAfterContractEdit(spec.status, true);
 
-    const writeResult = await this.writeCriteria(spec, parsed.data, "set", { status: newStatus, acId });
+    const writeResult = await this.writeCriteria(spec, parsed.data, "set", {
+      status: newStatus,
+      acId,
+      ...(declaration !== undefined ? { declaration } : {}),
+    });
     if (!writeResult.ok) return writeResult;
     return ok(parsed.data);
+  }
+
+  // ── countUnredeemedAllowMissingPath ───────────────────────────────────────
+
+  /**
+   * Corpus-wide count of UNREDEEMED `--allow-missing-path` declarations — an
+   * AC that exercised the D8 escape at declaration time whose declared
+   * script-mode command STILL names a path absent from disk (AC-OX-9,
+   * spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8).
+   *
+   * Recomputed FRESH from the live filesystem on every call via the SAME
+   * `findMissingOracleFiles` (`@lore/core`) the write-path check uses — never
+   * a cached/stored boolean. Creating the previously-missing file makes the
+   * count drop on the very next call, with NO further command: that liveness
+   * is the entire point of tracking the escape instead of letting it become
+   * an untracked silent fallback (D8's own "make the ambiguity visible and
+   * attributable" resolution).
+   *
+   * A declaration whose `ac_id` no longer names a CURRENTLY-declared
+   * criterion (the AC was removed via {@link removeCriterion}, or its mode
+   * changed away from `script` via `rm`+`add`) is silently excluded — removal
+   * is itself a valid way to resolve a stale declaration, so no separate
+   * cleanup step runs on `removeCriterion` itself.
+   *
+   * @param pathContext - the same injected fs context {@link DeclarePathOpts}
+   *   accepts — REQUIRED here (unlike the opt-in write-path check): a count
+   *   with no filesystem to check against is meaningless, so this method has
+   *   no no-op mode.
+   * @returns the corpus-wide unredeemed count — `0` when nothing was ever
+   *   declared, or every declared path now exists
+   * @throws whatever `StoreInterface.findMany` throws (STORE_ERROR family)
+   */
+  async countUnredeemedAllowMissingPath(
+    pathContext: OraclePathContext,
+  ): Promise<Result<number, LoreError>> {
+    const specsResult = await this.store.findMany({ type: "spec" });
+    if (!specsResult.ok) return specsResult;
+
+    let unredeemed = 0;
+    for (const spec of specsResult.value) {
+      const declarations = extractAllowMissingPathDeclarations(spec);
+      if (declarations.length === 0) continue;
+
+      const criteriaById = new Map(extractCriteria(spec).map((c) => [c.id, c] as const));
+      for (const declaration of declarations) {
+        const criterion = criteriaById.get(declaration.ac_id);
+        if (criterion === undefined || criterion.verify.mode !== "script") continue;
+
+        const missing = findMissingOracleFiles(criterion.verify.command, {
+          cwd: pathContext.cwd,
+          ...(pathContext.corpusRoot !== undefined ? { corpusRoot: pathContext.corpusRoot } : {}),
+          fileExists: pathContext.fileExists,
+        });
+        if (missing.length > 0) unredeemed += 1;
+      }
+    }
+    return ok(unredeemed);
   }
 
   // ── Private Helpers ───────────────────────────────────────────────────────
@@ -562,16 +733,27 @@ export class AcService {
    *   for add/remove, which never change status — defaults to `spec.status` unchanged.
    * @param opts.acId - The edited criterion's id, for setCriterion's change_summary/audit
    *   `details` only (add/remove operate on the whole array, no single id to name).
+   * @param opts.declaration - A NEW/updated D8 `--allow-missing-path` declaration to
+   *   upsert into `spec.extra.allow_missing_path_declarations` (task-promote-the-
+   *   oracle-file-existence-primitives-into-lore) — omitted when
+   *   `checkDeclaredPathExistence` produced none (the common case: no path was
+   *   missing, or the check did not run at all).
    */
   private async writeCriteria(
     spec: DocRecord,
     criteria: AcceptanceCriterion[],
     operation: "add" | "remove" | "set",
-    opts: { status?: DocRecord["status"]; acId?: string } = {},
+    opts: { status?: DocRecord["status"]; acId?: string; declaration?: AllowMissingPathDeclaration } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const now = new Date().toISOString();
     const newVersion = spec.version + 1;
     const newExtra: Record<string, unknown> = { ...spec.extra, acceptance_criteria: criteria };
+    if (opts.declaration !== undefined) {
+      newExtra["allow_missing_path_declarations"] = upsertAllowMissingPathDeclaration(
+        extractAllowMissingPathDeclarations(spec),
+        opts.declaration,
+      );
+    }
     const newStatus = opts.status ?? spec.status;
 
     const updateResult = await this.store.update(
@@ -631,6 +813,117 @@ export class AcService {
 function extractCriteria(spec: DocRecord): AcceptanceCriterion[] {
   const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
   return parsed.success ? parsed.data : [];
+}
+
+/**
+ * D8 declaration-time path-existence check for ONE candidate criterion
+ * (task-promote-the-oracle-file-existence-primitives-into-lore,
+ * spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.3/D8).
+ *
+ * Deliberately does NOT reuse `evidence-precheck.ts`'s shared
+ * `isSelfReportedPassInScope` — that gate answers "is this a self-reported
+ * TEST/E2E PASS", a question with no meaning for AC DECLARATION (there is no
+ * `result` here at all). Widening it to also cover this call site would
+ * silently arm evidence-precheck.ts's OTHER four guards (2/3/5) for a
+ * direction none of them reason about — an explicit non-negotiable
+ * constraint of this task. This check's own, narrow scope is instead: a
+ * `script`-mode criterion, checked at declaration time, with its own D8
+ * escape — nothing shared with the evidence-write guards beyond the promoted
+ * `findMissingOracleFiles` primitive itself.
+ *
+ * @param candidate - the schema-VALIDATED candidate criterion (never the raw,
+ *   untrusted input) — `addCriterion` passes `parsed.data`'s new entry,
+ *   `setCriterion` passes `parsed.data[index]`'s edited entry
+ * @param opts - see {@link DeclarePathOpts}
+ * @returns `err(VALIDATION_ERROR)` when a missing path was found with no (or
+ *   whitespace-only) `allowMissingPath` reason; otherwise
+ *   `ok({ declaration })` where `declaration` is:
+ *   - `null` when the check did not run at all (`opts.pathContext` omitted),
+ *     the criterion is not `script` mode, or every extracted path resolves —
+ *     THREE cases collapsed into one "nothing to track" value, since none of
+ *     them produces a stale escape to redeem later
+ *   - a NEW {@link AllowMissingPathDeclaration} ONLY when the escape was
+ *     genuinely exercised (≥1 path is missing AND a non-empty reason was
+ *     supplied) — the caller persists this via {@link AcService.writeCriteria}
+ */
+function checkDeclaredPathExistence(
+  candidate: { id: string; verify: AcceptanceCriterion["verify"] },
+  opts: DeclarePathOpts,
+): Result<{ declaration: AllowMissingPathDeclaration | null }, LoreError> {
+  const { pathContext } = opts;
+  if (pathContext === undefined) return ok({ declaration: null });
+  if (candidate.verify.mode !== "script") return ok({ declaration: null });
+
+  const missing = findMissingOracleFiles(candidate.verify.command, {
+    cwd: pathContext.cwd,
+    ...(pathContext.corpusRoot !== undefined ? { corpusRoot: pathContext.corpusRoot } : {}),
+    fileExists: pathContext.fileExists,
+  });
+  if (missing.length === 0) return ok({ declaration: null });
+
+  const reason = opts.allowMissingPath;
+  if (reason === undefined || reason.trim().length === 0) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "verify.command",
+      message:
+        `Declared script-mode command names path(s) that do not exist yet: ${missing.join(", ")}. ` +
+        "A red-first AC may legitimately name a test not yet written — pass a non-empty " +
+        '--allow-missing-path "<reason>" to declare it explicitly. The declaration is then ' +
+        "tracked as UNREDEEMED (lore status --json's unredeemed-declaration count) until the " +
+        "file exists — creating it drops the count on the next read, no further command needed.",
+      value: candidate.verify.command,
+    });
+  }
+
+  return ok({
+    declaration: {
+      ac_id: candidate.id,
+      reason: reason.trim(),
+      declared_at: new Date().toISOString(),
+    },
+  });
+}
+
+/**
+ * Extracts the well-formed subset of `spec.extra.allow_missing_path_declarations`
+ * — malformed/legacy entries are silently dropped rather than thrown on, the
+ * SAME fail-closed-on-read convention `extractCriteria` already uses for
+ * `acceptance_criteria` itself. This key lives OUTSIDE `acceptance_criteria`
+ * (never as a field on a criterion's own `verify` object) because
+ * `specAcceptanceCriteriaSchema`'s per-criterion `z.object()` schemas use
+ * Zod's default "strip unknown keys" behavior — an extra field on `verify`
+ * would be silently DROPPED on the very next `safeParse`, which is exactly
+ * the untracked-silent-fallback shape D8 exists to prevent.
+ */
+function extractAllowMissingPathDeclarations(spec: DocRecord): AllowMissingPathDeclaration[] {
+  const raw = spec.extra["allow_missing_path_declarations"];
+  if (!Array.isArray(raw)) return [];
+  const declarations: AllowMissingPathDeclaration[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record["ac_id"] === "string" &&
+      typeof record["reason"] === "string" &&
+      typeof record["declared_at"] === "string"
+    ) {
+      declarations.push({ ac_id: record["ac_id"], reason: record["reason"], declared_at: record["declared_at"] });
+    }
+  }
+  return declarations;
+}
+
+/**
+ * Upserts `next` into `existing` by `ac_id` — a re-declaration for the same
+ * criterion (e.g. `setCriterion` editing an already-escaped command again)
+ * REPLACES the prior reason/timestamp rather than accumulating duplicates.
+ */
+function upsertAllowMissingPathDeclaration(
+  existing: AllowMissingPathDeclaration[],
+  next: AllowMissingPathDeclaration,
+): AllowMissingPathDeclaration[] {
+  return [...existing.filter((d) => d.ac_id !== next.ac_id), next];
 }
 
 /**
