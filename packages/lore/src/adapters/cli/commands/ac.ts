@@ -52,6 +52,17 @@
  *                                   `requirement_refs` wholesale across repeated flags in
  *                                   one call; `--covers ""` clears it to `[]`.
  *
+ * `add`/`set` additionally print the approved->draft demotion an edit MAY trigger
+ * (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2, AC-GV-4) —
+ * see {@link reportDemotionIfAny}. The demotion rule itself is unchanged
+ * (`resolveStatusAfterContractEdit`, `@lore/core`); only its historical silence
+ * (this file's own module header, pre-AC-GV-4, documented it in a comment only)
+ * was the defect. Printed to stderr on EITHER subcommand, in BOTH --json and
+ * human mode, ONLY when the write actually observed an approved->draft
+ * transition — a write that does not (an already-draft spec, a rejected write,
+ * or `ac add`, which per `AcService.writeCriteria` never changes status at all)
+ * prints neither the demotion line nor its descendant-claim-blocking count.
+ *
  * All subcommands accept --json for machine-readable output (SPEC-003 §4).
  * Exit codes per SPEC-003 §5 (via utils.ts::exitCode):
  *   0 = success
@@ -76,10 +87,15 @@
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
-import { deriveAcCoverageState } from "@lore/core";
-import type { AcceptanceCriterion, AcCoverageFact } from "@lore/core";
+import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
+import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
 import type { AcService, AcListResult, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
+// reason: `isPlanMember` is SHARED, store-less predicate infrastructure (its own
+// module header: "not a service... exactly the shared infrastructure that pattern
+// exists to permit"), not the sibling `ac-service.ts` this task's file anchors
+// forbid editing — see {@link countBlockedDescendantTasks}.
+import { isPlanMember } from "../../../service/plan-membership.js";
 
 /**
  * `App.acService` is typed optional only to keep pre-existing hand-built App test
@@ -151,6 +167,8 @@ export default defineCommand({
       async run({ args }) {
         const { app } = loadLoreApp();
         try {
+          const beforeStatus = await fetchSpecStatus(app, args.spec as string);
+
           const criterion = buildCriterionCandidate(args);
           const result = await requireAcService(app).addCriterion(args.spec as string, criterion);
 
@@ -159,6 +177,8 @@ export default defineCommand({
             process.exitCode = exitCode(result.error);
             return;
           }
+
+          await reportDemotionIfAny(app, args.spec as string, beforeStatus);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -349,6 +369,8 @@ export default defineCommand({
 
         const { app } = loadLoreApp();
         try {
+          const beforeStatus = await fetchSpecStatus(app, args.spec as string);
+
           const result = await requireAcService(app).setCriterion(args.spec as string, args.id as string, patch);
 
           if (!result.ok) {
@@ -356,6 +378,8 @@ export default defineCommand({
             process.exitCode = exitCode(result.error);
             return;
           }
+
+          await reportDemotionIfAny(app, args.spec as string, beforeStatus);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -453,6 +477,114 @@ function buildSetPatch(args: Record<string, unknown>): SetCriterionPatch | null 
   }
 
   return Object.keys(patch).length === 0 ? null : patch;
+}
+
+// ─── Demotion Notice (spec-governance-visibility-an-armed-gate-that-vacuously-
+//     passes §B2, AC-GV-4) ──────────────────────────────────────────────────
+
+/**
+ * Fetches a doc's CURRENT status by id-or-slug for the demotion-notice before/
+ * after diff (see {@link reportDemotionIfAny}). Returns `undefined` on ANY
+ * lookup failure (unresolvable slug, store error) rather than a guessed status —
+ * the caller treats `undefined` as "nothing observed", never as a specific
+ * status value, so a failed lookup can never be misread as "was approved" (which
+ * would fabricate a demotion notice) or "was draft" (which would suppress a
+ * real one).
+ */
+async function fetchSpecStatus(app: App, specIdOrSlug: string): Promise<string | undefined> {
+  const result = await app.corpusService.get(specIdOrSlug);
+  return result.ok ? result.value.doc.status : undefined;
+}
+
+/**
+ * Prints the approved->draft demotion `ac add`/`ac set` may cause, plus a count
+ * of descendant task docs whose future `claim` this demotion now blocks
+ * (AC-GV-4). Fires ONLY when the OBSERVED status actually moved from
+ * `"approved"` (captured by {@link fetchSpecStatus} BEFORE the write) to
+ * `"draft"` (re-read AFTER the write succeeds) — never inferred from which
+ * subcommand ran. This is deliberate: `AcService.writeCriteria` only ever
+ * passes an explicit `status` patch from `setCriterion` (see its own JSDoc,
+ * D2) — `addCriterion`/`removeCriterion` never touch status — so diffing the
+ * OBSERVED transition, rather than hardcoding "only `set` can demote", stays
+ * correct even if a future write path starts demoting where it does not
+ * today, and is the ONLY way to satisfy AC-GV-4's load-bearing negative half
+ * (a write that does not demote must print NEITHER line, including a REJECTED
+ * write, an add, or a second edit on an already-draft spec).
+ *
+ * Printed to stderr — never stdout — in BOTH `--json` and human-render mode
+ * (mirrors `anchor add`'s established non-blocking-advisory convention,
+ * `service/anchor-resolution.ts`): an advisory must never pollute `--json`'s
+ * structured payload, and must fire identically regardless of `--json`.
+ *
+ * @param specIdOrSlug - The SAME spec argument the command was invoked with
+ *   (used to re-resolve the doc; correct in the presence of the write itself
+ *   having renamed the doc's slug — a slug is not part of what this call edits).
+ * @param beforeStatus - The status observed by {@link fetchSpecStatus} BEFORE
+ *   the write; `undefined` when that pre-read failed (see its own JSDoc) — the
+ *   demotion check short-circuits immediately in that case, since a lookup
+ *   failure carries no evidence of a prior "approved" state.
+ */
+async function reportDemotionIfAny(
+  app: App,
+  specIdOrSlug: string,
+  beforeStatus: string | undefined,
+): Promise<void> {
+  if (beforeStatus !== "approved") return;
+
+  const afterResult = await app.corpusService.get(specIdOrSlug);
+  if (!afterResult.ok || afterResult.value.doc.status !== "draft") return;
+
+  const blockedResult = await countBlockedDescendantTasks(app, afterResult.value.doc.id);
+  const blastRadius = blockedResult.ok
+    ? `${blockedResult.value} descendant task claim(s)`
+    : `an unknown number of descendant task claims (blast-radius count unavailable: ${blockedResult.error.code})`;
+
+  process.stderr.write(
+    `Notice: this edit demoted spec "${afterResult.value.doc.slug}" from approved to draft ` +
+      "(correct lifecycle behavior — an approved spec's governing contract just changed, " +
+      `resolveStatusAfterContractEdit in @lore/core). It now blocks ${blastRadius} until the ` +
+      "spec is re-approved.\n",
+  );
+}
+
+/**
+ * Counts descendant task docs — reached via the spec's DIRECT child plans
+ * (`parent_id`), then {@link isPlanMember} over every task in the corpus —
+ * that are NOT already in a terminal status (`getAllowedTransitions` returns
+ * `[]` for a terminal doc: `"archived"`/`"deprecated"`, `@lore/core`
+ * `schemas.ts`'s `VALID_TRANSITIONS`, never a locally hardcoded literal pair).
+ * A terminal task is excluded because it can never be claimed again regardless
+ * of the spec's status — counting it would inflate the reported blast radius
+ * with a doc the demotion cannot actually affect.
+ *
+ * Scoped to child-plan tasks only — the SAME scoping `AcService.removeCriterion`
+ * already documents on itself ("NOT (yet) extended to ad-hoc-governed tasks...
+ * a NAMED follow-up gap"): an `--adhoc` task's membership in a spec's coverage
+ * is resolved through a materially more expensive search
+ * (`resolveGoverningSpecByAcScope` over every spec in the corpus,
+ * `AcService.findAdhocGovernedTasks`) that this CLI-side advisory deliberately
+ * does not re-implement — doing so here would duplicate that resolution
+ * outside `AcService`, which this task's file anchors forbid editing.
+ *
+ * @param specId - The spec's resolved doc id (never a slug — {@link
+ *   isPlanMember} and the `parent_id` filter both compare against the stored
+ *   id, not a human-readable address).
+ */
+async function countBlockedDescendantTasks(app: App, specId: string): Promise<Result<number, LoreError>> {
+  const plansResult = await app.corpusService.listFull({ parent_id: specId, type: "plan" });
+  if (!plansResult.ok) return plansResult;
+  const plans = plansResult.value.docs;
+  if (plans.length === 0) return ok(0);
+
+  const tasksResult = await app.corpusService.listFull({ type: "task" });
+  if (!tasksResult.ok) return tasksResult;
+
+  const blocked = tasksResult.value.docs.filter(
+    (task) =>
+      getAllowedTransitions(task.status, task.type).length > 0 &&
+      plans.some((plan) => isPlanMember(task, plan.id)),
+  );
+  return ok(blocked.length);
 }
 
 // ─── Output Helpers ──────────────────────────────────────────────────────────
