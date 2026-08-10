@@ -102,12 +102,28 @@ export interface MirrorParityResult {
  * `scripts/check-test-budgets.ts`'s `checkLedger(..., pathExists)` seam) so this is unit-testable
  * without touching disk.
  *
+ * ⛔ NOT CHECKED: file CONTENT. This function verifies only (1) COUNT — `fileCountOnDisk ===
+ * specs.length` — and (2) SLUG PRESENCE — every spec's mapped `file_path` exists on disk. It never
+ * reads a mirror file's body and never compares it against the corpus doc's current content, so a
+ * spec whose corpus content changed since its LAST export (e.g. an AC evidence marker moving from
+ * `[·]` to `[✔]`) still reports `ok: true` here — this is DELIBERATE (AC-FR-6 asks for count +
+ * slug parity; content-diffing on every `bun run test` would be slow, and AC evidence markers
+ * change often enough that a content check would be red almost permanently), never an oversight.
+ * `runExport`'s underlying `ExportDocsService.exportDocs` DOES detect content drift separately
+ * (its own `report.drift` array, printed by `printExportReport`) — that is a DIFFERENT, narrower
+ * signal this function never consults, and `runCheck` (read-only, no export) has no equivalent at
+ * all. Every caller-facing string describing "parity"/"OK" (see `printParity`, and
+ * `export-spec-mirror.ts`'s own exit-code table) MUST name this same count-and-slug-only scope —
+ * never say "matches the corpus" or "in sync" without qualifying it, which would overclaim content
+ * fidelity this function does not provide (measured incident 2026-08-10: the two success/failure
+ * strings originally said "mirror matches the corpus exactly", which is untrue of file content).
+ *
  * @param specs every corpus spec's (id, slug) pair — the FULL live set, never pre-filtered.
  * @param mappings the loaded `.lore/export-index.json` mappings, keyed by doc ULID.
  * @param fileExists injected existence probe, given a mapping's `file_path` (repo-relative).
  * @param fileCountOnDisk the REAL count of `.md` files under {@link SPEC_MIRROR_DIR_RELATIVE} —
  *   passed in (not recomputed here) so this function stays pure and the caller controls the walk.
- * @returns the full parity verdict — never throws.
+ * @returns the full parity verdict (count + slug presence ONLY, never content) — never throws.
  */
 export function computeMirrorParity(
   specs: readonly { readonly id: string; readonly slug: string }[],

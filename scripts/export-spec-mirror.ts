@@ -79,9 +79,12 @@
  * `.lore/export-index.json` (both git-tracked deliverables — expected to be committed, per this
  * task's own scope note). `main` also writes to stdout/stderr.
  *
- * Exit codes:
- *   0 — clean. Export mode: 0 per-doc export errors AND full parity reached. Check mode: full
- *       parity (no missing mapping, no absent file, on-disk count === corpus spec count).
+ * Exit codes (⛔ "parity"/"OK" below means COUNT + SLUG PRESENCE ONLY — file CONTENT is never
+ * compared; see `computeMirrorParity`'s own doc comment in `export-spec-mirror-core.ts` for why
+ * that scope is deliberate, and for the caller-facing wording every "OK" message below must match):
+ *   0 — clean. Export mode: 0 per-doc export errors AND every corpus spec has a mirror file
+ *       (on-disk count === corpus spec count, every mapped file exists). Check mode: same parity
+ *       condition, read-only.
  *   {@link MIRROR_DRIFT_EXIT_CODE} (2) — check mode found >=1 corpus spec not mirrored on disk
  *       (either never exported, or its mapped file is absent); OR export mode completed with 0
  *       per-doc errors but still failed to reach parity (defensive — should not occur for `spec`
@@ -225,7 +228,7 @@ export async function main(
       const parity = await runCheck(app, repoRoot);
       printParity("check", parity);
       if (!parity.ok) return MIRROR_DRIFT_EXIT_CODE;
-      console.log(`export-spec-mirror --check: OK — mirror matches the corpus exactly.`);
+      console.log(`export-spec-mirror --check: OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).`);
       return 0;
     }
 
@@ -238,7 +241,7 @@ export async function main(
     printParity("export", parity);
     if (report.errors.length > 0) return MIRROR_HARD_FAILURE_EXIT_CODE;
     if (!parity.ok) return MIRROR_DRIFT_EXIT_CODE;
-    console.log(`export-spec-mirror: OK — mirror matches the corpus exactly.`);
+    console.log(`export-spec-mirror: OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).`);
     return 0;
   } finally {
     app.close();
