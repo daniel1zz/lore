@@ -723,12 +723,22 @@ export const VACUOUS_CHECKPOINT_NOTICE_PREFIX = "VACUOUS-GATE";
  * condition from an empty failure list — re-deriving it is the defect.
  *
  * ⛔ Known limit, stated rather than papered over: a conjunct that passes
- * VACUOUSLY on its own internal carve-out (e.g. `assessmentFreshness` with no
- * linked assessment) returns `{ok: true}` and therefore counts as APPLICABLE
- * here, suppressing the notice. This detector is a floor — it catches a fully
- * dark gate, not every partially dark one. Widening it would require each
- * predicate to distinguish "passed" from "passed because there was nothing to
- * check", which is the `PredicateNotApplicable` migration §Scope defers.
+ * VACUOUSLY on its own internal carve-out and returns a bare `{ok: true}`
+ * counts as APPLICABLE here, suppressing the notice. This detector is a
+ * floor — it catches a fully dark gate, not every partially dark one.
+ * Widening it requires each predicate (or, as `assessmentFreshness` was
+ * migrated, its `checkPlanClose` call site) to distinguish "passed" from
+ * "passed because there was nothing to check" — the `PredicateNotApplicable`
+ * migration §Scope defers this for predicates not yet touched.
+ * `assessmentFreshness` was this JSDoc's OWN named example of the gap (no
+ * linked assessment, or no task activity, rendering identically to a
+ * measured pass) until task-report-why-each-plan-close-predicate-passed-so-
+ * a-vacuous closed it: `checkPlanClose` now pushes a `PredicateNotApplicable`
+ * (`reason: "no-evidence"`) for that conjunct BEFORE calling the predicate at
+ * all, rather than letting it silently return `{ok: true}` for missing data.
+ * A FUTURE predicate added to this checkpoint with its own unmigrated
+ * internal vacuous-pass carve-out still has this limit until it, too, is
+ * given an explicit applicability check.
  *
  * @param checkpoint - The checkpoint whose predicates produced `results` —
  *   named in the notice so a log line is self-describing.
@@ -1422,9 +1432,15 @@ const DEFAULT_ATTESTATION_MIN_RATIO: number | null = null;
  *   - `assessmentFreshness` — OPT-OUT (SPEC-106 D1): runs for EVERY closing plan
  *     UNLESS `ctx.assessmentFreshnessExempt === true` (D4 — flag + non-empty
  *     reason, resolved by the caller; mirrors `attestationExempt`'s shape, but
- *     with NO separate "exempt kind" taxonomy). Vacuous pass when the plan has
- *     no linked assessment or no evidence/done task activity at all (D5,
- *     AC-FRESH-2) — this predicate never invents a denial from missing data.
+ *     with NO separate "exempt kind" taxonomy). When the plan has no linked
+ *     assessment OR no evidence/done task activity at all (D5, AC-FRESH-2) —
+ *     nothing to compare, so no denial is ever invented from missing data —
+ *     this checkPlanClose pushes a `PredicateNotApplicable` (`reason:
+ *     "no-evidence"`) INSTEAD of calling the predicate (task-report-why-each-
+ *     plan-close-predicate-passed-so-a-vacuous): the predicate itself is only
+ *     ever invoked with two REAL timestamps to compare, so its own return
+ *     value is always a genuinely measured `{ok: true}`/`{ok: false}`, never
+ *     a vacuous pass disguised as one.
  *
  * Every predicate that runs is pushed into the SAME results array (this
  * module's "run every predicate, don't short-circuit on the first failure"
@@ -1517,7 +1533,32 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
     results.push(prdOutlineSynced(ctx.prdSyncSynced, ctx.parentSpecPointer?.slug ?? "<spec>"));
   }
   if (ctx.assessmentFreshnessExempt !== true) {
-    results.push(assessmentFreshness(ctx.newestAssessmentAt, ctx.newestTaskActivityAt));
+    // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+    // `assessmentFreshness` (gate-predicates.ts) itself returns a bare
+    // `{ok: true}` for BOTH a genuinely-measured pass AND its own internal
+    // "nothing to compare" carve-out (either input `undefined`) — this was
+    // `describeCheckpointVacuity`'s OWN "Known limit" JSDoc's named example of
+    // a conjunct whose vacuous pass renders identically to a measured one,
+    // silently counting as APPLICABLE and suppressing the checkpoint-wide
+    // vacuity notice. Mirrors `attestationFloor`'s own `total_evidence === 0`
+    // guard one branch up: the APPLICABILITY decision (is there even a second
+    // fact to compare against?) is made HERE, before the predicate runs, so
+    // `assessmentFreshness` itself is called ONLY when it has two real
+    // timestamps to compare — its own return value can then only ever be a
+    // genuinely measured `{ok: true}` or `{ok: false}`, never a disguised
+    // vacuous pass. `assessmentFreshness`'s direct callers outside this
+    // checkpoint (`commands/assess.ts`'s non-blocking staleness advisory) are
+    // UNCHANGED — that surface only ever reads `.ok`, and a vacuous "nothing
+    // to compare" has always meant "don't warn" there too.
+    if (ctx.newestAssessmentAt === undefined || ctx.newestTaskActivityAt === undefined) {
+      results.push({
+        notApplicable: true,
+        reason: "no-evidence",
+        referent: ctx.targetIdOrSlug ?? "<plan>",
+      });
+    } else {
+      results.push(assessmentFreshness(ctx.newestAssessmentAt, ctx.newestTaskActivityAt));
+    }
   }
   return results;
 }

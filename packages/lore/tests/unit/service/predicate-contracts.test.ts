@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import type { DeclaredScopeCoverage } from "@lore/core";
 import {
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
@@ -160,11 +161,38 @@ describe("PREDICATE_CONTRACTS — contract table exhaustiveness (AC-PCI-11)", ()
 // ─── Amendment A — undefined vs explicit [] divergence ─────────────────────
 
 describe("checkPlanClose — planClaimedAcCoverage undefined is a caller-contract violation, not []", () => {
+  // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+  // this describe block never resolves `planDeclaredScopeCoverage`, so it
+  // defaulted (via `checkPlanClose`'s `?? UNRESOLVED_DECLARED_SCOPE`) to the
+  // UNDECLARED sentinel; `declaredScopeCoverageVerdict` reports THAT as its
+  // own `notApplicable("scope-undeclared")` verdict (evidence-panel.ts), which
+  // is what `attestationFloor` returns as ITS whole verdict here — never a
+  // bare `{ok: true}`. Pre-fix, these tests' "the real verdict still passes"
+  // assertions were satisfied ONLY by `assessmentFreshness`'s OWN vacuous
+  // `{ok: true}` (the exact defect this task removes), never by
+  // `attestationFloor`'s conditions 1/3 as the comments claim. A RESOLVED
+  // "claims nothing" scope fact makes `attestationFloor`'s own verdict a
+  // genuine `{ok: true}`, so the assertion means what its comment says.
+  const SCOPE_RESOLVED_CLAIMING_NOTHING: DeclaredScopeCoverage = {
+    declared_acs: [],
+    unattested_acs: [],
+    scope_undeclared: false,
+    meets_coverage: true,
+  };
+
   function realEvidenceCtx(overrides: Partial<GateContext>): GateContext {
     return {
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 2, attestedCount: 2 }],
+      planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
+      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+      // this describe block's fixtures never populate newestAssessmentAt/
+      // newestTaskActivityAt; now that the vacuous case pushes its own
+      // notApplicable("no-evidence") entry, an unexempted fixture here would
+      // trip a THIRD conjunct these planClaimedAcCoverage-focused assertions
+      // never anticipated.
+      assessmentFreshnessExempt: true,
       ...overrides,
     };
   }
@@ -206,7 +234,17 @@ describe("checkPlanClose — planClaimedAcCoverage undefined is a caller-contrac
   // suppressed rather than piling a second not-applicable verdict onto the
   // same predicate concern.
   it("BOUNDARY: no companion entry when attestationFloor is already notApplicable (zero evidence)", () => {
-    const ctx: GateContext = { targetIdOrSlug: "plan-y", attestationMinRatio: 0.5, planTasksAttestation: [] };
+    // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
+    // this test asserts EXACTLY one notApplicable entry (attestationFloor's
+    // own zero-evidence case); assessmentFreshnessExempt keeps the
+    // newly-visible assessment-freshness "no-evidence" entry from adding a
+    // second one.
+    const ctx: GateContext = {
+      targetIdOrSlug: "plan-y",
+      attestationMinRatio: 0.5,
+      planTasksAttestation: [],
+      assessmentFreshnessExempt: true,
+    };
     const results = planClose.check(ctx);
 
     const notApplicableEntries = results.filter((r) => "notApplicable" in r);
