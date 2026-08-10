@@ -360,3 +360,101 @@ describe("REGRESSION — leaves sibling criteria and other extra keys untouched 
     expect(after.value.extra["acceptance_criteria"]).toEqual(result.value);
   });
 });
+
+// ─── D8 declaration-time path-existence check (task-promote-the-oracle-file- ─
+// ─── existence-primitives-into-lore, spec-oracle-executability-a-runner-s- ──
+// ─── discovery-refusal-is-not-a §M6.3/D8, AC-OX-4) ──────────────────────────
+
+/**
+ * Mirrors ac-service.test.ts's own FIVE_TOKEN_LESS_COMMANDS fixture — see that
+ * file's doc for why these carry NO extractable test-file token. Duplicated
+ * (not imported) because these are two independently-runnable test files.
+ */
+const FIVE_TOKEN_LESS_COMMANDS = [
+  "bun run test",
+  "bun run typecheck",
+  'test $(grep -rln "TODO" packages/lore/src | wc -l) -eq 0',
+  "bun run dev -- setup --dry-run --claude-dir /tmp/lore-setup-probe",
+  "diff <(shasum assets/hooks/pre-push) <(shasum hooks/pre-push)",
+];
+
+describe("NEGATIVE/BOUNDARY — setCriterion declared-path-existence (AC-OX-4)", () => {
+  it("refuses editing --command to a nonexistent test path when pathContext is supplied", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, scriptCriterion());
+
+    const result = await acService.setCriterion(
+      specId,
+      "AC-X-1",
+      { command: "bunx vitest run packages/x/ghost.test.ts" },
+      { pathContext: { fileExists: () => false, cwd: "/repo" } },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toContain("packages/x/ghost.test.ts");
+  });
+
+  it("RED control — the refusal must NOT fire when the declared path resolves", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, scriptCriterion());
+
+    const result = await acService.setCriterion(
+      specId,
+      "AC-X-1",
+      { command: "bunx vitest run packages/x/real.test.ts" },
+      { pathContext: { fileExists: (p) => p.endsWith("packages/x/real.test.ts"), cwd: "/repo" } },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(FIVE_TOKEN_LESS_COMMANDS)(
+    "accepts unchanged the measured token-less command %s even when fileExists always returns false",
+    async (command) => {
+      const { corpusService, acService } = makeServices();
+      const prdId = await createPrd(corpusService);
+      const specId = await createSpec(corpusService, prdId);
+      await acService.addCriterion(specId, scriptCriterion());
+
+      const result = await acService.setCriterion(
+        specId,
+        "AC-X-1",
+        { command },
+        { pathContext: { fileExists: () => false, cwd: "/repo" } },
+      );
+      expect(result.ok).toBe(true);
+    },
+  );
+
+  it("BOUNDARY — no pathContext supplied at all is a complete no-op (existing callers unaffected)", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, scriptCriterion());
+
+    const result = await acService.setCriterion(specId, "AC-X-1", {
+      command: "bunx vitest run packages/x/ghost.test.ts",
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("--allow-missing-path with a non-empty reason unlocks an edit naming a not-yet-written test", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    await acService.addCriterion(specId, scriptCriterion());
+
+    const result = await acService.setCriterion(
+      specId,
+      "AC-X-1",
+      { command: "bunx vitest run packages/x/new.test.ts" },
+      { pathContext: { fileExists: () => false, cwd: "/repo" }, allowMissingPath: "red-first — not written yet" },
+    );
+    expect(result.ok).toBe(true);
+  });
+});
