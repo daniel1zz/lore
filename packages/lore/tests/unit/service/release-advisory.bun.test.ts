@@ -73,9 +73,15 @@ async function createPlanAndTask(cs: CorpusService): Promise<{ planId: string; t
   return { planId: plan.id, taskId: task.id };
 }
 
+// reason: SUPERSEDED default oracle (task-raise-the-evidence-tail-guard-s-
+// predicate-to-its-own, D5) — was "tsc", now "manual". rejectMissingPass
+// OutputTail's D5 raise refuses a self-reported "pass" for every OTHER
+// oracle kind regardless of tail content; "manual" is the one kind that
+// still lets a genuinely non-empty self-reported tail succeed, which is all
+// this fixture's callers need (none of them test the tail guard itself).
 function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
   return {
-    oracle: "tsc",
+    oracle: "manual",
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",

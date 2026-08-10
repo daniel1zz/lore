@@ -208,8 +208,12 @@ describe("lore_anchor_set — declarative replace, preserves claim/evidence (SPE
 
     const claimResult = await taskWorkflowService.claim(task.id, { by: "agent:t1", branch: "wt-a" });
     if (!claimResult.ok) throw new Error(JSON.stringify(claimResult.error));
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed.
     const evidenceResult = await taskWorkflowService.addEvidence(task.id, {
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "agent:t1",

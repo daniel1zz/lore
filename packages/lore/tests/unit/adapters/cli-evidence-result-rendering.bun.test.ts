@@ -246,10 +246,15 @@ describe("lore evidence --result rendering — REGRESSION", () => {
     const log = captureConsoleLog();
 
     try {
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — "tsc" self-report is now refused regardless
+      // of tail content; "manual" is the one oracle that still lets a
+      // genuinely non-empty self-reported tail succeed. This test only
+      // checks the success line's "(pass)" rendering, not oracle semantics.
       await cmd.run({
         args: {
           task: taskSlug,
-          oracle: "tsc",
+          oracle: "manual",
           command: "bun run typecheck",
           result: "pass",
           by: "alice",

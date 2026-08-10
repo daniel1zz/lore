@@ -278,9 +278,14 @@ describe("lore_evidence_add", () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
 
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — "tsc" self-report is now refused regardless
+      // of tail content; "manual" is the one oracle that still lets a
+      // genuinely non-empty self-reported tail succeed. This test only
+      // checks that an evidence entry is appended, not oracle-kind semantics.
       const result = await call()({
         id_or_slug: taskId,
-        oracle: "tsc",
+        oracle: "manual",
         command: "bun run typecheck",
         result: "pass",
         recorded_by: "alice",
@@ -295,9 +300,15 @@ describe("lore_evidence_add", () => {
 
   describe("error handling", () => {
     it("non-existent task id → isError=true, DOC_NOT_FOUND", async () => {
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — with "tsc" the D5 raise would refuse this
+      // call BEFORE task resolution ever runs (VALIDATION_ERROR, not
+      // DOC_NOT_FOUND), masking the condition this test means to exercise.
+      // "manual" satisfies the raised guard so the call proceeds to
+      // resolveTask, which is what actually produces DOC_NOT_FOUND here.
       const result = await call()({
         id_or_slug: "does-not-exist",
-        oracle: "tsc",
+        oracle: "manual",
         command: "cmd",
         result: "pass",
         recorded_by: "alice",
@@ -339,9 +350,13 @@ describe("lore_evidence_add", () => {
       const spy = spyOnAddEvidence();
 
       try {
+        // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+        // predicate-to-its-own) — "tsc" self-report is now refused; "manual"
+        // is the one oracle that still lets a genuinely non-empty
+        // self-reported tail succeed. This test only checks ac_ref threading.
         const result = await call()({
           id_or_slug: taskId,
-          oracle: "tsc",
+          oracle: "manual",
           command: "bun run typecheck",
           result: "pass",
           recorded_by: "alice",
@@ -361,9 +376,11 @@ describe("lore_evidence_add", () => {
       const spy = spyOnAddEvidence();
 
       try {
+        // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+        // predicate-to-its-own) — see the HAPPY test above in this block.
         const result = await call()({
           id_or_slug: taskId,
-          oracle: "tsc",
+          oracle: "manual",
           command: "cmd",
           result: "pass",
           recorded_by: "alice",
@@ -421,7 +438,18 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
   }
 
   describe("happy path", () => {
-    it("AC-1.H1: oracle test + result pass citing an EXISTING file records normally", async () => {
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)
+    // — this test used to prove the missing-oracle-file precheck's "file
+    // exists" pass was SUFFICIENT for a self-reported oracle-test pass to
+    // record. D5 raises the SEPARATE, later-running rejectMissingPassOutput
+    // Tail guard to also require capture_source:"runner" for every oracle but
+    // "manual" — so passing the file-existence precheck is now necessary but
+    // no longer sufficient. The precheck itself still ran and passed (proven
+    // by the refusal being the TAIL-GUARD's message, naming --capture,
+    // rather than the precheck's own "not found" message) — addEvidence WAS
+    // reached (spy.called() stays true), it just refuses for the D5 reason.
+    it("AC-1.H1 SUPERSEDED: oracle test + result pass citing an EXISTING file passes the precheck but is now refused without --capture", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
       const spy = spyOnAddEvidence();
@@ -435,11 +463,12 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           recorded_by: "alice",
           output_tail: "ok",
         });
-        expect(result.isError).toBeFalsy();
+        expect(result.isError).toBe(true);
         expect(spy.called()).toBe(true);
-        const data = parseResult(result) as { doc: DocRecord };
-        const evidenceArr = data.doc.extra["verification_evidence"] as unknown[];
-        expect(evidenceArr).toHaveLength(1);
+        const error = parseResult(result) as { code: string; message: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+        expect(error.message).toContain("--capture");
+        expect(error.message).not.toContain("not found");
       } finally {
         spy.restore();
       }
@@ -548,7 +577,13 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
       }
     });
 
-    it("AC-1.REG3: a non-test oracle (tsc) referencing no extractable token is unaffected (fail-open, pre-existing happy-path behavior)", async () => {
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, D5) — the missing-oracle-file precheck's fail-open behavior
+    // for a non-test/e2e oracle is STILL true (proven by the refusal being
+    // the D5 tail-guard's message, naming --capture, never a "not found"
+    // one) — but D5 separately refuses ANY self-reported oracle-"tsc" pass
+    // now, so the overall call no longer "records normally".
+    it("AC-1.REG3 SUPERSEDED: a non-test oracle (tsc) referencing no extractable token stays fail-open at the precheck, but is now refused by the D5 raise", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
       const spy = spyOnAddEvidence();
@@ -562,8 +597,12 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           recorded_by: "alice",
           output_tail: "ok",
         });
-        expect(result.isError).toBeFalsy();
+        expect(result.isError).toBe(true);
         expect(spy.called()).toBe(true);
+        const error = parseResult(result) as { code: string; message: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+        expect(error.message).toContain("--capture");
+        expect(error.message).not.toContain("not found");
       } finally {
         spy.restore();
       }
@@ -608,7 +647,13 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
   }
 
   describe("happy path", () => {
-    it("AC-2.H1 (GREEN): a token missing relative to process.cwd() but present relative to the declared caller_cwd records normally", async () => {
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, D5) — caller_cwd's file-existence resolution is still proven
+    // (the refusal is the D5 tail-guard's message, not a "not found" one, and
+    // addEvidence IS reached), but a hand-typed tail alone no longer suffices
+    // for a self-reported oracle-test pass — see AC-1.H1's identical
+    // supersession above.
+    it("AC-2.H1 SUPERSEDED: caller_cwd resolves the token, but the D5 raise still refuses without --capture", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
       const spy = spyOnAddEvidence();
@@ -623,8 +668,12 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           caller_cwd: CALLER_CWD,
           output_tail: "ok",
         });
-        expect(result.isError).toBeFalsy();
+        expect(result.isError).toBe(true);
         expect(spy.called()).toBe(true);
+        const error = parseResult(result) as { code: string; message: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+        expect(error.message).toContain("--capture");
+        expect(error.message).not.toContain("not found");
       } finally {
         spy.restore();
       }
@@ -688,7 +737,11 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
       }
     });
 
-    it("AC-2.REG: omitting caller_cwd entirely is byte-identical to pre-fix behavior for an EXISTING repo-root-relative file", async () => {
+    // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-
+    // its-own, D5) — the precheck's own repo-root resolution is still proven
+    // (refusal names --capture, not "not found"); see AC-1.H1's identical
+    // supersession above for the full rationale.
+    it("AC-2.REG SUPERSEDED: omitting caller_cwd for an EXISTING repo-root-relative file still passes the precheck, but the D5 raise now refuses without --capture", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
       const spy = spyOnAddEvidence();
@@ -703,8 +756,12 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           recorded_by: "alice",
           output_tail: "ok",
         });
-        expect(result.isError).toBeFalsy();
+        expect(result.isError).toBe(true);
         expect(spy.called()).toBe(true);
+        const error = parseResult(result) as { code: string; message: string };
+        expect(error.code).toBe("VALIDATION_ERROR");
+        expect(error.message).toContain("--capture");
+        expect(error.message).not.toContain("not found");
       } finally {
         spy.restore();
       }

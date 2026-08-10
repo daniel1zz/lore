@@ -245,8 +245,14 @@ describe("lore ac list --json — falsified + coverage state (AC-FALS-4)", () =>
       });
       expect(acResult.ok).toBe(true);
 
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — "test" self-report is now refused regardless
+      // of tail content; "manual" is the one oracle that still lets a
+      // genuinely non-empty self-reported tail succeed. This test only
+      // checks deriveAcCoverageState's pass_unfalsified state, not oracle
+      // semantics.
       const evResult = await app.taskWorkflowService.addEvidence(taskId, {
-        oracle: "test",
+        oracle: "manual",
         command: "bunx vitest run fixture.test.ts",
         result: "pass",
         output_tail: "1 passed",
@@ -329,8 +335,14 @@ describe("lore ac list human table — pass_unfalsified marker (AC-FALS-5)", () 
         statement: "a criterion carrying one expected-fail ref has been observed able to go red",
         verify: { mode: "script", oracle: "test", command: "bunx vitest run fixture-two.test.ts" },
       });
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — "test" self-report is now refused regardless
+      // of tail content; "manual" is the one oracle that still lets a
+      // genuinely non-empty self-reported tail succeed. This test only
+      // checks the pass_unfalsified human-render marker, not oracle
+      // semantics.
       await app.taskWorkflowService.addEvidence(taskId, {
-        oracle: "test",
+        oracle: "manual",
         command: "bunx vitest run fixture-one.test.ts",
         result: "pass",
         output_tail: "1 passed",
@@ -339,7 +351,7 @@ describe("lore ac list human table — pass_unfalsified marker (AC-FALS-5)", () 
         capture_source: "self-report",
       });
       await app.taskWorkflowService.addEvidence(taskId, {
-        oracle: "test",
+        oracle: "manual",
         command: "bunx vitest run fixture-two.test.ts",
         result: "pass",
         output_tail: "1 passed",
@@ -410,8 +422,14 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
         statement: "a first never-red criterion contributes one pass_unfalsified count",
         verify: { mode: "script", oracle: "test", command: "bunx vitest run fixture-first.test.ts" },
       });
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — "test" self-report is now refused regardless
+      // of tail content; "manual" is the one oracle that still lets a
+      // genuinely non-empty self-reported tail succeed. This test only
+      // checks the pass_unfalsified_count status field, not oracle
+      // semantics.
       await app.taskWorkflowService.addEvidence(taskId, {
-        oracle: "test",
+        oracle: "manual",
         command: "bunx vitest run fixture-first.test.ts",
         result: "pass",
         output_tail: "1 passed",
@@ -441,8 +459,10 @@ describe("lore status --json — corpus-wide pass_unfalsified count (AC-FALS-6)"
         statement: "a second never-red criterion contributes a second pass_unfalsified count",
         verify: { mode: "script", oracle: "test", command: "bunx vitest run fixture-second.test.ts" },
       });
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — see this test's first evidence call above.
       await app.taskWorkflowService.addEvidence(taskId, {
-        oracle: "test",
+        oracle: "manual",
         command: "bunx vitest run fixture-second.test.ts",
         result: "pass",
         output_tail: "1 passed",

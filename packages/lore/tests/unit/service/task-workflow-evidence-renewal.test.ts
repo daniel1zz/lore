@@ -61,9 +61,12 @@ async function createTask(cs: CorpusService, planId: string, title = "Renewal Ta
   return result.value.id;
 }
 
+// reason: SUPERSEDED default oracle (task-raise-the-evidence-tail-guard-s-
+// predicate-to-its-own, D5) — was "tsc", now "manual"; see task-workflow-
+// audit.test.ts's identical fixture header for the full rationale.
 function evidence(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
   return {
-    oracle: "tsc",
+    oracle: "manual",
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",

@@ -600,10 +600,35 @@ export class AcService {
   async countUnredeemedAllowMissingPath(
     pathContext: OraclePathContext,
   ): Promise<Result<number, LoreError>> {
+    const listResult = await this.listUnredeemedAllowMissingPath(pathContext);
+    if (!listResult.ok) return listResult;
+    return ok(listResult.value.length);
+  }
+
+  /**
+   * The MEMBER LIST behind {@link countUnredeemedAllowMissingPath} — task-
+   * raise-the-evidence-tail-guard-s-predicate-to-its-own (AC-FR-5): a
+   * corpus-wide count with no way to enumerate its members is not
+   * actionable (measured 2026-08-10 — producing this exact list for
+   * `pass_unfalsified_count=29` required a throwaway script iterating all
+   * 138 specs by hand). `countUnredeemedAllowMissingPath` now DERIVES its
+   * number from this list's length — one iteration, never two independently
+   * maintained copies of "which declarations are still unredeemed".
+   *
+   * @param pathContext - same REQUIRED injected fs context as {@link
+   *   countUnredeemedAllowMissingPath} — recomputed fresh from the live
+   *   filesystem every call, never cached.
+   * @returns one entry per unredeemed declaration, `"<spec-slug>#<ac-id>"` —
+   *   stable, greppable, and sufficient to locate the offending
+   *   `--allow-missing-path` declaration via `lore ac list <spec-slug>`.
+   */
+  async listUnredeemedAllowMissingPath(
+    pathContext: OraclePathContext,
+  ): Promise<Result<string[], LoreError>> {
     const specsResult = await this.store.findMany({ type: "spec" });
     if (!specsResult.ok) return specsResult;
 
-    let unredeemed = 0;
+    const unredeemed: string[] = [];
     for (const spec of specsResult.value) {
       const declarations = extractAllowMissingPathDeclarations(spec);
       if (declarations.length === 0) continue;
@@ -618,7 +643,7 @@ export class AcService {
           ...(pathContext.corpusRoot !== undefined ? { corpusRoot: pathContext.corpusRoot } : {}),
           fileExists: pathContext.fileExists,
         });
-        if (missing.length > 0) unredeemed += 1;
+        if (missing.length > 0) unredeemed.push(`${spec.slug}#${declaration.ac_id}`);
       }
     }
     return ok(unredeemed);

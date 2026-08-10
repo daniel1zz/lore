@@ -96,17 +96,19 @@
  *   reporting the failure. `"pass"` rows were, until task-a-non-empty-output-tail-
  *   can-be-hand-authored-prose-and-the, never bound (see the two invariants
  *   immediately below for the fix — the PASS-side asymmetry this closed).
- * @invariant addEvidence rejects a self-reported `result: "pass"` carrying no
- *   `output_tail` UNLESS `capture_source === "runner"` (task-a-non-empty-output-
- *   tail-can-be-hand-authored-prose-and-the, `rejectMissingPassOutputTail`) — the
- *   asymmetry the predecessor spec left standing (see the invariant above): a
- *   bare non-empty check was measured insufficient on its own (hand-authored prose
- *   with real numbers embedded passes it cleanly), so the actual fix is the
- *   `capture_source` discriminator immediately below, not a stronger shape check.
- *   Oracle-agnostic — applies to `--oracle manual` exactly like every other kind
- *   (a manual/visual check has no capturable stdout, so `--capture` is refused
- *   for it at the CLI layer, but its pass row still needs an explicit non-empty
- *   description — never a silently empty tail).
+ * @invariant addEvidence rejects EVERY self-reported `result: "pass"`
+ *   (`rejectMissingPassOutputTail`) UNLESS `capture_source === "runner"` OR
+ *   `oracle === "manual"` (task-raise-the-evidence-tail-guard-s-predicate-to-
+ *   its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5,
+ *   superseding task-a-non-empty-output-tail-can-be-hand-authored-prose-and-
+ *   the's own predicate) — that predecessor task's "actual fix" (a bare
+ *   `output_tail` non-empty check, exempting only `capture_source ===
+ *   "runner"`) was ITSELF measured insufficient: 2 of 3 dispatched agents
+ *   satisfied "non-empty" by hand-typing a plausible-looking summary, and
+ *   both passed the guard it shipped. D5 removes the non-empty-tail escape
+ *   entirely for every oracle but `"manual"` — the one kind `--capture`
+ *   structurally can never reach (a manual/visual check has no capturable
+ *   stdout), so it keeps a non-empty description as ITS OWN proof instead.
  * @invariant `capture_source` (`"runner"` | `"self-report"`, @lore/core's
  *   `CaptureSource`) is the discriminator distinguishing a runner-captured tail
  *   from a self-reported one (task-a-non-empty-output-tail-can-be-hand-authored-
@@ -1254,28 +1256,44 @@ export function rejectMissingNonPassOutputTail(
 }
 
 /**
- * Rejects a self-reported `result: "pass"` row that lacks a genuine tail
- * (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) — the
- * ASYMMETRY the predecessor spec left standing: {@link rejectMissingNonPassOutputTail}
- * already demands a non-empty tail for `"fail"`/`"expected-fail"`, but a `"pass"`
- * row — the ONE result that unlocks `done()`'s archival floor — carried no such
- * requirement at all. Two measurements (this task's own doc) showed a bare
- * non-empty check would not have been enough on its own (hand-authored prose with
- * real numbers embedded passes it cleanly) — the actual fix is `capture_source`:
- * a row this call itself PROVED was runner-captured (`captureSource === "runner"`,
- * `commands/evidence.ts`'s `--capture`, or any row where `attestation !== undefined`
- * — see {@link TaskWorkflowService.appendEvidenceEntry}'s own forcing logic) is
- * independently verified by its own captured exit code and is EXEMPT from this
- * tail-non-emptiness requirement (mirrors {@link rejectMissingNonPassOutputTail}'s
- * own exemption for a runner-attested `"fail"` that legitimately wrote nothing to
- * stdout+stderr) — only the residual `"self-report"` path is bound.
+ * Rejects a self-reported `result: "pass"` row whose PREDICATE is weaker than
+ * this function's own message (task-raise-the-evidence-tail-guard-s-predicate-
+ * to-its-own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5,
+ * G4) — the message has ALWAYS said "a hand-authored summary is not proof the
+ * command actually ran"; until this task, the predicate behind it was only
+ * `outputTail.trim().length > 0`. Measured 2026-08-10: 2 of 3 dispatched
+ * agents given the rule "the tail must be non-empty and contain the runner's
+ * summary line" satisfied it by WRITING the summary themselves — e.g.
+ * `'Test Files 1 passed (1); Tests 6 passed (6); Duration 4.24s'` (one line
+ * vitest never prints) and `'typecheck:core, typecheck:lore, ... all exit 0'`
+ * (a sentence no runner emits) — both PASSED the old predicate. A guard whose
+ * message overstates its predicate is worse than no guard: the pass reads as
+ * confirmation of the stronger property.
  *
- * Deliberately oracle-agnostic — applies to `--oracle manual` exactly like every
- * other oracle kind (task's own AC-4 BOUNDARY: a manual/visual check has no
- * capturable stdout, so `--capture` is refused for it at the CLI layer, but its
- * `--result pass` still needs an explicit, non-empty, hand-typed description of
- * what was checked — "silently empty" is the one shape this guard exists to close,
- * not manual checks themselves).
+ * D5's fix: the observable property (`non-empty`) is replaced by the MECHANISM
+ * (`capture_source: "runner"` — `commands/evidence.ts`'s `--capture`, or any
+ * row where `attestation !== undefined`, see {@link
+ * TaskWorkflowService.appendEvidenceEntry}'s own forcing logic) — a row this
+ * call itself PROVED by observing a real spawn's exit code. Self-report
+ * remains available under exactly ONE explicit, recorded justification:
+ * `oracle === "manual"` — the sole kind `--capture` structurally can never
+ * reach (`findCaptureFlagConflict` refuses `--capture` + `--oracle manual`;
+ * there is nothing to spawn for a visual/manual check), so it keeps the
+ * pre-existing "genuinely non-empty description" floor as ITS proof instead.
+ * Every OTHER oracle kind (`tsc`/`lint`/`build`/`test`/`e2e`/`other`) CAN be
+ * captured, so a hand-typed tail no longer substitutes for one — this is the
+ * change that closes the measured defect above.
+ *
+ * ⛔ Back-catalogue (task's own §4): raising this predicate retroactively
+ * makes every historical self-report `pass` row recorded before this landed
+ * non-conforming to the NEW rule — those existing rows are NOT rewritten or
+ * invalidated (the evidence log is append-only); this guard only gates NEW
+ * writes going forward. Pre-existing unit/integration tests that used a
+ * self-reported non-manual-oracle pass purely as SETUP fixture (not testing
+ * this guard itself) were swept to construct `capture_source: "runner"`
+ * fixtures instead — grep `task-raise-the-evidence-tail-guard-s-predicate-
+ * to-its-own` across the test tree for the swept call sites — never by
+ * weakening this predicate.
  *
  * SELF-REPORT PATH ONLY — called from `_addEvidenceImpl`, never from the shared
  * `appendEvidenceEntry`/`recordVerifiedEvidence` chokepoint, mirroring {@link
@@ -1293,36 +1311,52 @@ export function rejectMissingNonPassOutputTail(
  *   exported function. Any non-`"runner"` value (including a hypothetical `undefined`)
  *   is treated identically to `"self-report"`, never silently exempted the way
  *   `"runner"` is
+ * @param oracle - `EvidenceInput.oracle` as received — the ONE new input this D5 raise
+ *   needs, since the sole surviving self-report escape (`"manual"`) is oracle-keyed
  * @returns `ok(undefined)` for any non-`"pass"` result (D2, unaffected — that's
  *   {@link rejectMissingNonPassOutputTail}'s job), a `captureSource === "runner"` pass
- *   (any tail, independently verified), or a self-reported pass with a genuinely
- *   non-empty tail; `err(VALIDATION_ERROR)` naming `output_tail` otherwise
+ *   (any tail, independently verified), or an `oracle === "manual"` self-report with a
+ *   genuinely non-empty tail (its only available proof); `err(VALIDATION_ERROR)` naming
+ *   `output_tail` AND `--capture` otherwise — including a NON-EMPTY hand-authored tail on
+ *   any other oracle, which the pre-D5 predicate used to accept
  * @example
- * rejectMissingPassOutputTail("pass", undefined, "self-report");
+ * rejectMissingPassOutputTail("pass", "fabricated but non-empty", "self-report", "test");
+ * // => err({ code: "VALIDATION_ERROR", field: "output_tail", ... }) — D5's fix; pre-D5 this was ok()
+ * @example
+ * rejectMissingPassOutputTail("pass", undefined, "self-report", "test");
  * // => err({ code: "VALIDATION_ERROR", field: "output_tail", ... })
  * @example
- * rejectMissingPassOutputTail("pass", undefined, "runner");
+ * rejectMissingPassOutputTail("pass", undefined, "runner", "test");
  * // => ok(undefined) — a capture ran and produced nothing on stdout+stderr
  * @example
- * rejectMissingPassOutputTail("fail", undefined, "self-report"); // => ok(undefined) — not this guard's result
+ * rejectMissingPassOutputTail("pass", "checked the login page by hand", "self-report", "manual");
+ * // => ok(undefined) — manual is the one oracle --capture can never reach
+ * @example
+ * rejectMissingPassOutputTail("fail", undefined, "self-report", "test"); // => ok(undefined) — not this guard's result
  */
 export function rejectMissingPassOutputTail(
   result: string,
   outputTail: string | undefined,
   captureSource: CaptureSource | undefined,
+  oracle: string,
 ): Result<void, LoreError> {
   if (result !== "pass") return ok(undefined);
   if (captureSource === "runner") return ok(undefined);
-  if (outputTail !== undefined && outputTail.trim().length > 0) return ok(undefined);
+  // D5's ONE surviving self-report escape — see this function's own module header.
+  if (oracle === "manual" && outputTail !== undefined && outputTail.trim().length > 0) {
+    return ok(undefined);
+  }
   return err({
     code: "VALIDATION_ERROR",
     field: "output_tail",
     message:
-      'a self-reported result "pass" must carry a non-empty output_tail — a hand-authored ' +
-      "summary is not proof the command actually ran, and an empty tail is no evidence at " +
-      "all. Retry with `--capture` (spawns --command itself and captures its REAL output, " +
-      'exempt from this check), or supply a genuine --output-tail/--output-tail-file ' +
-      "(--oracle manual: describe exactly what was manually checked).",
+      'a self-reported result "pass" is not provable by a hand-authored output_tail alone ' +
+      "— a fabricated summary (even one embedding real-looking numbers) satisfies a bare " +
+      "non-empty check exactly as well as a genuine one, which this rule exists because it " +
+      "measurably happened. Retry with `--capture` (spawns --command itself and records ITS " +
+      'OWN captured output, stamping capture_source: "runner" — the only proof this check ' +
+      "accepts), or use --oracle manual for a check with nothing capturable (still needs a " +
+      "genuine non-empty --output-tail/--output-tail-file describing exactly what was checked).",
     value: outputTail,
   });
 }
@@ -1879,7 +1913,12 @@ export class TaskWorkflowService {
     // sibling of the guard immediately above (see that task's own JSDoc for the
     // asymmetry this closes). Exempts any row `capture_source: "runner"` already proved
     // via an actual capture.
-    const passTailCheck = rejectMissingPassOutputTail(entry.result, entry.output_tail, entry.capture_source);
+    const passTailCheck = rejectMissingPassOutputTail(
+      entry.result,
+      entry.output_tail,
+      entry.capture_source,
+      entry.oracle,
+    );
     if (!passTailCheck.ok) return passTailCheck;
 
     // task-fix-ordering-regression-placeholder-command-guard-preempts — resolve

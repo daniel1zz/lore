@@ -407,9 +407,14 @@ describe("lore_evidence_add — forged attestation is inert (AC-VRF-2 adapter ha
     }) as typeof app.taskWorkflowService.addEvidence;
 
     try {
+      // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+      // predicate-to-its-own) — "tsc" self-report is now refused regardless
+      // of tail content; "manual" is the one oracle that still lets a
+      // genuinely non-empty self-reported tail succeed. This test only
+      // checks attestation-stripping, not capture_source semantics.
       const result = await call({
         id_or_slug: taskId,
-        oracle: "tsc",
+        oracle: "manual",
         command: "bun run typecheck",
         result: "pass",
         recorded_by: "alice",

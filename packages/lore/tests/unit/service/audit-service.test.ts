@@ -336,8 +336,13 @@ describe("REGRESSION — TaskWorkflowService's action-string divergence does not
     const claimResult = await taskWorkflowService.claim(taskId, { by: "alice" });
     expect(claimResult.ok).toBe(true);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed. This test only checks audit
+    // action-string mapping, not capture_source semantics.
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, {
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",

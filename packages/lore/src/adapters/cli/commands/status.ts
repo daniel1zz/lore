@@ -40,9 +40,17 @@
  * `unredeemed_allow_missing_path_count` (spec-oracle-executability-a-runner-
  * s-discovery-refusal-is-not-a §D8, AC-OX-10 — D8 `--allow-missing-path`
  * escape declarations whose declared script-mode command still names a path
- * absent from disk, via `AcService.countUnredeemedAllowMissingPath`). ⛔ NONE
- * of the three may change `process.exitCode` — see `collectFalsifiabilitySignals`'s
- * and `countUnredeemedAllowMissingPathDeclarations`'s own JSDoc.
+ * absent from disk, via `AcService.countUnredeemedAllowMissingPath`), and a
+ * `capture_source_runner_count`/`capture_source_self_report_count` pair
+ * (task-raise-the-evidence-tail-guard-s-predicate-to-its-own, AC-FR-5, G4 —
+ * the corpus-wide runner-vs-self-report evidence distribution). ⛔ NONE of
+ * these may change `process.exitCode` — see `collectFalsifiabilitySignals`'s,
+ * `listUnredeemedAllowMissingPathDeclarations`'s, and
+ * `collectCaptureSourceMembers`'s own JSDoc. Every one of these `*_count`
+ * fields has a matching entry in `COUNT_FIELD_ENUMERATORS` below, reachable
+ * via `lore status --enumerate <field>` (AC-FR-5's own binding-on-future-
+ * counts requirement) — a new count with no enumerator is the exact gap that
+ * flag exists to make impossible to ship silently.
  *
  * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
  * early-exits the process anymore; both are value-returning, combined at the end):
@@ -89,6 +97,7 @@ import {
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import {
   deriveAcCoverageState,
+  extractEvidence,
   formatMemoryFileBudgetSubstitution,
   ok,
   resolveDriftEnabled,
@@ -509,13 +518,19 @@ function requireAcServiceForStatus(app: ReturnType<typeof loadLoreApp>["app"]): 
  *
  * @param app - Wired App instance.
  * @param dbPath - The discovered `.lore/lore.db` path `loadLoreApp()` returns.
+ * @returns the MEMBER LIST (task-raise-the-evidence-tail-guard-s-predicate-
+ *   to-its-own, AC-FR-5) — `unredeemed_allow_missing_path_count` (this
+ *   file's normal-status branch, and the `--enumerate` registry below) both
+ *   derive their number from THIS list's `.length`, never a separately
+ *   maintained counter — `AcService.listUnredeemedAllowMissingPath` is the
+ *   ONE iteration.
  */
-async function countUnredeemedAllowMissingPathDeclarations(
+async function listUnredeemedAllowMissingPathDeclarations(
   app: ReturnType<typeof loadLoreApp>["app"],
   dbPath: string,
-): Promise<Result<number, LoreError>> {
+): Promise<Result<string[], LoreError>> {
   const acService = requireAcServiceForStatus(app);
-  return acService.countUnredeemedAllowMissingPath({
+  return acService.listUnredeemedAllowMissingPath({
     fileExists: existsSync,
     cwd: process.cwd(),
     corpusRoot: dirname(dirname(dbPath)),
@@ -539,15 +554,25 @@ async function countUnredeemedAllowMissingPathDeclarations(
  * 574/700 existing criteria are grandfathered by that WRITTEN exemption, never by
  * a synthesized red run): the caller MUST NOT let either returned number influence
  * `process.exitCode`.
+ *
+ * @returns `passUnfalsifiedMembers` (task-raise-the-evidence-tail-guard-s-
+ *   predicate-to-its-own, AC-FR-5) — one `"<spec-slug>#<ac-id>"` entry per
+ *   criterion in the `pass_unfalsified` state, so `pass_unfalsified_count`
+ *   (this file's own `.length` of this array, never a separately-tallied
+ *   counter) has an ENUMERATOR: measured 2026-08-10, producing this exact
+ *   list for `pass_unfalsified_count=29` required a throwaway script
+ *   iterating all 138 specs by hand because no enumerator existed.
  */
 async function collectFalsifiabilitySignals(
   app: ReturnType<typeof loadLoreApp>["app"],
-): Promise<Result<{ passUnfalsifiedCount: number; declaredScriptCommands: string[] }, LoreError>> {
+): Promise<
+  Result<{ passUnfalsifiedMembers: string[]; declaredScriptCommands: string[] }, LoreError>
+> {
   const acService = requireAcServiceForStatus(app);
   const specsResult = await app.corpusService.list({ type: "spec" });
   if (!specsResult.ok) return specsResult;
 
-  let passUnfalsifiedCount = 0;
+  const passUnfalsifiedMembers: string[] = [];
   const declaredScriptCommands: string[] = [];
 
   for (const specSummary of specsResult.value.docs) {
@@ -563,14 +588,91 @@ async function collectFalsifiabilitySignals(
     if (listResult.value.coverage !== null) {
       for (const fact of listResult.value.coverage) {
         if (deriveAcCoverageState(fact) === "pass_unfalsified") {
-          passUnfalsifiedCount += 1;
+          passUnfalsifiedMembers.push(`${specSummary.slug}#${fact.ac_id}`);
         }
       }
     }
   }
 
-  return ok({ passUnfalsifiedCount, declaredScriptCommands });
+  return ok({ passUnfalsifiedMembers, declaredScriptCommands });
 }
+
+/**
+ * Corpus-wide `capture_source` distribution (task-raise-the-evidence-tail-
+ * guard-s-predicate-to-its-own, AC-FR-5) — every evidence entry across every
+ * task AND phase doc, bucketed into `"runner"` vs everything else. A LEGACY
+ * row with `capture_source` entirely ABSENT reads as self-report (never as
+ * "unknown, therefore fine" — the SAME convention `task-workflow-service.ts`'s
+ * own `capture_source` invariant documents at every other consumption site).
+ * Members are `"<doc-slug>#<n>"` (`n` = the entry's index within that doc's
+ * own `verification_evidence` array) — stable enough to locate the exact row
+ * via `lore get <doc-slug> --json`.
+ *
+ * `lore status --json`'s `capture_source_runner_count`/
+ * `capture_source_self_report_count` (below) and this file's `--enumerate`
+ * registry both derive their numbers from THIS list's lengths — one corpus
+ * scan, never two independently-tallied counters.
+ */
+async function collectCaptureSourceMembers(
+  app: ReturnType<typeof loadLoreApp>["app"],
+): Promise<Result<{ runner: string[]; selfReport: string[] }, LoreError>> {
+  const runner: string[] = [];
+  const selfReport: string[] = [];
+
+  for (const type of ["task", "phase"] as const) {
+    const listResult = await app.corpusService.listFull({ type });
+    if (!listResult.ok) return listResult;
+
+    for (const doc of listResult.value.docs) {
+      const entries = extractEvidence(doc);
+      entries.forEach((entry, index) => {
+        const member = `${doc.slug}#${index}`;
+        if (entry.capture_source === "runner") {
+          runner.push(member);
+        } else {
+          selfReport.push(member);
+        }
+      });
+    }
+  }
+
+  return ok({ runner, selfReport });
+}
+
+/**
+ * SSOT registry mapping every `*_count` field `lore status --json` reports
+ * to the function that ENUMERATES its members (task-raise-the-evidence-
+ * tail-guard-s-predicate-to-its-own, AC-FR-5). `lore status --enumerate
+ * <field>` (below) and the normal-status branch's own displayed counts BOTH
+ * consume this registry — a count is never computed independently of its
+ * enumerator, so `count === enumerator().length` holds by construction, not
+ * by convention. ⛔ Adding a new `*_count` field WITHOUT a matching entry
+ * here is the exact gap AC-FR-5 exists to close — `lore status --enumerate
+ * <that-field>` will refuse with VALIDATION_ERROR naming it, which is the
+ * generic test's own RED (b) case.
+ */
+const COUNT_FIELD_ENUMERATORS: Record<
+  string,
+  (app: ReturnType<typeof loadLoreApp>["app"], dbPath: string) => Promise<Result<string[], LoreError>>
+> = {
+  pass_unfalsified_count: async (app) => {
+    const signalsResult = await collectFalsifiabilitySignals(app);
+    if (!signalsResult.ok) return signalsResult;
+    return ok(signalsResult.value.passUnfalsifiedMembers);
+  },
+  unredeemed_allow_missing_path_count: async (app, dbPath) =>
+    listUnredeemedAllowMissingPathDeclarations(app, dbPath),
+  capture_source_runner_count: async (app) => {
+    const membersResult = await collectCaptureSourceMembers(app);
+    if (!membersResult.ok) return membersResult;
+    return ok(membersResult.value.runner);
+  },
+  capture_source_self_report_count: async (app) => {
+    const membersResult = await collectCaptureSourceMembers(app);
+    if (!membersResult.ok) return membersResult;
+    return ok(membersResult.value.selfReport);
+  },
+};
 
 /**
  * Narrow hand-typed surface of `scripts/check-unclaimed-oracle.ts`'s exports this
@@ -725,8 +827,59 @@ export default defineCommand({
       description:
         "Lint project memory files (CLAUDE.md by default) against corpus-governed line/byte ceilings, always reporting used/ceiling/remaining headroom. Config-only, never loads the corpus DB. Breach → exit 3; a near-ceiling advisory warning never changes the exit code.",
     },
+    enumerate: {
+      type: "string",
+      description:
+        "Enumerate the MEMBERS behind a *_count field the plain run reports (e.g. pass_unfalsified_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count). Unknown field → exit 4, naming it and the known set.",
+    },
   },
   async run({ args }) {
+    // reason: AC-FR-5 (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+    // own) — dispatched BEFORE every other flag: enumeration is a read-only,
+    // standalone query over the same COUNT_FIELD_ENUMERATORS registry the
+    // normal-status branch consumes below, never composed with --check-*.
+    if (typeof args.enumerate === "string") {
+      const { app, dbPath } = loadLoreApp();
+      try {
+        const enumerator = COUNT_FIELD_ENUMERATORS[args.enumerate];
+        if (enumerator === undefined) {
+          const knownFields = Object.keys(COUNT_FIELD_ENUMERATORS).sort().join(", ");
+          const error: LoreError = {
+            code: "VALIDATION_ERROR",
+            field: "enumerate",
+            message: `no enumerator registered for count field "${args.enumerate}" — known fields: ${knownFields}`,
+            value: args.enumerate,
+          };
+          process.stderr.write(formatError(error) + "\n");
+          process.exitCode = exitCode(error);
+          return;
+        }
+        const membersResult = await enumerator(app, dbPath);
+        if (!membersResult.ok) {
+          process.stderr.write(formatError(membersResult.error) + "\n");
+          process.exitCode = exitCode(membersResult.error);
+          return;
+        }
+        const members = membersResult.value;
+        if (args.json) {
+          console.log(
+            JSON.stringify(
+              { ok: true, data: { field: args.enumerate, count: members.length, members } },
+              null,
+              2,
+            ),
+          );
+        } else {
+          console.log(`${args.enumerate}: ${members.length} member(s)`);
+          for (const member of members) console.log(`  - ${member}`);
+        }
+        process.exitCode = 0;
+        return;
+      } finally {
+        app.close();
+      }
+    }
+
     const checkTreeRequested = args["check-tree"] === true;
     const checkDriftRequested = args["check-drift"] === true;
     const checkRequirementsRequested = args["check-requirements"] === true;
@@ -1188,7 +1341,11 @@ export default defineCommand({
         process.exitCode = exitCode(falsifiabilitySignalsResult.error);
         return;
       }
-      const { passUnfalsifiedCount, declaredScriptCommands } = falsifiabilitySignalsResult.value;
+      // reason: AC-FR-5 — the count is DERIVED from the member list's length,
+      // never a separately-tallied counter (see collectFalsifiabilitySignals's
+      // own JSDoc and the COUNT_FIELD_ENUMERATORS registry above).
+      const { passUnfalsifiedMembers, declaredScriptCommands } = falsifiabilitySignalsResult.value;
+      const passUnfalsifiedCount = passUnfalsifiedMembers.length;
       const unclaimedOracle = await runUnclaimedOracleCheck(declaredScriptCommands);
 
       // spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §D8,
@@ -1198,13 +1355,29 @@ export default defineCommand({
       // `pass_unfalsified_count`/`unclaimed_oracle` above: never influences
       // `process.exitCode` — a dangling declaration is a promise to redeem, not a
       // corpus-integrity breach the CI gate should block on.
-      const unredeemedResult = await countUnredeemedAllowMissingPathDeclarations(app, dbPath);
+      const unredeemedResult = await listUnredeemedAllowMissingPathDeclarations(app, dbPath);
       if (!unredeemedResult.ok) {
         process.stderr.write(formatError(unredeemedResult.error) + "\n");
         process.exitCode = exitCode(unredeemedResult.error);
         return;
       }
-      const unredeemedAllowMissingPathCount = unredeemedResult.value;
+      // reason: AC-FR-5 — same derive-from-member-list discipline as
+      // passUnfalsifiedCount immediately above.
+      const unredeemedAllowMissingPathCount = unredeemedResult.value.length;
+
+      // task-raise-the-evidence-tail-guard-s-predicate-to-its-own (AC-FR-5,
+      // G4) — corpus-wide runner-vs-self-report evidence distribution.
+      // REPORT-ONLY, same discipline as every other count on this branch:
+      // never influences process.exitCode. Both counts derive from
+      // collectCaptureSourceMembers's member lists' lengths.
+      const captureSourceMembersResult = await collectCaptureSourceMembers(app);
+      if (!captureSourceMembersResult.ok) {
+        process.stderr.write(formatError(captureSourceMembersResult.error) + "\n");
+        process.exitCode = exitCode(captureSourceMembersResult.error);
+        return;
+      }
+      const captureSourceRunnerCount = captureSourceMembersResult.value.runner.length;
+      const captureSourceSelfReportCount = captureSourceMembersResult.value.selfReport.length;
 
       if (args.json) {
         console.log(
@@ -1223,6 +1396,8 @@ export default defineCommand({
                 pass_unfalsified_count: passUnfalsifiedCount,
                 unclaimed_oracle: unclaimedOracle,
                 unredeemed_allow_missing_path_count: unredeemedAllowMissingPathCount,
+                capture_source_runner_count: captureSourceRunnerCount,
+                capture_source_self_report_count: captureSourceSelfReportCount,
               },
             },
             null,
@@ -1315,6 +1490,17 @@ export default defineCommand({
         `Unredeemed allow-missing-path declarations: ${unredeemedAllowMissingPathCount} ` +
           "(a lore ac add/set --allow-missing-path escape whose declared path still does not exist — " +
           "creating the file drops this on the next run, report-only)",
+      );
+
+      // task-raise-the-evidence-tail-guard-s-predicate-to-its-own (AC-FR-5, G4)
+      // — printed UNCONDITIONALLY (including 0), same "never a silent count"
+      // discipline as every other count above. Enumerate either bucket's
+      // exact members via `lore status --enumerate capture_source_runner_count`
+      // / `--enumerate capture_source_self_report_count`. REPORT-ONLY.
+      console.log(
+        `Capture source: ${captureSourceRunnerCount} runner-captured / ${captureSourceSelfReportCount} ` +
+          "self-reported (across every task/phase evidence entry — report-only, see " +
+          "spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)",
       );
 
       // M3 (AC-FALS-10) — same "only when > 0" discipline as open_stale_candidates/

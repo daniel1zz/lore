@@ -1,0 +1,325 @@
+/**
+ * `capture_source` visibility + a generic count↔enumerator contract
+ * (task-raise-the-evidence-tail-guard-s-predicate-to-its-own,
+ * spec-falsifiability-reachability-a-feedable-checkpoint-an §D5/AC-FR-5, G4).
+ *
+ * Defect closed: `lore status --json` reported `pass_unfalsified_count` and
+ * `unredeemed_allow_missing_path_count` with NO way to enumerate their
+ * members — measured 2026-08-10, producing the member list behind
+ * `pass_unfalsified_count=29` required a throwaway script iterating all 138
+ * specs by hand. This file proves, GENERICALLY (never a hand-listed set),
+ * that every `*_count` field a real `lore status --json` reports has a
+ * matching `lore status --enumerate <field>` whose returned member count
+ * EQUALS the reported number — and that the corpus-wide `capture_source`
+ * runner-vs-self-report distribution is one such field.
+ *
+ * Driven via the REAL CLI subprocess (never the service directly) against a
+ * throwaway `mkdtemp`-rooted corpus. NEVER touches this repo's own `.lore/`.
+ *
+ * ⛔ The global `lore` binary symlinks into the MAIN checkout's `dist/` —
+ * this file spawns `bun run <INDEX_TS> ...` against THIS worktree's own
+ * source entry, never the bare `lore` binary.
+ *
+ * Coverage:
+ *   HAPPY:      distribution-reported (AC-FR-5's primary oracle) — one
+ *               runner row + one self-report row, both counts non-zero and
+ *               correct, both enumerators' member counts match
+ *   NEGATIVE:   an unregistered count-field name is refused by name (RED (b)
+ *               — the binding-on-future-counts requirement)
+ *   BOUNDARY:   a genuinely EMPTY corpus reports every count as 0 with a
+ *               matching EMPTY member list (never a mismatch at the floor)
+ *   STATE:      lore assess's capture_source ratio (computeCaptureSource
+ *               Distribution/formatCaptureSourceLine, moved to assess-
+ *               render.ts specifically so this vitest file can drive them
+ *               directly — commands/assess.ts itself is bun-only)
+ *   ERROR:      the generic scan — EVERY `*_count` key `lore status --json`
+ *               reports, read at TEST TIME (never a hand-listed set), has an
+ *               enumerator whose member count matches
+ *   REGRESSION: a legacy evidence row with capture_source ABSENT is counted
+ *               as self-report, never silently dropped from either count
+ *
+ * @spec_ref AC-FR-5
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { spawnSync } from "child_process";
+import { mkdirSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import type { DocRecord, PlanBundle } from "@lore/core";
+import { computeCaptureSourceDistribution, formatCaptureSourceLine } from "../../../src/adapters/cli/assess-render.js";
+
+const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
+const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
+
+interface RunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+/** Spawn `bun run <INDEX_TS> ...args` in `cwd` — the real CLI, this worktree's own source entry. */
+function runLore(args: string[], cwd: string): RunResult {
+  const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
+    cwd,
+    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    encoding: "utf8",
+  });
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    exitCode: result.status ?? 1,
+  };
+}
+
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = join(tmpdir(), `lore-capsrc-vis-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(tmpDir, { recursive: true });
+  const init = runLore(["init"], tmpDir);
+  if (init.exitCode !== 0) throw new Error(`lore init failed: ${init.stderr}`);
+});
+
+afterEach(() => {
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore cleanup errors */
+  }
+});
+
+function createPlan(): string {
+  const r = runLore(["create", "plan", "--title", "Cap Src Plan", "--no-ai", "--content", "body"], tmpDir);
+  if (r.exitCode !== 0) throw new Error(`create plan failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  if (!m?.[1]) throw new Error(`Could not extract plan slug from: ${r.stdout}`);
+  return m[1];
+}
+
+function createTask(planSlug: string, title: string): string {
+  const r = runLore(
+    ["create", "task", "--title", title, "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "body"],
+    tmpDir,
+  );
+  if (r.exitCode !== 0) throw new Error(`create task failed: ${r.stderr}`);
+  const m = r.stdout.match(/Slug:\s+(\S+)/);
+  if (!m?.[1]) throw new Error(`Could not extract task slug from: ${r.stdout}`);
+  return m[1];
+}
+
+/** Parses `lore status --json`'s `data` object. */
+function statusJson(): Record<string, unknown> {
+  const r = runLore(["status", "--json"], tmpDir);
+  if (r.exitCode !== 0) throw new Error(`lore status --json failed: ${r.stderr}`);
+  const parsed = JSON.parse(r.stdout) as { data: Record<string, unknown> };
+  return parsed.data;
+}
+
+/** Drives `lore status --enumerate <field> --json` and returns its parsed payload. */
+function enumerate(field: string): { exitCode: number; count?: number; members?: string[]; stderr: string } {
+  const r = runLore(["status", "--enumerate", field, "--json"], tmpDir);
+  if (r.exitCode !== 0) return { exitCode: r.exitCode, stderr: r.stderr };
+  const parsed = JSON.parse(r.stdout) as { data: { count: number; members: string[] } };
+  return { exitCode: r.exitCode, count: parsed.data.count, members: parsed.data.members, stderr: r.stderr };
+}
+
+describe("AC-FR-5 — capture_source visibility + generic count↔enumerator contract", () => {
+  it("distribution-reported: one runner row + one self-report row both count non-zero and correctly, and each enumerator's member count matches", () => {
+    const planSlug = createPlan();
+
+    // One RUNNER row — --capture spawns the command itself.
+    const runnerTask = createTask(planSlug, "Runner Task");
+    const runnerWrite = runLore(
+      ["evidence", runnerTask, "--oracle", "test", "--command", "echo hi", "--result", "pass", "--capture"],
+      tmpDir,
+    );
+    expect(runnerWrite.exitCode).toBe(0);
+
+    // One SELF-REPORT row — --oracle manual, D5's one surviving self-report escape.
+    const selfReportTask = createTask(planSlug, "Self Report Task");
+    const selfReportWrite = runLore(
+      [
+        "evidence",
+        selfReportTask,
+        "--oracle",
+        "manual",
+        "--command",
+        "checked the login page by hand",
+        "--result",
+        "pass",
+        "--output-tail",
+        "logged in 3 times rapidly, 4th correctly blocked",
+      ],
+      tmpDir,
+    );
+    expect(selfReportWrite.exitCode).toBe(0);
+
+    const status = statusJson();
+    // A projection hardcoding zero self-reports would fail THIS assertion.
+    expect(status["capture_source_runner_count"]).toBe(1);
+    expect(status["capture_source_self_report_count"]).toBe(1);
+
+    const runnerEnum = enumerate("capture_source_runner_count");
+    expect(runnerEnum.exitCode).toBe(0);
+    expect(runnerEnum.count).toBe(1);
+    expect(runnerEnum.members).toHaveLength(1);
+    expect(runnerEnum.members?.[0]).toContain(runnerTask);
+
+    const selfReportEnum = enumerate("capture_source_self_report_count");
+    expect(selfReportEnum.exitCode).toBe(0);
+    expect(selfReportEnum.count).toBe(1);
+    expect(selfReportEnum.members).toHaveLength(1);
+    expect(selfReportEnum.members?.[0]).toContain(selfReportTask);
+  });
+
+  it("NEGATIVE (RED b): an unregistered count-field name is refused, naming it and the known set — the binding-on-future-counts requirement", () => {
+    const result = enumerate("totally_unregistered_count_field");
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("totally_unregistered_count_field");
+    expect(result.stderr).toContain("no enumerator registered");
+  });
+
+  it("BOUNDARY: a genuinely empty corpus reports every *_count field as 0 with a matching EMPTY member list", () => {
+    const status = statusJson();
+    const countFields = Object.keys(status).filter((k) => k.endsWith("_count"));
+    expect(countFields.length).toBeGreaterThan(0);
+    for (const field of countFields) {
+      expect(status[field]).toBe(0);
+      const result = enumerate(field);
+      expect(result.exitCode).toBe(0);
+      expect(result.count).toBe(0);
+      expect(result.members).toEqual([]);
+    }
+  });
+
+  it("ERROR: the GENERIC scan — every *_count field a real lore status --json reports (read at TEST TIME, never hand-listed) has an enumerator whose member count matches", () => {
+    // Seed some real state so the counts are non-trivial.
+    const planSlug = createPlan();
+    const t1 = createTask(planSlug, "Scan Task 1");
+    runLore(["evidence", t1, "--oracle", "test", "--command", "echo hi", "--result", "pass", "--capture"], tmpDir);
+    const t2 = createTask(planSlug, "Scan Task 2");
+    runLore(
+      ["evidence", t2, "--oracle", "manual", "--command", "manual check", "--result", "pass", "--output-tail", "ok, checked"],
+      tmpDir,
+    );
+
+    const status = statusJson();
+    const countFields = Object.keys(status).filter((k) => k.endsWith("_count"));
+    expect(countFields.length).toBeGreaterThanOrEqual(4); // at minimum the 4 documented in this task's own doc
+
+    for (const field of countFields) {
+      const reported = status[field];
+      expect(typeof reported).toBe("number");
+      const result = enumerate(field);
+      // Naming the offending field on failure — never a bare boolean assert.
+      expect(result.exitCode, `field "${field}" has no working enumerator`).toBe(0);
+      expect(result.count, `field "${field}": enumerate count mismatch`).toBe(reported);
+      expect(result.members?.length, `field "${field}": member array length mismatch`).toBe(reported);
+    }
+  });
+
+  it("REGRESSION: a legacy row with capture_source ABSENT is counted as self-report by computeCaptureSourceDistribution, never silently dropped", () => {
+    const legacyTask: DocRecord = {
+      id: "task-legacy-1",
+      slug: "task-legacy-evidence",
+      type: "task",
+      title: "Legacy Task",
+      status: "draft",
+      content: "body",
+      parent_id: null,
+      extra: {
+        verification_evidence: [
+          {
+            oracle: "tsc",
+            command: "bun run typecheck",
+            result: "pass",
+            recorded_at: "2026-01-01T00:00:00.000Z",
+            recorded_by: "agent:legacy",
+            // capture_source deliberately ABSENT — simulating pre-D5 data.
+          },
+        ],
+      },
+      version: 1,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      deleted_at: null,
+    } as unknown as DocRecord;
+
+    const bundle: PlanBundle = {
+      plan: { ...legacyTask, id: "plan-1", slug: "plan-legacy", type: "plan" } as unknown as DocRecord,
+      tasks: [legacyTask],
+    };
+
+    const distribution = computeCaptureSourceDistribution(bundle);
+    expect(distribution.runnerCount).toBe(0);
+    expect(distribution.selfReportCount).toBe(1);
+    expect(distribution.ratio).toBe(0);
+  });
+
+  it("STATE: lore assess's capture_source ratio — computeCaptureSourceDistribution/formatCaptureSourceLine render alongside attested_evidence_ratio", () => {
+    const runnerTask: DocRecord = {
+      id: "task-r1",
+      slug: "task-runner",
+      type: "task",
+      title: "Runner Task",
+      status: "draft",
+      content: "body",
+      parent_id: null,
+      extra: {
+        verification_evidence: [
+          {
+            oracle: "test",
+            command: "bunx vitest run x.test.ts",
+            result: "pass",
+            recorded_at: "2026-01-01T00:00:00.000Z",
+            recorded_by: "agent:runner",
+            capture_source: "runner",
+          },
+        ],
+      },
+      version: 1,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      deleted_at: null,
+    } as unknown as DocRecord;
+    const selfReportTask: DocRecord = {
+      ...runnerTask,
+      id: "task-s1",
+      slug: "task-self-report",
+      extra: {
+        verification_evidence: [
+          {
+            oracle: "manual",
+            command: "manual check",
+            result: "pass",
+            recorded_at: "2026-01-01T00:00:00.000Z",
+            recorded_by: "agent:human",
+            capture_source: "self-report",
+          },
+        ],
+      },
+    } as unknown as DocRecord;
+
+    const bundle: PlanBundle = {
+      plan: { ...runnerTask, id: "plan-2", slug: "plan-mixed", type: "plan" } as unknown as DocRecord,
+      tasks: [runnerTask, selfReportTask],
+    };
+
+    const distribution = computeCaptureSourceDistribution(bundle);
+    expect(distribution.runnerCount).toBe(1);
+    expect(distribution.selfReportCount).toBe(1);
+    expect(distribution.ratio).toBe(0.5);
+
+    // Alongside the attested ratio the assessment result already carries.
+    const line = formatCaptureSourceLine(distribution, 0.75);
+    expect(line).toContain("1 runner");
+    expect(line).toContain("1 self-report");
+    expect(line).toContain("0.50");
+    expect(line).toContain("attested_evidence_ratio 0.75");
+
+    // A legacy pre-SPEC-040 result carries no `facts` at all — additive, never thrown.
+    const lineWithoutAttested = formatCaptureSourceLine(distribution, undefined);
+    expect(lineWithoutAttested).not.toContain("attested_evidence_ratio");
+  });
+});

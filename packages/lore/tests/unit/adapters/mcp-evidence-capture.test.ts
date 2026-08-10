@@ -464,7 +464,15 @@ describe("ERROR — an unspawnable capture is refused, never downgraded", () => 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 
 describe("STATE — capture_source is stamped on EVERY MCP write, not only captured ones", () => {
-  it("RED of this task: a passing MCP row with a supplied tail and no capture now stores an EXPLICIT \"self-report\" (previously the field was absent)", async () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5) — this
+  // test used to prove a "tsc"-oracle self-report with a hand-written tail
+  // recorded cleanly, storing capture_source:"self-report" verbatim. That
+  // exact shape (self-report + hand-authored tail, no --capture) is the D5
+  // defect: it is now REFUSED outright for every oracle but "manual", never
+  // reaching a stored row at all — the guard's PREDICATE, not just its
+  // labeling, is what changed here.
+  it("RED of this task, SUPERSEDED by D5: a passing MCP row with a hand-written tail and no capture is now REFUSED, never stored (oracle \"tsc\" has no self-report escape)", async () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
@@ -477,11 +485,27 @@ describe("STATE — capture_source is stamped on EVERY MCP write, not only captu
       output_tail: "hand-written summary",
     });
 
+    expect(result.isError).toBe(true);
+    const stored = await storedEvidence(taskId);
+    expect(stored).toHaveLength(0);
+  });
+
+  it("D5's one surviving self-report escape: an --oracle manual row with a hand-written tail still stores an EXPLICIT \"self-report\"", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "manual",
+      command: "checked the login page by hand",
+      result: "pass",
+      recorded_by: "alice",
+      output_tail: "hand-written summary",
+    });
+
     expect(result.isError).toBeFalsy();
     const stored = await storedEvidence(taskId);
     expect(stored).toHaveLength(1);
-    // The assertion is on the stored VALUE, per this task's Oracle — not on
-    // "the field is present".
     expect(stored[0]?.capture_source).toBe("self-report");
   });
 

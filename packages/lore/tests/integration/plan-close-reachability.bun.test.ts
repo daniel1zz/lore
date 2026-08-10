@@ -233,8 +233,14 @@ function createFixtureChain(dir: string): { planSlug: string } {
 
   // Self-reported-only evidence — a plain `lore evidence` call, never run
   // through `lore verify`, so this entry carries zero runner attestation.
+  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+  // to-its-own) — "test" self-report is now refused regardless of tail
+  // content; "manual" is the one oracle that still lets a genuinely
+  // non-empty self-reported tail succeed while staying UNATTESTED (this
+  // fixture's own point — zero runner attestation for the attestation-gate
+  // regression it exercises).
   const evidenceResult = runLore(
-    ["evidence", taskSlug, "--oracle", "test", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
+    ["evidence", taskSlug, "--oracle", "manual", "--command", "bun test", "--result", "pass", "--output-tail", "ok"],
     dir,
   );
   expect(evidenceResult.exitCode).toBe(0);

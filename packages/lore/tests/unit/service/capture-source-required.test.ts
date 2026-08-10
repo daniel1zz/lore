@@ -198,8 +198,16 @@ describe("HAPPY — capture_source persists verbatim on a self-reported write", 
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+    // to-its-own) — `oracle: "tsc"` self-report is now REFUSED regardless of
+    // tail content (rejectMissingPassOutputTail's D5 raise); `"manual"` is the
+    // one oracle kind that can never produce capture_source "runner" (--capture
+    // is refused for it — nothing to spawn), so it is the only oracle left that
+    // still lets a genuinely non-empty self-reported tail succeed. This test's
+    // OWN point (does "self-report" persist verbatim) is unaffected by the
+    // oracle kind used to reach a successful write.
     const result = await taskWorkflowService.addEvidence(taskId, {
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -380,8 +388,16 @@ describe("ERROR — a capture_source value outside the vocabulary is rejected at
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+    // to-its-own) — with `oracle: "tsc"` the NEW rejectMissingPassOutputTail
+    // raise would refuse this call FIRST (field "output_tail", capture_source
+    // "bogus-value" is not "runner"), never reaching the schema-level enum
+    // check this test means to exercise. `"manual"` + a genuinely non-empty
+    // tail satisfies that guard's one surviving escape, so the call proceeds
+    // to `evidenceEntrySchema.safeParse`, which is what still rejects the
+    // bogus `capture_source` value — this test's actual point.
     const bogus = {
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",
@@ -411,8 +427,15 @@ describe("STATE — AC-5: done()'s runner-attested floor is unchanged by this re
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+    // to-its-own) — `oracle: "tsc"` self-report is now refused outright by
+    // rejectMissingPassOutputTail's D5 raise, never reaching done() at all.
+    // `"manual"` is the one oracle that still lets a genuinely non-empty
+    // self-reported tail record successfully — it is STILL "self-report"
+    // (no attestation), so done()'s SEPARATE runner-attested floor (this
+    // test's actual point) still refuses it exactly as before.
     const evidenceResult = await taskWorkflowService.addEvidence(taskId, {
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",

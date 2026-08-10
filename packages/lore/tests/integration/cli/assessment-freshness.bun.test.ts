@@ -213,8 +213,14 @@ describe("lore assess — AC-FRESH-4: non-blocking staleness advisory", () => {
 
     // Real task-evidence activity AFTER the first assessment — a genuine
     // `action: "evidence"` audit row (D2), via the real `lore evidence` write path.
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "test" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed. This test only needs a genuine
+    // audit row to land AFTER the first assessment, not a specific oracle
+    // kind.
     const evidence = runLore(
-      ["evidence", task.slug, "--oracle", "test", "--command", "true", "--result", "pass", "--by", "tester", "--output-tail", "ok", "--json"],
+      ["evidence", task.slug, "--oracle", "manual", "--command", "true", "--result", "pass", "--by", "tester", "--output-tail", "ok", "--json"],
       tmpDir,
     );
     expect(evidence.exitCode).toBe(0);

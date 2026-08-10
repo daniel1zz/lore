@@ -263,9 +263,17 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
       },
     });
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — TaskWorkflowService.addEvidence is ALWAYS tried
+    // FIRST (per the target-type dispatch), so rejectMissingPassOutputTail's
+    // D5 raise runs (and refuses "test" self-report) BEFORE the {field:
+    // "type", value:"phase"} probe that triggers the PhaseWorkflowService
+    // retry ever executes — masking this test's actual dispatch target.
+    // "manual" satisfies D5's one surviving escape, letting the call reach
+    // the phase-dispatch retry this test means to exercise.
     const result = await call()({
       id_or_slug: phaseSlug,
-      oracle: "test",
+      oracle: "manual",
       command: "bun test",
       result: "pass",
       recorded_by: "alice",
@@ -283,9 +291,13 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
     const plan = await createPlan();
     const phaseSlug = await createPhase(plan);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — see the HAPPY test above in this describe
+    // block for why "manual" is required to reach the phase-dispatch retry
+    // (and, in turn, this test's own checklist_ref cross-validation) at all.
     const result = await call()({
       id_or_slug: phaseSlug,
-      oracle: "test",
+      oracle: "manual",
       command: "bun test",
       result: "pass",
       recorded_by: "alice",
@@ -302,9 +314,14 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
     const plan = await createPlan();
     const taskId = await createTask(plan.id);
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused; "manual" is
+    // the one oracle that still lets a genuinely non-empty self-reported
+    // tail succeed, which this test needs since it asserts on a SUCCESSFUL
+    // write's resulting doc shape, not on capture_source semantics.
     const result = await call()({
       id_or_slug: taskId,
-      oracle: "tsc",
+      oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
       recorded_by: "alice",

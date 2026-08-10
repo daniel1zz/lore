@@ -178,8 +178,13 @@ function seedFixture(cwd: string): void {
     ["create", "task", "--title", "Migration Source", "--parent", PLAN_SLUG, "--plan-id", PLAN_SLUG, "--phase", "Alpha", "--content", "body", "--no-ai"],
     cwd,
   );
+  // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+  // predicate-to-its-own) — "test" self-report is now refused regardless of
+  // tail content; "manual" is the one oracle that still lets a genuinely
+  // non-empty self-reported tail succeed. This fixture only needs a
+  // successful pass row referencing AC-SC-1, not a specific oracle kind.
   mustRun(
-    ["evidence", "task-migration-source", "--oracle", "test", "--command", "bun test AC-SC-1", "--result", "pass", "--ac", "AC-SC-1", "--by", "agent:fixture", "--output-tail", "ok"],
+    ["evidence", "task-migration-source", "--oracle", "manual", "--command", "bun test AC-SC-1", "--result", "pass", "--ac", "AC-SC-1", "--by", "agent:fixture", "--output-tail", "ok"],
     cwd,
   );
   mustRun(["migrate", "tasks-to-phases"], cwd);
@@ -214,8 +219,10 @@ function createTask(
   const slug = (JSON.parse(created.stdout) as { data: { slug: string } }).data.slug;
 
   if (opts.evidenceAc !== undefined) {
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — see seedFixture's identical fix above.
     mustRun(
-      ["evidence", slug, "--oracle", "test", "--command", `bun test ${opts.evidenceAc}`, "--result", "pass", "--ac", opts.evidenceAc, "--by", "agent:fixture", "--output-tail", "ok"],
+      ["evidence", slug, "--oracle", "manual", "--command", `bun test ${opts.evidenceAc}`, "--result", "pass", "--ac", opts.evidenceAc, "--by", "agent:fixture", "--output-tail", "ok"],
       cwd,
     );
   }

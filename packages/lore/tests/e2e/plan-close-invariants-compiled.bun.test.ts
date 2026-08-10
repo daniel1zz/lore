@@ -326,9 +326,16 @@ function verifyAttested(dir: string, planSlug: string, taskSlug: string, acId: s
 }
 
 /** Records SELF-REPORTED (never attested) evidence via `lore evidence`. */
+// reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+// to-its-own) — "other" self-report is now refused regardless of tail
+// content; "manual" is the one oracle that still lets a genuinely non-empty
+// self-reported tail succeed, and — same as "other" — falls outside the
+// SPEC-061 attestation-completeness guard's and the missing-oracle-file
+// precheck's test/e2e-only scope (see this file's own module header), so
+// this fixture's other invariants are unaffected by the switch.
 function evidenceSelfReported(dir: string, taskSlug: string, acId: string, command: string): RunResult {
   return runLore(
-    ["evidence", taskSlug, "--oracle", "other", "--command", command, "--result", "pass", "--ac", acId, "--output-tail", "ok"],
+    ["evidence", taskSlug, "--oracle", "manual", "--command", command, "--result", "pass", "--ac", acId, "--output-tail", "ok"],
     dir,
   );
 }

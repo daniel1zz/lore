@@ -213,7 +213,19 @@ describe("AC-ETI-4 — a self-reported pass with no output_tail is now REJECTED 
     expect(after.value?.extra["verification_evidence"]).toBeUndefined();
   });
 
-  it("AC-ETI-4 CONTROL: the SAME pass row WITH a genuine non-empty output_tail is accepted", async () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, spec-falsifiability-reachability-a-feedable-checkpoint-an §D5) — this
+  // test used to prove a HAND-AUTHORED non-empty tail alone was enough for a
+  // self-reported "pass" on a capturable oracle like "tsc". That is exactly
+  // the defect D5 closes: measured 2026-08-10, 2 of 3 dispatched agents
+  // satisfied "non-empty tail" by typing a fabricated summary themselves, and
+  // both PASSED this exact check. The predicate is now raised to require
+  // `capture_source: "runner"` for every oracle except "manual" — this
+  // scenario (self-reported, oracle "tsc", hand-typed tail) is REFUSED going
+  // forward. The genuinely-still-legal sibling ("manual" oracle self-report,
+  // or ANY oracle with capture_source: "runner") is covered by the next two
+  // tests in this describe block, unchanged.
+  it("AC-ETI-4 SUPERSEDED-CONTROL: a hand-authored non-empty output_tail alone no longer suffices for a capturable oracle — refused, naming --capture", async () => {
     const { corpusService, taskWorkflowService } = makeServices();
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
@@ -225,6 +237,29 @@ describe("AC-ETI-4 — a self-reported pass with no output_tail is now REJECTED 
         command: "bun run typecheck",
         result: "pass",
         output_tail: "tsc exited 0, no diagnostics",
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.field).toBe("output_tail");
+    expect((result.error as { message: string }).message).toContain("--capture");
+  });
+
+  it("AC-ETI-4 CONTROL: the SAME pass row on --oracle manual WITH a genuine non-empty output_tail is still accepted (D5's one surviving self-report escape)", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.addEvidence(
+      taskId,
+      evidence({
+        oracle: "manual",
+        command: "checked the login page by hand",
+        result: "pass",
+        output_tail: "logged in 3 times rapidly, 4th attempt correctly blocked",
       }),
     );
 

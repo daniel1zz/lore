@@ -300,12 +300,17 @@ describe("lore evidence", () => {
     const planSlug = createPlan("Evidence Plan");
     const taskSlug = createTask(planSlug, "Evidenced Task");
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused regardless of
+    // tail content; "manual" is the one oracle that still lets a genuinely
+    // non-empty self-reported tail succeed via the real CLI. This test only
+    // checks that an oracle record appends and is visible via `lore log`.
     const result = runLore(
       [
         "evidence",
         taskSlug,
         "--oracle",
-        "tsc",
+        "manual",
         "--command",
         "bun run typecheck",
         "--result",
@@ -317,7 +322,7 @@ describe("lore evidence", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("tsc");
+    expect(result.stdout).toContain("manual");
 
     const log = runLore(["log", taskSlug], tmpDir);
     expect(log.exitCode).toBe(0);
@@ -379,12 +384,17 @@ describe("lore evidence", () => {
     const planSlug = createPlan("Evidence AC Plan", specSlug);
     const taskSlug = createTask(planSlug, "AC-Referencing Task");
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused before ever
+    // reaching the --ac cross-entity validation this test means to exercise;
+    // "manual" is the one oracle that still lets a genuinely non-empty
+    // self-reported tail proceed.
     const result = runLore(
       [
         "evidence",
         taskSlug,
         "--oracle",
-        "tsc",
+        "manual",
         "--command",
         "bun run typecheck",
         "--result",
@@ -398,7 +408,7 @@ describe("lore evidence", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("tsc");
+    expect(result.stdout).toContain("manual");
   });
 
   it("AC-ACODE-3.CLI.N4: --ac <undeclared-id> → exit 4 (VALIDATION_ERROR), no evidence written", () => {
@@ -411,12 +421,16 @@ describe("lore evidence", () => {
     const planSlug = createPlan("Evidence AC Undeclared Plan", specSlug);
     const taskSlug = createTask(planSlug, "AC-Undeclared-Referencing Task");
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — see AC-ACODE-3.CLI.H1's identical supersession
+    // above; "manual" lets the call reach the --ac cross-entity validation
+    // this test means to exercise.
     const result = runLore(
       [
         "evidence",
         taskSlug,
         "--oracle",
-        "tsc",
+        "manual",
         "--command",
         "bun run typecheck",
         "--result",
@@ -438,8 +452,13 @@ describe("lore evidence", () => {
     const planSlug = createPlan("Evidence No-AC Plan");
     const taskSlug = createTask(planSlug, "No-AC Task");
 
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused; "manual" is
+    // the one oracle that still lets a genuinely non-empty self-reported
+    // tail succeed. This test only checks ac_ref absence, not oracle-kind
+    // semantics.
     const result = runLore(
-      ["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass", "--output-tail", "ok", "--json"],
+      ["evidence", taskSlug, "--oracle", "manual", "--command", "cmd", "--result", "pass", "--output-tail", "ok", "--json"],
       tmpDir,
     );
 
@@ -539,8 +558,13 @@ describe("lore tree / lore list — workflow badges (AC-WF-9)", () => {
   it("a task with passing evidence shows a ✔ badge in `lore list --type task`", () => {
     const planSlug = createPlan("Evidence Badge Plan");
     const taskSlug = createTask(planSlug, "Evidenced Badge Task");
+    // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+    // predicate-to-its-own) — "tsc" self-report is now refused; "manual" is
+    // the one oracle that still lets a genuinely non-empty self-reported
+    // tail succeed. This test only checks the ✔ badge renders, not
+    // oracle-kind semantics.
     runLore(
-      ["evidence", taskSlug, "--oracle", "tsc", "--command", "cmd", "--result", "pass", "--output-tail", "ok"],
+      ["evidence", taskSlug, "--oracle", "manual", "--command", "cmd", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
 

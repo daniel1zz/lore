@@ -248,10 +248,15 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
 
     const evidenceResult = runLore(
       [
+        // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+        // predicate-to-its-own) — "test" self-report is now refused
+        // regardless of tail content; "manual" is the one oracle that still
+        // lets a genuinely non-empty self-reported tail succeed. This test
+        // only checks worktree corpus resolution, not oracle-kind semantics.
         "evidence",
         taskSlug,
         "--oracle",
-        "test",
+        "manual",
         "--command",
         "echo wcr-happy",
         "--result",
@@ -303,10 +308,15 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
 
     const evidenceResult = runLore(
       [
+        // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
+        // predicate-to-its-own) — "test" self-report is now refused
+        // regardless of tail content; "manual" is the one oracle that still
+        // lets a genuinely non-empty self-reported tail succeed. This test
+        // only checks worktree corpus resolution, not oracle-kind semantics.
         "evidence",
         taskSlug,
         "--oracle",
-        "test",
+        "manual",
         "--command",
         "echo wcr-regression",
         "--result",

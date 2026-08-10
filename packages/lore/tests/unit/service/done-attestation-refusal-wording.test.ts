@@ -95,10 +95,18 @@ async function createTask(
 }
 
 /** A SELF-REPORTED `result:"pass"` row — `capture_source: "self-report"`, the shape a
- *  bare `lore evidence --result pass --output-tail …` writes. */
+ *  bare `lore evidence --result pass --output-tail …` writes.
+ *
+ *  reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-predicate-
+ *  to-its-own, D5) — was "tsc"; rejectMissingPassOutputTail's D5 raise now
+ *  refuses a self-reported "pass" for "tsc" (or any oracle but "manual")
+ *  regardless of tail content, so constructing this fixture via addEvidence
+ *  would fail outright. "manual" is the one oracle D5 leaves able to reach a
+ *  successful self-reported write, and this fixture's whole point is
+ *  genuinely-self-reported (capture_source), never a claim about oracle kind. */
 function selfReportedPass(overrides: Partial<EvidenceInput> = {}): EvidenceInput {
   return {
-    oracle: "tsc",
+    oracle: "manual",
     command: "bun run typecheck",
     result: "pass",
     recorded_by: "alice",

@@ -351,7 +351,14 @@ describe("MCP lore_evidence_add refuses exactly what the CLI refuses (mixed-runn
     expect(error.message).toBe(shared.message);
   });
 
-  it("STATE: a refused MCP call writes NO evidence row; the split-in-two calls each write one", async () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, D5) — `firstHalf`/`secondHalf` below used to satisfy the mixed-
+  // runner guard (each names only ONE runner's files) and record cleanly
+  // with a hand-typed "ok" tail. D5's rejectMissingPassOutputTail raise now
+  // ALSO refuses self-reported oracle-"test" passes regardless of tail
+  // content, so satisfying the mixed-runner guard is necessary but no longer
+  // sufficient — all three calls below now write zero rows.
+  it("STATE SUPERSEDED: a refused MCP call writes NO evidence row; the split-in-two calls are ALSO refused by D5, so all three write zero", async () => {
     const taskId = await createTaskDoc();
     expect(await readEvidenceCount(taskId)).toBe(0);
 
@@ -373,8 +380,10 @@ describe("MCP lore_evidence_add refuses exactly what the CLI refuses (mixed-runn
       recorded_by: "agent:parity",
       output_tail: "ok",
     });
-    expect(firstHalf.isError).toBeFalsy();
-    expect(await readEvidenceCount(taskId)).toBe(1);
+    expect(firstHalf.isError).toBe(true);
+    const firstHalfError = parseResult(firstHalf) as { message: string };
+    expect(firstHalfError.message).toContain("--capture");
+    expect(await readEvidenceCount(taskId)).toBe(0);
 
     const secondHalf = await call()({
       id_or_slug: taskId,
@@ -384,13 +393,18 @@ describe("MCP lore_evidence_add refuses exactly what the CLI refuses (mixed-runn
       recorded_by: "agent:parity",
       output_tail: "ok",
     });
-    expect(secondHalf.isError).toBeFalsy();
-    const data = parseResult(secondHalf) as { doc: DocRecord };
-    expect((data.doc.extra["verification_evidence"] as unknown[]).length).toBe(2);
-    expect(await readEvidenceCount(taskId)).toBe(2);
+    expect(secondHalf.isError).toBe(true);
+    const secondHalfError = parseResult(secondHalf) as { message: string };
+    expect(secondHalfError.message).toContain("--capture");
+    expect(await readEvidenceCount(taskId)).toBe(0);
   });
 
-  it("CONTROL: an unrelated unfiltered single-runner pass still records through MCP", async () => {
+  // reason: SUPERSEDED (task-raise-the-evidence-tail-guard-s-predicate-to-its-
+  // own, D5) — this "unrelated" single-runner pass used to record cleanly
+  // with a hand-typed "ok" tail once past the mixed-runner guard. D5 now
+  // ALSO refuses it (self-reported oracle "test", no --capture) — see the
+  // STATE test above's identical supersession.
+  it("CONTROL SUPERSEDED: an unrelated unfiltered single-runner pass clears the mixed-runner guard, but D5 still refuses without --capture", async () => {
     const taskId = await createTaskDoc();
 
     const result = await call()({
@@ -402,7 +416,9 @@ describe("MCP lore_evidence_add refuses exactly what the CLI refuses (mixed-runn
       output_tail: "ok",
     });
 
-    expect(result.isError).toBeFalsy();
-    expect(await readEvidenceCount(taskId)).toBe(1);
+    expect(result.isError).toBe(true);
+    const error = parseResult(result) as { message: string };
+    expect(error.message).toContain("--capture");
+    expect(await readEvidenceCount(taskId)).toBe(0);
   });
 });
