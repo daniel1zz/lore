@@ -60,6 +60,7 @@ import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
+  NeverReadDoc,
   SearchHit,
   StoreFilters,
   StoreInterface,
@@ -68,6 +69,8 @@ import type {
   TraceGateDenyEvent,
   TraceRawSearchQuery,
   TraceStatsWindow,
+  TraceZeroHitListOpts,
+  TraceZeroHitSearch,
   UpdateOpts,
 } from "./store-interface.js";
 import {
@@ -2104,38 +2107,75 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
-  async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+  async listTraceZeroHitSearches(
+    window: TraceStatsWindow,
+    opts?: TraceZeroHitListOpts,
+  ): Promise<Result<TraceZeroHitSearch[], LoreError>> {
     try {
-      const row = this.db
+      const rows = this.db
         .query(
-          "SELECT COUNT(*) as count FROM trace_events WHERE kind = 'search' AND hit_count = 0 AND ts >= ?",
+          `SELECT ts, actor, details FROM trace_events
+           WHERE kind = 'search' AND hit_count = 0 AND ts >= ?
+           ORDER BY ts DESC, id DESC`,
         )
-        .get(window.since) as { count: number | bigint };
-      return ok(Number(row.count));
+        .all(window.since) as { ts: string; actor: string; details: string }[];
+      // reason: the `query` KEY is omitted entirely (conditional spread) rather
+      // than set to "" when raw queries were not requested — under
+      // exactOptionalPropertyTypes an absent key is observably different from an
+      // empty string, and only absence proves to a reader (and to AC-RR-3's
+      // oracle) that no literal search text was ever projected out of the row.
+      const includeRawQueries = opts?.includeRawQueries === true;
+      return ok(
+        rows.map((row) => ({
+          ts: row.ts,
+          actor: row.actor,
+          ...(includeRawQueries
+            ? { query: parseJson<{ query?: string }>(row.details, {}).query ?? "" }
+            : {}),
+        })),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
     try {
       // reason: SPEC-102 §Access Patterns "never-read docs" — non-deleted
       // docs with no kind='get' trace row since the window start. idx_trace_doc
-      // (partial, doc_id IS NOT NULL) backs the inner subquery.
-      const row = this.db
+      // (partial, doc_id IS NOT NULL) backs the inner subquery. ORDER BY slug
+      // (unique, id-tiebroken) makes the member list diff-stable across runs.
+      const rows = this.db
         .query(
-          `SELECT COUNT(*) as count FROM docs
+          `SELECT id, slug FROM docs
            WHERE deleted_at IS NULL
            AND id NOT IN (
              SELECT DISTINCT doc_id FROM trace_events
              WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
-           )`,
+           )
+           ORDER BY slug ASC, id ASC`,
         )
-        .get(window.since) as { count: number | bigint };
-      return ok(Number(row.count));
+        .all(window.since) as { id: string; slug: string }[];
+      return ok(rows.map((row) => ({ id: row.id, slug: row.slug })));
     } catch (e) {
       return wrapStoreError(e);
     }
+  }
+
+  async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    // reason: DERIVED from the member list, never a second COUNT(*) — see
+    // StoreInterface.countTraceZeroHitSearches's own ⛔ note. The privacy
+    // default is deliberate: a length needs no query text at all.
+    const listResult = await this.listTraceZeroHitSearches(window);
+    if (!listResult.ok) return listResult;
+    return ok(listResult.value.length);
+  }
+
+  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    // reason: DERIVED from the member list — see listNeverReadDocs above.
+    const listResult = await this.listNeverReadDocs(window);
+    if (!listResult.ok) return listResult;
+    return ok(listResult.value.length);
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {
