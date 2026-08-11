@@ -5712,6 +5712,10 @@
     "01KZRMT94GGWRZFT37NJ3EDXCY": {
       "human_id": "TASK-687",
       "file_path": "docs/requirements/task/TASK-687-widen-the-declared-ac-port-to-carry-criteria-so-th.md"
+    },
+    "01KZRYRB1K7BPDJR0Z650CYNPK": {
+      "human_id": "KN-434",
+      "file_path": "docs/requirements/knowledge/KN-434-handoff-agent-main-orchestrator.md"
     }
   }
 }
