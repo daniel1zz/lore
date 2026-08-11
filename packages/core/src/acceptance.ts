@@ -15,7 +15,14 @@
  *     per criterion; `falsified` is the fourth coverage dimension added by
  *     spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1, computed in
  *     the SAME pass, no second traversal)
- *   - AcCoverageFact / EvidenceRefLite — computeAcCoverage's output row shapes
+ *   - AcCoverageFact / EvidenceRefLite / AcOracleGenerationSplit —
+ *     computeAcCoverage's output row shapes. `AcCoverageFact.oracle_generation`
+ *     is the ORACLE-GENERATION SPLIT (spec-the-defect-channel-cannot-be-honestly-
+ *     maintained-an §M5, AC-DC-8): how many of a criterion's referencing evidence
+ *     rows were recorded under its CURRENT oracle versus a RETIRED one, so a
+ *     rewritten (e.g. polarity-REVERSED) command's stale-but-green evidence is
+ *     visible instead of reading as ordinary coverage. Facts only — the split
+ *     changes no existing count and no derived state (see below).
  *   - deriveAcCoverageState(fact) — the ONE fail-first coverage-precedence derivation
  *     (SPEC-070 AC-070-12, review finding F3) every rendering consumer shares. Widened
  *     to SEVEN states by spec-oracle-tier-falsifiability-a-criterion-never-observed-red
@@ -66,7 +73,12 @@ import { z } from "zod";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
-import { extractEvidence, type OracleKind } from "./task-workflow.js";
+import {
+  extractEvidence,
+  resolveOracleGeneration,
+  ORACLE_GENERATION_INITIAL,
+  type OracleKind,
+} from "./task-workflow.js";
 
 // ─── Verify Modes ──────────────────────────────────────────────────────────
 
@@ -221,6 +233,28 @@ export const acceptanceCriterionSchema = z.object({
    * covers nothing).
    */
   requirement_refs: z.array(z.string()).optional(),
+  /**
+   * This criterion's ORACLE GENERATION (spec-the-defect-channel-cannot-be-honestly-
+   * maintained-an §M5, AC-DC-8) — bumped by `AcService.setCriterion` whenever the
+   * resulting script-mode `verify.command` DIFFERS from the stored one, so a rewritten
+   * oracle is a new generation and every evidence row recorded against the previous
+   * one is reportable as prior-generation ({@link AcCoverageFact.oracle_generation}).
+   *
+   * Optional and additive: ABSENT means {@link ORACLE_GENERATION_INITIAL} — the entire
+   * pre-M5 back-catalogue — read through the ONE shared rule
+   * {@link resolveOracleGeneration}, never as "unknown" and never throwing (this
+   * module is browser-safe and its predicates are total). A criterion is therefore
+   * never written with `oracle_generation: 1` gratuitously: an edit that changes no
+   * command (a `--statement`-only edit, or re-setting the identical command) leaves
+   * the field exactly as it found it, absent included, so such an edit stays
+   * byte-identical to pre-M5 behavior (REGRESSION).
+   *
+   * ⛔ Only the script-mode `verify.command` drives it. An `ai` rubric or a `human`
+   * note is not an oracle whose POLARITY can silently reverse — the measured defect
+   * (spec §F3) is two mutually-exclusive ATTESTED passes under one AC id, which
+   * requires an executed command.
+   */
+  oracle_generation: z.number().int().min(ORACLE_GENERATION_INITIAL).optional(),
 });
 
 /** Derived TypeScript type for one acceptance criterion declaration. */
@@ -295,6 +329,46 @@ export interface EvidenceRefLite {
   result: "pass" | "fail" | "inconclusive" | "expected-fail";
   attested?: boolean;
   recorded_at?: string;
+  /**
+   * The RAW `EvidenceEntry.ac_oracle_generation` stamp this ref was projected from
+   * (§M5, AC-DC-8) — present iff the source row carried one, deliberately NOT
+   * normalised to {@link ORACLE_GENERATION_INITIAL} here. Normalising at projection
+   * time would erase the distinction between a pre-M5 row (no stamp) and a row
+   * explicitly stamped generation 1, which is a real audit distinction even though
+   * BOTH read as generation 1 for classification purposes (that read happens exactly
+   * once, in {@link computeAcCoverage}'s split, via {@link resolveOracleGeneration}).
+   */
+  ac_oracle_generation?: number;
+}
+
+/**
+ * The per-criterion ORACLE-GENERATION SPLIT on an {@link AcCoverageFact} (spec-the-
+ * defect-channel-cannot-be-honestly-maintained-an §M5, AC-DC-8) — how many of the
+ * criterion's referencing evidence rows were recorded under its CURRENT oracle
+ * generation versus a RETIRED (strictly older) one.
+ *
+ * Facts only, no rendering (D6) — each consumer renders its own badge/column.
+ *
+ * @invariant `current_refs + prior_refs === refs.length`, always. `prior_refs` is
+ *   defined as the STRICTLY-older count and `current_refs` as its COMPLEMENT, so the
+ *   two are total over `refs` by construction and a stamp that is somehow NEWER than
+ *   the criterion's own generation (unreachable through this codebase's write paths —
+ *   generations are monotonic and stamped from the criterion in force — so only a
+ *   hand-edited doc or fixture can produce one) can never open a silent third bucket
+ *   that no field reports.
+ * @invariant Additive and never counted as coverage: `pass`/`fail`/`attested_pass`/
+ *   `attested_fail`/`falsified` are UNCHANGED by this split, and
+ *   {@link deriveAcCoverageState} does not read it at all — supersession here is
+ *   REPORTED, never enforced, and no evidence row is deleted, edited, or hidden to
+ *   produce it (the append-only invariant the whole evidence log rests on).
+ */
+export interface AcOracleGenerationSplit {
+  /** The criterion's current generation, resolved through {@link resolveOracleGeneration}. */
+  current: number;
+  /** Refs recorded under {@link current} (the complement of {@link prior_refs}). */
+  current_refs: number;
+  /** Refs recorded under a STRICTLY older generation — evidence produced by a retired oracle. */
+  prior_refs: number;
 }
 
 /**
@@ -367,6 +441,20 @@ export interface AcCoverageFact {
    *   into a future blocking form.
    */
   falsified: number;
+  /**
+   * The current-vs-retired oracle split for this criterion (§M5, AC-DC-8) — see
+   * {@link AcOracleGenerationSplit}'s own JSDoc for the contract.
+   *
+   * OPTIONAL on the type, ALWAYS populated by {@link computeAcCoverage} — the exact
+   * convention {@link EvidenceRefLite.recorded_at} already uses in this module, and for
+   * the same reason: a hand-built fact literal (a test fixture, never this aggregator's
+   * output) must stay constructible, and an ABSENT split must read as "not computed"
+   * rather than as a computed all-zero one. ⛔ A consumer that needs the split must
+   * therefore branch on its PRESENCE — never `?? 0` a missing one into a number, which
+   * would silently report "no retired-oracle evidence" for a fact that was never
+   * measured at all.
+   */
+  oracle_generation?: AcOracleGenerationSplit;
 }
 
 /**
@@ -381,7 +469,10 @@ export interface AcCoverageFact {
  *   `ac_ref` pointers into `criteria` (typically a plan's child tasks)
  * @returns One {@link AcCoverageFact} per input criterion, in input order. An empty
  *   `tasks` array yields `{pass: 0, fail: 0, refs: [], attested_pass: 0, attested_fail: 0,
- *   falsified: 0}` for every criterion — never throws, never omits a declared criterion.
+ *   falsified: 0, oracle_generation: {current: <the criterion's own generation>,
+ *   current_refs: 0, prior_refs: 0}}` for every criterion — never throws, never omits a
+ *   declared criterion. `oracle_generation` is ALWAYS populated here (it is optional only
+ *   on the TYPE, for hand-built fixtures — see that field's own JSDoc).
  *
  * @example
  * computeAcCoverage(
@@ -390,7 +481,8 @@ export interface AcCoverageFact {
  * );
  * // => [{ ac_id: "AC-1", mode: "script", pass: 1, fail: 0,
  * //      refs: [{ task_id: "...", result: "pass", attested: true }],
- * //      attested_pass: 1, attested_fail: 0, falsified: 0 }]
+ * //      attested_pass: 1, attested_fail: 0, falsified: 0,
+ * //      oracle_generation: { current: 1, current_refs: 1, prior_refs: 0 } }]
  *
  * @remarks Single-pass over `tasks`/their evidence (SPEC-070 AC-070-17, review
  *   finding F10) — the PREVIOUS implementation re-called `extractEvidence(task)`
@@ -425,6 +517,11 @@ export function computeAcCoverage(
       if (entry.attestation !== undefined) {
         ref.attested = true;
       }
+      // reason: carried RAW (present-iff-stamped), never normalised here — see
+      // `EvidenceRefLite.ac_oracle_generation`'s own JSDoc. §M5, AC-DC-8.
+      if (entry.ac_oracle_generation !== undefined) {
+        ref.ac_oracle_generation = entry.ac_oracle_generation;
+      }
       const bucket = refsByAcId.get(entry.ac_ref);
       if (bucket === undefined) {
         refsByAcId.set(entry.ac_ref, [ref]);
@@ -436,6 +533,14 @@ export function computeAcCoverage(
 
   return criteria.map((criterion) => {
     const refs = refsByAcId.get(criterion.id) ?? [];
+    // §M5, AC-DC-8 — read from the SAME per-criterion `refs` bucket the five counts
+    // below read, with no extra pass over `tasks`. `prior_refs` is the STRICTLY-older
+    // count and `current_refs` its complement, so the pair is total over `refs` (see
+    // `AcOracleGenerationSplit`'s invariant).
+    const currentGeneration = resolveOracleGeneration(criterion.oracle_generation);
+    const priorGenerationRefs = refs.filter(
+      (r) => resolveOracleGeneration(r.ac_oracle_generation) < currentGeneration,
+    ).length;
     return {
       ac_id: criterion.id,
       mode: criterion.verify.mode,
@@ -445,6 +550,11 @@ export function computeAcCoverage(
       attested_pass: refs.filter((r) => r.result === "pass" && r.attested === true).length,
       attested_fail: refs.filter((r) => r.result === "fail" && r.attested === true).length,
       falsified: refs.filter((r) => r.result === "expected-fail" || r.result === "fail").length,
+      oracle_generation: {
+        current: currentGeneration,
+        current_refs: refs.length - priorGenerationRefs,
+        prior_refs: priorGenerationRefs,
+      },
     };
   });
 }
@@ -494,6 +604,13 @@ export function computeAcCoverage(
  * badge-layer residuals `commands/ac.ts::coverageBadge` derives from `fact.refs`
  * ONLY after THIS function has already returned `"none"` (rendering `⚑?`/`⚑R`);
  * they are never members of this function's own return type.
+ *
+ * ⛔ {@link AcCoverageFact.oracle_generation} (the §M5 current-vs-retired oracle
+ * split) is deliberately NOT read here, and adding an eighth state for it would be a
+ * BEHAVIOUR change, not an extension: these seven states and their precedence are
+ * pinned by other ACs and by a live-corpus old-vs-new comparison, so §M5 is additive
+ * REPORTING — a consumer that wants to surface retired-oracle evidence reads the split
+ * beside this verdict, never through it.
  *
  * **M4 — `"fail_superseded"` (rank 2)**: SUPERSEDED means the newest ATTESTED pass
  * ref is STRICTLY newer than the newest `"fail"` ref, by `recorded_at`. Reduces an

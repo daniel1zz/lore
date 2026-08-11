@@ -21,6 +21,18 @@
  *     whole `verify.falsifier` object — see {@link SetCriterionPatch.falsifier}'s own JSDoc for
  *     the require-all-four-together partial-update contract.
  *
+ * @invariant `setCriterion` bumps the criterion's `oracle_generation` EXACTLY WHEN the
+ *   resulting script-mode `verify.command` differs from the stored one (spec-the-defect-
+ *   channel-cannot-be-honestly-maintained-an §M5, AC-DC-8) — a rewritten oracle is a NEW
+ *   GENERATION, so `computeAcCoverage` can report evidence recorded against the retired
+ *   command as prior-generation. Monotonic, never reused, never reset; every other edit
+ *   (statement-only, `--covers`, `--falsifier-*`, an identical re-set, any non-script
+ *   criterion) carries the stored value through untouched — including ABSENT, so such a
+ *   write stays byte-identical to pre-M5 behavior. ⛔ This method writes ONLY the SPEC
+ *   doc: not one stored evidence row is edited, deleted, or hidden by the bump —
+ *   supersession is additive metadata on the criterion, matching the append-only
+ *   invariant the evidence log rests on. Decision table:
+ *   {@link resolveNextOracleGeneration}.
  * @invariant All methods return Promise<Result<T, LoreError>> — no thrown exceptions.
  * @invariant `addCriterion` validates the FULL candidate array (existing + new) via
  *   `specAcceptanceCriteriaSchema` in one `safeParse` call — covers the new entry's own
@@ -85,6 +97,7 @@ import {
   extractDeclaredAcScope,
   resolveGoverningSpecByAcScope,
   resolveStatusAfterContractEdit,
+  resolveOracleGeneration,
   findMissingOracleFiles,
   type AcceptanceCriterion,
   type AcCoverageFact,
@@ -549,15 +562,22 @@ export class AcService {
       return err(modeMismatchError(acId, "--note", mode));
     }
 
+    const verifyCandidate = buildVerifyCandidate(target.verify, patch);
+    const nextOracleGeneration = resolveNextOracleGeneration(target, verifyCandidate);
     const candidateCriterion: Record<string, unknown> = {
       id: target.id,
       statement: patch.statement ?? target.statement,
-      verify: buildVerifyCandidate(target.verify, patch),
+      verify: verifyCandidate,
       ...(patch.covers !== undefined
         ? { requirement_refs: patch.covers }
         : target.requirement_refs !== undefined
           ? { requirement_refs: target.requirement_refs }
           : {}),
+      // §M5 (AC-DC-8) — a rewritten script-mode command is a NEW ORACLE GENERATION;
+      // every other edit carries the stored value through untouched (absent included,
+      // so a statement-only edit stays byte-identical to pre-M5 behavior). See
+      // `resolveNextOracleGeneration`'s own JSDoc.
+      ...(nextOracleGeneration !== undefined ? { oracle_generation: nextOracleGeneration } : {}),
     };
 
     const candidateArray = existing.map((c, i) => (i === index ? candidateCriterion : c));
@@ -1032,6 +1052,50 @@ function buildVerifyCandidate(
             : {}),
       };
   }
+}
+
+/**
+ * The `oracle_generation` value {@link AcService.setCriterion} must write for this edit
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5, AC-DC-8).
+ *
+ * An acceptance criterion's ORACLE is its script-mode `verify.command`; rewriting that
+ * command produces a criterion whose evidence history now spans two different oracles
+ * under ONE id. The measured defect (spec §F3): `AC-BG-5` carried seven rows across
+ * `grep -rq MARKER apps/web` (marker MUST exist) and `! grep -rq MARKER …` (marker MUST
+ * NOT exist), two of them BOTH attested `exit_code: 0` — mutually exclusive facts reading
+ * as ordinary green, with no write path able to mark either one superseded (`lore
+ * evidence` is append-only with no amend; `lore invalidate` is whole-document; `lore
+ * audit` is read-only; `lore set`'s field whitelist excludes evidence). Bumping the
+ * generation here is what makes `computeAcCoverage` able to report the pre-rewrite rows
+ * as prior-generation WITHOUT touching a single stored row.
+ *
+ * @param target - the CURRENTLY-STORED criterion (never the candidate)
+ * @param candidateVerify - {@link buildVerifyCandidate}'s output for this edit — read
+ *   for its `command` only, and defensively (it is a `Record<string, unknown>` whose
+ *   shape `specAcceptanceCriteriaSchema` validates AFTER this call, so a non-string
+ *   command is possible here and is treated as "no bump"; the schema then refuses the
+ *   whole write, which is the loud path — never a bump on an invalid candidate)
+ * @returns the value to write, or `undefined` to write NO `oracle_generation` key at all:
+ *   - a NON-script criterion → the stored value, carried through unchanged (an `ai`
+ *     rubric / `human` note has no executable oracle whose polarity can reverse)
+ *   - a script criterion whose resulting command EQUALS the stored one → the stored
+ *     value, carried through (idempotent: re-setting the identical command, or editing
+ *     only `--statement`/`--covers`/`--falsifier-*`, is not a new oracle)
+ *   - a script criterion whose resulting command DIFFERS → `resolveOracleGeneration`
+ *     (`@lore/core` — the ONE "absent means generation 1" rule) of the stored value,
+ *     PLUS ONE. Monotonic and never reused: it is derived from the stored value, so it
+ *     can only increase, and it never resets to 1 (a first rewrite yields 2).
+ */
+function resolveNextOracleGeneration(
+  target: AcceptanceCriterion,
+  candidateVerify: Record<string, unknown>,
+): number | undefined {
+  if (target.verify.mode !== "script") return target.oracle_generation;
+  const nextCommand = candidateVerify["command"];
+  if (typeof nextCommand !== "string" || nextCommand === target.verify.command) {
+    return target.oracle_generation;
+  }
+  return resolveOracleGeneration(target.oracle_generation) + 1;
 }
 
 /**
