@@ -103,6 +103,8 @@ links:
   - {id: SPEC-136, type: governs}
   - {id: SPEC-137, type: governs}
   - {id: SPEC-138, type: governs}
+  - {id: SPEC-139, type: governs}
+  - {id: SPEC-140, type: governs}
 ---
 ## Overview
 

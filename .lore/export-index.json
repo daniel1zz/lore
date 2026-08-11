@@ -5580,6 +5580,78 @@
     "01KZRF1N28BMC1XW8YQVM28P7C": {
       "human_id": "TASK-666",
       "file_path": "docs/requirements/task/TASK-666-thread-diff-source-through-the-cli-and-mcp-assess.md"
+    },
+    "01KZRH1WKSHMA9FTGMDFYB1QN0": {
+      "human_id": "SPEC-140",
+      "file_path": "docs/requirements/spec/SPEC-140-a-write-side-fact-with-no-read-side-address-counts.md"
+    },
+    "01KZRH1PGMF0HAPHV9DVXZGZXZ": {
+      "human_id": "SPEC-139",
+      "file_path": "docs/requirements/spec/SPEC-139-the-defect-channel-cannot-be-honestly-maintained-a.md"
+    },
+    "01KZRHRA4QYT2VZXX5SR70P6CH": {
+      "human_id": "ADR-031",
+      "file_path": "docs/requirements/adr/ADR-031-governance-document-conflict-exposure-is-deferred.md"
+    },
+    "01KZRHHG131215X9Q8HFAN0YTZ": {
+      "human_id": "KN-427",
+      "file_path": "docs/requirements/knowledge/KN-427-handoff-agent-main-orchestrator.md"
+    },
+    "01KZRGJERNRTH4RHHZMW6VAYM8": {
+      "human_id": "KN-428",
+      "file_path": "docs/requirements/knowledge/KN-428-handoff-agent-main-orchestrator.md"
+    },
+    "01KZRGATQ5F6HHYCA0RAG53AJJ": {
+      "human_id": "KN-429",
+      "file_path": "docs/requirements/knowledge/KN-429-handoff-agent-main-orchestrator.md"
+    },
+    "01KZRHXWH28Q78R22ZVQDEXAK1": {
+      "human_id": "PLAN-126",
+      "file_path": "docs/requirements/plan/PLAN-126-land-read-side-reachability-enumerable-trace-count.md"
+    },
+    "01KZRHWMY320HF1Q8QD9ENQ6GT": {
+      "human_id": "PLAN-127",
+      "file_path": "docs/requirements/plan/PLAN-127-land-defect-channel-honesty-a-resolution-keyed-cap.md"
+    },
+    "01KZRJ0BSA81A3V51KGPQ15E5A": {
+      "human_id": "TASK-667",
+      "file_path": "docs/requirements/task/TASK-667-every-trace-stats-count-is-derived-from-a-member-l.md"
+    },
+    "01KZRHZBR636BJJ0RMGT0N1Q5S": {
+      "human_id": "TASK-668",
+      "file_path": "docs/requirements/task/TASK-668-one-terminal-resolution-ssot-two-non-derogatory-st.md"
+    },
+    "01KZRHZVHHZM9APZZSABGRGK87": {
+      "human_id": "TASK-669",
+      "file_path": "docs/requirements/task/TASK-669-ac-oracle-generations-rewriting-a-script-command-m.md"
+    },
+    "01KZRJ0BZRDA2TCBM929WG1XXC": {
+      "human_id": "TASK-670",
+      "file_path": "docs/requirements/task/TASK-670-a-knowledge-doc-may-declare-code-anchors-and-check.md"
+    },
+    "01KZRJ0C6H00G8XB4WT9BPNH4A": {
+      "human_id": "TASK-671",
+      "file_path": "docs/requirements/task/TASK-671-the-knowledge-sub-type-is-a-retrieval-filter-appli.md"
+    },
+    "01KZRHZW3V74B8JP5XME2T3E7K": {
+      "human_id": "TASK-672",
+      "file_path": "docs/requirements/task/TASK-672-both-issue-read-surfaces-name-the-corpus-they-read.md"
+    },
+    "01KZRHZVRPYA715GV81C4DT8XM": {
+      "human_id": "TASK-673",
+      "file_path": "docs/requirements/task/TASK-673-the-open-report-ceiling-is-the-upstream-corpus-own.md"
+    },
+    "01KZRHGRR9RKZ4WFPSFGJMHCFA": {
+      "human_id": "TASK-674",
+      "file_path": "docs/requirements/task/TASK-674-re-baseline-the-compiled-migrate-ordinals-e2e-to-t.md"
+    },
+    "01KZRGH8AP6D2HMFM4SWX1NCDV": {
+      "human_id": "TASK-675",
+      "file_path": "docs/requirements/task/TASK-675-update-the-four-comments-that-recorded-the-diffsou.md"
+    },
+    "01KZRG8WM13MNQH6WTR8VRRFKX": {
+      "human_id": "TASK-676",
+      "file_path": "docs/requirements/task/TASK-676-replace-the-false-git-tracked-mechanism-in-the.md"
     }
   }
 }
