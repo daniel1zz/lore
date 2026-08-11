@@ -6,8 +6,9 @@
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
  *   apiGetPendingReview, apiGetConfig, apiGetMachineConfig,
  *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey,
- *   apiGetReadyReport, apiGetPhaseStatus, apiGetProjects; plus the
- *   ISSUE_RESOLUTIONS vocabulary (the one enumerable value this module exports)
+ *   apiGetReadyReport, apiGetPhaseStatus, apiGetProjects; plus a RE-EXPORT of
+ *   `@lore/core`'s issue-resolution vocabulary as ISSUE_RESOLUTIONS /
+ *   IssueResolution (reference-identical — this module constructs no list)
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReadyReport`,
  *   which returns `Result<T, ApiError>` (the only Result-returning function in
@@ -53,6 +54,7 @@ import type {
   DocStatus,
   EvidencePanelProjection,
   GlobalLoreConfig,
+  IssueResolution,
   LoreConfig,
   ReadyRecord,
   ReadySession,
@@ -60,7 +62,7 @@ import type {
   Result,
   SearchHit,
 } from "@lore/core";
-import { ok } from "@lore/core";
+import { ISSUE_RESOLUTION_MEMBERS, ok } from "@lore/core";
 import { apiFetch, queryKeys } from "./project-api";
 import type { ProjectsResponse } from "./project-api";
 
@@ -647,55 +649,40 @@ export async function apiGetMachineConfig(
 
 /**
  * Every D2-computed resolution state a filed issue report can be in
- * (spec-issue-closure-loop-computed-resolution-agent-reachable D2). Declaration
- * ORDER mirrors the server union's own so a future diff between the two is
- * read at a glance: the two non-terminal states, then
- * `TERMINAL_ISSUE_RESOLUTION_MEMBERS` verbatim (hand-settable states first,
- * then the two computed-only ones).
+ * (spec-issue-closure-loop-computed-resolution-agent-reachable D2), and the
+ * matching union type.
  *
- * ⛔ This is a WIRE-CONTRACT MIRROR of `packages/lore/src/service/
- * issue-resolution.ts`'s `IssueResolution`, not an import: this package depends
- * on `@lore/core` ONLY (browser-safe boundary, `packages/dashboard/CLAUDE.md`)
- * and that union lives in the server-only `packages/lore/src` tree, so there is
- * nowhere browser-safe for the SHIPPED bundle to import it from. It is NOT a
- * "third copy" of a validated list in the `linkTypeSchema.options` / `LINK_TYPES`
- * sense — those are enumerable values the frontend genuinely can import.
+ * ⛔ A RE-EXPORT, not a mirror: `ISSUE_RESOLUTIONS` is reference-identical to
+ * `@lore/core`'s `ISSUE_RESOLUTION_MEMBERS`, and `IssueResolution` is that
+ * package's own union. This module constructs NO resolution list — there is
+ * exactly one construction site of the member tokens repo-wide
+ * (`packages/core/src/issue-resolution-vocab.ts`), asserted by a scan over
+ * `packages/**` (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1,
+ * AC-DC-9). ⛔ Do not re-list the members here, in any component, or in a test:
+ * import them.
  *
- * ⛔ It is a GUARDED mirror. `packages/dashboard/tests/unit/
- * issue-resolution-union-parity.test.ts` welds this array to the server union
- * with a type-level assertion that `bun run typecheck` evaluates (via
- * `typecheck:dashboard-tests`), so adding a member to the server union without
- * updating this array FAILS TO COMPILE with an error naming this file. That
- * test's own falsification probe injects a synthetic extra server member and
- * requires the failure, so "coupled" cannot silently decay into "happens to
- * match today".
+ * The two aliases exist so this module's documented public surface (and every
+ * `@/lib/api` importer) is unchanged by the vocabulary's relocation, and because
+ * `IssueReportRow.resolution` below is part of THIS module's wire contract.
  *
- * ⛔ Declared as an enumerable `as const` array rather than a bare
- * `type … = "a" | "b"` for a load-bearing reason: `bunx vitest run` does not
- * typecheck, so the parity oracle needs a RUNTIME set to compare — a type alone
- * is invisible to the test runner. Do NOT collapse it back into a bare union.
- *
- * History (measured 2026-08-11, `task-the-dashboard-hand-mirrors-the-
- * issueresolution-union-with`): before that assertion existed this mirror
- * carried five members and silently lagged the server union by THREE
- * (`superseded`, `duplicate`, `closed`) while `bun run typecheck` exited 0 —
- * the `switch` statements over it were exhaustive over the WRONG union, so
+ * Because the union now comes from the shipped `@lore/core` boundary, the
+ * `resolutionBadgeVariant` switches in `components/IssuesList.tsx` and
+ * `components/IssueDetail.tsx` are exhaustive (`never`-checked, no `default:`)
+ * over the REAL server union: a member added to the vocabulary fails to compile
+ * INSIDE `packages/dashboard/src/**` itself. History (measured 2026-08-11,
+ * `task-the-dashboard-hand-mirrors-the-issueresolution-union-with`): while this
+ * WAS a hand mirror it carried five members and silently lagged the server union
+ * by THREE (`superseded`, `duplicate`, `closed`) while `bun run typecheck` exited
+ * 0 — those switches were exhaustive over the WRONG union, so
  * `resolutionBadgeVariant` returned `undefined` and CVA's `defaultVariants`
- * painted a superseded report with the byte-identical classes of a FIXED one.
+ * painted a superseded report with the byte-identical classes of a FIXED one. The
+ * relocation (`task-relocate-the-issueresolution-vocabulary-into-lore-core-so`)
+ * is what turned that test-tree type assertion into a shipped-tree compile
+ * error; `packages/dashboard/tests/unit/issue-resolution-union-parity.test.ts`
+ * (AC-DC-12) proves the coupling with a synthetic-member tsc probe.
  */
-export const ISSUE_RESOLUTIONS = [
-  "open",
-  "resolving",
-  "rejected",
-  "wontfix",
-  "superseded",
-  "duplicate",
-  "fixed",
-  "closed",
-] as const;
-
-/** A filed issue report's D2-computed resolution — one member of {@link ISSUE_RESOLUTIONS}. */
-export type IssueResolution = (typeof ISSUE_RESOLUTIONS)[number];
+export { ISSUE_RESOLUTION_MEMBERS as ISSUE_RESOLUTIONS };
+export type { IssueResolution };
 
 /**
  * One row of the `GET /api/issue-reports` projection. Mirrors `IssueReportRow`

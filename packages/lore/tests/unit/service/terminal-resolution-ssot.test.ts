@@ -1,9 +1,28 @@
 /**
  * AC-DC-9 (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1) — the
  * terminal-issue-resolution MEMBER SET has exactly ONE construction site
- * repo-wide, and that site is the `TERMINAL_ISSUE_RESOLUTIONS` export in
- * `packages/lore/src/service/issue-resolution.ts`, consumed by BOTH the
- * `lore issues` listing filter and `IssueReportService`'s cap-count narrowing.
+ * repo-wide, and the `TERMINAL_ISSUE_RESOLUTIONS` export in
+ * `packages/lore/src/service/issue-resolution.ts` DERIVES from it, consumed by
+ * BOTH the `lore issues` listing filter and `IssueReportService`'s cap-count
+ * narrowing.
+ *
+ * ⛔ WHERE that one site lives changed on 2026-08-12 and this file's pinned path
+ * moved with it (`task-relocate-the-issueresolution-vocabulary-into-lore-core-so`):
+ * the member array now lives in `packages/core/src/issue-resolution-vocab.ts`.
+ * Read the change honestly — it is a RELOCATION, not a relaxation:
+ *   - the scan universe is unchanged (`packages/**`, tests included),
+ *   - the asserted CARDINALITY is unchanged (exactly one file, exactly one site),
+ *   - the member tokens are still DERIVED from the production export,
+ *   - and the file gained a STRICTLY NEW assertion (`derives the member set`
+ *     below) pinning that the service's `TERMINAL_ISSUE_RESOLUTIONS`/
+ *     `TERMINAL_ISSUE_RESOLUTION_LIST` exports are reference-identical VIEWS of
+ *     that one site rather than a second listing of it.
+ * The relocation is what ELIMINATED the second construction site this oracle
+ * caught on the merged tree: `packages/dashboard/src/lib/api.ts` had to hand-list
+ * the members because `packages/dashboard/src/**` may import `@lore/core` ONLY
+ * and the vocabulary lived in the server-only `packages/lore/src` tree. Moving
+ * the vocabulary to `@lore/core` gave the dashboard something browser-safe to
+ * import, so the copy is gone rather than tolerated.
  *
  * ⛔ Why a REPO-WIDE SCAN rather than an enumerated file list: the failure this
  * oracle must be able to observe is "a FOURTH copy of the member set appears in
@@ -32,7 +51,8 @@
  * hand-settable state automatically widens what the scan looks for.
  *
  * Six-dimension coverage:
- *   HAPPY:      exactly one construction site, in the expected file
+ *   HAPPY:      exactly one construction site, in the expected file, and the
+ *               service's exported views are reference-identical to it
  *   NEGATIVE:   `commands/issues.ts` declares NO local terminal set and imports
  *               the shared export (independent second condition — the scan
  *               alone cannot see a leftover copy of the OLD 4-member set, whose
@@ -58,12 +78,21 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+// The ONE site's own export, imported (never re-listed) so the derivation
+// assertions below compare REFERENCES rather than remembered contents.
+import { TERMINAL_ISSUE_RESOLUTION_MEMBERS } from "@lore/core";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 /** packages/lore/tests/unit/service -> repo root (5 levels up). */
 const REPO_ROOT = resolve(TEST_DIR, "..", "..", "..", "..", "..");
 const PACKAGES_DIR = join(REPO_ROOT, "packages");
 
+/**
+ * The ONE construction site of the member set — `@lore/core`'s vocabulary module
+ * (browser-safe, so the dashboard's shipped tree imports it instead of mirroring
+ * it). See this file's header on why the pin moved here.
+ */
+const VOCABULARY_REL = join("packages", "core", "src", "issue-resolution-vocab.ts");
 const ISSUE_RESOLUTION_REL = join("packages", "lore", "src", "service", "issue-resolution.ts");
 const ISSUES_COMMAND_REL = join("packages", "lore", "src", "adapters", "cli", "commands", "issues.ts");
 const ISSUE_REPORT_SERVICE_REL = join("packages", "lore", "src", "service", "issue-report-service.ts");
@@ -83,6 +112,7 @@ function assertRepoRoot(): void {
 
 interface TerminalResolutionSurface {
   TERMINAL_ISSUE_RESOLUTIONS: ReadonlySet<string>;
+  TERMINAL_ISSUE_RESOLUTION_LIST: readonly string[];
   EXPLICIT_TERMINAL_RESOLUTIONS: ReadonlySet<string>;
   computeIssueResolution: (
     issue: { extra?: unknown; status?: string },
@@ -101,6 +131,10 @@ async function loadTerminalResolutionSurface(): Promise<TerminalResolutionSurfac
     mod["EXPLICIT_TERMINAL_RESOLUTIONS"],
     "issue-resolution.ts must export EXPLICIT_TERMINAL_RESOLUTIONS (the hand-settable subset)",
   ).toBeInstanceOf(Set);
+  expect(
+    Array.isArray(mod["TERMINAL_ISSUE_RESOLUTION_LIST"]),
+    "issue-resolution.ts must export TERMINAL_ISSUE_RESOLUTION_LIST (the ordered, typed view of the one member array)",
+  ).toBe(true);
   expect(typeof mod["computeIssueResolution"]).toBe("function");
   return mod as unknown as TerminalResolutionSurface;
 }
@@ -260,7 +294,7 @@ describe("AC-DC-9: one terminal-resolution definition site, consumed by the list
     expect(surface.EXPLICIT_TERMINAL_RESOLUTIONS.size).toBe(4);
   });
 
-  it("AC-DC-9: exactly ONE member-set construction site exists under packages/**, and it is issue-resolution.ts", async () => {
+  it("AC-DC-9: exactly ONE member-set construction site exists under packages/**, and it is the @lore/core vocabulary module", async () => {
     assertRepoRoot();
     const surface = await loadTerminalResolutionSurface();
     const memberTokens = [...surface.EXPLICIT_TERMINAL_RESOLUTIONS];
@@ -279,7 +313,35 @@ describe("AC-DC-9: one terminal-resolution definition site, consumed by the list
     expect(
       [...sitesByFile.entries()].map(([file, count]) => `${file} (${count})`),
       "exactly one file may construct the terminal-resolution member set",
-    ).toEqual([`${ISSUE_RESOLUTION_REL} (1)`]);
+    ).toEqual([`${VOCABULARY_REL} (1)`]);
+  });
+
+  it("AC-DC-9: the service's exported views DERIVE from that one site rather than re-listing it", async () => {
+    assertRepoRoot();
+    const surface = await loadTerminalResolutionSurface();
+
+    // Reference identity, not deep equality: a hand-maintained copy with the
+    // same contents would satisfy a `toEqual` while being exactly the second
+    // declaration this AC forbids. `===` can only hold for the one array.
+    expect(
+      surface.TERMINAL_ISSUE_RESOLUTION_LIST,
+      `${ISSUE_RESOLUTION_REL}'s TERMINAL_ISSUE_RESOLUTION_LIST must be @lore/core's TERMINAL_ISSUE_RESOLUTION_MEMBERS itself, not a copy of its contents`,
+    ).toBe(TERMINAL_ISSUE_RESOLUTION_MEMBERS);
+
+    // And the membership Set is built from that same array — every member of the
+    // one site is in it, and it holds nothing else.
+    for (const member of TERMINAL_ISSUE_RESOLUTION_MEMBERS) {
+      expect(
+        surface.TERMINAL_ISSUE_RESOLUTIONS.has(member),
+        `${ISSUE_RESOLUTION_REL}'s TERMINAL_ISSUE_RESOLUTIONS is missing "${member}", which the one construction site declares`,
+      ).toBe(true);
+    }
+    expect(surface.TERMINAL_ISSUE_RESOLUTIONS.size).toBe(TERMINAL_ISSUE_RESOLUTION_MEMBERS.length);
+
+    // The service module reaches the vocabulary by IMPORT, so the two facts above
+    // cannot be satisfied by a local re-declaration that happens to be re-exported.
+    const source = readFileSync(join(REPO_ROOT, ISSUE_RESOLUTION_REL), "utf8");
+    expect(source).toMatch(/import[\s\S]{0,400}TERMINAL_ISSUE_RESOLUTION_MEMBERS[\s\S]{0,400}from "@lore\/core"/);
   });
 
   it("AC-DC-9: commands/issues.ts imports the shared export and declares no local terminal set", async () => {
