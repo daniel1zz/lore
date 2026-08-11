@@ -162,6 +162,53 @@ import type {
   TraceStatsWindow,
 } from "./store-shared.js";
 
+/**
+ * One never-read doc, as returned by {@link StoreInterface.listNeverReadDocs}.
+ *
+ * A store-layer READ PROJECTION (not a persisted row shape — those live in
+ * `store-shared.ts`), so it is declared beside the interface method that
+ * produces it, mirroring {@link CalibrationRecordWithPromptVersion}'s
+ * precedent in this module.
+ *
+ * @invariant `slug` ships in the SAME payload as `id`, never as a follow-up
+ *   lookup: "168 docs were never read" is an unactionable number, and a bare
+ *   list of ULIDs is very nearly as unactionable — deciding to archive,
+ *   rewrite, or investigate "this one was SUPPOSED to be read" all need the
+ *   human-readable identity in hand.
+ * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
+ */
+export interface NeverReadDoc {
+  id: DocId;
+  slug: Slug;
+}
+
+/**
+ * One zero-hit search row, as returned by
+ * {@link StoreInterface.listTraceZeroHitSearches}.
+ *
+ * @invariant `query` is ABSENT (the key itself, not an empty string) unless the
+ *   caller explicitly opted in via {@link TraceZeroHitListOpts.includeRawQueries}
+ *   — the default is the PRIVATE one, so a caller that forgets the option cannot
+ *   leak literal search text (SPEC-102 §Security & Privacy, surfaced as
+ *   `lore trace stats --raw-queries`). `ts` + `actor` keep every withheld row
+ *   addressable by when and who.
+ */
+export interface TraceZeroHitSearch {
+  ts: string;
+  actor: string;
+  query?: string;
+}
+
+/** Options for {@link StoreInterface.listTraceZeroHitSearches}. */
+export interface TraceZeroHitListOpts {
+  /**
+   * `true` includes each row's literal `details.query` text. Absent/`false`
+   * withholds it — ⛔ never invert this default; see
+   * {@link TraceZeroHitSearch}'s `query` invariant.
+   */
+  includeRawQueries?: boolean;
+}
+
 // ─── Interface ─────────────────────────────────────────────────────────────
 
 /**
@@ -753,10 +800,45 @@ export interface StoreInterface {
   /** `gate_deny` row counts grouped by `(checkpoint, details.layer)`, since `window.since` (idx_trace_kind_ts + checkpoint column; SPEC-102 D7 layer disambiguation). */
   countTraceDenyByCheckpoint(window: TraceStatsWindow): Promise<Result<TraceDenyByCheckpoint[], LoreError>>;
 
-  /** Count of `kind='search'` rows with `hit_count = 0`, since `window.since` (idx_trace_kind_ts). */
+  /**
+   * Every `kind='search'` row with `hit_count = 0` since `window.since`
+   * (idx_trace_kind_ts), newest first — the MEMBER LIST behind
+   * `lore trace stats`'s `zero_hit_search_count`.
+   *
+   * @param opts - Privacy control; ⛔ omitting it WITHHOLDS literal query text
+   *   (see {@link TraceZeroHitListOpts}).
+   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
+   */
+  listTraceZeroHitSearches(
+    window: TraceStatsWindow,
+    opts?: TraceZeroHitListOpts,
+  ): Promise<Result<TraceZeroHitSearch[], LoreError>>;
+
+  /**
+   * Every non-deleted doc with NO `kind='get'` trace row since `window.since`
+   * (idx_trace_doc), ordered by slug for a deterministic, diff-stable list —
+   * the MEMBER LIST behind `lore trace stats`'s `never_read_docs_count`.
+   *
+   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
+   */
+  listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>>;
+
+  /**
+   * Count of `kind='search'` rows with `hit_count = 0`, since `window.since`.
+   *
+   * ⛔ DERIVED from {@link listTraceZeroHitSearches}'s length in EVERY
+   * implementation — never a second `COUNT(*)`. A count computed independently
+   * of the list it summarises can drift from that list and nothing would
+   * notice, which is the exact defect M1 removes; keep the derivation.
+   */
   countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
 
-  /** Count of non-deleted docs with NO `kind='get'` trace row since `window.since` (idx_trace_doc). */
+  /**
+   * Count of non-deleted docs with NO `kind='get'` trace row since `window.since`.
+   *
+   * ⛔ DERIVED from {@link listNeverReadDocs}'s length in EVERY implementation —
+   * see {@link countTraceZeroHitSearches} for why a second tally is forbidden.
+   */
   countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>>;
 
   /** Every `gate_deny` row since `window.since`, for the deny→retry-success gap's read-side audit join (idx_trace_kind_actor). Computed by the caller — never stored. */

@@ -66,6 +66,7 @@ import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
+  NeverReadDoc,
   SearchHit,
   StoreFilters,
   StoreInterface,
@@ -74,6 +75,8 @@ import type {
   TraceGateDenyEvent,
   TraceRawSearchQuery,
   TraceStatsWindow,
+  TraceZeroHitListOpts,
+  TraceZeroHitSearch,
   UpdateOpts,
 } from "./store-interface.js";
 import {
@@ -2252,35 +2255,71 @@ export class TursoStore implements StoreInterface {
     }
   }
 
-  async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+  async listTraceZeroHitSearches(
+    window: TraceStatsWindow,
+    opts?: TraceZeroHitListOpts,
+  ): Promise<Result<TraceZeroHitSearch[], LoreError>> {
     try {
       await this.ensureReady();
       const rs = await this.client.execute({
-        sql: "SELECT COUNT(*) as count FROM trace_events WHERE kind = 'search' AND hit_count = 0 AND ts >= ?",
+        sql: `SELECT ts, actor, details FROM trace_events
+              WHERE kind = 'search' AND hit_count = 0 AND ts >= ?
+              ORDER BY ts DESC, id DESC`,
         args: [window.since],
       });
-      return ok(rs.rows[0] ? rowNum(rs.rows[0], "count") : 0);
+      // reason: the `query` KEY is omitted entirely when raw queries were not
+      // requested — see SQLiteStore.listTraceZeroHitSearches's own note; both
+      // stores must project the SAME absent-vs-empty distinction.
+      const includeRawQueries = opts?.includeRawQueries === true;
+      return ok(
+        rs.rows.map((row) => ({
+          ts: rowStr(row, "ts"),
+          actor: rowStr(row, "actor"),
+          ...(includeRawQueries
+            ? {
+                query:
+                  parseJson<{ query?: string }>(rowStr(row, "details") || "{}", {}).query ?? "",
+              }
+            : {}),
+        })),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }
   }
 
-  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+  async listNeverReadDocs(window: TraceStatsWindow): Promise<Result<NeverReadDoc[], LoreError>> {
     try {
       await this.ensureReady();
       const rs = await this.client.execute({
-        sql: `SELECT COUNT(*) as count FROM docs
+        sql: `SELECT id, slug FROM docs
               WHERE deleted_at IS NULL
               AND id NOT IN (
                 SELECT DISTINCT doc_id FROM trace_events
                 WHERE kind = 'get' AND doc_id IS NOT NULL AND ts >= ?
-              )`,
+              )
+              ORDER BY slug ASC, id ASC`,
         args: [window.since],
       });
-      return ok(rs.rows[0] ? rowNum(rs.rows[0], "count") : 0);
+      return ok(rs.rows.map((row) => ({ id: rowStr(row, "id"), slug: rowStr(row, "slug") })));
     } catch (e) {
       return wrapStoreError(e);
     }
+  }
+
+  async countTraceZeroHitSearches(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    // reason: DERIVED from the member list, never a second COUNT(*) — see
+    // StoreInterface.countTraceZeroHitSearches's own ⛔ note.
+    const listResult = await this.listTraceZeroHitSearches(window);
+    if (!listResult.ok) return listResult;
+    return ok(listResult.value.length);
+  }
+
+  async countNeverReadDocs(window: TraceStatsWindow): Promise<Result<number, LoreError>> {
+    // reason: DERIVED from the member list — see listNeverReadDocs above.
+    const listResult = await this.listNeverReadDocs(window);
+    if (!listResult.ok) return listResult;
+    return ok(listResult.value.length);
   }
 
   async listTraceGateDenies(window: TraceStatsWindow): Promise<Result<TraceGateDenyEvent[], LoreError>> {

@@ -22,10 +22,12 @@
 
 import { ok, type AuditEntry, type LoreError, type Result } from "@lore/core";
 import type {
+  NeverReadDoc,
   StoreInterface,
   TraceDenyByCheckpoint,
   TraceGateDenyEvent,
   TraceRawSearchQuery,
+  TraceZeroHitSearch,
 } from "../store/store-interface.js";
 
 /**
@@ -77,6 +79,34 @@ export interface TraceStatsOpts {
 }
 
 /**
+ * Every `*_count` field {@link TraceStatsReport} carries, derived from the
+ * report type itself rather than restated.
+ *
+ * ⛔ This is the load-bearing half of M1's "no count without a member list"
+ * contract: `lore trace stats --enumerate`'s registry is typed
+ * `Record<TraceStatsCountField, …>`, so ADDING a `*_count` field to
+ * {@link TraceStatsReport} without registering an enumerator for it is a
+ * COMPILE error, not a runtime surprise. (The runtime refusal in
+ * `commands/trace.ts` handles the other direction — an unknown name typed by a
+ * user.) ⛔ Do not widen this to `string`.
+ *
+ * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
+ */
+export type TraceStatsCountField = Extract<keyof TraceStatsReport, `${string}_count`>;
+
+/**
+ * One count field's member list, plus the count DERIVED from it — the payload
+ * behind `lore trace stats --enumerate <field>`.
+ *
+ * @invariant `count === members.length` by construction (both are produced from
+ *   ONE store list read), so a reader who sees them side by side is looking at
+ *   an identity, never a reconciliation.
+ */
+export type TraceStatsEnumeration =
+  | { field: "never_read_docs_count"; count: number; members: NeverReadDoc[] }
+  | { field: "zero_hit_search_count"; count: number; members: TraceZeroHitSearch[] };
+
+/**
  * Read-only aggregation surface for `lore trace stats` (SPEC-102) — see this
  * module's own header for the full "store-only, no writes" invariant.
  */
@@ -86,12 +116,19 @@ export class TraceStatsService {
   async stats(opts: TraceStatsOpts): Promise<Result<TraceStatsReport, LoreError>> {
     const window = { since: opts.since };
 
+    // reason: M1 — the two scalar counts below are read as MEMBER LISTS and
+    // reported as `list.length`. ⛔ Never restore the dedicated counting calls
+    // (`countTraceZeroHitSearches`/`countNeverReadDocs`): a separately-tallied
+    // number can drift from the list `--enumerate <field>` prints and nothing
+    // would notice, which is the defect this mechanism removes. The zero-hit
+    // read deliberately omits `includeRawQueries` — a LENGTH never needs query
+    // text, so the report cannot leak it even under `--raw-queries`.
     const [countsResult, denyResult, zeroHitResult, neverReadResult, gateDeniesResult, auditResult] =
       await Promise.all([
         this.store.countTraceEventsByKind(window),
         this.store.countTraceDenyByCheckpoint(window),
-        this.store.countTraceZeroHitSearches(window),
-        this.store.countNeverReadDocs(window),
+        this.store.listTraceZeroHitSearches(window),
+        this.store.listNeverReadDocs(window),
         this.store.listTraceGateDenies(window),
         this.store.queryAudit({ since: opts.since }),
       ]);
@@ -107,8 +144,8 @@ export class TraceStatsService {
       since: opts.since,
       counts_by_kind: countsResult.value,
       deny_by_checkpoint: denyResult.value,
-      zero_hit_search_count: zeroHitResult.value,
-      never_read_docs_count: neverReadResult.value,
+      zero_hit_search_count: zeroHitResult.value.length,
+      never_read_docs_count: neverReadResult.value.length,
       deny_retry_gap: computeDenyRetryGap(gateDeniesResult.value, auditResult.value),
     };
 
@@ -119,6 +156,54 @@ export class TraceStatsService {
     }
 
     return ok(report);
+  }
+
+  /**
+   * Member list behind {@link TraceStatsReport.never_read_docs_count} — every
+   * non-deleted doc with no `kind='get'` trace row in `opts.since`'s window,
+   * each carrying its slug so the answer is actionable without a second lookup.
+   *
+   * @param opts - Same window as {@link stats}; `includeRawQueries` is ignored
+   *   here (a never-read doc has no query text to withhold).
+   * @returns The list plus `count = list.length` — ⛔ never an independent tally.
+   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
+   */
+  async enumerateNeverReadDocs(
+    opts: TraceStatsOpts,
+  ): Promise<Result<TraceStatsEnumeration, LoreError>> {
+    const listResult = await this.store.listNeverReadDocs({ since: opts.since });
+    if (!listResult.ok) return listResult;
+    return ok({
+      field: "never_read_docs_count",
+      count: listResult.value.length,
+      members: listResult.value,
+    });
+  }
+
+  /**
+   * Member list behind {@link TraceStatsReport.zero_hit_search_count} — every
+   * `kind='search'` row with `hit_count = 0` in `opts.since`'s window.
+   *
+   * @param opts - `includeRawQueries` forwards SPEC-102's privacy boundary to
+   *   the store verbatim: omitted/`false` returns rows with NO `query` key at
+   *   all, so the literal search text is never read out of the row. ⛔ Never
+   *   default it on.
+   * @returns The list plus `count = list.length` — ⛔ never an independent tally.
+   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M1
+   */
+  async enumerateZeroHitSearches(
+    opts: TraceStatsOpts,
+  ): Promise<Result<TraceStatsEnumeration, LoreError>> {
+    const listResult = await this.store.listTraceZeroHitSearches(
+      { since: opts.since },
+      { includeRawQueries: opts.includeRawQueries === true },
+    );
+    if (!listResult.ok) return listResult;
+    return ok({
+      field: "zero_hit_search_count",
+      count: listResult.value.length,
+      members: listResult.value,
+    });
   }
 }
 
