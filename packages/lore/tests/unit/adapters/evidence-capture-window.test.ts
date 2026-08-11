@@ -211,8 +211,8 @@ describe("captureOracleCommand window — BOUNDARY", () => {
     if (generous.ok) expect(generous.value.captureSource).toBe("runner");
   });
 
-  it("CAPWIN-B2: DEFAULT_CAPTURE_TIMEOUT_MS is 600000 — an omitted timeoutMs preserves the pre-fix window exactly", () => {
-    expect(DEFAULT_CAPTURE_TIMEOUT_MS).toBe(600_000);
+  it("CAPWIN-B2: DEFAULT_CAPTURE_TIMEOUT_MS is 1200000 (raised 2026-08-11 — see config.ts evidence.capture_timeout_ms JSDoc) — an omitted timeoutMs preserves the configured window exactly", () => {
+    expect(DEFAULT_CAPTURE_TIMEOUT_MS).toBe(1_200_000);
 
     const outcome = captureOracleCommand({
       command: "echo default-window",

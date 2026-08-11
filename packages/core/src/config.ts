@@ -439,13 +439,24 @@ const WorkflowConfigSchema = z
      *   deliberately NOT folded into `verify.default_timeout_ms`) — `lore evidence`
      *   is a task-workflow verb whose sibling knobs (`claim_ttl_minutes`,
      *   `attestation.min_ratio`) already live here. Reusing
-     *   `verify.default_timeout_ms` was rejected outright: it is a PER-AC-SCRIPT
-     *   default of 300s, so adopting it would silently HALVE the capture window for
-     *   every existing consumer on upgrade.
-     * @invariant Default 600000 ms — byte-identical to the retired constant, so no
-     *   consumer's behavior changes on upgrade unless they set this key. Absence of
-     *   the whole `workflow` section, or of `evidence` within it, both resolve to
-     *   this default (`resolveCaptureTimeoutMs` is the sole seam).
+     *   `verify.default_timeout_ms` was rejected outright at authoring time: it was
+     *   a PER-AC-SCRIPT default (300s then; independently raised to 900s later,
+     *   see that field's own `@invariant` below — the two knobs' values move for
+     *   unrelated reasons and must stay two fields), so adopting it would have
+     *   silently HALVED the capture window for every existing consumer on upgrade.
+     * @invariant Default RAISED to 1_200_000 ms (2026-08-11,
+     *   task-raise-capture-timeout-ms-and-max-diff-chars-to-the-values,
+     *   spec-governance-defaults-must-ship-and-every-recorded-gap-must D2):
+     *   this repo's own mandated worktree oracle (`bun run test:changed <base>`)
+     *   measured ~620s twice in a row against the PRIOR 600_000 default, and that
+     *   dogfood-validated raise had lived ONLY in this repo's `.lore/config.yaml`
+     *   (never reaching any other consumer) until this default absorbed it. A
+     *   larger capture timeout is a pure CEILING — it costs a consumer nothing it
+     *   was not already willing to wait for, so raising it on upgrade is safe
+     *   unconditionally (contrast `ai.assess.max_diff_chars` below, which trades
+     *   real token cost for headroom). Absence of the whole `workflow` section, or
+     *   of `evidence` within it, both resolve to this default (`resolveCaptureTimeoutMs`
+     *   is the sole seam).
      * @invariant Unit is MILLISECONDS, matching its closest sibling
      *   `verify.default_timeout_ms` (the other spawn-and-attest timeout) and
      *   consumed by `spawnSync`'s own `timeout` option with no conversion — a
@@ -458,7 +469,7 @@ const WorkflowConfigSchema = z
          * capture: loud refusal, nothing recorded — never a quiet downgrade to a
          * self-reported row.
          */
-        capture_timeout_ms: z.number().int().positive().default(600_000),
+        capture_timeout_ms: z.number().int().positive().default(1_200_000),
       })
       .strict()
       .default({}),
@@ -731,6 +742,19 @@ export type VerifyEnvConfig = z.infer<typeof VerifyEnvConfigSchema>;
  *
  * @invariant `default_timeout_ms` is consulted ONLY when a script-mode AC's own
  *   `verify.timeout_ms` (acceptance.ts) is absent — the AC-level field always wins.
+ * @invariant Default RAISED to 900_000 ms (2026-08-11, same task/spec as
+ *   `workflow.evidence.capture_timeout_ms` above — this is the THIRD
+ *   dogfood-validated shipped-default gap the drift checker found, discovered
+ *   by back-catalogue sweep, not named in the spec's own Problem section).
+ *   Measured (`knowledge-lore-verify-long-oracle-flake-vitest-ontaskupdate-rpc`):
+ *   this repo's full-regression `lore verify` ACs legitimately take ~240–340s
+ *   (typecheck + vitest + bun test), riding the PRIOR 300_000ms edge — the one
+ *   historical run under it passed at 237s, slower runs were SIGTERM'd at
+ *   exit 143 `[TIMED OUT]`. Fix applied directly to `.lore/config.yaml` at the
+ *   time ("configuration fitting measured reality, not symptom-masking"); this
+ *   default absorbs that fix so every consumer inherits it on upgrade. Like
+ *   `capture_timeout_ms`, a pure ceiling — costs nothing extra for a command
+ *   that finishes fast.
  * @invariant `require_command_approval` (SPEC-039 §M2, default `true`) is the
  *   command-provenance approval gate's on/off switch. `false` restores the
  *   pre-M2-hardening behavior (any declared command runs without approval,
@@ -739,7 +763,7 @@ export type VerifyEnvConfig = z.infer<typeof VerifyEnvConfigSchema>;
 const VerifyConfigSchema = z
   .object({
     /** Default spawn timeout in ms, used when an AC's verify.script omits timeout_ms. */
-    default_timeout_ms: z.number().int().positive().default(300_000),
+    default_timeout_ms: z.number().int().positive().default(900_000),
     /** Env-passthrough allowlist configuration (SPEC-039 §M2). */
     env: VerifyEnvConfigSchema.default({}),
     /** Command-provenance approval gate on/off (SPEC-039 §M2). Default true (hardened). */
@@ -956,7 +980,7 @@ export const LoreConfigSchema = z
     /**
      * Trusted-runner (`lore verify`) configuration (SPEC-039).
      * When absent, createApp uses VerifyConfigSchema.parse({}) defaults
-     * (default_timeout_ms = 300000).
+     * (default_timeout_ms = 900000, raised 2026-08-11 — see that field's own JSDoc).
      */
     verify: VerifyConfigSchema.optional(),
     /**
@@ -1336,12 +1360,14 @@ export function resolveTraceRetentionDays(config: LoreConfig | undefined): numbe
 /**
  * Resolve the effective trusted-runner default spawn timeout (ms) from an optional
  * LoreConfig. Mirrors {@link resolveAuditVerifySince} — absence of the whole config
- * or the verify section both fall back to the schema default (300000ms).
+ * or the verify section both fall back to the schema default (900000ms, raised
+ * 2026-08-11 from 300000ms — see `VerifyConfigSchema.default_timeout_ms`'s own
+ * JSDoc for the measurement).
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
  * @returns Effective verify.default_timeout_ms value
  * @example
- *   resolveVerifyDefaultTimeoutMs(undefined) // => 300000
+ *   resolveVerifyDefaultTimeoutMs(undefined) // => 900000
  *   resolveVerifyDefaultTimeoutMs({ ..., verify: { default_timeout_ms: 60000 } }) // => 60000
  */
 export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): number {
@@ -1354,9 +1380,10 @@ export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): n
  *
  * This is the SOLE seam through which the capture window is read — the number
  * itself exists ONLY as `WorkflowConfigSchema.evidence.capture_timeout_ms`'s Zod
- * default, so `packages/lore/src/adapters/evidence-capture.ts` derives its
+ * default (1_200_000 as of 2026-08-11, raised from 600_000 — see that field's own
+ * JSDoc), so `packages/lore/src/adapters/evidence-capture.ts` derives its
  * `DEFAULT_CAPTURE_TIMEOUT_MS` by calling this with `undefined` rather than
- * restating `600_000` (the anti-dual-write shape `context.memory_files` documents:
+ * restating the literal (the anti-dual-write shape `context.memory_files` documents:
  * "zod defaults ONLY; config.yaml overrides").
  *
  * Callers MUST NOT reach into `config.workflow.evidence` directly: `config.workflow`
@@ -1397,10 +1424,10 @@ export function resolveVerifyDefaultTimeoutMs(config: LoreConfig | undefined): n
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
  * @returns Effective `workflow.evidence.capture_timeout_ms` value in milliseconds
  * @example
- *   resolveCaptureTimeoutMs(undefined) // => 600000 (the pre-config constant, preserved)
+ *   resolveCaptureTimeoutMs(undefined) // => 1200000 (raised 2026-08-11, see field JSDoc)
  *   resolveCaptureTimeoutMs({ ..., workflow: { evidence: { capture_timeout_ms: 1_800_000 } } })
  *   // => 1800000
- *   resolveCaptureTimeoutMs({ ..., workflow: { gates: {} } } as LoreConfig) // => 600000 (no throw)
+ *   resolveCaptureTimeoutMs({ ..., workflow: { gates: {} } } as LoreConfig) // => 1200000 (no throw)
  */
 export function resolveCaptureTimeoutMs(config: LoreConfig | undefined): number {
   return (

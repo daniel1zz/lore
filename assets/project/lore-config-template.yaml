@@ -45,3 +45,23 @@ workflow:
       # floor (no `required_oracles` declared at all) nor an acceptance-
       # criteria-count floor.
       min_acs: 0
+
+# Claude CLI provider invocation args — simplified from the registry's
+# built-in default (task-raise-capture-timeout-ms-and-max-diff-chars-to-the-values,
+# back-catalogue sweep, 2026-08-11). The built-in default statically appends
+# "--setting-sources project" to `args`, but `ClaudeCliProvider`'s hermetic
+# spawn (`packages/lore/src/ai/hermetic-spawn.ts::buildHermeticSpawnSpec`)
+# unconditionally appends its OWN, always-LAST "--setting-sources ''" when the
+# command's basename is "claude" — a repeated CLI flag takes its LAST
+# occurrence, so the static "--setting-sources project" was already fully
+# superseded and functionally inert. This ships the simplified args (dropping
+# the dead flag) as the recommended default for every fresh corpus too;
+# `command`/`timeout_ms` are unchanged from the built-in and repeated here
+# only because a provider entry REPLACES the whole built-in record, never a
+# per-field merge. Delete this whole `ai` key to fall back to the built-in.
+ai:
+  providers:
+    claude-cli:
+      command: claude
+      args: ["-p"]
+      timeout_ms: 180000

@@ -6,8 +6,11 @@
  * does not duplicate that, only the new `verify` section it doesn't cover.
  *
  * Six-dimension coverage for this file:
- *   HAPPY:      resolveVerifyDefaultTimeoutMs falls back to 300000 when config/section
- *               absent; returns the configured value when present; a minimal valid
+ *   HAPPY:      resolveVerifyDefaultTimeoutMs falls back to 900000 (raised from
+ *               300000 2026-08-11, task-raise-capture-timeout-ms-and-max-diff-chars-
+ *               to-the-values — see the field's own JSDoc in config.ts) when
+ *               config/section absent; returns the configured value when present;
+ *               a minimal valid
  *               LoreConfig with a verify section parses; resolveVerifyEnvConfig /
  *               resolveVerifyRequireCommandApproval return their configured values
  *   NEGATIVE:   an unknown key inside verify: {} (or verify.env: {}) is rejected (.strict())
@@ -36,8 +39,8 @@ import {
 const MINIMAL_PROJECT = { name: "test-project", author: "alice" };
 
 describe("resolveVerifyDefaultTimeoutMs", () => {
-  it("HAPPY: undefined config falls back to 300000", () => {
-    expect(resolveVerifyDefaultTimeoutMs(undefined)).toBe(300_000);
+  it("HAPPY: undefined config falls back to 900000 (raised 2026-08-11 — see config.ts VerifyConfigSchema JSDoc)", () => {
+    expect(resolveVerifyDefaultTimeoutMs(undefined)).toBe(900_000);
   });
 
   it("HAPPY: a LoreConfig with verify.default_timeout_ms set returns that value", () => {
@@ -51,7 +54,7 @@ describe("resolveVerifyDefaultTimeoutMs", () => {
   it("REGRESSION: a LoreConfig with NO verify key still parses and resolver falls back to the default", () => {
     const parsed = LoreConfigSchema.parse({ project: MINIMAL_PROJECT });
     expect(parsed.verify).toBeUndefined();
-    expect(resolveVerifyDefaultTimeoutMs(parsed)).toBe(300_000);
+    expect(resolveVerifyDefaultTimeoutMs(parsed)).toBe(900_000);
   });
 });
 
@@ -165,10 +168,17 @@ describe("resolveVerifyRequireCommandApproval — HAPPY/REGRESSION", () => {
  * "runner"` row, and the only class `lore done`'s attested-pass floor accepts)
  * unreachable for a legitimately-scoped run. This schema default is now the SOLE
  * place the number lives: `DEFAULT_CAPTURE_TIMEOUT_MS` derives from it via
- * `resolveCaptureTimeoutMs(undefined)` instead of restating `600_000`.
+ * `resolveCaptureTimeoutMs(undefined)` instead of restating a literal.
+ *
+ * The default was RAISED AGAIN, 600_000 -> 1_200_000, on 2026-08-11
+ * (task-raise-capture-timeout-ms-and-max-diff-chars-to-the-values,
+ * spec-governance-defaults-must-ship-and-every-recorded-gap-must D2) — the
+ * 600_000 raise above had itself been dogfood-validated only in this repo's
+ * `.lore/config.yaml` and never reached any other consumer; see the field's own
+ * JSDoc in `config.ts` for the measurement.
  *
  * Six-dimension coverage for this block:
- *   HAPPY:      absent config/section resolves to the 600000 default; a set value wins
+ *   HAPPY:      absent config/section resolves to the 1200000 default; a set value wins
  *   NEGATIVE:   an unknown key inside workflow.evidence is rejected (.strict())
  *   BOUNDARY:   0 / negative / non-integer rejected; 1 accepted (schema bounds the
  *               TYPE, the operator owns the value)
@@ -176,11 +186,11 @@ describe("resolveVerifyRequireCommandApproval — HAPPY/REGRESSION", () => {
  *               (so `evidence` is genuinely absent) resolves without throwing
  *   STATE:      n/a — pure projection, no accumulation across calls
  *   REGRESSION: a config with no `workflow` key at all still parses and resolves to
- *               600000, so an upgrading consumer's behavior is unchanged
+ *               1200000, so an upgrading consumer's behavior is unchanged
  */
 describe("resolveCaptureTimeoutMs", () => {
-  it("HAPPY: undefined config falls back to 600000 — byte-identical to the retired constant", () => {
-    expect(resolveCaptureTimeoutMs(undefined)).toBe(600_000);
+  it("HAPPY: undefined config falls back to 1200000 (raised 2026-08-11 — see config.ts evidence.capture_timeout_ms JSDoc)", () => {
+    expect(resolveCaptureTimeoutMs(undefined)).toBe(1_200_000);
   });
 
   it("HAPPY: a LoreConfig with workflow.evidence.capture_timeout_ms set returns that value", () => {
@@ -191,10 +201,10 @@ describe("resolveCaptureTimeoutMs", () => {
     expect(resolveCaptureTimeoutMs(parsed)).toBe(1_800_000);
   });
 
-  it("REGRESSION: a LoreConfig with NO workflow key still parses and resolves to the 600000 default", () => {
+  it("REGRESSION: a LoreConfig with NO workflow key still parses and resolves to the 1200000 default", () => {
     const parsed = LoreConfigSchema.parse({ project: MINIMAL_PROJECT });
     expect(parsed.workflow).toBeUndefined();
-    expect(resolveCaptureTimeoutMs(parsed)).toBe(600_000);
+    expect(resolveCaptureTimeoutMs(parsed)).toBe(1_200_000);
   });
 
   it("REGRESSION: a workflow section carrying only OTHER keys resolves to the default (the .default({}) fill-in)", () => {
@@ -202,7 +212,7 @@ describe("resolveCaptureTimeoutMs", () => {
       project: MINIMAL_PROJECT,
       workflow: { claim_ttl_minutes: 30 },
     });
-    expect(resolveCaptureTimeoutMs(parsed)).toBe(600_000);
+    expect(resolveCaptureTimeoutMs(parsed)).toBe(1_200_000);
   });
 
   it("ERROR: a hand-built workflow literal that never passed through the schema does not throw", () => {
@@ -213,7 +223,7 @@ describe("resolveCaptureTimeoutMs", () => {
       typeof resolveCaptureTimeoutMs
     >[0];
     expect(() => resolveCaptureTimeoutMs(handBuilt)).not.toThrow();
-    expect(resolveCaptureTimeoutMs(handBuilt)).toBe(600_000);
+    expect(resolveCaptureTimeoutMs(handBuilt)).toBe(1_200_000);
   });
 });
 

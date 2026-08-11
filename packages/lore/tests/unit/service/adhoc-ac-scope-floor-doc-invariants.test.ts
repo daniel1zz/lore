@@ -268,7 +268,9 @@ describe("faces 3.2/3.3: resolveCaptureTimeoutMs records both deliberately-unfix
   });
 
   it("REGRESSION (3.3): the key still ships to every consumer through the Zod schema, template or no template", () => {
-    expect(resolveCaptureTimeoutMs(undefined)).toBe(600_000);
+    // Raised 600_000 -> 1_200_000, 2026-08-11 (task-raise-capture-timeout-ms-and-max-diff-
+    // chars-to-the-values) — see config.ts evidence.capture_timeout_ms JSDoc.
+    expect(resolveCaptureTimeoutMs(undefined)).toBe(1_200_000);
     const configured = LoreConfigSchema.parse({
       project: { name: "n", author: "a" },
       workflow: { evidence: { capture_timeout_ms: 1_234 } },
@@ -281,6 +283,6 @@ describe("faces 3.2/3.3: resolveCaptureTimeoutMs records both deliberately-unfix
       project: { name: "n", author: "a" },
       workflow: { claim_ttl_minutes: 30 },
     });
-    expect(resolveCaptureTimeoutMs(partial)).toBe(600_000);
+    expect(resolveCaptureTimeoutMs(partial)).toBe(1_200_000);
   });
 });

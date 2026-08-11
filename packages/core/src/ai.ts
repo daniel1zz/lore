@@ -312,6 +312,20 @@ export const AiConfigSchema = z
      * prompt. Any section exceeding its budget is truncated and its name is recorded in
      * `judgment.truncated[]` (AC-ASSESS-7) — mirrors the `ai.refine.max_input_chars`
      * precedent so budget config lives in one consistent place.
+     *
+     * @invariant `max_diff_chars` RAISED to 80_000 (2026-08-11,
+     *   task-raise-capture-timeout-ms-and-max-diff-chars-to-the-values,
+     *   spec-governance-defaults-must-ship-and-every-recorded-gap-must D2): the
+     *   prior 24_000 default had been measured to truncate a real `lore assess`
+     *   diff of 5.3M characters, and that dogfood-validated raise had lived ONLY
+     *   in this repo's `.lore/config.yaml` (never reaching any other consumer)
+     *   until this default absorbed it. ⛔ Unlike `capture_timeout_ms`, this is
+     *   NOT a free ceiling raise: a larger `max_diff_chars` costs real tokens on
+     *   EVERY `lore assess` call whose diff is large enough to reach the new
+     *   ceiling, not only the rare oversized one — the trade is accepted because
+     *   the alternative (a judge scoring an assessment against a truncated diff)
+     *   is worse, but the next reader raising this further should re-measure the
+     *   token cost, not just repeat this raise.
      */
     assess: z
       .object({
@@ -321,8 +335,8 @@ export const AiConfigSchema = z
         max_spec_chars: z.number().int().positive().default(12000),
         /** Max chars of each task's content included in the prompt (per task). Default: 4000. */
         max_task_chars: z.number().int().positive().default(4000),
-        /** Max chars of the optional git diff included in the prompt. Default: 24000. */
-        max_diff_chars: z.number().int().positive().default(24000),
+        /** Max chars of the optional git diff included in the prompt. Default: 80000. */
+        max_diff_chars: z.number().int().positive().default(80_000),
       })
       .strict()
       .default({}),
