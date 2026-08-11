@@ -46,6 +46,13 @@
  *     `diff-truncation.ts`) — single derivation site, consumed by both v6/v7's own facts
  *     fallback and `AIProviderService.assessPlan`'s once-only facts computation
  *   - buildAssessRetryPrompt(originalPrompt, parseErrorMessage) — one corrective retry prompt
+ *   - ASSESS_DIFF_MIRROR_PATH_PREFIX / excludeAssessMirrorFromDiff(diffText) — D4
+ *     (spec-judgment-surfaces-must-verify-before-they-certify-machine): strips every
+ *     `docs/requirements/**` file-diff hunk from a unified diff BEFORE any registry-versioned
+ *     builder (and its internal `truncateDiffByFile`) ever sees it. Called ONCE by
+ *     `AIProviderService.assessPlan` on `opts.diffText`, deliberately NOT wired into any
+ *     builder's own body (see this pair's own JSDoc for why: it would retroactively break
+ *     slots 6/7's `reproducible: true` byte-identical guarantee)
  *
  * Invariants:
  *   - No IO — pure string assembly over already-fetched PlanBundle data.
@@ -161,6 +168,83 @@ import {
   listDiffFiles,
   type DiffFilePriority,
 } from "./diff-truncation.js";
+
+// ─── Mirror Exclusion (D4, spec-judgment-surfaces-must-verify-before-they-certify-machine) ───
+
+/**
+ * Single-definition-site path prefix for the generated corpus→file mirror this repo exports
+ * under `docs/requirements/**` (see root CLAUDE.md's "Finding Live Project State" section) —
+ * a PROJECTION of the corpus the judge already reads via the plan/spec/task materials
+ * sections, never a second source of truth. Never inline this prefix at a second call site.
+ */
+export const ASSESS_DIFF_MIRROR_PATH_PREFIX = "docs/requirements/";
+
+/** Same `diff --git a/... b/...` header shape `diff-truncation.ts`'s own (private,
+ * unexported) `parseDiffIntoChunks` uses — necessarily duplicated here rather than shared:
+ * this exclusion pass runs on the CALLER side (`AIProviderService.assessPlan`), strictly
+ * BEFORE any of `truncateDiffByFile`/`buildAssessDiffMeta`/`parseDiffFilePaths` ever see the
+ * diff text at all (D4) — splitting into per-file chunks is the only way to drop a whole
+ * mirror hunk without slicing a kept hunk's body in half. */
+const ASSESS_DIFF_FILE_HEADER_PATTERN = /^diff --git a\/(.*) b\/(.*)$/;
+
+/**
+ * Strips every `docs/requirements/**` file-diff hunk from a unified diff, UNCONDITIONALLY —
+ * regardless of whether the diff would even need truncation. The generated mirror is a
+ * projection of the corpus the judge is already shown via the plan/spec/task sections above
+ * it in the prompt; showing it a SECOND time, as a diff hunk, only spends the
+ * `ai.assess.max_diff_chars` budget that could have gone to real source hunks (one measured
+ * run truncated 5.3M chars, most of it the mirror — see this mechanism's governing spec's
+ * Problem section). This is the mirror-exclusion half of D4; `excludeAssessMirrorFromDiff`
+ * is called ONCE, by `AIProviderService.assessPlan`, on `opts.diffText` BEFORE it reaches
+ * `buildAssessDiffMeta`, `parseDiffFilePaths`, OR any registry-versioned prompt builder here
+ * — never inside a builder itself, because `ASSESS_TEMPLATE_REGISTRY[6]`/`[7]` are both
+ * declared `reproducible: true` (byte-identical output forever; see this file's own
+ * "landed version is FROZEN" invariant) and a builder-internal change would retroactively
+ * break that guarantee for every historical assessment stamped with either prompt_version.
+ *
+ * @invariant Pure, no IO.
+ * @invariant A diff with no `diff --git a/... b/...` headers at all (the SAME documented
+ *   passthrough `truncateDiffByFile` uses for an unparseable diff — see diff-truncation.ts's
+ *   module header) is returned UNCHANGED: there is no per-file identity to test the prefix
+ *   against.
+ * @invariant Returns `diffText` BYTE-IDENTICAL when it contains zero mirror hunks — the
+ *   overwhelmingly common case (most assess diffs never touch the mirror at all), so this
+ *   is a safe no-op default for every pre-existing caller/test that never exercised it.
+ * @param diffText - Raw unified diff text (already acquired by the caller)
+ * @returns `diffText` with every `docs/requirements/**` file hunk removed
+ *
+ * @example
+ * excludeAssessMirrorFromDiff(
+ *   "diff --git a/docs/requirements/spec/SPEC-1.md b/docs/requirements/spec/SPEC-1.md\n@@ -1 +1 @@\n-old\n+new\n" +
+ *   "diff --git a/packages/core/src/foo.ts b/packages/core/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
+ * );
+ * // → "diff --git a/packages/core/src/foo.ts b/packages/core/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n"
+ *
+ * @example
+ * excludeAssessMirrorFromDiff("not a diff at all"); // → "not a diff at all" (unchanged)
+ */
+export function excludeAssessMirrorFromDiff(diffText: string): string {
+  const lines = diffText.split("\n");
+  const headerIndices: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (ASSESS_DIFF_FILE_HEADER_PATTERN.test(lines[i] as string)) headerIndices.push(i);
+  }
+  if (headerIndices.length === 0) return diffText;
+
+  const keptChunks: string[] = [];
+  for (let i = 0; i < headerIndices.length; i++) {
+    const start = headerIndices[i] as number;
+    const end = i + 1 < headerIndices.length ? (headerIndices[i + 1] as number) : lines.length;
+    const headerMatch = ASSESS_DIFF_FILE_HEADER_PATTERN.exec(lines[start] as string);
+    // reason: post-change ("b/") path — same canonical-identity convention
+    // diff-truncation.ts's own parser documents (rename source vs destination: the "b/"
+    // side is stable across additions/modifications/deletions/renames alike).
+    const filePath = (headerMatch?.[2] ?? "").trim();
+    if (filePath.startsWith(ASSESS_DIFF_MIRROR_PATH_PREFIX)) continue;
+    keptChunks.push(lines.slice(start, end).join("\n"));
+  }
+  return keptChunks.join("\n");
+}
 
 /**
  * Judge prompt schema version. Bump whenever the prompt text, rubric anchors, or output
