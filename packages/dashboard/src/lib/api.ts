@@ -6,7 +6,8 @@
  *   apiGetJudgments, apiGetAuditForDoc, apiGetAuditVerify, apiGetCalibrationStats,
  *   apiGetPendingReview, apiGetConfig, apiGetMachineConfig,
  *   apiGetIssueReports, apiGetEvidencePanel, evidencePanelQueryKey,
- *   apiGetReadyReport, apiGetPhaseStatus, apiGetProjects
+ *   apiGetReadyReport, apiGetPhaseStatus, apiGetProjects; plus the
+ *   ISSUE_RESOLUTIONS vocabulary (the one enumerable value this module exports)
  * Invariants: 5-second timeout via AbortSignal.timeout; never leaks raw Response objects.
  *   Throws ApiError on non-2xx or server-side { ok: false } — EXCEPT `apiGetReadyReport`,
  *   which returns `Result<T, ApiError>` (the only Result-returning function in
@@ -645,19 +646,56 @@ export async function apiGetMachineConfig(
 // ─── SPEC-074: dashboard Issues triage projection ────────────────────────────
 
 /**
- * A filed issue report's D2-computed resolution
- * (spec-issue-closure-loop-computed-resolution-agent-reachable). Mirrors the
- * SAME literal union `packages/lore/src/service/issue-resolution.ts`'s
- * `IssueResolution` server type declares — duplicated here (not imported)
- * because this package depends on `@lore/core` only (browser-safe boundary,
- * `packages/dashboard/CLAUDE.md`), and `issue-resolution.ts` lives in the
- * server-only `packages/lore/src` tree. A wire-contract type mirror across a
- * network boundary, not a "third copy" of a validated list (that concern is
- * `linkTypeSchema.options` / `LINK_TYPES`, an enumerable value the frontend
- * DOES import) — there is nowhere browser-safe for the frontend to import
- * this union's VALUES from, only its literal shape.
+ * Every D2-computed resolution state a filed issue report can be in
+ * (spec-issue-closure-loop-computed-resolution-agent-reachable D2). Declaration
+ * ORDER mirrors the server union's own so a future diff between the two is
+ * read at a glance: the two non-terminal states, then
+ * `TERMINAL_ISSUE_RESOLUTION_MEMBERS` verbatim (hand-settable states first,
+ * then the two computed-only ones).
+ *
+ * ⛔ This is a WIRE-CONTRACT MIRROR of `packages/lore/src/service/
+ * issue-resolution.ts`'s `IssueResolution`, not an import: this package depends
+ * on `@lore/core` ONLY (browser-safe boundary, `packages/dashboard/CLAUDE.md`)
+ * and that union lives in the server-only `packages/lore/src` tree, so there is
+ * nowhere browser-safe for the SHIPPED bundle to import it from. It is NOT a
+ * "third copy" of a validated list in the `linkTypeSchema.options` / `LINK_TYPES`
+ * sense — those are enumerable values the frontend genuinely can import.
+ *
+ * ⛔ It is a GUARDED mirror. `packages/dashboard/tests/unit/
+ * issue-resolution-union-parity.test.ts` welds this array to the server union
+ * with a type-level assertion that `bun run typecheck` evaluates (via
+ * `typecheck:dashboard-tests`), so adding a member to the server union without
+ * updating this array FAILS TO COMPILE with an error naming this file. That
+ * test's own falsification probe injects a synthetic extra server member and
+ * requires the failure, so "coupled" cannot silently decay into "happens to
+ * match today".
+ *
+ * ⛔ Declared as an enumerable `as const` array rather than a bare
+ * `type … = "a" | "b"` for a load-bearing reason: `bunx vitest run` does not
+ * typecheck, so the parity oracle needs a RUNTIME set to compare — a type alone
+ * is invisible to the test runner. Do NOT collapse it back into a bare union.
+ *
+ * History (measured 2026-08-11, `task-the-dashboard-hand-mirrors-the-
+ * issueresolution-union-with`): before that assertion existed this mirror
+ * carried five members and silently lagged the server union by THREE
+ * (`superseded`, `duplicate`, `closed`) while `bun run typecheck` exited 0 —
+ * the `switch` statements over it were exhaustive over the WRONG union, so
+ * `resolutionBadgeVariant` returned `undefined` and CVA's `defaultVariants`
+ * painted a superseded report with the byte-identical classes of a FIXED one.
  */
-export type IssueResolution = "open" | "resolving" | "fixed" | "rejected" | "wontfix";
+export const ISSUE_RESOLUTIONS = [
+  "open",
+  "resolving",
+  "rejected",
+  "wontfix",
+  "superseded",
+  "duplicate",
+  "fixed",
+  "closed",
+] as const;
+
+/** A filed issue report's D2-computed resolution — one member of {@link ISSUE_RESOLUTIONS}. */
+export type IssueResolution = (typeof ISSUE_RESOLUTIONS)[number];
 
 /**
  * One row of the `GET /api/issue-reports` projection. Mirrors `IssueReportRow`

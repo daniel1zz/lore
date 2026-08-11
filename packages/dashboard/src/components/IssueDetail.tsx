@@ -8,7 +8,7 @@
  *   `apiApproveDoc`/`apiRejectDoc`, `src/api/mutations.ts`) so approve/reject
  *   here is the SAME write path `TriageQueue` uses — never a second,
  *   independently-authored adjudication call.
- * Public surface: IssueDetail, IssueDetailProps
+ * Public surface: IssueDetail, IssueDetailProps, resolutionBadgeVariant
  * Invariants:
  *   - `extra.issue_report` is read DEFENSIVELY (mirrors the server
  *     projection's own guard shape, `issue-reports-routes.ts`) — a
@@ -61,9 +61,17 @@ import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
  * Presentation-only resolution -> Badge variant mapping (D8) — same mapping
  * as `IssuesList.tsx`'s own local copy, duplicated rather than shared per
  * this codebase's "wait for the rule of three" convention (exactly two
- * consumers).
+ * consumers). The AC-DC-12 oracle asserts the two copies agree member-for-member,
+ * so the duplication cannot drift; see `IssuesList.tsx`'s copy for the full
+ * TONE-GROUP rationale (`superseded`/`duplicate` are the NON-DEROGATORY terminal
+ * states and must share neither `rejected`'s nor `fixed`'s bucket). Exported for
+ * that oracle to drive directly.
+ *
+ * ⛔ EXHAUSTIVE via the `never` binding after the switch, with NO `default:`
+ * clause — a `default` would absorb a state added to `IssueResolution` and render
+ * a plausible-but-wrong badge instead of failing to compile.
  */
-function resolutionBadgeVariant(resolution: IssueResolution): NonNullable<BadgeProps["variant"]> {
+export function resolutionBadgeVariant(resolution: IssueResolution): NonNullable<BadgeProps["variant"]> {
   switch (resolution) {
     case "open":
       return "outline";
@@ -74,7 +82,13 @@ function resolutionBadgeVariant(resolution: IssueResolution): NonNullable<BadgeP
     case "rejected":
     case "wontfix":
       return "destructive";
+    case "superseded":
+    case "duplicate":
+    case "closed":
+      return "secondary";
   }
+  const unhandledResolution: never = resolution;
+  throw new Error(`unhandled issue resolution: ${String(unhandledResolution)}`);
 }
 
 export interface IssueDetailProps {

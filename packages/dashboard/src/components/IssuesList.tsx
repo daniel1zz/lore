@@ -6,7 +6,7 @@
  *   reported_at / possible_duplicates count / computed resolution, newest
  *   first (server order — no independent client-side re-sort), linking to
  *   its detail view (`/issues/$id`).
- * Public surface: IssuesList, IssuesListProps
+ * Public surface: IssuesList, IssuesListProps, resolutionBadgeVariant
  * Invariants:
  *   - Uses the SAME shared query (`useIssueReportsQuery`) the nav badge and
  *     home card read — one cache entry, one invalidation point.
@@ -37,8 +37,36 @@ export interface IssuesListProps {
  * (this file, `IssueDetail.tsx`); per this codebase's "wait for the rule of
  * three" convention (`lore-ai-native-coding` skill, ai-anti-patterns.md
  * "Premature Abstraction"), a shared helper is not worth extracting yet.
+ * Exported only so `packages/dashboard/tests/unit/
+ * issue-resolution-union-parity.test.ts` (AC-DC-12) can drive it directly for
+ * every member of the vocabulary — rendering the whole component to observe one
+ * pure mapping would be a far weaker oracle.
+ *
+ * TONE GROUPS — eight resolution states, four Badge variants
+ * (`ui/badge.tsx`'s cva table), so the variant carries TONE and the badge's own
+ * text carries identity:
+ *   - `outline`     — still needs triage eyes (`open`)
+ *   - `secondary`   — neutral: a fix in flight (`resolving`), or terminal with
+ *                     NO judgement against the report (`superseded`,
+ *                     `duplicate`, `closed`)
+ *   - `default`     — the report produced a fix (`fixed`)
+ *   - `destructive` — a judgement AGAINST the report (`rejected`, `wontfix`)
+ *
+ * ⛔ `superseded`/`duplicate` MUST NOT be `destructive`: they are the two
+ * NON-DEROGATORY terminal states (spec-the-defect-channel-cannot-be-honestly-
+ * maintained-an §M3), and rendering them in the derogatory bucket reproduces the
+ * "silent trash can operationally indistinguishable from rejected" failure §M3
+ * exists to fix. They must also not share `fixed`'s bucket — that WAS the
+ * pre-2026-08-11 defect. Both constraints are pinned by the AC-DC-12 oracle.
+ *
+ * ⛔ EXHAUSTIVE via the `never` binding after the switch, with NO `default:`
+ * clause. A `default` would absorb a state added to `IssueResolution` and render
+ * a plausible-but-wrong badge; the `never` binding makes that same addition a
+ * COMPILE error here. Before this check existed the switch fell off its end and
+ * returned `undefined` in defiance of this signature, which CVA's
+ * `defaultVariants.variant: "default"` then rendered as `fixed` styling.
  */
-function resolutionBadgeVariant(resolution: IssueResolution): NonNullable<BadgeProps["variant"]> {
+export function resolutionBadgeVariant(resolution: IssueResolution): NonNullable<BadgeProps["variant"]> {
   switch (resolution) {
     case "open":
       return "outline";
@@ -49,7 +77,13 @@ function resolutionBadgeVariant(resolution: IssueResolution): NonNullable<BadgeP
     case "rejected":
     case "wontfix":
       return "destructive";
+    case "superseded":
+    case "duplicate":
+    case "closed":
+      return "secondary";
   }
+  const unhandledResolution: never = resolution;
+  throw new Error(`unhandled issue resolution: ${String(unhandledResolution)}`);
 }
 
 /**
