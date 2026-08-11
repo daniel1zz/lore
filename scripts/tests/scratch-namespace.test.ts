@@ -20,29 +20,32 @@
  *       nothing) is proven in TWO fully isolated, `mkdtemp`-created tsc
  *       projects — never inside this checkout's own typechecked trees.
  *
- * ⛔ **Correction to the governing spec's own measured claim, recorded here
- * because it changes how (b) below must be constructed.** The spec's D6 /
- * AC-OX-3 text states `tsc --noEmit` exits 1 for a genuine compile error and
- * 2 only for a config fatal (TS18003). Measured directly against THIS
- * repo's installed compiler (`node_modules/typescript` 5.9.3,
- * `node_modules/typescript/lib/_tsc.js`,
- * `emitFilesAndReportErrorsAndGetExitStatus`): with `noEmit` set — whether
- * via the CLI `--noEmit` flag or `compilerOptions.noEmit`, both compile to
- * the identical internal `options.noEmit` — `emitResult.emitSkipped` is
- * ALWAYS `false` (nothing was ever attempted, so nothing was "skipped"),
- * which routes the exit-status decision straight to
- * `DiagnosticsPresent_OutputsGenerated` (2) for BOTH a real `TS2322` and an
- * empty-include `TS18003` alike — measured twice, byte-for-byte identical
- * exit code both times, hand-verified against
- * `node_modules/typescript/lib/_tsc.js:128844-128849`. The 1-vs-2
- * discrimination the AC requires is real, but only materialises for an
- * invocation that actually ATTEMPTS an emit and has it skipped BY the
- * errors: `noEmitOnError: true` plus a real `outDir`, with `noEmit` absent
- * everywhere. That is the exact, verified shape
- * `runIsolatedTscProbe`/`ISOLATED_PROBE_COMPILER_OPTIONS` below use — not a
- * substitute for the AC's requirement, but the one construction that
- * actually SATISFIES its literal text ("a broken .ts drives tsc to exit
- * EXACTLY 1 ... while an empty include drives it to exit 2 with TS18003").
+ * ⛔ **Second-order correction, recorded here because it reverses this
+ * file's own first version.** That version "corrected" the governing spec's
+ * `tsc --noEmit` exit-1-for-a-real-error claim to exit 1 vs 2, based on a
+ * probe run through `bunx tsc` — which downloads its OWN TypeScript into a
+ * temp lockfile, never the compiler `bun run typecheck` actually invokes.
+ * Re-measured against THIS repo's `node_modules/.bin/tsc` (TypeScript
+ * 5.9.3) — the coordinator's independent re-measurement matched exactly,
+ * citing `node_modules/typescript/lib/_tsc.js:128844-128849`
+ * (`emitFilesAndReportErrorsAndGetExitStatus`):
+ *
+ *   | tsconfig shape                                  | case          | exit | error    |
+ *   |--------------------------------------------------|---------------|------|----------|
+ *   | `noEmit: true` (what every `typecheck:*` uses)    | type error    | 2    | TS2322   |
+ *   | `noEmit: true`                                    | empty include | 2    | TS18003  |
+ *   | `noEmitOnError: true` + `outDir`, no `noEmit`     | type error    | 1    | TS2322   |
+ *
+ * Since every real `typecheck:*` script passes `--noEmit`, the exit code
+ * CANNOT separate "detected an error" from "checked nothing" — both are 2.
+ * The `noEmitOnError`+`outDir` shape this file's first version used to force
+ * a 1 tests a compiler configuration this repo never runs; it satisfied the
+ * AC's old sentence while abandoning the property the AC exists to prove.
+ * The governing spec's D6/AC-OX-3 has been re-baselined to the discriminator
+ * that actually survives under `--noEmit`: the **error code in the output**
+ * (`TS2322`/`TS1136` = a real detection, `TS18003` = nothing was ever
+ * checked), never the exit code (both probes below now assert exit
+ * EXACTLY 2, and are told apart only by which error code appears).
  *
  * Six-dimension coverage:
  *   HAPPY:      `.scratch/probe.ts` is reported ignored by `git check-ignore`;
@@ -52,13 +55,17 @@
  *               ignored — proves the ignore assertion isn't vacuously true
  *               because `git check-ignore` itself is broken/misconfigured.
  *   BOUNDARY:   the isolated broken-file probe and the isolated
- *               empty-include probe are the two ends of the SAME
- *               discrimination — one exits exactly 1 naming the file, the
- *               other exits exactly 2 naming TS18003; neither is asserted
- *               with a loose "nonzero" check.
- *   ERROR:      the broken-file probe's `outDir` is asserted to be ABSENT
- *               afterward — `noEmitOnError` must have genuinely skipped the
- *               write, not silently emitted anyway alongside the error.
+ *               empty-include probe both exit EXACTLY 2 — proving the
+ *               discrimination is NOT available from the exit code — and
+ *               are separated only by which error code is present: a real
+ *               compile code (`TS2322`/`TS1136`) for the former, `TS18003`
+ *               for the latter, each exclusively (the broken-file probe's
+ *               output must NOT contain `TS18003`; the empty-include
+ *               probe's output must NOT contain a real compile code).
+ *   ERROR:      with `noEmit: true`, the broken-file probe must never emit
+ *               a sibling `.js` file alongside `broken.ts` even though it
+ *               was "checked" (as opposed to the empty-include probe, which
+ *               never got far enough to consider emitting anything).
  *   STATE:      every isolated project lives under a fresh `mkdtempSync`
  *               directory, cleaned up in a `finally` per case — no case can
  *               leak into or be perturbed by another.
@@ -268,16 +275,25 @@ function tsconfigIncludeMatches(tsconfigPath: string, targetAbsPath: string): bo
   return readDeclaredInclude(tsconfigPath).some((pattern) => globToRegExp(pattern).test(relPath));
 }
 
-/** Compiler options shared by both isolated tsc probes below -- see the module header's ⛔ correction for why `noEmitOnError`+`outDir` (never `noEmit`) is what actually produces the 1-vs-2 discrimination AC-OX-3 requires. */
+/**
+ * Compiler options shared by both isolated tsc probes below -- deliberately
+ * the SAME `noEmit: true` shape every real `bun run typecheck:*` script
+ * actually uses (see the module header's second-order correction). Neither
+ * `noEmitOnError` nor `outDir` appears here: that combination is what the
+ * FIRST version of this file used to manufacture an exit 1 the real repo
+ * never produces.
+ */
 const ISOLATED_PROBE_COMPILER_OPTIONS = {
   target: "ESNext",
   module: "ESNext",
   moduleResolution: "bundler",
   strict: true,
   skipLibCheck: true,
-  outDir: "out",
-  noEmitOnError: true,
+  noEmit: true,
 } as const;
+
+/** A real, DETECTED compile error's code -- as opposed to `TS18003`, a config-level fatal meaning nothing was ever checked. Matches either code this repo's own D6 text names (`TS2322` a type error, `TS1136` a syntax error). */
+const REAL_COMPILE_ERROR_CODE_RE = /\bTS(?:2322|1136)\b/;
 
 /** One isolated-project probe's result: the subprocess exit status plus its combined stdout+stderr text. */
 interface ProbeResult {
@@ -352,8 +368,8 @@ describe("D4 -- .scratch/ probe namespace is gitignored and outside every typech
   });
 });
 
-describe("D4/D6 -- isolated-project compile-error discrimination (AC-OX-3), never inside a real typechecked glob", () => {
-  it("BOUNDARY + ERROR: a genuine TS2322 in an isolated project drives tsc to exit EXACTLY 1, naming the broken file, and never emits", () => {
+describe("D4/D6 -- isolated-project detection-vs-fatal discrimination (AC-OX-3), never inside a real typechecked glob", () => {
+  it("BOUNDARY + ERROR: a genuine TS2322 in an isolated project drives tsc to exit EXACTLY 2 (same as the fatal case), naming the broken file with a REAL compile code and never emitting a sibling .js", () => {
     const projectDir = mkdtempSync(join(tmpdir(), "scratch-namespace-probe-broken-"));
     try {
       mkdirSync(join(projectDir, "src"));
@@ -365,17 +381,25 @@ describe("D4/D6 -- isolated-project compile-error discrimination (AC-OX-3), neve
 
       const probe = runIsolatedTscProbe(projectDir);
 
-      expect(probe.status).toBe(1);
+      // Exit code alone cannot discriminate under --noEmit (module header,
+      // second-order correction) -- both this case and the empty-include
+      // case below exit exactly 2.
+      expect(probe.status).toBe(2);
       expect(probe.output).toContain("broken.ts");
-      expect(probe.output).toContain("TS2322");
-      // ERROR dimension: noEmitOnError must have genuinely skipped the write.
-      expect(existsSync(join(projectDir, "out"))).toBe(false);
+      // The discriminator: a REAL compile code is present...
+      expect(probe.output).toMatch(REAL_COMPILE_ERROR_CODE_RE);
+      // ...and the config-fatal code is ABSENT -- this genuinely was a
+      // detection, not a fatal that happened to also print an unrelated TS18003.
+      expect(probe.output).not.toContain("TS18003");
+      // ERROR dimension: noEmit must have genuinely suppressed any emit --
+      // no sibling .js alongside the checked (and erroring) source file.
+      expect(existsSync(join(projectDir, "src", "broken.js"))).toBe(false);
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
     }
   });
 
-  it("BOUNDARY: an empty include in an isolated project drives tsc to exit EXACTLY 2 with TS18003 -- nothing was ever checked", () => {
+  it("BOUNDARY: an empty include in an isolated project ALSO exits EXACTLY 2, but with TS18003 and no real compile code -- nothing was ever checked", () => {
     const projectDir = mkdtempSync(join(tmpdir(), "scratch-namespace-probe-empty-include-"));
     try {
       writeFileSync(
@@ -387,8 +411,36 @@ describe("D4/D6 -- isolated-project compile-error discrimination (AC-OX-3), neve
 
       expect(probe.status).toBe(2);
       expect(probe.output).toContain("TS18003");
+      // The discriminator's other half: no real compile code appears --
+      // this is a config fatal, not a detection that happens to exit 2.
+      expect(probe.output).not.toMatch(REAL_COMPILE_ERROR_CODE_RE);
     } finally {
       rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("REGRESSION (control): the SAME status===2 is NOT by itself proof of detection -- the two cases above are told apart only by the error code, which this case cross-checks explicitly", () => {
+    const brokenDir = mkdtempSync(join(tmpdir(), "scratch-namespace-probe-cross-broken-"));
+    const emptyDir = mkdtempSync(join(tmpdir(), "scratch-namespace-probe-cross-empty-"));
+    try {
+      mkdirSync(join(brokenDir, "src"));
+      writeFileSync(join(brokenDir, "tsconfig.json"), JSON.stringify({ compilerOptions: ISOLATED_PROBE_COMPILER_OPTIONS, include: ["src/**/*"] }));
+      writeFileSync(join(brokenDir, "src", "broken.ts"), `const x: number = "not a number";\n`);
+      writeFileSync(join(emptyDir, "tsconfig.json"), JSON.stringify({ compilerOptions: ISOLATED_PROBE_COMPILER_OPTIONS, include: [] }));
+
+      const brokenProbe = runIsolatedTscProbe(brokenDir);
+      const emptyProbe = runIsolatedTscProbe(emptyDir);
+
+      // Same exit code -- the whole point of the correction.
+      expect(brokenProbe.status).toBe(emptyProbe.status);
+      // Yet distinguishable by error code alone.
+      expect(REAL_COMPILE_ERROR_CODE_RE.test(brokenProbe.output)).toBe(true);
+      expect(REAL_COMPILE_ERROR_CODE_RE.test(emptyProbe.output)).toBe(false);
+      expect(brokenProbe.output.includes("TS18003")).toBe(false);
+      expect(emptyProbe.output.includes("TS18003")).toBe(true);
+    } finally {
+      rmSync(brokenDir, { recursive: true, force: true });
+      rmSync(emptyDir, { recursive: true, force: true });
     }
   });
 });
