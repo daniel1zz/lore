@@ -5576,6 +5576,10 @@
     "01KZREAQFXXAMWMXZMA6F4JD8F": {
       "human_id": "KN-426",
       "file_path": "docs/requirements/knowledge/KN-426-five-governance-tooling-gaps-measured-while-resumi.md"
+    },
+    "01KZRF1N28BMC1XW8YQVM28P7C": {
+      "human_id": "TASK-666",
+      "file_path": "docs/requirements/task/TASK-666-thread-diff-source-through-the-cli-and-mcp-assess.md"
     }
   }
 }
