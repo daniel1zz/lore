@@ -262,27 +262,44 @@ function toWriteContentionError(
 }
 
 /**
- * The SPEC-072 §5 step 1 error for an unconfigured `feedback.upstream` —
- * exported so a CLI/MCP adapter can render the IDENTICAL message when
- * rejecting an unconfigured `--list`/`list` call itself, BEFORE ever
- * constructing a `UpstreamCfg` to pass to `list()` (whose `cfg` param is
- * REQUIRED, unlike `report()`'s optional `cfg` — see `list()`'s own JSDoc for
- * why: `list()`'s only local IO, `receipts.read()`, needs no upstream config
- * at all, so the "unconfigured" check is the CALLER's responsibility on that
- * path, not this service's).
+ * THE single shared "`feedback.upstream` is unconfigured" remedy —
+ * spec-governance-defaults-must-ship-and-every-recorded-gap-must D3's
+ * one-condition-one-remedy builder. This collapses what used to be TWO
+ * independently authored messages for the identical condition: this file's
+ * own (formerly `buildUnconfiguredUpstreamError`, a hand-edit-YAML template)
+ * and `../adapters/cli/commands/report-issue.ts`'s own (formerly
+ * `buildAutoConfigRequiredError`, now deleted) — a reader could not tell
+ * which one was current, and nothing enforced that they even agreed (AC-GD-2).
+ *
+ * ONE DEFINITION SITE (AC-GD-2(a)(i)): this is the only place this message's
+ * text is authored. BOTH consumers below import and call THIS exported
+ * symbol directly — never a locally rebuilt copy — so the prescribed remedy
+ * cannot drift between layers again (AC-GD-2(a)(ii)/(iii)):
+ *   - `report-issue.ts`'s `resolveEffectiveUpstreamCfg`, reached when
+ *     `--auto-config` is absent (CLI filing AND `--list`, single wording
+ *     SSOT, AC-OOB-1).
+ *   - This service's own `report()` step 1, reached from ANY direct caller
+ *     that passes `cfg: undefined` — including the MCP `lore_report_issue`
+ *     tool, which offers no `--auto-config` equivalent at all, and
+ *     `list()`'s caller-responsibility path (see that method's own JSDoc).
+ *
+ * Disclosure is pinned to three LITERAL substrings (AC-GD-2(b), deliberately
+ * not left to a reviewer's sense of whether the prose reads clearly enough):
+ * `.lore/config.yaml`, `git-tracked`, `shared`. And per the still-live
+ * AC-OOB-1 (`spec-out-of-box-reporting-channel-report-issue-self-provisions`),
+ * the text MUST name `--auto-config` and MUST carry ZERO hand-edit-YAML
+ * template VALUE lines (`corpus_path: /path/to`, `root_prd: prd-lore`) — this
+ * is why the remedy states the two required config KEYS in dotted-path prose
+ * (`feedback.upstream.corpus_path`/`feedback.upstream.root_prd`, pinned by
+ * the pre-existing AC-072-2 regression) rather than a copy-pasteable YAML
+ * block.
  */
-export function buildUnconfiguredUpstreamError(): LoreError {
+export function buildUnconfiguredUpstreamRemedy(): LoreError {
   return {
     code: "VALIDATION_ERROR",
     field: "feedback.upstream",
     message:
-      "`feedback.upstream` is not configured — lore report-issue needs both " +
-      "feedback.upstream.corpus_path and feedback.upstream.root_prd set in " +
-      ".lore/config.yaml, e.g.:\n\n" +
-      "feedback:\n" +
-      "  upstream:\n" +
-      "    corpus_path: /path/to/upstream/repo\n" +
-      "    root_prd: prd-lore\n",
+      "`feedback.upstream` is not configured — this needs both feedback.upstream.corpus_path and feedback.upstream.root_prd set in the git-tracked, team-shared .lore/config.yaml. Run `lore report-issue --auto-config` to self-provision them from this install's own upstream lore corpus — no manual YAML editing required.",
   };
 }
 
@@ -312,7 +329,7 @@ export class IssueReportService {
   ): Promise<Result<IssueReportResult, LoreError>> {
     // Step 1: feedback.upstream unset.
     if (cfg === undefined) {
-      return err(buildUnconfiguredUpstreamError());
+      return err(buildUnconfiguredUpstreamRemedy());
     }
 
     const upstreamResult = await this.openValidatedUpstream(cfg);

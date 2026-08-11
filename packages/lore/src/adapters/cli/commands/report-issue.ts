@@ -32,14 +32,25 @@
  * `provisionFeedbackUpstream` (that module intentionally never wires the CLI
  * flag itself — see its own header). `--auto-config` is the explicit,
  * non-interactive approval a non-TTY caller must pass before this command
- * self-provisions: absent it, `resolveEffectiveUpstreamCfg` below returns the
- * SAME actionable "run with --auto-config" error for BOTH the filing path and
- * `--list` (single wording SSOT, AC-OOB-1) — deliberately replacing
- * `IssueReportService`'s own `buildUnconfiguredUpstreamError()` hand-edit-YAML
- * template at this CLI layer only (that function's template guidance is
- * exactly what AC-OOB-1 requires ZERO occurrences of in stderr). An
- * ALREADY-configured `feedback.upstream` short-circuits straight through
- * without ever attempting resolution, `--auto-config` or not (AC-OOB-4a).
+ * self-provisions: absent it, `resolveEffectiveUpstreamCfg` below returns
+ * `IssueReportService`'s exported `buildUnconfiguredUpstreamRemedy()` — the
+ * SAME actionable error for BOTH the filing path and `--list` (single wording
+ * SSOT, AC-OOB-1), and now ALSO the identical error `IssueReportService.report()`
+ * itself returns on the same condition
+ * (spec-governance-defaults-must-ship-and-every-recorded-gap-must D3,
+ * AC-GD-2). Collapsing onto that ONE shared, imported builder — rather than
+ * this file's own now-deleted `buildAutoConfigRequiredError` — is what makes
+ * "the CLI's remedy" and "the service's remedy" the same remedy BY
+ * CONSTRUCTION, not by two literals that happen to read alike today
+ * (AC-GD-2(a) asserts this three ways: one definition site scanned by literal
+ * text, both layers importing that one symbol, and byte-identical output).
+ * AC-OOB-1's own constraint — the text MUST name `--auto-config` and MUST
+ * carry ZERO hand-edit-YAML template value lines — is why the shared builder
+ * states the two required config KEYS in dotted-path prose rather than a
+ * copy-pasteable YAML block (see `buildUnconfiguredUpstreamRemedy`'s own
+ * JSDoc). An ALREADY-configured `feedback.upstream` short-circuits straight
+ * through without ever attempting resolution, `--auto-config` or not
+ * (AC-OOB-4a).
  *
  * Every failure from `IssueReportService` is a `LoreError`, mapped through the
  * normal `exitCode()`/`formatError()` pipeline — most report-filing failures
@@ -66,42 +77,13 @@ import {
   resolveUpstreamFromInstalledBinary,
   type UpstreamCfg,
 } from "../report-issue-wiring.js";
-import { IssueReportService } from "../../../service/issue-report-service.js";
+import { buildUnconfiguredUpstreamRemedy, IssueReportService } from "../../../service/issue-report-service.js";
 
 /** The report-filing flags — mutually exclusive with `--list` (checked as a group). */
 const REPORT_FLAGS = ["title", "description", "expected", "actual", "repro-command"] as const;
 
 /** The report-filing flags that are REQUIRED when NOT using `--list`. */
 const REQUIRED_REPORT_FLAGS = ["title", "description", "expected", "actual"] as const;
-
-/**
- * The single-wording-SSOT actionable error for an unconfigured
- * `feedback.upstream` reached WITHOUT `--auto-config` — the ONE call site is
- * inside {@link resolveEffectiveUpstreamCfg} below, reached identically from
- * both the filing path and `--list` (AC-OOB-1's "single wording SSOT"
- * requirement). Deliberately contains ZERO hand-edit-YAML TEMPLATE guidance
- * (no `corpus_path: /path/to`/`root_prd: prd-lore` VALUE lines, AC-OOB-1) —
- * that template is exactly what `IssueReportService.buildUnconfiguredUpstreamError()`
- * renders, which this CLI seam supersedes for THIS command's own
- * invocation-time failure (see module header "Self-provisioning"). Still
- * names both required config KEYS in dotted-path prose form
- * (`feedback.upstream.corpus_path`/`feedback.upstream.root_prd`, no trailing
- * colon) — the pre-existing SPEC-072 regression test AC-072-2
- * (`tests/unit/service/issue-report-cross-corpus.bun.test.ts`) pins those two
- * substrings and must keep passing; "which two keys" and "how to set them"
- * are separable, and only the latter is what AC-OOB-1 requires dropped.
- */
-function buildAutoConfigRequiredError(): LoreError {
-  return {
-    code: "VALIDATION_ERROR",
-    field: "feedback.upstream",
-    message:
-      "`feedback.upstream` is not configured — this needs both " +
-      "feedback.upstream.corpus_path and feedback.upstream.root_prd. Run " +
-      "`lore report-issue --auto-config` to self-provision them from this " +
-      "install's own upstream lore corpus — no manual YAML editing required.",
-  };
-}
 
 /**
  * Resolves the `UpstreamCfg` THIS invocation should act against, deciding
@@ -112,7 +94,9 @@ function buildAutoConfigRequiredError(): LoreError {
  *   resolution/provisioning is NEVER attempted, `--auto-config` or not
  *   (AC-OOB-4a's byte-identical, resolution-free short-circuit).
  * - Unconfigured + `--auto-config` NOT passed → `err({@link
- *   buildAutoConfigRequiredError})` (AC-OOB-1).
+ *   buildUnconfiguredUpstreamRemedy})` (AC-OOB-1 / AC-GD-2 — the SAME shared
+ *   builder `IssueReportService.report()` returns on the identical
+ *   condition, imported from that module rather than rebuilt here).
  * - Unconfigured + `--auto-config` passed → resolves via
  *   `resolveUpstreamFromInstalledBinary` (pure reads + identity pin,
  *   AC-OOB-5) then, only on success, writes via `provisionFeedbackUpstream`
@@ -131,7 +115,7 @@ async function resolveEffectiveUpstreamCfg(
   consumerCorpusRoot: string,
 ): Promise<Result<UpstreamCfg, LoreError>> {
   if (cfg !== undefined) return ok(cfg);
-  if (!autoConfig) return err(buildAutoConfigRequiredError());
+  if (!autoConfig) return err(buildUnconfiguredUpstreamRemedy());
 
   const resolveResult = await resolveUpstreamFromInstalledBinary();
   if (!resolveResult.ok) return resolveResult;
