@@ -36,6 +36,26 @@
  * composite, or a new StoreInterface impl) can extend it with one line —
  * see the inline note below.
  *
+ * ## Rule (c) — the MirrorHumanId cast-escape (SPEC-mirror-identifier-ssot D4)
+ *
+ * A THIRD, independent textual rule guards an unrelated field: the corpus→file
+ * mirror's export-index `human_id`, branded `MirrorHumanId` in
+ * `packages/core/src/ordinal.ts`. That brand has exactly ONE sanctioned escape
+ * — the textual `as MirrorHumanId` cast (including the laundering
+ * `as unknown as MirrorHumanId` double-cast) at the JSON parse boundary in
+ * `packages/core/src/schemas.ts`. Every other producer of a `MirrorHumanId`
+ * value narrows via the exported `assertIsMirrorHumanId` assertion function
+ * instead of casting, so this rule's allowlist (`SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES`,
+ * deliberately SEPARATE from `SANCTIONED_ORDINAL_WRITE_FILES` — the two rules
+ * guard unrelated fields for unrelated reasons, and folding them into one set
+ * would exempt `schemas.ts` from the ordinal-column rules for a reason that
+ * has nothing to do with those rules) has exactly one member. Each rule now
+ * carries its OWN `allowedFiles` set (see `ALL_RULES` below) rather than a
+ * single file-level skip in `main()` — a single skip would have blinded rule
+ * (c) on every file already on the ordinal-column allowlist (e.g.
+ * `ordinal-migration-service.ts`), which is sanctioned for THAT rule but not
+ * for this one.
+ *
  * ## Public surface / why `main` returns instead of exiting
  *
  * `isScannableSourceFile` and `collectViolationsInFile` are pure (path/text in,
@@ -108,22 +128,38 @@ export const SANCTIONED_ORDINAL_WRITE_FILES = [
 
 const SANCTIONED_SET = new Set(SANCTIONED_ORDINAL_WRITE_FILES);
 
-/** Rule (a): MAX(ordinal)-style allocation arithmetic. */
+/**
+ * The ONE file permitted to contain a textual `as MirrorHumanId` cast (or the
+ * laundering `as unknown as MirrorHumanId`) — the `.lore/export-index.json`
+ * JSON-parse boundary in `exportIndexMappingSchema` (SPEC-mirror-identifier-ssot
+ * D4). Deliberately a SEPARATE array from {@link SANCTIONED_ORDINAL_WRITE_FILES}
+ * (see the module header's "Rule (c)" section) even though it is used the same
+ * way (as a per-rule `allowedFiles` set) — the two allowlists guard unrelated
+ * fields and must be able to diverge independently.
+ */
+export const SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES = ["packages/core/src/schemas.ts"];
+
+const MIRROR_HUMAN_ID_CAST_ALLOWED_SET = new Set(SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES);
+
+/** Rule (a): MAX(ordinal)-style allocation arithmetic. Sanctioned only in the ordinal-column allowlist. */
 const RULE_MAX_ORDINAL = {
   name: "ordinal-allocation-arithmetic",
   pattern: /MAX\s*\(\s*ordinal\s*\)/gi,
+  allowedFiles: SANCTIONED_SET,
 };
 
-/** Rule (a): `ordinal + 1`-style increment arithmetic (parenthesis-free form). */
+/** Rule (a): `ordinal + 1`-style increment arithmetic (parenthesis-free form). Sanctioned only in the ordinal-column allowlist. */
 const RULE_ORDINAL_PLUS_ONE = {
   name: "ordinal-allocation-arithmetic",
   pattern: /\bordinal\s*\+\s*1\b/gi,
+  allowedFiles: SANCTIONED_SET,
 };
 
-/** Rule (b): a raw SQL `SET ordinal = …` write. */
+/** Rule (b): a raw SQL `SET ordinal = …` write. Sanctioned only in the ordinal-column allowlist. */
 const RULE_SQL_SET_ORDINAL = {
   name: "ordinal-direct-sql-write",
   pattern: /\bSET\s+ordinal\s*=/gi,
+  allowedFiles: SANCTIONED_SET,
 };
 
 /**
@@ -133,11 +169,26 @@ const RULE_SQL_SET_ORDINAL = {
  * multi-line template literals — a per-line scan would miss the column list
  * entirely. The window is bounded (600 chars) so an unrelated later mention
  * of "ordinal" much further down the file is never misattributed to an
- * INSERT statement above it.
+ * INSERT statement above it. Sanctioned only in the ordinal-column allowlist.
  */
 const RULE_SQL_INSERT_ORDINAL = {
   name: "ordinal-direct-sql-write",
   pattern: /INSERT\s+INTO\s+docs[\s\S]{0,600}?\bordinal\b/gi,
+  allowedFiles: SANCTIONED_SET,
+};
+
+/**
+ * Rule (c): an `as MirrorHumanId` cast, including the laundering
+ * `as unknown as MirrorHumanId` double-cast (the `unknown as ` portion is
+ * OPTIONAL in the pattern so both forms are caught by one rule). Case-sensitive
+ * — `MirrorHumanId` is a specific TypeScript identifier, not a prose phrase — and
+ * sanctioned ONLY in `SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES` (D4), a narrower and
+ * INDEPENDENT allowlist from the ordinal-column rules above.
+ */
+const RULE_MIRROR_HUMAN_ID_CAST = {
+  name: "mirror-human-id-unsanctioned-cast",
+  pattern: /\bas\s+(?:unknown\s+as\s+)?MirrorHumanId\b/g,
+  allowedFiles: MIRROR_HUMAN_ID_CAST_ALLOWED_SET,
 };
 
 const ALL_RULES = [
@@ -145,6 +196,7 @@ const ALL_RULES = [
   RULE_ORDINAL_PLUS_ONE,
   RULE_SQL_SET_ORDINAL,
   RULE_SQL_INSERT_ORDINAL,
+  RULE_MIRROR_HUMAN_ID_CAST,
 ];
 
 /**
@@ -245,15 +297,22 @@ function lineNumberAt(content, index) {
  * regex `lastIndex` leaks between calls (each rule's index is reset on entry),
  * so the same input always yields the same result.
  *
+ * Each rule carries its OWN `allowedFiles` set (see `ALL_RULES` above) — a rule
+ * is skipped ENTIRELY for `relPath` when that path is in the rule's own
+ * allowlist, never a single global file-level skip. That is what lets rule (c)
+ * (the MirrorHumanId cast-escape) keep scanning a file that is sanctioned for
+ * the UNRELATED ordinal-column rules (a)/(b), and vice versa.
+ *
  * @param {string} relPath - repo-root-relative POSIX path, echoed into each violation
  * @param {string} content - the file's full text
- * @returns {{file: string, line: number, rule: "ordinal-allocation-arithmetic" | "ordinal-direct-sql-write", snippet: string}[]}
+ * @returns {{file: string, line: number, rule: "ordinal-allocation-arithmetic" | "ordinal-direct-sql-write" | "mirror-human-id-unsanctioned-cast", snippet: string}[]}
  *   — the typed surface TypeScript callers see is `check-ordinal-write-sites.d.mts`;
  *   keep the two in sync.
  */
 export function collectViolationsInFile(relPath, content) {
   const violations = [];
   for (const rule of ALL_RULES) {
+    if (rule.allowedFiles?.has(relPath)) continue; // sanctioned site for THIS rule specifically
     rule.pattern.lastIndex = 0;
     let match;
     while ((match = rule.pattern.exec(content)) !== null) {
@@ -282,9 +341,12 @@ export function main(repoRoot = REPO_ROOT) {
   const srcRoots = findPackageSrcRoots(repoRoot);
   const files = srcRoots.flatMap((root) => walkSourceFiles(root, repoRoot));
 
+  // No file-level short-circuit here (deliberately, see the module header's "Rule (c)"
+  // section) — every file is handed to collectViolationsInFile, and EACH rule decides for
+  // itself (via its own `allowedFiles`) whether relPath is exempt from THAT rule. A single
+  // global skip would blind rule (c) on files sanctioned only for rules (a)/(b), and vice versa.
   const violations = [];
   for (const relPath of files) {
-    if (SANCTIONED_SET.has(relPath)) continue;
     const abs = join(repoRoot, relPath);
     const content = readFileSync(abs, "utf8");
     violations.push(...collectViolationsInFile(relPath, content));
@@ -292,23 +354,26 @@ export function main(repoRoot = REPO_ROOT) {
 
   if (violations.length > 0) {
     console.error(
-      `check-ordinal-write-sites: found ${violations.length} ordinal-write reference(s) outside the sanctioned allowlist:\n`,
+      `check-ordinal-write-sites: found ${violations.length} violation(s) outside their rule's sanctioned allowlist:\n`,
     );
     for (const v of violations) {
       console.error(`  ${v.file}:${v.line}: [${v.rule}] ${v.snippet}`);
     }
     console.error(
-      `\nOnly these files may contain ordinal-allocation arithmetic or direct SQL writes to the 'ordinal' column:\n` +
+      `\nOrdinal-allocation arithmetic / direct SQL writes to the 'ordinal' column may only appear in:\n` +
         SANCTIONED_ORDINAL_WRITE_FILES.map((f) => `  - ${f}`).join("\n") +
-        `\n\nEither move the logic into one of the sanctioned files above, or — if this is a genuinely new` +
-        ` sanctioned write site — add it to SANCTIONED_ORDINAL_WRITE_FILES in scripts/check-ordinal-write-sites.mjs.`,
+        `\n\nAn 'as MirrorHumanId' (or laundering 'as unknown as MirrorHumanId') cast may only appear in:\n` +
+        SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES.map((f) => `  - ${f}`).join("\n") +
+        `\n\nEither move the offending logic into one of the sanctioned files for its rule, or — if this is a` +
+        ` genuinely new sanctioned site — extend the matching allowlist in scripts/check-ordinal-write-sites.mjs.`,
     );
     return 3;
   }
 
   console.log(
     `check-ordinal-write-sites: OK — ordinal-allocation arithmetic and direct SQL writes to 'ordinal' are` +
-      ` confined to the ${SANCTIONED_ORDINAL_WRITE_FILES.length} sanctioned file(s). Scanned ${files.length} source file(s).`,
+      ` confined to ${SANCTIONED_ORDINAL_WRITE_FILES.length} sanctioned file(s), and every 'as MirrorHumanId'` +
+      ` cast is confined to ${SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES.length} sanctioned file(s). Scanned ${files.length} source file(s).`,
   );
   return 0;
 }
