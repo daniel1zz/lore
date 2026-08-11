@@ -358,10 +358,23 @@ export default defineCommand({
       // scope_fidelity from publishing an absence-based score in that state; `false`
       // (the initialized default) on every OTHER path (explicit --diff/--diff-file, or a
       // genuinely commit-less plan) is a true, deliberate value, not an omission.
+      //
+      // reason: D6 (spec-judgment-surfaces-must-verify-before-they-certify-machine,
+      // task-thread-diff-source-through-the-cli-and-mcp-assess-adapters) — `diffSource`
+      // (this command's own already-computed `DiffSourceRecord` local, assigned on every
+      // branch of Step 3 above) is now threaded into `opts.diffSource` so
+      // `resolveAssessedCommit`/`verifyFindingPaths` (AC-JV-1, D2, D3) have a referent to
+      // check finding paths against. Every field name/shape on `DiffSourceRecord` matches
+      // `AssessDiffSource` exactly (see that type's own JSDoc), so this needs zero cast —
+      // before this line, `opts.diffSource` was never supplied at all, and every live run
+      // resolved to `paths_verified.unchecked` regardless of how much diff provenance this
+      // command had already gathered (measured 2026-08-11, immediately after AC-JV-1
+      // earned an attested pass at the service layer — see AC-JV-5).
       const assessResult = await app.aiProviderService.assessPlan(bundle, {
         ...(diffText !== undefined ? { diffText } : {}),
         source: app.callerSurface,
         commitDerivationUnverifiable,
+        diffSource,
       });
       if (!assessResult.ok) {
         // reason: assess has no non-AI mode (SPEC-026 §3 D5) — the shared AI_PROVIDER_ERROR

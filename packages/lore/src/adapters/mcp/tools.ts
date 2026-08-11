@@ -2111,10 +2111,18 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         }
       }
 
+      // reason: D6 (spec-judgment-surfaces-must-verify-before-they-certify-machine,
+      // task-thread-diff-source-through-the-cli-and-mcp-assess-adapters) — `diffSource`
+      // (this handler's own already-computed `DiffSourceRecord` local, assigned on every
+      // branch above) is now threaded into `opts.diffSource` so `resolveAssessedCommit`/
+      // `verifyFindingPaths` (AC-JV-1, D2, D3) have a referent to check finding paths
+      // against — mirrors the CLI's `commands/assess.ts` fix exactly; the two adapters
+      // drift independently, so wiring one alone proves nothing about the other (AC-JV-5).
       const assessResult = await app.aiProviderService.assessPlan(bundle, {
         ...(diffText !== undefined ? { diffText } : {}),
         source: app.callerSurface,
         commitDerivationUnverifiable,
+        diffSource,
       });
       if (!assessResult.ok) return errorContent(assessResult.error);
 
