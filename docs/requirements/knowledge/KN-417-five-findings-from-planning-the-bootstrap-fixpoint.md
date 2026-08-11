@@ -11,6 +11,7 @@ tags: []
 parent: PRD-001
 links:
   - {id: KN-170, type: relates-to}
+  - {id: KN-420, type: relates-to}
 ---
 # Five findings from planning the bootstrap-fixpoint slice: a plan-scoped anchor mutex, a hook that misnames its own refusal, an asymmetric AC demotion, and two probes that nearly lied
 
@@ -191,14 +192,46 @@ step, fixture helper, or script-chain side effect that silently re-exports is ca
 rather than hidden by it. Its RED is an export inserted into the test's own setup, which must break
 that equality. Copy this shape; do not re-derive it.
 
-⛔ Scope note, because the evidence for the second half arrived mis-scoped and this matters for
-anyone re-checking it: the peer's supporting observations (`bun run test` triggering an export,
-`identity_repaired` refreshing ids unconditionally, `spec-mirror-export.test.ts:229` opening with a
-full export) are properties of that session's UNMERGED branch. Verified on `main` 2026-08-11:
-`test` reaches `check:spec-mirror` = `export-spec-mirror.ts --check` (read-only), `mirror:export` is
-chained from nothing, `identity_repaired` appears 0 times, and `:229` is a `scriptChainReachesTarget`
-boundary case. The defect is real; the original scope statement was not. That section was itself
-about assertion scope — writing a lesson down does not immunise the work that documents it.
+### 6a. I refuted a correct conclusion with a method that had no power to test it
+
+This is the sharpest thing in this document and it is mine.
+
+The peer claimed `bun run test` rewrites generated mirror files. I checked the script chain on `main`
+and reported back that the claim did not hold there: `test` reaches `check:spec-mirror` =
+`export-spec-mirror.ts --check` (read-only), `mirror:export` is chained from nothing,
+`identity_repaired` appeared 0 times, and `:229` was a `scriptChainReachesTarget` boundary case. All
+four observations were true, and they remain true today. I concluded the claim was a property of
+their unmerged branch only.
+
+**The conclusion was wrong.** Measured on `main` at `cedb29db` after their merge landed: one full
+`bun run test` moved the mirror tree fingerprint `45ea1381` → `4c84f428` and left
+`docs/requirements/` and `.lore/export-index.json` modified — while the script chain was, and still
+is, exactly as clean as I had reported. The export does not come from the chain. It comes from
+`scripts/tests/spec-mirror-export.ts`, which runs the REAL exporter against the REAL production
+corpus **by design**, because AC-FR-6/7/10 explicitly require assertion against this repo's
+production corpus rather than a fixture. The suite was killed at the `test:bun` stage, so
+`check:spec-mirror` never even ran — the writes had already happened inside vitest.
+
+**Root cause.** Chain inspection has no discriminating power over "does running the suite write
+files." It answers a different question — "is an export step wired into a script" — and I substituted
+the answerable question for the asked one, then reported the substitute as a refutation. Every
+individual fact I gave the peer was correct; the inference from them was not. That is worse than
+being wrong on a fact, because the facts made the conclusion look measured.
+
+**Mechanization.** "Does running X modify the tree?" has exactly one sound oracle: fingerprint the
+tree, run X, fingerprint again — never read the configuration that is *supposed* to determine it. The
+general rule this instance teaches: before refuting a peer's empirical claim, check that the method
+reaches the phenomenon they described, not merely something adjacent to it. A refutation built from
+true-but-irrelevant observations is indistinguishable, to the person receiving it, from a sound one.
+
+⛔ Standing consequence for anyone writing a mirror oracle: `docs/requirements/` and
+`.lore/export-index.json` are REWRITTEN by an ordinary `bun run test`, from inside the test suite, on
+a clean checkout. A content-comparison oracle must be isolated from that sibling and must PROVE the
+isolation held (AC-BFI-8 condition (ii)) rather than assume it. The peer's original claim was right;
+only its stated scope was off, and my refutation of it was worse than its scope error.
+
+That section was itself about assertion scope — writing a lesson down does not immunise the work
+that documents it, and neither does checking.
 
 ## 7. Two more of my own, from the second half of this session
 

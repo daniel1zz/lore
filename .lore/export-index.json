@@ -5480,6 +5480,10 @@
     "01KZQYC17R13MZDVEF2NAFBY7W": {
       "human_id": "KN-421",
       "file_path": "docs/requirements/knowledge/KN-421-assessment-land-falsifiability-reachability-the.md"
+    },
+    "01KZR4QHE04PAD945D5TS59KM0": {
+      "human_id": "KN-422",
+      "file_path": "docs/requirements/knowledge/KN-422-handoff-agent-main-orchestrator.md"
     }
   }
 }
