@@ -59,6 +59,26 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { MirrorHumanId as RealMirrorHumanId } from "@lore/core";
+
+/**
+ * Compile-time round-trip against the REAL production brand — the missing link the
+ * isolated-mkdtemp suite below cannot provide by design (its fixtures reconstruct the brand
+ * SHAPE from scratch, per the module header, because a temp project can't resolve workspace
+ * packages; that means those tests would stay green even if `packages/core/src/ordinal.ts`'s
+ * OWN `MirrorHumanId` were ever weakened to a plain `string` alias — the exact "oracle stays
+ * green while the brand is not load-bearing" failure mode this block exists to close).
+ *
+ * `@ts-expect-error` demands the assignment below actually fail with a real diagnostic — if the
+ * brand is ever weakened, the assignment stops erroring, the directive becomes "unused" (a TS
+ * error in its own right, on by default, no `noUnusedLocals` needed), and `bun run typecheck`
+ * reddens on THIS statement rather than silently staying clean. `bun test`'s transpiler strips
+ * types without checking them, so this line is a no-op at runtime; the assertion is enforced
+ * purely by `bun run typecheck`, which is why AC-MIS-6's declared command runs both.
+ */
+// @ts-expect-error TS2322 — a plain string literal must not be assignable to the REAL, imported MirrorHumanId
+const REAL_BRAND_COMPILE_CHECK: RealMirrorHumanId = "SPEC-021";
+void REAL_BRAND_COMPILE_CHECK;
 
 // packages/lore/tests/unit/core -> repo root is 5 levels up (mirrors
 // barrel-isolation.test.ts's "-> packages/core/src (4 levels up + core/src)"
