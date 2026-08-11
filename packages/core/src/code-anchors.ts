@@ -1,5 +1,6 @@
 /**
- * Code anchors — spec-declared `path[#Symbol]` bindings + the pure drift-detection
+ * Code anchors — `path[#Symbol]` bindings declared by a spec OR a knowledge doc +
+ * the pure drift-detection
  * core (SPEC-045 §Design Decisions D1, D2, D3 — memory hygiene part 3, doc-code drift
  * oracle H3). Pure, browser-safe module: no IO, no wall-clock reads. Filesystem
  * probing lives entirely in `packages/lore/src/service/drift-check-service.ts`
@@ -44,6 +45,14 @@
  *   affirmatively verifies — any `probe_error`/`*_missing`/`node_type_mismatch`/
  *   `symbol_missing` row flips it `false`. A probe error is drift, never a silent
  *   scan abort (D4, G11's "including under probe IO errors" clause).
+ * @invariant Every `DriftInputEntry`/`DriftRow` carries a REQUIRED `doc_type`
+ *   alongside `doc_slug`, because more than one doc type may declare `code_anchors`
+ *   (`spec` and `knowledge`). A row is therefore self-attributing: a knowledge
+ *   breach can never be read as a spec breach. ⛔ Never reintroduce a
+ *   spec-flavoured slug field name here — the retired spelling and its successor
+ *   coexisting is the SSOT failure mode this repo has already paid for three times;
+ *   the census oracle is
+ *   `packages/lore/tests/unit/service/drift-population-reporting.test.ts`.
  *
  * Side-effect class: pure
  *
@@ -53,6 +62,7 @@
 import { err, ok } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import { normalizeFileAnchors } from "./file-anchors.js";
+import type { DocType } from "./types.js";
 
 // ─── Grammar (D1) ───────────────────────────────────────────────────────────
 
@@ -279,10 +289,21 @@ export const DRIFT_KINDS = [
 /** Derived TypeScript type for a drift row's classification. */
 export type DriftKind = (typeof DRIFT_KINDS)[number];
 
-/** One declared anchor, labeled with its owning spec's identity (D2/D4 input shape). */
+/**
+ * One declared anchor, labeled with its owning document's identity (D2/D4 input
+ * shape). The owning doc is a `spec` OR a `knowledge` document — `doc_type` says
+ * which, and is REQUIRED so the classification output can never be misattributed.
+ *
+ * reason: the governing spec's Declared field contract renames the SLUG field only
+ * and adds `doc_type`; `spec_id`/`spec_status` keep their historical SPEC-045 names,
+ * so a consumer keying on either MUST read `doc_type` to know which doc type they
+ * describe.
+ */
 export interface DriftInputEntry {
   spec_id: string;
-  spec_slug: string;
+  doc_slug: string;
+  /** The owning document's type — `"spec"` or `"knowledge"` today. */
+  doc_type: DocType;
   spec_status: string;
   anchor: ParsedCodeAnchor;
 }
@@ -304,16 +325,39 @@ export interface AnchorProbe {
   error?: string;
 }
 
-/** One drift row — a declared anchor that failed to affirmatively verify (D2). */
+/**
+ * One drift row — a declared anchor that failed to affirmatively verify (D2).
+ * `doc_type` is REQUIRED (see {@link DriftInputEntry}): a reader of a mixed report
+ * must never have to guess whether a breach belongs to a spec or to a knowledge doc.
+ */
 export interface DriftRow {
   spec_id: string;
-  spec_slug: string;
+  doc_slug: string;
+  /** The breaching document's type — `"spec"` or `"knowledge"` today. */
+  doc_type: DocType;
   spec_status: string;
   /** The anchor's original raw string (round-tripped from `ParsedCodeAnchor.raw`). */
   anchor: string;
   kind: DriftKind;
   /** Human-readable detail — populated for `probe_error` rows (the underlying error message). */
   detail?: string;
+}
+
+/**
+ * Projects one declared entry's owning-document identity onto a drift row — the ONE
+ * composition site for those fields, so a future doc type cannot be added to the scan
+ * while eight hand-written row literals silently keep labeling rows as before.
+ *
+ * @param entry - The declared anchor whose owning doc identity to copy
+ * @returns The identity half of a {@link DriftRow} (never the anchor/kind half)
+ */
+function docIdentityOf(entry: DriftInputEntry): Pick<DriftRow, "spec_id" | "doc_slug" | "doc_type" | "spec_status"> {
+  return {
+    spec_id: entry.spec_id,
+    doc_slug: entry.doc_slug,
+    doc_type: entry.doc_type,
+    spec_status: entry.spec_status,
+  };
 }
 
 /** Result of {@link computeDrift}. */
@@ -344,17 +388,18 @@ export interface ComputeDriftResult {
  *   8. `!isDir` and `stat === "file"`, `symbol` set, content collected: symbol not
  *      in `scanExportedSymbols(content)` → `symbol_missing`; else consistent
  *
- * @param declared - Every anchor declared across every scanned spec, spec-labeled.
+ * @param declared - Every anchor declared across every scanned document (spec AND
+ *   knowledge), each labeled with its owning doc's identity + type.
  * @param probes - Probe results keyed by `ParsedCodeAnchor.path` (one entry per
  *   DISTINCT path — probe-level dedup is the caller's job, D4).
  * @returns `{consistent, drifts}` — `consistent` is `true` iff `drifts` is empty.
  *
  * @example
  * computeDrift(
- *   [{ spec_id: "s1", spec_slug: "spec-x", spec_status: "approved", anchor: { raw: "a.ts", path: "a.ts", isDir: false } }],
+ *   [{ spec_id: "s1", doc_slug: "spec-x", doc_type: "spec", spec_status: "approved", anchor: { raw: "a.ts", path: "a.ts", isDir: false } }],
  *   new Map([["a.ts", { stat: "missing" }]]),
  * );
- * // => { consistent: false, drifts: [{ spec_id: "s1", spec_slug: "spec-x", spec_status: "approved", anchor: "a.ts", kind: "file_missing" }] }
+ * // => { consistent: false, drifts: [{ spec_id: "s1", doc_slug: "spec-x", doc_type: "spec", spec_status: "approved", anchor: "a.ts", kind: "file_missing" }] }
  */
 export function computeDrift(
   declared: DriftInputEntry[],
@@ -368,9 +413,7 @@ export function computeDrift(
 
     if (probe === undefined || probe.error !== undefined) {
       drifts.push({
-        spec_id: entry.spec_id,
-        spec_slug: entry.spec_slug,
-        spec_status: entry.spec_status,
+        ...docIdentityOf(entry),
         anchor: anchor.raw,
         kind: "probe_error",
         detail: probe?.error ?? `no probe result recorded for path "${anchor.path}"`,
@@ -380,9 +423,7 @@ export function computeDrift(
 
     if (probe.stat === undefined || probe.stat === "missing") {
       drifts.push({
-        spec_id: entry.spec_id,
-        spec_slug: entry.spec_slug,
-        spec_status: entry.spec_status,
+        ...docIdentityOf(entry),
         anchor: anchor.raw,
         kind: anchor.isDir ? "dir_missing" : "file_missing",
       });
@@ -392,9 +433,7 @@ export function computeDrift(
     if (anchor.isDir) {
       if (probe.stat === "file") {
         drifts.push({
-          spec_id: entry.spec_id,
-          spec_slug: entry.spec_slug,
-          spec_status: entry.spec_status,
+          ...docIdentityOf(entry),
           anchor: anchor.raw,
           kind: "node_type_mismatch",
         });
@@ -404,9 +443,7 @@ export function computeDrift(
       const nonDotChildren = (probe.children ?? []).filter((c) => !c.startsWith("."));
       if (nonDotChildren.length === 0) {
         drifts.push({
-          spec_id: entry.spec_id,
-          spec_slug: entry.spec_slug,
-          spec_status: entry.spec_status,
+          ...docIdentityOf(entry),
           anchor: anchor.raw,
           kind: "dir_empty",
         });
@@ -417,9 +454,7 @@ export function computeDrift(
     // File (or file#Symbol) anchor.
     if (probe.stat === "dir") {
       drifts.push({
-        spec_id: entry.spec_id,
-        spec_slug: entry.spec_slug,
-        spec_status: entry.spec_status,
+        ...docIdentityOf(entry),
         anchor: anchor.raw,
         kind: "node_type_mismatch",
       });
@@ -433,9 +468,7 @@ export function computeDrift(
 
     if (probe.content === undefined) {
       drifts.push({
-        spec_id: entry.spec_id,
-        spec_slug: entry.spec_slug,
-        spec_status: entry.spec_status,
+        ...docIdentityOf(entry),
         anchor: anchor.raw,
         kind: "probe_error",
         detail: `file content unavailable to verify symbol "${anchor.symbol}"`,
@@ -446,9 +479,7 @@ export function computeDrift(
     const exported = scanExportedSymbols(probe.content);
     if (!exported.has(anchor.symbol)) {
       drifts.push({
-        spec_id: entry.spec_id,
-        spec_slug: entry.spec_slug,
-        spec_status: entry.spec_status,
+        ...docIdentityOf(entry),
         anchor: anchor.raw,
         kind: "symbol_missing",
       });

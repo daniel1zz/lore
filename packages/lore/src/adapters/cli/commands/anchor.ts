@@ -1,7 +1,10 @@
 /**
- * lore anchor — manage a task's `file_anchors` or a spec's `code_anchors`
+ * lore anchor — manage a task's `file_anchors` or a spec's / knowledge doc's
+ * `code_anchors`
  * (SPEC-042 §Design Decisions D3; extended by SPEC-045 §Design Decisions D6 to
- * dispatch by target doc type).
+ * dispatch by target doc type, and by M2 of
+ * `spec-a-write-side-fact-with-no-read-side-address-counts-with-no` to admit a
+ * `knowledge` target on the SPEC grammar).
  *
  * Subcommands:
  *   add  <target> <path...>   Read-modify-write UNION — append anchors (repeatable positional).
@@ -12,9 +15,13 @@
  *   - task → `TaskWorkflowService.addAnchors`/`removeAnchors` (byte-identical to
  *     pre-SPEC-045 behavior — a REGRESSION oracle, `path` entries containing `#`
  *     are rejected loud at the service seam, naming the spec code-anchor grammar).
- *   - spec → `DriftCheckService.addCodeAnchors`/`removeCodeAnchors` (incremental
- *     CAS RMW, `path[#Symbol]` grammar — SPEC-045 D1/D6).
- *   - any other type → `VALIDATION_ERROR`, exit 4, naming "task or spec".
+ *   - spec OR knowledge → `DriftCheckService.addCodeAnchors`/`removeCodeAnchors`
+ *     (incremental CAS RMW, `path[#Symbol]` grammar — SPEC-045 D1/D6). A knowledge
+ *     doc uses the SPEC grammar, not the task one: a domain FACT asserts things about
+ *     named symbols, and `--check-drift` is the oracle that falsifies it. The
+ *     admitted set is `DriftCheckService.ANCHOR_SCANNED_DOC_TYPES` — the same set the
+ *     scan reads, so nothing is writable-but-unscanned.
+ *   - any other type → `VALIDATION_ERROR`, exit 4, naming every accepted type.
  *
  * All mutations are validated + normalized via the shared pure
  * `normalizeFileAnchors` (task target, `@lore/core`) or `parseCodeAnchor`/
@@ -29,6 +36,14 @@
  * resulting set is probed, and why `rm` is deliberately excluded. It is an
  * advisory: the exit code is untouched and the anchor is stored regardless.
  *
+ * ⛔ That advisory is TASK-ONLY and stays task-only for a spec/knowledge target: it
+ * consumes the FILE-anchor grammar, so `src/x.ts#Symbol` would be probed as a literal
+ * path and reported non-resolving every single time — a guaranteed-false advisory. A
+ * code anchor's non-resolution is reported by `lore status --check-drift` instead,
+ * which is the entire point of declaring one. Both target families are alike in the
+ * property that matters: a non-resolving anchor is NEVER a refusal, the exit code is
+ * untouched, and the anchor is stored.
+ *
  * There is deliberately NO `lore set --anchor` full-replace flag (D3 — a
  * wholesale-`extra` replace would silently delete other services' owned state);
  * use `lore anchor add`/`rm` for incremental changes, or pass every anchor to
@@ -42,7 +57,7 @@
  * Exit codes per SPEC-003 §5:
  *   0 = success
  *   3 = DOC_NOT_FOUND (target not found)
- *   4 = VALIDATION_ERROR (not a task/spec, invalid anchor entry — bad path/grammar,
+ *   4 = VALIDATION_ERROR (unsupported target type, invalid anchor entry — bad path/grammar,
  *       cap exceeded, `#` on a task anchor, etc.)
  *   5 = STALE_VERSION
  *
@@ -51,10 +66,11 @@
  */
 
 import { defineCommand } from "citty";
-import type { DocRecord, LoreError, Result } from "@lore/core";
+import type { DocRecord, DocType, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
+import { ANCHOR_SCANNED_DOC_TYPES } from "../../../service/drift-check-service.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
 
 /**
@@ -127,38 +143,54 @@ async function resolveAnchorTarget(
 }
 
 /**
- * The `VALIDATION_ERROR` a target resolving to neither `task` nor `spec`
+ * The accepted `<target>` doc types, in the order the refusal message names them —
+ * `task` (file anchors, `TaskWorkflowService`) plus every type
+ * `DriftCheckService` scans for code anchors. Derived from
+ * `ANCHOR_SCANNED_DOC_TYPES` rather than restated, so admitting a new
+ * anchor-declaring doc type in the service cannot leave this refusal naming a
+ * shorter list than the dispatch below actually accepts.
+ */
+const ACCEPTED_TARGET_TYPES: readonly DocType[] = ["task", ...ANCHOR_SCANNED_DOC_TYPES];
+
+/**
+ * The `VALIDATION_ERROR` a target resolving to none of {@link ACCEPTED_TARGET_TYPES}
  * produces (D6) — routed through the normal `formatError`/`exitCode` pipeline
  * (exit 4) rather than a hand-rolled stderr line, for consistency with every
  * other error path in this command.
  */
 function unsupportedTargetTypeError(docType: string): LoreError {
+  const accepted = ACCEPTED_TARGET_TYPES.join(", ");
   return {
     code: "VALIDATION_ERROR",
     field: "type",
-    message: `Expected a task or spec document; got type '${docType}'`,
+    message: `Expected one of these document types: ${accepted}; got type '${docType}'`,
     value: docType,
   };
+}
+
+/** `true` iff this target's anchors are `extra.code_anchors` owned by `DriftCheckService`. */
+function isCodeAnchorTarget(docType: DocType): boolean {
+  return ANCHOR_SCANNED_DOC_TYPES.includes(docType);
 }
 
 export default defineCommand({
   meta: {
     name: "anchor",
-    description: "Manage a task's file_anchors or a spec's code_anchors (add / rm / list)",
+    description: "Manage a task's file_anchors or a spec's / knowledge doc's code_anchors (add / rm / list)",
   },
   subCommands: {
     add: defineCommand({
-      meta: { name: "add", description: "Add one or more anchors to a task or spec (union with existing)" },
+      meta: { name: "add", description: "Add one or more anchors to a task, spec, or knowledge doc (union with existing)" },
       args: {
         target: {
           type: "positional",
-          description: "Task or spec document ID or slug",
+          description: "Task, spec, or knowledge document ID or slug",
           required: true,
         },
         path: {
           type: "positional",
           description:
-            "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope). Spec: path[#Symbol] (SPEC-045).",
+            "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope). Spec/knowledge: path[#Symbol] (SPEC-045).",
           required: true,
         },
         by: {
@@ -206,7 +238,7 @@ export default defineCommand({
 
             console.log(`Added ${paths.length} anchor(s) to ${result.value.slug} (v${result.value.version})`);
             renderAnchorList(anchors);
-          } else if (target.type === "spec") {
+          } else if (isCodeAnchorTarget(target.type)) {
             if (app.driftCheckService === undefined) {
               process.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
               process.exitCode = 1;
@@ -240,16 +272,16 @@ export default defineCommand({
     }),
 
     rm: defineCommand({
-      meta: { name: "rm", description: "Remove one or more anchors from a task or spec" },
+      meta: { name: "rm", description: "Remove one or more anchors from a task, spec, or knowledge doc" },
       args: {
         target: {
           type: "positional",
-          description: "Task or spec document ID or slug",
+          description: "Task, spec, or knowledge document ID or slug",
           required: true,
         },
         path: {
           type: "positional",
-          description: "[repeatable] Anchor entry to remove — task: path; spec: path[#Symbol]",
+          description: "[repeatable] Anchor entry to remove — task: path; spec/knowledge: path[#Symbol]",
           required: true,
         },
         by: {
@@ -296,7 +328,7 @@ export default defineCommand({
 
             console.log(`Removed ${paths.length} anchor(s) from ${result.value.slug} (v${result.value.version})`);
             renderAnchorList(anchors);
-          } else if (target.type === "spec") {
+          } else if (isCodeAnchorTarget(target.type)) {
             if (app.driftCheckService === undefined) {
               process.stderr.write("Error: DriftCheckService not wired on this App instance.\n");
               process.exitCode = 1;
@@ -330,11 +362,11 @@ export default defineCommand({
     }),
 
     list: defineCommand({
-      meta: { name: "list", description: "List a task's file_anchors or a spec's code_anchors" },
+      meta: { name: "list", description: "List a task's file_anchors or a spec's / knowledge doc's code_anchors" },
       args: {
         target: {
           type: "positional",
-          description: "Task or spec document ID or slug",
+          description: "Task, spec, or knowledge document ID or slug",
           required: true,
         },
         json: {
@@ -357,7 +389,7 @@ export default defineCommand({
           let anchors: string[];
           if (doc.type === "task") {
             anchors = (doc.extra["file_anchors"] as string[] | undefined) ?? [];
-          } else if (doc.type === "spec") {
+          } else if (isCodeAnchorTarget(doc.type)) {
             anchors = (doc.extra["code_anchors"] as string[] | undefined) ?? [];
           } else {
             const error = unsupportedTargetTypeError(doc.type);

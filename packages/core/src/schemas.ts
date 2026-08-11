@@ -176,6 +176,17 @@ export const knowledgeExtraSchema = z
     /** Bi-temporal validity metadata (SPEC-043 D1) — written exclusively via
      *  `ValidityService.invalidate` (`lore invalidate`), never `lore set` (D10). */
     validity: validitySchema.optional(),
+    /** Declared `path[#Symbol]` code anchors, scanned by `lore status --check-drift`
+     *  (M2 of spec-a-write-side-fact-with-no-read-side-address-counts-with-no). A
+     *  domain FACT filed as knowledge asserts things about code; without this field
+     *  those assertions had no drift oracle at all. SHAPE-ONLY here, exactly like
+     *  `specExtraSchema.code_anchors` — see that field's @invariant for why the
+     *  per-entry grammar lives in `parseCodeAnchor` and never in this schema.
+     *  Declared EXPLICITLY rather than left to `.passthrough()` so the shape is
+     *  validated instead of merely tolerated. Written exclusively via `lore anchor
+     *  add/rm` (`DriftCheckService`), never `lore set`. Eligible for ALL 9 sub_types:
+     *  a retro's claim about code is exactly as falsifiable as a reference table's. */
+    code_anchors: z.array(z.string()).optional(),
   })
   .passthrough()
   .superRefine((data, ctx) => {

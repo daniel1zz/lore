@@ -258,7 +258,8 @@ describe("lore_status {check_drift: true} — STATE (broken anchor)", () => {
     expect(data.code_drift.consistent).toBe(false);
     expect(data.code_drift.drifts).toHaveLength(1);
     expect(data.code_drift.drifts[0]).toMatchObject({
-      spec_slug: slug,
+      doc_slug: slug,
+      doc_type: "spec",
       anchor: "this/path/definitely/does/not/exist.ts",
       kind: "file_missing",
     });
