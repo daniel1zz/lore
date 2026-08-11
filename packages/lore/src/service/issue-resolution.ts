@@ -16,17 +16,31 @@
  * The requirement is DECLARED here (the `pointer` field of the reach table) and
  * enforced by the field's single writer, `adapters/cli/commands/issue.ts`.
  *
+ * ⛔ The VOCABULARY (the member tokens themselves, `IssueResolution`,
+ * `TerminalIssueResolution`) is NOT defined here — it lives in
+ * `@lore/core`'s `issue-resolution-vocab.ts` and is imported + re-exported
+ * below. This module owns the LOGIC over that vocabulary (the reach/pointer
+ * table, `computeIssueResolution`, `hasIssueReport`), never the token list. The
+ * vocabulary moved to `@lore/core` because `packages/dashboard/src/**` may
+ * import `@lore/core` ONLY and therefore could not reach a union defined in this
+ * server-only tree: it kept a hand mirror in `src/lib/api.ts` that was a SECOND
+ * construction site of the member set (AC-DC-9 went RED on it, 2026-08-11).
+ * Consumers keep importing every name below from THIS module — the re-exports
+ * are what make the relocation invisible to them.
+ *
  * Public surface:
- *   - `IssueResolution` — the 8-state computed resolution (`open | resolving`
- *     plus the six TERMINAL states below).
+ *   - `IssueResolution` / `TerminalIssueResolution` — re-exported from
+ *     `@lore/core`; the 8-state computed resolution (`open | resolving` plus the
+ *     six TERMINAL states).
  *   - `TERMINAL_ISSUE_RESOLUTIONS` — the SSOT member set of terminal
- *     resolutions (spec-the-defect-channel-cannot-be-honestly-maintained-an
- *     §M1). ⛔ THE ONLY construction site of that member set in the repo:
+ *     resolutions as a `ReadonlySet` (spec-the-defect-channel-cannot-be-honestly-
+ *     maintained-an §M1), built from `@lore/core`'s single member-array literal:
  *     `commands/issues.ts`'s `--open`/`--resolved` filter AND
- *     `IssueReportService`'s open-report-cap narrowing both IMPORT it. A second
- *     copy anywhere under `packages/**` is a RED test (AC-DC-9), because the
- *     two copies that existed before this export drifted in exactly the way
- *     that made a resolved report keep occupying cap quota.
+ *     `IssueReportService`'s open-report-cap narrowing both IMPORT it from here.
+ *     A second construction of that member set anywhere under `packages/**` is a
+ *     RED test (AC-DC-9), because the copies that existed before this SSOT
+ *     drifted in exactly the way that made a resolved report keep occupying cap
+ *     quota.
  *   - `TERMINAL_RESOLUTION_REACH` / `TerminalResolutionReach` — per terminal
  *     state, the ROUTE that reaches it and the pointer it REQUIRES. This is
  *     what lets the cap refusal render a remedy that works instead of a
@@ -53,7 +67,9 @@
  *
  * Invariants:
  *   - `TERMINAL_ISSUE_RESOLUTIONS` is the SSOT member set and every consumer
- *     IMPORTS it. Its two derived views (`EXPLICIT_TERMINAL_RESOLUTIONS`, the
+ *     IMPORTS it; it is DERIVED from `@lore/core`'s
+ *     `TERMINAL_ISSUE_RESOLUTION_MEMBERS`, never re-listed here. Its two further
+ *     derived views (`EXPLICIT_TERMINAL_RESOLUTIONS`, the
  *     `ExplicitTerminalResolution` type) are computed from
  *     `TERMINAL_RESOLUTION_REACH`, never re-listed — see those symbols' own docs.
  *   - Precedence, highest first: explicit terminal state (D3) > resolves-edge
@@ -89,52 +105,42 @@
  * Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D1, §D2.
  */
 
-import type { DocStatus } from "@lore/core";
+import {
+  TERMINAL_ISSUE_RESOLUTION_MEMBERS,
+  type DocStatus,
+  type IssueResolution,
+  type TerminalIssueResolution,
+} from "@lore/core";
 
 /**
- * ⛔ THE ONE construction site of the terminal-issue-resolution member set
- * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1, AC-DC-9). Every
- * consumer — the `lore issues` listing filter, `IssueReportService`'s cap
- * narrowing, the `--state` validator, the cap refusal's `quota_freeing_states`
- * — derives from THIS array or from the two sets built out of it below.
+ * The resolution vocabulary, RE-EXPORTED rather than redefined
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1, AC-DC-9).
  *
- * ⛔ Adding a member here is a three-line change with a compile-time obligation:
- * {@link TERMINAL_RESOLUTION_REACH} `satisfies Record<TerminalIssueResolution,
- * …>`, so a new member with no declared route/pointer fails to compile rather
- * than silently inheriting someone's default. Do NOT re-list these tokens in a
- * second set or array anywhere under `packages/**` — a repo-wide scan asserts
- * this is the only such literal (`tests/unit/service/terminal-resolution-ssot.test.ts`).
+ * `IssueResolution` is the 8-state computed resolution and
+ * `TerminalIssueResolution` its 6-state terminal subset; both are DERIVED in
+ * `@lore/core`'s `issue-resolution-vocab.ts` from the one member-array literal
+ * that exists for them repo-wide. ⛔ Do NOT restate either union here (nor
+ * anywhere else under `packages/**`) — the tokens had two construction sites
+ * before this relocation and a repo-wide scan now asserts they have exactly one
+ * (`tests/unit/service/terminal-resolution-ssot.test.ts`).
  *
- * Order is HAND-SETTABLE FIRST, then the two computed-only states: it is the
- * order the `--state` help text and the cap refusal's remedy table render in,
- * and the actionable verbs belong at the top of a refusal a caller is reading
- * to get unblocked.
+ * They are re-exported from this module because every server-side consumer
+ * (`commands/issues.ts`, `commands/issue.ts`, `commands/status.ts`,
+ * `issue-report-service.ts`, `issue-reports-routes.ts`,
+ * `upstream-context-flow.ts`) reads the vocabulary and the computation from ONE
+ * import site — the relocation must not fan a second `@lore/core` import out
+ * across all of them.
+ *
+ * What each state MEANS: `rejected`/`wontfix`/`superseded`/`duplicate` are
+ * explicit terminal states (written by the downstream `lore issue resolve` verb)
+ * OR — for `rejected` only — a recorded review-workflow rejection (D2, no
+ * explicit write required); `fixed` is reachable ONLY via a `resolves` edge to a
+ * terminal (`active`/`archived`) source doc — never hand-set; `closed` is the
+ * issue task's OWN doc status reaching `archived` with no traceable fix source
+ * ever recorded. {@link computeIssueResolution} is the one implementation of
+ * that precedence.
  */
-const TERMINAL_ISSUE_RESOLUTION_MEMBERS = [
-  "rejected",
-  "wontfix",
-  "superseded",
-  "duplicate",
-  "fixed",
-  "closed",
-] as const;
-
-/** A terminal resolution — a state in which a report no longer needs triage eyes and no longer occupies cap quota. */
-export type TerminalIssueResolution = (typeof TERMINAL_ISSUE_RESOLUTION_MEMBERS)[number];
-
-/**
- * Computed resolution states for a filed issue report (D2). The two
- * non-terminal states plus every member of {@link TERMINAL_ISSUE_RESOLUTIONS}.
- *
- * `rejected`/`wontfix`/`superseded`/`duplicate` are explicit terminal states
- * (written by the downstream `lore issue resolve` verb) OR — for `rejected`
- * only — a recorded review-workflow rejection (D2, no explicit write required);
- * `fixed` is reachable ONLY via a `resolves` edge to a terminal
- * (`active`/`archived`) source doc — never hand-set; `closed` is the issue
- * task's OWN doc status reaching `archived` with no traceable fix source ever
- * recorded.
- */
-export type IssueResolution = "open" | "resolving" | TerminalIssueResolution;
+export type { IssueResolution, TerminalIssueResolution };
 
 /** How a terminal resolution is REACHED — the axis the cap refusal's remedy lines are derived from. */
 export type TerminalResolutionRoute = "issue-resolve" | "resolves-link" | "review-archive";
@@ -172,9 +178,12 @@ export interface TerminalResolutionReach {
  * `route` as a LITERAL type (which is what makes
  * {@link ExplicitTerminalResolution} derivable instead of re-listed), while
  * `satisfies Record<TerminalIssueResolution, …>` makes a member added to
- * {@link TERMINAL_ISSUE_RESOLUTION_MEMBERS} without an entry here a COMPILE
- * error. ⛔ Do not widen it to a plain `Record<...>` annotation — that silently
- * destroys the first half.
+ * `@lore/core`'s {@link TERMINAL_ISSUE_RESOLUTION_MEMBERS} without an entry here
+ * a COMPILE error. ⛔ Do not widen it to a plain `Record<...>` annotation — that
+ * silently destroys the first half. ⛔ This table is LOGIC, not vocabulary: it
+ * stays in this server-only module (its `--superseded-by`/`--duplicate-of` flags
+ * and `extra` keys are CLI facts) and is deliberately NOT relocated to
+ * `@lore/core` alongside the member tokens.
  */
 const TERMINAL_RESOLUTION_REACH = {
   rejected: { route: "issue-resolve", pointer: null },
@@ -209,8 +218,11 @@ export type ExplicitTerminalResolution = {
 }[TerminalIssueResolution];
 
 /**
- * The SSOT terminal-resolution member set: a report in one of these states no
- * longer needs triage eyes, and (§M1) no longer occupies open-report cap quota.
+ * The SSOT terminal-resolution member set as a membership set: a report in one of
+ * these states no longer needs triage eyes, and (§M1) no longer occupies
+ * open-report cap quota. Built from `@lore/core`'s single
+ * {@link TERMINAL_ISSUE_RESOLUTION_MEMBERS} literal — this is a VIEW of that one
+ * declaration, never a second listing of it.
  *
  * `closed` is terminal for the SAME reason `fixed`/`rejected`/`wontfix` are: an
  * issue archived with no traceable fix source (the shape of every report closed
@@ -228,8 +240,14 @@ export const TERMINAL_ISSUE_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<
  * The same member set as an ORDERED, TYPED list — the view a consumer needs when
  * it must iterate terminal states and call {@link reachOfTerminalResolution} on
  * each (a `ReadonlySet<IssueResolution>` iterates as the wider union, which does
- * not type-check as a reach-table key). Same single literal, two views: this one
- * for iteration, the Set for membership.
+ * not type-check as a reach-table key).
+ *
+ * ⛔ An ALIAS of `@lore/core`'s {@link TERMINAL_ISSUE_RESOLUTION_MEMBERS}
+ * (reference-identical), not a copy: one declaration, three views — this list for
+ * iteration, {@link TERMINAL_ISSUE_RESOLUTIONS} for membership, and the core
+ * array itself for anything browser-side. The alias is kept because
+ * `issue-report-service.ts` imports this name from this module; a consumer that
+ * needs only the vocabulary should import the core name directly.
  */
 export const TERMINAL_ISSUE_RESOLUTION_LIST: readonly TerminalIssueResolution[] = TERMINAL_ISSUE_RESOLUTION_MEMBERS;
 
