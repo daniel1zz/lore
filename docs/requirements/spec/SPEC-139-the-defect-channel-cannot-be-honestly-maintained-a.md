@@ -3,7 +3,7 @@ id: SPEC-139
 type: spec
 role: spec
 title: "The defect channel cannot be honestly maintained: an unreleasable cap whose remedy is inert, two reads that disagree on which corpus, and no non-derogatory supersession"
-status: approved
+status: draft
 priority: medium
 created: 2026-08-11
 updated: 2026-08-11
@@ -187,23 +187,74 @@ observe going RED:
    file-by-file, consumed by both the listing filter and the cap-count path.
 
 
+# Re-baseline log
+
+⛔ An AC edited after it has been red is indistinguishable in the audit trail from covering
+up a failure, no matter how justified. So every in-flight revision is recorded here with
+three things: the original text, the exact observation that prompted the change, and why it
+is a correction rather than a weakening.
+
+## AC-DC-9 — prose only, 2026-08-12
+
+**Original clause:** "…and that single site is the `TERMINAL_ISSUE_RESOLUTIONS` export in
+`packages/lore/src/service/issue-resolution.ts`, imported by both `commands/issues.ts` and
+the cap-count narrowing in `issue-report-service.ts`."
+
+**What was observed.** AC-DC-9 went RED on the merged tree (it was green in its author's
+worktree — a concurrent peer merge invalidated a threshold calibrated against an older base).
+`lore verify` on main at `1634db63`:
+
+```
+exactly one file may construct the terminal-resolution member set:
+expected [ "packages/dashboard/src/lib/api.ts (1)",
+           "packages/lore/src/service/issue-resolution.ts (1)" ]
+to deeply equal [ "packages/lore/src/service/issue-resolution.ts (1)" ]
+```
+
+**What was NOT done.** The scan universe was not narrowed and the assertion was not
+loosened. That would have been an AC weakened after going red, and the duplicate was real —
+type-coupled rather than silent, but real. Instead the second site was ELIMINATED by
+relocating the vocabulary into `@lore/core`, after which AC-DC-9 and AC-DC-12 both pass
+attested with neither statement nor command modified (measured: `AC-DC-9 pass (1675ms, exit 0)`,
+`AC-DC-12 pass (9589ms, exit 0)`, on the rebuilt merged tree).
+
+**What IS being corrected, and why it is not a weakening.** The relocation moved the single
+member LITERAL to `packages/core/src/issue-resolution-vocab.ts`. The clause above names the
+old file, so it is now false — a stale path reference, not a loosened obligation. §M1's own
+"Declared uniqueness check" block pins no path (only "exactly one hit over `packages/**`"),
+so the SPEC was satisfied throughout; the drift is confined to this AC's derived sentence.
+The cardinality asserted (exactly one file, exactly one site), the scan universe
+(`packages/**`, tests included), and the requirement that consumers import rather than
+re-declare are all unchanged. The oracle's own constant was already updated by the
+relocating implementer, which is what surfaced the sentence's drift; it additionally ADDED an
+assertion that the service's list is reference-identical to core's array and reached by
+`import … from "@lore/core"`, so "consumed by the listing filter and the cap count" stays
+machine-checked rather than merely asserted in prose.
+
+
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-DC-1: End-to-end over two throwaway corpora: 10 reports filed, ALL 10 resolved with a non-derogatory terminal state, then the 11th report is ACCEPTED (exit 0) — the exact sequence measured refused (exit 4, byte-identical cap message) on 2026-08-11.
+- [✔] [script] AC-DC-1: End-to-end over two throwaway corpora: 10 reports filed, ALL 10 resolved with a non-derogatory terminal state, then the 11th report is ACCEPTED (exit 0) — the exact sequence measured refused (exit 4, byte-identical cap message) on 2026-08-11.
   script: test — bun test packages/lore/tests/integration/cli/issue-cap-quota-release.bun.test.ts 2>&1 && echo "AC-DC-1 PASS: a non-derogatory resolution releases cap quota end-to-end through the real CLI"
-- [·] [script] AC-DC-2: The cap refusal's structured LoreError.value payload carries blocking[] with one {id, resolution} entry per blocking report AND quota_freeing_states[]; the test asserts quota_freeing_states equals TERMINAL_ISSUE_RESOLUTIONS as SETS (never against a remembered literal list), and that every blocking id in the payload appears in the human stderr render alongside its resolution — so the refusal can never advertise a verb that does not free quota.
+- [✔] [script] AC-DC-2: The cap refusal's structured LoreError.value payload carries blocking[] with one {id, resolution} entry per blocking report AND quota_freeing_states[]; the test asserts quota_freeing_states equals TERMINAL_ISSUE_RESOLUTIONS as SETS (never against a remembered literal list), and that every blocking id in the payload appears in the human stderr render alongside its resolution — so the refusal can never advertise a verb that does not free quota.
   script: test — bun test packages/lore/tests/integration/cli/issue-cap-refusal-message.bun.test.ts 2>&1 && echo "AC-DC-2 PASS: every blocking id in the cap refusal carries its computed resolution and only working verbs are named"
-- [·] [script] AC-DC-3: The ceiling is read from the UPSTREAM corpus's own feedback.inbound.open_report_cap: with N=3 the 3rd report is accepted and the 4th refused naming cap 3 — proving the compiled OPEN_REPORT_CAP literal is no longer the operative value.
+- [✔] [script] AC-DC-3: The ceiling is read from the UPSTREAM corpus's own feedback.inbound.open_report_cap: with N=3 the 3rd report is accepted and the 4th refused naming cap 3 — proving the compiled OPEN_REPORT_CAP literal is no longer the operative value.
   script: test — bun test packages/lore/tests/integration/cli/issue-cap-configurable.bun.test.ts 2>&1 && echo "AC-DC-3 PASS: the upstream corpus own config sets the ceiling, not the compiled constant"
-- [·] [script] AC-DC-4: lore issue resolve --state superseded with NO --superseded-by, and with a pointer that does not resolve to an existing doc, BOTH exit 4 and write nothing — the target task's extra is byte-identical before and after (SHA compared).
+- [✔] [script] AC-DC-4: lore issue resolve --state superseded with NO --superseded-by, and with a pointer that does not resolve to an existing doc, BOTH exit 4 and write nothing — the target task's extra is byte-identical before and after (SHA compared).
   script: test — bun test packages/lore/tests/integration/cli/issue-resolve-pointer-required.bun.test.ts 2>&1 && echo "AC-DC-4 PASS: a non-derogatory terminal state without a resolving pointer is refused and writes nothing"
-- [·] [script] AC-DC-5: In a consumer corpus with feedback.upstream configured, lore issues --all --json returns the SAME doc-id SET (set equality, not merely non-empty) as lore report-issue --list --json; both --json payloads carry a top-level corpus_path equal to the upstream corpus absolute path, and both human renders' FIRST line matches the fixed prefix 'Corpus: ' followed by that same path.
+- [✔] [script] AC-DC-5: In a consumer corpus with feedback.upstream configured, lore issues --all --json returns the SAME doc-id SET (set equality, not merely non-empty) as lore report-issue --list --json; both --json payloads carry a top-level corpus_path equal to the upstream corpus absolute path, and both human renders' FIRST line matches the fixed prefix 'Corpus: ' followed by that same path.
   script: test — bun test packages/lore/tests/integration/cli/issue-read-surfaces-agree.bun.test.ts 2>&1 && echo "AC-DC-5 PASS: both issue read surfaces return the same id set and each names the corpus it read"
-- [·] [script] AC-DC-6: Reverse control for AC-DC-5: lore issues --local in that SAME consumer corpus returns zero rows and names the CONSUMER corpus path — proving the source actually switches rather than both branches reading upstream.
+- [✔] [script] AC-DC-6: Reverse control for AC-DC-5: lore issues --local in that SAME consumer corpus returns zero rows and names the CONSUMER corpus path — proving the source actually switches rather than both branches reading upstream.
   script: test — bun test packages/lore/tests/integration/cli/issue-read-surface-local-control.bun.test.ts 2>&1 && echo "AC-DC-6 PASS: --local reads the cwd corpus and names it, so the default upstream read is a real switch"
-- [·] [script] AC-DC-8: Rewriting a script-mode AC's verify.command bumps that criterion's oracle_generation, computeAcCoverage reports pre-bump evidence as prior-generation, and every stored evidence row is byte-identical before and after (SHA of the serialized rows compared) — supersession is additive metadata, never an edit.
+- [✔] [script] AC-DC-8: Rewriting a script-mode AC's verify.command bumps that criterion's oracle_generation, computeAcCoverage reports pre-bump evidence as prior-generation, and every stored evidence row is byte-identical before and after (SHA of the serialized rows compared) — supersession is additive metadata, never an edit.
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-oracle-generation.test.ts 2>&1 && echo "AC-DC-8 PASS: an oracle polarity change marks prior-generation evidence without mutating a single row"
-- [·] [script] AC-DC-9: A REPO-WIDE search over packages/** finds exactly ONE construction site of the terminal-issue-resolution member set (the rejected/wontfix/superseded/duplicate tokens co-occurring in one set or array literal) — so a fourth copy in any unnamed file goes RED — and that single site is the TERMINAL_ISSUE_RESOLUTIONS export in packages/lore/src/service/issue-resolution.ts, imported by both commands/issues.ts and the cap-count narrowing in issue-report-service.ts.
+- [✘] [script] AC-DC-9: A REPO-WIDE search over packages/** finds exactly ONE construction site of the terminal-issue-resolution member set (the rejected/wontfix/superseded/duplicate tokens co-occurring in one set or array literal) — so a fourth copy in any unnamed file goes RED — and that single site is the vocabulary in packages/core/src/issue-resolution-vocab.ts, from which packages/lore/src/service/issue-resolution.ts derives its export by import (reference-identical, machine-asserted) and which commands/issues.ts and the cap-count narrowing in issue-report-service.ts consume rather than re-declare. See the spec's Re-baseline log for why this names core rather than the service file.
   script: test — bunx vitest run packages/lore/tests/unit/service/terminal-resolution-ssot.test.ts 2>&1 && echo "AC-DC-9 PASS: one terminal-resolution definition site, consumed by both the listing filter and the cap count"
-- [·] [script] AC-DC-7: The severity and category flags round-trip into extra.issue_report and appear on BOTH read surfaces (a rendered column plus a --json key), AND provably change no admission decision: a quota filled entirely with severity=critical reports still refuses a further critical report.
+- [✔] [script] AC-DC-7: The severity and category flags round-trip into extra.issue_report and appear on BOTH read surfaces (a rendered column plus a --json key), AND provably change no admission decision: a quota filled entirely with severity=critical reports still refuses a further critical report.
   script: test — bun test packages/lore/tests/integration/cli/issue-severity-ordering-only.bun.test.ts 2>&1 && echo "AC-DC-7 PASS: severity/category are visible on both reads and change no admission decision"
+- [✔] [script] AC-DC-10: The oracle-generation split is REACHABLE from a user-facing surface: for an AC whose script command was rewritten after evidence was recorded, lore ac list names the prior-generation rows distinctly from current-generation ones, and the same distinction appears in the ac coverage --json payload. Asserted by driving the SURFACE (spawning the command), never the aggregator — a unit test over computeAcCoverage passes whether or not any renderer reads the field.
+  script: test — bun test packages/lore/tests/integration/cli/ac-oracle-generation-surface.bun.test.ts 2>&1 && echo "AC-DC-10 PASS: a retired oracle is visible as retired on the ac read surface, not only in the aggregator"
+- [·] [script] AC-DC-11: The retired-oracle signal reaches the FEED surface: for a task whose governing AC had its script command rewritten after evidence was recorded, lore feed task-start names the prior-generation evidence distinctly from current-generation, so an implementer dispatched off the pack cannot read a retired-oracle green as a plain green. Asserted by spawning lore feed task-start, never by calling the flow in-process.
+  script: test — bun test packages/lore/tests/integration/cli/feed-retired-oracle-visibility.bun.test.ts 2>&1 && echo "AC-DC-11 PASS: the feed pack distinguishes retired-oracle evidence from current"
+- [✔] [script] AC-DC-12: The dashboard cannot silently lag the IssueResolution union: a type-level assertion ties the dashboard's resolution vocabulary to the @lore/core union so ADDING a member without updating the dashboard FAILS TO COMPILE, and every resolution switch is exhaustive (never-checked) rather than defaulting. Asserted by a probe that adds a synthetic 13th member and observes a typecheck failure naming the dashboard site — a test that only checks the two current members would pass against a re-frozen hand-mirror.
+  script: test — bunx vitest run packages/dashboard/tests/unit/issue-resolution-union-parity.test.ts 2>&1 && echo "AC-DC-12 PASS: the dashboard resolution vocabulary is type-tied to the core union and both switches are exhaustive"
