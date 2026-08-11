@@ -20,7 +20,12 @@
  *     question on its own.
  *   - `buildIssueReportExtra` — assembles the `extra` payload for the
  *     upstream ad-hoc draft task `createDraft` writes.
- *   - `OPEN_REPORT_CAP` — the R-5d rate-cap ceiling (10).
+ *   - `OPEN_REPORT_CAP` — the SHIPPED DEFAULT for the R-5d rate-cap ceiling
+ *     (10). ⛔ No longer the operative ceiling: since spec-the-defect-channel-
+ *     cannot-be-honestly-maintained-an §M2 it is the Zod default of
+ *     `feedback.inbound.open_report_cap`, and the value in force is resolved
+ *     from the UPSTREAM corpus's own config by `config.ts`'s
+ *     `resolveOpenReportCap`. See this constant's own JSDoc.
  *
  * Concurrency contract surface (spec-report-issue-has-no-specified-
  * concurrency-contract-ac-072, §Contract Details) — the SSOT for the DECLARED
@@ -235,14 +240,27 @@ export function buildIssueReportExtra(p: IssueReportPayload): Record<string, unk
 }
 
 /**
- * R-5d rate-cap ceiling — the maximum number of simultaneously-open reports a
- * single reporter project may have filed upstream before `lore report-issue`
- * refuses to file another (SPEC-072 §5 step 6, AC-072-6).
+ * The SHIPPED DEFAULT for the R-5d rate-cap ceiling — the maximum number of
+ * simultaneously-open reports a single reporter project may have filed upstream
+ * before `lore report-issue` refuses to file another (SPEC-072 §5 step 6,
+ * AC-072-6).
  *
  * "Open" here means COMPUTED RESOLUTION not in `TERMINAL_ISSUE_RESOLUTIONS`
  * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1), NOT
  * `status === "draft"` — see {@link countOpenReports}'s own doc for the measured
  * reason those two are not the same question.
+ *
+ * ⛔ NOT the operative ceiling — do not read this at an enforcement site. Since
+ * §M2 the value in force is the UPSTREAM corpus's own declared
+ * `feedback.inbound.open_report_cap`, of which this constant is the Zod default:
+ * `config.ts`'s `resolveOpenReportCap` is the ONE resolution seam, and
+ * `IssueReportService` calls it with the upstream's loaded config. A ceiling the
+ * queue's owner cannot set is not a policy, it is a build-time constant — which
+ * is exactly the defect §M2 closes. Enforced observably rather than by prose:
+ * `tests/integration/cli/issue-cap-configurable.bun.test.ts` (AC-DC-3) drives
+ * THREE different operative ceilings — 3, 1, and this default — against one
+ * binary, so any code path that read this literal as the ceiling would fail two
+ * of the three.
  */
 export const OPEN_REPORT_CAP = 10;
 
