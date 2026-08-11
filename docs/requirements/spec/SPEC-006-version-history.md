@@ -1,5 +1,5 @@
 ---
-id: SPEC-6
+id: SPEC-006
 type: spec
 role: spec
 title: "Version History"
@@ -10,9 +10,9 @@ updated: 2026-07-14
 tags: [versioning, history, rollback, audit, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-1, type: implements}
-  - {id: SPEC-2, type: relates-to}
-  - {id: SPEC-5, type: relates-to}
+  - {id: SPEC-001, type: implements}
+  - {id: SPEC-002, type: relates-to}
+  - {id: SPEC-005, type: relates-to}
 ---
 # SPEC-006: Version History
 

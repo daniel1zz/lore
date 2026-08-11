@@ -3,12 +3,12 @@ id: PLAN-022
 type: plan
 role: plan
 title: "Implementation — P2 workflow state machine (checkpoint registry + commit-time gates)"
-status: approved
+status: archived
 priority: high
 created: 2026-07-09
-updated: 2026-07-09
+updated: 2026-07-26
 tags: [ioc, p2, state-machine, gate]
-parent: SPEC-042
+parent: SPEC-086
 phases:
   - {name: "Core: registry + predicates", description: "Pure, no IO: checkpointRegistry + new predicates, fully unit-tested before wiring"}
   - {name: "Gate wiring + config", description: "lore gate plan-promote|task-claim dispatch + workflow.gates config + feeding-pack"}

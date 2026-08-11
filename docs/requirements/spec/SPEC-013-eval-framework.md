@@ -1,5 +1,5 @@
 ---
-id: SPEC-13
+id: SPEC-013
 type: spec
 role: spec
 title: "Eval Framework"
@@ -10,9 +10,9 @@ updated: 2026-07-14
 tags: [eval, observability, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-7, type: relates-to}
-  - {id: SPEC-12, type: relates-to}
-  - {id: SPEC-3, type: implements}
+  - {id: SPEC-007, type: relates-to}
+  - {id: SPEC-012, type: relates-to}
+  - {id: SPEC-003, type: implements}
 ---
 # SPEC-013 — Eval Framework
 

@@ -3,12 +3,12 @@ id: PLAN-024
 type: plan
 role: plan
 title: "Implementation — corpus-governed spec-production loop (IoC slice)"
-status: approved
+status: archived
 priority: high
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-07-26
 tags: [implementation, ioc-slice, hook-gate]
-parent: SPEC-044
+parent: SPEC-052
 phases:
   - {name: "Phase 1 — gate kernel", description: "Pure predicates + spec-create/spec-promote gate commands with paired RED tests"}
   - {name: "Phase 2 — feeding asset", description: "Seed write-spec rule doc + minimal-slice feeding-pack trimming"}

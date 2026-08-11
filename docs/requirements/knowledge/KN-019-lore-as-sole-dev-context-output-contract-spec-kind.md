@@ -3,12 +3,14 @@ id: KN-019
 type: knowledge
 role: knowledge
 title: "Lore as sole dev context — output contract + spec_kind taxonomy + dashboard-as-PRD-projection"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-07-08
 tags: [output-contract, taxonomy, dashboard, ssot, ideation]
 parent: PRD-001
+links:
+  - {id: PRD-001, type: informs}
 ---
 # Ideation: Lore as sole dev context — output contract + type taxonomy + dashboard-as-PRD-projection
 

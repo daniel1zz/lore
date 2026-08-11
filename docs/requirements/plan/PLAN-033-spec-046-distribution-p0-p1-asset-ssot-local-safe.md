@@ -8,7 +8,7 @@ priority: high
 created: 2026-07-16
 updated: 2026-07-26
 tags: [distribution, installer, p17, setup]
-parent: SPEC-085
+parent: SPEC-046
 phases:
   - {name: "P0-assets", description: "Vendor the assets/ SSOT tree (skills/agents/hooks/project) + author the standalone corpus-workflow.md governance snippet FRESH + assets-ssot conformance test (AC-046-D). Independent of the code branch (D3)."}
   - {name: "core-pure", description: "@lore/core pure browser-safe setup modules: setup-manifest.ts (schema + planInstall), merge-settings.ts (narrow input), register-mcp.ts (args builder), barrel export; one six-dimension vitest (AC-046-A)."}
@@ -16,7 +16,7 @@ phases:
   - {name: "cli-adapter", description: "Real port impls (asset-source/fs/mcp-registrar) + adapters/cli/setup-render.ts receipt + adapters/cli/commands/setup.ts (flags + targetDir resolution + wiring in app.ts/loader) + full regression AC-046-E."}
   - {name: "verification", description: "Owner sandbox smoke AC-046-F (human oracle) — install into mktemp claude-dir, verify receipt, re-run all-skipped, uninstall restores. Left UNCLAIMED for the owner; never run against real ~/.claude."}
 links:
-  - {id: SPEC-085, type: implements}
+  - {id: SPEC-046, type: implements}
 ---
 ## Overview
 

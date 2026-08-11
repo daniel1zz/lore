@@ -3,11 +3,12 @@ id: KN-040
 type: knowledge
 role: knowledge
 title: "Retro — IoC P2+P4 build under score-gated autonomy (adversarial-review findings + migration/MCP-gate learnings)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-09
-updated: 2026-07-10
+updated: 2026-07-14
 tags: [ioc, p2, p4, retro, review, autonomy, migration, mcp-gate]
+parent: PRD-001
 links:
   - {id: ADR-002, type: informs}
 ---

@@ -8,7 +8,7 @@ priority: medium
 created: 2026-07-21
 updated: 2026-07-21
 tags: []
-parent: SPEC-085
+parent: SPEC-046
 ---
 # SPEC-046 amendment — vendor the SubagentStop commit guard
 

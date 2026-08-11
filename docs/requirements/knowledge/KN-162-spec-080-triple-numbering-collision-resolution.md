@@ -3,11 +3,12 @@ id: KN-162
 type: knowledge
 role: knowledge
 title: "SPEC-080 triple numbering collision — resolution protocol + gate mechanization candidate"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26
 tags: []
+parent: PRD-001
 ---
 ## Incident
 

@@ -8,6 +8,6 @@ priority: medium
 created: 2026-07-24
 updated: 2026-07-24
 tags: []
-parent: SPEC-082
+parent: SPEC-091
 ---
 Single implementer task: types + 3 stores + migration + log render + restore pin + AC tests (AC-072-1..4). Oracles: typecheck, scoped vitest + bun test.

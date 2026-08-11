@@ -10,7 +10,10 @@ updated: 2026-07-31
 tags: []
 parent: PRD-001
 links:
-  - {id: ADR-1, type: informs}
+  - {id: ADR-017, type: implements}
+  - {id: ADR-001, type: informs}
+  - {id: KN-326, type: relates-to}
+  - {id: KN-327, type: relates-to}
 ---
 # plan-close predicates measure invariants: an applicability verdict in the type, per-claimed-AC attested coverage, and attributable domain-doc sync
 

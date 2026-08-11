@@ -8,7 +8,7 @@ priority: medium
 created: 2026-07-23
 updated: 2026-07-24
 tags: []
-parent: SPEC-084
+parent: SPEC-089
 ---
 # Plan
 

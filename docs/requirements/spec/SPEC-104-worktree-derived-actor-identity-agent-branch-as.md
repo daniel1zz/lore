@@ -10,7 +10,7 @@ updated: 2026-07-28
 tags: []
 parent: PRD-001
 links:
-  - {id: SPEC-90, type: relates-to}
+  - {id: SPEC-090, type: relates-to}
   - {id: SPEC-093, type: implements}
 ---
 ## Overview/Goal

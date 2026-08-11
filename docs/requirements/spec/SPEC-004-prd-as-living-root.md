@@ -1,5 +1,5 @@
 ---
-id: SPEC-4
+id: SPEC-004
 type: spec
 role: spec
 title: "PRD-as-Living-Root"
@@ -10,9 +10,9 @@ updated: 2026-07-14
 tags: [mdx, living-root, navigation, core-differentiator, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-1, type: implements}
-  - {id: SPEC-2, type: relates-to}
-  - {id: SPEC-3, type: relates-to}
+  - {id: SPEC-001, type: implements}
+  - {id: SPEC-002, type: relates-to}
+  - {id: SPEC-003, type: relates-to}
 ---
 # SPEC-004: PRD-as-Living-Root
 

@@ -1,5 +1,5 @@
 ---
-id: SPEC-3
+id: SPEC-003
 type: spec
 role: spec
 title: "CLI Adapter"
@@ -10,9 +10,9 @@ updated: 2026-07-25
 tags: [cli, adapter, ux, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-1, type: implements}
-  - {id: SPEC-2, type: relates-to}
-  - {id: SPEC-4, type: relates-to}
+  - {id: SPEC-001, type: implements}
+  - {id: SPEC-002, type: relates-to}
+  - {id: SPEC-004, type: relates-to}
 ---
 # SPEC-003: CLI Adapter
 

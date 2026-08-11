@@ -3,19 +3,19 @@ id: PLAN-031
 type: plan
 role: plan
 title: "Implementation — SPEC-080 PRD-as-outline contract"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26
 tags: []
-parent: SPEC-080
+parent: SPEC-081
 phases:
   - {name: "Phase 1: Core schemas & outline writer", description: "outlineEntry/outline_budget/prd_sync_exempt schemas + SPEC_KINDS domain-overview + verification profile; PrdOutlineService + set-guards + renderOutlineContent; CLI lore outline group"}
   - {name: "Phase 2: Oracles & gate predicate", description: "lore status --check-prd-budget (tiered budgets, content-flight, detail-link hop check, advisory knob); plan-close prdOutlineSynced predicate + exemption surfacing"}
   - {name: "Phase 3: Migration machinery", description: "OutlineMigrationService (dry-run set-equality invariants, idempotent markers) + lore migrate prd-to-outline + bootstrap payload pin"}
   - {name: "Phase 4: Corpus migration & close-out", description: "Staged live-corpus migration; authoring-surface sync (lore-product asset + CLAUDE.md); full-suite verify/assess close-out"}
 links:
-  - {id: SPEC-080, type: implements}
+  - {id: SPEC-081, type: implements}
 ---
 # Implementation — SPEC-080 PRD-as-outline contract
 

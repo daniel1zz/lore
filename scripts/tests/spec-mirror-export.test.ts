@@ -46,10 +46,11 @@
 
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExportIndexMapping } from "@lore/core";
+import { NoOpTelemetry } from "@lore/core";
 import {
   computeMirrorParity,
   scriptChainReachesTarget,
@@ -57,7 +58,19 @@ import {
   countMdFilesFlat,
   MIRROR_DRIFT_EXIT_CODE,
   SPEC_MIRROR_DIR_RELATIVE,
+  MIRROR_TYPES,
+  mirrorDirRelative,
+  type MirrorDocType,
 } from "../export-spec-mirror-core.js";
+import { InMemoryStore } from "../../packages/lore/src/store/in-memory-store.js";
+import { CorpusService } from "../../packages/lore/src/service/corpus-service.js";
+import { MigrationService } from "../../packages/lore/src/service/migration-service.js";
+import { ReviewService } from "../../packages/lore/src/service/review-service.js";
+import { VersionService } from "../../packages/lore/src/service/version-service.js";
+import { OutlineService } from "../../packages/lore/src/service/outline-service.js";
+import { TreeCheckService } from "../../packages/lore/src/service/tree-check-service.js";
+import { runMigrationCoverage } from "../../packages/lore/src/eval/scenarios/migration-coverage.js";
+import type { App } from "../../packages/lore/src/app.js";
 
 // ─── Path setup ─────────────────────────────────────────────────────────────
 
@@ -121,6 +134,270 @@ function measureLiveParity(): { specs: { id: string; slug: string }[]; mappings:
   const fileExists = (relPath: string): boolean => existsSync(join(REPO_ROOT, relPath));
   return { specs, mappings, fileCountOnDisk, fileExists };
 }
+
+// ─── AC-FR-10: all-types-parity-and-id-format helpers ────────────────────────
+//
+// spec-falsifiability-reachability-a-feedable-checkpoint-an D6, AC-FR-10 (task-unify-mirror-
+// identifiers-on-zero-padded-form-export-all, 2026-08-11) — widens AC-FR-6/AC-FR-7's spec-only
+// scope to all six mirrored doc types, and adds two NEW invariants AC-FR-6 never asserted:
+// (b) every mirror file's frontmatter `id:` is byte-identical to its filename's leading
+// identifier, zero-padded to 3 digits; (c) the migration-coverage eval over docs/requirements
+// reports links_broken === 0. ⛔ Asserted against THIS repo's PRODUCTION corpus — the sibling
+// AC-FR-1 (a different plan) went green on a self-seeded corpus while 7 of 8 checkpoints were
+// empty in production, which is exactly the failure mode a fixture-only proof would repeat here.
+
+/** Live corpus (id, slug) pairs for ONE {@link MirrorDocType} via a real `lore list --type <t>
+ *  --json --include-invalid` subprocess. `--include-invalid` matches EXACTLY what
+ *  `ExportDocsService.exportDocs` itself walks (`StoreInterface.findMany` has no invalidation
+ *  filter at all — that filter is a `CorpusService.list()`-only post-filter, SPEC-043 D3);
+ *  omitting the flag would make knowledge/adr/task counts structurally NEVER match the mirror,
+ *  for a reason having nothing to do with padding or missing exports. */
+function readLiveCorpusDocsIncludingInvalid(type: MirrorDocType): { id: string; slug: string }[] {
+  const result = runLore(["list", "--type", type, "--json", "--include-invalid"]);
+  if (result.exitCode !== 0) {
+    throw new Error(`test setup: lore list --type ${type} --json --include-invalid failed (exit ${result.exitCode}): ${result.stderr}`);
+  }
+  const parsed = JSON.parse(result.stdout) as { data: { docs: { id: string; slug: string }[] } };
+  return parsed.data.docs.map((d) => ({ id: d.id, slug: d.slug }));
+}
+
+/** Every `.md` file's basename directly under one mirror type's directory (non-recursive, matches {@link countMdFilesFlat}'s own scope). */
+function listMirrorFilenames(type: MirrorDocType): string[] {
+  const dir = join(REPO_ROOT, mirrorDirRelative(type));
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".md"))
+    .map((e) => e.name);
+}
+
+/** Extracts the frontmatter `id:` scalar from a file's raw content — a minimal, test-local regex parse (mirrors `export-docs-service.test.ts`'s own `parseFrontmatterScalars`, not shared, since that file lives in a different package and this repo's convention keeps test helpers local per SPEC-013's eval CLAUDE.md note on fixtures). Returns `null` if no strict frontmatter block or no `id:` line is found. */
+function extractIdFromFileContent(content: string): string | null {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const match = normalized.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!match) return null;
+  for (const line of (match[1] ?? "").split("\n")) {
+    if (line.startsWith("id:")) return line.slice("id:".length).trim();
+  }
+  return null;
+}
+
+/** Extracts the leading `{PREFIX}-{digits}` identifier from a mirror filename, e.g. `"SPEC-021-foo.md"` → `"SPEC-021"`. Returns `null` if the filename has no such leading segment. */
+function extractFilenameLeadingId(filename: string): string | null {
+  const match = filename.match(/^([A-Za-z]+-\d+)-/);
+  return match?.[1] ?? null;
+}
+
+/** True iff `id`'s numeric suffix is zero-padded to AT LEAST 3 digits (`padStart(3,"0")` round-trips to itself) — the canonical mirror form (task-unify-mirror-identifiers-on-zero-padded-form-export-all, 2026-08-11). */
+function isThreeDigitPadded(id: string): boolean {
+  const match = id.match(/^[A-Za-z]+-(\d+)$/);
+  if (!match) return false;
+  const digits = match[1] as string;
+  return digits.padStart(3, "0") === digits;
+}
+
+/** Builds a throwaway `App` backed by `InMemoryStore` — the SAME construction `packages/lore/tests/unit/eval/migration-coverage.test.ts::makeApp` uses, duplicated here (not imported — that file is a `packages/lore`-internal test, this one lives under `scripts/tests/`, and this repo's convention keeps eval-scenario test fixtures local rather than exporting a shared test-only App builder from `src/`). NEVER touches this repo's own `.lore/lore.db` — `MigrationService`/`InMemoryStore` here operate entirely in memory. */
+function makeThrowawayApp(): App {
+  const store = new InMemoryStore();
+  const telemetry = new NoOpTelemetry();
+  return {
+    corpusService: new CorpusService(store, telemetry),
+    reviewService: new ReviewService(store),
+    versionService: new VersionService(store),
+    outlineService: new OutlineService(store),
+    migrationService: new MigrationService(store),
+    treeCheckService: new TreeCheckService(store),
+    apiKeyStore: null as unknown as App["apiKeyStore"],
+    aiProviderService: null as unknown as App["aiProviderService"],
+    syncDocsService: null as unknown as App["syncDocsService"],
+    exportDocsService: null as unknown as App["exportDocsService"],
+    phaseService: null as unknown as App["phaseService"],
+    taskWorkflowService: null as unknown as App["taskWorkflowService"],
+    specKindService: null as unknown as App["specKindService"],
+    judgmentService: null as unknown as App["judgmentService"],
+    auditService: null as unknown as App["auditService"],
+    callerSurface: "cli" as const,
+    resolveAiDefault: (_explicit?: boolean) => ({ ai: false, source: "cli_flag" as const }),
+    telemetry,
+    close: () => { telemetry.close(); },
+  };
+}
+
+describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL production corpus (all six doc types, never a fixture)", () => {
+  it(
+    "HAPPY (a+b): for every mirrored doc type, on-disk file count equals the live corpus count, and every mirror file's frontmatter id: is byte-identical to its filename's zero-padded leading identifier",
+    () => {
+      const baseline = runMirrorScript([]);
+      expect(baseline.exitCode).toBe(0);
+
+      let totalFilesChecked = 0;
+      for (const type of MIRROR_TYPES) {
+        const liveDocs = readLiveCorpusDocsIncludingInvalid(type);
+        const filenames = listMirrorFilenames(type);
+
+        // (a) exact-count parity, per type, against the LIVE corpus — never a literal.
+        expect(filenames.length).toBe(liveDocs.length);
+
+        // (b) every mirror file's frontmatter id: is byte-identical to its filename's leading
+        // identifier, AND that shared value is zero-padded to (at least) 3 digits.
+        for (const filename of filenames) {
+          const filenameId = extractFilenameLeadingId(filename);
+          expect(filenameId, `${type}/${filename} has no {PREFIX}-{digits}- leading identifier`).not.toBeNull();
+
+          const absPath = join(REPO_ROOT, mirrorDirRelative(type), filename);
+          const content = readFileSync(absPath, "utf8");
+          const frontmatterId = extractIdFromFileContent(content);
+          expect(frontmatterId, `${type}/${filename} has no frontmatter id: line`).not.toBeNull();
+
+          expect(frontmatterId, `${type}/${filename}: frontmatter id: (${frontmatterId}) != filename leading id (${filenameId})`).toBe(filenameId);
+          expect(isThreeDigitPadded(frontmatterId as string), `${type}/${filename}: id "${frontmatterId}" is not zero-padded to 3 digits`).toBe(true);
+
+          totalFilesChecked += 1;
+        }
+      }
+
+      // Sanity floor: never a vacuous pass over zero files (would trivially satisfy every
+      // assertion above without checking anything real).
+      expect(totalFilesChecked).toBeGreaterThan(0);
+    },
+    60_000,
+  );
+
+  it(
+    "HAPPY (c): the migration-coverage eval over the REAL docs/requirements reports links_broken === 0",
+    async () => {
+      const baseline = runMirrorScript([]);
+      expect(baseline.exitCode).toBe(0);
+
+      const app = makeThrowawayApp();
+      const result = await runMigrationCoverage(join(REPO_ROOT, "docs", "requirements"), app);
+      app.close();
+
+      expect(result.expected_files).toBeGreaterThan(0); // sanity floor: never a vacuous empty-dir pass
+      expect(result.links_broken).toBe(0);
+    },
+    60_000,
+  );
+
+  it(
+    "RED (a) — live: deleting one exported file of any type makes the per-type count parity check fail, naming that type and slug",
+    () => {
+      const baseline = runMirrorScript([]);
+      expect(baseline.exitCode).toBe(0);
+
+      // "plan" (never spec — AC-FR-6/AC-FR-7 already cover spec's own RED cases) — any doc with
+      // an export-index mapping works; the first one found is as good as any other.
+      const type: MirrorDocType = "plan";
+      const mappings = loadMirrorMappings(REPO_ROOT);
+      const liveDocs = readLiveCorpusDocsIncludingInvalid(type);
+      const target = liveDocs.find((d) => mappings[d.id] !== undefined);
+      if (target === undefined) {
+        throw new Error(`test setup: no live ${type} doc has an export-index mapping after a clean export`);
+      }
+      const mapping = mappings[target.id] as ExportIndexMapping;
+      const absPath = join(REPO_ROOT, mapping.file_path);
+
+      unlinkSync(absPath);
+      try {
+        const filenames = listMirrorFilenames(type);
+        expect(filenames.length).not.toBe(liveDocs.length);
+
+        const parity = computeMirrorParity(
+          liveDocs,
+          mappings,
+          (relPath) => existsSync(join(REPO_ROOT, relPath)),
+          filenames.length,
+        );
+        expect(parity.ok).toBe(false);
+        expect(parity.missing).toContainEqual({ slug: target.slug, reason: "file_absent" });
+      } finally {
+        const restore = runMirrorScript([]);
+        expect(restore.exitCode).toBe(0);
+        expect(existsSync(absPath)).toBe(true);
+      }
+    },
+    60_000,
+  );
+
+  it(
+    "RED (b) — live: rewriting one mirror file's frontmatter id: to the non-padded form fails, naming that exact file",
+    () => {
+      const baseline = runMirrorScript([]);
+      expect(baseline.exitCode).toBe(0);
+
+      const type: MirrorDocType = "adr";
+      const filenames = listMirrorFilenames(type);
+      const target = filenames.find((f) => extractFilenameLeadingId(f) !== null);
+      if (target === undefined) {
+        throw new Error(`test setup: no ${type} mirror file has a parseable leading identifier`);
+      }
+      const filenameId = extractFilenameLeadingId(target) as string;
+      const numMatch = filenameId.match(/^([A-Za-z]+)-0*(\d+)$/);
+      if (numMatch === null) {
+        throw new Error(`test setup: ${filenameId} does not parse as {PREFIX}-{digits}`);
+      }
+      const prefix = numMatch[1] as string;
+      const nonPaddedId = `${prefix}-${Number.parseInt(numMatch[2] as string, 10)}`;
+
+      const absPath = join(REPO_ROOT, mirrorDirRelative(type), target);
+      const original = readFileSync(absPath, "utf8");
+      const mutated = original.replace(/^id: .+$/m, `id: ${nonPaddedId}`);
+      expect(mutated).not.toBe(original); // sanity: the replace actually matched something
+
+      writeFileSync(absPath, mutated, "utf8");
+      try {
+        const rewritten = readFileSync(absPath, "utf8");
+        const frontmatterId = extractIdFromFileContent(rewritten);
+        expect(frontmatterId).toBe(nonPaddedId);
+        // The RED this test demonstrates: frontmatter id: no longer matches the filename's
+        // leading identifier, nor is it 3-digit padded — exactly the AC-FR-10(b) failure shape.
+        expect(frontmatterId).not.toBe(filenameId);
+        expect(isThreeDigitPadded(frontmatterId as string)).toBe(false);
+      } finally {
+        writeFileSync(absPath, original, "utf8");
+        expect(readFileSync(absPath, "utf8")).toBe(original);
+      }
+    },
+    60_000,
+  );
+
+  it(
+    "RED (c) — live: pointing one cross-type reference at a non-existent id makes migration-coverage's links_broken non-zero",
+    async () => {
+      const baseline = runMirrorScript([]);
+      expect(baseline.exitCode).toBe(0);
+
+      // A plan mirror file with at least one links: entry — PLAN-115 (audit-remediation, cited
+      // in this task's own root-cause diagnosis) always has outbound spec links on this corpus;
+      // fall back to scanning if that exact file ever moves.
+      const planFilenames = listMirrorFilenames("plan");
+      const target = planFilenames.find((f) => {
+        const content = readFileSync(join(REPO_ROOT, mirrorDirRelative("plan"), f), "utf8");
+        return /^links:\n(  - .*\n)+/m.test(content);
+      });
+      if (target === undefined) {
+        throw new Error("test setup: no plan mirror file has a links: array to corrupt");
+      }
+      const absPath = join(REPO_ROOT, mirrorDirRelative("plan"), target);
+      const original = readFileSync(absPath, "utf8");
+      const mutated = original.replace(/(links:\n  - \{id: )([^,]+)(, )/, `$1SPEC-999999$3`);
+      expect(mutated).not.toBe(original); // sanity: the replace actually matched something
+
+      writeFileSync(absPath, mutated, "utf8");
+      try {
+        const app = makeThrowawayApp();
+        const result = await runMigrationCoverage(join(REPO_ROOT, "docs", "requirements"), app);
+        app.close();
+
+        expect(result.links_broken).toBeGreaterThan(0);
+        expect(result.passed).toBe(false);
+      } finally {
+        writeFileSync(absPath, original, "utf8");
+        expect(readFileSync(absPath, "utf8")).toBe(original);
+      }
+    },
+    60_000,
+  );
+});
 
 // ─── Pure: computeMirrorParity ──────────────────────────────────────────────
 

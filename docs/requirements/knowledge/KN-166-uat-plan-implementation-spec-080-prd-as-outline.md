@@ -3,11 +3,12 @@ id: KN-166
 type: knowledge
 role: knowledge
 title: "UAT — plan-implementation-spec-080-prd-as-outline-contract"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26
 tags: []
+parent: PLAN-031
 links:
   - {id: PLAN-031, type: informs}
 ---

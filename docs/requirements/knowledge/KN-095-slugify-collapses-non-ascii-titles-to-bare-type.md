@@ -8,9 +8,9 @@ priority: medium
 created: 2026-07-23
 updated: 2026-07-24
 tags: [dogfood, slugify, cjk, defect]
-parent: SPEC-084
+parent: SPEC-089
 links:
-  - {id: SPEC-084, type: informs}
+  - {id: SPEC-089, type: informs}
 ---
 # Finding: non-ASCII title → degenerate slug, and slug is unfixable after create
 

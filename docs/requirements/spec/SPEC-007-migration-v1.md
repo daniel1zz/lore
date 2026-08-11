@@ -1,5 +1,5 @@
 ---
-id: SPEC-7
+id: SPEC-007
 type: spec
 role: spec
 title: "Migration v1"
@@ -10,8 +10,8 @@ updated: 2026-07-14
 tags: [migration, docman-v1, import, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-1, type: implements}
-  - {id: SPEC-2, type: relates-to}
+  - {id: SPEC-001, type: implements}
+  - {id: SPEC-002, type: relates-to}
 ---
 # SPEC-007: Migration v1
 
