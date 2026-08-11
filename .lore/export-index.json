@@ -5464,6 +5464,10 @@
     "01KZQJAN1922J51FYSQ3QFCD6K": {
       "human_id": "KN-417",
       "file_path": "docs/requirements/knowledge/KN-417-five-findings-from-planning-the-bootstrap-fixpoint.md"
+    },
+    "01KZQMCJNNV7GB8CCX389BQG1T": {
+      "human_id": "KN-418",
+      "file_path": "docs/requirements/knowledge/KN-418-handoff-agent-main-orchestrator.md"
     }
   }
 }

@@ -2,13 +2,15 @@
 id: KN-417
 type: knowledge
 role: knowledge
-title: "Five findings from planning the bootstrap-fixpoint slice: a plan-scoped anchor mutex, a hook that misnames its own refusal, an asymmetric AC demotion, and two probes that nearly lied"
+title: "Seven findings from planning the bootstrap-fixpoint slice: a plan-scoped anchor mutex and its equally blind report, a hook that misnames its own refusal, an asymmetric AC demotion, the self-exempting-oracle pair, and four probes of my own that nearly lied"
 status: approved
 priority: medium
 created: 2026-08-11
 updated: 2026-08-11
 tags: []
 parent: PRD-001
+links:
+  - {id: KN-170, type: relates-to}
 ---
 # Five findings from planning the bootstrap-fixpoint slice: a plan-scoped anchor mutex, a hook that misnames its own refusal, an asymmetric AC demotion, and two probes that nearly lied
 
@@ -50,12 +52,28 @@ followed is not a mechanism."* The author wrote that prose knowing it, which is 
 condition for reporting a gate gap: **an extra manual step taken to compensate for a gate IS the
 signal that the gate has a hole.**
 
+**The detection surface has the same blind spot, which is what makes it dangerous.**
+`lore ready <plan>`'s `anchor_conflicts` is plan-scoped by the same mechanism, so the pre-dispatch
+check an orchestrator runs to find collisions cannot see the other plan either. Measured here: with
+`agent:mirror-id-unify`'s claim LIVE and overlapping this plan's T6 on
+`scripts/export-spec-mirror-core.ts`, `lore ready` on the new plan printed `Sessions (0)` and no
+conflict section, while `lore ready` on the foreign task's own plan printed
+`⚠ Anchor conflicts (1)` for the identical overlap. So `anchor_conflicts: []` means "no conflict
+*within this plan*", but reads as "safe to dispatch" — and the field offers no way to tell whether
+another plan is even active. Confirmed independently at the call site by the peer session on
+`plan-land-falsifiability-reachability-…`: `task-workflow-service.ts:3676` passes
+`bundleResult.value.tasks` from `getPlanBundle(task.parent_id)` into `buildAnchorGateContext`.
+That session had dispatched three batches relying on this mutex as its backstop; all three happened
+to be same-plan, so the protection held by circumstance rather than by design.
+
 **Mechanization.** The overlap query must be corpus-wide over FRESH claims, not bundle-wide: gather
 claim-carrying tasks by anchor intersection across all plans (the claim set is small — `lore
 bootstrap`'s `active_sessions` is already corpus-wide and proves the query is cheap), and keep the
-plan bundle only as an optimisation for the common case. Until then, `lore ready` should at minimum
-report cross-plan anchor intersections as an advisory, so the conflict is at least VISIBLE where a
-dispatcher already looks.
+plan bundle only as an optimisation for the common case. The gate and `lore ready`'s
+`anchor_conflicts` must be fixed TOGETHER and asserted by one oracle spanning two plans: fixing only
+the gate leaves orchestrators reading a reassuring `[]`, and fixing only the report leaves the claim
+itself ungated. ⛔ An empty `anchor_conflicts` from a corpus with more than one active plan is not
+evidence of safety until that lands.
 
 ## 2. The g1 spec-create hook misnames a flag error as a content error
 
@@ -149,7 +167,66 @@ path in a governance doc should be a full path from the payload root, checkable 
 any oracle or probe must be written as `cmd > file 2>&1; echo $?` by construction, never as a
 pipeline — and that a reviewer seeing `| head` adjacent to `$?` should treat it as a defect on sight.
 
-## Standing lesson (one line, for CLAUDE.md if wanted)
+## 6. The self-exempting-oracle pair: a check that repairs, and a test that repairs
 
-An extra manual step taken to compensate for a gate is the signal that the gate has a hole — the
-compensating action is the trigger to report it, not evidence that the situation is handled.
+Surfaced by the peer session on `plan-land-falsifiability-reachability-…` and worth stating as a
+pair because each half hides the other.
+
+The repo already had one half, as that session's D6: **a check that regenerates what it is checking
+cannot fail.** It was written about the `--check` COMMAND. Nobody carried it to the TEST that
+exercises the check — and that is exactly where it recurred: AC-FR-10's oracle ran a full export
+before asserting, so it asserted against a tree it had just repaired. Corroborated by that
+session's own implementer, unprompted: driving that clause red required "self-healing temporarily
+disabled" — with the shipped path intact it could not go red at all.
+
+**The pair.** *A check that regenerates what it is checking cannot fail* — and its sibling — *a test
+that repairs the tree before asserting cannot fail either.* Same defect, one layer out. Prose
+forbidding the repair does not close it: both recorded instances HAD prose forbidding it.
+
+**Mechanization, and the reason this finding is here rather than only in that session's doc.**
+AC-BFI-8 of `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor` now enforces it
+mechanically instead of asserting it in prose: the test hashes the mutated file immediately after
+mutating it, re-reads that hash immediately before asserting, and requires equality — so any setup
+step, fixture helper, or script-chain side effect that silently re-exports is caught BY the test
+rather than hidden by it. Its RED is an export inserted into the test's own setup, which must break
+that equality. Copy this shape; do not re-derive it.
+
+⛔ Scope note, because the evidence for the second half arrived mis-scoped and this matters for
+anyone re-checking it: the peer's supporting observations (`bun run test` triggering an export,
+`identity_repaired` refreshing ids unconditionally, `spec-mirror-export.test.ts:229` opening with a
+full export) are properties of that session's UNMERGED branch. Verified on `main` 2026-08-11:
+`test` reaches `check:spec-mirror` = `export-spec-mirror.ts --check` (read-only), `mirror:export` is
+chained from nothing, `identity_repaired` appears 0 times, and `:229` is a `scriptChainReachesTarget`
+boundary case. The defect is real; the original scope statement was not. That section was itself
+about assertion scope — writing a lesson down does not immunise the work that documents it.
+
+## 7. Two more of my own, from the second half of this session
+
+Same class as finding 5, recorded at equal weight rather than quietly fixed.
+
+- **Backticks inside a double-quoted shell argument were executed.** Composing the hardened
+  AC-BFI-8 statement, `` `check:spec-mirror` `` and friends became command substitutions; zsh
+  reported `command not found` three times and the write failed. The repo's standing rule about
+  shell escaping turning output into commands already covers this exactly. Knowing a rule is not
+  applying it — the same shape as measuring an exit code through `| head` earlier in this session.
+- **I probed a LIVE governance object to isolate a failure.** After the escaping fix the write still
+  exited 4, so I ran a short "PROBE:" statement against the real AC-BFI-8 to test whether length was
+  the cause — overwriting a real acceptance criterion with placeholder text before restoring it. It
+  was: `packages/core/src/acceptance.ts:181` caps `statement` at `z.string().min(1).max(2000)`. The
+  answer was readable in the schema; I ran an experiment on a real object instead, against this
+  repo's explicit rule not to. The refusal's own message was also invisible to me because I had sent
+  it to `/dev/null` — a self-inflicted silent oracle.
+
+**Mechanization for both.** A refusal whose cause is a declared schema bound should be read from the
+schema, not bisected; and any write to a live governance object that is exploratory rather than
+intended must go to a throwaway corpus, which finding 3 already demonstrates is cheap
+(`mktemp -d` + `lore init`, three commands). Concretely: never send a governance write's stderr to
+`/dev/null` — the refusal text is the fastest path to the cause, and discarding it converts a
+one-command diagnosis into an experiment on production data.
+
+## Standing lessons (one line each, for CLAUDE.md if wanted)
+
+- An extra manual step taken to compensate for a gate is the signal that the gate has a hole — the
+  compensating action is the trigger to report it, not evidence that the situation is handled.
+- A check that regenerates what it checks cannot fail, and neither can a test that repairs the tree
+  before asserting — forbid both mechanically (hash before/after), never in prose.
