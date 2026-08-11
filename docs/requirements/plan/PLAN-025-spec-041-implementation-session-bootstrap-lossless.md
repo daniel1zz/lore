@@ -3,12 +3,12 @@ id: PLAN-025
 type: plan
 role: plan
 title: "SPEC-041 Implementation — session bootstrap + lossless handoff"
-status: draft
+status: archived
 priority: high
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-11
 tags: [spec-041, session]
-parent: SPEC-045
+parent: SPEC-041
 ---
 # PLAN — SPEC-041 implementation: session bootstrap + lossless handoff
 

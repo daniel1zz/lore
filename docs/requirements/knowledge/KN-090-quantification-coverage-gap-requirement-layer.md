@@ -10,7 +10,7 @@ updated: 2026-07-24
 tags: []
 parent: SPEC-059
 links:
-  - {id: SPEC-086, type: relates-to}
+  - {id: SPEC-088, type: relates-to}
   - {id: SPEC-055, type: relates-to}
   - {id: PLAN-067, type: informs}
 ---

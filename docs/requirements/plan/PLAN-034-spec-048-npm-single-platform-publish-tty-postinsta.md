@@ -8,13 +8,13 @@ priority: medium
 created: 2026-07-17
 updated: 2026-07-26
 tags: []
-parent: SPEC-088
+parent: SPEC-048
 phases:
   - {name: "Phase 1: Core modules", description: "Pure/foundational modules with disjoint anchors: platform-map SSOT extraction (+build.ts parity), buildPublishPlan assembler, zero-dep postinstall, setup-args realpath hardening. Each task owns its source + its tests/unit/distribution suite. Parallel except assemble (blocked by platform-map for the PlatformInfo type SSOT)."}
   - {name: "Phase 2: Publish pipeline + install simulation", description: "Dry-run-default publish orchestrator (scripts/publish-npm.ts) with injected Publisher port (real=node:child_process, fake in tests), staging via buildPublishPlan, verify stages a-c; then registry-free npm i <.tgz> integration simulation proving symlink --version + staged-asset resolution + postinstall nudge."}
   - {name: "Phase 3: Regression & verification", description: "Repo-wide typecheck + both test runners green; attested lore verify runs of every script AC; final DoD gate before completion."}
 links:
-  - {id: SPEC-088, type: implements}
+  - {id: SPEC-048, type: implements}
 ---
 ── 01KXPZYT… SPEC-048 npm single-platform publish + TTY postinstall ────────────────────────────────────────
 Type: plan | Status: approved | Priority: medium | v3

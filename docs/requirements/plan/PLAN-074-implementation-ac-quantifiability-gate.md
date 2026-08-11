@@ -8,7 +8,7 @@ priority: medium
 created: 2026-07-18
 updated: 2026-07-18
 tags: []
-parent: SPEC-086
+parent: SPEC-088
 phases:
   - {name: "core-lint", description: "Pure core lint module + tests"}
   - {name: "gate-wiring", description: "Predicate + registry + feeding + config + service integration"}

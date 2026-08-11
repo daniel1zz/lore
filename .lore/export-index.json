@@ -1,33 +1,9 @@
 {
   "version": 1,
   "mappings": {
-    "01KWBVX30DGVDYMTK1DR2ZW8PS": {
-      "human_id": "SPEC-21",
-      "file_path": "docs/requirements/spec/SPEC-021-sync-docs-reverse.md"
-    },
-    "01KWBVX30M4W03TCW8XEMK2ZFD": {
-      "human_id": "SPEC-24",
-      "file_path": "docs/requirements/spec/SPEC-024-default-no-ai-agents.md"
-    },
-    "01KWBVX305W16ZRYT9X5V7XJ7Y": {
-      "human_id": "SPEC-23",
-      "file_path": "docs/requirements/spec/SPEC-023-plan-phases.md"
-    },
-    "01KWBVX30GBGDC7JC4V221RQAB": {
-      "human_id": "SPEC-22",
-      "file_path": "docs/requirements/spec/SPEC-022-dashboard-write-ui.md"
-    },
     "01KWBSWC5J6K30Q0DHJ3FJGX03": {
       "human_id": "PLAN-001",
       "file_path": "docs/requirements/plan/PLAN-001-cli-v3-roadmap-state-alignment-new-surface.md"
-    },
-    "01KWBVX30CKTSVMSP5Y1SC7DYD": {
-      "human_id": "SPEC-20",
-      "file_path": "docs/requirements/spec/SPEC-020-http-ai-provider.md"
-    },
-    "01KWBVX30AS6XNP5X5FQ49QPE4": {
-      "human_id": "SPEC-19",
-      "file_path": "docs/requirements/spec/SPEC-019-ai-in-set-link.md"
     },
     "01KWBV2M9VZVF55PZT7B18BV9A": {
       "human_id": "TASK-001",
@@ -76,78 +52,6 @@
     "01KWBSXP93ZDJ6VFQPC2Q4BTQA": {
       "human_id": "TASK-012",
       "file_path": "docs/requirements/task/TASK-012-promote-spec-014-monorepo-skeleton-draft-approved.md"
-    },
-    "01KVZ4C4458T454V0JMRQ7CPQT": {
-      "human_id": "SPEC-3",
-      "file_path": "docs/requirements/spec/SPEC-003-cli-adapter.md"
-    },
-    "01KW6G5KX0SZVT65THK1EFFTB0": {
-      "human_id": "SPEC-18",
-      "file_path": "docs/requirements/spec/SPEC-018-sync-docs-command.md"
-    },
-    "01KW6E4DPF21ERDT5D2H87THDN": {
-      "human_id": "SPEC-17",
-      "file_path": "docs/requirements/spec/SPEC-017-ai-provider-built-in.md"
-    },
-    "01KW6E4DAHWQP3HT6XEYD1A91V": {
-      "human_id": "SPEC-16",
-      "file_path": "docs/requirements/spec/SPEC-016-cookie-auth-local-bootstrap.md"
-    },
-    "01KW6E4CYYS7THX3HPMPPKAEZ8": {
-      "human_id": "SPEC-15",
-      "file_path": "docs/requirements/spec/SPEC-015-dashboard-readonly-skeleton.md"
-    },
-    "01KW6E4CG1A33AQP5MC8857T27": {
-      "human_id": "SPEC-14",
-      "file_path": "docs/requirements/spec/SPEC-014-monorepo-skeleton.md"
-    },
-    "01KVZ4C441GQWXW52WB2PZ2SZY": {
-      "human_id": "SPEC-13",
-      "file_path": "docs/requirements/spec/SPEC-013-eval-framework.md"
-    },
-    "01KVZ4C443TDSJZG51V28AYS3V": {
-      "human_id": "SPEC-12",
-      "file_path": "docs/requirements/spec/SPEC-012-telemetry.md"
-    },
-    "01KVZ4C442A3PZJ4PC0XP6RNJG": {
-      "human_id": "SPEC-9",
-      "file_path": "docs/requirements/spec/SPEC-009-sync-engine.md"
-    },
-    "01KVZ4C43WJQDYX3RZAWP7DABY": {
-      "human_id": "SPEC-8",
-      "file_path": "docs/requirements/spec/SPEC-008-mcp-adapter.md"
-    },
-    "01KVZ4C4405Y709PKK199YCQTZ": {
-      "human_id": "SPEC-2",
-      "file_path": "docs/requirements/spec/SPEC-002-corpus-schema.md"
-    },
-    "01KVZ4C4403W3HFHNVXTPHMZ33": {
-      "human_id": "SPEC-7",
-      "file_path": "docs/requirements/spec/SPEC-007-migration-v1.md"
-    },
-    "01KVZ4C4418PNKA5QWTK6M7369": {
-      "human_id": "SPEC-10",
-      "file_path": "docs/requirements/spec/SPEC-010-auth-credentials.md"
-    },
-    "01KVZ4C442WTPZR93VB23S28KY": {
-      "human_id": "SPEC-5",
-      "file_path": "docs/requirements/spec/SPEC-005-review-workflow.md"
-    },
-    "01KVZ4C4421YHS7DDGTXDHBV3K": {
-      "human_id": "SPEC-4",
-      "file_path": "docs/requirements/spec/SPEC-004-prd-as-living-root.md"
-    },
-    "01KVZ4C443TC6JFVD2RG6QECTS": {
-      "human_id": "SPEC-6",
-      "file_path": "docs/requirements/spec/SPEC-006-version-history.md"
-    },
-    "01KVZ4C444MST333J8THG0KHST": {
-      "human_id": "SPEC-1",
-      "file_path": "docs/requirements/spec/SPEC-001-service-layer.md"
-    },
-    "01KVZ4C444R0KQD6QDHD5159FC": {
-      "human_id": "SPEC-11",
-      "file_path": "docs/requirements/spec/SPEC-011-http-api.md"
     },
     "01KVZ4C445EK479938W1TYT3AJ": {
       "human_id": "PRD-001",
@@ -209,10 +113,6 @@
       "human_id": "PLAN-003",
       "file_path": "docs/requirements/plan/PLAN-003-spec-025-implementation-task-workflow-metadata.md"
     },
-    "01KWGX62EA7J5HC9FHT431P0P8": {
-      "human_id": "SPEC-25",
-      "file_path": "docs/requirements/spec/SPEC-025-task-workflow-metadata.md"
-    },
     "01KWH86ZX7009MPM37RXVM2M55": {
       "human_id": "PLAN-004",
       "file_path": "docs/requirements/plan/PLAN-004-spec-026-implementation-ai-plan-assessment.md"
@@ -232,10 +132,6 @@
     "01KWH871AQ4S2N40D4NF2EPGWK": {
       "human_id": "TASK-026",
       "file_path": "docs/requirements/task/TASK-026-implement-lore-assess-end-to-end-ac-assess-1-12.md"
-    },
-    "01KWH86C2PRDSCQB99WVNSRV8R": {
-      "human_id": "SPEC-26",
-      "file_path": "docs/requirements/spec/SPEC-026-ai-plan-assessment.md"
     },
     "01KWHBEYN5TZGW4V21MZKSA2AJ": {
       "human_id": "TASK-027",
@@ -297,10 +193,6 @@
       "human_id": "PLAN-006",
       "file_path": "docs/requirements/plan/PLAN-006-spec-027-implementation-dashboard-hardening.md"
     },
-    "01KWJZCQ6CTRAJEGRKA111MJHV": {
-      "human_id": "SPEC-27",
-      "file_path": "docs/requirements/spec/SPEC-027-spec-027-dashboard-hardening-write-path-integrity.md"
-    },
     "01KWK1C8AKXGN4YYK096PGK22J": {
       "human_id": "KN-007",
       "file_path": "docs/requirements/knowledge/KN-007-dogfood-retro-spec-027-self-hosted-via-plan-claim.md"
@@ -349,10 +241,6 @@
       "human_id": "TASK-040",
       "file_path": "docs/requirements/task/TASK-040-cors-negative-assertion-lock-disallowed-origin-emi.md"
     },
-    "01KWK6WPNE1E8645ZGWNQ37D0E": {
-      "human_id": "SPEC-28",
-      "file_path": "docs/requirements/spec/SPEC-028-spec-028-assess-input-transparency-pre-flight-diff.md"
-    },
     "01KWKC1T1SWXPJQMBQ8XG66116": {
       "human_id": "KN-012",
       "file_path": "docs/requirements/knowledge/KN-012-round-3-findings-judge-session-contamination-silen.md"
@@ -376,10 +264,6 @@
     "01KWK9R5790V4GW17W0F1NBWJY": {
       "human_id": "TASK-042",
       "file_path": "docs/requirements/task/TASK-042-implement-assess-reliability-prompt-limit-statemen.md"
-    },
-    "01KWK9R3V6PGCGHZ3QRKE2EKH6": {
-      "human_id": "SPEC-29",
-      "file_path": "docs/requirements/spec/SPEC-029-spec-029-assess-reliability-reasoning-length-resil.md"
     },
     "01KWKDC4JTNX1SQEK2G5XSZQXP": {
       "human_id": "PLAN-010",
@@ -405,10 +289,6 @@
       "human_id": "TASK-045",
       "file_path": "docs/requirements/task/TASK-045-hermetic-judge-spawn-timeout-error-guidance-ac-hj.md"
     },
-    "01KWKDC46MX3AAH21DNPBV6V4Y": {
-      "human_id": "SPEC-30",
-      "file_path": "docs/requirements/spec/SPEC-030-spec-030-hermetic-judge-sessions-fail-loud-ai-conf.md"
-    },
     "01KWKT26EJX9AKRQ1M2H0MF9W6": {
       "human_id": "TASK-046",
       "file_path": "docs/requirements/task/TASK-046-t2-wire-tailwindcss-typography-so-prose-classes-re.md"
@@ -425,10 +305,6 @@
       "human_id": "PLAN-011",
       "file_path": "docs/requirements/plan/PLAN-011-spec-031-implementation-dashboard-read-path-fixes.md"
     },
-    "01KWKT1J7VHTD7YNXWHX82GHGG": {
-      "human_id": "SPEC-31",
-      "file_path": "docs/requirements/spec/SPEC-031-spec-031-dashboard-read-path-contract-fixes-markdo.md"
-    },
     "01KWKT3C9XY7839RV0FRM3ZP8G": {
       "human_id": "KN-018",
       "file_path": "docs/requirements/knowledge/KN-018-dashboard-product-design-review-2026-07-03-walkthr.md"
@@ -440,10 +316,6 @@
     "01KWM6FERBTNEEKW5YGZ4SYZEC": {
       "human_id": "KN-020",
       "file_path": "docs/requirements/knowledge/KN-020-spec-032-tech-review-revisions-needs-revision-appl.md"
-    },
-    "01KWM6ETFQD99W0FFHPWCE3BKW": {
-      "human_id": "SPEC-32",
-      "file_path": "docs/requirements/spec/SPEC-032-spec-032-output-contract-mechanization-spec-kind-t.md"
     },
     "01KWV8QF5X8F7QE8855B1XVJTE": {
       "human_id": "PLAN-012",
@@ -472,18 +344,6 @@
     "01KWV8RQ5AFW49080TT039WQJY": {
       "human_id": "TASK-052",
       "file_path": "docs/requirements/task/TASK-052-t1-spec-kind-enum-service-default-cli-kind.md"
-    },
-    "01KWV8EMN285ECV6QVFS7W39QE": {
-      "human_id": "SPEC-35",
-      "file_path": "docs/requirements/spec/SPEC-035-spec-035-audit-trail-calibration-data.md"
-    },
-    "01KWV8EM7X18JG4KKMF7MDX7E5": {
-      "human_id": "SPEC-34",
-      "file_path": "docs/requirements/spec/SPEC-034-spec-034-structured-review-judgment-triage-queue.md"
-    },
-    "01KWVQG3M93KPRY6RECEFFXHBX": {
-      "human_id": "SPEC-33",
-      "file_path": "docs/requirements/spec/SPEC-033-spec-033-dashboard-as-living-prd-projection-human.md"
     },
     "01KWVXA0GDMWP112DJX01QKQDV": {
       "human_id": "KN-022",
@@ -553,17 +413,9 @@
       "human_id": "TASK-061",
       "file_path": "docs/requirements/task/TASK-061-a-core-schemas-migration-003-store-methods.md"
     },
-    "01KWXKSV9269VM19X9Y6XM95DV": {
-      "human_id": "SPEC-36",
-      "file_path": "docs/requirements/spec/SPEC-036-spec-036-dashboard-browsing-ux-breadcrumb-tag-stat.md"
-    },
     "01KWXQXPYHDWSG3RHAXNRN7VXF": {
       "human_id": "KN-027",
       "file_path": "docs/requirements/knowledge/KN-027-retro-e2e-corpus-pollution-incident-port-squatter.md"
-    },
-    "01KWXXMZJQ6HC0NMMYE6AT4H8V": {
-      "human_id": "SPEC-37",
-      "file_path": "docs/requirements/spec/SPEC-037-spec-037-dashboard-execution-tracking-surface-read.md"
     },
     "01KWXXX82EE9C565Q18RHJZ8NQ": {
       "human_id": "PLAN-016",
@@ -649,14 +501,6 @@
       "human_id": "PLAN-018",
       "file_path": "docs/requirements/plan/PLAN-018-spec-038-implementation-ac-as-code.md"
     },
-    "01KWZRMZNPZ8WKBY0BEW3KTTCK": {
-      "human_id": "SPEC-38",
-      "file_path": "docs/requirements/spec/SPEC-038-spec-038-ac-as-code-structured-acceptance-criteria.md"
-    },
-    "01KWZRMQ5ZC41F847ZR5ZSXTV2": {
-      "human_id": "ADR-1",
-      "file_path": "docs/requirements/adr/ADR-001-ac-as-code-oracle.md"
-    },
     "01KWZRM5X5BKVEMRJKS7JHCKHY": {
       "human_id": "KN-032",
       "file_path": "docs/requirements/knowledge/KN-032-anthropic-official-agent-loop-engineering-research.md"
@@ -688,10 +532,6 @@
     "01KX01MJJX85F3TZWV5MN1QY93": {
       "human_id": "PLAN-019",
       "file_path": "docs/requirements/plan/PLAN-019-spec-039-implementation-trusted-runner.md"
-    },
-    "01KX01KEVSQFFF8GH31GD3RE9J": {
-      "human_id": "SPEC-39",
-      "file_path": "docs/requirements/spec/SPEC-039-spec-039-trusted-runner-attested-evidence-for-scri.md"
     },
     "01KX06JYF4A800B0PW99YS6QBW": {
       "human_id": "KN-034",
@@ -733,10 +573,6 @@
       "human_id": "KN-039",
       "file_path": "docs/requirements/knowledge/KN-039-assessment-spec-040-implementation-assessment-dime.md"
     },
-    "01KX634Z5SYYMQG37EN2Q65KFS": {
-      "human_id": "SPEC-40",
-      "file_path": "docs/requirements/spec/SPEC-040-spec-040-assessment-dimension-framework-v2-facts-j.md"
-    },
     "01KX3E9GCJFMHVGBR5CQ7ZACJ8": {
       "human_id": "KN-040",
       "file_path": "docs/requirements/knowledge/KN-040-retro-ioc-p2-p4-build-under-score-gated-autonomy-a.md"
@@ -764,10 +600,6 @@
     "01KX31GQF4HDFN7AE20H0QCFCG": {
       "human_id": "TASK-087",
       "file_path": "docs/requirements/task/TASK-087-t1-governs-link-type-schemas-types-enum.md"
-    },
-    "01KX31CCC3CH9THP58BXBWDP0J": {
-      "human_id": "SPEC-87",
-      "file_path": "docs/requirements/spec/SPEC-041-p4-upstream-downstream-linkage-feed-before-produce.md"
     },
     "01KX2XMYF2010FYK5PK6AYPK9C": {
       "human_id": "PLAN-022",
@@ -797,17 +629,9 @@
       "human_id": "TASK-093",
       "file_path": "docs/requirements/task/TASK-093-t1-checkpoint-registry-ts-refactor-spec-checkpoint.md"
     },
-    "01KX2PFSB95061N61DVASAG3E9": {
-      "human_id": "SPEC-86",
-      "file_path": "docs/requirements/spec/SPEC-042-p2-workflow-state-machine-checkpoint-registry-cros.md"
-    },
     "01KX0THBR7RKJSP7SX165PZE5S": {
       "human_id": "PLAN-023",
       "file_path": "docs/requirements/plan/PLAN-023-implementation-p1-upstream-asset-ization-prompt-sk.md"
-    },
-    "01KX0TH150RJPAD8KFD6YWZ3F1": {
-      "human_id": "SPEC-68",
-      "file_path": "docs/requirements/spec/SPEC-043-upstream-asset-ization-prompt-skill-as-first-class.md"
     },
     "01KX0TJKZG29A3CGYN1ZXPWMTW": {
       "human_id": "TASK-094",
@@ -829,17 +653,9 @@
       "human_id": "TASK-097",
       "file_path": "docs/requirements/task/TASK-097-p1-t2-migrate-seed-rule-doc-reference-skill-applie.md"
     },
-    "01KX0BA07RFXWDRGAQBB5674YW": {
-      "human_id": "ADR-2",
-      "file_path": "docs/requirements/adr/ADR-002-corpus-governed-active-ai-workflow-inversion-of-co.md"
-    },
     "01KX0CNZFF3BSRK6NEA9ST0W9N": {
       "human_id": "PLAN-024",
       "file_path": "docs/requirements/plan/PLAN-024-implementation-corpus-governed-spec-production-loo.md"
-    },
-    "01KX0CF2WVB4BQWAY52MFYQJE2": {
-      "human_id": "SPEC-52",
-      "file_path": "docs/requirements/spec/SPEC-044-corpus-governed-spec-production-loop-ioc-vertical.md"
     },
     "01KX0HR8SPGWDW72NEG54944GQ": {
       "human_id": "KN-043",
@@ -897,10 +713,6 @@
       "human_id": "PLAN-025",
       "file_path": "docs/requirements/plan/PLAN-025-spec-041-implementation-session-bootstrap-lossless.md"
     },
-    "01KX704CSP1KQRJG0CW53RGJZJ": {
-      "human_id": "SPEC-41",
-      "file_path": "docs/requirements/spec/SPEC-045-spec-041-session-layer-part-1-bootstrap-pointer-se.md"
-    },
     "01KX74ZKEP4FYE27GPD03FY6QS": {
       "human_id": "KN-044",
       "file_path": "docs/requirements/knowledge/KN-044-retro-spec-041-session-layer-s1-s2-3-lens-review-d.md"
@@ -924,10 +736,6 @@
     "01KX7G4GDNY3P0622HBHM4Z91R": {
       "human_id": "TASK-110",
       "file_path": "docs/requirements/task/TASK-110-t2-adapters-docs-cli-anchor-verbs-claim-capture-re.md"
-    },
-    "01KX7CC5PQRTD7ZHKQJWHYFCYM": {
-      "human_id": "SPEC-42",
-      "file_path": "docs/requirements/spec/SPEC-046-spec-042-session-layer-part-2-session-registry-fil.md"
     },
     "01KX7G4GA44M4DH87N0MMRN599": {
       "human_id": "TASK-111",
@@ -957,10 +765,6 @@
       "human_id": "PLAN-027",
       "file_path": "docs/requirements/plan/PLAN-027-spec-043-implementation-bi-temporal-invalidation.md"
     },
-    "01KX7WM8WEYCXZ7KGJ65A66BA8": {
-      "human_id": "SPEC-43",
-      "file_path": "docs/requirements/spec/SPEC-047-spec-043-memory-hygiene-part-1-bi-temporal-invalid.md"
-    },
     "01KX7RP24EQP23FZCDR9RCQBZE": {
       "human_id": "KN-051",
       "file_path": "docs/requirements/knowledge/KN-051-handoff-agent-main-orchestrator.md"
@@ -985,10 +789,6 @@
       "human_id": "TASK-115",
       "file_path": "docs/requirements/task/TASK-115-t1-core-store-services-staleness-pure-layer-migrat.md"
     },
-    "01KXAJ9Z74AB87WMX307VCB5WQ": {
-      "human_id": "SPEC-44",
-      "file_path": "docs/requirements/spec/SPEC-048-spec-044-memory-hygiene-part-2-staleness-probes-h2.md"
-    },
     "01KX832FK5YZR6P2768YSEXDN3": {
       "human_id": "KN-054",
       "file_path": "docs/requirements/knowledge/KN-054-handoff-agent-main-orchestrator.md"
@@ -1012,14 +812,6 @@
     "01KXB0X3VMNE4VZKK1AS34TTMP": {
       "human_id": "TASK-117",
       "file_path": "docs/requirements/task/TASK-117-t1-core-service-code-anchors-pure-layer-six-drift.md"
-    },
-    "01KXB08CEE6EQB9CGQMQN5QFTA": {
-      "human_id": "SPEC-45",
-      "file_path": "docs/requirements/spec/SPEC-049-spec-045-memory-hygiene-part-3-doc-code-drift-orac.md"
-    },
-    "01KYED2SPD2761574A8SN5VBHC": {
-      "human_id": "SPEC-79",
-      "file_path": "docs/requirements/spec/SPEC-079-079-audit-hardening-link-provenance-actor-fidelity.md"
     },
     "01KYED6NXQCMSZ0CSJQC9XX48K": {
       "human_id": "PLAN-030",
@@ -1129,10 +921,6 @@
       "human_id": "TASK-139",
       "file_path": "docs/requirements/task/TASK-139-skill-test-t1r-core-outline-schemas-red-scenarios.md"
     },
-    "01KYEGPX9NM0XCVP1ZYRFETTN3": {
-      "human_id": "SPEC-81",
-      "file_path": "docs/requirements/spec/SPEC-080-080-prd-as-outline-contract-structured-outline-dom.md"
-    },
     "01KYEGRSFZR1XTNV3ZFSB0392W": {
       "human_id": "PLAN-032",
       "file_path": "docs/requirements/plan/PLAN-032-implementation-spec-080-bootstrap-injection-projec.md"
@@ -1164,10 +952,6 @@
     "01KYEGRVHB2ZF0PXCBAPBGB1V5": {
       "human_id": "TASK-146",
       "file_path": "docs/requirements/task/TASK-146-skill-test-t1-buildbootstrapinjection-red-unit-sui.md"
-    },
-    "01KYEECNVG9WCFJSG8DB0ZMB3M": {
-      "human_id": "SPEC-80",
-      "file_path": "docs/requirements/spec/SPEC-081-080-bootstrap-injection-projection-tier-1-tier-2-p.md"
     },
     "01KYEE64DPNV6ECDEQ3ZGHB171": {
       "human_id": "KN-060",
@@ -1249,10 +1033,6 @@
       "human_id": "TASK-155",
       "file_path": "docs/requirements/task/TASK-155-xdg-semantics-resolveglobalconfigpath-falls-throug.md"
     },
-    "01KYBFWCM7KGG507X20WD7ZVF1": {
-      "human_id": "SPEC-76",
-      "file_path": "docs/requirements/spec/SPEC-076-076-distribution-integration-model-asset-update-co.md"
-    },
     "01KYBS0KN7BYXPE9PV3Q76A2ZB": {
       "human_id": "TASK-156",
       "file_path": "docs/requirements/task/TASK-156-spec-076-assess-follow-ups-classifyentry-no-manife.md"
@@ -1324,10 +1104,6 @@
     "01KYCB6Q5JG2EEFZXQ9A084Z6Y": {
       "human_id": "KN-074",
       "file_path": "docs/requirements/knowledge/KN-074-assessment-implementation-spec-078-dashboard-multi.md"
-    },
-    "01KYBY8ENFZV32SHNTK86YWA59": {
-      "human_id": "SPEC-78",
-      "file_path": "docs/requirements/spec/SPEC-078-078-dashboard-multi-project-mount-registry-machine.md"
     },
     "01KYBZ8JCYBZZC0CBBQQ9RYH7K": {
       "human_id": "TASK-163",
@@ -1457,10 +1233,6 @@
       "human_id": "TASK-189",
       "file_path": "docs/requirements/task/TASK-189-t3-execution-e2e-suite-dashboard-http-claude-md-do.md"
     },
-    "01KYBHK4RH9YY80K3E4YRETXJH": {
-      "human_id": "SPEC-77",
-      "file_path": "docs/requirements/spec/SPEC-077-077-dashboard-execution-read-surface-prd-21-f3.md"
-    },
     "01KYBMT0QCH9MYWYH8696PN556": {
       "human_id": "KN-078",
       "file_path": "docs/requirements/knowledge/KN-078-handoff-agent-task-t3-execution-e2e.md"
@@ -1484,10 +1256,6 @@
     "01KYA67075ZRCQE1C4QSWMDVZM": {
       "human_id": "TASK-194",
       "file_path": "docs/requirements/task/TASK-194-fix-spec-069-gap-adhoc-task-claim-structurally-imp.md"
-    },
-    "01KYA80CEKF93Y0YJ9TMFKS41W": {
-      "human_id": "ADR-3",
-      "file_path": "docs/requirements/adr/ADR-003-newdocmodal-spec-create-cli-skill-only-authoring-d.md"
     },
     "01KYA7FXJRECDK71E3XDTD59QP": {
       "human_id": "TASK-195",
@@ -1529,21 +1297,9 @@
       "human_id": "TASK-199",
       "file_path": "docs/requirements/task/TASK-199-t1-core-evidence-panel-ssot-types-attestation-math.md"
     },
-    "01KYA021RQE6CAHSVZP1AG0R95": {
-      "human_id": "SPEC-75",
-      "file_path": "docs/requirements/spec/SPEC-075-075-dashboard-adjudication-workbench-route-telemet.md"
-    },
     "01KY9GFZRA5A6787XPVVN4J729": {
       "human_id": "KN-083",
       "file_path": "docs/requirements/knowledge/KN-083-handoff-agent-main-orchestrator.md"
-    },
-    "01KY9C65QC7VCQ9FCXSYAXQN9H": {
-      "human_id": "SPEC-74",
-      "file_path": "docs/requirements/spec/SPEC-074-074-dashboard-issues-triage-surface-badge-list-in.md"
-    },
-    "01KY9C659XA7P833RQ0VRC90WC": {
-      "human_id": "SPEC-73",
-      "file_path": "docs/requirements/spec/SPEC-073-073-report-issue-trigger-surfaces-error-path-hints.md"
     },
     "01KY9C7ZMXDK21RKXPBBHPB3H3": {
       "human_id": "PLAN-043",
@@ -1641,17 +1397,9 @@
       "human_id": "KN-101",
       "file_path": "docs/requirements/knowledge/KN-101-uat-plan-implementation-spec-064-dashboard-setting.md"
     },
-    "01KY4Z4PSSNW7NC3WMZHM1AHH4": {
-      "human_id": "ADR-4",
-      "file_path": "docs/requirements/adr/ADR-004-claude-md-carries-only-standing-discipline-histori.md"
-    },
     "01KY8XH3WJX8N1WXBTHJRXRGD6": {
       "human_id": "KN-102",
       "file_path": "docs/requirements/knowledge/KN-102-uat-plan-spec-071-execution-liveness-signals.md"
-    },
-    "01KY8Z38VKHD0GCQ0VAZ6PZGXM": {
-      "human_id": "ADR-5",
-      "file_path": "docs/requirements/adr/ADR-005-loreconfig-carriage-for-mcp-tools-getter-param-now.md"
     },
     "01KY7QA4SRJE91GNWNJCHCJEZR": {
       "human_id": "KN-103",
@@ -1833,10 +1581,6 @@
       "human_id": "KN-135",
       "file_path": "docs/requirements/knowledge/KN-135-assessment-plan-spec-072-upstream-issue-reporting.md"
     },
-    "01KY95DHC5B3GGTRATV4V58Q66": {
-      "human_id": "SPEC-72",
-      "file_path": "docs/requirements/spec/SPEC-072-072-upstream-issue-reporting-lore-report-issue-con.md"
-    },
     "01KY95V5ARX7MEKP6BSG1FKGXP": {
       "human_id": "TASK-215",
       "file_path": "docs/requirements/task/TASK-215-skill-implement-t4-flows-upstream-probe-readonly-u.md"
@@ -1869,10 +1613,6 @@
       "human_id": "TASK-220",
       "file_path": "docs/requirements/task/TASK-220-fix-sync-push-remote-fixture-migration-drift-001-0.md"
     },
-    "01KY8YP5WNSRYG6PNBSZAQZ9H3": {
-      "human_id": "SPEC-91",
-      "file_path": "docs/requirements/spec/SPEC-082-version-snapshots-capture-slug-values-spec-068-d5.md"
-    },
     "01KY7SY95KCB7PH9E0YTWK1N4J": {
       "human_id": "TASK-221",
       "file_path": "docs/requirements/task/TASK-221-skill-implement-t3-mcp-budget-parity-thread-config.md"
@@ -1897,17 +1637,9 @@
       "human_id": "TASK-225",
       "file_path": "docs/requirements/task/TASK-225-skill-implement-fixa-wiring-core-surrogate-clip-to.md"
     },
-    "01KY8YP69N2DBEJEWMB5VKJ2E7": {
-      "human_id": "SPEC-92",
-      "file_path": "docs/requirements/spec/SPEC-083-strict-flag-hardening-single-dash-multi-char-token.md"
-    },
     "01KY7BTJ0YM63VFHD6YM7MGJHP": {
       "human_id": "PLAN-049",
       "file_path": "docs/requirements/plan/PLAN-049-slugify-cjk-fix-set-slug-single-implementer-execut.md"
-    },
-    "01KY7PVW0P372F2X1PHY4FWGW9": {
-      "human_id": "SPEC-70",
-      "file_path": "docs/requirements/spec/SPEC-070-070-deterministic-task-dispatch-bundle-lore-feed-t.md"
     },
     "01KY7QDRPEGT6C65KBQN8Y9Z4T": {
       "human_id": "KN-136",
@@ -1957,10 +1689,6 @@
       "human_id": "TASK-229",
       "file_path": "docs/requirements/task/TASK-229-skill-implement-f1-session-derived-actor-tier-core.md"
     },
-    "01KY7N4QMHKZVGJ3KAPYSKHYSB": {
-      "human_id": "SPEC-71",
-      "file_path": "docs/requirements/spec/SPEC-071-071-execution-liveness-signals-session-actor-tier.md"
-    },
     "01KY7NB2JMK93HTXH9BDKGGTJF": {
       "human_id": "TASK-230",
       "file_path": "docs/requirements/task/TASK-230-skill-verify-merge-whole-repo-oracles-code-anchors.md"
@@ -1981,10 +1709,6 @@
       "human_id": "PLAN-055",
       "file_path": "docs/requirements/plan/PLAN-055-spec-069-attestation-floor-ad-hoc-task-channel.md"
     },
-    "01KY6RMKCAENWV8F6EB6R24A9Y": {
-      "human_id": "SPEC-69",
-      "file_path": "docs/requirements/spec/SPEC-069-069-execution-time-attestation-floor-ad-hoc-task-c.md"
-    },
     "01KY6S27KK0RB100ZGWCK1MHPX": {
       "human_id": "TASK-231",
       "file_path": "docs/requirements/task/TASK-231-t3-lore-ready-adhoc-listing-assess-linkage-exempti.md"
@@ -1997,33 +1721,13 @@
       "human_id": "TASK-233",
       "file_path": "docs/requirements/task/TASK-233-t1-attestationfloor-predicate-on-plan-close-config.md"
     },
-    "01KY7BQ7PHV0X6P32A2JHDP0ZS": {
-      "human_id": "SPEC-89",
-      "file_path": "docs/requirements/spec/SPEC-084-cjk-aware-slugify-pinyin-transliteration-lore-set.md"
-    },
     "01KY7BW1P8ZA0B0CE12WB39GDA": {
       "human_id": "TASK-234",
       "file_path": "docs/requirements/task/TASK-234-implement-spec-066-slugify-cjk-set-slug-code-ac-te.md"
     },
-    "01KY6RMG0TN02DC4T18W7HY232": {
-      "human_id": "SPEC-67",
-      "file_path": "docs/requirements/spec/SPEC-067-067-ai-surface-robustness-assess-timeout-floor-par.md"
-    },
-    "01KY6RMDS2BW3PGH901PXCAW4V": {
-      "human_id": "SPEC-66",
-      "file_path": "docs/requirements/spec/SPEC-066-066-git-safety-gate-heredoc-string-literal-awarene.md"
-    },
-    "01KY6RKW5KDP7HPRWCNPW0X2Y6": {
-      "human_id": "SPEC-65",
-      "file_path": "docs/requirements/spec/SPEC-065-065-cli-ergonomics-unique-id-prefix-resolution-sin.md"
-    },
     "01KY4KCN4BFHVQVF9ZKVXZN279": {
       "human_id": "PLAN-056",
       "file_path": "docs/requirements/plan/PLAN-056-hotfix-verify-trust-extensions-build-freshness-cas.md"
-    },
-    "01KY1N7KVWSXB2T3XNR7CRH0HB": {
-      "human_id": "SPEC-61",
-      "file_path": "docs/requirements/spec/SPEC-061-061-attestation-completeness-guard-detect-zero-mat.md"
     },
     "01KY4KCSVPPE36C701YSYXF1A6": {
       "human_id": "TASK-235",
@@ -2052,10 +1756,6 @@
     "01KY3SJTGHYEVJASKMJK0TB2ZM": {
       "human_id": "TASK-238",
       "file_path": "docs/requirements/task/TASK-238-skill-implement-machine-config-write-backend.md"
-    },
-    "01KY2K32F4HTNG3N5TDDAZ3K50": {
-      "human_id": "SPEC-64",
-      "file_path": "docs/requirements/spec/SPEC-064-064-dashboard-settings-ui-two-scope-config-editing.md"
     },
     "01KY3SFSRBSPAWPNZ2RV9TM3PD": {
       "human_id": "TASK-239",
@@ -2089,10 +1789,6 @@
       "human_id": "TASK-245",
       "file_path": "docs/requirements/task/TASK-245-add-requires-uat-authoring-path-to-lore-create-pla.md"
     },
-    "01KXX8F1RTAFZK96NKGSWJEMP1": {
-      "human_id": "SPEC-58",
-      "file_path": "docs/requirements/spec/SPEC-058-058-verification-profiles-per-spec-kind-oracle-cov.md"
-    },
     "01KY2JG03RBEWFWA03VBX0HDBQ": {
       "human_id": "PLAN-061",
       "file_path": "docs/requirements/plan/PLAN-061-hotfix-defaults-editor-deny-key-gap.md"
@@ -2100,10 +1796,6 @@
     "01KY2JH5EEFSNVHHFGZ5XTX2ST": {
       "human_id": "TASK-246",
       "file_path": "docs/requirements/task/TASK-246-add-defaults-editor-to-config-deny-keys.md"
-    },
-    "01KY1NMTNCP47B69WNKGQGS0RE": {
-      "human_id": "SPEC-62",
-      "file_path": "docs/requirements/spec/SPEC-062-062-config-write-layer-configservice-http-surface.md"
     },
     "01KY1NPC95MRTX6FC0XWA4WA9C": {
       "human_id": "PLAN-062",
@@ -2132,10 +1824,6 @@
     "01KY211QWH4GWNNC184CS3WVPH": {
       "human_id": "KN-142",
       "file_path": "docs/requirements/knowledge/KN-142-assessment-implementation-spec-062-config-write-la.md"
-    },
-    "01KY1RKDSY0QFA30WX4SF0PHAS": {
-      "human_id": "SPEC-63",
-      "file_path": "docs/requirements/spec/SPEC-063-063-verify-execution-root-correctness-under-linked.md"
     },
     "01KY1QE0NWVWMT1RWAG87H8Y18": {
       "human_id": "TASK-248",
@@ -2169,14 +1857,6 @@
       "human_id": "TASK-255",
       "file_path": "docs/requirements/task/TASK-255-t1-config-editability-tables-pure-configservice-re.md"
     },
-    "01KXMY4KVDW213ADKWG6FSXCPA": {
-      "human_id": "SPEC-46",
-      "file_path": "docs/requirements/spec/SPEC-085-046-distribution-part-1-asset-ssot-local-safe-inst.md"
-    },
-    "01KY1G2KX8S024EG5T062F5K5J": {
-      "human_id": "SPEC-60",
-      "file_path": "docs/requirements/spec/SPEC-060-060-lore-setup-project-scaffold-completion-repo-le.md"
-    },
     "01KY1KBB430GD9CESDNSHWJV33": {
       "human_id": "KN-143",
       "file_path": "docs/requirements/knowledge/KN-143-assessment-implementation-spec-060-setup-project.md"
@@ -2197,10 +1877,6 @@
       "human_id": "TASK-259",
       "file_path": "docs/requirements/task/TASK-259-t1-repo-level-install-ledger-core-d1-projectfsport.md"
     },
-    "01KXZJAVGJEWNNXCTVN7N506H0": {
-      "human_id": "SPEC-59",
-      "file_path": "docs/requirements/spec/SPEC-059-059-requirement-layer-quantifiability-lint-close-s.md"
-    },
     "01KXZJGWM7B1FWYTEZTD5QS82Z": {
       "human_id": "PLAN-067",
       "file_path": "docs/requirements/plan/PLAN-067-implementation-spec-059-requirement-layer-quantifi.md"
@@ -2217,10 +1893,6 @@
       "human_id": "TASK-260",
       "file_path": "docs/requirements/task/TASK-260-skill-review-cutover-verification-docs-code-anchor.md"
     },
-    "01KXX4R6JYCNRBC666YDQ6DYRH": {
-      "human_id": "SPEC-56",
-      "file_path": "docs/requirements/spec/SPEC-056-056-phase-execution-model-phase-doc-type-computed.md"
-    },
     "01KXX8WSJQYJNPZEHSJ7FTQTM7": {
       "human_id": "TASK-261",
       "file_path": "docs/requirements/task/TASK-261-skill-implement-cli-mcp-surfaces-checklist-ref-evi.md"
@@ -2236,10 +1908,6 @@
     "01KXX932GGEF8PK0DP8XW9MDG6": {
       "human_id": "TASK-263",
       "file_path": "docs/requirements/task/TASK-263-skill-review-seat-verification-docs-code-anchors.md"
-    },
-    "01KXX7XN7MTWN1B2H9ABAF3DBH": {
-      "human_id": "SPEC-57",
-      "file_path": "docs/requirements/spec/SPEC-057-057-two-tier-worktree-seat-model-lore-seat-verb-se.md"
     },
     "01KXX8WS6H4VHG4NY1BMWETP53": {
       "human_id": "TASK-264",
@@ -2349,14 +2017,6 @@
       "human_id": "KN-153",
       "file_path": "docs/requirements/knowledge/KN-153-bun-1-3-10-process-stdout-instantiation-sets-fd1-o.md"
     },
-    "01KXR2TWS96BE5A25MP9E94RBS": {
-      "human_id": "ADR-6",
-      "file_path": "docs/requirements/adr/ADR-006-verification-skill-family-routed-convergence-share.md"
-    },
-    "01KXQG47VBMB3BV1J70MP9SVQK": {
-      "human_id": "ADR-7",
-      "file_path": "docs/requirements/adr/ADR-007-retire-lore-planner-agent-vendor-upstream-workflow.md"
-    },
     "01KXSQQQN1PB4Q09K03W1ZHZ1H": {
       "human_id": "KN-154",
       "file_path": "docs/requirements/knowledge/KN-154-assessment-implementation-ac-quantifiability-gate.md"
@@ -2385,18 +2045,6 @@
       "human_id": "TASK-283",
       "file_path": "docs/requirements/task/TASK-283-implement-spec-055-requirement-completeness-oracle.md"
     },
-    "01KXTKPS3RNCEFJKC3GFR4V39M": {
-      "human_id": "SPEC-55",
-      "file_path": "docs/requirements/spec/SPEC-055-055-requirement-ac-completeness-oracle.md"
-    },
-    "01KXTG8EV8XF3XC7NM4ZMS7WS9": {
-      "human_id": "SPEC-54",
-      "file_path": "docs/requirements/spec/SPEC-054-054-uat-verdict-as-plan-close-gate.md"
-    },
-    "01KXSZE4XQW3W14PMMT83RZTHX": {
-      "human_id": "SPEC-53",
-      "file_path": "docs/requirements/spec/SPEC-053-053-ai-advisory-ac-vagueness-supplement-on-lore-re.md"
-    },
     "01KXSNE3B806SC67E9W9VMR5TB": {
       "human_id": "PLAN-074",
       "file_path": "docs/requirements/plan/PLAN-074-implementation-ac-quantifiability-gate.md"
@@ -2413,10 +2061,6 @@
       "human_id": "TASK-286",
       "file_path": "docs/requirements/task/TASK-286-gate-predicate-registry-feeding-config.md"
     },
-    "01KXR933RSA8ERHEVNNCC8652N": {
-      "human_id": "SPEC-88",
-      "file_path": "docs/requirements/spec/SPEC-086-ac-quantifiability-gate-design-time-standardizatio.md"
-    },
     "01KXN9RM5DE4BS7ZPB9AGA03PV": {
       "human_id": "KN-155",
       "file_path": "docs/requirements/knowledge/KN-155-lore-verify-long-oracle-flake-vitest-ontaskupdate.md"
@@ -2429,21 +2073,9 @@
       "human_id": "TASK-288",
       "file_path": "docs/requirements/task/TASK-288-hook-cd-prefix-cwd-g1-anomaly-fail-open-command-po.md"
     },
-    "01KXQG4P7APNSHFCH32HQA4KQ1": {
-      "human_id": "SPEC-51",
-      "file_path": "docs/requirements/spec/SPEC-051-051-cli-strict-flags-unknown-flag-rejection-actor.md"
-    },
     "01KXQEG1MQKR5DF614J5KPN5DY": {
       "human_id": "TASK-289",
       "file_path": "docs/requirements/task/TASK-289-enforcer-feed-embedding-spec-create-enrichment-tes.md"
-    },
-    "01KXQG4NT41WZDERXM80Y8Q9R7": {
-      "human_id": "SPEC-50",
-      "file_path": "docs/requirements/spec/SPEC-050-050-gate-hooks-cross-corpus-false-deny-fix-cd-pref.md"
-    },
-    "01KXQEEP6D3TB7HTQRH4J0ZFAQ": {
-      "human_id": "SPEC-49",
-      "file_path": "docs/requirements/spec/SPEC-087-049-gate-denials-carry-the-feeding-pack-gateenforc.md"
     },
     "01KXQ02KRY2714HBXXF6PEQ70N": {
       "human_id": "TASK-290",
@@ -2477,10 +2109,6 @@
       "human_id": "TASK-297",
       "file_path": "docs/requirements/task/TASK-297-skill-implement-setup-args-realpath-hardening-for.md"
     },
-    "01KXNSWQCRV9PJW22105TVG103": {
-      "human_id": "SPEC-48",
-      "file_path": "docs/requirements/spec/SPEC-088-048-distribution-part-2-npm-single-platform-publis.md"
-    },
     "01KXNRM7A2BT6DSSFTQNNPR1JE": {
       "human_id": "TASK-298",
       "file_path": "docs/requirements/task/TASK-298-implement-seat-briefing-asset-worktree-aware-hook.md"
@@ -2488,14 +2116,6 @@
     "01KXNM7WCR2XDVY5QAPTYGECC4": {
       "human_id": "KN-156",
       "file_path": "docs/requirements/knowledge/KN-156-global-handoff-skill-retired-lore-native-handoff-s.md"
-    },
-    "01KXNRKHS7218XQQ6C9GJYW9GP": {
-      "human_id": "SPEC-47",
-      "file_path": "docs/requirements/spec/SPEC-089-047-session-seat-auto-briefing-worktree-aware-sess.md"
-    },
-    "01KXG828W7AB6YX4QS469V4NXC": {
-      "human_id": "SPEC-90",
-      "file_path": "docs/requirements/spec/SPEC-090-claim-time-actor-identity-guard-zero-evidence-rele.md"
     },
     "01KXN9TS320PSTXRCMWS8MYRZZ": {
       "human_id": "KN-157",
@@ -2593,10 +2213,6 @@
       "human_id": "KN-167",
       "file_path": "docs/requirements/knowledge/KN-167-assessment-implementation-spec-081-gate-skip.md"
     },
-    "01KYEK3FV5Y46J2CM72EGFC69V": {
-      "human_id": "SPEC-82",
-      "file_path": "docs/requirements/spec/SPEC-091-081-audit-hardening-part-2-gate-skip-observability.md"
-    },
     "01KYEK43VMSMWCHY42N4HD5TXM": {
       "human_id": "PLAN-075",
       "file_path": "docs/requirements/plan/PLAN-075-implementation-spec-081-gate-skip-observability-pu.md"
@@ -2612,14 +2228,6 @@
     "01KYEK8J63TNRFVJPKB3RAJTVN": {
       "human_id": "TASK-314",
       "file_path": "docs/requirements/task/TASK-314-dashboard-declared-phase-rendering-mirror-server.md"
-    },
-    "01KYENFCAVX7C37T3689DA53K2": {
-      "human_id": "ADR-8",
-      "file_path": "docs/requirements/adr/ADR-008-spec-kind-as-a-field-on-spec-taxonomy-option-c-not.md"
-    },
-    "01KYENFBYX90AXT5E1NBPATMXT": {
-      "human_id": "ADR-9",
-      "file_path": "docs/requirements/adr/ADR-009-dashboard-positioned-as-general-admin-console-owne.md"
     },
     "01KYENED6N2NT4Y5GQT67ECBY5": {
       "human_id": "SPEC-092",
@@ -2676,18 +2284,6 @@
     "01KYEK3E0SF09WG5SHSHJ8JV9S": {
       "human_id": "TASK-316",
       "file_path": "docs/requirements/task/TASK-316-dashboard-frontend-ux-pair-newdocmodal-searchable.md"
-    },
-    "01KYEK2XMV3QNX6CVG0JD6ZGMC": {
-      "human_id": "ADR-10",
-      "file_path": "docs/requirements/adr/ADR-010-dashboard-review-queues-include-in-review-docs-ahe.md"
-    },
-    "01KYEK2X8QZKC214ZFFD69SZS7": {
-      "human_id": "ADR-11",
-      "file_path": "docs/requirements/adr/ADR-011-planphasestatus-projects-declared-extra-phases-alo.md"
-    },
-    "01KYEK2WWA8SRETJVYVTBNSTNE": {
-      "human_id": "ADR-12",
-      "file_path": "docs/requirements/adr/ADR-012-dashboard-cookie-session-writes-attribute-author-v.md"
     },
     "01KZNFQE28253DR50G2Y1JQGQ7": {
       "human_id": "SPEC-133",
@@ -2825,37 +2421,3049 @@
       "human_id": "SPEC-100",
       "file_path": "docs/requirements/spec/SPEC-100-verify-reachability-plan-promote-early-warning.md"
     },
+    "01KXR933RSA8ERHEVNNCC8652N": {
+      "human_id": "SPEC-088",
+      "file_path": "docs/requirements/spec/SPEC-088-ac-quantifiability-gate-design-time-standardizatio.md"
+    },
+    "01KWH86C2PRDSCQB99WVNSRV8R": {
+      "human_id": "SPEC-026",
+      "file_path": "docs/requirements/spec/SPEC-026-lore-assess-ai-plan-outcome-assessment-llm-as-judg.md"
+    },
+    "01KY6RMG0TN02DC4T18W7HY232": {
+      "human_id": "SPEC-067",
+      "file_path": "docs/requirements/spec/SPEC-067-ai-surface-robustness-assess-timeout-floor-partial.md"
+    },
+    "01KY6RMKCAENWV8F6EB6R24A9Y": {
+      "human_id": "SPEC-069",
+      "file_path": "docs/requirements/spec/SPEC-069-execution-time-attestation-floor-ad-hoc-task-chann.md"
+    },
+    "01KWZRMZNPZ8WKBY0BEW3KTTCK": {
+      "human_id": "SPEC-038",
+      "file_path": "docs/requirements/spec/SPEC-038-ac-as-code-structured-acceptance-criteria-oracle-b.md"
+    },
+    "01KY1N7KVWSXB2T3XNR7CRH0HB": {
+      "human_id": "SPEC-061",
+      "file_path": "docs/requirements/spec/SPEC-061-attestation-completeness-guard-detect-zero-match-u.md"
+    },
     "01KYHREBH7JMD4T8R4AH4792D6": {
-      "human_id": "SPEC-99",
-      "file_path": "docs/requirements/spec/SPEC-99-workflow-hardening-evidence-red-vocabulary-claim-w.md"
+      "human_id": "SPEC-099",
+      "file_path": "docs/requirements/spec/SPEC-099-workflow-hardening-evidence-red-vocabulary-claim-w.md"
+    },
+    "01KXG828W7AB6YX4QS469V4NXC": {
+      "human_id": "SPEC-090",
+      "file_path": "docs/requirements/spec/SPEC-090-claim-time-actor-identity-guard-zero-evidence-rele.md"
     },
     "01KYH9580C7NQ20XV8J7M6JCYR": {
-      "human_id": "SPEC-98",
-      "file_path": "docs/requirements/spec/SPEC-98-context-verb-family-two-zone-claude-md-anatomy-lor.md"
+      "human_id": "SPEC-098",
+      "file_path": "docs/requirements/spec/SPEC-098-context-verb-family-two-zone-claude-md-anatomy-lor.md"
     },
     "01KYGRQMKA3N22Y50NBS484AQP": {
-      "human_id": "SPEC-95",
-      "file_path": "docs/requirements/spec/SPEC-95-project-claude-md-content-contract-governance-inje.md"
+      "human_id": "SPEC-095",
+      "file_path": "docs/requirements/spec/SPEC-095-project-claude-md-content-contract-governance-inje.md"
     },
     "01KYF1NXCQ78C4SSJ34HKJBYAW": {
-      "human_id": "SPEC-84",
-      "file_path": "docs/requirements/spec/SPEC-84-corpus-allocated-ordinal-identity-store-atomic-spe.md"
+      "human_id": "SPEC-084",
+      "file_path": "docs/requirements/spec/SPEC-084-corpus-allocated-ordinal-identity-store-atomic-spe.md"
     },
     "01KYH29FA0GJ3EYZ28WRBCYWMG": {
-      "human_id": "SPEC-97",
-      "file_path": "docs/requirements/spec/SPEC-97-lifecycle-archival-plan-close-cascade-deterministi.md"
+      "human_id": "SPEC-097",
+      "file_path": "docs/requirements/spec/SPEC-097-lifecycle-archival-plan-close-cascade-deterministi.md"
     },
     "01KYGTX80F15JJA576ZPFPDZSJ": {
-      "human_id": "SPEC-96",
-      "file_path": "docs/requirements/spec/SPEC-96-session-start-handoff-neutrality-injection-drops-r.md"
+      "human_id": "SPEC-096",
+      "file_path": "docs/requirements/spec/SPEC-096-session-start-handoff-neutrality-injection-drops-r.md"
+    },
+    "01KWJZCQ6CTRAJEGRKA111MJHV": {
+      "human_id": "SPEC-027",
+      "file_path": "docs/requirements/spec/SPEC-027-dashboard-hardening-write-path-integrity-delete-re.md"
+    },
+    "01KWK6WPNE1E8645ZGWNQ37D0E": {
+      "human_id": "SPEC-028",
+      "file_path": "docs/requirements/spec/SPEC-028-assess-input-transparency-pre-flight-diff-budgetin.md"
+    },
+    "01KWK9R3V6PGCGHZ3QRKE2EKH6": {
+      "human_id": "SPEC-029",
+      "file_path": "docs/requirements/spec/SPEC-029-assess-reliability-reasoning-length-resilience-sur.md"
+    },
+    "01KWKDC46MX3AAH21DNPBV6V4Y": {
+      "human_id": "SPEC-030",
+      "file_path": "docs/requirements/spec/SPEC-030-hermetic-judge-sessions-fail-loud-ai-config.md"
+    },
+    "01KWKT1J7VHTD7YNXWHX82GHGG": {
+      "human_id": "SPEC-031",
+      "file_path": "docs/requirements/spec/SPEC-031-dashboard-read-path-contract-fixes-markdown-typogr.md"
+    },
+    "01KWM6ETFQD99W0FFHPWCE3BKW": {
+      "human_id": "SPEC-032",
+      "file_path": "docs/requirements/spec/SPEC-032-output-contract-mechanization-spec-kind-tree-bluep.md"
+    },
+    "01KWV8EM7X18JG4KKMF7MDX7E5": {
+      "human_id": "SPEC-034",
+      "file_path": "docs/requirements/spec/SPEC-034-structured-review-judgment-triage-queue.md"
+    },
+    "01KWV8EMN285ECV6QVFS7W39QE": {
+      "human_id": "SPEC-035",
+      "file_path": "docs/requirements/spec/SPEC-035-audit-trail-calibration-data.md"
+    },
+    "01KWVQG3M93KPRY6RECEFFXHBX": {
+      "human_id": "SPEC-033",
+      "file_path": "docs/requirements/spec/SPEC-033-dashboard-as-living-prd-projection-human-adjudicat.md"
+    },
+    "01KWXKSV9269VM19X9Y6XM95DV": {
+      "human_id": "SPEC-036",
+      "file_path": "docs/requirements/spec/SPEC-036-dashboard-browsing-ux-breadcrumb-tag-status-filter.md"
+    },
+    "01KWXXMZJQ6HC0NMMYE6AT4H8V": {
+      "human_id": "SPEC-037",
+      "file_path": "docs/requirements/spec/SPEC-037-dashboard-execution-tracking-surface-readiness-rou.md"
+    },
+    "01KX01KEVSQFFF8GH31GD3RE9J": {
+      "human_id": "SPEC-039",
+      "file_path": "docs/requirements/spec/SPEC-039-trusted-runner-attested-evidence-for-script-mode-a.md"
+    },
+    "01KX634Z5SYYMQG37EN2Q65KFS": {
+      "human_id": "SPEC-040",
+      "file_path": "docs/requirements/spec/SPEC-040-assessment-dimension-framework-v2-facts-judgment-s.md"
+    },
+    "01KX704CSP1KQRJG0CW53RGJZJ": {
+      "human_id": "SPEC-041",
+      "file_path": "docs/requirements/spec/SPEC-041-session-layer-part-1-bootstrap-pointer-set-lossles.md"
+    },
+    "01KX7CC5PQRTD7ZHKQJWHYFCYM": {
+      "human_id": "SPEC-042",
+      "file_path": "docs/requirements/spec/SPEC-042-session-layer-part-2-session-registry-file-anchor.md"
+    },
+    "01KX7WM8WEYCXZ7KGJ65A66BA8": {
+      "human_id": "SPEC-043",
+      "file_path": "docs/requirements/spec/SPEC-043-memory-hygiene-part-1-bi-temporal-invalidation-h1.md"
+    },
+    "01KXAJ9Z74AB87WMX307VCB5WQ": {
+      "human_id": "SPEC-044",
+      "file_path": "docs/requirements/spec/SPEC-044-memory-hygiene-part-2-staleness-probes-h2.md"
+    },
+    "01KXB08CEE6EQB9CGQMQN5QFTA": {
+      "human_id": "SPEC-045",
+      "file_path": "docs/requirements/spec/SPEC-045-memory-hygiene-part-3-doc-code-drift-oracle-h3.md"
+    },
+    "01KXMY4KVDW213ADKWG6FSXCPA": {
+      "human_id": "SPEC-046",
+      "file_path": "docs/requirements/spec/SPEC-046-distribution-part-1-asset-ssot-local-safe-installe.md"
+    },
+    "01KXNRKHS7218XQQ6C9GJYW9GP": {
+      "human_id": "SPEC-047",
+      "file_path": "docs/requirements/spec/SPEC-047-session-seat-auto-briefing-worktree-aware-sessions.md"
+    },
+    "01KXNSWQCRV9PJW22105TVG103": {
+      "human_id": "SPEC-048",
+      "file_path": "docs/requirements/spec/SPEC-048-distribution-part-2-npm-single-platform-publish-tt.md"
+    },
+    "01KXQEEP6D3TB7HTQRH4J0ZFAQ": {
+      "human_id": "SPEC-049",
+      "file_path": "docs/requirements/spec/SPEC-049-gate-denials-carry-the-feeding-pack-gateenforcer-e.md"
+    },
+    "01KXQG4NT41WZDERXM80Y8Q9R7": {
+      "human_id": "SPEC-050",
+      "file_path": "docs/requirements/spec/SPEC-050-gate-hooks-cross-corpus-false-deny-fix-cd-prefix-t.md"
+    },
+    "01KXQG4P7APNSHFCH32HQA4KQ1": {
+      "human_id": "SPEC-051",
+      "file_path": "docs/requirements/spec/SPEC-051-cli-strict-flags-unknown-flag-rejection-actor-flag.md"
+    },
+    "01KXSZE4XQW3W14PMMT83RZTHX": {
+      "human_id": "SPEC-053",
+      "file_path": "docs/requirements/spec/SPEC-053-ai-advisory-ac-vagueness-supplement-on-lore-review.md"
+    },
+    "01KXTG8EV8XF3XC7NM4ZMS7WS9": {
+      "human_id": "SPEC-054",
+      "file_path": "docs/requirements/spec/SPEC-054-uat-verdict-as-plan-close-gate.md"
+    },
+    "01KXTKPS3RNCEFJKC3GFR4V39M": {
+      "human_id": "SPEC-055",
+      "file_path": "docs/requirements/spec/SPEC-055-requirement-ac-completeness-oracle.md"
+    },
+    "01KXX4R6JYCNRBC666YDQ6DYRH": {
+      "human_id": "SPEC-056",
+      "file_path": "docs/requirements/spec/SPEC-056-phase-execution-model-phase-doc-type-computed-comp.md"
+    },
+    "01KXX7XN7MTWN1B2H9ABAF3DBH": {
+      "human_id": "SPEC-057",
+      "file_path": "docs/requirements/spec/SPEC-057-two-tier-worktree-seat-model-lore-seat-verb-seat-a.md"
+    },
+    "01KXX8F1RTAFZK96NKGSWJEMP1": {
+      "human_id": "SPEC-058",
+      "file_path": "docs/requirements/spec/SPEC-058-verification-profiles-per-spec-kind-oracle-coverag.md"
+    },
+    "01KXZJAVGJEWNNXCTVN7N506H0": {
+      "human_id": "SPEC-059",
+      "file_path": "docs/requirements/spec/SPEC-059-requirement-layer-quantifiability-lint-close-spec.md"
+    },
+    "01KY1G2KX8S024EG5T062F5K5J": {
+      "human_id": "SPEC-060",
+      "file_path": "docs/requirements/spec/SPEC-060-lore-setup-project-scaffold-completion-repo-level.md"
+    },
+    "01KY1NMTNCP47B69WNKGQGS0RE": {
+      "human_id": "SPEC-062",
+      "file_path": "docs/requirements/spec/SPEC-062-config-write-layer-configservice-http-surface-and.md"
+    },
+    "01KY1RKDSY0QFA30WX4SF0PHAS": {
+      "human_id": "SPEC-063",
+      "file_path": "docs/requirements/spec/SPEC-063-verify-execution-root-correctness-under-linked-wor.md"
+    },
+    "01KY2K32F4HTNG3N5TDDAZ3K50": {
+      "human_id": "SPEC-064",
+      "file_path": "docs/requirements/spec/SPEC-064-dashboard-settings-ui-two-scope-config-editing-wit.md"
+    },
+    "01KY6RKW5KDP7HPRWCNPW0X2Y6": {
+      "human_id": "SPEC-065",
+      "file_path": "docs/requirements/spec/SPEC-065-cli-ergonomics-unique-id-prefix-resolution-single.md"
+    },
+    "01KY6RMDS2BW3PGH901PXCAW4V": {
+      "human_id": "SPEC-066",
+      "file_path": "docs/requirements/spec/SPEC-066-git-safety-gate-heredoc-string-literal-awareness-c.md"
+    },
+    "01KY7N4QMHKZVGJ3KAPYSKHYSB": {
+      "human_id": "SPEC-071",
+      "file_path": "docs/requirements/spec/SPEC-071-execution-liveness-signals-session-actor-tier-evid.md"
+    },
+    "01KY7PVW0P372F2X1PHY4FWGW9": {
+      "human_id": "SPEC-070",
+      "file_path": "docs/requirements/spec/SPEC-070-deterministic-task-dispatch-bundle-lore-feed-task.md"
+    },
+    "01KY95DHC5B3GGTRATV4V58Q66": {
+      "human_id": "SPEC-072",
+      "file_path": "docs/requirements/spec/SPEC-072-upstream-issue-reporting-lore-report-issue-consume.md"
+    },
+    "01KY9C659XA7P833RQ0VRC90WC": {
+      "human_id": "SPEC-073",
+      "file_path": "docs/requirements/spec/SPEC-073-report-issue-trigger-surfaces-error-path-hints-ven.md"
+    },
+    "01KY9C65QC7VCQ9FCXSYAXQN9H": {
+      "human_id": "SPEC-074",
+      "file_path": "docs/requirements/spec/SPEC-074-dashboard-issues-triage-surface-badge-list-in-plac.md"
+    },
+    "01KYA021RQE6CAHSVZP1AG0R95": {
+      "human_id": "SPEC-075",
+      "file_path": "docs/requirements/spec/SPEC-075-dashboard-adjudication-workbench-route-telemetry-p.md"
+    },
+    "01KYBFWCM7KGG507X20WD7ZVF1": {
+      "human_id": "SPEC-076",
+      "file_path": "docs/requirements/spec/SPEC-076-distribution-integration-model-asset-update-conver.md"
+    },
+    "01KYBHK4RH9YY80K3E4YRETXJH": {
+      "human_id": "SPEC-077",
+      "file_path": "docs/requirements/spec/SPEC-077-dashboard-execution-read-surface-prd-21-f3.md"
+    },
+    "01KYBY8ENFZV32SHNTK86YWA59": {
+      "human_id": "SPEC-078",
+      "file_path": "docs/requirements/spec/SPEC-078-dashboard-multi-project-mount-registry-machine-sco.md"
+    },
+    "01KYED2SPD2761574A8SN5VBHC": {
+      "human_id": "SPEC-079",
+      "file_path": "docs/requirements/spec/SPEC-079-audit-hardening-link-provenance-actor-fidelity-tam.md"
+    },
+    "01KYEECNVG9WCFJSG8DB0ZMB3M": {
+      "human_id": "SPEC-080",
+      "file_path": "docs/requirements/spec/SPEC-080-bootstrap-injection-projection-tier-1-tier-2-paylo.md"
+    },
+    "01KYEGPX9NM0XCVP1ZYRFETTN3": {
+      "human_id": "SPEC-081",
+      "file_path": "docs/requirements/spec/SPEC-081-prd-as-outline-contract-structured-outline-domain.md"
+    },
+    "01KYEK3FV5Y46J2CM72EGFC69V": {
+      "human_id": "SPEC-082",
+      "file_path": "docs/requirements/spec/SPEC-082-audit-hardening-part-2-gate-skip-observability-pus.md"
     },
     "01KYFA8Y8YBF8VNP9YR30H9EX9": {
-      "human_id": "SPEC-83",
-      "file_path": "docs/requirements/spec/SPEC-83-governance-prose-runtime-injection-retire-the-inst.md"
+      "human_id": "SPEC-083",
+      "file_path": "docs/requirements/spec/SPEC-083-governance-prose-runtime-injection-retire-the-inst.md"
     },
     "01KYFDNCN2R7NPVW9T71AJY62S": {
-      "human_id": "SPEC-85",
-      "file_path": "docs/requirements/spec/SPEC-85-seat-briefing-runtime-injection-retire-the-install.md"
+      "human_id": "SPEC-085",
+      "file_path": "docs/requirements/spec/SPEC-085-seat-briefing-runtime-injection-retire-the-install.md"
+    },
+    "01KVZ4C4458T454V0JMRQ7CPQT": {
+      "human_id": "SPEC-003",
+      "file_path": "docs/requirements/spec/SPEC-003-cli-adapter.md"
+    },
+    "01KY8YP5WNSRYG6PNBSZAQZ9H3": {
+      "human_id": "SPEC-091",
+      "file_path": "docs/requirements/spec/SPEC-091-version-snapshots-capture-slug-values-spec-068-d5.md"
+    },
+    "01KY8YP69N2DBEJEWMB5VKJ2E7": {
+      "human_id": "SPEC-092",
+      "file_path": "docs/requirements/spec/SPEC-092-strict-flag-hardening-single-dash-multi-char-token.md"
+    },
+    "01KY7BQ7PHV0X6P32A2JHDP0ZS": {
+      "human_id": "SPEC-089",
+      "file_path": "docs/requirements/spec/SPEC-089-cjk-aware-slugify-pinyin-transliteration-lore-set.md"
+    },
+    "01KWBVX30GBGDC7JC4V221RQAB": {
+      "human_id": "SPEC-022",
+      "file_path": "docs/requirements/spec/SPEC-022-dashboard-write-ui-create-edit-approve-link.md"
+    },
+    "01KW6E4CYYS7THX3HPMPPKAEZ8": {
+      "human_id": "SPEC-015",
+      "file_path": "docs/requirements/spec/SPEC-015-dashboard-read-only-skeleton.md"
+    },
+    "01KX0TH150RJPAD8KFD6YWZ3F1": {
+      "human_id": "SPEC-068",
+      "file_path": "docs/requirements/spec/SPEC-068-upstream-asset-ization-prompt-skill-as-first-class.md"
+    },
+    "01KX0CF2WVB4BQWAY52MFYQJE2": {
+      "human_id": "SPEC-052",
+      "file_path": "docs/requirements/spec/SPEC-052-corpus-governed-spec-production-loop-ioc-vertical.md"
+    },
+    "01KWBVX30CKTSVMSP5Y1SC7DYD": {
+      "human_id": "SPEC-020",
+      "file_path": "docs/requirements/spec/SPEC-020-http-backed-ai-provider-alongside-claude-cli.md"
+    },
+    "01KW6E4DPF21ERDT5D2H87THDN": {
+      "human_id": "SPEC-017",
+      "file_path": "docs/requirements/spec/SPEC-017-built-in-ai-provider-for-lore-create.md"
+    },
+    "01KWBVX305W16ZRYT9X5V7XJ7Y": {
+      "human_id": "SPEC-023",
+      "file_path": "docs/requirements/spec/SPEC-023-plan-phases-as-a-first-class-grouping-layer.md"
+    },
+    "01KW6G5KX0SZVT65THK1EFFTB0": {
+      "human_id": "SPEC-018",
+      "file_path": "docs/requirements/spec/SPEC-018-lore-sync-docs-backfill-new-spec-files-into-corpus.md"
+    },
+    "01KWBVX30DGVDYMTK1DR2ZW8PS": {
+      "human_id": "SPEC-021",
+      "file_path": "docs/requirements/spec/SPEC-021-lore-export-docs-reverse-sync-from-corpus-to-spec.md"
+    },
+    "01KVZ4C441GQWXW52WB2PZ2SZY": {
+      "human_id": "SPEC-013",
+      "file_path": "docs/requirements/spec/SPEC-013-eval-framework.md"
+    },
+    "01KVZ4C443TDSJZG51V28AYS3V": {
+      "human_id": "SPEC-012",
+      "file_path": "docs/requirements/spec/SPEC-012-telemetry-module.md"
+    },
+    "01KVZ4C442A3PZJ4PC0XP6RNJG": {
+      "human_id": "SPEC-009",
+      "file_path": "docs/requirements/spec/SPEC-009-sync-engine-turso.md"
+    },
+    "01KVZ4C4403W3HFHNVXTPHMZ33": {
+      "human_id": "SPEC-007",
+      "file_path": "docs/requirements/spec/SPEC-007-migration-v1.md"
+    },
+    "01KVZ4C443TC6JFVD2RG6QECTS": {
+      "human_id": "SPEC-006",
+      "file_path": "docs/requirements/spec/SPEC-006-version-history.md"
+    },
+    "01KVZ4C442WTPZR93VB23S28KY": {
+      "human_id": "SPEC-005",
+      "file_path": "docs/requirements/spec/SPEC-005-review-workflow.md"
+    },
+    "01KVZ4C4421YHS7DDGTXDHBV3K": {
+      "human_id": "SPEC-004",
+      "file_path": "docs/requirements/spec/SPEC-004-prd-as-living-root.md"
+    },
+    "01KVZ4C444R0KQD6QDHD5159FC": {
+      "human_id": "SPEC-011",
+      "file_path": "docs/requirements/spec/SPEC-011-http-api-adapter.md"
+    },
+    "01KVZ4C43WJQDYX3RZAWP7DABY": {
+      "human_id": "SPEC-008",
+      "file_path": "docs/requirements/spec/SPEC-008-mcp-server-adapter.md"
+    },
+    "01KVZ4C4405Y709PKK199YCQTZ": {
+      "human_id": "SPEC-002",
+      "file_path": "docs/requirements/spec/SPEC-002-corpus-schema.md"
+    },
+    "01KVZ4C444MST333J8THG0KHST": {
+      "human_id": "SPEC-001",
+      "file_path": "docs/requirements/spec/SPEC-001-service-layer-architecture.md"
+    },
+    "01KWGX62EA7J5HC9FHT431P0P8": {
+      "human_id": "SPEC-025",
+      "file_path": "docs/requirements/spec/SPEC-025-task-execution-workflow-metadata-evidence-claim-re.md"
+    },
+    "01KX31CCC3CH9THP58BXBWDP0J": {
+      "human_id": "SPEC-087",
+      "file_path": "docs/requirements/spec/SPEC-087-p4-upstream-downstream-linkage-feed-before-produce.md"
+    },
+    "01KX2PFSB95061N61DVASAG3E9": {
+      "human_id": "SPEC-086",
+      "file_path": "docs/requirements/spec/SPEC-086-p2-workflow-state-machine-checkpoint-registry-cros.md"
+    },
+    "01KVZ4C4418PNKA5QWTK6M7369": {
+      "human_id": "SPEC-010",
+      "file_path": "docs/requirements/spec/SPEC-010-auth-agent-credentials.md"
+    },
+    "01KWBVX30AS6XNP5X5FQ49QPE4": {
+      "human_id": "SPEC-019",
+      "file_path": "docs/requirements/spec/SPEC-019-ai-assistance-in-lore-set-and-lore-link.md"
+    },
+    "01KWBVX30M4W03TCW8XEMK2ZFD": {
+      "human_id": "SPEC-024",
+      "file_path": "docs/requirements/spec/SPEC-024-default-no-ai-for-agent-and-mcp-execution-paths.md"
+    },
+    "01KW6E4DAHWQP3HT6XEYD1A91V": {
+      "human_id": "SPEC-016",
+      "file_path": "docs/requirements/spec/SPEC-016-cookie-auth-cli-managed-local-bootstrap.md"
+    },
+    "01KW6E4CG1A33AQP5MC8857T27": {
+      "human_id": "SPEC-014",
+      "file_path": "docs/requirements/spec/SPEC-014-monorepo-skeleton-bun-workspaces-p1-layout.md"
+    },
+    "01KZDJYM99H6Y9J2MKVM0R0MTH": {
+      "human_id": "ADR-030",
+      "file_path": "docs/requirements/adr/ADR-030-falsifiability-moves-from-the-task-tier-to-the-ora.md"
+    },
+    "01KZ3AX21ER39W4Z3V9N2NE84W": {
+      "human_id": "ADR-029",
+      "file_path": "docs/requirements/adr/ADR-029-a-guard-does-not-exist-until-it-runs-against-the-r.md"
+    },
+    "01KYYR23WVT15AXAP3S0GS4PV0": {
+      "human_id": "ADR-028",
+      "file_path": "docs/requirements/adr/ADR-028-lore-s-mechanisms-validate-a-proxy-for-the-propert.md"
+    },
+    "01KYYAE41PSAYVH6QHVHRWA12V": {
+      "human_id": "ADR-027",
+      "file_path": "docs/requirements/adr/ADR-027-lore-done-requires-a-runner-attested-pass-the-sixt.md"
+    },
+    "01KYYAA01NJZNF0H66KWCQEVA5": {
+      "human_id": "ADR-026",
+      "file_path": "docs/requirements/adr/ADR-026-judge-flakiness-keep-d5-unchanged-explicit-human-d.md"
+    },
+    "01KYY22J8RYG2F4RFS1CR6VRY5": {
+      "human_id": "ADR-025",
+      "file_path": "docs/requirements/adr/ADR-025-the-coverage-floor-s-mcp-arming-compares-the-tool.md"
+    },
+    "01KYXNF646BVV7NT6A52JM5CQ7": {
+      "human_id": "ADR-024",
+      "file_path": "docs/requirements/adr/ADR-024-a-claude-md-standing-lesson-is-evicted-when-a-dete.md"
+    },
+    "01KYW5XKV16C9CSNVZQMTB2M5A": {
+      "human_id": "ADR-023",
+      "file_path": "docs/requirements/adr/ADR-023-answers-to-the-three-blocking-questions-on-the-202.md"
+    },
+    "01KYW5XKNEBA36ETYV7Y6RWSSR": {
+      "human_id": "ADR-022",
+      "file_path": "docs/requirements/adr/ADR-022-an-escalate-gates-every-doc-type-a-reject-stays-sc.md"
+    },
+    "01KYW5XKEVRQY0Z3ANRVY9DNZ9": {
+      "human_id": "ADR-021",
+      "file_path": "docs/requirements/adr/ADR-021-a-gate-premised-on-the-agent-s-judgment-being-untr.md"
+    },
+    "01KYW5VYHY3RN1Z2KG6WDTJY04": {
+      "human_id": "ADR-020",
+      "file_path": "docs/requirements/adr/ADR-020-lore-evidence-proves-a-filtered-pass-with-the-runn.md"
+    },
+    "01KYVTS9NAN3G1EP5BSTNRMPT5": {
+      "human_id": "ADR-019",
+      "file_path": "docs/requirements/adr/ADR-019-a-newly-armed-structural-oracle-enforces-from-a-ba.md"
+    },
+    "01KYV0NB465Q9ZCR6JP3WTZBVZ": {
+      "human_id": "ADR-018",
+      "file_path": "docs/requirements/adr/ADR-018-lore-verify-s-attested-evidence-scope-belongs-to-t.md"
+    },
+    "01KYRRHBP6P2KYM1BVAYYQ5K16": {
+      "human_id": "ADR-017",
+      "file_path": "docs/requirements/adr/ADR-017-plan-close-predicates-must-measure-invariants-not.md"
+    },
+    "01KYM76KXKTK7R08B1W5YYDQZC": {
+      "human_id": "ADR-016",
+      "file_path": "docs/requirements/adr/ADR-016-product-skill-chain-derive-features-via-ost-execut.md"
+    },
+    "01KYHJTHE9S583XK5WCVKZ5JAX": {
+      "human_id": "ADR-015",
+      "file_path": "docs/requirements/adr/ADR-015-distribution-first-every-improvement-names-its-con.md"
+    },
+    "01KYH76ZWNX2QSMZ6YPG7AMV2S": {
+      "human_id": "ADR-013",
+      "file_path": "docs/requirements/adr/ADR-013-claude-md-specs-section-is-pointer-only-per-spec-i.md"
+    },
+    "01KYH81XTEP2J6BSSANYCCZFFK": {
+      "human_id": "ADR-014",
+      "file_path": "docs/requirements/adr/ADR-014-context-capability-is-a-first-class-lore-verb-fami.md"
+    },
+    "01KY8Z38VKHD0GCQ0VAZ6PZGXM": {
+      "human_id": "ADR-005",
+      "file_path": "docs/requirements/adr/ADR-005-loreconfig-carriage-for-mcp-tools-getter-param-now.md"
+    },
+    "01KY4Z4PSSNW7NC3WMZHM1AHH4": {
+      "human_id": "ADR-004",
+      "file_path": "docs/requirements/adr/ADR-004-claude-md-carries-only-standing-discipline-histori.md"
+    },
+    "01KYA80CEKF93Y0YJ9TMFKS41W": {
+      "human_id": "ADR-003",
+      "file_path": "docs/requirements/adr/ADR-003-newdocmodal-spec-create-cli-skill-only-authoring-d.md"
+    },
+    "01KYEK2WWA8SRETJVYVTBNSTNE": {
+      "human_id": "ADR-012",
+      "file_path": "docs/requirements/adr/ADR-012-dashboard-cookie-session-writes-attribute-author-v.md"
+    },
+    "01KYEK2X8QZKC214ZFFD69SZS7": {
+      "human_id": "ADR-011",
+      "file_path": "docs/requirements/adr/ADR-011-planphasestatus-projects-declared-extra-phases-alo.md"
+    },
+    "01KYEK2XMV3QNX6CVG0JD6ZGMC": {
+      "human_id": "ADR-010",
+      "file_path": "docs/requirements/adr/ADR-010-dashboard-review-queues-include-in-review-docs-ahe.md"
+    },
+    "01KYENFBYX90AXT5E1NBPATMXT": {
+      "human_id": "ADR-009",
+      "file_path": "docs/requirements/adr/ADR-009-dashboard-positioned-as-general-admin-console-owne.md"
+    },
+    "01KYENFCAVX7C37T3689DA53K2": {
+      "human_id": "ADR-008",
+      "file_path": "docs/requirements/adr/ADR-008-spec-kind-as-a-field-on-spec-taxonomy-option-c-not.md"
+    },
+    "01KXR2TWS96BE5A25MP9E94RBS": {
+      "human_id": "ADR-006",
+      "file_path": "docs/requirements/adr/ADR-006-verification-skill-family-routed-convergence-share.md"
+    },
+    "01KXQG47VBMB3BV1J70MP9SVQK": {
+      "human_id": "ADR-007",
+      "file_path": "docs/requirements/adr/ADR-007-retire-lore-planner-agent-vendor-upstream-workflow.md"
+    },
+    "01KX0BA07RFXWDRGAQBB5674YW": {
+      "human_id": "ADR-002",
+      "file_path": "docs/requirements/adr/ADR-002-corpus-governed-active-ai-workflow-inversion-of-co.md"
+    },
+    "01KWZRMQ5ZC41F847ZR5ZSXTV2": {
+      "human_id": "ADR-001",
+      "file_path": "docs/requirements/adr/ADR-001-ac-as-code-yan-shou-biao-zhun-zuo-wei-lei-xing-hua.md"
+    },
+    "01KZN4Q68EJEV47W1KT0BPPCC6": {
+      "human_id": "KN-169",
+      "file_path": "docs/requirements/knowledge/KN-169-four-governance-tooling-gaps-measured-while-resumi.md"
+    },
+    "01KZNB1789D7VA8X19Z4HN6M3W": {
+      "human_id": "KN-170",
+      "file_path": "docs/requirements/knowledge/KN-170-attestation-is-structurally-one-sided-lore-verify.md"
+    },
+    "01KZNVJV569RJ4MTPZYM86XHMR": {
+      "human_id": "KN-171",
+      "file_path": "docs/requirements/knowledge/KN-171-handoff-agent-main-orchestrator.md"
+    },
+    "01KZNG5QNDVRRAG1Z6EP10CCH2": {
+      "human_id": "KN-172",
+      "file_path": "docs/requirements/knowledge/KN-172-handoff-agent-main-orchestrator.md"
+    },
+    "01KZND9TTK1HNRY9M7VYX37QEP": {
+      "human_id": "KN-173",
+      "file_path": "docs/requirements/knowledge/KN-173-assessment-make-three-governance-outcomes-legible.md"
+    },
+    "01KZND54GFVGYT1JKDHKS29HZQ": {
+      "human_id": "KN-174",
+      "file_path": "docs/requirements/knowledge/KN-174-assessment-land-oracle-executability-the-discovery.md"
+    },
+    "01KZNAXWEJD4DGWFMM65Q2C2Z6": {
+      "human_id": "KN-175",
+      "file_path": "docs/requirements/knowledge/KN-175-assessment-close-two-typecheck-blind-spots-and.md"
+    },
+    "01KZN8433CS6NKN47YMEXAMQXS": {
+      "human_id": "KN-176",
+      "file_path": "docs/requirements/knowledge/KN-176-handoff-agent-main-orchestrator.md"
+    },
+    "01KZN78AKENZK18AK7MN949Y8G": {
+      "human_id": "KN-177",
+      "file_path": "docs/requirements/knowledge/KN-177-an-attested-pass-is-not-evidence-of-production-wir.md"
+    },
+    "01KZN70RNBQN075CTSSC9SQD7C": {
+      "human_id": "KN-178",
+      "file_path": "docs/requirements/knowledge/KN-178-assessment-make-three-governance-outcomes-legible.md"
+    },
+    "01KZN5Y1Y6EJZKA9XXD9BRE8F4": {
+      "human_id": "KN-179",
+      "file_path": "docs/requirements/knowledge/KN-179-assessment-close-two-typecheck-blind-spots-and.md"
+    },
+    "01KZN4X6JEN3VWWR7WK3QP3HEC": {
+      "human_id": "KN-180",
+      "file_path": "docs/requirements/knowledge/KN-180-handoff-agent-main-orchestrator.md"
+    },
+    "01KZE8GVWGTWTV55RHFDX03GWF": {
+      "human_id": "KN-181",
+      "file_path": "docs/requirements/knowledge/KN-181-handoff-agent-widen-coverage-derivation.md"
+    },
+    "01KZEEBBY37BSQRRN6V62NYPS8": {
+      "human_id": "KN-182",
+      "file_path": "docs/requirements/knowledge/KN-182-handoff-agent-main-orchestrator.md"
+    },
+    "01KZE5VWWYVRR5P2GJ5473Y85C": {
+      "human_id": "KN-183",
+      "file_path": "docs/requirements/knowledge/KN-183-seven-of-lore-s-own-outputs-misled-this-session-a.md"
+    },
+    "01KZEDQ920K0DTEMC2MM9H0S5H": {
+      "human_id": "KN-184",
+      "file_path": "docs/requirements/knowledge/KN-184-assessment-land-fail-superseded-and-not-measured-a.md"
+    },
+    "01KZDVTQFRFSWP1H72Y4WH7A01": {
+      "human_id": "KN-185",
+      "file_path": "docs/requirements/knowledge/KN-185-handoff-agent-main-orchestrator-82242b77.md"
+    },
+    "01KZDVK2S0VAVZQ0E8R4DZ73XS": {
+      "human_id": "KN-186",
+      "file_path": "docs/requirements/knowledge/KN-186-the-anchor-set-is-the-acceptance-unit-design-so-an.md"
+    },
+    "01KZDVFNADCFJA1KEG950CH81P": {
+      "human_id": "KN-187",
+      "file_path": "docs/requirements/knowledge/KN-187-assessment-land-oracle-tier-falsifiability-falsifi.md"
+    },
+    "01KZDB9X6HXBZQ1D44AR9DSNYH": {
+      "human_id": "KN-188",
+      "file_path": "docs/requirements/knowledge/KN-188-handoff-agent-main-orchestrator.md"
+    },
+    "01KZBJHZ9VFN9X91FMQFZSE0K3": {
+      "human_id": "KN-189",
+      "file_path": "docs/requirements/knowledge/KN-189-module-claude-md-snapshot-cli-adapter-pre-eviction.md"
+    },
+    "01KZD6BPNEC23521STKFA62ZCM": {
+      "human_id": "KN-190",
+      "file_path": "docs/requirements/knowledge/KN-190-load-average-is-the-wrong-instrument-for-is-this-r.md"
+    },
+    "01KZBFH2W1BQG02S1NY5J87D7D": {
+      "human_id": "KN-191",
+      "file_path": "docs/requirements/knowledge/KN-191-module-claude-md-snapshot-packages-lore-src-adapte.md"
+    },
+    "01KZBFGXY6JYNQ32SB7XY2JGCV": {
+      "human_id": "KN-192",
+      "file_path": "docs/requirements/knowledge/KN-192-module-claude-md-snapshot-packages-lore-src-ai-fro.md"
+    },
+    "01KZBFGPHRNVRV806PWFQ8Z3JA": {
+      "human_id": "KN-193",
+      "file_path": "docs/requirements/knowledge/KN-193-module-claude-md-snapshot-packages-lore-src-store.md"
+    },
+    "01KZBFGGVRMTJJXD53FDDD0B33": {
+      "human_id": "KN-194",
+      "file_path": "docs/requirements/knowledge/KN-194-module-claude-md-snapshot-packages-lore-src-servic.md"
+    },
+    "01KZBJJ7DS7FWN4Q251DWG99V9": {
+      "human_id": "KN-195",
+      "file_path": "docs/requirements/knowledge/KN-195-a-newly-armed-threshold-is-calibrated-against-the.md"
+    },
+    "01KZBA929R53XV1G4GPCJ4NW0W": {
+      "human_id": "KN-196",
+      "file_path": "docs/requirements/knowledge/KN-196-handoff-agent-main-orchestrator.md"
+    },
+    "01KZB0ECHMPM434ZVP3H2EJRHH": {
+      "human_id": "KN-197",
+      "file_path": "docs/requirements/knowledge/KN-197-the-substring-matcher-lesson-has-a-mirror-face-ove.md"
+    },
+    "01KZ65RGS936T27682PCSNXQ1Q": {
+      "human_id": "KN-198",
+      "file_path": "docs/requirements/knowledge/KN-198-retired-from-root-claude-md-the-implementation-sta.md"
+    },
+    "01KZ65RGZRR6HD4G5AP8BY3VQP": {
+      "human_id": "KN-199",
+      "file_path": "docs/requirements/knowledge/KN-199-retired-from-root-claude-md-the-19-dogfooding.md"
+    },
+    "01KZ620SH1535WM0JTQ7PGV2S9": {
+      "human_id": "KN-200",
+      "file_path": "docs/requirements/knowledge/KN-200-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ61DHP18AGZBRMAQT6QSP9F": {
+      "human_id": "KN-201",
+      "file_path": "docs/requirements/knowledge/KN-201-a-backgrounded-command-s-completion-notice-reports.md"
+    },
+    "01KZ403HKF7YT6XW39DX7XMFSW": {
+      "human_id": "KN-202",
+      "file_path": "docs/requirements/knowledge/KN-202-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ3WYBH8XEMYHXBP1WTQMCAV": {
+      "human_id": "KN-203",
+      "file_path": "docs/requirements/knowledge/KN-203-lore-get-s-human-view-hides-extra-issue-report-so.md"
+    },
+    "01KZ3P33AN631RYSFAPYRJWD4S": {
+      "human_id": "KN-204",
+      "file_path": "docs/requirements/knowledge/KN-204-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ3EEW2SMB47TWSWB9N09SAM": {
+      "human_id": "KN-205",
+      "file_path": "docs/requirements/knowledge/KN-205-d5-re-scope-35-open-tasks-against-the-named-consum.md"
+    },
+    "01KZ3D4TC0KN2NNK1177DWX969": {
+      "human_id": "KN-206",
+      "file_path": "docs/requirements/knowledge/KN-206-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ35F4FT6NVSJY3C5VGTG6A6": {
+      "human_id": "KN-207",
+      "file_path": "docs/requirements/knowledge/KN-207-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ31J72809PZMKEEENF485R1": {
+      "human_id": "KN-208",
+      "file_path": "docs/requirements/knowledge/KN-208-the-global-lore-is-a-symlink-into-the-main-checkou.md"
+    },
+    "01KZ2YQPB2ZTFED8JQKHWJ02BW": {
+      "human_id": "KN-209",
+      "file_path": "docs/requirements/knowledge/KN-209-a-handoff-kd-that-counts-un-persisted-artifacts-lo.md"
+    },
+    "01KZ17MQ8J8F8SZDSTRD0WFH2D": {
+      "human_id": "KN-210",
+      "file_path": "docs/requirements/knowledge/KN-210-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ2XPCS04EN3CDBS40C8SKMX": {
+      "human_id": "KN-211",
+      "file_path": "docs/requirements/knowledge/KN-211-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ1E9Y1QEX7S7G1Q5Z7RRB3E": {
+      "human_id": "KN-212",
+      "file_path": "docs/requirements/knowledge/KN-212-vitest-silently-drops-a-nonexistent-path-and-repor.md"
+    },
+    "01KZ1A76THBDS2A7CF6STJPP2P": {
+      "human_id": "KN-213",
+      "file_path": "docs/requirements/knowledge/KN-213-handoff-agent-main-orchestrator.md"
+    },
+    "01KZ19XHYR0Z9Z652QF0Y32MRM": {
+      "human_id": "KN-214",
+      "file_path": "docs/requirements/knowledge/KN-214-handoff-agent-main-orchestrator-82242b77.md"
+    },
+    "01KZ17N19QSS8ACMK517VED94R": {
+      "human_id": "KN-215",
+      "file_path": "docs/requirements/knowledge/KN-215-three-signals-said-a-peer-s-worktree-was-safe-to.md"
+    },
+    "01KZ17PE0D3YRTQF5B7Z8RXCWC": {
+      "human_id": "KN-216",
+      "file_path": "docs/requirements/knowledge/KN-216-a-conjunction-detector-over-acceptance-criteria-is.md"
+    },
+    "01KZ17P95QT5KPAHW3S51C3YKE": {
+      "human_id": "KN-217",
+      "file_path": "docs/requirements/knowledge/KN-217-the-adhoc-flag-severs-plan-membership-and-every.md"
+    },
+    "01KYYV2DYESCRP5FSAGJT00AJA": {
+      "human_id": "KN-218",
+      "file_path": "docs/requirements/knowledge/KN-218-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYTT6BJRET2H16007ZGTV83": {
+      "human_id": "KN-219",
+      "file_path": "docs/requirements/knowledge/KN-219-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYSZY77S2T7CHF0MR7W2CM8": {
+      "human_id": "KN-220",
+      "file_path": "docs/requirements/knowledge/KN-220-arming-the-attested-pass-floor-the-gate-refused-it.md"
+    },
+    "01KYYR3D9Q1VVFZN0FQ108N0D3": {
+      "human_id": "KN-221",
+      "file_path": "docs/requirements/knowledge/KN-221-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYQR4WG0DB0S30V939C6RS9": {
+      "human_id": "KN-222",
+      "file_path": "docs/requirements/knowledge/KN-222-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYP18R6CYTV0VS9V8M8W9T4": {
+      "human_id": "KN-223",
+      "file_path": "docs/requirements/knowledge/KN-223-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYMWDS68NTCZRG1SZ63W2Q9": {
+      "human_id": "KN-224",
+      "file_path": "docs/requirements/knowledge/KN-224-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYMSE4R74TEWFPDSPAXMRXD": {
+      "human_id": "KN-225",
+      "file_path": "docs/requirements/knowledge/KN-225-assessment-implementation-evidence-output-tail.md"
+    },
+    "01KYYKG6S3E6WREWMJ28X6R2D9": {
+      "human_id": "KN-226",
+      "file_path": "docs/requirements/knowledge/KN-226-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYJZM8BANF4MH6ADKNDD08Z": {
+      "human_id": "KN-227",
+      "file_path": "docs/requirements/knowledge/KN-227-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYJXY8CG5TXCBJ1WT9SWN2W": {
+      "human_id": "KN-228",
+      "file_path": "docs/requirements/knowledge/KN-228-six-agent-wave-against-the-evidence-assess-layer-t.md"
+    },
+    "01KYYJQ8RS2020JSVBXQFYWPJ3": {
+      "human_id": "KN-229",
+      "file_path": "docs/requirements/knowledge/KN-229-assessment-implementation-assess-evidence-projecti.md"
+    },
+    "01KYYGPSM7MM0QW3JZDWF75KQ8": {
+      "human_id": "KN-230",
+      "file_path": "docs/requirements/knowledge/KN-230-assessment-implementation-evidence-output-tail.md"
+    },
+    "01KYYFNMFKKBYQJHD2VATY04KN": {
+      "human_id": "KN-231",
+      "file_path": "docs/requirements/knowledge/KN-231-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYE0WMA42PFWKK0V5039ANR": {
+      "human_id": "KN-232",
+      "file_path": "docs/requirements/knowledge/KN-232-handoff-agent-main-orchestrator.md"
+    },
+    "01KYYD1JHZBE9T0BXG20EEYCZQ": {
+      "human_id": "KN-233",
+      "file_path": "docs/requirements/knowledge/KN-233-merge-verify-must-read-the-diff-s-shape-not-just-r.md"
+    },
+    "01KYYAWHB9VDMJ52M9HAT8H17Q": {
+      "human_id": "KN-234",
+      "file_path": "docs/requirements/knowledge/KN-234-handoff-agent-main-orchestrator.md"
+    },
+    "01KYY96MMWFQ5MPY7D3XFCS2A0": {
+      "human_id": "KN-235",
+      "file_path": "docs/requirements/knowledge/KN-235-handoff-agent-main-orchestrator.md"
+    },
+    "01KYY4AF7D8A6WWK4RRJGG5A94": {
+      "human_id": "KN-236",
+      "file_path": "docs/requirements/knowledge/KN-236-handoff-agent-main-orchestrator.md"
+    },
+    "01KYY46CFDJ3TGQA0H38PFKF96": {
+      "human_id": "KN-237",
+      "file_path": "docs/requirements/knowledge/KN-237-a-task-doc-that-accumulated-10-evidence-rows.md"
+    },
+    "01KYY43KNADX54BAKX6GMA5PC6": {
+      "human_id": "KN-238",
+      "file_path": "docs/requirements/knowledge/KN-238-assessment-implementation-resume-coverage-floor.md"
+    },
+    "01KYY3KM0STXS0X80PQB62KGS7": {
+      "human_id": "KN-239",
+      "file_path": "docs/requirements/knowledge/KN-239-an-llm-judge-returned-escalate-and-approve-on-the.md"
+    },
+    "01KYY386JKBRJDVT5ZJ380SAKP": {
+      "human_id": "KN-240",
+      "file_path": "docs/requirements/knowledge/KN-240-handoff-agent-main-orchestrator.md"
+    },
+    "01KYXND53PS21Q0TKT7D3C4GVB": {
+      "human_id": "KN-241",
+      "file_path": "docs/requirements/knowledge/KN-241-two-gaps-t1-surfaced-a-change-selector-blind-to-sp.md"
+    },
+    "01KYY2KDYKK2HVK06D5CKRZP2A": {
+      "human_id": "KN-242",
+      "file_path": "docs/requirements/knowledge/KN-242-a-recommendation-s-premise-is-the-thing-to-re-meas.md"
+    },
+    "01KYY1WTY38ZE1EQ9NBH3EBN4E": {
+      "human_id": "KN-243",
+      "file_path": "docs/requirements/knowledge/KN-243-mechanized-eviction-sweep-of-the-claude-md-standin.md"
+    },
+    "01KYY1VDGH8SA90KKAJ6GK7C0B": {
+      "human_id": "KN-244",
+      "file_path": "docs/requirements/knowledge/KN-244-three-of-four-remaining-assess-gaps-were-bundle.md"
+    },
+    "01KYXT1K05ADS68XRVG7B062E4": {
+      "human_id": "KN-245",
+      "file_path": "docs/requirements/knowledge/KN-245-handoff-agent-main-orchestrator.md"
+    },
+    "01KYXSY95PS8WZ5XGEKWPFR7CM": {
+      "human_id": "KN-246",
+      "file_path": "docs/requirements/knowledge/KN-246-assessment-implementation-lore-ac-set-the-dangling.md"
+    },
+    "01KYXRVCP2ERP0JS49JQVY9BZG": {
+      "human_id": "KN-247",
+      "file_path": "docs/requirements/knowledge/KN-247-handoff-agent-main-orchestrator.md"
+    },
+    "01KYXRMKN28VVYVQA70235E762": {
+      "human_id": "KN-248",
+      "file_path": "docs/requirements/knowledge/KN-248-handoff-agent-main-orchestrator.md"
+    },
+    "01KYXRH147BYK3W2XB6T2JZNQ3": {
+      "human_id": "KN-249",
+      "file_path": "docs/requirements/knowledge/KN-249-close-out-findings-assess-must-be-the-last-step-an.md"
+    },
+    "01KYXRF04RXBW1ZYS0Q6WXJRAD": {
+      "human_id": "KN-250",
+      "file_path": "docs/requirements/knowledge/KN-250-assessment-implementation-resume-ticket-coverage.md"
+    },
+    "01KYXQY2QJ3TW5F9A4KCD9CWDW": {
+      "human_id": "KN-251",
+      "file_path": "docs/requirements/knowledge/KN-251-assessment-implementation-resume-ticket-coverage.md"
+    },
+    "01KYXQT0HMZ0QQ2E45GA5MDHZW": {
+      "human_id": "KN-252",
+      "file_path": "docs/requirements/knowledge/KN-252-assessment-implementation-resume-ticket-coverage.md"
+    },
+    "01KYXQGY09CGHJCPD89AYSYK8T": {
+      "human_id": "KN-253",
+      "file_path": "docs/requirements/knowledge/KN-253-assessment-implementation-ac-scope-admission-at-ta.md"
+    },
+    "01KYXPH5DHNMPEZSVNK4HFN5PX": {
+      "human_id": "KN-254",
+      "file_path": "docs/requirements/knowledge/KN-254-a-shared-checkout-makes-a-full-suite-verdict.md"
+    },
+    "01KYXP9KEXXY5MV24A54WH2T9F": {
+      "human_id": "KN-255",
+      "file_path": "docs/requirements/knowledge/KN-255-an-ssot-to-installed-parity-check-is-unfalsifiable.md"
+    },
+    "01KYXND3TENKV8CFRTRBP8KRZ0": {
+      "human_id": "KN-256",
+      "file_path": "docs/requirements/knowledge/KN-256-assessment-implementation-context-verb-family-two.md"
+    },
+    "01KYXNA6V5FRR9DGPXNEWZC042": {
+      "human_id": "KN-257",
+      "file_path": "docs/requirements/knowledge/KN-257-assessment-implementation-lifecycle-archival-casca.md"
+    },
+    "01KYXKGTRZ18B2F1C6W5E64S29": {
+      "human_id": "KN-258",
+      "file_path": "docs/requirements/knowledge/KN-258-a-true-detector-on-a-non-blocking-channel-changed.md"
+    },
+    "01KYXJW4Z4G4NB6BZ2JVJ7Z387": {
+      "human_id": "KN-259",
+      "file_path": "docs/requirements/knowledge/KN-259-handoff-agent-main-orchestrator.md"
+    },
+    "01KYXJSQDRPHKCSCQJAE3VRK5X": {
+      "human_id": "KN-260",
+      "file_path": "docs/requirements/knowledge/KN-260-file-level-anchor-mutex-does-not-prevent-one-agent.md"
+    },
+    "01KYXG6X5ZAYRR4HZ4STVFW8CD": {
+      "human_id": "KN-261",
+      "file_path": "docs/requirements/knowledge/KN-261-recovering-attestation-on-an-already-archived-plan.md"
+    },
+    "01KYXG5YD9FY9BC2RGW79AD31E": {
+      "human_id": "KN-262",
+      "file_path": "docs/requirements/knowledge/KN-262-git-branch-merged-lists-every-worktree-branch-that.md"
+    },
+    "01KYXG59G4CSWWV1MA0D74A261": {
+      "human_id": "KN-263",
+      "file_path": "docs/requirements/knowledge/KN-263-vitest-t-with-a-non-matching-pattern-exits-0-havin.md"
+    },
+    "01KYWFBW9FV2KNPTM9A2PWR7HQ": {
+      "human_id": "KN-264",
+      "file_path": "docs/requirements/knowledge/KN-264-handoff-agent-main-orchestrator.md"
+    },
+    "01KYWF6KA3T5P8DXN5PYDD2QVD": {
+      "human_id": "KN-265",
+      "file_path": "docs/requirements/knowledge/KN-265-grep-in-the-agent-shell-is-ugrep-ignore-files-and.md"
+    },
+    "01KYWC1T0JA3R4QYG9V4W806RY": {
+      "human_id": "KN-266",
+      "file_path": "docs/requirements/knowledge/KN-266-2-1-jq-is-dev-null-wearing-a-parser-asking-for-jso.md"
+    },
+    "01KYW8QWDXHTYWMF7TAH714PBK": {
+      "human_id": "KN-267",
+      "file_path": "docs/requirements/knowledge/KN-267-a-control-that-shares-the-load-with-the-observatio.md"
+    },
+    "01KYWATSXW7YC2MR6MPCTGG5RM": {
+      "human_id": "KN-268",
+      "file_path": "docs/requirements/knowledge/KN-268-four-assessments-converged-on-a-missing-capability.md"
+    },
+    "01KYWA71QA3A4P7VA3N6QREQVF": {
+      "human_id": "KN-269",
+      "file_path": "docs/requirements/knowledge/KN-269-assessment-d5-an-escalate-present-blocks-even.md"
+    },
+    "01KYW90HYXMJJSVW7Y7R3D88CZ": {
+      "human_id": "KN-270",
+      "file_path": "docs/requirements/knowledge/KN-270-assessment-escalate-gates-every-doc-type-the-denia.md"
+    },
+    "01KYW8D1KV9FSQVX1SR2KJW7XB": {
+      "human_id": "KN-271",
+      "file_path": "docs/requirements/knowledge/KN-271-assessment-superseded-handoff-archival-gains-r3-s.md"
+    },
+    "01KYW0WJZ5XGBQ6NCCHVB01240": {
+      "human_id": "KN-272",
+      "file_path": "docs/requirements/knowledge/KN-272-handoff-supersession-keys-on-plan-actor-concurrent.md"
+    },
+    "01KYW22JF8PHSRTBV8S5DSP8RQ": {
+      "human_id": "KN-273",
+      "file_path": "docs/requirements/knowledge/KN-273-session-process-review-2026-07-31-ten-agent-two-wa.md"
+    },
+    "01KYVV1BXZC46GVJQ43XH7Q49X": {
+      "human_id": "KN-274",
+      "file_path": "docs/requirements/knowledge/KN-274-handoff-agent-main-orchestrator.md"
+    },
+    "01KYW23JZ0VFV4ZREVVWQGDESP": {
+      "human_id": "KN-275",
+      "file_path": "docs/requirements/knowledge/KN-275-handoff-agent-main-orchestrator.md"
+    },
+    "01KYVTS9VVXH7Z65PD47CTPVKF": {
+      "human_id": "KN-276",
+      "file_path": "docs/requirements/knowledge/KN-276-ten-agent-two-wave-run-self-reported-evidence.md"
+    },
+    "01KYW0TV5YXMEEHEV4H49A02E7": {
+      "human_id": "KN-277",
+      "file_path": "docs/requirements/knowledge/KN-277-handoff-agent-main-orchestrator.md"
+    },
+    "01KYVAF9WG2WRN99TXH5J3J3M3": {
+      "human_id": "KN-278",
+      "file_path": "docs/requirements/knowledge/KN-278-handoff-agent-main-orchestrator.md"
+    },
+    "01KYVJ6BF6Y7XX9HWGCD810Y73": {
+      "human_id": "KN-279",
+      "file_path": "docs/requirements/knowledge/KN-279-handoff-agent-main-orchestrator.md"
+    },
+    "01KYVSPNW0YYB9QVT5KAQS3N0K": {
+      "human_id": "KN-280",
+      "file_path": "docs/requirements/knowledge/KN-280-handoff-agent-main-orchestrator.md"
+    },
+    "01KYVMYF4H6N6JPTQYDERR63AS": {
+      "human_id": "KN-281",
+      "file_path": "docs/requirements/knowledge/KN-281-handoff-agent-main-orchestrator.md"
+    },
+    "01KYVGT2CJZJR9F2N7STW5SVB8": {
+      "human_id": "KN-282",
+      "file_path": "docs/requirements/knowledge/KN-282-assessment-symlink-removal-d8-boundary-required-on.md"
+    },
+    "01KYVGBTMN10Z9BYS1NKGRFBWJ": {
+      "human_id": "KN-283",
+      "file_path": "docs/requirements/knowledge/KN-283-measured-rmsync-unlinks-a-symlink-it-is-pointed-at.md"
+    },
+    "01KYW0P2NY0N5RKZR0EY4G7S7P": {
+      "human_id": "KN-284",
+      "file_path": "docs/requirements/knowledge/KN-284-an-ungated-approve-is-not-a-mechanized-approve-a.md"
+    },
+    "01KYKZ96GRQ8X098MP4WA6RT3A": {
+      "human_id": "KN-285",
+      "file_path": "docs/requirements/knowledge/KN-285-dashboard-human-friendliness-evaluation-2026-07-28.md"
+    },
+    "01KYVS2WBT1QK3ZSXN5H140HAX": {
+      "human_id": "KN-286",
+      "file_path": "docs/requirements/knowledge/KN-286-assessment-implementation-lazy-libsql-load-tmpdir.md"
+    },
+    "01KYVPC35TDNCTSD7C6R5GDZ9N": {
+      "human_id": "KN-287",
+      "file_path": "docs/requirements/knowledge/KN-287-retro-eight-approving-review-rounds-cannot-catch-a.md"
+    },
+    "01KYVNNAW18MW3FSXCXGY57TKG": {
+      "human_id": "KN-288",
+      "file_path": "docs/requirements/knowledge/KN-288-assessment-implementation-lazy-libsql-load-tmpdir.md"
+    },
+    "01KYVNF0P6V9QW11ZP5ER53XCH": {
+      "human_id": "KN-289",
+      "file_path": "docs/requirements/knowledge/KN-289-assessment-implementation-lazy-libsql-load-tmpdir.md"
+    },
+    "01KYV2SSN3ARC9SZKKVN8WA62G": {
+      "human_id": "KN-290",
+      "file_path": "docs/requirements/knowledge/KN-290-handoff-agent-main-orchestrator.md"
+    },
+    "01KYVMSH0D031DMAFYZW5QG6CQ": {
+      "human_id": "KN-291",
+      "file_path": "docs/requirements/knowledge/KN-291-assessment-implementation-declared-scope-attestati.md"
+    },
+    "01KYVMQCWD8M9342RF5YNC6P9X": {
+      "human_id": "KN-292",
+      "file_path": "docs/requirements/knowledge/KN-292-assessment-implementation-report-issue-concurrency.md"
+    },
+    "01KYVMMGYPC8K4RCES6EMY4QJT": {
+      "human_id": "KN-293",
+      "file_path": "docs/requirements/knowledge/KN-293-assessment-implementation-proposed-to-accepted.md"
+    },
+    "01KYVMJREGRCP3ES2MDFVVGTA3": {
+      "human_id": "KN-294",
+      "file_path": "docs/requirements/knowledge/KN-294-assessment-implementation-declared-timeout-budgets.md"
+    },
+    "01KYVJ3XQ9EF1MK681MRN2MTEX": {
+      "human_id": "KN-295",
+      "file_path": "docs/requirements/knowledge/KN-295-assessment-git-safety-gate-argument-aware-probes-2.md"
+    },
+    "01KYVJ0T5BM0WNAKWB3FZTQ0R4": {
+      "human_id": "KN-296",
+      "file_path": "docs/requirements/knowledge/KN-296-assessment-git-safety-gate-argument-aware-probes-2.md"
+    },
+    "01KYKVAA8JC7VRAP1S0BHZPVSW": {
+      "human_id": "KN-297",
+      "file_path": "docs/requirements/knowledge/KN-297-grill-review-2026-07-28-seven-product-direction.md"
+    },
+    "01KYM6S4NPWWJJ01SSJ1QY28SS": {
+      "human_id": "KN-298",
+      "file_path": "docs/requirements/knowledge/KN-298-bun-build-compile-embeds-dynamic-imports-only-for.md"
+    },
+    "01KYS3TKYC45CZ6T9XPVEN6HHR": {
+      "human_id": "KN-299",
+      "file_path": "docs/requirements/knowledge/KN-299-turn-state-mjs-resolvesessionid-reads-claude-sessi.md"
+    },
+    "01KYVBN5K4A8W3E938DR5514YA": {
+      "human_id": "KN-300",
+      "file_path": "docs/requirements/knowledge/KN-300-a-zero-match-vitest-t-title-filter-exits-0-the-six.md"
+    },
+    "01KYF9NXJ9JKXBW7TG7NXH1P21": {
+      "human_id": "KN-301",
+      "file_path": "docs/requirements/knowledge/KN-301-handoff-agent-main-orchestrator.md"
+    },
+    "01KYM7ENXSYPP03N9BAMZNJDE9": {
+      "human_id": "KN-302",
+      "file_path": "docs/requirements/knowledge/KN-302-handoff-agent-main-orchestrator.md"
+    },
+    "01KYM9A0K43241PA1P84FMEM7H": {
+      "human_id": "KN-303",
+      "file_path": "docs/requirements/knowledge/KN-303-handoff-agent-main-orchestrator.md"
+    },
+    "01KYMAT95ET5RH9X2FWQ4RVTW1": {
+      "human_id": "KN-304",
+      "file_path": "docs/requirements/knowledge/KN-304-handoff-agent-main-orchestrator.md"
+    },
+    "01KYM89M422VYKY4EAW9NJR5TV": {
+      "human_id": "KN-305",
+      "file_path": "docs/requirements/knowledge/KN-305-handoff-agent-main-orchestrator.md"
+    },
+    "01KYRZWN9TNHG8ABKASJ5P73K5": {
+      "human_id": "KN-306",
+      "file_path": "docs/requirements/knowledge/KN-306-handoff-agent-main-orchestrator.md"
+    },
+    "01KYV11QS0YWQGE8XNDH0CT9N5": {
+      "human_id": "KN-307",
+      "file_path": "docs/requirements/knowledge/KN-307-handoff-agent-main-orchestrator.md"
+    },
+    "01KYV8NZXXNN6Z2X90CN6770R4": {
+      "human_id": "KN-308",
+      "file_path": "docs/requirements/knowledge/KN-308-grepping-the-defect-s-shape-finds-it-in-the-callee.md"
+    },
+    "01KYV7XPPNYR43ARYKX4P4QSPF": {
+      "human_id": "KN-309",
+      "file_path": "docs/requirements/knowledge/KN-309-retro-a-fresh-install-probe-vacuously-passes.md"
+    },
+    "01KYV4TMPBEDQ9P1P3THV2TD96": {
+      "human_id": "KN-310",
+      "file_path": "docs/requirements/knowledge/KN-310-a-wrong-rationale-survives-self-review-better-than.md"
+    },
+    "01KYTXF1GCN9M28B995B73E0S5": {
+      "human_id": "KN-311",
+      "file_path": "docs/requirements/knowledge/KN-311-handoff-agent-main-orchestrator.md"
+    },
+    "01KYSPDNWV4NXJY5DVW1MV1NVE": {
+      "human_id": "KN-312",
+      "file_path": "docs/requirements/knowledge/KN-312-handoff-agent-main-orchestrator.md"
+    },
+    "01KYTXA5TYZJ9T85PN1XZTECH0": {
+      "human_id": "KN-313",
+      "file_path": "docs/requirements/knowledge/KN-313-assessment-implementation-resume-ticket-coverage.md"
+    },
+    "01KYTX9Q0ASMP33Q93A9A5WHXA": {
+      "human_id": "KN-314",
+      "file_path": "docs/requirements/knowledge/KN-314-a-binary-side-mechanism-is-not-delivered-until.md"
+    },
+    "01KYTWVBAX6P5VY7FHRXY1K3NM": {
+      "human_id": "KN-315",
+      "file_path": "docs/requirements/knowledge/KN-315-assessment-implementation-resume-ticket-coverage.md"
+    },
+    "01KYSQRXQCP1JQJ7DC7QPY447E": {
+      "human_id": "KN-316",
+      "file_path": "docs/requirements/knowledge/KN-316-re-measuring-finding-1-falsified-its-cause-lore.md"
+    },
+    "01KYSQ9GVDNE753DME1J88M6X0": {
+      "human_id": "KN-317",
+      "file_path": "docs/requirements/knowledge/KN-317-worktree-isolation-delivers-a-worktree-not-a-base.md"
+    },
+    "01KYSP843PQVX16BX9EZMZXD3K": {
+      "human_id": "KN-318",
+      "file_path": "docs/requirements/knowledge/KN-318-handoff-agent-main-orchestrator.md"
+    },
+    "01KYSP6PNPTFZT9KTSKP9ND8TY": {
+      "human_id": "KN-319",
+      "file_path": "docs/requirements/knowledge/KN-319-eight-findings-from-building-and-closing-the-plan.md"
+    },
+    "01KYRRXF9095ZQZG98YA9YXY7W": {
+      "human_id": "KN-320",
+      "file_path": "docs/requirements/knowledge/KN-320-handoff-agent-main-orchestrator.md"
+    },
+    "01KYSP3ACS2CYKW82GXQTHJ8QZ": {
+      "human_id": "KN-321",
+      "file_path": "docs/requirements/knowledge/KN-321-assessment-implementation-context-provenance-scope.md"
+    },
+    "01KYSNWN36R1626QT5CEGGKN3T": {
+      "human_id": "KN-322",
+      "file_path": "docs/requirements/knowledge/KN-322-assessment-implementation-plan-close-predicates.md"
+    },
+    "01KYSNFV47GV9TYB82VQEQE5R6": {
+      "human_id": "KN-323",
+      "file_path": "docs/requirements/knowledge/KN-323-assessment-implementation-plan-close-predicates.md"
+    },
+    "01KYSNB5Y50V9E43FHRCWQVYCW": {
+      "human_id": "KN-324",
+      "file_path": "docs/requirements/knowledge/KN-324-assessment-implementation-plan-close-predicates.md"
+    },
+    "01KYSKR8A6HWJEA67ZM18TWAKQ": {
+      "human_id": "KN-325",
+      "file_path": "docs/requirements/knowledge/KN-325-lore-setup-follows-a-dev-symlink-into-assets-and.md"
+    },
+    "01KYS08ZKJS05W2AJFWCE0ARRV": {
+      "human_id": "KN-326",
+      "file_path": "docs/requirements/knowledge/KN-326-root-cause-synthesis-the-eight-dogfooding-findings.md"
+    },
+    "01KYRF305NY2REAN7C91RCETJ9": {
+      "human_id": "KN-327",
+      "file_path": "docs/requirements/knowledge/KN-327-four-dogfooding-findings-gates-validate-a-spec.md"
+    },
+    "01KYRPFYARH698Z357B9MQB37V": {
+      "human_id": "KN-328",
+      "file_path": "docs/requirements/knowledge/KN-328-assessment-implementation-context-provenance-scope.md"
+    },
+    "01KYRNRAW05QPTKGH241AZGAR7": {
+      "human_id": "KN-329",
+      "file_path": "docs/requirements/knowledge/KN-329-assessment-implementation-context-provenance-scope.md"
+    },
+    "01KYQ5WYTQAWDKDM3B7TB0KP25": {
+      "human_id": "KN-330",
+      "file_path": "docs/requirements/knowledge/KN-330-handoff-agent-main-orchestrator.md"
+    },
+    "01KYPWG0T4SD646YNR5XW6MDPZ": {
+      "human_id": "KN-331",
+      "file_path": "docs/requirements/knowledge/KN-331-handoff-agent-p2-consumer-list.md"
+    },
+    "01KYQ5VAJVJCZKS00ZF0K5PND1": {
+      "human_id": "KN-332",
+      "file_path": "docs/requirements/knowledge/KN-332-assessment-implementation-issue-closure-loop-resol.md"
+    },
+    "01KYQ5E9A5TRG8NX3BE7AMRBBR": {
+      "human_id": "KN-333",
+      "file_path": "docs/requirements/knowledge/KN-333-assessment-implementation-issue-closure-loop-resol.md"
+    },
+    "01KYQ4SEQKW93YNF1V5HXMB7EX": {
+      "human_id": "KN-334",
+      "file_path": "docs/requirements/knowledge/KN-334-assessment-implementation-issue-closure-loop-resol.md"
+    },
+    "01KYQ4ECF5Y23J6CVRV0VBKEJV": {
+      "human_id": "KN-335",
+      "file_path": "docs/requirements/knowledge/KN-335-retro-three-mechanism-gaps-found-while-building-th.md"
+    },
+    "01KYQ4628PWNQFN6VFYSSJ8DBH": {
+      "human_id": "KN-336",
+      "file_path": "docs/requirements/knowledge/KN-336-assessment-implementation-issue-closure-loop-resol.md"
+    },
+    "01KYPZJY70R1V7JH325TQG0MWV": {
+      "human_id": "KN-337",
+      "file_path": "docs/requirements/knowledge/KN-337-retro-a-green-ac-over-a-store-free-layer-let-a-sch.md"
+    },
+    "01KYPQP43DKERJ40DXNPF7H5KN": {
+      "human_id": "KN-338",
+      "file_path": "docs/requirements/knowledge/KN-338-retro-plan-close-s-recovery-text-is-not-executable.md"
+    },
+    "01KYPQK3A1XGT32PGZ8CV32VFQ": {
+      "human_id": "KN-339",
+      "file_path": "docs/requirements/knowledge/KN-339-assessment-fix-dashboard-no-open-inert-nonce-failu.md"
+    },
+    "01KYPQFB6Q5APG619HQGN9VYSN": {
+      "human_id": "KN-340",
+      "file_path": "docs/requirements/knowledge/KN-340-assessment-fix-dashboard-no-open-inert-nonce-failu.md"
+    },
+    "01KYPQBA1NQN4YCPWH1NAD2TR2": {
+      "human_id": "KN-341",
+      "file_path": "docs/requirements/knowledge/KN-341-retro-three-ways-a-green-oracle-measured-nothing.md"
+    },
+    "01KYPQ51TC1XS741VV85QBWG2X": {
+      "human_id": "KN-342",
+      "file_path": "docs/requirements/knowledge/KN-342-assessment-fix-dashboard-no-open-inert-nonce-failu.md"
+    },
+    "01KYPNGE986XEAJ6CAVBPJ3EXA": {
+      "human_id": "KN-343",
+      "file_path": "docs/requirements/knowledge/KN-343-handoff-agent-main-orchestrator.md"
+    },
+    "01KYPNC8T0GYQ4M63BAYZNHKVZ": {
+      "human_id": "KN-344",
+      "file_path": "docs/requirements/knowledge/KN-344-assessment-implementation-out-of-box-reporting.md"
+    },
+    "01KYPMFB5D5KD7TNKN0D5ARW62": {
+      "human_id": "KN-345",
+      "file_path": "docs/requirements/knowledge/KN-345-retro-a-silently-inert-cli-flag-is-the-fifth-false.md"
+    },
+    "01KYPG23CB9APZ7GV4XRXQYC8C": {
+      "human_id": "KN-346",
+      "file_path": "docs/requirements/knowledge/KN-346-a-red-test-s-redness-proves-absence-of-behaviour-n.md"
+    },
+    "01KYPFYB36201Z79GRQ8D17PJK": {
+      "human_id": "KN-347",
+      "file_path": "docs/requirements/knowledge/KN-347-assessment-implementation-out-of-box-reporting.md"
+    },
+    "01KYPA9H3JHCRGTAA779VTRWRY": {
+      "human_id": "KN-348",
+      "file_path": "docs/requirements/knowledge/KN-348-a-pure-red-task-cannot-terminate-expected-fail-is.md"
+    },
+    "01KYP91HQFXR55BNK2FP6YMPCY": {
+      "human_id": "KN-349",
+      "file_path": "docs/requirements/knowledge/KN-349-retro-a-newly-built-gate-leaves-every-pre-existing.md"
+    },
+    "01KYP8K135JRTRB3EPA0X910AG": {
+      "human_id": "KN-350",
+      "file_path": "docs/requirements/knowledge/KN-350-assessment-implementation-workflow-hardening-m1-m4.md"
+    },
+    "01KYP8JZ26E0EYQ6V3Q6F52YP8": {
+      "human_id": "KN-351",
+      "file_path": "docs/requirements/knowledge/KN-351-assessment-implementation-spec-080-bootstrap.md"
+    },
+    "01KYP2AB6DSFKQZ53JJVVRM0NF": {
+      "human_id": "KN-352",
+      "file_path": "docs/requirements/knowledge/KN-352-assessment-implementation-plan-closure-must-be-lou.md"
+    },
+    "01KYHK318XR5GNHDK389C2WNYB": {
+      "human_id": "KN-353",
+      "file_path": "docs/requirements/knowledge/KN-353-retro-context-refresh-module-index-walk-pollutes.md"
+    },
+    "01KYP074RXRMASWBXXB8XP9JN5": {
+      "human_id": "KN-354",
+      "file_path": "docs/requirements/knowledge/KN-354-assessment-implementation-assessment-freshness-gat.md"
+    },
+    "01KYP04X16HQ5H0778NM8RKZGV": {
+      "human_id": "KN-355",
+      "file_path": "docs/requirements/knowledge/KN-355-assessment-implementation-worktree-derived-actor.md"
+    },
+    "01KYP039H3NSXHJZQVW5TP6609": {
+      "human_id": "KN-356",
+      "file_path": "docs/requirements/knowledge/KN-356-assessment-implementation-tiered-review-spec-103-2.md"
+    },
+    "01KYP000NYWY88TFZ03GFHBCFA": {
+      "human_id": "KN-357",
+      "file_path": "docs/requirements/knowledge/KN-357-assessment-implementation-trace-layer-spec-102-202.md"
+    },
+    "01KYMEXA6ZJ7AYF4JDKQVA256G": {
+      "human_id": "KN-358",
+      "file_path": "docs/requirements/knowledge/KN-358-session-process-review-2026-07-28-grill-to-shipped.md"
+    },
+    "01KYMQRSPF51PNAT1ZRR3C078B": {
+      "human_id": "KN-359",
+      "file_path": "docs/requirements/knowledge/KN-359-handoff-agent-main-orchestrator.md"
+    },
+    "01KYMJF2H9SNFDZAH2MCQKVKR9": {
+      "human_id": "KN-360",
+      "file_path": "docs/requirements/knowledge/KN-360-assessment-implementation-assessment-freshness-gat.md"
+    },
+    "01KYMEW96RQQFECR5XMVVT7P4D": {
+      "human_id": "KN-361",
+      "file_path": "docs/requirements/knowledge/KN-361-session-process-review-2026-07-28-dashboard.md"
+    },
+    "01KYMESXP6R321MEVFXHGBDN08": {
+      "human_id": "KN-362",
+      "file_path": "docs/requirements/knowledge/KN-362-assessment-implementation-tiered-review-spec-103-2.md"
+    },
+    "01KYM9WE2JKE71QDDB6197ZA13": {
+      "human_id": "KN-363",
+      "file_path": "docs/requirements/knowledge/KN-363-handoff-agent-task-skill-test-f5a-single-process.md"
+    },
+    "01KYMBQCJPCCVC96K8GCT0XXEV": {
+      "human_id": "KN-364",
+      "file_path": "docs/requirements/knowledge/KN-364-handoff-agent-main-orchestrator.md"
+    },
+    "01KYMEPHFZBB2GQEHFTJB88ZTD": {
+      "human_id": "KN-365",
+      "file_path": "docs/requirements/knowledge/KN-365-assessment-implementation-trace-layer-spec-102-202.md"
+    },
+    "01KYM85XZSYJWC4C90MYDB2NT0": {
+      "human_id": "KN-366",
+      "file_path": "docs/requirements/knowledge/KN-366-session-retro-2026-07-28-grill-to-shipped-three-sp.md"
+    },
+    "01KYMBP7TF3140JGZPMFTT4SAM": {
+      "human_id": "KN-367",
+      "file_path": "docs/requirements/knowledge/KN-367-assessment-implementation-dashboard-production.md"
+    },
+    "01KYMAW48JDECJX48E19AJ5WSD": {
+      "human_id": "KN-368",
+      "file_path": "docs/requirements/knowledge/KN-368-a-session-row-is-only-as-real-as-the-api-keys-row.md"
+    },
+    "01KYMAW4S9B25JPGVB9M9EJW0S": {
+      "human_id": "KN-369",
+      "file_path": "docs/requirements/knowledge/KN-369-a-test-that-reads-its-precondition-from-ambient-st.md"
+    },
+    "01KYMASYD9Y8BFAXSWF3TN2WCD": {
+      "human_id": "KN-370",
+      "file_path": "docs/requirements/knowledge/KN-370-assessment-implementation-dashboard-production.md"
+    },
+    "01KYM9ERHCX6PT68PDPCKD5662": {
+      "human_id": "KN-371",
+      "file_path": "docs/requirements/knowledge/KN-371-assessment-implementation-tiered-review-spec-103-2.md"
+    },
+    "01KYM9C01VBZVHG9E55JMERQZX": {
+      "human_id": "KN-372",
+      "file_path": "docs/requirements/knowledge/KN-372-assessment-implementation-worktree-derived-actor.md"
+    },
+    "01KYM99AC63K7GNGPJ7V9XWV7N": {
+      "human_id": "KN-373",
+      "file_path": "docs/requirements/knowledge/KN-373-product-chain-round-two-worked-examples-decomposit.md"
+    },
+    "01KYM98YHEWYP72J6WTTJ4NG7M": {
+      "human_id": "KN-374",
+      "file_path": "docs/requirements/knowledge/KN-374-assessment-implementation-worktree-derived-actor.md"
+    },
+    "01KYM93F1Y3Q5NRC3E57NQYXK2": {
+      "human_id": "KN-375",
+      "file_path": "docs/requirements/knowledge/KN-375-assessment-implementation-trace-layer-spec-102-202.md"
+    },
+    "01KYM914DZ2VSVXD880MCWQAAZ": {
+      "human_id": "KN-376",
+      "file_path": "docs/requirements/knowledge/KN-376-assessment-implementation-trace-layer-spec-102-202.md"
+    },
+    "01KYM84AE1STVAX2H8YAGJMS14": {
+      "human_id": "KN-377",
+      "file_path": "docs/requirements/knowledge/KN-377-assessment-implementation-tiered-review-spec-103-2.md"
+    },
+    "01KYM5S4VFFXMB3MD0H18SGWDS": {
+      "human_id": "KN-378",
+      "file_path": "docs/requirements/knowledge/KN-378-assessment-implementation-worktree-derived-actor.md"
+    },
+    "01KYM5Q6WA7EDRXG0103QWD9KP": {
+      "human_id": "KN-379",
+      "file_path": "docs/requirements/knowledge/KN-379-assessment-implementation-trace-layer-spec-102-202.md"
+    },
+    "01KYM265JZ6A5Y39V5ZBD8Q1E3": {
+      "human_id": "KN-380",
+      "file_path": "docs/requirements/knowledge/KN-380-spec-104-fallout-changed-tests-ts-porcelain-path-b.md"
+    },
+    "01KYKW3NTX5039M8PYEC8N8C71": {
+      "human_id": "KN-381",
+      "file_path": "docs/requirements/knowledge/KN-381-cross-corpus-generalization-retro-2026-07-28-guyin.md"
+    },
+    "01KYHZDCQ7AP229T6PY0D1176W": {
+      "human_id": "KN-382",
+      "file_path": "docs/requirements/knowledge/KN-382-full-system-spec-compliance-audit-2026-07-27-85-11.md"
+    },
+    "01KYKG45KJ31SBB7G24S7JGAKN": {
+      "human_id": "KN-383",
+      "file_path": "docs/requirements/knowledge/KN-383-assessment-implementation-verify-reachability.md"
+    },
+    "01KYJ1DFV1RBN9SJKSZESYXT6Q": {
+      "human_id": "KN-384",
+      "file_path": "docs/requirements/knowledge/KN-384-assessment-audit-remediation-2026-07-27-parent-cyc.md"
+    },
+    "01KYHYMQQK8GJT9MAZD3YMER7E": {
+      "human_id": "KN-385",
+      "file_path": "docs/requirements/knowledge/KN-385-assessment-implementation-workflow-hardening-m1-m4.md"
+    },
+    "01KYHQJWXTH0V1FW084PHETJHB": {
+      "human_id": "KN-386",
+      "file_path": "docs/requirements/knowledge/KN-386-session-process-review-2026-07-27-context-refresh.md"
+    },
+    "01KYHH81ZGTP766Y187JR36F12": {
+      "human_id": "KN-387",
+      "file_path": "docs/requirements/knowledge/KN-387-stale-in-context-snapshot-replayed-as-current-stat.md"
+    },
+    "01KYHH82E767WA8NV3MBR8J7A4": {
+      "human_id": "KN-388",
+      "file_path": "docs/requirements/knowledge/KN-388-context-verb-family-autopilot-run-verify-task-scop.md"
+    },
+    "01KYHG7Z296NMZMNX484A2Q5F3": {
+      "human_id": "KN-389",
+      "file_path": "docs/requirements/knowledge/KN-389-assessment-implementation-context-verb-family-two.md"
+    },
+    "01KYH8EATZ20Z3EJ1CNZ6RBZV2": {
+      "human_id": "KN-390",
+      "file_path": "docs/requirements/knowledge/KN-390-retro-claude-md-contract-autopilot-run-merge-gate.md"
+    },
+    "01KYH8CG5FJTZ7HACAH26HAWS1": {
+      "human_id": "KN-391",
+      "file_path": "docs/requirements/knowledge/KN-391-assessment-implementation-project-claude-md-conten.md"
+    },
+    "01KYH76R6B6Y59YWH2MKP2RGSF": {
+      "human_id": "KN-392",
+      "file_path": "docs/requirements/knowledge/KN-392-module-claude-md-snapshot-packages-lore-src-adapte.md"
+    },
+    "01KYH77TGQZMW0P2E34FN25HSC": {
+      "human_id": "KN-393",
+      "file_path": "docs/requirements/knowledge/KN-393-module-claude-md-snapshot-packages-lore-src-adapte.md"
+    },
+    "01KYH78W9NN83V2P852RFTPBXJ": {
+      "human_id": "KN-394",
+      "file_path": "docs/requirements/knowledge/KN-394-module-claude-md-snapshot-packages-lore-src-servic.md"
+    },
+    "01KYH790TTJ2RHVXF54KHKD4TZ": {
+      "human_id": "KN-395",
+      "file_path": "docs/requirements/knowledge/KN-395-module-claude-md-snapshot-packages-dashboard-froze.md"
+    },
+    "01KYH79NC1JWYHGNJ42EXKSZFB": {
+      "human_id": "KN-396",
+      "file_path": "docs/requirements/knowledge/KN-396-module-claude-md-snapshot-packages-core-src-frozen.md"
+    },
+    "01KYH848TX1Q0QVZV6AGT0ZW0K": {
+      "human_id": "KN-397",
+      "file_path": "docs/requirements/knowledge/KN-397-uat-plan-implementation-project-claude-md-content.md"
+    },
+    "01KYF3ESGTQ05WH2NF93GYMDMW": {
+      "human_id": "KN-398",
+      "file_path": "docs/requirements/knowledge/KN-398-handoff-agent-main-orchestrator.md"
+    },
+    "01KYF58T9FN37SDFVY2ZWEY7A2": {
+      "human_id": "KN-399",
+      "file_path": "docs/requirements/knowledge/KN-399-handoff-agent-main-orchestrator.md"
+    },
+    "01KYFAWTFJE5WBCMCG73J54ERX": {
+      "human_id": "KN-400",
+      "file_path": "docs/requirements/knowledge/KN-400-handoff-agent-main-orchestrator.md"
+    },
+    "01KYH53DXNADTN8SPKB7G6P46P": {
+      "human_id": "KN-401",
+      "file_path": "docs/requirements/knowledge/KN-401-assessment-implementation-lifecycle-archival-casca.md"
+    },
+    "01KYF9850APB7SHBTZHD1TPP3F": {
+      "human_id": "KN-402",
+      "file_path": "docs/requirements/knowledge/KN-402-converge-governance-prose-distribution-retire-the.md"
+    },
+    "01KYFCZGVQDZ3SRPWD1GQMTQTG": {
+      "human_id": "KN-403",
+      "file_path": "docs/requirements/knowledge/KN-403-assessment-implementation-spec-083-governance-pros.md"
+    },
+    "01KYFFBAE1X6185KDV7PTEJM2A": {
+      "human_id": "KN-404",
+      "file_path": "docs/requirements/knowledge/KN-404-assessment-implementation-spec-085-seat-briefing.md"
+    },
+    "01KYGMS0ZVGGCYPKQETGJT7EWA": {
+      "human_id": "KN-405",
+      "file_path": "docs/requirements/knowledge/KN-405-assessment-implementation-spec-084-corpus-allocate.md"
+    },
+    "01KYGN5YJ7CB5655VPRAD5CFW1": {
+      "human_id": "KN-406",
+      "file_path": "docs/requirements/knowledge/KN-406-handoff-agent-main-orchestrator.md"
+    },
+    "01KYGWHB2XW291EKS6H06TMFD5": {
+      "human_id": "KN-407",
+      "file_path": "docs/requirements/knowledge/KN-407-assessment-implementation-session-start-handoff.md"
+    },
+    "01KYGMTBHJW8W4QT9AH8BF33H5": {
+      "human_id": "KN-408",
+      "file_path": "docs/requirements/knowledge/KN-408-spec-084-autopilot-retro-fixture-blindness-twice.md"
+    },
+    "01KYFEQ5H0NC7V2B5VJS7YMMWZ": {
+      "human_id": "KN-409",
+      "file_path": "docs/requirements/knowledge/KN-409-retro-claude-md-spec-index-re-bloat-boundary-adr.md"
+    },
+    "01KYFEK54F4GK131P5KF4AS0ZQ": {
+      "human_id": "KN-410",
+      "file_path": "docs/requirements/knowledge/KN-410-claude-md-specs-section-as-built-narratives-frozen.md"
+    },
+    "01KYFAYB7512EWS95FP729TWMH": {
+      "human_id": "KN-411",
+      "file_path": "docs/requirements/knowledge/KN-411-orchestrator-false-completion-anti-pattern-inherit.md"
+    },
+    "01KYF8ZECV8GRB216JJQNMKKXR": {
+      "human_id": "KN-412",
+      "file_path": "docs/requirements/knowledge/KN-412-assessment-implementation-spec-055-requirement.md"
+    },
+    "01KYF8Y53NF2EGFZ7H4ZKE6HNA": {
+      "human_id": "KN-413",
+      "file_path": "docs/requirements/knowledge/KN-413-assessment-implementation-spec-054-uat-verdict-pla.md"
+    },
+    "01KYF8WK07MG37QYVB6AKFVEQW": {
+      "human_id": "KN-414",
+      "file_path": "docs/requirements/knowledge/KN-414-assessment-implementation-spec-053-ac-vagueness.md"
+    },
+    "01KYF8SBFEBMEVR0AHK5N2AQT4": {
+      "human_id": "KN-415",
+      "file_path": "docs/requirements/knowledge/KN-415-assessment-implementation-spec-059-requirement-lay.md"
+    },
+    "01KYEQYFMG4GRSSSZX536P2934": {
+      "human_id": "KN-416",
+      "file_path": "docs/requirements/knowledge/KN-416-handoff-agent-main-orchestrator.md"
+    },
+    "01KZNHH19Y03TCMGFHRX1Z5CZ6": {
+      "human_id": "PLAN-076",
+      "file_path": "docs/requirements/plan/PLAN-076-land-falsifiability-reachability-the-attested-red.md"
+    },
+    "01KZN4F83SHEP9FT8A5YBZRTX5": {
+      "human_id": "PLAN-077",
+      "file_path": "docs/requirements/plan/PLAN-077-close-two-typecheck-blind-spots-and-correct-the-st.md"
+    },
+    "01KZN4F7772NR1BNYGNTRCQX4Z": {
+      "human_id": "PLAN-078",
+      "file_path": "docs/requirements/plan/PLAN-078-make-three-governance-outcomes-legible-vacuous-pla.md"
+    },
+    "01KZN4F66XA0S1E7N61EZ3M3S8": {
+      "human_id": "PLAN-079",
+      "file_path": "docs/requirements/plan/PLAN-079-land-oracle-executability-the-discovery-refusal-pr.md"
+    },
+    "01KZE4BGAQ4EAX14KMYF7TV9QD": {
+      "human_id": "PLAN-080",
+      "file_path": "docs/requirements/plan/PLAN-080-land-fail-superseded-and-not-measured-as-one-widen.md"
+    },
+    "01KZDK3F71XEXWKG6P0WAV0K7J": {
+      "human_id": "PLAN-081",
+      "file_path": "docs/requirements/plan/PLAN-081-land-oracle-tier-falsifiability-falsified-coverage.md"
+    },
+    "01KYYB0EVT7YBAMRTC2E3A3Z4Y": {
+      "human_id": "PLAN-082",
+      "file_path": "docs/requirements/plan/PLAN-082-implementation-assess-evidence-projection-and-abse.md"
+    },
+    "01KYYB0ENEGR78SFQYE6JX6NHE": {
+      "human_id": "PLAN-083",
+      "file_path": "docs/requirements/plan/PLAN-083-implementation-evidence-output-tail-integrity-self.md"
+    },
+    "01KYY2BX9KV0WN6H02NBE5YRRZ": {
+      "human_id": "PLAN-084",
+      "file_path": "docs/requirements/plan/PLAN-084-implementation-resume-coverage-floor-satisfaction.md"
+    },
+    "01KYXNZT15AXWBXKTSK3X5M1P3": {
+      "human_id": "PLAN-085",
+      "file_path": "docs/requirements/plan/PLAN-085-implementation-lore-ac-set-the-dangling-ac-ref-det.md"
+    },
+    "01KYXK8227XPEKC4CKMPTEJDPG": {
+      "human_id": "PLAN-086",
+      "file_path": "docs/requirements/plan/PLAN-086-implementation-resume-ticket-coverage-floor-blocki.md"
+    },
+    "01KYXN353MRYVKDS0GRMCADAGN": {
+      "human_id": "PLAN-087",
+      "file_path": "docs/requirements/plan/PLAN-087-implementation-ac-scope-admission-at-task-creation.md"
+    },
+    "01KYH98GVKM0C7KE0NVM1W45TS": {
+      "human_id": "PLAN-088",
+      "file_path": "docs/requirements/plan/PLAN-088-implementation-context-verb-family-two-zone-claude.md"
+    },
+    "01KYH2A23APCQ8VZT7M0XK4VX9": {
+      "human_id": "PLAN-089",
+      "file_path": "docs/requirements/plan/PLAN-089-implementation-lifecycle-archival-cascade-sweep-su.md"
+    },
+    "01KYV2PJ6MQZSSPAS5DN9VZWPK": {
+      "human_id": "PLAN-090",
+      "file_path": "docs/requirements/plan/PLAN-090-implementation-report-issue-concurrency-contract.md"
+    },
+    "01KYW96A72Q8Y4F8G34MGS4RG3": {
+      "human_id": "PLAN-091",
+      "file_path": "docs/requirements/plan/PLAN-091-d5-an-escalate-present-blocks-even-alongside-a-rej.md"
+    },
+    "01KYW74K1TATZZ5C7D1KF03APN": {
+      "human_id": "PLAN-092",
+      "file_path": "docs/requirements/plan/PLAN-092-escalate-gates-every-doc-type-the-denial-names-the.md"
+    },
+    "01KYW74K7HGG32HBMGR7TA3AJS": {
+      "human_id": "PLAN-093",
+      "file_path": "docs/requirements/plan/PLAN-093-superseded-handoff-archival-gains-r3-s-recency-gua.md"
+    },
+    "01KYVEW6VKQZA7S1483TM4CQ1M": {
+      "human_id": "PLAN-094",
+      "file_path": "docs/requirements/plan/PLAN-094-implementation-lazy-libsql-load-tmpdir-diagnostic.md"
+    },
+    "01KYV2N5J8K3FD9QK1XM412KYP": {
+      "human_id": "PLAN-095",
+      "file_path": "docs/requirements/plan/PLAN-095-implementation-declared-scope-attestation-contract.md"
+    },
+    "01KYV2PH7QG1MC3WQERHTTDVPQ": {
+      "human_id": "PLAN-096",
+      "file_path": "docs/requirements/plan/PLAN-096-implementation-proposed-to-accepted-decision-statu.md"
+    },
+    "01KYV2PHR4S9HMTFHVM1SSE0QX": {
+      "human_id": "PLAN-097",
+      "file_path": "docs/requirements/plan/PLAN-097-implementation-declared-timeout-budgets-for-spawn.md"
+    },
+    "01KYVEHPA6FVB5T8CFAZ2VTPTX": {
+      "human_id": "PLAN-098",
+      "file_path": "docs/requirements/plan/PLAN-098-git-safety-gate-argument-aware-probes.md"
+    },
+    "01KYVEHPSKKCRGM1Z2QDDX921J": {
+      "human_id": "PLAN-099",
+      "file_path": "docs/requirements/plan/PLAN-099-symlink-removal-d8-boundary-required-on-the-remova.md"
+    },
+    "01KYS2YBDZBFKZCKYD1KJP2RWB": {
+      "human_id": "PLAN-100",
+      "file_path": "docs/requirements/plan/PLAN-100-implementation-resume-ticket-coverage-floor-ordina.md"
+    },
+    "01KYRCSYQT9BZN3FFAB9K9MPVD": {
+      "human_id": "PLAN-101",
+      "file_path": "docs/requirements/plan/PLAN-101-implementation-context-provenance-scope-declaring.md"
+    },
+    "01KYS1FSHTF9X1G396894Y4QNX": {
+      "human_id": "PLAN-102",
+      "file_path": "docs/requirements/plan/PLAN-102-implementation-plan-close-predicates-measure-invar.md"
+    },
+    "01KYPTG5K2Y2XJN21TXHDX8Z5X": {
+      "human_id": "PLAN-103",
+      "file_path": "docs/requirements/plan/PLAN-103-implementation-issue-closure-loop-resolves-edge-co.md"
+    },
+    "01KYPM8VH2DRCK43R6TW3TF84H": {
+      "human_id": "PLAN-104",
+      "file_path": "docs/requirements/plan/PLAN-104-fix-dashboard-no-open-inert-nonce-failure-page-f5a.md"
+    },
+    "01KYP8SVY4E1S9CGAM43Q3EQ1H": {
+      "human_id": "PLAN-105",
+      "file_path": "docs/requirements/plan/PLAN-105-implementation-out-of-box-reporting-channel-self-p.md"
+    },
+    "01KYHRF83AQFRMEGZF1FJQZ3TN": {
+      "human_id": "PLAN-106",
+      "file_path": "docs/requirements/plan/PLAN-106-implementation-workflow-hardening-m1-m4-from-2026.md"
+    },
+    "01KYKX9XQSBB4J353KE2FR1P59": {
+      "human_id": "PLAN-107",
+      "file_path": "docs/requirements/plan/PLAN-107-implementation-worktree-derived-actor-identity-spe.md"
+    },
+    "01KYKWM9EX33MZD4HCAEYWR9RQ": {
+      "human_id": "PLAN-108",
+      "file_path": "docs/requirements/plan/PLAN-108-implementation-trace-layer-spec-102.md"
+    },
+    "01KYKX7S3AHCX5ER8R9B7W8X16": {
+      "human_id": "PLAN-109",
+      "file_path": "docs/requirements/plan/PLAN-109-implementation-tiered-review-spec-103.md"
+    },
+    "01KYMFDAB067MAMMTWKTCSS3GD": {
+      "human_id": "PLAN-110",
+      "file_path": "docs/requirements/plan/PLAN-110-implementation-assessment-freshness-gate-spec-106.md"
+    },
+    "01KYMFMYRZ6X7RDA64W05EX84M": {
+      "human_id": "PLAN-111",
+      "file_path": "docs/requirements/plan/PLAN-111-implementation-plan-closure-must-be-loud.md"
+    },
+    "01KYM0RRWAXXXFBATXPKNG9YGT": {
+      "human_id": "PLAN-112",
+      "file_path": "docs/requirements/plan/PLAN-112-implementation-dashboard-production-packaging-f5a.md"
+    },
+    "01KYKJK92D2A5HKA20PNND1Z1S": {
+      "human_id": "PLAN-113",
+      "file_path": "docs/requirements/plan/PLAN-113-implementation-test-changed-two-runner-selector.md"
+    },
+    "01KYKCZRBKJMG7RF3BZ6EMF1XP": {
+      "human_id": "PLAN-114",
+      "file_path": "docs/requirements/plan/PLAN-114-implementation-verify-reachability-advisory-reacha.md"
+    },
+    "01KYHZEHWJJE2JSW1EFKTG3QVW": {
+      "human_id": "PLAN-115",
+      "file_path": "docs/requirements/plan/PLAN-115-audit-remediation-2026-07-27-parent-cycle-write-gu.md"
+    },
+    "01KYH2A452MHT2KRS1XQKDT43Y": {
+      "human_id": "PLAN-116",
+      "file_path": "docs/requirements/plan/PLAN-116-implementation-project-claude-md-content-contract.md"
+    },
+    "01KYGTXSHE8Z8C9T19GKJ8CHRR": {
+      "human_id": "PLAN-117",
+      "file_path": "docs/requirements/plan/PLAN-117-implementation-session-start-handoff-neutrality.md"
+    },
+    "01KYFDP7VQ3H4E11E9X69BMSP5": {
+      "human_id": "PLAN-118",
+      "file_path": "docs/requirements/plan/PLAN-118-implementation-spec-085-seat-briefing-runtime-inje.md"
+    },
+    "01KYFAASTDD2XX8HASF7YH23EC": {
+      "human_id": "PLAN-119",
+      "file_path": "docs/requirements/plan/PLAN-119-implementation-spec-083-governance-prose-runtime-i.md"
+    },
+    "01KYF9E189H8WK31HN16B5CXY6": {
+      "human_id": "PLAN-120",
+      "file_path": "docs/requirements/plan/PLAN-120-implementation-spec-084-corpus-allocated-ordinal-i.md"
+    },
+    "01KZQAYRS56HTS1BNTVQG43N5B": {
+      "human_id": "TASK-317",
+      "file_path": "docs/requirements/task/TASK-317-unify-mirror-identifiers-on-zero-padded-form-expor.md"
+    },
+    "01KZNW4HB73B84Q32FP32F4PQ4": {
+      "human_id": "TASK-318",
+      "file_path": "docs/requirements/task/TASK-318-derive-lore-feed-s-checkpoint-set-from-the-registr.md"
+    },
+    "01KZNTWN40NATZQE4B3T995YEP": {
+      "human_id": "TASK-319",
+      "file_path": "docs/requirements/task/TASK-319-make-lore-ac-set-accept-the-falsifier-flags-its-ow.md"
+    },
+    "01KZN60K8EA3VJ07PYAY8YY6QN": {
+      "human_id": "TASK-320",
+      "file_path": "docs/requirements/task/TASK-320-assert-the-e2e-typecheck-project-s-live-wiring-rec.md"
+    },
+    "01KZNW544DSGZNCP66YTXNQTAM": {
+      "human_id": "TASK-321",
+      "file_path": "docs/requirements/task/TASK-321-build-the-spec-mirror-export-script-wire-it-into-t.md"
+    },
+    "01KZNHKF8SW00C1M676JZ131Z8": {
+      "human_id": "TASK-322",
+      "file_path": "docs/requirements/task/TASK-322-raise-the-evidence-tail-guard-s-predicate-to-its-o.md"
+    },
+    "01KZNHJE0Y0392C4TBAJ963B5F": {
+      "human_id": "TASK-323",
+      "file_path": "docs/requirements/task/TASK-323-build-the-attested-red-runner-a-declared-falsifier.md"
+    },
+    "01KZN738X38SGJ934R3EEM551Z": {
+      "human_id": "TASK-324",
+      "file_path": "docs/requirements/task/TASK-324-assert-the-plan-close-vacuity-discriminator-on-the.md"
+    },
+    "01KZN76D7KPJ0RAV6RD1MATHPR": {
+      "human_id": "TASK-325",
+      "file_path": "docs/requirements/task/TASK-325-wire-allow-missing-path-and-the-unredeemed-declara.md"
+    },
+    "01KZN4F72MYR3HK6YWHQMCPHC1": {
+      "human_id": "TASK-326",
+      "file_path": "docs/requirements/task/TASK-326-promote-the-oracle-file-existence-primitives-into.md"
+    },
+    "01KZN4F6XZ5H0NBC2TG4EAMPV9": {
+      "human_id": "TASK-327",
+      "file_path": "docs/requirements/task/TASK-327-consume-finddiscoveryrefusal-on-the-attested-exit.md"
+    },
+    "01KZN4F7Z7ANCTK31S0YH61KB3": {
+      "human_id": "TASK-328",
+      "file_path": "docs/requirements/task/TASK-328-give-a-fresh-install-corpus-a-non-empty-spec-creat.md"
+    },
+    "01KZN4F7TKAS1MEPAQ1SDSSABZ": {
+      "human_id": "TASK-329",
+      "file_path": "docs/requirements/task/TASK-329-print-the-approved-to-draft-demotion-and-its-claim.md"
+    },
+    "01KZN4F7H8CYG2GXYGRDJHBN81": {
+      "human_id": "TASK-330",
+      "file_path": "docs/requirements/task/TASK-330-report-why-each-plan-close-predicate-passed-so-a-v.md"
+    },
+    "01KZN4F6Q52HNPB5KC6V5Q85YP": {
+      "human_id": "TASK-331",
+      "file_path": "docs/requirements/task/TASK-331-add-finddiscoveryrefusal-to-lore-core-with-a-live.md"
+    },
+    "01KZN4F8ARA3RA6MJBVJFRS8XZ": {
+      "human_id": "TASK-332",
+      "file_path": "docs/requirements/task/TASK-332-add-an-e2e-tsconfig-project-covering-all-27-test-t.md"
+    },
+    "01KZN4F7NXQ5HDMFFP36S7AC1W": {
+      "human_id": "TASK-333",
+      "file_path": "docs/requirements/task/TASK-333-correct-the-tree-check-hint-that-claims-the-plan-c.md"
+    },
+    "01KZE4XN8J38TF97R5M9GA5P9B": {
+      "human_id": "TASK-334",
+      "file_path": "docs/requirements/task/TASK-334-clear-the-46-pre-existing-strictness-errors-the-un.md"
+    },
+    "01KZE8TVZ1D4PQEM4AG3YHCVJT": {
+      "human_id": "TASK-335",
+      "file_path": "docs/requirements/task/TASK-335-add-the-recorded-at-field-to-two-stale-exact-toequ.md"
+    },
+    "01KZE4DP2RCRG7C1SNTC0Q36ZS": {
+      "human_id": "TASK-336",
+      "file_path": "docs/requirements/task/TASK-336-widen-deriveaccoveragestate-to-seven-values-and-wi.md"
+    },
+    "01KZDVRPHX1FDXYBTDTXGDHG9Q": {
+      "human_id": "TASK-337",
+      "file_path": "docs/requirements/task/TASK-337-deriveaccoveragestate-fails-open-on-an-absent-fals.md"
+    },
+    "01KZDVEDCE3GECHPKFX88W0FGY": {
+      "human_id": "TASK-338",
+      "file_path": "docs/requirements/task/TASK-338-one-honest-historical-fail-row-pins-a-criterion-to.md"
+    },
+    "01KZDK4VVVKARJYYASD8QZCAHX": {
+      "human_id": "TASK-339",
+      "file_path": "docs/requirements/task/TASK-339-surface-pass-unfalsified-in-lore-ac-list-and-a-cor.md"
+    },
+    "01KZDNG6BFS95K5ZFXFSJT3VXV": {
+      "human_id": "TASK-340",
+      "file_path": "docs/requirements/task/TASK-340-absorb-the-required-field-ripple-from-the-falsifie.md"
+    },
+    "01KZDK4BAN9CDNDV21E08SPQ01": {
+      "human_id": "TASK-341",
+      "file_path": "docs/requirements/task/TASK-341-report-a-test-name-pattern-value-that-no-declared.md"
+    },
+    "01KZDN22RXSXN7PADQH0CN65KD": {
+      "human_id": "TASK-342",
+      "file_path": "docs/requirements/task/TASK-342-wire-findpiperefusal-into-the-live-lore-evidence-a.md"
+    },
+    "01KZDK4B5Y2FE8QZ7PKQW05NCN": {
+      "human_id": "TASK-343",
+      "file_path": "docs/requirements/task/TASK-343-refuse-a-self-reported-evidence-command-containing.md"
+    },
+    "01KZDK3THPGH2K6XXE7RDV20VC": {
+      "human_id": "TASK-344",
+      "file_path": "docs/requirements/task/TASK-344-derive-falsified-as-a-fourth-coverage-dimension-an.md"
+    },
+    "01KZDHN9MFDA5D6PTG5XQHFEWQ": {
+      "human_id": "TASK-345",
+      "file_path": "docs/requirements/task/TASK-345-de-vacuuming-ac-acq-7-exposed-three-sibling-faults.md"
+    },
+    "01KZ19S9K9C8Y2NTMBWBGV8NSA": {
+      "human_id": "TASK-346",
+      "file_path": "docs/requirements/task/TASK-346-ac-acq-7-is-vacuous-by-construction-and-its-oracle.md"
+    },
+    "01KZ19RZ7SGRVM2ASRN25HSTR8": {
+      "human_id": "TASK-347",
+      "file_path": "docs/requirements/task/TASK-347-mcp-lore-create-supersedes-still-creates-then-fail.md"
+    },
+    "01KZDFHY118X9QJV037AJB53G8": {
+      "human_id": "TASK-348",
+      "file_path": "docs/requirements/task/TASK-348-ke-yong-xing-liang-ze-bi-tian-can-shu-kao-er-ci-ba.md"
+    },
+    "01KZDFHXVD1VCY6SE82SZ9G3QH": {
+      "human_id": "TASK-349",
+      "file_path": "docs/requirements/task/TASK-349-lore-review-dui-da-wen-dang-jie-duan-approve-jie-l.md"
+    },
+    "01KZDFHXNXY0TRA2VCYM0W2DZS": {
+      "human_id": "TASK-350",
+      "file_path": "docs/requirements/task/TASK-350-lore-verify-wu-kua-task-de-attestation-fu-yong-ton.md"
+    },
+    "01KZDFHXGVW320TKZS5236ZHWG": {
+      "human_id": "TASK-351",
+      "file_path": "docs/requirements/task/TASK-351-lore-assess-jin-kao-commit-message-pi-pei-guan-lia.md"
+    },
+    "01KZDFHXBBCACR1SEGTNN56Z4J": {
+      "human_id": "TASK-352",
+      "file_path": "docs/requirements/task/TASK-352-lore-approve-de-review-du-li-xing-bu-jiao-yan-acto.md"
+    },
+    "01KZDFHX3EZ82BPPN5JRQ4CYCF": {
+      "human_id": "TASK-353",
+      "file_path": "docs/requirements/task/TASK-353-lore-done-de-hong-xian-xing-gate-bu-du-capture-sou.md"
+    },
+    "01KZDEECPX4V5QBP4DPFQ0H2FV": {
+      "human_id": "TASK-354",
+      "file_path": "docs/requirements/task/TASK-354-lore-ac-add-set-jing-mo-ba-approved-spec-da-hui-dr.md"
+    },
+    "01KZDEDSYNACMWTX5F1A6SBH5M": {
+      "human_id": "TASK-355",
+      "file_path": "docs/requirements/task/TASK-355-lore-done-bu-jian-cha-ac-de-zui-xin-attestation-sh.md"
+    },
+    "01KZBJJ79P50W3D6CA7CT9RZ40": {
+      "human_id": "TASK-356",
+      "file_path": "docs/requirements/task/TASK-356-lore-status-check-claude-md-silently-runs-on-schem.md"
+    },
+    "01KZB2KA4TTPNM6EP3CK3QCG1M": {
+      "human_id": "TASK-357",
+      "file_path": "docs/requirements/task/TASK-357-the-shared-renderdocmarkdown-seam-still-drops-stru.md"
+    },
+    "01KZB399KQPZ2DQ9Q70MY825HF": {
+      "human_id": "TASK-358",
+      "file_path": "docs/requirements/task/TASK-358-a-module-claude-md-at-its-byte-ceiling-silently-re.md"
+    },
+    "01KZB3WDSB7SP6D95NRXHCSHKD": {
+      "human_id": "TASK-359",
+      "file_path": "docs/requirements/task/TASK-359-validity-landed-on-lore-list-only-the-dispatch-sur.md"
+    },
+    "01KZBHDFMZD4BW6XSXAVRSD5EV": {
+      "human_id": "TASK-360",
+      "file_path": "docs/requirements/task/TASK-360-lore-ready-s-records-carry-no-validity-signal-so-a.md"
+    },
+    "01KZBEGMNYGEGBE5HKJAT22WV8": {
+      "human_id": "TASK-361",
+      "file_path": "docs/requirements/task/TASK-361-nothing-cross-checks-a-task-s-file-anchors-against.md"
+    },
+    "01KZ3Y9NK1W5ZJWTM5SWBFY75Z": {
+      "human_id": "TASK-362",
+      "file_path": "docs/requirements/task/TASK-362-lore-done-s-attestation-refusal-calls-a-capture-so.md"
+    },
+    "01KZ3MQ5C7HMPJ42K1RF1BWB9D": {
+      "human_id": "TASK-363",
+      "file_path": "docs/requirements/task/TASK-363-the-ac-scope-re-keying-left-the-red-first-floor-un.md"
+    },
+    "01KZ5XMQH02RQXGT38KS7CGJQC": {
+      "human_id": "TASK-364",
+      "file_path": "docs/requirements/task/TASK-364-an-invalidated-doc-is-indistinguishable-from-a-liv.md"
+    },
+    "01KZ19S9QKEFVXC0KED0Z8PEM6": {
+      "human_id": "TASK-365",
+      "file_path": "docs/requirements/task/TASK-365-a-mistyped-task-file-anchor-is-stored-and-consulte.md"
+    },
+    "01KZ3WZYCHG2F3AXH7X8MZK8JX": {
+      "human_id": "TASK-366",
+      "file_path": "docs/requirements/task/TASK-366-lore-get-s-default-render-silently-omits-structure.md"
+    },
+    "01KZ17H5MCM821C3N2KEPNZ029": {
+      "human_id": "TASK-367",
+      "file_path": "docs/requirements/task/TASK-367-active-sessions-derives-only-over-active-plans-tas.md"
+    },
+    "01KYSH0HZK5HY01FSMAFQAF0GK": {
+      "human_id": "TASK-368",
+      "file_path": "docs/requirements/task/TASK-368-lore-uat-record-bu-jiao-yan-mu-biao-doc-lei-xing-v.md"
+    },
+    "01KYKWC7VQH000FSASEYHRT4RD": {
+      "human_id": "TASK-369",
+      "file_path": "docs/requirements/task/TASK-369-lore-gate-bypass-honored-by-lore-gate-subcommands.md"
+    },
+    "01KYRS10E4WPSEGHE3X95XNQA5": {
+      "human_id": "TASK-370",
+      "file_path": "docs/requirements/task/TASK-370-corpus-workflow-injection-labels-lore-release-as-d.md"
+    },
+    "01KZ31ZGJKNRH5290MEXQ5N50X": {
+      "human_id": "TASK-371",
+      "file_path": "docs/requirements/task/TASK-371-capture-source-is-optional-at-the-evidence-write-b.md"
+    },
+    "01KZ18W4GVQFD8859378FQKR2W": {
+      "human_id": "TASK-372",
+      "file_path": "docs/requirements/task/TASK-372-the-resume-coverage-verb-accepts-a-reason-after-de.md"
+    },
+    "01KZ3MQ52VDYMRYPVB9CH34REW": {
+      "human_id": "TASK-373",
+      "file_path": "docs/requirements/task/TASK-373-plan-member-sites-twelve-and-thirteen-both-structu.md"
+    },
+    "01KZ3K0Z868J9QRGQG324AGHGD": {
+      "human_id": "TASK-374",
+      "file_path": "docs/requirements/task/TASK-374-a-test-s-green-depends-on-an-ambient-claude-code-s.md"
+    },
+    "01KZ30QVXH099A5A0Y550KYD80": {
+      "human_id": "TASK-375",
+      "file_path": "docs/requirements/task/TASK-375-lore-evidence-capture-has-a-hard-coded-600s-window.md"
+    },
+    "01KZ19S9D3HMVEQ6102R3T98B0": {
+      "human_id": "TASK-376",
+      "file_path": "docs/requirements/task/TASK-376-an-ad-hoc-task-can-never-reach-the-attestation-pat.md"
+    },
+    "01KZ30R4FFY07QJKFKKKZE02F9": {
+      "human_id": "TASK-377",
+      "file_path": "docs/requirements/task/TASK-377-the-tenth-plan-member-site-is-a-write-path-create.md"
+    },
+    "01KZ3CED913R3ZRCQ39K0X5RX7": {
+      "human_id": "TASK-378",
+      "file_path": "docs/requirements/task/TASK-378-the-eleventh-plan-member-site-found-by-enumeration.md"
+    },
+    "01KZ31Y54CQQR8BDQECJ66D779": {
+      "human_id": "TASK-379",
+      "file_path": "docs/requirements/task/TASK-379-phaseworkflowservice-claim-captures-no-session-id.md"
+    },
+    "01KZ321C4FWMJK8H1JG5D63GJA": {
+      "human_id": "TASK-380",
+      "file_path": "docs/requirements/task/TASK-380-a-t-filter-is-a-regex-so-this-repo-s-own-ac-titles.md"
+    },
+    "01KZ3AR703RK9AFRMH7KDTKCCB": {
+      "human_id": "TASK-381",
+      "file_path": "docs/requirements/task/TASK-381-plan-membership-has-ten-known-sites-and-no-enumera.md"
+    },
+    "01KZ3AR14BVANVEK4PR6676MMH": {
+      "human_id": "TASK-382",
+      "file_path": "docs/requirements/task/TASK-382-three-of-five-static-checkers-are-inert-no-exporte.md"
+    },
+    "01KZ2Y4S885D6Z4EVFHM7ZGGRV": {
+      "human_id": "TASK-383",
+      "file_path": "docs/requirements/task/TASK-383-three-byte-identical-copies-of-isplanmember-surviv.md"
+    },
+    "01KZ19RZ15EEZDT308V1TMD3S6": {
+      "human_id": "TASK-384",
+      "file_path": "docs/requirements/task/TASK-384-two-concurrent-orchestrators-both-resolve-to-agent.md"
+    },
+    "01KZ2XGM86A6BND84H9BKRXE6J": {
+      "human_id": "TASK-385",
+      "file_path": "docs/requirements/task/TASK-385-mcp-lore-evidence-add-cannot-set-capture-source-an.md"
+    },
+    "01KZ2PXFFJGR3TEKVKV433Z3F7": {
+      "human_id": "TASK-386",
+      "file_path": "docs/requirements/task/TASK-386-two-independent-copies-of-does-this-task-have-a-cl.md"
+    },
+    "01KZ1BD8PT68QEWGSQ7ZKMHPV2": {
+      "human_id": "TASK-387",
+      "file_path": "docs/requirements/task/TASK-387-evidence-precheck-only-sees-a-cd-in-the-first-segm.md"
+    },
+    "01KZ2TK4E6DQWHCTFZ3NAS3RBR": {
+      "human_id": "TASK-388",
+      "file_path": "docs/requirements/task/TASK-388-a-ninth-plan-member-query-hides-in-the-one-shot-ta.md"
+    },
+    "01KZ322T5ZVX5WN0D449XPXNA5": {
+      "human_id": "TASK-389",
+      "file_path": "docs/requirements/task/TASK-389-the-mcp-refusal-omits-the-derived-cd-target-the-cl.md"
+    },
+    "01KYYRNTWE10B9VDJYWQ9GY7DM": {
+      "human_id": "TASK-390",
+      "file_path": "docs/requirements/task/TASK-390-ac-statement-drift-is-deterministically-detectable.md"
+    },
+    "01KYYJWHKSHRX7E0WW7R2AATMV": {
+      "human_id": "TASK-391",
+      "file_path": "docs/requirements/task/TASK-391-a-non-empty-output-tail-can-be-hand-authored-prose.md"
+    },
+    "01KZ1EBMV8EFYNF8579013BDDX": {
+      "human_id": "TASK-392",
+      "file_path": "docs/requirements/task/TASK-392-eight-more-plan-member-queries-still-key-on-parent.md"
+    },
+    "01KYYMVHBJKTQHQMWE6T74EKH4": {
+      "human_id": "TASK-393",
+      "file_path": "docs/requirements/task/TASK-393-ac-eti-7-proves-the-tail-window-helper-but-not-its.md"
+    },
+    "01KZ1ESTMMK98BE18A427KW2X5": {
+      "human_id": "TASK-394",
+      "file_path": "docs/requirements/task/TASK-394-the-uncommitted-worktree-guard-treats-no-claim-at.md"
+    },
+    "01KYYRP3HVG0WDBP4BM4S4SNJ2": {
+      "human_id": "TASK-395",
+      "file_path": "docs/requirements/task/TASK-395-computescopemismatchwarning-cannot-distinguish-a-t.md"
+    },
+    "01KZ1C6BS3X3NTTB9PS6BXT4SX": {
+      "human_id": "TASK-396",
+      "file_path": "docs/requirements/task/TASK-396-lore-evidence-add-and-lore-release-over-mcp-get-no.md"
+    },
+    "01KYYASYSXF8AFJ5JB14C1BZFA": {
+      "human_id": "TASK-397",
+      "file_path": "docs/requirements/task/TASK-397-plan-membership-is-extra-plan-id-but-the-last-task.md"
+    },
+    "01KYYVFY8VRSXWKXYYZGFZP0A2": {
+      "human_id": "TASK-398",
+      "file_path": "docs/requirements/task/TASK-398-the-mcp-assess-adapter-still-calls-derivecommitset.md"
+    },
+    "01KYYD48KA361RXZ6SJE5MR00Q": {
+      "human_id": "TASK-399",
+      "file_path": "docs/requirements/task/TASK-399-lore-evidence-and-lore-release-accept-an-attestati.md"
+    },
+    "01KYYWH4C93TGF3CHQBC6JVXPC": {
+      "human_id": "TASK-400",
+      "file_path": "docs/requirements/task/TASK-400-the-session-start-marker-collapses-five-distinct.md"
+    },
+    "01KZ17FCCRN4ES25QN52YT1JJ2": {
+      "human_id": "TASK-401",
+      "file_path": "docs/requirements/task/TASK-401-getassesstemplatereproducibility-has-zero-producti.md"
+    },
+    "01KYYQXN12KRDR1W2AAFKWXBBK": {
+      "human_id": "TASK-402",
+      "file_path": "docs/requirements/task/TASK-402-short-id-rendering-truncates-ulids-to-8-chars-a-10.md"
+    },
+    "01KZ193T1S0DCP55HX89J5P7Z8": {
+      "human_id": "TASK-403",
+      "file_path": "docs/requirements/task/TASK-403-the-git-safety-gate-s-worktree-rule-matches-only-f.md"
+    },
+    "01KYY37BHKHPP34XN6CQ53SJJ7": {
+      "human_id": "TASK-404",
+      "file_path": "docs/requirements/task/TASK-404-session-start-freshness-boundary-cases-assert-a-wa.md"
+    },
+    "01KYYTQMQK138Q2WC0S4CDQV7N": {
+      "human_id": "TASK-405",
+      "file_path": "docs/requirements/task/TASK-405-provenance-writes-io-error-s-four-cases-inject-i-o.md"
+    },
+    "01KYYJTG2E75YCQ015DCY3CYH0": {
+      "human_id": "TASK-406",
+      "file_path": "docs/requirements/task/TASK-406-settle-the-v5-registry-policy-slot-5-is-slot-froze.md"
+    },
+    "01KYYMZ2M37D730DJ2XHP59F4H": {
+      "human_id": "TASK-407",
+      "file_path": "docs/requirements/task/TASK-407-verifying-a-handoff-you-just-authored-arms-the-cov.md"
+    },
+    "01KYYGVKJGHCHP2KC01703D4QT": {
+      "human_id": "TASK-408",
+      "file_path": "docs/requirements/task/TASK-408-lore-assess-derives-a-plan-s-commits-by-grepping-t.md"
+    },
+    "01KYYSHYHQ6THH96KFB3NXZRP4": {
+      "human_id": "TASK-409",
+      "file_path": "docs/requirements/task/TASK-409-main-is-red-a-fourth-selectionreason-was-added-to.md"
+    },
+    "01KYYAFMN7JYSJPMVYVVHVSQ6X": {
+      "human_id": "TASK-410",
+      "file_path": "docs/requirements/task/TASK-410-lore-done-accepts-an-unattested-self-reported-pass.md"
+    },
+    "01KYYDXH4SBSHGHAXNPKEY9SMB": {
+      "human_id": "TASK-411",
+      "file_path": "docs/requirements/task/TASK-411-test-changed-s-fourth-invisible-edge-a-tree-scanni.md"
+    },
+    "01KYYRVY3Z9M6RRWQ0HMRZ0GCQ": {
+      "human_id": "TASK-412",
+      "file_path": "docs/requirements/task/TASK-412-lore-handoff-reports-modified-files-none-while-fou.md"
+    },
+    "01KYYDXHBF3GXDSDJ22Q2ZYWKJ": {
+      "human_id": "TASK-413",
+      "file_path": "docs/requirements/task/TASK-413-vitest-run-silently-drops-a-bun-test-ts-named-alon.md"
+    },
+    "01KYYAB861WC5SQX2WPN6DPGE4": {
+      "human_id": "TASK-414",
+      "file_path": "docs/requirements/task/TASK-414-the-judge-truncation-notice-says-content-was-cut-b.md"
+    },
+    "01KYYBRME5P62C70V8QACXTW0A": {
+      "human_id": "TASK-415",
+      "file_path": "docs/requirements/task/TASK-415-ac-acs-1-and-ac-acs-9-are-still-compound-after-the.md"
+    },
+    "01KYYCS5VFF9ZHHPV6TPX4VYQT": {
+      "human_id": "TASK-416",
+      "file_path": "docs/requirements/task/TASK-416-a-stale-untracked-dashboard-assets-ts-breaks-every.md"
+    },
+    "01KYYAMW9KQ29D6TVGAJKNZQX2": {
+      "human_id": "TASK-417",
+      "file_path": "docs/requirements/task/TASK-417-resume-coverage-disposition-parser-an-unrecognised.md"
+    },
+    "01KYYBM16XSDFWT77N6PEQ5S1Q": {
+      "human_id": "TASK-418",
+      "file_path": "docs/requirements/task/TASK-418-a-task-cannot-be-retracted-supersedes-emits-a-repa.md"
+    },
+    "01KYYB5HZS47KXEHA3K3DSCH1J": {
+      "human_id": "TASK-419",
+      "file_path": "docs/requirements/task/TASK-419-lore-evidence-ac-accepts-an-ac-ref-on-an-ad-hoc-ta.md"
+    },
+    "01KYYA85V8AEQ4SCBYRET6ZW0V": {
+      "human_id": "TASK-420",
+      "file_path": "docs/requirements/task/TASK-420-two-more-evidence-consumers-erase-an-expected-fail.md"
+    },
+    "01KYYBGPG2DSHANPX0EME5TC5R": {
+      "human_id": "TASK-421",
+      "file_path": "docs/requirements/task/TASK-421-check-ac-ref-integrity-re-implements-governing-spe.md"
+    },
+    "01KYYB5HT1WWV2PEW2G7VDV78G": {
+      "human_id": "TASK-422",
+      "file_path": "docs/requirements/task/TASK-422-test-changed-selects-nothing-for-any-scripts-chang.md"
+    },
+    "01KYYGW3PHH2NDXXT9PFH6AQWZ": {
+      "human_id": "TASK-423",
+      "file_path": "docs/requirements/task/TASK-423-t6-suppression-removes-only-the-dimension-scores-r.md"
+    },
+    "01KYYG0HN3WGX2S00M4VRAAXWY": {
+      "human_id": "TASK-424",
+      "file_path": "docs/requirements/task/TASK-424-t5-parameterize-the-evidence-renderer-and-register.md"
+    },
+    "01KYYB2C8WMC2W9HSX5V2AXCMY": {
+      "human_id": "TASK-425",
+      "file_path": "docs/requirements/task/TASK-425-t4-suppress-ungrounded-absence-findings-instead-of.md"
+    },
+    "01KYYB2C2ZD4YN20KSEVDF0V10": {
+      "human_id": "TASK-426",
+      "file_path": "docs/requirements/task/TASK-426-t3-project-evidence-rows-as-oracle-ac-ref-result-c.md"
+    },
+    "01KYYB1J8B0KDQH5P09E2ANX66": {
+      "human_id": "TASK-427",
+      "file_path": "docs/requirements/task/TASK-427-t2-a-runner-tail-is-taken-around-the-ac-ref-s-last.md"
+    },
+    "01KYYB1J2MX03VDYW0035NTM0W": {
+      "human_id": "TASK-428",
+      "file_path": "docs/requirements/task/TASK-428-t1-self-reported-fail-expected-fail-must-carry-a-n.md"
+    },
+    "01KYY3GZQX875BBS0YRERX4J7P": {
+      "human_id": "TASK-429",
+      "file_path": "docs/requirements/task/TASK-429-discharge-d7-in-code-the-forced-contention-control.md"
+    },
+    "01KYY1XZT6419C4YE3NRVK5547": {
+      "human_id": "TASK-430",
+      "file_path": "docs/requirements/task/TASK-430-every-ac-oracle-is-t-scoped-so-the-file-passes-is.md"
+    },
+    "01KYY1J82TGVSSM5W1APV6N1S5": {
+      "human_id": "TASK-431",
+      "file_path": "docs/requirements/task/TASK-431-lore-ready-renders-an-expected-fail-evidence-row-a.md"
+    },
+    "01KYY1NKRCCH6HNGF0RXAHDNK2": {
+      "human_id": "TASK-432",
+      "file_path": "docs/requirements/task/TASK-432-lore-assess-diff-spawnsync-sets-no-maxbuffer-a-dif.md"
+    },
+    "01KYYCYG3G0D20GH0NJMTTF5VT": {
+      "human_id": "TASK-433",
+      "file_path": "docs/requirements/task/TASK-433-main-is-red-on-check-test-budgets-8-new-spawn-heav.md"
+    },
+    "01KYYB6JXT3EVEDW26W923Y0Z3": {
+      "human_id": "TASK-434",
+      "file_path": "docs/requirements/task/TASK-434-literal-nul-bytes-in-two-scripts-source-files-one.md"
+    },
+    "01KYXT06DEM3QATGXNXWB5X6HZ": {
+      "human_id": "TASK-435",
+      "file_path": "docs/requirements/task/TASK-435-red-first-discipline-is-asked-for-in-prose-but-nev.md"
+    },
+    "01KYY1XZBS7DMC13X5XV9PY67G": {
+      "human_id": "TASK-436",
+      "file_path": "docs/requirements/task/TASK-436-lore-assess-asks-the-caller-for-a-git-range-that-c.md"
+    },
+    "01KYYB6K55DRPN0FK01BVA6ZHG": {
+      "human_id": "TASK-437",
+      "file_path": "docs/requirements/task/TASK-437-test-changed-s-file-universe-is-packages-not-the-r.md"
+    },
+    "01KYY1XZJ1HNQSBHFXYF4C1YFR": {
+      "human_id": "TASK-438",
+      "file_path": "docs/requirements/task/TASK-438-split-the-compound-ac-acs-1-ac-acs-4-into-one-asse.md"
+    },
+    "01KYY2Z12E6ZPK5QEDPYCECCRR": {
+      "human_id": "TASK-439",
+      "file_path": "docs/requirements/task/TASK-439-key-test-budget-ledger-rows-on-a-test-title-finger.md"
+    },
+    "01KYY1XZP56VF7WN07WBEQR6TG": {
+      "human_id": "TASK-440",
+      "file_path": "docs/requirements/task/TASK-440-check-ac-ref-integrity-prints-an-exemption-count-n.md"
+    },
+    "01KYY2RTZDQHG5391FNFMJDQCY": {
+      "human_id": "TASK-441",
+      "file_path": "docs/requirements/task/TASK-441-test-changed-cannot-see-the-whole-integration-cli.md"
+    },
+    "01KYY9847XNVGR8WPG6SE38AER": {
+      "human_id": "TASK-442",
+      "file_path": "docs/requirements/task/TASK-442-spec-050-does-not-carry-the-g1-help-guard-rule-it.md"
+    },
+    "01KYY2C2WRN44HZ9SR9T1B38Z5": {
+      "human_id": "TASK-443",
+      "file_path": "docs/requirements/task/TASK-443-both-satisfaction-side-tightenings-a-deferral-need.md"
+    },
+    "01KYXR1P62Q3XFZA59B19M6QSC": {
+      "human_id": "TASK-444",
+      "file_path": "docs/requirements/task/TASK-444-the-approved-to-draft-demotion-rule-is-mirrored-in.md"
+    },
+    "01KYXNGDVASK6674BGQY0MSJ7N": {
+      "human_id": "TASK-445",
+      "file_path": "docs/requirements/task/TASK-445-g1-spec-create-gate-denies-lore-create-spec-help-w.md"
+    },
+    "01KYY1A4WGWNX97ZD9QFVZ84PK": {
+      "human_id": "TASK-446",
+      "file_path": "docs/requirements/task/TASK-446-verifyadhoctask-stamps-ac-ref-on-its-runner-attest.md"
+    },
+    "01KYXNJAX43TR3YT0CPXEQRHFK": {
+      "human_id": "TASK-447",
+      "file_path": "docs/requirements/task/TASK-447-sweep-the-claude-md-standing-lessons-layer-against.md"
+    },
+    "01KYXP1K338XP2CFXPVTY8JNSP": {
+      "human_id": "TASK-448",
+      "file_path": "docs/requirements/task/TASK-448-t3-diagnose-and-disposition-the-three-measured-dan.md"
+    },
+    "01KYXP1JYY7C4K69P4N2KC0VR7": {
+      "human_id": "TASK-449",
+      "file_path": "docs/requirements/task/TASK-449-t2-dangling-ac-ref-detector-plus-its-seeded-dangli.md"
+    },
+    "01KYXKCP1K62S4M4556VAK83WN": {
+      "human_id": "TASK-450",
+      "file_path": "docs/requirements/task/TASK-450-t1-coverage-check-verb-block-channel-verdict-armin.md"
+    },
+    "01KYXP1JR7SKCVC4C78PBBJ6ZF": {
+      "human_id": "TASK-451",
+      "file_path": "docs/requirements/task/TASK-451-t1-lore-ac-set-service-cli-six-dimension-suite.md"
+    },
+    "01KYXKCXYBCFXWAZYPV9TR3DKW": {
+      "human_id": "TASK-452",
+      "file_path": "docs/requirements/task/TASK-452-t3-compiled-consumer-path-oracle.md"
+    },
+    "01KYXKCXRKWNN4PA0E8B8B2V7D": {
+      "human_id": "TASK-453",
+      "file_path": "docs/requirements/task/TASK-453-t2-unit-oracles-for-the-coverage-check-verb.md"
+    },
+    "01KYXN3DBPYYJZ8GERDYEC6YTV": {
+      "human_id": "TASK-454",
+      "file_path": "docs/requirements/task/TASK-454-t1-ac-scope-admission-predicate-plus-the-ac-scope.md"
+    },
+    "01KYXJ3831HW9EZ5MB6TMKXP32": {
+      "human_id": "TASK-455",
+      "file_path": "docs/requirements/task/TASK-455-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac.md"
+    },
+    "01KYXG90EWSZWM335B7FXCJY74": {
+      "human_id": "TASK-456",
+      "file_path": "docs/requirements/task/TASK-456-adjudicationbar-s-compact-status-chip-still-derive.md"
+    },
+    "01KYXP57TAF3SECKMWDXBEJ5YF": {
+      "human_id": "TASK-457",
+      "file_path": "docs/requirements/task/TASK-457-ic-spec-discharge-the-startup-write-contention-gap.md"
+    },
+    "01KYH9AM7NP49A5N9BZ9VJDF77": {
+      "human_id": "TASK-458",
+      "file_path": "docs/requirements/task/TASK-458-skill-implement-core-leaves-memory-markers-constan.md"
+    },
+    "01KYH9ANHK18A18QYY2Z72ME2A": {
+      "human_id": "TASK-459",
+      "file_path": "docs/requirements/task/TASK-459-skill-test-red-admission-check-suite-for-reference.md"
+    },
+    "01KYH9AMP4R1W902Q8JJ4F2JCF": {
+      "human_id": "TASK-460",
+      "file_path": "docs/requirements/task/TASK-460-skill-test-red-projection-splice-suite-binding-the.md"
+    },
+    "01KYH9AN41YW77RZ7HVTV840EA": {
+      "human_id": "TASK-461",
+      "file_path": "docs/requirements/task/TASK-461-skill-implement-context-projection-pure-module-par.md"
+    },
+    "01KYH9ANZ5EK6PYEM0PMW3YSXG": {
+      "human_id": "TASK-462",
+      "file_path": "docs/requirements/task/TASK-462-skill-implement-claude-md-check-extensions-determi.md"
+    },
+    "01KYH9AQ6ZM37RF6XYDK6FAY3S": {
+      "human_id": "TASK-463",
+      "file_path": "docs/requirements/task/TASK-463-skill-test-red-splice-single-source-of-truth-pin-f.md"
+    },
+    "01KYH9APC47TT8SNH9F0KE1JTX": {
+      "human_id": "TASK-464",
+      "file_path": "docs/requirements/task/TASK-464-skill-test-red-compiled-binary-e2e-for-context-ini.md"
+    },
+    "01KYH9AQM9G0ARJZGA5ARFHPNA": {
+      "human_id": "TASK-465",
+      "file_path": "docs/requirements/task/TASK-465-skill-implement-setup-project-flow-refactor-to-con.md"
+    },
+    "01KYH9APSHPKHY811BBBYV5XP7": {
+      "human_id": "TASK-466",
+      "file_path": "docs/requirements/task/TASK-466-skill-implement-context-facts-collection-flow.md"
+    },
+    "01KYH9AR2BEZPVNVW8CGJETVXQ": {
+      "human_id": "TASK-467",
+      "file_path": "docs/requirements/task/TASK-467-skill-test-red-hook-trip-and-skill-retirement-inte.md"
+    },
+    "01KYH9ARG0BD96GJ636RKHDFD0": {
+      "human_id": "TASK-468",
+      "file_path": "docs/requirements/task/TASK-468-skill-implement-guard-hook-asset-registration-skil.md"
+    },
+    "01KYH9ARX8Q2D11HP65RGAC3D4": {
+      "human_id": "TASK-469",
+      "file_path": "docs/requirements/task/TASK-469-skill-verify-full-suite-close-out-with-attested-ve.md"
+    },
+    "01KYH2ADJ2TV0DWNAKGWDAFZK6": {
+      "human_id": "TASK-470",
+      "file_path": "docs/requirements/task/TASK-470-t1-rule-engine-plan-close-cascade-lore-archive-ver.md"
+    },
+    "01KYWEMAVW8N16Q25SAVN7QJ59": {
+      "human_id": "TASK-471",
+      "file_path": "docs/requirements/task/TASK-471-lore-evidence-s-oracle-file-precheck-resolves-agai.md"
+    },
+    "01KYW64894056W29E1C3502Y38": {
+      "human_id": "TASK-472",
+      "file_path": "docs/requirements/task/TASK-472-the-ad-hoc-task-channel-has-no-attested-evidence-p.md"
+    },
+    "01KYVGFWMSD6BP1QRKFQ7TWMN8": {
+      "human_id": "TASK-473",
+      "file_path": "docs/requirements/task/TASK-473-meets-floor-renders-pass-while-the-declared-scope.md"
+    },
+    "01KYVGFX5ZZB6EA7WY38S5WGH8": {
+      "human_id": "TASK-474",
+      "file_path": "docs/requirements/task/TASK-474-archive-sweep-gate-disable-is-silently-inert-a-who.md"
+    },
+    "01KYWFA4MSK21Z1K7V9PH8TKSS": {
+      "human_id": "TASK-475",
+      "file_path": "docs/requirements/task/TASK-475-lore-status-check-claude-md-reports-a-saturated-fi.md"
+    },
+    "01KYV2QAAJA5YRY1EMDWKG70NM": {
+      "human_id": "TASK-476",
+      "file_path": "docs/requirements/task/TASK-476-t1-structural-test-budget-oracle.md"
+    },
+    "01KYVV00JNHAWARY3Z29S1QPGD": {
+      "human_id": "TASK-477",
+      "file_path": "docs/requirements/task/TASK-477-land-the-baseline-ledger-policy-for-check-test-bud.md"
+    },
+    "01KYV2QBKFCBS9M09XHG0GY0KR": {
+      "human_id": "TASK-478",
+      "file_path": "docs/requirements/task/TASK-478-t2-pure-classifier-plus-enforcement-and-the-50-run.md"
+    },
+    "01KYV2Q9WWC2ZZ5JW0ZAZEAMZV": {
+      "human_id": "TASK-479",
+      "file_path": "docs/requirements/task/TASK-479-t2-wire-decision-status-into-lore-set-with-read-me.md"
+    },
+    "01KYV2Q9DGAA1TDNSSC6K3C35X": {
+      "human_id": "TASK-480",
+      "file_path": "docs/requirements/task/TASK-480-t1-pure-decision-status-value-restriction-module.md"
+    },
+    "01KYV2P1GJ6GMK5VG72W130QM2": {
+      "human_id": "TASK-481",
+      "file_path": "docs/requirements/task/TASK-481-t2-verify-selects-the-declared-scope-intersection.md"
+    },
+    "01KYV2P2DQ61HYNSW2Y664TXPC": {
+      "human_id": "TASK-482",
+      "file_path": "docs/requirements/task/TASK-482-t4-record-the-coverage-predicate-s-measured-false.md"
+    },
+    "01KYV2P1YWDC206AV7M3244DZY": {
+      "human_id": "TASK-483",
+      "file_path": "docs/requirements/task/TASK-483-t3-exercised-acs-rename-declaredscopecoverage-and.md"
+    },
+    "01KYV2P101ME3TSEBESDQ1TWTC": {
+      "human_id": "TASK-484",
+      "file_path": "docs/requirements/task/TASK-484-t1-task-extra-ac-scope-the-lore-scope-writer-and.md"
+    },
+    "01KYV2QARE92PK8D3KQ6ET2VVG": {
+      "human_id": "TASK-485",
+      "file_path": "docs/requirements/task/TASK-485-t2-declare-the-budget-on-the-reported-ac-vrw-5b-ca.md"
+    },
+    "01KYW1YV06HMMNQ3V28S3Q2HEJ": {
+      "human_id": "TASK-486",
+      "file_path": "docs/requirements/task/TASK-486-escalated-recommended-2026-07-24-still-unbuilt-att.md"
+    },
+    "01KYW984EBSFV4SB67R55SHR86": {
+      "human_id": "TASK-487",
+      "file_path": "docs/requirements/task/TASK-487-t1-escalate-present-blocks-even-alongside-a-reject.md"
+    },
+    "01KYVV00DF10G5BAY47SFKTT17": {
+      "human_id": "TASK-488",
+      "file_path": "docs/requirements/task/TASK-488-lore-evidence-must-refuse-a-t-filtered-pass-with-n.md"
+    },
+    "01KYW1YTTY8WFZJHRFB7ZADGR2": {
+      "human_id": "TASK-489",
+      "file_path": "docs/requirements/task/TASK-489-plan-close-must-block-when-the-coverage-conjunct-i.md"
+    },
+    "01KYW7DC59YRR0BBADTPT28M2F": {
+      "human_id": "TASK-490",
+      "file_path": "docs/requirements/task/TASK-490-t1-escalate-universalises-reject-stays-scoped-deni.md"
+    },
+    "01KYW7DCBPKDB52N7FX6SCCMRW": {
+      "human_id": "TASK-491",
+      "file_path": "docs/requirements/task/TASK-491-t1-r2-superseded-handoff-recency-guard-ac-r2-1-4.md"
+    },
+    "01KYVRB59PE5ZKAQT0BK4E6EVS": {
+      "human_id": "TASK-492",
+      "file_path": "docs/requirements/task/TASK-492-ac-ic-1-harness-runs-out-of-sampling-budget-under.md"
+    },
+    "01KYW556GH8H7KG4C0MJ23KWYY": {
+      "human_id": "TASK-493",
+      "file_path": "docs/requirements/task/TASK-493-openvalidatedupstream-lets-a-synchronous-store-ini.md"
+    },
+    "01KYW5513XY6Z8VSDANCNM9ZVH": {
+      "human_id": "TASK-494",
+      "file_path": "docs/requirements/task/TASK-494-the-concurrency-exclusion-classifier-excuses-gover.md"
+    },
+    "01KYVV00PEPH1M18NGVXZMFR0B": {
+      "human_id": "TASK-495",
+      "file_path": "docs/requirements/task/TASK-495-spec-first-require-ac-scope-at-task-creation-so-th.md"
+    },
+    "01KYVS49HZ7XAHVZTHT1YB47Q5": {
+      "human_id": "TASK-496",
+      "file_path": "docs/requirements/task/TASK-496-ac-ll-8-guards-the-loader-strip-not-the-no-sync-be.md"
+    },
+    "01KYVNQT1HQCWENM2QVDCK9AXP": {
+      "human_id": "TASK-497",
+      "file_path": "docs/requirements/task/TASK-497-t3-mechanize-the-createapp-unreachability-invarian.md"
+    },
+    "01KYVN9N4XT74P35WHPBQXDX31": {
+      "human_id": "TASK-498",
+      "file_path": "docs/requirements/task/TASK-498-fix-the-spec-072-cross-corpus-database-is-locked-r.md"
+    },
+    "01KYVEYBZ3BVM767HRFSVNPXW7": {
+      "human_id": "TASK-499",
+      "file_path": "docs/requirements/task/TASK-499-t2-defer-libsql-native-load-and-add-tmpdir-usabili.md"
+    },
+    "01KYVEKR997MMHHMYG3EHVE9KX": {
+      "human_id": "TASK-500",
+      "file_path": "docs/requirements/task/TASK-500-t1-argument-aware-probes-in-git-safety-gate-d1-d5.md"
+    },
+    "01KYVEYBA4R6M8QCP55M0D89RG": {
+      "human_id": "TASK-501",
+      "file_path": "docs/requirements/task/TASK-501-t1-red-oracles-for-lazy-libsql-load-and-tmpdir-dia.md"
+    },
+    "01KYVEKZN08FD6Y0Z0FTTKT3GH": {
+      "human_id": "TASK-502",
+      "file_path": "docs/requirements/task/TASK-502-t1-boundary-required-on-removal-ports-d8-ac-sl-7-8.md"
+    },
+    "01KYV2QB5VSCGPFQA4C5MSMMD7": {
+      "human_id": "TASK-503",
+      "file_path": "docs/requirements/task/TASK-503-t1-evidence-which-layer-refuses-the-second-concurr.md"
+    },
+    "01KYV2VGWYTZ7KQ1A66KN946BX": {
+      "human_id": "TASK-504",
+      "file_path": "docs/requirements/task/TASK-504-ship-the-dispatch-isolation-gate-wire-stop-handoff.md"
+    },
+    "01KYV211G6YN54B7GNXE2H7R0J": {
+      "human_id": "TASK-505",
+      "file_path": "docs/requirements/task/TASK-505-fix-lore-setup-removal-reaching-through-dev-symlin.md"
+    },
+    "01KYS31B6ZYMZ2CSFM0SEFKHZP": {
+      "human_id": "TASK-506",
+      "file_path": "docs/requirements/task/TASK-506-t4-governance-rule-manifest-regeneration-fresh-ins.md"
+    },
+    "01KYS3KT0WM5MPCHGZQ6GH3AYN": {
+      "human_id": "TASK-507",
+      "file_path": "docs/requirements/task/TASK-507-t5-stop-handoff-coverage-hook-as-blind-pipe.md"
+    },
+    "01KYS31AR2BYEJGVQ9FX9G1HSM": {
+      "human_id": "TASK-508",
+      "file_path": "docs/requirements/task/TASK-508-t3-lore-handoff-coverage-check-verb-sole-parser-an.md"
+    },
+    "01KYS30NMHDMNT3KXTD1YJH52G": {
+      "human_id": "TASK-509",
+      "file_path": "docs/requirements/task/TASK-509-t2-ordinal-render-at-the-ssot-projection-point.md"
+    },
+    "01KYS30N5TGTD4NS0E5NBQ9RKG": {
+      "human_id": "TASK-510",
+      "file_path": "docs/requirements/task/TASK-510-t1-core-constants-pure-cardinality-renderer.md"
+    },
+    "01KYTV4WKMG0D6J673VPRBAFTM": {
+      "human_id": "TASK-511",
+      "file_path": "docs/requirements/task/TASK-511-t6-wire-the-stop-hook-into-settings-json-auto-regi.md"
+    },
+    "01KYS1PBMF7WWN5AJERS6TVPCW": {
+      "human_id": "TASK-512",
+      "file_path": "docs/requirements/task/TASK-512-t5-compiled-binary-e2e-from-a-throwaway-corpus-cle.md"
+    },
+    "01KYS1PAC5GPERH03ZB8NP9FJQ": {
+      "human_id": "TASK-513",
+      "file_path": "docs/requirements/task/TASK-513-t2-per-claimed-ac-attested-coverage-as-the-default.md"
+    },
+    "01KYSH2BS37PWC78SYVGXB957A": {
+      "human_id": "TASK-514",
+      "file_path": "docs/requirements/task/TASK-514-t8-repair-the-t3-t4-integration-regression-6-under.md"
+    },
+    "01KYS6D3DZV6GD2DPG0BBB5BEW": {
+      "human_id": "TASK-515",
+      "file_path": "docs/requirements/task/TASK-515-t7-lore-approve-renders-the-prd-sync-advisory-to-s.md"
+    },
+    "01KYS1PC2424KRTVVFWSDMR8FY": {
+      "human_id": "TASK-516",
+      "file_path": "docs/requirements/task/TASK-516-t6-upstream-adr-revision-clause-decision-status-ac.md"
+    },
+    "01KYS1PB6C8Y43VRQQKY9M5XAD": {
+      "human_id": "TASK-517",
+      "file_path": "docs/requirements/task/TASK-517-t4-plan-close-predicate-contract-table-lore-gate-e.md"
+    },
+    "01KYS1PAS9188QTCN7K3J2D7AQ": {
+      "human_id": "TASK-518",
+      "file_path": "docs/requirements/task/TASK-518-t3-domain-doc-sync-requires-attribution-to-the-clo.md"
+    },
+    "01KYS1P9WM25HCGWGZGGNTE18E": {
+      "human_id": "TASK-519",
+      "file_path": "docs/requirements/task/TASK-519-t1-applicability-verdict-in-the-predicate-s-own-ty.md"
+    },
+    "01KYSHEV31JSZTW893RN2RE4KT": {
+      "human_id": "TASK-520",
+      "file_path": "docs/requirements/task/TASK-520-que-di-wu-ge-gate-dispatch-time-pai-subagent-shi-s.md"
+    },
+    "01KYPT2BK59YMQWASD8SEB23AA": {
+      "human_id": "TASK-521",
+      "file_path": "docs/requirements/task/TASK-521-fix-ordering-regression-placeholder-command-guard.md"
+    },
+    "01KYPP0PKD69WD50HVY75Z4N1D": {
+      "human_id": "TASK-522",
+      "file_path": "docs/requirements/task/TASK-522-mechanical-oracle-for-the-single-read-site-invaria.md"
+    },
+    "01KYRCXKCH9DYB9K44Y4WZ2RB1": {
+      "human_id": "TASK-523",
+      "file_path": "docs/requirements/task/TASK-523-t5-compiled-e2e-suite-proving-every-surface-from-a.md"
+    },
+    "01KYRCX76VD61PPVNP3R86HVWV": {
+      "human_id": "TASK-524",
+      "file_path": "docs/requirements/task/TASK-524-t3-scope-closure-on-the-resume-ticket-cli-stdout-a.md"
+    },
+    "01KYRCX6SH6Q79B2JPXEHYK9VH": {
+      "human_id": "TASK-525",
+      "file_path": "docs/requirements/task/TASK-525-t2-framing-line-emitted-binary-side-hook-demoted-t.md"
+    },
+    "01KYRCXJZAD8T3RNARQVNEJHTH": {
+      "human_id": "TASK-526",
+      "file_path": "docs/requirements/task/TASK-526-t4-payload-wide-feed-governance-rule-manifest-rege.md"
+    },
+    "01KYRCWWAF9VJWA25XJXFWTRZ2": {
+      "human_id": "TASK-527",
+      "file_path": "docs/requirements/task/TASK-527-t1-core-constants-leading-scope-field-in.md"
+    },
+    "01KYPZGB21SK89HP3QGCWK0TSY": {
+      "human_id": "TASK-528",
+      "file_path": "docs/requirements/task/TASK-528-p2-computed-closed-state-for-archived-issues-witho.md"
+    },
+    "01KYPTP4SSE7ZB961BRX7N6J0Y": {
+      "human_id": "TASK-529",
+      "file_path": "docs/requirements/task/TASK-529-p2-cli-verbs-lore-issue-resolve-lore-issues.md"
+    },
+    "01KYQ4VWM7J1464XRK1RVRD61P": {
+      "human_id": "TASK-530",
+      "file_path": "docs/requirements/task/TASK-530-p3-retire-the-test-only-check-widening-hack-suites.md"
+    },
+    "01KYPTP6D9ZVB30R36D5WQRHPN": {
+      "human_id": "TASK-531",
+      "file_path": "docs/requirements/task/TASK-531-p2-http-projection-dashboard-issues-page-render-co.md"
+    },
+    "01KYPTP6YABDCDHFRPG9X1VWDN": {
+      "human_id": "TASK-532",
+      "file_path": "docs/requirements/task/TASK-532-p3-e2e-closure-proof-live-backlog-closure.md"
+    },
+    "01KYPTP5VW27G2KKJW5SP2AST9": {
+      "human_id": "TASK-533",
+      "file_path": "docs/requirements/task/TASK-533-p2-consumer-report-issue-list-reports-computed-res.md"
+    },
+    "01KYPTP5AVSPDH8PMXRRXVXHT1": {
+      "human_id": "TASK-534",
+      "file_path": "docs/requirements/task/TASK-534-p2-lore-status-check-issues-detector-stale-after-d.md"
+    },
+    "01KYPTNR9M7CRX54BM2Y72ZY1S": {
+      "human_id": "TASK-535",
+      "file_path": "docs/requirements/task/TASK-535-p1-resolves-link-type-computed-resolution-foundati.md"
+    },
+    "01KYKWNRHM074193XH04BH49W0": {
+      "human_id": "TASK-536",
+      "file_path": "docs/requirements/task/TASK-536-no-init-setup-path-provisions-feedback-upstream-lo.md"
+    },
+    "01KYPRQFVA3D4MYE8BMD3D8ZV6": {
+      "human_id": "TASK-537",
+      "file_path": "docs/requirements/task/TASK-537-reject-placeholder-command-strings-at-evidence-wri.md"
+    },
+    "01KYPRS2T7RHAK966NQGXKSDKC": {
+      "human_id": "TASK-538",
+      "file_path": "docs/requirements/task/TASK-538-lore-quan-ju-ji-l-que-yi-tiao-jue-bu-ping-bi-lore.md"
+    },
+    "01KYPMB5QT6DRP421PJ1ZG5S9A": {
+      "human_id": "TASK-539",
+      "file_path": "docs/requirements/task/TASK-539-green-honour-no-open-serve-human-readable-nonce-fa.md"
+    },
+    "01KYPMADY00NKJNVZE4575EGBA": {
+      "human_id": "TASK-540",
+      "file_path": "docs/requirements/task/TASK-540-red-failing-tests-for-no-open-suppression-nonce-fa.md"
+    },
+    "01KYPEDPZRG6CRA90WT5P5QDWT": {
+      "human_id": "TASK-541",
+      "file_path": "docs/requirements/task/TASK-541-t9-make-the-hint-suite-hermetic-actor-advisory-pol.md"
+    },
+    "01KYPDT3TJV37Q81EHW7XYW6ST": {
+      "human_id": "TASK-542",
+      "file_path": "docs/requirements/task/TASK-542-t8-fix-macos-realpath-assumption-in-three-provisio.md"
+    },
+    "01KYPAQYEA4Q5H0JZH54HV9T1T": {
+      "human_id": "TASK-543",
+      "file_path": "docs/requirements/task/TASK-543-t7-reconcile-the-two-spec-073-baseline-sub-cases-t.md"
+    },
+    "01KYP8VNDVFVZVM75QQBTSGQHT": {
+      "human_id": "TASK-544",
+      "file_path": "docs/requirements/task/TASK-544-t5-unlock-the-spec-073-hint-s-unconfigured-branch.md"
+    },
+    "01KYP8VN100W45VNN33NF7NKN2": {
+      "human_id": "TASK-545",
+      "file_path": "docs/requirements/task/TASK-545-t4-cli-auto-config-flag-actionable-unconfigured-er.md"
+    },
+    "01KYP8VNXWRMWM6T94SWBWR2VS": {
+      "human_id": "TASK-546",
+      "file_path": "docs/requirements/task/TASK-546-t6-close-full-suite-typecheck-code-anchors.md"
+    },
+    "01KYP8VMKSNPS1XR7SH3B3YS9P": {
+      "human_id": "TASK-547",
+      "file_path": "docs/requirements/task/TASK-547-t3-core-upstream-resolver-config-writer.md"
+    },
+    "01KYP8V19X5A2VBEQ2G407K79F": {
+      "human_id": "TASK-548",
+      "file_path": "docs/requirements/task/TASK-548-t2-red-hint-both-directions-assertion-ac-oob-6.md"
+    },
+    "01KYP8V0WMXBKQ2D760T212K6F": {
+      "human_id": "TASK-549",
+      "file_path": "docs/requirements/task/TASK-549-t1-red-provision-integration-suite-ac-oob-1-5.md"
+    },
+    "01KYPED6JD7GDH4H46B0925EFR": {
+      "human_id": "TASK-550",
+      "file_path": "docs/requirements/task/TASK-550-scoped-oracles-cannot-verify-integration-reachabil.md"
+    },
+    "01KYPECR2WSTRVVM6PX055F38H": {
+      "human_id": "TASK-551",
+      "file_path": "docs/requirements/task/TASK-551-no-gate-arms-the-doc-code-drift-oracle-a-spec-whos.md"
+    },
+    "01KYP30SDFZSMV0CD8XQF8A50J": {
+      "human_id": "TASK-552",
+      "file_path": "docs/requirements/task/TASK-552-evidence-ac-gate-only-validates-against-the-plan-s.md"
+    },
+    "01KYHYP76ZAG43MJRVD7TTWST3": {
+      "human_id": "TASK-553",
+      "file_path": "docs/requirements/task/TASK-553-t5-close-ac-wh-1-rendering-clause-oracle-coverage.md"
+    },
+    "01KYM2YZCBVTA2HCRPSQEH69SW": {
+      "human_id": "TASK-554",
+      "file_path": "docs/requirements/task/TASK-554-t2-fallout-changed-tests-ts-porcelain-fix-worktree.md"
+    },
+    "01KYKX7VHCGY717ME6JVYV5GBN": {
+      "human_id": "TASK-555",
+      "file_path": "docs/requirements/task/TASK-555-t1-service-ledger-fast-track-ai-provenance-config.md"
+    },
+    "01KYKWNGC07ZS7JCDE7AHQ1F80": {
+      "human_id": "TASK-556",
+      "file_path": "docs/requirements/task/TASK-556-t2-service-lore-core-trace-zod-schema-tracerecorde.md"
+    },
+    "01KYKWNFZ9EE2HGCN5TPJ8D56X": {
+      "human_id": "TASK-557",
+      "file_path": "docs/requirements/task/TASK-557-t1-store-migration-011-trace-events-storeinterface.md"
+    },
+    "01KYMFQRMYJYHY3W8AQ38EF9DM": {
+      "human_id": "TASK-558",
+      "file_path": "docs/requirements/task/TASK-558-skill-test-closure-terminality-detector-red-scenar.md"
+    },
+    "01KYMFQTVP6W609WW61YBFEGDE": {
+      "human_id": "TASK-559",
+      "file_path": "docs/requirements/task/TASK-559-skill-test-absence-as-assertion-red-scenarios.md"
+    },
+    "01KYMFQSJA029QG6DXST2CRAZQ": {
+      "human_id": "TASK-560",
+      "file_path": "docs/requirements/task/TASK-560-skill-test-done-last-task-advisory-red-scenarios.md"
+    },
+    "01KYMFQS4AX8NS0268DPH2R5X0": {
+      "human_id": "TASK-561",
+      "file_path": "docs/requirements/task/TASK-561-skill-implement-plan-terminality-drift-kind-status.md"
+    },
+    "01KYMFQT0H9X8XKK2Q9B8FANPJ": {
+      "human_id": "TASK-562",
+      "file_path": "docs/requirements/task/TASK-562-skill-implement-lore-done-last-task-advisory-servi.md"
+    },
+    "01KYMFQV94KBBES6W2BKEEC9MY": {
+      "human_id": "TASK-563",
+      "file_path": "docs/requirements/task/TASK-563-skill-implement-reachability-unknown-outcome-plan.md"
+    },
+    "01KYMJHWDA8WDKQX4H7SP369F4": {
+      "human_id": "TASK-564",
+      "file_path": "docs/requirements/task/TASK-564-skill-test-sweep-the-ambient-precondition-class-da.md"
+    },
+    "01KYMHP6XQBC4NDQ423ZYXPFZ3": {
+      "human_id": "TASK-565",
+      "file_path": "docs/requirements/task/TASK-565-skill-test-check-tree-cli-scenarios-for-plan-termi.md"
+    },
+    "01KYMFQTE7TPXB57YM2WQKH9W1": {
+      "human_id": "TASK-566",
+      "file_path": "docs/requirements/task/TASK-566-skill-implement-surface-approved-to-draft-demotion.md"
+    },
+    "01KYMFDPGN8A3S4FSBC06629AR": {
+      "human_id": "TASK-567",
+      "file_path": "docs/requirements/task/TASK-567-t1-assessmentfreshness-predicate-on-plan-close-lor.md"
+    },
+    "01KYM0WBXCED9KTZ2D081MRGSP": {
+      "human_id": "TASK-568",
+      "file_path": "docs/requirements/task/TASK-568-skill-test-f5a-loader-and-build-red-scenarios.md"
+    },
+    "01KYM0WCQA6ZJVMH0HHGYCWNYD": {
+      "human_id": "TASK-569",
+      "file_path": "docs/requirements/task/TASK-569-skill-test-f5a-static-serving-and-nonce-red-scenar.md"
+    },
+    "01KYM0WDGK22Z7M27TA01ZN5A1": {
+      "human_id": "TASK-570",
+      "file_path": "docs/requirements/task/TASK-570-skill-test-f5a-cli-packaged-mode-red-scenarios.md"
+    },
+    "01KYM85TMP29JPQS6QG6C72K32": {
+      "human_id": "TASK-571",
+      "file_path": "docs/requirements/task/TASK-571-skill-test-f5a-restore-dashboard-sigterm-test-to-d.md"
+    },
+    "01KYM0WEAP841TKBJAWT8RXQPG": {
+      "human_id": "TASK-572",
+      "file_path": "docs/requirements/task/TASK-572-skill-test-f5a-single-process-static-e2e-harness.md"
+    },
+    "01KYM9Z9YBVB2WKMP1B28BAC7F": {
+      "human_id": "TASK-573",
+      "file_path": "docs/requirements/task/TASK-573-skill-implement-f5a-fix-packaged-mode-session-auth.md"
+    },
+    "01KYMBCZPG97AT27FWYCSRW8JZ": {
+      "human_id": "TASK-574",
+      "file_path": "docs/requirements/task/TASK-574-skill-test-f5a-ac-f5a-3-must-grep-the-real-built-d.md"
+    },
+    "01KYM0WEQDDXPK071HBT648F9Q": {
+      "human_id": "TASK-575",
+      "file_path": "docs/requirements/task/TASK-575-skill-docs-f5a-claude-md-parity-updates.md"
+    },
+    "01KYMBP3R3H41DTTXK9KCPXPWA": {
+      "human_id": "TASK-576",
+      "file_path": "docs/requirements/task/TASK-576-t4-give-modelawareprovider-its-real-implementor.md"
+    },
+    "01KYM9H4BFWMF066QRQ4YKB3Y2": {
+      "human_id": "TASK-577",
+      "file_path": "docs/requirements/task/TASK-577-t3-hardening-reachable-override-escape-real-ai-pro.md"
+    },
+    "01KYM0WF49F7ZB4NS1TG54Y7SG": {
+      "human_id": "TASK-578",
+      "file_path": "docs/requirements/task/TASK-578-skill-review-f5a-final-verification-and-assessment.md"
+    },
+    "01KYM95PEQ5F3JG9TE0YPE88MR": {
+      "human_id": "TASK-579",
+      "file_path": "docs/requirements/task/TASK-579-t4-hardening-feed-trace-gate-trap-feed-row-oracle.md"
+    },
+    "01KYM8D2BXKN8ZEGFARZV01ZAW": {
+      "human_id": "TASK-580",
+      "file_path": "docs/requirements/task/TASK-580-skill-test-f5a-source-run-guard-test-must-control.md"
+    },
+    "01KYM0WDXV4C4ZD2D7K1QV3F3Y": {
+      "human_id": "TASK-581",
+      "file_path": "docs/requirements/task/TASK-581-skill-implement-f5a-lore-dashboard-packaged-mode-d.md"
+    },
+    "01KYKX7WPE57QGTFQNZXHCFMX7": {
+      "human_id": "TASK-582",
+      "file_path": "docs/requirements/task/TASK-582-t2-gate-cli-judgment-required-promote-worst-decisi.md"
+    },
+    "01KYKX9ZNEYG4R00VTF56NME0A": {
+      "human_id": "TASK-583",
+      "file_path": "docs/requirements/task/TASK-583-t1-worktree-derivation-tier-in-resolveactorwithsou.md"
+    },
+    "01KYKWNGR47MWF2NBY7RSZVYHM": {
+      "human_id": "TASK-584",
+      "file_path": "docs/requirements/task/TASK-584-t3-cli-config-keys-composition-wiring-lore-trace-s.md"
+    },
+    "01KYM0WD3Y38B7192GGBRDN71N": {
+      "human_id": "TASK-585",
+      "file_path": "docs/requirements/task/TASK-585-skill-implement-f5a-static-serving-nonce-endpoint.md"
+    },
+    "01KYM0WCAF85SJPMQWVAC9BKJT": {
+      "human_id": "TASK-586",
+      "file_path": "docs/requirements/task/TASK-586-skill-implement-f5a-build-step-embed-manifest-and.md"
+    },
+    "01KYKXH5WSS9DCM17668QM6DG6": {
+      "human_id": "TASK-587",
+      "file_path": "docs/requirements/task/TASK-587-design-setup-must-be-a-brownfield-aware-completene.md"
+    },
+    "01KYKWP0WGP7PGDVDQNG06AHPV": {
+      "human_id": "TASK-588",
+      "file_path": "docs/requirements/task/TASK-588-spec-create-gate-s-missing-rule-doc-remediation-po.md"
+    },
+    "01KYKWNCQ4Y7AS544V7NV2A5XP": {
+      "human_id": "TASK-589",
+      "file_path": "docs/requirements/task/TASK-589-lore-init-does-not-seed-the-verification-profiles.md"
+    },
+    "01KYKWCN1074S5STTP61GNTFKP": {
+      "human_id": "TASK-590",
+      "file_path": "docs/requirements/task/TASK-590-multi-root-corpus-incoherence-data-model-allows-un.md"
+    },
+    "01KYKJKRTYT0X7XFQ4G6BGBRA9": {
+      "human_id": "TASK-591",
+      "file_path": "docs/requirements/task/TASK-591-t1-changed-tests-selector-script-package-script-cl.md"
+    },
+    "01KYKEK36Z77JYEJQ3GJAFC49J": {
+      "human_id": "TASK-592",
+      "file_path": "docs/requirements/task/TASK-592-t2-wire-planpromotereachabilityadvisory-into-live.md"
+    },
+    "01KYKD05RT1PZDFBSP8F8KRT7R": {
+      "human_id": "TASK-593",
+      "file_path": "docs/requirements/task/TASK-593-t1-verifyreachability-helper-plan-promote-advisory.md"
+    },
+    "01KYHZ824QHXHMQ422PTQ2ZT2J": {
+      "human_id": "TASK-594",
+      "file_path": "docs/requirements/task/TASK-594-t6-formatworkflowbadge-non-fail-is-green-classific.md"
+    },
+    "01KYHZH2E2EJD0QBQV658BZ62W": {
+      "human_id": "TASK-595",
+      "file_path": "docs/requirements/task/TASK-595-t3-actor-identity-guard-zero-evidence-release-advi.md"
+    },
+    "01KYHZH215HTXBNZ1BBF5DWRC5": {
+      "human_id": "TASK-596",
+      "file_path": "docs/requirements/task/TASK-596-t2-mdx-unknown-component-strip-from-rendered-outpu.md"
+    },
+    "01KYHZH1MP9JAM6MXBZY9TVEBQ": {
+      "human_id": "TASK-597",
+      "file_path": "docs/requirements/task/TASK-597-t1-parent-cycle-write-time-guard-detectparentcycle.md"
+    },
+    "01KYHRFSPTHFAG04P5112MK183": {
+      "human_id": "TASK-598",
+      "file_path": "docs/requirements/task/TASK-598-m4-worktree-corpus-resolution-via-git-common-dir-f.md"
+    },
+    "01KYHRFSA8KS7TYVV6ZCM0Y98R": {
+      "human_id": "TASK-599",
+      "file_path": "docs/requirements/task/TASK-599-m3-lore-done-verb-atomic-evidence-validated-lifecy.md"
+    },
+    "01KYHRFRX79ZC9RPD4HXC35ATK": {
+      "human_id": "TASK-600",
+      "file_path": "docs/requirements/task/TASK-600-m2-claim-worktree-empty-string-validation-ac-wh-2.md"
+    },
+    "01KYHRFRG0G2VQXDBF44318DMT": {
+      "human_id": "TASK-601",
+      "file_path": "docs/requirements/task/TASK-601-m1-evidence-result-vocabulary-expected-fail-ac-wh.md"
+    },
+    "01KYHNKH868KQWF2BK2YSGBKW3": {
+      "human_id": "TASK-602",
+      "file_path": "docs/requirements/task/TASK-602-skill-implement-plumb-configured-memory-file-budge.md"
+    },
+    "01KYHK8Z77KKK7Q116NDYP586J": {
+      "human_id": "TASK-603",
+      "file_path": "docs/requirements/task/TASK-603-skill-implement-gitignore-aware-module-walk-refres.md"
+    },
+    "01KYHK8EY3WNVFES40EV9779S5": {
+      "human_id": "TASK-604",
+      "file_path": "docs/requirements/task/TASK-604-skill-test-red-walk-hygiene-refresh-admission-suit.md"
+    },
+    "01KYHH82WT2T2PD091C3Q1R8N5": {
+      "human_id": "TASK-605",
+      "file_path": "docs/requirements/task/TASK-605-cli-gap-no-safe-update-path-for-adr-extra-decision.md"
+    },
+    "01KYH2DESX8X07GHS2HQBW8R4R": {
+      "human_id": "TASK-606",
+      "file_path": "docs/requirements/task/TASK-606-skill-verify-full-suite-close-out-attested-verify.md"
+    },
+    "01KYH749P3N1M2CW0GF169DZDN": {
+      "human_id": "TASK-607",
+      "file_path": "docs/requirements/task/TASK-607-skill-docs-compress-packages-lore-src-service-clau.md"
+    },
+    "01KYH74B95AR9ESWT94VDV1T18": {
+      "human_id": "TASK-608",
+      "file_path": "docs/requirements/task/TASK-608-skill-docs-compress-packages-lore-src-adapters-mcp.md"
+    },
+    "01KYH74C2KCRA520QGHVKPFXD9": {
+      "human_id": "TASK-609",
+      "file_path": "docs/requirements/task/TASK-609-skill-docs-compress-packages-core-src-claude-md-to.md"
+    },
+    "01KYH74AFMYEGWWR70F80FZH7H": {
+      "human_id": "TASK-610",
+      "file_path": "docs/requirements/task/TASK-610-skill-docs-compress-packages-dashboard-claude-md-t.md"
+    },
+    "01KYH2DECJJJGGT68HMVBXBXV3": {
+      "human_id": "TASK-611",
+      "file_path": "docs/requirements/task/TASK-611-skill-implement-pre-push-pair-check-step-assets-ma.md"
+    },
+    "01KYH748WFN05FP7B7RFZZ7GFX": {
+      "human_id": "TASK-612",
+      "file_path": "docs/requirements/task/TASK-612-skill-docs-compress-packages-lore-src-adapters-cli.md"
+    },
+    "01KYH2DDVBRQEEPNAK4B4YJZ6P": {
+      "human_id": "TASK-613",
+      "file_path": "docs/requirements/task/TASK-613-skill-test-pre-push-hook-trip-parity-extension-red.md"
+    },
+    "01KYH6YR4CXZFK02D5XC11WF09": {
+      "human_id": "TASK-614",
+      "file_path": "docs/requirements/task/TASK-614-dogfood-pin-root-claude-md-must-carry-the-claude-m.md"
+    },
+    "01KYH2DCM6HFCRKNS7BYG76141": {
+      "human_id": "TASK-615",
+      "file_path": "docs/requirements/task/TASK-615-skill-implement-lore-status-check-claude-md-config.md"
+    },
+    "01KYH2DB0Y3GYPPQCPTH6GWF3C": {
+      "human_id": "TASK-616",
+      "file_path": "docs/requirements/task/TASK-616-skill-implement-lintmemoryfiles-pure-service-fs-di.md"
+    },
+    "01KYH2DBTMRCHABG4F3KZNFEQ8": {
+      "human_id": "TASK-617",
+      "file_path": "docs/requirements/task/TASK-617-skill-implement-governance-verb-topic-registry-cor.md"
+    },
+    "01KYH2DAM8R3GX71R7S6FG3194": {
+      "human_id": "TASK-618",
+      "file_path": "docs/requirements/task/TASK-618-skill-test-lint-boundary-suite-red-ac-cmc-1-path.md"
+    },
+    "01KYH2DBDG35SSMZESRFWE4HY5": {
+      "human_id": "TASK-619",
+      "file_path": "docs/requirements/task/TASK-619-skill-test-governance-topic-dispatch-red-incl-comp.md"
+    },
+    "01KYH2D9CGQ13TDKEMHB8HYB3S": {
+      "human_id": "TASK-620",
+      "file_path": "docs/requirements/task/TASK-620-skill-implement-contextconfigschema.md"
+    },
+    "01KYH2DDE7EG3FWQZ4QKM1E6J7": {
+      "human_id": "TASK-621",
+      "file_path": "docs/requirements/task/TASK-621-skill-implement-template-pointer-lore-init-context.md"
+    },
+    "01KYH2D9TG57H9E249D9XQKM58": {
+      "human_id": "TASK-622",
+      "file_path": "docs/requirements/task/TASK-622-skill-test-config-context-schema-red-scenarios.md"
+    },
+    "01KYH2DC7JBXFW1ZB0J33CRT5N": {
+      "human_id": "TASK-623",
+      "file_path": "docs/requirements/task/TASK-623-skill-test-status-check-claude-md-corpus-less-orac.md"
+    },
+    "01KYH2DD1HR7227TJRFG2XPZHX": {
+      "human_id": "TASK-624",
+      "file_path": "docs/requirements/task/TASK-624-skill-test-init-context-template-ssot-consumption.md"
+    },
+    "01KYH2DA7KXGF7PNXBRN6DH8MP": {
+      "human_id": "TASK-625",
+      "file_path": "docs/requirements/task/TASK-625-skill-design-author-claude-md-contract-md-prose-as.md"
+    },
+    "01KYFF99V82AK4ADNN3VX208K2": {
+      "human_id": "TASK-626",
+      "file_path": "docs/requirements/task/TASK-626-lore-setup-mcp-add-step-is-non-idempotent-already.md"
+    },
+    "01KYGMTRYB6MHNVWDPSZ4Z94BD": {
+      "human_id": "TASK-627",
+      "file_path": "docs/requirements/task/TASK-627-skill-implement-ordinal-aware-provenance-composite.md"
+    },
+    "01KYGMTSBKV2XSVBXPDR7GN2AB": {
+      "human_id": "TASK-628",
+      "file_path": "docs/requirements/task/TASK-628-skill-docs-restate-spec-084-plan-invariant-2-as-th.md"
+    },
+    "01KYGTY65AR5AW0FZ702HHWXQF": {
+      "human_id": "TASK-629",
+      "file_path": "docs/requirements/task/TASK-629-t1-injection-resume-hint-removal-derivation-hygien.md"
+    },
+    "01KYFDP892D96CMQTFM7GRZ384": {
+      "human_id": "TASK-630",
+      "file_path": "docs/requirements/task/TASK-630-t1-seat-briefing-flag-phase-d-spawn-retirement-sso.md"
+    },
+    "01KYFAB6X6XNVDMMXF61H9YX7E": {
+      "human_id": "TASK-631",
+      "file_path": "docs/requirements/task/TASK-631-t1-governance-verb-hook-phase-c-spawn-install-set.md"
+    },
+    "01KYFEQTQSZXCF9A1A46N4V1Z1": {
+      "human_id": "TASK-632",
+      "file_path": "docs/requirements/task/TASK-632-mechanize-claude-md-byte-budget-check-in-pre-push.md"
+    },
+    "01KYFPHDKCDQHT9ZB0G9NM21WT": {
+      "human_id": "TASK-633",
+      "file_path": "docs/requirements/task/TASK-633-skill-implement-fix-ordinal-backfill-semantics-dec.md"
+    },
+    "01KYFNK2WM6HT88Q43S6XHZEBW": {
+      "human_id": "TASK-634",
+      "file_path": "docs/requirements/task/TASK-634-skill-implement-fix-corpusservice-resolve-duplicat.md"
+    },
+    "01KYF9E51SNXVNRY1KQHNVPDVB": {
+      "human_id": "TASK-635",
+      "file_path": "docs/requirements/task/TASK-635-skill-test-t7-compiled-binary-e2e-migrate-ordinals.md"
+    },
+    "01KYF9E4NQESPJQMW22H09F67F": {
+      "human_id": "TASK-636",
+      "file_path": "docs/requirements/task/TASK-636-skill-implement-t6-lore-migrate-ordinals-repair-ve.md"
+    },
+    "01KYF9E49NXJGNGCKKHH31BWP8": {
+      "human_id": "TASK-637",
+      "file_path": "docs/requirements/task/TASK-637-skill-implement-t5-export-read-switch-spec-021-a1.md"
+    },
+    "01KYF9E3XDJ8T09BTR18H2ESJX": {
+      "human_id": "TASK-638",
+      "file_path": "docs/requirements/task/TASK-638-skill-implement-t4-service-wiring-create-allocatio.md"
+    },
+    "01KYF9E34ZFW2KBCEABM9HC2QP": {
+      "human_id": "TASK-639",
+      "file_path": "docs/requirements/task/TASK-639-skill-implement-t3-core-ordinal-module-registry-fo.md"
+    },
+    "01KYF9E2RH36QPN63ZKN628BQ5": {
+      "human_id": "TASK-640",
+      "file_path": "docs/requirements/task/TASK-640-skill-test-t1-red-shared-case-table-contract-servi.md"
+    },
+    "01KYF9E5DTSPXG6BGZE7X2SK05": {
+      "human_id": "TASK-641",
+      "file_path": "docs/requirements/task/TASK-641-skill-verify-t8-attested-sweep-live-corpus-ordinal.md"
+    },
+    "01KYF9E3HFG2W50ZSAQNX0KVDG": {
+      "human_id": "TASK-642",
+      "file_path": "docs/requirements/task/TASK-642-skill-implement-t2-schema-migration-store-allocati.md"
+    },
+    "01KYF29QKY6KDAEG0J5APJQFJZ": {
+      "human_id": "TASK-643",
+      "file_path": "docs/requirements/task/TASK-643-lore-pending-does-not-filter-invalidated-docs-an.md"
+    },
+    "01KYF2511Y7B1WPQ3SP3718X6F": {
+      "human_id": "TASK-644",
+      "file_path": "docs/requirements/task/TASK-644-lore-evidence-self-reported-pass-lacks-oracle-file.md"
+    },
+    "01KYF3C6JT2K9231MT2B309ZPA": {
+      "human_id": "TASK-645",
+      "file_path": "docs/requirements/task/TASK-645-lore-gate-spec-promote-cli-pre-flight-is-not-spec.md"
+    },
+    "01KYF4S41MW2H3NK3S0TQ56ZSP": {
+      "human_id": "TASK-646",
+      "file_path": "docs/requirements/task/TASK-646-mcp-lore-evidence-add-bypasses-the-oracle-file-exi.md"
+    },
+    "01KYF25K5S2XBBE2DTQEHG5V6J": {
+      "human_id": "TASK-647",
+      "file_path": "docs/requirements/task/TASK-647-reconcile-spec-080-citations-in-session-ts-config.md"
+    },
+    "01KYF28B9VHYW0CN9VBJFFPZK0": {
+      "human_id": "TASK-648",
+      "file_path": "docs/requirements/task/TASK-648-arm-spec-080-phase-3-after-2-observed-clean-plan-c.md"
+    },
+    "01KZQEHA8XHQQ197RBAXYQFBBR": {
+      "human_id": "SPEC-134",
+      "file_path": "docs/requirements/spec/SPEC-134-bootstrap-fixpoint-integrity-binary-provenance-an.md"
+    },
+    "01KZQF85CB7MW3Y07ZFAVZJ2SY": {
+      "human_id": "PLAN-121",
+      "file_path": "docs/requirements/plan/PLAN-121-land-bootstrap-fixpoint-integrity-binary-provenanc.md"
+    },
+    "01KZQFB1PQ7AFSC6MZZJX53F18": {
+      "human_id": "TASK-649",
+      "file_path": "docs/requirements/task/TASK-649-wire-the-anchor-coverage-checker-into-both-byte-id.md"
+    },
+    "01KZQF9ZW1WHA0QX4STDZA9ZCG": {
+      "human_id": "TASK-650",
+      "file_path": "docs/requirements/task/TASK-650-wire-the-binary-provenance-check-into-both-byte-id.md"
+    },
+    "01KZQFB1VDS3HYFCD83BPYE3VT": {
+      "human_id": "TASK-651",
+      "file_path": "docs/requirements/task/TASK-651-compare-mirror-bodies-against-corpus-content-in-th.md"
+    },
+    "01KZQFB1HZ159ZMAAM443Y0XNV": {
+      "human_id": "TASK-652",
+      "file_path": "docs/requirements/task/TASK-652-register-an-anchor-coverage-enumerator-on-the-exis.md"
+    },
+    "01KZQFA01A00XMT1RPYD4NGG4C": {
+      "human_id": "TASK-653",
+      "file_path": "docs/requirements/task/TASK-653-ship-the-anchor-coverage-exemption-ledger-and-arm.md"
+    },
+    "01KZQF9ZPPRHX1WX3SK6XH4PQY": {
+      "human_id": "TASK-654",
+      "file_path": "docs/requirements/task/TASK-654-embed-build-provenance-into-the-binary-and-add-the.md"
+    },
+    "01KZQJAN1922J51FYSQ3QFCD6K": {
+      "human_id": "KN-417",
+      "file_path": "docs/requirements/knowledge/KN-417-five-findings-from-planning-the-bootstrap-fixpoint.md"
     }
   }
 }

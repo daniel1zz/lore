@@ -3,12 +3,12 @@ id: PLAN-023
 type: plan
 role: plan
 title: "Implementation — P1 upstream asset-ization (prompt/skill sub-types)"
-status: approved
+status: archived
 priority: high
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-07-26
 tags: [p1, implementation]
-parent: SPEC-043
+parent: SPEC-068
 phases:
   - {name: "Phase 1 - core sub_type", description: "KNOWLEDGE_SUB_TYPES += prompt/skill + extra schemas"}
   - {name: "Phase 2 - migrate + discovery", description: "seed rule doc → skill(applies_to) + gate applies_to lookup"}

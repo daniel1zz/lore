@@ -1,5 +1,5 @@
 ---
-id: SPEC-2
+id: SPEC-002
 type: spec
 role: spec
 title: "Corpus Schema"
@@ -10,10 +10,10 @@ updated: 2026-07-14
 tags: [schema, data-model, corpus, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-1, type: relates-to}
-  - {id: SPEC-4, type: informs}
-  - {id: SPEC-6, type: informs}
-  - {id: SPEC-7, type: informs}
+  - {id: SPEC-001, type: relates-to}
+  - {id: SPEC-004, type: informs}
+  - {id: SPEC-006, type: informs}
+  - {id: SPEC-007, type: informs}
 ---
 # SPEC-002: Corpus Schema
 

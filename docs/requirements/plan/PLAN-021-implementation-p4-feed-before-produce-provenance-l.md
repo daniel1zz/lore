@@ -3,12 +3,12 @@ id: PLAN-021
 type: plan
 role: plan
 title: "Implementation — P4 feed-before-produce + provenance linkage"
-status: approved
+status: archived
 priority: high
 created: 2026-07-09
-updated: 2026-07-09
+updated: 2026-07-26
 tags: [ioc, p4, feed, provenance]
-parent: SPEC-041
+parent: SPEC-087
 phases:
   - {name: "Core: governs + feed", description: "governs enum + lore feed command/MCP over findFeedingSkill+gate-feeding"}
   - {name: "Provenance + query", description: "auto-write governs at _createImpl (fail-soft) + --governed-by + nav backlink"}

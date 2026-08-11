@@ -21,7 +21,13 @@
  *   - `loadMirrorMappings` — IO (fs read, no `bun:sqlite`). Loads + Zod-validates
  *     `.lore/export-index.json`.
  *   - `countMdFilesFlat` — IO (fs read). Non-recursive `.md` count under a directory.
- *   - `pruneOrphanMirrorFiles` — IO (fs write: `unlinkSync`). See "Orphan pruning" below.
+ *   - `pruneOrphanMirrorFiles` — IO (fs write: `unlinkSync`), across an explicit, caller-supplied
+ *     list of mirror directories (task-unify-mirror-identifiers-on-zero-padded-form-export-all,
+ *     2026-08-11 — generalized from a single hardcoded spec-only sweep so a full six-type export
+ *     prunes every type's orphans). See "Orphan pruning" below.
+ *   - `MIRROR_TYPES` / `mirrorDirRelative` — the six doc types this mirror covers
+ *     (`prd`/`spec`/`adr`/`knowledge`/`plan`/`task`, deliberately excluding `phase` — see
+ *     `MIRROR_TYPES`'s own doc comment) and their repo-relative directories.
  *   - `printParity` / `printExportReport` — IO (stdout/stderr). Presentation only.
  *
  * ## Orphan pruning — why this exists at all
@@ -59,6 +65,31 @@ export const SPEC_MIRROR_DIR_RELATIVE = "docs/requirements/spec";
 /** Repo-relative path to the git-tracked export index (SPEC-021 §9.3) — read by both modes, written only by `ExportDocsService.exportDocs` (never by this file directly). */
 export const EXPORT_INDEX_RELATIVE = ".lore/export-index.json";
 
+/**
+ * All six doc types this mirror covers (task-unify-mirror-identifiers-on-zero-padded-form-
+ * export-all, 2026-08-11) — deliberately NOT every `DocType`: `phase` is excluded because
+ * `ExportDocsService` itself documents export-docs support for phase docs as "a later task's
+ * scope" (`TYPE_DIR`/`TYPE_PREFIX` in `export-docs-service.ts` carry a phase entry only as a
+ * compile-forced registry completeness marker). Order here is the order every all-type loop
+ * in this file and `export-spec-mirror.ts` iterates in — parents (prd) before their
+ * descendants is a nice-to-have for log readability, never a correctness dependency (each
+ * type's export/check is independent).
+ */
+export const MIRROR_TYPES = ["prd", "spec", "adr", "knowledge", "plan", "task"] as const;
+
+/** The doc types {@link MIRROR_TYPES} covers. */
+export type MirrorDocType = (typeof MIRROR_TYPES)[number];
+
+/**
+ * Repo-relative mirror directory for one doc type — identical to `ExportDocsService`'s own
+ * `TYPE_DIR` mapping (`docs/requirements/<type>`, SPEC-021 §2.1); for all six {@link
+ * MIRROR_TYPES} the directory segment is literally the type name (verified against
+ * `export-docs-service.ts::TYPE_DIR`), so no lookup table is needed.
+ */
+export function mirrorDirRelative(type: MirrorDocType): string {
+  return `docs/requirements/${type}`;
+}
+
 /** Documented non-zero exit code for "drift found" — see the IO shell's module header exit-code table. Exported so tests assert against this constant, never a bare literal. */
 export const MIRROR_DRIFT_EXIT_CODE = 2;
 /** Documented non-zero exit code for a hard failure (unreadable/corrupt index, corpus read failure, per-doc export error). */
@@ -81,14 +112,14 @@ export class SpecMirrorError extends Error {
   }
 }
 
-/** One corpus spec whose mirror is not present on disk, named by its human-readable identity — never a bare ULID. */
+/** One corpus doc whose mirror is not present on disk, named by its human-readable identity — never a bare ULID. Field/type names below stay spec-flavored (`MirrorParityMissing`/`corpusSpecCount`) for backward compatibility with this module's original spec-only scope and its existing pinned unit tests — `computeMirrorParity` itself is, and always was, type-agnostic: task-unify-mirror-identifiers-on-zero-padded-form-export-all's all-six-types orchestration calls it ONCE PER {@link MirrorDocType} (never widened to a multi-type shape), so a `spec`-labeled field holds a `plan`'s or `task`'s counts/misses exactly as well when the caller passes that type's docs. */
 export interface MirrorParityMissing {
   readonly slug: string;
-  /** `no_mapping` — the spec has never been exported (no `.lore/export-index.json` entry yet). `file_absent` — a mapping exists but the file it names does not. */
+  /** `no_mapping` — the doc has never been exported (no `.lore/export-index.json` entry yet). `file_absent` — a mapping exists but the file it names does not. */
   readonly reason: "no_mapping" | "file_absent";
 }
 
-/** Full parity verdict for one `computeMirrorParity` call — the shared result shape both the IO shell's post-export verification and its read-only check return. */
+/** Full parity verdict for one `computeMirrorParity` call, for ONE doc type — the shared result shape both the IO shell's post-export verification and its read-only check return. */
 export interface MirrorParityResult {
   readonly corpusSpecCount: number;
   readonly fileCountOnDisk: number;
@@ -197,33 +228,45 @@ export function countMdFilesFlat(dirPath: string): number {
 }
 
 /**
- * Removes any `.md` file under {@link SPEC_MIRROR_DIR_RELATIVE} that `mappings` (the FRESH,
+ * Removes any `.md` file under one of `dirRelativePaths` that `mappings` (the FRESH,
  * post-export index) no longer points to — see module header "Orphan pruning". Never touches a
- * file still referenced by a current mapping, and never touches anything outside the spec mirror
- * directory (other doc types' orphans, if any, are out of this file's scope).
+ * file still referenced by a current mapping, and never touches anything outside the given
+ * directories (task-unify-mirror-identifiers-on-zero-padded-form-export-all, 2026-08-11 —
+ * generalized from a single hardcoded {@link SPEC_MIRROR_DIR_RELATIVE} sweep to an explicit,
+ * caller-supplied list so a full six-type export prunes every type's orphans, not just spec's;
+ * the caller passes `MIRROR_TYPES.map(mirrorDirRelative)` for "every mirrored type" — no silent
+ * default here, so a caller can never accidentally skip a type by omitting the argument).
  *
  * @param repoRoot repo root the relative paths are resolved against.
  * @param mappings the fresh `.lore/export-index.json` mappings (ALL types) — filtered internally
- *   to those under {@link SPEC_MIRROR_DIR_RELATIVE}.
+ *   to those under one of `dirRelativePaths`.
+ * @param dirRelativePaths every mirror directory to sweep (repo-relative, e.g.
+ *   `["docs/requirements/spec", "docs/requirements/plan"]`).
  * @returns repo-relative paths actually deleted this run (empty array, never omitted, when there
  *   was nothing to prune).
  */
-export function pruneOrphanMirrorFiles(repoRoot: string, mappings: Readonly<Record<string, ExportIndexMapping>>): string[] {
-  const specDir = join(repoRoot, SPEC_MIRROR_DIR_RELATIVE);
-  if (!existsSync(specDir)) return [];
-
+export function pruneOrphanMirrorFiles(
+  repoRoot: string,
+  mappings: Readonly<Record<string, ExportIndexMapping>>,
+  dirRelativePaths: readonly string[],
+): string[] {
   const expected = new Set<string>();
   for (const mapping of Object.values(mappings)) {
-    if (mapping.file_path.startsWith(`${SPEC_MIRROR_DIR_RELATIVE}/`)) expected.add(mapping.file_path);
+    expected.add(mapping.file_path);
   }
 
   const removed: string[] = [];
-  for (const entry of readdirSync(specDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-    const relPath = `${SPEC_MIRROR_DIR_RELATIVE}/${entry.name}`;
-    if (expected.has(relPath)) continue;
-    unlinkSync(join(repoRoot, relPath));
-    removed.push(relPath);
+  for (const dirRelativePath of dirRelativePaths) {
+    const dirAbs = join(repoRoot, dirRelativePath);
+    if (!existsSync(dirAbs)) continue;
+
+    for (const entry of readdirSync(dirAbs, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      const relPath = `${dirRelativePath}/${entry.name}`;
+      if (expected.has(relPath)) continue;
+      unlinkSync(join(repoRoot, relPath));
+      removed.push(relPath);
+    }
   }
   return removed;
 }
@@ -274,23 +317,41 @@ export function scriptChainReachesTarget(
   return false;
 }
 
-/** Shape `printExportReport` needs from `ExportDocsService.exportDocs`'s report — a local structural subset (never re-declared as a duplicate DTO) so THIS file avoids importing `export-docs-service.ts` at all. */
+/** Shape `printExportReport` needs from `ExportDocsService.exportDocs`'s report — a local structural subset (never re-declared as a duplicate DTO) so THIS file avoids importing `export-docs-service.ts` at all. `identity_repaired` added task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11) — see `ExportReport.identity_repaired`'s own doc comment in `export-docs-service.ts` for the full mechanism (a stale mirror frontmatter `id:` refreshed unconditionally, independent of the body-only drift check). */
 export interface MirrorExportReportLike {
   readonly created: readonly string[];
   readonly skipped_clean: readonly string[];
   readonly drift: readonly string[];
   readonly overwritten: readonly string[];
   readonly errors: readonly string[];
+  readonly identity_repaired: readonly string[];
 }
 
-/** Prints a human-readable parity report — the count summary line always, plus one line per missing spec (naming its slug) when `missing` is non-empty, plus a remediation hint whenever `!parity.ok` (covers BOTH the named-missing case and the "orphan inflated the count with nothing named" case). */
-export function printParity(label: "export" | "check", parity: MirrorParityResult): void {
+/**
+ * Prints a human-readable parity report for ONE {@link MirrorDocType} — the count summary line
+ * always, plus one line per missing doc (naming its slug) when `missing` is non-empty, plus a
+ * remediation hint whenever `!parity.ok` (covers BOTH the named-missing case and the "orphan
+ * inflated the count with nothing named" case).
+ *
+ * Message text is parametrized by `type` (task-unify-mirror-identifiers-on-zero-padded-form-
+ * export-all, 2026-08-11 — generalized from a spec-only hardcoded label): for `type: "spec"`
+ * this produces the BYTE-IDENTICAL strings this file always printed ("corpus spec(s)", "every
+ * corpus spec has a mirror file") — the existing AC-FR-6/AC-FR-7 e2e tests assert those exact
+ * substrings and are deliberately left unchanged.
+ *
+ * @returns `true` when this type's parity is OK (mirrors `parity.ok`, so a caller aggregating
+ *   across {@link MIRROR_TYPES} doesn't need to re-derive it) and prints the type's own
+ *   "OK — every corpus {type} has a mirror file..." line; `false` prints the drift lines above
+ *   instead and returns without an OK line.
+ */
+export function printParity(label: "export" | "check", type: MirrorDocType, parity: MirrorParityResult): boolean {
+  const dirRelative = mirrorDirRelative(type);
   console.log(
-    `export-spec-mirror (${label}): ${parity.fileCountOnDisk} file(s) on disk under ${SPEC_MIRROR_DIR_RELATIVE}, ${parity.corpusSpecCount} live corpus spec(s).`,
+    `export-spec-mirror (${label}): ${parity.fileCountOnDisk} file(s) on disk under ${dirRelative}, ${parity.corpusSpecCount} live corpus ${type}(s).`,
   );
   if (parity.missing.length > 0) {
     console.error(
-      `\nexport-spec-mirror (${label}): ${parity.missing.length} corpus spec(s) not mirrored on disk:\n`,
+      `\nexport-spec-mirror (${label}): ${parity.missing.length} corpus ${type}(s) not mirrored on disk:\n`,
     );
     for (const entry of parity.missing) {
       const detail = entry.reason === "no_mapping" ? "never exported (no export-index mapping)" : "mapped file missing on disk";
@@ -298,15 +359,30 @@ export function printParity(label: "export" | "check", parity: MirrorParityResul
     }
   }
   if (!parity.ok) {
-    console.error(`\nRun \`bun run mirror:export\` to reconcile ${SPEC_MIRROR_DIR_RELATIVE} with the corpus.`);
+    console.error(`\nRun \`bun run mirror:export\` to reconcile ${dirRelative} with the corpus.`);
+    return false;
   }
+  console.log(
+    `export-spec-mirror (${label}): OK — every corpus ${type} has a mirror file (count and slug parity; file CONTENT is not compared).`,
+  );
+  return true;
 }
 
-/** Prints the underlying `ExportDocsService.exportDocs` report's per-bucket counts plus every per-doc error message. */
-export function printExportReport(report: MirrorExportReportLike): void {
+/**
+ * Prints the underlying `ExportDocsService.exportDocs` report's per-bucket counts plus every
+ * per-doc error message, labeled by `type` (task-unify-mirror-identifiers-on-zero-padded-form-
+ * export-all, 2026-08-11 — one call per {@link MirrorDocType}, since a six-type export runs
+ * `exportDocs` once per type rather than once for the whole corpus).
+ */
+export function printExportReport(type: MirrorDocType, report: MirrorExportReportLike): void {
   console.log(
-    `export-spec-mirror: created ${report.created.length}, skipped_clean ${report.skipped_clean.length}, ` +
-      `drift ${report.drift.length}, overwritten ${report.overwritten.length}, errors ${report.errors.length}.`,
+    `export-spec-mirror (${type}): created ${report.created.length}, skipped_clean ${report.skipped_clean.length}, ` +
+      `drift ${report.drift.length}, overwritten ${report.overwritten.length}, ` +
+      `identity_repaired ${report.identity_repaired.length}, errors ${report.errors.length}.`,
   );
+  if (report.identity_repaired.length > 0) {
+    console.log(`  identity_repaired (stale frontmatter id: refreshed — see ExportDocsService's own doc comment):`);
+    for (const path of report.identity_repaired) console.log(`    ${path}`);
+  }
   for (const errMsg of report.errors) console.error(`  error: ${errMsg}`);
 }

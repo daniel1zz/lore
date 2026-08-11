@@ -6,8 +6,20 @@ title: "Lore — Internal-First AI Team Knowledge Platform"
 status: approved
 priority: critical
 created: 2026-06-07
-updated: 2026-07-10
+updated: 2026-07-28
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
+links:
+  - {id: SPEC-102, type: relates-to}
+  - {id: SPEC-094, type: relates-to}
+  - {id: SPEC-095, type: relates-to}
+  - {id: SPEC-096, type: relates-to}
+  - {id: SPEC-097, type: relates-to}
+  - {id: SPEC-098, type: relates-to}
+  - {id: SPEC-099, type: relates-to}
+  - {id: SPEC-100, type: relates-to}
+  - {id: SPEC-101, type: relates-to}
+  - {id: SPEC-093, type: relates-to}
+  - {id: SPEC-092, type: relates-to}
 ---
 # Lore — Internal-First AI Team Knowledge Platform
 
@@ -49,6 +61,11 @@ Lore is an AI-native shared knowledge / memory platform for AI-first founding te
 | G9 | Autonomous feedback loop live (§14): R1 — every lifecycle transition audit-traced + ≥1 doc type at `assist`; R2 (data-gated) — human review load ↓≥70%, ≥1 doc type at `auto` on Wilson-bounded agreement data | P2+, R1 committed, R2/R3 contingent (§14.6) |
 | G10 | Session layer live (§15): bootstrap pointer-set + lossless handoff (`/clear` → resume with zero human re-briefing) + session registry with file-anchor claim safety | P2+, committed v0.8 |
 | G11 | Memory hygiene live (§16): bi-temporal invalidation + staleness probes + `lore status --check-drift` with 0 false-negatives on a seeded drift fixture | P2+, committed v0.8 |
+| G12 | Phase execution model live (§18): plans created after the landing spec ships execute via phases; phase completion 100% computed (oracle: P3 unit suite + seeded-corpus fixture); task→phase migration zero data loss (oracle: P7 pre/post reconciliation, idempotent re-run); phases-per-plan distribution tracked at each `lore assess` with the §18 re-open trigger | P2+, landing specs before the v0.11 PRD review |
+| G13 | Two-tier seat model live (§15 S4): `lore seat` covers seat entry / list / resume; seat-aware resume verified over the S4 equivalence-class table (main checkout / seat worktree / task-worktree-under-seat / detached HEAD), 0 counterexamples across all enumerated classes | P2+, landing specs before the v0.11 PRD review |
+| G14 | Upstream issue feedback loop live (§20): a consuming project's agent files a structured defect report via `lore report-issue` into this corpus as a draft ad-hoc task, with all four R-5 safety rails oracle-tested (identity pin, version-skew reject, sync-upstream reject, rate cap); all four trigger surfaces committed (hints + vendored stanza owner-promoted 2026-07-24) and dashboard Issues triage surface live (F5); ≥1 true defect fixed end-to-end through the loop | P2+ |
+| G15 | Dashboard console first batch live (§21 F1+F2): evidence/AC adjudication context + keyboard triage + judgment drill-down, with route-level usage telemetry recording to the SPEC-012 sink; oracle: keyboard-only component-test loop (incl. editor-focus suppression) + boundary-state component tests + Playwright adjudicate-with-evidence-visible e2e + telemetry enabled/disabled two-branch assert | P2+, committed v0.13 |
+| G16 | Multi-project dashboard live (§22): one instance mounts ≥3 registered projects with one login; switcher performs full context switch with per-project pending badges; two-corpus write-isolation + If-Match-replay e2e (R-12), gate-equivalence e2e (R-13), stale-bleed e2e (R-16), and runtime-degradation test (R-17) pass; registry-less regression incl. the new route-shape pin passes | P2+, committed v0.14 |
 
 ### Non-Goals (v1.0)
 
@@ -91,67 +108,493 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [spec] SPEC-045 — Memory hygiene part 3: doc-code drift oracle (H3) (approved)
-- [spec] SPEC-044 — Memory hygiene part 2: staleness probes (H2) (approved)
-- [spec] SPEC-043 — Memory hygiene part 1: bi-temporal invalidation (H1) (approved)
-- [spec] SPEC-042 — Session layer part 2: session registry + file-anchor claim safety (S3) (approved)
-- [knowledge] Decision-score log — instrument-first bootstrap session (2026-07-10) (draft)
-- [spec] SPEC-041 — Session layer part 1: bootstrap pointer-set + lossless handoff (S1+S2) (approved)
-- [spec] SPEC-040 — Assessment dimension framework v2: facts/judgment split + typed findings (approved)
-- [spec] P4 — Upstream-downstream linkage + feed-before-produce protocol (approved)
-- [spec] P2 — Workflow state machine: checkpoint registry + cross-tier production-chain gates (approved)
+- [spec] Falsifiability reachability: a feedable checkpoint, an attestable red, a guard that means what it says, and a mirror whose drift trips (approved)
+- [knowledge] Four governance-tooling gaps measured while resuming handoff-82: a silent pass, an undecomposable count, three unfeedable gates, and the eighth false-oracle vector (approved)
+- [knowledge] Attestation is structurally one-sided: lore verify can attest greens but never reds, and the done-gate's unfiltered-run requirement is unreachable from AC oracles that all carry -t (approved)
+- [spec] Typecheck coverage: two named blind spots, and the stale comments that understate them (approved)
+- [spec] Oracle executability: a runner's discovery refusal is not a measurement, and must never mint a red (approved)
+- [knowledge] An attested pass is not evidence of production wiring: three instances of the same AC-design defect in one session, all found after attestation (approved)
+- [spec] Governance visibility: an armed gate that vacuously passes lends its authority to everything it waves through (approved)
+- [knowledge] Handoff — agent:widen-coverage-derivation (approved)
+- [knowledge] Seven of lore's own outputs misled this session — a false plan-close hint over an ungated cascade, a gate shipped without its feeding source, a silent oracle, an empty log from a short-circuited chain, an AC edit that froze all downstream claims three times, an 82% figure off by 20x, and an unanchorable private symbol (approved)
+- [spec] Oracle-tier falsifiability: a criterion never observed red is a computed state, plus pipe-refusal and unclaimed-oracle detection (approved)
+- [task] deriveAcCoverageState fails open on an absent falsified, so not-measured and observed-red read identically — and the required-field type that was trusted is unenforced in test fixtures (draft)
+- [task] One honest historical fail row pins a criterion to state fail forever, because fail-first precedence over an append-only log has no recency notion (draft)
+- [knowledge] The anchor set IS the acceptance-unit design, so an omitted call site is an orchestrator defect no implementer can fix — three measured instances in one plan (approved)
+- [adr] Falsifiability moves from the task tier to the oracle tier: a criterion never observed red is a distinct computed state, reported not gated (draft)
+- [task] De-vacuuming AC-ACQ-7 exposed three sibling faults it was masking: a withdrawn false-positive bound, an identically vacuous AC-ACQ-6, and a drifted verbatim fixture (draft)
+- [task] AC-ACQ-7 is vacuous by construction and its oracle never reads the corpus, hiding a 5-of-5 false-positive rate in the shipped quantifiability lint's hyphen-boundary matching (archived)
+- [task] MCP lore_create.supersedes still creates-then-fails — the type precheck landed in the CLI command, above the shared flow both surfaces document as the anti-divergence seam (archived)
+- [task] 可用性两则：必填参数靠二次报错发现；CLI 参数名与存储字段名不一致 (draft)
+- [task] lore review 对大文档截断，approve 结论建立在部分文本上 (draft)
+- [task] lore verify 无跨 task 的 attestation 复用：同 HEAD 同命令重复执行 (draft)
+- [task] lore assess 仅靠 commit message 匹配关联 task，未利用已声明的 file_anchors (draft)
+- [task] lore approve 的 review「独立性」不校验 actor：改→自审→自批可在单 actor 内闭环 (draft)
+- [task] lore done 的红先行 gate 不读 capture_source：转录文本即可满足 expected-fail 要求 (draft)
+- [spec] SPEC — AC-Quantifiability Gate (design-time standardization enforcement) (draft)
+- [task] lore ac add/set 静默把 approved spec 打回 draft，进而阻塞并发批次中后发 task 的 claim (draft)
+- [task] lore done 不检查 AC 的最新 attestation 是否 pass —— task 可在 attested-fail 状态下被归档（不可逆） (draft)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] lore status --check-claude-md silently runs on SCHEMA DEFAULTS when the operator's context config fails to parse, so a configured budget is ignored with no message (archived)
+- [task] The shared renderDocMarkdown seam still drops structured extra silently, so a feeding pack and a gate DENIAL pack both hide the evidence (archived)
+- [knowledge] Module CLAUDE.md snapshot — cli adapter, pre-eviction (frozen 2026-08-06) (approved)
+- [task] A module CLAUDE.md at its byte ceiling silently relocates that module's facts into other modules' docs — realized on service/, and three more docs are next (archived)
+- [task] Validity landed on lore list only — the DISPATCH surface (feed task-start) still hands out retracted work with no signal, and status counts include retracted docs (archived)
+- [knowledge] Load average is the wrong instrument for is-this-red-suite-my-fault: memory pressure fakes a code regression, and a failure COUNT is not a failure identity (approved)
+- [knowledge] Module CLAUDE.md snapshot — packages/lore/src/adapters/http (frozen 2026-08-06, pre-eviction) (approved)
+- [knowledge] Module CLAUDE.md snapshot — packages/lore/src/ai (frozen 2026-08-06, pre-eviction) (approved)
+- [knowledge] Module CLAUDE.md snapshot — packages/lore/src/store (frozen 2026-08-06, pre-eviction) (approved)
+- [knowledge] Module CLAUDE.md snapshot — packages/lore/src/service (frozen 2026-08-06, pre-eviction) (approved)
+- [knowledge] A newly-armed threshold is calibrated against the agent's base, and a concurrent peer merge invalidates that calibration silently (approved)
+- [task] lore ready's records carry no validity signal, so a dispatcher cannot tell no-retracted-tasks from validity-never-consulted (draft)
+- [task] Nothing cross-checks a task's file_anchors against the paths its own body names, so the anchor mutex is blind to a collision the task already documented (draft)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] lore done's attestation refusal calls a capture_source:runner row SELF-REPORTED, misdirecting the reader to the wrong field (archived)
+- [task] The ac-scope re-keying left the red-first floor unarmed for the shape it created, plus three named residuals from the capture-window slice (archived)
+- [knowledge] The substring-matcher lesson has a mirror face: over-matching, and a corpus that documents its own markers is where it fires (approved)
+- [task] An invalidated doc is indistinguishable from a live one in lore list (both surfaces) and every --json payload, and --include-invalid is silently inert (archived)
+- [task] A mistyped task file_anchor is stored and consulted exactly like a correct one, so the mutual exclusion it declares is silently absent — advisory, never a refusal (archived)
+- [task] lore get's default render silently omits structured extra (issue_report), with no marker that it did (archived)
+- [knowledge] Retired from root CLAUDE.md — the Implementation Status section, verbatim (draft)
+- [knowledge] Retired from root CLAUDE.md — the 19 dogfooding standing lessons, verbatim (draft)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] active_sessions derives only over ACTIVE plans' tasks — with 0 active plans and adhoc tasks parented to the PRD, the field is unconditionally empty, and an orchestrator read that [] as 'nobody is working' before removing a live agent's worktree (archived)
+- [task] lore uat record 不校验目标 doc 类型：verdict 挂到 knowledge/adr 上静默成功，plan-close gate 永远读不到 (archived)
+- [task] LORE_GATE_BYPASS honored by 'lore gate' subcommands but ignored by the same gate logic embedded in create/set write paths (archived)
+- [task] corpus-workflow injection labels 'lore release' as Done and never mentions 'lore done' — 13/13 agents left a plan's readiness inflated at 34/34 (archived)
+- [knowledge] A backgrounded command's completion notice reports the shell's exit code, not your oracle's (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] capture_source is optional at the evidence write boundary with a silent self-report default, so a caller that never said is recorded as if it had (archived)
+- [task] The resume-coverage verb accepts a reason after deferred: but rejects one after done, and reports the explained completion as 'still unaccounted' — the asymmetry costs a Stop round-trip and discourages the more informative disposition (draft)
+- [task] Plan-member sites twelve and thirteen, both structurally invisible to the new guard: my_claims[].plan_slug and lore list --plan-id (archived)
+- [task] A test's green depends on an ambient CLAUDE_CODE_SESSION_ID, so every full-suite verdict on this machine is machine-conditional (archived)
+- [knowledge] lore get's human view hides extra.issue_report, so a reporter's measured refutation is invisible to the spec author (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] lore evidence --capture has a hard-coded 600s window that a legitimately-scoped oracle already exceeds, so the disciplined path terminates in a self-report row (archived)
+- [task] An ad-hoc task can never reach the attestation path that already ships for it — ac-scope requiredness is keyed on the parent plan's spec, which --adhoc guarantees is absent (archived)
+- [adr] A guard does not exist until it runs against the real tree, and a new guard needs a family with >=7 remaining instances (draft)
+- [spec] Declaring ac_scope is required at task creation, so the runner-attested evidence path is reachable by construction (draft)
+- [task] The tenth plan-member site is a WRITE path: create-time extra.phase validation resolves the plan by parent_id while every phase-scoped read resolves it by membership (archived)
+- [task] The eleventh plan-member site, found by enumeration: bootstrap's active-plan task listing and its active_sessions sibling both key on the parent_id proxy (archived)
+- [task] PhaseWorkflowService.claim captures no session_id, so every same-actor phase-anchor overlap now hits a fail-safe refusal it can never satisfy (archived)
+- [task] A -t filter is a regex, so this repo's own AC titles containing parens or plus silently match zero and exit 0 in the pre-recording window (archived)
+- [knowledge] D5 re-scope: 35 open tasks against the named-consumer criterion — 0 blocking, 14 must-fix, 8 onboarding-only, 13 descheduled (draft)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] plan-membership has ten known sites and no enumeration guard: the single-definition test keys on one literal form, leaving arrow-const/inline comparisons and parent_id-keyed plan resolution invisible (archived)
+- [task] Three of five static checkers are INERT: no exported main and/or no real-tree assertion, so nothing ever runs them against this checkout (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] Three byte-identical copies of isPlanMember survive because the shared module's own JSDoc records a false module-boundary blocker (archived)
+- [task] Two concurrent orchestrators both resolve to agent:main-orchestrator — LORE_ACTOR suppresses the only precedence tier carrying a session discriminator, collapsing SPEC-042 sessions and disabling noAnchorOverlap (archived)
+- [task] MCP lore_evidence_add cannot set capture_source and has no --capture equivalent, so an agent using lore through MCP is structurally unable to produce a runner-captured evidence row (archived)
+- [task] Two independent copies of 'does this task have a claim' now exist — the service short-circuit made the MCP adapter's hasRecordedTaskClaim redundant, and AC5's redundancy judgement was never made (archived)
+- [task] evidence-precheck only sees a cd in the FIRST segment of a command chain, so it falsely refuses this repo's own mandated build-then-cd e2e form and nudges the author toward --oracle manual (archived)
+- [task] A ninth plan-member query hides in the one-shot task→phase migration, where a dropped member cannot be recovered by a second run — plus one comment this sweep made stale and one orthogonal parent_id dependence to settle (archived)
+- [task] The MCP refusal omits the derived cd target the CLI now names, and --oracle manual remains an unmarked self-selected opt-out from every precheck (draft)
+- [knowledge] The global lore is a symlink into the main checkout's dist: rebuilding hot-swaps the CLI under live agents, and not rebuilding leaves every CLI fix inert (approved)
+- [knowledge] A handoff KD that counts un-persisted artifacts loses them; and a wrong --json path makes a successful write look failed, so the retry duplicates it (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] AC statement drift is deterministically detectable: an unchanged statement whose -t-matched tests were all retitled keeps the oracle green while the statement is false (draft)
+- [task] A non-empty output_tail can be hand-authored prose, and the red-first archive floor is opt-in — the record's form is satisfied while its evidentiary content is absent (archived)
+- [spec] Evidence output_tail integrity: a self-reported row must carry captured output (non-pass since 2026-08-01, pass since 2026-08-03), and a runner tail must witness the criterion it is filed under (approved)
+- [task] Eight more plan-member queries still key on parent_id instead of extra.plan_id — two of them gate task-claim and drive plan-close archival, so the membership error changes writes, not just displays (archived)
+- [task] AC-ETI-7 proves the tail-window helper but not its invocation: the three-hop acRef forwarding is typecheck-only, so a regression that stopped forwarding would leave every AC-ETI-7 row green (archived)
+- [task] The uncommitted-worktree guard treats 'no claim at all' as 'a claim that recorded no worktree', so every orchestrator post-merge evidence call from a main checkout is falsely refused with a message about a claim that does not exist (archived)
+- [task] computeScopeMismatchWarning cannot distinguish a too-wide range from tests never being declared anchors — it false-positives on every plan whose tasks ship tests, and exempts the anchor-less plans most likely to be wrong (archived)
+- [task] lore_evidence_add and lore_release over MCP get no callerCwd, so the uncommitted-worktree guard is silently absent on the surface AI agents actually use — the second optional-param-hides-an-unwired-adapter instance this session (archived)
+- [knowledge] vitest silently drops a nonexistent path and reports a large green test count; lore evidence's oracle-file precheck caught it against the orchestrator itself (approved)
+- [task] Plan membership is extra.plan_id but the last-task advisory and lore ready both query parent_id — a diverged member fires the advisory early and is attributed to the wrong plan (archived)
+- [task] The MCP assess adapter still calls deriveCommitSetForPlan with the old 2-arg shape, so the convention-mismatch suppression the CLI just gained is silently absent for every MCP caller (archived)
+- [task] lore evidence and lore release accept an attestation from a worktree whose declared anchors are uncommitted — the corpus records a verified, unclaimed task backed by no commit (archived)
+- [task] The session-start marker collapses five distinct conditions into one undefined, so the new same-session check can be entirely inert on any install that has not re-run lore setup — and nothing anywhere says so (archived)
+- [task] getAssessTemplateReproducibility has zero production callers: the reproducible field is defined, schema'd and rendered but never stamped, so every real assess run leaves it absent and the reader still sees nothing (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Handoff — agent:main-orchestrator-82242b77 (approved)
+- [task] Short-id rendering truncates ULIDs to 8 chars — a 1024ms window collapses to one printed id, across 9 sites with no shared formatter (archived)
+- [knowledge] Three signals said a peer's worktree was safe to remove; two could not have said otherwise, and the one that answered correctly was git reflog (approved)
+- [task] The git safety gate's worktree rule matches only --force, and its header calls non-force removal safe — so it passed a removal of a LIVE peer's worktree on an unmerged branch, while the exact blocking predicate already sat one branch away at line 363 (draft)
+- [task] session-start-freshness BOUNDARY cases assert a wall-clock budget for an ORDERING invariant: 116ms and 133ms red under full-suite load, 13/13 green alone (archived)
+- [task] provenance-writes-io-error's four cases inject I/O faults by unlinking an open SQLite file — a POSIX no-op, so the suite carries a 1-in-3 false RED (archived)
+- [knowledge] A conjunction detector over acceptance criteria is anti-correlated with this codebase's own false-oracle discipline — measured 80.1% fire, 50% precision, do not promote (approved)
+- [knowledge] The --adhoc flag severs plan membership, and every governance predicate keyed on plan membership silently goes inert — the ad-hoc attestation path already ships (approved)
+- [task] Settle the v5 registry policy: slot 5 is slot-frozen but output-unfrozen by explicit policy, and a stamped prompt_version 5 therefore does not reproduce (archived)
+- [task] Verifying a handoff you just authored arms the coverage floor against the writing session, charging it with the next steps it is explicitly handing off (archived)
+- [task] lore assess derives a plan's commits by grepping task slugs out of commit messages, a convention nothing enforces — a conventionally-worded commit yields zero, and the resulting diff_available=false manufactures a false major finding (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] main is RED: a fourth SelectionReason was added to the producer while a consumer hard-codes the three-value vocabulary in a regex (archived)
+- [knowledge] Arming the attested-pass floor: the gate refused its own task, and the retroactive count was 2 not 3 (approved)
+- [task] lore done accepts an unattested self-reported pass as sufficient to archive: gate the terminal transition on attestation, with one audited escape (archived)
+- [task] test:changed's fourth invisible edge: a tree-scanning oracle test judges files it never imports, so the test that guards test-budget debt is never selected by the change that creates it (archived)
+- [task] lore handoff reports Modified Files (none) while four dispatched worktrees hold uncommitted work — the ticket is authored mid-flight and records nothing about the flight (draft)
+- [task] vitest run silently drops a .bun.test.ts named alongside a valid file — exit 0 on a partial run; the loud 'no test files found' guard is defeated by a quorum of one (archived)
+- [task] The judge truncation notice says content was cut but never which sections — section ORDER decided a verdict, and manual reordering is the only remedy (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [adr] Lore's mechanisms validate a proxy for the property, not the property, and fail silent — three questions every new deterministic mechanism must answer (approved)
+- [adr] lore done requires a runner-attested pass: the sixth false-oracle face closes on the read side, not on lore evidence (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] AC-ACS-1 and AC-ACS-9 are still compound after the split — the predecessor task's Scope defined a half that was itself a conjunction, contradicting its own acceptance criterion (archived)
+- [spec] lore ac set — in-place edit of a declared acceptance criterion, under prose-edit demotion governance (approved)
+- [task] A stale untracked dashboard-assets.ts breaks every subsequent build with an error naming neither the cause nor the remedy (archived)
+- [task] Resume-coverage disposition parser: an unrecognised token on a KNOWN item id is reported as an unmentioned item, and done rejects the trailing reason that deferred accepts (archived)
+- [task] A task cannot be retracted: --supersedes emits a repair command that structurally cannot work, and a draft task has no deprecation path visible to list/ready/search (archived)
+- [task] lore evidence --ac accepts an AC ref on an ad-hoc task that has no governing spec — unresolvable at write time, permanent by append-only (draft)
+- [task] Two more evidence consumers erase an expected-fail row: doc-type-meta counts it as neither pass nor fail, and the dashboard adjudication bar reports status=none (archived)
+- [task] check-ac-ref-integrity re-implements governing-spec resolution and its private copy is narrower than the write path — every ad-hoc task with AC-scoped evidence is falsely reported dangling (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] test:changed selects nothing for any scripts/ change and still exits 0 — the prescribed worktree oracle measured a 350-line slice zero times (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [spec] lore assess — AI plan-outcome assessment (LLM-as-judge feedback loop) (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Six-agent wave against the evidence/assess layer: the judge missed the real defect for the second consecutive session, three of six agents attested work they had not committed, and my own AC's premise was unsatisfiable (approved)
+- [task] Discharge D7 in code: the forced-contention control cannot exclude a startup-phase refusal (false RED), and the readable-run floor is set to the sample size AC-IC-1 rejects (archived)
+- [spec] lore assess: project evidence rows instead of embedding the task body, and never author an absence finding against content the judge could not read (approved)
+- [task] Every AC oracle is -t-scoped, so 'the file passes' is attested nowhere — require an attested unfiltered run per touched test file (archived)
+- [spec] AI-surface robustness: assess timeout floor, partial-provider fail-loud, judge grounding downgrades (approved)
+- [task] lore ready renders an expected-fail evidence row as a green ✔ — a deliberate RED reads as verified (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] lore assess --diff spawnSync sets no maxBuffer: a diff over 1 MiB exits 2 blaming git for this call sites own ceiling (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] main is RED on check-test-budgets: 8 new spawn-heavy assess test cases landed with no declared timeout, escaping through the scripts/ selector blind spot that was fixed hours later (archived)
+- [knowledge] Merge-verify must read the diff's SHAPE, not just re-run the oracles: two defects shipped past a fully green oracle set, and a selector's UNIVERSE is part of its contract (approved)
+- [task] Literal NUL bytes in two scripts source files: one is already unreviewable-binary to git, the other is a latent bomb past the 8000-byte sniff window (archived)
+- [task] Red-first discipline is asked for in prose but never recorded: require a result=fail evidence row from any task claiming it (archived)
+- [task] lore assess asks the caller for a git range that cannot be correct under concurrency — derive the plan's own commit set instead (archived)
+- [task] test:changed's file universe is packages/** not the repo: the whole scripts/ tier is invisible even to rule (a), changed-test-file selection (archived)
+- [task] Split the compound AC-ACS-1 / AC-ACS-4 into one assertion per oracle, running the new halves' oracles in the same slice (archived)
+- [task] Key test-budget ledger rows on a test-title fingerprint, not (path,line): three unrelated insertions broke it in 24h (archived)
+- [task] check-ac-ref-integrity prints an exemption COUNT, not its justification — echo each applied exemption's version citation and merged/lost verdict (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [task] test:changed cannot see the whole integration-CLI tier: the binary-consumer escape hatch matches only .bun.test.ts spawning dist/lore, never a vitest test spawning the entry source (archived)
+- [adr] Judge flakiness: keep D5 unchanged — explicit human dismissal already ships as --override-judgment, and an N-consecutive-escalate threshold would reward re-rolls (draft)
+- [task] SPEC-050 does not carry the g1 help-guard rule (it lives only in hook comments), and knowledge 01KY95H6 is now partly superseded — record per-finding status, do not invalidate (draft)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [spec] Resume-coverage floor — the satisfaction boundaries: a deferral must carry its reason, and a sidechain chain cannot discharge (approved)
+- [spec] Session Layer (multi-session collaboration & context continuity) (domain overview) (approved)
+- [knowledge] An LLM judge returned escalate and approve on the identical document version, and D5 turns either outcome into a hard approval block (approved)
+- [task] The approved-to-draft demotion rule is mirrored in ac-service.ts instead of shared — extract it to @lore/core beside VALID_TRANSITIONS (archived)
+- [spec] report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [adr] The coverage floor's MCP arming compares the tool name's LAST segment deliberately — a full-name match would silently disarm alias-registered consumers (approved)
+- [task] g1 spec-create gate denies 'lore create spec --help' with PARENT_REQUIRED — a read-only introspection command cannot violate a create predicate (archived)
+- [task] verifyAdhocTask stamps ac_ref on its runner-attested evidence: retire the last shape difference between the ad-hoc and plan-owned verify channels (archived)
+- [task] Sweep the CLAUDE.md standing-lessons layer against the mechanized-eviction rule, naming the enforcing mechanism for every line removed (archived)
+- [knowledge] Mechanized-eviction sweep of the CLAUDE.md standing-lessons layer: 4 evicted with demonstrated mechanisms, 15 kept as measured-unmechanized, 967 bytes freed (draft)
+- [knowledge] Three of four remaining assess gaps were bundle-visibility artifacts, not defects: the diff was never passed, the ledger was never shown, the counter was monotonic by construction (approved)
+- [spec] Execution-time attestation floor + ad-hoc task channel (approved)
+- [spec] AC-as-code: structured acceptance criteria + oracle binding (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [spec] A test case's timeout budget must be declared when its spawn count makes the default unsafe: a structural oracle instead of a bigger number (approved)
+- [task] An ad-hoc task's attested evidence cannot carry ac_ref: appendEvidenceEntry resolves declared AC ids through parent_id, which is structurally a PRD for --adhoc tasks (archived)
+- [knowledge] A shared checkout makes a full-suite verdict unmeasurable: start-clean is not throughout-clean (approved)
+- [knowledge] An SSOT-to-installed parity check is unfalsifiable when the installed path is a symlink into the SSOT — the prescribed distribution oracle is inert on this machine (approved)
+- [task] AdjudicationBar's compact status chip still derives from meets_floor alone — the same gate/UI disagreement just fixed in PlanAttestationPanel, one surface over (archived)
+- [task] IC spec: discharge the startup-write contention gap AC-IC-1/AC-IC-2 leave open, and enumerate the classifier decision table (draft)
+- [adr] A CLAUDE.md standing lesson is evicted when a deterministic mechanism enforces it, never by age or by arrival order (approved)
+- [spec] Resume-ticket coverage floor — blocking channel, arming provenance, cross-turn idempotence (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] File-level anchor mutex does not prevent one agent's DATA from referencing another agent's file: a (path,line) ledger broke on a pure insertion, surfacing as orphaned-row AND new-debt at once (approved)
+- [task] lore evidence's oracle-file precheck resolves against the main checkout, so a worktree implementer's brand-new test file reads as missing (archived)
+- [task] The ad-hoc task channel has no attested-evidence path: lore verify requires a plan, so every --adhoc task is self-report-only by construction (archived)
+- [task] meets_floor renders pass while the declared-scope conjunct blocks — surface it in the projection and panel (archived)
+- [knowledge] Recovering attestation on an already-archived plan: the --task + explicit --ac escape is the sanctioned path, a plan-wide verify run is the catalogued false pass (draft)
+- [knowledge] git branch --merged lists every worktree branch that has not started work yet — cleaning by that list deletes live agents workspaces (approved)
+- [knowledge] vitest -t with a non-matching pattern exits 0 having run nothing: the sixth false-oracle vector, and it is NOT the loud path-filter case (approved)
+- [task] archive-sweep gate-disable is silently inert — a wholesale config overwrite drops the required project block (archived)
+- [task] lore status --check-claude-md reports a saturated file as healthy: 5 bytes of headroom prints as 'within budget (0 findings)', so the standing-lessons layer is silently closed (archived)
+- [task] Land the baseline+ledger policy for check:test-budgets (55 pre-existing violations currently gate nothing) (archived)
+- [spec] Declared-scope attestation contract: task-owned ac_scope, intersection by default, loud refusal on unknown scope (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] grep in the agent shell is ugrep --ignore-files and its blind spot does not match git check-ignore: a zero-hit result proves nothing (approved)
+- [task] ESCALATED (recommended 2026-07-24, still unbuilt): attestation_exempt is a gate-read field with no writer verb (archived)
+- [knowledge] 2>&1 | jq is >/dev/null wearing a parser: asking for --json does not license discarding lore's advisory stream (approved)
+- [knowledge] A control that shares the load with the observation is not a control: an A/B at base reproduced a contention artifact and read as 'pre-existing' (approved)
+- [knowledge] Four assessments converged on a missing capability that shipped — the gap was the dispatch bundle, not the tool (approved)
+- [task] lore evidence must refuse a -t-filtered pass with no matched-count proof (the self-report path has no completeness guard) (archived)
+- [task] plan-close must block when the coverage conjunct is scope-undeclared AND tasks carry evidence (a fully-inapplicable gate exits 0 today) (archived)
+- [spec] An escalate blocks approval for every doc type, and the denial names the questions (approved)
+- [task] AC-IC-1 harness runs out of sampling budget under load while the contract itself holds (draft)
+- [task] openValidatedUpstream lets a synchronous store-init throw escape the write-contention re-typing (archived)
+- [task] The concurrency exclusion classifier excuses governed-path throws (false-GREEN vector) (archived)
+- [spec] Superseded-handoff archival has no recency guard (approved)
+- [adr] Answers to the three blocking questions on the 2026-07-28 product-direction grill (approved)
+- [adr] An escalate gates every doc type; a reject stays scoped to spec and adr (approved)
+- [adr] A gate premised on the agent's judgment being untrustworthy must have NO agent-settable override (approved)
+- [spec] Attestation completeness guard: detect zero-match / under-match test oracles (approved)
+- [spec] plan-close predicates measure invariants: an applicability verdict in the type, per-claimed-AC attested coverage, and attributable domain-doc sync (approved)
+- [knowledge] Handoff supersession keys on (plan, actor) — concurrent sessions sharing an actor archive each other's live tickets (approved)
+- [knowledge] Session process review — 2026-07-31 ten-agent two-wave run: 7/7 deterministic clean, four plans closed through a self-disabled gate (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Ten-agent two-wave run: self-reported evidence, predictable anchor gaps, and foreign-red attribution (approved)
+- [task] SPEC-FIRST: require --ac-scope at task creation so the runner-attested evidence path stays reachable (draft)
+- [task] AC-LL-8 guards the loader strip, not the no-sync-bearing-createApp-call-site invariant (archived)
+- [knowledge] Handoff — agent:main-orchestrator (approved)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [spec] Eager libsql load makes every command depend on a healthy TMPDIR (approved)
+- [knowledge] Measured: rmSync unlinks a symlink it is pointed at, while statSync selects on the target's mtime (approved)
+- [knowledge] An ungated approve is not a mechanized approve — a judge's escalate can be filed away, blocking questions and all (approved)
+- [adr] A newly-armed structural oracle enforces from a baseline and carries an auditable exemption ledger, never a tree-wide green (approved)
+- [task] Fix the SPEC-072 cross-corpus database-is-locked race exposed by the libsql lazy-load speedup (archived)
+- [knowledge] Retro: eight approving review rounds cannot catch an error the author and reviewer both read from the same drifted doc (approved)
+- [spec] ADR decision_status has a create surface and no CLI update surface: a value-restricted affirmative writer for proposed to accepted (approved)
+- [spec] git-safety-gate probes report the wrong blast radius — argument-blind probes (approved)
+- [knowledge] Grill review 2026-07-28 — seven product-direction decisions from evidence-first self-review (approved)
+- [knowledge] turn-state.mjs resolveSessionId reads CLAUDE_SESSION_ID, but this harness provides CLAUDE_CODE_SESSION_ID — 73 of 73 state dirs are ppid-named (approved)
+- [spec] lore setup deletes repo source through dev symlinks — removal must never resolve through a link (approved)
+- [knowledge] A zero-match vitest -t title filter exits 0 — the sixth false-oracle face (approved)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [task] Ship the dispatch-isolation gate + wire stop-handoff-coverage in this repo (archived)
+- [task] Fix lore setup removal reaching through dev symlinks (D1-D4, D6) (archived)
+- [spec] Dispatch isolation must be enforced by a gate, and isolation does not imply a correct base (approved)
+- [knowledge] Retro: a FRESH-install probe vacuously passes convergence-shaped defects (setup removal) (approved)
+- [adr] lore verify's attested-evidence scope belongs to the task that declares it: default to declared-scope intersection, refuse an unknown scope, and demote the per-task attested floor to a reported fact (draft)
+- [spec] Resume-ticket coverage: a shipped upper bound left the lower bound unrepresented (approved)
+- [knowledge] Re-measuring finding 1 falsified its cause: lore verify --ac works, and the real defect is a plan-wide default write-scope over an evidence-derived claimed set (approved)
+- [knowledge] Eight findings from building and closing the plan-close-invariants slice: an inert --ac flag, an unwritable decision_status, evidence with no commit provenance, and a dev symlink that swapped the CLI's build (approved)
+- [knowledge] lore setup follows a dev symlink into assets/ and deletes the repo SSOT, then aborts mid-run while --check reports in sync (approved)
+- [adr] plan-close predicates must measure invariants, not proxies: default to per-claimed-AC attested coverage instead of an evidence ratio, and qualify the domain-doc window with relatedness (approved)
+- [task] 缺第五个 gate：dispatch-time（派 subagent 实施前无 claimed task）——四个 gate 全在 corpus 写入路径上，绕过 corpus 的工作零阻力 (draft)
+- [knowledge] Root-cause synthesis: the eight dogfooding findings are one defect eight times — a proxy substituted for an invariant, with the delta unrepresented (approved)
+- [task] Fix ordering regression: placeholder-command guard preempts the doc-type error (archived)
+- [task] Mechanical oracle for the single-read-site invariant on feedback.upstream (archived)
+- [knowledge] Four dogfooding findings: gates validate a spec against itself not the spec it claims to extend; ACs are immovable once evidenced; test:changed default base is wrong on feature branches; git log alone misses a stranded task (approved)
+- [spec] Context provenance: injected corpus-global state and a pasted resume ticket must each declare their own scope (approved)
+- [spec] Issue closure loop — computed resolution + agent-reachable visibility (approved)
+- [knowledge] Retro — three mechanism gaps found while building the issue-closure loop: lore done's type-keyed evidence guard, --help reaching a gate, and anchors never reconciled against the diff (approved)
+- [task] No init/setup path provisions feedback.upstream — lore report-issue fails out-of-box on every fresh corpus and demands hand-edited YAML (archived)
+- [knowledge] Retro — a green AC over a store-free layer let a schema change ship dead: we reproduced the consumer-reported integration-reachability defect while fixing issues (approved)
+- [spec] Upstream Issue Feedback Loop (consumer-reported defects → corpus) (domain overview) (approved)
+- [task] Reject placeholder command strings at evidence WRITE time (read path must stay tolerant) (archived)
+- [task] lore 全局纪律缺一条：「绝不屏蔽 lore 自身输出」应进 governance corpus-workflow 资产（原建议的 hook 方案已作废） (draft)
+- [knowledge] Retro — plan-close's recovery text is not executable: omitted exempt_kind, and a merge instruction that collides with dedicated writers (approved)
+- [spec] Dashboard production packaging — one-command lore dashboard (F5a) (approved)
+- [spec] Out-of-box reporting channel — report-issue self-provisions its upstream config (approved)
+- [task] Task-scoped oracles cannot verify integration reachability: an AC passes green while its deliverable is dead code (draft)
+- [task] No gate arms the doc-code drift oracle: a spec whose implementation merged with zero code_anchors passes every existing gate (draft)
+- [task] evidence --ac gate only validates against the plan's direct governing spec, breaking AC traceability across an implements chain (draft)
+- [spec] Provenance (domain overview) (approved)
+- [spec] Autonomous Feedback Loop (AI review, data-driven self-optimization) (domain overview) (approved)
+- [spec] Phase Execution Model (plan → phase → checklist; supersedes fine-grained task pre-decomposition) (domain overview) (approved)
+- [spec] Plan closure must be loud — terminality divergence, silent demotion, absence-as-assertion (approved)
+- [spec] Assessment freshness — plan-close denies a stale assessment (approved)
+- [spec] Dashboard Console (adjudication cockpit re-centered; admin-console breadth admission-gated) (domain overview) (approved)
+- [spec] Tiered review — ledger fast-track, judgment-required promote, pending-as-promises (approved)
+- [spec] Trace layer — read/deny observability table, default-on, with lore trace stats (approved)
+- [knowledge] Product chain round two: worked examples, decomposition layer, interview instrument, anchored scoring (approved)
+- [adr] Product skill chain: derive features via OST, execute graded validation, benchmark-first (draft)
+- [spec] Worktree-derived actor identity — agent:<branch> as deterministic default (approved)
+- [task] Design: setup must be a brownfield-aware, completeness-guaranteed onboarding orchestrator (skill-driven), not a silent file-copying CLI step (draft)
+- [task] spec-create gate's missing-rule-doc remediation points to a lore dev-repo script (bun scripts/seed-write-spec-rule.ts) that consumers do not have (draft)
+- [task] lore init does not seed the verification-profiles config template despite SPEC-058 D6 documenting verbatim seeding on fresh corpora (draft)
+- [task] Multi-root corpus incoherence: data model allows unlimited parentless PRDs but bare 'lore tree' renders a single root and root-PRD inference picks an arbitrary PRD (draft)
+- [knowledge] Full-system spec compliance audit 2026-07-27 — 85/11/1 verdicts, remediation dispatch, open decisions (draft)
+- [spec] Two-runner changed-test selection — deterministic test:changed replaces vitest-only regression sweep (approved)
+- [spec] Verify reachability — plan-promote early warning, reachability-aware attestation feeding pack, exemption kind taxonomy (approved)
+- [plan] Audit remediation 2026-07-27 — parent-cycle write guard, MDX unknown-component strip, actor-identity guard (archived)
+- [spec] Workflow hardening — evidence red vocabulary, claim worktree validation, task done verb, worktree corpus resolution (approved)
+- [spec] Claim-time actor-identity guard + zero-evidence release advisory (approved)
+- [knowledge] Session process review — 2026-07-27 context-refresh incident → CTX Phase 4 hardening (draft)
+- [spec] Context verb family — two-zone CLAUDE.md anatomy, lore context init refresh, admission checks, init-context skill retirement (approved)
+- [knowledge] Stale in-context snapshot replayed as current state in a cross-plan report — timeless-context bias, mechanized at reporter layer (draft)
+- [adr] Distribution-first: every improvement names its consumer-delivery surface before it counts as landed (draft)
+- [task] CLI gap: no safe update path for adr extra.decision_status — add lore set --decision-status (draft)
+- [knowledge] Context verb family autopilot run — verify task-scoping semantics, legacy-shape upgrade paths, TDD-paired worktree dispatch (draft)
+- [adr] CLAUDE.md Specs section is pointer-only — per-spec index lines retired to the corpus (approved)
+- [adr] Context capability is a first-class lore verb family — init-context skill retired, CLAUDE.md becomes two-zone (approved)
+- [spec] Distribution & Adoption (phased, spike-gated one-step install) (domain overview) (approved)
+- [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (approved)
+- [task] Dogfood pin: root CLAUDE.md must carry the claude-md-contract pointer line (draft)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [knowledge] Handoff — agent:main-orchestrator (archived)
+- [task] lore setup MCP-add step is non-idempotent — 'already exists' exits 1 and fails the whole converge (archived)
+- [task] [Skill:implement] ordinal-aware provenance composite — insertWithAllocatedOrdinalAndProvenance closes BUG-002 window on numbered creates (archived)
+- [task] [Skill:docs] restate SPEC-084 plan Invariant 2 as three sanctioned ordinal-write sites + mechanize the grep oracle (archived)
+- [spec] Corpus-allocated ordinal identity: store-atomic SPEC/ADR numbering, prose titles, repair migration (approved)
+- [knowledge] Converge governance prose distribution: retire the machine-level corpus-workflow.md file in favor of runtime injection from the binary (approved)
+- [knowledge] Retro — CLAUDE.md spec-index re-bloat: boundary-ADR drift recurred within 4 days (52.8KB), compressed + entry contract added (approved)
+- [knowledge] CLAUDE.md Specs-section as-built narratives — frozen 2026-07-26 snapshot (pre-compression) (approved)
+- [task] Mechanize CLAUDE.md byte-budget check in pre-push (twice-proven re-bloat, ingress-agnostic oracle) (archived)
+- [spec] Lifecycle archival — plan-close cascade, deterministic archive sweep, injected candidate surfacing (approved)
+- [spec] Session-start handoff neutrality — injection drops resume_hint, neutral open-thread directory (approved)
+- [spec] Output Contract & Document Taxonomy (domain overview) (approved)
+- [knowledge] Triple SPEC-080 numbering collision across concurrent sessions (2026-07-26) (approved)
+- [spec] Dashboard hardening: write-path integrity, delete/restore, component test coverage (approved)
+- [spec] Assess input transparency: pre-flight diff budgeting + file-boundary truncation (approved)
+- [spec] Assess reliability: reasoning-length resilience + surface-correct error hints (approved)
+- [spec] Hermetic judge sessions + fail-loud AI config (approved)
+- [spec] Dashboard read-path contract fixes + markdown typography (approved)
+- [spec] Output-contract mechanization (spec_kind + tree blueprint + text-projection splice) (approved)
+- [spec] Structured review judgment + triage queue (approved)
+- [spec] Audit trail + calibration data (approved)
+- [spec] Dashboard as living-PRD projection + human adjudication surface (approved)
+- [spec] Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
+- [spec] Dashboard execution-tracking surface: readiness route + plan progress + evidence viewer (approved)
+- [spec] Trusted runner: attested evidence for script-mode ACs (approved)
+- [spec] Assessment dimension framework v2: facts/judgment split + typed findings (approved)
+- [spec] Session layer part 1: bootstrap pointer-set + lossless handoff (S1+S2) (approved)
+- [spec] Session layer part 2: session registry + file-anchor claim safety (S3) (approved)
+- [spec] Memory hygiene part 1: bi-temporal invalidation (H1) (approved)
+- [spec] Memory hygiene part 2: staleness probes (H2) (approved)
+- [spec] Memory hygiene part 3: doc-code drift oracle (H3) (approved)
+- [spec] Distribution part 1: asset SSOT + local safe installer (P0+P1) (approved)
+- [spec] Session seat auto-briefing: worktree-aware SessionStart injection (approved)
+- [spec] Distribution part 2: npm single-platform publish + TTY postinstall (P2) (approved)
+- [spec] Gate denials carry the feeding pack (GateEnforcer error enrichment) (approved)
+- [spec] Gate hooks cross-corpus false-deny fix (cd-prefix TARGET_CWD + g1 lookup-anomaly fail-open) (approved)
+- [spec] CLI strict flags: unknown-flag rejection + actor-flag unification (approved)
+- [spec] AI-advisory AC-vagueness supplement on lore review <spec> (approved)
+- [spec] UAT-verdict-as-plan-close-gate (approved)
+- [spec] Requirement→AC completeness oracle (approved)
+- [spec] Phase execution model: phase doc type, computed completion, checklist/track, migration (approved)
+- [spec] Two-tier worktree seat model: lore seat verb + seat-aware resume (approved)
+- [spec] Verification profiles: per-spec_kind oracle-coverage floors (approved)
+- [spec] Requirement-layer quantifiability lint (close SPEC-052 upstream blind spot) (approved)
+- [spec] lore setup --project scaffold completion + repo-level install ledger (approved)
+- [spec] Config write layer: ConfigService, HTTP surface, and the edit-safety model (approved)
+- [spec] Verify execution-root correctness under linked worktrees (approved)
+- [spec] Dashboard Settings UI: two-scope config editing with precedence and blast-radius disclosure (approved)
+- [spec] CLI ergonomics: unique ID-prefix resolution + single-pass create-task validation (approved)
+- [spec] git-safety-gate heredoc/string-literal awareness (command-position discipline) (approved)
+- [spec] Execution liveness signals: session actor tier, evidence claim renewal, plan last-activity (approved)
+- [spec] Deterministic task dispatch bundle: lore feed task-start (approved)
+- [spec] Upstream issue reporting: lore report-issue (consumer defect feedback loop) (approved)
+- [spec] report-issue trigger surfaces: error-path hints + vendored discipline stanza (approved)
+- [spec] dashboard Issues triage surface: badge, list, in-place adjudication (approved)
+- [spec] Dashboard adjudication workbench + route telemetry (PRD §21 F1+F2) (approved)
+- [spec] Distribution integration model + asset update convergence (approved)
+- [spec] Dashboard execution read surface (PRD §21 F3) (approved)
+- [spec] Dashboard multi-project: mount registry, machine-scope auth, project-addressed routing (PRD §22) (approved)
+- [spec] Audit hardening: link provenance + actor fidelity + tamper-evident hash chain (approved)
+- [spec] Bootstrap injection projection: tier-1/tier-2 payload split (approved)
+- [spec] PRD-as-outline contract: structured outline, domain-overview kind, plan-close sync predicate, budget oracle (approved)
+- [spec] Audit hardening part 2: gate-skip observability + push-time chain verification (approved)
+- [spec] Governance prose runtime injection: retire the installed corpus-workflow.md (approved)
+- [spec] Seat-briefing runtime injection: retire the installed seat-briefing.md (approved)
+- [task] Backend attribution and phase projection — cookie-write author via resolveActor; planPhaseStatus projects declared phases (archived)
+- [task] Dashboard frontend UX pair — NewDocModal searchable parent picker; review queues include in-review ahead of drafts (archived)
+- [task] SPEC-069 adhoc tasks are unclaimable: task-claim gate crashes walking a prd parent (archived)
+- [task] Dashboard UI/UX dogfood fix batch — light-prose contrast, home responsive, PendingPanel overlap, chip a11y, NewDocModal default, count invalidation, phase empty-state copy (archived)
+- [task] attestation-floor feeding pack names tasks but the exemption mechanism is plan-level — pack should state the plan-level repair (extra.attestation_exempt on the PLAN) instead of per-task listing that misleads into writing dead task-level fields (archived)
+- [task] spec-promote base >=1-AC rule is spec_kind-agnostic — SPEC-080 C2's 'domain-overview needs no ACs' is unimplementable; make the AC floor profile-aware or codify the parity-AC pattern (archived)
+- [task] Dashboard declared-phase rendering — mirror server PhaseScorecard type, render source:declared entries in PhaseProgressPanel (archived)
+- [task] lore pending does not filter invalidated docs — an invalidated draft (assessment -2 duplicate) is stuck in the review queue forever; SPEC-043 list-surface filtering should apply (or rejected+invalidated drafts need an exit path from pending) (archived)
+- [task] lore evidence self-reported pass lacks oracle-file-existence precondition — a test-oracle pass whose command matched zero files records cleanly (AC-080-3 incident: oracle file absent through two verify rounds while a manual pass stood in) (archived)
+- [task] lore gate spec-promote CLI pre-flight is not spec_kind-aware — reports default floor-1 denial for domain-overview specs whose service-layer promote now passes (CLI/service parity gap widened by profile-aware min_acs fix) (archived)
+- [task] MCP lore_evidence_add bypasses the oracle-file-existence precheck — routes directly to TaskWorkflowService.addEvidence, so an MCP-originated self-reported test/e2e pass citing a missing file records cleanly (CLI is gated since e6aa451) (archived)
+- [task] Reconcile SPEC-080 citations in session.ts/config.ts comments after SPEC-084 renumbering — buildBootstrapInjection/config budgets cite 'SPEC-080 §Projection Contract/D1-D8' which belong to the bootstrap-injection spec, not PRD-as-outline (triple numbering collision) (archived)
+- [knowledge] Orchestrator false-completion anti-pattern: inherited next-steps treated as work boundary, turn-end treated as session-end, self-filed blocked labels never re-derived (approved)
+- [task] Arm SPEC-080 Phase 3 after 2 observed clean plan-closes — flip --check-prd-budget advisory to exit-3 in pre-push AND enable plan-close prd_sync knob; include I5 oracle (plain lore status byte-identity pre/post while disarmed) as arming precondition (archived)
+- [knowledge] SPEC-080 triple numbering collision — resolution protocol + gate mechanization candidate (approved)
+- [adr] CLAUDE.md carries only standing discipline — histories archive to docs/claude-md-archive + lore corpus (approved)
+- [adr] NewDocModal spec-create: CLI/skill-only authoring (disable + explain, not template or content field) (approved)
+- [adr] Dashboard cookie-session writes attribute author via resolveActor chain, never literal system (approved)
+- [adr] planPhaseStatus projects declared extra.phases alongside SPEC-056 phase docs (approved)
+- [adr] Dashboard review queues include in-review docs ahead of drafts (approved)
+- [knowledge] Ideation — Dashboard capability expansion (6-role brainstorm, 2026-07-24) (approved)
+- [knowledge] Dogfood — dashboard UI/UX review 2026-07-26 (10 findings, fix batch + 4 deferred decisions) (approved)
+- [spec] Extension Hooks System (direction pointer only — no commitment) (domain overview) (approved)
+- [spec] Dashboard Multi-Project (single-instance switcher over the machine's registered corpora) (domain overview) (approved)
+- [spec] Memory Hygiene (knowledge trustworthiness over time) (domain overview) (approved)
+- [task] Create-time orphan advisory: warn (or default-parent to root PRD) when adr/plan/knowledge is created parentless while a root PRD exists (archived)
+- [task] Search snippets render bigram-expanded shadow text (同步 步更 更新…) — collapse overlapping bigrams back to original prose in snippet output (archived)
+- [task] lore dashboard leaks the Vite child on SIGTERM — only SIGINT is handled, orphaned vite keeps the port and breaks the next run's origin allowlist (archived)
+- [task] Dashboard bootstrap Origin allowlist hardcodes port 5173 — any non-default Vite port (auto-increment or --dashboard-port) gets 403 and a fully unauthenticated dashboard (archived)
+- [task] FTS5 CJK search returns zero hits — unicode61 tokenizes contiguous CJK runs as single tokens, so any substring query misses (Chinese corpora effectively unsearchable) (archived)
+- [task] Gate hook denies the WHOLE chained Bash command when any segment matches a trigger — feeding pack masks that earlier segments never ran (archived)
+- [task] Multi-project nav links drop the /p/:name prefix — clicking any nav item under /p/guyin silently switches the user back to the default project (archived)
+- [spec] CLI Adapter (approved)
+- [task] Stabilize deleted-corpus-liveness.bun.test.ts (2 recorded load-dependent failures) or adopt dispatch watchdog (archived)
+- [task] XDG semantics: resolveGlobalConfigPath falls through to ~/.config when XDG_CONFIG_HOME is set (test-env leak of real machine config) (archived)
+- [task] SPEC-076 assess follow-ups: classifyEntry no-manifest-entry edge, prune substring match, markerRewrites contract (archived)
+- [task] gate feeding pack recovery via lore_set extra wholesale-wipes plan.extra.phases (archived)
+- [task] Fix Result-contract gap: BEGIN IMMEDIATE issued outside try/catch in SQLiteStore insertWithProvenance/updateWithProvenance (archived)
+- [task] Tree-check contract vs SPEC-069 adhoc channel: task-under-prd flagged misplaced by design (archived)
+- [task] Register eslint react-hooks plugin in dashboard flat config (4 pre-existing rule-not-found errors) (archived)
+- [task] Fix SPEC-077 T2 client shape drift: PhaseScorecard client types vs real /api/phase-status response (PhaseProgressPanel render TypeError blanks /execution) (archived)
+- [task] Fix live SPEC-042 regression: apiGetReady types /api/ready as flat ReadyRecord[] but server returns ReadyReport object (home-page render TypeError) (archived)
+- [task] Decide + implement NewDocModal gated-type authoring (spec creation via dashboard modal is structurally gate-rejected) (archived)
+- [task] Fix SPEC-061 miss: vitest -t zero-matched-case run recorded completeness=complete (false-oracle vector) (archived)
+- [task] Fix SPEC-069 gap: adhoc task claim structurally impossible (claim gate PRD-parent vs getPlanBundle) (archived)
+- [task] Fix pre-existing dashboard e2e regression: browse-ux spec-seed blocked by spec-create gate, review-loop home render (archived)
+- [knowledge] Retro — 2026-07-20 whole-repo static bug audit + fix sweep (15 findings, all fixed) (approved)
+- [knowledge] Session process review — 2026-07-20 lore self-audit + fix sweep + skill authoring (approved)
+- [knowledge] Session process review — 2026-07-21 setup-scaffold + config-layer + verify-trust fixes (approved)
+- [knowledge] Non-force git worktree remove needs no hook guard — git is already the gate (approved)
+- [knowledge] Retro — SPEC-071 built under live multi-session concurrency: number race, stale-binary guard vindication, dual-suite contention (approved)
+- [spec] Version snapshots capture slug values (SPEC-068 D5 follow-up) (approved)
+- [spec] Strict-flag hardening: single-dash multi-char tokens fail loud (SPEC-051 follow-up) (approved)
+- [knowledge] Full-suite oracle contention + orphaned-browser CPU noise — misattribution corrected, scoped-oracle dispatch mechanized (approved)
+- [knowledge] Guyin dogfood 2026-07-22 — 9 findings verified against main HEAD, hotfixes + spec dispositions (approved)
+- [spec] CJK-aware slugify (pinyin transliteration) + lore set --slug repair path (approved)
+- [knowledge] Dogfood retro — full-lifecycle fresh-corpus run (snip-demo) 2026-07-17 (approved)
+- [knowledge] Bun 1.3.10: process.stdout instantiation sets fd1 O_NONBLOCK — silent >64KB pipe truncation (approved)
+- [adr] Verification skill family — routed convergence + shared failure-first discipline (approved)
+- [adr] Retire lore-planner agent; vendor upstream workflow skills into assets SSOT (approved)
+- [knowledge] lore verify long-oracle flake — vitest onTaskUpdate RPC timeout under load (approved)
+- [knowledge] Global handoff skill retired — lore-native handoff (SPEC-041 S2) is the sole cross-session memory path (approved)
+- [knowledge] Decision-score log — instrument-first bootstrap session (2026-07-10) (approved)
+- [knowledge] Retro — IoC P2+P4 build under score-gated autonomy (adversarial-review findings + migration/MCP-gate learnings) (approved)
+- [knowledge] Global Claude Code workflow migrated from DocMan to lore (IoC adoption) (approved)
+- [knowledge] Convergence backfill — code-anchor adoption armed + gate feeding-source design finding (2026-07-14) (approved)
+- [spec] Dashboard write UI (create / edit / approve / link) (approved)
+- [spec] Dashboard — Read-only Skeleton (approved)
 - [spec] Upstream asset-ization — prompt & skill as first-class knowledge sub-types (approved)
 - [spec] Corpus-governed spec-production loop — IoC vertical slice (approved)
+- [spec] HTTP-backed AI provider (alongside claude-cli) (approved)
+- [spec] Built-in AI provider for lore create (approved)
+- [spec] plan.phases as a first-class grouping layer (approved)
+- [spec] lore sync-docs — backfill new spec files into corpus (approved)
+- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
+- [spec] Eval Framework (active)
+- [spec] Telemetry Module (active)
+- [spec] Sync Engine (Turso) (approved)
+- [spec] Migration v1 (approved)
+- [spec] Version History (approved)
+- [spec] Review Workflow (approved)
+- [spec] PRD-as-Living-Root (approved)
+- [spec] HTTP API Adapter (approved)
+- [spec] MCP Server Adapter (approved)
+- [spec] Corpus Schema (approved)
+- [spec] Service Layer Architecture (approved)
+- [spec] Task execution workflow metadata (evidence / claim / ready) (approved)
+- [spec] P4 — Upstream-downstream linkage + feed-before-produce protocol (approved)
+- [spec] P2 — Workflow state machine: checkpoint registry + cross-tier production-chain gates (approved)
+- [knowledge] Write-spec rules (gate feeding source) (approved)
+- [adr] Corpus-governed active AI workflow (Inversion of Control) with deterministic gates (approved)
 - [knowledge] Lore as sole dev context — output contract + spec_kind taxonomy + dashboard-as-PRD-projection (approved)
 - [knowledge] Assess material-budget distortion on multi-task plan diffs (approved)
 - [knowledge] DocMan replacement assessment — Lore coverage map + two remaining gaps (approved)
 - [knowledge] assess diff truncation systematically hides tests from the judge (approved)
 - [knowledge] MDX placeholder parser flags JSX inside fenced code blocks (approved)
 - [knowledge] Retro — SPEC-038 + SPEC-039 double delivery (multi-agent orchestration learnings) (approved)
-- [spec] SPEC-039 — Trusted runner: attested evidence for script-mode ACs (approved)
-- [spec] SPEC-038 — AC-as-code: structured acceptance criteria + oracle binding (approved)
 - [knowledge] Anthropic Official Agent-Loop Engineering — Research Digest (approved)
 - [adr] AC-as-code — 验收标准作为类型化 oracle 绑定数据 (approved)
-- [spec] SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation (approved)
-- [spec] lore export-docs — reverse sync from corpus to spec files (approved)
 - [plan] Bugfix — eval/assess/export findings 2026-07-07 (archived)
 - [knowledge] Retro — e2e corpus-pollution incident (port-squatter absorbed write suite) (approved)
-- [spec] SPEC-037 — Dashboard execution-tracking surface: readiness route + plan progress + evidence viewer (approved)
-- [spec] SPEC-033 — Dashboard as living-PRD projection + human adjudication surface (approved)
-- [spec] SPEC-035 — Audit trail + calibration data (approved)
-- [spec] SPEC-032 — Output-contract mechanization (spec_kind + tree blueprint + text-projection splice) (approved)
-- [spec] SPEC-034 — Structured review judgment + triage queue (approved)
-- [spec] SPEC-031 — Dashboard read-path contract fixes + markdown typography (approved)
-- [spec] SPEC-030 — Hermetic judge sessions + fail-loud AI config (approved)
-- [spec] SPEC-029 — Assess reliability: reasoning-length resilience + surface-correct error hints (approved)
-- [spec] SPEC-028 — Assess input transparency: pre-flight diff budgeting + file-boundary truncation (approved)
-- [spec] SPEC-027 — Dashboard hardening: write-path integrity, delete/restore, component test coverage (approved)
-- [spec] lore assess — AI plan-outcome assessment (LLM-as-judge feedback loop) (approved)
-- [spec] Task execution workflow metadata (evidence / claim / ready) (approved)
-- [spec] Dashboard write UI (create / edit / approve / link) (approved)
-- [spec] HTTP API Adapter (approved)
-- [spec] Service Layer Architecture (approved)
-- [spec] Version History (approved)
-- [spec] PRD-as-Living-Root (approved)
-- [spec] Review Workflow (approved)
 - [spec] Auth & Agent Credentials (approved)
-- [spec] Migration v1 (approved)
-- [spec] Corpus Schema (approved)
-- [spec] MCP Server Adapter (approved)
 - [spec] AI assistance in lore set and lore link (approved)
-- [spec] HTTP-backed AI provider (alongside claude-cli) (approved)
 - [spec] Default --no-ai for agent and MCP execution paths (approved)
-- [spec] plan.phases as a first-class grouping layer (approved)
 - [plan] CLI v3 Roadmap — State Alignment + New Surface (archived)
-- [spec] CLI Adapter (approved)
-- [spec] lore sync-docs — backfill new spec files into corpus (approved)
-- [spec] Built-in AI provider for lore create (approved)
 - [spec] Cookie Auth — CLI-managed local bootstrap (approved)
-- [spec] Dashboard — Read-only Skeleton (approved)
 - [spec] Monorepo Skeleton (Bun workspaces, P1 layout) (approved)
-- [spec] Eval Framework (active)
-- [spec] Telemetry Module (active)
-- [spec] Sync Engine (Turso) (approved)
 
 Text readers: run `lore tree <this-prd>` — the tree command splices the live children — or use the dashboard tree view. **Known limitation (accepted at v0.5, closed by SPEC-032)**: `OutlineService.resolve()` returns the placeholder data as a separate `resolvedComponents` array and leaves `content` verbatim (it does not splice rendered text back into the body). So every plain-text projection — `lore get --resolve-mdx` stdout AND the SPEC-021 `export-docs` `.md` snapshot — shows the raw `<ChildrenOf />` tag; only structured consumers (the dashboard) render it inline. SPEC-032 makes text projections splice placeholders so §5 reads as a tree everywhere.
 
@@ -270,163 +713,6 @@ Gated on Phase 2 metrics.
 
 **Action**: Complete competitive analysis before design phase.
 
-## 13. Output Contract & Document Taxonomy
-
-### 13.1 Spec kinds
-
-`spec` docs carry `extra.spec_kind: "feature" | "tech" | "design"`, **write-time validated as a Zod enum (fail-loud; unknown values rejected)**, default `"feature"` (backward compatible — all existing specs are feature specs). A one-shot audit `lore migrate spec-kind --dry-run` (parity with `migrate phases`) flags existing specs that are actually tech/design before the taxonomy is relied upon. Design specs are first-class normative contracts: reviewed, approval-gated, implementation must conform. Binary/HTML artifacts (prototypes, mockups, screenshots) live in-repo under `docs/design/`, referenced from the design spec by relative path — the corpus stores the normative text, the repo stores the artifact.
-
-### 13.2 Stage → required output → completion gate
-
-| Stage | Required output | Mounts under | Stage complete when |
-|---|---|---|---|
-| Direction / inception | PRD version bump | root | PRD approved |
-| Feature definition | spec (kind=feature) | PRD | spec approved |
-| UI/UX design | spec (kind=design) + repo prototype artifact | PRD, `relates`→feature spec | spec approved |
-| Technical decision | adr | prd or spec | adr accepted |
-| Structural tech design | spec (kind=tech) | PRD, `relates`→driving spec/adr | spec approved |
-| Execution | plan → tasks + verification evidence (SPEC-025) | spec → plan | tasks archived |
-| Closeout | assessment (SPEC-026) + retro knowledge | plan | assess verdict persisted |
-
-Cardinality: one required output doc per stage instance; multi-spec efforts repeat rows per spec. All spec kinds mount under the PRD — the live `PARENT_TYPE_CONTRACT` keeps `spec: ["prd"]` (NOT widened to spec-under-spec); cross-references between specs use typed links, not tree parenthood.
-
-### 13.3 Enforcement layers (status: partially live)
-
-1. **Create-time hard gate — LIVE**: `PARENT_TYPE_CONTRACT` (`@lore/core` doc-type-rules) already rejects illegal parent types at create/link time. Escape hatch: `knowledge` mounts anywhere — ad-hoc notes are never blocked.
-2. **Check-time soft gate — shipped, unarmed**: `lore status --check-tree` exists but the repo has no `lore.tree.yaml` blueprint yet. SPEC-032 authors the blueprint and arms the check.
-3. **Process convention (NOT a hard gate)**: a stage is complete iff its doc reaches `approved`. Anti-rubber-stamp rule: for design/tech specs the approver SHOULD differ from the author (agent-authored → human-approved). Candidate hardening (SPEC-032): `lore ready` warns when a plan's parent spec is not approved. **§14 mechanizes this layer**: approver≠author becomes a hard invariant (I1), and the approve decision itself becomes AI-triaged with confidence-gated escalation.
-
-Remaining SPEC-032 scope: `lore.tree.yaml` authoring, `spec_kind` Zod enum + `migrate spec-kind` audit, text-projection placeholder splicing (both `lore get --resolve-mdx` stdout and `export-docs` `.md` — `OutlineService.resolve()` today emits `resolvedComponents` data but leaves `content` verbatim), ready-warning, CLAUDE.md duplication lint. SPEC-033 scope: dashboard home replaced by the resolved-PRD projection (today's home is an unrelated hardcoded doc-list — a page rewrite, not a tweak).
-
-### 13.4 Context boundary (SSOT rule)
-
-- **Lore corpus**: everything about the product and the process — requirements, designs, decisions, plans, evidence, assessments, learnings.
-- **In-repo CLAUDE.md**: code-adjacent technical navigation only (how to modify this code), atomically co-evolving with the code, referencing Lore slugs for the "why".
-- A fact lives in one place and is linked from the other, never duplicated. Verification oracle (SPEC-032 candidate): a doc-lint flags CLAUDE.md sections that duplicate ≥N% of a corpus doc's text.
-
-### 13.5 Dashboard = PRD projection
-
-Dashboard home = resolveMdx-rendered living PRD (SPEC-004 machinery: ChildrenOf / RecentDecisions / ActivePlans / HealthStats) + pending-review and ready-task panels. Product current shape = the resolved PRD; iteration history = version log + assessment timeline; decisions = RecentDecisions + adr filter. Full page rewrite specified in SPEC-033.
-
-## 14. Autonomous Feedback Loop (AI review, data-driven self-optimization)
-
-**Vision (owner, 2026-07-06)**: Lore closes its own quality loop. AI reviews every lifecycle decision with structured, data-backed feedback; humans are pulled in only when the AI cannot decide; every automated decision is log-traceable; the accumulated decision data drives self-optimization. End state: Lore is not just self-hosting (it already manages its own corpus) but self-running, self-feedback, self-optimizing.
-
-**Today's gap (measured 2026-07-06)**: the loop exists as disconnected parts. `lore pending` holds 12 docs, 100% awaiting manual approval regardless of how confident an AI reviewer would be; SPEC-026 assessments carry structured `gaps`/`recommendations` that no downstream consumer reads; SPEC-025 evidence and SPEC-012 telemetry record locally but aggregate nowhere; approve/reject reasons are free text — feedback is not comparable across time, so nothing can learn from it.
-
-### 14.1 Capability domains
-
-| ID | Domain | What it delivers |
-|---|---|---|
-| D1 | Structured review judgment | AI reviewer emits a Zod-typed `ReviewJudgment` per pending doc — never free text |
-| D2 | Confidence-gated triage | Judgment either auto-executes (whitelisted type, above threshold, in `auto` stage) or escalates to a human with structured blocking questions |
-| D3 | Audit trail | Every lifecycle transition (automated or human) emits an append-only `AuditEvent`; `lore audit <doc>` answers "who decided what, on which input, on what basis" |
-| D4 | Calibration data | Human confirm/override of AI judgments accumulates as labeled `CalibrationRecord`s; aggregated into per-doc-type × per-prompt-version agreement rates |
-| D5 | Self-optimization | L1: assessment `recommendations` feed forward into subsequent spec/plan generation context. L2: judge-prompt versions iterate, evaluated offline against calibration data. L3: thresholds/sampling rates self-tune within hard bounds |
-| D6 | Escalation surfaces | CLI triage queue (`lore pending` upgraded), dashboard panel (extends SPEC-033), push notification on escalation events |
-
-### 14.2 Data entities (Zod SSOT, all append-only)
-
-- **ReviewJudgment** — `{decision: approve|reject|escalate, confidence: 0-1, reasons[]: {dimension, finding, evidence_ref}, checks[]: deterministic pre-checks run (schema validity, check-tree, link integrity, evidence completeness), judge: {provider, model, prompt_version}}`. Judge identity is the exact `{provider, model, prompt_version}` tuple — this tuple is what I1 compares. An `escalate` decision MUST carry `blocking_questions[]` — the exact points the AI could not resolve become the human queue's display content. Deterministic checks run BEFORE the LLM: a doc failing schema/tree checks is rejected without burning a judge call (the `check-tree` pre-check depends on SPEC-032 arming the blueprint — declared dependency).
-- **AuditEvent** — `{actor: human id | ai judge identity, action, doc_id, doc_version, judgment_ref?, timestamp}` for every status transition. This is a NEW queryable surface (`lore audit <doc>` / `lore audit --verify`) — SPEC-012 telemetry is a write-only JSONL sink with no read path; storage may reuse that sink (NFR-7: audit separate from corpus storage) but the query surface is net-new build, not an extension. Completeness is an oracle: zero transitions without a matching event.
-- **CalibrationRecord** — `{judgment_ref, human_outcome: confirmed|overridden, delta_reasons[]}`. Written whenever a human acts on (or samples) an AI judgment. The aggregation over these records — agreement rate per doc type per prompt version — is the single data source for stage unlocks (14.3), circuit breakers, and L2 prompt selection. No unlock decision may cite AI self-reported confidence alone.
-
-**Ground-truth caveat (acknowledged, not solved)**: with a single human owner, "agreement" measures consistency with one person's decisions, not objective doc quality. For an internal tool this is definitionally acceptable — the owner's judgment IS the approval standard being automated — but it means agreement data cannot detect owner-correlated blind spots. Mitigations: I2 stratified sampling, L1 provenance tagging (14.6), and the §8 kill criterion. When the team grows past one reviewer, per-reviewer calibration becomes the upgrade path.
-
-**Trigger model (no daemon)**: judgments are computed on demand — `lore review <doc>` (single) and `lore review --pending` (batch) CLI/MCP verbs; optionally invoked by the create/set flows behind config. Consistent with SPEC-025's read-side-computation ethos: no background process, no heartbeat. Judge-call cost is bounded by SPEC-026-style char budgets; a batch run over N pending docs makes at most N judge calls, deterministic-check failures short-circuit for free.
-
-**Storage & testability**: Zod schemas live in `@lore/core`; judgments/calibration records persist in dedicated store tables (not doc `extra` — they are cross-doc data, §13.4 SSOT); 14.3 thresholds live in `LoreConfigSchema` following the `workflow.claim_ttl_minutes` precedent. The store MUST expose a seeding path for synthetic CalibrationRecords so 14.3 state transitions and circuit breakers are CI-testable without accumulating real judgments. Rolling-agreement aggregation reads a bounded, indexed window (last 50 records per type) — O(window) per recompute, never a full-table scan; NFR-2's query budget applies to it.
-
-### 14.3 Staged unlock state machine (per doc type, data-gated)
-
-Every doc type starts in **shadow** and advances only on measured data; ambition is capped by evidence, not by policy:
-
-| Stage | Behavior | Entry condition |
-|---|---|---|
-| shadow | AI judges every pending doc, judgment recorded + shown as advisory; human still decides everything (no load reduction — this stage buys calibration data, not time) | Day 1, all types |
-| assist | Human queue is triaged: AI-confident items pre-sorted with one-keystroke confirm; escalations flagged with blocking questions. Partial load reduction | ≥20 calibration records for the type |
-| auto | AI executes approve/reject itself above the confidence threshold; below threshold → escalate. Human sampling floor stays active. This stage delivers the ↓70% target | Wilson-score lower bound of rolling agreement ≥0.90 at n≥50 for the type (raw "95% over 50" has a confidence interval too wide to distinguish signal from noise — the gate is the interval bound, not the point estimate) |
-
-- Expected (not mandated) unlock order: knowledge → task → plan → spec/PRD — low blast radius accumulates data fastest. The data, not the roadmap, decides.
-- **Blast-radius-scaled strictness**: the `auto` bound is per-type config; defaults 0.90 for knowledge/task, 0.95 for plan/spec/PRD. High-stakes types demand tighter evidence, not just more of it.
-- **Honest expectation**: at this team's volume, spec/PRD types may never reach `auto` — that outcome is acceptable, not a failure. `assist`-level triage (pre-sorted queue, blocking questions) already delivers the owner's core ask for those types; G9-R2 is satisfiable by any type reaching `auto`, and unlocking only low-stakes types is the expected, honest reading.
-- **Rolling window**: agreement is computed over the most recent 50 judgments per type (config), recomputed on every new CalibrationRecord.
-- **Circuit breaker**: the Wilson lower bound drops below the unlock threshold → the type reverts to shadow automatically + push notification. Re-entry requires re-satisfying the full entry condition on NEW post-reversion data (no flapping: one reversion costs the type its accumulated streak).
-- All thresholds (bound, window sizes, sampling floor) live in config with the defaults above; L3 may tune them only within §14.4 bounds.
-
-### 14.4 Non-negotiable invariants
-
-| ID | Invariant | Rationale |
-|---|---|---|
-| I1 | Approver ≠ author, mechanized: the judge tuple `{provider, model, prompt_version}` that authored a doc cannot auto-approve it; reviews use an independent judge prompt (substrate: SPEC-030 hermetic judge sessions — LIVE). **Honest limit**: this is process independence, not statistical independence — same-model judges share correlated blind spots. Cross-provider judging is a config option, and the residual correlated-error risk is exactly what I2 sampling exists to catch | Blocks the AI-writes → AI-approves → feeds-AI self-reinforcement loop, to the extent prompt-lineage separation can |
-| I2 | Human sampling floor: even fully unlocked types route ≥10% of auto-decisions to human spot-check, **stratified** per doc type × judge prompt_version (flat random sampling has weak power against clustered failures, e.g. one bad L2 prompt iteration degrading one type); sampling is seeded/deterministic in tests. L3 may raise but never lower the floor, never to zero | LLM error rate is irreducible; unsampled automation lets errors compound silently |
-| I3 | Every automated decision is reversible: version history stays append-only; `lore audit` links decision → judgment → doc version for one-command rollback | Automation without cheap reversal is a ratchet |
-| I4 | AI-generated improvements are draft-first AND provenance-tagged: L1/L2 outputs (injected context, new prompt versions) never mutate approved docs directly; every L1 recommendation injected into a generation context carries its source `judgment_ref` so later audits can trace — and discount — self-reinforced context | Self-optimization must not pollute the SSOT it optimizes, visibly or invisibly |
-| I5 | Escalation is fail-loud default: any judgment outside whitelist/threshold/stage escalates; no silent fallback to auto | Extends D-007 fail-loud philosophy to decisions |
-
-### 14.5 Success metrics
-
-R1 exit (oracle-checkable in CI + corpus):
-
-| Metric | Baseline (2026-07-06) | Target | Measurement |
-|---|---|---|---|
-| Audit completeness | 0 (no audit surface) | 100% of transitions have an AuditEvent | `lore audit --verify` oracle |
-| Judgment coverage | 0 | 100% of pending docs carry a ReviewJudgment when reviewed | CLI queue render |
-| Calibration volume | 0 | ≥20 records on ≥2 doc types | store count |
-
-R2 exit (requires weeks of real usage — measured, not CI-asserted):
-
-| Metric | Baseline (2026-07-06) | Target | Measurement |
-|---|---|---|---|
-| Human review decisions/week | 100% of transitions manual (12-doc queue, 2+ day dwell) | ↓≥70% (denominator: measured R1 weekly decision volume, recorded before R2 starts) | AuditEvent aggregation |
-| Escalation precision | n/a (no triage) | ≥80% of escalated items genuinely needed the human (owner-relative by construction — it measures "AI escalates trivia" annoyance, not objective necessity) | CalibrationRecord on escalations |
-| Agreement (unlocked types) | n/a | Wilson lower bound ≥0.90 rolling | CalibrationRecord aggregation |
-| Median time to detect+rollback a wrong auto-decision | n/a | ≤7 days (I2 sampling + a weekly `lore audit` digest bound the detection window) | AuditEvent timestamps |
-
-**Kill criterion (§8 addition)**: if after 8 weeks of shadow mode any of — weekly judgment volume <10, or agreement so noisy the Wilson bound cannot reach 0.90 at any achievable n — then freeze the loop at `assist` permanently and record a decision-gate ADR; the calibration machinery (SPEC-036+) is not built.
-
-### 14.6 Delivery stages & spec split
-
-- **R1 — close the loop (shadow/assist)**: D1 judgment schema + on-demand review verbs, D3 audit events on every transition, D6 CLI triage queue, D4 records start accumulating. Shadow itself reduces no load (human still decides everything); the first relief arrives when types reach `assist` (pre-sorted queue, one-keystroke confirm).
-- **R2 — unlock self-decision** (contingent on R1 data volume passing the kill criterion): 14.3 state machine live; types unlock on data. D5-L1 feed-forward: assessment `recommendations` are injected at the AI-template context-assembly point (`AIProviderService` template render, the same seam SPEC-026 uses) when generating a child spec/plan under the assessed plan's lineage — each injected item provenance-tagged per I4. Dashboard panel (after SPEC-033) + push channel: a configurable exec hook (`notify.command` in config — shell command receiving the escalation event as JSON on stdin; no vendor-specific channel).
-- **R3 — self-optimization** (contingent on R2 exit metrics): D5-L2 prompt iteration (offline eval against calibration data, winner promoted), D5-L3 bounded threshold self-tuning.
-- **Stage-gate reviews are self-hosted**: each R-stage exit review runs through `lore assess` (SPEC-026) against this section's metrics and persists as an assessment doc under the stage's plan — the loop's own gates leave the same evidence trail the loop enforces on everything else. No stage may be declared passed from memory or chat; the assessment doc is the gate record.
-
-Committed landing specs (R1 only): **SPEC-034** structured review judgment + triage queue (D1, D2-triage, D6-CLI); **SPEC-035** audit trail + calibration data (D3, D4). Input-quality hardening serving every R stage (committed 2026-07-08, NOT an R2 unlock): **SPEC-038** AC-as-code — structured, oracle-bound acceptance criteria on specs (`extra.acceptance_criteria`, script/ai/human verify modes, evidence `ac_ref`, assess judges against the declared AC set; see ADR "AC-as-code"). Contingent (named by capability for traceability, NOT committed — each requires a decision-gate ADR citing R1/R2 data before creation; the spec numbers originally reserved here as SPEC-036–038 have since been consumed by other landed specs — refer by capability name): unlock state machine + auto-execution; L1 feed-forward; L2/L3 self-optimization. This staging exists because §9-R1 (second-system syndrome) applies to §14 itself — a 5-spec autonomous-review platform built ahead of its data is the failure §14 is designed to prevent. Declared dependencies: SPEC-034's check-tree pre-check needs SPEC-032 (blueprint arming); the dashboard escalation panel needs SPEC-033. Benchmark patterns to validate at design time: confidence-triaged AI code review (CodeRabbit / GitHub Copilot review), LLM-observability data models (Langfuse / LangSmith traces + scores + prompt versions), active-learning sampling loops (Label Studio-class systems).
-
-### 14.7 Assessment dimension framework v2 (input-quality hardening, committed 2026-07-10)
-
-The v1 assess rubric is one-dimensional (per-AC evidencing) and its `gaps`/`recommendations` are free-text — the measured §14 gap "recommendations that no downstream consumer reads" is structural: untyped output cannot be programmatically consumed. Committed upgrade (landing spec: SPEC-040), serving every R stage like SPEC-038; NOT an R2 unlock, §14 staging untouched:
-
-- **Two-layer split**: deterministic facts are computed in code and FED to the judge (AC coverage incl. attested ratio — already live; per-task evidence completeness; scope-match between plan-declared scope and spec AC surface; gate/process compliance), while judgment dimensions are reserved for what has no executable oracle. The judge never re-derives what code can compute (IoC ADR boundary 1).
-- **Typed multi-dimension rubric**: `outcome` (AC satisfaction — v1 carried over), `evidence_integrity` (claims backed by attested vs self-reported evidence), `scope_fidelity` (delivered = planned; creep/cut named explicitly). Per-dimension score + advisory-only judge confidence + `based_on: evidence|absence` grounding declaration. `regression_risk` and `knowledge_capture` are NOT judge dimensions — SPEC-040's 3-lens design review found them ungrounded in bundle-visible material (fabrication invitation); both are demoted to deterministic facts (tests-touched/attested-ratio signals; knowledge-link counts).
-- **Typed findings**: `gaps[]` → `{dimension, severity, ac_ref?, statement}`; `recommendations[]` → `{target: spec|plan|prompt|skill|process, action, rationale}` carrying provenance (I4). This is the D5-L1 consumer-side unblock: R2 feed-forward injection requires typed recommendations to exist first.
-- **Judge self-declared uncertainty**: `unverifiable[]` names materials the judge could not see (complements the diff Truncation Manifest); scoring an unseen material down without a matching `unverifiable` entry is a mechanically detectable rubric violation.
-- **Scope-fit fix**: a narrow plan hanging off a broad spec is judged against the plan-declared AC subset (evidence: `knowledge-assess-usage-patterns` #1 — 63/100 despite complete in-scope delivery).
-- **Golden-set regression gate (the L2 harness arrives early)**: promoting a new assess prompt/rubric version requires non-inferiority on replayed historical assessments labeled by human outcomes (the existing assessment docs + SPEC-035 calibration overrides are the seed corpus). The same data discipline §14.3 applies to autonomy applies to the instrument itself — no rubric version ships on vibes.
-
-Baseline instrument-defect evidence: `knowledge-assess-material-budget-distortion` (3× systematic under-scoring, 30-50 points), `knowledge-assess-usage-patterns` (#1 scope mismatch, #9 ±2 score noise), `knowledge-round-3-findings` (judge session contamination — since fixed by SPEC-030), §14 intro's unconsumed-recommendations gap.
-
-## 15. Session Layer (multi-session collaboration & context continuity)
-
-**Vision (owner, 2026-07-10)**: sessions become governed, first-class work units. Today Lore governs artifacts (docs) and their production functions (prompt/skill — IoC P1), but not the unit that produces them: an agent session. Cross-session amnesia, context-drift-vs-`/clear`-loss, and multi-session write conflicts are the three highest-ranked unsolved pain points in the 2026-07-10 strategic review. Three capabilities, all read-side computed (SPEC-025 ethos — no daemon, no heartbeat):
-
-- **S1 Session bootstrap** — a `lore_bootstrap` MCP tool / CLI verb emitting the pointer-set (tree roots, active plans, pending queue, caller's fresh claims, armed gates) for SessionStart hook injection. Replaces the DocMan bootstrap dependency (gap recorded in `knowledge-docman-replacement-assessment`). Pointers + summaries, never full dump (IoC ADR boundary 2).
-- **S2 Session handoff** — `lore handoff` persists a typed session digest (knowledge `sub_type: handoff`: modified files, active plan/task ids, key decisions with confidence scores, failing oracle output) and `lore feed session-resume` replays it at the next session's start. Makes `/clear` lossless: the cure for context drift stops costing the context. Handoff docs enter the same review/judge loop as every other doc — an unreviewed handoff is advisory, never authoritative.
-- **S3 Session registry & write-conflict safety** — lightweight session records (actor, machine, worktree, branch, held claims) surfaced in `lore ready` / `lore tree`; a file-anchor overlap predicate at the task-claim gate upgrades the worktree-mutex *convention* (CLAUDE.md) into a corpus-enforced *predicate* — the same convention→predicate move P2 made for upstream approval.
-
-Non-goals: no live message bus between sessions (the corpus is the medium); no daemon (freshness TTL-computed like claims).
-
-## 16. Memory Hygiene (knowledge trustworthiness over time)
-
-**Vision (owner, 2026-07-10)**: the corpus must not silently rot. Landscape evidence (2026-07-10 tier-tagged research): bi-temporal invalidation (Zep/Graphiti, arXiv 2501.13956) is the strongest known explicit-signal mechanism; *silent* staleness (a fact changes with no contradicting signal) is an industry-open problem — and Lore has already been bitten (`knowledge-retro-stale-claude-md`: a stale doc produced a false 'SPEC-022 unimplemented' judgment). Three capabilities:
-
-- **H1 Bi-temporal invalidation** — knowledge/ADR docs gain `valid_at`/`invalid_at` semantics; superseding marks the old doc invalid (never deletes — version history stays append-only); default queries/feeds filter invalidated knowledge; an `--include-invalid` escape shows history.
-- **H2 Staleness probes** — `lore review --staleness` re-judges high-in-degree knowledge/ADR docs ("does this still hold?") on demand; result is escalation, never auto-invalidation (probabilistic zone, IoC ADR boundary 1). Probe priority: link in-degree × age.
-- **H3 Doc-code drift oracle** — specs may declare code anchors (file paths / exported symbols); `lore status --check-drift` verifies anchor existence — deterministic, CI-runnable, zero LLM calls.
-
-Non-goals: no vector store (NG8 unchanged — H1-H3 are metadata + FTS5 + judge verbs); no automatic deletion, ever.
-
 ## 12. Out of Scope
 
 - v2.1+: Agent-memory protocol RFC (extracted from v1.0 architecture)
@@ -436,14 +722,3 @@ Non-goals: no vector store (NG8 unchanged — H1-H3 are metadata + FTS5 + judge 
 - §14 explicit exclusions: code-diff review (owner decision 2026-07-06 — the loop's object is corpus document lifecycle, not git diffs); external workflow-orchestration engines (the loop is built on Lore's own service layer + config, no new runtime dependency); removing the human from the loop entirely (I2 sampling floor is permanent at every autonomy level)
 
 ---
-
-## Provenance
-
-- **Ideation**: 6-role parallel brainstorm → `IDEATION-001-v2-positioning-synthesis`
-- **Phase 2 review**: 6-role stakeholder review (2 APPROVE_WITH_CONDITIONS / 4 REQUEST_CHANGES). All conditions addressed in v0.2-0.3.
-- **Owner decisions**: A1 skip external validation; protocol-aware app; 3-phase delivery; Web UI → SHOULD; P1 CLI-only; service layer abstraction.
-- **v0.4**: PRD restructured to outline-level. Detail lives in 7 child feature specs.
-- **v0.5** (2026-07-03): Sole-context positioning (§1) + output contract & document taxonomy (§13: spec_kind feature/tech/design, stage→output→gate table, 3 enforcement layers, SSOT boundary, dashboard-as-PRD-projection) + G8 + §6/§8 governance hooks + §5 module map converted to live `<ChildrenOf />`. Owner-approved: taxonomy option C (spec_kind field, not a new first-class type); full-chain launch. 5-stakeholder review applied — enforcement-layer status corrected to as-built (Layers 1-2 already implemented in `@lore/core`), spec-under-spec mount rejected (contract stays `spec:["prd"]`), export-fidelity limitation documented, spec_kind write-time validation + migrate audit added, approver≠author convention added. Landing specs: SPEC-032 (contract mechanization) + SPEC-033 (dashboard projection). Input: `knowledge-lore-as-sole-dev-context-output-contract-spec-kind-tax`.
-- **v0.6** (2026-07-06): Autonomous feedback loop (§14: D1-D6 capability domains, three data entities, shadow→assist→auto staged unlock, five invariants, R1-R3 delivery) + G9 + §13.3 layer-3 mechanization pointer + §12 exclusions + A6 + §8 feedback-loop kill criterion. Owner-confirmed boundaries: loop object = document lifecycle (not code diffs); self-decision whitelist = all types including spec/PRD (data-gated, not day-1); end-state autonomy = L3 within I2 sampling-floor bounds; escalation surfaces = CLI + dashboard + push. 5-stakeholder review applied (avg 5.6 → revisions): unlock gates rebased from point estimates to Wilson lower bounds; single-owner ground-truth limitation acknowledged with mitigations; I1 downgraded to honest process-independence claim + cross-provider option; I2 sampling stratified; L1 feed-forward provenance-tagged (I4) with named injection seam; trigger model pinned to on-demand verbs (no daemon); AuditEvent scoped as net-new query surface over SPEC-012's write-only sink; storage/config/fixture-seeding homes named; R1 load-drop misattribution fixed; spec commitment cut from 5 to 2 (SPEC-034/035), SPEC-036-038 ADR-gated on data; SPEC-032/033 dependencies declared. One reviewer claim rejected with evidence: SPEC-030 alleged nonexistent — it is landed (hermetic-spawn.ts, corpus doc 01KWKDC4). Second synthesis pass (same review inputs): bounded-window aggregation guard (NFR-2), NFR-15 judge-call cost visibility, blast-radius-scaled auto bounds (0.95 for plan/spec/PRD), honest spec/PRD-may-stay-assist expectation, self-hosted stage-gate reviews via `lore assess`. Committed landing specs: SPEC-034 (judgment + triage), SPEC-035 (audit + calibration).
-- **v0.7** (2026-07-08): AC-as-code committed as §14 input-quality hardening (SPEC-038: structured `extra.acceptance_criteria` with script/ai/human verify modes, oracle-enum SSOT consolidation, evidence `ac_ref`, assess judges against the declared AC set — serves R1+ judge-input quality; NOT an R2 unlock, §14 staging untouched). §14 contingent-spec references renamed from stale reserved numbers (SPEC-036–038, since consumed by landed specs) to capability names. Origin: Anthropic official loop-engineering research (knowledge doc) + ADR "AC-as-code" (4-perspective design review applied). Loop framing: feedback × feedback-trustworthiness × loop-closure; this delivers the standardized feedback supply side. Deferred by decision: trusted runner (SPEC-039 candidate), assess-gap auto-task + calibration-gated autonomy (§14 R2, data-gated as before).
-- **v0.8** (2026-07-10): Strategic review applied (full corpus audit + tier-tagged competitive research: spec-kit/Kiro/GSD/superpowers/beads confirmed red-ocean on spec/plan/orchestration; outcome-verification loops, production-grade self-evolution, and memory hygiene confirmed open gaps that Lore's SPEC-025/026/034/035/038/039 line already sits on). Owner directives: all subsequent development fully self-hosted on Lore; score-gated autonomy (human pulled in only below confidence threshold); every plan closes with a self-assessment — **instrument first**: assessment dimension framework v2 committed as §14.7 (landing spec SPEC-040) BEFORE new capability work, so early autonomous cycles do not accumulate mis-calibrated data. New sections: §15 session layer (S1 bootstrap / S2 handoff / S3 registry+write-safety, G10), §16 memory hygiene (H1 bi-temporal invalidation / H2 staleness probes / H3 drift oracle, G11) — capability-named landing specs to follow, each through the §13 output contract. §14 R2/R3 data-gating and the §8 kill criterion untouched.

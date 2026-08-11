@@ -8,6 +8,6 @@ priority: medium
 created: 2026-07-24
 updated: 2026-07-24
 tags: []
-parent: SPEC-083
+parent: SPEC-092
 ---
 Single implementer task: strict seam rejection + help render fix + AC tests (AC-073-1..4). Oracles: typecheck, scoped vitest.

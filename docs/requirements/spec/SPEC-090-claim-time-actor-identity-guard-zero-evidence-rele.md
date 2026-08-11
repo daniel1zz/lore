@@ -1,5 +1,5 @@
 ---
-id: SPEC-90
+id: SPEC-090
 type: spec
 role: spec
 title: "Claim-time actor-identity guard + zero-evidence release advisory"

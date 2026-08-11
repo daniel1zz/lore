@@ -3,11 +3,12 @@ id: KN-041
 type: knowledge
 role: knowledge
 title: "P2 decision-score log (score-gated autonomy)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-09
-updated: 2026-07-09
+updated: 2026-07-14
 tags: [ioc, p2, decision-log, calibration, autonomy]
+parent: PLAN-022
 links:
   - {id: PLAN-022, type: informs}
 ---

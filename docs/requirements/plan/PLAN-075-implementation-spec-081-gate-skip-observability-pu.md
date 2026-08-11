@@ -8,7 +8,7 @@ priority: medium
 created: 2026-07-26
 updated: 2026-07-26
 tags: []
-parent: SPEC-091
+parent: SPEC-082
 phases:
   - {name: "Wave 1"}
 ---

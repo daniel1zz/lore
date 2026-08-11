@@ -10,8 +10,9 @@ updated: 2026-07-29
 tags: [feedback-loop, distribution-first, dogfood]
 parent: PRD-001
 links:
-  - {id: SPEC-73, type: relates-to}
+  - {id: SPEC-073, type: relates-to}
   - {id: SPEC-099, type: implements}
+  - {id: TASK-536, type: resolves}
 ---
 # Out-of-box reporting channel — `report-issue` self-provisions its upstream config
 

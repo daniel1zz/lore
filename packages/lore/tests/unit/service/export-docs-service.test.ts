@@ -1524,14 +1524,33 @@ describe("REGRESSION — titles with no self-declared number or a foreign prefix
 // ─── SPEC-084 T5 — export read-switch + SPEC-021 A1 retirement for numbered types ─────
 //
 // A "numbered type" (spec/adr, per @lore/core's ORDINAL_REGISTRY) with a store-allocated
-// `ordinal` column value composes its human_id via `formatDocDisplayId` (a pure column
-// read — NO title parsing, NO sequential counter, NEVER a silent renumber) instead of the
-// Amendment A1 legacy allocator above. `formatDocDisplayId` deliberately does NOT
-// zero-pad (SPEC-084 D5) — "SPEC-84", not "SPEC-084" — a real behavioral divergence from
-// the legacy path's 3-digit padding, verified explicitly below.
+// `ordinal` column value composes its human_id via `formatMirrorHumanId` (a pure, zero-padded
+// column read — NO title parsing, NO sequential counter, NEVER a silent renumber) instead of
+// the Amendment A1 legacy allocator above.
+//
+// ⛔ RE-BASELINE (task-unify-mirror-identifiers-on-zero-padded-form-export-all, 2026-08-11):
+// this block used to assert the OPPOSITE — `formatDocDisplayId` (unpadded, "SPEC-84") — citing
+// "SPEC-084 D5". Re-checked against SPEC-084's actual spec text: D5 is about a single
+// composition site + never persisting the composite string; it does NOT mandate an unpadded
+// OUTPUT format anywhere in the Module Boundary / Design Decisions / structured
+// Acceptance-Criteria sections (confirmed: none of AC-084-1..6's oracle commands touch this
+// file). "No zero-padding" was this file's OWN prior assertion of `formatDocDisplayId`'s
+// then-current implementation choice, not a spec-mandated invariant.
+//
+// Original command: `bunx vitest run packages/lore/tests/unit/service/export-docs-service.test.ts
+// -t "AC-084-6 T5-1"`. Original failure once the ExportDocsService source changed:
+// `expect(index.mappings[docId]!.human_id).toBe("SPEC-84")` → received `"SPEC-084"`, and the
+// `not.toBe("SPEC-084")` assertion inverted to a hard failure.
+// Why this is a correction, not a cover-up: the LEGACY allocator (Amendment A1, same file)
+// has ALWAYS zero-padded (`SPEC-001`, `.padStart(3, "0")`), and every mirror filename on disk
+// has always been zero-padded too (`SPEC-021-*.md`) — only THIS column-derived branch (added
+// later by SPEC-084 T5) diverged, which is the exact `id: SPEC-21` inside a
+// `SPEC-021-sync-docs-reverse.md` file corruption this task measured on the live corpus
+// (89/142 spec mirrors mismatched). Unifying this branch to pad, like its sibling, is the fix,
+// not a weakening — it makes the two allocation paths agree instead of one silently drifting.
 
 describe("HAPPY — numbered-type doc with an allocated ordinal uses the column, not the legacy allocator (AC-084-6 T5-1)", () => {
-  it("spec with ordinal=84 exports human_id SPEC-84 (unpadded) and a matching file_path", async () => {
+  it("spec with ordinal=84 exports human_id SPEC-084 (zero-padded, matches the legacy allocator's own convention) and a matching file_path", async () => {
     const store = new InMemoryStore();
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
@@ -1550,21 +1569,22 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
     if (!result.ok) return;
 
     const index = readExportIndex(projectDir);
-    expect(index.mappings[docId]!.human_id).toBe("SPEC-84");
-    // No zero-padding (SPEC-084 D5) — the legacy allocator above always produced SPEC-084.
-    expect(index.mappings[docId]!.human_id).not.toBe("SPEC-084");
-    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/spec\/SPEC-84-/);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-084");
+    // Zero-padded to 3 digits (task-unify-mirror-identifiers..., 2026-08-11) — matches the
+    // legacy allocator's own convention below, and the mirror's filename convention.
+    expect(index.mappings[docId]!.human_id).not.toBe("SPEC-84");
+    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/spec\/SPEC-084-/);
 
     const filePath = result.value.created[0]!;
     const content = readFileSync(join(projectDir, filePath), "utf8");
     const fm = parseFrontmatterScalars(content);
-    expect(fm["id"]).toBe("SPEC-84");
+    expect(fm["id"]).toBe("SPEC-084");
 
     // A doc with an allocated ordinal never hits the legacy fallback — no warning.
     expect(result.value.ordinal_warnings).toHaveLength(0);
   });
 
-  it("adr with ordinal=3 exports human_id ADR-3 via the same column-derived branch", async () => {
+  it("adr with ordinal=3 exports human_id ADR-003 (zero-padded) via the same column-derived branch", async () => {
     const store = new InMemoryStore();
     const service = makeExportService(store);
     const projectDir = makeTempProjectDir();
@@ -1584,8 +1604,8 @@ describe("HAPPY — numbered-type doc with an allocated ordinal uses the column,
     if (!result.ok) return;
 
     const index = readExportIndex(projectDir);
-    expect(index.mappings[docId]!.human_id).toBe("ADR-3");
-    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/adr\/ADR-3-/);
+    expect(index.mappings[docId]!.human_id).toBe("ADR-003");
+    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/adr\/ADR-003-/);
     expect(result.value.ordinal_warnings).toHaveLength(0);
   });
 
@@ -1774,8 +1794,12 @@ describe("STATE — an existing export-index mapping for a numbered doc reconcil
     expect(result.value.repaired[0]).toContain(docId);
 
     const index = readExportIndex(projectDir);
-    expect(index.mappings[docId]!.human_id).toBe("SPEC-40");
-    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/spec\/SPEC-40-/);
+    // ⛔ RE-BASELINE (task-unify-mirror-identifiers-on-zero-padded-form-export-all, 2026-08-11):
+    // was `.toBe("SPEC-40")` / `/^docs\/requirements\/spec\/SPEC-40-/` (unpadded) — see the
+    // "AC-084-6 T5-1" describe block's header comment above for why zero-padding this
+    // column-derived branch is the correction, not a weakening.
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-040");
+    expect(index.mappings[docId]!.file_path).toMatch(/^docs\/requirements\/spec\/SPEC-040-/);
     expect(index.mappings[docId]!.file_path).not.toBe(staleFilePath);
 
     // A fresh file is written at the corrected path...
@@ -1791,5 +1815,291 @@ describe("STATE — an existing export-index mapping for a numbered doc reconcil
     if (!second.ok) return;
     expect(second.value.repaired).toHaveLength(0);
     expect(second.value.ordinal_warnings).toHaveLength(0);
+  });
+});
+
+// ─── SPEC-084 T5 + task-unify-mirror-identifiers-on-zero-padded-form-export-all ──────
+//
+// Live-corpus mechanism, measured 2026-08-11: `OrdinalMigrationService`'s step 3 patches ONLY
+// `human_id` in `.lore/export-index.json` (`{...mapping, human_id: expectedHumanId}`), NEVER
+// `file_path` — Scope-Alt, by that service's own design. When a doc's ORIGINAL file was written
+// under the (already zero-padded) legacy allocator BEFORE its ordinal was backfilled, `file_path`
+// already correctly embeds the padded form (e.g. `SPEC-021-*.md`) — only `human_id` gets
+// corrupted to the unpadded `formatDocDisplayId` output (`"SPEC-21"`). Reconciling THAT mapping
+// recomputes the SAME `file_path` (same padded id, same kebab title) — so without the
+// `identity_repaired` bypass, the write loop's body-only drift check finds "file exists, body
+// unchanged" and reports `skipped_clean`, NEVER refreshing the stale `id:` frontmatter line. This
+// is the exact defect that left 31 cross-type references broken on the live corpus even after the
+// column-derived branch itself was fixed to zero-pad.
+
+describe("STATE — a reconciled mapping that recomputes the SAME file_path as its stale entry is unconditionally rewritten (identity_repaired, not skipped_clean)", () => {
+  it("frontmatter id: refreshes from the stale unpadded form to the padded one, even though the file already existed at the correct path", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5S9";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "Legacy Padded Spec",
+      slug: "spec-legacy-padded-spec",
+      // Ordinal IS allocated (post-`lore migrate ordinals`) — this doc is squarely in the
+      // column-derived branch, same as every AC-084-6 T5-1 case above.
+      ordinal: 21,
+    }));
+
+    // Pre-seed export-index.json with the EXACT corruption signature measured on the live
+    // corpus (SPEC-21-sync-docs-reverse.md incident): human_id UNPADDED, file_path ALREADY
+    // padded and matching what the corrected human_id would itself resolve to.
+    const stalePaddedFilePath = "docs/requirements/spec/SPEC-021-legacy-padded-spec.md";
+    writeExportIndex(projectDir, {
+      version: 1,
+      mappings: {
+        [docId]: { human_id: "SPEC-21", file_path: stalePaddedFilePath },
+      },
+    });
+    mkdirSync(join(projectDir, "docs/requirements/spec"), { recursive: true });
+    // On-disk file ALREADY at the (correct) padded path, but with the STALE unpadded id: line
+    // — this is what a prior export run wrote before `human_id` was corrupted in the index.
+    writeFileSync(
+      join(projectDir, stalePaddedFilePath),
+      "---\nid: SPEC-21\ntype: spec\n---\n\nUnchanged body content.\n",
+      "utf8",
+    );
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Reconciled + logged, same loudness contract as AC-084-6 T5-5.
+    expect(result.value.repaired).toHaveLength(1);
+    expect(result.value.repaired[0]).toContain("ordinal-reconcile");
+    expect(result.value.repaired[0]).toContain(docId);
+
+    // The critical assertion this test exists for: the file is reported as identity_repaired,
+    // NEVER as skipped_clean (which is what a body-only drift check would have said, since the
+    // body text here is unchanged and the recomputed path is identical to the stale one).
+    expect(result.value.identity_repaired).toEqual([stalePaddedFilePath]);
+    expect(result.value.skipped_clean).not.toContain(stalePaddedFilePath);
+    expect(result.value.created).toHaveLength(0);
+    expect(result.value.drift).toHaveLength(0);
+    expect(result.value.overwritten).toHaveLength(0);
+
+    const index = readExportIndex(projectDir);
+    expect(index.mappings[docId]!.human_id).toBe("SPEC-021");
+    expect(index.mappings[docId]!.file_path).toBe(stalePaddedFilePath);
+
+    // The file's frontmatter id: is now refreshed to the padded form — this is the exact
+    // "frontmatter disagrees with its own filename forever" corruption this task fixes.
+    const rewritten = readFileSync(join(projectDir, stalePaddedFilePath), "utf8");
+    const fm = parseFrontmatterScalars(rewritten);
+    expect(fm["id"]).toBe("SPEC-021");
+    // identity_repaired is a FULL rebuild from the corpus (frontmatter AND body), same as a
+    // force-overwrite — it does not selectively patch just the id: line, nor does it preserve
+    // whatever the stale on-disk file happened to contain. The stale fixture body ("Unchanged
+    // body content.") is GONE, replaced by the corpus doc's own current content
+    // ("makeDoc"'s default, since this test never overrides it).
+    expect(rewritten).not.toContain("Unchanged body content.");
+    expect(rewritten).toContain("Content body.");
+
+    // Second run: already converged — no further reconcile, no repeat identity_repaired entry.
+    const second = await service.exportDocs({ projectDir, dryRun: false });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.repaired).toHaveLength(0);
+    expect(second.value.identity_repaired).toHaveLength(0);
+    expect(second.value.skipped_clean).toEqual([stalePaddedFilePath]);
+  });
+
+  it("catches the SAME staleness even with NO reconcile this run — the index already agrees with the column, only the on-disk file lags (measured on the live corpus: an earlier run's reconcile had already corrected the index, but the file was never revisited)", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000T5SA";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "spec",
+      title: "Index Already Fixed Spec",
+      slug: "spec-index-already-fixed-spec",
+      ordinal: 2,
+    }));
+
+    // The index mapping is ALREADY the correct padded form — reconcileOrdinalMappings will find
+    // NOTHING to reconcile here (mapping.human_id === formatMirrorHumanId(doc) already), so
+    // `reconciledDocIds` will NOT contain this doc. Only the on-disk file itself is stale.
+    const filePath = "docs/requirements/spec/SPEC-002-index-already-fixed-spec.md";
+    writeExportIndex(projectDir, {
+      version: 1,
+      mappings: {
+        [docId]: { human_id: "SPEC-002", file_path: filePath },
+      },
+    });
+    mkdirSync(join(projectDir, "docs/requirements/spec"), { recursive: true });
+    writeFileSync(
+      join(projectDir, filePath),
+      "---\nid: SPEC-2\ntype: spec\n---\n\nContent body.\n",
+      "utf8",
+    );
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // No reconcile log entry — the index never diverged this run.
+    expect(result.value.repaired).toHaveLength(0);
+    // Yet the file's stale frontmatter is still caught and fixed, never silently skipped_clean.
+    expect(result.value.identity_repaired).toEqual([filePath]);
+    expect(result.value.skipped_clean).not.toContain(filePath);
+
+    const rewritten = readFileSync(join(projectDir, filePath), "utf8");
+    const fm = parseFrontmatterScalars(rewritten);
+    expect(fm["id"]).toBe("SPEC-002");
+  });
+
+  it("catches CITING-side staleness too: doc B's own id/body never changed, but its links: entry still names doc A's OLD id string after A's own id was corrected (the exact class of bug that left cross-type links_broken non-zero on the live corpus)", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docAId = "01J0000000000000000000T5AA";
+    const docBId = "01J0000000000000000000T5BB";
+    await insertDoc(store, makeDoc({
+      id: docAId,
+      type: "adr",
+      title: "Cited Decision",
+      slug: "adr-cited-decision",
+      extra: { decision_status: "accepted" },
+      // A's identity is ALREADY correct (index already padded — same "index converged, file
+      // lags" shape as the previous test) — this test is entirely about B's citation of A.
+    }));
+    await insertDoc(store, makeDoc({
+      id: docBId,
+      type: "spec",
+      title: "Citing Spec",
+      slug: "spec-citing-spec",
+    }));
+    const linkResult = await store.addLink({
+      from_id: docBId,
+      to_id: docAId,
+      link_type: "relates-to",
+      created_at: "2024-01-15T10:00:00.000Z",
+      created_by: "test-agent",
+    });
+    expect(linkResult.ok).toBe(true);
+
+    const aFilePath = "docs/requirements/adr/ADR-001-cited-decision.md";
+    const bFilePath = "docs/requirements/spec/SPEC-001-citing-spec.md";
+    writeExportIndex(projectDir, {
+      version: 1,
+      mappings: {
+        [docAId]: { human_id: "ADR-001", file_path: aFilePath },
+        [docBId]: { human_id: "SPEC-001", file_path: bFilePath },
+      },
+    });
+    mkdirSync(join(projectDir, "docs/requirements/adr"), { recursive: true });
+    mkdirSync(join(projectDir, "docs/requirements/spec"), { recursive: true });
+    writeFileSync(join(projectDir, aFilePath), "---\nid: ADR-001\ntype: adr\n---\n\nA's content.\n", "utf8");
+    // B's OWN id/body is fine — only its links: entry is stale, citing A's OLD unpadded form.
+    writeFileSync(
+      join(projectDir, bFilePath),
+      "---\nid: SPEC-001\ntype: spec\nlinks:\n  - {id: ADR-1, type: relates-to}\n---\n\nB's content.\n",
+      "utf8",
+    );
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // A's own id already matched — never reconciled (A's index mapping never diverged).
+    expect(result.value.repaired).toHaveLength(0);
+    // B is caught by the CITING-side (links) staleness signal, never skipped_clean.
+    expect(result.value.identity_repaired).toContain(bFilePath);
+    expect(result.value.skipped_clean).not.toContain(bFilePath);
+
+    const rewrittenB = readFileSync(join(projectDir, bFilePath), "utf8");
+    expect(rewrittenB).toContain("id: ADR-001");
+    expect(rewrittenB).not.toContain("id: ADR-1,");
+  });
+});
+
+// ─── task-unify-mirror-identifiers-on-zero-padded-form-export-all: NUL-byte sanitization ─────
+//
+// Measured live (2026-08-11): widening the export to ALL SIX types (this task's own deliverable)
+// exported `task` docs for the first time, which surfaced a real corpus doc
+// (TASK-434-literal-nul-bytes-in-two-scripts-source-files-one) whose body INTENTIONALLY quotes a
+// raw NUL byte (`const KEY_SEP = "\x00"`, as a before/after contrast against its own escaped
+// fix) — and immediately failed `scripts/check-no-nul-bytes.ts`'s `bun run test`-wired gate,
+// because a raw NUL inside git's binary-sniff window makes the whole mirror file unreviewable.
+
+describe("REGRESSION — a raw NUL byte in a doc's body is sanitized in the exported mirror, never in the corpus (task-unify-mirror-identifiers-on-zero-padded-form-export-all)", () => {
+  it("a doc whose content contains a literal NUL character exports with the byte replaced by the visible \\u0000 escape, and the export never touches doc.content itself", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000NUL1";
+    const rawNulContent = 'Before the fix:\n\n```ts\nconst KEY_SEP = "\u0000";\n```\n\nAfter the fix: `\\0`.\n';
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "knowledge",
+      title: "Nul Byte Retro",
+      slug: "knowledge-nul-byte-retro",
+      content: rawNulContent,
+      extra: { sub_type: "retro" },
+    }));
+
+    const result = await service.exportDocs({ projectDir, dryRun: false });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.errors).toHaveLength(0);
+    expect(result.value.created).toHaveLength(1);
+
+    const filePath = result.value.created[0]!;
+    const written = readFileSync(join(projectDir, filePath), "utf8");
+
+    // The exported mirror file contains ZERO raw NUL bytes — the exact property
+    // scripts/check-no-nul-bytes.ts asserts against every git-tracked text-source file.
+    expect(written.includes("\u0000")).toBe(false);
+    // The escape is visible and reversible — the original byte's presence is still legible.
+    expect(written).toContain('const KEY_SEP = "\\u0000";');
+
+    // The corpus doc's OWN content is untouched — sanitization is export-boundary-only,
+    // never a silent rewrite of the source of truth.
+    const reFetched = await store.find(docId);
+    expect(reFetched.ok).toBe(true);
+    if (reFetched.ok && reFetched.value !== null) {
+      expect(reFetched.value.content.includes("\u0000")).toBe(true);
+      expect(reFetched.value.content).toBe(rawNulContent);
+    }
+  });
+
+  it("re-exporting an already-sanitized file converges (idempotent, skipped_clean second run) — the drift comparison uses the SAME sanitized value both sides", async () => {
+    const store = new InMemoryStore();
+    const service = makeExportService(store);
+    const projectDir = makeTempProjectDir();
+
+    const docId = "01J0000000000000000000NUL2";
+    await insertDoc(store, makeDoc({
+      id: docId,
+      type: "knowledge",
+      title: "Nul Byte Retro Two",
+      slug: "knowledge-nul-byte-retro-two",
+      content: 'A literal NUL: "\u0000" end.\n',
+      extra: { sub_type: "retro" },
+    }));
+
+    const first = await service.exportDocs({ projectDir, dryRun: false });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.created).toHaveLength(1);
+
+    const second = await service.exportDocs({ projectDir, dryRun: false });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.created).toHaveLength(0);
+    expect(second.value.skipped_clean).toHaveLength(1);
+    expect(second.value.drift).toHaveLength(0);
   });
 });

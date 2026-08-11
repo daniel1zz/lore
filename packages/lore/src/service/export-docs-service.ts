@@ -40,9 +40,12 @@
  *     RETIRED for "numbered types" (spec/adr, per `@lore/core`'s `ORDINAL_REGISTRY`) once a
  *     doc carries a store-allocated `ordinal` column value: `buildOrExtendIndex`'s main
  *     allocation loop checks `ORDINAL_REGISTRY[doc.type] !== undefined && typeof doc.ordinal
- *     === "number"` FIRST, and when true composes `human_id` via `formatDocDisplayId` (a
- *     pure read of the column — no title parsing, no counter, never a silent renumber) and
- *     derives `file_path` from that id, skipping the legacy branch entirely. A numbered-type
+ *     === "number"` FIRST, and when true composes `human_id` via `formatMirrorHumanId` (a
+ *     pure, zero-padded read of the column — no title parsing, no counter, never a silent
+ *     renumber; task-unify-mirror-identifiers-on-zero-padded-form-export-all switched this
+ *     from the unpadded `formatDocDisplayId` so the mirror's `human_id` matches its own
+ *     zero-padded filename/legacy-allocator convention) and derives `file_path` from that id,
+ *     skipping the legacy branch entirely. A numbered-type
  *     doc whose `ordinal` is still `null`/`undefined` (pre-`lore migrate ordinals` legacy, OR
  *     permanently kind-exempt e.g. a `domain-overview` spec) falls through to the UNCHANGED
  *     Amendment A1 legacy path — but when it is NOT kind-exempt, `buildOrExtendIndex` also
@@ -57,8 +60,10 @@
  *     reallocated" strategy, logged into the SAME `ExportReport.repaired` array — a
  *     `repaired`-family entry, mirroring `repairCollisions`' loudness) detects a mapped doc
  *     whose `ordinal` is now a number but whose recorded `human_id` no longer matches
- *     `formatDocDisplayId(doc)` (e.g. it was exported under a legacy allocation before
- *     `lore migrate ordinals` backfilled the column) and deletes the stale mapping so the
+ *     `formatMirrorHumanId(doc)` (e.g. it was exported under a legacy allocation before
+ *     `lore migrate ordinals` backfilled the column, OR a later write patched `human_id`
+ *     with the unpadded `formatDocDisplayId` — see `reconcileOrdinalMappings`'s own JSDoc)
+ *     and deletes the stale mapping so the
  *     column-derived branch above re-derives it fresh. The doc's previously-written file at
  *     the stale path is left on disk (this module never deletes files it wrote) — a fresh
  *     file is created at the corrected path on the same run.
@@ -120,7 +125,7 @@ import {
   slugify,
   DOC_TYPE_ROLE_MAP,
   splitFrontmatter,
-  formatDocDisplayId,
+  formatMirrorHumanId,
   ORDINAL_REGISTRY,
 } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -222,6 +227,41 @@ export interface ExportReport {
    * is legitimately kind-exempt).
    */
   ordinal_warnings: string[];
+  /**
+   * task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11) — file paths
+   * whose FRONTMATTER was unconditionally rewritten because this doc's identity was determined
+   * stale, by ANY of three independent signals (see the write loop's own comment for the full
+   * detail): (1) this run's `reconcileOrdinalMappings` just deleted-and-refreshed the doc's
+   * OWN mapping (its `human_id` was stale, e.g. `SPEC-2` corrected to `SPEC-002`); (2) the
+   * file's ACTUAL on-disk frontmatter `id:` disagrees with the mapping's CURRENT `human_id`
+   * right now; or (3) the file's on-disk `links`/`parent`/`plan` refs — i.e. what it CITES —
+   * disagree with what those refs freshly resolve to right now (a doc whose OWN id never
+   * changed can still cite ANOTHER doc's OLD, now-corrected id string) — ALL regardless of the
+   * normal body-only drift check.
+   *
+   * ⛔ Why this bucket exists at all: the drift check in the main write loop below compares ONLY
+   * the file's BODY (`extractBodyFromMd` strips frontmatter before comparing, by design — SPEC-021
+   * §4's roundtrip-parity requirement, and so a routine status/tag/AC-checklist edit never forces
+   * a rewrite). A doc whose identity was corrected very often recomputes (or already sits at) the
+   * EXACT SAME `file_path` it already had (only the `human_id` STRING changed, not the file it
+   * lives at) — so the write loop would see "file exists, body unchanged" and silently report
+   * `skipped_clean`, NEVER refreshing the stale `id:`/`links:` frontmatter lines. Signal (1)
+   * alone is INSUFFICIENT — measured empirically: once an earlier run's reconcile had already
+   * corrected the INDEX, a later run finds no mismatch left to reconcile against, yet the FILE's
+   * frontmatter can still lag behind forever with nothing else to catch it; signal (2) reads the
+   * on-disk truth directly, every run, closing that gap regardless of which run caused it. Signal
+   * (2) alone is STILL insufficient for a doc that only CITES a stale id without its OWN id ever
+   * being wrong — that is signal (3), the CITING side of the same bug class (a doc B's `links:`
+   * entry for doc A survives with A's OLD id string even after A's own id is corrected, because
+   * B's own content/id never changed and so B never trips signals 1/2 for ITSELF). All three
+   * together are exactly what this task fixes: a mirror file whose frontmatter (its own id, or
+   * what it cites) disagreed with the CURRENT truth forever, because nothing ever revisited it
+   * after the referenced identity was corrected elsewhere. Entries here bypass the body-only
+   * check entirely and are ALWAYS freshly written (frontmatter AND body), independent of
+   * `created`/`skipped_clean`/`drift`/`overwritten` (a doc can appear in `identity_repaired` OR
+   * exactly one of those four, never both — see the write loop's `identityStale` branch).
+   */
+  identity_repaired: string[];
 }
 
 /**
@@ -308,12 +348,18 @@ export class ExportDocsService {
    *   Phase 2 — Write files (topological order):
    *     5. Sort docs so parents come before children (DFS on parent_id chain).
    *     6. For each doc:
-   *        a. If file exists at mapping.file_path → compare body (drift check).
+   *        a. If this doc's mapping was just reconciled in Phase 1 (its `human_id` was stale —
+   *           task-unify-mirror-identifiers-on-zero-padded-form-export-all, 2026-08-11) →
+   *           unconditionally rebuild frontmatter + body and write, report in
+   *           `identity_repaired` — bypasses steps b/c entirely, since the body-only drift
+   *           check would otherwise misreport this as `skipped_clean` (frontmatter isn't part
+   *           of that comparison) whenever the recomputed path happens to already exist.
+   *        b. Else if file exists at mapping.file_path → compare body (drift check).
    *           - Match → skipped_clean.
    *           - Differ, no `opts.force` → drift (file untouched).
    *           - Differ, `opts.force: true` → rebuild frontmatter + body, overwrite in
    *             place, report in `overwritten` (SPEC-021 Amendment A2).
-   *        b. If file absent → build frontmatter, write with O_EXCL; add to created.
+   *        c. If file absent → build frontmatter, write with O_EXCL; add to created.
    *
    * @param opts - Project root, dry-run flag, optional type filter, optional force-overwrite.
    * @param now - Time seam (SPEC-043 D3/D4 convention) — drives the invalidation banner
@@ -337,7 +383,7 @@ export class ExportDocsService {
 
     const indexResult = await buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir);
     if (!indexResult.ok) return indexResult;
-    const { index, repaired, ordinalWarnings } = indexResult.value;
+    const { index, repaired, ordinalWarnings, reconciledDocIds } = indexResult.value;
 
     // Save index (atomically) before writing any files — all human IDs are now allocated.
     if (!opts.dryRun) {
@@ -363,17 +409,26 @@ export class ExportDocsService {
       errors: [],
       repaired,
       ordinal_warnings: ordinalWarnings,
+      identity_repaired: [],
+    };
+
+    // Computes this doc's CURRENT, correct identity refs (parent/plan/links human_ids) from the
+    // live index — the SAME value used for both the staleness comparison below and the actual
+    // write, so they can never independently diverge (see `computeFreshIdentityRefs`'s own doc
+    // comment).
+    const fetchFreshIdentityRefs = async (doc: DocRecord): Promise<FreshIdentityRefs> => {
+      const linksResult = await this.store.findLinks(doc.id, "out");
+      const outLinks: LinkRecord[] = linksResult.ok ? linksResult.value : [];
+      return computeFreshIdentityRefs(doc, outLinks, index);
     };
 
     // Builds the complete file content (frontmatter + spliced body) for a doc — shared by
     // BOTH the "file absent → create" path and the "drift + force → overwrite" path, so a
     // force-overwrite regenerates frontmatter (title/status/tags/links may also have
     // changed) rather than only patching the body.
-    const buildFileContent = async (doc: DocRecord, resolvedBody: string): Promise<string> => {
+    const buildFileContent = (doc: DocRecord, resolvedBody: string, freshRefs: FreshIdentityRefs): string => {
       const mapping = index.mappings[doc.id]!;
-      const linksResult = await this.store.findLinks(doc.id, "out");
-      const outLinks: LinkRecord[] = linksResult.ok ? linksResult.value : [];
-      const fmStr = buildFrontmatterString(doc, mapping.human_id, outLinks, index);
+      const fmStr = buildFrontmatterString(doc, mapping.human_id, freshRefs);
       return fmStr + canonicaliseBody(resolvedBody);
     };
 
@@ -402,7 +457,13 @@ export class ExportDocsService {
       // drift comparison below and the on-write content — never a second, divergent
       // computation for either side (same critical invariant as the MDX splice above).
       const banner = await resolveValidityBanner(this.store, doc, nowIso);
-      const resolvedBody = banner !== undefined ? `${banner}\n\n${bodyResult.value}` : bodyResult.value;
+      const bannerBody = banner !== undefined ? `${banner}\n\n${bodyResult.value}` : bodyResult.value;
+      // task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11) — sanitize
+      // raw NUL bytes BEFORE both the drift comparison and the on-write content (same "one
+      // computation, both uses" rule the MDX splice/banner above already establish) — see
+      // `sanitizeRawNulBytes`'s own doc comment for why this belongs at the export boundary,
+      // never on `doc.content` itself.
+      const resolvedBody = sanitizeRawNulBytes(bannerBody);
 
       const absFilePath = join(opts.projectDir, mapping.file_path);
       const dirPath = dirname(absFilePath);
@@ -419,8 +480,11 @@ export class ExportDocsService {
         }
       }
 
+      const freshRefs = await fetchFreshIdentityRefs(doc);
+
       if (existsSync(absFilePath)) {
-        // File already exists — drift check (SPEC-021 §9.6)
+        // File already exists — read once, then decide identity-repair vs. the normal
+        // body-only drift check (SPEC-021 §9.6).
         let fileMd: string;
         try {
           fileMd = readFileSync(absFilePath, "utf8");
@@ -428,6 +492,50 @@ export class ExportDocsService {
           report.errors.push(
             `${mapping.file_path}: cannot read — ${e instanceof Error ? e.message : String(e)}`,
           );
+          continue;
+        }
+
+        // task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11) — THREE
+        // independent signals, any one forces an unconditional rewrite (bypassing the
+        // body-only drift check entirely, which is blind to frontmatter by design):
+        //   1. `reconciledDocIds.has(doc.id)` — this doc's mapping was JUST deleted-and-
+        //      refreshed in Phase 1 THIS run (reconcileOrdinalMappings), so its frontmatter is
+        //      KNOWN stale even before comparing anything.
+        //   2. `onDiskId !== mapping.human_id` — the file's ACTUAL frontmatter `id:` disagrees
+        //      with the CURRENT mapping right now, regardless of whether Phase 1 reconciled
+        //      anything THIS run. Needed because an EARLIER run (or a still-unfixed write path
+        //      like `OrdinalMigrationService` step 3) can leave the INDEX already correct while
+        //      the FILE lags behind with no mismatch left for Phase 1 to detect — signal 1
+        //      alone would silently perpetuate that gap forever once the index converges.
+        //   3. The file's on-disk `links`/`parent`/`plan` refs disagree with `freshRefs` right
+        //      now — the CITING side of the exact same class of bug: doc B cites doc A by A's
+        //      OLD human_id string; A's own id later gets corrected (by signal 1 or 2, on A's
+        //      OWN export), but B's frontmatter is never revisited (B's own id/body never
+        //      changed, so B never trips signals 1/2 for ITSELF) — B's stale citation of A
+        //      would otherwise survive forever, which is exactly what left 12+ cross-type
+        //      `links_broken` references broken even after every doc's OWN id was fixed
+        //      (measured empirically on the live corpus, 2026-08-11).
+        // See `ExportReport.identity_repaired`'s own doc comment for the full mechanism.
+        const onDiskId = extractFrontmatterId(fileMd);
+        const onDiskRefs = extractFrontmatterIdentityRefs(fileMd);
+        const refsStale = onDiskRefs !== null && canonicalizeIdentityRefs(onDiskRefs) !== canonicalizeIdentityRefs(freshRefs);
+        const identityStale = reconciledDocIds.has(doc.id) || (onDiskId !== null && onDiskId !== mapping.human_id) || refsStale;
+
+        if (identityStale) {
+          if (opts.dryRun) {
+            report.identity_repaired.push(mapping.file_path);
+            continue;
+          }
+          const fileContent = buildFileContent(doc, resolvedBody, freshRefs);
+          try {
+            writeFileSync(absFilePath, fileContent, "utf8");
+          } catch (e) {
+            report.errors.push(
+              `${mapping.file_path}: identity-repair rewrite failed — ${e instanceof Error ? e.message : String(e)}`,
+            );
+            continue;
+          }
+          report.identity_repaired.push(mapping.file_path);
           continue;
         }
 
@@ -456,7 +564,7 @@ export class ExportDocsService {
           continue;
         }
         try {
-          const fileContent = await buildFileContent(doc, resolvedBody);
+          const fileContent = buildFileContent(doc, resolvedBody, freshRefs);
           writeFileSync(absFilePath, fileContent, "utf8");
         } catch (e) {
           report.errors.push(
@@ -474,7 +582,7 @@ export class ExportDocsService {
         continue;
       }
 
-      const fileContent = await buildFileContent(doc, resolvedBody);
+      const fileContent = buildFileContent(doc, resolvedBody, freshRefs);
 
       // Write with O_EXCL semantics (fail if file appeared between check and write).
       // reason: concurrent exports could both see "file absent" and race to create.
@@ -608,8 +716,8 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  *   4. Seed per-type next-number counters from index + file scan.
  *   5. For each corpus doc not in index:
  *      a. SPEC-084 T5 — if `doc.type` is a numbered type (`ORDINAL_REGISTRY[doc.type]`
- *         defined) AND `doc.ordinal` is an allocated number: human_id = `formatDocDisplayId`
- *         (pure column read, no title parsing, no counter) — skip b/c entirely.
+ *         defined) AND `doc.ordinal` is an allocated number: human_id = `formatMirrorHumanId`
+ *         (pure, zero-padded column read, no title parsing, no counter) — skip b/c entirely.
  *      b. Match by title to scanned file → inherit its ID + filePath, UNLESS that
  *         filePath is already claimed by a different doc id this pass (usedFilePaths) —
  *         titles are not unique across docs (only slug is), so this guard is required.
@@ -633,15 +741,20 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  * @param docsBaseDir - Absolute path to docs/requirements/.
  * @param docs - All active corpus docs to reconcile.
  * @param projectDir - Absolute project root (for resolving file_path during self-heal).
- * @returns ok({index, repaired, ordinalWarnings}) with all docs mapped; err on allocation
- *   exhaustion or store failure.
+ * @returns ok({index, repaired, ordinalWarnings, reconciledDocIds}) with all docs mapped; err on
+ *   allocation exhaustion or store failure.
  */
 async function buildOrExtendIndex(
   indexPath: string,
   docsBaseDir: string,
   docs: DocRecord[],
   projectDir: string,
-): Promise<Result<{ index: ExportIndex; repaired: string[]; ordinalWarnings: string[] }, LoreError>> {
+): Promise<
+  Result<
+    { index: ExportIndex; repaired: string[]; ordinalWarnings: string[]; reconciledDocIds: Set<string> },
+    LoreError
+  >
+> {
   const index = loadIndex(indexPath);
 
   // Self-heal BEFORE seeding counters/usedFilePaths so repaired (stripped) doc ids are
@@ -652,7 +765,9 @@ async function buildOrExtendIndex(
   // numbered-type docs whose column has since diverged from their recorded human_id. Runs
   // AFTER collision self-heal (operates on whatever mappings survived that pass) and BEFORE
   // the counter/usedFilePaths seeding below, so a reconciled doc is treated as unmapped.
-  repaired.push(...reconcileOrdinalMappings(index, docs));
+  const ordinalReconcile = reconcileOrdinalMappings(index, docs);
+  repaired.push(...ordinalReconcile.repairLog);
+  const reconciledDocIds = ordinalReconcile.reconciledDocIds;
 
   const ordinalWarnings: string[] = [];
 
@@ -699,12 +814,17 @@ async function buildOrExtendIndex(
     if (index.mappings[doc.id] !== undefined) continue; // already mapped
 
     // SPEC-084 T5 — column-derived branch: a numbered type (spec/adr) with an allocated
-    // ordinal composes its human_id from the column via formatDocDisplayId (pure read, no
+    // ordinal composes its human_id from the column via formatMirrorHumanId (pure read, no
     // title parsing, no counter, never a silent renumber) and skips the legacy path (title-
     // match / title-declared-number / sequential fallback) entirely — the column is
     // authoritative once it holds a value.
+    // reason (task-unify-mirror-identifiers-on-zero-padded-form-export-all, 2026-08-11):
+    // zero-padded to 3 digits via formatMirrorHumanId, NOT the general-purpose (unpadded)
+    // formatDocDisplayId — the legacy allocator below has always zero-padded, so this branch
+    // must match it or every doc that flows through here diverges from its own filename
+    // (the exact SPEC-021/"SPEC-21" corruption this task fixes).
     if (isOrdinalEligibleType(doc.type) && typeof doc.ordinal === "number") {
-      const humanId = formatDocDisplayId(doc);
+      const humanId = formatMirrorHumanId(doc);
       if (humanId !== null) {
         const truncatedKebab = await computeExportKebabStem(doc);
         const dirRelPath = `docs/requirements/${TYPE_DIR[doc.type]}`;
@@ -798,7 +918,7 @@ async function buildOrExtendIndex(
     index.mappings[doc.id] = { human_id: humanId, file_path: filePath };
   }
 
-  return ok({ index, repaired, ordinalWarnings });
+  return ok({ index, repaired, ordinalWarnings, reconciledDocIds });
 }
 
 /**
@@ -866,16 +986,40 @@ function isOrdinalExemptKind(doc: DocRecord): boolean {
  *
  * Repair strategy mirrors `repairCollisions`: DELETE the stale mapping entry rather than
  * mutate it in place here, so there remains exactly one code path (the column-derived branch
- * in `buildOrExtendIndex`'s main loop) that ever WRITES a column-derived mapping. The doc's
- * previously-exported file at the stale path is left on disk — this module never silently
- * deletes a file it wrote; the next Phase 2 write creates a fresh file at the corrected path.
+ * in `buildOrExtendIndex`'s main loop) that ever WRITES a column-derived mapping. A deleted
+ * doc id is returned in `reconciledDocIds` (task-unify-mirror-identifiers-on-zero-padded-form-
+ * export-all, 2026-08-11 addition — see below) so Phase 2 knows to unconditionally rewrite
+ * that doc's file even when the freshly-recomputed `file_path` turns out identical to the
+ * stale one (the common case: only the `human_id` STRING was corrupted, e.g. `SPEC-2` instead
+ * of `SPEC-002`, while `file_path` already correctly embedded the padded form — reconciling
+ * recomputes the SAME path from the corrected id, so `existsSync` finds "the file exists" and
+ * the normal body-only drift check would report `skipped_clean`, NEVER refreshing the stale
+ * frontmatter `id:` line — see `ExportReport.identity_repaired`'s own doc comment for the full
+ * mechanism this closes).
+ *
+ * reason (task-unify-mirror-identifiers-on-zero-padded-form-export-all, 2026-08-11): compares
+ * against `formatMirrorHumanId` (zero-padded), not `formatDocDisplayId` (unpadded) — this is
+ * the SAME function `buildOrExtendIndex`'s column-derived branch now writes with, so a
+ * mapping this reconciler leaves untouched is guaranteed to already carry the padded form. A
+ * prior version of this line compared against the unpadded formatter, which meant a mapping
+ * whose `human_id` had ALREADY been corrupted to the unpadded form by some other write path
+ * (empirically: `OrdinalMigrationService`'s step 3, `.lore/export-index.json`'s
+ * `{...mapping, human_id: expectedHumanId}` patch) trivially "matched" (unpadded ===
+ * unpadded) and was never caught — this line is what makes THIS reconciler catch that drift
+ * on the next export run instead of silently perpetuating it into the next file write.
  *
  * @param index - Loaded export index (mutated in place: stale entries removed).
  * @param docs - All active corpus docs currently being reconciled.
- * @returns Human-readable repair log lines (empty when nothing needed reconciling).
+ * @returns `repairLog` (human-readable lines, empty when nothing needed reconciling) plus
+ *   `reconciledDocIds` (the doc ids whose mapping was just deleted here — Phase 2 forces a
+ *   rewrite for every one of these, never trusting the body-only drift check for them).
  */
-function reconcileOrdinalMappings(index: ExportIndex, docs: DocRecord[]): string[] {
+function reconcileOrdinalMappings(
+  index: ExportIndex,
+  docs: DocRecord[],
+): { repairLog: string[]; reconciledDocIds: Set<string> } {
   const repairLog: string[] = [];
+  const reconciledDocIds = new Set<string>();
   const docById = new Map(docs.map((d) => [d.id, d]));
 
   for (const [docId, mapping] of Object.entries(index.mappings)) {
@@ -884,20 +1028,22 @@ function reconcileOrdinalMappings(index: ExportIndex, docs: DocRecord[]): string
     if (!isOrdinalEligibleType(doc.type)) continue;
     if (typeof doc.ordinal !== "number") continue; // not yet migrated — nothing to reconcile against
 
-    const correctHumanId = formatDocDisplayId(doc);
+    const correctHumanId = formatMirrorHumanId(doc);
     if (correctHumanId === null) continue; // unreachable given the ordinal-number check above
     if (mapping.human_id === correctHumanId) continue; // already converged
 
     delete index.mappings[docId];
+    reconciledDocIds.add(docId);
     const line =
       `ordinal-reconcile: doc ${docId} ("${doc.title}") was mapped to ${mapping.human_id} / ` +
       `${mapping.file_path} — reconciling to its store-allocated ordinal ${correctHumanId} ` +
-      `(a fresh file will be written; the stale file at the old path is left on disk)`;
+      `(the file at the recomputed path — same path or a fresh one — will be unconditionally ` +
+      `rewritten this run, see ExportReport.identity_repaired)`;
     repairLog.push(line);
     process.stderr.write(`⚠ export-index ordinal-reconcile: ${line}\n`);
   }
 
-  return repairLog;
+  return { repairLog, reconciledDocIds };
 }
 
 /**
@@ -1092,6 +1238,35 @@ function topoSortDocs(docs: DocRecord[]): { sorted: DocRecord[]; cycles: string[
 // ─── Frontmatter Emission ─────────────────────────────────────────────────────
 
 /**
+ * Replaces every raw NUL character (U+0000) in a doc's resolved body with the visible, 6-
+ * character escape sequence `\u0000` — mirror files are meant to be `git diff`/`git show`
+ * reviewable, and a raw NUL inside git's first-8000-byte binary-sniff window makes the WHOLE
+ * FILE unreviewable (`git show --stat` reports `Bin 0 -> N bytes`, no diff at all — this is
+ * `scripts/check-no-nul-bytes.ts`'s own stated concern, and its `bun run test`-wired check is
+ * what actually catches an unsanitized export).
+ *
+ * task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11) — measured live:
+ * widening the export to ALL SIX types (this task's own deliverable) exported `task` docs for
+ * the FIRST time, which surfaced `TASK-434-literal-nul-bytes-in-two-scripts-source-files-one`
+ * (a retro doc whose OWN body intentionally quotes a raw NUL — `const KEY_SEP = "\x00"` — as a
+ * before/after contrast against its escaped fix) and immediately failed `check-no-nul-bytes`.
+ *
+ * ⛔ Applied ONLY to the exported PROJECTION (this function's caller, right where the MDX
+ * splice/invalidation banner above already establish "one computation, both the drift
+ * comparison and the on-write content"), NEVER to `doc.content` itself — a doc's raw NUL can be
+ * entirely intentional and evidentiary (exactly the TASK-434 case above); silently rewriting
+ * the corpus SOURCE would destroy that evidentiary value. Sanitizing the mirror instead keeps
+ * the corpus untouched while making the git-tracked projection reviewable.
+ *
+ * @param body - Resolved body text about to be written to (or compared against) a mirror file.
+ * @returns The same text with every U+0000 replaced by the literal `\u0000` escape — a no-op
+ *   when `body` contains none.
+ */
+function sanitizeRawNulBytes(body: string): string {
+  return body.replace(/\u0000/g, "\\u0000");
+}
+
+/**
  * Extract the body section from a .md file (everything after the closing `---`).
  * Returns the full file content as body if no frontmatter is found.
  *
@@ -1105,27 +1280,71 @@ function extractBodyFromMd(mdContent: string): string {
 }
 
 /**
- * Build the YAML frontmatter string for a corpus doc.
+ * Extract the frontmatter `id:` field from a .md file — the SAME strict-frontmatter +
+ * `parseYaml` pattern {@link scanTypeDirectory} already uses for title-match reconcile, applied
+ * here to a single already-loaded file's content instead of a directory scan.
  *
- * Frontmatter shape (SPEC-021 §9.2):
- *   id, type, role, title, status, priority, [phase], created, updated, tags,
- *   [parent (human ID)], [plan (human ID, for tasks)], [links], [phases (for plans)]
+ * task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11): this is the direct,
+ * ALWAYS-CURRENT observable signal the write loop below compares against `mapping.human_id` to
+ * decide `identity_repaired` — strictly more robust than relying only on "was this doc's mapping
+ * reconciled in THIS SAME run" (`reconciledDocIds`): a doc whose mapping was already silently
+ * corrected to the padded form by an EARLIER export run (before this fix existed, or before a
+ * still-unfixed write path like `OrdinalMigrationService` step 3 touches it again) has NO
+ * mismatch left in the INDEX to reconcile against on a LATER run, yet its on-disk FILE's
+ * frontmatter can still carry the stale value forever — the body-only drift check is blind to
+ * this (frontmatter isn't part of that comparison), so nothing else would ever catch it. Reading
+ * this value directly, every run, closes that gap regardless of which run originally caused it.
+ *
+ * @param mdContent - Full file content (as read from disk).
+ * @returns The frontmatter `id:` string, or `null` if the file has no strict frontmatter block,
+ *   the frontmatter isn't valid YAML, or it has no string `id` field — never throws.
+ */
+function extractFrontmatterId(mdContent: string): string | null {
+  const normalized = mdContent.replace(/\r\n/g, "\n");
+  const split = splitFrontmatter(normalized, "strict");
+  if (!split.ok) return null;
+  let fm: unknown;
+  try {
+    fm = parseYaml(split.frontmatter);
+  } catch {
+    return null;
+  }
+  if (!fm || typeof fm !== "object") return null;
+  const record = fm as Record<string, unknown>;
+  return typeof record["id"] === "string" ? record["id"].trim() : null;
+}
+
+/** One `links:` entry as either side (fresh-computed or on-disk-parsed) represents it. */
+interface FrontmatterLinkRef {
+  id: string;
+  type: string;
+}
+
+/**
+ * The identity-bearing cross-reference fields a doc's frontmatter carries — everything that
+ * names ANOTHER doc by its human_id string: `parent`, `plan` (tasks only), and `links[]`.
+ * Deliberately excludes `id` itself (that's `mapping.human_id`, checked separately by
+ * {@link extractFrontmatterId}) — this shape is specifically the OUTBOUND reference set whose
+ * staleness `links_broken` (and the parent/plan warnings) actually measure.
+ */
+interface FreshIdentityRefs {
+  parentHumanId: string | undefined;
+  planHumanId: string | undefined;
+  links: FrontmatterLinkRef[];
+}
+
+/**
+ * Computes the CURRENT, correct identity-reference fields for a doc from the live index —
+ * the single source both {@link buildFrontmatterString} (what gets WRITTEN) and the write
+ * loop's staleness check (task-unify-mirror-identifiers-on-zero-padded-form-export-all,
+ * 2026-08-11 — what gets COMPARED against what's already on disk) read from, so the two can
+ * never independently drift from each other.
  *
  * @param doc - Full DocRecord from corpus.
- * @param humanId - Human-readable ID (e.g. "SPEC-025").
  * @param outLinks - Outbound non-parent links from store.findLinks(doc.id, "out").
  * @param index - Export index for resolving linked doc IDs to human IDs.
- * @returns Frontmatter string including `---\n...\n---\n` delimiters.
  */
-function buildFrontmatterString(
-  doc: DocRecord,
-  humanId: string,
-  outLinks: LinkRecord[],
-  index: ExportIndex,
-): string {
-  const created = doc.created_at.split("T")[0] ?? doc.created_at;
-  const updated = doc.updated_at.split("T")[0] ?? doc.updated_at;
-
+function computeFreshIdentityRefs(doc: DocRecord, outLinks: LinkRecord[], index: ExportIndex): FreshIdentityRefs {
   // Resolve parent ULID → human ID (if available in index).
   const parentHumanId =
     doc.parent_id !== null ? index.mappings[doc.parent_id]?.human_id : undefined;
@@ -1136,6 +1355,99 @@ function buildFrontmatterString(
       ? index.mappings[doc.extra["plan_id"]]?.human_id
       : undefined;
 
+  // Outbound non-parent links — resolve to human IDs (skip unresolvable ones).
+  const links = outLinks
+    .filter((l) => l.link_type !== "parent")
+    .flatMap((l) => {
+      const linkedHumanId = index.mappings[l.to_id]?.human_id;
+      if (!linkedHumanId) return []; // linked doc not in index (soft-deleted or filtered out)
+      return [{ id: linkedHumanId, type: l.link_type }];
+    });
+
+  return { parentHumanId, planHumanId, links };
+}
+
+/**
+ * Order-independent canonical string for a {@link FreshIdentityRefs}-shaped value — used ONLY
+ * to COMPARE two ref sets for equality (task-unify-mirror-identifiers-on-zero-padded-form-
+ * export-all, 2026-08-11), never written anywhere. Sorting `links` before stringifying makes
+ * the comparison independent of `store.findLinks`' return order, which this module makes no
+ * ordering guarantee about — an order-sensitive comparison would false-positive as "drift" on
+ * every run whenever the store's link order isn't stable, defeating idempotency corpus-wide.
+ */
+function canonicalizeIdentityRefs(refs: { parentHumanId: string | undefined; planHumanId: string | undefined; links: FrontmatterLinkRef[] }): string {
+  const sortedLinks = [...refs.links].sort((a, b) => (a.id === b.id ? a.type.localeCompare(b.type) : a.id.localeCompare(b.id)));
+  return JSON.stringify({ parent: refs.parentHumanId ?? null, plan: refs.planHumanId ?? null, links: sortedLinks });
+}
+
+/**
+ * Extracts the SAME identity-reference shape {@link computeFreshIdentityRefs} computes, but
+ * read from an ALREADY-WRITTEN file's frontmatter — the on-disk half of the
+ * task-unify-mirror-identifiers-on-zero-padded-form-export-all (2026-08-11) staleness
+ * comparison. Same strict-frontmatter + `parseYaml` pattern as {@link extractFrontmatterId}.
+ * Malformed/missing fields degrade to absent (`undefined`/empty array) rather than throwing —
+ * this feeds a COMPARISON, never a write, so a parse gap should never abort the export run.
+ *
+ * @param mdContent - Full file content (as read from disk).
+ * @returns The parsed refs, or `null` if the file has no strict frontmatter block or the
+ *   frontmatter isn't valid YAML.
+ */
+function extractFrontmatterIdentityRefs(
+  mdContent: string,
+): { parentHumanId: string | undefined; planHumanId: string | undefined; links: FrontmatterLinkRef[] } | null {
+  const normalized = mdContent.replace(/\r\n/g, "\n");
+  const split = splitFrontmatter(normalized, "strict");
+  if (!split.ok) return null;
+  let fm: unknown;
+  try {
+    fm = parseYaml(split.frontmatter);
+  } catch {
+    return null;
+  }
+  if (!fm || typeof fm !== "object") return null;
+  const record = fm as Record<string, unknown>;
+
+  const parentHumanId = typeof record["parent"] === "string" ? record["parent"] : undefined;
+  const planHumanId = typeof record["plan"] === "string" ? record["plan"] : undefined;
+
+  const rawLinks = Array.isArray(record["links"]) ? record["links"] : [];
+  const links: FrontmatterLinkRef[] = [];
+  for (const item of rawLinks) {
+    if (item !== null && typeof item === "object") {
+      const obj = item as Record<string, unknown>;
+      if (typeof obj["id"] === "string" && typeof obj["type"] === "string") {
+        links.push({ id: obj["id"], type: obj["type"] });
+      }
+    }
+  }
+
+  return { parentHumanId, planHumanId, links };
+}
+
+/**
+ * Build the YAML frontmatter string for a corpus doc.
+ *
+ * Frontmatter shape (SPEC-021 §9.2):
+ *   id, type, role, title, status, priority, [phase], created, updated, tags,
+ *   [parent (human ID)], [plan (human ID, for tasks)], [links], [phases (for plans)]
+ *
+ * @param doc - Full DocRecord from corpus.
+ * @param humanId - Human-readable ID (e.g. "SPEC-025").
+ * @param freshRefs - Pre-computed identity refs (see {@link computeFreshIdentityRefs}) — the
+ *   caller computes this once and reuses it for both the staleness comparison and this write,
+ *   so the two can never independently diverge.
+ * @returns Frontmatter string including `---\n...\n---\n` delimiters.
+ */
+function buildFrontmatterString(
+  doc: DocRecord,
+  humanId: string,
+  freshRefs: FreshIdentityRefs,
+): string {
+  const created = doc.created_at.split("T")[0] ?? doc.created_at;
+  const updated = doc.updated_at.split("T")[0] ?? doc.updated_at;
+
+  const { parentHumanId, planHumanId, links } = freshRefs;
+
   // Extra.phase string (legacy singular phase field, used by specs/tasks as label).
   const phaseStr =
     typeof doc.extra["phase"] === "string" ? doc.extra["phase"] : undefined;
@@ -1145,15 +1457,6 @@ function buildFrontmatterString(
     doc.type === "plan" && Array.isArray(doc.extra["phases"]) && doc.extra["phases"].length > 0
       ? (doc.extra["phases"] as Array<{ name: string; description?: string }>)
       : undefined;
-
-  // Outbound non-parent links — resolve to human IDs (skip unresolvable ones).
-  const links = outLinks
-    .filter((l) => l.link_type !== "parent")
-    .flatMap((l) => {
-      const linkedHumanId = index.mappings[l.to_id]?.human_id;
-      if (!linkedHumanId) return []; // linked doc not in index (soft-deleted or filtered out)
-      return [{ id: linkedHumanId, type: l.link_type }];
-    });
 
   let fm = "---\n";
   fm += `id: ${humanId}\n`;

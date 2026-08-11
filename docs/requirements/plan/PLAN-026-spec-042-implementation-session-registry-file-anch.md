@@ -8,7 +8,7 @@ priority: high
 created: 2026-07-11
 updated: 2026-07-11
 tags: [spec-042, session, implementation]
-parent: SPEC-046
+parent: SPEC-042
 ---
 # PLAN — SPEC-042 implementation: session registry + file-anchor claim safety
 

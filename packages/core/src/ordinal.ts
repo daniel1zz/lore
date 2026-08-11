@@ -4,10 +4,12 @@
  * Public surface: `ORDINAL_REGISTRY` (which doc types get a store-allocated
  * display number, and which `spec_kind`s of that type are exempt from
  * allocation), the two display-composition formatters
- * (`formatDocDisplayId` / `composeDocDisplayTitle`), `parseOrdinalRef`
- * (parses a human-typed `SPEC-84` / `adr-007` reference back into
- * `{type, ordinal}`), and the title-purity predicate shared by every write
- * surface that must reject a self-declared number in a title.
+ * (`formatDocDisplayId` / `composeDocDisplayTitle`), the mirror-only padded
+ * variant (`formatMirrorHumanId` — reformats `formatDocDisplayId`'s OWN
+ * output, never a second composition site), `parseOrdinalRef` (parses a
+ * human-typed `SPEC-84` / `adr-007` reference back into `{type, ordinal}`),
+ * and the title-purity predicate shared by every write surface that must
+ * reject a self-declared number in a title.
  *
  * Invariant: this module is the ONLY legal site in the whole repo that
  * composes a `"SPEC-"`/`"ADR-"` display string from a prefix + number — see
@@ -112,6 +114,48 @@ export function composeDocDisplayTitle(doc: {
 }): string {
   const displayId = formatDocDisplayId(doc);
   return displayId === null ? doc.title : `${displayId} — ${doc.title}`;
+}
+
+/**
+ * The corpus→file MIRROR's zero-padded display id — `formatDocDisplayId(doc)`'s composed
+ * string with its numeric suffix left-padded to `width` digits (default 3), e.g.
+ * `"SPEC-021"` not `"SPEC-21"`.
+ *
+ * Deliberately a SEPARATE function from {@link formatDocDisplayId}, which keeps its own
+ * "no zero-padding" CLI/MCP/dashboard display contract byte-for-byte unchanged (pinned by
+ * `ordinal-identity.test.ts`'s AC-084-3 regression case — `formatDocDisplayId({type:"spec",
+ * ordinal:84})` must keep returning `"SPEC-84"`). This function never re-derives the
+ * `{prefix}-{ordinal}` composition independently (that would create a SECOND composition
+ * site, violating this module's "one legal site" invariant, see the header) — it only
+ * reformats the numeric suffix of {@link formatDocDisplayId}'s own output.
+ *
+ * Consumed ONLY by the corpus→file mirror write path (`ExportDocsService`'s
+ * `.lore/export-index.json` `human_id` allocation for numbered types, and the generated
+ * `docs/requirements/<type>/*.md` filenames/frontmatter `id:` derived from it) — never by
+ * general CLI/MCP/dashboard display, which stays on {@link formatDocDisplayId}. Zero-padding
+ * to 3 digits is the mirror's canonical form (user decision 2026-08-10,
+ * `task-unify-mirror-identifiers-on-zero-padded-form-export-all`): the mirror's filenames
+ * have always zero-padded (`SPEC-021-*.md`), and cross-type frontmatter `links:`/`parent:`
+ * entries cite that padded form — aligning `human_id` to the FILENAME convention (not the
+ * reverse) is what makes the migration-coverage eval's `links_broken` reach zero.
+ *
+ * @param doc - the `type` and `ordinal` of a doc (same shape {@link formatDocDisplayId} takes).
+ * @param width - minimum digit width for the numeric suffix (default 3); a wider ordinal
+ *   (≥1000) is never truncated, only ever padded UP to at least `width` digits.
+ * @returns the padded display id, or `null` under the same conditions
+ *   {@link formatDocDisplayId} returns `null` (non-numbered type, or no allocated ordinal).
+ */
+export function formatMirrorHumanId(
+  doc: { type: DocType; ordinal?: number | null },
+  width = 3,
+): string | null {
+  const displayId = formatDocDisplayId(doc);
+  if (displayId === null) return null;
+  const separatorIdx = displayId.indexOf("-");
+  if (separatorIdx === -1) return displayId; // defensive — every registry prefix embeds "-"
+  const prefix = displayId.slice(0, separatorIdx);
+  const ordinalText = displayId.slice(separatorIdx + 1);
+  return `${prefix}-${ordinalText.padStart(width, "0")}`;
 }
 
 /** Matches `SPEC-84` / `adr-007` (case-insensitive, optional leading zeros

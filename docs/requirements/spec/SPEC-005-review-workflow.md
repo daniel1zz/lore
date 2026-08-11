@@ -1,5 +1,5 @@
 ---
-id: SPEC-5
+id: SPEC-005
 type: spec
 role: spec
 title: "Review Workflow"
@@ -10,9 +10,9 @@ updated: 2026-07-14
 tags: [review, workflow, human-in-the-loop, phase-1]
 parent: PRD-001
 links:
-  - {id: SPEC-1, type: implements}
-  - {id: SPEC-2, type: relates-to}
-  - {id: SPEC-6, type: relates-to}
+  - {id: SPEC-001, type: implements}
+  - {id: SPEC-002, type: relates-to}
+  - {id: SPEC-006, type: relates-to}
 ---
 # SPEC-005: Review Workflow
 

@@ -8,7 +8,7 @@ priority: medium
 created: 2026-07-17
 updated: 2026-07-26
 tags: []
-parent: SPEC-087
+parent: SPEC-049
 phases:
   - {name: "P1-impl", description: "enforcer feed embedding + spec-create enrichment + tests"}
 ---

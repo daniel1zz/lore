@@ -10,7 +10,7 @@ updated: 2026-08-01
 tags: []
 parent: PRD-001
 links:
-  - {id: SPEC-38, type: implements}
+  - {id: SPEC-038, type: implements}
 ---
 # `lore ac set` — in-place edit of a declared acceptance criterion
 

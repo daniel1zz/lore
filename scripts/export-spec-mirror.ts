@@ -1,15 +1,19 @@
 #!/usr/bin/env bun
 /**
- * Spec-mirror export + drift check (`bun run mirror:export` / `bun run check:spec-mirror`) —
- * `spec-falsifiability-reachability-a-feedable-checkpoint-an` D6, AC-FR-6/AC-FR-7 (G5).
+ * Corpus-mirror export + drift check for ALL SIX mirrored doc types (`bun run mirror:export` /
+ * `bun run check:spec-mirror`) — `spec-falsifiability-reachability-a-feedable-checkpoint-an` D6,
+ * AC-FR-6/AC-FR-7/AC-FR-10 (G5).
  *
  * Root CLAUDE.md tells readers "exported mirrors live under `docs/requirements/spec/`", but
- * until this task NOTHING regenerated that directory and NOTHING detected its divergence from
- * the corpus (measured 2026-08-10: 100 files on disk vs 142 live corpus specs — 42 absent, before
- * ALSO discovering 89 orphaned legacy-named files once the exporter actually ran — see
- * `export-spec-mirror-core.ts`'s "Orphan pruning" for that measurement). This file delivers both
- * halves D6 requires, as two DELIBERATELY SEPARATE commands sharing one pure comparison function
- * (`computeMirrorParity`, imported from the sibling core module):
+ * until the first D6 task NOTHING regenerated that directory and NOTHING detected its
+ * divergence from the corpus (measured 2026-08-10: 100 files on disk vs 142 live corpus specs —
+ * 42 absent, before ALSO discovering 89 orphaned legacy-named files once the exporter actually
+ * ran — see `export-spec-mirror-core.ts`'s "Orphan pruning" for that measurement). This file
+ * delivers both halves D6 requires, as two DELIBERATELY SEPARATE commands sharing one pure
+ * comparison function (`computeMirrorParity`, imported from the sibling core module) — run ONCE
+ * PER {@link MirrorDocType} (task-unify-mirror-identifiers-on-zero-padded-form-export-all,
+ * 2026-08-11 — widened from `spec`-only to `MIRROR_TYPES`' full six types: `prd`/`spec`/`adr`/
+ * `knowledge`/`plan`/`task`, per AC-FR-10):
  *
  *   - `bun run mirror:export` (this file's default mode) — WRITES. Delegates to the existing,
  *     already-idempotent, already-collision-safe `ExportDocsService.exportDocs` (SPEC-021) —
@@ -57,44 +61,46 @@
  * "which working tree receives writes" (always the one running this script). Mirrors the identical
  * `REPO_ROOT` derivation `scripts/check-ac-ref-integrity.ts` already uses for its ledger path.
  *
- * ## Mirror identity: corpus spec (id, slug) <-> `.lore/export-index.json` mapping <-> on-disk file
+ * ## Mirror identity: corpus doc (id, slug) <-> `.lore/export-index.json` mapping <-> on-disk file
  *
- * A corpus spec's exported filename is `SPEC-<ordinal>-<kebab-title>.md` (human_id, never the
- * slug) — `.lore/export-index.json` (git-tracked, SPEC-021 §9.3) is the SSOT translating a spec's
- * ULID to its `file_path`. "Every corpus spec slug present as a file" (AC-FR-6) therefore means:
- * for every spec doc, its export-index mapping resolves to a file that exists on disk — reported
- * by SLUG (the human-readable identity a reader can act on), never by ULID or human_id alone.
+ * A corpus doc's exported filename is `{PREFIX}-<padded-ordinal-or-counter>-<kebab-title>.md`
+ * (human_id, never the slug) — `.lore/export-index.json` (git-tracked, SPEC-021 §9.3) is the SSOT
+ * translating a doc's ULID to its `file_path`. "Every corpus doc slug present as a file"
+ * (AC-FR-6/AC-FR-10) therefore means: for every doc of a mirrored type, its export-index mapping
+ * resolves to a file that exists on disk — reported by SLUG (the human-readable identity a
+ * reader can act on), never by ULID or human_id alone.
  *
  * Public surface:
- *   - `runExport` — IO, WRITES. Calls `ExportDocsService.exportDocs`, prunes orphans, then
- *     re-derives parity via `runCheck` so the export's own report reflects ground truth, never an
- *     assumed success.
+ *   - `runExport` — IO, WRITES. Calls `ExportDocsService.exportDocs` once per {@link
+ *     MirrorDocType}, prunes orphans across every mirrored directory, then re-derives parity via
+ *     `runCheck` so the export's own report reflects ground truth, never an assumed success.
  *   - `runCheck` — IO, READ-ONLY. Never calls `exportDocs` — see the module-level warning above.
  *   - `main` — IO. CLI dispatch (`--check` selects check mode); never calls `process.exit` itself.
  *   - Everything under "Pure/fs-only surface" below is re-exported from `export-spec-mirror-core.js`
  *     for callers that only need one import site.
  *
  * Side-effect class: `runCheck` reads the corpus (via the injected `App`) and the filesystem
- * (index + `.md` listing), never writes. `runExport` writes generated `.md` files and
+ * (index + `.md` listing per type), never writes. `runExport` writes generated `.md` files and
  * `.lore/export-index.json` (both git-tracked deliverables — expected to be committed, per this
  * task's own scope note). `main` also writes to stdout/stderr.
  *
  * Exit codes (⛔ "parity"/"OK" below means COUNT + SLUG PRESENCE ONLY — file CONTENT is never
  * compared; see `computeMirrorParity`'s own doc comment in `export-spec-mirror-core.ts` for why
  * that scope is deliberate, and for the caller-facing wording every "OK" message below must match):
- *   0 — clean. Export mode: 0 per-doc export errors AND every corpus spec has a mirror file
- *       (on-disk count === corpus spec count, every mapped file exists). Check mode: same parity
- *       condition, read-only.
- *   {@link MIRROR_DRIFT_EXIT_CODE} (2) — check mode found >=1 corpus spec not mirrored on disk
- *       (either never exported, or its mapped file is absent); OR export mode completed with 0
- *       per-doc errors but still failed to reach parity (defensive — should not occur for `spec`
- *       docs, since `exportDocs` either creates or reports an error for every doc it processes).
+ *   0 — clean. Export mode: 0 per-doc export errors across EVERY type AND every corpus doc of
+ *       every mirrored type has a mirror file (on-disk count === corpus count per type, every
+ *       mapped file exists). Check mode: same parity condition across all six types, read-only.
+ *   {@link MIRROR_DRIFT_EXIT_CODE} (2) — check mode found >=1 corpus doc (any mirrored type) not
+ *       mirrored on disk (either never exported, or its mapped file is absent); OR export mode
+ *       completed with 0 per-doc errors but still failed to reach parity for some type
+ *       (defensive — should not occur, since `exportDocs` either creates or reports an error for
+ *       every doc it processes).
  *   {@link MIRROR_HARD_FAILURE_EXIT_CODE} (4) — a per-doc export error, an unreadable or
- *       schema-invalid `.lore/export-index.json`, or a corpus read failure.
+ *       schema-invalid `.lore/export-index.json`, or a corpus read failure, for ANY type.
  *
  * Usage:
- *   bun scripts/export-spec-mirror.ts            # export (writes)
- *   bun scripts/export-spec-mirror.ts --check    # drift check (read-only, never regenerates)
+ *   bun scripts/export-spec-mirror.ts            # export ALL SIX types (writes)
+ *   bun scripts/export-spec-mirror.ts --check    # drift check, ALL SIX types (read-only, never regenerates)
  */
 
 import { existsSync } from "node:fs";
@@ -103,6 +109,8 @@ import { fileURLToPath } from "node:url";
 import { createApp, type App } from "../packages/lore/src/app.js";
 import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
 import {
+  MIRROR_TYPES,
+  mirrorDirRelative,
   SPEC_MIRROR_DIR_RELATIVE,
   MIRROR_DRIFT_EXIT_CODE,
   MIRROR_HARD_FAILURE_EXIT_CODE,
@@ -114,6 +122,7 @@ import {
   scriptChainReachesTarget,
   printParity,
   printExportReport,
+  type MirrorDocType,
   type MirrorParityResult,
   type MirrorParityMissing,
   type MirrorExportReportLike,
@@ -121,6 +130,8 @@ import {
 
 // Pure/fs-only surface — re-exported so a caller needing both halves has one import site.
 export {
+  MIRROR_TYPES,
+  mirrorDirRelative,
   SPEC_MIRROR_DIR_RELATIVE,
   MIRROR_DRIFT_EXIT_CODE,
   MIRROR_HARD_FAILURE_EXIT_CODE,
@@ -131,82 +142,139 @@ export {
   pruneOrphanMirrorFiles,
   scriptChainReachesTarget,
 };
-export type { MirrorParityResult, MirrorParityMissing, MirrorExportReportLike };
+export type { MirrorDocType, MirrorParityResult, MirrorParityMissing, MirrorExportReportLike };
 
 const __filename = fileURLToPath(import.meta.url);
 /** This file's own repo root — see module header "Why `projectDir` is derived from THIS FILE's own path". */
 const REPO_ROOT = join(__filename, "..", "..");
 
-/** Full result of one `runExport` run — the underlying service's own report, the orphan-pruning log (empty when nothing was orphaned), and the measured post-write parity verdict. */
+/** Parity verdict across every {@link MirrorDocType} — the aggregate `runCheck`/`runExport` return, one `MirrorParityResult` per type plus a corpus-wide `ok` (AND across all six). */
+export interface MirrorParityAllTypesResult {
+  readonly perType: Readonly<Record<MirrorDocType, MirrorParityResult>>;
+  /** `true` iff every type's own `perType[type].ok` is `true`. */
+  readonly ok: boolean;
+}
+
+/** Full result of one `runExport` run — the underlying service's own report PER TYPE, the corpus-wide orphan-pruning log (empty when nothing was orphaned), and the measured post-write parity verdict across all six types. */
 export interface MirrorExportResult {
-  readonly report: MirrorExportReportLike;
-  /** Repo-relative paths of `.md` files removed this run because no CURRENT export-index mapping pointed to them — see `export-spec-mirror-core.ts`'s "Orphan pruning". Never silent: always populated, even when empty. */
+  readonly perType: Readonly<Record<MirrorDocType, MirrorExportReportLike>>;
+  /** Repo-relative paths of `.md` files removed this run (any mirrored type) because no CURRENT export-index mapping pointed to them — see `export-spec-mirror-core.ts`'s "Orphan pruning". Never silent: always populated, even when empty. */
   readonly pruned: readonly string[];
-  readonly parity: MirrorParityResult;
+  readonly parity: MirrorParityAllTypesResult;
 }
 
 /**
- * Read-only drift check (D6/AC-FR-7). Reads the live corpus spec list and the on-disk mirror
- * state; NEVER calls `exportDocs` and never writes a byte — running this twice in a row against
- * the same on-disk state MUST report the identical verdict both times, which is exactly what
- * makes this a drift CHECK rather than a self-healing export.
+ * Read-only drift check (D6/AC-FR-7, widened to all six types by AC-FR-10). Reads the live
+ * corpus doc list and the on-disk mirror state for EVERY {@link MirrorDocType}; NEVER calls
+ * `exportDocs` and never writes a byte — running this twice in a row against the same on-disk
+ * state MUST report the identical verdict both times, which is exactly what makes this a drift
+ * CHECK rather than a self-healing export.
  *
- * @throws {SpecMirrorError} `corpus_unreadable` (store read failure) or any `loadMirrorMappings` error.
+ * `.lore/export-index.json` is loaded ONCE (not once per type) — it is a single shared mapping
+ * table keyed by doc ULID across ALL types, so `computeMirrorParity` looking up only the ids
+ * belonging to the current type's doc list is sufficient; no per-type filtering needed.
+ *
+ * @throws {SpecMirrorError} `corpus_unreadable` (store read failure, names the failing type) or
+ *   any `loadMirrorMappings` error.
  */
-export async function runCheck(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorParityResult> {
-  const specsResult = await app.corpusService.listFull({ type: "spec" });
-  if (!specsResult.ok) {
-    throw new SpecMirrorError("corpus_unreadable", `failed to list corpus spec docs: ${JSON.stringify(specsResult.error)}`, {
-      error: specsResult.error,
-    });
-  }
-  const specs = specsResult.value.docs.map((doc) => ({ id: doc.id, slug: doc.slug }));
-
+export async function runCheck(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorParityAllTypesResult> {
   const mappings = loadMirrorMappings(repoRoot);
-  const fileCountOnDisk = countMdFilesFlat(join(repoRoot, SPEC_MIRROR_DIR_RELATIVE));
   const fileExists = (relFilePath: string): boolean => existsSync(join(repoRoot, relFilePath));
 
-  return computeMirrorParity(specs, mappings, fileExists, fileCountOnDisk);
+  const perType = {} as Record<MirrorDocType, MirrorParityResult>;
+  for (const type of MIRROR_TYPES) {
+    const docsResult = await app.corpusService.listFull({ type });
+    if (!docsResult.ok) {
+      throw new SpecMirrorError("corpus_unreadable", `failed to list corpus ${type} docs: ${JSON.stringify(docsResult.error)}`, {
+        error: docsResult.error,
+        type,
+      });
+    }
+    const docs = docsResult.value.docs.map((doc) => ({ id: doc.id, slug: doc.slug }));
+    const fileCountOnDisk = countMdFilesFlat(join(repoRoot, mirrorDirRelative(type)));
+    perType[type] = computeMirrorParity(docs, mappings, fileExists, fileCountOnDisk);
+  }
+
+  const ok = MIRROR_TYPES.every((type) => perType[type].ok);
+  return { perType, ok };
 }
 
 /**
- * Idempotent, convergent export (D6/AC-FR-6). Delegates the actual corpus->markdown projection
- * to the existing `ExportDocsService.exportDocs` (SPEC-021) — this function adds nothing to that
- * algorithm's WRITE logic beyond scoping it to `type: "spec"` and this file's own `projectDir`
- * (never `dbPath`'s directory — see module header). It DOES add orphan pruning (see
- * `export-spec-mirror-core.ts`'s "Orphan pruning") — without it, this would be idempotent (stable
- * additions) but never convergent (exact parity), which is what AC-FR-6 actually requires.
- * Re-derives parity via `runCheck` afterward so the returned verdict is measured, never assumed
- * from `report.errors.length === 0` alone.
+ * Idempotent, convergent export (D6/AC-FR-6, widened to all six types by AC-FR-10). Delegates
+ * the actual corpus->markdown projection to the existing `ExportDocsService.exportDocs`
+ * (SPEC-021) — this function adds nothing to that algorithm's WRITE logic beyond scoping each
+ * call to one {@link MirrorDocType} at a time and this file's own `projectDir` (never `dbPath`'s
+ * directory — see module header). It DOES add orphan pruning across EVERY mirrored directory
+ * (see `export-spec-mirror-core.ts`'s "Orphan pruning") — without it, this would be idempotent
+ * (stable additions) but never convergent (exact parity), which is what AC-FR-6/AC-FR-10
+ * actually require. Re-derives parity via `runCheck` afterward so the returned verdict is
+ * measured, never assumed from `report.errors.length === 0` alone.
  *
- * @throws {SpecMirrorError} `corpus_unreadable` if the underlying `exportDocs` call itself fails
- *   (a store-level error, not a per-doc one — those land in `report.errors` instead); propagates
- *   `loadMirrorMappings`'s / `runCheck`'s errors for the post-write reconcile + verification pass.
+ * ⛔ Soft-deleted-doc orphans (measured 2026-08-11, task-unify-mirror-identifiers-on-zero-padded-
+ * form-export-all): `ExportDocsService.exportDocs`'s own reconcile/prune-adjacent logic only ever
+ * revisits docs in its OWN `findMany({type})` result, which defaults to `exclude_deleted: true`
+ * — a doc soft-deleted AFTER being mirrored is invisible to it forever, so its stale mapping
+ * (and file) would otherwise never be pruned even though `.md` files under a mirror dir must
+ * equal the LIVE (non-deleted) corpus count for AC-FR-10a. Fix: before pruning, this function
+ * additionally intersects the fresh mappings against the SAME live (non-deleted) doc-id set this
+ * pass just fetched per type — a mapping whose doc id is no longer live is treated as an orphan
+ * exactly like a mapping with no doc backing it at all, even though `.lore/export-index.json`
+ * itself still names it. (Empirically: doc `01KWVPCJBKHPTBZQBPMXZK0B99`, a soft-deleted
+ * `knowledge` assessment, inflated the on-disk knowledge count to 416 against a 415 live count.)
+ *
+ * @throws {SpecMirrorError} `corpus_unreadable` if the underlying `exportDocs`/`listFull` call
+ *   for ANY type fails outright (a store-level error, not a per-doc one — those land in that
+ *   type's `report.errors` instead); propagates `loadMirrorMappings`'s / `runCheck`'s errors for
+ *   the post-write reconcile + verification pass.
  */
 export async function runExport(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorExportResult> {
-  const exportResult = await app.exportDocsService.exportDocs({ projectDir: repoRoot, dryRun: false, type: "spec" });
-  if (!exportResult.ok) {
-    throw new SpecMirrorError("corpus_unreadable", `export failed: ${JSON.stringify(exportResult.error)}`, {
-      error: exportResult.error,
-    });
+  const perType = {} as Record<MirrorDocType, MirrorExportReportLike>;
+  for (const type of MIRROR_TYPES) {
+    const exportResult = await app.exportDocsService.exportDocs({ projectDir: repoRoot, dryRun: false, type });
+    if (!exportResult.ok) {
+      throw new SpecMirrorError("corpus_unreadable", `export failed for type ${type}: ${JSON.stringify(exportResult.error)}`, {
+        error: exportResult.error,
+        type,
+      });
+    }
+    perType[type] = exportResult.value;
+  }
+
+  // Live (non-deleted) doc-id set across every mirrored type — see the "soft-deleted-doc
+  // orphans" note above. Same default `exclude_deleted: true` ExportDocsService itself uses, so
+  // this set is exactly "what SHOULD still be mirrored", never a broader or narrower one.
+  const liveDocIds = new Set<string>();
+  for (const type of MIRROR_TYPES) {
+    const docsResult = await app.corpusService.listFull({ type });
+    if (!docsResult.ok) {
+      throw new SpecMirrorError("corpus_unreadable", `failed to list corpus ${type} docs for orphan pruning: ${JSON.stringify(docsResult.error)}`, {
+        error: docsResult.error,
+        type,
+      });
+    }
+    for (const doc of docsResult.value.docs) liveDocIds.add(doc.id);
   }
 
   // reason: exportDocs saves the index (Phase 1) BEFORE it writes any files (Phase 2) — see
-  // ExportDocsService's own module header — so by the time exportDocs() has returned, the index
-  // on disk already reflects every mapping change this run made. Re-reading it here (rather than
-  // reusing a stale in-memory copy) is what makes pruning see the CURRENT truth.
+  // ExportDocsService's own module header — so by the time every type's exportDocs() call has
+  // returned, the index on disk already reflects every mapping change this run made. Re-reading
+  // it here (rather than reusing a stale in-memory copy) is what makes pruning see the CURRENT
+  // truth, across every type's directory in one pass.
   const freshMappings = loadMirrorMappings(repoRoot);
-  const pruned = pruneOrphanMirrorFiles(repoRoot, freshMappings);
+  const liveMappings = Object.fromEntries(
+    Object.entries(freshMappings).filter(([docId]) => liveDocIds.has(docId)),
+  );
+  const pruned = pruneOrphanMirrorFiles(repoRoot, liveMappings, MIRROR_TYPES.map(mirrorDirRelative));
 
   const parity = await runCheck(app, repoRoot);
-  return { report: exportResult.value, pruned, parity };
+  return { perType, pruned, parity };
 }
 
 /**
  * CLI entrypoint: dispatches export vs. check mode from `argv`, runs it against a real `App`,
- * prints a report, and returns the process exit code. Never calls `process.exit` itself (the
- * `import.meta.main` block below is the only place that does), so this stays directly callable
- * from tests.
+ * prints a report per type, and returns the process exit code. Never calls `process.exit` itself
+ * (the `import.meta.main` block below is the only place that does), so this stays directly
+ * callable from tests.
  *
  * @param argv defaults to `process.argv.slice(2)`; `--check` selects the read-only drift check.
  * @param repoRootOverride defaults to {@link REPO_ROOT} (this file's own location) — tests pass a
@@ -226,23 +294,27 @@ export async function main(
   try {
     if (checkMode) {
       const parity = await runCheck(app, repoRoot);
-      printParity("check", parity);
-      if (!parity.ok) return MIRROR_DRIFT_EXIT_CODE;
-      console.log(`export-spec-mirror --check: OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).`);
-      return 0;
+      let allOk = true;
+      for (const type of MIRROR_TYPES) {
+        if (!printParity("check", type, parity.perType[type])) allOk = false;
+      }
+      return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
     }
 
-    const { report, pruned, parity } = await runExport(app, repoRoot);
-    printExportReport(report);
+    const { perType, pruned, parity } = await runExport(app, repoRoot);
+    for (const type of MIRROR_TYPES) printExportReport(type, perType[type]);
     if (pruned.length > 0) {
-      console.log(`export-spec-mirror: pruned ${pruned.length} orphaned file(s) (no longer mapped to any corpus spec):`);
+      console.log(`export-spec-mirror: pruned ${pruned.length} orphaned file(s) (no longer mapped to any corpus doc, any mirrored type):`);
       for (const relPath of pruned) console.log(`  ${relPath}`);
     }
-    printParity("export", parity);
-    if (report.errors.length > 0) return MIRROR_HARD_FAILURE_EXIT_CODE;
-    if (!parity.ok) return MIRROR_DRIFT_EXIT_CODE;
-    console.log(`export-spec-mirror: OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).`);
-    return 0;
+    let anyErrors = false;
+    let allOk = true;
+    for (const type of MIRROR_TYPES) {
+      if (perType[type].errors.length > 0) anyErrors = true;
+      if (!printParity("export", type, parity.perType[type])) allOk = false;
+    }
+    if (anyErrors) return MIRROR_HARD_FAILURE_EXIT_CODE;
+    return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
   } finally {
     app.close();
   }

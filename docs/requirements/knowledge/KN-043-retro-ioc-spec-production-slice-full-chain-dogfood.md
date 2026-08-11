@@ -3,11 +3,12 @@ id: KN-043
 type: knowledge
 role: knowledge
 title: "Retro — IoC spec-production slice (full-chain dogfood + worktree/env learnings)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-07-08
+updated: 2026-07-14
 tags: [retro, ioc-slice, dogfood, worktree, learnings]
+parent: PLAN-024
 links:
   - {id: PLAN-024, type: informs}
 ---

@@ -193,5 +193,5 @@ Lore is itself the knowledge store — query it through its own CLI rather than 
 - `lore pending` — list docs awaiting review
 - `lore log <id-or-slug>` — version history; `lore diff <id> --from N --to M` for unified diff
 - `lore status` — corpus-level health snapshot
-- ⛔ The corpus is the ONLY spec index — read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/spec/`.
+- ⛔ The corpus is the ONLY spec index — read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`, zero-padded 3-digit ids (`bun run mirror:export` / `check:spec-mirror`).
 <!-- /auto:dynamic-context -->

@@ -10,7 +10,7 @@ updated: 2026-07-18
 tags: []
 parent: PRD-001
 links:
-  - {id: SPEC-087, type: informs}
+  - {id: SPEC-049, type: informs}
   - {id: SPEC-050, type: informs}
   - {id: SPEC-051, type: informs}
   - {id: ADR-006, type: informs}

@@ -8,6 +8,7 @@ priority: medium
 created: 2026-07-07
 updated: 2026-07-07
 tags: [retro, e2e, test-isolation, spec-036]
+parent: PRD-001
 links:
   - {id: SPEC-036, type: relates-to}
 ---

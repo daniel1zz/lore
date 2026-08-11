@@ -3,12 +3,12 @@ id: PLAN-027
 type: plan
 role: plan
 title: "SPEC-043 Implementation — bi-temporal invalidation"
-status: active
+status: archived
 priority: high
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-12
 tags: [spec-043, validity, implementation]
-parent: SPEC-047
+parent: SPEC-043
 ---
 # PLAN — SPEC-043 implementation: bi-temporal invalidation
 

@@ -3,18 +3,18 @@ id: PLAN-032
 type: plan
 role: plan
 title: "Implementation — SPEC-080 bootstrap injection projection (interface-first)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-29
 tags: []
-parent: SPEC-081
+parent: SPEC-080
 phases:
   - {name: "Phase 1: Core contract", description: "Pin the projection contract: RED unit suite then buildBootstrapInjection + bootstrapInjectionSchema + workflow.bootstrap_injection knobs in @lore/core. Serial."}
   - {name: "Phase 2: Surfaces (parallel)", description: "Three disjoint-anchor consumers of the frozen contract: CLI --injection + config threading; hook blind-pipe + backstop; session-service omitted-plan fixture. 3-way parallel, each blocked only by T2."}
   - {name: "Phase 3: Verification", description: "Compiled-binary e2e (AC-080-3/6) then the attested sweep: build, manifest check, typecheck, full suites on main, lore verify, spec code anchors, live smoke."}
 links:
-  - {id: SPEC-081, type: implements}
+  - {id: SPEC-080, type: implements}
 ---
 ## Overview
 
