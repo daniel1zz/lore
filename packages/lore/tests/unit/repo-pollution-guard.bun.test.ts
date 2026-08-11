@@ -28,7 +28,23 @@
  *                pre-existing behaviour this task must not break).
  */
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
+
+/**
+ * Path to the e2e WIRING file (SPEC-OX D3, AC-OX-2) — the OTHER file, never this
+ * one. Reading a distinct file (rather than this test file's own source) is what
+ * keeps the assertions below non-vacuous: a `toContain` over this file's own
+ * literals would trivially match its own copy of the same strings.
+ */
+const E2E_WIRING_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "integration",
+  "spec-loop-e2e.bun.test.ts",
+);
 
 describe("checkRepoPollution", () => {
   // ── NEGATIVE: this is the case the pre-widening guard could not see — written
@@ -122,5 +138,40 @@ describe("checkRepoPollution", () => {
     const second = checkRepoPollution(input);
     expect(first).toEqual(second);
     expect(first.offendingPaths).not.toBe(second.offendingPaths); // distinct array instances
+  });
+});
+
+/**
+ * AC-OX-2 revision (2026-08-11, in-flight): SPEC-061's attestation-completeness
+ * guard counts every test-file-shaped argv token in an AC's declared command, so a
+ * command pairing `grep ... spec-loop-e2e.bun.test.ts` with `bun test
+ * repo-pollution-guard.bun.test.ts` declared TWO paths against ONE executed file and
+ * `lore verify` returned `inconclusive`. Fix: the grep assertion moves IN here — this
+ * unit suite reads the e2e wiring file's source and asserts its shape directly, so
+ * AC-OX-2's declared command names exactly one path and runs on every `bun run test`.
+ *
+ * ⛔ Vacuity trap: read the OTHER file (`spec-loop-e2e.bun.test.ts`), never this
+ * file's own source — a `toContain` over this file would trivially match its own
+ * copy of the same literal strings.
+ */
+describe("e2e wiring (packages/lore/tests/integration/spec-loop-e2e.bun.test.ts)", () => {
+  const e2eSource = readFileSync(E2E_WIRING_PATH, "utf8");
+
+  it("names the WIDENED invocation — git status --short .lore docs/requirements — not just the pre-widening .lore-only form", () => {
+    expect(e2eSource).toContain("git status --short .lore docs/requirements");
+  });
+
+  it("wires the guard at FILE scope: beforeAll/afterAll at column 0, never nested inside a describe block", () => {
+    // Column-0 (no leading whitespace) is what makes a hook wrap the WHOLE file's
+    // test run rather than only one describe's own tests — the exact defect found
+    // in the pre-change guard, whose it() never actually ran "before" despite its
+    // name. A hook indented under a describe would fail this pattern.
+    expect(/^beforeAll\(\(\) => \{$/m.test(e2eSource)).toBe(true);
+    expect(/^afterAll\(\(\) => \{$/m.test(e2eSource)).toBe(true);
+  });
+
+  it("the file-scope beforeAll drives the \"before\" phase and afterAll drives the \"after\" phase", () => {
+    expect(e2eSource).toContain('assertRepoCorpusClean("before")');
+    expect(e2eSource).toContain('assertRepoCorpusClean("after")');
   });
 });
