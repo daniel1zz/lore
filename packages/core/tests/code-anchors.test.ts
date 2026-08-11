@@ -44,7 +44,11 @@ function makeEntry(overrides: Partial<DriftInputEntry> = {}): DriftInputEntry {
     overrides.anchor ?? { raw: "src/a.ts", path: "src/a.ts", isDir: false };
   return {
     spec_id: "01SPEC000000000000000001",
-    spec_slug: "spec-x",
+    doc_slug: "spec-x",
+    // The default fixture is a SPEC-owned anchor. The knowledge-owned population and
+    // the per-row doc_type attribution live in
+    // packages/lore/tests/unit/service/drift-population-reporting.test.ts.
+    doc_type: "spec",
     spec_status: "approved",
     ...overrides,
     anchor,
@@ -405,11 +409,11 @@ describe("REGRESSION — computeDrift classifies all six drift kinds", () => {
   it("probe_error: a probe carrying an explicit error becomes a probe_error row for that anchor, scan continues", () => {
     const declared = [
       makeEntry({
-        spec_slug: "spec-a",
+        doc_slug: "spec-a",
         anchor: { raw: "src/a.ts", path: "src/a.ts", isDir: false },
       }),
       makeEntry({
-        spec_slug: "spec-b",
+        doc_slug: "spec-b",
         anchor: { raw: "src/b.ts", path: "src/b.ts", isDir: false },
       }),
     ];
@@ -421,7 +425,8 @@ describe("REGRESSION — computeDrift classifies all six drift kinds", () => {
     expect(result.consistent).toBe(false);
     expect(result.drifts).toHaveLength(1);
     expect(result.drifts[0]?.kind).toBe("probe_error");
-    expect(result.drifts[0]?.spec_slug).toBe("spec-a");
+    expect(result.drifts[0]?.doc_slug).toBe("spec-a");
+    expect(result.drifts[0]?.doc_type).toBe("spec");
     expect(result.drifts[0]?.detail).toContain("EACCES");
   });
 });

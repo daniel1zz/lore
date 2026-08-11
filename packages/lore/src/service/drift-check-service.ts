@@ -1,18 +1,19 @@
 /**
  * DriftCheckService — orchestrates the doc-code drift oracle (SPEC-045 §Design
  * Decisions D4, D6, D9 — memory hygiene part 3, doc-code drift oracle H3). Loads
- * every non-deleted spec's declared `extra.code_anchors`, probes each DISTINCT path
+ * every non-deleted SPEC's and KNOWLEDGE doc's declared `extra.code_anchors`, probes
+ * each DISTINCT path
  * exactly once via an injected `FsProbe` port, and delegates classification to the
  * pure `computeDrift` (`@lore/core`, code-anchors.ts). ALSO owns the code_anchors
  * authoring RMW verbs (`addCodeAnchors`/`removeCodeAnchors`/`setCodeAnchors`) — the
- * spec-target half of `lore anchor` dispatch (D6; the task-target half stays on
- * `TaskWorkflowService`, unchanged).
+ * spec/knowledge-target half of `lore anchor` dispatch (D6; the task-target half
+ * stays on `TaskWorkflowService`, unchanged).
  *
  * Public surface:
- *   checkDrift(probe)                          → scan every armed spec, report drift
- *   addCodeAnchors(specIdOrSlug, anchors)      → incremental CAS RMW union
- *   removeCodeAnchors(specIdOrSlug, anchors)   → incremental CAS RMW difference
- *   setCodeAnchors(specIdOrSlug, anchors)      → declarative CAS REPLACE (MCP shape)
+ *   checkDrift(probe)                         → scan every armed spec + knowledge doc
+ *   addCodeAnchors(docIdOrSlug, anchors)      → incremental CAS RMW union
+ *   removeCodeAnchors(docIdOrSlug, anchors)   → incremental CAS RMW difference
+ *   setCodeAnchors(docIdOrSlug, anchors)      → declarative CAS REPLACE (MCP shape)
  *
  * @invariant This module NEVER imports the Node filesystem builtin — every probe
  *   call goes through the caller-injected `FsProbe` port (D4). `checkDrift`'s `probe`
@@ -25,9 +26,16 @@
  *   anchor sharing that path, and the scan CONTINUES for every other path (D4, G11 —
  *   never a batch-abort silent false-negative).
  * @invariant Probe-level dedup: `stat`/`listDir`/`readFile` are each called AT MOST
- *   ONCE per DISTINCT declared path, regardless of how many specs (or how many
- *   anchors on the SAME spec) declare that path — a separate, later concern from
- *   `parseCodeAnchor`'s per-entry validation (D4, D1).
+ *   ONCE per DISTINCT declared path, regardless of how many documents (or how many
+ *   anchors on the SAME document) declare that path — a separate, later concern from
+ *   `parseCodeAnchor`'s per-entry validation (D4, D1). The dedup spans BOTH scanned
+ *   populations: a path anchored by a spec AND by a knowledge doc is probed once.
+ * @invariant TWO populations are scanned and reported SEPARATELY (`specs_checked`,
+ *   `knowledge_checked`), while `armed`/`consistent` are computed over their UNION —
+ *   so a drift report can never imply it covered knowledge when it did not, and can
+ *   never call a corpus consistent because only the spec half was clean. Every
+ *   emitted `DriftRow` carries its own `doc_type` (M2 of
+ *   spec-a-write-side-fact-with-no-read-side-address-counts-with-no).
  * @invariant `checkDrift` performs ZERO store writes, bumps no doc version, writes no
  *   audit rows — a REPORT, never a mutation (D9). Paired with the positive-detection
  *   ACs (AC-DR-1/AC-DR-4) — read-only-ness alone is no-op-satisfiable (D9 note).
@@ -36,8 +44,10 @@
  *   call) and produce exactly one `insertVersion` snapshot + one `appendAuditEntry`
  *   (action "update", actor "system") — same shape as `AcService.writeCriteria`, so
  *   `AuditService.verify`'s completeness oracle needs no special case for these
- *   writes. Every sibling `extra` key (spec_kind, acceptance_criteria, ...) is
- *   preserved verbatim via `{...spec.extra, code_anchors: ...}`.
+ *   writes. Every sibling `extra` key (spec_kind, acceptance_criteria, knowledge's
+ *   own REQUIRED sub_type, ...) is preserved verbatim via
+ *   `{...doc.extra, code_anchors: ...}` — a knowledge doc losing `sub_type` here
+ *   would fail its own create-schema on the next validated write.
  *
  * Side-effect class: IO (reads/writes via StoreInterface; `checkDrift` additionally
  *   invokes the injected FsProbe port, but issues no store WRITES).
@@ -55,7 +65,7 @@ import {
   type AnchorProbe,
   type DriftRow,
 } from "@lore/core";
-import type { DocRecord } from "@lore/core";
+import type { DocRecord, DocType } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 
@@ -82,16 +92,46 @@ export interface FsProbe {
 
 /** Result of {@link DriftCheckService.checkDrift}. */
 export interface DriftCheckResult {
-  /** `true` iff at least one non-deleted spec declares ≥1 `code_anchors` entry. */
+  /** `true` iff at least one non-deleted spec OR knowledge doc declares ≥1 `code_anchors` entry. */
   armed: boolean;
   /** `true` iff `drifts` is empty (armed:false ⇒ always consistent, vacuously). */
   consistent: boolean;
-  /** Count of specs that declare ≥1 code_anchors entry — the scanned population (U7). */
+  /** Count of non-deleted SPECS that declare ≥1 code_anchors entry (U7). */
   specs_checked: number;
-  /** `specs_checked`'s population, broken down by doc status. */
+  /**
+   * Count of non-deleted KNOWLEDGE docs that declare ≥1 code_anchors entry — mirrors
+   * {@link DriftCheckResult.specs_checked} exactly, reported separately so a caller can
+   * tell "knowledge was scanned and clean" from "knowledge was never scanned".
+   */
+  knowledge_checked: number;
+  /**
+   * The UNION of both scanned populations, broken down by doc status. Statuses are
+   * shared vocabulary across doc types, so this histogram does NOT attribute per type
+   * — `specs_checked`/`knowledge_checked` and each row's own `doc_type` do that.
+   */
   status_breakdown: Record<string, number>;
-  /** Every anchor that failed to verify, sorted by spec_slug then anchor (D5 — adapter's job to sort; this returns scan order). */
+  /** Every anchor that failed to verify, sorted by doc_slug then anchor (D5 — adapter's job to sort; this returns scan order). */
   drifts: DriftRow[];
+}
+
+/**
+ * The doc types whose `extra.code_anchors` `checkDrift` scans and whose anchors the
+ * RMW verbs may write — the SINGLE definition of that set, read by both the scan and
+ * the target-type refusal, so the two can never disagree about what is anchorable.
+ *
+ * `knowledge` is here because a team files a domain FACT as knowledge (a fact has no
+ * implementation plan), and an unanchored fact's assertions about code had zero drift
+ * detection — M2 of
+ * `spec-a-write-side-fact-with-no-read-side-address-counts-with-no`. All 9 knowledge
+ * sub_types are eligible: a retro's claim about code is exactly as falsifiable as a
+ * reference table's.
+ */
+export const ANCHOR_SCANNED_DOC_TYPES: readonly DocType[] = ["spec", "knowledge"];
+
+/** One armed document: it declares ≥1 parseable `code_anchors` entry. */
+interface ArmedDoc {
+  doc: DocRecord;
+  anchors: DriftInputEntry["anchor"][];
 }
 
 const defaultNow = (): string => new Date().toISOString();
@@ -104,31 +144,34 @@ export class DriftCheckService {
   // ── checkDrift ──────────────────────────────────────────────────────────
 
   /**
-   * Scans every non-deleted spec's declared `extra.code_anchors` against the
-   * working tree via `probe`, returning a full drift report. Never mutates
+   * Scans every non-deleted SPEC's and KNOWLEDGE doc's declared `extra.code_anchors`
+   * against the working tree via `probe`, returning a full drift report. Never mutates
    * anything (D9).
    *
    * @param probe - Filesystem probe port, injected per call (D4).
-   * @returns {@link DriftCheckResult}
+   * @returns {@link DriftCheckResult} — `specs_checked`/`knowledge_checked` report the
+   *   two populations separately; `armed`/`consistent` span their union.
    * @throws STORE_ERROR (findMany failure) — probe failures never abort the scan,
    *   only become `probe_error` rows.
    */
   async checkDrift(probe: FsProbe): Promise<Result<DriftCheckResult, LoreError>> {
-    const specsResult = await this.store.findMany({ type: "spec" });
-    if (!specsResult.ok) return specsResult;
-
-    const armedSpecs: Array<{ doc: DocRecord; anchors: DriftInputEntry["anchor"][] }> = [];
-    for (const doc of specsResult.value) {
-      const anchors = extractParsedCodeAnchors(doc);
-      if (anchors.length > 0) armedSpecs.push({ doc, anchors });
+    const armedByType = new Map<DocType, ArmedDoc[]>();
+    for (const type of ANCHOR_SCANNED_DOC_TYPES) {
+      const docsResult = await this.store.findMany({ type });
+      if (!docsResult.ok) return docsResult;
+      armedByType.set(type, collectArmedDocs(docsResult.value));
     }
 
     const declared: DriftInputEntry[] = [];
     const statusBreakdown: Record<string, number> = {};
-    for (const { doc, anchors } of armedSpecs) {
-      statusBreakdown[doc.status] = (statusBreakdown[doc.status] ?? 0) + 1;
-      for (const anchor of anchors) {
-        declared.push({ spec_id: doc.id, spec_slug: doc.slug, spec_status: doc.status, anchor });
+    let armedTotal = 0;
+    for (const [type, armedDocs] of armedByType) {
+      armedTotal += armedDocs.length;
+      for (const { doc, anchors } of armedDocs) {
+        statusBreakdown[doc.status] = (statusBreakdown[doc.status] ?? 0) + 1;
+        for (const anchor of anchors) {
+          declared.push({ spec_id: doc.id, doc_slug: doc.slug, doc_type: type, spec_status: doc.status, anchor });
+        }
       }
     }
 
@@ -136,9 +179,13 @@ export class DriftCheckService {
     const { consistent, drifts } = computeDrift(declared, probes);
 
     return ok({
-      armed: armedSpecs.length > 0,
+      // reason: `armed` counts the UNION, derived from the scanned map rather than
+      // from the two named fields below — so a third anchor-declaring doc type added
+      // to ANCHOR_SCANNED_DOC_TYPES cannot leave `armed` silently false for it.
+      armed: armedTotal > 0,
       consistent,
-      specs_checked: armedSpecs.length,
+      specs_checked: armedByType.get("spec")?.length ?? 0,
+      knowledge_checked: armedByType.get("knowledge")?.length ?? 0,
       status_breakdown: statusBreakdown,
       drifts,
     });
@@ -151,57 +198,57 @@ export class DriftCheckService {
    * BOTH — mirrors `TaskWorkflowService.addAnchors`'s shape), rejecting the whole
    * call loud on the first grammar violation.
    *
-   * @param specIdOrSlug - Spec document ULID or slug
+   * @param docIdOrSlug - Spec or knowledge document ULID or slug
    * @param anchors - Candidate raw anchor strings to add
    * @param now - Time seam (mirrors `TaskWorkflowService`'s `now: () => string`
    *   convention) — lets a test deterministically inject a concurrent writer
    *   between the read and the CAS write (SPEC-025 §7 sequential-CAS recipe).
    * @returns Updated `code_anchors` array after the union
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / bad anchor entry), STALE_VERSION
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec/knowledge doc, or a bad anchor entry), STALE_VERSION
    */
   async addCodeAnchors(
-    specIdOrSlug: string,
+    docIdOrSlug: string,
     anchors: string[],
     now: () => string = defaultNow,
   ): Promise<Result<string[], LoreError>> {
-    const specResult = await this.resolveSpec(specIdOrSlug);
-    if (!specResult.ok) return specResult;
-    const spec = specResult.value;
+    const docResult = await this.resolveAnchorableDoc(docIdOrSlug);
+    if (!docResult.ok) return docResult;
+    const doc = docResult.value;
 
-    const existing = extractCodeAnchorStrings(spec);
+    const existing = extractCodeAnchorStrings(doc);
     const normalizedResult = normalizeCodeAnchorEntries([...existing, ...anchors]);
     if (!normalizedResult.ok) return normalizedResult;
 
-    return this.writeCodeAnchors(spec, normalizedResult.value, "add", now);
+    return this.writeCodeAnchors(doc, normalizedResult.value, "add", now);
   }
 
   /**
    * Read-modify-write DIFFERENCE: normalizes the removal candidates, then strips
    * any matching entry from the spec's existing (as-stored) list.
    *
-   * @param specIdOrSlug - Spec document ULID or slug
+   * @param docIdOrSlug - Spec or knowledge document ULID or slug
    * @param anchors - Candidate raw anchor strings to remove
    * @param now - Time seam (see {@link addCodeAnchors}).
    * @returns Updated `code_anchors` array after removal
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / bad anchor entry), STALE_VERSION
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec/knowledge doc, or a bad anchor entry), STALE_VERSION
    */
   async removeCodeAnchors(
-    specIdOrSlug: string,
+    docIdOrSlug: string,
     anchors: string[],
     now: () => string = defaultNow,
   ): Promise<Result<string[], LoreError>> {
-    const specResult = await this.resolveSpec(specIdOrSlug);
-    if (!specResult.ok) return specResult;
-    const spec = specResult.value;
+    const docResult = await this.resolveAnchorableDoc(docIdOrSlug);
+    if (!docResult.ok) return docResult;
+    const doc = docResult.value;
 
     const normalizedRemovalResult = normalizeCodeAnchorEntries(anchors);
     if (!normalizedRemovalResult.ok) return normalizedRemovalResult;
     const toRemove = new Set(normalizedRemovalResult.value);
 
-    const existing = extractCodeAnchorStrings(spec);
+    const existing = extractCodeAnchorStrings(doc);
     const remaining = existing.filter((a) => !toRemove.has(a));
 
-    return this.writeCodeAnchors(spec, remaining, "remove", now);
+    return this.writeCodeAnchors(doc, remaining, "remove", now);
   }
 
   /**
@@ -209,39 +256,43 @@ export class DriftCheckService {
    * the CLI's `addCodeAnchors`/`removeCodeAnchors`, this OVERWRITES the whole
    * `code_anchors` array with `anchors` (normalized).
    *
-   * @param specIdOrSlug - Spec document ULID or slug
+   * @param docIdOrSlug - Spec or knowledge document ULID or slug
    * @param anchors - The FULL replacement anchor list
    * @param now - Time seam (see {@link addCodeAnchors}).
    * @returns The new `code_anchors` array
-   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / bad anchor entry), STALE_VERSION
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec/knowledge doc, or a bad anchor entry), STALE_VERSION
    */
   async setCodeAnchors(
-    specIdOrSlug: string,
+    docIdOrSlug: string,
     anchors: string[],
     now: () => string = defaultNow,
   ): Promise<Result<string[], LoreError>> {
-    const specResult = await this.resolveSpec(specIdOrSlug);
-    if (!specResult.ok) return specResult;
-    const spec = specResult.value;
+    const docResult = await this.resolveAnchorableDoc(docIdOrSlug);
+    if (!docResult.ok) return docResult;
+    const doc = docResult.value;
 
     const normalizedResult = normalizeCodeAnchorEntries(anchors);
     if (!normalizedResult.ok) return normalizedResult;
 
-    return this.writeCodeAnchors(spec, normalizedResult.value, "set", now);
+    return this.writeCodeAnchors(doc, normalizedResult.value, "set", now);
   }
 
   // ── Private Helpers ───────────────────────────────────────────────────────
 
-  /** Resolves idOrSlug and validates it is a spec document. */
-  private async resolveSpec(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
+  /**
+   * Resolves idOrSlug and validates it is a document type this service may anchor —
+   * gated by {@link ANCHOR_SCANNED_DOC_TYPES}, the same set `checkDrift` scans, so a
+   * doc can never be anchorable-but-unscanned (or scanned-but-unanchorable).
+   */
+  private async resolveAnchorableDoc(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     const docResult = await resolveDoc(this.store, idOrSlug);
     if (!docResult.ok) return docResult;
     const doc = docResult.value;
-    if (doc.type !== "spec") {
+    if (!ANCHOR_SCANNED_DOC_TYPES.includes(doc.type)) {
       return err({
         code: "VALIDATION_ERROR",
         field: "type",
-        message: `Expected a spec document; got type '${doc.type}'`,
+        message: `Expected a ${ANCHOR_SCANNED_DOC_TYPES.join(" or ")} document; got type '${doc.type}'`,
         value: doc.type,
       });
     }
@@ -250,30 +301,31 @@ export class DriftCheckService {
 
   /**
    * Shared CAS-guarded write path for addCodeAnchors/removeCodeAnchors/
-   * setCodeAnchors — bumps the spec's version, writes one insertVersion snapshot,
+   * setCodeAnchors — bumps the document's version, writes one insertVersion snapshot,
    * then one audit entry (action "update", actor "system"). Mirrors
-   * `AcService.writeCriteria` exactly.
+   * `AcService.writeCriteria` exactly. Target-type admission already happened in
+   * {@link DriftCheckService.resolveAnchorableDoc}; this path is type-agnostic.
    */
   private async writeCodeAnchors(
-    spec: DocRecord,
+    doc: DocRecord,
     anchors: string[],
     operation: "add" | "remove" | "set",
     now: () => string,
   ): Promise<Result<string[], LoreError>> {
     const nowIso = now();
-    const newVersion = spec.version + 1;
-    const newExtra: Record<string, unknown> = { ...spec.extra, code_anchors: anchors };
+    const newVersion = doc.version + 1;
+    const newExtra: Record<string, unknown> = { ...doc.extra, code_anchors: anchors };
 
     const updateResult = await this.store.update(
-      spec.id,
+      doc.id,
       { extra: newExtra, updated_at: nowIso, version: newVersion },
-      { expected_version: spec.version },
+      { expected_version: doc.version },
     );
     if (!updateResult.ok) return updateResult;
 
     const changeVerb = operation === "add" ? "updated" : operation === "remove" ? "updated (removal)" : "replaced";
     const versionResult = await this.store.insertVersion({
-      doc_id: spec.id,
+      doc_id: doc.id,
       version: newVersion,
       content: updateResult.value.content,
       extra: updateResult.value.extra,
@@ -292,9 +344,9 @@ export class DriftCheckService {
     const auditResult = await this.store.appendAuditEntry({
       timestamp: nowIso,
       actor: "system",
-      session_id: spec.id,
+      session_id: doc.id,
       action: "update",
-      doc_id: spec.id,
+      doc_id: doc.id,
       details: { operation, anchor_count: anchors.length, version: newVersion },
     });
     if (!auditResult.ok) return auditResult;
@@ -306,24 +358,41 @@ export class DriftCheckService {
 // ─── Module-scope Helpers ────────────────────────────────────────────────────
 
 /**
- * Extracts a spec's raw stored `code_anchors` strings, defensively (untyped
+ * Narrows a fetched population to the ARMED subset — the docs that declare ≥1
+ * parseable `code_anchors` entry. `store.findMany` already excludes soft-deleted
+ * docs, so the armed population is non-deleted by construction.
+ *
+ * @param docs - Every non-deleted doc of one type, as returned by `store.findMany`
+ * @returns One {@link ArmedDoc} per doc with at least one parseable anchor
+ */
+function collectArmedDocs(docs: readonly DocRecord[]): ArmedDoc[] {
+  const armed: ArmedDoc[] = [];
+  for (const doc of docs) {
+    const anchors = extractParsedCodeAnchors(doc);
+    if (anchors.length > 0) armed.push({ doc, anchors });
+  }
+  return armed;
+}
+
+/**
+ * Extracts a document's raw stored `code_anchors` strings, defensively (untyped
  * `extra` storage — mirrors `AcService`'s `extractCriteria`/`TaskWorkflowService`'s
  * `extractFileAnchors` shape).
  */
-function extractCodeAnchorStrings(spec: DocRecord): string[] {
-  const raw = spec.extra["code_anchors"];
+function extractCodeAnchorStrings(doc: DocRecord): string[] {
+  const raw = doc.extra["code_anchors"];
   return Array.isArray(raw) ? raw.filter((a): a is string => typeof a === "string") : [];
 }
 
 /**
- * Extracts and PARSES a spec's stored `code_anchors` into `ParsedCodeAnchor[]`,
+ * Extracts and PARSES a document's stored `code_anchors` into `ParsedCodeAnchor[]`,
  * silently skipping any entry that fails `parseCodeAnchor` — grammar is guaranteed
  * at every write seam (D6a), so a parse failure here means a hand-edited/legacy row;
  * this scan-time defensive skip is intentionally OUT of the six documented drift
  * kinds (grammar policing is a WRITE-time concern, not this read-only scan's job).
  */
-function extractParsedCodeAnchors(spec: DocRecord): DriftInputEntry["anchor"][] {
-  const raw = extractCodeAnchorStrings(spec);
+function extractParsedCodeAnchors(doc: DocRecord): DriftInputEntry["anchor"][] {
+  const raw = extractCodeAnchorStrings(doc);
   const parsed: DriftInputEntry["anchor"][] = [];
   for (const entry of raw) {
     const result = parseCodeAnchor(entry);

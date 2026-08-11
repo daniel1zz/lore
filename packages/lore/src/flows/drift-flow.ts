@@ -24,7 +24,7 @@
  *   countArmedSpecs(listSpecs) — store-only "N specs declare code_anchors" count,
  *     ZERO fs probing — the shared helper `lore status` (plain) and `lore
  *     bootstrap` both splice in (D5, D7 review U8).
- *   sortDrifts(drifts) — deterministic (spec_slug, then anchor) ordering (D5).
+ *   sortDrifts(drifts) — deterministic (doc_slug, then anchor) ordering (D5).
  *   renderDriftRepairHint(row) — the literal `fix: lore anchor rm <spec-slug>
  *     '<anchor>' (or update the path/export)` repair command (D5, review U5).
  *   SYMBOL_MISSING_FOOTNOTE — the documented false-positive-forms footnote (D3),
@@ -88,17 +88,23 @@ export function buildDriftFlowDeps(app: App, driftCheckService: DriftCheckServic
 
 /** The `data.code_drift` / `lore_status`'s `code_drift` payload shape (D5, D7). */
 export interface CodeDriftPayload {
-  /** `true` iff at least one non-deleted spec declares ≥1 `code_anchors` entry. */
+  /** `true` iff at least one non-deleted spec OR knowledge doc declares ≥1 `code_anchors` entry. */
   armed: boolean;
   /** `false` when `workflow.drift.enabled` is `false` (D8) — no probing occurred. */
   enabled: boolean;
   /** `true` iff `drifts` is empty (armed:false OR enabled:false ⇒ always consistent, vacuously). */
   consistent: boolean;
-  /** Count of specs that declare ≥1 code_anchors entry — the scanned population (review U7). */
+  /** Count of SPECS that declare ≥1 code_anchors entry (review U7). */
   specs_checked: number;
-  /** `specs_checked`'s population, broken down by doc status. */
+  /**
+   * Count of KNOWLEDGE docs that declare ≥1 code_anchors entry — the second scanned
+   * population, reported separately so this payload can never imply it covered
+   * knowledge when it did not.
+   */
+  knowledge_checked: number;
+  /** The UNION of both scanned populations, broken down by doc status. */
   status_breakdown: Record<string, number>;
-  /** Every anchor that failed to verify, deterministically sorted (spec_slug, then anchor — D5). */
+  /** Every anchor that failed to verify, deterministically sorted (doc_slug, then anchor — D5); each row self-attributes via `doc_type`. */
   drifts: DriftRow[];
 }
 
@@ -109,19 +115,29 @@ export interface CodeDriftPayload {
  * (never a shared mutable constant).
  */
 export function disabledCodeDriftPayload(): CodeDriftPayload {
-  return { armed: false, enabled: false, consistent: true, specs_checked: 0, status_breakdown: {}, drifts: [] };
+  return {
+    armed: false,
+    enabled: false,
+    consistent: true,
+    specs_checked: 0,
+    knowledge_checked: 0,
+    status_breakdown: {},
+    drifts: [],
+  };
 }
 
 /**
- * Deterministic drift-row ordering (D5) — sorted by `spec_slug`, then `anchor`,
- * both ascending lexicographic. Pure — does not mutate its input.
+ * Deterministic drift-row ordering (D5) — sorted by `doc_slug`, then `anchor`, both
+ * ascending lexicographic. Pure — does not mutate its input. A slug is unique corpus-
+ * wide, so this stays a total order across both scanned doc types without needing
+ * `doc_type` as a sort key.
  *
  * @param drifts - Unordered drift rows (e.g. `DriftCheckResult.drifts`, scan order)
  * @returns A NEW array, sorted.
  */
 export function sortDrifts(drifts: readonly DriftRow[]): DriftRow[] {
   return [...drifts].sort((a, b) => {
-    if (a.spec_slug !== b.spec_slug) return a.spec_slug < b.spec_slug ? -1 : 1;
+    if (a.doc_slug !== b.doc_slug) return a.doc_slug < b.doc_slug ? -1 : 1;
     if (a.anchor !== b.anchor) return a.anchor < b.anchor ? -1 : 1;
     return 0;
   });
@@ -147,6 +163,7 @@ export async function runDrift(deps: DriftFlowDeps, probe: FsProbe): Promise<Res
     enabled: true,
     consistent: result.value.consistent,
     specs_checked: result.value.specs_checked,
+    knowledge_checked: result.value.knowledge_checked,
     status_breakdown: result.value.status_breakdown,
     drifts: sortDrifts(result.value.drifts),
   });
@@ -155,17 +172,17 @@ export async function runDrift(deps: DriftFlowDeps, probe: FsProbe): Promise<Res
 /**
  * The literal `lore anchor rm` repair command for one drift row (D5, review U5)
  * — CLI text-rendering-only (the JSON payload's `DriftRow` carries no `fix`
- * field; MCP callers construct their own command from `spec_slug`/`anchor` if
+ * field; MCP callers construct their own command from `doc_slug`/`anchor` if
  * they want one).
  *
  * @param row - One `DriftRow` from a `CodeDriftPayload.drifts` entry
  * @returns The literal repair command line
  * @example
- * renderDriftRepairHint({ spec_id: "x", spec_slug: "spec-foo", spec_status: "approved", anchor: "src/a.ts#Foo", kind: "symbol_missing" });
+ * renderDriftRepairHint({ spec_id: "x", doc_slug: "spec-foo", doc_type: "spec", spec_status: "approved", anchor: "src/a.ts#Foo", kind: "symbol_missing" });
  * // => "fix: lore anchor rm spec-foo 'src/a.ts#Foo' (or update the path/export)"
  */
 export function renderDriftRepairHint(row: DriftRow): string {
-  return `fix: lore anchor rm ${row.spec_slug} '${row.anchor}' (or update the path/export)`;
+  return `fix: lore anchor rm ${row.doc_slug} '${row.anchor}' (or update the path/export)`;
 }
 
 /**
@@ -182,8 +199,16 @@ export const SYMBOL_MISSING_FOOTNOTE =
  * Store-only "N specs declare code_anchors" count (D5, D7 review U8) — ZERO
  * filesystem probing. This is a DECLARATION count (any spec whose stored
  * `extra.code_anchors` is a non-empty array), not a grammar-verified or
- * drift-verified count — mirrors `DriftCheckService`'s own "armed" population
- * definition without needing the service (or any fs probe) at all.
+ * drift-verified count.
+ *
+ * ⛔ SPEC-SCOPED BY DECISION, and therefore NARROWER than
+ * `DriftCheckResult.armed`: `--check-drift` also scans KNOWLEDGE docs
+ * (`ANCHOR_SCANNED_DOC_TYPES`), so a corpus where only a knowledge doc declares
+ * anchors reports `0` here while `checkDrift` reports `armed: true`. That is the
+ * field's contract — its consumers (`lore status`'s `code_anchor_specs`, `lore
+ * bootstrap`) name SPECS in their own output. Extending this count would silently
+ * change the meaning of a published field; a knowledge-inclusive figure belongs in a
+ * separately named one.
  *
  * @param listSpecs - See {@link DriftFlowDeps.listSpecs} / {@link buildListSpecs}
  * @returns `Result<number, LoreError>`

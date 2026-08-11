@@ -37,7 +37,12 @@
  *               precedence over a missing `lore.tree.yaml` blueprint (D5)
  *   REGRESSION: plain `lore status` (no `--check-drift`) never fs-probes — it still
  *               exits 0 and prints the declared-count line even when every anchor on
- *               disk is currently broken
+ *               disk is currently broken; every spec-owned drift row is LABELLED
+ *               `[spec]` and `knowledge_checked` is reported as an explicit 0 on this
+ *               spec-only corpus (M2 of
+ *               spec-a-write-side-fact-with-no-read-side-address-counts-with-no — the
+ *               knowledge-owned half lives in
+ *               `tests/integration/cli/knowledge-code-anchor-drift.bun.test.ts`)
  *
  * @spec_ref SPEC-045 §Acceptance Criteria AC-DR-4
  */
@@ -77,7 +82,8 @@ interface JsonEnvelope {
 
 interface DriftRowJson {
   spec_id: string;
-  spec_slug: string;
+  doc_slug: string;
+  doc_type: string;
   spec_status: string;
   anchor: string;
   kind: string;
@@ -89,6 +95,7 @@ interface CodeDriftJson {
   enabled: boolean;
   consistent: boolean;
   specs_checked: number;
+  knowledge_checked: number;
   status_breakdown: Record<string, number>;
   drifts: DriftRowJson[];
 }
@@ -180,7 +187,7 @@ function checkDriftJson(tmpDir: string): { result: RunResult; data: CodeDriftJso
 }
 
 function findDrift(data: CodeDriftJson, specSlug: string, anchor: string): DriftRowJson | undefined {
-  return data.drifts.find((d) => d.spec_slug === specSlug && d.anchor === anchor);
+  return data.drifts.find((d) => d.doc_slug === specSlug && d.doc_type === "spec" && d.anchor === anchor);
 }
 
 // ─── Suite: binary freshness guard ───────────────────────────────────────────
@@ -241,6 +248,9 @@ describe("lore status --check-drift — HAPPY (fully-consistent initial state)",
     expect(data.enabled).toBe(true);
     expect(data.consistent).toBe(true);
     expect(data.specs_checked).toBe(3);
+    // The knowledge population is reported EXPLICITLY as zero on a spec-only corpus —
+    // an omitted count would read as "knowledge was never scanned".
+    expect(data.knowledge_checked).toBe(0);
     expect(data.drifts).toEqual([]);
   });
 });
@@ -253,7 +263,7 @@ describe("lore status --check-drift — ERROR (drift-kind classification, sequen
 
     const result = runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
-    expect(result.stdout).toContain(`${specASlug} → src/a.ts#Exported (file_missing)`);
+    expect(result.stdout).toContain(`[spec] ${specASlug} → src/a.ts#Exported (file_missing)`);
     expect(result.stdout).toContain(
       `fix: lore anchor rm ${specASlug} 'src/a.ts#Exported' (or update the path/export)`,
     );
@@ -264,7 +274,7 @@ describe("lore status --check-drift — ERROR (drift-kind classification, sequen
 
     const result = runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
-    expect(result.stdout).toContain(`${specBSlug} → src/b.ts#Exported (symbol_missing)`);
+    expect(result.stdout).toContain(`[spec] ${specBSlug} → src/b.ts#Exported (symbol_missing)`);
     expect(result.stdout).toContain("does not recognize `export * from`");
   });
 
@@ -273,7 +283,7 @@ describe("lore status --check-drift — ERROR (drift-kind classification, sequen
 
     const result = runLore(["status", "--check-drift"], tmpDir);
     expect(result.exitCode).toBe(3);
-    expect(result.stdout).toContain(`${specCSlug} → adir/ (dir_empty)`);
+    expect(result.stdout).toContain(`[spec] ${specCSlug} → adir/ (dir_empty)`);
   });
 
   it("STATE bridge: restoring specA's file clears ITS drift row while specB/specC's persist", () => {
@@ -350,7 +360,9 @@ describe("lore status --check-drift — BOUNDARY (unarmed corpus, zero specs dec
       initCorpus(unarmedDir);
       const result = runLore(["status", "--check-drift"], unarmedDir);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("Code drift: armed=false (no spec declares code_anchors)");
+      expect(result.stdout).toContain(
+        "Code drift: armed=false (no spec or knowledge doc declares code_anchors)",
+      );
 
       const jsonResult = runLore(["status", "--check-drift", "--json"], unarmedDir);
       const envelope = JSON.parse(jsonResult.stdout) as JsonEnvelope;
