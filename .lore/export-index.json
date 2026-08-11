@@ -5468,6 +5468,18 @@
     "01KZQMCJNNV7GB8CCX389BQG1T": {
       "human_id": "KN-418",
       "file_path": "docs/requirements/knowledge/KN-418-handoff-agent-main-orchestrator.md"
+    },
+    "01KZQYSAE8SK34XZ9WR4THQDG0": {
+      "human_id": "KN-419",
+      "file_path": "docs/requirements/knowledge/KN-419-handoff-agent-main-orchestrator.md"
+    },
+    "01KZQYK3YH04F6YVMNMW826PPR": {
+      "human_id": "KN-420",
+      "file_path": "docs/requirements/knowledge/KN-420-nine-findings-from-landing-the-mirror-id-unify-mer.md"
+    },
+    "01KZQYC17R13MZDVEF2NAFBY7W": {
+      "human_id": "KN-421",
+      "file_path": "docs/requirements/knowledge/KN-421-assessment-land-falsifiability-reachability-the.md"
     }
   }
 }
