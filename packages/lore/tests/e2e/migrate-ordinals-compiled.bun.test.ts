@@ -77,9 +77,21 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "f
 import { join } from "path";
 import { tmpdir } from "os";
 import { createHash } from "node:crypto";
-import type { DocRecord, ExportIndex } from "@lore/core";
+import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
+import { assertIsMirrorHumanId } from "@lore/core";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+
+/**
+ * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
+ * construction — via {@link assertIsMirrorHumanId}, never a textual `as MirrorHumanId` cast
+ * (`scripts/check-ordinal-write-sites.mjs`'s rule (c) confines that cast to
+ * `packages/core/src/schemas.ts` alone; a fixture file is not that file).
+ */
+function brandedHumanId(value: string): MirrorHumanId {
+  assertIsMirrorHumanId(value);
+  return value;
+}
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -348,7 +360,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
       version: 1,
       mappings: {
         [specA.id]: {
-          human_id: "SPEC-99",
+          human_id: brandedHumanId("SPEC-99"),
           // Doubled-number scar, mirrors the real incident's "SPEC-081-080-…" filename.
           file_path: "docs/requirements/spec/SPEC-99-001-alpha-decision.md",
         },
@@ -453,7 +465,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(rows[0]?.version).toBe(1);
 
     const indexAfter = JSON.parse(readFileSync(join(dir, ".lore", "export-index.json"), "utf8")) as ExportIndex;
-    expect(indexAfter.mappings[specA.id]?.human_id).toBe("SPEC-99");
+    expect(indexAfter.mappings[specA.id]?.human_id).toBe(brandedHumanId("SPEC-99"));
 
     // ...and the whole-file hash (incl. WAL/SHM) is byte-identical.
     const afterHash = hashDbState(dbPath);
@@ -510,7 +522,7 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
 
     // Export-index human_id read from the column (never a stored composite).
     const index = JSON.parse(readFileSync(join(dir, ".lore", "export-index.json"), "utf8")) as ExportIndex;
-    expect(index.mappings[specA.id]?.human_id).toBe("SPEC-1");
+    expect(index.mappings[specA.id]?.human_id).toBe(brandedHumanId("SPEC-1"));
     // file_path itself is untouched (Scope-Alt: renames stay report-only).
     expect(index.mappings[specA.id]?.file_path).toBe("docs/requirements/spec/SPEC-99-001-alpha-decision.md");
 

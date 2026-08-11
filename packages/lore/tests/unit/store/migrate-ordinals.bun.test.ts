@@ -90,11 +90,23 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DocRecord, ExportIndex } from "@lore/core";
+import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
+import { assertIsMirrorHumanId } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { OrdinalMigrationService } from "../../../src/service/ordinal-migration-service.js";
 
 // ─── Fixture factory ────────────────────────────────────────────────────────
+
+/**
+ * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
+ * construction — via {@link assertIsMirrorHumanId}, never a textual `as MirrorHumanId` cast
+ * (`scripts/check-ordinal-write-sites.mjs`'s rule (c) confines that cast to
+ * `packages/core/src/schemas.ts` alone; a fixture file is not that file).
+ */
+function brandedHumanId(value: string): MirrorHumanId {
+  assertIsMirrorHumanId(value);
+  return value;
+}
 
 let _counter = 0;
 
@@ -174,10 +186,10 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
     writeExportIndex(projectDir, {
       version: 1,
       mappings: {
-        [specA.id]: { human_id: "SPEC-3", file_path: "docs/requirements/spec/SPEC-3-alpha-decision.md" },
+        [specA.id]: { human_id: brandedHumanId("SPEC-3"), file_path: "docs/requirements/spec/SPEC-3-alpha-decision.md" },
         // RE-BASELINE (2026-08-11, ordinal.ts:133-145): padded SPEC-002, not unpadded
         // SPEC-2 — see this file's module-header RE-BASELINE note, point 1.
-        [specB.id]: { human_id: "SPEC-002", file_path: "docs/requirements/spec/SPEC-2-beta-workflow.md" },
+        [specB.id]: { human_id: brandedHumanId("SPEC-002"), file_path: "docs/requirements/spec/SPEC-2-beta-workflow.md" },
       },
     });
   });
@@ -265,7 +277,7 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
       expect(reFetched.value?.version).toBe(1);
     }
     const indexAfterDryRun = readExportIndex(projectDir);
-    expect(indexAfterDryRun.mappings[specA.id]?.human_id).toBe("SPEC-3");
+    expect(indexAfterDryRun.mappings[specA.id]?.human_id).toBe(brandedHumanId("SPEC-3"));
   });
 
   // ── STATE + REGRESSION: --apply executes, converges, and is idempotent ──
@@ -314,9 +326,9 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
     // mapping was corrected to that value above (point 1) — it was never reconciled by
     // this run (report.export_index_reconciles above has length 1, specA only).
     const indexAfterApply = readExportIndex(projectDir);
-    expect(indexAfterApply.mappings[specA.id]?.human_id).toBe("SPEC-001");
+    expect(indexAfterApply.mappings[specA.id]?.human_id).toBe(brandedHumanId("SPEC-001"));
     expect(indexAfterApply.mappings[specA.id]?.file_path).toBe("docs/requirements/spec/SPEC-3-alpha-decision.md");
-    expect(indexAfterApply.mappings[specB.id]?.human_id).toBe("SPEC-002");
+    expect(indexAfterApply.mappings[specB.id]?.human_id).toBe(brandedHumanId("SPEC-002"));
 
     // REGRESSION: a second --apply run performs literally zero writes.
     const secondRun = await service.migrateOrdinals({ dryRun: false, projectDir });
@@ -548,8 +560,8 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
     writeExportIndex(projectDir, {
       version: 1,
       mappings: {
-        [docTier2Solo.id]: { human_id: "SPEC-1", file_path: "docs/requirements/spec/legacy-solo.md" },
-        [docTier2Loser.id]: { human_id: "SPEC-2", file_path: "docs/requirements/spec/legacy-loser.md" },
+        [docTier2Solo.id]: { human_id: brandedHumanId("SPEC-1"), file_path: "docs/requirements/spec/legacy-solo.md" },
+        [docTier2Loser.id]: { human_id: brandedHumanId("SPEC-2"), file_path: "docs/requirements/spec/legacy-loser.md" },
       },
     });
 
