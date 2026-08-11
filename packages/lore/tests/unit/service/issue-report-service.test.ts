@@ -59,6 +59,17 @@ interface LocalUpstreamPort {
     content: string;
     extra: Record<string, unknown>;
   }): Promise<Result<{ id: string }, LoreError>>;
+  /**
+   * The port's 5th operation (spec-issue-closure-loop-computed-resolution-agent-
+   * reachable D6/D7) — the per-doc COMPUTED resolution the step-6 cap narrowing
+   * consults. Kept structurally typed (plain `string` unions rather than the
+   * real `DocStatus`/`IssueResolution` imports) for the same reason every other
+   * shape in this block is locally redeclared: this file couples to the SUT only
+   * through the dynamic-import helper below.
+   */
+  getResolution(
+    id: string,
+  ): Promise<Result<{ status: string; resolution: string; rejection_reason?: string } | null, LoreError>>;
   close(): void;
 }
 
@@ -145,6 +156,11 @@ function makeFakePort(overrides: Partial<LocalUpstreamPort> = {}): LocalUpstream
     listOpenAdhocDrafts: vi.fn(async () => ok([])),
     searchDuplicates: vi.fn(async () => ok([])),
     createDraft: vi.fn(async () => ok({ id: "01NEWDOC" })),
+    // Default: every candidate reads back as genuinely still open, so a case
+    // that fills the cap is blocked by NON-terminal reports (the pre-M1
+    // behaviour those assertions were written against) rather than by a
+    // fail-closed read error.
+    getResolution: vi.fn(async () => ok({ status: "draft", resolution: "open" })),
     close: vi.fn(),
     ...overrides,
   };
