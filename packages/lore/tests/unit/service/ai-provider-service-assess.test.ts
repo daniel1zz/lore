@@ -955,19 +955,21 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
   });
 
   // reason: SPEC-040 §T2 D6 bumped the ACTIVE registry version to 6 (buildAssessPromptV6),
-  // and SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5 re-bumped it to
-  // 7 (buildAssessPromptV7, frozen pre-projection rendering kept reproducible at slot 6) —
-  // buildAssessPrompt itself is still frozen provenance-only as the registry's `5` entry, so
-  // this reconciled assertion pins THAT (ASSESS_TEMPLATES[5] === buildAssessPrompt) rather
-  // than the now-stale "ASSESS_PROMPT_VERSION is 5" claim. See ai/assess-template-registry.test.ts
-  // and ai/assess-prompt-version-freeze.test.ts for the full registry-dispatch coverage.
-  it("ASSESS_PROMPT_VERSION is 7 (the active registry entry, T5); buildAssessPrompt itself stays pinned as ASSESS_TEMPLATES[5] (SPEC-040 §T2 D6)", async () => {
+  // SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5 re-bumped it to 7
+  // (buildAssessPromptV7, frozen pre-projection rendering kept reproducible at slot 6), and
+  // D1 (spec-judgment-surfaces-must-verify-before-they-certify-machine) re-bumped it again
+  // to 8 (buildAssessPromptV8, slot 7 kept output-frozen) — buildAssessPrompt itself is
+  // still frozen provenance-only as the registry's `5` entry, so this reconciled assertion
+  // pins THAT (ASSESS_TEMPLATES[5] === buildAssessPrompt) rather than the now-stale
+  // "ASSESS_PROMPT_VERSION is 5" claim. See ai/assess-template-registry.test.ts and
+  // ai/assess-prompt-version-freeze.test.ts for the full registry-dispatch coverage.
+  it("ASSESS_PROMPT_VERSION is 8 (the active registry entry, D1); buildAssessPrompt itself stays pinned as ASSESS_TEMPLATES[5] (SPEC-040 §T2 D6)", async () => {
     const { ASSESS_TEMPLATES } = await import("../../../src/ai/assess-template.js");
-    expect(ASSESS_PROMPT_VERSION).toBe(7);
+    expect(ASSESS_PROMPT_VERSION).toBe(8);
     expect(ASSESS_TEMPLATES[5]).toBe(buildAssessPrompt);
   });
 
-  it("a full assessPlan() call against the structured-AC bundle carries prompt_version 7 (the active registry version, T5) in the persisted judgment", async () => {
+  it("a full assessPlan() call against the structured-AC bundle carries prompt_version 8 (the active registry version, D1) in the persisted judgment", async () => {
     const store = new InMemoryStore();
     const bundle = await makeStructuredAcBundle(store);
     const scriptedJson = JSON.stringify({
@@ -986,7 +988,7 @@ describe("buildAssessPrompt — structured acceptance criteria table (SPEC-038 A
     const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.judgment.prompt_version).toBe(7);
+    expect(result.value.judgment.prompt_version).toBe(ASSESS_PROMPT_VERSION);
   });
 });
 
@@ -1103,7 +1105,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
     expect(result.declaredAcIds).toEqual([]);
   });
 
-  it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 7 (the active registry version, T5) end-to-end", async () => {
+  it("a full assessPlan() call against the legacy (no structured ACs) bundle also carries prompt_version 8 (the active registry version, D1) end-to-end", async () => {
     const store = new InMemoryStore();
     const bundle = await makeBundle(store);
     const provider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
@@ -1112,7 +1114,7 @@ describe("buildAssessPrompt — legacy verbatim path is byte-identical for specs
     const result = await service.assessPlan(bundle, { commitDerivationUnverifiable: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.judgment.prompt_version).toBe(7);
+    expect(result.value.judgment.prompt_version).toBe(ASSESS_PROMPT_VERSION);
   });
 });
 

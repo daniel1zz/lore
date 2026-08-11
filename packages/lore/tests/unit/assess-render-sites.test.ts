@@ -83,8 +83,8 @@ function typedResult(): AssessmentResult {
       evidence_integrity: { score: 60, confidence: 0.4, based_on: "absence", reasoning: "No attested runs." },
     },
     typed_gaps: [
-      { dimension: "outcome", severity: "minor", ac_ref: "AC-1", statement: "No negative-path test." },
-      { dimension: "evidence_integrity", severity: "major", statement: "Evidence is self-reported only." },
+      { dimension: "outcome", severity: "minor", ac_ref: "AC-1", statement: "No negative-path test.", paths: [] },
+      { dimension: "evidence_integrity", severity: "major", statement: "Evidence is self-reported only.", paths: [] },
     ],
     typed_recommendations: [
       { target: "plan", action: "Add a negative-path test task.", rationale: "Closes the coverage gap." },
@@ -145,7 +145,7 @@ function pipeHostileResult(): AssessmentResult {
   return {
     ...legacyResult(),
     ac_scores: [{ ac_id: "AC-1", score: 50, reasoning: "a | b | c", evidence_refs: [] }],
-    typed_gaps: [{ dimension: "outcome", severity: "minor", statement: "x | y" }],
+    typed_gaps: [{ dimension: "outcome", severity: "minor", statement: "x | y", paths: [] }],
     typed_recommendations: [{ target: "plan", action: "do | this", rationale: "why | not" }],
   };
 }
@@ -233,7 +233,7 @@ describe("assess render sites — BOUNDARY", () => {
   it("cli: a typed_gaps entry with no ac_ref renders '—'", () => {
     const result: AssessmentResult = {
       ...legacyResult(),
-      typed_gaps: [{ dimension: "outcome", severity: "minor", statement: "No ac_ref here." }],
+      typed_gaps: [{ dimension: "outcome", severity: "minor", statement: "No ac_ref here.", paths: [] }],
     };
     expect(formatAssessmentSummary(result)).toContain("—");
   });
@@ -241,7 +241,7 @@ describe("assess render sites — BOUNDARY", () => {
   it("mcp: a typed_gaps entry with no ac_ref renders '—'", () => {
     const result: AssessmentResult = {
       ...legacyResult(),
-      typed_gaps: [{ dimension: "outcome", severity: "minor", statement: "No ac_ref here." }],
+      typed_gaps: [{ dimension: "outcome", severity: "minor", statement: "No ac_ref here.", paths: [] }],
     };
     expect(buildAssessSummaryText(result)).toContain("—");
   });

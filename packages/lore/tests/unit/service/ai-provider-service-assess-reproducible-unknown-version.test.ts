@@ -63,6 +63,7 @@ import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
+import { ASSESS_PROMPT_VERSION } from "../../../src/ai/assess-template.js";
 import type { Telemetry, TelemetryEvent, AiGenerationEvent, CreateDocInput, PlanBundle } from "@lore/core";
 
 const DEFAULT_BUDGETS = { max_plan_chars: 8000, max_spec_chars: 12000, max_task_chars: 4000, max_diff_chars: 24000 };
@@ -144,7 +145,11 @@ describe("assessPlan — an unregistered getAssessTemplateReproducibility lookup
     // assertion without this substring would be indistinguishable from "the mock was
     // never consulted and assessPlan failed for some unrelated reason."
     expect("message" in result.error ? result.error.message : "").toContain(SENTINEL_MESSAGE);
-    expect("message" in result.error ? result.error.message : "").toContain("version 7");
+    // reason: derived from the REAL (passed-through) ASSESS_PROMPT_VERSION rather than a
+    // restated literal — this exact drift (a hardcoded "version 7" surviving a later bump
+    // to 8) is what broke this assertion once already, per D1's re-key of the assess
+    // template registry (spec-judgment-surfaces-must-verify-before-they-certify-machine).
+    expect("message" in result.error ? result.error.message : "").toContain(`version ${ASSESS_PROMPT_VERSION}`);
   });
 
   it("the provider is never invoked — the failure is caught BEFORE the judge call, same position as the pre-existing templateResult check", async () => {

@@ -22,8 +22,9 @@
  *     guaranteed reproducible, `reproducible: false`), `6` is the OUTPUT-FROZEN pre-
  *     projection v6 entry (`buildAssessPromptV6OutputFrozen` — byte-identical to
  *     `buildAssessPromptV6`'s behaviour before T3/a639485, `reproducible: true`), `7` is the
- *     active entry (`buildAssessPromptV7`, T3's projected evidence renderer,
- *     `reproducible: true`)
+ *     OUTPUT-FROZEN pre-D1 entry (`buildAssessPromptV7`, T3's projected evidence renderer,
+ *     `reproducible: true`), `8` is the active entry (`buildAssessPromptV8`, D1's
+ *     `typed_gaps[].paths` requirement, `reproducible: true`)
  *   - getAssessTemplate(version) — Result-returning registry lookup; an absent version is
  *     err(AI_PROVIDER_ERROR) naming it, never an uncaught throw
  *   - getAssessTemplateReproducibility(version) — Result-returning lookup for the OTHER half
@@ -40,7 +41,14 @@
  *     as v5 — it could not be repurposed to mean "output-frozen" without breaking that
  *     spec-level AC, so the output-frozen entry got a new name
  *     (`buildAssessPromptV6OutputFrozen`) instead of this one. `buildAssessPromptV7` is the
- *     forward-looking alias for any new caller.
+ *     forward-looking alias for any new caller, now itself OUTPUT-FROZEN (registry slot `7`)
+ *     since `buildAssessPromptV8` became the active `ASSESS_PROMPT_VERSION` (D1, below).
+ *   - buildAssessPromptV8(bundle, diffText, budgets, facts?) — the ACTIVE builder (registry
+ *     entry `8`, D1, spec-judgment-surfaces-must-verify-before-they-certify-machine): same
+ *     shared core as v6/v7, with `assembleFactsBasedAssessPrompt`'s `requireFindingPaths`
+ *     opt-in set — the typed_gaps[] output-instruction JSON shape gains a `"paths"` array and
+ *     an instruction requiring every file path a finding names in `statement` to also appear
+ *     there, verbatim.
  *   - buildAssessDiffMeta(diffText) — derives the {@link DiffMeta} regression-signal shape
  *     from the SAME diff-header parse `truncateDiffByFile` uses (`listDiffFiles`,
  *     `diff-truncation.ts`) — single derivation site, consumed by both v6/v7's own facts
@@ -307,8 +315,22 @@ export function excludeAssessMirrorFromDiff(diffText: string): string {
  * BEHAVIOUR unchanged — AC-AEP-4 pins a direct caller asserting it matches v5's projected
  * shape — it simply moved to registry slot `7`; `buildAssessPromptV7` is the same function
  * under the name that matches its new active slot.
+ *
+ * **v7 → v8 (D1, spec-judgment-surfaces-must-verify-before-they-certify-machine)**: adds a
+ * `"paths"` array to the `typed_gaps[]` output-instruction JSON shape and a paragraph
+ * requiring every file path a finding names in `statement`'s prose to also appear there,
+ * verbatim — the machine-verifiable declaration D2/D3 checks against the assessed commit
+ * (`AIProviderService`'s `verifyFindingPaths`). This is a NEW registry key (`8`), never a
+ * mutation of slot `7` in place: `assembleFactsBasedAssessPrompt` gained an opt-in
+ * `requireFindingPaths` PARAMETER (default `false`, so `buildAssessPromptV6OutputFrozen`'s
+ * and `buildAssessPromptV7`'s own call sites are unchanged and their rendered output stays
+ * byte-identical) — same "parameterize the shared core, never fork it" fix the v6→v7
+ * transition above already established for the evidence renderer. `buildAssessPromptV8`
+ * becomes the active `ASSESS_PROMPT_VERSION` (`reproducible: true` — a fresh registry key
+ * with no prior renders to stay byte-identical to; any FUTURE change to slot `8` still moves
+ * to a new key `9`, never mutates `8` in place).
  */
-export const ASSESS_PROMPT_VERSION = 7;
+export const ASSESS_PROMPT_VERSION = 8;
 
 /** Character budgets for each prompt section, sourced from `config.ai.assess.*`. */
 export interface AssessBudgets {
@@ -892,6 +914,12 @@ function renderFactsSection(facts: AssessmentFacts): string {
  * @param evidenceRenderer - The {@link EvidenceRenderer} to project each task's evidence
  *   rows with — the ONLY behavioural difference between the output-frozen v6 entry and the
  *   active v7 entry.
+ * @param requireFindingPaths - D1 (spec-judgment-surfaces-must-verify-before-they-certify-
+ *   machine) — OPT-IN, defaults to `false`. `false` renders BYTE-IDENTICAL output to before
+ *   this parameter existed (slots 6/7's `reproducible: true` guarantee depends on this
+ *   default never changing) — `true` (registry slot 8 only, {@link buildAssessPromptV8})
+ *   adds a `"paths"` array to the `typed_gaps[]` JSON shape and an instruction requiring
+ *   every file path a finding names in `statement` to also appear there, verbatim.
  * @returns { prompt, truncated, declaredAcIds } — `declaredAcIds` is scope-restricted (D5)
  */
 function assembleFactsBasedAssessPrompt(
@@ -900,6 +928,7 @@ function assembleFactsBasedAssessPrompt(
   budgets: AssessBudgets,
   facts: AssessmentFacts | undefined,
   evidenceRenderer: EvidenceRenderer,
+  requireFindingPaths = false,
 ): BuildAssessPromptResult {
   const truncated: string[] = [];
 
@@ -1036,7 +1065,9 @@ function assembleFactsBasedAssessPrompt(
     `  },\n` +
     `  "typed_gaps": [\n` +
     `    { "dimension": "outcome"|"evidence_integrity"|"scope_fidelity", "severity": "blocker"|"major"|"minor",\n` +
-    `      "ac_ref": "<optional AC id>", "statement": "<<=500 chars>" }\n` +
+    `      "ac_ref": "<optional AC id>", "statement": "<<=500 chars>"` +
+    (requireFindingPaths ? `,\n      "paths": ["<file path named in statement, verbatim>", ...]` : "") +
+    ` }\n` +
     `  ],\n` +
     `  "typed_recommendations": [\n` +
     `    { "target": "spec"|"plan"|"prompt"|"skill"|"process", "action": "<<=500 chars>", "rationale": "<<=300 chars>" }\n` +
@@ -1045,6 +1076,12 @@ function assembleFactsBasedAssessPrompt(
     `    { "material": "<string>", "reason": "<<=200 chars>" }\n` +
     `  ]\n` +
     `}\n` +
+    (requireFindingPaths
+      ? `Every file path you name in a typed_gaps[] finding's "statement" prose MUST also appear, ` +
+        `verbatim, in that same finding's "paths" array — it is machine-verified against the ` +
+        `exact commit this assessment covers, so do not paraphrase or normalize it. A finding ` +
+        `naming no file path at all uses "paths": [].\n`
+      : "") +
     (hasStructuredAc
       ? `ac_id MUST be one of: ${scopedDeclaredCriteria.map((c) => c.id).join(", ")}.\n` +
         // reason: only mention "(out of scope for this plan)" rows when at least one
@@ -1102,12 +1139,13 @@ export function buildAssessPromptV6(
 }
 
 /**
- * Alias for {@link buildAssessPromptV6} under the name that matches its ACTIVE registry
- * slot (`ASSESS_TEMPLATES[7]`, `ASSESS_PROMPT_VERSION`) — same shared core, same projected
- * {@link renderTaskEvidence}, byte-identical output for the same input. Prefer this name
- * for any NEW caller; `buildAssessPromptV6` is kept only because AC-AEP-4 pins a
- * pre-existing direct caller of that historical name (see its own JSDoc for why the name
- * and the registry slot number diverge).
+ * Alias for {@link buildAssessPromptV6} under the name that matched ITS active registry
+ * slot at the time (`ASSESS_TEMPLATES[7]`) — same shared core, same projected
+ * {@link renderTaskEvidence}, byte-identical output for the same input. Now itself
+ * OUTPUT-FROZEN (`reproducible: true`, slot `7`) since {@link buildAssessPromptV8} became
+ * the active `ASSESS_PROMPT_VERSION` (D1). `buildAssessPromptV6` is kept only because
+ * AC-AEP-4 pins a pre-existing direct caller of that historical name (see its own JSDoc for
+ * why the name and the registry slot number diverge).
  */
 export function buildAssessPromptV7(
   bundle: PlanBundle,
@@ -1116,6 +1154,31 @@ export function buildAssessPromptV7(
   facts?: AssessmentFacts,
 ): BuildAssessPromptResult {
   return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidence);
+}
+
+/**
+ * The ACTIVE assess judge prompt builder (registry slot `8`, `ASSESS_PROMPT_VERSION`) — D1
+ * (spec-judgment-surfaces-must-verify-before-they-certify-machine): same shared core and
+ * projected {@link renderTaskEvidence} as {@link buildAssessPromptV7}, with
+ * `assembleFactsBasedAssessPrompt`'s `requireFindingPaths` opt-in set to `true` — the ONLY
+ * behavioural difference from v7. `buildAssessPromptV7` stays byte-identical (its own call
+ * site never passes this new argument, so it keeps the parameter's `false` default) — this
+ * is a NEW registry key, never a mutation of `7` in place, mirroring the v6→v7 transition's
+ * own "parameterize the shared core" precedent.
+ *
+ * @param bundle - {plan, spec?, tasks[], knowledge_links?} from CorpusService.getPlanBundle
+ * @param diffText - Optional git diff / diff-file content (already read by the CLI layer)
+ * @param budgets - Character budgets from config.ai.assess.*
+ * @param facts - Pre-computed {@link AssessmentFacts}; see {@link assembleFactsBasedAssessPrompt}
+ * @returns { prompt, truncated, declaredAcIds } — `declaredAcIds` is scope-restricted (D5)
+ */
+export function buildAssessPromptV8(
+  bundle: PlanBundle,
+  diffText: string | undefined,
+  budgets: AssessBudgets,
+  facts?: AssessmentFacts,
+): BuildAssessPromptResult {
+  return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidence, true);
 }
 
 /**
@@ -1148,7 +1211,7 @@ function buildAssessPromptV6OutputFrozen(
  * `reproducible` answers, for THIS registry key specifically: is `getAssessTemplate(version)`'s
  * bound function guaranteed to render byte-identical output for the same input, FOREVER (no
  * future edit may change this key's behaviour in place — a behavioural change requires a NEW
- * key)? `true` on slots 6 and 7 (both output-frozen, in the disambiguated sense above the
+ * key)? `true` on slots 6, 7, and 8 (all output-frozen, in the disambiguated sense above the
  * module's registry construction below); `false` on slot 5 — `buildAssessPrompt` is
  * slot-stable (key `5` never moves) but was EXPLICITLY exempted from the byte-identical
  * guarantee by SPEC-040 §T2 D6 ("no byte-identical guarantee required going forward"), and its
@@ -1167,22 +1230,26 @@ export interface AssessTemplateRegistryEntry {
 
 /**
  * Version-keyed registry of assess judge prompt builders (SPEC-040 §T2 D6, re-keyed by
- * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, mirrors
+ * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, re-keyed again by D1
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine — mirrors
  * `review-template.ts`'s `REVIEW_TEMPLATES`) — the SSOT both {@link ASSESS_TEMPLATES}
  * (function-only view) and {@link getAssessTemplateReproducibility} derive from. `5` is the
  * SLOT-STABLE v5 entry (`buildAssessPrompt`) kept for provenance — key permanent,
  * `reproducible: false`; `6` is the OUTPUT-FROZEN pre-projection v6 entry
  * (`buildAssessPromptV6OutputFrozen` — byte-identical to `buildAssessPromptV6`'s behaviour
- * before T3/a639485, `reproducible: true`); `7` is the active `ASSESS_PROMPT_VERSION` entry
- * (`buildAssessPromptV7`, T3's projected evidence renderer, `reproducible: true`). A future
- * prompt revision adds a new key here rather than mutating an existing one, so historical
- * assessments' `judgment.prompt_version` stays meaningful — and that new key MUST declare
- * its own `reproducible` value rather than inheriting one silently.
+ * before T3/a639485, `reproducible: true`); `7` is the OUTPUT-FROZEN pre-D1 entry
+ * (`buildAssessPromptV7`, T3's projected evidence renderer, `reproducible: true`); `8` is the
+ * active `ASSESS_PROMPT_VERSION` entry (`buildAssessPromptV8`, D1's `typed_gaps[].paths`
+ * requirement, `reproducible: true`). A future prompt revision adds a new key here rather
+ * than mutating an existing one, so historical assessments' `judgment.prompt_version` stays
+ * meaningful — and that new key MUST declare its own `reproducible` value rather than
+ * inheriting one silently.
  */
 const ASSESS_TEMPLATE_REGISTRY: Record<number, AssessTemplateRegistryEntry> = {
   5: { fn: buildAssessPrompt, reproducible: false },
   6: { fn: buildAssessPromptV6OutputFrozen, reproducible: true },
   7: { fn: buildAssessPromptV7, reproducible: true },
+  8: { fn: buildAssessPromptV8, reproducible: true },
 };
 
 /**

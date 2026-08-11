@@ -168,10 +168,11 @@
  *   - `typedGapSchema.paths` / `unverifiableFindingSchema` / `pathsVerifiedSchema` /
  *     `resolveAssessedCommit` (D1/D2/D3, spec-judgment-surfaces-must-verify-before-they-
  *     certify-machine) declare the SHAPES and the PURE referent-resolution rule only — the
- *     actual `git cat-file -e` verification is IO and lives in
- *     `AIProviderService._verifyFindingPaths` (`packages/lore/src/service/ai-provider-service.ts`),
- *     never here. `resolveAssessedCommit` never substitutes `HEAD` for the assessed commit —
- *     that substitution IS the defect this mechanism exists to fix.
+ *     actual `git cat-file -e` verification is IO and lives in the exported
+ *     `verifyFindingPaths` function (`packages/lore/src/service/ai-provider-service.ts`,
+ *     called from `AIProviderService`'s private `_finalizeAssessment`), never here.
+ *     `resolveAssessedCommit` never substitutes `HEAD` for the assessed commit — that
+ *     substitution IS the defect this mechanism exists to fix.
  *
  * Side-effect class: pure
  *
