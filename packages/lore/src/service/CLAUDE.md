@@ -68,7 +68,7 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | `GateEnforcer` | `enforce(checkpoint, ctx)` — service-layer runner for the seven `lore gate` checkpoints |
 | `RequirementService` | add/list/removeRequirement on `prd.extra.requirements`; mirrors `AcService` one tier up |
 | `UatService` | `record` — sole UAT-verdict write orchestrator; refuses a non-plan target BEFORE doc creation (no orphan, no `--force`) |
-| `DriftCheckService` | `checkDrift` over declared `extra.code_anchors`; owns the spec-target anchor RMW verbs |
+| `DriftCheckService` | `checkDrift` over declared `extra.code_anchors` for EVERY type in its own `ANCHOR_SCANNED_DOC_TYPES` seam (spec + knowledge) — the one list the scan, the RMW target refusal and the CLI's accepted-type list all read; owns those anchor RMW verbs. Reports `specs_checked`/`knowledge_checked` separately; `DriftRow` carries `doc_slug` + `doc_type`. ⛔ Residual: `spec_id`/`spec_status` still read spec-flavoured on a knowledge row |
 | `VerificationProjectionService` | `evidencePanel` dashboard projection; zero local derivation math, all of it from `@lore/core` |
 | `SessionService` | `lore bootstrap`'s corpus-wide session pointer-set; per-plan blocker lookup via batch store reads |
 
