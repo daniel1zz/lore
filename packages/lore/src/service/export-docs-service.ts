@@ -126,6 +126,7 @@ import {
   DOC_TYPE_ROLE_MAP,
   splitFrontmatter,
   formatMirrorHumanId,
+  assertIsMirrorHumanId,
   ORDINAL_REGISTRY,
 } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
@@ -860,6 +861,11 @@ async function buildOrExtendIndex(
     // or two docs end up sharing one human_id + file_path (the export-collision bug).
     const fileMatch = typeTitleMap?.get(doc.title);
     if (fileMatch && !usedFilePaths.has(fileMatch.filePath)) {
+      // Narrows the scanned-from-disk human_id to the branded MirrorHumanId (SPEC-mirror-
+      // identifier-ssot D3/D4) via the exported assertion function, never a textual cast —
+      // this legacy title-match rebuild path composes the SAME {PREFIX}-{digits} shape but is
+      // NOT formatMirrorHumanId itself, so it can't return the brand type on its own.
+      assertIsMirrorHumanId(fileMatch.humanId);
       index.mappings[doc.id] = {
         human_id: fileMatch.humanId,
         file_path: fileMatch.filePath,
@@ -915,6 +921,11 @@ async function buildOrExtendIndex(
     const filePath = filePathResult.value;
 
     usedFilePaths.add(filePath);
+    // Narrows this legacy per-type sequential/title-claimed allocation (non-numbered doc
+    // types — prd/plan/knowledge/task/phase, never touched by the D1 two-writer reversion
+    // loop) to the branded MirrorHumanId via the exported assertion function, never a
+    // textual cast (SPEC-mirror-identifier-ssot D3/D4).
+    assertIsMirrorHumanId(humanId);
     index.mappings[doc.id] = { human_id: humanId, file_path: filePath };
   }
 

@@ -17,6 +17,7 @@ import { validitySchema } from "./validity.js";
 import { acScopeArraySchema, phaseExtraSchema } from "./phase.js";
 import { fnv1a32Hex } from "./slug-hash.js";
 import { isSelfDeclaredOrdinalTitle } from "./ordinal.js";
+import type { MirrorHumanId } from "./ordinal.js";
 
 // ─── Primitive Schemas ─────────────────────────────────────────────────────
 
@@ -1100,12 +1101,29 @@ export type AiHttpResponse = z.infer<typeof aiHttpResponseSchema>;
  * Schema for a single entry in the export index mapping table.
  * One entry per exported corpus doc.
  *
+ * `human_id` carries the nominal {@link MirrorHumanId} brand (SPEC-mirror-identifier-ssot
+ * D3/D4): a value can only reach this shape by being produced through
+ * `formatMirrorHumanId`/`assertIsMirrorHumanId` (`packages/core/src/ordinal.ts`) OR by being
+ * read through THIS schema's `.transform` below, which is the ONE sanctioned `as MirrorHumanId`
+ * cast site in the whole tree — every other occurrence of that cast text is a violation
+ * `scripts/check-ordinal-write-sites.mjs` flags.
+ *
  * @example
- *   const m: ExportIndexMapping = { human_id: "SPEC-025", file_path: "docs/requirements/spec/SPEC-025-foo.md" };
+ *   const m: ExportIndexMapping = exportIndexMappingSchema.parse({
+ *     human_id: "SPEC-025",
+ *     file_path: "docs/requirements/spec/SPEC-025-foo.md",
+ *   });
  */
 export const exportIndexMappingSchema = z.object({
-  /** Human-readable ID, e.g. "SPEC-025". Stable once assigned. */
-  human_id: z.string().min(1),
+  /**
+   * Human-readable ID, e.g. "SPEC-025". Stable once assigned.
+   *
+   * The `.transform` below is the SOLE sanctioned `as MirrorHumanId` cast (D4): it admits a
+   * value already read from `.lore/export-index.json` at this exact JSON-parse boundary,
+   * branding it as {@link MirrorHumanId} without re-validating the shape (the file is
+   * git-tracked and only ever written by the sanctioned producers on the write side).
+   */
+  human_id: z.string().min(1).transform((value) => value as MirrorHumanId), // sanctioned cast (D4) — the ONE site
   /** Forward-slash path relative to project root, e.g. "docs/requirements/spec/SPEC-025-foo.md". */
   file_path: z.string().min(1),
 });

@@ -13,8 +13,11 @@
  * @spec_ref task-three-of-five-static-checkers-are-inert-no-exported-main
  */
 
-/** The two textual rules this oracle enforces, as reported on each violation. */
-export type OrdinalWriteRule = "ordinal-allocation-arithmetic" | "ordinal-direct-sql-write";
+/** The three textual rules this oracle enforces, as reported on each violation. */
+export type OrdinalWriteRule =
+  | "ordinal-allocation-arithmetic"
+  | "ordinal-direct-sql-write"
+  | "mirror-human-id-unsanctioned-cast";
 
 /** One rule occurrence in one scanned file. */
 export interface OrdinalWriteViolation {
@@ -32,6 +35,15 @@ export interface OrdinalWriteViolation {
  * SQL write to the `ordinal` column. POSIX paths, relative to repo root.
  */
 export const SANCTIONED_ORDINAL_WRITE_FILES: readonly string[];
+
+/**
+ * The ONLY file permitted to contain a textual `as MirrorHumanId` (or laundering
+ * `as unknown as MirrorHumanId`) cast — the `.lore/export-index.json` JSON-parse
+ * boundary (SPEC-mirror-identifier-ssot D4). Deliberately a SEPARATE allowlist
+ * from {@link SANCTIONED_ORDINAL_WRITE_FILES} — see check-ordinal-write-sites.mjs's
+ * module header "Rule (c)" section.
+ */
+export const SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES: readonly string[];
 
 /** True for source `.ts`/`.mts`/`.cts` files in scan scope (excludes tests, `.d.ts`, generated, node_modules). Pure. */
 export function isScannableSourceFile(relPath: string): boolean;

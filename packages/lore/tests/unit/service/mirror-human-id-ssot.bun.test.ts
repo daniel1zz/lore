@@ -57,9 +57,23 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DocRecord, ExportIndex } from "@lore/core";
+import type { DocRecord, ExportIndex, MirrorHumanId } from "@lore/core";
+import { assertIsMirrorHumanId } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { OrdinalMigrationService } from "../../../src/service/ordinal-migration-service.js";
+
+/**
+ * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
+ * construction — via {@link assertIsMirrorHumanId}, never a textual `as MirrorHumanId` cast
+ * (`scripts/check-ordinal-write-sites.mjs`'s rule (c) confines that cast to
+ * `packages/core/src/schemas.ts` alone; a fixture file is not that file). Local to this suite,
+ * per this file's own precedent (see the fixture-factory comment above) of a per-suite-local
+ * factory rather than a cross-file fixture module.
+ */
+function brandedHumanId(value: string): MirrorHumanId {
+  assertIsMirrorHumanId(value);
+  return value;
+}
 
 // ─── Fixture factory (mirrors migrate-ordinals.bun.test.ts's own local
 // factory — deliberately NOT imported/shared, per that file's own precedent
@@ -136,7 +150,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
     writeExportIndex(projectDir, {
       version: 1,
       mappings: {
-        [doc.id]: { human_id: "SPEC-1", file_path: "docs/requirements/spec/SPEC-1-alpha-decision.md" },
+        [doc.id]: { human_id: brandedHumanId("SPEC-1"), file_path: "docs/requirements/spec/SPEC-1-alpha-decision.md" },
       },
     });
 
@@ -171,7 +185,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
     writeExportIndex(projectDir, {
       version: 1,
       mappings: {
-        [doc.id]: { human_id: "SPEC-002", file_path: "docs/requirements/spec/SPEC-002-beta-workflow.md" },
+        [doc.id]: { human_id: brandedHumanId("SPEC-002"), file_path: "docs/requirements/spec/SPEC-002-beta-workflow.md" },
       },
     });
 
@@ -196,7 +210,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
     writeExportIndex(projectDir, {
       version: 1,
       mappings: {
-        [doc.id]: { human_id: "SPEC-100", file_path: "docs/requirements/spec/SPEC-100-century-decision.md" },
+        [doc.id]: { human_id: brandedHumanId("SPEC-100"), file_path: "docs/requirements/spec/SPEC-100-century-decision.md" },
       },
     });
 
@@ -230,7 +244,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
     writeExportIndex(projectDir, {
       version: 1,
       mappings: {
-        [doc.id]: { human_id: "SPEC-1", file_path: "docs/requirements/spec/SPEC-1-alpha-decision.md" },
+        [doc.id]: { human_id: brandedHumanId("SPEC-1"), file_path: "docs/requirements/spec/SPEC-1-alpha-decision.md" },
       },
     });
 
@@ -241,7 +255,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
     expect(result.value.writes_performed).toBe(0);
 
     const onDisk = readExportIndex(projectDir);
-    expect(onDisk.mappings[doc.id]?.human_id).toBe("SPEC-1"); // still unpadded — untouched
+    expect(onDisk.mappings[doc.id]?.human_id).toBe(brandedHumanId("SPEC-1")); // still unpadded — untouched
   });
 
   // ── REGRESSION: a live --apply run persists the padded value to disk ───
@@ -253,7 +267,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
     writeExportIndex(projectDir, {
       version: 1,
       mappings: {
-        [doc.id]: { human_id: "SPEC-1", file_path: "docs/requirements/spec/SPEC-1-alpha-decision.md" },
+        [doc.id]: { human_id: brandedHumanId("SPEC-1"), file_path: "docs/requirements/spec/SPEC-1-alpha-decision.md" },
       },
     });
 
@@ -262,7 +276,7 @@ describe("OrdinalMigrationService step-3 reconcile composes human_id via formatM
     if (!applyResult.ok) return;
 
     const onDisk = readExportIndex(projectDir);
-    expect(onDisk.mappings[doc.id]?.human_id).toBe("SPEC-001");
+    expect(onDisk.mappings[doc.id]?.human_id).toBe(brandedHumanId("SPEC-001"));
     // file_path is Scope-Alt (report-only rename) — untouched on disk.
     expect(onDisk.mappings[doc.id]?.file_path).toBe("docs/requirements/spec/SPEC-1-alpha-decision.md");
   });

@@ -19,6 +19,24 @@
  * same template-literal/string-concat composition. Do not add a second site;
  * import `formatDocDisplayId`/`composeDocDisplayTitle` from here instead.
  *
+ * SPEC-mirror-identifier-ssot D3/D4 — the mirror's `human_id` invariant is
+ * now a MECHANISM, not prose: `formatMirrorHumanId` returns the nominal
+ * brand {@link MirrorHumanId} (type-only — erased at compile time, zero
+ * runtime footprint, so the browser-safe barrel below stays browser-safe).
+ * A plain `string` — including `formatDocDisplayId`'s own unpadded output —
+ * cannot be assigned where a `MirrorHumanId` is expected, so the two-writer
+ * reversion loop this header used to describe only in prose is now a `tsc`
+ * error instead of a silent runtime oscillation. The brand's ONE sanctioned
+ * textual cast (written `as` immediately followed by the brand name) lives at
+ * the JSON parse boundary in `packages/core/src/schemas.ts`
+ * (`exportIndexMappingSchema`); every OTHER legitimate producer — this
+ * module's own `formatMirrorHumanId`, and `ExportDocsService`'s legacy
+ * per-type allocator for non-numbered doc types — narrows via the exported
+ * assertion function {@link assertIsMirrorHumanId} instead of a textual cast,
+ * so the cast escape really does stay singular. `scripts/check-ordinal-write-sites.mjs`
+ * greps for the cast text itself and flags any occurrence outside
+ * `schemas.ts`.
+ *
  * Side-effect class: pure. Zero Node imports (browser-safe — re-exported
  * from the default `@lore/core` barrel, consumed by `@lore/dashboard`).
  *
@@ -29,7 +47,7 @@
  * - `resolveDoc`'s ordinal-ref resolution step and `CorpusService`'s
  *   create/set wiring consume this module but live in `packages/lore/src/service`.
  *
- * @spec_ref SPEC-084 §Module Boundary D3, D4, D5, D6
+ * @spec_ref SPEC-084 §Module Boundary D3, D4, D5, D6; SPEC-mirror-identifier-ssot D3, D4
  */
 
 import type { DocType } from "./types.js";
@@ -117,6 +135,58 @@ export function composeDocDisplayTitle(doc: {
 }
 
 /**
+ * Nominal brand for a mirror `human_id` — the corpus→file mirror's zero-padded display id
+ * (e.g. `"SPEC-021"`), producible ONLY via {@link formatMirrorHumanId} or the schema parse
+ * boundary in `packages/core/src/schemas.ts` (SPEC-mirror-identifier-ssot D3/D4). Type-only:
+ * the intersection with a `unique symbol`-tagged property has no runtime representation, so
+ * this adds zero bytes to the compiled/transpiled output and never threatens the `@lore/core`
+ * barrel's browser-safety invariant (see the module header).
+ *
+ * A plain `string` is NOT assignable to this type (it lacks the phantom `__mirrorHumanIdBrand`
+ * property), so the two-writer reversion loop the module header describes — `formatDocDisplayId`'s
+ * UNPADDED output landing in an export-index `human_id` field — becomes a `tsc` TS2322 error
+ * rather than a silent runtime oscillation. There is exactly one legal way to narrow a `string`
+ * into this type WITHOUT the sanctioned schema-boundary cast: {@link assertIsMirrorHumanId}.
+ */
+export type MirrorHumanId = string & { readonly __mirrorHumanIdBrand: unique symbol };
+
+/**
+ * Runtime shape a mirror `human_id` must have: an uppercase-letter prefix, a hyphen, and one
+ * or more digits (e.g. `"SPEC-021"`, `"PRD-004"`, `"KN-017"`) — the same token class
+ * {@link formatDocDisplayId} composes, and the one `ExportDocsService`'s legacy per-type
+ * allocator independently composes for doc types that carry no {@link ORDINAL_REGISTRY} entry.
+ * Backs {@link assertIsMirrorHumanId}'s runtime check.
+ */
+const MIRROR_HUMAN_ID_SHAPE = /^[A-Z]+-\d+$/;
+
+/**
+ * Narrows a plain `string` to {@link MirrorHumanId} via a TypeScript assertion signature —
+ * deliberately NOT a textual cast (`as` immediately followed by the brand name), which
+ * SPEC-mirror-identifier-ssot D4 confines to the ONE sanctioned site in
+ * `packages/core/src/schemas.ts` (the
+ * `.lore/export-index.json` parse boundary) and `scripts/check-ordinal-write-sites.mjs`
+ * mechanically enforces by grepping for that cast text outside that one file. Every OTHER
+ * legitimate producer of an export-index `human_id` calls this function instead:
+ * {@link formatMirrorHumanId} itself, and `ExportDocsService`'s legacy per-type
+ * sequential/title-claimed/title-match allocator for doc types with no
+ * {@link ORDINAL_REGISTRY} entry (prd/plan/knowledge/task/phase) — a composition the
+ * two-writer reversion loop (D1) never touched, since those types never had a
+ * `formatDocDisplayId`/`formatMirrorHumanId` pair to disagree over in the first place.
+ *
+ * @param value - the composed id string to narrow.
+ * @throws if `value` does not match `{PREFIX}-{digits}` — every caller composes `value` from
+ *   its own prefix + a numeric suffix, so this is defensive and not expected to trip; a silent
+ *   mis-narrow would be worse than a loud, never-triggered throw.
+ */
+export function assertIsMirrorHumanId(value: string): asserts value is MirrorHumanId {
+  if (!MIRROR_HUMAN_ID_SHAPE.test(value)) {
+    throw new Error(
+      `assertIsMirrorHumanId: "${value}" does not match the mirror human_id shape {PREFIX}-{digits}`,
+    );
+  }
+}
+
+/**
  * The corpus→file MIRROR's zero-padded display id — `formatDocDisplayId(doc)`'s composed
  * string with its numeric suffix left-padded to `width` digits (default 3), e.g.
  * `"SPEC-021"` not `"SPEC-21"`.
@@ -139,6 +209,10 @@ export function composeDocDisplayTitle(doc: {
  * entries cite that padded form — aligning `human_id` to the FILENAME convention (not the
  * reverse) is what makes the migration-coverage eval's `links_broken` reach zero.
  *
+ * Returns the branded {@link MirrorHumanId} (SPEC-mirror-identifier-ssot D3) — narrowed via
+ * {@link assertIsMirrorHumanId}, never a textual cast, so this composition site itself never
+ * trips `scripts/check-ordinal-write-sites.mjs`'s cast-escape rule.
+ *
  * @param doc - the `type` and `ordinal` of a doc (same shape {@link formatDocDisplayId} takes).
  * @param width - minimum digit width for the numeric suffix (default 3); a wider ordinal
  *   (≥1000) is never truncated, only ever padded UP to at least `width` digits.
@@ -148,14 +222,20 @@ export function composeDocDisplayTitle(doc: {
 export function formatMirrorHumanId(
   doc: { type: DocType; ordinal?: number | null },
   width = 3,
-): string | null {
+): MirrorHumanId | null {
   const displayId = formatDocDisplayId(doc);
   if (displayId === null) return null;
   const separatorIdx = displayId.indexOf("-");
-  if (separatorIdx === -1) return displayId; // defensive — every registry prefix embeds "-"
+  if (separatorIdx === -1) {
+    // defensive — every registry prefix embeds "-", so this branch is unreachable in practice.
+    assertIsMirrorHumanId(displayId);
+    return displayId;
+  }
   const prefix = displayId.slice(0, separatorIdx);
   const ordinalText = displayId.slice(separatorIdx + 1);
-  return `${prefix}-${ordinalText.padStart(width, "0")}`;
+  const padded = `${prefix}-${ordinalText.padStart(width, "0")}`;
+  assertIsMirrorHumanId(padded);
+  return padded;
 }
 
 /** Matches `SPEC-84` / `adr-007` (case-insensitive, optional leading zeros

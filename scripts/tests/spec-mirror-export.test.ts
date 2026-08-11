@@ -49,8 +49,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExportIndexMapping } from "@lore/core";
-import { NoOpTelemetry } from "@lore/core";
+import type { ExportIndexMapping, MirrorHumanId } from "@lore/core";
+import { NoOpTelemetry, assertIsMirrorHumanId } from "@lore/core";
 import {
   computeMirrorParity,
   scriptChainReachesTarget,
@@ -71,6 +71,17 @@ import { OutlineService } from "../../packages/lore/src/service/outline-service.
 import { TreeCheckService } from "../../packages/lore/src/service/tree-check-service.js";
 import { runMigrationCoverage } from "../../packages/lore/src/eval/scenarios/migration-coverage.js";
 import type { App } from "../../packages/lore/src/app.js";
+
+/**
+ * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
+ * construction — via {@link assertIsMirrorHumanId}, never a textual `as MirrorHumanId` cast
+ * (`scripts/check-ordinal-write-sites.mjs`'s rule (c) confines that cast to
+ * `packages/core/src/schemas.ts` alone; a fixture file is not that file).
+ */
+function brandedHumanId(value: string): MirrorHumanId {
+  assertIsMirrorHumanId(value);
+  return value;
+}
 
 // ─── Path setup ─────────────────────────────────────────────────────────────
 
@@ -402,7 +413,7 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
 // ─── Pure: computeMirrorParity ──────────────────────────────────────────────
 
 describe("computeMirrorParity (pure, no IO)", () => {
-  const mkMapping = (filePath: string): ExportIndexMapping => ({ human_id: "SPEC-1", file_path: filePath });
+  const mkMapping = (filePath: string): ExportIndexMapping => ({ human_id: brandedHumanId("SPEC-1"), file_path: filePath });
 
   it("HAPPY: every spec mapped with its file present -> ok true, missing empty", () => {
     const specs = [{ id: "id-a", slug: "spec-a" }, { id: "id-b", slug: "spec-b" }];

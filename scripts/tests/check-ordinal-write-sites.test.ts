@@ -1,8 +1,11 @@
 /**
  * Unit + fixture-tree suite for `scripts/check-ordinal-write-sites.mjs`
- * (`task-three-of-five-static-checkers-are-inert-no-exported-main`) — the
- * SPEC-084 Invariant-2 guard confining ordinal-allocation arithmetic and direct
- * SQL writes to the `ordinal` column to a fixed allowlist of files.
+ * (`task-three-of-five-static-checkers-are-inert-no-exported-main`,
+ * `task-make-mirrorhumanid-a-nominal-type-on`) — the SPEC-084 Invariant-2 guard
+ * confining ordinal-allocation arithmetic and direct SQL writes to the
+ * `ordinal` column to a fixed allowlist of files, PLUS (D4) the
+ * SPEC-mirror-identifier-ssot cast-escape rule confining a textual
+ * `as MirrorHumanId` cast to the ONE sanctioned schema-boundary file.
  *
  * Why this file exists at all: until this task the checker had **no test**, no
  * exported `main`, and no caller anywhere in the tree (`package.json`'s
@@ -23,27 +26,34 @@
  *
  * Coverage (six dimensions):
  *   HAPPY — a clean fixture tree exits 0; the real repo tree exits 0 (the arming
- *     assertion); both textual rules are found where they occur, with their
- *     EXACT line numbers (computed from the fixture's own prefix, never
- *     hand-counted, per this repo's failure-first verification discipline).
- *   NEGATIVE — introducing allocation arithmetic in an UNSANCTIONED file makes
- *     `main()` return exactly 3 and name the file/line/rule; the same content in
- *     a SANCTIONED file is exempted (the allowlist is honoured, not ignored); a
- *     line merely mentioning the word `ordinal` is never a violation.
+ *     assertion, now ALSO exercising rule (c) against the real
+ *     `packages/core/src/schemas.ts`); all three textual rules are found where
+ *     they occur, with their EXACT line numbers (computed from the fixture's own
+ *     prefix, never hand-counted, per this repo's failure-first verification
+ *     discipline).
+ *   NEGATIVE — introducing allocation arithmetic (or an unsanctioned
+ *     `as MirrorHumanId` cast) in an UNSANCTIONED file makes `main()` return
+ *     exactly 3 and name the file/line/rule; the same content in a SANCTIONED
+ *     file (for that rule specifically — the two allowlists are independent)
+ *     is exempted; a line merely mentioning the word `ordinal`/`MirrorHumanId`
+ *     is never a violation.
  *   BOUNDARY — the `INSERT INTO docs` rule's 600-char window: an `ordinal`
  *     mention just inside it matches, one just outside does not (padding
- *     computed, not guessed); a `.mts` file IS scanned while a `.d.ts` is not.
+ *     computed, not guessed); a `.mts` file IS scanned while a `.d.ts` is not;
+ *     the MirrorHumanId cast rule is case-SENSITIVE and catches the laundering
+ *     `as unknown as MirrorHumanId` double-cast form.
  *   ERROR — a fixture root with no `packages/` directory makes `main()` THROW
  *     (the scan-failure path the CLI maps to exit 4), never a silent exit 0.
  *   STATE — `main()` is read-only and idempotent: two runs over an unchanged
  *     tree return the identical code; removing an injected violation restores 0
  *     (the control half, proving the FIXTURE — not leftover state — tripped it).
- *   REGRESSION — every path in `SANCTIONED_ORDINAL_WRITE_FILES` still exists on
- *     disk (an allowlist row that outlived its file exempts nothing and hides
- *     drift); tests/generated/`.d.ts`/non-TypeScript files stay out of scan
- *     scope, so the allowlist can never become a false-positive source.
+ *   REGRESSION — every path in `SANCTIONED_ORDINAL_WRITE_FILES` AND
+ *     `SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES` still exists on disk (an allowlist
+ *     row that outlived its file exempts nothing and hides drift);
+ *     tests/generated/`.d.ts`/non-TypeScript files stay out of scan scope, so
+ *     the allowlist can never become a false-positive source.
  *
- * @spec_ref task-three-of-five-static-checkers-are-inert-no-exported-main
+ * @spec_ref task-three-of-five-static-checkers-are-inert-no-exported-main, task-make-mirrorhumanid-a-nominal-type-on
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -55,6 +65,7 @@ import {
   collectViolationsInFile,
   isScannableSourceFile,
   main,
+  SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES,
   SANCTIONED_ORDINAL_WRITE_FILES,
 } from "../check-ordinal-write-sites.mjs";
 
@@ -167,7 +178,96 @@ describe("check-ordinal-write-sites: main() — injected fixture tree", () => {
   });
 });
 
-// ─── collectViolationsInFile(): the two textual rules ───────────────────────
+// ─── main(): rule (c) — the MirrorHumanId cast-escape (SPEC-mirror-identifier-ssot D4) ─────
+
+describe("check-ordinal-write-sites: main() — MirrorHumanId cast-escape rule (AC-MIS-3)", () => {
+  it("NEGATIVE: an 'as MirrorHumanId' cast in an UNSANCTIONED file returns EXACTLY 3, naming the rule and file:line", () => {
+    const root = makeCleanFixture();
+    const rogue = "packages/lore/src/service/rogue-cast.ts";
+    writeSource(
+      root,
+      rogue,
+      'import type { MirrorHumanId } from "@lore/core";\nconst id = "SPEC-021" as MirrorHumanId;\n',
+    );
+
+    expect(main(root)).toBe(EXIT_VIOLATIONS_FOUND); // exactly 3, not merely non-zero — same discipline as the ordinal rules
+
+    const violations = collectViolationsInFile(rogue, 'const id = "SPEC-021" as MirrorHumanId;\n');
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.rule).toBe("mirror-human-id-unsanctioned-cast");
+    expect(violations[0]?.file).toBe(rogue);
+    expect(violations[0]?.line).toBe(1);
+  });
+
+  it("NEGATIVE: the laundering 'as unknown as MirrorHumanId' double-cast is ALSO caught in an unsanctioned file", () => {
+    const root = makeCleanFixture();
+    writeSource(
+      root,
+      "packages/lore/src/service/rogue-launder.ts",
+      'const id = ("SPEC-021" as unknown) as MirrorHumanId;\n',
+    );
+    expect(main(root)).toBe(EXIT_VIOLATIONS_FOUND);
+  });
+
+  it("NEGATIVE: the SAME 'as MirrorHumanId' cast bytes inside the SANCTIONED schemas.ts path return 0 — the allowlist is honoured, not ignored", () => {
+    const root = makeCleanFixture();
+    const sanctioned = SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES[0] as string;
+    const castLine = 'human_id: z.string().min(1).transform((value) => value as MirrorHumanId),\n';
+
+    writeSource(root, sanctioned, castLine);
+    expect(main(root)).toBe(EXIT_CLEAN);
+
+    // Independent control: the IDENTICAL bytes in a non-allowlisted path DO trip the guard,
+    // so the exemption above is the allowlist doing its job, not the pattern failing to match.
+    writeSource(root, "packages/lore/src/service/same-cast-bytes.ts", castLine);
+    expect(main(root)).toBe(EXIT_VIOLATIONS_FOUND);
+  });
+
+  it("NEGATIVE: a comment merely mentioning the identifier MirrorHumanId (no 'as' cast) is never a violation", () => {
+    const root = makeCleanFixture();
+    writeSource(
+      root,
+      "packages/lore/src/service/mentions-only.ts",
+      "// this value is a MirrorHumanId once formatMirrorHumanId returns it\nexport type X = string;\n",
+    );
+    expect(main(root)).toBe(EXIT_CLEAN);
+  });
+
+  it("BOUNDARY: the cast rule is case-SENSITIVE — 'as mirrorhumanid' (wrong case) is never flagged", () => {
+    const root = makeCleanFixture();
+    writeSource(root, "packages/lore/src/service/wrong-case.ts", "const id = x as mirrorhumanid;\n");
+    expect(main(root)).toBe(EXIT_CLEAN);
+  });
+
+  it("NEGATIVE: an UNRELATED 'as SomeOtherType' cast in the same unsanctioned file is not flagged by this rule", () => {
+    const root = makeCleanFixture();
+    writeSource(root, "packages/lore/src/service/other-cast.ts", "const id = x as SomeOtherType;\n");
+    expect(main(root)).toBe(EXIT_CLEAN);
+  });
+
+  it("STATE: a file sanctioned for the ORDINAL rules but NOT for the cast rule still trips the cast rule — the two allowlists are independent", () => {
+    const root = makeCleanFixture();
+    // ordinal-migration-service.ts is on SANCTIONED_ORDINAL_WRITE_FILES but NOT on
+    // SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES — an unsanctioned cast there must still trip.
+    const ordinalSanctionedFile = SANCTIONED_ORDINAL_WRITE_FILES.find(
+      (f) => !SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES.includes(f),
+    ) as string;
+    writeSource(root, ordinalSanctionedFile, "const id = x as MirrorHumanId;\n");
+    expect(main(root)).toBe(EXIT_VIOLATIONS_FOUND);
+  });
+
+  it("REGRESSION: every path in SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES still exists on disk", () => {
+    const missing = SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES.filter((relPath) => !existsSync(join(REPO_ROOT, relPath)));
+    expect(missing).toEqual([]);
+  });
+
+  it("REGRESSION: SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES is a SEPARATE allowlist from SANCTIONED_ORDINAL_WRITE_FILES — the two rule families must stay independently extensible", () => {
+    expect(SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES).not.toBe(SANCTIONED_ORDINAL_WRITE_FILES);
+    expect(SANCTIONED_MIRROR_HUMAN_ID_CAST_FILES).toEqual(["packages/core/src/schemas.ts"]);
+  });
+});
+
+// ─── collectViolationsInFile(): the three textual rules ─────────────────────
 
 describe("check-ordinal-write-sites: collectViolationsInFile — rule (a) allocation arithmetic", () => {
   it("HAPPY: MAX(ordinal) is reported at its EXACT line, with the arithmetic rule name", () => {
@@ -288,6 +388,10 @@ describe("check-ordinal-write-sites: real repo tree (task oracle)", () => {
     // Deliberately un-mocked and un-injected: this is the exact `bun run
     // check:ordinal-sites` code path. Before this task nothing in the repo ever
     // executed it — no CI, no pre-push hook, no test — so its green was unproven.
+    // This is ALSO AC-MIS-3's "the real tree returns 0" requirement: since rule (c)
+    // now runs against every scanned file, a real, unsanctioned `as MirrorHumanId`
+    // cast anywhere in packages/*/src would have made this fail, not just the
+    // ordinal-column rules.
     expect(main()).toBe(EXIT_CLEAN);
   });
 });
