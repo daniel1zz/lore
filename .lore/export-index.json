@@ -5460,6 +5460,10 @@
     "01KZQF9ZPPRHX1WX3SK6XH4PQY": {
       "human_id": "TASK-654",
       "file_path": "docs/requirements/task/TASK-654-embed-build-provenance-into-the-binary-and-add-the.md"
+    },
+    "01KZQJAN1922J51FYSQ3QFCD6K": {
+      "human_id": "KN-417",
+      "file_path": "docs/requirements/knowledge/KN-417-five-findings-from-planning-the-bootstrap-fixpoint.md"
     }
   }
 }
