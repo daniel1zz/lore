@@ -734,7 +734,7 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
     expect(stored[0]?.capture_source).toBe("runner");
   });
 
-  it("CAPMCP-S1: the live control — a server registered with NO getConfig still runs at the 600000ms default", async () => {
+  it("CAPMCP-S1: the live control — a server registered with NO getConfig still runs at the (1200000ms, raised 2026-08-11) default", async () => {
     const planId = await createPlan(corpusService);
     const taskId = await createTask(corpusService, planId);
 
