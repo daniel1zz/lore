@@ -179,6 +179,8 @@ import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs } from "@lore/core";
 import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFileAnchors } from "@lore/core";
+import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
+import { resolveSubTypeFilter } from "../../service/corpus-service.js";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
@@ -235,6 +237,17 @@ import { existsSync } from "node:fs";
 
 /** Valid document types accepted by all lore_* tools. */
 const DOC_TYPE_ENUM = z.enum(["prd", "spec", "adr", "plan", "knowledge", "task"]);
+
+/**
+ * Valid `knowledge` sub-type values accepted by `lore_list`/`lore_search`'s
+ * `sub_type` retrieval filter.
+ *
+ * reason: built from `@lore/core`'s `KNOWLEDGE_SUB_TYPES` tuple (the value-set
+ * SSOT) rather than a re-typed literal list — a tenth sub-type must not need an
+ * edit here to become filterable. Declared as a module-level const per this
+ * file's schema-constant rule above (ADR-01KVYFJ5G8EVB6S5NMD3PNY5KA).
+ */
+const KNOWLEDGE_SUB_TYPE_ENUM = z.enum(KNOWLEDGE_SUB_TYPES);
 
 /** Valid document status values accepted by lore_set and lore_list filters. */
 const DOC_STATUS_ENUM = z.enum([
@@ -380,6 +393,8 @@ export const LoreListSchema = z.object({
   governed_by: z.string().optional(),
   /** See {@link LoreSearchSchema.include_invalid} — same escape, CLI `--include-invalid` mirror. */
   include_invalid: z.boolean().optional(),
+  /** See {@link LoreSearchSchema.sub_type} — same store-level predicate, CLI `--sub-type` mirror. */
+  sub_type: KNOWLEDGE_SUB_TYPE_ENUM.optional(),
 });
 
 /** Input schema for lore_search. */
@@ -393,6 +408,19 @@ export const LoreSearchSchema = z.object({
    * `--include-invalid` flag.
    */
   include_invalid: z.boolean().optional(),
+  /**
+   * A `knowledge` doc's `extra.sub_type`, as a store-level retrieval predicate —
+   * the CLI `--sub-type` mirror (spec-a-write-side-fact-with-no-read-side-address-counts-with-no §M3).
+   *
+   * ⛔ This surface exists so the MCP tools never silently lag the CLI on a
+   * retrieval filter: agents are the dominant caller, and a taxonomy reachable
+   * only from a terminal is not reachable at all for them.
+   *
+   * Requires `type: "knowledge"`. Any other `type` (or none) is an `isError`
+   * refusal naming the conflict, via the same `resolveSubTypeFilter` seam the CLI
+   * maps to exit 2 — never a silently empty result set.
+   */
+  sub_type: KNOWLEDGE_SUB_TYPE_ENUM.optional(),
 });
 
 /** Input schema for lore_tree. */
@@ -1410,7 +1438,24 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
   // lore_list
   registerToolWithArgs(server, "lore_list", "List documents matching optional filters", LoreListSchema, async (args) => {
-    const { type, status, since, author, tag, limit, offset, governed_by, include_invalid } = args;
+    const { type, status, since, author, tag, limit, offset, governed_by, include_invalid, sub_type } = args;
+
+    // reason: the SAME `resolveSubTypeFilter` seam the CLI's `lore list` consumes
+    // (spec-a-write-side-fact-with-no-read-side-address-counts-with-no §M3) — a
+    // sub_type is only meaningful under type "knowledge", and a contradictory
+    // combination is refused BY NAME rather than returning an exit-0/no-isError
+    // empty `docs` array, which an agent cannot distinguish from "no such docs".
+    // The refusal is mapped to this surface's vocabulary (isError) while the CLI
+    // maps the same message to exit 2; ⛔ the RULE itself is never re-derived here.
+    const subTypeResolution = resolveSubTypeFilter(sub_type, type);
+    if (!subTypeResolution.ok) {
+      return errorContent({
+        code: "VALIDATION_ERROR",
+        field: "sub_type",
+        message: subTypeResolution.message,
+        value: sub_type,
+      });
+    }
 
     // reason: pagination hardening (unbounded-payload review) — an omitted `limit`
     // defaults to MCP_LIST_DEFAULT_LIMIT (never an unpaged corpus-wide fetch on this
@@ -1425,6 +1470,25 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     // listGovernedBy has no store-level limit/offset param, so paging (incl. the
     // truncation probe) is applied in-memory to its already-fetched result.
     if (governed_by !== undefined) {
+      // reason: `governed_by` short-circuits to a link traversal that never builds
+      // the `filters` object below, so a `sub_type` passed alongside it would be
+      // SILENTLY IGNORED — the caller would get an unfiltered governed-artifact
+      // list and no signal that their filter did nothing. The CLI refuses the same
+      // pair (`--governed-by`'s `otherFilterKeys` names `sub-type`), so refuse it
+      // here too rather than let the two surfaces disagree on what is legal.
+      // ⛔ Do not "simplify" this into a silent drop to match how `type`/`status`
+      // behave on this branch: that pre-existing silence is the defect this repo
+      // keeps paying for, not a pattern to extend.
+      if (sub_type !== undefined) {
+        return errorContent({
+          code: "VALIDATION_ERROR",
+          field: "sub_type",
+          message:
+            "Error: sub_type cannot be combined with governed_by — governed_by is a link " +
+            "traversal, not a column filter, and would silently ignore it.",
+          value: sub_type,
+        });
+      }
       // SPEC-043 D3 / task-validity-landed-on-lore-list-only-the-dispatch-surface
       // Required #6 — `include_invalid` is FORWARDED to the service method, which owns
       // both the default exclusion and the `validity_status` projection. This branch
@@ -1448,6 +1512,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       ...(tag !== undefined ? { tags: [tag] } : {}),
       // SPEC-043 D3 — mirrors the CLI's --include-invalid flag.
       ...(include_invalid === true ? { include_invalid: true } : {}),
+      // reason: forwarded into StoreFilters so the DB applies it alongside
+      // LIMIT/OFFSET below. ⛔ Deliberately NOT filtered over `result.value.docs`
+      // afterwards: this surface's `probeLimit` page is bound in SQL, so a
+      // post-fetch sub_type pass would make `truncated` lie (rows dropped after
+      // the limit+1 probe) on top of the paging bug M3 forbids.
+      ...(subTypeResolution.sub_type !== undefined ? { sub_type: subTypeResolution.sub_type } : {}),
       // pagination hardening — store-level LIMIT/OFFSET, never an unpaged fetch.
       limit: probeLimit,
       ...(offset !== undefined ? { offset } : {}),
@@ -1461,11 +1531,29 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
   // lore_search
   registerToolWithArgs(server, "lore_search", "Full-text search across the corpus", LoreSearchSchema, async (args) => {
-    const { query, type, limit, include_invalid } = args;
+    const { query, type, limit, include_invalid, sub_type } = args;
+
+    // reason: same shared seam as lore_list above / the CLI's `lore search` — see
+    // the lore_list handler's comment for why a refusal must be isError here
+    // rather than an empty `results` array.
+    const subTypeResolution = resolveSubTypeFilter(sub_type, type);
+    if (!subTypeResolution.ok) {
+      return errorContent({
+        code: "VALIDATION_ERROR",
+        field: "sub_type",
+        message: subTypeResolution.message,
+        value: sub_type,
+      });
+    }
+
     const filters = {
       ...(type !== undefined ? { type } : {}),
       // SPEC-043 D3 — mirrors the CLI's --include-invalid flag.
       ...(include_invalid === true ? { include_invalid: true } : {}),
+      // reason: forwarded into StoreFilters so the FTS5→docs join applies it —
+      // ⛔ never a filter over `result.value.results`, which `limit` below already
+      // slices (the CLI header records why that ordering breaks the query).
+      ...(subTypeResolution.sub_type !== undefined ? { sub_type: subTypeResolution.sub_type } : {}),
     };
     const result = await corpusService.search(query, filters);
     if (!result.ok) return errorContent(result.error);

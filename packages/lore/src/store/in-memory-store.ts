@@ -305,6 +305,13 @@ export class InMemoryStore implements StoreInterface {
         return false;
       if (filters.since !== undefined && doc.updated_at < filters.since)
         return false;
+      // reason: applied HERE — in the candidate predicate, alongside every other
+      // column filter — and NOT after the sort/slice below, so this double
+      // reproduces the SQL stores' WHERE-before-LIMIT/OFFSET ordering exactly.
+      // A double that filtered after paging would make the in-memory suite green
+      // for the very post-window bug StoreFilters.sub_type forbids.
+      if (filters.sub_type !== undefined && !matchesSubType(doc, filters.sub_type))
+        return false;
       return true;
     });
 
@@ -710,6 +717,11 @@ export class InMemoryStore implements StoreInterface {
       if (filters?.type !== undefined && doc.type !== filters.type) return false;
       if (filters?.status !== undefined && doc.status !== filters.status)
         return false;
+      // reason: same candidate-stage placement as findMany's — the narrowing runs
+      // before any scoring/ordering, mirroring the SQL stores' FTS5→docs join
+      // WHERE clause rather than a post-fetch pass over the hit list.
+      if (filters?.sub_type !== undefined && !matchesSubType(doc, filters.sub_type))
+        return false;
       return true;
     });
 
@@ -1108,6 +1120,36 @@ export class InMemoryStore implements StoreInterface {
 }
 
 // ── Module-level helpers ───────────────────────────────────────────────────
+
+/**
+ * Faithful in-memory equivalent of SQLiteStore/TursoStore's
+ * `json_extract(extra, '$.sub_type') = ?` predicate — see
+ * {@link StoreFilters.sub_type}.
+ *
+ * Parity notes, each mirroring what SQLite actually does rather than what reads
+ * nicer here:
+ *   - a doc with NO `sub_type` key does NOT match any value (`json_extract`
+ *     returns SQL NULL, and `NULL = ?` is never true) — so this returns `false`,
+ *     never "unfiltered".
+ *   - a non-string `sub_type` (a corrupted/legacy row) does NOT match either;
+ *     the strict `===` stands in for SQL's type-affinity compare.
+ *
+ * `doc.extra` is typed `Record<string, unknown>` but a hand-built unit-test
+ * fixture can legitimately hand this a `null`/non-object value at runtime, so
+ * the read is defensive (same reasoning as `@lore/core`'s
+ * `doc-type-meta.ts::safeExtra`).
+ *
+ * Side-effect class: pure.
+ *
+ * @param doc - The candidate document.
+ * @param subType - The value being filtered for.
+ * @returns `true` iff the doc's `extra.sub_type` is exactly `subType`.
+ */
+function matchesSubType(doc: DocRecord, subType: string): boolean {
+  const extra: unknown = doc.extra;
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return false;
+  return (extra as Record<string, unknown>)["sub_type"] === subType;
+}
 
 /**
  * Extract a short snippet from content that includes the match context.

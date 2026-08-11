@@ -1073,6 +1073,15 @@ export class TursoStore implements StoreInterface {
         clauses.push("updated_at >= ?");
         params.push(filters.since);
       }
+      // reason: mirrors SQLiteStore.findMany's identical json_extract predicate —
+      // `sub_type` lives in the `extra` JSON column but belongs in the SQL WHERE
+      // clause (NOT the in-memory `tags` pass below), because it must narrow the
+      // row set BEFORE LIMIT/OFFSET binds the page window. Bound, never
+      // interpolated. See StoreFilters.sub_type.
+      if (filters.sub_type !== undefined) {
+        clauses.push("json_extract(extra, '$.sub_type') = ?");
+        params.push(filters.sub_type);
+      }
 
       const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 
@@ -1979,6 +1988,13 @@ export class TursoStore implements StoreInterface {
       if (filters?.status !== undefined) {
         docClauses.push("d.status = ?");
         docParams.push(filters.status);
+      }
+      // reason: mirrors SQLiteStore.search's identical json_extract predicate —
+      // the narrowing rides the FTS5→docs join's WHERE, never a post-fetch filter
+      // over the hit list. See StoreFilters.sub_type.
+      if (filters?.sub_type !== undefined) {
+        docClauses.push("json_extract(d.extra, '$.sub_type') = ?");
+        docParams.push(filters.sub_type);
       }
 
       const docWhere = docClauses.length > 0 ? `AND ${docClauses.join(" AND ")}` : "";

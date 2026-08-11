@@ -12,6 +12,7 @@ import type {
   DocRecord,
   DocStatus,
   DocType,
+  KnowledgeSubType,
   LinkRecord,
   LinkType,
   ReviewJudgment,
@@ -72,6 +73,35 @@ export interface StoreFilters {
   /** ISO 8601 — only docs updated at or after this timestamp */
   since?: string;
   tags?: string[];
+  /**
+   * A `knowledge` document's `extra.sub_type`, as a RETRIEVAL predicate —
+   * surfaced as `lore list --sub-type <v>` / `lore search --sub-type <v>` and
+   * the matching MCP `lore_list`/`lore_search` fields.
+   *
+   * ⛔ **Every implementation MUST apply this IN THE QUERY, never as a filter
+   * over already-fetched rows.** `sub_type` lives in the untyped `extra` JSON
+   * column, so SQLite/libsql express it as
+   * `json_extract(extra, '$.sub_type') = ?` — BOUND as a parameter, never
+   * string-interpolated (the same non-negotiable bind-protocol rule
+   * {@link StoreFilters.limit} and {@link AuditFilters.limit} document).
+   * A predicate applied AFTER the {@link limit}/{@link offset} window would
+   * return fewer rows than `limit` asked for while more matches sat past the
+   * offset — the paging bug the SQL-side `tags` guard in `findMany` exists to
+   * avoid, and the exact mistake AC-RR-5's `--limit 1 --offset 1` oracle is
+   * built to fail.
+   *
+   * @remarks Only `knowledge` docs ever carry `extra.sub_type`, so this
+   *   composes with `type: "knowledge"`; the CLI/MCP surfaces REFUSE it
+   *   alongside any other `type` (usage error, exit 2) rather than returning a
+   *   silently empty set. The store layer itself applies no such cross-field
+   *   rule — it is a pure column predicate here, and a caller pairing it with
+   *   another type legitimately gets zero rows.
+   * @remarks A row whose `extra` is not valid JSON makes `json_extract` raise,
+   *   surfacing as `STORE_ERROR`. That is deliberate: a corrupt row is reported
+   *   loudly rather than silently excluded from a filtered listing.
+   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M3
+   */
+  sub_type?: KnowledgeSubType;
   /** Default: true. When false, soft-deleted docs are included. */
   exclude_deleted?: boolean;
   /**

@@ -920,6 +920,17 @@ export class SQLiteStore implements StoreInterface {
         clauses.push("updated_at >= ?");
         params.push(filters.since);
       }
+      // reason: `sub_type` lives in the `extra` JSON column, so it needs
+      // json_extract rather than a bare column compare — but it belongs in the
+      // SQL WHERE clause, NOT in an in-memory pass like `tags` below, because it
+      // must narrow the row set BEFORE LIMIT/OFFSET binds the page window.
+      // Filtering after the window would return fewer rows than `limit` asked
+      // for while more matches sat past the offset (StoreFilters.sub_type's own
+      // ⛔ note). Bound as a parameter, never interpolated.
+      if (filters.sub_type !== undefined) {
+        clauses.push("json_extract(extra, '$.sub_type') = ?");
+        params.push(filters.sub_type);
+      }
 
       const whereClause =
         clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -1363,6 +1374,16 @@ export class SQLiteStore implements StoreInterface {
       if (filters?.status !== undefined) {
         docClauses.push("d.status = ?");
         docParams.push(filters.status);
+      }
+      // reason: same store-level predicate findMany applies (see its
+      // json_extract comment) — the FTS5 MATCH joins the `docs` table, so the
+      // sub_type narrowing rides that join's WHERE rather than filtering the hit
+      // list afterwards. `lore search --limit` is a post-fetch slice in the CLI,
+      // so an adapter-side filter would cut the ranked hits to N rows and only
+      // THEN drop the non-matching ones (AC-RR-7's --limit 1 oracle fails that).
+      if (filters?.sub_type !== undefined) {
+        docClauses.push("json_extract(d.extra, '$.sub_type') = ?");
+        docParams.push(filters.sub_type);
       }
 
       const docWhere =
