@@ -22,8 +22,9 @@
  *     guaranteed reproducible, `reproducible: false`), `6` is the OUTPUT-FROZEN pre-
  *     projection v6 entry (`buildAssessPromptV6OutputFrozen` — byte-identical to
  *     `buildAssessPromptV6`'s behaviour before T3/a639485, `reproducible: true`), `7` is the
- *     active entry (`buildAssessPromptV7`, T3's projected evidence renderer,
- *     `reproducible: true`)
+ *     OUTPUT-FROZEN pre-D1 entry (`buildAssessPromptV7`, T3's projected evidence renderer,
+ *     `reproducible: true`), `8` is the active entry (`buildAssessPromptV8`, D1's
+ *     `typed_gaps[].paths` requirement, `reproducible: true`)
  *   - getAssessTemplate(version) — Result-returning registry lookup; an absent version is
  *     err(AI_PROVIDER_ERROR) naming it, never an uncaught throw
  *   - getAssessTemplateReproducibility(version) — Result-returning lookup for the OTHER half
@@ -40,12 +41,26 @@
  *     as v5 — it could not be repurposed to mean "output-frozen" without breaking that
  *     spec-level AC, so the output-frozen entry got a new name
  *     (`buildAssessPromptV6OutputFrozen`) instead of this one. `buildAssessPromptV7` is the
- *     forward-looking alias for any new caller.
+ *     forward-looking alias for any new caller, now itself OUTPUT-FROZEN (registry slot `7`)
+ *     since `buildAssessPromptV8` became the active `ASSESS_PROMPT_VERSION` (D1, below).
+ *   - buildAssessPromptV8(bundle, diffText, budgets, facts?) — the ACTIVE builder (registry
+ *     entry `8`, D1, spec-judgment-surfaces-must-verify-before-they-certify-machine): same
+ *     shared core as v6/v7, with `assembleFactsBasedAssessPrompt`'s `requireFindingPaths`
+ *     opt-in set — the typed_gaps[] output-instruction JSON shape gains a `"paths"` array and
+ *     an instruction requiring every file path a finding names in `statement` to also appear
+ *     there, verbatim.
  *   - buildAssessDiffMeta(diffText) — derives the {@link DiffMeta} regression-signal shape
  *     from the SAME diff-header parse `truncateDiffByFile` uses (`listDiffFiles`,
  *     `diff-truncation.ts`) — single derivation site, consumed by both v6/v7's own facts
  *     fallback and `AIProviderService.assessPlan`'s once-only facts computation
  *   - buildAssessRetryPrompt(originalPrompt, parseErrorMessage) — one corrective retry prompt
+ *   - ASSESS_DIFF_MIRROR_PATH_PREFIX / excludeAssessMirrorFromDiff(diffText) — D4
+ *     (spec-judgment-surfaces-must-verify-before-they-certify-machine): strips every
+ *     `docs/requirements/**` file-diff hunk from a unified diff BEFORE any registry-versioned
+ *     builder (and its internal `truncateDiffByFile`) ever sees it. Called ONCE by
+ *     `AIProviderService.assessPlan` on `opts.diffText`, deliberately NOT wired into any
+ *     builder's own body (see this pair's own JSDoc for why: it would retroactively break
+ *     slots 6/7's `reproducible: true` byte-identical guarantee)
  *
  * Invariants:
  *   - No IO — pure string assembly over already-fetched PlanBundle data.
@@ -162,6 +177,83 @@ import {
   type DiffFilePriority,
 } from "./diff-truncation.js";
 
+// ─── Mirror Exclusion (D4, spec-judgment-surfaces-must-verify-before-they-certify-machine) ───
+
+/**
+ * Single-definition-site path prefix for the generated corpus→file mirror this repo exports
+ * under `docs/requirements/**` (see root CLAUDE.md's "Finding Live Project State" section) —
+ * a PROJECTION of the corpus the judge already reads via the plan/spec/task materials
+ * sections, never a second source of truth. Never inline this prefix at a second call site.
+ */
+export const ASSESS_DIFF_MIRROR_PATH_PREFIX = "docs/requirements/";
+
+/** Same `diff --git a/... b/...` header shape `diff-truncation.ts`'s own (private,
+ * unexported) `parseDiffIntoChunks` uses — necessarily duplicated here rather than shared:
+ * this exclusion pass runs on the CALLER side (`AIProviderService.assessPlan`), strictly
+ * BEFORE any of `truncateDiffByFile`/`buildAssessDiffMeta`/`parseDiffFilePaths` ever see the
+ * diff text at all (D4) — splitting into per-file chunks is the only way to drop a whole
+ * mirror hunk without slicing a kept hunk's body in half. */
+const ASSESS_DIFF_FILE_HEADER_PATTERN = /^diff --git a\/(.*) b\/(.*)$/;
+
+/**
+ * Strips every `docs/requirements/**` file-diff hunk from a unified diff, UNCONDITIONALLY —
+ * regardless of whether the diff would even need truncation. The generated mirror is a
+ * projection of the corpus the judge is already shown via the plan/spec/task sections above
+ * it in the prompt; showing it a SECOND time, as a diff hunk, only spends the
+ * `ai.assess.max_diff_chars` budget that could have gone to real source hunks (one measured
+ * run truncated 5.3M chars, most of it the mirror — see this mechanism's governing spec's
+ * Problem section). This is the mirror-exclusion half of D4; `excludeAssessMirrorFromDiff`
+ * is called ONCE, by `AIProviderService.assessPlan`, on `opts.diffText` BEFORE it reaches
+ * `buildAssessDiffMeta`, `parseDiffFilePaths`, OR any registry-versioned prompt builder here
+ * — never inside a builder itself, because `ASSESS_TEMPLATE_REGISTRY[6]`/`[7]` are both
+ * declared `reproducible: true` (byte-identical output forever; see this file's own
+ * "landed version is FROZEN" invariant) and a builder-internal change would retroactively
+ * break that guarantee for every historical assessment stamped with either prompt_version.
+ *
+ * @invariant Pure, no IO.
+ * @invariant A diff with no `diff --git a/... b/...` headers at all (the SAME documented
+ *   passthrough `truncateDiffByFile` uses for an unparseable diff — see diff-truncation.ts's
+ *   module header) is returned UNCHANGED: there is no per-file identity to test the prefix
+ *   against.
+ * @invariant Returns `diffText` BYTE-IDENTICAL when it contains zero mirror hunks — the
+ *   overwhelmingly common case (most assess diffs never touch the mirror at all), so this
+ *   is a safe no-op default for every pre-existing caller/test that never exercised it.
+ * @param diffText - Raw unified diff text (already acquired by the caller)
+ * @returns `diffText` with every `docs/requirements/**` file hunk removed
+ *
+ * @example
+ * excludeAssessMirrorFromDiff(
+ *   "diff --git a/docs/requirements/spec/SPEC-1.md b/docs/requirements/spec/SPEC-1.md\n@@ -1 +1 @@\n-old\n+new\n" +
+ *   "diff --git a/packages/core/src/foo.ts b/packages/core/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n",
+ * );
+ * // → "diff --git a/packages/core/src/foo.ts b/packages/core/src/foo.ts\n@@ -1 +1 @@\n-old\n+new\n"
+ *
+ * @example
+ * excludeAssessMirrorFromDiff("not a diff at all"); // → "not a diff at all" (unchanged)
+ */
+export function excludeAssessMirrorFromDiff(diffText: string): string {
+  const lines = diffText.split("\n");
+  const headerIndices: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (ASSESS_DIFF_FILE_HEADER_PATTERN.test(lines[i] as string)) headerIndices.push(i);
+  }
+  if (headerIndices.length === 0) return diffText;
+
+  const keptChunks: string[] = [];
+  for (let i = 0; i < headerIndices.length; i++) {
+    const start = headerIndices[i] as number;
+    const end = i + 1 < headerIndices.length ? (headerIndices[i + 1] as number) : lines.length;
+    const headerMatch = ASSESS_DIFF_FILE_HEADER_PATTERN.exec(lines[start] as string);
+    // reason: post-change ("b/") path — same canonical-identity convention
+    // diff-truncation.ts's own parser documents (rename source vs destination: the "b/"
+    // side is stable across additions/modifications/deletions/renames alike).
+    const filePath = (headerMatch?.[2] ?? "").trim();
+    if (filePath.startsWith(ASSESS_DIFF_MIRROR_PATH_PREFIX)) continue;
+    keptChunks.push(lines.slice(start, end).join("\n"));
+  }
+  return keptChunks.join("\n");
+}
+
 /**
  * Judge prompt schema version. Bump whenever the prompt text, rubric anchors, or output
  * instruction changes in a way that could shift judge behaviour — persisted verbatim into
@@ -223,8 +315,22 @@ import {
  * BEHAVIOUR unchanged — AC-AEP-4 pins a direct caller asserting it matches v5's projected
  * shape — it simply moved to registry slot `7`; `buildAssessPromptV7` is the same function
  * under the name that matches its new active slot.
+ *
+ * **v7 → v8 (D1, spec-judgment-surfaces-must-verify-before-they-certify-machine)**: adds a
+ * `"paths"` array to the `typed_gaps[]` output-instruction JSON shape and a paragraph
+ * requiring every file path a finding names in `statement`'s prose to also appear there,
+ * verbatim — the machine-verifiable declaration D2/D3 checks against the assessed commit
+ * (`AIProviderService`'s `verifyFindingPaths`). This is a NEW registry key (`8`), never a
+ * mutation of slot `7` in place: `assembleFactsBasedAssessPrompt` gained an opt-in
+ * `requireFindingPaths` PARAMETER (default `false`, so `buildAssessPromptV6OutputFrozen`'s
+ * and `buildAssessPromptV7`'s own call sites are unchanged and their rendered output stays
+ * byte-identical) — same "parameterize the shared core, never fork it" fix the v6→v7
+ * transition above already established for the evidence renderer. `buildAssessPromptV8`
+ * becomes the active `ASSESS_PROMPT_VERSION` (`reproducible: true` — a fresh registry key
+ * with no prior renders to stay byte-identical to; any FUTURE change to slot `8` still moves
+ * to a new key `9`, never mutates `8` in place).
  */
-export const ASSESS_PROMPT_VERSION = 7;
+export const ASSESS_PROMPT_VERSION = 8;
 
 /** Character budgets for each prompt section, sourced from `config.ai.assess.*`. */
 export interface AssessBudgets {
@@ -808,6 +914,12 @@ function renderFactsSection(facts: AssessmentFacts): string {
  * @param evidenceRenderer - The {@link EvidenceRenderer} to project each task's evidence
  *   rows with — the ONLY behavioural difference between the output-frozen v6 entry and the
  *   active v7 entry.
+ * @param requireFindingPaths - D1 (spec-judgment-surfaces-must-verify-before-they-certify-
+ *   machine) — OPT-IN, defaults to `false`. `false` renders BYTE-IDENTICAL output to before
+ *   this parameter existed (slots 6/7's `reproducible: true` guarantee depends on this
+ *   default never changing) — `true` (registry slot 8 only, {@link buildAssessPromptV8})
+ *   adds a `"paths"` array to the `typed_gaps[]` JSON shape and an instruction requiring
+ *   every file path a finding names in `statement` to also appear there, verbatim.
  * @returns { prompt, truncated, declaredAcIds } — `declaredAcIds` is scope-restricted (D5)
  */
 function assembleFactsBasedAssessPrompt(
@@ -816,6 +928,7 @@ function assembleFactsBasedAssessPrompt(
   budgets: AssessBudgets,
   facts: AssessmentFacts | undefined,
   evidenceRenderer: EvidenceRenderer,
+  requireFindingPaths = false,
 ): BuildAssessPromptResult {
   const truncated: string[] = [];
 
@@ -952,7 +1065,9 @@ function assembleFactsBasedAssessPrompt(
     `  },\n` +
     `  "typed_gaps": [\n` +
     `    { "dimension": "outcome"|"evidence_integrity"|"scope_fidelity", "severity": "blocker"|"major"|"minor",\n` +
-    `      "ac_ref": "<optional AC id>", "statement": "<<=500 chars>" }\n` +
+    `      "ac_ref": "<optional AC id>", "statement": "<<=500 chars>"` +
+    (requireFindingPaths ? `,\n      "paths": ["<file path named in statement, verbatim>", ...]` : "") +
+    ` }\n` +
     `  ],\n` +
     `  "typed_recommendations": [\n` +
     `    { "target": "spec"|"plan"|"prompt"|"skill"|"process", "action": "<<=500 chars>", "rationale": "<<=300 chars>" }\n` +
@@ -961,6 +1076,12 @@ function assembleFactsBasedAssessPrompt(
     `    { "material": "<string>", "reason": "<<=200 chars>" }\n` +
     `  ]\n` +
     `}\n` +
+    (requireFindingPaths
+      ? `Every file path you name in a typed_gaps[] finding's "statement" prose MUST also appear, ` +
+        `verbatim, in that same finding's "paths" array — it is machine-verified against the ` +
+        `exact commit this assessment covers, so do not paraphrase or normalize it. A finding ` +
+        `naming no file path at all uses "paths": [].\n`
+      : "") +
     (hasStructuredAc
       ? `ac_id MUST be one of: ${scopedDeclaredCriteria.map((c) => c.id).join(", ")}.\n` +
         // reason: only mention "(out of scope for this plan)" rows when at least one
@@ -1018,12 +1139,13 @@ export function buildAssessPromptV6(
 }
 
 /**
- * Alias for {@link buildAssessPromptV6} under the name that matches its ACTIVE registry
- * slot (`ASSESS_TEMPLATES[7]`, `ASSESS_PROMPT_VERSION`) — same shared core, same projected
- * {@link renderTaskEvidence}, byte-identical output for the same input. Prefer this name
- * for any NEW caller; `buildAssessPromptV6` is kept only because AC-AEP-4 pins a
- * pre-existing direct caller of that historical name (see its own JSDoc for why the name
- * and the registry slot number diverge).
+ * Alias for {@link buildAssessPromptV6} under the name that matched ITS active registry
+ * slot at the time (`ASSESS_TEMPLATES[7]`) — same shared core, same projected
+ * {@link renderTaskEvidence}, byte-identical output for the same input. Now itself
+ * OUTPUT-FROZEN (`reproducible: true`, slot `7`) since {@link buildAssessPromptV8} became
+ * the active `ASSESS_PROMPT_VERSION` (D1). `buildAssessPromptV6` is kept only because
+ * AC-AEP-4 pins a pre-existing direct caller of that historical name (see its own JSDoc for
+ * why the name and the registry slot number diverge).
  */
 export function buildAssessPromptV7(
   bundle: PlanBundle,
@@ -1032,6 +1154,31 @@ export function buildAssessPromptV7(
   facts?: AssessmentFacts,
 ): BuildAssessPromptResult {
   return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidence);
+}
+
+/**
+ * The ACTIVE assess judge prompt builder (registry slot `8`, `ASSESS_PROMPT_VERSION`) — D1
+ * (spec-judgment-surfaces-must-verify-before-they-certify-machine): same shared core and
+ * projected {@link renderTaskEvidence} as {@link buildAssessPromptV7}, with
+ * `assembleFactsBasedAssessPrompt`'s `requireFindingPaths` opt-in set to `true` — the ONLY
+ * behavioural difference from v7. `buildAssessPromptV7` stays byte-identical (its own call
+ * site never passes this new argument, so it keeps the parameter's `false` default) — this
+ * is a NEW registry key, never a mutation of `7` in place, mirroring the v6→v7 transition's
+ * own "parameterize the shared core" precedent.
+ *
+ * @param bundle - {plan, spec?, tasks[], knowledge_links?} from CorpusService.getPlanBundle
+ * @param diffText - Optional git diff / diff-file content (already read by the CLI layer)
+ * @param budgets - Character budgets from config.ai.assess.*
+ * @param facts - Pre-computed {@link AssessmentFacts}; see {@link assembleFactsBasedAssessPrompt}
+ * @returns { prompt, truncated, declaredAcIds } — `declaredAcIds` is scope-restricted (D5)
+ */
+export function buildAssessPromptV8(
+  bundle: PlanBundle,
+  diffText: string | undefined,
+  budgets: AssessBudgets,
+  facts?: AssessmentFacts,
+): BuildAssessPromptResult {
+  return assembleFactsBasedAssessPrompt(bundle, diffText, budgets, facts, renderTaskEvidence, true);
 }
 
 /**
@@ -1064,7 +1211,7 @@ function buildAssessPromptV6OutputFrozen(
  * `reproducible` answers, for THIS registry key specifically: is `getAssessTemplate(version)`'s
  * bound function guaranteed to render byte-identical output for the same input, FOREVER (no
  * future edit may change this key's behaviour in place — a behavioural change requires a NEW
- * key)? `true` on slots 6 and 7 (both output-frozen, in the disambiguated sense above the
+ * key)? `true` on slots 6, 7, and 8 (all output-frozen, in the disambiguated sense above the
  * module's registry construction below); `false` on slot 5 — `buildAssessPrompt` is
  * slot-stable (key `5` never moves) but was EXPLICITLY exempted from the byte-identical
  * guarantee by SPEC-040 §T2 D6 ("no byte-identical guarantee required going forward"), and its
@@ -1083,22 +1230,26 @@ export interface AssessTemplateRegistryEntry {
 
 /**
  * Version-keyed registry of assess judge prompt builders (SPEC-040 §T2 D6, re-keyed by
- * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, mirrors
+ * SPEC-lore-assess-project-evidence-rows-instead-of-embedding-the T5, re-keyed again by D1
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine — mirrors
  * `review-template.ts`'s `REVIEW_TEMPLATES`) — the SSOT both {@link ASSESS_TEMPLATES}
  * (function-only view) and {@link getAssessTemplateReproducibility} derive from. `5` is the
  * SLOT-STABLE v5 entry (`buildAssessPrompt`) kept for provenance — key permanent,
  * `reproducible: false`; `6` is the OUTPUT-FROZEN pre-projection v6 entry
  * (`buildAssessPromptV6OutputFrozen` — byte-identical to `buildAssessPromptV6`'s behaviour
- * before T3/a639485, `reproducible: true`); `7` is the active `ASSESS_PROMPT_VERSION` entry
- * (`buildAssessPromptV7`, T3's projected evidence renderer, `reproducible: true`). A future
- * prompt revision adds a new key here rather than mutating an existing one, so historical
- * assessments' `judgment.prompt_version` stays meaningful — and that new key MUST declare
- * its own `reproducible` value rather than inheriting one silently.
+ * before T3/a639485, `reproducible: true`); `7` is the OUTPUT-FROZEN pre-D1 entry
+ * (`buildAssessPromptV7`, T3's projected evidence renderer, `reproducible: true`); `8` is the
+ * active `ASSESS_PROMPT_VERSION` entry (`buildAssessPromptV8`, D1's `typed_gaps[].paths`
+ * requirement, `reproducible: true`). A future prompt revision adds a new key here rather
+ * than mutating an existing one, so historical assessments' `judgment.prompt_version` stays
+ * meaningful — and that new key MUST declare its own `reproducible` value rather than
+ * inheriting one silently.
  */
 const ASSESS_TEMPLATE_REGISTRY: Record<number, AssessTemplateRegistryEntry> = {
   5: { fn: buildAssessPrompt, reproducible: false },
   6: { fn: buildAssessPromptV6OutputFrozen, reproducible: true },
   7: { fn: buildAssessPromptV7, reproducible: true },
+  8: { fn: buildAssessPromptV8, reproducible: true },
 };
 
 /**

@@ -18,9 +18,12 @@
  *
  * Six-dimension coverage for this file:
  *   HAPPY:      a real assess run stamps judgment.reproducible === true, matching
- *               getAssessTemplateReproducibility(7)'s registry declaration for the SAME
- *               ASSESS_PROMPT_VERSION (7) stamped as judgment.prompt_version — the two
- *               fields read the identical registry slot, never independently derived
+ *               getAssessTemplateReproducibility(ASSESS_PROMPT_VERSION)'s registry
+ *               declaration for the SAME ASSESS_PROMPT_VERSION stamped as
+ *               judgment.prompt_version — the two fields read the identical registry slot,
+ *               never independently derived (the slot number itself has moved twice since
+ *               this file was authored — 6 → 7 → 8 — precisely because neither assertion
+ *               below restates it as a literal)
  *   STATE:      the field lands in the PERSISTED doc (re-opened via a fresh createApp),
  *               not just in the in-process return value
  *   REGRESSION: a pre-existing ("legacy") assessment doc — one never touched by
@@ -43,6 +46,7 @@ import { createApp } from "../../../src/app.js";
 import { saveConfig } from "@lore/core/node";
 import { renderAssessmentContent, type AssessmentResult } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
+import { ASSESS_PROMPT_VERSION } from "../../../src/ai/assess-template.js";
 
 // ─── Command type / output capture (mirrors assess-ai.bun.test.ts) ────────────
 
@@ -222,9 +226,10 @@ describe("lore assess — judgment.reproducible is stamped by a REAL run (task-g
       if (assessment === undefined) return;
 
       // Never derived from two different sources: prompt_version and reproducible must
-      // agree on the SAME registry slot (7 → reproducible: true, per assess-template.ts's
-      // ASSESS_TEMPLATE_REGISTRY).
-      expect(assessment.judgment.prompt_version).toBe(7);
+      // agree on the SAME registry slot (ASSESS_PROMPT_VERSION → reproducible: true, per
+      // assess-template.ts's ASSESS_TEMPLATE_REGISTRY) — read from the live export, never a
+      // restated literal, so a future re-key (like D1's own 7→8 bump) cannot silently drift.
+      expect(assessment.judgment.prompt_version).toBe(ASSESS_PROMPT_VERSION);
       expect(assessment.judgment.reproducible).toBe(true);
     } finally {
       app.close();
@@ -260,7 +265,7 @@ describe("lore assess — judgment.reproducible is stamped by a REAL run (task-g
       // Sanity: this really did take the retry path (proves the fixture drove the
       // SECOND _finalizeAssessment call site, not the first).
       expect(assessment.judgment.retried).toBe(true);
-      expect(assessment.judgment.prompt_version).toBe(7);
+      expect(assessment.judgment.prompt_version).toBe(ASSESS_PROMPT_VERSION);
       expect(assessment.judgment.reproducible).toBe(true);
     } finally {
       app.close();

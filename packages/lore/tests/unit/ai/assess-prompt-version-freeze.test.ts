@@ -30,6 +30,14 @@
  * `getAssessTemplateReproducibility`, a Result-returning lookup mirroring
  * `getAssessTemplate`'s own shape.
  *
+ * ⛔ SUPERSEDED-BY-A-LATER-BUMP NOTE (D1, spec-judgment-surfaces-must-verify-before-they-
+ * certify-machine): `ASSESS_PROMPT_VERSION` was `7` at THIS suite's own authoring time
+ * (AC-AEP-9/AC-AEP-10) — it is now `8`; slot `7` stays registered, defined, and
+ * output-frozen exactly as this suite already asserted, it is simply no longer the ACTIVE
+ * entry. Every assertion below reads `ASSESS_PROMPT_VERSION` from the live export (never a
+ * restated literal `7`) except where a test's own point IS specifically about the frozen
+ * slot `7` itself, which stays a literal `7` on purpose.
+ *
  * @spec_ref AC-AEP-9, AC-AEP-10
  */
 
@@ -111,10 +119,16 @@ function stripEvidenceRows(prompt: string): string {
 
 // ─── AC-AEP-9: getAssessTemplate(6) stays frozen at the PRE-projection shape ───
 
-describe("AC-AEP-9: ASSESS_PROMPT_VERSION is 7 and getAssessTemplate(6) renders the frozen pre-projection shape", () => {
-  it("STATE: ASSESS_PROMPT_VERSION is 7, the active registry entry", () => {
-    expect(ASSESS_PROMPT_VERSION).toBe(7);
+describe("AC-AEP-9: getAssessTemplate(6) renders the frozen pre-projection shape (slot 7 is now itself frozen, superseded by D1's slot 8 — see the reproducibility suite below)", () => {
+  it("STATE: ASSESS_PROMPT_VERSION is 8 (D1, spec-judgment-surfaces-must-verify-before-they-certify-machine, bumped it from AC-AEP-9's original 7) — slot 7 stays registered, defined, and untouched", () => {
+    // reason: AC-AEP-9 pinned ASSESS_PROMPT_VERSION at 7 when slot 7 was the active entry.
+    // D1 landed a NEW registry slot (8) rather than mutating 7 in place — same "add a key,
+    // never mutate an existing one" precedent this file's own module header documents for
+    // the v5→v6→v7 transition. Slot 7 stays registered and output-frozen (AC-AEP-9's own
+    // frozen-shape assertions below are UNCHANGED by this bump).
+    expect(ASSESS_PROMPT_VERSION).toBe(8);
     expect(ASSESS_TEMPLATES[ASSESS_PROMPT_VERSION]).toBeDefined();
+    expect(ASSESS_TEMPLATES[7]).toBeDefined();
   });
 
   it("HAPPY: getAssessTemplate(6) renders a row byte-identical to the LITERAL pre-projection output captured from a639485^ (never derived by calling the frozen renderer and comparing it to itself)", () => {
@@ -306,8 +320,15 @@ describe("getAssessTemplateReproducibility — registry entry reproducibility (t
     expect(result.value).toBe(true);
   });
 
-  it("HAPPY: slot 7 (the active entry, ASSESS_PROMPT_VERSION) is declared reproducible: true", () => {
+  it("HAPPY: slot 8 (the ACTIVE entry, ASSESS_PROMPT_VERSION — D1 superseded slot 7) is declared reproducible: true", () => {
     const result = getAssessTemplateReproducibility(ASSESS_PROMPT_VERSION);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toBe(true);
+  });
+
+  it("HAPPY: slot 7 (now output-frozen, no longer active) is STILL declared reproducible: true — D1 superseded it with a NEW key, never mutated it in place", () => {
+    const result = getAssessTemplateReproducibility(7);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value).toBe(true);

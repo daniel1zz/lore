@@ -16,6 +16,9 @@
  *     - judgeDoc(bundle, checks, opts?) → Promise<Result<NewReviewJudgment, LoreError>>  (SPEC-034, SPEC-040 D8)
  *   - validateAcIdContainment(output, declaredIds) → Result<void, LoreError>  (SPEC-038 §5 D5)
  *   - computeGroundingWarnings(output, truncatedSections) → string[]  (SPEC-040 §T2 D4, pure, exported for direct testing)
+ *   - verifyFindingPaths(typedGaps, diffSource, repoRoot) → Result<FindingPathVerificationOutcome, LoreError>
+ *     (D2/D3, spec-judgment-surfaces-must-verify-before-they-certify-machine — IO via
+ *     `git cat-file -e`; exported for direct testing, called from `_finalizeAssessment`)
  *
  * Invariants:
  *   - Stateless: every dependency is constructor-injected; no module-level state or globals
@@ -76,28 +79,46 @@
  *     returned `ScopeMismatchNotMeasured` (an internal "could not be attempted" signal — see
  *     `assessPlan`'s own `scopeWarning` local for the narrowing that keeps this field's
  *     persisted contract exactly as it was before that task).
+ *   - assessPlan (D2/D3, spec-judgment-surfaces-must-verify-before-they-certify-machine)
+ *     resolves `repoRoot` (`opts.repoRoot ?? process.cwd()`) ONCE and passes it, plus
+ *     `opts.diffSource` verbatim, into `_finalizeAssessment`, which runs `verifyFindingPaths`
+ *     on the (grounding-)suppressed `typedGaps` — withdrawing any finding with an absent
+ *     declared path into `unverifiable_findings[]`, tallying `paths_verified`, and NEVER
+ *     recomputing `overall_score`. `opts.diffSource` is currently supplied by NO production
+ *     caller (`commands/assess.ts`/MCP `tools.ts` are outside this task's scope — see
+ *     `assessPlan`'s own `@param opts.diffSource` doc) so every live `lore assess` run today
+ *     resolves to `paths_verified.unchecked` for any declared path — a real, named,
+ *     un-closed gap, not a claim that the mechanism itself is inert.
  *
- * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
+ * Side-effect class: IO (delegates to AIProvider.generate, Telemetry.emit, and — D2,
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine — `git cat-file -e`
+ * subprocess calls for finding-path verification)
  *
  * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3; SPEC-034 §4;
- * SPEC-038 §5, §7 D5; SPEC-040 §T2 D1-D6, D8; task-assess-diff-range-scope-mismatch-warning
+ * SPEC-038 §5, §7 D5; SPEC-040 §T2 D1-D6, D8; task-assess-diff-range-scope-mismatch-warning;
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine D1, D2, D3, D4
+ * (task-verify-assess-finding-paths-against-the-assessed-commit)
  */
 
+import { spawnSync } from "node:child_process";
 import { err, ok } from "@lore/core";
 import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { linkTypeSchema } from "@lore/core";
 import type {
+  AssessDiffSource,
   AssessmentFacts,
   AssessmentResult,
   DimensionScores,
   LlmAssessmentOutput,
+  PathsVerified,
   PlanBundle,
   ScopeMismatchNotMeasured,
   ScopeMismatchWarning,
   SourceVersionRef,
   TypedGap,
   UnverifiableEntry,
+  UnverifiableFinding,
 } from "@lore/core";
 import {
   clipOverlongReasoning,
@@ -109,6 +130,7 @@ import {
   extractFileAnchors,
   llmAssessmentOutputSchema,
   parseDiffFilePaths,
+  resolveAssessedCommit,
   TRUNCATION_DOWNGRADE_THRESHOLDS,
 } from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
@@ -131,6 +153,7 @@ import {
   ASSESS_PROMPT_VERSION,
   buildAssessDiffMeta,
   buildAssessRetryPrompt,
+  excludeAssessMirrorFromDiff,
   extractDeclaredAcceptanceCriteria,
   getAssessTemplate,
   getAssessTemplateReproducibility,
@@ -558,6 +581,152 @@ export function deriveRepoTestedSourcePath(filePath: string): string | undefined
   const rest = segments.slice(testsIdx + 1);
   const restWithoutGrouping = rest[0] === "unit" || rest[0] === "integration" ? rest.slice(1) : rest;
   return [...segments.slice(0, testsIdx), "src", ...restWithoutGrouping].join("/");
+}
+
+// ─── Finding-Path Verification (D2/D3, spec-judgment-surfaces-must-verify-before-they-certify-machine) ───
+
+/**
+ * `true` iff `ref` resolves to an existing git object in `repoRoot` — a thin, never-throwing
+ * wrapper over `git cat-file -e <ref>`. Used for BOTH of D2's two distinct checks: whether
+ * the assessed commit itself resolves (`"<sha>^{commit}"`) and whether a declared path
+ * exists in that commit's tree (`"<sha>:<path>"`) — the caller decides which `ref` shape to
+ * pass; this function has no opinion on the difference.
+ *
+ * @invariant Never throws — `spawnSync`'s own `error` (e.g. `git` not on PATH) is treated
+ *   the same as a non-zero exit: `false`. A missing/misconfigured `git` binary and a
+ *   genuinely absent object are indistinguishable to this ONE check by design; the caller
+ *   (`verifyFindingPaths`) tells them apart by checking the COMMIT referent FIRST, before
+ *   ever checking a path against it (see that function's own JSDoc).
+ * @param repoRoot - Directory to run `git` in (the assessed repo's root)
+ * @param ref - A git revision spec, e.g. `"<sha>^{commit}"` or `"<sha>:<path>"`
+ * @returns `true` iff `git cat-file -e <ref>` exited 0
+ */
+function gitObjectExists(repoRoot: string, ref: string): boolean {
+  const result = spawnSync("git", ["cat-file", "-e", ref], { cwd: repoRoot, encoding: "utf8" });
+  return !result.error && result.status === 0;
+}
+
+/**
+ * Outcome of {@link verifyFindingPaths} — the SURVIVING `typed_gaps[]` (every finding whose
+ * declared paths all exist at the assessed commit, or which declared none at all), the
+ * WITHDRAWN findings (D3), and the three-state tally over every path any input finding
+ * declared.
+ */
+export interface FindingPathVerificationOutcome {
+  typedGaps: TypedGap[] | undefined;
+  unverifiableFindings: UnverifiableFinding[];
+  pathsVerified: PathsVerified;
+}
+
+/**
+ * D2/D3 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — machine-verifies
+ * every path a `typedGaps[]` entry declares against the ASSESSED commit
+ * {@link resolveAssessedCommit} (pure, `@lore/core`) resolves from `diffSource`, via
+ * `git cat-file -e <commit>:<path>` ({@link gitObjectExists}) — never `fs.existsSync` against
+ * the caller's own worktree, and never `HEAD` (substituting `HEAD` for the assessed commit IS
+ * the defect this mechanism exists to fix; see `resolveAssessedCommit`'s own JSDoc).
+ *
+ * @invariant When `resolveAssessedCommit(diffSource)` returns `{status: "unchecked"}` (no git
+ *   referent — every case enumerated on that function's own JSDoc) OR no finding declares any
+ *   path at all, this is a NO-OP: `typedGaps` is returned BY THE SAME REFERENCE, no findings
+ *   are withdrawn, and every declared path (if any) is tallied `unchecked` — NEVER silently
+ *   counted as verified (D2). No `git` subprocess runs on this branch.
+ * @invariant When the resolved commit itself cannot be found (`git cat-file -e
+ *   <commit>^{commit}` fails — shallow clone, pruned range, a stale/bogus SHA), this FAILS
+ *   LOUD: an `err(VALIDATION_ERROR)` naming the commit, rather than treating every declared
+ *   path as absent (which would silently convert an environment problem into false findings —
+ *   D2's own "fails LOUD naming the commit" requirement). This check runs ONLY when there is
+ *   at least one declared path to verify — nothing declared means nothing to check, and there
+ *   is no reason to demand the commit resolve at all in that case.
+ * @invariant A finding with >=1 declared path confirmed ABSENT is withdrawn WHOLESALE to
+ *   `unverifiableFindings[]` — `failing_path` is the FIRST absent path in encounter order
+ *   (mirrors `unverifiableFindingSchema`'s own JSDoc), `checked_against_commit` is the
+ *   resolved commit. A finding whose declared paths ALL exist (or which declares none) is
+ *   KEPT, unchanged, in the returned `typedGaps`.
+ * @invariant `pathsVerified.checked` / `.unverifiable` tally EVERY individual path checked,
+ *   not one count per finding — a finding with two declared paths, one present and one
+ *   absent, adds 1 to `checked` AND 1 to `unverifiable` even though the finding itself is
+ *   withdrawn wholesale (mirrors `pathsVerifiedSchema`'s own JSDoc).
+ * @invariant Never mutates `typedGaps` or any entry in it — always builds new arrays/objects.
+ * @param typedGaps - `typed_gaps[]` AFTER any prior suppression pass (e.g.
+ *   `suppressUngroundedAbsenceFindings`) — the surviving set this verification operates on
+ * @param diffSource - The run's diff-source provenance, or `undefined` (same "no referent"
+ *   treatment as `explicit_diff_text` — see `resolveAssessedCommit`)
+ * @param repoRoot - Directory `git cat-file -e` runs in
+ * @returns `ok(outcome)`, or `err(VALIDATION_ERROR)` naming the unresolvable commit
+ *
+ * @example
+ * verifyFindingPaths(
+ *   [{ dimension: "outcome", severity: "major", statement: "x", paths: ["src/gone.ts"] }],
+ *   { mode: "explicit_diff", range: "abc..def" },
+ *   "/repo",
+ * );
+ * // → ok({ typedGaps: [], unverifiableFindings: [{ ..., failing_path: "src/gone.ts",
+ * //        checked_against_commit: "def" }], pathsVerified: { checked: 0, unverifiable: 1, unchecked: 0 } })
+ * // — assuming "def:src/gone.ts" does not resolve in "/repo"
+ */
+export function verifyFindingPaths(
+  typedGaps: TypedGap[] | undefined,
+  diffSource: AssessDiffSource | undefined,
+  repoRoot: string,
+): Result<FindingPathVerificationOutcome, LoreError> {
+  const gaps = typedGaps ?? [];
+  const totalPaths = gaps.reduce((sum, gap) => sum + gap.paths.length, 0);
+
+  const resolution = resolveAssessedCommit(diffSource);
+  if (resolution.status === "unchecked" || totalPaths === 0) {
+    return ok({
+      typedGaps,
+      unverifiableFindings: [],
+      pathsVerified: {
+        checked: 0,
+        unverifiable: 0,
+        unchecked: resolution.status === "unchecked" ? totalPaths : 0,
+      },
+    });
+  }
+
+  const { commit } = resolution;
+  if (!gitObjectExists(repoRoot, `${commit}^{commit}`)) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "diff_source",
+      message:
+        `Assessed commit "${commit}" could not be resolved in "${repoRoot}" (git cat-file -e ` +
+        `"${commit}^{commit}" failed) — cannot verify finding paths against it. This is an ` +
+        `environment problem (shallow clone, pruned range, or a stale reference), never an ` +
+        `absent path: fix the environment, or supply --diff/--diff-file explicitly.`,
+      value: commit,
+    });
+  }
+
+  const keptGaps: TypedGap[] = [];
+  const unverifiableFindings: UnverifiableFinding[] = [];
+  let checked = 0;
+  let unverifiable = 0;
+
+  for (const gap of gaps) {
+    let failingPath: string | undefined;
+    for (const path of gap.paths) {
+      if (gitObjectExists(repoRoot, `${commit}:${path}`)) {
+        checked++;
+      } else {
+        unverifiable++;
+        if (failingPath === undefined) failingPath = path;
+      }
+    }
+    if (failingPath !== undefined) {
+      unverifiableFindings.push({ ...gap, failing_path: failingPath, checked_against_commit: commit });
+    } else {
+      keptGaps.push(gap);
+    }
+  }
+
+  return ok({
+    typedGaps: keptGaps,
+    unverifiableFindings,
+    pathsVerified: { checked, unverifiable, unchecked: 0 },
+  });
 }
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
@@ -998,7 +1167,11 @@ export class AIProviderService {
    * Emits ai.generation telemetry (kind="assess") on every terminal outcome exactly once.
    *
    * @param bundle - {plan, spec?, tasks[]} from CorpusService.getPlanBundle
-   * @param opts.diffText - Optional diff text (already acquired by the CLI layer)
+   * @param opts.diffText - Optional diff text (already acquired by the CLI layer). Filtered
+   *   through {@link excludeAssessMirrorFromDiff} EXACTLY ONCE, at the top of this method
+   *   (D4, spec-judgment-surfaces-must-verify-before-they-certify-machine) — every downstream
+   *   use (facts, scope-mismatch, the rendered prompt) sees the mirror-free text, never the
+   *   raw caller-supplied one.
    * @param opts.source - Caller surface, forwarded to telemetry as caller_surface
    * @param opts.commitDerivationUnverifiable - REQUIRED (task-the-mcp-assess-adapter-
    *   still-calls-derivecommitsetforplan mechanizes this — no default, every caller must
@@ -1008,7 +1181,28 @@ export class AIProviderService {
    *   (see `forceScopeFidelityUnverifiable`), regardless of the judge's own output. Pass
    *   `false` for every other path (explicit `--diff`/`diff_text` override, or a
    *   genuinely commit-less plan) — a deliberate value, never an omission.
-   * @returns Result<AssessmentResult, LoreError> — never throws
+   * @param opts.diffSource - OPTIONAL (D2, spec-judgment-surfaces-must-verify-before-they-
+   *   certify-machine) — the run's `DiffSourceRecord`-shaped diff provenance (mirrored as
+   *   {@link AssessDiffSource}; see that type's own JSDoc for why it is not imported
+   *   directly from the adapter layer). Resolved via {@link resolveAssessedCommit} to the ONE
+   *   commit every `typed_gaps[].paths` entry is checked against, by
+   *   {@link verifyFindingPaths} (called from `_finalizeAssessment`, below). ⛔ Still NOT
+   *   THREADED by either production caller (`commands/assess.ts`, MCP `tools.ts` — both
+   *   outside this task's file anchors, spec-judgment-surfaces-must-verify-before-they-
+   *   certify-machine's own declared Scope): a follow-up task must have the CLI/MCP layer
+   *   pass its already-resolved `diffSource` local through here. Until then this stays
+   *   `undefined` in production, which {@link verifyFindingPaths} treats as "no referent" —
+   *   every declared path is recorded `"unchecked"`, NEVER silently "verified" or dropped.
+   *   This mechanism itself (the verification pass, its wiring into `_finalizeAssessment`,
+   *   and its unit coverage) IS fully live and exercised the moment a caller supplies
+   *   `diffSource` — e.g. every test in `assess-path-verification.bun.test.ts` — the gap is
+   *   solely "no production caller supplies it yet", never "the mechanism is inert".
+   * @param opts.repoRoot - OPTIONAL — directory `git cat-file -e` runs in when verifying
+   *   finding paths. Defaults to `process.cwd()`; tests pass a throwaway git fixture.
+   * @returns Result<AssessmentResult, LoreError> — never throws. Returns
+   *   `err(VALIDATION_ERROR)` naming the commit when `opts.diffSource` resolves to a commit
+   *   that `git cat-file -e` cannot find (shallow clone / pruned range) — D2 fails LOUD
+   *   rather than silently reading "cannot resolve" as "path absent".
    *
    * @example
    * const bundleResult = await app.corpusService.getPlanBundle("plan-my-feature");
@@ -1022,7 +1216,8 @@ export class AIProviderService {
    *
    * Source: SPEC-026 §3 D1, D2; §4 AC-ASSESS-1, AC-ASSESS-3, AC-ASSESS-4, AC-ASSESS-5;
    * SPEC-038 §5 AC-ACODE-4, AC-ACODE-5; task-lore-assess-derives-a-plan-s-commits-by-
-   * grepping-task AC #3; task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan
+   * grepping-task AC #3; task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan;
+   * spec-judgment-surfaces-must-verify-before-they-certify-machine D2, D3, D4
    */
   async assessPlan(
     bundle: PlanBundle,
@@ -1037,9 +1232,28 @@ export class AIProviderService {
       // this fact from its own `allTasksArchived` + `deriveCommitSetForPlan` call and
       // pass it explicitly — there is no longer a default to fall back on.
       commitDerivationUnverifiable: boolean;
+      // reason: OPTIONAL — see this method's own @param doc above for the "not yet wired
+      // by either production caller" state and why `undefined` is a SAFE default, not a
+      // silent capability gap.
+      diffSource?: AssessDiffSource | undefined;
+      repoRoot?: string | undefined;
     },
   ): Promise<Result<AssessmentResult, LoreError>> {
     const t0 = performance.now();
+
+    // reason: D2 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — resolved
+    // ONCE here (never re-derived per finalization branch below) so both the first-attempt
+    // and corrective-retry success paths verify finding paths against the SAME root.
+    const repoRoot = opts.repoRoot ?? process.cwd();
+
+    // reason: D4 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — the
+    // generated docs/requirements/** mirror is stripped EXACTLY ONCE here, before ANY
+    // downstream consumer (facts, scope-mismatch, the rendered prompt) ever sees
+    // `opts.diffText` — never inside a registry-versioned prompt builder itself (that would
+    // retroactively break ASSESS_TEMPLATE_REGISTRY[6]/[7]'s `reproducible: true` guarantee;
+    // see `excludeAssessMirrorFromDiff`'s own JSDoc). A no-op (byte-identical) for the
+    // overwhelmingly common diff that never touches the mirror at all.
+    const diffText = opts.diffText !== undefined ? excludeAssessMirrorFromDiff(opts.diffText) : undefined;
 
     // reason: SPEC-040 D1/D2 — facts are computed EXACTLY ONCE here, from the full
     // untruncated bundle, BEFORE any prompt-budget truncation happens. The SAME facts
@@ -1047,7 +1261,7 @@ export class AIProviderService {
     // section and (b) persisted verbatim into extra.assessment.facts — a judge's output
     // can never overwrite what facts.ac_coverage/task_evidence/scope/etc. actually say.
     const declaredCriteriaForFacts = extractDeclaredAcceptanceCriteria(bundle.spec);
-    const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(opts.diffText));
+    const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(diffText));
     const sourceVersions = this._buildSourceVersions(bundle);
 
     // reason: hotfix (task-assess-diff-range-scope-mismatch-warning) — a deterministic,
@@ -1059,7 +1273,7 @@ export class AIProviderService {
     // file by direct anchor overlap only and the false-positive fix that task built would
     // never actually run in production, only in its own unit test (the exact inert-mechanism
     // failure the ADR's Q1/Q3 warn about).
-    const diffFilesForScope = parseDiffFilePaths(opts.diffText ?? "");
+    const diffFilesForScope = parseDiffFilePaths(diffText ?? "");
     const taskAnchorsForScope = bundle.tasks.flatMap((task) => extractFileAnchors(task));
     const scopeMismatchOutcome = computeScopeMismatchWarning(
       diffFilesForScope,
@@ -1097,7 +1311,7 @@ export class AIProviderService {
     if (!reproducibleResult.ok) return reproducibleResult;
     const { prompt, truncated, declaredAcIds } = templateResult.value(
       bundle,
-      opts.diffText,
+      diffText,
       this.assessBudgets,
       facts,
     );
@@ -1139,22 +1353,33 @@ export class AIProviderService {
           return containment;
         }
       }
-      emitAssessEvent(first.providerResult);
-      return ok(
-        this._finalizeAssessment(
-          first.parsed,
-          bundle,
-          Math.round(performance.now() - t0),
-          false,
-          truncated,
-          first.clippedAcIds ?? [],
-          facts,
-          sourceVersions,
-          scopeWarning,
-          opts.commitDerivationUnverifiable,
-          reproducibleResult.value,
-        ),
+      // reason: D2/D3 (spec-judgment-surfaces-must-verify-before-they-certify-machine) —
+      // path verification can itself fail LOUD (an unresolvable assessed commit), a THIRD
+      // terminal outcome alongside provider failure and containment failure above; `err()`'s
+      // `Result<never, LoreError>` is assignable to `Result<GenerateOutput, LoreError>` (never
+      // is bottom), the same precedent `doubleFailure` below relies on, so it can be handed to
+      // `emitAssessEvent` directly.
+      const finalizeResult = this._finalizeAssessment(
+        first.parsed,
+        bundle,
+        Math.round(performance.now() - t0),
+        false,
+        truncated,
+        first.clippedAcIds ?? [],
+        facts,
+        sourceVersions,
+        scopeWarning,
+        opts.commitDerivationUnverifiable,
+        reproducibleResult.value,
+        opts.diffSource,
+        repoRoot,
       );
+      if (!finalizeResult.ok) {
+        emitAssessEvent(finalizeResult);
+        return finalizeResult;
+      }
+      emitAssessEvent(first.providerResult);
+      return ok(finalizeResult.value);
     }
 
     // Corrective retry (SPEC-026 §3 D2) — embed the parse error + reminder.
@@ -1175,22 +1400,28 @@ export class AIProviderService {
           return containment;
         }
       }
-      emitAssessEvent(second.providerResult);
-      return ok(
-        this._finalizeAssessment(
-          second.parsed,
-          bundle,
-          Math.round(performance.now() - t0),
-          true,
-          truncated,
-          second.clippedAcIds ?? [],
-          facts,
-          sourceVersions,
-          scopeWarning,
-          opts.commitDerivationUnverifiable,
-          reproducibleResult.value,
-        ),
+      // reason: same D2/D3 finalize-can-fail-loud precedent as the first-attempt branch above.
+      const finalizeResult = this._finalizeAssessment(
+        second.parsed,
+        bundle,
+        Math.round(performance.now() - t0),
+        true,
+        truncated,
+        second.clippedAcIds ?? [],
+        facts,
+        sourceVersions,
+        scopeWarning,
+        opts.commitDerivationUnverifiable,
+        reproducibleResult.value,
+        opts.diffSource,
+        repoRoot,
       );
+      if (!finalizeResult.ok) {
+        emitAssessEvent(finalizeResult);
+        return finalizeResult;
+      }
+      emitAssessEvent(second.providerResult);
+      return ok(finalizeResult.value);
     }
 
     // Both attempts malformed → AI_PROVIDER_ERROR with a raw-output prefix (AC-ASSESS-4).
@@ -1581,6 +1812,15 @@ export class AIProviderService {
    *   - The existing `rubric_warning` text (D4, above) stays as the human-readable trace of
    *     the ungrounded-dimension computation `computeGroundingWarnings` performs.
    *
+   * spec-judgment-surfaces-must-verify-before-they-certify-machine D2/D3 additions:
+   *   - AFTER grounding suppression (below) produces the surviving `typedGaps`,
+   *     {@link verifyFindingPaths} machine-checks every declared `paths[]` entry against the
+   *     ASSESSED commit resolved from `diffSource` — a finding with an absent path moves to
+   *     `unverifiable_findings[]` (excluded from the scored `typed_gaps`/legacy `gaps[]`
+   *     both); `overall_score` is NEVER recomputed from the surviving count. This can fail
+   *     this whole method LOUD (an unresolvable assessed commit) — see this method's own
+   *     `@returns` doc.
+   *
    * spec-lore-assess-project-evidence-rows-instead-of-embedding-the D3/D4 additions
    * (SUPERSEDES SPEC-067 D3's confidence-downgrade-only mechanism, removed):
    *   - `dimension_scores` is passed through `suppressUngroundedAbsenceFindings` — every
@@ -1628,6 +1868,14 @@ export class AIProviderService {
    *   own JSDoc in `packages/core/src/assessment.ts`) that must always render, not a falsy
    *   default that collapses into the LEGAL "absent = not recorded" state reserved for
    *   assessments persisted before this field existed.
+   * @param diffSource - D2/D3 (spec-judgment-surfaces-must-verify-before-they-certify-machine)
+   *   — the run's diff-source provenance, passed straight through to {@link verifyFindingPaths}.
+   * @param repoRoot - Directory `git cat-file -e` runs in, resolved ONCE by the caller
+   *   (`assessPlan`) and passed unchanged into {@link verifyFindingPaths}.
+   * @returns `Result<AssessmentResult, LoreError>` — was a bare `AssessmentResult` before D2/D3
+   *   added a THIRD way finalization can fail (an unresolvable assessed commit, alongside the
+   *   pre-existing provider-failure and containment-failure outcomes `assessPlan` already
+   *   handled before ever calling this method).
    */
   private _finalizeAssessment(
     parsed: LlmAssessmentOutput,
@@ -1641,7 +1889,9 @@ export class AIProviderService {
     scopeWarning: ScopeMismatchWarning | undefined,
     commitDerivationUnverifiable: boolean,
     reproducible: boolean,
-  ): AssessmentResult {
+    diffSource: AssessDiffSource | undefined,
+    repoRoot: string,
+  ): Result<AssessmentResult, LoreError> {
     // reason: SPEC-040 D4 — grounding cross-check runs on the validated-but-not-yet-final
     // output; warnings are advisory-only and never fail the run.
     const groundingWarnings = computeGroundingWarnings(parsed, truncated);
@@ -1681,6 +1931,18 @@ export class AIProviderService {
       forced.typedGaps,
     );
 
+    // reason: D2/D3 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — runs
+    // on the ALREADY-SUPPRESSED `typedGaps` (grounding suppression above is an orthogonal
+    // concern; a finding removed for being ungrounded is simply gone before this pass ever
+    // sees it, so there is no double-processing). A finding surviving THIS pass declaring an
+    // absent path is withdrawn to `unverifiableFindings[]`; the scored `typedGaps` set below
+    // is the SURVIVOR of both passes. An unresolvable assessed commit fails this whole method
+    // LOUD (see `verifyFindingPaths`'s own JSDoc) — propagated as this call's own `err`,
+    // exactly like `templateResult`/`reproducibleResult` upstream in `assessPlan`.
+    const verification = verifyFindingPaths(typedGaps, diffSource, repoRoot);
+    if (!verification.ok) return verification;
+    const { typedGaps: verifiedTypedGaps, unverifiableFindings, pathsVerified } = verification.value;
+
     // reason: SPEC-040 D3 — only substitute the legacy string arrays when the judge
     // actually emitted the corresponding typed array; a typed_gaps-less response leaves
     // parsed.gaps untouched (independently keyed per array, not an all-or-nothing swap).
@@ -1689,8 +1951,12 @@ export class AIProviderService {
     // whose typed_gaps sibling was just removed, reintroducing the exact "still
     // publishes, twice" bug this task exists to close. The PRESENCE check stays on the
     // raw `parsed.typed_gaps` — D3's original rule ("did the judge emit the array at
-    // all") is unaffected by suppression; only the projected VALUE changes.
-    const legacy = deriveLegacyFindings(typedGaps, parsed.typed_recommendations);
+    // all") is unaffected by suppression; only the projected VALUE changes. D2/D3: the
+    // legacy projection is built from `verifiedTypedGaps` (post path-verification), not the
+    // pre-verification `typedGaps` — a withdrawn finding must not still publish into the
+    // legacy `gaps[]` array either, or D3's "excluded from the scored set" would be false for
+    // that array specifically even though `typed_gaps`/`unverifiable_findings` agree.
+    const legacy = deriveLegacyFindings(verifiedTypedGaps, parsed.typed_recommendations);
     const gaps = parsed.typed_gaps !== undefined ? legacy.gaps : parsed.gaps;
     // reason: task-t6 — typed_recommendations carries NO field linking a recommendation to
     // a specific gap/dimension (typedRecommendationSchema is only target/action/rationale
@@ -1732,13 +1998,19 @@ export class AIProviderService {
     void _unusedRawUnverifiable; // reason: destructured only to exclude it from restParsed; suppressed value re-added below.
     void _unusedRawTypedGaps; // reason: destructured only to exclude it from restParsed; suppressed value re-added below.
 
-    return {
+    return ok({
       ...restParsed,
+      // reason: D2/D3 — `overall_score`/`verdict` come straight from `judgeOverallScore`/
+      // `judgeVerdict` (destructured verbatim from `parsed`, the RAW judge output) —
+      // path-withdrawal NEVER touches either. `overall_score` stays byte-identical to what
+      // the judge emitted even when `unverifiableFindings` is non-empty (see
+      // `unverifiableFindingSchema`'s own JSDoc for why re-deriving it would be inventing
+      // arithmetic this corpus has never used).
       verdict: fullyTruncated ? "inconclusive" : judgeVerdict,
       ...(fullyTruncated ? {} : { overall_score: judgeOverallScore }),
       ...(dimensionScores !== undefined ? { dimension_scores: dimensionScores } : {}),
       ...(unverifiable !== undefined ? { unverifiable } : {}),
-      ...(typedGaps !== undefined ? { typed_gaps: typedGaps } : {}),
+      ...(verifiedTypedGaps !== undefined ? { typed_gaps: verifiedTypedGaps } : {}),
       gaps,
       recommendations,
       ...(rubricWarning.length > 0 ? { rubric_warning: rubricWarning } : {}),
@@ -1763,7 +2035,15 @@ export class AIProviderService {
       facts,
       source_versions: sourceVersions,
       ...(scopeWarning !== undefined ? { scope_warning: scopeWarning } : {}),
-    };
+      // reason: D3 — `unverifiable_findings` follows the SAME present-iff-non-empty
+      // convention as `rubric_warning` above (never an empty array; the field is simply
+      // omitted when nothing was withdrawn). `paths_verified` is UNCONDITIONAL — even
+      // {checked:0, unverifiable:0, unchecked:0} is meaningful information ("this pass ran
+      // and found nothing to verify"), unlike an omitted key which (pre-D2/D3 historical
+      // assessments) means "this mechanism did not exist yet".
+      ...(unverifiableFindings.length > 0 ? { unverifiable_findings: unverifiableFindings } : {}),
+      paths_verified: pathsVerified,
+    });
   }
 
   /**

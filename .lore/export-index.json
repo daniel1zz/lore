@@ -5568,6 +5568,14 @@
     "01KZR6RNJA6HT5H21WAXJ8FABF": {
       "human_id": "TASK-665",
       "file_path": "docs/requirements/task/TASK-665-make-the-ac-fr-10-mirror-oracle-drive-the-read-onl.md"
+    },
+    "01KZREH7XNWFE8SD3M6DJ1GD20": {
+      "human_id": "KN-425",
+      "file_path": "docs/requirements/knowledge/KN-425-assessment-land-mirror-identifier-ssot-a-branded.md"
+    },
+    "01KZREAQFXXAMWMXZMA6F4JD8F": {
+      "human_id": "KN-426",
+      "file_path": "docs/requirements/knowledge/KN-426-five-governance-tooling-gaps-measured-while-resumi.md"
     }
   }
 }
