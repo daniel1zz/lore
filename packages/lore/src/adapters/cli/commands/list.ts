@@ -36,9 +36,31 @@
  * than duplicating each of their branches.
  *
  * --governed-by is exclusive of every other filter flag (--type/--status/--author/
- * --since/--tag/--plan-id/--phase): combining them fails loud (exit 2, naming the
- * conflicting flags) rather than silently running --governed-by alone and dropping
- * the rest. --json is a rendering mode, not a filter, and may combine freely.
+ * --since/--tag/--plan-id/--phase/--sub-type): combining them fails loud (exit 2,
+ * naming the conflicting flags) rather than silently running --governed-by alone and
+ * dropping the rest. --json is a rendering mode, not a filter, and may combine freely.
+ *
+ * ## `--sub-type` is a STORE-level predicate, unlike --phase/--plan-id
+ * (spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M3, AC-RR-5/6)
+ *
+ * `--phase` and `--plan-id` read `extra` fields with no SQL predicate, so they are
+ * client-side filters and their branches page in-memory (stance (b) below).
+ * `--sub-type` is deliberately NOT one of those: it joins the `filters` object and
+ * is pushed all the way into `StoreInterface.findMany`, where it becomes a bound
+ * `json_extract(extra, '$.sub_type') = ?` clause. That placement is the whole point
+ * — a post-fetch sub-type filter would return fewer rows than `--limit` asked for
+ * while more matches sat past `--offset`, which is exactly what AC-RR-5's
+ * `--limit 1 --offset 1` oracle is constructed to catch. ⛔ Never "simplify" it into
+ * a `.filter()` beside the --phase predicate.
+ *
+ * Because a knowledge listing takes the DocSummary fallback branch (it is not
+ * `--type task`, and carries no --phase/--plan-id), `--sub-type` composes with
+ * `withPaging()` and the DB bounds the page directly.
+ *
+ * The USAGE half (`--sub-type` requires `--type knowledge`; an unrecognised value is
+ * refused by name) is NOT implemented here — it is one shared seam,
+ * `CorpusService::resolveSubTypeFilter`, consumed identically by `lore search` and
+ * both MCP read tools. This file only maps its refusal to exit 2.
  *
  * --limit <n> / --offset <n> — optional paging (pagination hardening, unbounded-payload
  * review). BOTH omitted → current unbounded behavior, byte-identical (backward-compatible
@@ -108,13 +130,14 @@ import {
   relativeTime,
 } from "../utils.js";
 import { isPlanMember } from "../../../service/plan-membership.js";
+import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
 import {
   selectLiveDocs,
   withPreGatedLiveStatus,
   withValidityStatus,
   type WithValidityStatus,
 } from "../../../service/validity-service.js";
-import { ok } from "@lore/core";
+import { KNOWLEDGE_SUB_TYPES, ok } from "@lore/core";
 import type { DocRecord, DocType, DocStatus, LoreError, Result } from "@lore/core";
 
 /** A full corpus row as this command emits it — every `--json` record carries its
@@ -165,6 +188,16 @@ export default defineCommand({
     "include-invalid": {
       type: "boolean",
       description: "Include invalidated knowledge/adr/task docs (excluded by default). Source: SPEC-043 D3, task-a-task-cannot-be-retracted-supersedes-emits-a-repair.",
+    },
+    "sub-type": {
+      type: "string",
+      // reason: the value list is INTERPOLATED from KNOWLEDGE_SUB_TYPES, never
+      // retyped — a tenth sub-type must show up in --help without an edit here.
+      description:
+        `[requires --type knowledge] Filter knowledge docs by extra.sub_type: ${KNOWLEDGE_SUB_TYPES.join(" | ")}. ` +
+        "Applied as a STORE-LEVEL predicate, so --limit/--offset page the FILTERED set. Any other --type " +
+        "(or none) is a usage error, never a silently empty result. " +
+        "Source: spec-a-write-side-fact-with-no-read-side-address-counts-with-no M3.",
     },
     limit: {
       type: "string",
@@ -261,7 +294,7 @@ export default defineCommand({
         // short-circuits to listGovernedBy above and never reaches the filters
         // block below, so any other filter flag passed alongside it would
         // otherwise be silently ignored. Source: no-silent-fallback project norm.
-        const otherFilterKeys = ["type", "status", "author", "since", "tag", "plan-id", "phase"] as const;
+        const otherFilterKeys = ["type", "status", "author", "since", "tag", "plan-id", "phase", "sub-type"] as const;
         const conflicting = otherFilterKeys.filter((k) => args[k] !== undefined);
         if (conflicting.length > 0) {
           process.stderr.write(
@@ -310,8 +343,22 @@ export default defineCommand({
         return;
       }
 
+      // reason: resolved AFTER the --governed-by short-circuit above (which owns
+      // its own exclusivity refusal, and now names --sub-type among the flags it
+      // forbids) so each shape gets the message that actually explains it. The
+      // rule itself lives in ONE place shared with `lore search` and both MCP
+      // read tools — see resolveSubTypeFilter's JSDoc for why it must not be
+      // re-derived here. Exit 2 = CLI usage error (utils.ts::exitCode).
+      const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
+      if (!subTypeResolution.ok) {
+        process.stderr.write(subTypeResolution.message + "\n");
+        process.exitCode = 2;
+        return;
+      }
+
       const filters: Record<string, unknown> = {};
       if (args.type !== undefined) filters["type"] = args.type as DocType;
+      if (subTypeResolution.sub_type !== undefined) filters["sub_type"] = subTypeResolution.sub_type;
       if (args.status !== undefined) filters["status"] = args.status as DocStatus;
       if (args.author !== undefined) filters["created_by"] = args.author;
       if (args.since !== undefined) filters["since"] = args.since;
@@ -595,6 +642,12 @@ export default defineCommand({
 
       console.log(formatTable(headers, rows));
 
+      // reason: this echo is keyed on the STORE filter names, not the CLI flag
+      // spellings, so `--author` renders as `--created_by`, `--tag` as `--tags`
+      // and `--sub-type` as `--sub_type`. Pre-existing and deliberately left
+      // alone here: normalising it would change `lore list`'s human output for
+      // flags this change does not otherwise touch. Nothing in the suite asserts
+      // on these strings (checked), and no oracle depends on them.
       const filterDesc = Object.entries(filters)
         .map(([k, v]) => `--${k} ${Array.isArray(v) ? v.join(",") : String(v)}`)
         .join(" ");

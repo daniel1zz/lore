@@ -1,10 +1,30 @@
 /**
  * lore search <query> — full-text search with FTS5.
+ *
+ * ## `--sub-type` (spec-a-write-side-fact-with-no-read-side-address-counts-with-no §M3)
+ *
+ * Narrows a `--type knowledge` search to one `extra.sub_type`. The predicate is
+ * pushed into `StoreInterface.search`, where it rides the FTS5→docs join's WHERE
+ * clause as a bound `json_extract(d.extra, '$.sub_type') = ?`.
+ *
+ * ⛔ That placement is load-bearing on THIS surface specifically: `--limit` below
+ * is a POST-FETCH slice over the ranked hits, so a sub-type filter applied here in
+ * the adapter would cut the hit list to N rows first and only then drop the
+ * non-matching ones — a query with a legitimate match ranked below the cut would
+ * come back empty. AC-RR-7 pins that with a fixture whose retro is deliberately
+ * NOT the top-ranked hit.
+ *
+ * The usage contract (`--sub-type` requires `--type knowledge`; an unrecognised
+ * value is refused by name; exit 2 either way) comes from the ONE shared seam
+ * `CorpusService::resolveSubTypeFilter`, which `lore list` and both MCP read tools
+ * consume identically — ⛔ never re-derive it here.
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable, formatValidityBadge, parsePositiveIntArg } from "../utils.js";
+import { resolveSubTypeFilter } from "../../../service/corpus-service.js";
+import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import type { DocType } from "@lore/core";
 
 export default defineCommand({
@@ -21,6 +41,16 @@ export default defineCommand({
     type: {
       type: "string",
       description: "Filter by type",
+    },
+    "sub-type": {
+      type: "string",
+      // reason: interpolated from KNOWLEDGE_SUB_TYPES, never retyped — same rule
+      // as `lore list`'s identical flag.
+      description:
+        `[requires --type knowledge] Filter knowledge hits by extra.sub_type: ${KNOWLEDGE_SUB_TYPES.join(" | ")}. ` +
+        "Applied as a STORE-LEVEL predicate (before --limit's slice). Any other --type (or none) is a " +
+        "usage error, never a silently empty result. " +
+        "Source: spec-a-write-side-fact-with-no-read-side-address-counts-with-no M3.",
     },
     limit: {
       type: "string",
@@ -48,8 +78,19 @@ export default defineCommand({
         return;
       }
 
+      // reason: ONE shared seam with `lore list` and both MCP read tools (see this
+      // file's header). Exit 2 = CLI usage error (utils.ts::exitCode) — a refusal
+      // must never degrade into an exit-0 empty hit list.
+      const subTypeResolution = resolveSubTypeFilter(args["sub-type"], args.type);
+      if (!subTypeResolution.ok) {
+        process.stderr.write(subTypeResolution.message + "\n");
+        process.exitCode = 2;
+        return;
+      }
+
       const filters: Record<string, unknown> = {};
       if (args.type !== undefined) filters["type"] = args.type as DocType;
+      if (subTypeResolution.sub_type !== undefined) filters["sub_type"] = subTypeResolution.sub_type;
       if (args["include-invalid"] === true) filters["include_invalid"] = true;
 
       const result = await app.corpusService.search(args.query, filters);

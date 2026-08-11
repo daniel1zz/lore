@@ -49,7 +49,14 @@ import {
   extractDeclaredAcScope,
   resolveGoverningSpecByAcScope,
   resolveStatusAfterContractEdit,
+  // reason: BOTH halves of the --sub-type usage contract read their authority
+  // from @lore/core rather than restating it — KNOWLEDGE_SUB_TYPES (types.ts) is
+  // the value-set SSOT and knowledgeSubTypeSchema is the parser built from it, so
+  // a tenth sub-type becomes filterable and nameable with no edit here.
+  KNOWLEDGE_SUB_TYPES,
+  knowledgeSubTypeSchema,
 } from "@lore/core";
+import type { KnowledgeSubType } from "@lore/core";
 import type {
   CreateDocInput,
   DocPatch,
@@ -452,6 +459,20 @@ export interface ListFilters {
   since?: string;
   tags?: string[];
   /**
+   * Forwarded VERBATIM to {@link StoreInterface.findMany} — see
+   * {@link StoreFilters.sub_type} for the contract, including the ⛔ "predicate
+   * in the query, never after the pagination window" rule this service layer
+   * must not undermine.
+   *
+   * ⛔ This service applies NO filtering of its own for it (unlike
+   * `include_invalid`, which IS a post-store step here). If you find yourself
+   * adding a `.filter((d) => d.extra.sub_type === …)` in this file, that is the
+   * post-window bug — put the predicate in the store instead.
+   *
+   * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M3
+   */
+  sub_type?: KnowledgeSubType;
+  /**
    * SPEC-043 D3 escape — when `true`, invalidated `knowledge`/`adr` docs are included
    * (the pre-SPEC-043 default: none are ever excluded). Stripped before the filter
    * object is forwarded to `StoreInterface.findMany` (not a store-level filter).
@@ -484,6 +505,93 @@ export interface SearchFilters {
   tags?: string[];
   /** See {@link ListFilters.include_invalid} — same escape, same strip-before-store rule. */
   include_invalid?: boolean;
+  /** See {@link ListFilters.sub_type} — same store-level predicate, same ⛔ no-post-filter rule. */
+  sub_type?: KnowledgeSubType;
+}
+
+/**
+ * Outcome of {@link resolveSubTypeFilter} — a discriminated union so a refusal
+ * can never be read as "no filter requested" (which is exactly how a usage error
+ * would degrade into a silently empty result set).
+ */
+export type SubTypeFilterResolution =
+  | { readonly ok: true; readonly sub_type: KnowledgeSubType | undefined }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * The ONE place the `--sub-type` USAGE CONTRACT lives: a knowledge sub-type is
+ * only a meaningful retrieval predicate under `type: "knowledge"`, so every other
+ * shape is refused BY NAME rather than silently returning zero rows.
+ *
+ * Four consumers share this seam — CLI `lore list`, CLI `lore search`, MCP
+ * `lore_list`, MCP `lore_search`. ⛔ Do NOT re-derive the rule at a consumer: the
+ * `listGovernedBy` precedent in this same file records what that costs (a fix
+ * landed on one consumer while the shared seam kept the old behaviour). Each
+ * consumer maps a refusal to its OWN surface's vocabulary — the CLI to exit code
+ * 2 (usage error, per `adapters/cli/utils.ts::exitCode`), MCP to an `isError`
+ * payload — which is why this returns a message rather than a `LoreError`
+ * (`VALIDATION_ERROR` maps to exit 4, and AC-RR-6 requires exactly 2).
+ *
+ * JUDGMENT recorded here: the message is worded in CLI-FLAG vocabulary
+ * (`--sub-type` / `--type knowledge`) on BOTH surfaces, rather than being
+ * parameterised per caller. AC-RR-6 requires those exact tokens in the CLI's
+ * stderr, and MCP callers get the field-correct name separately and
+ * machine-readably as the refusal's `field: "sub_type"` — so the one place the
+ * spelling could mislead already carries the right one beside it. A spelling
+ * parameter was considered and rejected: it would put the two surfaces'
+ * wordings back in two places, which is the drift this seam exists to prevent.
+ *
+ * Side-effect class: pure.
+ *
+ * @param rawSubType - The requested sub-type, exactly as the caller supplied it
+ *   (an empty string is a MALFORMED value, deliberately not treated as absent);
+ *   `undefined` means the caller asked for no sub-type filter at all.
+ * @param rawType - The requested doc type, or `undefined` when the caller passed
+ *   none. There is no implicit type: an absent `type` with a present `sub_type`
+ *   is a refusal, not a defaulted `"knowledge"`.
+ * @returns `{ok: true, sub_type}` — with `sub_type: undefined` when none was
+ *   requested — or `{ok: false, message}` naming the conflict and the legal shape.
+ * @example
+ * resolveSubTypeFilter("retro", "knowledge"); // => { ok: true, sub_type: "retro" }
+ * resolveSubTypeFilter(undefined, "spec");    // => { ok: true, sub_type: undefined }
+ * resolveSubTypeFilter("retro", "spec");      // => { ok: false, message: "…--type spec…" }
+ * resolveSubTypeFilter("retro", undefined);   // => { ok: false, message: "…requires --type knowledge…" }
+ * resolveSubTypeFilter("handof", "knowledge");// => { ok: false, message: "…'handof'…Valid values…" }
+ * @see spec-a-write-side-fact-with-no-read-side-address-counts-with-no §Scope M3, AC-RR-6
+ */
+export function resolveSubTypeFilter(
+  rawSubType: string | undefined,
+  rawType: string | undefined,
+): SubTypeFilterResolution {
+  if (rawSubType === undefined) return { ok: true, sub_type: undefined };
+
+  const legalValues = KNOWLEDGE_SUB_TYPES.join(" | ");
+  if (rawType === undefined) {
+    return {
+      ok: false,
+      message:
+        "Error: --sub-type requires --type knowledge — only knowledge documents carry a sub_type.\n" +
+        `  Pass --type knowledge, or drop --sub-type. Valid values: ${legalValues}`,
+    };
+  }
+  if (rawType !== "knowledge") {
+    return {
+      ok: false,
+      message:
+        `Error: --sub-type cannot be combined with --type ${rawType} — ` +
+        "only knowledge documents carry a sub_type.\n" +
+        `  Use --type knowledge with --sub-type, or drop --sub-type. Valid values: ${legalValues}`,
+    };
+  }
+
+  const parsed = knowledgeSubTypeSchema.safeParse(rawSubType);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: `Error: Invalid --sub-type '${rawSubType}'.\n  Valid values: ${legalValues}`,
+    };
+  }
+  return { ok: true, sub_type: parsed.data };
 }
 
 export interface TreeOpts {
