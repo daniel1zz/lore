@@ -124,6 +124,7 @@ import {
   ORDINAL_REGISTRY,
   ORDINAL_REGISTERED_TYPES,
   formatDocDisplayId,
+  formatMirrorHumanId,
   isSelfDeclaredOrdinalTitle,
 } from "@lore/core";
 import type {
@@ -740,7 +741,14 @@ export class OrdinalMigrationService {
       const mapping = index.mappings[doc.id];
       if (mapping === undefined) continue;
 
-      const expectedHumanId = formatDocDisplayId({ type: doc.type, ordinal: finalOrdinal.ordinal });
+      // SPEC-mirror-identifier-ssot D1: `formatMirrorHumanId` (padded, e.g. "SPEC-001") is
+      // the ONLY function whose output may be assigned to an export-index `human_id` —
+      // `formatDocDisplayId` (unpadded) is a DIFFERENT consumer's contract (CLI/MCP/dashboard
+      // display, see `old_display`/`new_display` below) and must never compose this field.
+      // Composing with the unpadded formatter here was the reversion-loop defect: ExportDocsService
+      // (:1031) self-heals this same field to the padded form, so an unpadded value written here
+      // gets deleted and re-exported on the very next `mirror:export`, oscillating forever.
+      const expectedHumanId = formatMirrorHumanId({ type: doc.type, ordinal: finalOrdinal.ordinal });
       if (expectedHumanId === null || mapping.human_id === expectedHumanId) continue;
 
       const prefix = ORDINAL_REGISTRY[doc.type]?.prefix ?? "";
