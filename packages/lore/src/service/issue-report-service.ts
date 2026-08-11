@@ -46,10 +46,21 @@
  *     import-graph pin; also enforced by this repo's `bun-only` composition
  *     convention — see `../flows/upstream-context-flow.ts`'s own header).
  *   - `deps.loadUpstreamConfig(root)` loads the UPSTREAM corpus's OWN
- *     config (its `sync.enabled` flag) — distinct from `cfg`, which is the
- *     CONSUMER's `feedback.upstream.*` settings naming which upstream to
- *     talk to. Do not conflate the two: `cfg` says "where"; the loaded
- *     config says "is that place even a supported v1 target".
+ *     config — distinct from `cfg`, which is the CONSUMER's
+ *     `feedback.upstream.*` settings naming which upstream to talk to. Do not
+ *     conflate the two: `cfg` says "where"; the loaded config says what THAT
+ *     PLACE's own policy is. Two things are read from it, both the upstream's
+ *     to decide: its `sync.enabled` flag (is that place even a supported v1
+ *     target, step 3) and its `feedback.inbound.open_report_cap` (how deep may
+ *     one reporter's open queue get, step 6 — §M2). It is loaded EXACTLY ONCE
+ *     per call, inside `openValidatedUpstream`, and returned alongside the port
+ *     as a {@link ValidatedUpstream}; ⛔ never re-read at the cap site — a
+ *     second read could observe a different file mid-call and would let the
+ *     rails and the ceiling disagree about which upstream they are talking to.
+ *   - The step-6 ceiling is the UPSTREAM's DECLARED policy, resolved through
+ *     `@lore/core`'s single `resolveOpenReportCap` seam (§M2). ⛔ The compiled
+ *     `OPEN_REPORT_CAP` constant is NOT imported here and must not be: it is
+ *     that config field's Zod default, not the operative value.
  *   - `cfg` is OPTIONAL on `report()` — an unconfigured `feedback.upstream`
  *     is the single most common failure a first-time caller hits, so it is
  *     checked before any dependency is invoked at all (T2 deviation note,
@@ -74,7 +85,7 @@ import {
   countOpenReports,
   isWriteContentionFailure,
   matchRootPrd,
-  OPEN_REPORT_CAP,
+  resolveOpenReportCap,
   UNKNOWN_CONTENDING_SOURCE,
   type DocStatus,
   type IssueReportPayload,
@@ -214,7 +225,14 @@ export interface ReceiptStatusRow {
  * faked ports (SPEC-072 §4).
  */
 export interface IssueReportDeps {
-  /** Loads the UPSTREAM corpus's own `.lore/config.yaml` (its `sync.enabled` flag). */
+  /**
+   * Loads the UPSTREAM corpus's own `.lore/config.yaml` — the source of BOTH
+   * upstream-declared facts this service reads: its `sync.enabled` flag (step 3)
+   * and its `feedback.inbound.open_report_cap` ceiling (step 6, §M2). Called
+   * exactly once per `report()`/`list()`; a malformed upstream config therefore
+   * refuses the call LOUDLY at step 3, naming the offending key — it never
+   * degrades to "no policy declared".
+   */
   loadUpstreamConfig: (root: string) => Result<LoreConfig, LoreError>;
   /** Readonly `PRAGMA user_version` probe — see `../flows/upstream-probe.ts`. */
   probe: (dbPath: string) => Result<{ user_version: number }, LoreError>;
@@ -244,6 +262,24 @@ export interface IssueReportDeps {
 
 /** Consumer-side `feedback.upstream.*` config, as resolved by the caller. */
 type UpstreamCfg = { corpus_path: string; root_prd: string };
+
+/**
+ * What a fully-validated upstream connection carries: the open port PLUS the
+ * upstream's own loaded config.
+ *
+ * The config travels WITH the port deliberately (§M2). `openValidatedUpstream`
+ * must load it anyway for step 3's sync-mode rail, and step 6's ceiling is a
+ * second fact declared by that same file — returning it here is what makes
+ * "loaded exactly once per call" true by construction instead of by convention.
+ * ⛔ Do not replace this with a second `deps.loadUpstreamConfig` call at the cap
+ * site: two reads can observe two different files mid-call, and the rails would
+ * then be validating one upstream while the ceiling came from another.
+ */
+interface ValidatedUpstream {
+  readonly port: UpstreamPort;
+  /** The UPSTREAM corpus's OWN config — read `feedback.inbound.*` from here via `resolveOpenReportCap`, never from `cfg`. */
+  readonly upstreamConfig: LoreConfig;
+}
 
 /**
  * Generic human-readable description of a `LoreError` — only 4 of the 16
@@ -487,7 +523,15 @@ export class IssueReportService {
 
     const upstreamResult = await this.openValidatedUpstream(cfg);
     if (!upstreamResult.ok) return upstreamResult;
-    const port = upstreamResult.value;
+    const { port, upstreamConfig } = upstreamResult.value;
+
+    // The OPERATIVE ceiling: the UPSTREAM's own declared
+    // `feedback.inbound.open_report_cap` (§M2), resolved through the single
+    // `@lore/core` seam from the config `openValidatedUpstream` already loaded.
+    // ⛔ Not `OPEN_REPORT_CAP` (that is only this field's Zod default) and ⛔ not
+    // anything read off `cfg` — `cfg` is the CONSUMER's file, and a reporter that
+    // could raise its own ceiling is not rate-limited at all.
+    const openReportCap = resolveOpenReportCap(upstreamConfig);
 
     try {
       // Step 6: rate cap (R-5d), keyed on COMPUTED RESOLUTION (M1).
@@ -530,7 +574,7 @@ export class IssueReportService {
         blocking.push({ id, resolution: live.resolution });
       }
 
-      if (blocking.length >= OPEN_REPORT_CAP) {
+      if (blocking.length >= openReportCap) {
         const refusal: OpenReportCapRefusal = {
           blocking,
           // DERIVED from the shared SSOT, never a literal list (AC-DC-2).
@@ -539,7 +583,10 @@ export class IssueReportService {
         return err({
           code: "VALIDATION_ERROR",
           field: "feedback.upstream",
-          message: formatOpenReportCapRefusalMessage(this.deps.reporterProject, OPEN_REPORT_CAP, refusal),
+          // The message names the ceiling that was actually APPLIED — same value,
+          // same variable, so "the cap printed is the cap enforced" holds by
+          // construction (AC-DC-3 reads `cap N` out of this line).
+          message: formatOpenReportCapRefusalMessage(this.deps.reporterProject, openReportCap, refusal),
           value: refusal,
         });
       }
@@ -658,7 +705,10 @@ export class IssueReportService {
       );
     }
 
-    const port = upstreamResult.value;
+    // reason: `list()` is a pure read — it enforces no ceiling, so it destructures
+    // the port and deliberately ignores `upstreamConfig`. The cap belongs to the
+    // WRITE path only (`report()`); reading history must never be rate-limited.
+    const { port } = upstreamResult.value;
     try {
       const rows = await Promise.all(
         entries.map(async (entry): Promise<ReceiptStatusRow> => {
@@ -708,15 +758,22 @@ export class IssueReportService {
    * the rails shared verbatim by `report()` and `list()` ("§5: list() runs
    * steps 1-5, same rails").
    *
-   * @returns `ok(port)` on a fully-validated, OPEN upstream connection
-   *   (caller MUST `port.close()` when done); `err(...)` naming the first
-   *   failing rail
+   * @returns `ok({port, upstreamConfig})` on a fully-validated, OPEN upstream
+   *   connection (caller MUST `port.close()` when done) — the upstream's own
+   *   loaded config travels with the port so step 6's ceiling reads the SAME
+   *   file this method validated, loaded once (§M2, see {@link ValidatedUpstream});
+   *   `err(...)` naming the first failing rail
    */
-  private async openValidatedUpstream(cfg: UpstreamCfg): Promise<Result<UpstreamPort, LoreError>> {
+  private async openValidatedUpstream(cfg: UpstreamCfg): Promise<Result<ValidatedUpstream, LoreError>> {
     // Step 3: upstream config sync.enabled === true (config check precedes probe).
+    // This is ALSO the one load of the upstream's own declared policy — a
+    // malformed upstream config (e.g. an out-of-range
+    // `feedback.inbound.open_report_cap`) refuses the whole call here, naming the
+    // offending key, rather than silently reverting to the shipped default.
     const upstreamConfigResult = this.deps.loadUpstreamConfig(cfg.corpus_path);
     if (!upstreamConfigResult.ok) return upstreamConfigResult;
-    if (upstreamConfigResult.value.sync?.enabled === true) {
+    const upstreamConfig = upstreamConfigResult.value;
+    if (upstreamConfig.sync?.enabled === true) {
       return err({
         code: "VALIDATION_ERROR",
         field: "feedback.upstream.corpus_path",
@@ -795,7 +852,7 @@ export class IssueReportService {
       });
     }
 
-    return ok(port);
+    return ok({ port, upstreamConfig });
   }
 }
 

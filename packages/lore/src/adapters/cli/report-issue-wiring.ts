@@ -31,11 +31,21 @@
  *
  * Invariants:
  *   - `loadUpstreamConfig` in the returned deps bundle loads the UPSTREAM
- *     corpus's OWN `.lore/config.yaml` (its `sync.enabled` flag) — the SAME
- *     `@lore/core/node` `loadConfig` this codebase's `loader.ts` uses for the
- *     LOCAL corpus, called here against whatever root
- *     `IssueReportService.report`/`.list` pass in (the consumer's configured
- *     `feedback.upstream.corpus_path`, never this process's own cwd).
+ *     corpus's OWN `.lore/config.yaml` — the SAME `@lore/core/node` `loadConfig`
+ *     this codebase's `loader.ts` uses for the LOCAL corpus, called here against
+ *     whatever root `IssueReportService.report`/`.list` pass in (the consumer's
+ *     configured `feedback.upstream.corpus_path`, never this process's own cwd).
+ *     It carries TWO upstream-declared facts, both the upstream's own to decide:
+ *     `sync.enabled` (v1 target support) and `feedback.inbound.open_report_cap`
+ *     (the open-report ceiling, spec-the-defect-channel-cannot-be-honestly-
+ *     maintained-an §M2 — resolved by `IssueReportService` via `@lore/core`'s
+ *     `resolveOpenReportCap`, from the config THIS port returns).
+ *   - ⛔ Nothing here resolves the open-report ceiling, and nothing should:
+ *     `resolveUpstreamWriteWaitMs` below is resolved wiring-side because the
+ *     bound is a property of the CONSUMER's connection (`consumerConfig`), while
+ *     the ceiling is a property of the UPSTREAM's queue — a config this wiring
+ *     never loads. Resolving it here would require a second read of the upstream
+ *     file and would silently re-site the policy on the consumer's side.
  *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
  *     handler despite internally calling `findLoreDbPath` (which
  *     `process.exit(1)`s on a miss) — `loadLoreApp()` already called it once,
