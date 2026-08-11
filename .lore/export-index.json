@@ -5652,6 +5652,66 @@
     "01KZRG8WM13MNQH6WTR8VRRFKX": {
       "human_id": "TASK-676",
       "file_path": "docs/requirements/task/TASK-676-replace-the-false-git-tracked-mechanism-in-the.md"
+    },
+    "01KZRPZBSEGA45BRB7J1HYYMH6": {
+      "human_id": "KN-430",
+      "file_path": "docs/requirements/knowledge/KN-430-fifteen-findings-from-fixing-a-consumer-defect-lis.md"
+    },
+    "01KZRRQAEKWSBZMA0XD2Z0S0YA": {
+      "human_id": "KN-431",
+      "file_path": "docs/requirements/knowledge/KN-431-evicted-from-the-service-module-doc-reviewservice.md"
+    },
+    "01KZRNC4DARRW040PF744JKGCZ": {
+      "human_id": "KN-432",
+      "file_path": "docs/requirements/knowledge/KN-432-evicted-from-the-cli-adapter-module-doc-the-gate-f.md"
+    },
+    "01KZRMW1HYDK3WP2B1TC9WHYJN": {
+      "human_id": "KN-433",
+      "file_path": "docs/requirements/knowledge/KN-433-handoff-agent-main-orchestrator.md"
+    },
+    "01KZRMT8VVBWAYBETC5NR22QPR": {
+      "human_id": "TASK-677",
+      "file_path": "docs/requirements/task/TASK-677-update-the-five-toequal-assertions-that-still-pin.md"
+    },
+    "01KZRSCTMVNCJT5E28ZX588D70": {
+      "human_id": "TASK-678",
+      "file_path": "docs/requirements/task/TASK-678-relocate-the-issueresolution-vocabulary-into-lore.md"
+    },
+    "01KZRP4SQHP82M1EPHABB0PEVT": {
+      "human_id": "TASK-679",
+      "file_path": "docs/requirements/task/TASK-679-the-dashboard-hand-mirrors-the-issueresolution-uni.md"
+    },
+    "01KZRMT8BMSETD23BGFQXETMHZ": {
+      "human_id": "TASK-680",
+      "file_path": "docs/requirements/task/TASK-680-wire-the-oracle-generation-split-to-a-read-surface.md"
+    },
+    "01KZRW1SAJS3AGEQN313QP3C83": {
+      "human_id": "TASK-681",
+      "file_path": "docs/requirements/task/TASK-681-a-worktree-nested-inside-the-main-checkout-resolve.md"
+    },
+    "01KZRW1S4ZEVH7K89ZDX9NV08W": {
+      "human_id": "TASK-682",
+      "file_path": "docs/requirements/task/TASK-682-the-issues-resolution-e2e-fixture-calls-adhoc-with.md"
+    },
+    "01KZRS6YTV7TS9NFEV32Y5DA3S": {
+      "human_id": "TASK-683",
+      "file_path": "docs/requirements/task/TASK-683-test-changed-s-alias-map-is-blind-to-and-lore-lore.md"
+    },
+    "01KZRPT2NKJ0NBXDD4TJPFGR32": {
+      "human_id": "TASK-684",
+      "file_path": "docs/requirements/task/TASK-684-carry-the-retired-oracle-signal-into-the-feed-pack.md"
+    },
+    "01KZRN9N4DRY97QN8XWRGCVZKN": {
+      "human_id": "TASK-685",
+      "file_path": "docs/requirements/task/TASK-685-close-the-mcp-side-door-that-stores-a-grammar-inva.md"
+    },
+    "01KZRN9MXQHCYQQHWNH81SR4MZ": {
+      "human_id": "TASK-686",
+      "file_path": "docs/requirements/task/TASK-686-finish-the-drift-row-rename-spec-id-and-spec-statu.md"
+    },
+    "01KZRMT94GGWRZFT37NJ3EDXCY": {
+      "human_id": "TASK-687",
+      "file_path": "docs/requirements/task/TASK-687-widen-the-declared-ac-port-to-carry-criteria-so-th.md"
     }
   }
 }

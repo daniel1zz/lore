@@ -9,8 +9,54 @@ created: 2026-08-11
 updated: 2026-08-11
 tags: []
 parent: PLAN-122
+links:
+  - {id: KN-429, type: supersedes}
+  - {id: KN-428, type: supersedes}
 ---
 # Handoff — agent:main-orchestrator
+
+## ⛔ READ THIS FIRST — this is the SINGLE ENTRY POINT for the session of 2026-08-11
+
+Three handoffs were written as this session progressed. They are chronological, they OVERLAP, and one
+carries a claim a later measurement REFUTED. Read them in this order, and apply the corrections below
+BEFORE acting on anything in the earlier two:
+
+1. `knowledge-handoff-agent-main-orchestrator-91` — the main thread: GAP-25, `.lore/config.yaml` not being
+   git-tracked, seven rounds of AC tightening, the original 9 open items.
+2. `knowledge-handoff-agent-main-orchestrator-92` — AC-JV-5 close-out: the `check:test-budgets` red on
+   `main` (fixed), the stale-comment finding, AC-JV-6.
+3. **THIS document** — final state, and the authority wherever the three disagree.
+
+### ⛔ Corrections to the earlier two — do not act on the superseded versions
+
+- **`-91` NS3 says the mirror was "re-exported and committed on `main`". That is FALSE and I retracted it
+  later the same session.** `bun run mirror:export` exits 0 and reports parity OK but does NOT rewrite an
+  existing file's content — proven by an identical before/after md5 across a rename that changed 65 tokens.
+  It writes NEW files only, and `check:spec-mirror` compares count+slug while stating outright that CONTENT
+  is not compared. ⛔ Treat every `docs/requirements/*.md` as possibly superseded. Full entry: `GAP-25` in
+  `knowledge-five-governance-tooling-gaps-measured-while-resuming`.
+- **`-91` and `-92` both list agents as "still running". None are.** All five finished, all ten worktrees
+  and branches were removed after an UNCONDITIONAL `git log main..<branch>` scan showed zero unmerged
+  commits on every one. Do not go looking for in-flight work.
+- **`-92` says `ai-provider-service.ts` has FOUR stale comments. It has SIX** — the four `diffSource` ones
+  (`:87 :89 :1193 :1199`) plus two `default 24000` ones near `:616` and `:663` that AC-GD-1's raise
+  falsified. Widen AC-JV-6 accordingly.
+
+### Start here, in this order — the ordering is load-bearing
+
+1. **`task-re-baseline-the-compiled-migrate-ordinals-e2e-to-the`** — ready, undispatched, and it fixes a
+   LIVE RED on `main` (verified after a fresh `bun run build`: exit 1, 2 of 5 cases). ⛔ Do NOT fix it by
+   reverting the padded composition — AC-MIS-1/2/4 are attested against it; the pins are stale, not the code.
+2. **Then the full suite** — never run this session. It is finally safe (no agents, `dist/lore` freshly
+   built). Running it BEFORE step 1 gives you a baseline you cannot read, because those 2 failures are
+   expected until step 1 lands and anything else is new.
+3. Then everything in the Next Steps table below.
+
+⛔ One measured caution about this session's own output: I twice pinned an AC's oracle to something I had
+not measured — the second time immediately after adding a CLAUDE.md lesson warning against exactly that.
+Both were caught by implementers, not by me. If a judgment in these three handoffs names a field, a path,
+or an exit code, machine-check it before relying on it.
+
 
 SCOPE: 7 decisions + 6 next steps = 13 items to account for
 
