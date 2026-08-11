@@ -77,27 +77,35 @@
  *     `assessPlan`'s own `scopeWarning` local for the narrowing that keeps this field's
  *     persisted contract exactly as it was before that task).
  *
- * Side-effect class: IO (delegates to AIProvider.generate and Telemetry.emit)
+ * Side-effect class: IO (delegates to AIProvider.generate, Telemetry.emit, and — D2,
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine — `git cat-file -e`
+ * subprocess calls for finding-path verification)
  *
  * Source: SPEC-017 §3.6, SPEC-019 §9.1, SPEC-026 §3 D1, D2; SPEC-029 AC-AR-2, AC-AR-3; SPEC-034 §4;
- * SPEC-038 §5, §7 D5; SPEC-040 §T2 D1-D6, D8; task-assess-diff-range-scope-mismatch-warning
+ * SPEC-038 §5, §7 D5; SPEC-040 §T2 D1-D6, D8; task-assess-diff-range-scope-mismatch-warning;
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine D1, D2, D3, D4
+ * (task-verify-assess-finding-paths-against-the-assessed-commit)
  */
 
+import { spawnSync } from "node:child_process";
 import { err, ok } from "@lore/core";
 import type { AIProvider, DocRecord, DocType, GenerateInput, GenerateOutput, LinkType, LoreError, Telemetry } from "@lore/core";
 import type { AiDefaultSource, CallerSurface, Result } from "@lore/core";
 import { linkTypeSchema } from "@lore/core";
 import type {
+  AssessDiffSource,
   AssessmentFacts,
   AssessmentResult,
   DimensionScores,
   LlmAssessmentOutput,
+  PathsVerified,
   PlanBundle,
   ScopeMismatchNotMeasured,
   ScopeMismatchWarning,
   SourceVersionRef,
   TypedGap,
   UnverifiableEntry,
+  UnverifiableFinding,
 } from "@lore/core";
 import {
   clipOverlongReasoning,
@@ -109,6 +117,7 @@ import {
   extractFileAnchors,
   llmAssessmentOutputSchema,
   parseDiffFilePaths,
+  resolveAssessedCommit,
   TRUNCATION_DOWNGRADE_THRESHOLDS,
 } from "@lore/core";
 import type { CheckResult, LlmReviewOutput, NewReviewJudgment, ReviewBundle } from "@lore/core";
@@ -131,6 +140,7 @@ import {
   ASSESS_PROMPT_VERSION,
   buildAssessDiffMeta,
   buildAssessRetryPrompt,
+  excludeAssessMirrorFromDiff,
   extractDeclaredAcceptanceCriteria,
   getAssessTemplate,
   getAssessTemplateReproducibility,
@@ -558,6 +568,29 @@ export function deriveRepoTestedSourcePath(filePath: string): string | undefined
   const rest = segments.slice(testsIdx + 1);
   const restWithoutGrouping = rest[0] === "unit" || rest[0] === "integration" ? rest.slice(1) : rest;
   return [...segments.slice(0, testsIdx), "src", ...restWithoutGrouping].join("/");
+}
+
+// ─── Finding-Path Verification (D2/D3, spec-judgment-surfaces-must-verify-before-they-certify-machine) ───
+
+/**
+ * `true` iff `ref` resolves to an existing git object in `repoRoot` — a thin, never-throwing
+ * wrapper over `git cat-file -e <ref>`. Used for BOTH of D2's two distinct checks: whether
+ * the assessed commit itself resolves (`"<sha>^{commit}"`) and whether a declared path
+ * exists in that commit's tree (`"<sha>:<path>"`) — the caller decides which `ref` shape to
+ * pass; this function has no opinion on the difference.
+ *
+ * @invariant Never throws — `spawnSync`'s own `error` (e.g. `git` not on PATH) is treated
+ *   the same as a non-zero exit: `false`. A missing/misconfigured `git` binary and a
+ *   genuinely absent object are indistinguishable to this ONE check by design; the caller
+ *   (`_verifyFindingPaths`) tells them apart by checking the COMMIT referent FIRST, before
+ *   ever checking a path against it (see that method's own JSDoc).
+ * @param repoRoot - Directory to run `git` in (the assessed repo's root)
+ * @param ref - A git revision spec, e.g. `"<sha>^{commit}"` or `"<sha>:<path>"`
+ * @returns `true` iff `git cat-file -e <ref>` exited 0
+ */
+function gitObjectExists(repoRoot: string, ref: string): boolean {
+  const result = spawnSync("git", ["cat-file", "-e", ref], { cwd: repoRoot, encoding: "utf8" });
+  return !result.error && result.status === 0;
 }
 
 // ─── AIProviderService ────────────────────────────────────────────────────────
@@ -998,7 +1031,11 @@ export class AIProviderService {
    * Emits ai.generation telemetry (kind="assess") on every terminal outcome exactly once.
    *
    * @param bundle - {plan, spec?, tasks[]} from CorpusService.getPlanBundle
-   * @param opts.diffText - Optional diff text (already acquired by the CLI layer)
+   * @param opts.diffText - Optional diff text (already acquired by the CLI layer). Filtered
+   *   through {@link excludeAssessMirrorFromDiff} EXACTLY ONCE, at the top of this method
+   *   (D4, spec-judgment-surfaces-must-verify-before-they-certify-machine) — every downstream
+   *   use (facts, scope-mismatch, the rendered prompt) sees the mirror-free text, never the
+   *   raw caller-supplied one.
    * @param opts.source - Caller surface, forwarded to telemetry as caller_surface
    * @param opts.commitDerivationUnverifiable - REQUIRED (task-the-mcp-assess-adapter-
    *   still-calls-derivecommitsetforplan mechanizes this — no default, every caller must
@@ -1008,7 +1045,22 @@ export class AIProviderService {
    *   (see `forceScopeFidelityUnverifiable`), regardless of the judge's own output. Pass
    *   `false` for every other path (explicit `--diff`/`diff_text` override, or a
    *   genuinely commit-less plan) — a deliberate value, never an omission.
-   * @returns Result<AssessmentResult, LoreError> — never throws
+   * @param opts.diffSource - OPTIONAL (D2, spec-judgment-surfaces-must-verify-before-they-
+   *   certify-machine) — the run's `DiffSourceRecord`-shaped diff provenance (mirrored as
+   *   {@link AssessDiffSource}; see that type's own JSDoc for why it is not imported
+   *   directly from the adapter layer). Resolved via {@link resolveAssessedCommit} to the ONE
+   *   commit every `typed_gaps[].paths` entry is checked against. ⛔ NOT YET WIRED by either
+   *   production caller (`commands/assess.ts`, MCP `tools.ts` — both outside this task's file
+   *   anchors): until a follow-up task threads it through, this stays `undefined` in
+   *   production, which `_verifyFindingPaths` treats as "no referent" — every declared path
+   *   is recorded `"unchecked"`, NEVER silently "verified" or dropped. This is the safe
+   *   default for an unwired capability, not a claim that verification is live end-to-end.
+   * @param opts.repoRoot - OPTIONAL — directory `git cat-file -e` runs in when verifying
+   *   finding paths. Defaults to `process.cwd()`; tests pass a throwaway git fixture.
+   * @returns Result<AssessmentResult, LoreError> — never throws. Returns
+   *   `err(VALIDATION_ERROR)` naming the commit when `opts.diffSource` resolves to a commit
+   *   that `git cat-file -e` cannot find (shallow clone / pruned range) — D2 fails LOUD
+   *   rather than silently reading "cannot resolve" as "path absent".
    *
    * @example
    * const bundleResult = await app.corpusService.getPlanBundle("plan-my-feature");
@@ -1022,7 +1074,8 @@ export class AIProviderService {
    *
    * Source: SPEC-026 §3 D1, D2; §4 AC-ASSESS-1, AC-ASSESS-3, AC-ASSESS-4, AC-ASSESS-5;
    * SPEC-038 §5 AC-ACODE-4, AC-ACODE-5; task-lore-assess-derives-a-plan-s-commits-by-
-   * grepping-task AC #3; task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan
+   * grepping-task AC #3; task-the-mcp-assess-adapter-still-calls-derivecommitsetforplan;
+   * spec-judgment-surfaces-must-verify-before-they-certify-machine D2, D3, D4
    */
   async assessPlan(
     bundle: PlanBundle,
@@ -1037,9 +1090,23 @@ export class AIProviderService {
       // this fact from its own `allTasksArchived` + `deriveCommitSetForPlan` call and
       // pass it explicitly — there is no longer a default to fall back on.
       commitDerivationUnverifiable: boolean;
+      // reason: OPTIONAL — see this method's own @param doc above for the "not yet wired
+      // by either production caller" state and why `undefined` is a SAFE default, not a
+      // silent capability gap.
+      diffSource?: AssessDiffSource | undefined;
+      repoRoot?: string | undefined;
     },
   ): Promise<Result<AssessmentResult, LoreError>> {
     const t0 = performance.now();
+
+    // reason: D4 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — the
+    // generated docs/requirements/** mirror is stripped EXACTLY ONCE here, before ANY
+    // downstream consumer (facts, scope-mismatch, the rendered prompt) ever sees
+    // `opts.diffText` — never inside a registry-versioned prompt builder itself (that would
+    // retroactively break ASSESS_TEMPLATE_REGISTRY[6]/[7]'s `reproducible: true` guarantee;
+    // see `excludeAssessMirrorFromDiff`'s own JSDoc). A no-op (byte-identical) for the
+    // overwhelmingly common diff that never touches the mirror at all.
+    const diffText = opts.diffText !== undefined ? excludeAssessMirrorFromDiff(opts.diffText) : undefined;
 
     // reason: SPEC-040 D1/D2 — facts are computed EXACTLY ONCE here, from the full
     // untruncated bundle, BEFORE any prompt-budget truncation happens. The SAME facts
@@ -1047,7 +1114,7 @@ export class AIProviderService {
     // section and (b) persisted verbatim into extra.assessment.facts — a judge's output
     // can never overwrite what facts.ac_coverage/task_evidence/scope/etc. actually say.
     const declaredCriteriaForFacts = extractDeclaredAcceptanceCriteria(bundle.spec);
-    const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(opts.diffText));
+    const facts = computeAssessmentFacts(bundle, declaredCriteriaForFacts, buildAssessDiffMeta(diffText));
     const sourceVersions = this._buildSourceVersions(bundle);
 
     // reason: hotfix (task-assess-diff-range-scope-mismatch-warning) — a deterministic,
@@ -1059,7 +1126,7 @@ export class AIProviderService {
     // file by direct anchor overlap only and the false-positive fix that task built would
     // never actually run in production, only in its own unit test (the exact inert-mechanism
     // failure the ADR's Q1/Q3 warn about).
-    const diffFilesForScope = parseDiffFilePaths(opts.diffText ?? "");
+    const diffFilesForScope = parseDiffFilePaths(diffText ?? "");
     const taskAnchorsForScope = bundle.tasks.flatMap((task) => extractFileAnchors(task));
     const scopeMismatchOutcome = computeScopeMismatchWarning(
       diffFilesForScope,
@@ -1097,7 +1164,7 @@ export class AIProviderService {
     if (!reproducibleResult.ok) return reproducibleResult;
     const { prompt, truncated, declaredAcIds } = templateResult.value(
       bundle,
-      opts.diffText,
+      diffText,
       this.assessBudgets,
       facts,
     );

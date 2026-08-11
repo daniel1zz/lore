@@ -15,7 +15,20 @@
  *   - dimensionScoresSchema / DimensionScores — permissive per-dimension judge score record
  *   - unverifiableEntrySchema / UnverifiableEntry — a material the judge could not verify
  *   - TYPED_FINDING_SEVERITIES / TypedFindingSeverity — typed_gaps[].severity enum
- *   - typedGapSchema / TypedGap — one structured gap finding (SPEC-040 D3)
+ *   - typedGapSchema / TypedGap — one structured gap finding (SPEC-040 D3); `paths` (D1,
+ *     spec-judgment-surfaces-must-verify-before-they-certify-machine) is the finding's
+ *     EXPLICITLY declared file-path list, `.default([])`
+ *   - unverifiableFindingSchema / UnverifiableFinding — a TypedGap withdrawn from the scored
+ *     set because a declared path was confirmed absent at the assessed commit (D2/D3); one
+ *     entry per withdrawn finding in `unverifiable_findings[]`
+ *   - pathsVerifiedSchema / PathsVerified — `{checked, unverifiable, unchecked}` three-state
+ *     tally over every path any `typed_gaps[]` entry declared (D2/D3)
+ *   - AssessDiffSource — caller-built (not schema-validated) mirror of the CLI/MCP adapters'
+ *     `DiffSourceRecord` union, the input to `resolveAssessedCommit`
+ *   - AssessedCommitResolution — `{status: "resolved", commit} | {status: "unchecked", reason}`
+ *   - extractDiffRangeTip(range) — pure `A..B`/`A...B` range-string tip extraction
+ *   - resolveAssessedCommit(diffSource) — pure D2 referent resolution, pinned per
+ *     `AssessDiffSource.mode`, exhaustively — NEVER `HEAD`
  *   - RECOMMENDATION_TARGETS / RecommendationTarget — typed_recommendations[].target enum
  *   - typedRecommendationSchema / TypedRecommendation — one structured recommendation (SPEC-040 D3)
  *   - deriveLegacyFindings(typedGaps, typedRecommendations) — pure statement/action projection
@@ -28,7 +41,8 @@
  *     scope, no judgment, no facts: those are filled in by AIProviderService after a
  *     successful parse, not by the model)
  *   - assessmentResultSchema / AssessmentResult — full persisted shape (llm output + scope +
- *     judgment + OPTIONAL facts/source_versions, SPEC-040 D2)
+ *     judgment + OPTIONAL facts/source_versions/unverifiable_findings/paths_verified,
+ *     SPEC-040 D2; unverifiable_findings/paths_verified per D2/D3 above)
  *   - planBundleSchema / PlanBundle — {plan, spec?, tasks[], knowledge_links?} assembled by
  *     CorpusService.getPlanBundle (knowledge_links populated by SPEC-040 T2)
  *   - DiffMeta — pre-classified diff shape consumed by computeAssessmentFacts (caller-built,
@@ -151,6 +165,13 @@
  *     the field's own JSDoc on {@link judgmentSchema} for the full three-state contract and
  *     `adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the` (Q2) for why absence
  *     must never read as `true`.
+ *   - `typedGapSchema.paths` / `unverifiableFindingSchema` / `pathsVerifiedSchema` /
+ *     `resolveAssessedCommit` (D1/D2/D3, spec-judgment-surfaces-must-verify-before-they-
+ *     certify-machine) declare the SHAPES and the PURE referent-resolution rule only — the
+ *     actual `git cat-file -e` verification is IO and lives in
+ *     `AIProviderService._verifyFindingPaths` (`packages/lore/src/service/ai-provider-service.ts`),
+ *     never here. `resolveAssessedCommit` never substitutes `HEAD` for the assessed commit —
+ *     that substitution IS the defect this mechanism exists to fix.
  *
  * Side-effect class: pure
  *
@@ -161,7 +182,9 @@
  *   SPEC-067 D3, D4;
  *   task-computescopemismatchwarning-cannot-distinguish-a-too-wide (test-of-anchor
  *   reclassification, ScopeMismatchNotMeasured);
- *   adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the (Proxy/Silence/Opt-in)
+ *   adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the (Proxy/Silence/Opt-in);
+ *   spec-judgment-surfaces-must-verify-before-they-certify-machine D1, D2, D3
+ *   (task-verify-assess-finding-paths-against-the-assessed-commit)
  */
 
 import { z } from "zod";
@@ -386,16 +409,203 @@ export type TypedFindingSeverity = (typeof TYPED_FINDING_SEVERITIES)[number];
  *
  * @invariant `dimension` is a free string (not `z.enum(ASSESSMENT_DIMENSIONS)`) — same
  *   forward-compatibility rationale as {@link dimensionScoresSchema}'s permissive keys.
+ * @invariant `paths` (spec-judgment-surfaces-must-verify-before-they-certify-machine D1) is
+ *   `.default([])`, NEVER required — a required field would make every assessment stored
+ *   before this field existed fail to re-parse. It is the EXPLICIT list of file paths this
+ *   finding names in `statement`'s prose; `AIProviderService`'s path-verification pass (D2)
+ *   checks each entry against the assessed commit, never regex-extracting paths out of
+ *   `statement` itself (a heuristic extractor would be a second, unverified surface — see
+ *   this field's governing spec's Problem section). Defaults to `[]` for a finding that
+ *   names no file path at all.
  */
 export const typedGapSchema = z.object({
   dimension: z.string().min(1),
   severity: z.enum(TYPED_FINDING_SEVERITIES),
   ac_ref: z.string().optional(),
   statement: z.string().max(500),
+  paths: z.array(z.string()).default([]),
 });
 
 /** Derived TypeScript type for one typed gap. */
 export type TypedGap = z.infer<typeof typedGapSchema>;
+
+/**
+ * One {@link TypedGap} that could NOT be verified against the assessed commit (D2/D3,
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine) — carries every field the
+ * original finding had, PLUS which declared path failed verification and which commit it
+ * was checked against. Moved here out of the scored set (`typed_gaps[]`) rather than
+ * silently dropped: `overall_score` is left byte-identical to what the judge emitted (the
+ * severity→score arithmetic lives in the judge LLM, never re-derived here), so a withdrawn
+ * finding must remain visible as the record of WHY the score and the surviving findings
+ * disagree in count.
+ *
+ * @invariant Extends {@link typedGapSchema} — every field a surviving finding has, a
+ *   withdrawn one keeps, so a reader never needs to cross-reference the original judge
+ *   output to see what was withdrawn.
+ * @invariant `failing_path` is exactly ONE of `paths` — the first path (encounter order)
+ *   that `git cat-file -e <checked_against_commit>:<path>` reported absent. A finding
+ *   declaring multiple paths where only one fails is STILL withdrawn wholesale (the finding
+ *   is the unit of withdrawal, not the individual path) — `failing_path` names which one
+ *   triggered it, it does not claim it was the ONLY one.
+ */
+export const unverifiableFindingSchema = typedGapSchema.extend({
+  failing_path: z.string().min(1),
+  checked_against_commit: z.string().min(1),
+});
+
+/** Derived TypeScript type for one withdrawn (unverifiable) finding. */
+export type UnverifiableFinding = z.infer<typeof unverifiableFindingSchema>;
+
+/**
+ * Path-verification tallies for one assess run (D2/D3) — a THREE-STATE partition over every
+ * path any `typed_gaps[]` entry declared, never a two-state checked/unchecked collapse.
+ *
+ * @invariant `checked` — paths confirmed to EXIST at the assessed commit (their finding was
+ *   kept, or another path on the same finding failed while this one passed).
+ * @invariant `unverifiable` — paths confirmed ABSENT at the assessed commit (their finding
+ *   moved to {@link unverifiableFindingSchema}[]).
+ * @invariant `unchecked` — paths that were NEVER looked up at all, because
+ *   `extra.diff_source` resolved to no git referent (`explicit_diff_text`,
+ *   `explicit_diff_file`, or an `auto_derived` run with zero commits) — see
+ *   `resolveAssessedCommit`'s own JSDoc. MUST render distinctly from `checked`: a reader
+ *   must never mistake "we did not look" for "we looked and it was fine".
+ */
+export const pathsVerifiedSchema = z.object({
+  checked: z.number().int().nonnegative(),
+  unverifiable: z.number().int().nonnegative(),
+  unchecked: z.number().int().nonnegative(),
+});
+
+/** Derived TypeScript type for the D2/D3 path-verification tallies. */
+export type PathsVerified = z.infer<typeof pathsVerifiedSchema>;
+
+// ─── Assessed-Commit Resolution (D2, spec-judgment-surfaces-must-verify-before-they-certify-machine) ───
+
+/**
+ * Service-layer-owned mirror of the CLI/MCP adapters' `DiffSourceRecord` union
+ * (`packages/lore/src/adapters/cli/assess-commit-derivation.ts`) — deliberately NOT
+ * imported from there: this package is a dependency-free leaf (see this module's own
+ * header) and services never depend on the adapter layer either
+ * (`packages/lore/src/service/CLAUDE.md`'s "Service per concern" pattern). Every field
+ * name/shape here matches `DiffSourceRecord` exactly, so a real `DiffSourceRecord` value
+ * satisfies this type with zero cast the day a caller threads `opts.diffSource` through
+ * from `commands/assess.ts` / MCP `tools.ts` (currently NOT wired — see
+ * `AIProviderService.assessPlan`'s own JSDoc on `opts.diffSource`).
+ */
+export type AssessDiffSource =
+  | { mode: "explicit_diff"; range: string }
+  | { mode: "explicit_diff_file"; path: string }
+  | { mode: "explicit_diff_text" }
+  | {
+      mode: "auto_derived";
+      status: "derived" | "no_commits_found" | "unverifiable_convention_mismatch";
+      /** Oldest-first, mirroring `deriveCommitSetForPlan`'s own ordering — see {@link resolveAssessedCommit}. */
+      commits: ReadonlyArray<{ sha: string }>;
+    };
+
+/**
+ * The outcome of resolving ONE assessed commit to check finding paths against — a
+ * discriminated union, never a bare `string | undefined`, so a caller cannot mistake "there
+ * is no referent" for "the referent is the empty string".
+ */
+export type AssessedCommitResolution = { status: "resolved"; commit: string } | { status: "unchecked"; reason: string };
+
+/**
+ * Extracts the "B" (tip) side of a `git diff`-style range string — `A..B` or `A...B` (the
+ * latter git's symmetric-difference syntax; both keep the SAME tip semantics for "which tree
+ * was the judge shown"). A range with NO dot-run at all (a single ref, e.g. `"HEAD"`,
+ * diffing that ref against the working tree) is its own tip.
+ *
+ * @invariant Greedy match on the LEADING group — for a pathological multi-dot-run input
+ *   (`"a..b..c"`), the LAST dot-run's suffix wins (`"c"`), matching "the tip is whatever
+ *   comes after the final range separator".
+ * @param range - Raw `--diff <range>` string, e.g. `"HEAD~3..HEAD"`
+ * @returns The tip ref, or `undefined` for an empty/whitespace-only input
+ *
+ * @example
+ * extractDiffRangeTip("HEAD~3..HEAD"); // → "HEAD"
+ * extractDiffRangeTip("abc123...def456"); // → "def456"
+ * extractDiffRangeTip("HEAD"); // → "HEAD" (no dot-run — the whole string is the tip)
+ */
+export function extractDiffRangeTip(range: string): string | undefined {
+  const trimmed = range.trim();
+  if (trimmed.length === 0) return undefined;
+  const dotRangeMatch = /^(.*)\.{2,3}([^.]+)$/.exec(trimmed);
+  if (dotRangeMatch) {
+    const tip = (dotRangeMatch[2] ?? "").trim();
+    return tip.length > 0 ? tip : undefined;
+  }
+  return trimmed;
+}
+
+/**
+ * Resolves the ONE commit finding-path verification must check against (D2) — pinned
+ * per {@link AssessDiffSource}.mode, exhaustively, NEVER `HEAD` (substituting `HEAD` for the
+ * assessed commit is precisely the original defect this mechanism exists to fix):
+ *   - `explicit_diff` — the range's tip (`B` in `A..B`): the tree state the judge was
+ *     actually shown; the range's baseline (`A`) and the merge base are neither.
+ *   - `explicit_diff_file` — records a FILE PATH read from disk (`--diff-file <path>`),
+ *     never a git range or commit. There is no git ref to resolve here at all — the SAME
+ *     "no referent exists" case `explicit_diff_text` is below, even though a literal
+ *     reading of this mechanism's governing spec groups this mode with `explicit_diff`'s
+ *     range-bearing case; `DiffSourceRecord`'s actual persisted shape
+ *     (`assess-commit-derivation.ts`) has never carried a `range` for this mode.
+ *   - `explicit_diff_text` — no range, no commits: there IS no referent. Verification is
+ *     SKIPPED and recorded as `"unchecked"`, never silently counted as verified and never a
+ *     hard failure.
+ *   - `auto_derived` — the NEWEST entry in `commits[]` (oldest-first order, per
+ *     `deriveCommitSetForPlan`'s own documented ordering) — NOT every commit: a path added
+ *     partway through the derived range exists at the tip and not at the earliest commit, so
+ *     an all-commits rule would withdraw findings about newly added files. Zero commits
+ *     (either zero-match status) is the same "no referent" case as `explicit_diff_text`.
+ *   - `undefined` (no diff source recorded at all — e.g. a caller that has not yet threaded
+ *     `opts.diffSource` through) — same "no referent" / `"unchecked"` treatment.
+ *
+ * @invariant Pure — no IO, no git calls. Resolving WHICH commit to check is separate from
+ *   verifying paths AGAINST it (that requires `git cat-file -e`, a service-layer concern —
+ *   `AIProviderService._verifyFindingPaths`).
+ * @param diffSource - The run's recorded diff-source record, or `undefined`
+ * @returns `{status: "resolved", commit}` when a referent exists; `{status: "unchecked",
+ *   reason}` naming why not, otherwise
+ *
+ * @example
+ * resolveAssessedCommit({ mode: "explicit_diff", range: "HEAD~3..HEAD" });
+ * // → { status: "resolved", commit: "HEAD" }
+ *
+ * @example
+ * resolveAssessedCommit({ mode: "auto_derived", status: "derived", commits: [{ sha: "aaa" }, { sha: "bbb" }] });
+ * // → { status: "resolved", commit: "bbb" } (the NEWEST — last — entry)
+ *
+ * @example
+ * resolveAssessedCommit({ mode: "explicit_diff_text" });
+ * // → { status: "unchecked", reason: "explicit_diff_text has no range and no commits" }
+ */
+export function resolveAssessedCommit(diffSource: AssessDiffSource | undefined): AssessedCommitResolution {
+  if (diffSource === undefined) {
+    return { status: "unchecked", reason: "no diff source was recorded for this assess run" };
+  }
+  switch (diffSource.mode) {
+    case "explicit_diff": {
+      const tip = extractDiffRangeTip(diffSource.range);
+      return tip === undefined
+        ? { status: "unchecked", reason: `explicit_diff range "${diffSource.range}" has no resolvable endpoint` }
+        : { status: "resolved", commit: tip };
+    }
+    case "explicit_diff_file":
+      return {
+        status: "unchecked",
+        reason: "explicit_diff_file records a file path read from disk, not a git commit reference",
+      };
+    case "explicit_diff_text":
+      return { status: "unchecked", reason: "explicit_diff_text has no range and no commits" };
+    case "auto_derived": {
+      const newest = diffSource.commits[diffSource.commits.length - 1];
+      return newest === undefined
+        ? { status: "unchecked", reason: `auto_derived (${diffSource.status}) recorded no commits` }
+        : { status: "resolved", commit: newest.sha };
+    }
+  }
+}
 
 /** Closed enum of recommendation targets — the corpus doc family a fix belongs in. */
 export const RECOMMENDATION_TARGETS = ["spec", "plan", "prompt", "skill", "process"] as const;
@@ -974,6 +1184,14 @@ export const assessmentResultSchema = llmAssessmentOutputSchema.extend({
   // judge is validated against) is untouched.
   verdict: z.enum(["met", "partially_met", "not_met", "inconclusive"]),
   overall_score: z.number().int().min(0).max(100).optional(),
+  // reason: D2/D3 (spec-judgment-surfaces-must-verify-before-they-certify-machine) —
+  // service-computed, additive, mirroring facts/source_versions/scope_warning above: every
+  // assessment persisted before this mechanism existed has neither field and still
+  // validates unchanged. `overall_score` above is left byte-identical to what the judge
+  // emitted even when `unverifiable_findings` is non-empty — the score is NEVER recomputed
+  // from the surviving finding count (see unverifiableFindingSchema's own JSDoc for why).
+  unverifiable_findings: z.array(unverifiableFindingSchema).optional(),
+  paths_verified: pathsVerifiedSchema.optional(),
 });
 
 /** Derived TypeScript type for a full persisted assessment result. */
@@ -1690,6 +1908,40 @@ export function renderAssessmentContent(result: AssessmentResult): string {
     lines.push("");
     for (const entry of result.unverifiable) {
       lines.push(`- ${entry.material}: ${entry.reason}`);
+    }
+  }
+
+  // reason: D2/D3 (spec-judgment-surfaces-must-verify-before-they-certify-machine) — both
+  // blocks are additive, guarded by their own optional field, so a legacy AssessmentResult
+  // with neither field renders BYTE-IDENTICALLY to before this mechanism existed. Distinct
+  // heading from "## Unverifiable Materials" above on purpose — that block is the JUDGE's
+  // own self-reported epistemic-limits list; this one is the SERVICE's machine-verified
+  // path-check outcome, a different concept entirely.
+  if (result.paths_verified) {
+    lines.push("");
+    lines.push("## Finding Path Verification");
+    lines.push("");
+    lines.push(`- Checked (confirmed present at the assessed commit): ${result.paths_verified.checked}`);
+    lines.push(`- Unverifiable (confirmed absent — finding withdrawn): ${result.paths_verified.unverifiable}`);
+    lines.push(
+      `- Unchecked (NO assessed-commit referent — NOT verified; do not read as "fine"): ${result.paths_verified.unchecked}`,
+    );
+  }
+
+  if (result.unverifiable_findings && result.unverifiable_findings.length > 0) {
+    lines.push("");
+    lines.push("## Withdrawn Findings (Path Verification)");
+    lines.push("");
+    lines.push(
+      `${result.unverifiable_findings.length} finding(s) below were EXCLUDED from ac_scores/typed_gaps/gaps ` +
+        `because a path they declared does not exist at the assessed commit. overall_score above is NOT ` +
+        `recomputed to account for their removal.\n`,
+    );
+    for (const finding of result.unverifiable_findings) {
+      lines.push(
+        `- [${finding.severity}] ${finding.statement.replace(/\|/g, "\\|")} — "${finding.failing_path}" not ` +
+          `found at commit ${finding.checked_against_commit}`,
+      );
     }
   }
 
