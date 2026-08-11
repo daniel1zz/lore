@@ -10,16 +10,21 @@
  * rejected per §20 F4 (the spec's own "Out of scope"); an agent PULLS this on
  * demand, it is never pushed automatically.
  *
- * Default `--open` — resolution NOT IN {fixed, closed, rejected, wontfix},
- * i.e. `open` OR `resolving` (a fix in flight still needs eyes until it
- * actually lands). `--resolved` is the complement (fixed/closed/rejected/
- * wontfix) — `closed` (P2, D2) covers an issue task whose OWN status reached
- * `archived` with no `resolves` in-edge and no explicit terminal state ever
- * recorded (every report closed BEFORE the computed-resolution mechanism
- * existed has exactly this shape). `--all` shows every issue-report-carrying
- * task regardless of resolution. The three flags are mutually exclusive —
- * passing more than one is a usage error (exit 2), the same mutex shape
- * SPEC-024's `--ai`/`--no-ai` pair uses.
+ * Default `--open` — resolution NOT IN `TERMINAL_ISSUE_RESOLUTIONS`
+ * (`../../../service/issue-resolution.js`, the SSOT member set — CONSUMED here,
+ * ⛔ never re-listed; this file's own private copy of that set was the second of
+ * the two copies spec-the-defect-channel-cannot-be-honestly-maintained-an §M1
+ * collapsed into one, after they drifted and left resolved reports occupying cap
+ * quota), i.e. `open` OR `resolving` (a fix in flight still needs eyes until it
+ * actually lands). `--resolved` is the complement — including the two
+ * NON-DEROGATORY states (`superseded`/`duplicate`, §M3), which stay VISIBLE
+ * here rather than disappearing, and `closed` (P2, D2), which covers an issue
+ * task whose OWN status reached `archived` with no `resolves` in-edge and no
+ * explicit terminal state ever recorded (every report closed BEFORE the
+ * computed-resolution mechanism existed has exactly this shape). `--all` shows
+ * every issue-report-carrying task regardless of resolution. The three flags
+ * are mutually exclusive — passing more than one is a usage error (exit 2), the
+ * same mutex shape SPEC-024's `--ai`/`--no-ai` pair uses.
  *
  * Built over `CorpusService.listFull({type: "task"})` — the SAME narrow
  * "extra survives" read `http/issue-reports-routes.ts`'s SPEC-074 dashboard
@@ -49,24 +54,9 @@ import { relativeTime, formatTable } from "../utils.js";
 import {
   hasIssueReport,
   computeIssueResolution,
+  TERMINAL_ISSUE_RESOLUTIONS,
   type IssueResolution,
 } from "../../../service/issue-resolution.js";
-
-/**
- * The 4 terminal resolutions `--open` excludes and `--resolved` selects
- * (D2). `closed` (an issue archived with no traceable fix source ever
- * recorded — the shape of every report closed BEFORE the computed-resolution
- * mechanism existed) is terminal for the SAME reason `fixed`/`rejected`/
- * `wontfix` are: none of them still need triage eyes. This is the single
- * source for this terminal set — extend HERE, never re-list it at another
- * call site.
- */
-const TERMINAL_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<IssueResolution>([
-  "fixed",
-  "closed",
-  "rejected",
-  "wontfix",
-]);
 
 /** One rendered row — exactly the fields D4 names: title, slug, reporter_project, reported_at, age, computed resolution (plus `id`, useful for piping straight into `lore issue resolve`/`lore get`). */
 interface IssueRow {
@@ -109,11 +99,14 @@ export default defineCommand({
   args: {
     open: {
       type: "boolean",
-      description: "Show only still-open reports (default) — resolution not in fixed/rejected/wontfix",
+      // reason: the state list is RENDERED from the SSOT set, never typed out —
+      // a hand-written help string is exactly how the previous private copy
+      // drifted out of date without any test noticing.
+      description: `Show only still-open reports (default) — resolution not in ${[...TERMINAL_ISSUE_RESOLUTIONS].join("/")}`,
     },
     resolved: {
       type: "boolean",
-      description: "Show only resolved reports (fixed/rejected/wontfix)",
+      description: `Show only resolved reports (${[...TERMINAL_ISSUE_RESOLUTIONS].join("/")})`,
     },
     all: {
       type: "boolean",
@@ -168,8 +161,8 @@ export default defineCommand({
           resolvesInEdges.map((r) => ({ id: r.id, status: r.status })),
         );
 
-        if (mode === "open" && TERMINAL_RESOLUTIONS.has(resolution)) continue;
-        if (mode === "resolved" && !TERMINAL_RESOLUTIONS.has(resolution)) continue;
+        if (mode === "open" && TERMINAL_ISSUE_RESOLUTIONS.has(resolution)) continue;
+        if (mode === "resolved" && !TERMINAL_ISSUE_RESOLUTIONS.has(resolution)) continue;
 
         const reportedAt = readIssueReportString(task.extra, "reported_at");
         rows.push({

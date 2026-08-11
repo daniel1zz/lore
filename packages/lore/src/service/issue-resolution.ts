@@ -8,9 +8,34 @@
  * of this module's scope) supplies every doc it needs, this module never
  * re-fetches anything itself.
  *
+ * ⛔ The two NON-DEROGATORY terminal states (`superseded`, `duplicate`,
+ * spec-the-defect-channel-cannot-be-honestly-maintained-an §M3) each REQUIRE a
+ * pointer to the doc that supersedes/absorbs the report. Without one,
+ * "superseded" degrades into a silent trash can operationally indistinguishable
+ * from `rejected` — which IS the defect §M3 fixes, not a lesser version of it.
+ * The requirement is DECLARED here (the `pointer` field of the reach table) and
+ * enforced by the field's single writer, `adapters/cli/commands/issue.ts`.
+ *
  * Public surface:
- *   - `IssueResolution` — the 6-state computed resolution
- *     (`open | resolving | fixed | closed | rejected | wontfix`).
+ *   - `IssueResolution` — the 8-state computed resolution (`open | resolving`
+ *     plus the six TERMINAL states below).
+ *   - `TERMINAL_ISSUE_RESOLUTIONS` — the SSOT member set of terminal
+ *     resolutions (spec-the-defect-channel-cannot-be-honestly-maintained-an
+ *     §M1). ⛔ THE ONLY construction site of that member set in the repo:
+ *     `commands/issues.ts`'s `--open`/`--resolved` filter AND
+ *     `IssueReportService`'s open-report-cap narrowing both IMPORT it. A second
+ *     copy anywhere under `packages/**` is a RED test (AC-DC-9), because the
+ *     two copies that existed before this export drifted in exactly the way
+ *     that made a resolved report keep occupying cap quota.
+ *   - `TERMINAL_RESOLUTION_REACH` / `TerminalResolutionReach` — per terminal
+ *     state, the ROUTE that reaches it and the pointer it REQUIRES. This is
+ *     what lets the cap refusal render a remedy that works instead of a
+ *     hand-authored list of verbs that can silently rot (§M1's structured
+ *     refusal payload).
+ *   - `EXPLICIT_TERMINAL_RESOLUTIONS` / `ExplicitTerminalResolution` — the
+ *     hand-settable subset (`route === "issue-resolve"`), DERIVED from the
+ *     reach table rather than re-listed: `lore issue resolve --state` accepts
+ *     exactly these, and `fixed`/`closed` are structurally unreachable there.
  *   - `computeIssueResolution` — derives the resolution from, highest
  *     precedence first: (a) any explicit terminal state recorded at
  *     `extra.issue_report.resolution` (D3), (b) the `resolves` in-edges
@@ -27,6 +52,10 @@
  *     to reject a `resolves` edge whose target isn't an issue task.
  *
  * Invariants:
+ *   - `TERMINAL_ISSUE_RESOLUTIONS` is the SSOT member set and every consumer
+ *     IMPORTS it. Its two derived views (`EXPLICIT_TERMINAL_RESOLUTIONS`, the
+ *     `ExplicitTerminalResolution` type) are computed from
+ *     `TERMINAL_RESOLUTION_REACH`, never re-listed — see those symbols' own docs.
  *   - Precedence, highest first: explicit terminal state (D3) > resolves-edge
  *     computation (`fixed`/`resolving`) > recorded review rejection
  *     (`rejected`) > archived doc status (`closed`) > `open`. A `resolves`
@@ -63,15 +92,177 @@
 import type { DocStatus } from "@lore/core";
 
 /**
- * Computed resolution states for a filed issue report (D2). `rejected`/
- * `wontfix` are explicit terminal states (written by the downstream `lore
- * issue resolve` verb) OR — for `rejected` only — a recorded review-workflow
- * rejection (D2, no explicit write required); `fixed` is reachable ONLY via
- * a `resolves` edge to a terminal (`active`/`archived`) source doc — never
- * hand-set; `closed` is the issue task's OWN doc status reaching `archived`
- * with no traceable fix source ever recorded.
+ * ⛔ THE ONE construction site of the terminal-issue-resolution member set
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1, AC-DC-9). Every
+ * consumer — the `lore issues` listing filter, `IssueReportService`'s cap
+ * narrowing, the `--state` validator, the cap refusal's `quota_freeing_states`
+ * — derives from THIS array or from the two sets built out of it below.
+ *
+ * ⛔ Adding a member here is a three-line change with a compile-time obligation:
+ * {@link TERMINAL_RESOLUTION_REACH} `satisfies Record<TerminalIssueResolution,
+ * …>`, so a new member with no declared route/pointer fails to compile rather
+ * than silently inheriting someone's default. Do NOT re-list these tokens in a
+ * second set or array anywhere under `packages/**` — a repo-wide scan asserts
+ * this is the only such literal (`tests/unit/service/terminal-resolution-ssot.test.ts`).
+ *
+ * Order is HAND-SETTABLE FIRST, then the two computed-only states: it is the
+ * order the `--state` help text and the cap refusal's remedy table render in,
+ * and the actionable verbs belong at the top of a refusal a caller is reading
+ * to get unblocked.
  */
-export type IssueResolution = "open" | "resolving" | "fixed" | "closed" | "rejected" | "wontfix";
+const TERMINAL_ISSUE_RESOLUTION_MEMBERS = [
+  "rejected",
+  "wontfix",
+  "superseded",
+  "duplicate",
+  "fixed",
+  "closed",
+] as const;
+
+/** A terminal resolution — a state in which a report no longer needs triage eyes and no longer occupies cap quota. */
+export type TerminalIssueResolution = (typeof TERMINAL_ISSUE_RESOLUTION_MEMBERS)[number];
+
+/**
+ * Computed resolution states for a filed issue report (D2). The two
+ * non-terminal states plus every member of {@link TERMINAL_ISSUE_RESOLUTIONS}.
+ *
+ * `rejected`/`wontfix`/`superseded`/`duplicate` are explicit terminal states
+ * (written by the downstream `lore issue resolve` verb) OR — for `rejected`
+ * only — a recorded review-workflow rejection (D2, no explicit write required);
+ * `fixed` is reachable ONLY via a `resolves` edge to a terminal
+ * (`active`/`archived`) source doc — never hand-set; `closed` is the issue
+ * task's OWN doc status reaching `archived` with no traceable fix source ever
+ * recorded.
+ */
+export type IssueResolution = "open" | "resolving" | TerminalIssueResolution;
+
+/** How a terminal resolution is REACHED — the axis the cap refusal's remedy lines are derived from. */
+export type TerminalResolutionRoute = "issue-resolve" | "resolves-link" | "review-archive";
+
+/**
+ * A REQUIRED pointer: which CLI flag supplies it, the key it is persisted under
+ * inside `extra.issue_report.resolution`, and the noun phrase describing WHAT it
+ * must name.
+ *
+ * `names` lives here rather than in the refusal messages so a third
+ * pointer-carrying state cannot inherit another state's wording by falling
+ * through a `state === "duplicate" ? … : …` ternary — every refusal that has to
+ * describe the pointer reads this field.
+ */
+export interface TerminalResolutionPointer {
+  readonly flag: string;
+  readonly extra_key: string;
+  readonly names: string;
+}
+
+/**
+ * One terminal state's reachability facts. `pointer: null` is an EXPLICIT "this
+ * state takes no pointer" rather than an absent field, so every consumer reads
+ * the same shape and a missing declaration cannot read as "no pointer needed".
+ */
+export interface TerminalResolutionReach {
+  readonly route: TerminalResolutionRoute;
+  readonly pointer: TerminalResolutionPointer | null;
+}
+
+/**
+ * Per terminal state: the route that reaches it and the pointer it requires.
+ *
+ * `as const satisfies` is load-bearing, not decoration: `as const` preserves each
+ * `route` as a LITERAL type (which is what makes
+ * {@link ExplicitTerminalResolution} derivable instead of re-listed), while
+ * `satisfies Record<TerminalIssueResolution, …>` makes a member added to
+ * {@link TERMINAL_ISSUE_RESOLUTION_MEMBERS} without an entry here a COMPILE
+ * error. ⛔ Do not widen it to a plain `Record<...>` annotation — that silently
+ * destroys the first half.
+ */
+const TERMINAL_RESOLUTION_REACH = {
+  rejected: { route: "issue-resolve", pointer: null },
+  wontfix: { route: "issue-resolve", pointer: null },
+  superseded: {
+    route: "issue-resolve",
+    pointer: {
+      flag: "--superseded-by",
+      extra_key: "superseded_by",
+      names: "the doc that supersedes this report",
+    },
+  },
+  duplicate: {
+    route: "issue-resolve",
+    pointer: {
+      flag: "--duplicate-of",
+      extra_key: "duplicate_of",
+      names: "the doc this report duplicates",
+    },
+  },
+  fixed: { route: "resolves-link", pointer: null },
+  closed: { route: "review-archive", pointer: null },
+} as const satisfies Record<TerminalIssueResolution, TerminalResolutionReach>;
+
+/**
+ * The terminal states a caller may write by hand — derived from the reach table
+ * rather than re-listed, so `lore issue resolve --state fixed` is refused by the
+ * TYPE SYSTEM's own arithmetic and not by a remembered exclusion.
+ */
+export type ExplicitTerminalResolution = {
+  [K in TerminalIssueResolution]: (typeof TERMINAL_RESOLUTION_REACH)[K]["route"] extends "issue-resolve" ? K : never;
+}[TerminalIssueResolution];
+
+/**
+ * The SSOT terminal-resolution member set: a report in one of these states no
+ * longer needs triage eyes, and (§M1) no longer occupies open-report cap quota.
+ *
+ * `closed` is terminal for the SAME reason `fixed`/`rejected`/`wontfix` are: an
+ * issue archived with no traceable fix source (the shape of every report closed
+ * BEFORE the computed-resolution mechanism existed) needs no further triage.
+ *
+ * @example
+ *   TERMINAL_ISSUE_RESOLUTIONS.has("superseded") // => true
+ *   TERMINAL_ISSUE_RESOLUTIONS.has("resolving")  // => false (a fix in flight still needs eyes)
+ */
+export const TERMINAL_ISSUE_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<IssueResolution>(
+  TERMINAL_ISSUE_RESOLUTION_MEMBERS,
+);
+
+/**
+ * The same member set as an ORDERED, TYPED list — the view a consumer needs when
+ * it must iterate terminal states and call {@link reachOfTerminalResolution} on
+ * each (a `ReadonlySet<IssueResolution>` iterates as the wider union, which does
+ * not type-check as a reach-table key). Same single literal, two views: this one
+ * for iteration, the Set for membership.
+ */
+export const TERMINAL_ISSUE_RESOLUTION_LIST: readonly TerminalIssueResolution[] = TERMINAL_ISSUE_RESOLUTION_MEMBERS;
+
+/**
+ * The hand-settable subset of {@link TERMINAL_ISSUE_RESOLUTIONS} — exactly the
+ * values `lore issue resolve --state` accepts, and the values
+ * {@link readExplicitResolutionState} recognises inside a stored `extra`.
+ *
+ * @example
+ *   EXPLICIT_TERMINAL_RESOLUTIONS.has("duplicate") // => true
+ *   EXPLICIT_TERMINAL_RESOLUTIONS.has("fixed")     // => false (computed only, never hand-set)
+ */
+export const EXPLICIT_TERMINAL_RESOLUTIONS: ReadonlySet<ExplicitTerminalResolution> = new Set(
+  TERMINAL_ISSUE_RESOLUTION_MEMBERS.filter(
+    (member): member is ExplicitTerminalResolution => TERMINAL_RESOLUTION_REACH[member].route === "issue-resolve",
+  ),
+);
+
+/**
+ * The reach facts for one terminal state. A function rather than a direct table
+ * read so callers get the WIDENED {@link TerminalResolutionReach} type (the
+ * table's own `as const` value type is a union of six literal object types,
+ * which a caller iterating over states cannot destructure).
+ *
+ * @param state - any terminal resolution
+ * @returns that state's route plus its required pointer (`null` when it takes none)
+ * @example
+ *   reachOfTerminalResolution("superseded").pointer?.flag // => "--superseded-by"
+ *   reachOfTerminalResolution("fixed").route              // => "resolves-link"
+ */
+export function reachOfTerminalResolution(state: TerminalIssueResolution): TerminalResolutionReach {
+  return TERMINAL_RESOLUTION_REACH[state];
+}
 
 /**
  * Minimal issue-task shape `computeIssueResolution` needs: its `extra` bag,
@@ -128,15 +319,22 @@ export function hasIssueReport(extra: unknown): boolean {
 /**
  * Defensive reader for an explicit terminal resolution
  * (`extra.issue_report.resolution.state`), written only by the downstream
- * `lore issue resolve --state rejected|wontfix` verb (D3, out of this
- * module's scope — this reader just consumes the shape that verb will
- * write).
+ * `lore issue resolve --state <explicit terminal state>` verb (D3 +
+ * spec-the-defect-channel-cannot-be-honestly-maintained-an §M3, out of this
+ * module's scope — this reader just consumes the shape that verb writes).
+ *
+ * Recognised values come from {@link EXPLICIT_TERMINAL_RESOLUTIONS}, never a
+ * local list: when §M3 added `superseded`/`duplicate`, the set widened here
+ * automatically, and a hand-written comparison chain would have kept computing
+ * `open` for a report that WAS explicitly resolved — the exact class of silent
+ * under-reporting §M1's cap defect was made of.
  *
  * @param extra - the issue task's raw `extra` field
- * @returns `"rejected"` | `"wontfix"` when present and well-shaped,
- *   `undefined` otherwise (absent, malformed, or any other value)
+ * @returns the recorded {@link ExplicitTerminalResolution} when present and
+ *   well-shaped; `undefined` otherwise (absent, malformed, a computed-only
+ *   state someone hand-wrote, or any other value)
  */
-function readExplicitResolutionState(extra: unknown): "rejected" | "wontfix" | undefined {
+function readExplicitResolutionState(extra: unknown): ExplicitTerminalResolution | undefined {
   if (extra === null || typeof extra !== "object" || Array.isArray(extra)) {
     return undefined;
   }
@@ -149,7 +347,10 @@ function readExplicitResolutionState(extra: unknown): "rejected" | "wontfix" | u
     return undefined;
   }
   const state = (resolution as Record<string, unknown>)["state"];
-  return state === "rejected" || state === "wontfix" ? state : undefined;
+  if (typeof state !== "string") return undefined;
+  return (EXPLICIT_TERMINAL_RESOLUTIONS as ReadonlySet<string>).has(state)
+    ? (state as ExplicitTerminalResolution)
+    : undefined;
 }
 
 /**
@@ -158,7 +359,9 @@ function readExplicitResolutionState(extra: unknown): "rejected" | "wontfix" | u
  *
  * Precedence (highest first):
  *   1. An explicit terminal state at `extra.issue_report.resolution.state`
- *      (`rejected`/`wontfix`) — wins over everything below.
+ *      (any member of {@link EXPLICIT_TERMINAL_RESOLUTIONS}, i.e.
+ *      `rejected`/`wontfix`/`superseded`/`duplicate`) — wins over everything
+ *      below.
  *   2. `fixed` — at least one `resolvesInEdges` entry whose joined
  *      `sourceDocs` status is `active` or `archived`.
  *   3. `resolving` — at least one `resolvesInEdges` entry exists, but no

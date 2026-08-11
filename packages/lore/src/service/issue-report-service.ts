@@ -3,16 +3,26 @@
  * (SPEC-072). Runs the §5 fail-loud, cheapest-first check sequence over an
  * injected `IssueReportDeps` bundle: config presence → upstream's own
  * sync-mode constraint → schema-version match → upstream root-PRD identity
- * → per-reporter rate cap → advisory duplicate search → `createDraft` →
- * (only on success) local receipt append.
+ * → per-reporter rate cap (narrowed by COMPUTED RESOLUTION — see the first
+ * invariant below) → advisory duplicate search → `createDraft` → (only on
+ * success) local receipt append.
  *
  * Public surface:
  *   - `IssueReportService` — `report(input, cfg?)` / `list(cfg)`.
  *   - `IssueReportInput` / `IssueReportResult` / `ReceiptStatusRow` /
  *     `IssueReportDeps` — the DTOs this service's constructor and methods
  *     are typed against (SPEC-072 §4).
+ *   - `OpenReportCapRefusal` / `CapBlockingReport` / `ResolutionReadFailure` —
+ *     the STRUCTURED cap-refusal payload and its parts
+ *     (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1).
  *
  * Invariants:
+ *   - The step-6 cap counts COMPUTED RESOLUTION, never raw lifecycle status
+ *     (§M1). `countOpenReports` supplies candidates; each candidate's
+ *     `port.getResolution` result is checked against the shared
+ *     `TERMINAL_ISSUE_RESOLUTIONS` SSOT, and only non-terminal candidates hold a
+ *     slot. ⛔ A resolution READ FAILURE keeps its slot (fail closed) and is
+ *     reported in both observable places — never treated as "resolved".
  *   - ZERO writes before `createDraft` (step 8) succeeds — every check
  *     before it is read-only or pure. `receipts.append` (step 9) runs
  *     STRICTLY AFTER `createDraft` resolves `ok`, never before, never in
@@ -72,9 +82,14 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import {
+  TERMINAL_ISSUE_RESOLUTIONS,
+  TERMINAL_ISSUE_RESOLUTION_LIST,
+  reachOfTerminalResolution,
+} from "./issue-resolution.js";
 import type { UpstreamPort } from "../flows/upstream-context-flow.js";
 import type { ReceiptEntry, ReceiptLog } from "./receipt-log.js";
-import type { IssueResolution } from "./issue-resolution.js";
+import type { IssueResolution, TerminalIssueResolution } from "./issue-resolution.js";
 
 /** Input to `IssueReportService.report` — the fields a caller (CLI/MCP) supplies. */
 export interface IssueReportInput {
@@ -100,6 +115,57 @@ export interface IssueReportResult {
   possible_duplicates: string[];
   /** `true` iff the advisory FTS dedup search errored — filing proceeded anyway. */
   dedup_degraded: boolean;
+  /**
+   * Candidate reports whose COMPUTED resolution could not be read during the
+   * step-6 cap narrowing (M1). Each such id was counted as STILL OPEN (fail
+   * closed — a read error must never free quota), so this filing succeeded
+   * DESPITE them, not because of them.
+   *
+   * ⛔ Always present (`[]` when every read succeeded): an omitted field and a
+   * silent swallow are the same shape to a reader. Surfaced verbatim by
+   * `lore report-issue --json` and the MCP tool, both of which serialize this
+   * whole object; the HUMAN branch of `adapters/cli/commands/report-issue.ts`
+   * prints only the doc id / duplicates / dedup-degradation lines and does NOT
+   * name this field (that render is outside this mechanism's file anchors).
+   */
+  resolution_read_failures: ResolutionReadFailure[];
+}
+
+/** One candidate report whose resolution read failed, with the failure's own classification. */
+export interface ResolutionReadFailure {
+  readonly id: string;
+  readonly error: string;
+}
+
+/**
+ * One report still occupying open-report cap quota, as carried by the cap
+ * refusal's STRUCTURED payload (spec-the-defect-channel-cannot-be-honestly-
+ * maintained-an §M1, "Declared contract").
+ *
+ * `resolution: null` means the per-report resolution read FAILED — an explicit
+ * NOT MEASURED. ⛔ Never a fabricated `"open"`: the refusal would then assert a
+ * computed fact nobody computed. `unreadable_reason` is present exactly when
+ * `resolution` is `null`.
+ */
+export interface CapBlockingReport {
+  readonly id: string;
+  readonly resolution: IssueResolution | null;
+  readonly unreadable_reason?: string;
+}
+
+/**
+ * The cap refusal's `LoreError.value` payload — the CONTRACT; the human stderr
+ * message is a projection of it (see {@link formatOpenReportCapRefusalMessage}).
+ *
+ * `quota_freeing_states` is DERIVED from the shared terminal-resolution SSOT at
+ * construction time, ⛔ never written as a literal list — that is what makes
+ * AC-DC-2's set comparison an observable quantity rather than a free-text
+ * extraction, and what stops the refusal from ever advertising a verb that does
+ * not actually free a slot.
+ */
+export interface OpenReportCapRefusal {
+  readonly blocking: readonly CapBlockingReport[];
+  readonly quota_freeing_states: readonly string[];
 }
 
 /** One joined row of `IssueReportService.list`'s output. */
@@ -190,6 +256,91 @@ type UpstreamCfg = { corpus_path: string; root_prd: string };
 function describeLoreError(error: LoreError): string {
   if ("message" in error) return error.message;
   return error.code;
+}
+
+/**
+ * Like {@link describeLoreError} but leads with the CODE. Used only where the
+ * string is a machine-facing CLASSIFICATION carried in a structured payload (the
+ * cap refusal's `unreadable_reason`, `IssueReportResult.resolution_read_failures`)
+ * rather than advisory prose — a consumer deciding what to do about an unreadable
+ * candidate needs the code, and `describeLoreError` alone drops it for the four
+ * variants that carry a `message`. ⛔ Kept separate rather than folded into
+ * `describeLoreError`: that function's output is embedded mid-sentence in
+ * existing user-facing warnings, where a code prefix would be noise.
+ *
+ * @param error - any `LoreError`
+ * @returns `"<CODE>: <message>"`, or just `"<CODE>"` for the variants without one
+ */
+function describeLoreErrorWithCode(error: LoreError): string {
+  if ("message" in error) return `${error.code}: ${error.message}`;
+  return error.code;
+}
+
+/**
+ * The VERB that actually reaches one quota-freeing resolution, derived from the
+ * shared reach table — so the refusal cannot name a remedy that does not exist,
+ * and a newly added terminal state cannot ship without one (the `never` branch
+ * makes an unhandled route a compile error).
+ *
+ * This exists because the measured refusal (2026-08-11) advised "resolve or wait
+ * for review" and NEITHER worked: `lore issue resolve` wrote a resolution the cap
+ * never read, and the review workflow cannot move a report off `draft` at all.
+ *
+ * @param state - a terminal resolution
+ * @returns a copy-pasteable command, or a description of the workflow that
+ *   reaches states no single command can set
+ */
+function formatQuotaFreeingRemedy(state: TerminalIssueResolution): string {
+  const reach = reachOfTerminalResolution(state);
+  switch (reach.route) {
+    case "issue-resolve": {
+      const pointer = reach.pointer === null ? "" : ` ${reach.pointer.flag} <doc>`;
+      return `lore issue resolve <id> --state ${state}${pointer} --reason "<why>"`;
+    }
+    case "resolves-link":
+      return "lore link --type resolves <fixer-doc> <id> — computed, and only once the fixer doc reaches active/archived";
+    case "review-archive":
+      return "upstream-side archiving of the report itself (its own lifecycle, e.g. lore set <id> --status archived)";
+    default: {
+      const unreachable: never = reach.route;
+      return unreachable;
+    }
+  }
+}
+
+/** One blocking line: the id ALONGSIDE its computed resolution — never two lists a reader must join by position. */
+function formatBlockingReport(entry: CapBlockingReport): string {
+  if (entry.resolution === null) {
+    return `  ${entry.id} — resolution UNREADABLE (${entry.unreadable_reason ?? "unknown"}); counted as still open`;
+  }
+  return `  ${entry.id} — ${entry.resolution}`;
+}
+
+/**
+ * Renders the cap refusal's human stderr message as a PROJECTION of
+ * {@link OpenReportCapRefusal} — every id, every resolution and every named verb
+ * comes from the payload, so the two can never disagree.
+ *
+ * @param reporterProject - the filing project the cap is scoped to
+ * @param cap - the ceiling in force
+ * @param refusal - the structured payload this message projects
+ * @returns a multi-line message (no trailing newline; the CLI's `formatError`
+ *   writer adds one)
+ */
+function formatOpenReportCapRefusalMessage(
+  reporterProject: string,
+  cap: number,
+  refusal: OpenReportCapRefusal,
+): string {
+  return [
+    `reporter project '${reporterProject}' already has ${refusal.blocking.length} open report(s) upstream (cap ${cap}).`,
+    "A slot frees the moment a report's COMPUTED resolution becomes terminal. Its own doc status stays 'draft' " +
+      "throughout (the corpus has no draft->archived edge), so nothing below frees a slot by waiting.",
+    "Still blocking (id — computed resolution):",
+    ...refusal.blocking.map(formatBlockingReport),
+    "Quota-freeing resolutions, and the verb that reaches each:",
+    ...TERMINAL_ISSUE_RESOLUTION_LIST.map((state) => `  ${state} — ${formatQuotaFreeingRemedy(state)}`),
+  ].join("\n");
 }
 
 /**
@@ -319,9 +470,11 @@ export class IssueReportService {
    * @param input - the report's content fields
    * @param cfg - the consumer's `feedback.upstream.{corpus_path,root_prd}`;
    *   `undefined` means "not configured" (step 1's failure case)
-   * @returns `ok({upstream_doc_id, possible_duplicates, dedup_degraded})` on
-   *   success; `err(...)` on the first failing check (§5 table) — ZERO
-   *   writes occur before `createDraft` succeeds
+   * @returns `ok({upstream_doc_id, possible_duplicates, dedup_degraded,
+   *   resolution_read_failures})` on success; `err(...)` on the first failing
+   *   check (§5 table) — ZERO writes occur before `createDraft` succeeds. A cap
+   *   refusal's `error.value` is the structured {@link OpenReportCapRefusal}
+   *   payload, and its `message` is that payload's human projection
    */
   async report(
     input: IssueReportInput,
@@ -337,18 +490,57 @@ export class IssueReportService {
     const port = upstreamResult.value;
 
     try {
-      // Step 6: rate cap (R-5d).
+      // Step 6: rate cap (R-5d), keyed on COMPUTED RESOLUTION (M1).
+      //
+      // `countOpenReports` yields the CANDIDATE set only — the reporter's own
+      // ad-hoc drafts. It cannot answer "is this report still open?" because a
+      // resolved report's `status` never leaves `draft` (no closure verb can move
+      // it, and `VALID_TRANSITIONS` has no draft->archived edge), which is exactly
+      // why the pre-M1 cap was unreleasable by ANY action available to the
+      // reporter: 10 reports resolved `rejected` still refused the 11th with a
+      // byte-identical message (measured 2026-08-11). The narrowing below asks the
+      // SAME question the read surfaces ask — `port.getResolution`, the existing
+      // per-doc computed-resolution read `list()` already consumes, never a
+      // parallel re-derivation.
       const openDraftsResult = await port.listOpenAdhocDrafts();
       if (!openDraftsResult.ok) return openDraftsResult;
-      const { open, ids } = countOpenReports(openDraftsResult.value, this.deps.reporterProject);
-      if (open >= OPEN_REPORT_CAP) {
+      const { ids } = countOpenReports(openDraftsResult.value, this.deps.reporterProject);
+
+      const blocking: CapBlockingReport[] = [];
+      const resolutionReadFailures: ResolutionReadFailure[] = [];
+      for (const id of ids) {
+        const resolutionResult = await port.getResolution(id);
+        if (!resolutionResult.ok) {
+          // reason: FAIL CLOSED. An unreadable candidate keeps its slot — a read
+          // error must never be the thing that frees quota — and the failure is
+          // recorded in BOTH observable places (the refusal payload below and
+          // `IssueReportResult.resolution_read_failures` when the filing
+          // proceeds), so it is never silently swallowed either way.
+          const reason = describeLoreErrorWithCode(resolutionResult.error);
+          resolutionReadFailures.push({ id, error: reason });
+          blocking.push({ id, resolution: null, unreadable_reason: reason });
+          continue;
+        }
+        const live = resolutionResult.value;
+        // reason: `ok(null)` means the doc vanished between listOpenAdhocDrafts
+        // and this read (deleted upstream). A doc that no longer exists cannot
+        // need triage, so it holds no slot — a FACT, not a fallback.
+        if (live === null) continue;
+        if (TERMINAL_ISSUE_RESOLUTIONS.has(live.resolution)) continue;
+        blocking.push({ id, resolution: live.resolution });
+      }
+
+      if (blocking.length >= OPEN_REPORT_CAP) {
+        const refusal: OpenReportCapRefusal = {
+          blocking,
+          // DERIVED from the shared SSOT, never a literal list (AC-DC-2).
+          quota_freeing_states: [...TERMINAL_ISSUE_RESOLUTION_LIST],
+        };
         return err({
           code: "VALIDATION_ERROR",
           field: "feedback.upstream",
-          message:
-            `reporter project '${this.deps.reporterProject}' already has ${open} open ` +
-            `report(s) upstream (cap ${OPEN_REPORT_CAP}) — resolve or wait for review on: ${ids.join(", ")}`,
-          value: ids,
+          message: formatOpenReportCapRefusalMessage(this.deps.reporterProject, OPEN_REPORT_CAP, refusal),
+          value: refusal,
         });
       }
 
@@ -412,6 +604,7 @@ export class IssueReportService {
         upstream_doc_id: createResult.value.id,
         possible_duplicates: possibleDuplicates,
         dedup_degraded: dedupDegraded,
+        resolution_read_failures: resolutionReadFailures,
       });
     } finally {
       port.close();
