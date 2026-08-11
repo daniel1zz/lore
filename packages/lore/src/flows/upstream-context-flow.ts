@@ -172,6 +172,19 @@ export interface UpstreamPort {
    *   stale audit-log reason from BEFORE a later fix landed (resolution now
    *   `fixed`/`resolving`) is never echoed, so no row ever shows a rejection
    *   reason next to a resolution that isn't actually a rejection.
+   *
+   *   ⛔ KNOWN GAP, deliberately left rather than half-closed: the two
+   *   NON-DEROGATORY explicit states (`superseded`/`duplicate`,
+   *   spec-the-defect-channel-cannot-be-honestly-maintained-an §M3) also record
+   *   a `reason` AND a pointer (`resolution.superseded_by` /
+   *   `resolution.duplicate_of`), and NEITHER is echoed here — this field is
+   *   named `rejection_reason` and a non-derogatory retirement is not a
+   *   rejection, so widening the condition would mislabel it. Closing the gap
+   *   properly means renaming this field to a state-neutral one and teaching
+   *   `IssueReportService.list`'s `ReceiptStatusRow` plus
+   *   `adapters/cli/commands/report-issue.ts`'s row render to carry the pointer
+   *   — that render is outside §M3's file anchors, so it is named here instead
+   *   of silently widened. Grep `rejection_reason` to find all three sites.
    */
   getResolution(
     id: string,

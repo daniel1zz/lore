@@ -11,9 +11,13 @@
  *     report's `extra.issue_report` (SPEC-072 §4).
  *   - `matchRootPrd` — R-5a identity-pin check: does the upstream corpus's
  *     root PRD match the consumer's configured `feedback.upstream.root_prd`?
- *   - `countOpenReports` — R-5d rate-cap check: how many still-open
- *     (status=draft) reports has this reporter project already filed
- *     upstream?
+ *   - `countOpenReports` — R-5d rate-cap CANDIDATE selection: which of this
+ *     reporter project's upstream reports are still at `status: "draft"`? ⛔ Not
+ *     the cap decision itself: since spec-the-defect-channel-cannot-be-honestly-
+ *     maintained-an §M1, `IssueReportService` narrows this candidate set by each
+ *     report's COMPUTED RESOLUTION before comparing against the ceiling. See
+ *     this function's own JSDoc for why the raw status cannot answer the
+ *     question on its own.
  *   - `buildIssueReportExtra` — assembles the `extra` payload for the
  *     upstream ad-hoc draft task `createDraft` writes.
  *   - `OPEN_REPORT_CAP` — the R-5d rate-cap ceiling (10).
@@ -132,11 +136,24 @@ function readReporterProject(extra: unknown): string | undefined {
 }
 
 /**
- * R-5d rate-cap check: how many still-open (status=`draft`) upstream ad-hoc
- * reports has `reporterProject` already filed? A report stops being "open"
- * the moment it leaves `draft` (approved/rejected/archived by the upstream
- * reviewer) — this function counts ONLY current drafts, never the reporter's
- * full filing history.
+ * R-5d rate-cap CANDIDATE selection: which still-`draft` upstream ad-hoc reports
+ * has `reporterProject` already filed? Never the reporter's full filing history.
+ *
+ * ⛔ This is a NECESSARY but NOT SUFFICIENT condition for "still occupies cap
+ * quota", and a previous version of this doc comment claimed otherwise ("a report
+ * stops being open the moment it leaves draft"). It never does leave `draft`: no
+ * closure verb moves an issue report off it (`lore issue resolve` writes only
+ * `extra.issue_report.resolution`, `ReviewService.reject` returns a doc TO
+ * `draft`, and `VALID_TRANSITIONS` has no `draft -> archived` edge). Keying the
+ * cap on this count alone therefore made it UNRELEASEABLE by any action available
+ * to a reporter — measured 2026-08-11: 10 reports filed, all 10 resolved
+ * `rejected`, the 11th still refused with a byte-identical message. The caller
+ * (`IssueReportService.report` step 6) now narrows this set by each candidate's
+ * COMPUTED resolution (`TERMINAL_ISSUE_RESOLUTIONS`,
+ * spec-the-defect-channel-cannot-be-honestly-maintained-an §M1) before comparing
+ * against the ceiling. ⛔ Do not "fix" that back into this pure function: reading
+ * a computed resolution needs the store (resolves in-edges + the audit trail),
+ * which this browser-safe module deliberately cannot touch.
  *
  * @param tasks - candidate upstream tasks, each carrying at least its own
  *   `id`, lifecycle `status`, and untyped `extra` (see module invariant above
@@ -218,10 +235,14 @@ export function buildIssueReportExtra(p: IssueReportPayload): Record<string, unk
 }
 
 /**
- * R-5d rate-cap ceiling — the maximum number of simultaneously-open
- * (status=`draft`) reports a single reporter project may have filed upstream
- * before `lore report-issue` refuses to file another (SPEC-072 §5 step 6,
- * AC-072-6).
+ * R-5d rate-cap ceiling — the maximum number of simultaneously-open reports a
+ * single reporter project may have filed upstream before `lore report-issue`
+ * refuses to file another (SPEC-072 §5 step 6, AC-072-6).
+ *
+ * "Open" here means COMPUTED RESOLUTION not in `TERMINAL_ISSUE_RESOLUTIONS`
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1), NOT
+ * `status === "draft"` — see {@link countOpenReports}'s own doc for the measured
+ * reason those two are not the same question.
  */
 export const OPEN_REPORT_CAP = 10;
 

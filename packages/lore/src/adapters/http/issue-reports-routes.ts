@@ -82,10 +82,27 @@ import { computeIssueResolution, type IssueResolution } from "../../service/issu
  * route, per SPEC-074 §Design "detail view rendering the full
  * extra.issue_report payload").
  *
+ * ⛔ WIRE-CONTRACT MIRROR, currently STALE (named rather than silently widened):
+ * `resolution` is typed by `service/issue-resolution.ts`'s `IssueResolution`,
+ * which spec-the-defect-channel-cannot-be-honestly-maintained-an §M3 extended
+ * with `superseded` and `duplicate`. The dashboard cannot import that type (it
+ * depends on `@lore/core` only), so it MIRRORS the union by hand at
+ * `packages/dashboard/src/lib/api.ts` (`export type IssueResolution = …`) and
+ * switches over it in TWO presentation-only badge maps
+ * (`components/IssuesList.tsx::resolutionBadgeVariant`,
+ * `components/IssueDetail.tsx::resolutionBadgeVariant`). Those three sites do
+ * NOT yet know the two new members: this route will serve
+ * `resolution: "superseded"`, the mirror type will not admit it, and each badge
+ * switch will fall through to an implicit `undefined` variant. Nothing type-checks
+ * that mirror (it is a hand copy across a network boundary), so the drift is
+ * invisible to `bun run typecheck` — the three sites are named here so the fix is
+ * a grep away. They sit outside §M3's declared file anchors, which is why this is
+ * a named gap rather than an edit.
+ *
  * `status` stays the RAW doc lifecycle status (draft/in-review/...) —
  * unchanged meaning, kept for the same reasons SPEC-074 always projected it
  * (e.g. the in-review badge). `resolution` is the NEW, orthogonal, COMPUTED
- * field (D2: open/resolving/fixed/rejected/wontfix) — the two are
+ * field (D2: open/resolving/fixed/rejected/wontfix/superseded/duplicate) — the two are
  * INTENTIONALLY independent: a report can sit at `status: "draft"` (never
  * manually archived, D5(a)/spec's "no auto-advancing the issue task's own
  * status" non-goal) while its `resolution` is already `"fixed"` (a
