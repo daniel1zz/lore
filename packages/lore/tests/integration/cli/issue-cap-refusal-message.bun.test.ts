@@ -160,6 +160,14 @@ function makeFakeUpstream(candidates: readonly CandidateSpec[]): FakeUpstream {
       }
       return ok({ status: "draft" as DocStatus, resolution });
     },
+    // reason: `listIssueReports` is the §M4 read op `lore issues` consumes; this
+    // suite exercises the WRITE path's cap refusal only, so it is stubbed empty
+    // rather than faked. ⛔ Present rather than cast away: the fake is typed as
+    // `UpstreamPort` on purpose, so a future op addition must be acknowledged here
+    // instead of silently bypassing the interface.
+    async listIssueReports() {
+      return ok([]);
+    },
     close() {
       /* no connection to close in the fake */
     },

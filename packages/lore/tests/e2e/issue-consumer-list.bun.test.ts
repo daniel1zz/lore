@@ -193,7 +193,7 @@ interface ListRow {
   at: string;
   status: string;
   doc_status?: string;
-  rejection_reason?: string;
+  resolution_reason?: string;
   warnings?: string[];
 }
 
@@ -324,7 +324,7 @@ describe("AC-ICL-7: consumer report-issue --list reports computed resolution", (
     const row = rows.find((r) => r.upstream_doc_id === issueId);
     expect(row).toBeTruthy();
     expect(row?.status).toBe("rejected");
-    expect(row?.rejection_reason).toBe("not a lore defect");
+    expect(row?.resolution_reason).toBe("not a lore defect");
     expect(row?.doc_status).toBe("draft");
   }, 20_000);
 
@@ -345,7 +345,7 @@ describe("AC-ICL-7: consumer report-issue --list reports computed resolution", (
     const row = rows.find((r) => r.upstream_doc_id === issueId);
     expect(row).toBeTruthy();
     expect(row?.status).toBe("wontfix");
-    expect(row?.rejection_reason).toBe("duplicate of an accepted tradeoff");
+    expect(row?.resolution_reason).toBe("duplicate of an accepted tradeoff");
   }, 20_000);
 
   // ─── BOUNDARY: a resolves edge exists but its source is not yet terminal ──
@@ -433,6 +433,6 @@ describe("AC-ICL-7: consumer report-issue --list reports computed resolution", (
     expect(row).toBeTruthy();
     expect(row?.status).toBe("open");
     expect(row?.doc_status).toBe("draft");
-    expect(row?.rejection_reason).toBeUndefined();
+    expect(row?.resolution_reason).toBeUndefined();
   }, 20_000);
 });

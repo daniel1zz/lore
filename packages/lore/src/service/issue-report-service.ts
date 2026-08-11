@@ -89,6 +89,7 @@ import {
   UNKNOWN_CONTENDING_SOURCE,
   type DocStatus,
   type IssueReportPayload,
+  type IssueSeverity,
   type LoreConfig,
   type LoreError,
   type Result,
@@ -118,6 +119,16 @@ export interface IssueReportInput {
    * `deps.reporterProject` (see `report()`), never by throwing.
    */
   by?: string;
+  /**
+   * §M6 ORDERING-ONLY severity, as declared by the FILER. ⛔ Read by NOTHING in
+   * `report()` except the payload assembly below: the step-6 cap narrowing takes
+   * no severity argument at all, so "severity changes no admission decision" is
+   * true by construction rather than by discipline. Absent when undeclared —
+   * never defaulted.
+   */
+  severity?: IssueSeverity;
+  /** §M6 ORDERING-ONLY category, as declared by the FILER. Same admission-inertness as {@link IssueReportInput.severity}. */
+  category?: string;
 }
 
 /** Successful outcome of `IssueReportService.report`. */
@@ -204,12 +215,36 @@ export interface ReceiptStatusRow {
    */
   doc_status?: DocStatus;
   /**
-   * The reason recorded on an explicit `rejected`/`wontfix` terminal state
-   * (`lore issue resolve --state rejected|wontfix --reason <r>`, D3) —
-   * echoed here so the reporting agent learns WHY, not just that it isn't
-   * open anymore.
+   * The reason recorded on ANY explicit terminal state — `rejected`/`wontfix`
+   * (derogatory) and `superseded`/`duplicate` (non-derogatory, §M3) alike —
+   * echoed here so the reporting agent learns WHY, not just that it isn't open
+   * anymore.
+   *
+   * ⛔ STATE-NEUTRAL name, and that is the fix rather than cosmetics: this field
+   * was `rejection_reason`, so §M3's two non-derogatory states could not be
+   * carried through it without mislabelling a retirement as a rejection — and
+   * were therefore carried NOWHERE. A non-derogatory terminal state whose reason
+   * and pointer never reach a read surface is operationally indistinguishable
+   * from a rejection, i.e. §M3's capability would have shipped implemented and
+   * unreachable. Populated from `UpstreamPort.getResolution`'s own state-neutral
+   * `resolution_reason`, whose membership test is the SSOT
+   * `EXPLICIT_TERMINAL_RESOLUTIONS` set.
    */
-  rejection_reason?: string;
+  resolution_reason?: string;
+  /**
+   * The doc id a NON-DEROGATORY terminal state points at
+   * (`--superseded-by`/`--duplicate-of`, persisted under the key that state
+   * DECLARES). Present exactly when the upstream record carries one; absent for
+   * `rejected`/`wontfix`, which declare no pointer.
+   *
+   * Rendered as its own `Pointer` column by `commands/report-issue.ts` — the
+   * third and last of the three sites the closed KNOWN GAP named.
+   */
+  resolution_pointer?: string;
+  /** §M6 ORDERING-ONLY severity as the FILER declared it upstream. Absent = NOT DECLARED (never a fabricated default). */
+  severity?: IssueSeverity;
+  /** §M6 ORDERING-ONLY category as the FILER declared it upstream. Absent = NOT DECLARED. */
+  category?: string;
   /**
    * Non-blocking caveats about this row's data (e.g. a receipt line the
    * local `ReceiptLog` had to skip as corrupt, or a resolution this service
@@ -616,6 +651,13 @@ export class IssueReportService {
         reported_at: reportedAt,
         possible_duplicates: possibleDuplicates,
         ...(input.repro_command !== undefined ? { repro_command: input.repro_command } : {}),
+        // §M6 ORDERING-ONLY labels. The KEY is omitted when undeclared (never
+        // `severity: undefined`), so `readIssueTriageLabels` reports NOT DECLARED
+        // on both read surfaces instead of a fabricated level. ⛔ This is the ONLY
+        // place in `report()` that reads them — the cap arithmetic above never
+        // does, which is what makes §M6's admission-neutrality structural.
+        ...(input.severity !== undefined ? { severity: input.severity } : {}),
+        ...(input.category !== undefined ? { category: input.category } : {}),
       };
       const createResult = await port.createDraft({
         title: input.title,
@@ -665,9 +707,12 @@ export class IssueReportService {
    * silently misreport a `draft` issue task whose fix already shipped as a
    * SEPARATE `active`/`archived` doc as still `draft`; that exact shape
    * misreported to a real consuming project for 9 days). Raw doc status is
-   * now a demoted debugging detail (`ReceiptStatusRow.doc_status`); an
-   * explicit `rejected`/`wontfix` reason is echoed via `rejection_reason`
-   * (D3's `lore issue resolve --reason`, read by `UpstreamPort.getResolution`).
+   * now a demoted debugging detail (`ReceiptStatusRow.doc_status`); ANY explicit
+   * terminal state's reason is echoed via the state-neutral `resolution_reason`,
+   * and a non-derogatory state's REQUIRED pointer via `resolution_pointer` (D3's
+   * `lore issue resolve --reason`/`--superseded-by`/`--duplicate-of`, read by
+   * `UpstreamPort.getResolution`). §M6's ordering-only `severity`/`category` ride
+   * the same read, so both surfaces show the labels the FILER declared.
    *
    * @param cfg - the consumer's `feedback.upstream.{corpus_path,root_prd}`
    * @returns `ok(rows[])` — an upstream that cannot be validated/opened at
@@ -741,7 +786,13 @@ export class IssueReportService {
             at: entry.at,
             status: live.resolution,
             doc_status: live.status,
-            ...(live.rejection_reason !== undefined ? { rejection_reason: live.rejection_reason } : {}),
+            ...(live.resolution_reason !== undefined ? { resolution_reason: live.resolution_reason } : {}),
+            ...(live.resolution_pointer !== undefined ? { resolution_pointer: live.resolution_pointer } : {}),
+            // §M6: read back from the UPSTREAM doc's own extra.issue_report, not
+            // from the local receipt — that is what makes AC-DC-7's "round-trip"
+            // a round trip rather than an echo of what this process just wrote.
+            ...(live.severity !== undefined ? { severity: live.severity } : {}),
+            ...(live.category !== undefined ? { category: live.category } : {}),
             ...(corruptWarning.length > 0 ? { warnings: corruptWarning } : {}),
           };
         }),

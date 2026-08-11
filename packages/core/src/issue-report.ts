@@ -20,6 +20,17 @@
  *     question on its own.
  *   - `buildIssueReportExtra` — assembles the `extra` payload for the
  *     upstream ad-hoc draft task `createDraft` writes.
+ *   - `ISSUE_SEVERITIES` / `IssueSeverity` / `isIssueSeverity` — the ORDERING-ONLY
+ *     severity vocabulary (§M6). ⛔ Admission-inert by construction: nothing in
+ *     this module's cap arithmetic reads it, and `IssueReportService`'s step-6
+ *     narrowing takes no severity argument at all.
+ *   - `readIssueTriageLabels` — the ONE defensive reader for
+ *     `extra.issue_report.{severity,category}`, consumed by BOTH read surfaces so
+ *     neither can render a label the other cannot see.
+ *   - `ISSUE_CORPUS_LINE_PREFIX` / `formatIssueCorpusLine` — the §M4 DECLARED
+ *     render contract's single composition site.
+ *   - `IssueReadSource` / `resolveIssueReadSource` — the ONE decision function for
+ *     WHICH corpus an issue read surface reads (§M4).
  *   - `OPEN_REPORT_CAP` — the SHIPPED DEFAULT for the R-5d rate-cap ceiling
  *     (10). ⛔ No longer the operative ceiling: since spec-the-defect-channel-
  *     cannot-be-honestly-maintained-an §M2 it is the Zod default of
@@ -70,8 +81,13 @@
  */
 
 /**
- * The 7 fields persisted verbatim under a filed report's `extra.issue_report`
- * (SPEC-072 AC-072-1: "all 7 extra.issue_report fields populated").
+ * The 7 required fields persisted verbatim under a filed report's
+ * `extra.issue_report` (SPEC-072 AC-072-1: "all 7 extra.issue_report fields
+ * populated"), plus the two OPTIONAL ordering-only triage labels §M6 adds.
+ *
+ * ⛔ `severity`/`category` are absent when the filer declared none — never
+ * defaulted. A fabricated `severity: "medium"` would assert a judgment nobody
+ * made, and would make "was this triaged?" unanswerable from the record.
  */
 export interface IssueReportPayload {
   reporter_project: string;
@@ -82,6 +98,174 @@ export interface IssueReportPayload {
   actual: string;
   reported_at: string;
   possible_duplicates: string[];
+  /** §M6 ORDERING-ONLY severity, as declared by the FILER. ⛔ Never read by any admission decision. */
+  severity?: IssueSeverity;
+  /** §M6 ORDERING-ONLY free-text category, as declared by the FILER. ⛔ Never read by any admission decision. */
+  category?: string;
+}
+
+/**
+ * The ORDERING-ONLY severity vocabulary (§M6), highest first — the order the
+ * `--severity` help text renders in and the order a reader triaging a queue
+ * scans in.
+ *
+ * ⛔ A CLOSED vocabulary, deliberately: an open string would make the column
+ * unsortable and a typo indistinguishable from a new level. ⛔ And ORDERING ONLY
+ * — severity is self-declared by the party the cap constrains, so letting it
+ * bucket, exempt, or evict quota would put the ceiling under that party's
+ * control (the same reason §M2 sites the ceiling on the upstream side).
+ * `IssueReportService`'s step-6 narrowing takes no severity argument, so this is
+ * true by construction rather than by discipline; AC-DC-7 pins it observably (a
+ * quota filled entirely with `critical` still refuses a further `critical`).
+ */
+export const ISSUE_SEVERITIES = ["critical", "high", "medium", "low"] as const;
+
+/** One member of {@link ISSUE_SEVERITIES}. */
+export type IssueSeverity = (typeof ISSUE_SEVERITIES)[number];
+
+/**
+ * Is `value` a declared severity? Total over any string — an unrecognised value
+ * is REFUSED by the caller (a usage error naming the valid set), ⛔ never
+ * coerced to a neighbouring level.
+ *
+ * @param value - a raw `--severity` argument
+ * @returns `true` iff `value` is a member of {@link ISSUE_SEVERITIES}
+ * @example
+ *   isIssueSeverity("critical")     // => true
+ *   isIssueSeverity("catastrophic") // => false
+ */
+export function isIssueSeverity(value: string): value is IssueSeverity {
+  return (ISSUE_SEVERITIES as readonly string[]).includes(value);
+}
+
+/**
+ * Upper bound on a `--category` value's length. A category is free text (the
+ * filing project's own taxonomy — this repo cannot enumerate a consumer's) but
+ * still a COLUMN, so it is bounded rather than unbounded: an unbounded value
+ * would render a table no reader can scan and would let one filer's prose
+ * destroy the shared surface.
+ */
+export const ISSUE_CATEGORY_MAX_LENGTH = 48;
+
+/** The two ORDERING-ONLY triage labels as read back off a stored `extra`. Either may be absent (NOT DECLARED). */
+export interface IssueTriageLabels {
+  readonly severity?: IssueSeverity;
+  readonly category?: string;
+}
+
+/**
+ * The ONE defensive reader for `extra.issue_report.{severity,category}` — mirrors
+ * {@link readReporterProject}'s guard shape (a malformed/legacy `extra` degrades
+ * to "no labels" rather than throwing, since `extra.issue_report` stays untyped
+ * passthrough per this module's own invariant).
+ *
+ * Consumed by BOTH read surfaces (`commands/issues.ts` via the upstream port, and
+ * `IssueReportService.list` via `UpstreamPort.getResolution`) so neither surface
+ * can render a label the other cannot see — the same "one reader, two surfaces"
+ * shape §M4 exists to establish for the corpus itself.
+ *
+ * ⛔ An unrecognised stored `severity` reads as ABSENT, never as a coerced level:
+ * a hand-edited or future-version value must not be silently relabelled into
+ * today's vocabulary.
+ *
+ * @param extra - a task's raw `extra` field (untyped storage)
+ * @returns the declared labels; `{}` when neither is present or well-shaped
+ * @example
+ *   readIssueTriageLabels({issue_report: {severity: "high", category: "docs"}})
+ *   // => {severity: "high", category: "docs"}
+ *   readIssueTriageLabels({issue_report: {severity: "catastrophic"}}) // => {}
+ *   readIssueTriageLabels(null)                                      // => {}
+ */
+export function readIssueTriageLabels(extra: unknown): IssueTriageLabels {
+  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return {};
+  const issueReport = (extra as Record<string, unknown>)["issue_report"];
+  if (issueReport === null || typeof issueReport !== "object" || Array.isArray(issueReport)) return {};
+  const bag = issueReport as Record<string, unknown>;
+  const rawSeverity = bag["severity"];
+  const rawCategory = bag["category"];
+  return {
+    ...(typeof rawSeverity === "string" && isIssueSeverity(rawSeverity) ? { severity: rawSeverity } : {}),
+    ...(typeof rawCategory === "string" && rawCategory.length > 0 ? { category: rawCategory } : {}),
+  };
+}
+
+/**
+ * The §M4 DECLARED render contract's fixed prefix. A FIXED PREFIX AT A FIXED
+ * POSITION is declared (rather than "the output mentions the corpus somewhere")
+ * so an oracle can anchor on position instead of on incidental substring
+ * presence anywhere in the buffer.
+ *
+ * ⛔ The trailing space is part of the contract — `Corpus:/path` is not it.
+ */
+export const ISSUE_CORPUS_LINE_PREFIX = "Corpus: ";
+
+/**
+ * Composes the FIRST line every issue read surface's human output emits.
+ *
+ * ONE composition site so `lore issues` and `lore report-issue --list` cannot
+ * drift into two spellings of the same fact — the identical reason §M1's cap
+ * refusal renders from its structured payload rather than from prose.
+ *
+ * @param corpusPath - the ABSOLUTE path of the corpus that was actually read
+ * @returns the header line, WITHOUT a trailing newline (each caller's own
+ *   `console.log` adds one)
+ * @example
+ *   formatIssueCorpusLine("/opt/lore") // => "Corpus: /opt/lore"
+ */
+export function formatIssueCorpusLine(corpusPath: string): string {
+  return `${ISSUE_CORPUS_LINE_PREFIX}${corpusPath}`;
+}
+
+/**
+ * WHICH corpus an issue read surface read, and why (§M4).
+ *
+ * `why` exists so the JSON payload can distinguish "I read cwd because you asked
+ * for `--local`" from "I read cwd because no upstream is configured" — two facts
+ * a bare `kind: "local"` renders identically, and the second is exactly the state
+ * a caller needs to know about (it is why the measured defect read as an empty
+ * queue).
+ */
+export type IssueReadSource =
+  | { readonly kind: "local"; readonly corpus_path: string; readonly why: "forced-local" | "no-upstream-configured" }
+  | { readonly kind: "upstream"; readonly corpus_path: string; readonly why: "upstream-configured" };
+
+/**
+ * The ONE decision function for which corpus an issue read surface reads (§M4).
+ *
+ * ⛔ Takes an ALREADY-RESOLVED upstream config rather than a `LoreConfig`, so
+ * `report-issue-wiring.ts::resolveFeedbackUpstreamCfg` stays the only
+ * `feedback.upstream` READ site (that module's own plan invariant) and this pure
+ * function does not become a second one.
+ *
+ * @param input.localCorpusRoot - the CALLING corpus's own root, ABSOLUTE
+ * @param input.upstreamCorpusPath - the configured upstream corpus path, ABSOLUTE,
+ *   or `undefined` when `feedback.upstream` is unconfigured. Absolutization is the
+ *   caller's job: this module is browser-safe and cannot import `node:path`.
+ * @param input.forceLocal - whether `--local` was passed
+ * @returns the resolved source. ⛔ Total — there is no failure mode and no
+ *   fallback: an upstream that is configured but unopenable is the READER's
+ *   loud failure, never a silent downgrade to cwd (which would print a clean
+ *   empty listing, the measured defect's exact shape).
+ * @example
+ *   resolveIssueReadSource({localCorpusRoot: "/c", upstreamCorpusPath: "/u", forceLocal: false})
+ *   // => {kind: "upstream", corpus_path: "/u", why: "upstream-configured"}
+ *   resolveIssueReadSource({localCorpusRoot: "/c", upstreamCorpusPath: "/u", forceLocal: true})
+ *   // => {kind: "local", corpus_path: "/c", why: "forced-local"}
+ *   resolveIssueReadSource({localCorpusRoot: "/c", upstreamCorpusPath: undefined, forceLocal: false})
+ *   // => {kind: "local", corpus_path: "/c", why: "no-upstream-configured"}
+ */
+export function resolveIssueReadSource(input: {
+  readonly localCorpusRoot: string;
+  readonly upstreamCorpusPath: string | undefined;
+  readonly forceLocal: boolean;
+}): IssueReadSource {
+  if (input.forceLocal) {
+    return { kind: "local", corpus_path: input.localCorpusRoot, why: "forced-local" };
+  }
+  if (input.upstreamCorpusPath === undefined) {
+    return { kind: "local", corpus_path: input.localCorpusRoot, why: "no-upstream-configured" };
+  }
+  return { kind: "upstream", corpus_path: input.upstreamCorpusPath, why: "upstream-configured" };
 }
 
 /**
@@ -217,6 +401,12 @@ export function countOpenReports(
  * closing one must record a red evidence row or the audited
  * `--declare-no-new-tests "<reason>"` — which is the correct standard for a bug
  * fix, and reachable either way.
+ *
+ * §M6: `p.severity`/`p.category` ride along inside the `{...p}` spread. Because
+ * they are OPTIONAL on {@link IssueReportPayload} and the caller omits the KEY
+ * (rather than passing `undefined`), an undeclared label is ABSENT from the
+ * persisted `extra` — which is what lets {@link readIssueTriageLabels} report NOT
+ * DECLARED instead of a fabricated default on both read surfaces.
  *
  * @param p - the fully-assembled report payload
  * @returns `{adhoc: true, ac_scope: [], issue_report: {...p}}` — `adhoc: true`

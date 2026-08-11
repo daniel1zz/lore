@@ -1,7 +1,32 @@
 /**
  * lore report-issue --title <t> --description <d> --expected <e> --actual <a>
- *   [--repro-command <cmd>] [--auto-config] [--json]
+ *   [--repro-command <cmd>] [--severity <s>] [--category <c>] [--auto-config] [--json]
  * lore report-issue --list [--json]
+ *
+ * ── §M4/§M6 (spec-the-defect-channel-cannot-be-honestly-maintained-an) ──
+ * `--list` NAMES the corpus its rows describe: its first human output line is
+ * `formatIssueCorpusLine(...)`'s fixed `Corpus: ` prefix plus the CONFIGURED
+ * UPSTREAM's absolute path, and `--json` carries the same value as
+ * `data.corpus_path`. The sibling `lore issues` now emits the identical header for
+ * the corpus IT read, which is how the measured 0-vs-12 divergence (see that
+ * file's header) becomes visible from either surface instead of requiring a reader
+ * to know which side each command talks to.
+ *
+ * `--severity`/`--category` are ORDERING-ONLY triage labels the FILER declares
+ * (§M6). They are written into `extra.issue_report`, read back off the UPSTREAM
+ * doc, and rendered as columns on BOTH read surfaces. ⛔ They change NO admission
+ * decision: severity is self-declared by the party the cap constrains, so letting
+ * it bucket/exempt/evict quota would put the ceiling under that party's control
+ * (the same reason §M2 sites the ceiling upstream). `IssueReportService.report`'s
+ * step-6 narrowing takes no severity argument, so this holds by construction.
+ *
+ * `--list`'s row render also carries the state-neutral `resolution_reason` and,
+ * new here, a `Pointer` column for the doc a NON-DEROGATORY terminal state points
+ * at (`--superseded-by`/`--duplicate-of`, §M3). This render was the third of the
+ * three sites the KNOWN GAP in `flows/upstream-context-flow.ts::getResolution`
+ * named: while the reason field was called `rejection_reason` and no column
+ * existed, a `superseded` report was operationally indistinguishable from a
+ * rejected one — §M3's capability implemented and unreachable.
  *
  * Files a structured lore-defect report directly into a configured upstream
  * corpus (SPEC-072), landing there as a draft ad-hoc task in the upstream
@@ -66,21 +91,46 @@
  */
 
 import { defineCommand } from "citty";
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import {
+  err,
+  formatIssueCorpusLine,
+  isIssueSeverity,
+  ISSUE_CATEGORY_MAX_LENGTH,
+  ISSUE_SEVERITIES,
+  ok,
+  type IssueSeverity,
+  type LoreError,
+  type Result,
+} from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable, resolveActor } from "../utils.js";
 import {
   buildIssueReportDeps,
   provisionFeedbackUpstream,
   resolveConsumerCorpusRoot,
+  resolveDeclaredCorpusPath,
   resolveFeedbackUpstreamCfg,
   resolveUpstreamFromInstalledBinary,
   type UpstreamCfg,
 } from "../report-issue-wiring.js";
 import { buildUnconfiguredUpstreamRemedy, IssueReportService } from "../../../service/issue-report-service.js";
 
-/** The report-filing flags — mutually exclusive with `--list` (checked as a group). */
-const REPORT_FLAGS = ["title", "description", "expected", "actual", "repro-command"] as const;
+/**
+ * The report-filing flags — mutually exclusive with `--list` (checked as a group).
+ *
+ * §M6's two triage labels JOIN this list rather than getting their own check: they
+ * are filing-mode fields like every other entry, and a separate mutex check would
+ * be a second place for the rule to drift.
+ */
+const REPORT_FLAGS = [
+  "title",
+  "description",
+  "expected",
+  "actual",
+  "repro-command",
+  "severity",
+  "category",
+] as const;
 
 /** The report-filing flags that are REQUIRED when NOT using `--list`. */
 const REQUIRED_REPORT_FLAGS = ["title", "description", "expected", "actual"] as const;
@@ -126,6 +176,74 @@ async function resolveEffectiveUpstreamCfg(
   return ok(resolveResult.value);
 }
 
+/**
+ * §M6 — validates the two ORDERING-ONLY triage labels BEFORE any IO, returning the
+ * values to persist.
+ *
+ * ⛔ Both refusals are USAGE errors (exit 2) that NAME the offending value and the
+ * accepted set, and they are checked here rather than left to the service: an
+ * unrecognised severity is a caller mistake, not an upstream policy outcome.
+ * ⛔ And they must be DISTINGUISHABLE from `strict-flags.ts`'s own exit-2
+ * unknown-flag refusal — which already fired for `--severity` before this
+ * mechanism existed, making an exit-code-only oracle green against zero
+ * implementation. Naming the value and the valid set is what separates the two,
+ * and AC-DC-7's ERROR case asserts exactly that separation.
+ *
+ * @param severityArg - the raw `--severity` value, or `undefined`
+ * @param categoryArg - the raw `--category` value, or `undefined`
+ * @returns the validated labels (keys ABSENT when undeclared, so nothing
+ *   fabricates a level downstream); `err(VALIDATION_ERROR)` naming the offender
+ */
+function validateTriageLabels(
+  severityArg: string | undefined,
+  categoryArg: string | undefined,
+): Result<{ severity?: IssueSeverity; category?: string }, LoreError> {
+  let severity: IssueSeverity | undefined;
+  if (severityArg !== undefined) {
+    const trimmed = severityArg.trim();
+    if (!isIssueSeverity(trimmed)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "severity",
+        message:
+          `Invalid --severity '${severityArg}'. Valid values: ${ISSUE_SEVERITIES.join(", ")}. ` +
+          "Severity is an ordering-only label — it never changes whether a report is accepted.",
+        value: severityArg,
+      });
+    }
+    severity = trimmed;
+  }
+
+  let category: string | undefined;
+  if (categoryArg !== undefined) {
+    const trimmed = categoryArg.trim();
+    if (trimmed.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "category",
+        message: "--category must be a non-empty label (omit the flag to declare none).",
+        value: categoryArg,
+      });
+    }
+    if (trimmed.length > ISSUE_CATEGORY_MAX_LENGTH) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "category",
+        message:
+          `--category is limited to ${ISSUE_CATEGORY_MAX_LENGTH} characters ` +
+          `(got ${trimmed.length}) — it is rendered as a column on both issue read surfaces.`,
+        value: categoryArg,
+      });
+    }
+    category = trimmed;
+  }
+
+  return ok({
+    ...(severity !== undefined ? { severity } : {}),
+    ...(category !== undefined ? { category } : {}),
+  });
+}
+
 export default defineCommand({
   meta: {
     name: "report-issue",
@@ -152,6 +270,18 @@ export default defineCommand({
     "repro-command": {
       type: "string",
       description: "A command that reproduces the issue (optional)",
+    },
+    severity: {
+      type: "string",
+      // reason: the accepted values are RENDERED from the SSOT vocabulary, never
+      // typed out — the same discipline `commands/issues.ts` applies to the
+      // terminal-resolution set, and for the same reason (a hand-written help
+      // string is how a list silently rots out of date).
+      description: `Ordering-only severity label (${ISSUE_SEVERITIES.join(" | ")}) — never changes whether a report is accepted (optional)`,
+    },
+    category: {
+      type: "string",
+      description: `Ordering-only free-text category label, max ${ISSUE_CATEGORY_MAX_LENGTH} chars — never changes whether a report is accepted (optional)`,
     },
     "auto-config": {
       type: "boolean",
@@ -193,6 +323,27 @@ export default defineCommand({
       }
     }
 
+    // §M6 triage labels, validated HERE — synchronously, before any IO — so a
+    // rejected value provably writes zero bytes (AC-DC-7's ERROR case asserts the
+    // upstream report count is unchanged afterwards).
+    //
+    // reason: rendered as `Usage error:` + exit 2, matching the two sibling checks
+    // above rather than `formatError`/`exitCode()`'s VALIDATION_ERROR → 4. An
+    // unrecognised `--severity` value is a CALLER mistake in the same class as a
+    // missing required flag, not an upstream policy outcome; `validateTriageLabels`
+    // still returns a structured `LoreError` so the field/value survive for any
+    // future non-CLI caller.
+    const triageResult = validateTriageLabels(
+      typeof args.severity === "string" ? args.severity : undefined,
+      typeof args.category === "string" ? args.category : undefined,
+    );
+    if (!triageResult.ok) {
+      const detail = "message" in triageResult.error ? triageResult.error.message : triageResult.error.code;
+      process.stderr.write(`Usage error: ${detail}\n`);
+      process.exit(2);
+    }
+    const triageLabels = triageResult.value;
+
     const { app, config } = loadLoreApp();
     try {
       const corpusRoot = resolveConsumerCorpusRoot();
@@ -209,6 +360,13 @@ export default defineCommand({
       }
       const effectiveCfg = effectiveCfgResult.value;
 
+      // §M4 — the corpus these rows describe: the CONFIGURED UPSTREAM (that is
+      // what `list()` joins the local receipt ledger against), absolutized through
+      // the SAME seam `lore issues` uses so the two surfaces render one path one
+      // way. Resolved BEFORE the read so the header is present even on the
+      // degraded all-rows-`unreachable` path.
+      const listedCorpusPath = resolveDeclaredCorpusPath(effectiveCfg.corpus_path);
+
       if (isList) {
         const result = await service.list(effectiveCfg);
         if (!result.ok) {
@@ -218,9 +376,16 @@ export default defineCommand({
         }
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { rows: result.value } }, null, 2));
+          console.log(
+            JSON.stringify({ ok: true, data: { corpus_path: listedCorpusPath, rows: result.value } }, null, 2),
+          );
           return;
         }
+
+        // ⛔ FIRST, before the empty-listing line: the empty case is exactly where
+        // a missing corpus header goes unnoticed, and it is the shape the measured
+        // defect produced on the sibling surface.
+        console.log(formatIssueCorpusLine(listedCorpusPath));
 
         if (result.value.length === 0) {
           console.log("No reports filed yet from this corpus.");
@@ -229,15 +394,34 @@ export default defineCommand({
 
         // reason: "Resolution" (D6's computed resolution) is now the PRIMARY
         // signal; "Doc Status" (the upstream doc's raw lifecycle status) is
-        // demoted to a debugging detail, per this file's own header.
-        const headers = ["Doc ID", "Title", "Filed At", "Resolution", "Doc Status", "Reason"];
+        // demoted to a debugging detail, per this file's own header. "Reason" is
+        // fed by the STATE-NEUTRAL `resolution_reason` and "Pointer" by
+        // `resolution_pointer`, so a `superseded`/`duplicate` retirement shows both
+        // WHY and WHAT-INSTEAD instead of reading like an unexplained rejection
+        // (§M3's capability was unreachable from this render until both landed).
+        // "Severity"/"Category" are §M6's ordering-only labels, read back off the
+        // upstream doc's own `extra.issue_report`.
+        const headers = [
+          "Doc ID",
+          "Title",
+          "Filed At",
+          "Resolution",
+          "Doc Status",
+          "Severity",
+          "Category",
+          "Reason",
+          "Pointer",
+        ];
         const rows = result.value.map((row) => [
           row.upstream_doc_id,
           row.title,
           row.at,
           row.status,
           row.doc_status ?? "",
-          row.rejection_reason ?? "",
+          row.severity ?? "",
+          row.category ?? "",
+          row.resolution_reason ?? "",
+          row.resolution_pointer ?? "",
         ]);
         console.log(formatTable(headers, rows));
 
@@ -261,6 +445,8 @@ export default defineCommand({
           actual: args.actual as string,
           by,
           ...(typeof reproCommand === "string" ? { repro_command: reproCommand } : {}),
+          // §M6: already-validated labels, keys omitted when undeclared.
+          ...triageLabels,
         },
         effectiveCfg,
       );
