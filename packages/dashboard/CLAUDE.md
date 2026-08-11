@@ -69,7 +69,13 @@ Two-process model intentional for `--dev`. `vite.config.ts` sets `server.proxy: 
 
 ## Links
 
-- Depends on: [`@lore/core`](../core/src/CLAUDE.md) (types only).
+- Depends on: [`@lore/core`](../core/src/CLAUDE.md) — types, plus the RUNTIME issue-resolution
+  vocabulary (`ISSUE_RESOLUTION_MEMBERS`, re-exported from `src/lib/api.ts` as
+  `ISSUE_RESOLUTIONS`). ⛔ The dashboard constructs no resolution list of its own: both
+  `IssuesList`/`IssueDetail` switches are exhaustive over the imported union, so adding a
+  member upstream fails to compile HERE (TS2322 to `never`) rather than rendering an
+  undefined badge variant — which CVA's `defaultVariants` silently absorbed as a SUCCESS
+  badge before that weld existed.
 - Talks to: `@lore/lore`'s [`adapters/http`](../lore/src/adapters/http/CLAUDE.md) over `/api/*`; the built `dist/**` is also embedded into and served BY that same adapter in packaged mode (`dashboard-assets-loader.ts` + `static-serving.ts`).
 - Consumed by: the user opens `http://localhost:8787` directly in packaged mode (default `--api-port`), or `http://localhost:5173` under `--dev`.
 
