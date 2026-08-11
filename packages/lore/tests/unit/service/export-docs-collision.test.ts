@@ -47,8 +47,19 @@ import { tmpdir } from "node:os";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { ExportDocsService, type ResolveDocBody } from "../../../src/service/export-docs-service.js";
 import { OutlineService, renderResolvedToMarkdown } from "../../../src/service/outline-service.js";
-import { canonicaliseBody, ok, DOC_TYPE_ROLE_MAP } from "@lore/core";
-import type { DocRecord, ExportIndex, Slug } from "@lore/core";
+import { canonicaliseBody, ok, DOC_TYPE_ROLE_MAP, assertIsMirrorHumanId } from "@lore/core";
+import type { DocRecord, ExportIndex, MirrorHumanId, Slug } from "@lore/core";
+
+/**
+ * Narrows a raw human_id string literal to the branded {@link MirrorHumanId} for fixture
+ * construction — via {@link assertIsMirrorHumanId}, never a textual `as MirrorHumanId` cast
+ * (`scripts/check-ordinal-write-sites.mjs`'s rule (c) confines that cast to
+ * `packages/core/src/schemas.ts` alone; a fixture file is not that file).
+ */
+function brandedHumanId(value: string): MirrorHumanId {
+  assertIsMirrorHumanId(value);
+  return value;
+}
 
 /**
  * Build the real ResolveDocBody wiring (OutlineService.resolve + renderResolvedToMarkdown)
@@ -353,8 +364,8 @@ describe("Self-heal — corrupted index (two doc ids -> one file_path), unambigu
     writeIndexFile(projectDir, {
       version: 1,
       mappings: {
-        "doc-heal-alpha": { human_id: "KN-002", file_path: collidedPath },
-        "doc-heal-beta": { human_id: "KN-002", file_path: collidedPath },
+        "doc-heal-alpha": { human_id: brandedHumanId("KN-002"), file_path: collidedPath },
+        "doc-heal-beta": { human_id: brandedHumanId("KN-002"), file_path: collidedPath },
       },
     });
 
@@ -417,8 +428,8 @@ describe("Self-heal — corrupted index (two doc ids -> one file_path), unambigu
     writeIndexFile(projectDir, {
       version: 1,
       mappings: {
-        "doc-heal2-alpha": { human_id: "KN-005", file_path: collidedPath },
-        "doc-heal2-beta": { human_id: "KN-005", file_path: collidedPath },
+        "doc-heal2-alpha": { human_id: brandedHumanId("KN-005"), file_path: collidedPath },
+        "doc-heal2-beta": { human_id: brandedHumanId("KN-005"), file_path: collidedPath },
       },
     });
     writeExportedFile(projectDir, collidedPath, "KN-005", "Assessment Alpha 2", contentAlpha);
@@ -478,8 +489,8 @@ describe("Self-heal — ambiguous collision (on-disk file matches neither claima
       version: 1,
       mappings: {
         // later doc listed FIRST in the object
-        "doc-ambig-later": { human_id: "KN-009", file_path: collidedPath },
-        "doc-ambig-earlier": { human_id: "KN-009", file_path: collidedPath },
+        "doc-ambig-later": { human_id: brandedHumanId("KN-009"), file_path: collidedPath },
+        "doc-ambig-earlier": { human_id: brandedHumanId("KN-009"), file_path: collidedPath },
       },
     });
 
@@ -529,8 +540,8 @@ describe("BOUNDARY — allocateUniqueFilePath dedupes a computed file_path with 
         // (seeded from maxNumberForPrefix) still lands on "KN-002" — but their
         // file_path values pre-claim exactly what KN-002's base and -2
         // candidates would compute to.
-        "orphan-base": { human_id: "KN-001", file_path: `${dir}/KN-002-widget.md` },
-        "orphan-dash2": { human_id: "KN-001", file_path: `${dir}/KN-002-widget-2.md` },
+        "orphan-base": { human_id: brandedHumanId("KN-001"), file_path: `${dir}/KN-002-widget.md` },
+        "orphan-dash2": { human_id: brandedHumanId("KN-001"), file_path: `${dir}/KN-002-widget-2.md` },
       },
     });
 
@@ -574,10 +585,10 @@ describe("ERROR — allocateUniqueFilePath fails loud (VALIDATION_ERROR) after 9
     // Pre-claim the base path plus every -2..-999 suffix candidate for KN-002 —
     // exactly the 999 attempts allocateUniqueFilePath will make.
     const mappings: ExportIndex["mappings"] = {
-      "orphan-0": { human_id: "KN-001", file_path: `${dir}/KN-002-widget.md` },
+      "orphan-0": { human_id: brandedHumanId("KN-001"), file_path: `${dir}/KN-002-widget.md` },
     };
     for (let n = 2; n <= 999; n++) {
-      mappings[`orphan-${n}`] = { human_id: "KN-001", file_path: `${dir}/KN-002-widget-${n}.md` };
+      mappings[`orphan-${n}`] = { human_id: brandedHumanId("KN-001"), file_path: `${dir}/KN-002-widget-${n}.md` };
     }
     const preRunIndex: ExportIndex = { version: 1, mappings };
     writeIndexFile(projectDir, preRunIndex);

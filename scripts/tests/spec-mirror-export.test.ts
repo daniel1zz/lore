@@ -49,8 +49,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExportIndexMapping } from "@lore/core";
-import { NoOpTelemetry } from "@lore/core";
+import type { ExportIndexMapping, MirrorHumanId } from "@lore/core";
+import { NoOpTelemetry, assertIsMirrorHumanId } from "@lore/core";
 import {
   computeMirrorParity,
   scriptChainReachesTarget,
