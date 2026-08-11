@@ -29,3 +29,12 @@ dist-npm/
 # (scripts/build.ts); consumed only via the committed dynamic-import loader
 # packages/lore/src/adapters/http/dashboard-assets-loader.ts.
 packages/lore/src/generated/dashboard-assets.ts
+
+# spec-oracle-exclusivity-in-a-shared-checkout-a-mirror-check, D4: the ONLY
+# sanctioned home for hand-written probe / negative-control artifacts (a
+# deliberately-broken .ts, a fixture tree, etc). Sits outside every
+# `bun run typecheck:*` project's `include` glob (asserted from both sides by
+# scripts/tests/scratch-namespace.test.ts) -- never write a probe into a real
+# typechecked glob, even transiently, even with cleanup: doing so reds every
+# concurrent `typecheck` in this checkout for the duration of the write.
+.scratch/
