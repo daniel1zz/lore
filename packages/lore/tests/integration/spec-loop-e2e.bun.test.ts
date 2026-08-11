@@ -14,7 +14,12 @@
  *
  * ⛔ Never touches the repo's own `.lore/` corpus (project CLAUDE.md hard rule) — every
  * test operates inside its own `mkdtempSync` directory, and the outer suite asserts
- * `git status --short .lore` is empty both before and after the full run.
+ * `git status --short .lore docs/requirements` is empty both before and after the
+ * full run (SPEC-OX D3): the widened scope covers mirror-content dirt under
+ * `docs/requirements/**`, which a `.lore`-only invocation could never see. The
+ * decision logic lives in the pure predicate `checkRepoPollution`
+ * (`../../src/repo-pollution-guard.ts`) — this file is only the wiring that feeds it
+ * real `git status` output and prints the offending paths on rejection.
  *
  * Closed loop under test (tech-spec §9 AC6), six steps:
  *   1. gate spec-create on a no-parent candidate           → exit 4, feeding pack.
@@ -30,7 +35,7 @@
  * on the promote gate) / REGRESSION (LORE_GATE_BYPASS=1 skips the entire chain).
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { tmpdir } from "os";
@@ -38,6 +43,7 @@ import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { createApp, type App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
+import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
 import type { CreateDocInput } from "@lore/core";
 
 /**
@@ -110,6 +116,45 @@ function captureOutput() {
 // Repo root (two levels above packages/lore) — where the team's real `.lore/` corpus
 // lives; the pollution guard below checks THIS path, not packages/lore's own root.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
+
+/**
+ * Repo-corpus pollution guard wiring (SPEC-OX D3, AC-OX-2): run the real, widened
+ * `git status --short` invocation against the repo root and feed its output to the
+ * pure predicate in `repo-pollution-guard.ts`. On rejection, PRINTS the offending
+ * paths (via `console.error`) before throwing — a bare boolean would reproduce the
+ * attribution cost this spec exists to remove, since the predicate already computed
+ * exactly which paths are dirty.
+ *
+ * Wired below as file-scope `beforeAll`/`afterAll` (NOT nested inside any
+ * `describe`), so it genuinely wraps the WHOLE file's test run — both the IoC
+ * closed-loop suite above and this file's own pollution-guard tests — rather than
+ * only whichever describe block happens to contain it. That is what makes "before
+ * AND after" real: a run cannot pass by dirtying the tree only at the end.
+ *
+ * @param phase which side of the suite this invocation is guarding, used only for
+ *   the printed report.
+ * @throws if the scoped `git status --short` output is non-empty.
+ */
+function assertRepoCorpusClean(phase: "before" | "after"): void {
+  const output = execSync("git status --short .lore docs/requirements", { cwd: REPO_ROOT }).toString();
+  const verdict = checkRepoPollution(output);
+  if (verdict.clean) return;
+  const report = [
+    `repo-pollution-guard: repo corpus is dirty ${phase} this suite ran.`,
+    "Offending paths (git status --short .lore docs/requirements):",
+    ...verdict.offendingPaths.map((path) => `  - ${path}`),
+  ].join("\n");
+  console.error(report);
+  throw new Error(report);
+}
+
+beforeAll(() => {
+  assertRepoCorpusClean("before");
+});
+
+afterAll(() => {
+  assertRepoCorpusClean("after");
+});
 
 let tmpDir: string;
 let dbPath: string;
@@ -334,11 +379,21 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
   });
 });
 
-// ─── Zero-pollution guard on the repo's own .lore/ corpus ─────────────────────
+// ─── Zero-pollution guard on the repo's own .lore/ and docs/requirements/ ─────
+//
+// The actual assertions run as the file-scope `beforeAll`/`afterAll` hooks declared
+// above `assertRepoCorpusClean` (NOT nested in a `describe`), so they wrap this
+// ENTIRE file's test run — including the IoC closed-loop describe above — rather
+// than only whichever describe block would otherwise contain them. A single `it()`
+// placed at the tail of the file, by contrast, would only ever run AFTER every test
+// preceding it in file order, never genuinely "before the suite".
 
 describe("spec-loop-e2e.bun.test.ts: repo corpus pollution guard", () => {
-  it("`git status --short .lore` is empty in the repo root before and after this suite ran", () => {
-    const output = execSync("git status --short .lore", { cwd: REPO_ROOT }).toString();
-    expect(output.trim()).toBe("");
+  it("is wired via file-scope beforeAll/afterAll hooks feeding checkRepoPollution (see assertRepoCorpusClean above)", () => {
+    // A named, addressable result for the wiring's presence — the guarding
+    // assertions themselves already ran (before) and will run again (after) as
+    // beforeAll/afterAll around the whole file, not around this it() alone.
+    expect(typeof assertRepoCorpusClean).toBe("function");
+    expect(typeof checkRepoPollution).toBe("function");
   });
 });
