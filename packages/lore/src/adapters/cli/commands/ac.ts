@@ -59,6 +59,21 @@
  *                                   whose `falsified` fails runtime well-formedness (M5)
  *                                   renders `⚠` (AC-FALS-19) — see `coverageBadge`'s own
  *                                   JSDoc for the full rationale.
+ *                                   A criterion carrying evidence recorded before its
+ *                                   script command was REWRITTEN (spec-the-defect-channel-
+ *                                   cannot-be-honestly-maintained-an §M5, AC-DC-10) gets a
+ *                                   second trailing marker, ` [retired_oracle_evidence:
+ *                                   prior_refs=<n> current_refs=<n> generation=<n>]` — see
+ *                                   {@link retiredOracleMarker}. Its BADGE stays green on
+ *                                   purpose (the split is additive reporting, never an
+ *                                   eighth `deriveAcCoverageState`), so this marker is the
+ *                                   only thing distinguishing evidence produced by the
+ *                                   CURRENT oracle from evidence produced by the one it
+ *                                   replaced. `--json`'s `coverage[]` entries carry the
+ *                                   SAME split as the structured `oracle_generation` key —
+ *                                   `AcCoverageFact`'s own field, serialized verbatim (see
+ *                                   {@link withCoverageState}), never re-flattened into
+ *                                   prose a consumer would have to re-parse.
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
  *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
@@ -139,7 +154,14 @@
  *   declared-falsifier authoring, now on BOTH `add` and `set`);
  *   task-make-lore-ac-set-accept-the-falsifier-flags-its-own-error (`set` wiring +
  *   the suggested-command-integrity scanner, AC-FR-9,
- *   scripts/tests/error-message-commands-executable.test.ts)
+ *   scripts/tests/error-message-commands-executable.test.ts);
+ *   spec-the-defect-channel-cannot-be-honestly-maintained-an §M5 AC-DC-10 +
+ *   task-wire-the-oracle-generation-split-to-a-read-surface-so-a (the retired-oracle
+ *   marker — §M5's aggregator half landed with NO renderer reading it, so a
+ *   polarity-reversed oracle still displayed as plain green; oracle:
+ *   packages/lore/tests/integration/cli/ac-oracle-generation-surface.bun.test.ts,
+ *   which SPAWNS this command because a unit test over `computeAcCoverage` passes
+ *   whether or not any renderer reads the field)
  */
 
 import { defineCommand } from "citty";
@@ -843,7 +865,10 @@ function renderCriteriaList(result: AcListResult): void {
   for (const criterion of result.criteria) {
     const badge = result.coverage !== null ? `${coverageBadge(result.coverage, criterion.id)} ` : "";
     const marker = passUnfalsifiedMarker(result.coverage, criterion.id);
-    console.log(`  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}`);
+    const retiredOracle = retiredOracleMarker(result.coverage, criterion.id);
+    console.log(
+      `  ${badge}${criterion.id} — ${criterion.statement} [${describeVerify(criterion.verify)}]${marker}${retiredOracle}`,
+    );
   }
   if (result.dangling.length > 0) {
     console.log(
@@ -873,6 +898,64 @@ function passUnfalsifiedMarker(coverage: AcListResult["coverage"], acId: string)
   const fact = coverage?.find((f) => f.ac_id === acId);
   if (fact === undefined) return "";
   return deriveAcCoverageState(fact) === "pass_unfalsified" ? " [pass_unfalsified]" : "";
+}
+
+/**
+ * Trailing human-table marker naming this criterion's RETIRED-ORACLE evidence
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5 read surface,
+ * AC-DC-10) — evidence rows recorded before its script `verify.command` was
+ * rewritten, which `AcService.setCriterion` records as an `oracle_generation` bump
+ * and `computeAcCoverage` reports as `AcCoverageFact.oracle_generation`.
+ *
+ * The defect this closes is §Measured-not-inferred F3: one criterion carried seven
+ * evidence rows spanning `grep -rq MARKER` and `! grep -rq MARKER` — a POLARITY
+ * REVERSAL, two of the rows BOTH attested `exit_code: 0` — and every read surface
+ * rendered a plain green badge, so nothing distinguished the rows proving the
+ * current oracle from the rows proving its opposite. §M5 landed the aggregator half
+ * with NO consumer, which left the badge exactly as misleading as before: a fact no
+ * renderer reads is not a read surface.
+ *
+ * RENDERS the split, never re-derives it: the three numbers come straight from
+ * `computeAcCoverage`'s own fact. Deliberately a SEPARATE line marker rather than a
+ * change to {@link coverageBadge}, for the reason that function's own JSDoc gives —
+ * `deriveAcCoverageState`'s seven states and their precedence are pinned by other
+ * ACs and by a live-corpus old-vs-new comparison, so §M5 is ADDITIVE reporting
+ * rendered BESIDE the verdict, never an eighth state routed through it. The badge on
+ * a retired-oracle criterion therefore stays green on purpose; this marker is the
+ * whole distinction, which is why AC-DC-10's oracle asserts BOTH on the same line.
+ *
+ * Unlike {@link passUnfalsifiedMarker}, this marker carries NUMBERS rather than a
+ * bare flag: "some evidence predates the current oracle" is not actionable, while
+ * "2 of the 3 rows behind this badge do" is — a reader can tell a criterion with one
+ * stale row and a fresh attested pass from one whose ENTIRE case rests on a retired
+ * oracle. The keys are the fact's OWN field names (`prior_refs`/`current_refs`, and
+ * `generation` for its `current`), so the human render and the `--json` payload stay
+ * greppable with one vocabulary instead of two.
+ *
+ * @param coverage - `AcListResult.coverage` (`null` when the spec has no coverage
+ *   infrastructure at all — no marker, same as {@link passUnfalsifiedMarker})
+ * @param acId - the criterion id whose fact to read
+ * @returns ` [retired_oracle_evidence: prior_refs=<n> current_refs=<n> generation=<n>]`
+ *   when this criterion has ≥1 prior-generation row; ` [retired_oracle_evidence:
+ *   not_computed]` when the fact carries NO split; `""` otherwise (no fact, or every
+ *   row was recorded under the current generation)
+ */
+function retiredOracleMarker(coverage: AcListResult["coverage"], acId: string): string {
+  const fact = coverage?.find((f) => f.ac_id === acId);
+  if (fact === undefined) return "";
+  const split = fact.oracle_generation;
+  // reason: branch on PRESENCE, never `?? 0` — `AcCoverageFact.oracle_generation` is
+  // optional on the TYPE so hand-built fact literals stay constructible, and that
+  // field's own JSDoc forbids coalescing an ABSENT split into a number: doing so
+  // would render "no retired-oracle evidence" for a fact that was never measured at
+  // all. Unreachable from THIS command (`AcService.listCriteria` always populates the
+  // split via `computeAcCoverage`) and therefore unasserted by AC-DC-10's oracle,
+  // which drives the CLI; it is still rendered distinctly rather than silently,
+  // because a future caller handing `renderCriteriaList` a fact from anywhere else
+  // must not read silence as a measured zero.
+  if (split === undefined) return " [retired_oracle_evidence: not_computed]";
+  if (split.prior_refs === 0) return "";
+  return ` [retired_oracle_evidence: prior_refs=${split.prior_refs} current_refs=${split.current_refs} generation=${split.current}]`;
 }
 
 function describeVerify(verify: AcceptanceCriterion["verify"]): string {
@@ -1000,7 +1083,15 @@ export function coverageBadge(coverage: AcListResult["coverage"], acId: string):
  * string (spec-oracle-tier-falsifiability-a-criterion-never-observed-red M1
  * surfacing, AC-FALS-4) for the `--json` payload. `falsified` is already a raw
  * field on `AcCoverageFact` (M1, `@lore/core`) — serialized verbatim, untouched
- * here. `state` is NOT stored anywhere on the fact itself; it is always computed
+ * here. So is `oracle_generation` (the §M5 current-vs-retired split, AC-DC-10): the
+ * spread below is what puts it on the wire, which is deliberate — the fact's own
+ * three-field shape IS the structured key a machine consumer reads, so there is no
+ * parallel `--json`-only shape to keep in sync with the human marker
+ * ({@link retiredOracleMarker}). ⛔ Do not "normalise" it into a flat boolean or a
+ * prose string here: AC-DC-10's oracle reads `prior_refs`/`current_refs`/`current`
+ * off this payload by name and cross-checks them against the rendered marker's own
+ * numbers, so a payload rebuilt field-by-field (dropping the spread) goes red. `state`
+ * is NOT stored anywhere on the fact itself; it is always computed
  * via `deriveAcCoverageState` (`@lore/core`), the SAME SSOT {@link coverageBadge}
  * reads — never a second derivation.
  *
