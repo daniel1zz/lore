@@ -668,3 +668,59 @@ describe("OrdinalMigrationService.migrateOrdinals — declared-number claims pre
     expect(freshHolder.ok && freshHolder.value?.ordinal).toBe(9);
   });
 });
+
+// >>> AC-MIS-4 SELF-ASSERTION BOUNDARY <<<
+/**
+ * AC-MIS-4's declared `--command` originally ran FOUR separate `grep -q`
+ * invocations against this same file (checking for the RE-BASELINE record's
+ * literal tokens) before running the suite itself — five test-file-shaped
+ * argv tokens naming ONE file. SPEC-061's attestation-completeness guard
+ * counts every such token and, seeing 5 declared paths against 1 executed
+ * file, returned `inconclusive` ("ran 1 of 5 declared paths") at exit 0 —
+ * `lore verify` could reach neither a pass nor a fail verdict.
+ *
+ * This is a CORRECTION, not a weakening: every one of the four grep
+ * assertions survives verbatim below, as a REAL test case that now runs on
+ * every `bun run test`/`bun test` invocation of this file — not only when
+ * AC-MIS-4's own declared command happens to be attested — while the
+ * declared command shrinks to exactly one path
+ * (`bun test packages/lore/tests/unit/store/migrate-ordinals.bun.test.ts`),
+ * which the completeness guard can now score.
+ *
+ * Reads ITS OWN SOURCE via `import.meta.path` (Bun's absolute path of the
+ * currently-executing file) rather than a hardcoded literal path — a
+ * hardcoded path would silently stop checking the moment this file is
+ * renamed or moved, which is exactly the drift this assertion exists to
+ * catch.
+ *
+ * ⛔ Self-reference trap this test must NOT fall into: this describe/it
+ * block's own title strings and assertion-argument literals necessarily
+ * contain the four search tokens too (they name what they search for), so
+ * naively `readFileSync`-ing the WHOLE file and calling `toContain` would
+ * pass even if every genuine RE-BASELINE comment above were deleted — the
+ * search would just be finding ITSELF. The literal marker
+ * `>>> AC-MIS-4 SELF-ASSERTION BOUNDARY <<<` immediately above never
+ * contains any of the four tokens (verified by inspection); slicing the
+ * source at that marker and searching only the PREFIX (everything written
+ * before this block) is what makes the assertion check the actual
+ * documentation, not its own search strings.
+ */
+describe("AC-MIS-4 self-assertion: this file's own RE-BASELINE record", () => {
+  it("contains the literal RE-BASELINE tokens citing the prior decision (ordinal.ts:133-145, 2026-08-10) and the padded re-baseline value, grep-checkable rather than an unfalsifiable adequacy judgment", () => {
+    const BOUNDARY_MARKER = ">>> AC-MIS-4 SELF-ASSERTION BOUNDARY <<<";
+    const ownSource = readFileSync(import.meta.path, "utf8");
+    const boundaryIndex = ownSource.indexOf(BOUNDARY_MARKER);
+    // The boundary marker itself must be found — if it is ever renamed this
+    // assertion must fail loud, not silently scan the whole (self-
+    // contaminated) file.
+    expect(boundaryIndex).toBeGreaterThan(-1);
+    // Search ONLY the portion written BEFORE this self-assertion block —
+    // this test's own title/assertion-argument strings (which restate the
+    // four tokens) live entirely AFTER the boundary and are excluded.
+    const documentedPortion = ownSource.slice(0, boundaryIndex);
+    expect(documentedPortion).toContain("RE-BASELINE");
+    expect(documentedPortion).toContain("ordinal.ts:133-145");
+    expect(documentedPortion).toContain("2026-08-10");
+    expect(documentedPortion).toContain("SPEC-001-alpha-decision.md");
+  });
+});
