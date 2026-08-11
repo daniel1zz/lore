@@ -15,18 +15,24 @@
  * subcommand because every piece of context it needs (plan/spec/task
  * resolution, the M2 env-allowlist, the injected `executor` port) is already
  * resolved here, and a sibling would have had to re-derive all of it. It
- * creates a SCRATCH git worktree off the corpus repo's `HEAD`
- * (`VerifyRunnerService.verifyFalsifier` → `createFalsifierScratchWorktree`),
+ * creates a SCRATCH git worktree off the RESOLVED execution root's `HEAD` —
+ * or, when that root is itself a linked worktree, off a `git stash create`
+ * snapshot of THAT worktree's own uncommitted state (AC-JV-3,
+ * spec-judgment-surfaces-must-verify-before-they-certify-machine §D5 — see the
+ * branch's own inline comment below) — via
+ * `VerifyRunnerService.verifyFalsifier` → `createFalsifierScratchWorktree`,
  * applies the named AC's declared `verify.falsifier` mutation there (NEVER the
  * caller's working tree), runs the AC's command in that isolated copy, and
  * records a runner-issued `result: "expected-fail"` / `capture_source: "runner"`
  * evidence row ONLY when the observed exit code equals the falsifier's
  * declared value exactly — a mismatch or a missing/stale declaration refuses
  * loud (exit per `exitCode(error)`) and records NOTHING. Requires the PLAN
- * positional (refuses `--task`-only ad-hoc invocations, exit 2) and skips the
- * ordinary four-step pipeline's M2 approval gate and execution-root resolution
- * entirely (neither applies to a scratch-worktree run — see the branch's own
- * inline comment).
+ * positional (refuses `--task`-only ad-hoc invocations, exit 2) and skips ONLY
+ * the ordinary four-step pipeline's M2 approval gate (a falsifier run always
+ * executes a mutated tree, so "already-seen command" never applies) — the
+ * SAME `executionRoot` the ordinary pipeline resolves and threads into
+ * `verifyPlan` is threaded into this branch's `verifyFalsifier` call too, not
+ * skipped.
  *
  * `--ac <id>` may repeat (citty collapses repeated `--ac` flags into a string
  * array at the raw-args layer — see `normalizeRepeatableFlag` below) to
@@ -83,6 +89,11 @@
  *      `opts.executionRoot` — every AC's command spawns from it, and every
  *      recorded evidence's `attestation` carries `execution_root`/
  *      `execution_mode` (SPEC-063 §Design Decisions D2, D3).
+ *   5. The SAME resolved `{root, mode}` also feeds `verifyFalsifier`'s
+ *      `opts.executionRoot` on the `--falsify` branch below (AC-JV-3,
+ *      spec-judgment-surfaces-must-verify-before-they-certify-machine §D5) —
+ *      before that fix this branch silently dropped the resolution and always
+ *      scratched off `config.repoRoot` regardless of point 1's result.
  *
  * Exit codes (SPEC-003 §5 `exitCode()` SSOT covers the LoreError branch; the
  * "some AC failed"/"some AC inconclusive" branches below are NOT LoreErrors —
@@ -444,12 +455,31 @@ export default defineCommand({
 
       // ATTESTED-RED runner (spec-falsifiability-reachability-a-feedable-checkpoint-an
       // §D2/D3/D4) — a SEPARATE, wholly distinct code path from the four-step
-      // pipeline below: no execution-root resolution (the scratch worktree IS this
-      // run's root, by construction), no M2 command-provenance gate (a falsifier run
-      // always executes a MUTATED tree, so "already-seen command" never applies).
-      // Returns EARLY — `FalsifierRunResult` is a different shape from
-      // `VerifyPlanResult`, rendered here rather than threaded through the shared
-      // per-AC table below.
+      // pipeline below: no M2 command-provenance gate (a falsifier run always
+      // executes a MUTATED tree, so "already-seen command" never applies). Returns
+      // EARLY — `FalsifierRunResult` is a different shape from `VerifyPlanResult`,
+      // rendered here rather than threaded through the shared per-AC table below.
+      //
+      // Resolved 2026-08-11 (AC-JV-3, spec-judgment-surfaces-must-verify-before-they-certify-machine
+      // §D5) — this branch used to call `verifyFalsifier` with NO `executionRoot` at
+      // all, even though `executionRoot` (above) was ALREADY resolved before this
+      // branch runs: the falsifier's scratch worktree unconditionally branched off
+      // `VerifyRunnerService.config.repoRoot` (the corpus/main-checkout root) —
+      // exactly the SAME "main checkout, never the caller's own worktree" defect
+      // SPEC-063 closed for the ordinary pipeline. A `--falsify` run invoked from a
+      // linked worktree therefore silently scratched off the MAIN checkout's HEAD,
+      // never the worktree's own uncommitted work, no matter how correctly
+      // `resolveCliExecutionRoot` had already resolved `executionRoot` two lines up
+      // — an accepted-but-never-passed option. `executionRoot` is now threaded
+      // through the SAME way the four-step pipeline threads it into `verifyPlan`
+      // below: the scratch worktree branches off THIS root (and, when its `mode` is
+      // `"worktree"`, off a `git stash create` snapshot of that root's OWN
+      // uncommitted state — see `createFalsifierScratchWorktree`'s own JSDoc) rather
+      // than unconditionally `config.repoRoot`. See
+      // `tests/unit/service/falsifier-execution-root.bun.test.ts` for the oracle
+      // (positive worktree-rooted case, the mandatory `config.repoRoot` reverse
+      // control, AND a CLI-level black-box proof that this exact call site threads
+      // the resolved root through).
       const falsifyAcId = typeof args.falsify === "string" ? args.falsify : undefined;
       if (falsifyAcId !== undefined) {
         if (planArg === undefined) {
@@ -464,6 +494,7 @@ export default defineCommand({
           ...(taskArg !== undefined ? { explicitTaskIdOrSlug: taskArg } : {}),
           by,
           nowIso: new Date().toISOString(),
+          executionRoot,
         });
         if (!falsifyResult.ok) {
           process.stderr.write(formatError(falsifyResult.error) + "\n");
