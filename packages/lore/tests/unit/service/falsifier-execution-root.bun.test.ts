@@ -558,5 +558,11 @@ describe("AC-JV-3 (CLI tier) — `lore verify <plan> --falsify <AC>` threads the
     expect(mainJson.ok).toBe(true);
     expect(mainJson.data?.output_tail).not.toContain("WORKTREE_ONLY_CHANGE");
     expect(mainJson.data?.output_tail).toContain("extra: original");
-  });
+    // reason: 5 spawn-helper calls (`lore init`, two `--falsify` runs, plus setup)
+    // — `check:test-budgets` requires an EXPLICIT declaration at >= 3 spawns and
+    // judges the declaration, never the number. Measured 2026-08-11: this file's
+    // 6 tests complete in ~2.1s on an idle machine, so 120s is ~50x headroom for a
+    // checkout running concurrent worktree agents, where spawn-heavy cases have
+    // previously been starved into false 30s timeouts.
+  }, 120_000);
 });
