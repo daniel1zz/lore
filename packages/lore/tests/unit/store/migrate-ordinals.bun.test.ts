@@ -14,6 +14,46 @@
  *     (created_at priority) and keeps 3; specD/specE are collision losers
  *     and get next-free (4, 5).
  *
+ * RE-BASELINE (spec-mirror-identifier-ssot-one-writer-for-export-index-human
+ * D1/D2, AC-MIS-4, 2026-08-11): the step-3 export-index reconcile at
+ * `ordinal-migration-service.ts:743` now composes `human_id` via the PADDED
+ * `formatMirrorHumanId` (e.g. `"SPEC-001"`), never the unpadded
+ * `formatDocDisplayId` (`"SPEC-1"`) this fixture originally pinned. Padded
+ * is the decided canonical mirror form — a user decision recorded BEFORE
+ * this fix at `packages/core/src/ordinal.ts:133-145` (2026-08-10,
+ * `task-unify-mirror-identifiers-on-zero-padded-form-export-all`): the
+ * mirror's filenames have always zero-padded (`SPEC-021-*.md`), and
+ * `ExportDocsService` (`export-docs-service.ts:1031`) already composed this
+ * SAME field padded — the unpadded pin below was therefore already
+ * contradicting a landed decision AND the mirror's own filename convention,
+ * not merely "inconvenient." Two things changed, both because specB's
+ * `human_id` no longer round-trips as "already correct" once composition is
+ * padded:
+ *   1. specB's SEEDED mapping (`beforeEach`, below) moved from unpadded
+ *      `"SPEC-2"` to padded `"SPEC-002"` — otherwise it would ALSO now
+ *      mismatch its own declared ordinal 2 (`formatMirrorHumanId` gives
+ *      `"SPEC-002"`, not `"SPEC-2"`), turning it from the deliberate
+ *      "nothing to reconcile" HAPPY control case into an UNINTENDED second
+ *      reconcile entry — a fixture-input correction, not a pinned-output
+ *      weakening (specB was never the subject of this AC; it stays a
+ *      zero-reconcile control, just at the correct padded value).
+ *   2. specA's PINNED OUTPUTS (`new_human_id`, `suggested_file_path`,
+ *      `rename_command`, and the post-`--apply` `human_id` on disk) moved
+ *      from unpadded `"SPEC-1"`/`"SPEC-1-alpha-decision.md"` to padded
+ *      `"SPEC-001"`/`"SPEC-001-alpha-decision.md"` — this is AC-MIS-4's own
+ *      named correction.
+ * Measured before this fix (`bun test` on the unmodified pins, this same
+ * command): `export_index_reconciles` had length 1 (expected) but its lone
+ * entry read `new_human_id: "SPEC-1"`, and after `--apply`,
+ * `indexAfterApply.mappings[specA.id]?.human_id` read `"SPEC-1"` — exactly
+ * the pre-fix, unpadded composition this whole task replaces. Re-running
+ * `bun test packages/lore/tests/unit/store/migrate-ordinals.bun.test.ts`
+ * with ONLY specA's re-baseline applied (specB's seed left at unpadded
+ * `"SPEC-2"`) reproduces `export_index_reconciles` at length 2, not 1 — the
+ * fixture-input correction above is required, not optional, for this suite
+ * to still assert what it always asserted (specB stays a zero-reconcile
+ * control) rather than silently accepting a second, unintended reconcile.
+ *
  * Runner: bun:sqlite (real `SQLiteStore(":memory:")`) — must run under
  * `bun test`, not vitest (project CLAUDE.md "bun:sqlite is external to
  * vitest"). `.lore/export-index.json` lives in a real mkdtemp'd throwaway
@@ -106,7 +146,7 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
   let service: OrdinalMigrationService;
 
   let specA: DocRecord; // declared SPEC-1, drifted export mapping (SPEC-3)
-  let specB: DocRecord; // declared SPEC-2, already-correct export mapping
+  let specB: DocRecord; // declared SPEC-2, already-correct export mapping (padded SPEC-002 — RE-BASELINE above)
   let specC: DocRecord; // declared SPEC-3, earliest of the collision trio — winner
   let specD: DocRecord; // declared SPEC-3, collision loser #1
   let specE: DocRecord; // declared SPEC-3, collision loser #2, approved status
@@ -135,7 +175,9 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
       version: 1,
       mappings: {
         [specA.id]: { human_id: "SPEC-3", file_path: "docs/requirements/spec/SPEC-3-alpha-decision.md" },
-        [specB.id]: { human_id: "SPEC-2", file_path: "docs/requirements/spec/SPEC-2-beta-workflow.md" },
+        // RE-BASELINE (2026-08-11, ordinal.ts:133-145): padded SPEC-002, not unpadded
+        // SPEC-2 — see this file's module-header RE-BASELINE note, point 1.
+        [specB.id]: { human_id: "SPEC-002", file_path: "docs/requirements/spec/SPEC-2-beta-workflow.md" },
       },
     });
   });
@@ -201,12 +243,17 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
     expect(report.export_index_reconciles).toHaveLength(1);
     const reconcile = report.export_index_reconciles[0];
     expect(reconcile?.doc_id).toBe(specA.id);
+    // RE-BASELINE (2026-08-11, ordinal.ts:133-145): new_human_id/suggested_file_path/
+    // rename_command corrected from unpadded SPEC-1/SPEC-1-alpha-decision.md to the
+    // padded SPEC-001/SPEC-001-alpha-decision.md form — see this file's module-header
+    // RE-BASELINE note, point 2. old_human_id stays "SPEC-3": it is the literal DRIFTED
+    // value this fixture seeds above, read back verbatim, never composed by the fix.
     expect(reconcile?.old_human_id).toBe("SPEC-3");
-    expect(reconcile?.new_human_id).toBe("SPEC-1");
+    expect(reconcile?.new_human_id).toBe("SPEC-001");
     expect(reconcile?.file_path).toBe("docs/requirements/spec/SPEC-3-alpha-decision.md");
-    expect(reconcile?.suggested_file_path).toBe("docs/requirements/spec/SPEC-1-alpha-decision.md");
+    expect(reconcile?.suggested_file_path).toBe("docs/requirements/spec/SPEC-001-alpha-decision.md");
     expect(reconcile?.rename_command).toBe(
-      "git mv 'docs/requirements/spec/SPEC-3-alpha-decision.md' 'docs/requirements/spec/SPEC-1-alpha-decision.md'",
+      "git mv 'docs/requirements/spec/SPEC-3-alpha-decision.md' 'docs/requirements/spec/SPEC-001-alpha-decision.md'",
     );
 
     // NEGATIVE: dry-run touched NOTHING — re-fetch and verify byte-for-byte.
@@ -261,10 +308,15 @@ describe("OrdinalMigrationService.migrateOrdinals (SPEC-084, AC-084-4)", () => {
 
     // Export-index human_id converged; file_path left untouched (Scope-Alt —
     // renames are report-only, never executed against the filesystem).
+    // RE-BASELINE (2026-08-11, ordinal.ts:133-145): specA's converged human_id is now
+    // padded SPEC-001 (was unpadded SPEC-1) — see this file's module-header RE-BASELINE
+    // note, point 2. specB's asserted value is padded SPEC-002 because its SEEDED
+    // mapping was corrected to that value above (point 1) — it was never reconciled by
+    // this run (report.export_index_reconciles above has length 1, specA only).
     const indexAfterApply = readExportIndex(projectDir);
-    expect(indexAfterApply.mappings[specA.id]?.human_id).toBe("SPEC-1");
+    expect(indexAfterApply.mappings[specA.id]?.human_id).toBe("SPEC-001");
     expect(indexAfterApply.mappings[specA.id]?.file_path).toBe("docs/requirements/spec/SPEC-3-alpha-decision.md");
-    expect(indexAfterApply.mappings[specB.id]?.human_id).toBe("SPEC-2");
+    expect(indexAfterApply.mappings[specB.id]?.human_id).toBe("SPEC-002");
 
     // REGRESSION: a second --apply run performs literally zero writes.
     const secondRun = await service.migrateOrdinals({ dryRun: false, projectDir });
