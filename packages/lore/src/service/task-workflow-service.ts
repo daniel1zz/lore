@@ -130,7 +130,24 @@
  *   (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the Q2).
  * @invariant addEvidence and recordVerifiedEvidence share ONE append implementation
  *   (private `appendEvidenceEntry`) — cap check, schema validation, ac_ref cross-entity
- *   validation, and the writeTaskExtra commit path are never duplicated between them.
+ *   validation, the §M5 oracle-generation stamp, and the writeTaskExtra commit path are
+ *   never duplicated between them.
+ * @invariant `ac_oracle_generation` is STAMPED by `appendEvidenceEntry`, never accepted
+ *   from any caller (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5,
+ *   AC-DC-8) — the oracle generation in force for the row's `ac_ref` at record time,
+ *   resolved from the referenced criterion (`resolveAcOracleGeneration`), so a later
+ *   `verify.command` rewrite makes this row reportable as prior-generation
+ *   (`computeAcCoverage`'s `oracle_generation` split) with NO row ever edited. Unlike
+ *   `attestation` — which the trusted runner DOES supply and which only the public path
+ *   rejects — this field is refused on BOTH paths (`EvidenceInput` and
+ *   `VerifiedEvidenceInput` exclude it structurally; the shared chokepoint's
+ *   `hasOwnProperty` check stops an `as`-cast candidate), and it is NEVER inferred from
+ *   the command string or the tail's shape — the same rule `capture_source` follows.
+ *   Present-iff-resolved: a row with no `ac_ref` carries no stamp, and a row whose
+ *   `ac_ref` does not resolve is refused by the cross-entity check above, so no
+ *   COMMITTED row is ever silently left unstamped. `VerifyRunnerService` needs no change
+ *   of its own — its `recordVerifiedEvidence` port lands here, so every runner-attested
+ *   row carries the stamp too.
  * @invariant `claim()` is write-then-verify, not just gate-then-write (BUG-011 TOCTOU
  *   hardening) — the pre-write `enforceClaimGate` call's sibling-claim snapshot can go
  *   stale in the gap before this method's own CAS write commits (per-doc CAS alone
@@ -293,6 +310,10 @@ import {
   UNFILTERED_RUN_CASE_FILTER_DESCRIPTION,
   isInvalidated,
   unprobedFileAnchors,
+  specAcceptanceCriteriaSchema,
+  resolveGoverningSpecByAcScope,
+  resolveOracleGeneration,
+  type AcceptanceCriterion,
   type AcScopeEditOp,
   type EvidenceEntry,
   type TaskClaim,
@@ -556,7 +577,7 @@ export interface DoneResult {
  */
 export type EvidenceInput = Omit<
   EvidenceEntry,
-  "recorded_at" | "attestation" | "result" | "capture_source"
+  "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation"
 > & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /** REQUIRED — see this type's own header comment. The value the caller can actually PROVE, never a convenient default. */
@@ -578,8 +599,16 @@ export type EvidenceInput = Omit<
  * even though `appendEvidenceEntry` would additionally force `"runner"` from
  * `attestation` alone; the explicit pass documents the caller's own provenance claim
  * rather than relying on that downstream override.
+ *
+ * `ac_oracle_generation` is EXCLUDED here too (§M5, AC-DC-8) — unlike `attestation`,
+ * which the trusted runner DOES supply, the generation is resolved by
+ * `appendEvidenceEntry` from the referenced criterion for BOTH write paths, so neither
+ * a CLI caller nor the runner may declare it. See that method's own resolution step.
  */
-export type VerifiedEvidenceInput = Omit<EvidenceEntry, "recorded_at" | "capture_source"> & {
+export type VerifiedEvidenceInput = Omit<
+  EvidenceEntry,
+  "recorded_at" | "capture_source" | "ac_oracle_generation"
+> & {
   capture_source: CaptureSource;
 };
 
@@ -1995,6 +2024,25 @@ export class TaskWorkflowService {
     actor: string,
     now: () => string,
   ): Promise<Result<DocRecord, LoreError>> {
+    // §M5 (AC-DC-8) — fail-loud, NOT a silent strip, and bound to the SHARED chokepoint
+    // rather than the self-report path: `ac_oracle_generation` is resolved from the
+    // referenced criterion below for BOTH write paths, so NEITHER a CLI caller NOR the
+    // trusted runner may declare it (this is where it differs from `attestation`, which
+    // the runner does supply). `EvidenceInput`/`VerifiedEvidenceInput` both exclude the
+    // field at compile time; this runtime check is what actually stops an
+    // `as EvidenceInput`-cast untyped candidate object — the exact shape CLI commands
+    // assemble flag-derived candidates with — from smuggling it past the type system.
+    if (Object.prototype.hasOwnProperty.call(entry, "ac_oracle_generation")) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "ac_oracle_generation",
+        message:
+          "ac_oracle_generation is stamped by the evidence write path from the referenced " +
+          "acceptance criterion (not a valid evidence input field)",
+        value: (entry as Record<string, unknown>)["ac_oracle_generation"],
+      });
+    }
+
     const taskResult = await this.resolveTask(idOrSlug);
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
@@ -2008,6 +2056,18 @@ export class TaskWorkflowService {
         value: existing.length,
       });
     }
+
+    // §M5 (AC-DC-8) — resolve the oracle generation in force for this row's `ac_ref`
+    // BEFORE `now()` fires, so the time seam stays as tight to the write as it has
+    // always been (see this method's `now` param JSDoc — the sequential-CAS
+    // STALE_VERSION recipe depends on that ordering). `null` means "no criterion to
+    // resolve against": either no `ac_ref` at all, or an `ac_ref` the cross-entity
+    // check below is about to REFUSE — so no committed row is ever left unstamped by a
+    // resolution failure. See `resolveAcOracleGeneration`'s own JSDoc.
+    const generationResult =
+      entry.ac_ref === undefined ? ok(null) : await this.resolveAcOracleGeneration(task, entry.ac_ref);
+    if (!generationResult.ok) return generationResult;
+    const acOracleGeneration = generationResult.value;
 
     const nowIso = now();
     // reason: NO fallback here by design (task-capture-source-is-optional-at-the-
@@ -2027,6 +2087,9 @@ export class TaskWorkflowService {
       capture_source: captureSource,
       ...(entry.output_tail !== undefined ? { output_tail: entry.output_tail } : {}),
       ...(entry.ac_ref !== undefined ? { ac_ref: entry.ac_ref } : {}),
+      // §M5 (AC-DC-8) — present-iff-resolved, and validated by the same
+      // `evidenceEntrySchema.safeParse` every other field goes through below.
+      ...(acOracleGeneration !== null ? { ac_oracle_generation: acOracleGeneration } : {}),
       ...(entry.attestation !== undefined ? { attestation: entry.attestation } : {}),
     };
     const parsedEntry = evidenceEntrySchema.safeParse(candidate);
@@ -2119,6 +2182,94 @@ export class TaskWorkflowService {
         ...(renewedClaim !== null ? { claim_renewed: true } : {}),
       },
     );
+  }
+
+  /**
+   * The oracle generation in force for `acRef`'s declared criterion, right now
+   * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5, AC-DC-8) — the value
+   * {@link appendEvidenceEntry} stamps onto the row it is about to append, so a later
+   * `verify.command` rewrite (`AcService.setCriterion`) leaves this row reportable as
+   * PRIOR-generation without anyone editing it.
+   *
+   * @param task - the resolved target task (already type-validated by the caller)
+   * @param acRef - the row's `ac_ref`, verbatim
+   * @returns `ok(<generation>)` when `acRef` names a criterion on the task's governing
+   *   spec; `ok(null)` when it does not. `null` is NOT a silent fallback: every case that
+   *   produces it (no parent, a non-plan parent, a parent plan under no spec, a spec with
+   *   no schema-valid `acceptance_criteria`, an ad-hoc task whose `ac_scope` resolves to
+   *   zero or several specs, or simply an `acRef` that is not declared) is a case the
+   *   pre-existing cross-entity `ac_ref` check in {@link appendEvidenceEntry} REFUSES a
+   *   few lines later, with its own better-worded VALIDATION_ERROR naming the available
+   *   ids. Returning `null` here rather than a competing error keeps that message the one
+   *   the caller sees, and the refusal is what guarantees no committed row is ever
+   *   silently unstamped. `err` only propagates a store failure.
+   */
+  private async resolveAcOracleGeneration(
+    task: DocRecord,
+    acRef: string,
+  ): Promise<Result<number | null, LoreError>> {
+    const criteriaResult = await this.findGoverningAcceptanceCriteria(task);
+    if (!criteriaResult.ok) return criteriaResult;
+    const criterion = criteriaResult.value.find((c) => c.id === acRef);
+    if (criterion === undefined) return ok(null);
+    return ok(resolveOracleGeneration(criterion.oracle_generation));
+  }
+
+  /**
+   * The task's governing spec's DECLARED acceptance criteria — the full criterion
+   * objects, which {@link resolveAcOracleGeneration} needs and which neither injected
+   * `ac_ref` port can supply.
+   *
+   * ⛔ Read this before "simplifying" it: the two injected ports
+   * ({@link resolveDeclaredAcIds}, {@link resolveAdhocGoverningAcIds}) exist precisely so
+   * this service does not own the task → governing-spec traversal (SPEC-038 §7 D4, and
+   * this module's own `addEvidence` invariant). Their contract returns `Set<string>` — AC
+   * IDS ONLY — so neither can answer "what generation is that criterion in", and widening
+   * either one is a change to `CorpusService.resolveDeclaredAcIds`/
+   * `resolveDeclaredAcIdsForAdhocTask` plus their `app.ts` bindings, i.e. two files
+   * outside the anchors §M5's own task declared. This method is therefore a deliberate,
+   * BOUNDED second traversal of the same edges, and it is kept from drifting from the
+   * ports' verdict in the only two ways that matter: it parses with the SAME
+   * `specAcceptanceCriteriaSchema` and, for an ad-hoc task, runs the SAME
+   * `resolveGoverningSpecByAcScope` search (`@lore/core`) — so the two can disagree only
+   * about how they REACHED the spec, never about which criterion an id names. If the
+   * ports are ever widened to carry generations, delete this method and read them
+   * instead; nothing else consumes it.
+   *
+   * @param task - the resolved target task
+   * @returns the declared criteria, or `[]` for every "no governing spec resolvable"
+   *   case — a FACT, never an error (see {@link resolveAcOracleGeneration}'s `@returns`
+   *   for why the caller's `null` is safe). `err` only propagates a store failure.
+   */
+  private async findGoverningAcceptanceCriteria(
+    task: DocRecord,
+  ): Promise<Result<AcceptanceCriterion[], LoreError>> {
+    if (task.extra["adhoc"] === true) {
+      const declaredScope = extractDeclaredAcScope(task);
+      if (declaredScope === undefined || declaredScope.length === 0) return ok([]);
+      const specsResult = await this.store.findMany({ type: "spec" });
+      if (!specsResult.ok) return specsResult;
+      const match = resolveGoverningSpecByAcScope(
+        declaredScope,
+        specsResult.value,
+        `ad-hoc task "${task.slug}"`,
+      );
+      return ok(match.ok ? match.value.criteria : []);
+    }
+
+    if (task.parent_id === null) return ok([]);
+    const planResult = await this.store.find(task.parent_id);
+    if (!planResult.ok) return planResult;
+    const plan = planResult.value;
+    if (plan === null || plan.deleted_at !== null || plan.type !== "plan" || plan.parent_id === null) {
+      return ok([]);
+    }
+    const specResult = await this.store.find(plan.parent_id);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+    if (spec === null || spec.deleted_at !== null || spec.type !== "spec") return ok([]);
+    const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
+    return ok(parsed.success ? parsed.data : []);
   }
 
   // ── claim ────────────────────────────────────────────────────────────────

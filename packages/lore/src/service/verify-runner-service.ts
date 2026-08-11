@@ -90,6 +90,16 @@
  *      the run's `warnings` ONLY — it is NOT persisted onto `attestation` (the
  *      `evidenceEntrySchema.attestation` shape lives outside this task's anchors;
  *      the downgraded `result`/the warning text are the durable signal).
+ *      This step also gives every runner-attested row its `ac_oracle_generation`
+ *      stamp (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5,
+ *      AC-DC-8) — WITHOUT this service supplying it: the stamp is resolved from the
+ *      referenced criterion inside `TaskWorkflowService.appendEvidenceEntry`, the
+ *      shared chokepoint behind this port, for the self-reported and attested paths
+ *      alike (see that method's `resolveAcOracleGeneration`). ⛔ Do not add a
+ *      generation field to the object passed at step ④: both evidence input types
+ *      structurally exclude it and the chokepoint refuses a raw candidate carrying
+ *      it, deliberately — unlike `attestation`, a generation this runner declared
+ *      would be a caller-supplied claim about a criterion it did not re-read.
  *
  * SPEC-063 execution-root correctness — `opts.executionRoot` (optional) is the
  * CLI adapter's pre-resolved `resolveVerifyExecutionRoot(...)` result (core, pure);

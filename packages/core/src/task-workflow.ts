@@ -25,6 +25,10 @@
  *     bucket (task-two-more-evidence-consumers-erase-an-expected-fail-row-doc)
  *   - ATTESTATION_RUNNERS / AttestationRunner — enum of trusted runners allowed to
  *     write `EvidenceEntry.attestation` (SPEC-039 §2 D1)
+ *   - ORACLE_GENERATION_INITIAL / resolveOracleGeneration(declared) — the ONE
+ *     "absent means generation 1" read rule shared by `AcceptanceCriterion
+ *     .oracle_generation` (acceptance.ts) and `EvidenceEntry.ac_oracle_generation`
+ *     (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5, AC-DC-8)
  *   - taskClaimSchema / TaskClaim — advisory execution lease
  *     {by, at, branch?, machine?, worktree?, session_id?} — `session_id` is the
  *     captured SESSION INSTANCE, a peer of machine/worktree and never part of
@@ -159,6 +163,65 @@ export const CAPTURE_SOURCES = ["runner", "self-report"] as const;
 /** Derived TypeScript union for {@link EvidenceEntry.capture_source}. */
 export type CaptureSource = (typeof CAPTURE_SOURCES)[number];
 
+// ─── Oracle Generations (spec-the-defect-channel-cannot-be-honestly- ────────
+// ─── maintained-an §M5, AC-DC-8) ────────────────────────────────────────────
+
+/**
+ * The oracle generation EVERY acceptance criterion starts in, and the value both
+ * an absent `AcceptanceCriterion.oracle_generation` (`acceptance.ts`) and an
+ * absent {@link EvidenceEntry.ac_oracle_generation} are read as — i.e. the whole
+ * pre-M5 back-catalogue is generation 1, never "unknown".
+ *
+ * Lives HERE rather than beside the criterion schema it primarily describes
+ * purely because of import direction: `acceptance.ts` already imports this
+ * module ({@link extractEvidence}, {@link OracleKind}), so the reverse edge
+ * would be a cycle. One constant, imported by both schemas — never a `1`
+ * literal repeated in two `.min()` calls.
+ */
+export const ORACLE_GENERATION_INITIAL = 1;
+
+/**
+ * The ONE read rule for an oracle generation, shared by every consumer of either
+ * spelling (`AcceptanceCriterion.oracle_generation` on the declaring side,
+ * {@link EvidenceEntry.ac_oracle_generation} on the recorded side) — M5's
+ * "absent means generation 1" stated exactly once, as code.
+ *
+ * TOTAL by construction: `undefined` (the pre-M5 back-catalogue) and any value
+ * that is not a well-formed generation both read as
+ * {@link ORACLE_GENERATION_INITIAL}. The second case is NOT a silent fallback
+ * standing in for a required value — both Zod schemas constrain the field to an
+ * integer ≥ 1, so the only inputs that can reach it are hand-built test
+ * fixtures, exactly the premise `acceptance.ts`'s `isWellFormedFalsifiedCount`
+ * (M5 of spec-oracle-tier-falsifiability-a-criterion-never-observed-red) was
+ * built on: a `number` annotation is a compile-time claim the runtime does not
+ * enforce. Named consequence, in the fail-CLOSED direction: a row whose stamp is
+ * malformed reads as the INITIAL generation, so it is reported as
+ * PRIOR-generation (flagged) for any criterion that has advanced — never
+ * silently as current.
+ *
+ * @param declared - the stored generation, or `undefined` when the field is absent
+ * @returns `declared` when it is an integer ≥ {@link ORACLE_GENERATION_INITIAL};
+ *   {@link ORACLE_GENERATION_INITIAL} otherwise
+ * @example
+ * resolveOracleGeneration(undefined); // => 1 (the pre-M5 back-catalogue)
+ * resolveOracleGeneration(3);         // => 3
+ * resolveOracleGeneration(0);         // => 1 (not a well-formed generation)
+ */
+export function resolveOracleGeneration(declared: number | undefined): number {
+  return isWellFormedOracleGeneration(declared) ? declared : ORACLE_GENERATION_INITIAL;
+}
+
+/**
+ * Runtime well-formedness check behind {@link resolveOracleGeneration} — a
+ * POSITIVE test ("is this usable as a generation"), deliberately not a list of
+ * bad values: a "not a finite number" phrasing would leave a finite `0`/negative
+ * matching no rule at all, the exact fail-open shape this predicate's sibling in
+ * `acceptance.ts` was written to close.
+ */
+function isWellFormedOracleGeneration(value: number | undefined): value is number {
+  return Number.isInteger(value) && (value as number) >= ORACLE_GENERATION_INITIAL;
+}
+
 /**
  * One oracle verification record, appended to task.extra.verification_evidence.
  * Append-only — entries are never edited or removed, only added (up to the 50-entry cap
@@ -253,6 +316,35 @@ export type CaptureSource = (typeof CAPTURE_SOURCES)[number];
  *   consumer that needs a concrete value (never "unknown, therefore fine") — never
  *   silently defaulted at the SCHEMA layer, only at the READ/aggregation layer that
  *   actually needs to classify old rows.
+ * @invariant `ac_oracle_generation` (spec-the-defect-channel-cannot-be-honestly-
+ *   maintained-an §M5, AC-DC-8) is the oracle generation that was in force for
+ *   `ac_ref`'s declared criterion AT THE MOMENT THIS ROW WAS RECORDED — the recorded
+ *   half of `AcceptanceCriterion.oracle_generation` (`acceptance.ts`), which
+ *   `AcService.setCriterion` bumps whenever a script-mode `verify.command` is
+ *   rewritten. It exists so `computeAcCoverage` can report evidence produced by a
+ *   RETIRED oracle as prior-generation: the measured defect (spec §F3) is an AC whose
+ *   command REVERSED POLARITY, leaving two mutually-exclusive attested passes that
+ *   `deriveAcCoverageState` reads as ordinary green, because `fail_superseded` keys on
+ *   a FAIL superseded by a newer attested pass and structurally cannot see two PASSES
+ *   of opposite polarity.
+ *   STAMPED BY THE WRITE PATH, NEVER SUPPLIED BY THE CALLER — the same restriction
+ *   `attestation` carries, enforced the same way: both `EvidenceInput` and
+ *   `VerifiedEvidenceInput` (`service/task-workflow-service.ts`) structurally exclude
+ *   the field, and the shared `appendEvidenceEntry` chokepoint additionally runs an
+ *   explicit `hasOwnProperty` check on the raw input so an `as EvidenceInput` cast
+ *   cannot smuggle it past the type system. It is resolved from the REFERENCED
+ *   CRITERION, never inferred from the command string or the tail's shape (the same
+ *   reason `capture_source` is never shape-inferred).
+ *   PRESENT-IFF-RESOLVED: a row with no `ac_ref` has no criterion to resolve against
+ *   and carries no stamp at all; a row whose `ac_ref` cannot be resolved is REFUSED by
+ *   the pre-existing cross-entity `ac_ref` check and never committed, so no committed
+ *   row is ever left silently unstamped by a resolution failure. Staying `.optional()`
+ *   here is load-bearing for the same reason `attestation`/`capture_source` are (see
+ *   their own invariants above): `extractEvidence` parses the WHOLE array in one call,
+ *   so a required field would fail-close every array holding one pre-M5 row and
+ *   silently zero that task's entire evidence log. An ABSENT stamp is read as
+ *   {@link ORACLE_GENERATION_INITIAL} by {@link resolveOracleGeneration} — the one
+ *   shared read rule, never a per-consumer default.
  *
  * @example
  * evidenceEntrySchema.parse({
@@ -287,6 +379,8 @@ export const evidenceEntrySchema = z.object({
   checklist_ref: z.string().optional(),
   /** Discriminates a runner-captured tail from a self-reported one — see the field-level invariant above. */
   capture_source: z.enum(CAPTURE_SOURCES).optional(),
+  /** The oracle generation in force for `ac_ref`'s criterion when this row was recorded (§M5) — see the field-level invariant above. */
+  ac_oracle_generation: z.number().int().min(ORACLE_GENERATION_INITIAL).optional(),
   /** Runner-issued attestation metadata (SPEC-039 §2 D1) — see the field-level invariant above. */
   attestation: z
     .object({
