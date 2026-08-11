@@ -958,7 +958,7 @@ describe("a synchronous store-init throw is re-typed into the declared refusal i
 // `resolution` with no knowledge of a review-workflow rejection (the SPEC-005
 // audit trail, not `doc.status`, is the only record — see the inline `reason:`
 // comment below), so a review-rejected report computed `open` while still
-// carrying a `rejection_reason` — a self-contradicting row §20 F3/F4 forbid.
+// carrying a `resolution_reason` — a self-contradicting row §20 F3/F4 forbid.
 // This change is a SEMANTIC fix, not a test-green-washing edit: the row's
 // `status` field IS the computed resolution (`issue-report-service.ts`'s
 // `ReceiptStatusRow.status`, joined from `live.resolution` — never
@@ -994,7 +994,7 @@ describe("AC-072-10: --list joins live upstream status; rejection reason surface
 
     const listAfterReject = runJson<{
       ok: true;
-      data: { rows: Array<{ upstream_doc_id: string; status: string; rejection_reason?: string }> };
+      data: { rows: Array<{ upstream_doc_id: string; status: string; resolution_reason?: string }> };
     }>(["report-issue", "--list"], { cwd: consumerRoot });
     expect(listAfterReject.result.exitCode).toBe(0);
     const rejectedRow = listAfterReject.data.data.rows.find((r) => r.upstream_doc_id === upstreamDocId);
@@ -1010,7 +1010,7 @@ describe("AC-072-10: --list joins live upstream status; rejection reason surface
     // resolution, not the raw `doc.status` — that raw value is separately
     // available as `doc_status` and stays 'draft', per SPEC-005, unasserted here).
     expect(rejectedRow?.status).toBe("rejected");
-    expect(rejectedRow?.rejection_reason).toBe("not a lore defect");
+    expect(rejectedRow?.resolution_reason).toBe("not a lore defect");
 
     // Remove the upstream corpus entirely.
     assertUnderTmp(upstream.root);

@@ -21,6 +21,9 @@
  *     shape `IssueReportService.report`/`.list` take. STAYS the ONLY
  *     `feedback.upstream` READ site (plan invariant) — self-provisioning
  *     below never reads it, only writes it.
+ *   - `resolveDeclaredCorpusPath(declared)` — the ONE absolutization of a declared
+ *     corpus path, shared by both issue read surfaces so §M4's "ABSOLUTE path"
+ *     render clause has a single implementation.
  *   - `buildIssueReportDeps(corpusRoot)` — the real `IssueReportDeps` bundle.
  *   - `resolveUpstreamFromInstalledBinary(ctx?)` — self-provisioning READ
  *     half: resolves + identity-verifies an upstream candidate from the
@@ -78,7 +81,7 @@
  */
 
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import yaml from "yaml";
 import { loadConfig } from "@lore/core/node";
 import {
@@ -144,6 +147,34 @@ export type UpstreamCfg = { corpus_path: string; root_prd: string };
  */
 export function resolveFeedbackUpstreamCfg(config: LoreConfig | undefined): UpstreamCfg | undefined {
   return config?.feedback?.upstream;
+}
+
+/**
+ * Absolutizes a DECLARED corpus path — the ONE place the §M4 render contract's
+ * "the corpus's ABSOLUTE path" clause is satisfied, shared by both issue read
+ * surfaces (`commands/issues.ts` and `commands/report-issue.ts`).
+ *
+ * ⛔ `resolve`, not `realpathSync`: this must be TOTAL. A configured upstream that
+ * does not exist yet still has to be NAMED in the loud refusal the reader is
+ * about to print, and a realpath on a missing path throws — which would replace a
+ * diagnosable "upstream corpus not found at <path>" with an uncaught stack trace.
+ * The two surfaces therefore render the same declared path the same way, which is
+ * what lets AC-DC-5 compare their two `corpus_path` values to EACH OTHER rather
+ * than only to a fixture.
+ *
+ * ⛔ Lives here, not in `@lore/core`'s browser-safe `issue-report.ts`: that module
+ * must never top-level-import `node:path` (packages/core/src/CLAUDE.md's browser-safety
+ * invariant), which is exactly why `resolveIssueReadSource` takes already-absolute
+ * paths.
+ *
+ * @param declared - a corpus path as written in config (may be relative)
+ * @returns the absolute path, resolved against `process.cwd()`
+ * @example
+ *   resolveDeclaredCorpusPath("/opt/lore") // "/opt/lore"
+ *   resolveDeclaredCorpusPath("../lore")   // "<cwd's parent>/lore"
+ */
+export function resolveDeclaredCorpusPath(declared: string): string {
+  return resolve(declared);
 }
 
 /**

@@ -27,7 +27,16 @@
  *     review-rejected report is indistinguishable from an untouched one by
  *     `doc.status` alone (SPEC-005), so `getResolution` needs that same
  *     lookback to feed `computeIssueResolution`'s `hasRecordedReviewRejection`
- *     parameter — see `getResolution`'s own JSDoc.
+ *     parameter — see `getResolution`'s own JSDoc. A 6th op,
+ *     `listIssueReports`, was added by
+ *     spec-the-defect-channel-cannot-be-honestly-maintained-an §M4: `lore issues`
+ *     now reads the CONFIGURED UPSTREAM by default, which no combination of the
+ *     other five can answer (see that method's own JSDoc).
+ *   - `UpstreamIssueFacts` / `UpstreamIssueReportRow` — the computed per-report
+ *     facts BOTH read ops return, derived at ONE site (`deriveIssueFacts`) so
+ *     `lore issues` and `lore report-issue --list` cannot disagree about the same
+ *     report. That agreement IS §M4's mechanism; a second derivation would
+ *     re-open the measured 0-vs-12 divergence one layer below where it was fixed.
  *   - `buildUpstreamContext(corpusRoot)` — resolves `corpusRoot/.lore/lore.db`,
  *     re-asserts its schema version against `LATEST_SCHEMA_VERSION` via a
  *     readonly probe BEFORE constructing a real (migrating) `SQLiteStore`,
@@ -78,20 +87,29 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_WRITE_WAIT_MS, err, ok, type Result } from "@lore/core";
-import type { DocStatus, LoreError } from "@lore/core";
+import { DEFAULT_WRITE_WAIT_MS, err, ok, readIssueTriageLabels, type Result } from "@lore/core";
+import type { DocStatus, IssueSeverity, LoreError } from "@lore/core";
 import { probeUpstreamDb } from "./upstream-probe.js";
 import { SQLiteStore, LATEST_SCHEMA_VERSION } from "../store/sqlite-store.js";
 import { wrapStoreError } from "../store/store-shared.js";
 import { CorpusService } from "../service/corpus-service.js";
-import { computeIssueResolution, type IssueResolution } from "../service/issue-resolution.js";
+import {
+  computeIssueResolution,
+  EXPLICIT_TERMINAL_RESOLUTIONS,
+  hasIssueReport,
+  reachOfTerminalResolution,
+  type ExplicitTerminalResolution,
+  type IssueResolution,
+} from "../service/issue-resolution.js";
 
 /**
- * The transport seam `IssueReportService` orchestrates through — never the
- * full `CorpusService`/`StoreInterface` surface (leak-proof against a
- * future P2 `HttpUpstreamPort` needing to implement anything beyond these 4
- * ops). Every method returns `Promise<Result<T, LoreError>>`, same
- * convention as every other service in this codebase.
+ * The transport seam `IssueReportService` and the `lore issues` read surface
+ * orchestrate through — never the full `CorpusService`/`StoreInterface` surface
+ * (leak-proof against a future P2 `HttpUpstreamPort` needing to implement
+ * anything beyond the ops declared below; ⛔ never restate their count here —
+ * this interface's own members are the only true tally). Every method returns
+ * `Promise<Result<T, LoreError>>`, same convention as every other service in
+ * this codebase.
  */
 export interface UpstreamPort {
   /**
@@ -166,33 +184,103 @@ export interface UpstreamPort {
    * @param id - the upstream draft task's doc id (a `ReceiptEntry.upstream_doc_id`)
    * @returns `ok(null)` when no doc with this id exists upstream anymore
    *   (deleted, or never existed) — a fact, not an error, and the caller's
-   *   documented "unreachable"-equivalent row case; `ok({status, resolution,
-   *   rejection_reason?})` otherwise. `rejection_reason` is populated ONLY
-   *   when the computed `resolution` is itself `rejected`/`wontfix` — a
-   *   stale audit-log reason from BEFORE a later fix landed (resolution now
-   *   `fixed`/`resolving`) is never echoed, so no row ever shows a rejection
-   *   reason next to a resolution that isn't actually a rejection.
+   *   documented "unreachable"-equivalent row case; {@link UpstreamIssueFacts}
+   *   otherwise. `resolution_reason` is populated ONLY when the computed
+   *   `resolution` is itself an EXPLICIT terminal state — a stale audit-log
+   *   reason from BEFORE a later fix landed (resolution now `fixed`/`resolving`)
+   *   is never echoed, so no row ever shows a reason next to a resolution that
+   *   never recorded one.
    *
-   *   ⛔ KNOWN GAP, deliberately left rather than half-closed: the two
-   *   NON-DEROGATORY explicit states (`superseded`/`duplicate`,
-   *   spec-the-defect-channel-cannot-be-honestly-maintained-an §M3) also record
-   *   a `reason` AND a pointer (`resolution.superseded_by` /
-   *   `resolution.duplicate_of`), and NEITHER is echoed here — this field is
-   *   named `rejection_reason` and a non-derogatory retirement is not a
-   *   rejection, so widening the condition would mislabel it. Closing the gap
-   *   properly means renaming this field to a state-neutral one and teaching
-   *   `IssueReportService.list`'s `ReceiptStatusRow` plus
-   *   `adapters/cli/commands/report-issue.ts`'s row render to carry the pointer
-   *   — that render is outside §M3's file anchors, so it is named here instead
-   *   of silently widened. Grep `rejection_reason` to find all three sites.
+   *   The formerly-`rejection_reason` field is now the state-neutral
+   *   {@link UpstreamIssueFacts.resolution_reason}, and the pointer the two
+   *   NON-DEROGATORY states carry is echoed as `resolution_pointer` — see that
+   *   interface's own field docs. The previously-recorded KNOWN GAP (a
+   *   rejection-named field could not carry a `superseded`/`duplicate` reason
+   *   without mislabelling it, and its pointer reached no read surface at all)
+   *   is CLOSED at all three sites this file's own note named:
+   *   `resolution_reason`/`resolution_pointer` here, `ReceiptStatusRow` in
+   *   `service/issue-report-service.ts`, and the row render in
+   *   `adapters/cli/commands/report-issue.ts` (a `Pointer` column). Grep
+   *   `resolution_pointer` to find all three.
    */
-  getResolution(
-    id: string,
-  ): Promise<
-    Result<{ status: DocStatus; resolution: IssueResolution; rejection_reason?: string } | null, LoreError>
-  >;
+  getResolution(id: string): Promise<Result<UpstreamIssueFacts | null, LoreError>>;
+  /**
+   * EVERY task in this corpus carrying `extra.issue_report`, each annotated with
+   * the facts {@link getResolution} computes for one — the read `lore issues`
+   * consumes (spec-the-defect-channel-cannot-be-honestly-maintained-an §M4).
+   *
+   * Added as a 6th op because §M4 makes `lore issues` read the CONFIGURED
+   * UPSTREAM by default, and none of the existing 5 can answer it:
+   * `listOpenAdhocDrafts` is narrowed to `status: "draft"` (so `--all`/`--resolved`
+   * would silently miss an archived report, whose computed resolution is exactly
+   * the `closed` state that listing exists to show) and carries no
+   * `slug`/`title`; `getResolution` answers for one already-known id, which is
+   * the question `report-issue --list` asks from its local receipt ledger, not
+   * the question a listing asks.
+   *
+   * ⛔ Resolution is computed by the SAME internal derivation `getResolution`
+   * uses, deliberately: the whole point of §M4 is that the two read surfaces stop
+   * disagreeing, so a second derivation here would re-open the defect one layer
+   * down.
+   *
+   * @returns every issue-report-carrying task, in store order — filtering by
+   *   `--open`/`--resolved`/`--all` is the CALLER's concern (the terminal-set
+   *   predicate lives in `service/issue-resolution.ts`, not in a transport op)
+   */
+  listIssueReports(): Promise<Result<UpstreamIssueReportRow[], LoreError>>;
   /** Closes the underlying SQLite connection. Idempotent-unsafe (do not call twice). */
   close(): void;
+}
+
+/**
+ * The computed facts about ONE upstream issue report, shared verbatim by
+ * {@link UpstreamPort.getResolution} (one id) and
+ * {@link UpstreamPort.listIssueReports} (every report).
+ */
+export interface UpstreamIssueFacts {
+  /** The issue task's OWN raw lifecycle status — a demoted debugging detail (D6), never the primary signal. */
+  readonly status: DocStatus;
+  /** The COMPUTED resolution (`computeIssueResolution`, consumed verbatim — never reimplemented here). */
+  readonly resolution: IssueResolution;
+  /**
+   * The reason recorded alongside an EXPLICIT terminal resolution — `rejected`
+   * and `wontfix` (derogatory) AND `superseded`/`duplicate` (non-derogatory,
+   * §M3) alike — or, for `rejected` only, the most recent review-workflow reject
+   * reason from the audit trail.
+   *
+   * State-NEUTRAL by name and by predicate: membership is tested against
+   * `EXPLICIT_TERMINAL_RESOLUTIONS` (the SSOT set), ⛔ never a hand-written state
+   * list, so a future explicit state cannot ship with its reason silently
+   * withheld. Absent when the computed resolution is not an explicit terminal
+   * state, so no row ever shows a reason beside a resolution that did not record
+   * one (AC-ICL-11, preserved).
+   */
+  readonly resolution_reason?: string;
+  /**
+   * The RESOLVED doc id the two NON-DEROGATORY states point at
+   * (`resolution.superseded_by` / `resolution.duplicate_of`), read via the state's
+   * own declared `extra_key` from `reachOfTerminalResolution` — ⛔ never a
+   * hardcoded key pair.
+   *
+   * Load-bearing rather than decorative: a non-derogatory terminal state whose
+   * pointer never reaches a read surface is operationally indistinguishable from
+   * a rejection, which is the defect §M3 exists to remove — so §M3's capability
+   * would be implemented and unreachable without this field.
+   */
+  readonly resolution_pointer?: string;
+  /** §M6 ORDERING-ONLY severity, as the FILER declared it. Absent = NOT DECLARED. */
+  readonly severity?: IssueSeverity;
+  /** §M6 ORDERING-ONLY category, as the FILER declared it. Absent = NOT DECLARED. */
+  readonly category?: string;
+}
+
+/** One row of {@link UpstreamPort.listIssueReports} — the shared facts plus the identity a listing renders. */
+export interface UpstreamIssueReportRow extends UpstreamIssueFacts {
+  readonly id: string;
+  readonly slug: string;
+  readonly title: string;
+  /** The report's raw `extra` — the caller reads `reporter_project`/`reported_at` off it with its own defensive reader. */
+  readonly extra: Record<string, unknown>;
 }
 
 /**
@@ -203,10 +291,10 @@ export interface UpstreamPort {
  * module-boundary reasoning: a malformed/legacy `extra` degrades to
  * "no reason", never throws; duplicated rather than imported since each
  * call site reads a different key). `lore issue resolve` is the sole writer
- * of this field (`adapters/cli/commands/issue.ts`, D3). `getResolution`
+ * of this field (`adapters/cli/commands/issue.ts`, D3). {@link deriveIssueFacts}
  * (below) is this reader's ONLY caller — it merges this D3-explicit source
  * with the D2 audit-log reject-reason fallback into the SAME single
- * `rejection_reason` output field, preferring this one when both exist.
+ * `resolution_reason` output field, preferring this one when both exist.
  *
  * @param extra - the issue task's raw `extra` field
  * @returns the recorded reason string when `extra.issue_report.resolution.reason`
@@ -214,13 +302,53 @@ export interface UpstreamPort {
  *   no explicit terminal state was ever recorded)
  */
 function readResolutionReason(extra: unknown): string | undefined {
+  return readResolutionStringField(extra, "reason");
+}
+
+/**
+ * Defensive reader for ONE string field inside `extra.issue_report.resolution` —
+ * the guard shape {@link readResolutionReason} used to inline, factored out
+ * because §M3's pointer lives in a SIBLING key of the same object and reading it
+ * with a second hand-copied guard chain is how the two would drift.
+ *
+ * @param extra - the issue task's raw `extra` field (untyped storage)
+ * @param field - the key to read off `extra.issue_report.resolution`
+ * @returns the string value when present and well-shaped; `undefined` otherwise
+ */
+function readResolutionStringField(extra: unknown, field: string): string | undefined {
   if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return undefined;
   const issueReport = (extra as Record<string, unknown>)["issue_report"];
   if (issueReport === null || typeof issueReport !== "object" || Array.isArray(issueReport)) return undefined;
   const resolution = (issueReport as Record<string, unknown>)["resolution"];
   if (resolution === null || typeof resolution !== "object" || Array.isArray(resolution)) return undefined;
-  const reason = (resolution as Record<string, unknown>)["reason"];
-  return typeof reason === "string" ? reason : undefined;
+  const value = (resolution as Record<string, unknown>)[field];
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * The §M3 pointer for an EXPLICIT terminal state, read from the key that state
+ * itself DECLARES (`reachOfTerminalResolution(state).pointer.extra_key`).
+ *
+ * ⛔ The key is never hardcoded and the two states are never enumerated here: a
+ * third pointer-carrying state added to the reach table surfaces automatically,
+ * whereas a `state === "superseded" ? "superseded_by" : "duplicate_of"` ternary
+ * would inherit one state's key for the new one — the exact fall-through
+ * `TerminalResolutionPointer.names` was introduced to prevent.
+ *
+ * @param extra - the issue task's raw `extra` field
+ * @param state - the EXPLICIT terminal state the resolution computed to
+ * @returns the resolved pointer doc id, or `undefined` for a state that declares
+ *   no pointer (`rejected`/`wontfix`) or a record that carries none
+ */
+function readResolutionPointer(extra: unknown, state: ExplicitTerminalResolution): string | undefined {
+  const pointer = reachOfTerminalResolution(state).pointer;
+  if (pointer === null) return undefined;
+  return readResolutionStringField(extra, pointer.extra_key);
+}
+
+/** Is `resolution` a state a caller may have recorded a reason (and possibly a pointer) on? Keyed on the SSOT set, never a literal list. */
+function isExplicitTerminal(resolution: IssueResolution): resolution is ExplicitTerminalResolution {
+  return (EXPLICIT_TERMINAL_RESOLUTIONS as ReadonlySet<string>).has(resolution);
 }
 
 /**
@@ -357,6 +485,83 @@ export function buildUpstreamContext(
     return wrapStoreError(error);
   }
 
+  /**
+   * THE single derivation of {@link UpstreamIssueFacts} for one already-fetched
+   * issue doc — consumed by BOTH `getResolution` (one id) and `listIssueReports`
+   * (every report).
+   *
+   * ⛔ Shared rather than duplicated because §M4's whole purpose is that the two
+   * issue read surfaces stop disagreeing: `lore issues` reads it through
+   * `listIssueReports`, `lore report-issue --list` through `getResolution`, and a
+   * second derivation would re-open the measured 0-vs-12 defect one layer down
+   * from where it was fixed. (It also closes a pre-existing asymmetry: the
+   * pre-§M4 `commands/issues.ts` computed resolution with NO review-rejection
+   * lookback, so a review-rejected report read `open` there and `rejected` on
+   * `--list` — same corpus, two answers.)
+   *
+   * @param doc - the issue task, already fetched (id/slug/title/status/extra)
+   * @param ctx - that doc's `resolves` in-edges and their source docs, from the
+   *   BATCHED `getResolvesInEdgesForIssues` read
+   * @returns the computed facts; `err(...)` only when the audit-trail read fails
+   *   (⛔ never degraded to "no rejection on record" — that would silently
+   *   downgrade a rejected report to `open`)
+   */
+  async function deriveIssueFacts(
+    doc: { readonly id: string; readonly status: DocStatus; readonly extra: Record<string, unknown> },
+    ctx: { readonly resolvesInEdges: ReadonlyArray<{ from_id: string }>; readonly sourceDocs: ReadonlyArray<{ id: string; status: DocStatus }> },
+  ): Promise<Result<UpstreamIssueFacts, LoreError>> {
+    // reason: D2's review-rejection precedence step needs the audit trail
+    // directly — ReviewService.reject (SPEC-005) never transitions a doc
+    // OFF `draft`, so `doc.status` alone can't distinguish "never
+    // reviewed" from "rejected back to draft". `queryAudit` orders by
+    // `timestamp DESC`, so index 0 (limit:1) is the MOST RECENT reject,
+    // correctly superseding an earlier one if the doc was rejected more
+    // than once — restores the exact lookback T5's `getDocStatus` used
+    // before D6 replaced it with this method (see this port's own
+    // `getResolution` JSDoc, "P2 RESTORED").
+    const auditResult = await store.queryAudit({ doc_id: doc.id, action: "reject", limit: 1 });
+    if (!auditResult.ok) return auditResult;
+    const latestReject = auditResult.value[0];
+
+    const resolution = computeIssueResolution(
+      { extra: doc.extra, status: doc.status },
+      ctx.resolvesInEdges,
+      ctx.sourceDocs,
+      latestReject !== undefined,
+    );
+
+    // ONE unified reason field regardless of origin: an explicit D3 write wins
+    // (mirrors computeIssueResolution's own precedence), else fall back to the
+    // audit-log reject reason — but ONLY when the computed resolution is itself an
+    // EXPLICIT terminal state, so a stale reason from BEFORE a later fix landed is
+    // never echoed next to a `fixed`/`resolving`/`closed`/`open` row (AC-ICL-11:
+    // no row ever shows a reason beside a resolution that isn't one).
+    //
+    // ⛔ The membership test is `EXPLICIT_TERMINAL_RESOLUTIONS`, not the
+    // `rejected`/`wontfix` pair this line used to name literally: that literal is
+    // exactly why §M3's two non-derogatory states landed with their reason AND
+    // their pointer invisible on every read surface. The audit fallback stays
+    // `rejected`-only — a review-workflow rejection can reach no other state.
+    const explicitState = isExplicitTerminal(resolution) ? resolution : undefined;
+    const auditReason = latestReject?.details?.["reason"];
+    const reason =
+      explicitState === undefined
+        ? undefined
+        : (readResolutionReason(doc.extra) ??
+          (resolution === "rejected" && typeof auditReason === "string" ? auditReason : undefined));
+    const pointer = explicitState === undefined ? undefined : readResolutionPointer(doc.extra, explicitState);
+    const triage = readIssueTriageLabels(doc.extra);
+
+    return ok({
+      status: doc.status,
+      resolution,
+      ...(reason !== undefined ? { resolution_reason: reason } : {}),
+      ...(pointer !== undefined ? { resolution_pointer: pointer } : {}),
+      ...(triage.severity !== undefined ? { severity: triage.severity } : {}),
+      ...(triage.category !== undefined ? { category: triage.category } : {}),
+    });
+  }
+
   const port: UpstreamPort = {
     async resolveRootDoc() {
       const result = await store.findMany({ type: "prd" });
@@ -399,44 +604,42 @@ export function buildUpstreamContext(
       if (!edgesResult.ok) return edgesResult;
       const ctx = edgesResult.value.get(doc.id) ?? { resolvesInEdges: [], sourceDocs: [] };
 
-      // reason: D2's review-rejection precedence step needs the audit trail
-      // directly — ReviewService.reject (SPEC-005) never transitions a doc
-      // OFF `draft`, so `doc.status` alone can't distinguish "never
-      // reviewed" from "rejected back to draft". `queryAudit` orders by
-      // `timestamp DESC`, so index 0 (limit:1) is the MOST RECENT reject,
-      // correctly superseding an earlier one if the doc was rejected more
-      // than once — restores the exact lookback T5's `getDocStatus` used
-      // before D6 replaced it with this method (see this port's own
-      // `getResolution` JSDoc, "P2 RESTORED").
-      const auditResult = await store.queryAudit({ doc_id: doc.id, action: "reject", limit: 1 });
-      if (!auditResult.ok) return auditResult;
-      const latestReject = auditResult.value[0];
+      const factsResult = await deriveIssueFacts(doc, ctx);
+      if (!factsResult.ok) return factsResult;
+      return ok(factsResult.value);
+    },
 
-      const resolution = computeIssueResolution(
-        { extra: doc.extra, status: doc.status },
-        ctx.resolvesInEdges,
-        ctx.sourceDocs,
-        latestReject !== undefined,
-      );
+    async listIssueReports() {
+      // Every task, EVERY status — not `status: "draft"` like
+      // `listOpenAdhocDrafts`: a report archived upstream computes `closed`, and
+      // narrowing to draft here would make `--all`/`--resolved` silently omit the
+      // very rows those flags exist to show.
+      const tasksResult = await store.findMany({ type: "task" });
+      if (!tasksResult.ok) return tasksResult;
+      const issueTasks = tasksResult.value.filter((task) => hasIssueReport(task.extra));
+      if (issueTasks.length === 0) return ok([]);
 
-      // ONE unified reason field regardless of origin: an explicit D3 write
-      // wins (mirrors computeIssueResolution's own precedence), else fall
-      // back to the audit-log reject reason — but ONLY when the computed
-      // resolution is ITSELF a rejection, so a stale reason from BEFORE a
-      // later fix landed is never echoed next to a `fixed`/`resolving`/
-      // `closed`/`open` row (AC-ICL-11: no row ever shows a rejection reason
-      // beside a resolution that isn't actually a rejection).
-      const auditReason = latestReject?.details?.["reason"];
-      const reason =
-        resolution === "rejected" || resolution === "wontfix"
-          ? (readResolutionReason(doc.extra) ?? (typeof auditReason === "string" ? auditReason : undefined))
-          : undefined;
+      // ONE batched resolves-edge read for all N reports (`getResolvesInEdgesForIssues`
+      // is D7's cross-doc read-orchestration locus for exactly this join), replacing
+      // the N per-doc `CorpusService.get()` calls the pre-§M4 `commands/issues.ts`
+      // made against its own corpus.
+      const edgesResult = await corpusService.getResolvesInEdgesForIssues(issueTasks.map((t) => t.id));
+      if (!edgesResult.ok) return edgesResult;
 
-      return ok({
-        status: doc.status,
-        resolution,
-        ...(reason !== undefined ? { rejection_reason: reason } : {}),
-      });
+      const rows: UpstreamIssueReportRow[] = [];
+      for (const task of issueTasks) {
+        const ctx = edgesResult.value.get(task.id) ?? { resolvesInEdges: [], sourceDocs: [] };
+        const factsResult = await deriveIssueFacts(task, ctx);
+        if (!factsResult.ok) return factsResult;
+        rows.push({
+          id: task.id,
+          slug: task.slug,
+          title: task.title,
+          extra: task.extra,
+          ...factsResult.value,
+        });
+      }
+      return ok(rows);
     },
 
     close() {

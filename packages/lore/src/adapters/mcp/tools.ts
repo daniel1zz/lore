@@ -180,6 +180,7 @@ import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@
 import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs } from "@lore/core";
 import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFileAnchors } from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
+import { ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
 import { resolveSubTypeFilter } from "../../service/corpus-service.js";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
@@ -877,6 +878,16 @@ export const LoreRequirementAddSchema = z.object({
  * explicitly; the CLI's `resolveActor` fallback chain does not apply here).
  * No `list` field on this surface — the CLI's `--list` (live-status join over
  * the local receipt log) has no MCP counterpart in this task's scope.
+ *
+ * §M6 (spec-the-defect-channel-cannot-be-honestly-maintained-an) adds the two
+ * ORDERING-ONLY triage labels. They are declared HERE as well as on the CLI
+ * deliberately: an agent surface that could not declare severity would push every
+ * agent-filed report into the "no label" bucket while human CLI filings carried
+ * one, making the column's meaning depend on which surface filed the row. ⛔ The
+ * severity vocabulary is `ISSUE_SEVERITIES` (the shared SSOT), never a re-typed
+ * `z.enum([...])` literal list, and ⛔ neither label changes any admission
+ * decision on this surface either — `IssueReportService.report`'s cap narrowing
+ * takes no severity argument at all.
  */
 export const LoreReportIssueSchema = z.object({
   by: z.string().min(1),
@@ -885,6 +896,8 @@ export const LoreReportIssueSchema = z.object({
   expected: z.string().min(1),
   actual: z.string().min(1),
   repro_command: z.string().optional(),
+  severity: z.enum(ISSUE_SEVERITIES).optional(),
+  category: z.string().min(1).max(ISSUE_CATEGORY_MAX_LENGTH).optional(),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -2697,6 +2710,11 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
           actual: args.actual,
           by: args.by,
           ...(args.repro_command !== undefined ? { repro_command: args.repro_command } : {}),
+          // §M6 ordering-only labels — key OMITTED when the caller declared none,
+          // so an undeclared label stays absent from `extra.issue_report` rather
+          // than becoming a fabricated default (same contract the CLI upholds).
+          ...(args.severity !== undefined ? { severity: args.severity } : {}),
+          ...(args.category !== undefined ? { category: args.category } : {}),
         },
         cfg,
       );

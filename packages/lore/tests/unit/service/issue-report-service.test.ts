@@ -69,7 +69,7 @@ interface LocalUpstreamPort {
    */
   getResolution(
     id: string,
-  ): Promise<Result<{ status: string; resolution: string; rejection_reason?: string } | null, LoreError>>;
+  ): Promise<Result<{ status: string; resolution: string; resolution_reason?: string } | null, LoreError>>;
   close(): void;
 }
 

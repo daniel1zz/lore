@@ -41,7 +41,7 @@
  * `packages/lore/`), so the fix (teaching `isOpenIssueReportTask` to also
  * consult the audit trail for a prior "reject" action on the doc, mirroring
  * how `report-issue --list`'s `UpstreamPort.getDocStatus` already derives
- * `rejection_reason` from that SAME audit trail rather than from
+ * `resolution_reason` from that SAME audit trail rather than from
  * `doc.status`) is reported here, not applied. The AC-074-3 test below
  * asserts the LITERAL SPEC-074 wording ("drops the badge to 0") and will
  * currently, honestly FAIL on that specific expectation — the reason-echo
@@ -418,11 +418,11 @@ test.describe("SPEC-074 dashboard Issues triage", () => {
       // badge-exclusion gap below (see this file's header note).
       const listAfterReject = runLoreJson<{
         ok: true;
-        data: { rows: Array<{ upstream_doc_id: string; status: string; rejection_reason?: string }> };
+        data: { rows: Array<{ upstream_doc_id: string; status: string; resolution_reason?: string }> };
       }>(["report-issue", "--list"], consumerRoot);
       const rejectedRow = listAfterReject.data.rows.find((r) => r.upstream_doc_id === rejectId);
       expect(rejectedRow).toBeTruthy();
-      expect(rejectedRow?.rejection_reason).toBe(rejectReasonText);
+      expect(rejectedRow?.resolution_reason).toBe(rejectReasonText);
 
       // KNOWN GAP (see this file's header note): `isOpenIssueReportTask`
       // (packages/lore/src/adapters/http/issue-reports-routes.ts) filters
