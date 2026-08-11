@@ -5484,6 +5484,90 @@
     "01KZR4QHE04PAD945D5TS59KM0": {
       "human_id": "KN-422",
       "file_path": "docs/requirements/knowledge/KN-422-handoff-agent-main-orchestrator.md"
+    },
+    "01KZR9ZW8VZEF98E1MQ8XF0D1X": {
+      "human_id": "SPEC-138",
+      "file_path": "docs/requirements/spec/SPEC-138-governance-defaults-must-ship-and-every-recorded-g.md"
+    },
+    "01KZR5AD3V893544EQBCBB5QZ5": {
+      "human_id": "SPEC-135",
+      "file_path": "docs/requirements/spec/SPEC-135-mirror-identifier-ssot-one-writer-for-export-index.md"
+    },
+    "01KZR6EHYEQMVYVXDR3FPHXSXE": {
+      "human_id": "SPEC-136",
+      "file_path": "docs/requirements/spec/SPEC-136-oracle-exclusivity-in-a-shared-checkout-a-mirror-c.md"
+    },
+    "01KZR7GP6C8AHME7XVYMW4SGW7": {
+      "human_id": "SPEC-137",
+      "file_path": "docs/requirements/spec/SPEC-137-judgment-surfaces-must-verify-before-they-certify.md"
+    },
+    "01KZRB6J14VQPJDKF5D259XS95": {
+      "human_id": "KN-423",
+      "file_path": "docs/requirements/knowledge/KN-423-handoff-agent-main-orchestrator.md"
+    },
+    "01KZRB3KDG8WRDDQED1YCAGD48": {
+      "human_id": "KN-424",
+      "file_path": "docs/requirements/knowledge/KN-424-eight-findings-from-landing-four-governance-specs.md"
+    },
+    "01KZRA6287AGNE3AHEPAWV8XZR": {
+      "human_id": "PLAN-122",
+      "file_path": "docs/requirements/plan/PLAN-122-land-governance-distribution-shipped-defaults-that.md"
+    },
+    "01KZR7P85KNA5SVEV6CJGHN6E6": {
+      "human_id": "PLAN-123",
+      "file_path": "docs/requirements/plan/PLAN-123-land-judgment-verification-path-checked-assess-fin.md"
+    },
+    "01KZR6QS8HQPE1VMAF8MXVHCCX": {
+      "human_id": "PLAN-124",
+      "file_path": "docs/requirements/plan/PLAN-124-land-oracle-exclusivity-a-mirror-check-that-can-fa.md"
+    },
+    "01KZR64PCQF99XE5FBK3HHC82K": {
+      "human_id": "PLAN-125",
+      "file_path": "docs/requirements/plan/PLAN-125-land-mirror-identifier-ssot-a-branded-human-id-an.md"
+    },
+    "01KZR7Q8KKAV70RWH46B773VEH": {
+      "human_id": "TASK-655",
+      "file_path": "docs/requirements/task/TASK-655-verify-assess-finding-paths-against-the-assessed-c.md"
+    },
+    "01KZR66AVXD59BCRMHDA3885ME": {
+      "human_id": "TASK-656",
+      "file_path": "docs/requirements/task/TASK-656-make-mirrorhumanid-a-nominal-type-on.md"
+    },
+    "01KZR7Q8YK2KW6RTCB313NW0S1": {
+      "human_id": "TASK-657",
+      "file_path": "docs/requirements/task/TASK-657-resolve-verifyfalsifier-s-execution-root-through-s.md"
+    },
+    "01KZR6RN5T63QRDKRZQ46JPQS0": {
+      "human_id": "TASK-658",
+      "file_path": "docs/requirements/task/TASK-658-extract-the-repo-corpus-pollution-guard-into-a-pur.md"
+    },
+    "01KZRA72PP20FX42JEW968N9DZ": {
+      "human_id": "TASK-659",
+      "file_path": "docs/requirements/task/TASK-659-build-the-gap-namespace-checker-and-the-unowned-ga.md"
+    },
+    "01KZRA72GC67YDZ1BN1CBMHWVN": {
+      "human_id": "TASK-660",
+      "file_path": "docs/requirements/task/TASK-660-collapse-the-two-divergent-unconfigured-upstream-r.md"
+    },
+    "01KZRA726P282SST6Z658Z0KQF": {
+      "human_id": "TASK-661",
+      "file_path": "docs/requirements/task/TASK-661-raise-capture-timeout-ms-and-max-diff-chars-to-the.md"
+    },
+    "01KZR6RNBY9C8RER1PS0WP15PE": {
+      "human_id": "TASK-662",
+      "file_path": "docs/requirements/task/TASK-662-add-the-gitignored-scratch-probe-namespace-asserte.md"
+    },
+    "01KZR66AGMR0Y1VKY0H6S20PTX": {
+      "human_id": "TASK-663",
+      "file_path": "docs/requirements/task/TASK-663-compose-the-step-3-export-index-reconcile-via.md"
+    },
+    "01KZR66B2EZFECVKSQQ55AARXH": {
+      "human_id": "TASK-664",
+      "file_path": "docs/requirements/task/TASK-664-assert-the-mirror-drift-check-writes-nothing-runch.md"
+    },
+    "01KZR6RNJA6HT5H21WAXJ8FABF": {
+      "human_id": "TASK-665",
+      "file_path": "docs/requirements/task/TASK-665-make-the-ac-fr-10-mirror-oracle-drive-the-read-onl.md"
     }
   }
 }
