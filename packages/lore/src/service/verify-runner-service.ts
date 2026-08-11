@@ -395,33 +395,67 @@ export interface FalsifierRunResult {
 }
 
 /**
- * Creates an isolated SCRATCH git worktree off `repoRoot`'s current `HEAD`
- * (D3 — "attested reds run in an isolated worktree, never the working
- * tree"). Real IO: shells `git worktree add --detach` via `execFileSync`.
- * Deliberately NOT injectable (unlike this class's `executor`/`getPlanBundle`
- * constructor ports) — the isolation guarantee AC-FR-3 exists to prove is
- * exactly that this is REAL, never a test double standing in for it; a fake
- * port here would let the whole mechanism ship untested against the one
- * property that matters.
+ * Options for {@link createFalsifierScratchWorktree} — the AC-JV-3 hook that
+ * lets a resolved-worktree caller carry its uncommitted state into the
+ * scratch copy.
+ */
+export interface CreateFalsifierScratchWorktreeOpts {
+  /**
+   * `true` iff `repoRoot` is itself a git worktree whose UNCOMMITTED (tracked,
+   * modified) changes the falsifier's command must observe (AC-JV-3 — a
+   * falsifier run's execution root has been resolved to a linked worktree via
+   * `resolveVerifyExecutionRoot`/SPEC-063, not the corpus root). `HEAD` names
+   * a COMMIT, never the working tree or index, so branching off it alone can
+   * never see a modification nobody has committed yet — this flag instead
+   * snapshots `repoRoot`'s dirty state via `git stash create` (a PLUMBING
+   * command that returns a throwaway commit object WITHOUT touching the
+   * working tree, the index, or the stash ref list — unlike `git stash push`/
+   * `save`, so `repoRoot` itself is never mutated) and branches the scratch
+   * worktree off THAT commit instead. `git stash create` prints nothing on a
+   * clean tree (nothing to stash) — that case falls back to `HEAD`, which is
+   * already the correct (and only) state a clean worktree has.
+   *
+   * Omitted or `false` — every caller before AC-JV-3, and every
+   * `mode: "corpus_root"` resolution (the ordinary main-checkout path) — is
+   * BYTE IDENTICAL to this function's pre-AC-JV-3 behavior: `git worktree add
+   * --detach <dir> HEAD`, never shelling out to `git stash` at all.
+   */
+  captureUncommitted?: boolean;
+}
+
+/**
+ * Creates an isolated SCRATCH git worktree off `repoRoot`'s current `HEAD` —
+ * or, when {@link CreateFalsifierScratchWorktreeOpts.captureUncommitted} is
+ * `true`, off a `git stash create` snapshot of `repoRoot`'s own uncommitted
+ * state (AC-JV-3; see that option's own JSDoc for why) — never the working
+ * tree itself (D3 — "attested reds run in an isolated worktree, never the
+ * working tree"). Real IO: shells `git worktree add --detach` (and, when
+ * requested, `git stash create` first) via `execFileSync`. Deliberately NOT
+ * injectable (unlike this class's `executor`/`getPlanBundle` constructor
+ * ports) — the isolation guarantee AC-FR-3 exists to prove is exactly that
+ * this is REAL, never a test double standing in for it; a fake port here
+ * would let the whole mechanism ship untested against the one property that
+ * matters.
  *
- * ⛔ NAMED SCOPE LIMIT (measured 2026-08-10, stated rather than hidden): this
- * branches from `repoRoot`'s `HEAD` — i.e. `VerifyRunnerService.config.repoRoot`,
- * which for an agent running `lore verify --falsify` from INSIDE a linked git
- * worktree resolves to the MAIN checkout (SPEC-063's `findLoreDbPath` fallback,
- * since a linked worktree carries no `.lore/` of its own), NOT that agent's own
- * worktree branch/uncommitted changes. Unlike the ordinary green-path pipeline
- * (`_runVerification`), `verifyFalsifier` does NOT consult
- * `opts.executionRoot`/`resolveVerifyExecutionRoot` (SPEC-063) at all — an
- * agent whose falsifiable code lives only on their own linked worktree (this
- * task's own dogfood run used a wholly separate throwaway repo, which sidesteps
- * this gap entirely rather than closing it) must COMMIT to a ref `config.repoRoot`
- * can resolve before `--falsify` will see it. A real integration with SPEC-063's
- * resolution is a NAMED follow-up, not silently assumed solved.
+ * Resolved 2026-08-11 (AC-JV-3, spec-judgment-surfaces-must-verify-before-they-certify-machine
+ * §D5): before this, `_runFalsifier` always passed `VerifyRunnerService.config.repoRoot` here
+ * unconditionally — the MAIN checkout whenever the caller stood inside a linked git worktree
+ * (SPEC-063's `findLoreDbPath` fallback, since a linked worktree carries no `.lore/` of its own)
+ * — so a falsifier run from a worktree silently mutated and compiled the main checkout's code,
+ * never the caller's own worktree branch or uncommitted changes. `_runFalsifier` now resolves the
+ * execution root through `resolveVerifyExecutionRoot` (SPEC-063) first and passes ITS `root` here,
+ * with `captureUncommitted: true` iff that resolution's `mode` is `"worktree"` — see
+ * `falsifier-execution-root.bun.test.ts` for the oracle (positive half PLUS the mandatory
+ * `config.repoRoot` reverse control).
  *
  * @param repoRoot - The git repository to branch a scratch worktree from
- *   (`VerifyRunnerService`'s own `config.repoRoot` in production).
+ *   (`_runFalsifier`'s resolved execution root — `VerifyRunnerService.config.repoRoot` when no
+ *   worktree-aware resolution was supplied, a caller's linked worktree root otherwise).
+ * @param opts - See {@link CreateFalsifierScratchWorktreeOpts}. Omitted = today's default
+ *   `HEAD`-only behavior.
  * @returns The created worktree's paths, or `STORE_ERROR` when the scratch
- *   temp directory can't be created, or `git worktree add` itself fails (a
+ *   temp directory can't be created, the uncommitted-state snapshot itself fails (a
+ *   non-git `repoRoot`, a missing `git` binary), or `git worktree add` itself fails (a
  *   non-git `repoRoot`, a missing `git` binary, an unclean `HEAD`, etc.) —
  *   the caller never proceeds to apply a mutation without a confirmed-real
  *   worktree.
@@ -429,9 +463,13 @@ export interface FalsifierRunResult {
  * @example
  * const result = createFalsifierScratchWorktree("/path/to/repo");
  * // result.ok && result.value.worktreeDir → e.g. "/tmp/lore-attested-red-xxxx/wt"
+ * @example
+ * // AC-JV-3 — branches off a linked worktree's UNCOMMITTED state instead of its last commit.
+ * const result = createFalsifierScratchWorktree("/path/to/worktree", { captureUncommitted: true });
  */
 export function createFalsifierScratchWorktree(
   repoRoot: string,
+  opts?: CreateFalsifierScratchWorktreeOpts,
 ): Result<FalsifierScratchWorktree, LoreError> {
   let parentDir: string;
   try {
@@ -447,8 +485,42 @@ export function createFalsifierScratchWorktree(
   // target is a NOT-YET-EXISTING child of it (`wt`), never `parentDir`
   // directly (git would refuse an existing, non-empty directory).
   const worktreeDir = join(parentDir, "wt");
+
+  // AC-JV-3 — resolve which commit-ish to branch the scratch worktree from.
+  // Default "HEAD" is BYTE IDENTICAL to pre-AC-JV-3 behavior; `captureUncommitted`
+  // swaps it for a `git stash create` snapshot ONLY when the caller asked for one
+  // (see this function's own JSDoc + `CreateFalsifierScratchWorktreeOpts`).
+  let checkoutRef = "HEAD";
+  if (opts?.captureUncommitted === true) {
+    try {
+      const stashSha = execFileSync("git", ["stash", "create"], {
+        cwd: repoRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+        .toString()
+        .trim();
+      // reason: empty stdout means "nothing to stash" (a clean worktree) — NOT
+      // an error; `checkoutRef` stays "HEAD", the correct (and only) state a
+      // clean worktree has. `git stash create` never mutates `repoRoot` either
+      // way (see the JSDoc above for why it's safe to call unconditionally).
+      if (stashSha.length > 0) {
+        checkoutRef = stashSha;
+      }
+    } catch (error) {
+      try {
+        rmSync(parentDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort cleanup of an empty scratch dir */
+      }
+      return err({
+        code: "STORE_ERROR",
+        message: `attested-red runner could not snapshot "${repoRoot}"'s uncommitted state via "git stash create": ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }
+
   try {
-    execFileSync("git", ["worktree", "add", "--detach", worktreeDir, "HEAD"], {
+    execFileSync("git", ["worktree", "add", "--detach", worktreeDir, checkoutRef], {
       cwd: repoRoot,
       stdio: "pipe",
     });
@@ -1397,12 +1469,20 @@ export class VerifyRunnerService {
    *   `verifyPlan` uses).
    * @param acId - The declared criterion id to falsify (its `verify.falsifier`
    *   must be present — see `lore ac add/set --falsifier-*`).
-   * @param opts - `{ explicitTaskIdOrSlug?, by, nowIso }`. Deliberately NOT
-   *   the full `VerifyPlanOpts` — no M2 command-provenance gate applies here:
-   *   a falsifier run executes a MUTATED tree every time, so "don't
-   *   re-prompt for a command already seen" (M2's whole premise) doesn't
-   *   hold; no execution-root override either, since the scratch worktree
-   *   IS this run's execution root by construction.
+   * @param opts - `{ explicitTaskIdOrSlug?, by, nowIso, executionRoot? }`.
+   *   Deliberately NOT the full `VerifyPlanOpts` — no M2 command-provenance gate
+   *   applies here: a falsifier run executes a MUTATED tree every time, so "don't
+   *   re-prompt for a command already seen" (M2's whole premise) doesn't hold.
+   *   `executionRoot` IS accepted (AC-JV-3, spec-judgment-surfaces-must-verify-before-they-certify-machine
+   *   §D5) — the SAME pre-resolved `resolveVerifyExecutionRoot(...)` result
+   *   `VerifyPlanOpts.executionRoot` carries, threaded to {@link _runFalsifier} so
+   *   the scratch worktree branches off the CALLER's resolved root (and, when that
+   *   root is a linked worktree, off its uncommitted state — see
+   *   {@link createFalsifierScratchWorktree}) rather than unconditionally
+   *   `config.repoRoot`. Omitted (e.g. an MCP caller doing no worktree-aware
+   *   resolution) falls back to `{root: config.repoRoot, mode: "corpus_root"}` —
+   *   byte-identical to this method's pre-AC-JV-3 behavior (the REGRESSION half of
+   *   AC-JV-3's own oracle).
    * @returns {@link FalsifierRunResult} on a genuine, recorded attested red.
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (no parent spec / no structured
    *   ACs / unknown acId / not script-mode / no declared falsifier / an exit
@@ -1414,7 +1494,12 @@ export class VerifyRunnerService {
   async verifyFalsifier(
     planIdOrSlug: string,
     acId: string,
-    opts: { explicitTaskIdOrSlug?: string; by: string; nowIso: string },
+    opts: {
+      explicitTaskIdOrSlug?: string;
+      by: string;
+      nowIso: string;
+      executionRoot?: VerifyExecutionRootResolution;
+    },
   ): Promise<Result<FalsifierRunResult, LoreError>> {
     // ① bundle — same port `verifyPlan` uses.
     const bundleResult = await this.getPlanBundle(planIdOrSlug);
@@ -1499,7 +1584,9 @@ export class VerifyRunnerService {
    * ALL of that resolution already succeeded (criterion is script-mode and
    * carries `falsifier`, target task resolved).
    *
-   *   3. {@link createFalsifierScratchWorktree} off `config.repoRoot`.
+   *   3. {@link createFalsifierScratchWorktree} off the resolved execution root
+   *      (AC-JV-3 — `opts.executionRoot?.root ?? config.repoRoot`, WITH
+   *      `captureUncommitted: true` iff that resolution's `mode` is `"worktree"`).
    *   4. {@link applyFalsifierMutation} inside the scratch worktree.
    *   5. Spawn the AC's `verify.command` from the SCRATCH worktree (via the
    *      SAME injected `executor` port `verifyPlan` uses — `buildVerifySpawnSpec`
@@ -1523,10 +1610,21 @@ export class VerifyRunnerService {
     criterion: ScriptAcceptanceCriterion,
     falsifier: AcFalsifier,
     task: DocRecord,
-    opts: { by: string; nowIso: string },
+    opts: { by: string; nowIso: string; executionRoot?: VerifyExecutionRootResolution },
   ): Promise<Result<FalsifierRunResult, LoreError>> {
-    const repoRoot = this.config.repoRoot;
-    const createResult = createFalsifierScratchWorktree(repoRoot);
+    // AC-JV-3 (spec-judgment-surfaces-must-verify-before-they-certify-machine §D5) —
+    // resolved the SAME "opts value or fall back to config.repoRoot" shape
+    // `_runVerification`'s own `resolvedExecutionRoot` uses. A caller that supplies
+    // NO resolution (every pre-AC-JV-3 caller, and any MCP caller today) gets
+    // `mode: "corpus_root"` here — BYTE IDENTICAL to this method's behavior before
+    // this fix (the REGRESSION half of AC-JV-3's own oracle; see
+    // `falsifier-execution-root.bun.test.ts`).
+    const resolvedExecutionRoot: VerifyExecutionRootResolution =
+      opts.executionRoot ?? { root: this.config.repoRoot, mode: "corpus_root" };
+    const repoRoot = resolvedExecutionRoot.root;
+    const createResult = createFalsifierScratchWorktree(repoRoot, {
+      captureUncommitted: resolvedExecutionRoot.mode === "worktree",
+    });
     if (!createResult.ok) return createResult;
     const scratch = createResult.value;
 
