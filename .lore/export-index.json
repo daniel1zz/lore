@@ -5760,6 +5760,10 @@
     "01KZSXZCGRC8X4CHXHZ87H5XXB": {
       "human_id": "TASK-693",
       "file_path": "docs/requirements/task/TASK-693-the-wire-contract-mirror-comment-in-issue-reports.md"
+    },
+    "01KZT5Y9DFMWCHMX9HDZJYNA9V": {
+      "human_id": "KN-438",
+      "file_path": "docs/requirements/knowledge/KN-438-evicted-from-the-cli-adapter-module-doc-the-claim.md"
     }
   }
 }

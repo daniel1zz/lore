@@ -117,6 +117,11 @@ import {
   withValidityStatus,
   type WithValidityStatus,
 } from "./validity-service.js";
+import {
+  checkForeignCorpusWrite,
+  foreignCorpusWriteRefusalError,
+  type ForeignCorpusWriteContext,
+} from "./foreign-corpus-write-guard.js";
 
 /**
  * `checkpointRegistry`'s `"spec-create"` checkpoint always produces a `"spec"` doc
@@ -698,6 +703,19 @@ interface PrdSyncAttributionTargets {
 
 export class CorpusService {
   private readonly telemetry: Telemetry;
+  /**
+   * The foreign-corpus-write guard's ambient facts (spec-corpus-resolution-
+   * carries-provenance-and-a-foreign-write §D5) — MUTABLE, set post-
+   * construction via {@link setForeignCorpusWriteContext}, NEVER threaded
+   * through the constructor. Defaults to `{provenance: null, enabled: true}`:
+   * `provenance: null` makes `checkForeignCorpusWrite` ALWAYS allow (see that
+   * function's own decision table), so every one of this codebase's ~3700
+   * bare `new CorpusService(store)` unit-test constructions — which never
+   * call the setter — stays byte-identical to pre-guard behavior. Only
+   * `adapters/cli/loader.ts`'s `loadLoreApp()` calls the setter, with the
+   * REAL resolved provenance for the current CLI process.
+   */
+  private foreignCorpusWriteContext: ForeignCorpusWriteContext = { provenance: null, enabled: true };
 
   /**
    * @param store - Storage abstraction (SQLiteStore, TursoStore, or InMemoryStore)
@@ -745,6 +763,40 @@ export class CorpusService {
     private readonly ledgerAutoApprove?: boolean,
   ) {
     this.telemetry = telemetry;
+  }
+
+  /**
+   * Sets the foreign-corpus-write guard's ambient facts for every write this
+   * instance performs from now on (spec-corpus-resolution-carries-
+   * provenance-and-a-foreign-write §D5). Called EXACTLY ONCE per CLI process
+   * by `adapters/cli/loader.ts`'s `loadLoreApp()`, right after `createApp()`
+   * returns — mirrors that same function's existing `app.callerSurface = ...`
+   * post-construction assignment. Never called by any bare unit-test
+   * construction, which is what keeps {@link foreignCorpusWriteContext}'s
+   * `{provenance: null, enabled: true}` default byte-identical to pre-guard
+   * behavior for all of them (`provenance: null` alone makes the guard inert
+   * regardless of `enabled` — see `checkForeignCorpusWrite`'s decision table).
+   *
+   * @param context - See {@link ForeignCorpusWriteContext}.
+   */
+  setForeignCorpusWriteContext(context: ForeignCorpusWriteContext): void {
+    this.foreignCorpusWriteContext = context;
+  }
+
+  /**
+   * Runs {@link checkForeignCorpusWrite} against this instance's current
+   * {@link foreignCorpusWriteContext} for a NON-LIFECYCLE write (create/set/
+   * link/unlink/delete — none of these have a task-claim lease to declare
+   * intent on, so `intentDeclared` is always `false` here). The ONE call site
+   * every guarded write method below shares, so the decision can never drift
+   * between them.
+   *
+   * @returns `undefined` when the write may proceed; a ready-to-return
+   *   `err(...)` `Result` when it must be refused.
+   */
+  private refuseIfForeignCorpusWrite<T>(): Result<T, LoreError> | undefined {
+    const verdict = checkForeignCorpusWrite(this.foreignCorpusWriteContext, false);
+    return verdict.allowed ? undefined : err(foreignCorpusWriteRefusalError(verdict));
   }
 
   /**
@@ -929,6 +981,22 @@ export class CorpusService {
     input: CreateDocInput,
     opts?: WriteActorOpts & { allowHandoff?: boolean; allowUat?: boolean },
   ): Promise<Result<CreateDocResult, LoreError>> {
+    // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write
+    // §D5/AC-CP-3 cell 3 — `lore create <type>` (and every OTHER non-lifecycle
+    // write below) has no task-claim lease to declare intent on, so it is
+    // ALWAYS refused when this instance's resolved corpus provenance is a
+    // foreign git-common-dir crossing. `allowHandoff`/`allowUat` are EXEMPT:
+    // those two internal seams (`createHandoffDoc`/`createUatDoc`) back
+    // `lore handoff`/`lore uat record`, session-continuity writes an
+    // implementer's OWN worktree legitimately needs at end-of-session with NO
+    // lease to declare intent on — gating them would refuse the dispatch
+    // protocol's own writes, the exact self-defeating rule this spec's "what
+    // this spec must NOT do" section forbids for provenance itself.
+    if (opts?.allowHandoff !== true && opts?.allowUat !== true) {
+      const refusal = this.refuseIfForeignCorpusWrite<CreateDocResult>();
+      if (refusal !== undefined) return refusal;
+    }
+
     const parsed = createDocInputSchema.safeParse(input);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
@@ -1808,6 +1876,12 @@ export class CorpusService {
     patch: DocPatch,
     opts?: WriteActorOpts & { expectedVersion?: number },
   ): Promise<Result<DocRecord & { cascade?: PlanCloseCascadeResult }, LoreError>> {
+    // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
+    {
+      const refusal = this.refuseIfForeignCorpusWrite<DocRecord & { cascade?: PlanCloseCascadeResult }>();
+      if (refusal !== undefined) return refusal;
+    }
+
     const parsedPatch = docPatchSchema.safeParse(patch);
     if (!parsedPatch.success) {
       const issue = parsedPatch.error.issues[0];
@@ -2905,6 +2979,14 @@ export class CorpusService {
     confirm: boolean,
     opts?: WriteActorOpts,
   ): Promise<Result<{ id: DocId; recoverable_until: string }, LoreError>> {
+    // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5 —
+    // checked BEFORE the confirm gate, since a foreign write is refused
+    // regardless of confirmation state.
+    {
+      const refusal = this.refuseIfForeignCorpusWrite<{ id: DocId; recoverable_until: string }>();
+      if (refusal !== undefined) return refusal;
+    }
+
     if (!confirm) {
       // Resolve ID for the error even without confirm
       const r = await this.resolve(idOrSlug);
@@ -4311,6 +4393,12 @@ export class CorpusService {
     type: LinkType,
     opts?: { by?: string },
   ): Promise<Result<LinkRecord, LoreError>> {
+    // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
+    {
+      const refusal = this.refuseIfForeignCorpusWrite<LinkRecord>();
+      if (refusal !== undefined) return refusal;
+    }
+
     const fromResult = await this.resolve(fromIdOrSlug);
     if (!fromResult.ok) return fromResult;
 
@@ -4443,6 +4531,12 @@ export class CorpusService {
     toIdOrSlug: string,
     opts?: { by?: string },
   ): Promise<Result<void, LoreError>> {
+    // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
+    {
+      const refusal = this.refuseIfForeignCorpusWrite<void>();
+      if (refusal !== undefined) return refusal;
+    }
+
     const fromResult = await this.resolve(fromIdOrSlug);
     if (!fromResult.ok) return fromResult;
 
