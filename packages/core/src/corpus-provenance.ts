@@ -168,12 +168,54 @@ function stripTrailingSlash(path: string): string {
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 }
 
-/** `true` iff `candidate` is `root` itself or a path nested under it. */
+/**
+ * The prefix EVERY strict descendant of `normalizedRoot` starts with. The bare
+ * filesystem root is the one case where that is not `${root}/`: `"/"`'s
+ * children are `/x`, never `//x`.
+ *
+ * `stripTrailingSlash` deliberately leaves `"/"` intact (see its doc), so
+ * without this separation the containment test below would ask for
+ * `startsWith("//")` — which NO absolute path satisfies — and a
+ * `callerTreeRoot` of `"/"` would refuse every candidate, aborting the `"own"`
+ * walk before it probed even `cwd` itself. This is the ONE attachment site for
+ * that rule: ⛔ do NOT re-add a caller-side workaround that hands this module
+ * the highest non-root ancestor instead — one lived in
+ * `packages/lore/src/adapters/cli/corpus-resolution.ts` and is deleted, so
+ * `resolveCallerTreeRoot` there now passes the real root straight through.
+ * Pinned by `packages/core/tests/corpus-provenance-resolver.test.ts` →
+ * `BOUNDARY — callerTreeRoot === "/" behaves like a real boundary`.
+ */
+function childPrefix(normalizedRoot: string): string {
+  return normalizedRoot === "/" ? "/" : `${normalizedRoot}/`;
+}
+
+/**
+ * `dir` joined to `child` with exactly one separator — shares
+ * {@link childPrefix} with {@link isWithin} so a candidate path this module
+ * BUILDS can never fail the containment test this module APPLIES. Without the
+ * shared prefix, a boundary of `"/"` would have the walk probe
+ * `//.lore/lore.db`.
+ */
+function joinChild(dir: string, child: string): string {
+  return `${childPrefix(stripTrailingSlash(dir))}${child}`;
+}
+
+/**
+ * `true` iff `candidate` is `root` itself or a path nested under it.
+ *
+ * An EMPTY `root` is refused outright rather than read as `"/"`: it is a
+ * malformed fact, and guessing that the caller meant the filesystem root is
+ * exactly the silent fallback this module's FAIL-SAFE invariant forbids. The
+ * refusal is also what keeps {@link findLoreDbWithinBoundary} terminating —
+ * its climb saturates at `"/"`, which can never equal an empty boundary, so an
+ * accepted empty boundary would loop forever rather than miss.
+ */
 function isWithin(root: string, candidate: string): boolean {
   const normalizedRoot = stripTrailingSlash(root);
+  if (normalizedRoot === "") return false;
   const normalizedCandidate = stripTrailingSlash(candidate);
   if (normalizedCandidate === normalizedRoot) return true;
-  return normalizedCandidate.startsWith(`${normalizedRoot}/`);
+  return normalizedCandidate.startsWith(childPrefix(normalizedRoot));
 }
 
 /**
@@ -207,7 +249,7 @@ function findLoreDbWithinBoundary(
   }
 
   while (true) {
-    const candidate = `${current}/.lore/lore.db`;
+    const candidate = joinChild(current, ".lore/lore.db");
     if (probeExists(candidate)) {
       return candidate;
     }
@@ -281,7 +323,7 @@ export function resolveCorpusProvenance(
     return undefined;
   }
 
-  const crossingCandidate = `${stripTrailingSlash(gitFacts.mainCheckoutRoot)}/.lore/lore.db`;
+  const crossingCandidate = joinChild(gitFacts.mainCheckoutRoot, ".lore/lore.db");
   if (probeExists(crossingCandidate)) {
     return { path: crossingCandidate, provenance: "git_common_dir" };
   }

@@ -122,38 +122,12 @@ function probeGitCommonDir(dir: string): GitCommonDirProbe {
 }
 
 /**
- * Highest ancestor of `dir` that is NOT the filesystem root itself.
- *
- * WHY this exists at all: `resolveCorpusProvenance`'s own `isWithin` helper
- * (`@lore/core`'s `corpus-provenance.ts`, out of this module's control)
- * strips at most one trailing slash and then requires an exact match or a
- * `${root}/`-prefixed candidate. For `root === "/"` that check degrades to
- * `candidate.startsWith("//")`, which NO real absolute path satisfies — so
- * passing the literal filesystem root as `callerTreeRoot` would make
- * `isWithin` reject every real `cwd`, aborting the "own" search before it
- * ever probes even `cwd` itself (verified interactively against the
- * out-of-anchor resolver; not a hypothetical). Stopping one level short of
- * `/` instead reproduces the pre-existing "walk all the way up" behaviour
- * (`utils.ts`'s old `findLoreDbPath`, which climbed to the real filesystem
- * root unconditionally) for every realistic corpus location — nothing
- * legitimately keeps a `.lore/` directly under `/` — while staying inside a
- * boundary shape the shared resolver can actually accept.
- *
- * @param dir - absolute path to start climbing from
- * @returns `dir` itself if it is already a top-level directory (e.g. `/tmp`),
- *   otherwise the highest ancestor below the filesystem root
- * @example
- *   highestNonRootAncestor("/tmp/a/b/c") // "/tmp"
- *   highestNonRootAncestor("/tmp")       // "/tmp"
+ * The filesystem root — the boundary handed to `@lore/core` when `cwd` sits
+ * inside no git repository at all, so the "own" walk climbs as far as it
+ * possibly can (the pre-existing unconditional walk-to-filesystem-root
+ * behaviour of `utils.ts`'s old `findLoreDbPath`).
  */
-function highestNonRootAncestor(dir: string): string {
-  let current = dir;
-  for (;;) {
-    const parent = dirname(current);
-    if (parent === current || parent === "/") return current;
-    current = parent;
-  }
-}
+const FILESYSTEM_ROOT = "/";
 
 /**
  * The caller's own working-tree boundary (`CorpusProvenanceGitFacts.
@@ -164,11 +138,21 @@ function highestNonRootAncestor(dir: string): string {
  * answers this directly for any git-tracked `dir` (nested or not — it
  * always reports the working tree's own top, whether that is a main
  * checkout or a linked worktree); a `dir` that isn't inside any git
- * repository at all falls back to {@link highestNonRootAncestor}, which
- * reproduces the old unconditional walk-to-filesystem-root behaviour for
- * that (rare, but pre-existing-test-covered — see
+ * repository at all falls back to {@link FILESYSTEM_ROOT} — the REAL root,
+ * passed straight through, which the shared resolver treats as an ordinary
+ * boundary (`@lore/core`'s `corpus-provenance.ts::childPrefix`). That covers
+ * the rare-but-pre-existing-test-covered non-git case: see
  * `tests/integration/cli/gate-bypass-audit.test.ts`'s "walks upward past a
- * nested cwd" case) scenario.
+ * nested cwd to find an ancestor .lore/lore.db".
+ *
+ * ⛔ Do NOT reintroduce a "highest non-root ancestor" helper here to dodge a
+ * root-shaped boundary. That workaround existed until the bare-root case was
+ * fixed at its one attachment site in the shared resolver, where it is pinned
+ * by `packages/core/tests/corpus-provenance-resolver.test.ts`'s
+ * `BOUNDARY — callerTreeRoot === "/" behaves like a real boundary` block;
+ * re-adding it here would put the policy in two places again, and every other
+ * consumer of `resolveCorpusProvenance` (MCP, HTTP) would still need its own
+ * copy.
  */
 function resolveCallerTreeRoot(cwd: string): string {
   try {
@@ -183,7 +167,7 @@ function resolveCallerTreeRoot(cwd: string): string {
   } catch {
     // fall through to the non-git fallback below
   }
-  return highestNonRootAncestor(cwd);
+  return FILESYSTEM_ROOT;
 }
 
 /**

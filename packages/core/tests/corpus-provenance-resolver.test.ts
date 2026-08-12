@@ -196,6 +196,132 @@ describe("BOUNDARY", () => {
   });
 });
 
+// ─── BOUNDARY — the bare filesystem root as callerTreeRoot ──────────────────
+
+/**
+ * A `probeExists` that records every candidate it was asked about and refuses
+ * to answer more than `limit` times.
+ *
+ * WHY the limit: `findLoreDbWithinBoundary` climbs with `parentDirectory`,
+ * which saturates at `"/"` — so a boundary the climb can never reach makes the
+ * walk loop FOREVER. A synchronous infinite loop cannot be interrupted by
+ * vitest's own test timeout (it blocks the worker thread), so the bound is
+ * enforced here, turning a hang into an ordinary assertion failure. Measured
+ * on the pre-fix module: `callerTreeRoot: ""` never terminated (killed by
+ * SIGALRM after 10s, exit 142).
+ */
+function countingProbe(
+  hits: readonly string[],
+  limit = 100,
+): { probe: (path: string) => boolean; asked: string[] } {
+  const asked: string[] = [];
+  const probe = (path: string): boolean => {
+    asked.push(path);
+    if (asked.length > limit) {
+      throw new Error(
+        `findLoreDbWithinBoundary did not terminate: ${asked.length} probes, last "${path}"`,
+      );
+    }
+    return hits.includes(path);
+  };
+  return { probe, asked };
+}
+
+describe('BOUNDARY — callerTreeRoot === "/" behaves like a real boundary', () => {
+  it("finds a corpus above cwd instead of rejecting every candidate", () => {
+    const result = resolveCorpusProvenance({
+      cwd: "/tmp/scratch/deep",
+      probeExists: (p) => p === "/tmp/scratch/.lore/lore.db",
+      gitFacts: facts({ callerTreeRoot: "/", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(result).toEqual({ path: "/tmp/scratch/.lore/lore.db", provenance: "own" });
+  });
+
+  it("finds a corpus AT the root itself, and never builds a doubled-slash candidate", () => {
+    const { probe, asked } = countingProbe(["/.lore/lore.db"]);
+    const result = resolveCorpusProvenance({
+      cwd: "/tmp/scratch",
+      probeExists: probe,
+      gitFacts: facts({ callerTreeRoot: "/", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(result).toEqual({ path: "/.lore/lore.db", provenance: "own" });
+    expect(asked.filter((p) => p.includes("//"))).toEqual([]);
+  });
+
+  it("cwd IS the filesystem root — the walk still probes the boundary itself", () => {
+    const result = resolveCorpusProvenance({
+      cwd: "/",
+      probeExists: (p) => p === "/.lore/lore.db",
+      gitFacts: facts({ callerTreeRoot: "/", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(result).toEqual({ path: "/.lore/lore.db", provenance: "own" });
+  });
+
+  it('a trailing-slash root ("//") normalizes to the same boundary as "/"', () => {
+    const result = resolveCorpusProvenance({
+      cwd: "/tmp/scratch/deep",
+      probeExists: (p) => p === "/tmp/.lore/lore.db",
+      gitFacts: facts({ callerTreeRoot: "//", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(result).toEqual({ path: "/tmp/.lore/lore.db", provenance: "own" });
+  });
+
+  it("NEGATIVE: no corpus anywhere under a / boundary — undefined, and the climb terminates", () => {
+    const { probe, asked } = countingProbe([]);
+    const result = resolveCorpusProvenance({
+      cwd: "/tmp/scratch/deep",
+      probeExists: probe,
+      gitFacts: facts({ callerTreeRoot: "/", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(result).toBeUndefined();
+    // /tmp/scratch/deep, /tmp/scratch, /tmp, / — four candidates, then stop.
+    expect(asked).toEqual([
+      "/tmp/scratch/deep/.lore/lore.db",
+      "/tmp/scratch/.lore/lore.db",
+      "/tmp/.lore/lore.db",
+      "/.lore/lore.db",
+    ]);
+  });
+
+  it("REGRESSION: a /-rooted own walk that misses still reaches the git_common_dir route", () => {
+    const result = resolveCorpusProvenance({
+      cwd: "/repo/.claude/worktrees/agent-x",
+      probeExists: (p) => p === "/main-checkout/.lore/lore.db",
+      gitFacts: facts({
+        callerTreeRoot: "/",
+        resolved: true,
+        isLinkedWorktree: true,
+        mainCheckoutRoot: "/main-checkout",
+      }),
+    });
+    expect(result).toEqual({ path: "/main-checkout/.lore/lore.db", provenance: "git_common_dir" });
+  });
+});
+
+// ─── ERROR/NEGATIVE — malformed and sibling-prefix boundaries ───────────────
+
+describe("ERROR — a malformed or non-containing boundary never yields own", () => {
+  it("an empty callerTreeRoot is not a boundary: the walk never starts, and never loops", () => {
+    const { probe, asked } = countingProbe(["/.lore/lore.db", "/tmp/.lore/lore.db"]);
+    const result = resolveCorpusProvenance({
+      cwd: "/tmp/scratch/deep",
+      probeExists: probe,
+      gitFacts: facts({ callerTreeRoot: "", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(result).toBeUndefined();
+    expect(asked).toEqual([]);
+  });
+
+  it('sibling-prefix: "/foobar" is NOT inside "/foo", so a corpus under it is not own', () => {
+    const result = resolveCorpusProvenance({
+      cwd: "/foobar/deep",
+      probeExists: (p) => p === "/foobar/.lore/lore.db",
+      gitFacts: facts({ callerTreeRoot: "/foo", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(result).toBeUndefined();
+  });
+});
+
 // ─── STATE ───────────────────────────────────────────────────────────────────
 
 describe("STATE — identical cwd/probeExists resolve differently purely based on gitFacts", () => {
@@ -288,6 +414,43 @@ describe("CONTROL", () => {
     // has no `.provenance` field to even be "undetermined" -- it is a DIFFERENT,
     // definite answer (absence of any corpus at all), not the indefinite one.
     expect(nothing).toBeUndefined();
+  });
+
+  /**
+   * The containment check inside `findLoreDbWithinBoundary` has TWO degenerate
+   * failure directions, and a suite that only pins the fixed `"/"` behaviour
+   * stays green under one of them. Both are pinned here, so neither degenerate
+   * containment check can pass this file:
+   *
+   *   - REJECT-EVERYTHING (the shipped defect: `"/"` normalized to `"/"` then
+   *     tested as `startsWith("//")`) — caught by the `"/"` rows, which demand
+   *     a REAL hit.
+   *   - ACCEPT-EVERYTHING (a containment check that answers `true` for any
+   *     root/candidate pair) — caught by the sibling-prefix and empty-root
+   *     rows, which demand a REFUSAL where a corpus IS reachable by climbing.
+   *
+   * Measured against both mutations of `corpus-provenance.ts::isWithin`; see
+   * the `BOUNDARY — callerTreeRoot === "/"` and `ERROR — a malformed or
+   * non-containing boundary` describe blocks above for the rows themselves.
+   */
+  it("discriminates in BOTH degenerate directions: rejects-everything AND accepts-everything", () => {
+    // Direction 1 — a reject-everything containment check returns `undefined` here.
+    const atRoot = resolveCorpusProvenance({
+      cwd: "/tmp/scratch/deep",
+      probeExists: (p) => p === "/tmp/scratch/.lore/lore.db",
+      gitFacts: facts({ callerTreeRoot: "/", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(atRoot).toEqual({ path: "/tmp/scratch/.lore/lore.db", provenance: "own" });
+
+    // Direction 2 — an accept-everything containment check returns `own` here,
+    // because `/foobar/.lore/lore.db` IS reachable by climbing from cwd; only a
+    // real containment test refuses it.
+    const siblingPrefix = resolveCorpusProvenance({
+      cwd: "/foobar/deep",
+      probeExists: (p) => p === "/foobar/.lore/lore.db",
+      gitFacts: facts({ callerTreeRoot: "/foo", resolved: true, isLinkedWorktree: false }),
+    });
+    expect(siblingPrefix).toBeUndefined();
   });
 });
 
