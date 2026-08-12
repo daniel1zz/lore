@@ -172,6 +172,16 @@ export interface LoadLoreAppOptions {
  * prevent that outcome, and it is a property of the ADAPTER, never of where
  * the operator happened to start the server.
  *
+ * Two oracles hold this together, and neither is sufficient alone:
+ *   - `tests/unit/adapters/loader-foreign-write-surface.bun.test.ts` — drives
+ *     `loadLoreApp()` itself from a nested-worktree fixture and asserts HTTP
+ *     accepts / CLI refuses the SAME write. (Bun, not vitest: this module
+ *     reaches `bun:sqlite` through `app.ts`.)
+ *   - `tests/unit/adapters/foreign-corpus-write-adapters.test.ts` — a
+ *     production-wiring census proving no `startHttpServer` mount silently
+ *     relies on the `"cli"` default. That default is the only reason this
+ *     defect could recur, so the census is what makes it safe.
+ *
  * ⛔ DISCLOSED RESIDUAL — the MCP boot (`packages/lore/src/index.ts`'s
  * `--mcp-server` branch) still passes no surface and therefore still resolves
  * this process's frozen startup cwd into the AMBIENT `CorpusService` context.
