@@ -60,6 +60,7 @@ export * from "./phase.js";
 export * from "./phase-completion.js";
 export * from "./frontmatter.js";
 export * from "./verify-execution-root.js";
+export * from "./corpus-provenance.js";
 export * from "./setup-manifest.js";
 export * from "./merge-settings.js";
 export * from "./register-mcp.js";
