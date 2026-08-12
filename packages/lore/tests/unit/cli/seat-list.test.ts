@@ -58,6 +58,9 @@ class FakeListGitPort implements GitPort {
   async isMerged(branch: string): Promise<Result<boolean, LoreError>> {
     return ok(this.mergedByBranch[branch] ?? false);
   }
+  async countUnmergedCommits(): Promise<Result<number, LoreError>> {
+    throw new Error("not used by this suite");
+  }
   async rebaseFromMain(): Promise<Result<void, LoreError>> {
     throw new Error("not used by this suite");
   }

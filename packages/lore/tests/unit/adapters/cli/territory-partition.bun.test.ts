@@ -33,13 +33,28 @@
  * to catch (an implementation that drops what it cannot classify would pass
  * a bucket-shape test while silently losing data).
  *
- * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-1
+ * A SECOND describe block below (AC-REPLAY-1) covers `unmerged_commits`
+ * with REAL `mkdtemp` git fixtures — the tests above use fake string paths
+ * because they exercise classification only, but measuring a commit count
+ * genuinely shells `git`. Its own six dimensions: HAPPY (several commits),
+ * BOUNDARY (a MEASURED zero, distinguishable from uncountable), ERROR
+ * (nonexistent branch; nonexistent base ref), STATE (a live foreign
+ * worktree entry, not just an orphan branch, measures correctly), and
+ * REGRESSION (a probe path outside any git repo; a worktree entry whose OWN
+ * path is stale still measures via fallback).
+ *
+ * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-1, AC-REPLAY-1
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ReadySession } from "@lore/core";
 import {
   partitionTerritory,
+  type TerritoryEntry,
   type TerritoryPartition,
   type TerritoryWorktree,
 } from "../../../../src/adapters/cli/territory-partition.js";
@@ -258,4 +273,210 @@ describe("partitionTerritory (AC-OWN-1)", () => {
     expect(totalEntries(partition)).toBe(1);
     expect(partition.unmeasured.some((e) => e.kind === "branch" && e.branch === "ghost-branch")).toBe(true);
   });
+});
+
+// ─── `unmerged_commits` (AC-REPLAY-1) — real `mkdtemp` git fixtures ─────────
+//
+// The tests above use fake, non-existent worktree paths (by design — they
+// exercise pure classification logic that needs no real git repo). Measuring
+// `unmerged_commits` genuinely shells `git`, so THESE tests need a real
+// throwaway repo — mirrors `real-git-port.test.ts`'s / `territory-
+// replay.bun.test.ts`'s own fixture style. ⛔ Never this repo's own tree.
+
+const cleanupDirs: string[] = [];
+
+afterEach(() => {
+  while (cleanupDirs.length > 0) {
+    const dir = cleanupDirs.pop();
+    if (dir === undefined) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+});
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+/** See `territory-replay.bun.test.ts`'s identically-named helper for the macOS symlink rationale. */
+function mkdtempReal(prefix: string): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  cleanupDirs.push(dir);
+  return dir;
+}
+
+function commitFile(repoRoot: string, name: string, message: string): void {
+  writeFileSync(join(repoRoot, name), `${name} content\n`);
+  git(repoRoot, ["add", name]);
+  git(repoRoot, ["commit", "-q", "-m", message]);
+}
+
+/** Initializes a git repo at `dir` with one commit on `main`. */
+function initRepo(dir: string): void {
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "territory-partition-test@example.invalid"]);
+  git(dir, ["config", "user.name", "territory-partition Test"]);
+  commitFile(dir, "seed.txt", "seed");
+}
+
+function findEntry(partition: TerritoryPartition, predicate: (e: TerritoryEntry) => boolean): TerritoryEntry | undefined {
+  return [...partition.mine, ...partition.foreign, ...partition.unowned, ...partition.unmeasured].find(predicate);
+}
+
+function branchSession(by: string, sessionId: string, branch: string): ReadySession {
+  return { by, session_id: sessionId, branches: [branch], task_slugs: [`t-${branch}`], newest_at: "2026-08-13T10:00:00.000Z" };
+}
+
+describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
+  it("HAPPY: an orphan branch several commits ahead of main counts exactly", () => {
+    const repoRoot = mkdtempReal("tp-count-happy-");
+    initRepo(repoRoot);
+    git(repoRoot, ["branch", "peer-feature"]);
+    git(repoRoot, ["checkout", "-q", "peer-feature"]);
+    commitFile(repoRoot, "a.txt", "a");
+    commitFile(repoRoot, "b.txt", "b");
+    commitFile(repoRoot, "c.txt", "c");
+    commitFile(repoRoot, "d.txt", "d");
+    git(repoRoot, ["checkout", "-q", "main"]);
+
+    const worktrees: TerritoryWorktree[] = [{ path: repoRoot, branch: "main" }];
+    const sessions: ReadySession[] = [branchSession("agent:peer", "peer0001", "peer-feature")];
+
+    const partition = partitionTerritory(worktrees, sessions, undefined);
+    const entry = findEntry(partition, (e) => e.branch === "peer-feature");
+    expect(entry?.unmerged_commits).toBe(4);
+    // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+    // D1) — this body's real `git` fixture construction spawns >= SPAWN_THRESHOLD times.
+  }, 15000);
+
+  it("BOUNDARY: a fully-merged orphan branch counts exactly 0 — a MEASURED zero, distinguishable from uncountable", () => {
+    const repoRoot = mkdtempReal("tp-count-boundary-");
+    initRepo(repoRoot);
+    git(repoRoot, ["branch", "merged-peer"]);
+    git(repoRoot, ["checkout", "-q", "merged-peer"]);
+    commitFile(repoRoot, "merged.txt", "merged work");
+    git(repoRoot, ["checkout", "-q", "main"]);
+    git(repoRoot, ["merge", "-q", "--no-ff", "merged-peer", "-m", "merge merged-peer"]);
+
+    const worktrees: TerritoryWorktree[] = [{ path: repoRoot, branch: "main" }];
+    const sessions: ReadySession[] = [branchSession("agent:peer", "peer0002", "merged-peer")];
+
+    const partition = partitionTerritory(worktrees, sessions, undefined);
+    const entry = findEntry(partition, (e) => e.branch === "merged-peer");
+    // reason: `0` must be PRESENT, not absent — a measured zero is a fact,
+    // not the same silence as "could not measure" (module @invariant).
+    expect(entry?.unmerged_commits).toBe(0);
+    expect("unmerged_commits" in (entry ?? {})).toBe(true);
+    // ^ explicit timeout — see the HAPPY case above.
+  }, 15000);
+
+  it("ERROR: a claimed branch that does not exist in the repo never invents a count", () => {
+    const repoRoot = mkdtempReal("tp-count-error-nobranch-");
+    initRepo(repoRoot);
+
+    const worktrees: TerritoryWorktree[] = [{ path: repoRoot, branch: "main" }];
+    const sessions: ReadySession[] = [branchSession("agent:ghost", "ghost001", "ghost-branch")];
+
+    const partition = partitionTerritory(worktrees, sessions, undefined);
+    const entry = findEntry(partition, (e) => e.branch === "ghost-branch");
+    expect(entry).toBeDefined();
+    expect(entry?.unmerged_commits).toBeUndefined();
+  });
+
+  it("ERROR: a base ref (main) that does not exist never invents a count for ANY entry", () => {
+    const repoRoot = mkdtempReal("tp-count-error-nobase-");
+    // reason: default branch deliberately named "trunk" — "main" resolves
+    // NOWHERE in this repo, so every count must degrade to absent.
+    git(repoRoot, ["init", "-q", "-b", "trunk"]);
+    git(repoRoot, ["config", "user.email", "territory-partition-test@example.invalid"]);
+    git(repoRoot, ["config", "user.name", "territory-partition Test"]);
+    commitFile(repoRoot, "seed.txt", "seed");
+    git(repoRoot, ["branch", "feature-on-trunk"]);
+    git(repoRoot, ["checkout", "-q", "feature-on-trunk"]);
+    commitFile(repoRoot, "feature.txt", "feature work");
+    git(repoRoot, ["checkout", "-q", "trunk"]);
+
+    const worktrees: TerritoryWorktree[] = [{ path: repoRoot, branch: "trunk" }];
+    const sessions: ReadySession[] = [branchSession("agent:peer", "peer0003", "feature-on-trunk")];
+
+    const partition = partitionTerritory(worktrees, sessions, undefined);
+    const worktreeEntry = findEntry(partition, (e) => e.kind === "worktree" && e.path === repoRoot);
+    const branchEntry = findEntry(partition, (e) => e.branch === "feature-on-trunk" && e.kind === "branch");
+    expect(worktreeEntry?.unmerged_commits).toBeUndefined();
+    expect(branchEntry?.unmerged_commits).toBeUndefined();
+    // ^ explicit timeout — see the HAPPY case above.
+  }, 15000);
+
+  it("REGRESSION: a worktrees list pointing outside any git repo never invents a count", () => {
+    const notARepo = mkdtempReal("tp-count-regression-notarepo-");
+    // deliberately never `git init`'d.
+
+    const worktrees: TerritoryWorktree[] = [{ path: notARepo, branch: "main" }];
+    const sessions: ReadySession[] = [branchSession("agent:ghost", "ghost002", "some-branch")];
+
+    const partition = partitionTerritory(worktrees, sessions, undefined);
+    const worktreeEntry = findEntry(partition, (e) => e.kind === "worktree" && e.path === notARepo);
+    const branchEntry = findEntry(partition, (e) => e.branch === "some-branch");
+    expect(worktreeEntry?.unmerged_commits).toBeUndefined();
+    expect(branchEntry?.unmerged_commits).toBeUndefined();
+  });
+
+  it("STATE: a live foreign WORKTREE entry (not just an orphan branch) also measures its own branch's count correctly", () => {
+    const repoRoot = mkdtempReal("tp-count-state-worktree-");
+    initRepo(repoRoot);
+    const wtParent = mkdtempReal("tp-count-state-worktree-parent-");
+    const peerWorktreePath = join(wtParent, "peer-wt");
+    git(repoRoot, ["worktree", "add", "-q", "-b", "peer-worktree-branch", peerWorktreePath]);
+    commitFile(peerWorktreePath, "peer-1.txt", "peer 1");
+    commitFile(peerWorktreePath, "peer-2.txt", "peer 2");
+
+    const worktrees: TerritoryWorktree[] = [
+      { path: repoRoot, branch: "main" },
+      { path: peerWorktreePath, branch: "peer-worktree-branch" },
+    ];
+    const sessions: ReadySession[] = [
+      {
+        by: "agent:peer",
+        session_id: "peer0004",
+        worktree: peerWorktreePath,
+        branches: ["peer-worktree-branch"],
+        task_slugs: ["t-peer-wt"],
+        newest_at: "2026-08-13T10:00:00.000Z",
+      },
+    ];
+
+    const partition = partitionTerritory(worktrees, sessions, undefined);
+    const entry = findEntry(partition, (e) => e.kind === "worktree" && e.path === peerWorktreePath);
+    expect(entry?.unmerged_commits).toBe(2);
+  });
+
+  it("REGRESSION: a worktree entry whose OWN path is stale still measures its branch by falling back to another known worktree", () => {
+    const repoRoot = mkdtempReal("tp-count-regression-fallback-");
+    initRepo(repoRoot);
+    git(repoRoot, ["branch", "stale-path-branch"]);
+    git(repoRoot, ["checkout", "-q", "stale-path-branch"]);
+    commitFile(repoRoot, "stale-1.txt", "stale 1");
+    commitFile(repoRoot, "stale-2.txt", "stale 2");
+    git(repoRoot, ["checkout", "-q", "main"]);
+
+    // `repoRoot` (a REAL, valid worktree) listed FIRST so it becomes the
+    // fallback probe cwd; the SECOND entry's own `path` is fabricated and
+    // does not exist on disk at all — its branch is still measurable only
+    // by borrowing the first entry's path.
+    const worktrees: TerritoryWorktree[] = [
+      { path: repoRoot, branch: "main" },
+      { path: "/definitely/does/not/exist/lore-territory-partition-test", branch: "stale-path-branch" },
+    ];
+
+    const partition = partitionTerritory(worktrees, [], undefined);
+    const entry = findEntry(
+      partition,
+      (e) => e.kind === "worktree" && e.path === "/definitely/does/not/exist/lore-territory-partition-test",
+    );
+    expect(entry?.unmerged_commits).toBe(2);
+    // ^ explicit timeout — see the HAPPY case above.
+  }, 15000);
 });

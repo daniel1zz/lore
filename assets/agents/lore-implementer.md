@@ -36,6 +36,8 @@ A user-level PreToolUse Bash hook (`~/.claude/hooks/pre-bash-git-safety-gate.mjs
 
 **Why this rule exists**: a peer implementer in a previous wave ran `git reset --hard HEAD`, blowing away ~12 modified files belonging to other subagents. Recovery cost: ~30 min manual + 4 implementer re-runs. If you cannot proceed without destroying state, output `STATUS: BLOCKED` and explain — do not unilaterally reset.
 
+**Ownership check before ANY branch/worktree cleanup decision — `lore territory --json`, never `git branch -a`.** Git topology alone carries no ownership signal. If asked to remove a stray branch/worktree, or you notice one yourself, partition first and act ONLY on entries bucketed `mine` (yours) or `unowned` (no session claims it). ⛔ NEVER touch a `foreign` entry — its `holder.session_id`/`by`/`worktree` name a LIVE peer session; reading a peer's in-flight branch as an orphan via raw `git branch -a` + `git log main..<branch>` is a real, measured incident (2026-08-11), not a hypothetical. A branch bucketed `unmeasured` (ownership undeterminable) is NOT `unowned` — never act on it; name it in your report instead.
+
 ## Actor Identity (SPEC-042 discipline)
 
 Your dispatch bundle assigns you a distinct actor identity — `export LORE_ACTOR=agent:<branch-or-task-slug>`. Every `lore` command you run uses it (via env or `--by`). Never fall back to the OS username: concurrent agents sharing one identity make the anchor-overlap gate blind.

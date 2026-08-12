@@ -5884,6 +5884,14 @@
     "01KZV3XFFY7SEZ9E11NZDC81W8": {
       "human_id": "TASK-711",
       "file_path": "docs/requirements/task/TASK-711-the-oracle-file-existence-precheck-understands-onl.md"
+    },
+    "01KZVDFG4183TYBAWGEGTA2320": {
+      "human_id": "TASK-712",
+      "file_path": "docs/requirements/task/TASK-712-add-a-per-branch-unmerged-commit-count-to-gitport.md"
+    },
+    "01KZVAXZQAT4S9F4HGQT45YTT9": {
+      "human_id": "TASK-713",
+      "file_path": "docs/requirements/task/TASK-713-mirror-export-never-rewrites-an-existing-file-whos.md"
     }
   }
 }
