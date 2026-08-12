@@ -417,7 +417,7 @@ describe("AC-REPLAY-1 dimension: NEGATIVE — a dead session's holder is disting
 
 // ─── BOUNDARY: isMerged distinguishes zero vs nonzero unmerged commits ──────
 
-describe("AC-REPLAY-1 dimension: BOUNDARY — the only available lore signal DOES distinguish zero from nonzero unmerged commits", () => {
+describe("AC-REPLAY-1 dimension: BOUNDARY — the boolean isMerged signal DOES distinguish zero from nonzero unmerged commits (a coarser, corroborating check beside the exact TerritoryEntry.unmerged_commits count FACT 2 now reads)", () => {
   it("a fully-merged branch reports isMerged=true (zero unmerged); the foreign branch reports isMerged=false (>=1 unmerged)", async () => {
     const { repoRoot } = makeTerritoryFixtureRepo();
     const gitPort = new RealGitPort(repoRoot);
