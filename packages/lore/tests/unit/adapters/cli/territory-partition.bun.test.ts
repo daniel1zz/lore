@@ -348,7 +348,9 @@ describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
     const partition = partitionTerritory(worktrees, sessions, undefined);
     const entry = findEntry(partition, (e) => e.branch === "peer-feature");
     expect(entry?.unmerged_commits).toBe(4);
-  });
+    // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+    // D1) — this body's real `git` fixture construction spawns >= SPAWN_THRESHOLD times.
+  }, 15000);
 
   it("BOUNDARY: a fully-merged orphan branch counts exactly 0 — a MEASURED zero, distinguishable from uncountable", () => {
     const repoRoot = mkdtempReal("tp-count-boundary-");
@@ -368,7 +370,8 @@ describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
     // not the same silence as "could not measure" (module @invariant).
     expect(entry?.unmerged_commits).toBe(0);
     expect("unmerged_commits" in (entry ?? {})).toBe(true);
-  });
+    // ^ explicit timeout — see the HAPPY case above.
+  }, 15000);
 
   it("ERROR: a claimed branch that does not exist in the repo never invents a count", () => {
     const repoRoot = mkdtempReal("tp-count-error-nobranch-");
@@ -404,7 +407,8 @@ describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
     const branchEntry = findEntry(partition, (e) => e.branch === "feature-on-trunk" && e.kind === "branch");
     expect(worktreeEntry?.unmerged_commits).toBeUndefined();
     expect(branchEntry?.unmerged_commits).toBeUndefined();
-  });
+    // ^ explicit timeout — see the HAPPY case above.
+  }, 15000);
 
   it("REGRESSION: a worktrees list pointing outside any git repo never invents a count", () => {
     const notARepo = mkdtempReal("tp-count-regression-notarepo-");
@@ -473,5 +477,6 @@ describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
       (e) => e.kind === "worktree" && e.path === "/definitely/does/not/exist/lore-territory-partition-test",
     );
     expect(entry?.unmerged_commits).toBe(2);
-  });
+    // ^ explicit timeout — see the HAPPY case above.
+  }, 15000);
 });

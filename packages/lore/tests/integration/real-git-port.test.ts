@@ -237,7 +237,9 @@ describe("RealGitPort — countUnmergedCommits (AC-REPLAY-1)", () => {
     const port = new RealGitPort(repoRoot);
     const result = await port.countUnmergedCommits("plan/three-ahead", "main");
     expect(result).toEqual({ ok: true, value: 3 });
-  });
+    // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+    // D1) — this body's real `git` fixture construction spawns >= SPAWN_THRESHOLD times.
+  }, 15000);
 
   it("BOUNDARY: a branch fully merged into main counts exactly 0 — a MEASURED zero, never confused with uncountable", async () => {
     const repoRoot = mkScratchDir("rgp-repo-count-boundary-");
@@ -253,7 +255,8 @@ describe("RealGitPort — countUnmergedCommits (AC-REPLAY-1)", () => {
     const port = new RealGitPort(repoRoot);
     const result = await port.countUnmergedCommits("plan/soon-merged", "main");
     expect(result).toEqual({ ok: true, value: 0 });
-  });
+    // ^ explicit timeout — see the HAPPY case above.
+  }, 15000);
 
   it("NEGATIVE: a nonexistent branch name errs, never ok(0)", async () => {
     const repoRoot = mkScratchDir("rgp-repo-count-negative-");
@@ -302,7 +305,8 @@ describe("RealGitPort — countUnmergedCommits (AC-REPLAY-1)", () => {
     expect(twoResult).toEqual({ ok: true, value: 2 });
     expect(fiveResult).toEqual({ ok: true, value: 5 });
     expect(twoResult).not.toEqual(fiveResult);
-  });
+    // ^ explicit timeout — see the HAPPY case above (this body spawns even more).
+  }, 20000);
 
   it("REGRESSION: a repoRoot outside any git work tree errs rather than throwing", async () => {
     const notARepo = mkScratchDir("rgp-repo-count-regression-");
