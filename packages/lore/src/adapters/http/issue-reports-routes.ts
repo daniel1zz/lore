@@ -82,22 +82,29 @@ import { computeIssueResolution, type IssueResolution } from "../../service/issu
  * route, per SPEC-074 §Design "detail view rendering the full
  * extra.issue_report payload").
  *
- * ⛔ WIRE-CONTRACT MIRROR, currently STALE (named rather than silently widened):
- * `resolution` is typed by `service/issue-resolution.ts`'s `IssueResolution`,
- * which spec-the-defect-channel-cannot-be-honestly-maintained-an §M3 extended
- * with `superseded` and `duplicate`. The dashboard cannot import that type (it
- * depends on `@lore/core` only), so it MIRRORS the union by hand at
- * `packages/dashboard/src/lib/api.ts` (`export type IssueResolution = …`) and
- * switches over it in TWO presentation-only badge maps
+ * ⛔ WIRE-CONTRACT UNION, IMPORTED not mirrored (verify every clause below by
+ * grep before trusting this prose — that is the failure mode this comment
+ * previously fell into): `resolution` is typed by
+ * `service/issue-resolution.ts`'s `IssueResolution`, which
+ * spec-the-defect-channel-cannot-be-honestly-maintained-an §M3 extended with
+ * `superseded` and `duplicate`. `packages/dashboard/src/lib/api.ts` imports
+ * that SAME vocabulary from `@lore/core` — `IssueResolution` as a type and
+ * `ISSUE_RESOLUTION_MEMBERS` as a value (AC-DC-12) — and re-exports both
+ * rather than hand-copying the union; its own module header states the
+ * re-export is "reference-identical — this module constructs no list". The
+ * two presentation-only badge switches
  * (`components/IssuesList.tsx::resolutionBadgeVariant`,
- * `components/IssueDetail.tsx::resolutionBadgeVariant`). Those three sites do
- * NOT yet know the two new members: this route will serve
- * `resolution: "superseded"`, the mirror type will not admit it, and each badge
- * switch will fall through to an implicit `undefined` variant. Nothing type-checks
- * that mirror (it is a hand copy across a network boundary), so the drift is
- * invisible to `bun run typecheck` — the three sites are named here so the fix is
- * a grep away. They sit outside §M3's declared file anchors, which is why this is
- * a named gap rather than an edit.
+ * `components/IssueDetail.tsx::resolutionBadgeVariant`) both import
+ * `IssueResolution` from `api.ts` and are `never`-checked over it, so a member
+ * added upstream to `IssueResolution` fails `bun run typecheck` INSIDE those
+ * two files rather than falling through to an implicit `undefined` badge
+ * variant. The oracle pinning this shape end-to-end is
+ * `packages/dashboard/tests/unit/issue-resolution-union-parity.test.ts` — it
+ * asserts the re-export by `toBe` identity (not set comparison, which a hand
+ * copy with today's contents would also satisfy) AND overlays a widened
+ * `@lore/core` onto the real dashboard source to require both switches to
+ * fail to compile. If `grep` disagrees with a sentence above, the sentence is
+ * wrong, not the file.
  *
  * `status` stays the RAW doc lifecycle status (draft/in-review/...) —
  * unchanged meaning, kept for the same reasons SPEC-074 always projected it
