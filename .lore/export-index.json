@@ -5764,6 +5764,46 @@
     "01KZT5Y9DFMWCHMX9HDZJYNA9V": {
       "human_id": "KN-438",
       "file_path": "docs/requirements/knowledge/KN-438-evicted-from-the-cli-adapter-module-doc-the-claim.md"
+    },
+    "01KZTCXAJE8RA78RNREVES1WRE": {
+      "human_id": "ADR-032",
+      "file_path": "docs/requirements/adr/ADR-032-ci-cd-is-the-consuming-team-s-own-infrastructure-n.md"
+    },
+    "01KZTD15QVTGYQQJRCBX2MBR6N": {
+      "human_id": "KN-439",
+      "file_path": "docs/requirements/knowledge/KN-439-assessment-land-corpus-resolution-provenance-one-p.md"
+    },
+    "01KZTBNBMZV3GPPQ7W4E70721F": {
+      "human_id": "KN-440",
+      "file_path": "docs/requirements/knowledge/KN-440-handoff-agent-main-orchestrator.md"
+    },
+    "01KZTDERYZM98FZJKHFR7C8QMK": {
+      "human_id": "TASK-694",
+      "file_path": "docs/requirements/task/TASK-694-merged-tree-broad-suite-run-after-the-corpus-prove.md"
+    },
+    "01KZTDE655MJY0MTSF452NRZNM": {
+      "human_id": "TASK-695",
+      "file_path": "docs/requirements/task/TASK-695-lore-done-override-attestation-demands-fresh-prose.md"
+    },
+    "01KZTD9MYDRJ2Z38TZ999GGSB5": {
+      "human_id": "TASK-696",
+      "file_path": "docs/requirements/task/TASK-696-the-handoff-and-uat-carve-out-in-the-foreign-write.md"
+    },
+    "01KZTD9MK4HQE6PEZ7XNPNG67H": {
+      "human_id": "TASK-697",
+      "file_path": "docs/requirements/task/TASK-697-the-pure-resolver-s-iswithin-rejects-everything-at.md"
+    },
+    "01KZTD8QPFAPQFNQ6KT9X1EW3T": {
+      "human_id": "TASK-698",
+      "file_path": "docs/requirements/task/TASK-698-the-http-exemption-is-conditional-on-where-lore-se.md"
+    },
+    "01KZTBM7Z5XYPDQQZSHNGDHS2V": {
+      "human_id": "TASK-699",
+      "file_path": "docs/requirements/task/TASK-699-main-carries-two-red-e2e-cases-migrate-ordinals-co.md"
+    },
+    "01KZTCQMNX18B1D2TWNDZEVERG": {
+      "human_id": "TASK-700",
+      "file_path": "docs/requirements/task/TASK-700-nothing-automated-runs-the-test-suite-pre-push-run.md"
     }
   }
 }
