@@ -33,6 +33,25 @@
  * to catch (an implementation that drops what it cannot classify would pass
  * a bucket-shape test while silently losing data).
  *
+ * Another describe block below, positioned BEFORE the AC-REPLAY-1 one
+ * ("local branch discovery", task-lore-territory-s-discovery-set-is-claim-
+ * derived-so-an, 2026-08-13), covers the optional 4th
+ * `localBranches` parameter — a discovery source that closes the gap this
+ * task exists for: a local branch NEITHER a worktree's current branch NOR
+ * named by any session's claim was previously invisible to the discovered
+ * set entirely, hence silently dropped rather than filed `unowned`. Its own
+ * dimensions: HAPPY (a git-known, unclaimed, un-worktreed branch surfaces
+ * `unowned`, no double-count of a worktree's own branch), a dedup/regression
+ * case (a claimed branch is not re-bucketed `unowned` by the new source),
+ * NEGATIVE (omitting the parameter entirely never invents entries — pre-
+ * remediation behaviour is preserved), and BOUNDARY (sum-equals-total
+ * checked against git's OWN ref list from a REAL `mkdtemp` repo — an
+ * INDEPENDENT enumeration, never a re-derivation over the same
+ * `worktrees`/`sessions` objects `partitionTerritory` itself consumes, which
+ * is exactly what made the ORIGINAL `expectedDiscoveredTotal`-based
+ * sum-equals-total oracle above vacuous: it could never disagree with a bug
+ * shared by both the check and the code under test).
+ *
  * A SECOND describe block below (AC-REPLAY-1) covers `unmerged_commits`
  * with REAL `mkdtemp` git fixtures — the tests above use fake string paths
  * because they exercise classification only, but measuring a commit count
@@ -329,6 +348,110 @@ function findEntry(partition: TerritoryPartition, predicate: (e: TerritoryEntry)
 function branchSession(by: string, sessionId: string, branch: string): ReadySession {
   return { by, session_id: sessionId, branches: [branch], task_slugs: [`t-${branch}`], newest_at: "2026-08-13T10:00:00.000Z" };
 }
+
+// ─── Local branch discovery (AC-OWN-1 remediation, task-lore-territory-s-
+// discovery-set-is-claim-derived-so-an, 2026-08-13) ─────────────────────────
+//
+// `worktrees` (git worktree list) and `sessions[].branches` (claim-derived
+// orphans) are not the only two facts git can supply: a LOCAL branch that no
+// worktree currently checks out AND no session claims exists in neither
+// structure, so it was previously invisible to `partitionTerritory` and
+// silently dropped — exactly the branch a reader deciding what to delete is
+// deciding about. The optional 4th parameter `localBranches` closes this by
+// injecting a THIRD fact set (every local branch name, e.g. from `git
+// for-each-ref refs/heads/`) rather than having the partitioner shell out
+// itself — see `territory-partition.ts`'s own module header for why.
+describe("partitionTerritory — local branch discovery (AC-OWN-1 remediation)", () => {
+  it("an unclaimed, un-worktreed local branch is reported unowned, never dropped, and never double-counts a worktree's own current branch", () => {
+    const worktrees: TerritoryWorktree[] = [{ path: "/wt-mine", branch: "main" }];
+    const sessions: ReadySession[] = [];
+    // "main" is ALSO one of the git-reported local branches — it must fold
+    // into the worktree's own single entry, never mint a second entry.
+    const localBranches = ["main", "nobody-claims-this"];
+
+    const partition = partitionTerritory(worktrees, sessions, CURRENT_SESSION_ID, localBranches);
+
+    expect(totalEntries(partition)).toBe(2); // 1 worktree (main) + 1 orphan branch, never 3
+    const entry = partition.unowned.find((e) => e.kind === "branch" && e.branch === "nobody-claims-this");
+    expect(entry).toBeDefined();
+    expect(partition.mine.some((e) => e.kind === "branch" && e.branch === "nobody-claims-this")).toBe(false);
+    expect(partition.foreign.some((e) => e.kind === "branch" && e.branch === "nobody-claims-this")).toBe(false);
+    expect(partition.unmeasured.some((e) => e.kind === "branch" && e.branch === "nobody-claims-this")).toBe(false);
+  });
+
+  it("a local branch ALSO named by a session's claim is still classified by that claim, not re-filed unowned by the third source", () => {
+    const worktrees: TerritoryWorktree[] = [{ path: "/wt-mine", branch: "main" }];
+    const sessions: ReadySession[] = [branchSession("agent:peer", "peer5555", "claimed-branch")];
+    const localBranches = ["main", "claimed-branch"];
+
+    const partition = partitionTerritory(worktrees, sessions, CURRENT_SESSION_ID, localBranches);
+
+    expect(totalEntries(partition)).toBe(2);
+    expect(partition.unmeasured.some((e) => e.kind === "branch" && e.branch === "claimed-branch")).toBe(false);
+    // reason: `compareClaimSessions` cannot prove same/different for a peer
+    // it has no relation to via CURRENT_SESSION_ID here, so this specific
+    // fixture's claimant is "foreign" — the point under test is only that it
+    // is NOT re-classified `unowned` by the new discovery source.
+    const claimedEntry = [...partition.foreign, ...partition.unmeasured].find(
+      (e) => e.kind === "branch" && e.branch === "claimed-branch",
+    );
+    expect(claimedEntry).toBeDefined();
+    expect(partition.unowned.some((e) => e.kind === "branch" && e.branch === "claimed-branch")).toBe(false);
+  });
+
+  it("omitting localBranches (enumeration not attempted/failed) never invents entries — behaves exactly as before this remediation", () => {
+    const worktrees: TerritoryWorktree[] = [{ path: "/wt-mine", branch: "main" }];
+    const sessions: ReadySession[] = [];
+
+    const partition = partitionTerritory(worktrees, sessions, CURRENT_SESSION_ID);
+
+    expect(totalEntries(partition)).toBe(1);
+  });
+
+  it("BOUNDARY: sum-equals-total checked against git's OWN ref list (real repo) — an INDEPENDENT enumeration, never a re-derivation over the same worktrees/sessions objects fed to partitionTerritory", () => {
+    const repoRoot = mkdtempReal("tp-independent-total-");
+    initRepo(repoRoot);
+    git(repoRoot, ["branch", "claimed-elsewhere"]);
+    git(repoRoot, ["branch", "nobody-claims-this"]);
+
+    // Ground truth: queried DIRECTLY from git in this repo, never through
+    // `partitionTerritory` or any helper that mirrors its own discovery
+    // algorithm (the previous `expectedDiscoveredTotal` helper re-derived the
+    // total from the exact same `worktrees`/`sessions` JS objects using
+    // near-identical set-construction rules — vacuous, since it could never
+    // disagree with a bug shared by both. This query is a genuinely separate
+    // data source: real git state, read independently.)
+    const groundTruthBranches = git(repoRoot, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"])
+      .split("\n")
+      .filter((line) => line.length > 0);
+    expect(new Set(groundTruthBranches)).toEqual(new Set(["main", "claimed-elsewhere", "nobody-claims-this"]));
+
+    const worktrees: TerritoryWorktree[] = [{ path: repoRoot, branch: "main" }];
+    const sessions: ReadySession[] = [branchSession("agent:peer", "peer9999", "claimed-elsewhere")];
+    const partition = partitionTerritory(worktrees, sessions, undefined, groundTruthBranches);
+
+    // THE case this remediation exists to catch: present, not absent.
+    const unclaimedEntry = partition.unowned.find((e) => e.kind === "branch" && e.branch === "nobody-claims-this");
+    expect(unclaimedEntry).toBeDefined();
+
+    // sum-equals-total, with the TOTAL derived from `groundTruthBranches` (the
+    // independent git query above) rather than from replaying
+    // worktrees/sessions/localBranches through partitionTerritory's own
+    // set-construction: 1 worktree entry (main) + every ground-truth branch
+    // NOT currently checked out by that worktree (2: claimed-elsewhere,
+    // nobody-claims-this). Before this remediation, `nobody-claims-this` was
+    // dropped and this assertion would read totalEntries === 2 while
+    // independentTotal === 3 — a genuine, catchable mismatch.
+    const checkedOutBranches = new Set(worktrees.filter((w) => w.branch !== null).map((w) => w.branch as string));
+    const independentTotal = worktrees.length + groundTruthBranches.filter((b) => !checkedOutBranches.has(b)).length;
+    expect(independentTotal).toBe(3); // hand-countable: 1 worktree (main) + 2 orphan branches
+    expect(totalEntries(partition)).toBe(independentTotal);
+    // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+    // D1) — this body's real `git` fixture construction spawns >= SPAWN_THRESHOLD
+    // times (initRepo + 2 `git branch` + 1 `git for-each-ref`), mirroring the
+    // AC-REPLAY-1 cases below in this same file.
+  }, 15000);
+});
 
 describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
   it("HAPPY: an orphan branch several commits ahead of main counts exactly", () => {
