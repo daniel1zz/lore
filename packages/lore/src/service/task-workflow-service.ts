@@ -310,8 +310,6 @@ import {
   UNFILTERED_RUN_CASE_FILTER_DESCRIPTION,
   isInvalidated,
   unprobedFileAnchors,
-  specAcceptanceCriteriaSchema,
-  resolveGoverningSpecByAcScope,
   resolveOracleGeneration,
   type AcceptanceCriterion,
   type AcScopeEditOp,
@@ -1771,6 +1769,43 @@ export class TaskWorkflowService {
   ) => Promise<Result<Set<string>, LoreError>>;
 
   /**
+   * Narrow port resolving the FULL declared acceptance criteria on a plan's parent
+   * spec — the generation-carrying sibling of {@link resolveDeclaredAcIds}. A bare
+   * `Set<string>` of ids cannot answer "what generation is that criterion in", so
+   * {@link resolveAcOracleGeneration} (this service's SOLE consumer of this port)
+   * needs the criterion OBJECTS, not just their ids. Implemented by
+   * `CorpusService.resolveDeclaredAcCriteria` and injected here for the same
+   * cross-service reason `resolveDeclaredAcIds` is (services don't cross-import).
+   * Before this port existed, `resolveAcOracleGeneration` carried its own private
+   * task→plan→spec traversal (deleted by
+   * task-widen-the-declared-ac-port-to-carry-criteria-so-the) precisely because
+   * neither injected port could carry more than an id set. Defaults to a
+   * stub that always resolves `null` ("nothing declared"), same rationale as
+   * `resolveDeclaredAcIds`'s own default — the default is only ever consulted when
+   * an `ac_ref` is actually supplied to addEvidence for a plan-owned task.
+   */
+  private readonly resolveDeclaredAcCriteria: (
+    planId: string,
+  ) => Promise<Result<AcceptanceCriterion[] | null, LoreError>>;
+
+  /**
+   * The `--adhoc`-task sibling of {@link resolveDeclaredAcCriteria} — the
+   * generation-carrying counterpart of {@link resolveAdhocGoverningAcIds}.
+   * Implemented by `CorpusService.resolveDeclaredAcCriteriaForAdhocTask` and
+   * injected here for the same reason. Its sole consumer is
+   * {@link resolveAcOracleGeneration}. Defaults to a stub that always resolves an
+   * EMPTY array — deliberately NOT a refusing stub like
+   * `resolveAdhocGoverningAcIds`'s default: an unresolved criterion here degrades
+   * to "no generation to stamp" (`ok(null)` from {@link resolveAcOracleGeneration}),
+   * never a write-blocking refusal — refusing on a bad/absent `ac_scope` is
+   * `resolveAdhocGoverningAcIds`'s job alone, in the cross-entity check a few lines
+   * later in `appendEvidenceEntry`.
+   */
+  private readonly resolveAdhocGoverningAcCriteria: (
+    task: DocRecord,
+  ) => Promise<Result<AcceptanceCriterion[], LoreError>>;
+
+  /**
    * @param store - Storage abstraction (same instance passed to CorpusService)
    * @param telemetry - Telemetry sink (own wiring — D8; defaults to NoOp)
    * @param config - `{ claimTtlMinutes }` — see resolveClaimTtlMinutes in @lore/core
@@ -1799,6 +1834,19 @@ export class TaskWorkflowService {
    *   `new TaskWorkflowService(store, telemetry, config)` therefore records no
    *   `session_id` — byte-identical to pre-fix behavior, the same optional-DI
    *   convention `gate` follows.
+   * @param resolveDeclaredAcCriteria - task-widen-the-declared-ac-port-to-carry-
+   *   criteria-so-the cross-entity port; production wiring is
+   *   `corpusService.resolveDeclaredAcCriteria.bind(corpusService)` (app.ts). The
+   *   SOLE consumer is {@link resolveAcOracleGeneration} — every existing `ac_ref`
+   *   existence check keeps reading `resolveDeclaredAcIds` unchanged. Defaults to
+   *   a stub resolving `null`, so every pre-existing bare construction that omits
+   *   it keeps compiling and stamps no generation (byte-identical to before this
+   *   port existed for a task never exercising `ac_ref`).
+   * @param resolveAdhocGoverningAcCriteria - the ad-hoc sibling of
+   *   `resolveDeclaredAcCriteria`; production wiring is
+   *   `corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService)`
+   *   (app.ts). Defaults to a stub resolving an empty array (see the field's own
+   *   JSDoc for why this default is benign rather than refusing).
    */
   constructor(
     private readonly store: StoreInterface,
@@ -1819,11 +1867,19 @@ export class TaskWorkflowService {
           "not wired on this TaskWorkflowService instance",
       }),
     private readonly processEnv: Record<string, string | undefined> = {},
+    resolveDeclaredAcCriteria: (
+      planId: string,
+    ) => Promise<Result<AcceptanceCriterion[] | null, LoreError>> = async () => ok(null),
+    resolveAdhocGoverningAcCriteria: (
+      task: DocRecord,
+    ) => Promise<Result<AcceptanceCriterion[], LoreError>> = async () => ok([]),
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
     this.resolveDeclaredAcIds = resolveDeclaredAcIds;
     this.resolveAdhocGoverningAcIds = resolveAdhocGoverningAcIds;
+    this.resolveDeclaredAcCriteria = resolveDeclaredAcCriteria;
+    this.resolveAdhocGoverningAcCriteria = resolveAdhocGoverningAcCriteria;
   }
 
   // ── addEvidence ───────────────────────────────────────────────────────────
@@ -2191,85 +2247,48 @@ export class TaskWorkflowService {
    * `verify.command` rewrite (`AcService.setCriterion`) leaves this row reportable as
    * PRIOR-generation without anyone editing it.
    *
+   * Reads the criterion from the injected {@link resolveDeclaredAcCriteria} (plan-owned
+   * task) / {@link resolveAdhocGoverningAcCriteria} (`--adhoc` task) ports — task-widen-
+   * the-declared-ac-port-to-carry-criteria-so-the widened both ports to carry the full
+   * criterion (not just its id) precisely so this method no longer needs a traversal of
+   * its own. A prior version of this method owned a private task→plan→spec walk (deleted
+   * by that task) because neither port could answer "what generation is that criterion
+   * in" until they returned criterion OBJECTS instead of a bare id set.
+   *
    * @param task - the resolved target task (already type-validated by the caller)
    * @param acRef - the row's `ac_ref`, verbatim
-   * @returns `ok(<generation>)` when `acRef` names a criterion on the task's governing
-   *   spec; `ok(null)` when it does not. `null` is NOT a silent fallback: every case that
-   *   produces it (no parent, a non-plan parent, a parent plan under no spec, a spec with
-   *   no schema-valid `acceptance_criteria`, an ad-hoc task whose `ac_scope` resolves to
-   *   zero or several specs, or simply an `acRef` that is not declared) is a case the
-   *   pre-existing cross-entity `ac_ref` check in {@link appendEvidenceEntry} REFUSES a
-   *   few lines later, with its own better-worded VALIDATION_ERROR naming the available
-   *   ids. Returning `null` here rather than a competing error keeps that message the one
-   *   the caller sees, and the refusal is what guarantees no committed row is ever
-   *   silently unstamped. `err` only propagates a store failure.
+   * @returns `ok(<generation>)` when `acRef` names a criterion the port resolves;
+   *   `ok(null)` when it does not, or when a plan-owned task has no parent at all
+   *   (`task.parent_id === null`, checked before consulting the port — same short
+   *   circuit the deleted traversal used to apply). `null` is NOT a silent
+   *   fallback: every case that produces it is a case the pre-existing cross-entity
+   *   `ac_ref` check in {@link appendEvidenceEntry} REFUSES a few lines later, with its
+   *   own better-worded VALIDATION_ERROR naming the available ids — this method never
+   *   needs to duplicate that message. `err` propagates either a store failure OR a
+   *   VALIDATION_ERROR surfaced by the port itself (e.g. an `--adhoc` task with no
+   *   declared `ac_scope`) — the SAME error {@link appendEvidenceEntry}'s later
+   *   existence check would produce from the SAME underlying traversal, just surfaced
+   *   one call earlier: `resolveDeclaredAcCriteria`/`resolveDeclaredAcIds` (and their
+   *   ad-hoc siblings) share ONE walk in `CorpusService`, so the two can never disagree.
    */
   private async resolveAcOracleGeneration(
     task: DocRecord,
     acRef: string,
   ): Promise<Result<number | null, LoreError>> {
-    const criteriaResult = await this.findGoverningAcceptanceCriteria(task);
-    if (!criteriaResult.ok) return criteriaResult;
-    const criterion = criteriaResult.value.find((c) => c.id === acRef);
+    let criteria: AcceptanceCriterion[];
+    if (task.extra["adhoc"] === true) {
+      const criteriaResult = await this.resolveAdhocGoverningAcCriteria(task);
+      if (!criteriaResult.ok) return criteriaResult;
+      criteria = criteriaResult.value;
+    } else {
+      if (task.parent_id === null) return ok(null);
+      const criteriaResult = await this.resolveDeclaredAcCriteria(task.parent_id);
+      if (!criteriaResult.ok) return criteriaResult;
+      criteria = criteriaResult.value ?? [];
+    }
+    const criterion = criteria.find((c) => c.id === acRef);
     if (criterion === undefined) return ok(null);
     return ok(resolveOracleGeneration(criterion.oracle_generation));
-  }
-
-  /**
-   * The task's governing spec's DECLARED acceptance criteria — the full criterion
-   * objects, which {@link resolveAcOracleGeneration} needs and which neither injected
-   * `ac_ref` port can supply.
-   *
-   * ⛔ Read this before "simplifying" it: the two injected ports
-   * ({@link resolveDeclaredAcIds}, {@link resolveAdhocGoverningAcIds}) exist precisely so
-   * this service does not own the task → governing-spec traversal (SPEC-038 §7 D4, and
-   * this module's own `addEvidence` invariant). Their contract returns `Set<string>` — AC
-   * IDS ONLY — so neither can answer "what generation is that criterion in", and widening
-   * either one is a change to `CorpusService.resolveDeclaredAcIds`/
-   * `resolveDeclaredAcIdsForAdhocTask` plus their `app.ts` bindings, i.e. two files
-   * outside the anchors §M5's own task declared. This method is therefore a deliberate,
-   * BOUNDED second traversal of the same edges, and it is kept from drifting from the
-   * ports' verdict in the only two ways that matter: it parses with the SAME
-   * `specAcceptanceCriteriaSchema` and, for an ad-hoc task, runs the SAME
-   * `resolveGoverningSpecByAcScope` search (`@lore/core`) — so the two can disagree only
-   * about how they REACHED the spec, never about which criterion an id names. If the
-   * ports are ever widened to carry generations, delete this method and read them
-   * instead; nothing else consumes it.
-   *
-   * @param task - the resolved target task
-   * @returns the declared criteria, or `[]` for every "no governing spec resolvable"
-   *   case — a FACT, never an error (see {@link resolveAcOracleGeneration}'s `@returns`
-   *   for why the caller's `null` is safe). `err` only propagates a store failure.
-   */
-  private async findGoverningAcceptanceCriteria(
-    task: DocRecord,
-  ): Promise<Result<AcceptanceCriterion[], LoreError>> {
-    if (task.extra["adhoc"] === true) {
-      const declaredScope = extractDeclaredAcScope(task);
-      if (declaredScope === undefined || declaredScope.length === 0) return ok([]);
-      const specsResult = await this.store.findMany({ type: "spec" });
-      if (!specsResult.ok) return specsResult;
-      const match = resolveGoverningSpecByAcScope(
-        declaredScope,
-        specsResult.value,
-        `ad-hoc task "${task.slug}"`,
-      );
-      return ok(match.ok ? match.value.criteria : []);
-    }
-
-    if (task.parent_id === null) return ok([]);
-    const planResult = await this.store.find(task.parent_id);
-    if (!planResult.ok) return planResult;
-    const plan = planResult.value;
-    if (plan === null || plan.deleted_at !== null || plan.type !== "plan" || plan.parent_id === null) {
-      return ok([]);
-    }
-    const specResult = await this.store.find(plan.parent_id);
-    if (!specResult.ok) return specResult;
-    const spec = specResult.value;
-    if (spec === null || spec.deleted_at !== null || spec.type !== "spec") return ok([]);
-    const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
-    return ok(parsed.success ? parsed.data : []);
   }
 
   // ── claim ────────────────────────────────────────────────────────────────

@@ -94,6 +94,15 @@ function makeServices(): {
     undefined,
     { claimTtlMinutes: 120 },
     corpusService.resolveDeclaredAcIds.bind(corpusService),
+    undefined,
+    undefined,
+    undefined,
+    // reason: task-widen-the-declared-ac-port-to-carry-criteria-so-the — the
+    // generation-carrying sibling of the 4th arg. `resolveAcOracleGeneration` now
+    // reads the criterion (and its oracle_generation) from THIS port rather than a
+    // private traversal of its own, so this fixture must wire it for the stamping
+    // this whole file asserts on to happen at all.
+    corpusService.resolveDeclaredAcCriteria.bind(corpusService),
   );
   return { store, corpusService, acService, taskWorkflowService };
 }
