@@ -5876,6 +5876,14 @@
     "01KZV0C3N0KPKWXA9ZJWTTWHFA": {
       "human_id": "TASK-710",
       "file_path": "docs/requirements/task/TASK-710-add-the-two-ownership-read-surfaces-lore-territory.md"
+    },
+    "01KZV44BTQPK4ZQ4P3XD448ST1": {
+      "human_id": "KN-446",
+      "file_path": "docs/requirements/knowledge/KN-446-evicted-from-the-service-module-doc-the-acservice.md"
+    },
+    "01KZV3XFFY7SEZ9E11NZDC81W8": {
+      "human_id": "TASK-711",
+      "file_path": "docs/requirements/task/TASK-711-the-oracle-file-existence-precheck-understands-onl.md"
     }
   }
 }
