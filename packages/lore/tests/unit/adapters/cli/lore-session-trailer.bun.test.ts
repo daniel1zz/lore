@@ -33,12 +33,53 @@
  *               it carries no trailer, exactly as a claim made with no
  *               worktree at all
  *
+ * ── task-the-lore-session-trailer-is-inert-whenever-core-hookspath ──────────
+ * Two further describe blocks below close the gap the assessment named:
+ * AC-OWN-4's own oracle never drove the configuration THIS repo ships
+ * (`git config core.hooksPath hooks`, a directory outside `.git` — the
+ * pre-fix code's `hooksDirIsInsideGitDir` check silently skipped exactly
+ * that case). Direction chosen (recorded in `real-git-port.ts`'s own doc):
+ * SUPPORT the outside-the-git-dir case (Direction 1) rather than merely
+ * report the skip, because it is achievable without writing outside the
+ * repo (the hook lands inside a KNOWN working tree of the repo, protected
+ * from dirtying `git status` via the repo's own `$GIT_COMMON_DIR/info/
+ * exclude`) — see `real-git-port.ts::ensureSessionTrailerHookInstalled`'s
+ * own JSDoc for the full rationale.
+ *
+ *   "core.hooksPath outside the git dir..." describe block:
+ *     HAPPY:      hooksPath outside .git but INSIDE the repo (this repo's
+ *                 own shape) — the trailer STILL LANDS
+ *     STATE:      installing there NEVER dirties `git status` (the exact
+ *                 invariant the pre-fix skip existed to protect)
+ *     REGRESSION: a SECOND claim under the same hooksPath shape is
+ *                 idempotent — no duplicate `info/exclude` line, no error
+ *     BOUNDARY:   a hooksPath resolving OUTSIDE every working tree of the
+ *                 repo entirely (a genuinely foreign directory) is STILL
+ *                 silently skipped, and nothing is ever written there — the
+ *                 blast-radius containment this fix's own doc promises
+ *
+ * The marker's second defect — `writeClaimSessionMarker` had no clearing
+ * path on release, so a released worktree's later commits kept the stale
+ * trailer — is fixed by the newly-exported `unbindClaimSessionForTrailer`
+ * (real-git-port.ts). ⛔ NOT YET wired into `TaskWorkflowService.release`:
+ * that edit belongs to `task-workflow-service.ts`, outside this task's
+ * declared anchor (`real-git-port.ts` only) — see that function's own
+ * JSDoc. The block below exercises the exported port DIRECTLY, honestly
+ * proving the mechanism rather than a not-yet-existing wiring path:
+ *
+ *   "a released claim's session no longer taints later commits" describe block:
+ *     STATE:    unbinding with the SAME session id that bound it clears the
+ *               marker — a LATER commit carries no trailer
+ *     NEGATIVE: unbinding with a MISMATCHED session id is a no-op — it never
+ *               erases a DIFFERENT, still-live claim's marker (the exact
+ *               cross-contamination compare-and-delete exists to prevent)
+ *
  * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-4
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sessionIdDiscriminator } from "@lore/core";
@@ -46,6 +87,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
+import { bindClaimSessionForTrailer, unbindClaimSessionForTrailer } from "../../../../src/adapters/real-git-port.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -88,6 +130,30 @@ function commitFile(repoRoot: string, name: string, content: string, message: st
 /** Reads the `Lore-Session` trailer of `repoRoot`'s most recent commit — "" when absent. */
 function readLoreSessionTrailer(repoRoot: string): string {
   return git(repoRoot, "log", "-1", "--format=%(trailers:key=Lore-Session,valueonly)");
+}
+
+/** `git status --porcelain` output — "" means a clean tree (no untracked/modified paths). */
+function gitStatusPorcelain(repoRoot: string): string {
+  return git(repoRoot, "status", "--porcelain");
+}
+
+/**
+ * Configures `repoRoot`'s `core.hooksPath` to `relativeDir` — a directory
+ * INSIDE the repo's own working tree but OUTSIDE `.git` — mirroring THIS
+ * repo's own shipped shape (`hooks/pre-push` et al, root CLAUDE.md's
+ * `git config core.hooksPath hooks` instruction). Creates and COMMITS a
+ * placeholder tracked file inside it first, so the directory is genuinely
+ * TRACKED — the exact precondition `ensureSessionTrailerHookInstalled`'s
+ * dirtying risk depends on (an untracked hooks dir would never dirty `git
+ * status` in the first place, so it would not exercise the fix at all).
+ */
+function configureTrackedHooksPathOutsideGitDir(repoRoot: string, relativeDir: string): void {
+  const hooksDirAbs = join(repoRoot, relativeDir);
+  mkdirSync(hooksDirAbs, { recursive: true });
+  writeFileSync(join(hooksDirAbs, "placeholder.sh"), "#!/bin/sh\n", "utf8");
+  git(repoRoot, "add", join(relativeDir, "placeholder.sh"));
+  git(repoRoot, "commit", "-q", "-m", `track ${relativeDir}`);
+  git(repoRoot, "config", "core.hooksPath", relativeDir);
 }
 
 // ─── Service fixtures ───────────────────────────────────────────────────────
@@ -236,5 +302,126 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
     commitFile(repoRoot, "no-session.txt", "content\n", "commit under a claim with no measured session");
 
     expect(readLoreSessionTrailer(repoRoot)).toBe("");
+  });
+});
+
+// ─── task-the-lore-session-trailer-is-inert-whenever-core-hookspath ────────
+
+describe("core.hooksPath outside the git dir but inside the repo still gets the trailer (AC-OWN-4, Direction 1)", () => {
+  it("HAPPY: hooksPath outside .git but inside the repo (this repo's own shape) still lands the trailer", async () => {
+    const { repoRoot } = makeRepo();
+    configureTrackedHooksPathOutsideGitDir(repoRoot, "hooks");
+    const { corpusService, taskWorkflowService } = makeServices({
+      CLAUDE_CODE_SESSION_ID: "hookspath-happy-1234",
+    });
+    const { taskId } = await createPlanAndTask(corpusService);
+
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    expect(claimResult.ok).toBe(true);
+
+    commitFile(repoRoot, "under-claim.txt", "content\n", "commit under active claim, hooksPath outside .git");
+
+    expect(readLoreSessionTrailer(repoRoot)).toBe(sessionIdDiscriminator("hookspath-happy-1234"));
+  });
+
+  it("STATE: installing the hook into a hooksPath outside .git never dirties the working tree", async () => {
+    const { repoRoot } = makeRepo();
+    configureTrackedHooksPathOutsideGitDir(repoRoot, "hooks");
+    // reason: the CONFIGURE step above already commits its own placeholder
+    // file, so the tree is clean again by the time we measure the baseline —
+    // this assertion is about what `lore claim` itself introduces, not about
+    // the fixture setup.
+    expect(gitStatusPorcelain(repoRoot)).toBe("");
+
+    const { corpusService, taskWorkflowService } = makeServices({
+      CLAUDE_CODE_SESSION_ID: "hookspath-clean-1234",
+    });
+    const { taskId } = await createPlanAndTask(corpusService);
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    expect(claimResult.ok).toBe(true);
+
+    // reason: this is the invariant the pre-fix code's blanket skip existed
+    // to protect — a `commit-msg` file now genuinely exists inside the
+    // TRACKED `hooks/` dir (proven by the HAPPY case above), so an oracle
+    // that only checked "the file was written" would pass even if `git
+    // status` had gone dirty. Assert the actual promise directly.
+    expect(gitStatusPorcelain(repoRoot)).toBe("");
+  });
+
+  it("REGRESSION: a second claim under the same hooksPath shape is idempotent — no duplicate exclude line, no error", async () => {
+    const { repoRoot } = makeRepo();
+    configureTrackedHooksPathOutsideGitDir(repoRoot, "hooks");
+    const { corpusService, taskWorkflowService } = makeServices({
+      CLAUDE_CODE_SESSION_ID: "hookspath-idempotent-1",
+    });
+    const { taskId } = await createPlanAndTask(corpusService);
+
+    const first = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    expect(first.ok).toBe(true);
+    const excludeContentAfterFirst = readFileSync(join(repoRoot, ".git", "info", "exclude"), "utf8");
+    const patternOccurrences = excludeContentAfterFirst.split("\n").filter((line) => line === "/hooks/commit-msg")
+      .length;
+    expect(patternOccurrences).toBe(1);
+
+    const second = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    expect(second.ok).toBe(true);
+    const excludeContentAfterSecond = readFileSync(join(repoRoot, ".git", "info", "exclude"), "utf8");
+    expect(excludeContentAfterSecond.split("\n").filter((line) => line === "/hooks/commit-msg").length).toBe(1);
+    expect(gitStatusPorcelain(repoRoot)).toBe("");
+  });
+
+  it("BOUNDARY: a hooksPath resolving outside every working tree of the repo is still silently skipped", async () => {
+    const { repoRoot } = makeRepo();
+    const foreignDir = mkdtempSync(join(tmpdir(), "lore-ac-own-4-foreign-hooks-"));
+    cleanupDirs.push(foreignDir);
+    git(repoRoot, "config", "core.hooksPath", foreignDir);
+
+    const { corpusService, taskWorkflowService } = makeServices({
+      CLAUDE_CODE_SESSION_ID: "hookspath-foreign-1234",
+    });
+    const { taskId } = await createPlanAndTask(corpusService);
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    expect(claimResult.ok).toBe(true);
+
+    commitFile(repoRoot, "under-claim.txt", "content\n", "commit under active claim, hooksPath entirely foreign");
+
+    // reason: install was refused, so the trailer never lands — AND nothing
+    // was ever written into the foreign directory itself (the blast-radius
+    // containment `ensureSessionTrailerHookInstalled`'s own doc promises).
+    expect(readLoreSessionTrailer(repoRoot)).toBe("");
+    expect(readdirSync(foreignDir)).toEqual([]);
+  });
+});
+
+describe("a released claim's session no longer taints later commits (AC-OWN-4, second defect)", () => {
+  it("STATE: unbinding with the SAME session id clears the marker — a later commit carries no trailer", async () => {
+    const { repoRoot } = makeRepo();
+    const sessionId = sessionIdDiscriminator("release-state-1234");
+
+    await bindClaimSessionForTrailer(repoRoot, sessionId);
+    commitFile(repoRoot, "before-release.txt", "content\n", "commit while the binding is still active");
+    expect(readLoreSessionTrailer(repoRoot)).toBe(sessionId);
+
+    await unbindClaimSessionForTrailer(repoRoot, sessionId);
+    commitFile(repoRoot, "after-release.txt", "content\n", "commit after the claim was released");
+    expect(readLoreSessionTrailer(repoRoot)).toBe("");
+  });
+
+  it("NEGATIVE: unbinding with a MISMATCHED session id never erases a different, still-live claim's marker", async () => {
+    const { repoRoot } = makeRepo();
+    const releasedSessionId = sessionIdDiscriminator("released-session-1111");
+    const liveSessionId = sessionIdDiscriminator("live-session-2222");
+
+    await bindClaimSessionForTrailer(repoRoot, releasedSessionId);
+    // reason: a DIFFERENT claim re-binds this SAME worktree before the
+    // original claim's (stale) release call ever reaches this function —
+    // mirrors AC-OWN-4's own STATE case ("re-claiming overwrites the
+    // marker"), just staged as the PRECONDITION here instead of the assertion.
+    await bindClaimSessionForTrailer(repoRoot, liveSessionId);
+
+    await unbindClaimSessionForTrailer(repoRoot, releasedSessionId);
+
+    commitFile(repoRoot, "after-mismatched-unbind.txt", "content\n", "commit after a mismatched unbind attempt");
+    expect(readLoreSessionTrailer(repoRoot)).toBe(liveSessionId);
   });
 });
