@@ -4,6 +4,20 @@
  * Mirrors `real-mcp-registrar.ts`'s "port implementation, adapter layer"
  * placement and its `node:child_process`-not-`Bun.spawn` invariant.
  *
+ * Also the L0 ownership-binding git port (spec-multi-session-concurrency-
+ * queryable-ownership-checkout §Scope L0, AC-OWN-2/AC-OWN-4) — three
+ * standalone exported functions, deliberately NOT methods on `RealGitPort`
+ * (they need no `repoRoot` state; every caller passes its own `cwd`) and
+ * consumed by `TaskWorkflowService.claim`'s injectable `detectBranch`/
+ * `installClaimTrailerBinding` ports (their real, default implementations —
+ * see that service's constructor JSDoc for why a service importing a
+ * concrete adapter function is a deliberate, narrow exception here: branch
+ * detection / trailer binding are leaf IO capabilities with no OTHER service
+ * dependency, so there is no `app.ts` composition-root wiring to route
+ * through — mirrors `measureWorktreeCleanliness`'s own pre-existing ad hoc
+ * `git` subprocess calls inside that same service file, just consolidated
+ * behind an injectable, fake-able seam instead of inlined there again).
+ *
  * Public surface:
  *   - RealGitPort implements GitPort — constructor(repoRoot) (the directory
  *     every `worktreeAdd`/`worktreeList`/`worktreeRemove`/`isMerged` call
@@ -11,6 +25,23 @@
  *     explicit `cwd` argument, per the `GitPort` interface contract —
  *     those two operate on whichever checkout the CALLER names, typically
  *     the main checkout, not necessarily `repoRoot`).
+ *   - BranchMeasurement / detectWorktreeBranch(cwd) — AC-OWN-2: a
+ *     discriminated `{status:"measured", branch} | {status:"unmeasured"}`,
+ *     NEVER a nullable string (mirrors `gate-predicates.ts::
+ *     compareClaimSessions`'s three-valued "not measured ≠ known-absent"
+ *     discipline). Detached HEAD, a non-repo path, a missing path, and any
+ *     other `git` failure ALL degrade to `"unmeasured"` uniformly — never
+ *     coerced to a placeholder branch name, and never to be confused with
+ *     "unowned" (a DIFFERENT, higher-layer fact `lore territory` reports).
+ *   - bindClaimSessionForTrailer(cwd, sessionId) — AC-OWN-4: best-effort
+ *     composite of `writeClaimSessionMarker` + `ensureSessionTrailerHookInstalled`
+ *     (both private) — records `sessionId` as the worktree's active claim and
+ *     ensures the shared `commit-msg` hook that reads it is installed, so a
+ *     commit made in `cwd` while the binding is live carries the
+ *     `Lore-Session: <sessionId>` git trailer. Deliberately swallows both
+ *     calls' Results and returns `void` — see its own doc for why this
+ *     capability is advisory-only, mirroring `anchor-resolution.ts`'s
+ *     "a non-resolving anchor is never a refusal" precedent.
  *
  * Invariants:
  *   - `node:child_process.spawn`, NOT `Bun.spawn` — the global `Bun` object
@@ -33,16 +64,30 @@
  *     carries no creation timestamp of its own; this is a best-effort
  *     approximation, not a git-native fact (mirrors the fake `GitPort`'s own
  *     "fixture-only convenience" framing in the service-layer test suite).
+ *   - `ensureSessionTrailerHookInstalled` ONLY EVER writes into a hooks
+ *     directory that resolves INSIDE the git directory itself (`.git/hooks`,
+ *     or a linked worktree's own private git-dir) — a `core.hooksPath`
+ *     pointed OUTSIDE the git dir (this very repo's own checked-in, TRACKED
+ *     `hooks/`) is explicitly SKIPPED, never written to: an untracked file
+ *     appearing there as a side effect of `lore claim` would dirty the
+ *     working tree, which `measureWorktreeCleanliness` (`task-workflow-
+ *     service.ts`) would then itself refuse evidence/release over. It also
+ *     never clobbers a pre-existing FOREIGN `commit-msg` hook (one lacking
+ *     this module's own marker comment) — it reports `"skipped-foreign-hook"`
+ *     instead.
  *
  * Side-effect class: IO (child_process subprocess; `worktreeList`'s
  *   `createdAt` derivation additionally does one synchronous `fs.statSync`
- *   per listed worktree).
+ *   per listed worktree; the L0 trailer functions additionally do synchronous
+ *   `fs` read/write/chmod calls against the resolved git directory).
  *
- * Source: SPEC-057 §Module Boundary D1, §Structure.
+ * Source: SPEC-057 §Module Boundary D1, §Structure;
+ *   spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0.
  */
 
 import { spawn } from "node:child_process";
-import { statSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
 
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
@@ -126,6 +171,192 @@ function parsePorcelainWorktreeList(stdout: string): Array<{ path: string; branc
   }
 
   return entries;
+}
+
+// ─── L0 Ownership Binding (spec-multi-session-concurrency-queryable- ────────
+// ─── ownership-checkout §Scope L0, AC-OWN-2/AC-OWN-4) ───────────────────────
+
+/**
+ * A worktree's current git branch, or the fact that it could not be
+ * determined — a discriminated union, NEVER a nullable/empty string
+ * (mirrors {@link GitPort}'s sibling module `gate-predicates.ts`'s
+ * `SessionComparison`: "not measured" and "known to be absent" are
+ * different facts with opposite safe defaults, and collapsing them is
+ * exactly the defect this whole task exists to close).
+ */
+export type BranchMeasurement =
+  | { readonly status: "measured"; readonly branch: string }
+  | { readonly status: "unmeasured" };
+
+/**
+ * Detects `cwd`'s current git branch via `git symbolic-ref --short -q HEAD`
+ * — chosen over `git rev-parse --abbrev-ref HEAD` specifically because the
+ * latter prints the literal string `"HEAD"` on a detached checkout (a
+ * plausible-looking but WRONG branch name), where `symbolic-ref -q` instead
+ * exits nonzero with empty output — a clean, unambiguous "not on a branch"
+ * signal. NEVER throws: `runGit` itself never rejects (module @invariant),
+ * so every failure path here — detached HEAD, a path outside any git work
+ * tree, a path that does not exist on disk, `git` absent from PATH — is a
+ * plain nonzero exit, uniformly `"unmeasured"`.
+ *
+ * @param cwd - The worktree path to inspect (typically `ClaimOpts.worktree`
+ *   — deliberately NEVER `process.cwd()`, mirroring why `--worktree` itself
+ *   stays always-explicit, SPEC-042 D2 review U2).
+ * @returns `{status: "measured", branch}` when `cwd` sits on a named branch;
+ *   `{status: "unmeasured"}` otherwise.
+ * @example
+ * await detectWorktreeBranch("/repo"); // => { status: "measured", branch: "main" }
+ * @example
+ * await detectWorktreeBranch("/tmp/not-a-repo"); // => { status: "unmeasured" }
+ */
+export async function detectWorktreeBranch(cwd: string): Promise<BranchMeasurement> {
+  const result = await runGit(cwd, ["symbolic-ref", "--short", "-q", "HEAD"]);
+  const branch = result.stdout.trim();
+  if (result.exitCode !== 0 || branch.length === 0) {
+    return { status: "unmeasured" };
+  }
+  return { status: "measured", branch };
+}
+
+/** Filename of the per-worktree active-claim-session marker, written inside that worktree's OWN private git-dir (never the tracked working tree). */
+const CLAIM_SESSION_MARKER_FILENAME = "LORE_SESSION_ID";
+
+/**
+ * Records `sessionId` as the ACTIVE claim session for the worktree at `cwd`
+ * — writes a plain marker file inside `cwd`'s own private git directory
+ * (`git rev-parse --git-dir`, resolved from `cwd`), which for a LINKED
+ * worktree is a directory unique to THAT worktree (`<common>/worktrees/
+ * <name>`) and for the main checkout is the ordinary `.git` — either way,
+ * untracked and never visible to `git status` (so this write can never dirty
+ * the working tree `measureWorktreeCleanliness` polices). Overwrites any
+ * previous value — the marker is a CURRENT-STATE pointer, not an append log.
+ *
+ * @param cwd - The worktree path a claim was just taken against.
+ * @param sessionId - The claim's captured session instance (already
+ *   sanitized via `sessionIdDiscriminator` by the caller).
+ * @returns `ok(undefined)` on success; `err` naming the failure — the
+ *   caller ({@link bindClaimSessionForTrailer}) treats this as best-effort
+ *   and discards the Result, per this module's own doc.
+ */
+async function writeClaimSessionMarker(cwd: string, sessionId: string): Promise<Result<void, LoreError>> {
+  const gitDirResult = await runGit(cwd, ["rev-parse", "--git-dir"]);
+  if (gitDirResult.exitCode !== 0) return err(gitFailure(["rev-parse", "--git-dir"], gitDirResult));
+  const gitDir = resolve(cwd, gitDirResult.stdout.trim());
+
+  try {
+    writeFileSync(join(gitDir, CLAIM_SESSION_MARKER_FILENAME), `${sessionId}\n`, "utf8");
+    return ok(undefined);
+  } catch (cause) {
+    return err({
+      code: "STORE_ERROR",
+      message: `failed to write claim session marker in "${gitDir}": ${cause instanceof Error ? cause.message : String(cause)}`,
+    });
+  }
+}
+
+/** First line of the commit-msg hook this module installs — the marker `ensureSessionTrailerHookInstalled` checks for on re-entry/foreign-hook detection. */
+const TRAILER_HOOK_MARKER_LINE =
+  "# lore-managed: Lore-Session trailer hook — see packages/lore/src/adapters/real-git-port.ts::ensureSessionTrailerHookInstalled";
+
+/** Builds the `commit-msg` hook script content — reads {@link CLAIM_SESSION_MARKER_FILENAME} from the CURRENT worktree's own git-dir at commit time (never the install-time `cwd`, since one shared hook serves every worktree of the repo). */
+function buildTrailerHookScript(): string {
+  return [
+    "#!/bin/sh",
+    TRAILER_HOOK_MARKER_LINE,
+    `LORE_MARKER="$(git rev-parse --git-dir 2>/dev/null)/${CLAIM_SESSION_MARKER_FILENAME}"`,
+    'if [ -f "$LORE_MARKER" ]; then',
+    '  LORE_SESSION_ID="$(cat "$LORE_MARKER" 2>/dev/null)"',
+    '  if [ -n "$LORE_SESSION_ID" ]; then',
+    '    git interpret-trailers --in-place --trailer "Lore-Session: ${LORE_SESSION_ID}" "$1"',
+    "  fi",
+    "fi",
+    "",
+  ].join("\n");
+}
+
+/** {@link ensureSessionTrailerHookInstalled}'s outcome — a discriminated status, never a boolean, so a caller can tell "already there" from "just installed" from "deliberately skipped" from "skipped because a foreign hook already exists there". */
+export type TrailerHookInstallStatus =
+  | "installed"
+  | "already-installed"
+  | "skipped-unsafe-hooks-path"
+  | "skipped-foreign-hook"
+  | "skipped-not-a-repo";
+
+/**
+ * Ensures a `commit-msg` hook that appends the `Lore-Session` trailer (per
+ * {@link writeClaimSessionMarker}'s marker) is installed for the repo `cwd`
+ * belongs to. See this module's own @invariant for the "only inside the git
+ * dir itself" safety rule and the "never clobber a foreign hook" rule.
+ *
+ * @param cwd - Any worktree of the target repo.
+ * @returns `ok(<status>)` — never a hard failure for an ordinary "can't
+ *   safely install here" case (those are `ok("skipped-*")`, not `err`);
+ *   `err` only for an unexpected filesystem fault while writing.
+ */
+async function ensureSessionTrailerHookInstalled(
+  cwd: string,
+): Promise<Result<TrailerHookInstallStatus, LoreError>> {
+  const gitDirResult = await runGit(cwd, ["rev-parse", "--git-dir"]);
+  if (gitDirResult.exitCode !== 0) return ok("skipped-not-a-repo");
+  const gitDir = resolve(cwd, gitDirResult.stdout.trim());
+
+  const hooksPathResult = await runGit(cwd, ["rev-parse", "--git-path", "hooks"]);
+  if (hooksPathResult.exitCode !== 0) return ok("skipped-not-a-repo");
+  const hooksDir = resolve(cwd, hooksPathResult.stdout.trim());
+
+  // reason: see module @invariant — a `core.hooksPath` pointed outside the
+  // git dir (this very repo's own `hooks/`, a TRACKED directory) must never
+  // receive a write from this function.
+  const hooksDirIsInsideGitDir = hooksDir === gitDir || hooksDir.startsWith(gitDir + sep);
+  if (!hooksDirIsInsideGitDir) return ok("skipped-unsafe-hooks-path");
+
+  const hookPath = join(hooksDir, "commit-msg");
+  let existing: string | null = null;
+  try {
+    existing = readFileSync(hookPath, "utf8");
+  } catch {
+    existing = null; // absent — the common case for a fresh repo
+  }
+
+  if (existing !== null) {
+    return existing.includes(TRAILER_HOOK_MARKER_LINE) ? ok("already-installed") : ok("skipped-foreign-hook");
+  }
+
+  try {
+    mkdirSync(hooksDir, { recursive: true });
+    writeFileSync(hookPath, buildTrailerHookScript(), "utf8");
+    chmodSync(hookPath, 0o755);
+    return ok("installed");
+  } catch (cause) {
+    return err({
+      code: "STORE_ERROR",
+      message: `failed to install commit-msg hook at "${hookPath}": ${cause instanceof Error ? cause.message : String(cause)}`,
+    });
+  }
+}
+
+/**
+ * Best-effort composite (AC-OWN-4): records `sessionId` as the active claim
+ * for `worktree` and ensures the shared trailer-appending `commit-msg` hook
+ * is installed, so a commit made in `worktree` while this binding is live
+ * carries the `Lore-Session: <sessionId>` trailer.
+ *
+ * NEVER throws and deliberately returns `void`, not a `Result` — this
+ * capability is ADVISORY ONLY (mirrors `anchor-resolution.ts`'s "a
+ * non-resolving anchor is never a refusal" precedent): an unusual hooks
+ * setup (this very repo's OWN `core.hooksPath hooks`), a foreign pre-
+ * existing hook, or a missing/unreadable worktree all degrade to a silent
+ * no-op here rather than blocking `TaskWorkflowService.claim`'s core
+ * contract of persisting `extra.claim`. Both inner Results are deliberately
+ * discarded for that reason — see `writeClaimSessionMarker` /
+ * `ensureSessionTrailerHookInstalled`'s own JSDoc for what they can report.
+ *
+ * @param worktree - The worktree path a claim was just taken against.
+ * @param sessionId - The claim's captured (sanitized) session instance.
+ */
+export async function bindClaimSessionForTrailer(worktree: string, sessionId: string): Promise<void> {
+  await writeClaimSessionMarker(worktree, sessionId);
+  await ensureSessionTrailerHookInstalled(worktree);
 }
 
 /**
