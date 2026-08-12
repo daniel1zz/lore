@@ -5744,6 +5744,22 @@
     "01KZSVJGXB99RWST3SKHVVFVH6": {
       "human_id": "TASK-692",
       "file_path": "docs/requirements/task/TASK-692-the-pure-corpus-provenance-resolver-four-outcomes.md"
+    },
+    "01KZSY0MYVBR8ZEJGB3QNNVSC7": {
+      "human_id": "KN-435",
+      "file_path": "docs/requirements/knowledge/KN-435-handoff-agent-main-orchestrator.md"
+    },
+    "01KZSXYDBBC121N4323FQA1KJT": {
+      "human_id": "KN-436",
+      "file_path": "docs/requirements/knowledge/KN-436-assessment-land-read-side-reachability-enumerable.md"
+    },
+    "01KZSXQJPKDM1XC92Y89Q4TDGS": {
+      "human_id": "KN-437",
+      "file_path": "docs/requirements/knowledge/KN-437-assessment-land-defect-channel-honesty-a-resolutio.md"
+    },
+    "01KZSXZCGRC8X4CHXHZ87H5XXB": {
+      "human_id": "TASK-693",
+      "file_path": "docs/requirements/task/TASK-693-the-wire-contract-mirror-comment-in-issue-reports.md"
     }
   }
 }
