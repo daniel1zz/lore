@@ -502,7 +502,7 @@ function scanTranscript(transcriptText: string): TranscriptScan {
  * the parser HAD the item id and threw that fact away.
  */
 interface DispositionParseResult {
-  /** Item ids this text accounts for (`RESUME_DISPOSITION_DONE` or a non-empty `RESUME_DISPOSITION_DEFERRED_PREFIX<reason>` — SPEC-112 D5: account, not complete). */
+  /** Item ids this text accounts for (an accepted completion form, `isAcceptedDoneDisposition` — task-the-resume-coverage-verb-accepts-a-reason-after-deferred — or a non-empty `RESUME_DISPOSITION_DEFERRED_PREFIX<reason>` — SPEC-112 D5: account, not complete). */
   readonly accepted: ReadonlySet<string>;
   /**
    * Item id → the VERBATIM (trimmed) disposition text a marker line carried,
@@ -519,6 +519,96 @@ interface DispositionParseResult {
    * {@link UNDISPOSITIONED_ITEM_STDERR_PREFIX}, not this map.
    */
   readonly unrecognized: ReadonlyMap<string, string>;
+}
+
+/**
+ * The em dash character (U+2014) recognized as one completion-with-reason
+ * separator (below) — named once so the acceptance regex and every presentation
+ * string built from it (`buildBlockReason`) share the exact literal rather than
+ * two independently hand-typed copies that could drift on which dash character
+ * they mean (a plain ASCII hyphen is visually similar but is NOT this
+ * character, and is deliberately NOT accepted — only the two forms
+ * task-the-resume-coverage-verb-accepts-a-reason-after-deferred names).
+ */
+const EM_DASH = "—";
+
+/**
+ * The colon separator between {@link RESUME_DISPOSITION_DONE} and an optional
+ * trailing reason (`done:<reason>`) — task-the-resume-coverage-verb-accepts-a-reason-after-deferred
+ * Required #1. Deliberately immediate (no whitespace tolerated before it),
+ * mirroring {@link RESUME_DISPOSITION_DEFERRED_PREFIX}'s own `"deferred:"`
+ * shape, so the two accepted-token grammars stay structurally parallel.
+ */
+const DONE_REASON_SEPARATOR_COLON = ":";
+
+/**
+ * Matches "one-or-more whitespace characters, then {@link EM_DASH}" at the
+ * START of the text immediately following {@link RESUME_DISPOSITION_DONE}
+ * (`done — <reason>`) — task-the-resume-coverage-verb-accepts-a-reason-after-deferred
+ * Required #1, the exact natural-language form two independently measured
+ * live sessions wrote when explaining a completion under this repo's own
+ * evidence discipline.
+ *
+ * @invariant Requires `\s+` (at least ONE whitespace char) strictly BEFORE
+ *   the dash — this is what keeps this pattern from also matching
+ *   `done` immediately touching a doubled em dash with NO space at all
+ *   (`done——…`), which task-resume-coverage-disposition-parser-an-unrecognised-token's
+ *   own BOUNDARY test pins as staying an UNRECOGNIZED token, not a silently
+ *   widened acceptance — that measured live failure was a different string
+ *   than the one this task fixes, and remains distinguishable on purpose.
+ */
+const DONE_REASON_DASH_SEPARATOR_PATTERN = new RegExp(`^\\s+${EM_DASH}`);
+
+/**
+ * Human-readable presentation of every accepted completion form, composed
+ * from {@link RESUME_DISPOSITION_DONE} plus the two separator literals above
+ * — never a hand-typed duplicate of the grammar this module parses with
+ * (mirrors {@link buildBlockReason}'s own D7 discipline: every token comes
+ * from a named binding, not a remembered phrase). Used by
+ * {@link buildBlockReason}'s per-item unrecognized-token note and its
+ * "accounting is not completion" line — the ONE place both need to describe
+ * what a completion may look like.
+ */
+const DONE_WITH_OPTIONAL_REASON_FORMS_HINT =
+  `\`${RESUME_DISPOSITION_DONE}\`, \`${RESUME_DISPOSITION_DONE}${DONE_REASON_SEPARATOR_COLON}<reason>\`, ` +
+  `or \`${RESUME_DISPOSITION_DONE} ${EM_DASH} <reason>\``;
+
+/**
+ * True iff `disposition` is an accepted completion form —
+ * task-the-resume-coverage-verb-accepts-a-reason-after-deferred Required #1.
+ * The bare {@link RESUME_DISPOSITION_DONE} token needs no reason at all (that
+ * case alone is what this function's predecessor, a plain `===` check,
+ * already covered); this function WIDENS acceptance to also recognize that
+ * token followed by {@link DONE_REASON_SEPARATOR_COLON} or
+ * {@link DONE_REASON_DASH_SEPARATOR_PATTERN}, with any trailing text
+ * DISCARDED — a completion, unlike a deferral, has no comparable
+ * non-empty-reason requirement (S1 in the sibling spec), so an empty reason
+ * after a recognized separator (`done:`) is still a completion.
+ *
+ * A disposition starting with the same four letters but followed by NEITHER
+ * separator — no punctuation at all, or the glued/doubled-em-dash form the
+ * sibling task's own BOUNDARY test measures — returns `false` and falls
+ * through to `parseDispositionLines`' pre-existing `unrecognized` bucket
+ * unchanged: this function only ADDS accepted shapes, it narrows nothing
+ * that already matched before it existed. Pure — no IO, no wall-clock reads.
+ *
+ * @param disposition - The trimmed text following a marker line's item-id
+ *   colon (`parseDispositionLines`' own `rest.slice(colonIndex + 1).trim()`).
+ * @returns `true` iff `disposition` is an accepted completion disposition.
+ * @example
+ * isAcceptedDoneDisposition(RESUME_DISPOSITION_DONE); // => true
+ * @example
+ * isAcceptedDoneDisposition(`${RESUME_DISPOSITION_DONE}:shipped in abc123`); // => true
+ * @example
+ * isAcceptedDoneDisposition(`${RESUME_DISPOSITION_DONE} — shipped in abc123`); // => true
+ * @example
+ * isAcceptedDoneDisposition(`${RESUME_DISPOSITION_DONE}${EM_DASH}${EM_DASH}no space`); // => false
+ */
+function isAcceptedDoneDisposition(disposition: string): boolean {
+  if (disposition === RESUME_DISPOSITION_DONE) return true;
+  if (!disposition.startsWith(RESUME_DISPOSITION_DONE)) return false;
+  const rest = disposition.slice(RESUME_DISPOSITION_DONE.length);
+  return rest.startsWith(DONE_REASON_SEPARATOR_COLON) || DONE_REASON_DASH_SEPARATOR_PATTERN.test(rest);
 }
 
 /**
@@ -542,6 +632,12 @@ interface DispositionParseResult {
  * bare-prefix case before this function ever sees it — the explicit
  * `.trim()` below is kept anyway so this function's own contract does not
  * silently depend on that upstream trim.
+ *
+ * task-the-resume-coverage-verb-accepts-a-reason-after-deferred Required #1:
+ * `RESUME_DISPOSITION_DONE` optionally followed by a reason is ALSO an
+ * accepted completion (see {@link isAcceptedDoneDisposition}) — a completion
+ * claim carrying its own evidence is no longer punished relative to a
+ * deferral, which already accepted (in fact required) one.
  *
  * Called once per disposition source and unioned by the caller
  * (spec-resume-ticket-coverage-floor-blocking-channel-arming H5): every
@@ -574,7 +670,7 @@ function parseDispositionLines(assistantText: string): DispositionParseResult {
     const deferralReason = disposition.startsWith(RESUME_DISPOSITION_DEFERRED_PREFIX)
       ? disposition.slice(RESUME_DISPOSITION_DEFERRED_PREFIX.length).trim()
       : undefined;
-    if (disposition === RESUME_DISPOSITION_DONE || (deferralReason !== undefined && deferralReason.length > 0)) {
+    if (isAcceptedDoneDisposition(disposition) || (deferralReason !== undefined && deferralReason.length > 0)) {
       accepted.add(itemId);
       continue;
     }
@@ -650,7 +746,7 @@ function buildBlockReason(missing: readonly MissingItem[]): string {
           `The following item(s) were already named this session, but with a disposition token this verb does not recognize — that is NOT the same as never mentioning them:`,
           ...unrecognizedItems.map(
             (item) =>
-              `- ${item.id}: received "${item.unrecognizedToken}" — the only accepted forms are \`${RESUME_DISPOSITION_DONE}\` or \`${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>\`.`,
+              `- ${item.id}: received "${item.unrecognizedToken}" — the only accepted forms are ${DONE_WITH_OPTIONAL_REASON_FORMS_HINT}, or \`${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>\`.`,
           ),
         ].join("\n")
       : "";
@@ -661,7 +757,7 @@ function buildBlockReason(missing: readonly MissingItem[]): string {
     "",
     dispositionLines,
     "",
-    `Accounting is not completion: \`${RESUME_DISPOSITION_DONE}\` and \`${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>\` are equally accepted, and a deferral must carry its reason after the colon. Items already dispositioned earlier in this session are not listed above and need not be restated.`,
+    `Accounting is not completion: ${DONE_WITH_OPTIONAL_REASON_FORMS_HINT} and \`${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>\` are equally accepted; an optional reason after \`${RESUME_DISPOSITION_DONE}\` is discarded, and a deferral must carry its reason after the colon. Items already dispositioned earlier in this session are not listed above and need not be restated.`,
     unrecognizedSection,
   ].join("\n");
 }
