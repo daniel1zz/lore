@@ -3,7 +3,7 @@ id: TASK-699
 type: task
 role: plan
 title: "main carries two RED e2e cases: migrate-ordinals-compiled expects SPEC-1 while the compiled binary emits the zero-padded SPEC-001 — a deterministic format divergence sitting red on a clean tree, unmentioned by any handoff"
-status: draft
+status: archived
 priority: high
 created: 2026-08-12
 updated: 2026-08-12
@@ -11,6 +11,7 @@ tags: []
 parent: PRD-001
 links:
   - {id: TASK-700, type: relates-to}
+  - {id: TASK-674, type: relates-to}
 ---
 ## Measured 2026-08-12 by the orchestrator — on a CLEAN tree at main `18c52cf8`
 

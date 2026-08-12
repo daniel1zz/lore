@@ -3,7 +3,7 @@ id: PLAN-128
 type: plan
 role: plan
 title: "Land corpus-resolution provenance: one pure resolver, one boundary detector, and a foreign-write guard keyed on declared intent"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-12
 updated: 2026-08-12

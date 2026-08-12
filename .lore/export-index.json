@@ -5804,6 +5804,14 @@
     "01KZTCQMNX18B1D2TWNDZEVERG": {
       "human_id": "TASK-700",
       "file_path": "docs/requirements/task/TASK-700-nothing-automated-runs-the-test-suite-pre-push-run.md"
+    },
+    "01KZTDHD0ZJ6ZGDBQ86RK28WBV": {
+      "human_id": "KN-441",
+      "file_path": "docs/requirements/knowledge/KN-441-eight-findings-from-landing-corpus-resolution.md"
+    },
+    "01KZTFS90C9SVG5QS0DCDP11XR": {
+      "human_id": "KN-442",
+      "file_path": "docs/requirements/knowledge/KN-442-handoff-agent-main-orchestrator.md"
     }
   }
 }
