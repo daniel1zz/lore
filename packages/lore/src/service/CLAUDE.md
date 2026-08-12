@@ -25,6 +25,7 @@ Full pre-eviction file (mechanism walkthroughs, per-spec design decisions, empir
 - ⛔ **The mirror's `human_id` has ONE composition site, `formatMirrorHumanId`** (padded, 3-digit) — both `ExportDocsService` (`:1031`) and `OrdinalMigrationService`'s step-3 reconcile route through it; the report's `old_display`/`new_display` stay UNPADDED per AC-084-3. SSOT: `spec-mirror-identifier-ssot-one-writer-for-export-index-human`.
 - **`OutlineService` is regex-based** (no remark/unified/mdx dep) — self-closing tags only, unknown components stripped with a warning not an error. `renderResolvedToMarkdown` is the SOLE text-projection splice; consumed by CLI `get` and `ExportDocsService`.
 - **`CorpusService.get()`'s `resolve_mdx`/`resolved_components` are intentionally dead** — MDX resolution is adapter-side (`app.outlineService.resolve(doc)`); CorpusService must never import OutlineService.
+- ⛔ **`TaskWorkflowService.claim` is the ONE service file permitted to import an adapter directly** (`../adapters/real-git-port.js` — `detectWorktreeBranch`/`bindClaimSessionForTrailer`, spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0): both are leaf IO capabilities with no OTHER service dependency, so there is no `app.ts` composition-root wiring to route the real implementation through, unlike every cross-service port above (`resolveDeclaredAcIds` et al.) whose defaults are benign stubs. `claim()` auto-captures `extra.claim.branch` from `opts.worktree` ONLY when `opts.branch` is omitted (explicit always wins); an unmeasurable branch stays ABSENT, never a placeholder — "unmeasured" is never "unowned". A confirmed successful claim with both a worktree and a measured `session_id` also binds that session for a `Lore-Session:` git-trailer on later commits (best-effort/advisory, never affects `claim()`'s own `Result`).
 
 ## Patterns
 
@@ -74,5 +75,5 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 
 ## Links
 
-- Depends on: [`@lore/core`](../../../../core/src/CLAUDE.md), [`../store`](../store/CLAUDE.md).
+- Depends on: [`@lore/core`](../../../../core/src/CLAUDE.md), [`../store`](../store/CLAUDE.md); `TaskWorkflowService` ALSO depends directly on `../adapters/real-git-port.js` (the one documented exception above).
 - Used by: [`../adapters/cli`](../adapters/cli/CLAUDE.md), [`../adapters/mcp`](../adapters/mcp/CLAUDE.md), [`../adapters/http`](../adapters/http/CLAUDE.md), [`../eval`](../eval/CLAUDE.md) (read-only), and `../app.ts`.

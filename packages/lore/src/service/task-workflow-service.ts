@@ -169,6 +169,19 @@
  *   `session_id` answers "which run", and `noAnchorOverlap` needs the second to be a
  *   cross-session mutex at all. Never sourced from `ClaimOpts` — a caller-declarable
  *   session id would be a forgeable proxy, the exact class of thing being retired.
+ * @invariant `claim()` AUTO-CAPTURES `extra.claim.branch` from `opts.worktree`
+ * (spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0, AC-OWN-2)
+ *   via the injected `detectBranch` port — ONLY when `opts.branch` is omitted; an
+ *   explicit `--branch` always wins outright and skips detection. An unmeasurable
+ *   branch (detached HEAD, non-repo/missing worktree path) leaves the field ABSENT,
+ *   never a placeholder — "unmeasured" is never written as "unowned" (mirrors
+ *   `compareClaimSessions`'s "not-measured ≠ known-absent" discipline). A CONFIRMED
+ *   successful claim with both a worktree AND a measured `session_id` additionally
+ *   binds that session for the AC-OWN-4 git-trailer mechanism via the injected
+ *   `installClaimTrailerBinding` port — best-effort/advisory, never awaited into this
+ *   method's own `Result`. Both ports default to `real-git-port.ts`'s real
+ *   implementations (see the constructor's own JSDoc for why that file, an adapter,
+ *   is imported directly here).
  *
  * @invariant `done()` is the ONLY method that writes `status` (every other method here
  *   touches `extra` exclusively via `writeTaskExtra` — see that method's own
@@ -339,6 +352,16 @@ import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError 
 import { compareClaimSessions, type SessionComparison } from "./gate-predicates.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
 import type { GateDependencies } from "./gate-enforcer.js";
+// reason: spec-multi-session-concurrency-queryable-ownership-checkout §Scope
+// L0 (AC-OWN-2/AC-OWN-4) — the ONE deliberate exception to "services don't
+// import adapters": branch detection / trailer binding are leaf IO
+// capabilities with no OTHER service dependency, so there is no app.ts
+// composition-root wiring to route the REAL implementation through (unlike
+// `resolveDeclaredAcIds` et al., whose real implementations need
+// CorpusService). See real-git-port.ts's own module doc for the full
+// rationale and its precedent (`measureWorktreeCleanliness`'s pre-existing
+// ad hoc `git` subprocess calls, already inline in THIS file below).
+import { detectWorktreeBranch, bindClaimSessionForTrailer, type BranchMeasurement } from "../adapters/real-git-port.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -1847,6 +1870,25 @@ export class TaskWorkflowService {
    *   `corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService)`
    *   (app.ts). Defaults to a stub resolving an empty array (see the field's own
    *   JSDoc for why this default is benign rather than refusing).
+   * @param detectBranch - AC-OWN-2 injected port measuring a worktree's current
+   *   git branch — `claim()` calls this ONLY when `opts.branch` is omitted AND
+   *   `opts.worktree` is given (an explicit `--branch` always wins outright,
+   *   skipping detection entirely). Defaults to the REAL implementation
+   *   (`real-git-port.ts::detectWorktreeBranch`) — unlike the cross-service
+   *   ports above, this capability needs no `app.ts` wiring (no other service
+   *   dependency), so the default IS production behavior, not a benign stub.
+   *   Tests inject a fake to avoid a real `git` subprocess, or rely on the
+   *   real one against a throwaway `mkdtemp` repo (this service's own suite
+   *   does both).
+   * @param installClaimTrailerBinding - AC-OWN-4 injected port — best-effort,
+   *   ADVISORY (see its own JSDoc): binds `opts.worktree` to the claim's
+   *   captured session so a LATER commit made there carries the
+   *   `Lore-Session:` git trailer. Defaults to the REAL implementation
+   *   (`real-git-port.ts::bindClaimSessionForTrailer`) for the same
+   *   no-app.ts-wiring-needed reason `detectBranch` does. Called ONLY when
+   *   both a worktree AND a measured session_id are present — never awaited
+   *   into `claim()`'s own `Result` (a hook-install/marker-write failure must
+   *   never fail a claim).
    */
   constructor(
     private readonly store: StoreInterface,
@@ -1873,6 +1915,11 @@ export class TaskWorkflowService {
     resolveAdhocGoverningAcCriteria: (
       task: DocRecord,
     ) => Promise<Result<AcceptanceCriterion[], LoreError>> = async () => ok([]),
+    private readonly detectBranch: (worktree: string) => Promise<BranchMeasurement> = detectWorktreeBranch,
+    private readonly installClaimTrailerBinding: (
+      worktree: string,
+      sessionId: string,
+    ) => Promise<void> = bindClaimSessionForTrailer,
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
@@ -2374,12 +2421,32 @@ export class TaskWorkflowService {
       carryForward = !stale && sameHolder;
     }
 
+    // reason: AC-OWN-2 auto-capture (spec-multi-session-concurrency-queryable-
+    // ownership-checkout §Scope L0, GAP-C) — an explicit opts.branch always
+    // wins outright, skipping detection entirely. When absent AND a worktree
+    // IS explicitly named, measure THAT worktree's own current branch via the
+    // injected git port (never process.cwd() — mirrors why --worktree itself
+    // stays always-explicit, SPEC-042 D2 review U2). An unmeasurable branch
+    // (detached HEAD, non-repo path, deleted worktree) leaves `capturedBranch`
+    // undefined — NEVER coerced to a placeholder — so buildTaskClaim's
+    // existing omission/carry-forward rules apply exactly as they already do
+    // for machine/worktree. "Unmeasured" must never be written as though it
+    // meant "unowned" (this task's own governing distinction, mirroring
+    // gate-predicates.ts::compareClaimSessions's "not-measured" branch).
+    let capturedBranch = opts.branch;
+    if (capturedBranch === undefined && opts.worktree !== undefined) {
+      const measurement = await this.detectBranch(opts.worktree);
+      if (measurement.status === "measured") {
+        capturedBranch = measurement.branch;
+      }
+    }
+
     const newClaim: TaskClaim = buildTaskClaim(
       existingClaim,
       {
         by: opts.by,
         at: nowIso,
-        ...(opts.branch !== undefined ? { branch: opts.branch } : {}),
+        ...(capturedBranch !== undefined ? { branch: capturedBranch } : {}),
         ...(opts.machine !== undefined ? { machine: opts.machine } : {}),
         ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
         // reason: the session instance is captured HERE, from the injected env —
@@ -2450,6 +2517,19 @@ export class TaskWorkflowService {
         });
       }
       return postWriteGateResult;
+    }
+
+    // reason: AC-OWN-4 (spec-multi-session-concurrency-queryable-ownership-
+    // checkout §Scope L0) — best-effort, ADVISORY side effect of a CONFIRMED
+    // successful claim (never on the CLAIM_CONFLICT/rollback paths above, so
+    // a claim that ultimately doesn't stick never binds a trailer). Only
+    // attempted when BOTH a worktree AND a measured session_id are present —
+    // no worktree means nowhere to bind; no measured session means nothing
+    // honest to stamp (never a placeholder, same "unmeasured ≠ unowned"
+    // discipline the branch capture above follows). Never awaited into this
+    // method's own Result — see installClaimTrailerBinding's own JSDoc.
+    if (opts.worktree !== undefined && sessionId !== undefined) {
+      await this.installClaimTrailerBinding(opts.worktree, sessionId);
     }
 
     return writeResult;
