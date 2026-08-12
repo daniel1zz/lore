@@ -40,6 +40,22 @@ import { exitCode, formatError } from "../utils.js";
 
 const RESERVED_SUBCOMMANDS = new Set(["list", "show"]);
 
+/**
+ * The reason clause appended to an `"unmeasured"` liveness verdict at the
+ * RENDER surface itself — task-ac-own-5-s-oracle-exercises-only-the-pure-
+ * verdict-function: this module's header above already documents the
+ * self-registration precondition ("a session's liveness is only ever
+ * measurable by a peer once that session has itself run `lore session
+ * list|show` at least once on this machine"), but a reader of the COMMAND'S
+ * OWN OUTPUT never sees this file's JSDoc. Without this clause, bare
+ * `"unmeasured"` is indistinguishable from any other possible reading of
+ * that word (e.g. "checked, but the verdict came back ambiguous" — a state
+ * this three-valued type does not even have, see `LivenessVerdict`); WITH
+ * it, the one true cause ("no heartbeat on file yet") is named at the exact
+ * place a human or another agent actually reads the verdict.
+ */
+const UNMEASURED_LIVENESS_REASON = "no heartbeat on file — this session has never run `lore session list|show` on this machine";
+
 /** Compact human-readable rendering of the full session+liveness list. */
 function formatSessionList(records: readonly SessionLivenessRecord[]): string {
   const lines: string[] = [`── lore session list (${records.length}) ──`];
@@ -63,13 +79,20 @@ function formatSessionLine(record: SessionLivenessRecord): string {
   const worktreePart = record.worktree !== undefined ? `, worktree ${record.worktree}` : "";
   const branchesPart = record.branches.length > 0 ? `, branches [${record.branches.join(", ")}]` : "";
   const stalePart = record.stale === true ? ", stale" : "";
-  return `  - ${record.by} (${idPart}${worktreePart}${branchesPart}) — liveness: ${record.liveness}${stalePart}`;
+  // reason: "unmeasured" alone is printed EXPLICITLY WITH its cause, never
+  // bare — see UNMEASURED_LIVENESS_REASON's own doc for why a bare verdict
+  // would be indistinguishable from a reading this three-valued type cannot
+  // even produce.
+  const livenessPart = record.liveness === "unmeasured" ? `unmeasured (${UNMEASURED_LIVENESS_REASON})` : record.liveness;
+  return `  - ${record.by} (${idPart}${worktreePart}${branchesPart}) — liveness: ${livenessPart}${stalePart}`;
 }
 
 export default defineCommand({
   meta: {
     name: "session",
-    description: "Corpus-wide sessions joined with probed process liveness: list / show <id> (SPEC-L0, AC-OWN-5)",
+    description:
+      "Corpus-wide sessions joined with probed process liveness: list / show <id> (SPEC-L0, AC-OWN-5). " +
+      "Liveness is measurable ONLY for a session that has itself run this command at least once on this machine — a peer that never has reports 'unmeasured'.",
   },
   args: {
     target: {
