@@ -56,6 +56,19 @@
  *     `deps.listLinkedKnowledgePointers` takes THESE pointers directly (not a
  *     `docId` to re-fetch), so the task doc is never fetched a second time just to
  *     re-derive its own `navigation.related`.
+ *   - **AC-DC-11** (task-carry-the-retired-oracle-signal-into-the-feed-pack-so-a,
+ *     spec-the-defect-channel-cannot-be-honestly-maintained-an §M5): each
+ *     `AcceptanceView` carries an optional `oracle_generation` split ALONGSIDE
+ *     `coverage` (never folding it into `deriveAcCoverageState`'s seven states —
+ *     the eighth-state extension this task was explicitly forbidden from making).
+ *     `renderAcceptanceRow` appends the SAME literal ` [retired_oracle_evidence:
+ *     prior_refs=<n> current_refs=<n> generation=<n>]` marker `commands/ac.ts`'s
+ *     `lore ac list` already renders (byte-identical vocabulary, see
+ *     {@link retiredOracleMarker}'s own JSDoc for why it is a reproduction rather
+ *     than an import), omitted whenever `prior_refs === 0`.
+ *     `TaskStartPack.acceptance_detail` carries the same `AcceptanceView[]`
+ *     structured for `--json`, so a machine consumer reads `oracle_generation` as
+ *     a real object instead of re-parsing the rendered marker text.
  *
  * `TASK_START_CHECKPOINT` is registered in `feed-flow.ts`'s `CHECKPOINT_PRODUCED_TYPE`
  * SSOT map (SPEC-070 D1) — `commands/feed.ts` special-cases it (mirroring
@@ -111,7 +124,7 @@
  */
 
 import { ok, err, truncateSection } from "@lore/core";
-import type { AcVerifyMode, LoreError, DocRecord, Result, deriveAcCoverageState } from "@lore/core";
+import type { AcOracleGenerationSplit, AcVerifyMode, LoreError, DocRecord, Result, deriveAcCoverageState } from "@lore/core";
 import { projectValidityStatus, type ValidityStatus } from "../service/validity-service.js";
 import type { KnowledgePointer, HandoffPointer } from "./feed-shared-types.js";
 
@@ -152,6 +165,29 @@ export interface AcceptanceView {
    * (non-empty) `ac_scope` that omits this id (SPEC-070 D4).
    */
   readonly scoped: boolean;
+  /**
+   * The current-vs-retired oracle-generation split for this criterion
+   * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M5,
+   * task-carry-the-retired-oracle-signal-into-the-feed-pack-so-a, AC-DC-11) —
+   * `AcCoverageFact.oracle_generation` (`@lore/core`'s `acceptance.ts`), carried
+   * VERBATIM by the wiring (`task-feed-wiring.ts::buildTaskBundle`) ALONGSIDE
+   * `coverage`, never folded into it: `deriveAcCoverageState` gains NO eighth
+   * state for this (the task's own binding constraint) — `coverage`'s badge
+   * stays whatever it already was, exactly the additive-reporting design
+   * `commands/ac.ts`'s module header documents for the sibling `lore ac list`
+   * surface (AC-DC-10). This field is the ONLY thing on this view that
+   * distinguishes a criterion whose green evidence includes rows produced by a
+   * RETIRED (rewritten) oracle command from one whose evidence is entirely
+   * current.
+   *
+   * `undefined` when the wiring's underlying `AcCoverageFact` carries no split
+   * at all (no coverage fact for this criterion — see that field's own JSDoc);
+   * NEVER coalesced to a computed zero (`?? 0`) by any reader — a consumer
+   * (this module's {@link renderAcceptanceRow}, or a `--json` reader of
+   * {@link TaskStartPack.acceptance_detail}) must branch on PRESENCE, the same
+   * convention `AcCoverageFact.oracle_generation` itself documents.
+   */
+  readonly oracle_generation?: AcOracleGenerationSplit;
 }
 
 /** One prior FAILING evidence entry, pre-clipped by the wiring (tail ≤500 chars, last ≤3 kept — SPEC-070 D2/D3). */
@@ -328,6 +364,20 @@ export interface TaskStartPack {
   };
   /** Exactly the section keys clipped to fit their budget — mirrors `phase-feed-flow.ts`'s `truncated[]`. */
   readonly truncated: string[];
+  /**
+   * The declared acceptance criteria, STRUCTURED and verbatim (`TaskBundle.
+   * acceptance`, unchanged by this module) — the machine-readable counterpart
+   * to `sections.acceptance`'s prose (task-carry-the-retired-oracle-signal-
+   * into-the-feed-pack-so-a, AC-DC-11). A `--json` consumer reads
+   * `oracle_generation` per criterion here as a REAL object (keyed by
+   * `AcCoverageFact`'s own field names, `@lore/core`), never by re-parsing
+   * `sections.acceptance`'s rendered marker text. The two are asserted to
+   * AGREE — both come from the SAME `AcceptanceView[]`, never two
+   * independently derived answers (see
+   * `tests/integration/cli/feed-retired-oracle-visibility.bun.test.ts`'s
+   * cross-surface checks against `lore ac list`'s own coverage fact).
+   */
+  readonly acceptance_detail: readonly AcceptanceView[];
 }
 
 /** The fixed scoped-oracle discipline line embedded in every `boundaries` section (2026-07-23 full-suite-contention lesson, mechanized as pack text — SPEC-070 D3). */
@@ -401,10 +451,47 @@ function renderObjective(bundle: TaskBundle): string {
   return lines.join("\n");
 }
 
+/**
+ * Trailing marker naming `ac`'s retired-oracle evidence split — the SAME literal
+ * vocabulary `commands/ac.ts::retiredOracleMarker` renders for `lore ac list`
+ * (AC-DC-10), reproduced HERE rather than imported: `commands/ac.ts` sits outside
+ * this task's file anchors (task-carry-the-retired-oracle-signal-into-the-feed-
+ * pack-so-a's own File Anchors), so the two functions are two call sites by
+ * necessity, not by choice — see this task's own residual note (recorded at
+ * hand-off) proposing a follow-up that extracts ONE shared function into
+ * `@lore/core` and points `commands/ac.ts` at it too, closing the drift risk this
+ * duplication leaves open. AC-DC-11's binding constraint is "ONE renderer
+ * vocabulary across both surfaces, never invent a second spelling" — this
+ * function's three branches and their exact string templates MUST stay in
+ * lockstep with `retiredOracleMarker`'s (`commands/ac.ts`, current line ~943); a
+ * future edit to either side without the other is exactly the drift this comment
+ * exists to catch on read. `tests/integration/cli/
+ * feed-retired-oracle-visibility.bun.test.ts`'s HAPPY dimension asserts the two
+ * surfaces' rendered marker SUBSTRINGS are byte-identical for the same criterion
+ * in the same corpus, which would catch a silent divergence even without this
+ * comment being re-read.
+ *
+ * @param split - `AcceptanceView.oracle_generation` — never re-derived here.
+ * @returns `""` when `split` is `undefined` (no coverage fact for this criterion
+ *   at all — the only reachable "absent" case through this module's real wiring,
+ *   `task-feed-wiring.ts::buildTaskBundle`, since `computeAcCoverage` always
+ *   populates `oracle_generation` on every fact it returns) or when
+ *   `prior_refs === 0` (every referencing evidence row is current-generation —
+ *   the NEGATIVE-control case a bare `> 0` marker-always-fires bug would miss);
+ *   the full ` [retired_oracle_evidence: prior_refs=<n> current_refs=<n>
+ *   generation=<n>]` marker otherwise.
+ */
+function retiredOracleMarker(split: AcceptanceView["oracle_generation"]): string {
+  if (split === undefined) return "";
+  if (split.prior_refs === 0) return "";
+  return ` [retired_oracle_evidence: prior_refs=${split.prior_refs} current_refs=${split.current_refs} generation=${split.current}]`;
+}
+
 function renderAcceptanceRow(ac: AcceptanceView): string {
   const scopeTag = ac.scoped ? "" : " [out-of-scope]";
   const commandTag = ac.command !== undefined ? ` — command: ${ac.command}` : "";
-  return `- ${ac.id} [${ac.coverage}] (${ac.mode})${scopeTag}: ${ac.statement}${commandTag}`;
+  const retiredTag = retiredOracleMarker(ac.oracle_generation);
+  return `- ${ac.id} [${ac.coverage}] (${ac.mode})${scopeTag}: ${ac.statement}${commandTag}${retiredTag}`;
 }
 
 function renderAcceptance(bundle: TaskBundle): string {
@@ -599,5 +686,5 @@ export async function buildTaskStartPack(
     handoff: clip("handoff", rawSections.handoff, resolvedBudgets.max_handoff_chars),
   };
 
-  return ok({ task_id: taskId, sections, truncated });
+  return ok({ task_id: taskId, sections, truncated, acceptance_detail: bundle.acceptance });
 }
