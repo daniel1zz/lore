@@ -109,6 +109,7 @@ retry the claim. ⛔ NEVER set `LORE_GATE_BYPASS=1` — gate escape is user-only
 On each implementer return:
 
 1. **Merge immediately** — `git merge <branch> --no-ff`; never batch merges. ⛔ GATE every downstream step (archive, readiness re-check, next dispatch) on the merge's EXIT CODE — an `&&`-chain or explicit check, never an unconditional command sequence (live incident 2026-07-19: 'strategy ort failed' on untracked-file collision + unconditional archive chain → task archived while its code was NOT on main). Untracked-file collision → diff the copies first; identical → remove the stale untracked copy and re-merge. Conflict → dispatch a fresh subagent to resolve. After merge confirmed (`git branch --merged main`): `git worktree remove <path>` + `git branch -d <branch>`.
+   **Orphan-branch sweep — `lore territory --json`, never `git branch -a`.** A subagent's own internal re-dispatch can open a branch this round's return never mentions, so the sweep runs every round, not only when a return looks incomplete. Partition its output and act ONLY on `mine` (yours — merge/clean up per the paragraph above) and `unowned` (no session claims it — safe to inspect, and remove if genuinely stray) entries. ⛔ NEVER touch a `foreign` entry — its `holder.session_id`/`by`/`worktree` name a LIVE peer session; git topology alone carries no ownership, and reading a peer's in-flight branch as an orphan via raw `git branch -a` + `git log main..<branch>` is the exact 2026-08-11 incident this replaces. A branch reported `unmeasured` (ownership could not be determined) is NOT `unowned` — never act on it; name it in the round report instead.
 2. **Check evidence** — `lore get <task> --json` → `extra.verification_evidence` must carry passing oracle entries for the task's ACs. Missing/failing evidence → failure loop below.
 3. **Attested verification** — after merging, run the trusted runner on main:
    ```
@@ -156,5 +157,5 @@ When `lore ready <plan>` returns no ready tasks and nothing is in flight:
 - ⛔ Evidence comes from oracle exit codes; `lore verify` attests script ACs — never self-report pass.
 - ⛔ Never `--steal`, never `lore release --force` foreign fresh claims, never `LORE_GATE_BYPASS` — user say-so only (M2).
 - ⛔ Overlapping or undeclared anchors → serialize; distinct `LORE_ACTOR=agent:<task-slug>` per concurrent agent.
-- ⛔ Merge returned branches immediately; clean up merged worktrees; never leave orphans.
+- ⛔ Merge returned branches immediately; clean up merged worktrees; never leave orphans. Sweep every round with `lore territory --json` — act only on `mine`/`unowned`, never `foreign`, escalate `unmeasured` by name.
 - ⛔ Do not stop between tasks; only M1–M5 escalate.
