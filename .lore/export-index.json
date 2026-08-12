@@ -5908,6 +5908,14 @@
     "01KZVJGDB7SJ0ZD7FS3T97F7ZD": {
       "human_id": "TASK-716",
       "file_path": "docs/requirements/task/TASK-716-lore-territory-s-discovery-set-is-claim-derived-so.md"
+    },
+    "01KZVNE1K5JTFFT4V5RZ3E4JT9": {
+      "human_id": "TASK-717",
+      "file_path": "docs/requirements/task/TASK-717-thread-real-local-branch-enumeration-from-the-git.md"
+    },
+    "01KZVN9Q8HN9D7RGS2MRW8FYVC": {
+      "human_id": "TASK-718",
+      "file_path": "docs/requirements/task/TASK-718-wire-unbindclaimsessionfortrailer-into-lore-releas.md"
     }
   }
 }
