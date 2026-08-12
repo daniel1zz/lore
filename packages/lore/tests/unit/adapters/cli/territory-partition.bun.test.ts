@@ -446,7 +446,11 @@ describe("partitionTerritory — local branch discovery (AC-OWN-1 remediation)",
     const independentTotal = worktrees.length + groundTruthBranches.filter((b) => !checkedOutBranches.has(b)).length;
     expect(independentTotal).toBe(3); // hand-countable: 1 worktree (main) + 2 orphan branches
     expect(totalEntries(partition)).toBe(independentTotal);
-  });
+    // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+    // D1) — this body's real `git` fixture construction spawns >= SPAWN_THRESHOLD
+    // times (initRepo + 2 `git branch` + 1 `git for-each-ref`), mirroring the
+    // AC-REPLAY-1 cases below in this same file.
+  }, 15000);
 });
 
 describe("partitionTerritory — unmerged_commits (AC-REPLAY-1)", () => {
