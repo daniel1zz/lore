@@ -10,6 +10,14 @@
  * subagents. Recovery: ~30 min manual + 4 implementer re-runs. Later (2026-07-20,
  * the "W4" incident): `git worktree remove --force` on a never-committed worktree
  * after a merge printed "Already up to date" destroyed the only copy of 4 fixes.
+ * Later still (2026-08-02): an orchestrator ran `git worktree remove <path>` with
+ * NO `--force` at all. The gate's worktree rule matched only `--force`/`-f`, so
+ * it passed straight through. At that instant the branch carried two commits not
+ * in main, and a LIVE peer agent was working in that directory — its most recent
+ * commit was 90 seconds old — so the directory was deleted out from under a
+ * running agent. The blocking predicate (below, "worktree is clean but its
+ * branch … is NOT merged") already existed; it was simply unreachable without
+ * --force. See task-the-git-safety-gate-s-worktree-rule-matches-only-force-and.
  *
  * DESIGN B — the gate ALWAYS BLOCKS a matched destructive op (exit 2, fail-safe:
  * a false block only costs friction; a false allow costs data). But for the rules
@@ -20,13 +28,20 @@
  * still routes to the human/agent, but on evidence, not a generic warning.
  * Auto-allowing on a "looks safe" probe was deliberately NOT done: a probe bug
  * would become a false-allow (data loss), trading away the gate's core guarantee.
+ * `git worktree remove` (below) is the ONE rule that is the exception to this
+ * "always blocks" summary — see its own entry for the CLEAN+MERGED+QUIET carve-out
+ * and why it exists.
  *
  * State-probed rules (block + evidence):
  *   git reset --hard/--keep/--merge   → dirty-tree file list, or "clean"
  *   git checkout -- <path> / git restore <path> → that path's dirty state
  *   git clean -f/-fd/-fdx             → `git clean -n` preview of what dies
  *   git stash drop <rev> / clear      → that entry / the whole `git stash list`
- *   git worktree remove --force <p>   → worktree dirty state + branch merged?
+ *   git worktree remove [--force] <p> → dirty state, branch/detached-HEAD merged
+ *                                        into base?, and branch reflog recency
+ *                                        (see WORKTREE_LIVENESS_WINDOW_MINUTES) —
+ *                                        force or not, BOTH are assessed; see the
+ *                                        rule entry for the one pass-through case
  *   git branch -D <b>                 → branch merged/ancestor? unmerged commits?
  * Unconditional hard-block (no safe variant / not cheaply determinable):
  *   git push --force / -f / --force-with-lease
@@ -36,7 +51,17 @@
  *
  * Allowed (safe variants, never matched):
  *   git reset --soft/--mixed · git restore --staged · git stash push/pop
- *   git clean -n · git branch -d (merged-only) · git worktree remove (no --force)
+ *   git clean -n · git branch -d (merged-only)
+ *
+ * `git worktree remove` WITHOUT --force is now MATCHED (2026-08-02 fix) and
+ * passes through ONLY when the probe finds the worktree CLEAN, its branch (or
+ * detached HEAD) MERGED into the default branch, AND its reflog QUIET for
+ * WORKTREE_LIVENESS_WINDOW_MINUTES — the exact legitimate post-merge cleanup
+ * path CLAUDE.md mandates. Merged-ness alone answers "will commits be lost",
+ * never "is someone in there", so a merged-but-recently-active worktree still
+ * blocks. Every other combination (dirty, unmerged, or recent reflog activity)
+ * blocks too, --force or not — the previous blanket "no --force is safe" claim
+ * here was false in exactly the case that mattered most.
  *
  * Escape hatch: a matched op is BLOCKED with a clear message; when genuinely
  * needed the human runs it in their own shell (they can run anything directly).
@@ -338,31 +363,137 @@ function extractPathArg(inner, verbRe) {
   // reason: unquote here too. These probes use the token as a `cwd` / a rev
   // argument; since D1 now hands them RAW text, a quoted path would otherwise
   // reach spawnSync with its quotes attached, every git call would fail, and
-  // probeWorktreeForce's final branch would report "Likely SAFE" — a narrowing
-  // that D4 forbids. null routes to the probes' explicit UNSAFE message instead.
+  // probeWorktreeRemove's final branch would report "SAFE" — a narrowing that
+  // D4 forbids. null routes to the probes' explicit UNSAFE message instead.
   return token === undefined ? null : unquoteToken(token);
 }
 
-function probeWorktreeForce(inner) {
-  const path = extractPathArg(inner, /\bgit\s+worktree\s+remove\b/);
+const WORKTREE_REMOVE_VERB_RE = /\bgit\s+worktree\s+remove\b/;
+const WORKTREE_REMOVE_FORCE_RE = /\bgit\s+worktree\s+remove\b[^\n]*?\s(--force|-f)(?=\s|$)/;
+
+/**
+ * Liveness window for `git worktree remove` (task
+ * task-the-git-safety-gate-s-worktree-rule-matches-only-force-and, decision
+ * fixed 2026-08-02 — NOT a config knob on purpose: a tunable defaults
+ * permissive, and this constant must not).
+ *
+ * Rationale: the 2026-08-02 incident agent's last commit was 90 SECONDS old
+ * when its worktree was deleted out from under it. Observed session
+ * turnaround in this repo is ~30 minutes. 30 minutes covers an agent's normal
+ * quiet period — thinking, or running a long oracle (the full suite measured
+ * 476s in one bun phase alone) — without locking a genuinely abandoned
+ * worktree forever.
+ */
+const WORKTREE_LIVENESS_WINDOW_MINUTES = 30;
+
+/**
+ * Minutes elapsed since the most recent reflog entry for `HEAD`, read from
+ * `cwd`'s OWN per-worktree reflog.
+ *
+ * @param {string} cwd worktree directory to inspect
+ * @returns {number | null} minutes elapsed, or null when undecidable (empty /
+ *   unreadable reflog) — callers treat null as "cannot prove quiet" (D4:
+ *   undecidable widens toward blocking, it never narrows toward pass-through)
+ *
+ * reason: reads `HEAD` — never a branch name — inside `cwd`, because every
+ * worktree keeps its OWN private HEAD reflog
+ * (`.git/worktrees/<id>/logs/HEAD`) regardless of whether HEAD is attached to
+ * a branch. A checked-out branch's own reflog agrees with it (git allows only
+ * one worktree to hold a given branch at a time), and a DETACHED-HEAD
+ * worktree (AC5/boundary) has no branch reflog at all — `HEAD` is the one
+ * query that covers both shapes without a special case.
+ */
+function minutesSinceLastReflogActivity(cwd) {
+  const r = git(['reflog', 'show', '--date=unix', 'HEAD'], cwd);
+  if (!r.ok || !r.out) return null;
+  const firstLine = r.out.split('\n')[0];
+  // `--date=unix` renders as `HEAD@{<epoch-seconds>}: …` — the epoch replaces
+  // the ordinal `{0}` that a plain `reflog show` would print there.
+  const m = firstLine.match(/@\{(\d{10,})\}/);
+  if (!m) return null;
+  const ts = Number(m[1]);
+  if (!Number.isFinite(ts)) return null;
+  return (Date.now() / 1000 - ts) / 60;
+}
+
+/**
+ * Assesses a `git worktree remove` invocation — force or not (2026-08-02 fix:
+ * previously only the --force path reached any assessment at all).
+ *
+ * @param {string} inner RAW command segment (D1)
+ * @returns {string | null} a block-message assessment, or `null` when this
+ *   specific invocation is safe to PASS THROUGH with no block at all: clean +
+ *   merged + quiet + NO --force — the mandated post-merge cleanup path
+ *   (CLAUDE.md). Every other outcome blocks, --force or not.
+ */
+function probeWorktreeRemove(inner) {
+  const forced = WORKTREE_REMOVE_FORCE_RE.test(inner);
+  const path = extractPathArg(inner, WORKTREE_REMOVE_VERB_RE);
   if (!path) return 'Assessment: could not parse the worktree path — treat as UNSAFE.';
+
   const st = git(['status', '--porcelain'], path);
-  const dirty = st.ok && st.out;
+  if (!st.ok) {
+    return `Assessment: could not read the worktree's status (${st.err || 'git failed'}) — treat as UNSAFE.`;
+  }
+  if (st.out) {
+    const n = st.out.split('\n').filter(Boolean).length;
+    if (forced) {
+      // AC3 regression: this exact string is pinned unchanged.
+      return `Assessment: WORKTREE HAS ${n} UNCOMMITTED change(s) — --force DELETES them:\n${firstLines(st.out, 8)}`;
+    }
+    // git itself refuses a non-force remove of a dirty worktree (verified:
+    // exit 128, "contains modified or untracked files, use --force to delete
+    // it") — this is defense-in-depth so the gate's OWN evidence, not git's
+    // stderr, is what the operator sees first.
+    return `Assessment: WORKTREE HAS ${n} UNCOMMITTED change(s) — git itself refuses this without --force, but treat as UNSAFE:\n${firstLines(st.out, 8)}`;
+  }
+
   const br = git(['rev-parse', '--abbrev-ref', 'HEAD'], path);
   const base = defaultBranch();
-  let merged = false;
-  if (br.ok && br.out && br.out !== 'HEAD') {
-    merged = git(['merge-base', '--is-ancestor', br.out, base]).ok;
+  const detached = br.ok && br.out === 'HEAD';
+  let ref = null;
+  if (br.ok && br.out && !detached) ref = br.out;
+  else if (detached) {
+    const sha = git(['rev-parse', 'HEAD'], path);
+    ref = sha.ok && sha.out ? sha.out : null;
   }
-  if (dirty) {
-    const n = st.out.split('\n').filter(Boolean).length;
-    return `Assessment: WORKTREE HAS ${n} UNCOMMITTED change(s) — --force DELETES them:\n${firstLines(st.out, 8)}`;
+  if (!ref) return "Assessment: could not resolve the worktree's HEAD — treat as UNSAFE.";
+
+  const merged = git(['merge-base', '--is-ancestor', ref, base]).ok;
+  if (!merged) {
+    const ahead = git(['log', '--oneline', `${base}..${ref}`]);
+    const label = detached ? `detached HEAD (${ref.slice(0, 12)})` : `branch "${ref}"`;
+    return `Assessment: worktree is clean but its ${label} is NOT merged into ${base} — removing loses these commit(s):\n${firstLines(ahead.out || '(unknown)', 6)}`;
   }
-  if (br.ok && br.out && br.out !== 'HEAD' && !merged) {
-    const ahead = git(['log', '--oneline', `${base}..${br.out}`]);
-    return `Assessment: worktree is clean but its branch "${br.out}" is NOT merged into ${base} — removing loses these commit(s):\n${firstLines(ahead.out || '(unknown)', 6)}`;
+
+  const minutes = minutesSinceLastReflogActivity(path);
+  const quiet = minutes !== null && minutes >= WORKTREE_LIVENESS_WINDOW_MINUTES;
+  if (!quiet) {
+    const activityNote =
+      minutes === null
+        ? 'its reflog could not be read'
+        : `its last reflog activity was ${minutes.toFixed(1)} minute(s) ago`;
+    const label = detached ? 'its detached HEAD' : `its branch "${ref}"`;
+    return (
+      `Assessment: worktree is clean and ${label} is merged into ${base}, but ${activityNote} — ` +
+      `inside the ${WORKTREE_LIVENESS_WINDOW_MINUTES}-minute liveness window, so a peer may still be ` +
+      `working here (merged-ness only answers "will commits be lost", never "is someone in there"). ` +
+      `Removing now risks deleting a LIVE session's worktree.`
+    );
   }
-  return `Assessment: worktree is CLEAN and its branch is merged into ${base} (or detached) — --force is only needed for untracked leftovers (e.g. node_modules). Likely SAFE; run it yourself to confirm.`;
+
+  const label = detached ? 'its detached HEAD' : `its branch "${ref}"`;
+  if (forced) {
+    return (
+      `Assessment: worktree is CLEAN, ${label} is merged into ${base}, and it has been quiet for ` +
+      `${minutes.toFixed(1)} minute(s) (≥ ${WORKTREE_LIVENESS_WINDOW_MINUTES}) — SAFE. --force is only ` +
+      `needed for untracked leftovers (e.g. node_modules); run it yourself to confirm.`
+    );
+  }
+  // CLEAN + MERGED + QUIET + no --force: the mandated post-merge cleanup path
+  // (CLAUDE.md). Blocking it would train operators to bypass the gate
+  // entirely, so this is the ONE rule in this file with a pass-through.
+  return null;
 }
 
 function probeBranchForceDelete(inner) {
@@ -415,10 +546,20 @@ const RULES = [
     probe: probeStash,
   },
   {
-    pat: /\bgit\s+worktree\s+remove\b[^\n]*?\s(--force|-f)(?=\s|$)/,
-    why: 'git worktree remove --force destroys a worktree even with uncommitted/unmerged work (the W4 near-data-loss)',
-    safe: 'Verify the work landed — `git log <base>..<branch>` empty OR the branch merged. A merge that says "Already up to date" on a branch that SHOULD carry work is the STOP signal. Legit cleanup of a merged worktree uses `git worktree remove` WITHOUT --force.',
-    probe: probeWorktreeForce,
+    // Matches WITH or WITHOUT --force (2026-08-02 fix). Force is no longer
+    // required to reach this rule: a clean, unmerged, non-force removal is
+    // exactly the 2026-08-02 incident this rule now catches.
+    pat: WORKTREE_REMOVE_VERB_RE,
+    why: 'git worktree remove destroys a worktree — with uncommitted/unmerged work (the W4 near-data-loss), OR, even without --force, when the branch is unmerged or a peer may still be working there (the 2026-08-02 incident)',
+    safe:
+      'Verify the work landed — `git log <base>..<branch>` empty OR the branch merged. A merge that says ' +
+      '"Already up to date" on a branch that SHOULD carry work is the STOP signal. Merged-ness alone is not ' +
+      `enough: also check the branch's reflog has been quiet for ${WORKTREE_LIVENESS_WINDOW_MINUTES} minutes ` +
+      '(`git reflog show <branch> --date=iso`) — a peer can still be mid-session on a merged branch. Only a ' +
+      'CLEAN + MERGED + QUIET worktree is safe to remove WITHOUT --force — that IS the mandated post-merge ' +
+      'cleanup path (CLAUDE.md) and this gate lets it through; every other combination needs the human/agent ' +
+      'to run it directly in their own shell.',
+    probe: probeWorktreeRemove,
   },
   {
     pat: /\bgit\s+branch\s+(-D\b|--delete\s+--force\b|--force\s+--delete\b|-d\s+-f\b)/,
@@ -648,6 +789,12 @@ for (const pair of segmentPairs) {
         // attacker-influenced text only ever becomes a single array element.
         try { assessment = rule.probe(target.raw); } catch { assessment = 'Assessment: probe failed — treat as UNSAFE.'; }
       }
+      // A probe returning `null` (currently only probeWorktreeRemove, for its
+      // CLEAN+MERGED+QUIET+no-force case) declares THIS specific invocation
+      // safe to pass through with no block at all — try the next rule instead
+      // of this segment's match. Every other probe always returns a string,
+      // so this is a no-op for them.
+      if (assessment === null) continue;
       process.stderr.write(
         `\n⛔ [git-safety-gate] BLOCKED — destructive operation detected.\n` +
           // D5: what the user actually typed. Printing the blanked segment
