@@ -287,7 +287,11 @@ async function runPackagedMode(args: {
 
   const apiPort = parsePort(args["api-port"], "api-port", "8787");
 
-  const { app } = loadLoreApp();
+  // reason: `{surface: "http"}` — this command mounts the SAME long-lived
+  // `startHttpServer` boot `lore serve` does, so it inherits §D5's HTTP
+  // exemption for the foreign-corpus-write guard verbatim. See serve.ts's own
+  // call site for the lockout this prevents.
+  const { app } = loadLoreApp({ surface: "http" });
   const machineAuth = createMachineAuthStores();
 
   // GAP-1 fix (see this file's header): ensure the machine-scope "dashboard-local"
@@ -449,7 +453,9 @@ async function runDevMode(args: {
   "dashboard-port"?: string;
   open?: boolean;
 }): Promise<never> {
-  const { app, dbPath } = loadLoreApp();
+  // reason: `{surface: "http"}` — see runPackagedMode's identical call site;
+  // the dev topology mounts the same long-lived HTTP server (§D5).
+  const { app, dbPath } = loadLoreApp({ surface: "http" });
   const loreDir = dirname(dbPath);
   const projectRoot = dirname(loreDir);
 
