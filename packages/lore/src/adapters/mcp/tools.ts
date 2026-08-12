@@ -125,6 +125,25 @@
  * gone; the service handles the no-claim case unconditionally, for every
  * adapter, without this file computing it a second time.
  *
+ * `lore_create` gains an optional `caller_cwd` field (spec-corpus-resolution-
+ * carries-provenance-and-a-foreign-write §D5, AC-CP-5(a)/(b)) — the adapter
+ * matrix's "MCP inherits" row. Unlike the CLI (`adapters/cli/loader.ts`,
+ * ambient — one `process.cwd()` read per fresh subprocess, frozen for that
+ * whole invocation) this server is long-lived and stdio-driven, so the guard
+ * cannot be set up once at startup and stay correct for every later call —
+ * `resolveMcpCorpusProvenance` (this file's own Helpers section) resolves
+ * the caller's provenance PER CALL from `caller_cwd`, reusing the CLI's own
+ * `resolveCorpus()` verbatim, and `checkMcpForeignCorpusWrite` runs the SAME
+ * exported `checkForeignCorpusWrite`/`foreignCorpusWriteRefusalError` pair
+ * the CLI's `CorpusService.refuseIfForeignCorpusWrite` calls — one refusal
+ * vocabulary, never a second MCP-side implementation. ABSENT `caller_cwd` is
+ * treated exactly like HTTP's own named exemption (`provenance: null`,
+ * always inert) rather than falling back to this server's own frozen
+ * startup cwd — see that function's own header for why. `lore_create` is
+ * the one non-lifecycle write tool wired to this today; the check itself is
+ * adapter-agnostic and reusable the moment a future task threads
+ * `caller_cwd` through `lore_set`/`lore_link`/`lore_unlink`.
+ *
  * ⛔ NO AC-DECLARING TOOL EXISTS ON THIS SURFACE (measured while wiring D8's
  * `--allow-missing-path` escape into production, task-wire-allow-missing-
  * path-and-the-unredeemed-declaration, spec-oracle-executability-a-runner-s-
@@ -173,11 +192,11 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
-import type { LoreError, LoreConfig, CaptureSource } from "@lore/core";
+import type { LoreError, LoreConfig, CaptureSource, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
-import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs } from "@lore/core";
+import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFileAnchors } from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import { ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
@@ -197,6 +216,14 @@ import { buildPhaseStartPack, PHASE_START_CHECKPOINT } from "../../flows/phase-f
 import { buildTaskStartPack, TASK_START_CHECKPOINT } from "../../flows/task-feed-flow.js";
 import { buildTaskFeedFlowDeps, resolveTaskStartBudgets } from "../cli/task-feed-wiring.js";
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../flows/supersede-flow.js";
+// spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5, AC-CP-5 —
+// the SAME exported predicate/error-factory the CLI's `CorpusService.
+// refuseIfForeignCorpusWrite` calls (never a paraphrased MCP-side copy), and
+// the CLI adapter's OWN composition-boundary corpus resolver, reused verbatim
+// against THIS call's `caller_cwd` instead of a fresh CLI subprocess's
+// `process.cwd()` — see `resolveMcpCorpusProvenance`'s own header below.
+import { checkForeignCorpusWrite, foreignCorpusWriteRefusalError } from "../../service/foreign-corpus-write-guard.js";
+import { resolveCorpus } from "../cli/corpus-resolution.js";
 // reason: SPEC-102 — resolveActorWithSource lives in @lore/core/node (node:os
 // only, no bun:sqlite) — safe to import here without breaking this file's
 // vitest-reachability (mirrors this module's own precedent of lazy-importing
@@ -330,6 +357,20 @@ export const LoreCreateSchema = z.object({
    * (ignored) when `supersedes` is omitted.
    */
   by: z.string().optional(),
+  /**
+   * The calling agent's OWN current working directory — same rationale as
+   * `lore_evidence_add`/`lore_release`'s pre-existing `caller_cwd` field
+   * (module header, "MCP has a long-lived process.cwd() problem"): this
+   * server's own `process.cwd()` is frozen at startup and cannot answer
+   * "which directory is the calling agent logically in right now" for THIS
+   * call. Feeds the foreign-corpus-write guard's per-call provenance
+   * (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5,
+   * AC-CP-5) — see `resolveMcpCorpusProvenance`'s own header (this file's
+   * Helpers section) for the ABSENT-value decision. Optional; omitted is
+   * byte-identical to HTTP's own named exemption (`provenance: null`, the
+   * predicate is always inert).
+   */
+  caller_cwd: z.string().optional(),
 });
 
 /** Input schema for lore_get. */
@@ -1103,6 +1144,100 @@ function resolveMcpCallerCwd(callerCwdArg: string | undefined): string {
   return callerCwdArg ?? NOT_MEASURED_NO_CALLER_CWD;
 }
 
+// ─── spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5 ─────
+// (AC-CP-5, "MCP inherits the guard via caller_cwd")
+
+/**
+ * Resolves the {@link ForeignCorpusWriteContext.provenance} an MCP non-
+ * lifecycle write should hand the foreign-corpus-write guard for THIS call
+ * (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5's
+ * adapter matrix, "MCP inherits"). Reuses the CLI adapter's OWN
+ * composition-boundary function, `resolveCorpus` (`../cli/corpus-
+ * resolution.js`), against `callerCwdArg` exactly as if that path were a
+ * fresh CLI subprocess's own `process.cwd()` — deliberate reuse of the
+ * identical resolution mechanism `loader.ts` already uses, never a second
+ * implementation of it.
+ *
+ * ABSENT `caller_cwd` (the schema field is optional) is treated EXACTLY
+ * like HTTP's own named exemption (§D5's adapter-matrix row): `null`,
+ * which makes `checkForeignCorpusWrite` always allow regardless of
+ * `enabled`. This is a DECISION, not an omission — an agent that supplies
+ * no directory has given this guard no per-call caller directory to reason
+ * about at all, and "cannot know" collapses to the SAME `null` treatment as
+ * "measured and it's fine" (`foreign-corpus-write-guard.ts`'s own module
+ * header already documents this for every adapter with no per-call caller
+ * directory). The alternative — falling back to THIS SERVER's own frozen
+ * startup `process.cwd()` — was rejected: it would silently reintroduce the
+ * exact staleness `caller_cwd`'s sibling fields on `lore_evidence_add`/
+ * `lore_release` already exist to avoid (module header above
+ * `resolveMcpCallerCwd`), and would make the guard's answer depend on
+ * wherever THIS long-lived server happened to be launched from rather than
+ * on the calling agent's actual location.
+ *
+ * @param callerCwdArg - The tool's own `caller_cwd` input field, verbatim.
+ * @returns The resolved `CorpusProvenance`, or `null` when `callerCwdArg`
+ *   is absent (never calls `resolveCorpus` in that case).
+ * @example
+ * resolveMcpCorpusProvenance("/repo/.claude/worktrees/agent-x");
+ *   // => "git_common_dir" (nested worktree, no own .lore/, repo has one)
+ * @example
+ * resolveMcpCorpusProvenance("/repo"); // => "own" (repo's own .lore/ present)
+ * @example
+ * resolveMcpCorpusProvenance(undefined); // => null — HTTP's own treatment
+ */
+function resolveMcpCorpusProvenance(callerCwdArg: string | undefined): CorpusProvenance | null {
+  if (callerCwdArg === undefined) return null;
+  return resolveCorpus(callerCwdArg)?.provenance ?? null;
+}
+
+/**
+ * Runs the foreign-corpus-write guard (spec-corpus-resolution-carries-
+ * provenance-and-a-foreign-write §D5, AC-CP-5(a)/(b)) for an MCP NON-
+ * LIFECYCLE write tool call. `intentDeclared` is always `false` here,
+ * mirroring `CorpusService.refuseIfForeignCorpusWrite`'s identical `false`
+ * for the CLI's own non-lifecycle writes — none of `create`/`set`/`link`/
+ * `unlink`/`delete` have a task-claim lease to declare intent on.
+ * `lore_create` is the one MCP tool wired to this today (the only tool
+ * carrying a `caller_cwd` field of this shape); the check itself is
+ * adapter-agnostic and reusable the moment a future task threads
+ * `caller_cwd` through another non-lifecycle write tool.
+ *
+ * Emits the SAME `FOREIGN_CORPUS_WRITE_TOKEN`-carrying `LoreError` the
+ * CLI's own `refuseIfForeignCorpusWrite` produces — both surfaces call the
+ * SAME exported `checkForeignCorpusWrite`/`foreignCorpusWriteRefusalError`
+ * pair, never a paraphrased MCP-side copy (AC-CP-5(a)'s "one vocabulary
+ * across both surfaces, asserted by equality against the CLI string").
+ *
+ * @param callerCwdArg - The tool's own `caller_cwd` input field, verbatim.
+ * @param getConfig - The SAME zero-arg config getter `registerTools`
+ *   receives, called PER INVOCATION (not memoized) so a long-lived server
+ *   observes a mid-session `.lore/config.yaml` edit to
+ *   `workflow.gates."corpus-write".foreign_corpus_write.enabled` — mirrors
+ *   this file's pre-existing `resolveCaptureTimeoutMs(getConfig?.())` call
+ *   convention.
+ * @returns `undefined` when the write may proceed; a ready-to-return
+ *   `errorContent(...)` payload when it must be refused.
+ * @example
+ * checkMcpForeignCorpusWrite("/repo/.claude/worktrees/agent-x", undefined);
+ *   // => { content: [...], isError: true } — refused, foreign provenance
+ * @example
+ * checkMcpForeignCorpusWrite(undefined, undefined);
+ *   // => undefined — no per-call caller directory, guard inert
+ */
+function checkMcpForeignCorpusWrite(
+  callerCwdArg: string | undefined,
+  getConfig: (() => LoreConfig | undefined) | undefined,
+): ReturnType<typeof errorContent> | undefined {
+  const verdict = checkForeignCorpusWrite(
+    {
+      provenance: resolveMcpCorpusProvenance(callerCwdArg),
+      enabled: resolveForeignCorpusWriteGateEnabled(getConfig?.()),
+    },
+    false,
+  );
+  return verdict.allowed ? undefined : errorContent(foreignCorpusWriteRefusalError(verdict));
+}
+
 // ─── Tool Registration Helper ─────────────────────────────────────────────────
 
 /**
@@ -1284,6 +1419,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
   // lore_create
   registerToolWithArgs(server, "lore_create", "Create a new document in the Lore corpus", LoreCreateSchema, async (args) => {
+    // spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5,
+    // AC-CP-5(a)/(b) — checked FIRST, before any other side effect
+    // (including the AI-generation call below), so a refused write never
+    // spends an AI call first. See checkMcpForeignCorpusWrite's own header.
+    const foreignWriteRefusal = checkMcpForeignCorpusWrite(args.caller_cwd, getConfig);
+    if (foreignWriteRefusal !== undefined) return foreignWriteRefusal;
+
     // SPEC-024 AC-NOAI-4/5: ai=false (default) → create with empty/provided content (no AI call).
     // ai=true → invoke AIProviderService to generate content before creating the doc.
     let resolvedContent = args.content;
@@ -1314,12 +1456,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       });
     }
 
-    // Strip the `ai`/`file_anchors`/`requires_uat`/`supersedes`/`by` fields before
-    // passing to corpusService.create — none is a corpus field; file_anchors
-    // (SPEC-042 D9) and requires_uat (SPEC-058 hotfix, plan branch only, `true` only)
-    // are folded into `extra` here so CorpusService._createImpl's single validation
-    // gate sees them the same way it would from a raw extra.* payload.
-    const { ai: _ai, file_anchors: fileAnchors, requires_uat: requiresUat, supersedes, by, ...createInput } = args;
+    // Strip the `ai`/`file_anchors`/`requires_uat`/`supersedes`/`by`/`caller_cwd`
+    // fields before passing to corpusService.create — none is a corpus field;
+    // file_anchors (SPEC-042 D9) and requires_uat (SPEC-058 hotfix, plan branch
+    // only, `true` only) are folded into `extra` here so CorpusService._createImpl's
+    // single validation gate sees them the same way it would from a raw extra.*
+    // payload; caller_cwd was already consumed above by checkMcpForeignCorpusWrite.
+    const { ai: _ai, file_anchors: fileAnchors, requires_uat: requiresUat, supersedes, by, caller_cwd: _callerCwd, ...createInput } = args;
     let mergedExtra = createInput.extra;
     if (fileAnchors !== undefined) {
       mergedExtra = { ...(mergedExtra ?? {}), file_anchors: fileAnchors };
