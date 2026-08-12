@@ -5816,6 +5816,10 @@
     "01KZTK127591FZ0JMKCWG2ESQR": {
       "human_id": "TASK-701",
       "file_path": "docs/requirements/task/TASK-701-the-mirror-export-silently-skips-a-changed-knowled.md"
+    },
+    "01KZTRSMEAHCG2DDW1KQPMV5M2": {
+      "human_id": "TASK-702",
+      "file_path": "docs/requirements/task/TASK-702-the-mcp-boot-carries-the-same-frozen-startup-cwd.md"
     }
   }
 }
