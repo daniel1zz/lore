@@ -8,6 +8,7 @@ priority: medium
 created: 2026-08-12
 updated: 2026-08-12
 tags: []
+parent: PRD-001
 ---
 Session of 2026-08-12, `agent:main-orchestrator`, resuming `knowledge-handoff-agent-main-orchestrator-98`. Three follow-up tasks landed and archived; SIX new tasks filed; the governing spec went v27 → v33. What follows is only what was MEASURED, with the measurement named.
 
@@ -88,3 +89,15 @@ I ran the merged-tree suite as a background command with `... ; echo $? > fullsu
 The standing lesson says a backgrounded oracle's completion notice reports the SHELL's exit code, so persist `$?` and read it back. True, but incomplete: when the shell is killed, there is nothing to read back. **An ABSENT exit file must be read as "did not complete", never as "still running" and never as a default pass.** The only positive evidence available was the log's own last line, `error: script "test" was terminated by signal SIGTERM`.
 
 Re-run under `nohup`, fully detached from the tool's timeout, with a separate backgrounded `until [ -f <exitfile> ]` waiter. Note that the waiter's own exit 0 means only that the file appeared — it carries no information about the suite's verdict, which still comes from the persisted code (0) and the summary (2072 pass / 0 fail across 206 files; vitest 509 files / 8976 passed / 0 failed).
+
+## 9. A handoff goes stale the moment it is written, and its structured fields cannot be revised
+
+`lore handoff` writes `next_steps` into `extra.handoff` — the structured payload `lore feed session-resume` reads back. Measured: `lore set` has NO path to edit `extra` (zero occurrences of "extra" in its help), and `--json-file` on `lore handoff` CREATES a document rather than amending one. So once written, a next-step is frozen.
+
+That collides with the order of work. This session wrote the handoff, then correctly kept going — cleaning the last worktree that the handoff's own next-step lists as pending. The ticket is now wrong in a way its author cannot fix, and the next session will go looking for a worktree that does not exist.
+
+Neither obvious sequencing rule fixes it: writing the handoff LAST still leaves everything after it unrecordable (the mirror export and commit that must follow a corpus write are themselves work), and writing it EARLY guarantees more drift. The asymmetry is structural — a handoff is a snapshot given an append-only interface.
+
+Two candidate mechanisms, neither implemented: let `lore handoff` amend the most recent open ticket by the same actor (an explicit `--amend`, so it can never silently overwrite a peer's), or have `session-resume` render next-steps through a freshness check that flags ones whose named artifacts no longer exist — the worktree path and the stash names in this ticket are both decidable on disk.
+
+Related, smaller, same session: `lore create knowledge --sub-type retro` leaves `parent_id` NULL and `lore status --check-tree` immediately reports it as an orphan, while `lore handoff` parents its doc to the root PRD automatically. The preceding session's retro is orphaned in exactly the same way, so this reproduces rather than being a one-off. Repaired here with `lore link <retro> <root> --type parent`, which dropped the tree's drift count from 7 to 6.
