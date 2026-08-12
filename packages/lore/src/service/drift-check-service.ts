@@ -170,7 +170,7 @@ export class DriftCheckService {
       for (const { doc, anchors } of armedDocs) {
         statusBreakdown[doc.status] = (statusBreakdown[doc.status] ?? 0) + 1;
         for (const anchor of anchors) {
-          declared.push({ spec_id: doc.id, doc_slug: doc.slug, doc_type: type, spec_status: doc.status, anchor });
+          declared.push({ doc_id: doc.id, doc_slug: doc.slug, doc_type: type, doc_status: doc.status, anchor });
         }
       }
     }

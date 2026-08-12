@@ -25,8 +25,15 @@
  *     ZERO fs probing — the shared helper `lore status` (plain) and `lore
  *     bootstrap` both splice in (D5, D7 review U8).
  *   sortDrifts(drifts) — deterministic (doc_slug, then anchor) ordering (D5).
- *   renderDriftRepairHint(row) — the literal `fix: lore anchor rm <spec-slug>
+ *   renderDriftRepairHint(row) — the literal `fix: lore anchor rm <doc-slug>
  *     '<anchor>' (or update the path/export)` repair command (D5, review U5).
+ *   renderDriftPopulation(payload) / renderDriftSectionLines(payload) — the pure
+ *     text-rendering half of `lore status --check-drift`'s CLI output, moved here
+ *     from `commands/status.ts` (M2 of
+ *     spec-a-write-side-fact-with-no-read-side-address-counts-with-no) so the
+ *     row rendering that command actually ships is directly vitest-callable —
+ *     `commands/status.ts::renderDriftSection` is a thin console.log wrapper
+ *     over `renderDriftSectionLines`, its ONE production caller.
  *   SYMBOL_MISSING_FOOTNOTE — the documented false-positive-forms footnote (D3),
  *     printed by CLI text rendering whenever any `symbol_missing` row appears.
  *
@@ -178,11 +185,59 @@ export async function runDrift(deps: DriftFlowDeps, probe: FsProbe): Promise<Res
  * @param row - One `DriftRow` from a `CodeDriftPayload.drifts` entry
  * @returns The literal repair command line
  * @example
- * renderDriftRepairHint({ spec_id: "x", doc_slug: "spec-foo", doc_type: "spec", spec_status: "approved", anchor: "src/a.ts#Foo", kind: "symbol_missing" });
+ * renderDriftRepairHint({ doc_id: "x", doc_slug: "spec-foo", doc_type: "spec", doc_status: "approved", anchor: "src/a.ts#Foo", kind: "symbol_missing" });
  * // => "fix: lore anchor rm spec-foo 'src/a.ts#Foo' (or update the path/export)"
  */
 export function renderDriftRepairHint(row: DriftRow): string {
   return `fix: lore anchor rm ${row.doc_slug} '${row.anchor}' (or update the path/export)`;
+}
+
+/**
+ * Renders the two scanned populations — SPECS and KNOWLEDGE docs — as one phrase
+ * (moved here from `commands/status.ts` so a vitest-safe caller can assert it
+ * directly — `status.ts` transitively imports `loader.ts` → `app.ts` → `bun:sqlite`,
+ * unresolvable under vitest). Both counts always print, including a zero: an
+ * omitted population reads as "not scanned", which is exactly the ambiguity the
+ * separate `knowledge_checked` field exists to remove.
+ */
+export function renderDriftPopulation(payload: CodeDriftPayload): string {
+  return `${payload.specs_checked} spec(s) + ${payload.knowledge_checked} knowledge doc(s) checked`;
+}
+
+/**
+ * Renders the FULL `--check-drift` text section as an array of lines (D5) — the
+ * SAME lines `lore status --check-drift`'s CLI text rendering prints, moved here
+ * (mirrors {@link renderDriftPopulation}'s reason) so the row rendering `lore
+ * status` actually ships is directly callable from a plain vitest test, never
+ * re-derived by one. `commands/status.ts::renderDriftSection` is a thin
+ * `for (const line of renderDriftSectionLines(payload)) console.log(line)`
+ * wrapper over this — the ONE production caller.
+ *
+ * Every drift row names the DOC TYPE its anchor came from (`row.doc_type`), so a
+ * knowledge breach in a mixed report can never be read as a spec breach.
+ *
+ * @param payload - A `CodeDriftPayload` (e.g. from {@link runDrift})
+ * @returns The lines to print, in order — never mutates `payload`.
+ */
+export function renderDriftSectionLines(payload: CodeDriftPayload): string[] {
+  if (!payload.enabled) {
+    return ["Code drift: disabled (workflow.drift.enabled=false)"];
+  }
+  if (!payload.armed) {
+    return ["Code drift: armed=false (no spec or knowledge doc declares code_anchors)"];
+  }
+  if (payload.consistent) {
+    return [`Code drift: consistent (${renderDriftPopulation(payload)})`];
+  }
+  const lines: string[] = [`Code drift: ${payload.drifts.length} drift(s) (${renderDriftPopulation(payload)})`];
+  for (const row of payload.drifts) {
+    lines.push(`  - [${row.doc_type}] ${row.doc_slug} → ${row.anchor} (${row.kind})`);
+    lines.push(`    ${renderDriftRepairHint(row)}`);
+  }
+  if (payload.drifts.some((d) => d.kind === "symbol_missing")) {
+    lines.push(`  ${SYMBOL_MISSING_FOOTNOTE}`);
+  }
+  return lines;
 }
 
 /**
