@@ -5716,6 +5716,34 @@
     "01KZRYRB1K7BPDJR0Z650CYNPK": {
       "human_id": "KN-434",
       "file_path": "docs/requirements/knowledge/KN-434-handoff-agent-main-orchestrator.md"
+    },
+    "01KZSTGA18QN7C83XK0YMB94RW": {
+      "human_id": "SPEC-141",
+      "file_path": "docs/requirements/spec/SPEC-141-corpus-resolution-carries-provenance-and-a-foreign.md"
+    },
+    "01KZSVHABK7ZFMP7S3F1TPFKF3": {
+      "human_id": "PLAN-128",
+      "file_path": "docs/requirements/plan/PLAN-128-land-corpus-resolution-provenance-one-pure-resolve.md"
+    },
+    "01KZSVKF0A967MBQB8PHZAJ3K0": {
+      "human_id": "TASK-688",
+      "file_path": "docs/requirements/task/TASK-688-the-adapter-matrix-mcp-inherits-the-guard-via-call.md"
+    },
+    "01KZSVKEREMB0VAX4VS2TBWAEM": {
+      "human_id": "TASK-689",
+      "file_path": "docs/requirements/task/TASK-689-the-foreign-write-guard-intent-is-a-claim-lease-fa.md"
+    },
+    "01KZSVK0YRCYE6DWMDS7BE2B6Y": {
+      "human_id": "TASK-690",
+      "file_path": "docs/requirements/task/TASK-690-foreign-corpus-write-joins-the-six-gate-sub-predic.md"
+    },
+    "01KZSVK0R3Y0ZYRRHADE8M35X8": {
+      "human_id": "TASK-691",
+      "file_path": "docs/requirements/task/TASK-691-collapse-the-two-resolvers-move-db-discovery-out-o.md"
+    },
+    "01KZSVJGXB99RWST3SKHVVFVH6": {
+      "human_id": "TASK-692",
+      "file_path": "docs/requirements/task/TASK-692-the-pure-corpus-provenance-resolver-four-outcomes.md"
     }
   }
 }
