@@ -30,6 +30,11 @@
  *   - The task doc is fetched exactly once — `listLinkedKnowledgePointers` takes
  *     the already-computed `TaskBundle.relatedKnowledge` directly rather than
  *     re-fetching the task by id (F10/AC-070-17).
+ *   - Each `AcceptanceView`'s `oracle_generation` field is populated straight from
+ *     the SAME `fact` this function already reads for `deriveCoverageLabel` — no
+ *     second `computeAcCoverage` call, no re-derivation (task-carry-the-retired-
+ *     oracle-signal-into-the-feed-pack-so-a, AC-DC-11; spec-the-defect-channel-
+ *     cannot-be-honestly-maintained-an §M5).
  *
  * Two DISTINCT truncation mechanisms — never conflated (2026-07-23 lesson,
  * documented again here since this is the mechanism that performs the first one):
@@ -260,6 +265,18 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
       ...(criterion.verify.mode === "script" ? { command: criterion.verify.command } : {}),
       coverage: fact !== undefined ? deriveCoverageLabel(fact) : "none",
       scoped,
+      // reason: SPEC-070 AC-DC-11 (task-carry-the-retired-oracle-signal-into-the-
+      // feed-pack-so-a) — `fact.oracle_generation` is carried onto the view
+      // VERBATIM, ALONGSIDE `coverage` above, never folded into it (this task's
+      // own binding constraint: `deriveAcCoverageState` gains no eighth state).
+      // Conditional spread (never a bare field assignment) because
+      // `AcceptanceView.oracle_generation` is optional under
+      // `exactOptionalPropertyTypes` — an explicit `undefined` VALUE on the key
+      // is rejected by the same rule `resolveTaskStartBudgets` documents on
+      // itself below; omitting the key entirely (rather than writing
+      // `oracle_generation: undefined`) is the only well-typed way to say
+      // "no split known for this criterion".
+      ...(fact?.oracle_generation !== undefined ? { oracle_generation: fact.oracle_generation } : {}),
     };
   });
 
