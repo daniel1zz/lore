@@ -189,8 +189,13 @@ export interface LoadLoreAppOptions {
  * `caller_cwd` tool parameter) is unaffected and correct, but the ambient
  * second layer under it carries the same boot-cwd defect this function fixes
  * for HTTP. Left as-is deliberately: §D5's adapter matrix names exactly ONE
- * exemption (the HTTP row), and `index.ts` is outside this change's declared
- * scope. Tracked, not forgotten — see the task above.
+ * exemption (the HTTP row), and `packages/lore/src/index.ts` is outside the
+ * declared scope of `task-the-http-exemption-is-conditional-on-where-lore-
+ * serve-was`. Disclosed by that task's implementer, not silently carried: the
+ * fix is one `{surface: "mcp"}`-shaped argument at `index.ts`'s `loadLoreApp()`
+ * call plus the matching enum member here, and it needs its own AC because
+ * removing the ambient layer under MCP's per-call check is a real behaviour
+ * change, not a refactor.
  *
  * @param bootSurface - See {@link LoreAppBootSurface}.
  * @returns `null` for a surface with no per-call caller directory (always
