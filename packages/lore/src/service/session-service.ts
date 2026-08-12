@@ -1,5 +1,7 @@
 /**
- * SessionService — SPEC-041 S1 (bootstrap pointer-set) + S2 (lossless handoff) + resume.
+ * SessionService — SPEC-041 S1 (bootstrap pointer-set) + S2 (lossless handoff) + resume
+ * + L0 ownership read surfaces (spec-multi-session-concurrency-queryable-ownership-checkout
+ * §Scope L0, AC-OWN-1/AC-OWN-5).
  *
  * Public surface:
  *   bootstrap(by, now?)       → BootstrapReport — the volatile session pointer-set
@@ -8,11 +10,30 @@
  *                                `createHandoffDoc` port; four-way parent resolution.
  *   resume(opts, now?)        → ResumeResult — newest-wins or direct handoff targeting,
  *                                age/TTL warning, multi-actor surfacing. READ-ONLY.
+ *   getActiveSessions(now?)   → ReadySession[] — the SAME corpus-wide derivation
+ *                                `bootstrap`'s `active_sessions` uses, exposed as its
+ *                                OWN query (`lore territory`/`lore session list|show`
+ *                                consume it without paying for `bootstrap`'s unrelated
+ *                                assembly). READ-ONLY.
+ *   recordOwnHeartbeat(sessionId, pid, machine, now?) → void — AC-OWN-5's ONLY write:
+ *                                records THIS process's OS-probed `{pid, started_at}`
+ *                                as `sessionId`'s current heartbeat. A COMMAND, never
+ *                                hidden inside a query method (CQS) — the CLI adapter
+ *                                calls it explicitly before querying.
+ *   deriveSessionLiveness(sessions, currentMachine) → SessionLivenessRecord[] — joins
+ *                                each session with a probed liveness verdict
+ *                                (`session-liveness.ts::deriveLivenessVerdict`), NEVER
+ *                                from claim age. READ-ONLY.
  *
- * @invariant `bootstrap` and `resume` perform ZERO store mutations — no
- *   insert/update/softDelete/addLink/removeLink/insertVersion/appendAuditEntry/
- *   insertJudgment/insertCalibrationRecord call, ever (SPEC-041 §4 AC-SL-2). Both
- *   methods only ever call `store.find`/`findMany`/`findLinksByToIds`.
+ * @invariant `bootstrap`, `resume`, `getActiveSessions`, and `deriveSessionLiveness`
+ *   perform ZERO store mutations — no insert/update/softDelete/addLink/removeLink/
+ *   insertVersion/appendAuditEntry/insertJudgment/insertCalibrationRecord call, ever
+ *   (SPEC-041 §4 AC-SL-2, extended to the two new L0 queries by the same rule). All
+ *   four only ever call `store.find`/`findMany`/`findLinksByToIds` (plus, for
+ *   `deriveSessionLiveness`, the injected heartbeat-read/process-probe PORTS — leaf
+ *   IO, never the store). `recordOwnHeartbeat` is the ONE exception, and it writes
+ *   nowhere near the store either — its target is a tmpdir sidecar file behind
+ *   `writeHeartbeatPort`, never a corpus document.
  * @invariant `writeHandoff` never writes through `store` directly — every doc it
  *   creates goes through the constructor-injected `createHandoffDoc` port
  *   (`CorpusService.createHandoffDoc`, bound in `app.ts`), mirroring the
@@ -73,6 +94,14 @@ import { resolveDoc } from "./resolve.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
 import { isPlanMember } from "./plan-membership.js";
+import { deriveLivenessVerdict, type LivenessVerdict } from "./session-liveness.js";
+import { probeProcessStartTime, type ProcessStartTimeProbe } from "../adapters/process-probe-port.js";
+import {
+  writeSessionHeartbeat,
+  readSessionHeartbeat,
+  type WriteSessionHeartbeat,
+  type ReadSessionHeartbeat,
+} from "../adapters/session-heartbeat-port.js";
 
 const defaultNow = (): string => new Date().toISOString();
 
@@ -186,10 +215,41 @@ export interface ResumeResult {
   readonly readiness: ResumeReadinessPointer | null;
 }
 
+/**
+ * One {@link ReadySession} joined with its probed {@link LivenessVerdict}
+ * (`deriveSessionLiveness`, AC-OWN-5) — `stale` (claim-age, when present) and
+ * `liveness` (process-probed) are two INDEPENDENT facts, carried side by side,
+ * never merged into one: the AC's own "claim age must not influence the
+ * verdict" clause would be unfalsifiable if the two were collapsed into a
+ * single field.
+ */
+export interface SessionLivenessRecord extends ReadySession {
+  readonly liveness: LivenessVerdict;
+}
+
 export class SessionService {
+  /**
+   * @param probeProcessStartTimePort - AC-OWN-5 injected port measuring a
+   *   pid's current OS-observed start time. Defaults to the REAL
+   *   implementation (`adapters/process-probe-port.ts::probeProcessStartTime`)
+   *   — leaf IO needing no `app.ts` wiring (mirrors `TaskWorkflowService`'s
+   *   `detectBranch` ctor-DI precedent). Tests inject a fake to avoid a real
+   *   `ps` subprocess.
+   * @param writeHeartbeatPort - AC-OWN-5 injected port persisting a session's
+   *   own heartbeat. Defaults to the REAL implementation
+   *   (`adapters/session-heartbeat-port.ts::writeSessionHeartbeat`), same
+   *   no-app.ts-wiring-needed reason as `probeProcessStartTimePort`.
+   * @param readHeartbeatPort - AC-OWN-5 injected port reading a session's
+   *   recorded heartbeat. Defaults to the REAL implementation
+   *   (`adapters/session-heartbeat-port.ts::readSessionHeartbeat`), same
+   *   reason.
+   */
   constructor(
     private readonly store: StoreInterface,
     private readonly deps: SessionServiceDeps,
+    private readonly probeProcessStartTimePort: ProcessStartTimeProbe = probeProcessStartTime,
+    private readonly writeHeartbeatPort: WriteSessionHeartbeat = writeSessionHeartbeat,
+    private readonly readHeartbeatPort: ReadSessionHeartbeat = readSessionHeartbeat,
   ) {}
 
   // ── Bootstrap (S1) ────────────────────────────────────────────────────────
@@ -300,104 +360,15 @@ export class SessionService {
     // `allActiveTaskIds` set above, which stays active-plan-scoped for
     // `active_plans`' own per-plan counts only
     // (task-active-sessions-derives-only-over-active-plans-tasks-with,
-    // Required #1). The shipped bootstrap contract documents this field as a
-    // "corpus-global snapshot spanning every plan, every actor, and every
-    // concurrent session" (`BOOTSTRAP_SCOPE_DECLARATION`) — the pre-fix form
-    // intersected with `activePlanIds`, so this field read `[]` in ANY corpus
-    // with zero active plans (measured: 114 archived / 0 active here) AND
-    // never included an `--adhoc` task (SPEC-069 D2 parents these to the root
-    // PRD, never a plan, and adhoc is now the dominant task shape in this
-    // corpus) — a fresh session read that `[]` as "nobody is working" and
-    // removed a live agent's worktree. Scoping this field to active-plan
-    // membership was the bug, not a feature to preserve.
-    //
-    // `TaskWorkflowService.ready`'s plan-scoped `sessions[]` is DELIBERATELY
-    // LEFT UNCHANGED and is NOT the defect — it answers "who's on THIS plan",
-    // this field answers "who's working AT ALL, anywhere" — the two stay two
-    // independent call sites over the shared `deriveSessions` pure fn rather
-    // than being collapsed into one helper with a scope flag (this task's own
-    // boundary rule; a shared-helper fix risks widening BOTH derivations at
-    // once, which is exactly what the Oracle's REGRESSION bullet guards
-    // against). `ready()`'s own call, one method below, is untouched.
-    //
-    // Terminal-status tasks (archived/deprecated) are EXCLUDED — `lore done`'s
-    // `writeTaskStatus` only ever changes `status`/`updated_at`/`version`, it
-    // never clears `extra.claim`, so an archived task can still carry a claim
-    // that has not yet aged past `claimTtlMinutes`. Without this filter, the
-    // widening above would "resurrect" a just-completed task into
-    // `active_sessions` for the remainder of its stale claim's TTL window
-    // (STATE dimension, dispatch addendum). `release()` already deletes
-    // `extra.claim` outright (`_releaseImpl` above), so a released task needs
-    // no explicit check here — it has no claim left to be picked up at all.
-    //
-    // reason: deliberately does NOT ALSO filter `isInvalidated` (retracted)
-    // tasks — that is a SEPARATE, already-filed defect in this SAME derivation
-    // (`knowledge-handoff-agent-main-orchestrator-71` NS3: a retracted task's
-    // claim is not excluded here). Fixing it silently as a side effect of this
-    // task was explicitly forbidden by its own dispatch — `ready()` already
-    // excludes retracted tasks via its own `isInvalidated` filter
-    // (task-a-task-cannot-be-retracted-supersedes-emits-a-repair AC3); this
-    // site does not, exactly as before this fix (no new regression — it was
-    // never filtered here either).
-    const claimBearingTasks = allDocs.filter(
-      (d) => d.type === "task" && d.status !== "archived" && d.status !== "deprecated",
-    );
-
-    // reason: Required #2's RECORDED decision (dispatch addendum — "do not
-    // silently pick one"). Chosen: candidate (a) — keep reporting a stale
-    // claim in `active_sessions`, flagged, rather than silently dropping it —
-    // the incident's own minimum viable fix. Weighed against:
-    //   (b) claim.at ALREADY refreshes on evidence writes (SPEC-069 D4/D5's
-    //       `renewClaimForEvidence`, wired into `appendEvidenceEntry`) — but
-    //       that leaves the ENTIRE pre-first-evidence working phase
-    //       unrefreshed, which is EXACTLY the incident's own window (the
-    //       agent's claim.at was ~20h old while it was still implementing,
-    //       having recorded no evidence yet — age 1203 min against a 120 min
-    //       ttl, `stale: true` ten times over, while the process was
-    //       demonstrably alive per `git reflog`). (b) alone would still have
-    //       produced this incident's exact reading.
-    //   (c) an explicit `liveness: "unknown"` marker — rejected because it
-    //       still requires deciding whether the ROW itself survives; "unknown"
-    //       on a row that vanished is no different from `[]` to a reader in a
-    //       hurry. (a) subsumes it: a `stale: true` row already tells a reader
-    //       "liveness unconfirmed" without inventing a second vocabulary.
-    // Lengthening `claim_ttl_minutes` was explicitly out of scope (task doc,
-    // "Second half") — it moves the false-death threshold without making
-    // staleness mean liveness, and delays genuine lease reclamation.
-    //
-    // Mechanically: `deriveSessions` is called with an EFFECTIVELY UNBOUNDED
-    // ttl so nothing is filtered out during grouping (fresh AND what would
-    // otherwise be "stale" group together uniformly, by the SAME pure
-    // function `ready()` uses, called here an EXTRA time rather than
-    // modified — `deriveSessions` itself is untouched, so `ready()`'s
-    // behavior stays byte-identical). Each returned group is then
-    // independently re-checked: `stale: true` iff that group's OWN freshest
-    // signal (`newest_at`, already the max `claim.at` across every member
-    // task) has itself aged past the REAL ttl — mirrors this same module's
-    // `deriveLastActivityAt` "over-reporting is the safe direction"
-    // precedent. `stale` is present-iff-true (never `false`), so a genuinely
-    // fresh session's shape stays BYTE-IDENTICAL to pre-this-decision output.
-    //
-    // `stale: true` means "no fresher activity signal has been recorded for
-    // this claimant" — it does NOT mean dead (see `readySessionSchema`'s own
-    // `stale` field JSDoc). A consumer must treat it as "claimant exists,
-    // liveness unconfirmed" — the same non-solitude caveat this schema
-    // already states for an absent `session_id` — never as sole grounds for
-    // a destructive action against the claimant's worktree. That is the
-    // exact failure this whole task exists to close.
-    const UNBOUNDED_TTL_MINUTES = Number.POSITIVE_INFINITY;
-    const activeSessions: ReadySession[] = deriveSessions(
-      claimBearingTasks,
-      nowIso,
-      UNBOUNDED_TTL_MINUTES,
-    ).map((session) => {
-      const groupIsStale = isClaimStale(
-        { by: session.by, at: session.newest_at },
-        nowIso,
-        this.deps.claimTtlMinutes,
-      );
-      return groupIsStale ? { ...session, stale: true } : session;
-    });
+    // Required #1). See `computeActiveSessionsFrom`'s own JSDoc (Private
+    // Helpers, below) for the full rationale this used to carry inline —
+    // extracted so `getActiveSessions` (spec-multi-session-concurrency-
+    // queryable-ownership-checkout §Scope L0, AC-OWN-1/AC-OWN-5) can reuse the
+    // IDENTICAL derivation without `lore territory`/`lore session list|show`
+    // paying for this method's unrelated plan/queue/handoff assembly.
+    // `TaskWorkflowService.ready`'s plan-scoped `sessions[]` remains a
+    // SEPARATE, untouched call site over the shared `deriveSessions` pure fn.
+    const activeSessions: ReadySession[] = this.computeActiveSessionsFrom(allDocs, nowIso);
 
     // Pending review queue — same `status: "draft"` filter ReviewService.pending uses.
     const pendingDrafts = allDocs.filter((d) => d.status === "draft").sort(byCreatedAtAsc);
@@ -577,6 +548,147 @@ export class SessionService {
     // method, not bad external input, so a throwing `.parse` is appropriate (mirrors
     // checkpoint-registry.ts's "can't happen in production" throw shape).
     return ok(bootstrapReportSchema.parse(report));
+  }
+
+  // ── L0 Ownership Read Surfaces (spec-multi-session-concurrency-queryable- ──
+  // ── ownership-checkout §Scope L0, AC-OWN-1, AC-OWN-5) ───────────────────────
+
+  /**
+   * Corpus-wide derived sessions (`computeActiveSessionsFrom`'s shared
+   * derivation — the SAME computation `bootstrap`'s `active_sessions` uses)
+   * — exposed as its OWN query so `lore territory`/`lore session list|show`
+   * (AC-OWN-1, AC-OWN-5) don't pay for `bootstrap`'s unrelated plan/queue/
+   * handoff assembly just to read this one field. READ-ONLY — zero store
+   * mutations, same module invariant `bootstrap`/`resume` already carry.
+   *
+   * @param now - Caller-supplied current-time seam (D10), never `Date.now()`
+   *   directly.
+   * @returns `ok(ReadySession[])` — corpus-wide, byte-identical shape to
+   *   `BootstrapReport.active_sessions`.
+   */
+  async getActiveSessions(now: () => string = defaultNow): Promise<Result<ReadySession[], LoreError>> {
+    const nowIso = now();
+    const allDocsResult = await this.store.findMany({});
+    if (!allDocsResult.ok) return allDocsResult;
+    return ok(this.computeActiveSessionsFrom(allDocsResult.value, nowIso));
+  }
+
+  /**
+   * Records THIS process's own `{pid, started_at, machine?}` as `sessionId`'s
+   * current heartbeat (AC-OWN-5) — the ONLY write this service performs for
+   * liveness purposes, and a deliberate COMMAND, never hidden inside
+   * `getActiveSessions`/`deriveSessionLiveness` (CQS — a query method must
+   * never carry a hidden side effect). The CLI adapter (`commands/session.ts`)
+   * calls this explicitly, BEFORE it queries `deriveSessionLiveness`, so the
+   * calling session's own presence becomes measurable to a LATER `lore
+   * session list|show` call — the mechanism that makes AC-OWN-5's
+   * cross-process liveness answerable at all without a P2 session-lease write
+   * path (deliberately out of THIS plan's scope — see the plan doc's own "Out
+   * of scope" section). A session that never calls this (or calls it on a
+   * DIFFERENT machine) is honestly reported `"unmeasured"` by
+   * `deriveSessionLiveness`, never fabricated.
+   *
+   * Best-effort / ADVISORY, mirrors `TaskWorkflowService.claim`'s
+   * `installClaimTrailerBinding`: a probe/write fault here must never fail
+   * the caller. `pid` is probed via the SAME `probeProcessStartTimePort`
+   * `deriveSessionLiveness` later uses to verify it — so a later re-probe of
+   * the identical pid yields the IDENTICAL `started_at` (self-consistency:
+   * this is the OS's own answer about this process, never a self-reported
+   * wall-clock value).
+   *
+   * @param sessionId - The captured session instance (`ReadySession.session_id`
+   *   — the SAME sanitized discriminator `TaskWorkflowService.claim` captures
+   *   via `resolveClaimSessionId`).
+   * @param pid - The pid to record (caller-supplied; never read directly
+   *   here, for testability). The CLI layer passes `process.ppid` — the
+   *   PARENT that invoked the `lore` binary (the orchestrating shell/agent
+   *   process) — deliberately NEVER `process.pid`: the `lore` CLI process
+   *   itself is a short-lived subprocess that exits the instant its command
+   *   returns, so recording its OWN pid would make every session report
+   *   "dead" on the very next probe, moments after reporting "alive"
+   *   (measured while building this command, `commands/session.ts`'s own
+   *   comment carries the same note).
+   * @param machine - This process's own machine identity (caller-supplied —
+   *   `os.hostname()` at the CLI layer, mirrors `TaskClaim.machine`'s own
+   *   "auto-captured by the CLI" convention).
+   * @example
+   * await sessionService.recordOwnHeartbeat("3de02220", process.ppid, "alices-mbp");
+   */
+  async recordOwnHeartbeat(sessionId: string, pid: number, machine: string | undefined): Promise<void> {
+    const startedAt = await this.probeProcessStartTimePort(pid);
+    // reason: can't honestly record a start time we couldn't measure, even
+    // for OURSELVES — a probe failure here degrades to "no heartbeat
+    // recorded" (readSessionHeartbeat later reports "unmeasured"), never a
+    // fabricated value.
+    if (startedAt === null) return;
+    await this.writeHeartbeatPort(sessionId, {
+      pid,
+      started_at: startedAt,
+      ...(machine !== undefined ? { machine } : {}),
+    });
+  }
+
+  /**
+   * `lore session list|show`'s liveness join (AC-OWN-5) — pairs each
+   * corpus-wide derived session with a probed liveness verdict, NEVER
+   * inferred from claim age (`session.stale`, when present, is carried
+   * through UNCHANGED alongside `liveness` — two independent facts, never
+   * merged into one). READ-ONLY query (CQS) — the write half is
+   * `recordOwnHeartbeat`, a SEPARATE, explicitly-named method the caller
+   * invokes first.
+   *
+   * Liveness resolution per session, in order:
+   *   1. `session.session_id` absent → `"unmeasured"` (nothing to look a
+   *      heartbeat up by — mirrors `compareClaimSessions`'s own "absent ⇒
+   *      not-measured" rule, `gate-predicates.ts`).
+   *   2. `session.machine` present AND differs from `currentMachine` →
+   *      `"unmeasured"` (spec §Non-goals: cross-machine liveness is
+   *      advisory-only, never rendered as a live/dead verdict). An ABSENT
+   *      `session.machine` does NOT trip this — `TaskClaim.machine` is
+   *      additive/optional, and absence is not evidence of a DIFFERENT
+   *      machine (mirrors `actorIdentityGuard`'s "missing on either side ⇒
+   *      not comparable, never a trip" discipline, `gate-predicates.ts`).
+   *   3. No recorded heartbeat on file for this `session_id` → `"unmeasured"`
+   *      (the session never called `recordOwnHeartbeat` — on this machine or
+   *      at all — or its heartbeat was never written).
+   *   4. Else → {@link deriveLivenessVerdict} over the recorded heartbeat and
+   *      a FRESH probe of the recorded pid's CURRENT start time.
+   *
+   * @param sessions - Corpus-wide derived sessions (`getActiveSessions`'s
+   *   result) — passed in rather than re-fetched, so a caller (`lore
+   *   territory` already computing the SAME set) never pays for a second
+   *   store round trip.
+   * @param currentMachine - THIS process's own machine identity
+   *   (caller-supplied — `os.hostname()`, mirrors `recordOwnHeartbeat`'s
+   *   identical convention).
+   * @returns One {@link SessionLivenessRecord} per input session, SAME order,
+   *   1:1 — no session is ever dropped (mirrors `deriveSessions`'s own
+   *   never-drop discipline).
+   */
+  async deriveSessionLiveness(
+    sessions: readonly ReadySession[],
+    currentMachine: string,
+  ): Promise<SessionLivenessRecord[]> {
+    const records: SessionLivenessRecord[] = [];
+    for (const session of sessions) {
+      if (session.session_id === undefined) {
+        records.push({ ...session, liveness: "unmeasured" });
+        continue;
+      }
+      const sameMachine = session.machine === undefined || session.machine === currentMachine;
+      if (!sameMachine) {
+        records.push({ ...session, liveness: "unmeasured" });
+        continue;
+      }
+      const recorded = await this.readHeartbeatPort(session.session_id);
+      if (recorded === undefined) {
+        records.push({ ...session, liveness: "unmeasured" });
+        continue;
+      }
+      const probed = await this.probeProcessStartTimePort(recorded.pid);
+      records.push({ ...session, liveness: deriveLivenessVerdict(recorded, probed, true) });
+    }
+    return records;
   }
 
   // ── Handoff Write (S2) ──────────────────────────────────────────────────
@@ -823,6 +935,103 @@ export class SessionService {
   }
 
   // ── Private Helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Corpus-wide derived sessions over EVERY task carrying a claim (SPEC-041,
+   * task-active-sessions-derives-only-over-active-plans-tasks-with Required
+   * #1) — the shared derivation both `bootstrap`'s `active_sessions` and
+   * `getActiveSessions` (AC-OWN-1, AC-OWN-5) call, over an already-fetched
+   * `allDocs` (no extra store round trip for `bootstrap`'s own call site).
+   *
+   * NOT scoped to `active_plans`' membership — the shipped bootstrap
+   * contract documents this field as a "corpus-global snapshot spanning
+   * every plan, every actor, and every concurrent session"
+   * (`BOOTSTRAP_SCOPE_DECLARATION`) — the pre-fix form intersected with
+   * `activePlanIds`, so this field read `[]` in ANY corpus with zero active
+   * plans (measured: 114 archived / 0 active here) AND never included an
+   * `--adhoc` task (SPEC-069 D2 parents these to the root PRD, never a plan,
+   * and adhoc is now the dominant task shape in this corpus) — a fresh
+   * session read that `[]` as "nobody is working" and removed a live agent's
+   * worktree. Scoping this field to active-plan membership was the bug, not
+   * a feature to preserve.
+   *
+   * `TaskWorkflowService.ready`'s plan-scoped `sessions[]` is DELIBERATELY
+   * LEFT UNCHANGED and is NOT the defect — it answers "who's on THIS plan",
+   * this method answers "who's working AT ALL, anywhere" — the two stay two
+   * independent call sites over the shared `deriveSessions` pure fn rather
+   * than being collapsed into one helper with a scope flag.
+   *
+   * Terminal-status tasks (archived/deprecated) are EXCLUDED — `lore done`'s
+   * `writeTaskStatus` only ever changes `status`/`updated_at`/`version`, it
+   * never clears `extra.claim`, so an archived task can still carry a claim
+   * that has not yet aged past `claimTtlMinutes`. Without this filter, the
+   * widening above would "resurrect" a just-completed task into
+   * `active_sessions` for the remainder of its stale claim's TTL window
+   * (STATE dimension, dispatch addendum). `release()` already deletes
+   * `extra.claim` outright, so a released task needs no explicit check here —
+   * it has no claim left to be picked up at all.
+   *
+   * reason: deliberately does NOT ALSO filter `isInvalidated` (retracted)
+   * tasks — that is a SEPARATE, already-filed defect in this SAME derivation
+   * (`knowledge-handoff-agent-main-orchestrator-71` NS3: a retracted task's
+   * claim is not excluded here). `ready()` already excludes retracted tasks
+   * via its own `isInvalidated` filter
+   * (task-a-task-cannot-be-retracted-supersedes-emits-a-repair AC3); this
+   * site does not, exactly as before this method was extracted (no new
+   * regression — it was never filtered here either).
+   *
+   * Staleness: Required #2's RECORDED decision (dispatch addendum — "do not
+   * silently pick one"). Chosen: candidate (a) — keep reporting a stale
+   * claim, flagged, rather than silently dropping it — the incident's own
+   * minimum viable fix. Weighed against (b) claim.at ALREADY refreshes on
+   * evidence writes (SPEC-069 D4/D5's `renewClaimForEvidence`) — but that
+   * leaves the ENTIRE pre-first-evidence working phase unrefreshed, exactly
+   * the incident's own window; and (c) an explicit `liveness: "unknown"`
+   * marker — rejected because (a) already subsumes it: a `stale: true` row
+   * already tells a reader "liveness unconfirmed" without inventing a second
+   * vocabulary (AC-OWN-5's `deriveSessionLiveness`, above, is the mechanism
+   * that eventually DOES supply a real liveness verdict — probed, never
+   * inferred from this same staleness flag). Lengthening `claim_ttl_minutes`
+   * was explicitly out of scope — it moves the false-death threshold without
+   * making staleness mean liveness, and delays genuine lease reclamation.
+   *
+   * Mechanically: `deriveSessions` is called with an EFFECTIVELY UNBOUNDED
+   * ttl so nothing is filtered out during grouping (fresh AND what would
+   * otherwise be "stale" group together uniformly, by the SAME pure function
+   * `ready()` uses, called here an EXTRA time rather than modified —
+   * `deriveSessions` itself is untouched, so `ready()`'s behavior stays
+   * byte-identical). Each returned group is then independently re-checked:
+   * `stale: true` iff that group's OWN freshest signal (`newest_at`, already
+   * the max `claim.at` across every member task) has itself aged past the
+   * REAL ttl — mirrors this same module's `deriveLastActivityAt`
+   * "over-reporting is the safe direction" precedent. `stale` is
+   * present-iff-true (never `false`), so a genuinely fresh session's shape
+   * stays BYTE-IDENTICAL to the pre-this-decision output.
+   *
+   * `stale: true` means "no fresher activity signal has been recorded for
+   * this claimant" — it does NOT mean dead (see `readySessionSchema`'s own
+   * `stale` field JSDoc). A consumer must treat it as "claimant exists,
+   * liveness unconfirmed" — the same non-solitude caveat this schema already
+   * states for an absent `session_id` — never as sole grounds for a
+   * destructive action against the claimant's worktree.
+   *
+   * @param allDocs - Every doc in the corpus (already fetched by the caller).
+   * @param nowIso - Current time, ISO 8601.
+   */
+  private computeActiveSessionsFrom(allDocs: DocRecord[], nowIso: string): ReadySession[] {
+    const claimBearingTasks = allDocs.filter(
+      (d) => d.type === "task" && d.status !== "archived" && d.status !== "deprecated",
+    );
+    const UNBOUNDED_TTL_MINUTES = Number.POSITIVE_INFINITY;
+    return deriveSessions(claimBearingTasks, nowIso, UNBOUNDED_TTL_MINUTES).map((session) => {
+      const groupIsStale = isClaimStale(
+        { by: session.by, at: session.newest_at },
+        nowIso,
+        this.deps.claimTtlMinutes,
+      );
+      return groupIsStale ? { ...session, stale: true } : session;
+    });
+  }
 
   /**
    * Computes `{ready, claimed, done}` for one plan's `tasks`, reusing
