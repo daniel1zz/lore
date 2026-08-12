@@ -233,7 +233,7 @@ const SyncConfigSchema = z
  * a pre-existing `.lore/config.yaml` with no `workflow.gates` key gating exactly as it
  * did before this field existed (no breaking change).
  */
-const GateCheckpointConfigSchema = z
+export const GateCheckpointConfigSchema = z
   .object({
     /** `false` disables this checkpoint entirely; absent or `true` leaves it enabled. */
     enabled: z.boolean().optional(),
@@ -292,6 +292,41 @@ const GateCheckpointConfigSchema = z
      * migration has landed enough domain docs to sync against.
      */
     prd_sync: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+    /**
+     * Corpus-write-level sub-predicate override (spec-corpus-resolution-carries-
+     * provenance-and-a-foreign-write §D4) — `false` disables JUST the foreign-
+     * corpus-write guard: a write reaching a corpus the caller's own working
+     * tree does not own (§M4 git-common-dir fallback from a linked worktree)
+     * with no declared claim-lease intent (`taskClaimSchema.worktree`, D5).
+     *
+     * ⛔ UNLIKE every sibling key above, this is NOT scoped to `task-claim` (or
+     * to any other of the four `GateCheckpoint` ids) — D4 states outright that
+     * the measured pollution came from `lore create knowledge`, which never
+     * touches `task-claim`. It is read under the deliberately synthetic
+     * `"corpus-write"` map key (not a real `GateCheckpoint` member; `@lore/core`
+     * does not import that type — see {@link resolveGateEnabled}'s own `checkpoint`
+     * param doc) chosen to match the guard's own refusal token literal,
+     * `gate:corpus-write:foreign-provenance` (pinned equal across CLI/MCP by
+     * AC-CP-5(a)). Still nested on `GateCheckpointConfigSchema` — reusing the
+     * SAME per-checkpoint-shaped schema, rather than a bespoke top-level field,
+     * is the "exact shape" D4 calls for.
+     *
+     * Absence of the whole config, the `workflow` section, the `gates` map, the
+     * `"corpus-write"` entry, or the nested `foreign_corpus_write` key ALL mean
+     * "enabled" (same default polarity as `anchor_overlap`/`actor_identity`/
+     * `ac_quantifiable`/`oracle_coverage`/`requires_uat` — the OPPOSITE of
+     * `prd_sync`'s default-OFF) — AC-CP-4(a): a bare `lore init` project is
+     * already covered with zero config edits. Only an EXPLICIT
+     * `foreign_corpus_write.enabled: false` disables it (AC-CP-4(b) control).
+     *
+     * The guard itself (the predicate that actually reads this resolver and
+     * refuses the write) is a SEPARATE task
+     * (`task-the-foreign-write-guard-intent-is-a-claim-lease-fact-and`,
+     * AC-CP-3) — this schema field plus {@link resolveForeignCorpusWriteGateEnabled}
+     * are the config half only (`task-foreign-corpus-write-joins-the-six-gate-
+     * sub-predicates-and`, AC-CP-4).
+     */
+    foreign_corpus_write: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   })
   .strict();
 
@@ -1362,6 +1397,41 @@ export function resolveRequiresUatGateEnabled(config: LoreConfig | undefined): b
  */
 export function resolvePrdSyncGateEnabled(config: LoreConfig | undefined): boolean {
   return config?.workflow?.gates?.["plan-close"]?.prd_sync?.enabled === true;
+}
+
+/**
+ * Resolve whether the foreign-corpus-write guard's `foreign_corpus_write`
+ * sub-predicate specifically is enabled, per `workflow.gates."corpus-write"
+ * .foreign_corpus_write.enabled` (spec-corpus-resolution-carries-provenance-
+ * and-a-foreign-write §D4). ⛔ Hardcoded to the synthetic `"corpus-write"` map
+ * key, DELIBERATELY NOT one of the four real `GateCheckpoint` ids (`task-claim`
+ * / `spec-create` / `spec-promote` / `plan-promote`) that every sibling
+ * `resolve*GateEnabled` function above keys on — D4 states outright that this
+ * predicate governs a corpus-**write** (e.g. `lore create knowledge`), which
+ * never touches any of those four checkpoints. The key matches the guard's own
+ * refusal token literal, `gate:corpus-write:foreign-provenance`.
+ *
+ * Same default polarity as {@link resolveAnchorOverlapGateEnabled} /
+ * {@link resolveActorIdentityGateEnabled} / {@link resolveAcQuantifiableGateEnabled}
+ * / {@link resolveOracleCoverageGateEnabled} / {@link resolveRequiresUatGateEnabled}
+ * (all default ENABLED) — the OPPOSITE of {@link resolvePrdSyncGateEnabled}'s
+ * default-OFF polarity immediately above. Absence of the whole config, the
+ * `workflow` section, the `gates` map, the `"corpus-write"` entry, or the
+ * nested `foreign_corpus_write` key ALL mean "enabled" — AC-CP-4(a): a project
+ * that ran nothing but `lore init` is already covered, with no config edit.
+ * Only an EXPLICIT `foreign_corpus_write.enabled: false` disables it
+ * (AC-CP-4(b) control, proving the knob is real in both directions).
+ *
+ * @param config - Parsed LoreConfig, or undefined when no config file was loaded
+ * @returns `false` iff `workflow.gates."corpus-write".foreign_corpus_write.enabled === false`; `true` otherwise
+ * @example
+ *   resolveForeignCorpusWriteGateEnabled(undefined) // => true
+ *   resolveForeignCorpusWriteGateEnabled({
+ *     project, workflow: { gates: { "corpus-write": { foreign_corpus_write: { enabled: false } } } },
+ *   }) // => false
+ */
+export function resolveForeignCorpusWriteGateEnabled(config: LoreConfig | undefined): boolean {
+  return config?.workflow?.gates?.["corpus-write"]?.foreign_corpus_write?.enabled !== false;
 }
 
 /**
