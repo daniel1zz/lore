@@ -104,6 +104,7 @@ import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import { isPlanMember } from "./plan-membership.js";
+import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
 // rule scopes "service" to a store-holding class composed in `app.ts`. These four are
 // the STORE-FREE pure read-surface projection helpers that module also exports, and they
@@ -1163,17 +1164,26 @@ export class CorpusService {
       }
     }
 
-    // Create-time code_anchors GRAMMAR validation for specs (SPEC-045 §Design
-    // Decisions D6a). reason: specExtraSchema only shape-checks code_anchors
-    // (bare array of strings) — the per-entry `path[#Symbol]` grammar lives in
-    // the shared pure `parseCodeAnchor` (@lore/core, code-anchors.ts), run
-    // per-entry on the FULL raw string (never batch-normalized — SPEC-045
-    // review S3). Mirrors the task file_anchors branch immediately above, but
-    // this is VALIDATION ONLY — unlike file_anchors, code_anchors entries are
-    // NOT rewritten/normalized here ("they just must PARSE", D6a) — a
+    // Create-time code_anchors GRAMMAR validation (SPEC-045 §Design Decisions
+    // D6a, widened doc-type-agnostic by spec-a-write-side-fact-with-no-read-
+    // side-address-counts-with-no §M2/AC-RR-9). reason: specExtraSchema/
+    // knowledgeExtraSchema only shape-check code_anchors (bare array of
+    // strings) — the per-entry `path[#Symbol]` grammar lives in the shared
+    // pure `parseCodeAnchor` (@lore/core, code-anchors.ts), run per-entry on
+    // the FULL raw string (never batch-normalized — SPEC-045 review S3).
+    // Mirrors the task file_anchors branch immediately above, but this is
+    // VALIDATION ONLY — unlike file_anchors, code_anchors entries are NOT
+    // rewritten/normalized here ("they just must PARSE", D6a) — a
     // grammar-valid raw string persists verbatim. Filesystem verification is
-    // `lore status --check-drift`'s job, never a write-time check.
-    if (data.type === "spec") {
+    // `lore status --check-drift`'s job, never a write-time check. Gated on
+    // `ANCHOR_SCANNED_DOC_TYPES` (`drift-check-service.ts`, currently
+    // spec+knowledge) rather than a literal `type === "spec"` — that literal
+    // was the MCP side door: `lore_create`/`lore_set` accept `extra` directly
+    // (no CLI-only gate to fall back on), so a knowledge doc's
+    // grammar-invalid entry rode through unchecked while `extractParsedCodeAnchors`
+    // (drift-check-service.ts) silently skipped it at scan time — a stored
+    // fact with zero drift coverage, never surfaced as a refusal.
+    if (ANCHOR_SCANNED_DOC_TYPES.includes(data.type)) {
       const rawCodeAnchors = data.extra?.["code_anchors"];
       if (rawCodeAnchors !== undefined) {
         if (!Array.isArray(rawCodeAnchors) || !rawCodeAnchors.every((a) => typeof a === "string")) {
@@ -2050,18 +2060,25 @@ export class CorpusService {
       }
     }
 
-    // code_anchors GRAMMAR re-validation when updating a spec's extra (SPEC-045
-    // §Design Decisions D6a). reason: specExtraSchema (just re-parsed above) only
-    // shape-checks code_anchors (bare array of strings) — the per-entry
-    // `path[#Symbol]` grammar is a SEPARATE check via the shared pure
-    // `parseCodeAnchor` (@lore/core), run here so `lore set` / HTTP PATCH / MCP
-    // `lore_set` can't smuggle a malformed anchor past the shape-only Zod gate
-    // (mirrors D6a's "no side doors" requirement, same shape as the ac_scope/
-    // spec_kind cross-cutting checks immediately above/below). Validation only —
-    // a grammar-valid incoming array persists verbatim, no rewrite ("they just
-    // must PARSE", D6a); the RMW verbs (DriftCheckService.addCodeAnchors/
-    // removeCodeAnchors) remain the sanctioned normalize-on-write path.
-    if (existing.type === "spec" && parsedPatch.data.extra !== undefined) {
+    // code_anchors GRAMMAR re-validation when updating a spec/knowledge doc's
+    // extra (SPEC-045 §Design Decisions D6a, widened doc-type-agnostic by
+    // spec-a-write-side-fact-with-no-read-side-address-counts-with-no §M2/
+    // AC-RR-9). reason: specExtraSchema/knowledgeExtraSchema (re-parsed above/
+    // below) only shape-check code_anchors (bare array of strings) — the
+    // per-entry `path[#Symbol]` grammar is a SEPARATE check via the shared
+    // pure `parseCodeAnchor` (@lore/core), run here so `lore set` / HTTP PATCH
+    // / MCP `lore_set` can't smuggle a malformed anchor past the shape-only
+    // Zod gate (mirrors D6a's "no side doors" requirement, same shape as the
+    // ac_scope/spec_kind cross-cutting checks immediately above/below).
+    // Validation only — a grammar-valid incoming array persists verbatim, no
+    // rewrite ("they just must PARSE", D6a); the RMW verbs
+    // (DriftCheckService.addCodeAnchors/removeCodeAnchors) remain the
+    // sanctioned normalize-on-write path. Gated on `ANCHOR_SCANNED_DOC_TYPES`
+    // rather than a literal `type === "spec"` — that literal was the MCP side
+    // door this AC closes: a knowledge doc's `extra.code_anchors` patched
+    // through `lore_set` rode past this check entirely, byte-identical extra
+    // never re-validated for grammar before persisting.
+    if (ANCHOR_SCANNED_DOC_TYPES.includes(existing.type) && parsedPatch.data.extra !== undefined) {
       const rawCodeAnchors = parsedPatch.data.extra["code_anchors"];
       if (rawCodeAnchors !== undefined) {
         if (!Array.isArray(rawCodeAnchors) || !rawCodeAnchors.every((a) => typeof a === "string")) {
