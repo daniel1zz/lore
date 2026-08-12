@@ -634,6 +634,10 @@ function buildAppFromSqlite(
   // service defaults to `{}` so unit constructions stay deterministic, so EVERY
   // shipped surface depends on this one line being here. Pinned by an end-to-end
   // oracle over the real `createApp` (tests/integration/claim-session-capture-app-wiring.bun.test.ts).
+  // reason: 8th/9th args wire task-widen-the-declared-ac-port-to-carry-criteria-so-the's
+  // generation-carrying siblings of the 4th/6th args — `resolveDeclaredAcCriteria`/
+  // `resolveDeclaredAcCriteriaForAdhocTask` return the full criterion (not just its id),
+  // which `resolveAcOracleGeneration` needs and a bare id set structurally cannot supply.
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -642,6 +646,8 @@ function buildAppFromSqlite(
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
     process.env,
+    corpusService.resolveDeclaredAcCriteria.bind(corpusService),
+    corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService),
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
@@ -973,6 +979,9 @@ function buildAppFromTurso(
   // reason: 7th arg wires the claim path's session capture — see
   // buildAppFromSqlite's identical comment (both composition roots must pass it,
   // or the Turso-backed surface silently records no session_id).
+  // reason: 8th/9th args — see buildAppFromSqlite's identical comment (both
+  // composition roots must wire the generation-carrying siblings, or the
+  // Turso-backed surface silently stamps no `ac_oracle_generation`).
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -981,6 +990,8 @@ function buildAppFromTurso(
     { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     corpusService.resolveDeclaredAcIdsForAdhocTask.bind(corpusService),
     process.env,
+    corpusService.resolveDeclaredAcCriteria.bind(corpusService),
+    corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService),
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff

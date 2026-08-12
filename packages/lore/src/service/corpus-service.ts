@@ -66,6 +66,7 @@ import type {
   VersionRecord,
   AuditEntry,
   ArchiveCandidateRule,
+  AcceptanceCriterion,
 } from "@lore/core";
 import {
   DOC_TYPE_ROLE_MAP,
@@ -3714,30 +3715,19 @@ export class CorpusService {
   // ── Declared AC Ids (SPEC-038 §4, §7 D4) ────────────────────────────────
 
   /**
-   * Resolve the set of acceptance-criterion ids declared on a plan's parent spec —
-   * the single cross-entity traversal locus for `ac_ref` validation, same family as
-   * `getPlanBundle` (plan → parent spec). CorpusService owns this walk because
-   * services never cross-import (service/CLAUDE.md "no cross-service calls");
-   * `TaskWorkflowService.addEvidence` consumes it via a narrow injected port
-   * (`resolveDeclaredAcIds.bind(corpusService)`, wired in `app.ts`) rather than
-   * gaining graph-walking responsibility itself (SPEC-038 §7 D4).
+   * Resolve the plan document a `resolveDeclaredAc*`-family lookup starts from — the
+   * `resolve` → `store.find` → type-check preamble shared verbatim by
+   * {@link resolveDeclaredAcIds} and {@link resolveDeclaredAcCriteria} (the id-set and
+   * full-criteria views of the SAME plan→parent-spec walk), so the two can never
+   * disagree about which plan a given id/slug names — only about how much of what
+   * they find they hand back.
    *
    * @param planIdOrSlug - Plan document ULID or slug (typically a task's `parent_id`)
-   * @returns `Set<string>` of declared `AC-*` ids when the plan is parented under a
-   *   spec that has a schema-valid `extra.acceptance_criteria` array; `null` when the
-   *   plan has no parent, the parent isn't a spec, or the parent spec has no
-   *   structured AC (absent or fails `specAcceptanceCriteriaSchema`) — `null` is a
-   *   fact ("nothing declared"), never a thrown error for this class of absence.
+   * @returns The resolved plan `DocRecord`
    * @throws DOC_NOT_FOUND when planIdOrSlug does not resolve at all; VALIDATION_ERROR
    *   when the resolved doc is not a plan
-   *
-   * @example
-   * const idsResult = await corpusService.resolveDeclaredAcIds("plan-my-feature");
-   * if (idsResult.ok && idsResult.value?.has("AC-ACODE-1")) { ... }
-   *
-   * Source: SPEC-038 §4, §7 D4
    */
-  async resolveDeclaredAcIds(planIdOrSlug: string): Promise<Result<Set<string> | null, LoreError>> {
+  private async _resolvePlanForAcLookup(planIdOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     const resolveResult = await this.resolve(planIdOrSlug);
     if (!resolveResult.ok) return resolveResult;
 
@@ -3756,7 +3746,71 @@ export class CorpusService {
       });
     }
 
-    return this._resolveDeclaredAcIdsForParent(plan.parent_id);
+    return ok(plan);
+  }
+
+  /**
+   * Resolve the set of acceptance-criterion ids declared on a plan's parent spec —
+   * the single cross-entity traversal locus for `ac_ref` validation, same family as
+   * `getPlanBundle` (plan → parent spec). CorpusService owns this walk because
+   * services never cross-import (service/CLAUDE.md "no cross-service calls");
+   * `TaskWorkflowService.addEvidence` consumes it via a narrow injected port
+   * (`resolveDeclaredAcIds.bind(corpusService)`, wired in `app.ts`) rather than
+   * gaining graph-walking responsibility itself (SPEC-038 §7 D4). A bare id set is
+   * all `addEvidence`'s existence check needs; a consumer that needs the full
+   * criterion object (e.g. its `oracle_generation`) reads {@link resolveDeclaredAcCriteria}
+   * instead — the two share one traversal ({@link _resolveDeclaredAcCriteriaForParent})
+   * and can never drift apart (task-widen-the-declared-ac-port-to-carry-criteria-so-the).
+   *
+   * @param planIdOrSlug - Plan document ULID or slug (typically a task's `parent_id`)
+   * @returns `Set<string>` of declared `AC-*` ids when the plan is parented under a
+   *   spec that has a schema-valid `extra.acceptance_criteria` array; `null` when the
+   *   plan has no parent, the parent isn't a spec, or the parent spec has no
+   *   structured AC (absent or fails `specAcceptanceCriteriaSchema`) — `null` is a
+   *   fact ("nothing declared"), never a thrown error for this class of absence.
+   * @throws DOC_NOT_FOUND when planIdOrSlug does not resolve at all; VALIDATION_ERROR
+   *   when the resolved doc is not a plan
+   *
+   * @example
+   * const idsResult = await corpusService.resolveDeclaredAcIds("plan-my-feature");
+   * if (idsResult.ok && idsResult.value?.has("AC-ACODE-1")) { ... }
+   *
+   * Source: SPEC-038 §4, §7 D4
+   */
+  async resolveDeclaredAcIds(planIdOrSlug: string): Promise<Result<Set<string> | null, LoreError>> {
+    const planResult = await this._resolvePlanForAcLookup(planIdOrSlug);
+    if (!planResult.ok) return planResult;
+    return this._resolveDeclaredAcIdsForParent(planResult.value.parent_id);
+  }
+
+  /**
+   * The FULL-criteria sibling of {@link resolveDeclaredAcIds} — same plan → parent-spec
+   * walk (via {@link _resolvePlanForAcLookup} / {@link _resolveDeclaredAcCriteriaForParent}),
+   * but hands back the criterion OBJECTS rather than a bare id set. Exists because a
+   * `Set<string>` cannot answer "what generation is that criterion in", which is exactly
+   * what `TaskWorkflowService.resolveAcOracleGeneration` needs — before this port existed,
+   * that method owned its own private traversal of the same edges (deleted by
+   * task-widen-the-declared-ac-port-to-carry-criteria-so-the) precisely because neither
+   * injected port could carry more than ids. Injected into `TaskWorkflowService` in
+   * `app.ts` the same way `resolveDeclaredAcIds` is; nothing else currently consumes it.
+   *
+   * @param planIdOrSlug - Plan document ULID or slug (typically a task's `parent_id`)
+   * @returns The declared criteria when the plan is parented under a spec with a
+   *   schema-valid `extra.acceptance_criteria` array; `null` when the plan has no
+   *   parent, the parent isn't a spec, or the parent spec has no structured AC — a
+   *   FACT, never a thrown error for this class of absence (same contract as
+   *   `resolveDeclaredAcIds`).
+   * @throws DOC_NOT_FOUND when planIdOrSlug does not resolve at all; VALIDATION_ERROR
+   *   when the resolved doc is not a plan
+   *
+   * Source: task-widen-the-declared-ac-port-to-carry-criteria-so-the
+   */
+  async resolveDeclaredAcCriteria(
+    planIdOrSlug: string,
+  ): Promise<Result<AcceptanceCriterion[] | null, LoreError>> {
+    const planResult = await this._resolvePlanForAcLookup(planIdOrSlug);
+    if (!planResult.ok) return planResult;
+    return this._resolveDeclaredAcCriteriaForParent(planResult.value.parent_id);
   }
 
   /**
@@ -3764,7 +3818,9 @@ export class CorpusService {
    * so `_createImpl`/`set`'s SPEC-040 §T2 D5 `extra.ac_scope` cross-entity validation can
    * reuse the identical parent-spec walk WITHOUT first resolving a plan that, at create
    * time, doesn't exist as a persisted doc yet (`resolveDeclaredAcIds` itself always takes
-   * an id/slug and re-fetches the plan row first — not usable mid-`_createImpl`).
+   * an id/slug and re-fetches the plan row first — not usable mid-`_createImpl`). A thin
+   * id-projecting wrapper over {@link _resolveDeclaredAcCriteriaForParent} — the criteria
+   * walk is the ONE traversal; this is a derived view, never a second copy of it.
    *
    * @param parentId - A plan's `parent_id` (already resolved by the caller)
    * @returns Same contract as `resolveDeclaredAcIds`: `Set<string>` when `parentId` points
@@ -3774,6 +3830,26 @@ export class CorpusService {
   private async _resolveDeclaredAcIdsForParent(
     parentId: DocId | null,
   ): Promise<Result<Set<string> | null, LoreError>> {
+    const criteriaResult = await this._resolveDeclaredAcCriteriaForParent(parentId);
+    if (!criteriaResult.ok) return criteriaResult;
+    const criteria = criteriaResult.value;
+    return ok(criteria === null ? null : new Set(criteria.map((c) => c.id)));
+  }
+
+  /**
+   * The "parent → declared AC criteria" walk itself — the ONE traversal
+   * {@link _resolveDeclaredAcIdsForParent} (id-set view) and {@link resolveDeclaredAcCriteria}
+   * (public, full-criteria view) both read through, so a future third view is a third
+   * thin wrapper here, never a third copy of this lookup.
+   *
+   * @param parentId - A plan's `parent_id` (already resolved by the caller)
+   * @returns The declared criteria when `parentId` points at a live spec with a
+   *   schema-valid `extra.acceptance_criteria` array; `null` (a fact, never an error)
+   *   for a null parentId, a non-spec parent, or a spec with no valid declared AC
+   */
+  private async _resolveDeclaredAcCriteriaForParent(
+    parentId: DocId | null,
+  ): Promise<Result<AcceptanceCriterion[] | null, LoreError>> {
     if (parentId === null) return ok(null);
     const parentResult = await this.store.find(parentId);
     if (!parentResult.ok) return parentResult;
@@ -3783,7 +3859,7 @@ export class CorpusService {
     const parsed = specAcceptanceCriteriaSchema.safeParse(parent.extra["acceptance_criteria"]);
     if (!parsed.success) return ok(null);
 
-    return ok(new Set(parsed.data.map((c) => c.id)));
+    return ok(parsed.data);
   }
 
   /**
@@ -3993,6 +4069,38 @@ export class CorpusService {
    * Source: task-an-ad-hoc-task-s-attested-evidence-cannot-carry-ac-ref
    */
   async resolveDeclaredAcIdsForAdhocTask(task: DocRecord): Promise<Result<Set<string>, LoreError>> {
+    const criteriaResult = await this.resolveDeclaredAcCriteriaForAdhocTask(task);
+    if (!criteriaResult.ok) return criteriaResult;
+    return ok(new Set(criteriaResult.value.map((c) => c.id)));
+  }
+
+  /**
+   * The FULL-criteria sibling of {@link resolveDeclaredAcIdsForAdhocTask} — same
+   * declared-`ac_scope` → governing-spec search, but hands back the criterion
+   * OBJECTS rather than a bare id set (same "why" as {@link resolveDeclaredAcCriteria}
+   * for the plan-owned case: a `Set<string>` cannot answer "what generation is that
+   * criterion in", which `TaskWorkflowService.resolveAcOracleGeneration` needs for
+   * an `--adhoc` task's evidence too). Injected into `TaskWorkflowService` in
+   * `app.ts` alongside `resolveDeclaredAcCriteria`; nothing else consumes it.
+   * {@link resolveDeclaredAcIdsForAdhocTask} is now a thin id-projecting wrapper
+   * over THIS method — one search, two views, never two traversals.
+   *
+   * @param task - The ALREADY-RESOLVED target ad-hoc task (caller resolves by
+   *   id/slug; this method does no id resolution of its own).
+   * @returns Every AC criterion declared on the ONE spec that fully covers the
+   *   task's declared ac_scope. UNLIKE `resolveDeclaredAcCriteria`, there is no
+   *   `null` ("nothing declared") case: an ad-hoc task's ac_scope IS the only
+   *   signal available to resolve a governing spec, so an absent/empty scope is
+   *   itself a hard refusal, never "nothing to check against".
+   * @throws VALIDATION_ERROR field `ac_scope` — ac_scope absent, empty, or
+   *   matches zero/multiple specs (same message family
+   *   `resolveDeclaredAcIdsForAdhocTask`/`VerifyRunnerService.verifyAdhocTask` raise).
+   *
+   * Source: task-widen-the-declared-ac-port-to-carry-criteria-so-the
+   */
+  async resolveDeclaredAcCriteriaForAdhocTask(
+    task: DocRecord,
+  ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const declared = extractDeclaredAcScope(task);
     if (declared === undefined) {
       return err({
@@ -4027,7 +4135,7 @@ export class CorpusService {
     );
     if (!resolveResult.ok) return resolveResult;
 
-    return ok(new Set(resolveResult.value.criteria.map((c) => c.id)));
+    return ok(resolveResult.value.criteria);
   }
 
   // ── Feeding Skill Discovery (IoC vertical-slice tech-spec §4.1/§11, P1 slice-2) ──
