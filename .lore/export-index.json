@@ -5832,6 +5832,18 @@
     "01KZTTKMZ88M35MNW8A9ZD1EGW": {
       "human_id": "TASK-705",
       "file_path": "docs/requirements/task/TASK-705-the-undetermined-provenance-value-has-no-policy-fa.md"
+    },
+    "01KZTXY36HB5NFTCCC5GHW3A3G": {
+      "human_id": "KN-443",
+      "file_path": "docs/requirements/knowledge/KN-443-handoff-agent-main-orchestrator.md"
+    },
+    "01KZTXVB3YC3Z88TE878RQN2F3": {
+      "human_id": "KN-444",
+      "file_path": "docs/requirements/knowledge/KN-444-eight-findings-from-resuming-the-corpus-provenance.md"
+    },
+    "01KZTXTCC0BZ0PHJJ8F2WNK8SM": {
+      "human_id": "TASK-706",
+      "file_path": "docs/requirements/task/TASK-706-the-clean-tree-floor-and-the-repo-s-own-test-selec.md"
     }
   }
 }
