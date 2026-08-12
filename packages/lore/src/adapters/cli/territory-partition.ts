@@ -75,13 +75,14 @@
  *     shape — a `GitPort` method would force EVERY `GitPort` implementer,
  *     including `SeatService`'s unrelated fake fixtures, to grow a method
  *     they do not need) and threaded through `commands/territory.ts` into
- *     this parameter. That wiring is NOT yet done as of this remediation —
- *     no current caller of `partitionTerritory` passes a real
- *     `localBranches` value — because `adapters/real-git-port.ts` was, at
- *     the time this parameter was added, under an active `lore claim` by a
- *     concurrent task on a different anchor; landing it here would have
- *     touched a file this task never declared as its own anchor. This
- *     function is ready to receive real refs the moment that wiring lands.
+ *     this parameter. That wiring landed at task-thread-real-local-branch-
+ *     enumeration-from-the-git-port (2026-08-13): `adapters/real-git-
+ *     port.ts::listLocalBranches` is the enumeration function, and
+ *     `adapters/cli/commands/territory.ts`'s `run()` is this parameter's
+ *     ONE production caller — it awaits `listLocalBranches(app.repoRoot)`
+ *     and passes the result through UNCHANGED (an `undefined` enumeration
+ *     failure stays `undefined`, never coerced to `[]`) as this function's
+ *     4th argument.
  *   - `unowned`: an entry with NO session recording it at all — a worktree
  *     GAP-B never taken through `lore claim`, OR (since source (c) above) a
  *     git-known branch nobody's claim names either. `unmeasured` is reserved

@@ -5,18 +5,23 @@
  * placement and its `node:child_process`-not-`Bun.spawn` invariant.
  *
  * Also the L0 ownership-binding git port (spec-multi-session-concurrency-
- * queryable-ownership-checkout §Scope L0, AC-OWN-2/AC-OWN-4) — four
+ * queryable-ownership-checkout §Scope L0, AC-OWN-2/AC-OWN-4) — five
  * standalone exported functions, deliberately NOT methods on `RealGitPort`
- * (they need no `repoRoot` state; every caller passes its own `cwd`) and
- * consumed by `TaskWorkflowService.claim`'s injectable `detectBranch`/
- * `installClaimTrailerBinding` ports (their real, default implementations —
- * see that service's constructor JSDoc for why a service importing a
- * concrete adapter function is a deliberate, narrow exception here: branch
- * detection / trailer binding are leaf IO capabilities with no OTHER service
- * dependency, so there is no `app.ts` composition-root wiring to route
- * through — mirrors `measureWorktreeCleanliness`'s own pre-existing ad hoc
- * `git` subprocess calls inside that same service file, just consolidated
- * behind an injectable, fake-able seam instead of inlined there again).
+ * (they need no `repoRoot` state; every caller passes its own `cwd`).
+ * `detectWorktreeBranch`/`bindClaimSessionForTrailer`/
+ * `unbindClaimSessionForTrailer` are consumed by `TaskWorkflowService.claim`'s
+ * injectable `detectBranch`/`installClaimTrailerBinding` ports (their real,
+ * default implementations — see that service's constructor JSDoc for why a
+ * service importing a concrete adapter function is a deliberate, narrow
+ * exception here: branch detection / trailer binding are leaf IO capabilities
+ * with no OTHER service dependency, so there is no `app.ts` composition-root
+ * wiring to route through — mirrors `measureWorktreeCleanliness`'s own
+ * pre-existing ad hoc `git` subprocess calls inside that same service file,
+ * just consolidated behind an injectable, fake-able seam instead of inlined
+ * there again). `countUnmergedCommitsSync`/`listLocalBranches` are instead
+ * consumed directly by `adapters/cli/territory-partition.ts::partitionTerritory`
+ * (via its own caller, `adapters/cli/commands/territory.ts`), which needs no
+ * injectable seam of its own — see each function's own doc below.
  *
  * Public surface:
  *   - RealGitPort implements GitPort — constructor(repoRoot) (the directory
@@ -33,6 +38,19 @@
  *     other `git` failure ALL degrade to `"unmeasured"` uniformly — never
  *     coerced to a placeholder branch name, and never to be confused with
  *     "unowned" (a DIFFERENT, higher-layer fact `lore territory` reports).
+ *   - listLocalBranches(cwd) — AC-OWN-1's discovery source (c)
+ *     (`adapters/cli/territory-partition.ts`'s own §Invariants): every LOCAL
+ *     branch name in the repo `cwd` belongs to (`git for-each-ref
+ *     --format=%(refname:short) refs/heads/`), independent of what `cwd`'s
+ *     HEAD currently points to — a DETACHED HEAD does not shrink this list,
+ *     unlike {@link detectWorktreeBranch}'s own "unmeasured" answer for that
+ *     same checkout state. `undefined` when enumeration could not be
+ *     performed at all (never coerced to `[]`, mirroring
+ *     `BranchMeasurement`'s discipline); `[]` is reserved for a genuinely
+ *     branch-less repo, a MEASURED fact. The ONE producer for
+ *     `adapters/cli/territory-partition.ts::partitionTerritory`'s optional
+ *     4th `localBranches` parameter, threaded through by its ONE caller,
+ *     `adapters/cli/commands/territory.ts`.
  *   - countUnmergedCommitsSync(cwd, branch, into) — AC-REPLAY-1: the
  *     SYNCHRONOUS counterpart to `RealGitPort.countUnmergedCommits`, a
  *     standalone leaf function for the ONE consumer
@@ -272,6 +290,54 @@ export async function detectWorktreeBranch(cwd: string): Promise<BranchMeasureme
     return { status: "unmeasured" };
   }
   return { status: "measured", branch };
+}
+
+/**
+ * Enumerates every LOCAL branch name in the repo `cwd` belongs to, via `git
+ * for-each-ref --format=%(refname:short) refs/heads/` — AC-OWN-1's discovery
+ * source (c) (`adapters/cli/territory-partition.ts`'s own §Invariants): a
+ * branch that is NEITHER a worktree's current branch NOR named by any
+ * session's claim was, before this function existed, invisible to
+ * `partitionTerritory` entirely and silently dropped.
+ *
+ * Deliberately independent of {@link detectWorktreeBranch}: `refs/heads/`
+ * lists every local branch regardless of what (if anything) `cwd`'s HEAD
+ * currently points to, so a DETACHED HEAD — which makes
+ * {@link detectWorktreeBranch} report `"unmeasured"` — does NOT shrink this
+ * function's result at all; it answers "what branches exist", never "what
+ * is currently checked out".
+ *
+ * NEVER throws — `runGit` itself never rejects (module @invariant). Every
+ * failure path (`cwd` outside any git work tree, a broken git-directory
+ * pointer, `git` absent from `PATH`, any other `for-each-ref` fault)
+ * degrades uniformly to `undefined`, mirroring {@link BranchMeasurement}'s
+ * "not-measured ≠ known-absent" discipline: a repo that genuinely has ZERO
+ * local branches (e.g. freshly `git init`'d, no commit yet — `refs/heads/`
+ * has no members) is a MEASURED empty list (`[]`), a different fact from
+ * enumeration never having succeeded at all (`undefined`). The caller
+ * (`adapters/cli/commands/territory.ts`) MUST preserve this distinction —
+ * collapsing a failed enumeration to `[]` before it reaches
+ * `partitionTerritory`'s `localBranches` parameter would silently
+ * reintroduce the exact defect this function exists to close.
+ *
+ * @param cwd - Any worktree path of the target repo — local branches are
+ *   visible repo-wide from every worktree sharing one `.git` (mirrors
+ *   {@link countUnmergedCommitsSync}'s identical "any known worktree" note).
+ * @returns Every local branch's short name (e.g. `"feat/x"`, never
+ *   `"refs/heads/feat/x"`), in git's own listing order; `[]` for a
+ *   genuinely branch-less repo; `undefined` when enumeration could not be
+ *   performed at all.
+ * @example
+ * await listLocalBranches("/repo"); // => ["main", "feat/x"]
+ * @example
+ * await listLocalBranches("/tmp/not-a-repo"); // => undefined
+ */
+export async function listLocalBranches(cwd: string): Promise<readonly string[] | undefined> {
+  const result = await runGit(cwd, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"]);
+  if (result.exitCode !== 0) return undefined;
+  const trimmed = result.stdout.trim();
+  if (trimmed.length === 0) return [];
+  return trimmed.split("\n");
 }
 
 /**

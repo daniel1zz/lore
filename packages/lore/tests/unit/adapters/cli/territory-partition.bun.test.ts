@@ -52,6 +52,27 @@
  * sum-equals-total oracle above vacuous: it could never disagree with a bug
  * shared by both the check and the code under test).
  *
+ * A THIRD pair of describe blocks below covers the PRODUCER side of
+ * `localBranches` (task-thread-real-local-branch-enumeration-from-the-git-
+ * port, 2026-08-13) — the "local branch discovery" block above only proved
+ * `partitionTerritory` correctly CONSUMES an injected branch list; until
+ * this task, nothing supplied one, so every real `lore territory` run still
+ * passed `undefined` and the gap this parameter exists to close reproduced
+ * one layer down. Two blocks: `real-git-port.ts::listLocalBranches` (the
+ * enumeration function itself, real `mkdtemp` git fixtures, six dimensions:
+ * HAPPY — a slash-named branch enumerates correctly; NEGATIVE — a `cwd`
+ * outside any git repository degrades to `undefined`; BOUNDARY — a
+ * zero-commit repo is a MEASURED empty list, distinguishable from
+ * `undefined`; ERROR — `for-each-ref` itself failing via a broken git-
+ * directory pointer, a DIFFERENT fixture from "no repo at all", also
+ * degrades to `undefined`; STATE — a detached-HEAD checkout does not shrink
+ * the enumerated list, unlike `detectWorktreeBranch`'s own answer for that
+ * same state; REGRESSION — see the second block), and its ONE production
+ * caller, `commands/territory.ts`'s `run()` (REGRESSION: driven end-to-end
+ * through the REAL CLI command — not a hand-rolled call to the pure
+ * functions — so a future revert of the WIRING, not just the enumeration
+ * function, goes red).
+ *
  * A SECOND describe block below (AC-REPLAY-1) covers `unmerged_commits`
  * with REAL `mkdtemp` git fixtures — the tests above use fake string paths
  * because they exercise classification only, but measuring a commit count
@@ -65,12 +86,14 @@
  * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-1, AC-REPLAY-1
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReadySession } from "@lore/core";
+import { createApp } from "../../../../src/app.js";
+import { listLocalBranches } from "../../../../src/adapters/real-git-port.js";
 import {
   partitionTerritory,
   type TerritoryEntry,
@@ -450,6 +473,195 @@ describe("partitionTerritory — local branch discovery (AC-OWN-1 remediation)",
     // D1) — this body's real `git` fixture construction spawns >= SPAWN_THRESHOLD
     // times (initRepo + 2 `git branch` + 1 `git for-each-ref`), mirroring the
     // AC-REPLAY-1 cases below in this same file.
+  }, 15000);
+});
+
+// ─── real-git-port.ts::listLocalBranches — the PRODUCER side of AC-OWN-1's
+// localBranches parameter (task-thread-real-local-branch-enumeration-from-
+// the-git-port, 2026-08-13) ─────────────────────────────────────────────────
+//
+// The block above proved `partitionTerritory` correctly CONSUMES an
+// injected branch list. It never proved anything SUPPLIES one — before this
+// task, `territory-partition.ts`'s own module header recorded that no
+// caller passed a real value, so every real `lore territory --json`
+// invocation still passed `undefined` and the exact defect `localBranches`
+// exists to close reproduced one layer down. These tests cover the
+// standalone leaf function beside `detectWorktreeBranch` (never a `GitPort`
+// interface method — same reason: `SeatService`'s fake fixtures need no new
+// method) that performs the actual `git for-each-ref` shell-out.
+//
+// Six-dimension coverage:
+//   HAPPY:      a branch name containing a slash (`feat/x`) enumerates
+//               correctly, alongside an ordinary name
+//   NEGATIVE:   a `cwd` outside any git repository degrades to `undefined`
+//               — never `[]`, which would assert a MEASURED zero
+//   BOUNDARY:   a freshly-`git init`'d repo with ZERO commits (so
+//               `refs/heads/` has no members at all yet) is a legitimately
+//               MEASURED empty list — `[]`, distinguishable from `undefined`
+//   ERROR:      `for-each-ref` itself failing (a `.git` FILE pointing at a
+//               nonexistent gitdir — a DIFFERENT fixture from "no repo at
+//               all") also degrades to `undefined`, uniformly with every
+//               other failure mode (module @invariant)
+//   STATE:      a detached-HEAD checkout does not shrink the enumerated
+//               list at all — every local branch still lists, unlike
+//               `detectWorktreeBranch`'s OWN "unmeasured" answer for the
+//               SAME checkout state (a deliberate, documented difference:
+//               this function answers "what branches exist", never "what
+//               is currently checked out")
+//   REGRESSION: see the SECOND describe block below — the live call site.
+describe("real-git-port.ts::listLocalBranches — the producer side of AC-OWN-1's localBranches parameter", () => {
+  it("HAPPY: enumerates every local branch, including one whose name contains a slash", async () => {
+    const repoRoot = mkdtempReal("lb-happy-");
+    initRepo(repoRoot);
+    git(repoRoot, ["branch", "feat/x"]);
+
+    const branches = await listLocalBranches(repoRoot);
+
+    expect(branches).toBeDefined();
+    expect(new Set(branches)).toEqual(new Set(["main", "feat/x"]));
+  });
+
+  it("NEGATIVE: a cwd outside any git repository degrades to undefined, never an empty array", async () => {
+    const notARepo = mkdtempReal("lb-negative-notarepo-");
+    // deliberately never `git init`'d.
+
+    const branches = await listLocalBranches(notARepo);
+
+    expect(branches).toBeUndefined();
+  });
+
+  it("BOUNDARY: a freshly-initialized repo with zero commits is a MEASURED empty list ([]), distinguishable from undefined", async () => {
+    const emptyRepo = mkdtempReal("lb-boundary-empty-");
+    git(emptyRepo, ["init", "-q", "-b", "main"]);
+    // deliberately no commit — refs/heads/ has no members yet, but the
+    // git call itself still succeeds (exit 0), which is the whole point:
+    // this is a MEASURED fact, never the same silence as `undefined`.
+
+    const branches = await listLocalBranches(emptyRepo);
+
+    expect(branches).not.toBeUndefined();
+    expect(branches).toEqual([]);
+  });
+
+  it("ERROR: for-each-ref itself failing (a broken .git gitdir pointer, not merely 'no repo') degrades to undefined uniformly", async () => {
+    const brokenRepo = mkdtempReal("lb-error-broken-gitdir-");
+    // reason: a DIFFERENT fixture from the NEGATIVE case above — this
+    // directory LOOKS like a linked worktree (a `.git` FILE, not a bare
+    // absence of one) whose gitdir pointer resolves nowhere, so `git`
+    // itself fails inside `for-each-ref`'s own repository-discovery step
+    // rather than never finding a `.git` marker at all. Empirically
+    // verified (2026-08-13): exits 128 with "fatal: not a git repository:
+    // <target>", a DIFFERENT message from the NEGATIVE case's "(or any of
+    // the parent directories)" — genuinely a separate failure path,
+    // asserted here to degrade to the SAME `undefined` outcome.
+    writeFileSync(join(brokenRepo, ".git"), "gitdir: /definitely/does/not/exist/lore-lb-test\n");
+
+    const branches = await listLocalBranches(brokenRepo);
+
+    expect(branches).toBeUndefined();
+  });
+
+  it("STATE: a detached-HEAD checkout still enumerates every local branch — unaffected by current checkout state", async () => {
+    const repoRoot = mkdtempReal("lb-state-detached-");
+    initRepo(repoRoot);
+    git(repoRoot, ["branch", "side-branch"]);
+    const headSha = git(repoRoot, ["rev-parse", "HEAD"]);
+    git(repoRoot, ["checkout", "-q", headSha]);
+
+    // Confirm the checkout genuinely IS detached (mirrors
+    // `detectWorktreeBranch`'s own "unmeasured" precondition) — `git
+    // symbolic-ref -q HEAD` exits nonzero only when HEAD is detached.
+    let symbolicRefThrew = false;
+    try {
+      git(repoRoot, ["symbolic-ref", "-q", "HEAD"]);
+    } catch {
+      symbolicRefThrew = true;
+    }
+    expect(symbolicRefThrew).toBe(true);
+
+    const branches = await listLocalBranches(repoRoot);
+
+    // The point under test: detachment does NOT shrink or empty this list —
+    // both "main" and "side-branch" still enumerate, in direct contrast to
+    // `detectWorktreeBranch`'s own "unmeasured" answer for this same repo.
+    expect(new Set(branches)).toEqual(new Set(["main", "side-branch"]));
+    // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+    // D1) — this body's real `git` fixture construction spawns >= SPAWN_THRESHOLD
+    // times (branch + rev-parse + checkout + symbolic-ref), mirroring the
+    // AC-REPLAY-1 cases elsewhere in this same file.
+  }, 15000);
+});
+
+// ─── commands/territory.ts's production run() — the live call site
+// (task-thread-real-local-branch-enumeration-from-the-git-port) ───────────
+//
+// The block above proves the enumeration FUNCTION works. This block proves
+// the one thing the task brief calls out by name as the actual gap: that
+// `lore territory`'s production command THREADS its result through, rather
+// than continuing to pass `undefined` unconditionally. A unit test on
+// `listLocalBranches` alone, with `commands/territory.ts` left unwired,
+// would reproduce this exact defect one layer down — the failure mode this
+// describe block exists to catch.
+describe("commands/territory.ts's production run() — the live call site (AC-OWN-1 remediation)", () => {
+  it("REGRESSION: threads a genuinely non-undefined localBranches value into partitionTerritory, surfacing an unclaimed local branch that used to be silently dropped", async () => {
+    const repoRoot = mkdtempReal("tp-live-callsite-");
+    initRepo(repoRoot);
+    git(repoRoot, ["branch", "nobody-claims-this-live"]);
+
+    const loreDir = join(repoRoot, ".lore");
+    mkdirSync(loreDir, { recursive: true });
+    // reason: constructs the throwaway corpus file only — `createApp`
+    // derives `repoRoot` itself from `dirname(dirname(dbPath))` (never
+    // `process.cwd()`), so no explicit override is needed or accepted here
+    // (its public overloads take only `dbPath`/`config`). The command under
+    // test performs its OWN `loadLoreApp()` call below, which re-opens this
+    // SAME db (mirrors `loader-foreign-write-surface.bun.test.ts`'s
+    // established fixture pattern).
+    const bootstrapApp = createApp(join(loreDir, "lore.db"));
+    bootstrapApp.close();
+
+    const originalCwd = process.cwd();
+    process.chdir(repoRoot);
+    // reason: `spy.mock.calls` does NOT reliably populate under this bun
+    // version (empirically verified, 2026-08-13) — the established capture
+    // pattern in this codebase (`cli-evidence-result-rendering.bun.test.ts::
+    // captureConsoleLog`) instead pushes into its OWN closure array from
+    // inside `mockImplementation` itself, which does work. Mirrored here.
+    const printedLines: string[] = [];
+    const logSpy = spyOn(console, "log").mockImplementation((...logArgs: unknown[]) => {
+      printedLines.push(String(logArgs[0]));
+    });
+    try {
+      const mod = await import("../../../../src/adapters/cli/commands/territory.js");
+      const territoryCommand = (
+        mod as { default?: { run?: (ctx: { args: Record<string, unknown> }) => Promise<void> } }
+      ).default;
+      if (!territoryCommand?.run) throw new Error("territory command not exported");
+      await territoryCommand.run({ args: { json: true } });
+    } finally {
+      process.chdir(originalCwd);
+      logSpy.mockRestore();
+    }
+
+    const printedLine = printedLines.find((line) => line.includes("nobody-claims-this-live"));
+    // reason: the historical defect (nothing supplies `localBranches` at the
+    // live call site) means this line — and this entry — would be ENTIRELY
+    // ABSENT, not merely miscategorized. Asserting presence, never just a
+    // bucket shape, is what this AC's own header warns a shape-only test
+    // would miss.
+    expect(printedLine).toBeDefined();
+
+    const parsed = JSON.parse(printedLine as string) as { ok: boolean; data: TerritoryPartition };
+    expect(parsed.ok).toBe(true);
+    const allEntries: TerritoryEntry[] = [
+      ...parsed.data.mine,
+      ...parsed.data.foreign,
+      ...parsed.data.unowned,
+      ...parsed.data.unmeasured,
+    ];
+    const entry = allEntries.find((e) => e.kind === "branch" && e.branch === "nobody-claims-this-live");
+    expect(entry).toBeDefined();
+    expect(entry?.bucket).toBe("unowned");
   }, 15000);
 });
 
