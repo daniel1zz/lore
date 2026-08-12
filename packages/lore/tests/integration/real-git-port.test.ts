@@ -22,6 +22,19 @@
  *                worktreeAdd for an already-existing path fails loud
  *   REGRESSION:  worktreeList reflects a removal (removed entries do not linger)
  *
+ * `countUnmergedCommits` (AC-REPLAY-1, spec-multi-session-concurrency-
+ * queryable-ownership-checkout §Scope L0) gets its OWN six-dimension block
+ * below, added alongside the pre-existing coverage above:
+ *   HAPPY:       a branch several commits ahead of `main` counts exactly
+ *   BOUNDARY:    a branch fully merged into `main` counts exactly `0` — a
+ *                MEASURED zero, never confused with "uncountable"
+ *   NEGATIVE:    a nonexistent branch name `err`s, never `ok(0)`
+ *   ERROR:       a nonexistent base (`into`) ref `err`s, never `ok(0)`
+ *   STATE:       two sibling branches report DIFFERENT, individually-correct
+ *                counts — not a constant
+ *   REGRESSION:  a `repoRoot` outside any git work tree `err`s rather than
+ *                throwing
+ *
  * @spec_ref AC-S-6
  */
 
@@ -204,6 +217,99 @@ describe("RealGitPort — worktreeAdd on an already-existing path (ERROR)", () =
     writeFileSync(join(worktreePath, "occupied.txt"), "already occupied\n");
 
     const result = await port.worktreeAdd(worktreePath, "plan/collides");
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("RealGitPort — countUnmergedCommits (AC-REPLAY-1)", () => {
+  it("HAPPY: a branch several commits ahead of main counts exactly", async () => {
+    const repoRoot = mkScratchDir("rgp-repo-count-happy-");
+    initGitRepo(repoRoot);
+    git(repoRoot, ["branch", "plan/three-ahead"]);
+    git(repoRoot, ["checkout", "-q", "plan/three-ahead"]);
+    for (let i = 0; i < 3; i += 1) {
+      writeFileSync(join(repoRoot, `count-${i}.txt`), `commit ${i}\n`);
+      git(repoRoot, ["add", "."]);
+      git(repoRoot, ["commit", "-q", "-m", `count commit ${i}`]);
+    }
+    git(repoRoot, ["checkout", "-q", "main"]);
+
+    const port = new RealGitPort(repoRoot);
+    const result = await port.countUnmergedCommits("plan/three-ahead", "main");
+    expect(result).toEqual({ ok: true, value: 3 });
+  });
+
+  it("BOUNDARY: a branch fully merged into main counts exactly 0 — a MEASURED zero, never confused with uncountable", async () => {
+    const repoRoot = mkScratchDir("rgp-repo-count-boundary-");
+    initGitRepo(repoRoot);
+    git(repoRoot, ["branch", "plan/soon-merged"]);
+    git(repoRoot, ["checkout", "-q", "plan/soon-merged"]);
+    writeFileSync(join(repoRoot, "merged-work.txt"), "will be merged\n");
+    git(repoRoot, ["add", "."]);
+    git(repoRoot, ["commit", "-q", "-m", "work to merge"]);
+    git(repoRoot, ["checkout", "-q", "main"]);
+    git(repoRoot, ["merge", "-q", "--no-ff", "plan/soon-merged", "-m", "merge plan/soon-merged"]);
+
+    const port = new RealGitPort(repoRoot);
+    const result = await port.countUnmergedCommits("plan/soon-merged", "main");
+    expect(result).toEqual({ ok: true, value: 0 });
+  });
+
+  it("NEGATIVE: a nonexistent branch name errs, never ok(0)", async () => {
+    const repoRoot = mkScratchDir("rgp-repo-count-negative-");
+    initGitRepo(repoRoot);
+    const port = new RealGitPort(repoRoot);
+
+    const result = await port.countUnmergedCommits("plan/does-not-exist", "main");
+    expect(result.ok).toBe(false);
+  });
+
+  it("ERROR: a nonexistent base (into) ref errs, never ok(0)", async () => {
+    const repoRoot = mkScratchDir("rgp-repo-count-error-");
+    initGitRepo(repoRoot);
+    git(repoRoot, ["branch", "plan/real-branch"]);
+    const port = new RealGitPort(repoRoot);
+
+    const result = await port.countUnmergedCommits("plan/real-branch", "no-such-base-ref");
+    expect(result.ok).toBe(false);
+  });
+
+  it("STATE: two sibling branches report different, individually-correct counts — not a constant", async () => {
+    const repoRoot = mkScratchDir("rgp-repo-count-state-");
+    initGitRepo(repoRoot);
+
+    git(repoRoot, ["branch", "plan/two-ahead"]);
+    git(repoRoot, ["checkout", "-q", "plan/two-ahead"]);
+    for (let i = 0; i < 2; i += 1) {
+      writeFileSync(join(repoRoot, `two-${i}.txt`), `two ${i}\n`);
+      git(repoRoot, ["add", "."]);
+      git(repoRoot, ["commit", "-q", "-m", `two-ahead commit ${i}`]);
+    }
+    git(repoRoot, ["checkout", "-q", "main"]);
+
+    git(repoRoot, ["branch", "plan/five-ahead"]);
+    git(repoRoot, ["checkout", "-q", "plan/five-ahead"]);
+    for (let i = 0; i < 5; i += 1) {
+      writeFileSync(join(repoRoot, `five-${i}.txt`), `five ${i}\n`);
+      git(repoRoot, ["add", "."]);
+      git(repoRoot, ["commit", "-q", "-m", `five-ahead commit ${i}`]);
+    }
+    git(repoRoot, ["checkout", "-q", "main"]);
+
+    const port = new RealGitPort(repoRoot);
+    const twoResult = await port.countUnmergedCommits("plan/two-ahead", "main");
+    const fiveResult = await port.countUnmergedCommits("plan/five-ahead", "main");
+    expect(twoResult).toEqual({ ok: true, value: 2 });
+    expect(fiveResult).toEqual({ ok: true, value: 5 });
+    expect(twoResult).not.toEqual(fiveResult);
+  });
+
+  it("REGRESSION: a repoRoot outside any git work tree errs rather than throwing", async () => {
+    const notARepo = mkScratchDir("rgp-repo-count-regression-");
+    // deliberately never `git init`'d.
+    const port = new RealGitPort(notARepo);
+
+    const result = await port.countUnmergedCommits("main", "main");
     expect(result.ok).toBe(false);
   });
 });

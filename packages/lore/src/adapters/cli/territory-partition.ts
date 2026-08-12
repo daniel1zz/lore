@@ -18,6 +18,20 @@
  *   - partitionTerritory(worktrees, sessions, currentSessionId)
  *   - formatTerritoryHuman(partition)
  *
+ * ⛔ No longer side-effect-free (AC-REPLAY-1, spec-multi-session-concurrency-
+ * queryable-ownership-checkout §Scope L0): every entry that carries a
+ * `branch` is measured for `unmerged_commits` via a SYNCHRONOUS git
+ * shell-out (`real-git-port.ts::countUnmergedCommitsSync`) — `bun:sqlite`
+ * -free, so this module stays exactly as unit-testable as before (the
+ * original reason for this file's split from `commands/territory.ts`); it
+ * is `bun:sqlite`-freedom this split protects, never IO-freedom, and the
+ * 2026-08-11 diagnosis showed a boolean-only git port was the actual gap.
+ * `partitionTerritory` MUST stay callable without `await` (both its
+ * callers assign its return value directly) — this is WHY the sync leaf
+ * function exists at all, rather than the async `GitPort.
+ * countUnmergedCommits` every OTHER git-backed capability in this codebase
+ * uses.
+ *
  * Invariants:
  *   - Classification routes through `gate-predicates.ts::compareClaimSessions`
  *     — the SAME three-valued session comparator the anchor-overlap mutex
@@ -51,6 +65,7 @@
 
 import type { ReadySession } from "@lore/core";
 import { compareClaimSessions } from "../../service/gate-predicates.js";
+import { countUnmergedCommitsSync } from "../real-git-port.js";
 
 /** The four disjoint buckets `partitionTerritory` sorts every discovered entry into. */
 export type TerritoryBucket = "mine" | "foreign" | "unowned" | "unmeasured";
@@ -76,6 +91,18 @@ export interface TerritoryEntry {
   readonly bucket: TerritoryBucket;
   /** Present iff `bucket === "foreign"`. */
   readonly holder?: TerritoryHolder;
+  /**
+   * Commits reachable from `branch` but not from the fixed base branch
+   * ({@link TERRITORY_BASE_BRANCH}) — AC-REPLAY-1's answer to "does this
+   * branch carry unmerged work, and how much" (`isMerged` alone can only
+   * say "some or none"). Present ONLY when an actual git measurement
+   * succeeded; ABSENT — NEVER `0` — when `branch` is absent, no local
+   * worktree path was available to probe from, or the git call itself
+   * failed (nonexistent branch, nonexistent base ref, a probe path outside
+   * any git work tree). Collapsing "not measured" into `0` would recreate
+   * the exact 2026-08-11 defect this field exists to close.
+   */
+  readonly unmerged_commits?: number;
 }
 
 /** The full corpus-wide partition `lore territory --json` prints. */
@@ -126,6 +153,39 @@ function classify(
 }
 
 /**
+ * The fixed base branch every `unmerged_commits` count is measured against
+ * — mirrors `seat-service.ts::SEAT_BASE_BRANCH`'s SAME "main is the
+ * integration branch" assumption. Kept as this module's OWN constant
+ * rather than importing that one: `SeatService`'s is about "safe to
+ * delete", this one is about "surface a number" — today they happen to
+ * agree, but a service importing a CLI-adapter constant (or vice versa)
+ * would be the wrong dependency direction regardless.
+ */
+const TERRITORY_BASE_BRANCH = "main";
+
+/**
+ * Best-effort per-branch unmerged-commit count (AC-REPLAY-1). Tries each
+ * candidate cwd in order via {@link countUnmergedCommitsSync} and returns
+ * the FIRST successful measurement — `undefined` (never `0`) when `branch`
+ * is absent, every candidate is `undefined`, or every git call failed
+ * (nonexistent branch/base ref, a candidate outside any git work tree).
+ * Multiple candidates matter for a `kind: "worktree"` entry whose OWN
+ * `path` may no longer be a real worktree (this module's own "a worktree
+ * whose path no longer exists" case) — falling back to any OTHER currently
+ * known worktree still measures the branch correctly, since git branches
+ * are visible repo-wide from every worktree sharing one `.git`.
+ */
+function measureUnmergedCommits(branch: string | undefined, candidateCwds: readonly (string | undefined)[]): number | undefined {
+  if (branch === undefined) return undefined;
+  for (const cwd of candidateCwds) {
+    if (cwd === undefined) continue;
+    const result = countUnmergedCommitsSync(cwd, branch, TERRITORY_BASE_BRANCH);
+    if (result.ok) return result.value;
+  }
+  return undefined;
+}
+
+/**
  * @param worktrees - Every CURRENT `git worktree list` entry (real: `RealGitPort.worktreeList()`).
  * @param sessions - Every corpus-wide derived session (`SessionService.getActiveSessions()`,
  *   the SAME derivation `lore bootstrap`'s `active_sessions` uses).
@@ -163,16 +223,30 @@ export function partitionTerritory(
     }
   }
 
+  // reason: AC-REPLAY-1's probe cwd — ANY currently-known real worktree path
+  // (git branches are visible repo-wide from every worktree sharing one
+  // `.git`, so this need not belong to the entry being measured). Absent
+  // only when `worktrees` itself is empty (git reported no worktrees at
+  // all) — every count then degrades to `undefined`, never `0`.
+  const anyKnownWorktreePath: string | undefined = worktrees[0]?.path;
+
   for (const path of worktreePaths) {
     const branch = branchByPath.get(path) ?? null;
     const relevant = sessions.filter((s) => s.worktree === path);
     const { bucket, holder } = classify(relevant, currentSessionId);
+    const branchName = branch !== null ? branch : undefined;
+    // reason: prefer this entry's OWN path (most precise); fall back to any
+    // other known worktree when `path` itself is stale (this module's own
+    // "a worktree whose path no longer exists" failure mode) — the branch
+    // name is still measurable from elsewhere in the same repo.
+    const unmergedCommits = measureUnmergedCommits(branchName, [path, anyKnownWorktreePath]);
     const entry: TerritoryEntry = {
       kind: "worktree",
       path,
       ...(branch !== null ? { branch } : {}),
       bucket,
       ...(holder !== undefined ? { holder } : {}),
+      ...(unmergedCommits !== undefined ? { unmerged_commits: unmergedCommits } : {}),
     };
     partition[bucket].push(entry);
   }
@@ -187,11 +261,15 @@ export function partitionTerritory(
   for (const branch of orphanBranches) {
     const relevant = sessions.filter((s) => s.branches.includes(branch));
     const { bucket, holder } = classify(relevant, currentSessionId);
+    // reason: an orphan branch has no worktree of its own — the ONLY
+    // candidate cwd is a borrowed one (see `anyKnownWorktreePath` above).
+    const unmergedCommits = measureUnmergedCommits(branch, [anyKnownWorktreePath]);
     partition[bucket].push({
       kind: "branch",
       branch,
       bucket,
       ...(holder !== undefined ? { holder } : {}),
+      ...(unmergedCommits !== undefined ? { unmerged_commits: unmergedCommits } : {}),
     });
   }
 
@@ -216,7 +294,11 @@ export function formatTerritoryHuman(partition: TerritoryPartition): string {
           ? ` — held by ${entry.holder.by} (session ${entry.holder.session_id}` +
             `${entry.holder.worktree !== undefined ? `, worktree ${entry.holder.worktree}` : ""})`
           : "";
-      lines.push(`  - ${target}${branchNote}${holderNote}`);
+      // reason: the human view must not silently hide a fact `--json` carries
+      // (CLAUDE.md's "human renders are lossy projections" lesson) — an
+      // ABSENT count (never measured) prints nothing, never a fabricated "0".
+      const unmergedNote = entry.unmerged_commits !== undefined ? ` [${entry.unmerged_commits} unmerged]` : "";
+      lines.push(`  - ${target}${branchNote}${unmergedNote}${holderNote}`);
     }
   };
 

@@ -7,10 +7,14 @@
  * "orchestrator delegates classification to a pure core function" shape.
  *
  * Public surface:
- *   - GitPort — the 6-method port every git operation goes through
+ *   - GitPort — the 7-method port every git operation goes through
  *     (`worktreeAdd`, `worktreeList`, `worktreeRemove`, `isMerged`,
- *     `rebaseFromMain`, `isDirty`; `currentBranch` deliberately absent, D1 —
- *     no consumer). The real implementation
+ *     `countUnmergedCommits`, `rebaseFromMain`, `isDirty`; `currentBranch`
+ *     deliberately absent, D1 — no consumer). `countUnmergedCommits` is the
+ *     count-yielding sibling of `isMerged` (spec-multi-session-concurrency-
+ *     queryable-ownership-checkout §Scope L0, AC-REPLAY-1) — `isMerged`
+ *     alone cannot tell a branch with one unmerged commit from one with two
+ *     hundred. The real implementation
  *     (`packages/lore/src/adapters/real-git-port.ts`) shells `git` via
  *     `node:child_process`; tests inject a scripted fake.
  *   - WorktreeInfo — one `worktreeList()` entry.
@@ -62,7 +66,7 @@ export interface WorktreeInfo {
 }
 
 /**
- * The 6-method git port every `SeatService` operation goes through
+ * The 7-method git port every `SeatService` operation goes through
  * (`currentBranch` deliberately absent — D1, no consumer). Every method
  * returns a `Result` for EXPECTED failures (a nonzero git exit, an ENOENT);
  * only genuinely unexpected faults reject the promise.
@@ -72,6 +76,19 @@ export interface GitPort {
   worktreeList(): Promise<Result<WorktreeInfo[], LoreError>>;
   worktreeRemove(path: string, force: boolean): Promise<Result<void, LoreError>>;
   isMerged(branch: string, into: string): Promise<Result<boolean, LoreError>>;
+  /**
+   * Counts commits reachable from `branch` but not from `into` (git's own
+   * `into..branch` range syntax) — the fact `isMerged`'s boolean collapses:
+   * a branch with 1 unmerged commit and a branch with 200 both read
+   * `isMerged() === false`, yet only one is safe to delete without a second
+   * thought (spec-multi-session-concurrency-queryable-ownership-checkout
+   * §Scope L0, AC-REPLAY-1 — the 2026-08-11 diagnosis this closes).
+   * @returns `ok(<non-negative integer>)` when both refs resolve — NEVER
+   *   `ok(0)` for an UNCOUNTABLE branch (nonexistent `branch`/`into`, `cwd`
+   *   outside any git work tree, any other git failure); those are `err`,
+   *   so a caller can tell "measured zero" from "could not measure".
+   */
+  countUnmergedCommits(branch: string, into: string): Promise<Result<number, LoreError>>;
   rebaseFromMain(cwd: string): Promise<Result<void, LoreError>>;
   isDirty(cwd: string): Promise<Result<boolean, LoreError>>;
 }

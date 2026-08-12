@@ -12,9 +12,13 @@
  *   - `SessionService.getActiveSessions()` — the SAME corpus-wide derivation
  *     `lore bootstrap`'s `active_sessions` uses (by/machine/worktree/
  *     session_id groups with their claimed branches).
- * Classification (`../territory-partition.ts::partitionTerritory`, pure)
- *   routes through `gate-predicates.ts::compareClaimSessions` — the SAME
+ * Classification (`../territory-partition.ts::partitionTerritory`) routes
+ *   through `gate-predicates.ts::compareClaimSessions` — the SAME
  *   three-valued session comparator the anchor-overlap mutex uses.
+ *   `partitionTerritory` ALSO measures each entry's `unmerged_commits`
+ *   (AC-REPLAY-1) via its own synchronous git probe — no separate
+ *   enrichment step is needed here, `JSON.stringify(partition)` below
+ *   already carries the field once present on an entry.
  *
  * The reason this task exists (2026-08-11): a session read a live peer's
  * in-flight branch as an orphan to rescue, because git topology carries no

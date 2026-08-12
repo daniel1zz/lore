@@ -33,6 +33,15 @@
  *     other `git` failure ALL degrade to `"unmeasured"` uniformly — never
  *     coerced to a placeholder branch name, and never to be confused with
  *     "unowned" (a DIFFERENT, higher-layer fact `lore territory` reports).
+ *   - countUnmergedCommitsSync(cwd, branch, into) — AC-REPLAY-1: the
+ *     SYNCHRONOUS counterpart to `RealGitPort.countUnmergedCommits`, a
+ *     standalone leaf function for the ONE consumer
+ *     (`adapters/cli/territory-partition.ts::partitionTerritory`) that must
+ *     stay callable without `await`. `execFileSync`, not `runGit`'s async
+ *     `spawn`, for that reason alone — same git invocation and the same
+ *     "never `0` for an uncountable branch" contract as the async method
+ *     (shared `unmergedCountArgs`/`parseUnmergedCount` helpers, ONE
+ *     definition of the git command and its output shape).
  *   - bindClaimSessionForTrailer(cwd, sessionId) — AC-OWN-4: best-effort
  *     composite of `writeClaimSessionMarker` + `ensureSessionTrailerHookInstalled`
  *     (both private) — records `sessionId` as the worktree's active claim and
@@ -59,6 +68,10 @@
  *     the same algorithm `git-delete-squashed`-style tooling uses).
  *     Empirically verified against a real git repo before landing this file
  *     (unmerged → `git cherry` reports `+<sha>`; squash-merged → `-<sha>`).
+ *   - `countUnmergedCommits`/`countUnmergedCommitsSync` never resolve `0`
+ *     for a branch or base ref that does not exist, nor for a `cwd` outside
+ *     any git work tree — those are `err`. `0` is reserved for a git call
+ *     that genuinely SUCCEEDED with an empty range (a real merged branch).
  *   - `worktreeList`'s `createdAt` is derived from the worktree DIRECTORY's
  *     filesystem birthtime (`node:fs.statSync`) — real `git worktree list`
  *     carries no creation timestamp of its own; this is a best-effort
@@ -85,7 +98,7 @@
  *   spec-multi-session-concurrency-queryable-ownership-checkout §Scope L0.
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
@@ -143,6 +156,28 @@ function gitFailure(args: string[], result: GitRunResult): LoreError {
     code: "STORE_ERROR",
     message: `git ${args.join(" ")} exited ${result.exitCode}: ${result.stderr.slice(0, STDERR_TAIL_MAX_CHARS)}`,
   };
+}
+
+/** Builds the `git rev-list --count <into>..<branch>` argv — shared by {@link RealGitPort.countUnmergedCommits} (async) and {@link countUnmergedCommitsSync} so the exact git invocation has ONE definition. */
+function unmergedCountArgs(branch: string, into: string): string[] {
+  return ["rev-list", "--count", `${into}..${branch}`];
+}
+
+/**
+ * Parses `git rev-list --count`'s stdout into a non-negative integer, or
+ * `err` when it is not one — defensive: a successful exit with unparsable
+ * stdout would otherwise silently become `0` via `Number.parseInt`, exactly
+ * the "uncountable ≠ zero" collapse `countUnmergedCommits` exists to avoid.
+ */
+function parseUnmergedCount(stdout: string, args: string[], cwd: string): Result<number, LoreError> {
+  const trimmed = stdout.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return err({
+      code: "STORE_ERROR",
+      message: `git ${args.join(" ")} in "${cwd}" produced a non-numeric count: "${trimmed}"`,
+    });
+  }
+  return ok(Number.parseInt(trimmed, 10));
 }
 
 /**
@@ -216,6 +251,46 @@ export async function detectWorktreeBranch(cwd: string): Promise<BranchMeasureme
     return { status: "unmeasured" };
   }
   return { status: "measured", branch };
+}
+
+/**
+ * SYNCHRONOUS counterpart to {@link RealGitPort.countUnmergedCommits} — a
+ * standalone, repo-root-less leaf function (mirrors {@link
+ * detectWorktreeBranch}'s "no `SeatService`/`GitPort` dependency, every
+ * caller passes its own `cwd`" shape). Exists because
+ * `adapters/cli/territory-partition.ts::partitionTerritory` must stay
+ * callable WITHOUT `await` (both its callers — `commands/territory.ts` and
+ * the AC-REPLAY-1 replay test — assign its return value directly, never
+ * `await partitionTerritory(...)`) — the async, `spawn`-based
+ * {@link RealGitPort.countUnmergedCommits} cannot be used from there.
+ *
+ * @param cwd - ANY worktree path of the target repo — git branches are
+ *   visible repo-wide from every worktree sharing one `.git`, so this need
+ *   NOT be a worktree currently checked out to `branch` itself.
+ * @param branch - The branch to count commits FROM.
+ * @param into - The base ref to count commits NOT reachable from (mirrors
+ *   `SeatService`'s own `SEAT_BASE_BRANCH` convention of an explicit,
+ *   caller-supplied base rather than one hardcoded in the port).
+ * @returns `ok(<non-negative integer>)` when git resolves BOTH refs from
+ *   `cwd`; `err` for every other case (a nonexistent `branch`, a
+ *   nonexistent `into`, `cwd` outside any git work tree, `git` absent from
+ *   `PATH`) — NEVER `ok(0)` for an uncountable branch.
+ * @example
+ * countUnmergedCommitsSync("/repo", "foreign-branch", "main"); // => { ok: true, value: 1 }
+ * @example
+ * countUnmergedCommitsSync("/repo", "no-such-branch", "main"); // => { ok: false, error: {...} }
+ */
+export function countUnmergedCommitsSync(cwd: string, branch: string, into: string): Result<number, LoreError> {
+  const args = unmergedCountArgs(branch, into);
+  try {
+    const stdout = execFileSync(GIT_COMMAND, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return parseUnmergedCount(stdout, args, cwd);
+  } catch (cause) {
+    return err({
+      code: "STORE_ERROR",
+      message: `git ${args.join(" ")} in "${cwd}" failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    });
+  }
 }
 
 /** Filename of the per-worktree active-claim-session marker, written inside that worktree's OWN private git-dir (never the tracked working tree). */
@@ -456,6 +531,13 @@ export class RealGitPort implements GitPort {
       .split("\n")
       .some((line) => line.trim().startsWith("+"));
     return ok(!hasUnmergedLine);
+  }
+
+  async countUnmergedCommits(branch: string, into: string): Promise<Result<number, LoreError>> {
+    const args = unmergedCountArgs(branch, into);
+    const result = await runGit(this.repoRoot, args);
+    if (result.exitCode !== 0) return err(gitFailure(args, result));
+    return parseUnmergedCount(result.stdout, args, this.repoRoot);
   }
 
   async rebaseFromMain(cwd: string): Promise<Result<void, LoreError>> {
