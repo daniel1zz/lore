@@ -117,6 +117,14 @@ const main = defineCommand({
     // trace (SPEC-102) — `lore trace stats`, read/deny observability
     // aggregation surface; see commands/trace.ts's module header.
     trace: () => import("./commands/trace.js").then(wrapDefault("trace")),
+    // territory / session (spec-multi-session-concurrency-queryable-
+    // ownership-checkout §Scope L0, AC-OWN-1/AC-OWN-5) — the two read-only
+    // ownership surfaces: `territory` partitions every worktree/branch
+    // corpus-wide into mine/foreign/unowned/unmeasured; `session list|show`
+    // joins corpus claims with probed process liveness. See each command
+    // file's own module header.
+    territory: () => import("./commands/territory.js").then(wrapDefault("territory")),
+    session: () => import("./commands/session.js").then(wrapDefault("session")),
   },
 });
 
