@@ -1,30 +1,59 @@
 /**
- * Shared CLI utilities — error formatting and output helpers.
- * No business logic here; only terminal I/O concerns.
+ * Shared CLI utilities — error formatting/output helpers, actor-identity
+ * resolution, and misc CLI-adapter helpers (retry-command reconstruction,
+ * numeric flag validation).
+ *
+ * ⛔ This header formerly asserted that no business logic lived here and that
+ * this module performed no IO — both were already false before this comment
+ * was corrected: `resolveActor`/`resolveActorWithSource`/
+ * `detectWorktreeDerivedActor` (SPEC-104) encode genuine actor-resolution
+ * PRECEDENCE RULES (a decision, not terminal I/O), and that same trio
+ * performs real filesystem IO (`existsSync`/`readFileSync`/`statSync`) plus
+ * `process.stderr.write` advisories. DB discovery (`findLoreDbPath` et al.)
+ * ALSO used to live in this file — genuinely relocated now (see below), not
+ * merely re-described — but its departure does not by itself make the
+ * remaining claims true, which is why they are corrected rather than just
+ * trimmed (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D6:
+ * a header recording a property that stopped being true is the failure class
+ * this correction closes).
  *
  * Public surface:
  *   - exitCode() / formatError() — error presentation
  *   - buildRetryCommandLine() / currentRetryCommandLine() — the `Retry:` line of
  *     the declared write-contention message (the only ambient `process.argv`
  *     read in the error path; the reconstruction itself is pure)
+ *   - resolveActor() / resolveActorWithSource() / resolveActorWithIdentitySource()
+ *     / detectWorktreeDerivedActor() / resolveActorAlias() — actor-identity
+ *     resolution (SPEC-051, SPEC-104)
+ *   - parsePositiveIntArg() — numeric CLI flag validation
  *   - formatTable() / formatTree() / formatNavigation() / relativeTime() — output helpers
  *   - formatShortId() — the ONE shared ULID short-id renderer (head+tail,
  *     git-style); every human-readable id display in this adapter routes
  *     through it (see its own doc comment for the rationale and the
  *     collision-probability derivation)
  *
- * Note: DB discovery and App construction live in `loader.ts` to avoid
- * importing bun:sqlite into this module (vitest cannot resolve bun:sqlite).
- * CLI commands that need an App instance should import from `loader.ts`.
+ * DB discovery no longer lives in this file at all — it now lives in
+ * `corpus-resolution.ts` (spec-corpus-resolution-carries-provenance-and-a-
+ * foreign-write §D3/§D6), which this module re-exports `findLoreDbPath` from
+ * so its five pre-existing importers (`loader.ts` ×2, `commands/context.ts`,
+ * `report-issue-wiring.ts`, `scripts/check-ac-ref-integrity.ts`,
+ * `scripts/export-spec-mirror.ts`) keep byte-identical import statements.
+ * `findLoreDbPathQuiet` (`gate-bypass-audit.ts`) and `findMainCheckoutLoreDb`
+ * relocated there too; neither is re-exported from here because nothing
+ * imports either of them from this module.
  *
- * Side-effect class: pure (no IO, no process.exit)
+ * Side-effect class: MIXED, not pure — most of this module (the format-
+ * prefixed renderers, relativeTime, exitCode, formatError) is pure
+ * presentation, but actor resolution performs real filesystem IO and stderr
+ * advisories (see above), and `currentRetryCommandLine` reads ambient
+ * `process.argv`/`process.execPath`. No `process.exit` anywhere in this
+ * file — that left with DB discovery.
  *
- * Source: SPEC-003 §5
+ * Source: SPEC-003 §5, SPEC-051, SPEC-104
  */
 
 import { existsSync, readFileSync, statSync } from "fs";
 import { basename, join, dirname, resolve as resolvePath } from "path";
-import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import {
   evidenceEntrySchema,
@@ -41,112 +70,17 @@ import type { DocWithNavigation } from "../../service/corpus-service.js";
 
 const evidenceArraySchema = z.array(evidenceEntrySchema);
 
-// ─── DB Discovery (used only by loader.ts) ──────────────────────────────────
-
-/**
- * Resolves the MAIN checkout's `.lore/lore.db` when `dir` sits inside a
- * LINKED git worktree (SPEC M4 —
- * spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M4,
- * AC-WH-4). A fresh `git worktree add` tree never materializes `.lore/`
- * (gitignored, untracked, never checked out into a linked worktree) — the
- * primary walk-up in {@link findLoreDbPath} / `findLoreDbPathQuiet`
- * (`gate-bypass-audit.ts`) always misses there. This is the fallback of
- * last resort, consulted ONLY after that walk-up already failed.
- *
- * Shells `git rev-parse --git-common-dir` and `--git-dir` from `dir` — in a
- * linked worktree these differ (`--git-common-dir` points at the MAIN repo's
- * shared `.git`, `--git-dir` at this worktree's own
- * `.git/worktrees/<name>`); in a primary checkout (or a non-worktree repo)
- * they resolve to the SAME path, so no fallback root exists distinct from
- * the one the primary walk-up already tried. Mirrors the identical
- * git-common-dir-vs-git-dir differencing fact
- * `commands/verify.ts#gatherVerifyGitFacts` gathers for SPEC-063's execution-
- * root resolution — same two-command probe, different consumer.
- *
- * ANY probe failure (not a git repo, `git` missing, nonzero exit, empty/
- * whitespace-only stdout, a thrown `spawnSync` error) degrades to
- * `undefined` — this function never throws, so callers can treat "no
- * fallback available" identically to "not a linked worktree at all".
- *
- * @param dir - Directory the primary walk-up already failed to resolve
- *   `.lore/lore.db` from (`process.cwd()` in production).
- * @returns The main checkout's `.lore/lore.db` absolute path, when that
- *   checkout's `.lore/` directory actually contains one; otherwise `undefined`.
- */
-export function findMainCheckoutLoreDb(dir: string): string | undefined {
-  try {
-    const commonDirRaw = spawnSync("git", ["rev-parse", "--git-common-dir"], {
-      cwd: dir,
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    const gitDirRaw = spawnSync("git", ["rev-parse", "--git-dir"], {
-      cwd: dir,
-      encoding: "utf8",
-      timeout: 5000,
-    });
-    if (
-      commonDirRaw.status !== 0 ||
-      gitDirRaw.status !== 0 ||
-      !commonDirRaw.stdout?.trim() ||
-      !gitDirRaw.stdout?.trim()
-    ) {
-      return undefined;
-    }
-
-    const commonDirAbs = resolvePath(dir, commonDirRaw.stdout.trim());
-    const gitDirAbs = resolvePath(dir, gitDirRaw.stdout.trim());
-    if (commonDirAbs === gitDirAbs) {
-      // Primary checkout (or a non-worktree repo) — not a linked worktree,
-      // no distinct fallback root to try.
-      return undefined;
-    }
-
-    // Linked worktree confirmed: commonDirAbs is the MAIN repo's shared
-    // `.git` directory — its parent is the main checkout root.
-    const mainCheckoutRoot = dirname(commonDirAbs);
-    const candidate = join(mainCheckoutRoot, ".lore", "lore.db");
-    return existsSync(candidate) ? candidate : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Walk up from cwd looking for .lore/lore.db. When that walk-up misses AND
- * cwd is inside a linked git worktree, falls back to the MAIN checkout's
- * `.lore/lore.db` via {@link findMainCheckoutLoreDb} (SPEC M4, AC-WH-4) —
- * still absent there too → the existing loud failure, unchanged.
- * Exits with code 1 if not found (suggests `lore init`).
- *
- * @returns absolute path to the lore.db file
- */
-export function findLoreDbPath(): string {
-  const startDir = process.cwd();
-  let dir = startDir;
-
-  // Walk up to filesystem root
-  while (true) {
-    const candidate = join(dir, ".lore", "lore.db");
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break; // reached root
-    dir = parent;
-  }
-
-  const mainCheckoutDb = findMainCheckoutLoreDb(startDir);
-  if (mainCheckoutDb !== undefined) {
-    return mainCheckoutDb;
-  }
-
-  process.stderr.write(
-    "Error: No Lore database found in this directory or any parent.\n" +
-    "  Run `lore init` to initialise a new Lore project here.\n",
-  );
-  process.exit(1);
-}
+// ─── DB Discovery (relocated to corpus-resolution.ts) ──────────────────────
+//
+// findLoreDbPath now lives in corpus-resolution.ts
+// (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D3/§D6),
+// re-exported here so the five pre-existing importers of this module
+// (loader.ts ×2, commands/context.ts, report-issue-wiring.ts,
+// scripts/check-ac-ref-integrity.ts, scripts/export-spec-mirror.ts) keep
+// byte-identical import statements. findLoreDbPathQuiet (gate-bypass-audit.ts)
+// and findMainCheckoutLoreDb relocated there too, but are NOT re-exported
+// from here — nothing imports either of them from this module.
+export { findLoreDbPath } from "./corpus-resolution.js";
 
 // ─── Error Formatting ───────────────────────────────────────────────────────
 

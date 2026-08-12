@@ -5,19 +5,20 @@
  * split out (`../../CLAUDE.md`'s testability-split pattern): `commands/gate.ts`
  * transitively imports `loader.ts` (`bun:sqlite` via `app.ts`), which vitest
  * cannot resolve, but this file imports only `@lore/core`/`@lore/core/node` +
- * `node:fs`/`node:path` + `utils.ts` (also vitest-safe, no `bun:sqlite`), so
+ * `corpus-resolution.js` (also vitest-safe, no `bun:sqlite`), so
  * `tests/integration/cli/gate-bypass-audit.test.ts` can exercise the decision
  * logic directly.
  *
  * Public surface:
  *   - GateBypassAuditDeps — injected port shape (`openRecordGateSkip`)
  *   - runGateEnvBypassAudit(checkpoint, deps) — attempt-write-or-degrade logic
- *   - findLoreDbPathQuiet() — same `.lore/lore.db` upward walk as
- *     `utils.ts::findLoreDbPath`, PLUS the same SPEC M4 main-checkout
- *     git-common-dir fallback (`utils.ts::findMainCheckoutLoreDb`) — but
- *     returns `undefined` on a miss instead of `process.exit(1)` — the
- *     bypass path's exit-0 guarantee (SPEC-080 D3) must survive an absent
- *     corpus, so this walk may never terminate the process.
+ *   - findLoreDbPathQuiet() — RE-EXPORTED from `./corpus-resolution.js`
+ *     (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D3/§D6
+ *     genuinely relocated it there — this module no longer declares it
+ *     itself, only re-exports, so `commands/gate.ts`'s existing import site
+ *     stays untouched). Same terminal contract as before: `undefined` on a
+ *     miss, never `process.exit` — the bypass path's exit-0 guarantee
+ *     (SPEC-080 D3) must survive an absent corpus.
  *
  * @invariant D1/D3 (SPEC-080 §Design Decisions) — this module NEVER changes the
  *   bypass's outcome. `runGateEnvBypassAudit` never throws and never rejects:
@@ -27,15 +28,14 @@
  *   `commands/gate.ts`'s caller unconditionally sets `process.exitCode = 0`
  *   immediately after awaiting this function, regardless of what happened here.
  *
- * Side-effect class: IO (one `existsSync` walk via `findLoreDbPathQuiet`, the
- *   injected port's own IO, one `process.stderr.write` on failure) — never
- *   `process.exit`, never a thrown/rejected promise escaping this module.
+ * Side-effect class: IO (`findLoreDbPathQuiet`'s own IO via `corpus-
+ *   resolution.js`, the injected port's own IO, one `process.stderr.write` on
+ *   failure) — never `process.exit`, never a thrown/rejected promise escaping
+ *   this module.
  *
  * Source: SPEC-080 §Scope, §Design Decisions D1/D3; AC-080-2.
  */
 
-import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
 import { resolveActorWithSource } from "@lore/core/node";
 import {
   buildGateSkipAuditEntry,
@@ -44,7 +44,8 @@ import {
   type RecordGateSkip,
 } from "../../service/gate-enforcer.js";
 import type { GateCheckpoint } from "../../service/checkpoint-registry.js";
-import { findMainCheckoutLoreDb } from "./utils.js";
+
+export { findLoreDbPathQuiet } from "./corpus-resolution.js";
 
 /**
  * Injected port for the ONE piece of this module's decision logic that needs
@@ -114,38 +115,4 @@ export async function runGateEnvBypassAudit(
 /** Single stderr-line formatter shared by every failure branch above (SPEC-080 D1). */
 function warnBypassNotAudited(reason: string): void {
   process.stderr.write(`gate bypass NOT audited: ${reason}\n`); // CLI surface
-}
-
-/**
- * Walks `cwd` → filesystem root looking for `.lore/lore.db`, same traversal as
- * `utils.ts::findLoreDbPath` — but returns `undefined` on a miss instead of
- * printing an error and calling `process.exit(1)`. When that walk-up misses
- * AND cwd is inside a linked git worktree, falls back to the MAIN checkout's
- * `.lore/lore.db` via `utils.ts::findMainCheckoutLoreDb` (SPEC M4 —
- * spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M4,
- * AC-WH-4) — the SAME fallback `findLoreDbPath` applies, reused here rather
- * than re-implemented so the two discovery paths never independently drift.
- * The env-bypass audit path must NEVER terminate the process itself
- * (SPEC-080 D3, "the bypass's exit-0 guarantee is preserved unconditionally")
- * — an absent corpus (still absent after the fallback) is exactly the
- * "unreachable" case `runGateEnvBypassAudit` degrades gracefully, not a fatal
- * CLI error.
- *
- * @returns The discovered `.lore/lore.db` absolute path (local walk-up or the
- *   main-checkout fallback), or `undefined` when neither resolves from
- *   `process.cwd()`.
- */
-export function findLoreDbPathQuiet(): string | undefined {
-  const startDir = process.cwd();
-  let dir = startDir;
-  while (true) {
-    const candidate = join(dir, ".lore", "lore.db");
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break; // reached filesystem root
-    dir = parent;
-  }
-  return findMainCheckoutLoreDb(startDir);
 }
