@@ -45,7 +45,7 @@
  */
 
 import { dirname } from "path";
-import { mergeDefaults, isAiConfigValidationError } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type { LoreConfig, LoreDefaults, CallerSurface, LoreError, Result } from "@lore/core";
 // reason: loadConfig/loadGlobalConfig/resolveGlobalConfigPath read the filesystem
 // via Node fs/path/os — only reachable via the @lore/core/node subpath
@@ -57,6 +57,12 @@ import {
 } from "@lore/core/node";
 import { createApp, type App } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
+import { resolveCorpus } from "./corpus-resolution.js";
+import {
+  guardTaskLifecycleWrites,
+  type ForeignCorpusWriteContext,
+  type TaskClaimLookup,
+} from "../../service/foreign-corpus-write-guard.js";
 // reason: buildReportIssueHint is pure/import-light (SPEC-073) — safe here regardless
 // of this module's own bun-only status. resolveFeedbackUpstreamCfg's OWNING module
 // (report-issue-wiring.ts) DOES value-import bun:sqlite transitively (probeUpstreamDb/
@@ -90,6 +96,25 @@ function detectCliSurface(): CallerSurface {
     return "agent";
   }
   return "cli";
+}
+
+/**
+ * `guardTaskLifecycleWrites`'s `readExistingClaim` port, backed by the REAL
+ * `app.corpusService.get()` (spec-corpus-resolution-carries-provenance-and-
+ * a-foreign-write §D5) — the only way `loader.ts` can read a task's CURRENT
+ * persisted claim lease without importing `TaskWorkflowService` internals.
+ * `get()`'s own error (DOC_NOT_FOUND, wrong type, etc.) degrades to
+ * `{found: false}` — see {@link TaskClaimLookup}'s own doc for why a lookup
+ * FAILURE must never manufacture a refusal here.
+ *
+ * @param app - The already-constructed App (`app.corpusService`).
+ * @param idOrSlug - Task document id-or-slug, forwarded verbatim from the
+ *   `claim`/`evidence`/`release` call this lookup is guarding.
+ */
+async function readTaskClaimLease(app: App, idOrSlug: string): Promise<TaskClaimLookup> {
+  const result = await app.corpusService.get(idOrSlug);
+  if (!result.ok) return { found: false };
+  return { found: true, claim: extractClaim(result.value.doc) };
 }
 
 /**
@@ -312,6 +337,30 @@ export function loadLoreApp(): {
   // for the entire CLI invocation. MCP sets "mcp" in adapters/mcp/index.ts; HTTP
   // resolves per-request in ActorContext — see SPEC-024 §9.2.
   app.callerSurface = detectCliSurface();
+
+  // spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5 — the
+  // foreign-corpus-write guard's ambient context, resolved ONCE here (a CLI
+  // process's cwd/config never change mid-invocation) and threaded into BOTH
+  // CorpusService (reads it internally on every create/set/link/unlink/
+  // delete) and TaskWorkflowService's claim/addEvidence/release (wrapped
+  // externally from here — see foreign-corpus-write-guard.ts's module header,
+  // "Why external wrapping", for why that lives outside TaskWorkflowService
+  // itself). Calling `resolveCorpus()` again here — `findLoreDbPath()` above
+  // already computed the IDENTICAL resolution internally, deterministically,
+  // from the same cwd — is deliberate: neither `findLoreDbPath` nor
+  // `findLoreDbPathQuiet` exposes the `provenance` they computed, and
+  // `corpus-resolution.ts`'s own module header names exactly this guard as
+  // the future caller that needs to call `resolveCorpus()` directly instead.
+  const foreignWriteContext: ForeignCorpusWriteContext = {
+    provenance: resolveCorpus(process.cwd())?.provenance ?? null,
+    enabled: resolveForeignCorpusWriteGateEnabled(telemetryOnlyConfig),
+  };
+  app.corpusService.setForeignCorpusWriteContext(foreignWriteContext);
+  guardTaskLifecycleWrites(
+    app.taskWorkflowService,
+    (idOrSlug) => readTaskClaimLease(app, idOrSlug),
+    foreignWriteContext,
+  );
 
   // SPEC-102 §Migration Strategy — opportunistic bounded-batch trace
   // retention prune, fired ONCE per CLI invocation (not MCP/HTTP — those are
