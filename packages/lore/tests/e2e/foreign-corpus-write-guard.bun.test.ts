@@ -11,10 +11,7 @@
  * names the SHAPE, not a single shared instance — that AC's own next
  * sentence says "Every FIXTURE [plural] is an mkdtemp git repo").
  *
- * Cells (the three-cell shape AC-CP-3 pins — see its own structured
- * statement for why the "obvious" 2x2's fourth cell, non-lifecycle WITH
- * declared intent, is UNCONSTRUCTIBLE BY DESIGN and deliberately absent: no
- * non-lifecycle verb defines `--worktree` and no general intent flag exists):
+ * Cells (the four-cell shape AC-CP-3 pins):
  *   (1) ALLOWED — `lore claim --worktree <path>`, then `lore evidence` on
  *       the SAME task, which carries NO `--worktree` flag at all (that flag
  *       does not exist on `evidence`) — permitted by INHERITING intent from
@@ -29,17 +26,38 @@
  *            `worktree` recorded), then running `evidence` on it from the
  *            foreign worktree.
  *   (3) REFUSED — a non-lifecycle write, `lore create knowledge`.
+ *   (4) ALLOWED — §D5's SECOND named exemption, which is SEAM-shaped rather
+ *       than adapter-shaped: `lore handoff` and `lore uat record` issued from
+ *       that same foreign worktree with NO lease anywhere must LAND, because
+ *       they route through `CorpusService.createHandoffDoc`/`createUatDoc`.
+ *
+ * ⛔ Cell 4 is the deliberate PAIR of cell 3, and the pairing is the whole
+ * oracle: both are non-lifecycle creates against the same foreign corpus,
+ * differing ONLY in whether the write goes through those two seams. So an
+ * exemption WIDENED to cover ordinary creates reddens cell 3, and one NARROWED
+ * away or deleted reddens cell 4 — which is what makes the carve-out
+ * falsifiable in both directions instead of merely reasoned in a comment.
+ * Both measured 2026-08-12 by probe (each probe reverted immediately).
+ *
+ * ⛔ Cell 4 is NOT the cell AC-CP-3 calls UNCONSTRUCTIBLE BY DESIGN. That one
+ * is a DIFFERENT cell — non-lifecycle WITH declared intent — and stays
+ * deliberately absent: no non-lifecycle verb defines `--worktree` and no
+ * general intent flag exists. The seams cell 4 drives are exempt for WHAT THEY
+ * ARE, never because anything declared intent, which is why cell 4's fixture
+ * asserts it holds no task (and therefore no claim lease) at all.
  *
  * PINNED ORACLE VALUES: every refused case asserts exit code EXACTLY 4 and
  * stderr CONTAINING the literal token `gate:corpus-write:foreign-provenance`
  * (`FOREIGN_CORPUS_WRITE_TOKEN`, `foreign-corpus-write-guard.ts` — the SAME
- * token AC-CP-5(a) asserts equal across CLI and MCP). Cell 1 asserts BOTH
- * writes actually LANDED in the parent corpus (read back from the PRIMARY
- * checkout) — never just "the doc count did not change", the empty-artifact
- * false oracle this spec explicitly calls out (a refused write and a
- * crashed process look identical under that assertion alone; a positive
- * landing check is the only thing that proves ALLOW rather than "nothing
- * ran").
+ * token AC-CP-5(a) asserts equal across CLI and MCP). Cells 1 and 4 assert
+ * their writes actually LANDED by READING THEM BACK from the parent corpus
+ * (from the PRIMARY checkout) — cell 1 the evidence row on the task, matched
+ * on the row's own `command`/`result`/`oracle` rather than on its bare
+ * presence; cell 4 each created doc by slug. Never just "the doc count did not
+ * change", and never a bare exit 0: both are the empty-artifact false oracle
+ * this spec explicitly calls out (a refused write and a crashed process look
+ * identical under that assertion alone; a positive landing check is the only
+ * thing that proves ALLOW rather than "nothing ran").
  *
  * A separate, NON-e2e `describe` block below exercises
  * `checkForeignCorpusWrite` (the pure predicate, imported directly from
@@ -205,13 +223,16 @@ function parseSlug(stdout: string): string {
 }
 
 /**
- * Seeds a PRD -> plan -> task chain FROM `dir` (the PRIMARY checkout — never
- * foreign, so seeding itself is never subject to the guard under test) and
- * returns the task's slug. Mirrors `worktree-corpus-resolution.bun.test.ts`'s
- * own `seedTask` shape exactly (task requires a plan parent + `extra.plan_id`
- * per `CreateDocInput` validation).
+ * Seeds a PRD -> plan chain FROM `dir` (the PRIMARY checkout — never foreign,
+ * so seeding itself is never subject to the guard under test) and returns the
+ * plan's slug.
+ *
+ * Split out of {@link seedTask} for cell 4, which needs a plan as `lore uat
+ * record`'s target but must NOT have a task in its fixture at all: a task is
+ * the only doc that carries a claim lease, so a task-free fixture is what makes
+ * "no declared intent anywhere" a structural fact rather than an assumption.
  */
-function seedTask(dir: string, titleSuffix: string): string {
+function seedPlan(dir: string, titleSuffix: string): string {
   const prdResult = runLore(
     ["create", "prd", "--title", `FCWG E2E PRD ${titleSuffix}`, "--content", "root", "--no-ai"],
     dir,
@@ -224,7 +245,18 @@ function seedTask(dir: string, titleSuffix: string): string {
     dir,
   );
   expect(planResult.exitCode).toBe(0);
-  const planSlug = parseSlug(planResult.stdout);
+  return parseSlug(planResult.stdout);
+}
+
+/**
+ * Seeds a PRD -> plan -> task chain FROM `dir` (the PRIMARY checkout — never
+ * foreign, so seeding itself is never subject to the guard under test) and
+ * returns the task's slug. Mirrors `worktree-corpus-resolution.bun.test.ts`'s
+ * own `seedTask` shape exactly (task requires a plan parent + `extra.plan_id`
+ * per `CreateDocInput` validation).
+ */
+function seedTask(dir: string, titleSuffix: string): string {
+  const planSlug = seedPlan(dir, titleSuffix);
 
   const taskResult = runLore(
     [
@@ -335,16 +367,30 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       );
       expect(evidenceResult.exitCode).toBe(0);
 
-      // Positive landing check (never just "doc count unchanged") — both
-      // writes are visible from the PRIMARY checkout's corpus.
+      // Positive landing check (never just "doc count unchanged", never a bare
+      // exit 0) — both writes are read back from the PRIMARY checkout's corpus,
+      // and the evidence row is matched on its OWN recorded fields rather than
+      // on the array merely being length 1: a row-shaped placeholder written by
+      // some other path would satisfy a count but not this.
       const verify = runLore(["get", taskSlug, "--json"], repoRoot);
       expect(verify.exitCode).toBe(0);
       const parsed = JSON.parse(verify.stdout) as {
-        data: { doc: { extra: { claim?: { worktree?: string }; verification_evidence?: unknown[] } } };
+        data: {
+          doc: {
+            extra: {
+              claim?: { worktree?: string };
+              verification_evidence?: Array<{ oracle?: string; command?: string; result?: string }>;
+            };
+          };
+        };
       };
       expect(parsed.data.doc.extra.claim?.worktree).toBe(worktreePath);
-      expect(Array.isArray(parsed.data.doc.extra.verification_evidence)).toBe(true);
-      expect(parsed.data.doc.extra.verification_evidence?.length).toBe(1);
+      const evidenceRows = parsed.data.doc.extra.verification_evidence;
+      expect(Array.isArray(evidenceRows)).toBe(true);
+      expect(evidenceRows?.length).toBe(1);
+      expect(evidenceRows?.[0]?.oracle).toBe("manual");
+      expect(evidenceRows?.[0]?.command).toBe("echo fcwg-cell1");
+      expect(evidenceRows?.[0]?.result).toBe("pass");
     },
     30000,
   );
@@ -444,6 +490,81 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       expect(parsed.data.docs.some((d) => d.title === "FCWG E2E fixture cell3")).toBe(false);
     },
     30000,
+  );
+
+  it(
+    "(4) ALLOWED: the D5 seam exemption — `lore handoff` and `lore uat record` land from the SAME foreign worktree with NO lease",
+    () => {
+      const { repoRoot, worktreePath } = createNestedWorktreeFixture("cell4");
+      const planSlug = seedPlan(repoRoot, "cell4");
+
+      // The precondition that makes this cell mean what AC-CP-3 says it means,
+      // ASSERTED rather than assumed: the fixture holds no task at all, and a
+      // task is the only doc that can carry a claim lease. So neither write
+      // below has any declared intent to inherit — they are permitted for WHAT
+      // THEY ARE (the two §D5 seams), never because something declared intent.
+      // Without this assertion cell 4 would be indistinguishable from the
+      // UNCONSTRUCTIBLE non-lifecycle-WITH-intent cell it must not become.
+      const tasks = runLore(["list", "--type", "task", "--json"], repoRoot);
+      expect(tasks.exitCode).toBe(0);
+      expect((JSON.parse(tasks.stdout) as { data: { docs: unknown[] } }).data.docs).toEqual([]);
+
+      // ── Seam 1: `lore handoff` → SessionService.writeHandoff → createHandoffDoc ──
+      const handoffResult = runLore(
+        [
+          "handoff",
+          "--plan",
+          planSlug,
+          "--next",
+          "merge the cell4 fixture branch",
+          "--by",
+          "agent:fcwg-cell4",
+          "--json",
+        ],
+        worktreePath,
+      );
+      expect(handoffResult.exitCode).toBe(0);
+      const handoffSlug = (JSON.parse(handoffResult.stdout) as { data: { slug: string } }).data.slug;
+
+      // ── Seam 2: `lore uat record` → UatService.record → createUatDoc ──
+      const uatPayloadPath = join(worktreePath, "fcwg-cell4-uat.json");
+      writeFileSync(
+        uatPayloadPath,
+        JSON.stringify({
+          verdict: "accept",
+          tier_results: [{ tier: "P0", accepted: 1, rejected: 0, unverified: 0 }],
+          requirement_coverage: { total: 1, covered: 1, uncovered_p0: [] },
+          uiux: { blocker_count: 0, min_dimension_score: 5 },
+          run_meta: { at: "2026-08-12T00:00:00.000Z", by: "agent:fcwg-cell4" },
+        }),
+      );
+      const uatResult = runLore(
+        ["uat", "record", planSlug, "--json-file", uatPayloadPath, "--by", "agent:fcwg-cell4", "--json"],
+        worktreePath,
+      );
+      expect(uatResult.exitCode).toBe(0);
+      const uatSlug = (JSON.parse(uatResult.stdout) as { data: { slug: string } }).data.slug;
+
+      // LANDING proven by READ-BACK from the PARENT corpus by slug, never by
+      // the exit codes above — a bare exit 0 cannot tell a landed write from a
+      // process that reported success and wrote nothing.
+      for (const [slug, subType] of [
+        [handoffSlug, "handoff"],
+        [uatSlug, "uat"],
+      ] as const) {
+        const readBack = runLore(["get", slug, "--json"], repoRoot);
+        expect(readBack.exitCode).toBe(0);
+        const doc = (
+          JSON.parse(readBack.stdout) as {
+            data: { doc: { slug: string; type: string; extra: { sub_type?: string } } };
+          }
+        ).data.doc;
+        expect(doc.slug).toBe(slug);
+        expect(doc.type).toBe("knowledge");
+        expect(doc.extra.sub_type).toBe(subType);
+      }
+    },
+    60000,
   );
 });
 

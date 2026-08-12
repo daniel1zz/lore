@@ -941,13 +941,20 @@ export class CorpusService {
    * doc with `extra.sub_type: "handoff"` may be created. Mirrors
    * `TaskWorkflowService.recordVerifiedEvidence`'s sole-injection-site pattern
    * (SPEC-039 §2 D2): runs the IDENTICAL `_createImpl` pipeline `create()` does, with
-   * ONLY the handoff writer-identity rejection skipped (`opts.allowHandoff: true`).
+   * `opts.allowHandoff: true` skipping exactly TWO of its rejections and nothing
+   * else — (a) the handoff writer-identity rejection below, and (b) the
+   * foreign-corpus-write provenance guard at the top of `_createImpl`
+   * (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5's SECOND
+   * named exemption, asserted by AC-CP-3 cell 4). ⛔ Those two are DIFFERENT
+   * rejections that merely happen to key on the same flag: (a) answers "who may
+   * author this sub_type", (b) answers "may this process write a corpus it does
+   * not own". Do not reason about one from the other.
    * Never registered on any CLI/MCP/HTTP adapter — its only production caller is
    * `SessionService.writeHandoff`, bound in `app.ts` as
    * `corpusService.createHandoffDoc.bind(corpusService)` the same way
    * `resolveDeclaredAcIds`/`recordVerifiedEvidence` are bound. Callers passing a
    * non-handoff `input` (any other type/sub_type) are still fully validated —
-   * `allowHandoff` only widens the ONE rejection above, nothing else in the pipeline
+   * `allowHandoff` widens ONLY those two rejections, nothing else in the pipeline
    * changes.
    *
    * @param input - Same shape `create()` accepts; expected (not enforced here) to be a
@@ -964,11 +971,21 @@ export class CorpusService {
 
   /**
    * Internal creation seam for SPEC-054 UAT verdict docs — the SOLE way a `knowledge`
-   * doc with `extra.sub_type: "uat"` may be created. Mirrors {@link createHandoffDoc}:
-   * runs the full `_createImpl` pipeline with ONLY the uat writer-identity rejection
-   * skipped (`opts.allowUat: true`). The public `create()` / `lore create` path keeps
+   * doc with `extra.sub_type: "uat"` may be created. Mirrors {@link createHandoffDoc}
+   * exactly, including WHICH rejections the flag skips: `opts.allowUat: true` skips
+   * the uat writer-identity rejection below AND the foreign-corpus-write provenance
+   * guard at the top of `_createImpl` (§D5's second named exemption, AC-CP-3 cell 4)
+   * — see that method's doc for why the two must not be reasoned about as one.
+   * The public `create()` / `lore create` path keeps
    * rejecting sub_type "uat" so the typed `extra.uat` payload can never be hand-forged.
    * `UatService.record` is its production caller (bound in `app.ts`).
+   *
+   * ⛔ Only the DOC create is exempt. `UatService.record` also writes an `informs`
+   * link, and it does so through the injected `store.addLink` port rather than
+   * `CorpusService.link` (`app.ts`), so that link never reaches the guard either.
+   * Routing it through `CorpusService.link` would refuse the second half of every
+   * foreign `lore uat record` and leave the loud half-failure that service's own
+   * `@invariant` describes — which is what AC-CP-3 cell 4 measures end-to-end.
    */
   async createUatDoc(input: CreateDocInput): Promise<Result<DocRecord, LoreError>> {
     const startMs = Date.now();
@@ -985,13 +1002,21 @@ export class CorpusService {
     // §D5/AC-CP-3 cell 3 — `lore create <type>` (and every OTHER non-lifecycle
     // write below) has no task-claim lease to declare intent on, so it is
     // ALWAYS refused when this instance's resolved corpus provenance is a
-    // foreign git-common-dir crossing. `allowHandoff`/`allowUat` are EXEMPT:
-    // those two internal seams (`createHandoffDoc`/`createUatDoc`) back
-    // `lore handoff`/`lore uat record`, session-continuity writes an
-    // implementer's OWN worktree legitimately needs at end-of-session with NO
-    // lease to declare intent on — gating them would refuse the dispatch
-    // protocol's own writes, the exact self-defeating rule this spec's "what
-    // this spec must NOT do" section forbids for provenance itself.
+    // foreign git-common-dir crossing.
+    //
+    // The `allowHandoff`/`allowUat` skip is that spec's SECOND named exemption
+    // — seam-shaped rather than adapter-shaped. Its reason and its narrowness
+    // argument live in §D5 and are deliberately NOT restated here: a second
+    // copy of a rationale is a second thing that can drift out of agreement
+    // with the spec it came from.
+    //
+    // ⛔ It is FALSIFIABLE, not merely reasoned: AC-CP-3 cells 3 and 4 fence it
+    // from both sides (`tests/e2e/foreign-corpus-write-guard.bun.test.ts`).
+    // Widening this condition to cover ordinary creates reddens cell 3;
+    // narrowing or deleting it reddens cell 4. Both directions were measured by
+    // probe on 2026-08-12 — so a future change here has an oracle, and changing
+    // it without reading §D5 first is a spec change wearing a refactor's
+    // clothes.
     if (opts?.allowHandoff !== true && opts?.allowUat !== true) {
       const refusal = this.refuseIfForeignCorpusWrite<CreateDocResult>();
       if (refusal !== undefined) return refusal;
