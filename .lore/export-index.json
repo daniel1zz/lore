@@ -5848,6 +5848,34 @@
     "01KZTZGW5FRWYJB8V9HQ9S9J20": {
       "human_id": "TASK-707",
       "file_path": "docs/requirements/task/TASK-707-ac-ids-are-not-globally-unique-so-an-ad-hoc-task-s.md"
+    },
+    "01KZV041PR20VB764TXX5CAXFW": {
+      "human_id": "SPEC-142",
+      "file_path": "docs/requirements/spec/SPEC-142-multi-session-concurrency-queryable-ownership-chec.md"
+    },
+    "01KZV03TRBPZSM28N33M6BWFB4": {
+      "human_id": "ADR-033",
+      "file_path": "docs/requirements/adr/ADR-033-multi-session-coordination-is-decentralised-file-l.md"
+    },
+    "01KZV0PQJ97J54VVMGB48BHCDR": {
+      "human_id": "KN-445",
+      "file_path": "docs/requirements/knowledge/KN-445-two-governance-tooling-gaps-measured-while-designi.md"
+    },
+    "01KZV0A0KC19BJD13WPZ88N00P": {
+      "human_id": "PLAN-129",
+      "file_path": "docs/requirements/plan/PLAN-129-land-multi-session-concurrency-p1-queryable-owners.md"
+    },
+    "01KZV0BNP5ZRY1WE31H82WP4C4": {
+      "human_id": "TASK-708",
+      "file_path": "docs/requirements/task/TASK-708-bind-ownership-a-claim-records-its-branch-commits.md"
+    },
+    "01KZV0C3XN986VKMQ6NWHP6RAS": {
+      "human_id": "TASK-709",
+      "file_path": "docs/requirements/task/TASK-709-prove-sufficiency-replay-the-2026-08-11-diagnosis.md"
+    },
+    "01KZV0C3N0KPKWXA9ZJWTTWHFA": {
+      "human_id": "TASK-710",
+      "file_path": "docs/requirements/task/TASK-710-add-the-two-ownership-read-surfaces-lore-territory.md"
     }
   }
 }
