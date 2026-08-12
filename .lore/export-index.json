@@ -5844,6 +5844,10 @@
     "01KZTXTCC0BZ0PHJJ8F2WNK8SM": {
       "human_id": "TASK-706",
       "file_path": "docs/requirements/task/TASK-706-the-clean-tree-floor-and-the-repo-s-own-test-selec.md"
+    },
+    "01KZTZGW5FRWYJB8V9HQ9S9J20": {
+      "human_id": "TASK-707",
+      "file_path": "docs/requirements/task/TASK-707-ac-ids-are-not-globally-unique-so-an-ad-hoc-task-s.md"
     }
   }
 }
