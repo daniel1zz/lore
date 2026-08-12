@@ -3,10 +3,10 @@ id: PLAN-126
 type: plan
 role: plan
 title: "Land read-side reachability: enumerable trace counts, knowledge code anchors under check-drift, and a store-level sub-type filter"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 tags: []
 parent: SPEC-140
 phases:
