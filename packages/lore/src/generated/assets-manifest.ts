@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "44405807e16e1723fe9781c4fd610e52f03670c1555707b5a13e0c762fbe40bb",
+  tree_digest: "80e81d18a29ab234d5f395cbabaea4204ef67412fd5ba7e9bed8966fc1e3e2b1",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "9007eda7ceb89ada4a686d6707da02589930e7b1b15baa218039f4f11c0a8eab" },
@@ -59,7 +59,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/lore-gate-g2-spec-promote.sh", kind: "hook", ownership: "managed", sha256: "16383138488773260bdb738c03ba5a05d331097605d99980d7a4559c5c8a43ba" },
   { path: "hooks/lore-gate-g3-plan-promote.sh", kind: "hook", ownership: "managed", sha256: "a41d6ffc71f529d485a71dc193268e72aab5f43e7d8c02df6803746a71147a91" },
   { path: "hooks/lore-gate-g4-task-claim.sh", kind: "hook", ownership: "managed", sha256: "af8890e3cdefc4cba2eca2e9f1c4a36367ad475ee69f659cb40f8122b7303ee1" },
-  { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "42bebdd954998c7392efbd894bacff5dd698c477ca3755c83c0661ddad402b29" },
+  { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "b7d0bc3640910c1a7c01c381b96e391661bdd636898e0c2c83b570fd988f76cf" },
   { path: "hooks/pre-dispatch-isolation-gate.mjs", kind: "hook", ownership: "managed", sha256: "1479ddc2b6f596a8c3709d8e84571b2b5bbccda39d73ef23dca45d69150c8866" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "e238cfcf73ba5794f3decbcd0efccfc8869ce0c593032923810a0ddd41cd3b1b" },
   { path: "hooks/pre-subagent-gate.mjs", kind: "hook", ownership: "managed", sha256: "eff1c2d0cd8b92288d48e278040c6d014f1725eb54c69d21eab342f5924ccae4" },
