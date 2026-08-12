@@ -3,7 +3,7 @@ id: TASK-697
 type: task
 role: plan
 title: "The pure resolver's isWithin rejects everything at the filesystem root, so each caller must route around it"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-12
 updated: 2026-08-12

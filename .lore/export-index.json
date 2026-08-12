@@ -5820,6 +5820,18 @@
     "01KZTRSMEAHCG2DDW1KQPMV5M2": {
       "human_id": "TASK-702",
       "file_path": "docs/requirements/task/TASK-702-the-mcp-boot-carries-the-same-frozen-startup-cwd.md"
+    },
+    "01KZTTZFYTNR4NGYSATNFZMC2B": {
+      "human_id": "TASK-703",
+      "file_path": "docs/requirements/task/TASK-703-a-captured-evidence-row-observes-the-exit-code-val.md"
+    },
+    "01KZTTKQMF2ZGECM4K1JV0FFZP": {
+      "human_id": "TASK-704",
+      "file_path": "docs/requirements/task/TASK-704-verify-execution-root-carries-a-byte-identical-cop.md"
+    },
+    "01KZTTKMZ88M35MNW8A9ZD1EGW": {
+      "human_id": "TASK-705",
+      "file_path": "docs/requirements/task/TASK-705-the-undetermined-provenance-value-has-no-policy-fa.md"
     }
   }
 }

@@ -3,7 +3,7 @@ id: TASK-698
 type: task
 role: plan
 title: "The HTTP exemption is conditional on where lore serve was launched, not on the adapter"
-status: draft
+status: archived
 priority: high
 created: 2026-08-12
 updated: 2026-08-12

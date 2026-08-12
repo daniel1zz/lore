@@ -3,7 +3,7 @@ id: TASK-696
 type: task
 role: plan
 title: "The handoff and UAT carve-out in the foreign-write guard is unnamed in the spec and unasserted by any AC"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-12
 updated: 2026-08-12
