@@ -36,18 +36,62 @@
  *   - Classification routes through `gate-predicates.ts::compareClaimSessions`
  *     — the SAME three-valued session comparator the anchor-overlap mutex
  *     uses — never a new ad hoc boolean equality check.
- *   - The discovered entry set is the union of (a) every worktree path named
- *     by EITHER `worktrees` (current `git worktree list`) OR any session's
- *     own `.worktree` (a claim can outlive its worktree's removal — "a
- *     worktree whose path no longer exists" must still surface, never
- *     vanish), and (b) every branch named by a session's `branches[]` that
- *     is NOT the current branch of any worktree in (a) — an "orphan" branch,
- *     claimed but checked out nowhere right now.
- *   - `unowned`: a worktree entry with NO session recording that worktree at
- *     all (GAP-B: the main checkout, or any worktree never taken through
- *     `lore claim`, is an anchor of no task). A branch entry is NEVER
- *     `unowned` by construction — it exists in the discovered set ONLY
- *     because some session's claim named it.
+ *   - The discovered entry set is the union of THREE sources: (a) every
+ *     worktree path named by EITHER `worktrees` (current `git worktree
+ *     list`) OR any session's own `.worktree` (a claim can outlive its
+ *     worktree's removal — "a worktree whose path no longer exists" must
+ *     still surface, never vanish); (b) every branch named by a session's
+ *     `branches[]` that is NOT the current branch of any worktree in (a) —
+ *     an "orphan" branch, claimed but checked out nowhere right now; and
+ *     (c) every branch named by the optional `localBranches` parameter that
+ *     is NOT already covered by (a) or (b) — a git-known local branch that
+ *     NEITHER a worktree NOR any claim currently names. Before source (c)
+ *     existed (task-lore-territory-s-discovery-set-is-claim-derived-so-an,
+ *     2026-08-13), such a branch was invisible to BOTH (a) and (b) and
+ *     silently dropped — exactly the branch a reader deciding what to delete
+ *     needs to see. `localBranches` is `undefined`, NEVER `[]`, when the
+ *     caller could not enumerate local refs at all (mirrors
+ *     `real-git-port.ts::BranchMeasurement`'s "not measured ≠ known-absent"
+ *     discipline) — an empty array asserts a MEASURED zero local branches, a
+ *     genuinely different fact from "enumeration was not attempted or
+ *     failed"; this function never needs to distinguish the two itself
+ *     (`undefined` simply contributes nothing to source (c)), but a caller
+ *     collapsing "failed" into `[]` before calling in would silently
+ *     reintroduce the exact defect this parameter exists to close.
+ *   - Ref enumeration for source (c) is deliberately NOT performed by this
+ *     module — `localBranches` is injected DATA, never a git shell-out this
+ *     file makes itself. Two reasons, both from this module's own prior
+ *     history: (1) this file was split out of `commands/territory.ts`
+ *     specifically to stay unit-testable without IO (see this header's own
+ *     account of that split, and the later AC-REPLAY-1 tension it already
+ *     records — adding a SECOND independent git dependency here would widen
+ *     that same drift rather than resolve it); (2) a pure function taking an
+ *     injected fact set is testable with hand-constructed fixtures AND with
+ *     real `mkdtemp` git repos (this file does both), with no repo required
+ *     for the former. The actual enumeration (e.g. `git for-each-ref
+ *     refs/heads/`) belongs in the adapter git port
+ *     (`adapters/real-git-port.ts`, alongside `detectWorktreeBranch`'s
+ *     identical "standalone leaf function, not a `GitPort` interface method"
+ *     shape — a `GitPort` method would force EVERY `GitPort` implementer,
+ *     including `SeatService`'s unrelated fake fixtures, to grow a method
+ *     they do not need) and threaded through `commands/territory.ts` into
+ *     this parameter. That wiring is NOT yet done as of this remediation —
+ *     no current caller of `partitionTerritory` passes a real
+ *     `localBranches` value — because `adapters/real-git-port.ts` was, at
+ *     the time this parameter was added, under an active `lore claim` by a
+ *     concurrent task on a different anchor; landing it here would have
+ *     touched a file this task never declared as its own anchor. This
+ *     function is ready to receive real refs the moment that wiring lands.
+ *   - `unowned`: an entry with NO session recording it at all — a worktree
+ *     GAP-B never taken through `lore claim`, OR (since source (c) above) a
+ *     git-known branch nobody's claim names either. `unmeasured` is reserved
+ *     for the OPPOSITE shape: at least one session names the entry, but
+ *     session-identity comparison cannot resolve same-vs-different (see
+ *     `classify()`) — "nobody claims this at all" is a more decisive, more
+ *     final fact than "someone claims this but we cannot tell who", so it
+ *     gets the more decisive bucket. A prior version of this line asserted a
+ *     branch entry is "NEVER `unowned` by construction"; that was true only
+ *     because source (c) did not exist yet.
  *   - Per-entry bucket precedence when MULTIPLE sessions reference the same
  *     worktree/branch: `mine` (any session compares same-session) beats
  *     `foreign` (any session compares different-session) beats `unmeasured`
@@ -193,6 +237,12 @@ function measureUnmergedCommits(branch: string | undefined, candidateCwds: reado
  *   (`resolveClaimSessionId(process.env)`), or `undefined` when unmeasured —
  *   an absent value makes EVERY comparison `"not-measured"`, so nothing is
  *   ever misclassified `mine` on an unmeasured caller.
+ * @param localBranches - Every LOCAL branch name git itself reports (e.g. via
+ *   `git for-each-ref --format=%(refname:short) refs/heads/`) — discovery
+ *   source (c), see this module's own §Invariants. `undefined` when the
+ *   caller could not enumerate (or has not been wired to attempt it yet) —
+ *   NEVER `[]` to stand in for that; an empty array asserts a MEASURED zero
+ *   local branches, a different fact entirely.
  * @returns The four-bucket partition — `mine.length + foreign.length +
  *   unowned.length + unmeasured.length` always equals the discovered entry
  *   count (this module's own §Invariants "never dropped" clause).
@@ -201,6 +251,7 @@ export function partitionTerritory(
   worktrees: readonly TerritoryWorktree[],
   sessions: readonly ReadySession[],
   currentSessionId: string | undefined,
+  localBranches?: readonly string[],
 ): TerritoryPartition {
   const partition: TerritoryPartition = { mine: [], foreign: [], unowned: [], unmeasured: [] };
 
@@ -254,6 +305,20 @@ export function partitionTerritory(
   const orphanBranches = new Set<string>();
   for (const session of sessions) {
     for (const branch of session.branches) {
+      if (!worktreeBranches.has(branch)) orphanBranches.add(branch);
+    }
+  }
+  // reason: discovery source (c), §Invariants — a git-known local branch that
+  // is NEITHER a worktree's current branch NOR named by any session's claim
+  // was, before this loop existed, invisible to both prior sources and
+  // silently dropped. Folding it into the SAME `orphanBranches` set reuses
+  // the identical classify+push loop below unchanged: its `relevant` filter
+  // naturally comes back empty for a branch no session names, which
+  // `classify` resolves to `unowned` with no special-casing needed here.
+  // `Set.add` is idempotent, so a branch already added above (claimed) is
+  // never duplicated.
+  if (localBranches !== undefined) {
+    for (const branch of localBranches) {
       if (!worktreeBranches.has(branch)) orphanBranches.add(branch);
     }
   }
