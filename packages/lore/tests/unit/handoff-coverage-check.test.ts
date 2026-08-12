@@ -1383,6 +1383,164 @@ describe("task-resume-coverage-disposition-parser-an-unrecognised-token — an u
   });
 });
 
+// ─── task-the-resume-coverage-verb-accepts-a-reason-after-deferred ─────────
+//
+// The defect: `deferred:<reason>` requires and parses a reason, but `done`
+// forbade one outright — appending a reason after `done` invalidated the
+// token entirely, punishing the more informative disposition (an author
+// explaining a completion's own evidence, exactly this repo's own evidence
+// discipline). Measured live TWICE against real handoff tickets
+// (2026-08-02 against knowledge-handoff-agent-main-orchestrator-70,
+// 2026-08-03 against -77) — both times `done — <evidence>` was rejected.
+// Fixed by widening `isAcceptedDoneDisposition` to also recognize
+// `done:<reason>` and `done — <reason>` (a SPACE then U+2014 EM DASH),
+// discarding the trailing text — never a second diagnostic, never a round
+// trip, for exactly the two forms Required #1 names.
+
+describe("task-the-resume-coverage-verb-accepts-a-reason-after-deferred — a reason after `done` is accepted, not rejected", () => {
+  it("NEGATIVE (fails before this fix): `done:<reason>` (colon form) is accepted — full accounting, empty stdout, no diagnostic of any kind", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const message = TWO_AND_TWO_IDS.map((id) =>
+      dispositionLine(id, `${RESUME_DISPOSITION_DONE}:shipped in commit abc123`),
+    ).join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("NEGATIVE (fails before this fix): `done — <reason>` (space + U+2014 em dash + space, the exact live-measured natural-language form) is accepted — full accounting, empty stdout, no diagnostic", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    // The literal em dash character (U+2014), not an ASCII hyphen — matches
+    // the measured incident text (`done — 作为本轮基线消费…`).
+    const message = TWO_AND_TWO_IDS.map((id) =>
+      dispositionLine(id, `${RESUME_DISPOSITION_DONE} — 作为本轮基线消费的证据`),
+    ).join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("STATE: bare `done`, `done:<reason>`, `done — <reason>`, and `deferred:<reason>` all accepted TOGETHER across the same ticket's four items", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const dispositions = [
+      RESUME_DISPOSITION_DONE,
+      `${RESUME_DISPOSITION_DONE}:shipped in commit abc123`,
+      `${RESUME_DISPOSITION_DONE} — verified via bun test, all green`,
+      `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope for this session`,
+    ];
+    expect(dispositions).toHaveLength(TWO_AND_TWO_IDS.length);
+    const message = TWO_AND_TWO_IDS.map((id, i) => dispositionLine(id, dispositions[i] as string)).join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("REGRESSION: a genuinely unmentioned item is STILL reported as unaccounted — this fix widens acceptance, it does not fabricate coverage for an item never named at all", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const mentioned = TWO_AND_TWO_IDS.slice(0, 3);
+    const unmentioned = TWO_AND_TWO_IDS[3] as string;
+    const message = mentioned
+      .map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DONE} — with a reason attached`))
+      .join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(parseDecisionPayload(result.stdout).decision).toBe(BLOCK_DECISION);
+    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual([unmentioned]);
+    expect(parseUnrecognizedDispositionIds(result.stderr)).toEqual([]);
+  });
+
+  it("REGRESSION: `deferred:<reason>` with a genuine non-empty reason is STILL accepted, unaffected by this fix — only the `done` side of the grammar changed", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const message = TWO_AND_TWO_IDS.map((id) =>
+      dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}next session`),
+    ).join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("BOUNDARY/REGRESSION: `deferred:` with an empty reason is STILL rejected via the original generic 'unaccounted' path — requiring a non-empty deferral reason (S1) is unchanged", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const message = TWO_AND_TWO_IDS.map((id) => dispositionLine(id, RESUME_DISPOSITION_DEFERRED_PREFIX)).join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(parseDecisionPayload(result.stdout).decision).toBe(BLOCK_DECISION);
+    expect(sortedUnique(parseUndispositionedIds(result.stderr))).toEqual(sortedUnique(TWO_AND_TWO_IDS));
+    expect(parseUnrecognizedDispositionIds(result.stderr)).toEqual([]);
+  });
+
+  it("BOUNDARY: bare `done` with trailing whitespace only is STILL accepted, unchanged by this fix", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const message = TWO_AND_TWO_IDS.map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DONE}   `)).join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("BOUNDARY: the glued/doubled-em-dash form with NO space at all (the OTHER, already-fixed live incident) stays unrecognized — the widened acceptance does not swallow it", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const targetId = TWO_AND_TWO_IDS[0] as string;
+    // Same shape as the OTHER sibling task's own BOUNDARY fixture: `done`
+    // directly touching a DOUBLED em dash, zero whitespace before it. This
+    // fix's separator pattern requires `\s+` before the dash, so this string
+    // must still fall through to `unrecognized`, never to `accepted`.
+    const rawToken = `${RESUME_DISPOSITION_DONE}——no space at all before the dash`;
+    const otherIds = TWO_AND_TWO_IDS.filter((id) => id !== targetId);
+    const message = [dispositionLine(targetId, rawToken), fullAccounting(otherIds)].join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(parseDecisionPayload(result.stdout).decision).toBe(BLOCK_DECISION);
+    expect(parseUnrecognizedDispositionIds(result.stderr)).toEqual([targetId]);
+    expect(parseUndispositionedIds(result.stderr)).toEqual([]);
+  });
+
+  it("BOUNDARY: `done:` with nothing after the colon is still accepted — a completion's reason, unlike a deferral's, has no non-empty requirement", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const message = TWO_AND_TWO_IDS.map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DONE}:`)).join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("REGRESSION: the unrecognized-token message names all THREE accepted completion forms plus the deferral form, composed from exported constants where they exist", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    const targetId = TWO_AND_TWO_IDS[0] as string;
+    const otherIds = TWO_AND_TWO_IDS.filter((id) => id !== targetId);
+    const message = [dispositionLine(targetId, "not sure yet"), fullAccounting(otherIds)].join("\n");
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    const reason = blockReasonOf(result);
+    expect(reason).toContain(RESUME_DISPOSITION_DONE);
+    expect(reason).toContain(RESUME_DISPOSITION_DEFERRED_PREFIX);
+    // The colon and em-dash separator forms are presented too, so an author
+    // reading this message can actually discover the widened grammar.
+    expect(reason).toContain(`${RESUME_DISPOSITION_DONE}:<reason>`);
+    expect(reason).toContain(`${RESUME_DISPOSITION_DONE} — <reason>`);
+  });
+});
+
 // ─── ERROR — degraded inputs degrade, never crash ───────────────────────────
 
 describe("ERROR — a degraded input never crashes and never fabricates an obligation", () => {
