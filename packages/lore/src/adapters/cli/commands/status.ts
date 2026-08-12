@@ -89,9 +89,8 @@ import {
   buildListSpecs,
   countArmedSpecs,
   disabledCodeDriftPayload,
-  renderDriftRepairHint,
+  renderDriftSectionLines,
   runDrift,
-  SYMBOL_MISSING_FOOTNOTE,
   type CodeDriftPayload,
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
@@ -244,41 +243,19 @@ function renderPrdBudgetSection(payload: {
 }
 
 /**
- * Renders the two scanned populations — SPECS and KNOWLEDGE docs — as one phrase.
- * Both counts always print, including a zero: an omitted population reads as "not
- * scanned", which is exactly the ambiguity the separate `knowledge_checked` field
- * exists to remove.
- */
-function renderDriftPopulation(payload: CodeDriftPayload): string {
-  return `${payload.specs_checked} spec(s) + ${payload.knowledge_checked} knowledge doc(s) checked`;
-}
-
-/**
  * Text rendering for the `--check-drift` section (D5) — used regardless of
  * whether `--check-tree` was ALSO requested (both sections always print fully).
  * Every drift row names the DOC TYPE its anchor came from, so a knowledge breach in
  * a mixed report can never be read as a spec breach.
+ *
+ * A thin `console.log` wrapper over `renderDriftSectionLines` (`flows/drift-flow.js`)
+ * — the actual line-building logic lives THERE, not here, so a plain vitest test
+ * can call it directly (this file transitively imports `loader.js` → `bun:sqlite`,
+ * unresolvable under vitest — see that function's own doc for why).
  */
 function renderDriftSection(payload: CodeDriftPayload): void {
-  if (!payload.enabled) {
-    console.log("Code drift: disabled (workflow.drift.enabled=false)");
-    return;
-  }
-  if (!payload.armed) {
-    console.log("Code drift: armed=false (no spec or knowledge doc declares code_anchors)");
-    return;
-  }
-  if (payload.consistent) {
-    console.log(`Code drift: consistent (${renderDriftPopulation(payload)})`);
-    return;
-  }
-  console.log(`Code drift: ${payload.drifts.length} drift(s) (${renderDriftPopulation(payload)})`);
-  for (const row of payload.drifts) {
-    console.log(`  - [${row.doc_type}] ${row.doc_slug} → ${row.anchor} (${row.kind})`);
-    console.log(`    ${renderDriftRepairHint(row)}`);
-  }
-  if (payload.drifts.some((d) => d.kind === "symbol_missing")) {
-    console.log(`  ${SYMBOL_MISSING_FOOTNOTE}`);
+  for (const line of renderDriftSectionLines(payload)) {
+    console.log(line);
   }
 }
 

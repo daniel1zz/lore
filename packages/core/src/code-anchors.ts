@@ -294,17 +294,19 @@ export type DriftKind = (typeof DRIFT_KINDS)[number];
  * shape). The owning doc is a `spec` OR a `knowledge` document — `doc_type` says
  * which, and is REQUIRED so the classification output can never be misattributed.
  *
- * reason: the governing spec's Declared field contract renames the SLUG field only
- * and adds `doc_type`; `spec_id`/`spec_status` keep their historical SPEC-045 names,
- * so a consumer keying on either MUST read `doc_type` to know which doc type they
- * describe.
+ * reason: every identity field is doc-flavoured (`doc_id`/`doc_slug`/`doc_status`) —
+ * the governing spec's Declared field contract (M2 of
+ * spec-a-write-side-fact-with-no-read-side-address-counts-with-no) retired the
+ * legacy spec-flavoured spellings this interface used to carry, so no consumer can
+ * key on a spec-shaped field name and silently misread a knowledge doc's breach as
+ * a spec's.
  */
 export interface DriftInputEntry {
-  spec_id: string;
+  doc_id: string;
   doc_slug: string;
   /** The owning document's type — `"spec"` or `"knowledge"` today. */
   doc_type: DocType;
-  spec_status: string;
+  doc_status: string;
   anchor: ParsedCodeAnchor;
 }
 
@@ -331,11 +333,11 @@ export interface AnchorProbe {
  * must never have to guess whether a breach belongs to a spec or to a knowledge doc.
  */
 export interface DriftRow {
-  spec_id: string;
+  doc_id: string;
   doc_slug: string;
   /** The breaching document's type — `"spec"` or `"knowledge"` today. */
   doc_type: DocType;
-  spec_status: string;
+  doc_status: string;
   /** The anchor's original raw string (round-tripped from `ParsedCodeAnchor.raw`). */
   anchor: string;
   kind: DriftKind;
@@ -351,12 +353,12 @@ export interface DriftRow {
  * @param entry - The declared anchor whose owning doc identity to copy
  * @returns The identity half of a {@link DriftRow} (never the anchor/kind half)
  */
-function docIdentityOf(entry: DriftInputEntry): Pick<DriftRow, "spec_id" | "doc_slug" | "doc_type" | "spec_status"> {
+function docIdentityOf(entry: DriftInputEntry): Pick<DriftRow, "doc_id" | "doc_slug" | "doc_type" | "doc_status"> {
   return {
-    spec_id: entry.spec_id,
+    doc_id: entry.doc_id,
     doc_slug: entry.doc_slug,
     doc_type: entry.doc_type,
-    spec_status: entry.spec_status,
+    doc_status: entry.doc_status,
   };
 }
 
@@ -396,10 +398,10 @@ export interface ComputeDriftResult {
  *
  * @example
  * computeDrift(
- *   [{ spec_id: "s1", doc_slug: "spec-x", doc_type: "spec", spec_status: "approved", anchor: { raw: "a.ts", path: "a.ts", isDir: false } }],
+ *   [{ doc_id: "s1", doc_slug: "spec-x", doc_type: "spec", doc_status: "approved", anchor: { raw: "a.ts", path: "a.ts", isDir: false } }],
  *   new Map([["a.ts", { stat: "missing" }]]),
  * );
- * // => { consistent: false, drifts: [{ spec_id: "s1", doc_slug: "spec-x", doc_type: "spec", spec_status: "approved", anchor: "a.ts", kind: "file_missing" }] }
+ * // => { consistent: false, drifts: [{ doc_id: "s1", doc_slug: "spec-x", doc_type: "spec", doc_status: "approved", anchor: "a.ts", kind: "file_missing" }] }
  */
 export function computeDrift(
   declared: DriftInputEntry[],

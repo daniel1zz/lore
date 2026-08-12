@@ -81,10 +81,10 @@ interface JsonEnvelope {
 }
 
 interface DriftRowJson {
-  spec_id: string;
+  doc_id: string;
   doc_slug: string;
   doc_type: string;
-  spec_status: string;
+  doc_status: string;
   anchor: string;
   kind: string;
   detail?: string;

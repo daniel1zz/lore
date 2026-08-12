@@ -43,13 +43,13 @@ function makeEntry(overrides: Partial<DriftInputEntry> = {}): DriftInputEntry {
   const anchor: ParsedCodeAnchor =
     overrides.anchor ?? { raw: "src/a.ts", path: "src/a.ts", isDir: false };
   return {
-    spec_id: "01SPEC000000000000000001",
+    doc_id: "01SPEC000000000000000001",
     doc_slug: "spec-x",
     // The default fixture is a SPEC-owned anchor. The knowledge-owned population and
     // the per-row doc_type attribution live in
     // packages/lore/tests/unit/service/drift-population-reporting.test.ts.
     doc_type: "spec",
-    spec_status: "approved",
+    doc_status: "approved",
     ...overrides,
     anchor,
   };
