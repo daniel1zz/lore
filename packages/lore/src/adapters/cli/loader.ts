@@ -2,7 +2,10 @@
  * CLI App loader — telemetry-aware DB discovery and App construction.
  *
  * Public surface:
- *   - loadLoreApp() — single unified entry point for all CLI commands
+ *   - loadLoreApp(opts?) — single unified entry point for all CLI commands
+ *   - LoreAppBootSurface / LoadLoreAppOptions — the ONE boot-time fact a caller
+ *     must supply when its process is NOT a fresh per-invocation CLI subprocess
+ *     (see {@link LoreAppBootSurface})
  *
  * Invariants:
  *   - loadLoreApp() ALWAYS loads config.yaml so telemetry is wired when enabled
@@ -21,6 +24,12 @@
  *     failure (malformed YAML, bad `sync`/`telemetry`/`workflow` section, unknown top-level
  *     key, etc.) keeps the pre-existing silent fallback-to-undefined behaviour — this is a
  *     documented non-goal of SPEC-030, not an oversight.
+ *   - spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5: the
+ *     foreign-corpus-write guard's `provenance` is keyed on the BOOT SURFACE
+ *     (`opts.surface`), NEVER unconditionally on this process's `process.cwd()`.
+ *     A `"http"` boot supplies `null` — §D5's one named exemption. See
+ *     {@link resolveForeignWriteProvenance} for the full decision and its
+ *     disclosed residual.
  *   - SPEC-073: `createApp()` is called inside a `try/catch` — a corrupted/non-SQLite
  *     `.lore/lore.db` makes `bun:sqlite`'s `Database` constructor throw SYNCHRONOUSLY
  *     (never a `Result`), which pre-SPEC-073 propagated uncaught all the way to citty's
@@ -46,7 +55,14 @@
 
 import { dirname } from "path";
 import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
-import type { LoreConfig, LoreDefaults, CallerSurface, LoreError, Result } from "@lore/core";
+import type {
+  LoreConfig,
+  LoreDefaults,
+  CallerSurface,
+  CorpusProvenance,
+  LoreError,
+  Result,
+} from "@lore/core";
 // reason: loadConfig/loadGlobalConfig/resolveGlobalConfigPath read the filesystem
 // via Node fs/path/os — only reachable via the @lore/core/node subpath
 // (browser-safety split, packages/core/src/CLAUDE.md).
@@ -96,6 +112,118 @@ function detectCliSurface(): CallerSurface {
     return "agent";
   }
   return "cli";
+}
+
+/**
+ * WHICH ADAPTER a {@link loadLoreApp} boot is composing an App for — the one
+ * fact about the calling PROCESS this loader cannot derive and must be TOLD.
+ *
+ * ⛔ Deliberately NOT `CallerSurface` (SPEC-024's five per-operation values),
+ * and the difference is the whole point. `CallerSurface` answers "who is
+ * making THIS call"; for HTTP that is a PER-REQUEST fact resolved in
+ * `ActorContext` (`adapters/http/auth.ts`, values `http_cookie`/`http_token`)
+ * and is therefore UNKNOWABLE at boot — `app.callerSurface` is `"cli"` or
+ * `"agent"` for a `lore serve` process, never an HTTP value. This type answers
+ * a different, boot-time question: does THIS process's `process.cwd()`
+ * faithfully represent the caller's own directory?
+ *
+ *   - `"cli"` — YES. Covers SPEC-024's `cli` AND `agent`: both are a fresh
+ *     subprocess per invocation, so the process cwd IS the caller's cwd, and
+ *     the corpus-write guard can key on it.
+ *   - `"http"` — NO. Covers SPEC-024's `http_cookie` AND `http_token`: ONE
+ *     long-lived `lore serve` / `lore dashboard` process whose cwd was frozen
+ *     at boot, answering requests that carry no directory at all. This is
+ *     spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5's ONE
+ *     named exemption.
+ *
+ * ⛔ Do NOT add a value here without also adding its production call site in
+ * the SAME change: an unwired boot surface is a capability with no consumer,
+ * and `foreign-corpus-write-adapters.test.ts`'s wiring census exists to make
+ * that drift loud rather than silent.
+ */
+export type LoreAppBootSurface = "cli" | "http";
+
+/**
+ * {@link loadLoreApp}'s options.
+ */
+export interface LoadLoreAppOptions {
+  /**
+   * See {@link LoreAppBootSurface}. Omitted → `"cli"`, which is correct for
+   * every one of this CLI's per-invocation commands (the overwhelming
+   * majority of call sites) and is the FAIL-CLOSED direction: it keeps the
+   * corpus-write guard armed. Only a boot that mounts a long-lived server
+   * passes anything else.
+   */
+  readonly surface?: LoreAppBootSurface;
+}
+
+/**
+ * The §D5 adapter-matrix decision for THIS boot: which `provenance` the
+ * foreign-corpus-write guard receives.
+ *
+ * Root cause this closes: the previous implementation read
+ * `resolveCorpus(process.cwd())` unconditionally, so the guard's provenance
+ * came from the SERVER's startup directory for every surface booting through
+ * {@link loadLoreApp}. `lore serve` launched from inside a nested worktree
+ * therefore gave HTTP a `git_common_dir` provenance and refused EVERY HTTP
+ * write with `gate:corpus-write:foreign-provenance` — an unrecoverable
+ * lockout, because an HTTP caller has neither a per-call directory nor a claim
+ * lease through which to declare intent. §D5's exemption exists precisely to
+ * prevent that outcome, and it is a property of the ADAPTER, never of where
+ * the operator happened to start the server.
+ *
+ * Two oracles hold this together, and neither is sufficient alone:
+ *   - `tests/unit/adapters/loader-foreign-write-surface.bun.test.ts` — drives
+ *     `loadLoreApp()` itself from a nested-worktree fixture and asserts HTTP
+ *     accepts / CLI refuses the SAME write. (Bun, not vitest: this module
+ *     reaches `bun:sqlite` through `app.ts`.)
+ *   - `tests/unit/adapters/foreign-corpus-write-adapters.test.ts` — a
+ *     production-wiring census proving no `startHttpServer` mount silently
+ *     relies on the `"cli"` default. That default is the only reason this
+ *     defect could recur, so the census is what makes it safe.
+ *
+ * ⛔ DISCLOSED RESIDUAL — the MCP boot (`packages/lore/src/index.ts`'s
+ * `--mcp-server` branch) still passes no surface and therefore still resolves
+ * this process's frozen startup cwd into the AMBIENT `CorpusService` context.
+ * MCP's own PER-CALL check (`adapters/mcp/tools.ts`, derived from the
+ * `caller_cwd` tool parameter) is unaffected and correct, but the ambient
+ * second layer under it carries the same boot-cwd defect this function fixes
+ * for HTTP. Left as-is deliberately: §D5's adapter matrix names exactly ONE
+ * exemption (the HTTP row), and `packages/lore/src/index.ts` is outside the
+ * declared scope of `task-the-http-exemption-is-conditional-on-where-lore-
+ * serve-was`. Disclosed by that task's implementer, not silently carried: the
+ * fix is one `{surface: "mcp"}`-shaped argument at `index.ts`'s `loadLoreApp()`
+ * call plus the matching enum member here, and it needs its own AC because
+ * removing the ambient layer under MCP's per-call check is a real behaviour
+ * change, not a refactor.
+ *
+ * @param bootSurface - See {@link LoreAppBootSurface}.
+ * @returns `null` for a surface with no per-call caller directory (always
+ *   inert in `checkForeignCorpusWrite`); otherwise the provenance
+ *   `resolveCorpus` derives from this process's cwd. `undefined` from
+ *   `resolveCorpus` (no corpus resolvable at all) collapses to `null` — the
+ *   same "nothing to key on" answer, and unreachable in practice because
+ *   `findLoreDbPath()` already exited on that condition before this runs.
+ * @example
+ *   resolveForeignWriteProvenance("http") // => null, wherever the server was started
+ *   resolveForeignWriteProvenance("cli")  // => "own" | "git_common_dir" | "undetermined" | null
+ */
+function resolveForeignWriteProvenance(bootSurface: LoreAppBootSurface): CorpusProvenance | null {
+  switch (bootSurface) {
+    case "http":
+      return null;
+    case "cli":
+      return resolveCorpus(process.cwd())?.provenance ?? null;
+    default: {
+      // Exhaustive check — a new LoreAppBootSurface must decide explicitly.
+      // reason: the fallback is the CLI branch, not `null`: an unhandled
+      // surface must leave the guard ARMED (fail closed), never silently
+      // disable it for a whole adapter.
+      const _exhaustive: never = bootSurface;
+      void _exhaustive;
+      return resolveCorpus(process.cwd())?.provenance ?? null;
+    }
+  }
 }
 
 /**
@@ -217,6 +345,11 @@ export function loadProjectConfig(): LoreConfig | undefined {
  * reason: Adding defaults to the return type (not to App) keeps App composition-root
  * pure — defaults are CLI display preferences, not domain state. (SPEC-003 §6.2)
  *
+ * @param opts - See {@link LoadLoreAppOptions}. `opts.surface` is the ONE fact
+ *   the loader cannot derive: a long-lived server boot (`lore serve`,
+ *   `lore dashboard`) MUST pass `{surface: "http"}` so the foreign-corpus-write
+ *   guard is keyed on the adapter rather than on the directory the operator
+ *   started the server from (§D5, {@link resolveForeignWriteProvenance}).
  * @returns { app, dbPath, defaults, config } — App wired with telemetry; dbPath for
  *   commands that need it; defaults (editor/format/color) merged from global + project
  *   config; config is the parsed project `.lore/config.yaml` (sync section stripped,
@@ -233,12 +366,17 @@ export function loadProjectConfig(): LoreConfig | undefined {
  *   const { app, defaults, config } = loadLoreApp();
  *   try { ... } finally { app.close(); }
  */
-export function loadLoreApp(): {
+export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   app: App;
   dbPath: string;
   defaults: LoreDefaults;
   config: LoreConfig | undefined;
 } {
+  // reason: `?? "cli"` is a documented DEFAULT for an optional field, not a
+  // silent fallback for a required one — see {@link LoadLoreAppOptions.surface}
+  // for why "cli" is both the overwhelming majority case and the fail-closed
+  // direction.
+  const bootSurface: LoreAppBootSurface = opts.surface ?? "cli";
   const dbPath = findLoreDbPath();
   const configResult = resolveProjectConfigResult(dbPath);
   let rawConfig: LoreConfig | undefined;
@@ -339,20 +477,25 @@ export function loadLoreApp(): {
   app.callerSurface = detectCliSurface();
 
   // spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5 — the
-  // foreign-corpus-write guard's ambient context, resolved ONCE here (a CLI
-  // process's cwd/config never change mid-invocation) and threaded into BOTH
-  // CorpusService (reads it internally on every create/set/link/unlink/
-  // delete) and TaskWorkflowService's claim/addEvidence/release (wrapped
-  // externally from here — see foreign-corpus-write-guard.ts's module header,
-  // "Why external wrapping", for why that lives outside TaskWorkflowService
-  // itself). Calling `resolveCorpus()` again here — `findLoreDbPath()` above
-  // already computed the IDENTICAL resolution internally, deterministically,
-  // from the same cwd — is deliberate: neither `findLoreDbPath` nor
-  // `findLoreDbPathQuiet` exposes the `provenance` they computed, and
-  // `corpus-resolution.ts`'s own module header names exactly this guard as
-  // the future caller that needs to call `resolveCorpus()` directly instead.
+  // foreign-corpus-write guard's ambient context, resolved ONCE here (neither
+  // a CLI invocation's cwd/config nor a server boot's surface changes
+  // afterwards) and threaded into BOTH CorpusService (reads it internally on
+  // every create/set/link/unlink/delete) and TaskWorkflowService's
+  // claim/addEvidence/release (wrapped externally from here — see
+  // foreign-corpus-write-guard.ts's module header, "Why external wrapping",
+  // for why that lives outside TaskWorkflowService itself).
+  //
+  // ⛔ The `provenance` half is keyed on the BOOT SURFACE, never on this
+  // process's cwd alone — `resolveForeignWriteProvenance` owns that decision
+  // and documents why (the HTTP lockout it closes, and the MCP residual it
+  // does not). On the `"cli"` branch it calls `resolveCorpus()` a second time:
+  // `findLoreDbPath()` above already computed the IDENTICAL resolution
+  // internally, deterministically, from the same cwd, but neither
+  // `findLoreDbPath` nor `findLoreDbPathQuiet` exposes the `provenance` they
+  // computed, and `corpus-resolution.ts`'s own module header names exactly
+  // this guard as the caller that needs `resolveCorpus()` directly instead.
   const foreignWriteContext: ForeignCorpusWriteContext = {
-    provenance: resolveCorpus(process.cwd())?.provenance ?? null,
+    provenance: resolveForeignWriteProvenance(bootSurface),
     enabled: resolveForeignCorpusWriteGateEnabled(telemetryOnlyConfig),
   };
   app.corpusService.setForeignCorpusWriteContext(foreignWriteContext);

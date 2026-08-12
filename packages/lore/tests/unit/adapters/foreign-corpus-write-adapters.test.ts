@@ -37,6 +37,20 @@
  * is accepted regardless of fixture) and mechanistically (the CLI's
  * `resolveCorpus` is never even invoked when `caller_cwd` is absent).
  *
+ * A fifth block is a PRODUCTION-WIRING CENSUS over the source tree
+ * (`task-the-http-exemption-is-conditional-on-where-lore-serve-was`). AC-CP-5(c)
+ * above observes the predicate on a bare `CorpusService`, whose constructor
+ * default is `{provenance: null, enabled: true}` — null BY CONSTRUCTION, so
+ * that block alone can never go red when the COMPOSITION ROOT wires something
+ * else, and for a while it did: `loader.ts` derived the guard's provenance
+ * from the SERVER's startup `process.cwd()` for every surface, so `lore serve`
+ * launched inside a nested worktree refused every HTTP write. The behavioural
+ * half of that fix is asserted at the wired path in
+ * `loader-foreign-write-surface.bun.test.ts` (a bun test — `loader.ts` pulls in
+ * `bun:sqlite`, which vitest cannot resolve, so it CANNOT live in this file).
+ * The census here closes the other half: it makes the loader's `"cli"` DEFAULT
+ * safe by proving no production HTTP mount silently relies on it.
+ *
  * Runner: vitest. This file touches no `bun:sqlite` (InMemoryStore only);
  * the MCP-side fixtures spawn only the real `git` binary via `corpus-
  * resolution.ts`'s own `spawnSync` calls, mirroring `corpus-resolver-
@@ -48,9 +62,18 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { NoOpTelemetry } from "@lore/core";
@@ -334,9 +357,18 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
   it("an HTTP-adapter write (via auth.ts's resolveDocWriteOpts) invokes the predicate EXACTLY ONCE with provenance EXACTLY null, and the write lands", async () => {
     // Bare CorpusService construction — NEVER calls setForeignCorpusWriteContext,
     // so its ambient context stays the documented default {provenance: null,
-    // enabled: true}. This is the FACTUAL basis of the HTTP exemption measured
-    // for this task: zero `process.cwd()` reads anywhere under adapters/http/**
-    // mean nothing in that adapter ever supplies a non-null provenance either.
+    // enabled: true}, which is the SHAPE the HTTP exemption requires.
+    //
+    // ⛔ That default is null BY CONSTRUCTION, so this block proves the SHAPE
+    // and nothing about the WIRING — an earlier version of this comment claimed
+    // it was "the FACTUAL basis of the HTTP exemption", and that claim was
+    // wrong: `adapters/http/**` indeed reads no `process.cwd()`, but the App it
+    // serves comes from `loadLoreApp()`, which DID call
+    // `setForeignCorpusWriteContext` with the server's startup-cwd provenance
+    // (`task-the-http-exemption-is-conditional-on-where-lore-serve-was`). The
+    // wiring is now asserted where it actually lives — the composition root —
+    // by `loader-foreign-write-surface.bun.test.ts` (behaviour) and by the
+    // production-wiring census at the bottom of this file (call sites).
     const httpStore = new InMemoryStore();
     const httpCorpusService = new CorpusService(httpStore);
 
@@ -387,5 +419,86 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
     // for the HTTP write path would look IDENTICAL to this control under a
     // behaviour-only assertion, and only the spy's zero-call count exposes it.
     expect(guardSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ─── PRODUCTION-WIRING CENSUS — every HTTP mount declares the HTTP surface ──
+
+/**
+ * `loadLoreApp`'s `surface` option defaults to `"cli"`, because ~50 per-invocation
+ * CLI commands legitimately want that and making the argument required would be a
+ * repo-wide edit for no safety gain. The cost of that default is a DRIFT HOLE: a
+ * new command that mounts `startHttpServer` and forgets `{surface: "http"}` gets
+ * the startup-cwd provenance back, silently, and reintroduces the exact lockout
+ * `task-the-http-exemption-is-conditional-on-where-lore-serve-was` closed. This
+ * census is the mechanism that makes that drift LOUD.
+ *
+ * @param source - The full text of one `.ts` source file.
+ * @returns Every `loadLoreApp(...)` CALL in `source` whose argument list is not
+ *   exactly `{surface: "http"}` (whitespace-insensitive), rendered verbatim.
+ *   Import statements and `typeof loadLoreApp` references carry no `(` and are
+ *   therefore never matched.
+ */
+function findNonHttpLoaderCalls(source: string): string[] {
+  const calls: string[] = [];
+  for (const match of source.matchAll(/loadLoreApp\(([^)]*)\)/g)) {
+    const args = (match[1] ?? "").replace(/\s+/g, "");
+    if (args !== '{surface:"http"}') calls.push(match[0]);
+  }
+  return calls;
+}
+
+/** Recursively collects every `.ts` file under `dir`. */
+function collectTypeScriptSources(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...collectTypeScriptSources(full));
+    else if (entry.name.endsWith(".ts")) found.push(full);
+  }
+  return found;
+}
+
+const LORE_SRC_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "src");
+
+describe("PRODUCTION WIRING — every startHttpServer mount boots loadLoreApp with the HTTP surface", () => {
+  it("no source file that CALLS startHttpServer contains a loadLoreApp call missing {surface: \"http\"}", () => {
+    const sources = collectTypeScriptSources(LORE_SRC_ROOT);
+
+    // Positive trace of execution — an empty scan is byte-identical to a clean
+    // one, so assert the walk actually visited a real tree before trusting a
+    // zero-violation verdict.
+    expect(sources.length).toBeGreaterThan(100);
+
+    const mountFiles: string[] = [];
+    const violations: string[] = [];
+    for (const file of sources) {
+      const source = readFileSync(file, "utf8");
+      // A CALL, not the definition (`export function startHttpServer(`) —
+      // `adapters/http/index.ts` declares it and never boots an App itself.
+      const withoutDefinition = source.replace(/export function startHttpServer\(/g, "");
+      if (!withoutDefinition.includes("startHttpServer(")) continue;
+      if (!source.includes("loadLoreApp(")) continue;
+      mountFiles.push(file);
+      for (const call of findNonHttpLoaderCalls(source)) violations.push(`${file}: ${call}`);
+    }
+
+    // The census must have found the mounts it exists to police — otherwise a
+    // renamed file would turn this into a permanently-vacuous pass.
+    expect(mountFiles.some((f) => f.endsWith(join("commands", "serve.ts")))).toBe(true);
+    expect(mountFiles.some((f) => f.endsWith(join("commands", "dashboard.ts")))).toBe(true);
+
+    expect(violations).toEqual([]);
+  });
+
+  it("CONTROL — the classifier reports a bare loadLoreApp() as a violation, so the empty-violations assertion above is falsifiable", () => {
+    expect(findNonHttpLoaderCalls("const { app } = loadLoreApp();")).toEqual(["loadLoreApp()"]);
+    expect(findNonHttpLoaderCalls('const { app } = loadLoreApp({ surface: "cli" });')).toEqual([
+      'loadLoreApp({ surface: "cli" })',
+    ]);
+    expect(findNonHttpLoaderCalls('const { app } = loadLoreApp({ surface: "http" });')).toEqual([]);
+    // An import or a `typeof` reference is not a call and must never be flagged.
+    expect(findNonHttpLoaderCalls('import { loadLoreApp } from "../loader.js";')).toEqual([]);
+    expect(findNonHttpLoaderCalls("type A = ReturnType<typeof loadLoreApp>['app'];")).toEqual([]);
   });
 });
