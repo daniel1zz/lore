@@ -63,6 +63,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSyn
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 // Runtime (not type-only) import — @lore/core's default barrel is browser-safe
 // and re-exports config.ts's schemas/resolvers via `export *`. `* as loreCore`
@@ -87,6 +88,28 @@ interface RunResult {
 }
 
 beforeAll(() => {
+  // Pins "YOUR worktree's dist/lore, never the main checkout's" as a runtime
+  // assertion, not just a derivation: cross-validate the `import.meta.url`-
+  // derived REPO_ROOT against an INDEPENDENTLY computed git toplevel (`git
+  // rev-parse --show-toplevel` run from this very file's own directory). If
+  // this file were ever executed from a copy under a DIFFERENT checkout (main
+  // or a sibling worktree), the two derivations would disagree and this
+  // throws before assertFreshBinary ever runs — silently building/spawning
+  // the WRONG dist/lore is exactly the false-oracle vector this guards.
+  const gitToplevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: fileURLToPath(new URL(".", import.meta.url)),
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+  }).trim();
+  if (gitToplevel !== REPO_ROOT) {
+    throw new Error(
+      `REPO_ROOT derivation mismatch: import.meta.url-derived REPO_ROOT is "${REPO_ROOT}" ` +
+        `but 'git rev-parse --show-toplevel' from this file's own directory says ` +
+        `"${gitToplevel}". This test must run against ITS OWN worktree's checkout, never ` +
+        `a sibling worktree or the main checkout.`,
+    );
+  }
+
   assertFreshBinary(LORE_BIN, [
     join(REPO_ROOT, "packages", "lore", "src"),
     join(REPO_ROOT, "packages", "core", "src"),
@@ -163,6 +186,19 @@ function initCorpus(dir: string): void {
  */
 function createNestedWorktreeFixture(prefix: string): { repoRoot: string; worktreePath: string } {
   const repoRoot = mkScratchDir(`fcwd-${prefix}-repo-`);
+
+  // Pins "every fixture is an mkdtemp repo asserted to live OUTSIDE the repo
+  // root" (AC-CP-3's fixture discipline, reused verbatim by AC-CP-4) as a
+  // runtime check, not a comment: the real corpus (this checkout's own
+  // .lore/) must never be reachable from the throwaway repo's path.
+  if (repoRoot === REPO_ROOT || repoRoot.startsWith(`${REPO_ROOT}/`)) {
+    throw new Error(
+      `fixture safety: mkdtemp repoRoot "${repoRoot}" is INSIDE this checkout's own ` +
+        `REPO_ROOT ("${REPO_ROOT}") — refusing to proceed. Every fixture in this file ` +
+        `must live outside the repo root so a write can never reach the real corpus.`,
+    );
+  }
+
   initGitRepo(repoRoot);
   initCorpus(repoRoot);
 
