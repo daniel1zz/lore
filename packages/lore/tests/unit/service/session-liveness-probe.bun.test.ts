@@ -9,13 +9,31 @@
  * OS-observed start time no longer matches the recorded one is the pid-reuse
  * defence and reports "dead" — pid alone is not sufficient identity.
  *
- * Two layers are exercised:
+ * Three layers are exercised — the first two in-process, the third through
+ * the SHIPPED command surface the AC's own prose names ("`lore session
+ * list` derives ..."), closing the gap `assess` flagged 2026-08-13: an
+ * attested pass resting only on layers 1/2 certifies the decision function,
+ * never the command a caller actually runs:
  *   1. `deriveLivenessVerdict` (`service/session-liveness.ts`) — the pure
  *      three-valued decision, in isolation.
  *   2. `SessionService.recordOwnHeartbeat` / `deriveSessionLiveness` — the
  *      service-level join, with FAKE `probeProcessStartTimePort`/
  *      `writeHeartbeatPort`/`readHeartbeatPort` injected via the
  *      constructor (never a real `ps` subprocess or real tmpdir file).
+ *   3. `lore session list [--json]` (`adapters/cli/commands/session.ts`) —
+ *      spawns the COMPILED `dist/lore` binary (`Bun.spawnSync`, mirrors
+ *      `cli-claim-anchors.bun.test.ts`'s established pattern) against a
+ *      THROWAWAY corpus, asserting the REAL `liveness` field the command
+ *      prints on `--json` output for two REAL claimed sessions — one that
+ *      self-registers by running the command (reports `"alive"`, a genuine
+ *      pid+start-time probe of the actual test-runner process, nothing
+ *      faked), one that never does (reports `"unmeasured"`). Also asserts,
+ *      on the human-readable render, that `"unmeasured"` carries an
+ *      EXPLICIT reason clause naming the self-registration precondition
+ *      (`commands/session.ts::formatSessionLine`) — surfaced at the CLI
+ *      output itself, not left only in JSDoc, so a reader can tell "this
+ *      peer has never run the command" apart from any other reading of the
+ *      bare word "unmeasured".
  *
  * Six-dimension coverage (service-level `deriveSessionLiveness` suite):
  *   HAPPY:      a fresh claim's recorded pid is alive with a matching start
@@ -37,15 +55,23 @@
  * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-5
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { CreateDocInput, DocRecord, LoreError, ReadySession, Result } from "@lore/core";
-import { err } from "@lore/core";
+import { err, sessionIdDiscriminator } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { SessionService } from "../../../src/service/session-service.js";
 import {
   deriveLivenessVerdict,
   type SessionHeartbeatRecord,
 } from "../../../src/service/session-liveness.js";
+import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
+
+// tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 levels up).
+const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
+const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 
 // ─── Pure deriveLivenessVerdict ──────────────────────────────────────────────
 
@@ -229,4 +255,151 @@ describe("SessionService.recordOwnHeartbeat (AC-OWN-5 write half)", () => {
 
     expect(ports.heartbeats.has("sess-unmeasurable-self")).toBe(false);
   });
+});
+
+// ─── Command-level oracle: `lore session list` (AC-OWN-5's own named surface) ─
+//
+// Layers 1/2 above prove `deriveLivenessVerdict`/`deriveSessionLiveness` — the
+// DECISION function. AC-OWN-5's own prose names a COMMAND ("`lore session
+// list` derives each liveness verdict from ..."), and nothing above ever
+// spawns it. This block does: it drives the COMPILED `dist/lore session list
+// [--json]` command against a throwaway corpus with two REAL claimed
+// sessions, and asserts the `liveness` field the command itself prints.
+
+interface CliRunResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+/** Spawns the COMPILED `dist/lore` binary — mirrors `cli-claim-anchors.bun.test.ts`'s established pattern. */
+function runLoreCmd(args: string[], cwd: string, extraEnv: Record<string, string | undefined> = {}): CliRunResult {
+  const proc = Bun.spawnSync([LORE_BIN, ...args], {
+    cwd,
+    env: { ...process.env, HOME: cwd, EDITOR: "true", ...extraEnv },
+  });
+  return {
+    stdout: proc.stdout.toString(),
+    stderr: proc.stderr.toString(),
+    exitCode: proc.exitCode ?? 1,
+  };
+}
+
+/** Like {@link runLoreCmd}, but throws with the captured stderr on a nonzero exit — fixture setup steps must never silently continue past a failure. */
+function mustRunLoreCmd(args: string[], cwd: string, extraEnv?: Record<string, string | undefined>): CliRunResult {
+  const result = runLoreCmd(args, cwd, extraEnv);
+  if (result.exitCode !== 0) {
+    throw new Error(`lore ${args.join(" ")} failed (exit ${result.exitCode}): ${result.stderr}`);
+  }
+  return result;
+}
+
+function parseSlugFromCreateOutput(stdout: string): string {
+  const match = stdout.match(/Slug:\s+(\S+)/);
+  const slug = match?.[1];
+  if (slug === undefined) throw new Error(`could not parse slug from output: ${stdout}`);
+  return slug;
+}
+
+interface SessionListJsonRecord {
+  readonly session_id?: string;
+  readonly liveness: string;
+}
+
+interface SessionListJsonEnvelope {
+  readonly ok: boolean;
+  readonly data: { readonly sessions: readonly SessionListJsonRecord[] };
+}
+
+/** `lore-session-heartbeat-<id>.json` under `os.tmpdir()` — same filename convention as `session-heartbeat-port.ts::heartbeatFilename` (id already sanitizes to plain `[a-z0-9]` here, so no further transform is needed). */
+function heartbeatFilePath(sessionId: string): string {
+  return join(tmpdir(), `lore-session-heartbeat-${sessionId}.json`);
+}
+
+describe("`lore session list` command-level oracle (AC-OWN-5's own named surface, not just the pure function)", () => {
+  // Raw env values chosen so `sessionIdDiscriminator` (`@lore/core`, the SAME
+  // sanitize+slice transform `commands/claim.ts`/`commands/session.ts` use)
+  // yields a predictable, collision-unlikely 8-char id — computed via the
+  // SSOT function itself, never hand-derived, so a future change to the
+  // sanitizer cannot silently desync this test from production behavior.
+  const MINE_RAW_SESSION_ID = "MINE0001-cmd-oracle-session";
+  const PEER_RAW_SESSION_ID = "PEER0002-cmd-oracle-session";
+  const MINE_SESSION_ID = sessionIdDiscriminator(MINE_RAW_SESSION_ID);
+  const PEER_SESSION_ID = sessionIdDiscriminator(PEER_RAW_SESSION_ID);
+
+  let tmpDir: string;
+
+  beforeAll(() => {
+    assertFreshBinary(LORE_BIN, [join(REPO_ROOT, "packages", "lore", "src"), join(REPO_ROOT, "packages", "core", "src")]);
+  });
+
+  afterEach(() => {
+    // reason: best-effort cleanup — never touches this repo's own `.lore/`
+    // corpus (the throwaway `tmpDir` below is a SEPARATE mkdtemp corpus), but
+    // the heartbeat sidecar is deliberately OUTSIDE any repo (`os.tmpdir()`,
+    // per the ADR) and must not linger on the real machine after this suite.
+    if (tmpDir !== undefined) rmSync(tmpDir, { recursive: true, force: true });
+    for (const id of [MINE_SESSION_ID, PEER_SESSION_ID]) {
+      rmSync(heartbeatFilePath(id), { force: true });
+    }
+  });
+
+  it(
+    "HAPPY/STATE: a self-registered session reports \"alive\" on --json, a peer that never ran the command reports \"unmeasured\" WITH an explicit reason clause on the human render",
+    () => {
+      tmpDir = mkdtempSync(join(tmpdir(), "lore-session-cmd-oracle-"));
+      mustRunLoreCmd(["init"], tmpDir);
+
+      const planSlug = parseSlugFromCreateOutput(
+        mustRunLoreCmd(["create", "plan", "--title", "Session cmd oracle plan", "--content", "Plan body.", "--no-ai"], tmpDir).stdout,
+      );
+      const mineTaskSlug = parseSlugFromCreateOutput(
+        mustRunLoreCmd(
+          ["create", "task", "--title", "Mine task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "Task body."],
+          tmpDir,
+        ).stdout,
+      );
+      const peerTaskSlug = parseSlugFromCreateOutput(
+        mustRunLoreCmd(
+          ["create", "task", "--title", "Peer task", "--parent", planSlug, "--plan-id", planSlug, "--no-ai", "--content", "Task body."],
+          tmpDir,
+        ).stdout,
+      );
+
+      // Two REAL claimed sessions, each with its own captured session_id.
+      mustRunLoreCmd(["claim", mineTaskSlug, "--by", "agent:cmd-oracle-mine"], tmpDir, { CLAUDE_CODE_SESSION_ID: MINE_RAW_SESSION_ID });
+      mustRunLoreCmd(["claim", peerTaskSlug, "--by", "agent:cmd-oracle-peer"], tmpDir, { CLAUDE_CODE_SESSION_ID: PEER_RAW_SESSION_ID });
+      // ⛔ The peer session NEVER runs `lore session list|show` — no heartbeat
+      // is ever recorded for it. This is the precondition itself: liveness is
+      // measurable ONLY for a session that has self-registered by running the
+      // command at least once.
+
+      // Drives the SHIPPED command, not the pure function: only "mine" runs
+      // `lore session list`, which self-registers ITS OWN heartbeat (real
+      // pid = this test-runner process, real `ps` probe) before querying.
+      const jsonResult = mustRunLoreCmd(["session", "list", "--json"], tmpDir, { CLAUDE_CODE_SESSION_ID: MINE_RAW_SESSION_ID });
+      const parsed = JSON.parse(jsonResult.stdout) as SessionListJsonEnvelope;
+      expect(parsed.ok).toBe(true);
+
+      const mineRecord = parsed.data.sessions.find((s) => s.session_id === MINE_SESSION_ID);
+      const peerRecord = parsed.data.sessions.find((s) => s.session_id === PEER_SESSION_ID);
+      expect(mineRecord).toBeDefined();
+      expect(peerRecord).toBeDefined();
+      // AC-OWN-5's own field, read off the REAL command's REAL stdout:
+      expect(mineRecord?.liveness).toBe("alive");
+      expect(peerRecord?.liveness).toBe("unmeasured");
+
+      // Surfaced at the CLI OUTPUT itself (never only JSDoc): the peer's
+      // "unmeasured" line names WHY — it never ran `lore session list|show`
+      // on this machine — so a reader can tell that apart from any other
+      // reading of the bare word "unmeasured" (`commands/session.ts::
+      // formatSessionLine`).
+      const humanResult = mustRunLoreCmd(["session", "list"], tmpDir, { CLAUDE_CODE_SESSION_ID: MINE_RAW_SESSION_ID });
+      const peerLine = humanResult.stdout.split("\n").find((line) => line.includes(PEER_SESSION_ID));
+      expect(peerLine).toBeDefined();
+      expect(peerLine).toContain("never run");
+      expect(peerLine).toContain("lore session list|show");
+    },
+    20000,
+  );
 });

@@ -13,22 +13,22 @@
  * The AC demands a CONCLUSION, not a command: "yields the EXACT expected
  * value for each of the four facts ... foreign branch set, unmerged commit
  * count per branch, holder session_id per branch, liveness verdict per
- * session; the assertion fails if any of the four is an empty set". Three of
- * the four ARE reachable through lore alone and are asserted exactly, never
- * as an empty set, below. The fourth — an INTEGER unmerged-commit count per
- * branch — is NOT reachable through any shipped lore command: exhaustively
- * grepped (`territory-partition.ts`, `commands/territory.ts`,
- * `commands/session.ts`, `real-git-port.ts`, `seat-service.ts`), the only
- * git-backed signal lore ships anywhere is `GitPort.isMerged(branch, into):
- * Promise<Result<boolean, LoreError>>` — a BOOLEAN "has zero vs at least one
- * unmerged commit", never a count, and `lore territory --json` does not even
- * call it. This is a genuine P1 gap, not a test bug — see the "FACT 2" block
- * in the HAPPY case below, and the task's own final report, for the finding.
- * Per the task brief: "do not paper over it by shelling out to git inside
- * the replay" — this file never does; every git subprocess call below is
- * FIXTURE CONSTRUCTION (building the throwaway repo + branches) or a
- * ground-truth SELF-CHECK on that construction, clearly marked, never part
- * of a REPLAY step answering one of the four facts.
+ * session; the assertion fails if any of the four is an empty set". ALL FOUR
+ * facts are reachable through lore alone and are asserted exactly, never as
+ * an empty set, below — INCLUDING the count, closed since this test was
+ * first written: `territory-partition.ts`'s `TerritoryEntry.unmerged_commits`
+ * field (populated via `real-git-port.ts::countUnmergedCommitsSync`, wired at
+ * `territory-partition.ts:242` for a worktree entry and `:266` for an orphan
+ * branch entry) now carries the per-branch integer that `commands/
+ * territory.ts` once had no signal for at all (the only git-backed signal
+ * used to be the BOOLEAN `GitPort.isMerged`). See the "FACT 2" block in the
+ * HAPPY case below — it reads `TerritoryEntry.unmerged_commits` off the SAME
+ * `partition` this test already computed for facts 1/3, asserts it exactly
+ * against ground truth, and never shells out to git to ANSWER a fact (per
+ * the task brief: "do not paper over it by shelling out to git inside the
+ * replay"). Every git subprocess call below is FIXTURE CONSTRUCTION (building
+ * the throwaway repo + branches) or a ground-truth SELF-CHECK on that
+ * construction, clearly marked, never part of a REPLAY step.
  *
  * ⛔ Never touches this repo's own `.lore/` corpus — every case uses a bare
  * `InMemoryStore` (no `bun:sqlite`, no `lore init`) plus throwaway `mkdtemp`
@@ -36,14 +36,14 @@
  *
  * Six-dimension coverage:
  *   HAPPY:      the AC's own fixture — exactly 2 sessions, exactly 3 branches
- *               (mine / foreign-with-1-unmerged-commit / unowned) — three of
- *               the four facts reconstructed exactly, non-empty; the fourth's
- *               gap is demonstrated, not papered over.
+ *               (mine / foreign-with-1-unmerged-commit / unowned) — ALL FOUR
+ *               facts reconstructed exactly, non-empty, through lore alone.
  *   NEGATIVE:   liveness distinguishes a DEAD session's holder from an ALIVE
  *               one — collapsing them was the GAP-D defect this spec closes.
- *   BOUNDARY:   `isMerged` — lore's only available signal — DOES distinguish
- *               zero unmerged commits (merged branch) from at least one
- *               (foreign branch), even though it cannot give the exact count.
+ *   BOUNDARY:   `isMerged` — a boolean, coarser than the exact
+ *               `unmerged_commits` count FACT 2 now reads — still DOES
+ *               distinguish zero unmerged commits (merged branch) from at
+ *               least one (foreign branch) as its own corroborating check.
  *   ERROR:      a claim with no measurable branch (detached HEAD worktree)
  *               never invents a branch name and is never classified
  *               `unowned` — the worktree still shows a real claimant.
@@ -233,7 +233,7 @@ async function createPlanAndTask(cs: CorpusService, title: string): Promise<{ pl
 // ─── HAPPY: the AC's own fixture — exactly 2 sessions, exactly 3 branches ────
 
 describe("AC-REPLAY-1: replaying the 2026-08-11 diagnosis through lore invocations alone", () => {
-  it("HAPPY: territory + session liveness reconstruct 3 of the 4 facts exactly, non-empty; the 4th (a per-branch commit COUNT) has no lore surface — a P1 finding, not papered over", async () => {
+  it("HAPPY: territory + session liveness reconstruct ALL 4 of the AC's facts exactly, non-empty — the 4th (a per-branch commit COUNT) via TerritoryEntry.unmerged_commits (territory-partition.ts), asserted against ground truth by this test's own `expect(commitCountByBranch)` call below", async () => {
     const { repoRoot, unownedWorktreePath } = makeTerritoryFixtureRepo();
     const { store, corpusService, sessionService } = makeCorpusAndSession();
 
@@ -308,37 +308,33 @@ describe("AC-REPLAY-1: replaying the 2026-08-11 diagnosis through lore invocatio
       [FOREIGN_SESSION_ID]: "unmeasured",
     });
 
-    // ── FACT 2 — unmerged commit count per branch: attempted through EVERY
-    // lore-shipped surface, and genuinely UNREACHABLE. This is the honest
-    // conclusion, encoded as a real assertion rather than a comment, per the
-    // task brief: "if you find yourself needing git log main.. to reach a
-    // fact, that is a finding about P1 being incomplete — report it, do not
-    // paper over it by shelling out to git inside the replay." ──
+    // ── FACT 2 — unmerged commit count per branch. Reachable through lore's
+    // OWN territory partition since `countUnmergedCommits`/
+    // `countUnmergedCommitsSync` landed (`real-git-port.ts:283`, wired into
+    // `partitionTerritory` at `territory-partition.ts:242`/`:266`):
+    // `partition.foreign` entries now carry `TerritoryEntry.unmerged_commits`
+    // (`territory-partition.ts:105`) directly — no git shell-out needed in
+    // THIS step. The `isMerged` boolean check below is a SEPARATE,
+    // corroborating signal (the BOUNDARY dimension further down this file
+    // exercises it directly) — no longer the only route to this fact. ──
 
-    // The only lore-shipped git-backed signal, ANYWHERE, is this BOOLEAN. It
-    // is exercised here via the SAME production adapter class `SeatService`
-    // calls (`RealGitPort.isMerged`) — never an ad hoc `git log main..<branch>`
-    // — and it genuinely answers "does foreign-branch have unmerged work" (yes):
+    // Corroborating signal, via the SAME production adapter class
+    // `SeatService` calls (`RealGitPort.isMerged`) — never an ad hoc `git log
+    // main..<branch>` — confirms "foreign-branch has unmerged work" (yes),
+    // independent of the exact count read below:
     const isMergedResult = await gitPort.isMerged("foreign-branch", "main");
     expect(isMergedResult.ok).toBe(true);
-    if (isMergedResult.ok) expect(isMergedResult.value).toBe(false); // "has unmerged commits" — but NOT a count.
+    if (isMergedResult.ok) expect(isMergedResult.value).toBe(false); // corroborates: foreign-branch has >=1 unmerged commit.
 
     // Reconstruct the per-branch commit-COUNT map using ONLY the lore-surfaced
-    // facts already gathered above (the territory partition, the liveness
-    // records, and the one boolean signal just read) — no new git invocation.
-    // Neither shipped read surface's own output shape carries an integer
-    // commit-count field anywhere: `TerritoryEntry`'s only per-branch keys are
-    // structural (`kind`/`branch`/`bucket`/`holder`), and `SessionLivenessRecord`
-    // carries no branch-scoped commit data either. So this map is built from
-    // what lore ACTUALLY hands back — nothing:
+    // fact already gathered above: `partition.foreign`'s own
+    // `TerritoryEntry.unmerged_commits` field (`territory-partition.ts:105`,
+    // populated by `measureUnmergedCommits` at `:242`/`:266`) — no new git
+    // invocation in THIS step.
     const commitCountByBranch: Record<string, number> = {};
     for (const entry of partition.foreign) {
-      const hasCountField = "unmerged_commits" in entry || "commit_count" in entry;
-      if (hasCountField) {
-        // Would only execute if a future change adds a count field — kept so
-        // this test starts failing LOUD (wrong shape below) the day it does,
-        // rather than silently continuing to assert a now-outdated gap.
-        commitCountByBranch[entry.branch ?? "?"] = (entry as unknown as Record<string, number>)["unmerged_commits"]!;
+      if (entry.unmerged_commits !== undefined) {
+        commitCountByBranch[entry.branch ?? "?"] = entry.unmerged_commits;
       }
     }
 
@@ -347,16 +343,14 @@ describe("AC-REPLAY-1: replaying the 2026-08-11 diagnosis through lore invocatio
     const groundTruthUnmergedCount = Number(git(repoRoot, "rev-list", "--count", "main..foreign-branch"));
     expect(groundTruthUnmergedCount).toBe(1); // fixture sanity check only.
 
-    // THE HONEST, INTENDED FAILURE POINT: the AC's own guard clause — "the
-    // assertion fails if any of the four is an empty set" — applies to THIS
-    // fact exactly as written. `commitCountByBranch` IS that empty set,
-    // because P1 ships no lore surface producing it (exhaustively confirmed:
-    // `territory-partition.ts`, `commands/territory.ts`, `commands/session.ts`,
-    // `real-git-port.ts`, `seat-service.ts` — grepped for "unmerged"/"rev-list"/
-    // "--count"/"cherry"/"commit_count"). Facts 1/3/4 above ARE fully
-    // reachable, exactly, non-empty, through lore alone — this is the one
-    // fact that is not, and this assertion is what makes that a measured
-    // finding rather than a claim.
+    // FACT 2, asserted exactly against ground truth, THIS line: fed
+    // EXCLUSIVELY by `TerritoryEntry.unmerged_commits` above — a lore-shipped
+    // surface, never a git shell-out — and it matches, non-empty. Combined
+    // with facts 1/3 (asserted above) and fact 4 (asserted below), all FOUR
+    // facts the AC names are now reconstructed through lore alone in this one
+    // test — see this file's module header for the mechanism (`real-git-
+    // port.ts::countUnmergedCommitsSync` wired into `territory-partition.ts`)
+    // that closed what used to be a genuine gap here.
     expect(commitCountByBranch).toEqual({ "foreign-branch": groundTruthUnmergedCount });
   });
 });
@@ -423,7 +417,7 @@ describe("AC-REPLAY-1 dimension: NEGATIVE — a dead session's holder is disting
 
 // ─── BOUNDARY: isMerged distinguishes zero vs nonzero unmerged commits ──────
 
-describe("AC-REPLAY-1 dimension: BOUNDARY — the only available lore signal DOES distinguish zero from nonzero unmerged commits", () => {
+describe("AC-REPLAY-1 dimension: BOUNDARY — the boolean isMerged signal DOES distinguish zero from nonzero unmerged commits (a coarser, corroborating check beside the exact TerritoryEntry.unmerged_commits count FACT 2 now reads)", () => {
   it("a fully-merged branch reports isMerged=true (zero unmerged); the foreign branch reports isMerged=false (>=1 unmerged)", async () => {
     const { repoRoot } = makeTerritoryFixtureRepo();
     const gitPort = new RealGitPort(repoRoot);
