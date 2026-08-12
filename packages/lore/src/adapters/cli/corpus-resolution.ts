@@ -1,0 +1,326 @@
+/**
+ * DB discovery for the CLI adapter — relocated OUT of `utils.ts`
+ * (spec-corpus-resolution-carries-provenance-and-a-foreign-write §D3/§D6):
+ * `utils.ts`'s own module header used to assert "no business logic here" and
+ * "DB discovery ... live[s] in `loader.ts`", both false the moment
+ * `findLoreDbPath`, `findMainCheckoutLoreDb`, and (via `gate-bypass-audit.ts`)
+ * `findLoreDbPathQuiet` lived there. This module is where that discovery
+ * genuinely lives now, built on top of `@lore/core`'s pure
+ * `resolveCorpusProvenance` decision (§D2) rather than a hand-rolled walk.
+ *
+ * Public surface:
+ *   - resolveCorpus(cwd?) — the ONE composition-boundary function (§D3) that
+ *     supplies REAL IO (`existsSync`, the git-based boundary probe) to
+ *     `@lore/core`'s pure resolver and returns its full `ResolvedCorpus`,
+ *     provenance included. This is the only place in the CLI adapter that
+ *     should ever need to know *which route* a corpus resolution took.
+ *   - findLoreDbPath() / findLoreDbPathQuiet() — ≤3-line wrappers over
+ *     `resolveCorpus()` preserving their EXACT pre-existing terminal
+ *     contracts: the loud one still prints the original message and
+ *     `process.exit(1)`s on a miss, the quiet one still returns `undefined`.
+ *     Both treat `provenance: "undetermined"` as a miss — see the note on
+ *     `definiteCorpusPath` below for why that is a mechanism, not a
+ *     convention left to each call site.
+ *   - findMainCheckoutLoreDb(dir) — the SPEC M4 git-common-dir-vs-git-dir
+ *     fallback probe, relocated verbatim from `utils.ts`. Still exported
+ *     standalone (nothing outside this module calls it directly today, but
+ *     nothing should have to reimplement it either).
+ *   - gatherCorpusGitFacts(cwd) — the §D1 boundary-detector adapter: supplies
+ *     `@lore/core`'s `CorpusProvenanceGitFacts` from real git probes. See its
+ *     own doc comment for WHICH of `utils.ts`'s two pre-existing detectors
+ *     this extracts (and why), and for the one place it deliberately departs
+ *     from a literal git-facts translation (`resolveCallerTreeRoot`'s
+ *     non-git fallback).
+ *
+ * ⛔ Route 2 (the §M4 main-checkout fallback, surfaced here as
+ * `provenance: "git_common_dir"`) is LOAD-BEARING and untouched by this
+ * relocation: the worktree-dispatch protocol's `claim`/`evidence`/`release`/
+ * `verify` all resolve the main corpus through it from a freshly
+ * `git worktree add`-ed tree that never materializes its own `.lore/`. This
+ * module changes HOW that route is detected (one shared git-facts probe
+ * feeding a pure decision, replacing an ad hoc inline walk), never WHETHER it
+ * fires for the same inputs.
+ *
+ * Side-effect class: IO — `existsSync` (the pure resolver's injected probe),
+ *   `spawnSync` (git facts), `process.exit` (findLoreDbPath's miss branch),
+ *   `process.stderr.write` (the same branch's diagnostic).
+ *
+ * Source: spec-corpus-resolution-carries-provenance-and-a-foreign-write
+ * §Design D1, D2, D3, D6.
+ */
+
+import { existsSync } from "node:fs";
+import { dirname, join, resolve as resolvePath } from "node:path";
+import { spawnSync } from "node:child_process";
+import { resolveCorpusProvenance } from "@lore/core";
+import type { CorpusProvenanceGitFacts, ResolvedCorpus } from "@lore/core";
+
+const NO_DB_MESSAGE =
+  "Error: No Lore database found in this directory or any parent.\n" +
+  "  Run `lore init` to initialise a new Lore project here.\n";
+
+// ─── §D1 boundary detector ───────────────────────────────────────────────
+
+/**
+ * The git-common-dir-vs-git-dir crossing determination, shared by
+ * {@link findMainCheckoutLoreDb} and {@link gatherCorpusGitFacts} — the ONE
+ * primitive §D1 asks for, so the two can never independently drift on
+ * whether `dir` sits inside a linked worktree or where its main checkout is.
+ */
+interface GitCommonDirProbe {
+  readonly resolved: boolean;
+  readonly isLinkedWorktree: boolean;
+  readonly mainCheckoutRoot: string | null;
+}
+
+/**
+ * Runs `git rev-parse --git-common-dir` / `--git-dir` from `dir` and
+ * classifies the result — the extracted core of `utils.ts`'s former
+ * `findMainCheckoutLoreDb` (unchanged probe shape: same two commands, same
+ * 5000ms timeout, same comparison). ANY probe failure (not a git repo, `git`
+ * missing, nonzero exit, empty/whitespace-only stdout, a thrown `spawnSync`
+ * error) degrades to `resolved: false` — mirrors `commands/verify.ts`'s
+ * `gatherVerifyGitFacts` UNRESOLVED convention rather than trying to
+ * discriminate "genuinely not a worktree" from "the probe itself is broken",
+ * a distinction `git rev-parse`'s exit code cannot reliably support anyway
+ * (both print a similar generic `fatal:` line).
+ */
+function probeGitCommonDir(dir: string): GitCommonDirProbe {
+  try {
+    const commonDirRaw = spawnSync("git", ["rev-parse", "--git-common-dir"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    const gitDirRaw = spawnSync("git", ["rev-parse", "--git-dir"], {
+      cwd: dir,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (
+      commonDirRaw.status !== 0 ||
+      gitDirRaw.status !== 0 ||
+      !commonDirRaw.stdout?.trim() ||
+      !gitDirRaw.stdout?.trim()
+    ) {
+      return { resolved: false, isLinkedWorktree: false, mainCheckoutRoot: null };
+    }
+
+    const commonDirAbs = resolvePath(dir, commonDirRaw.stdout.trim());
+    const gitDirAbs = resolvePath(dir, gitDirRaw.stdout.trim());
+    if (commonDirAbs === gitDirAbs) {
+      // Primary checkout (or a non-worktree repo) — resolved, not linked.
+      return { resolved: true, isLinkedWorktree: false, mainCheckoutRoot: null };
+    }
+
+    // Linked worktree confirmed: commonDirAbs is the MAIN repo's shared
+    // `.git` directory — its parent is the main checkout root.
+    return { resolved: true, isLinkedWorktree: true, mainCheckoutRoot: dirname(commonDirAbs) };
+  } catch {
+    return { resolved: false, isLinkedWorktree: false, mainCheckoutRoot: null };
+  }
+}
+
+/**
+ * Highest ancestor of `dir` that is NOT the filesystem root itself.
+ *
+ * WHY this exists at all: `resolveCorpusProvenance`'s own `isWithin` helper
+ * (`@lore/core`'s `corpus-provenance.ts`, out of this module's control)
+ * strips at most one trailing slash and then requires an exact match or a
+ * `${root}/`-prefixed candidate. For `root === "/"` that check degrades to
+ * `candidate.startsWith("//")`, which NO real absolute path satisfies — so
+ * passing the literal filesystem root as `callerTreeRoot` would make
+ * `isWithin` reject every real `cwd`, aborting the "own" search before it
+ * ever probes even `cwd` itself (verified interactively against the
+ * out-of-anchor resolver; not a hypothetical). Stopping one level short of
+ * `/` instead reproduces the pre-existing "walk all the way up" behaviour
+ * (`utils.ts`'s old `findLoreDbPath`, which climbed to the real filesystem
+ * root unconditionally) for every realistic corpus location — nothing
+ * legitimately keeps a `.lore/` directly under `/` — while staying inside a
+ * boundary shape the shared resolver can actually accept.
+ *
+ * @param dir - absolute path to start climbing from
+ * @returns `dir` itself if it is already a top-level directory (e.g. `/tmp`),
+ *   otherwise the highest ancestor below the filesystem root
+ * @example
+ *   highestNonRootAncestor("/tmp/a/b/c") // "/tmp"
+ *   highestNonRootAncestor("/tmp")       // "/tmp"
+ */
+function highestNonRootAncestor(dir: string): string {
+  let current = dir;
+  for (;;) {
+    const parent = dirname(current);
+    if (parent === current || parent === "/") return current;
+    current = parent;
+  }
+}
+
+/**
+ * The caller's own working-tree boundary (`CorpusProvenanceGitFacts.
+ * callerTreeRoot`), resolved independently of the crossing determination
+ * above — the two are kept as SEPARATE facts by `@lore/core`'s own module
+ * header specifically so an unresolved crossing probe never has to also
+ * poison the "own" search's boundary. `git rev-parse --show-toplevel`
+ * answers this directly for any git-tracked `dir` (nested or not — it
+ * always reports the working tree's own top, whether that is a main
+ * checkout or a linked worktree); a `dir` that isn't inside any git
+ * repository at all falls back to {@link highestNonRootAncestor}, which
+ * reproduces the old unconditional walk-to-filesystem-root behaviour for
+ * that (rare, but pre-existing-test-covered — see
+ * `tests/integration/cli/gate-bypass-audit.test.ts`'s "walks upward past a
+ * nested cwd" case) scenario.
+ */
+function resolveCallerTreeRoot(cwd: string): string {
+  try {
+    const topLevelRaw = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    if (topLevelRaw.status === 0 && topLevelRaw.stdout?.trim()) {
+      return resolvePath(cwd, topLevelRaw.stdout.trim());
+    }
+  } catch {
+    // fall through to the non-git fallback below
+  }
+  return highestNonRootAncestor(cwd);
+}
+
+/**
+ * Supplies `@lore/core`'s pure `resolveCorpusProvenance` with real
+ * `CorpusProvenanceGitFacts` about `cwd` — the §D1 "one boundary detector,
+ * never a third" adapter. Extracted from `utils.ts`'s `findMainCheckoutLoreDb`
+ * (the git-shellout detector), NOT `detectWorktreeDerivedActor` (the
+ * `.git`-file-reading one, still in `utils.ts` unchanged, serving SPEC-104's
+ * unrelated actor-identity question): the git-shellout detector already
+ * answers exactly the "main-checkout CROSSING determination" §D1 calls out
+ * as the two detectors' disagreement surface, via git's OWN documented
+ * `rev-parse` contract rather than a hand-parsed assumption about the
+ * `.git/worktrees/<name>` internal layout. Extending it one step further
+ * with `--show-toplevel` (mirroring `commands/verify.ts`'s own
+ * `gatherVerifyGitFacts`, which this module's sibling `VerifyGitFacts`
+ * already established as the precedent — see `@lore/core`'s
+ * `corpus-provenance.ts` module header) supplies `callerTreeRoot` too, with
+ * zero new detection MECHANISM invented.
+ *
+ * `detectWorktreeDerivedActor` stays exactly where it is, doing its own
+ * independent `.git`-file probe for a DIFFERENT question (branch name for
+ * actor identity) — that overlap is coincidental, not a second competing
+ * boundary detector for corpus resolution.
+ */
+export function gatherCorpusGitFacts(cwd: string): CorpusProvenanceGitFacts {
+  const probe = probeGitCommonDir(cwd);
+  return {
+    callerTreeRoot: resolveCallerTreeRoot(cwd),
+    resolved: probe.resolved,
+    isLinkedWorktree: probe.isLinkedWorktree,
+    mainCheckoutRoot: probe.mainCheckoutRoot,
+  };
+}
+
+// ─── §M4 fallback probe (relocated verbatim from utils.ts) ─────────────────
+
+/**
+ * Resolves the MAIN checkout's `.lore/lore.db` when `dir` sits inside a
+ * LINKED git worktree (SPEC M4 —
+ * spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M4,
+ * AC-WH-4). A fresh `git worktree add` tree never materializes `.lore/`
+ * (gitignored, untracked, never checked out into a linked worktree) — the
+ * primary "own" search inside {@link resolveCorpus} always misses there.
+ * This is the fallback of last resort, consulted only via
+ * `resolveCorpusProvenance`'s own `git_common_dir` route once that primary
+ * search has already failed.
+ *
+ * Shares {@link probeGitCommonDir} with {@link gatherCorpusGitFacts} (§D1) —
+ * this function adds only the final `.lore/lore.db` existence check on top
+ * of the shared crossing determination.
+ *
+ * @param dir - Directory the primary walk-up already failed to resolve
+ *   `.lore/lore.db` from (`process.cwd()` in production).
+ * @returns The main checkout's `.lore/lore.db` absolute path, when that
+ *   checkout's `.lore/` directory actually contains one; otherwise `undefined`.
+ */
+export function findMainCheckoutLoreDb(dir: string): string | undefined {
+  const probe = probeGitCommonDir(dir);
+  if (!probe.resolved || !probe.isLinkedWorktree || probe.mainCheckoutRoot === null) {
+    return undefined;
+  }
+  const candidate = join(probe.mainCheckoutRoot, ".lore", "lore.db");
+  return existsSync(candidate) ? candidate : undefined;
+}
+
+// ─── §D3 composition boundary + wrappers ───────────────────────────────────
+
+/**
+ * The ONE composition-boundary function exposing `@lore/core`'s
+ * `resolveCorpusProvenance` decision (§D3) — supplies the real
+ * `existsSync`-based `probeExists` and the real {@link gatherCorpusGitFacts}
+ * git facts, and returns the decision UNFILTERED, provenance included.
+ * `findLoreDbPath` / `findLoreDbPathQuiet` are the only two callers that
+ * collapse `provenance: "undetermined"` into a miss; a future caller that
+ * genuinely needs to know WHICH route a resolution took (the corpus-write
+ * guard this spec's later tasks add) calls this directly instead of either
+ * wrapper.
+ *
+ * @param cwd - defaults to `process.cwd()`; tests pass a fixture directory
+ * @returns `@lore/core`'s `ResolvedCorpus` (path + provenance), or
+ *   `undefined` when no corpus exists on any route this module knows about
+ */
+export function resolveCorpus(cwd: string = process.cwd()): ResolvedCorpus | undefined {
+  return resolveCorpusProvenance({
+    cwd,
+    probeExists: existsSync,
+    gitFacts: gatherCorpusGitFacts(cwd),
+  });
+}
+
+/**
+ * `resolveCorpus()` filtered down to a definite, real corpus path — `undefined`
+ * for BOTH a total miss (`resolveCorpus()` returns `undefined`) AND an
+ * unresolved crossing question (`provenance: "undetermined"`, whose `path`
+ * field is the caller's bare `cwd`, a DIRECTORY, never a real corpus file —
+ * `@lore/core`'s own doc comment on `ResolvedCorpus.path` is explicit that
+ * only `"own"`/`"git_common_dir"` provenance makes that field a real corpus
+ * location). Collapsing that filter into ONE shared helper — rather than
+ * leaving each wrapper below to remember the same `!== "undetermined"` check
+ * — is what makes it a mechanism instead of a convention two call sites could
+ * independently forget.
+ */
+function definiteCorpusPath(cwd?: string): string | undefined {
+  const resolved = resolveCorpus(cwd);
+  return resolved !== undefined && resolved.provenance !== "undetermined" ? resolved.path : undefined;
+}
+
+/**
+ * Resolves `.lore/lore.db` for the current process — the loud, exit-on-miss
+ * half of the pair (§D3). Delegates entirely to {@link definiteCorpusPath};
+ * still exits with the EXACT original message and code 1 when no corpus can
+ * be confirmed (whether that is a genuine absence or an unresolved crossing
+ * question — see {@link definiteCorpusPath}'s doc for why the latter counts
+ * as a miss here too).
+ *
+ * @returns absolute path to the lore.db file
+ */
+export function findLoreDbPath(): string {
+  const path = definiteCorpusPath();
+  if (path === undefined) {
+    process.stderr.write(NO_DB_MESSAGE);
+    process.exit(1);
+  }
+  return path;
+}
+
+/**
+ * `findLoreDbPath`'s quiet sibling (§D3) — same resolution, `undefined` on a
+ * miss instead of a loud `process.exit(1)`. Relocated here from
+ * `gate-bypass-audit.ts` (which now only re-exports this name, so
+ * `commands/gate.ts`'s existing import site is untouched) — see this
+ * module's own header for why that relocation matters on its own, not just
+ * as a side effect of the resolver collapse.
+ *
+ * @returns The discovered `.lore/lore.db` absolute path, or `undefined` when
+ *   no corpus can be confirmed from `process.cwd()`.
+ */
+export function findLoreDbPathQuiet(): string | undefined {
+  return definiteCorpusPath();
+}
