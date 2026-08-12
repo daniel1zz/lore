@@ -10,7 +10,7 @@ updated: 2026-08-12
 tags: []
 parent: PRD-001
 ---
-Session of 2026-08-12, `agent:main-orchestrator`, resuming `knowledge-handoff-agent-main-orchestrator-98`. Three follow-up tasks landed and archived; SIX new tasks filed; the governing spec went v27 → v33. What follows is only what was MEASURED, with the measurement named.
+Session of 2026-08-12, `agent:main-orchestrator`, resuming `knowledge-handoff-agent-main-orchestrator-98`. Three follow-up tasks landed and archived; FIVE new tasks filed (mcp-boot / captured-evidence-row / undetermined-provenance / clean-tree-floor / verify-execution-root -- count them by slug, not by this number); the governing spec went v27 → v33. What follows is only what was MEASURED, with the measurement named.
 
 ## 1. A handoff can carry a defect description that is already half-fixed, and acting on it produces a fix for nothing
 
