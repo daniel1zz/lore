@@ -25,6 +25,19 @@
  * `expect(dir.startsWith(REPO_ROOT)).toBe(false)`) to live genuinely outside
  * this repo's working tree.
  *
+ * RE-BASELINE (spec-mirror-identifier-ssot-one-writer-for-export-index-human D1/D2,
+ * AC-MIS-4/AC-MIS-7, commit 63164c20, 2026-08-11): the export-index reconcile's
+ * `human_id` (and derived `suggested_file_path`/`rename_command`) now composes via the
+ * PADDED `formatMirrorHumanId` (`"SPEC-001"`), never the unpadded `formatDocDisplayId`
+ * (`"SPEC-1"`) this file originally pinned — this sibling compiled-binary tier missed the
+ * unit-test re-baseline (`migrate-ordinals.bun.test.ts`, whose own module header carries
+ * the full rationale) because AC-MIS-4's anchors named only the unit test, not this file —
+ * a since-corrected anchor-design gap (`task-re-baseline-the-compiled-migrate-ordinals-e2e-to-the`).
+ * Padded is the mirror's own convention (matching its filenames); general CLI/MCP/dashboard
+ * DISPLAY stays on unpadded `formatDocDisplayId` (`SPEC-1`) — see the dedicated "RESOLUTION
+ * SURFACE" test case below, which pins that `dist/lore get` resolves BOTH forms to the SAME
+ * document (leading zeros stripped by `parseOrdinalRef`), not just that neither form throws.
+ *
  * Fixture (models the live 2026-07-26 incident at small scale, mirroring
  * AC-084-4's own fixture shape but through `.lore/lore.db` on disk instead of
  * `:memory:`): a root PRD, then SIX numbered docs seeded via DIRECT
@@ -61,7 +74,10 @@
  *   STATE:      `--apply` converges the corpus (bijective ordinals, prose-pure
  *               titles, export-index reconciled from columns, `SPEC-<n>`/
  *               `ADR-<n>` resolve via `dist/lore get`), `approved` status
- *               survives the title strip untouched.
+ *               survives the title strip untouched; a dedicated follow-up case
+ *               asserts the padded `SPEC-00n` mirror form resolves to the SAME
+ *               document as its unpadded `SPEC-n` display form (RESOLUTION
+ *               SURFACE, see the module-header RE-BASELINE note above).
  *   ERROR:      n/a at this layer (the malformed-export-index abort path is
  *               AC-084-4's job, `OrdinalMigrationService`-direct) — this
  *               suite's job is the CLI/compiled-binary wiring, not
@@ -444,14 +460,24 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(byId.has(specExempt.id)).toBe(false);
 
     // Doubled-number-scar export-index reconcile, computed but not written.
+    //
+    // RE-BASELINE (spec-mirror-identifier-ssot-one-writer-for-export-index-human D1/D2,
+    // AC-MIS-4/AC-MIS-7, commit 63164c20, 2026-08-11): the step-3 export-index reconcile at
+    // `ordinal-migration-service.ts:743` composes `new_human_id`/`suggested_file_path`/
+    // `rename_command` via the PADDED `formatMirrorHumanId` (e.g. `"SPEC-001"`), never the
+    // unpadded `formatDocDisplayId` (`"SPEC-1"`) this pin originally carried — mirrors the
+    // sibling `migrate-ordinals.bun.test.ts`'s own RE-BASELINE (its module header has the full
+    // rationale: padded is the mirror's canonical form, matching its own filename convention).
+    // `old_human_id` stays unpadded "SPEC-99": it is the literal DRIFTED seed value read back
+    // verbatim, never composed by the fix.
     expect(report.export_index_reconciles).toHaveLength(1);
     const reconcile = report.export_index_reconciles[0]!;
     expect(reconcile.doc_id).toBe(specA.id);
     expect(reconcile.old_human_id).toBe("SPEC-99");
-    expect(reconcile.new_human_id).toBe("SPEC-1");
-    expect(reconcile.suggested_file_path).toBe("docs/requirements/spec/SPEC-1-alpha-decision.md");
+    expect(reconcile.new_human_id).toBe("SPEC-001");
+    expect(reconcile.suggested_file_path).toBe("docs/requirements/spec/SPEC-001-alpha-decision.md");
     expect(reconcile.rename_command).toBe(
-      "git mv 'docs/requirements/spec/SPEC-99-001-alpha-decision.md' 'docs/requirements/spec/SPEC-1-alpha-decision.md'",
+      "git mv 'docs/requirements/spec/SPEC-99-001-alpha-decision.md' 'docs/requirements/spec/SPEC-001-alpha-decision.md'",
     );
 
     // REGRESSION: dry-run touched NOTHING — row state re-fetched fresh...
@@ -521,12 +547,18 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(eRow[0]?.ordinal).toBe(5);
 
     // Export-index human_id read from the column (never a stored composite).
+    // RE-BASELINE (spec-mirror-identifier-ssot-one-writer-for-export-index-human D1/D2,
+    // AC-MIS-4/AC-MIS-7, commit 63164c20, 2026-08-11): padded "SPEC-001", not unpadded
+    // "SPEC-1" — see the identical note above the dry-run test's reconcile assertions.
     const index = JSON.parse(readFileSync(join(dir, ".lore", "export-index.json"), "utf8")) as ExportIndex;
-    expect(index.mappings[specA.id]?.human_id).toBe(brandedHumanId("SPEC-1"));
+    expect(index.mappings[specA.id]?.human_id).toBe(brandedHumanId("SPEC-001"));
     // file_path itself is untouched (Scope-Alt: renames stay report-only).
     expect(index.mappings[specA.id]?.file_path).toBe("docs/requirements/spec/SPEC-99-001-alpha-decision.md");
 
-    // `dist/lore get SPEC-<n>` / `ADR-<n>` resolve every renumbered doc.
+    // `dist/lore get SPEC-<n>` / `ADR-<n>` resolve every renumbered doc. Unpadded "SPEC-1" is
+    // the CLI/MCP/dashboard display convention (`formatDocDisplayId`) — deliberately UNCHANGED
+    // by the mirror's own padded `human_id` convention (`formatMirrorHumanId` is consumed only
+    // by the export-index/filename mirror, never by general display — ordinal.ts:194-200).
     const getSpec1 = runLore(["get", "SPEC-1", "--json"], dir);
     expect(getSpec1.exitCode).toBe(0);
     const spec1Envelope = JSON.parse(getSpec1.stdout) as JsonEnvelope<{ doc: DocRecord }>;
@@ -552,6 +584,35 @@ describe("AC-084-5: compiled dist/lore migrate ordinals — dry-run/apply/idempo
     expect(getSpecExempt.exitCode).toBe(0);
     const exemptEnvelope = JSON.parse(getSpecExempt.stdout) as JsonEnvelope<{ doc: DocRecord }>;
     expect(exemptEnvelope.data!.doc.ordinal ?? null).toBeNull();
+  });
+
+  // ── RESOLUTION SURFACE: SPEC-<n> vs SPEC-00n must never resolve to DIFFERENT docs ──
+  // A standalone case (not folded into the STATE test above) so its 2 spawn-helper calls
+  // stay under scripts/check-test-budgets.mjs's SPAWN_THRESHOLD of 3 — folding it into the
+  // already-5-spawn STATE test would silently orphan that test's entry in
+  // scripts/test-budget-ledger.json (spawnCount 5 -> 6), a change outside this task's own
+  // file anchor (task-main-carries-two-red-e2e-cases-migrate-ordinals-compiled).
+  it("RESOLUTION SURFACE: dist/lore get resolves SPEC-1 and SPEC-001 to the SAME document, never silently different ones", () => {
+    // This task's own load-bearing extra assertion: `SPEC-1` vs `SPEC-001` is a RESOLUTION
+    // surface, not merely a rendering choice. `parseOrdinalRef` (ordinal.ts:244,
+    // `/^(spec|adr)-0*(\d+)$/i`) strips leading zeros before matching, so both forms parse to
+    // the identical `{type: "spec", ordinal: 1}` and MUST resolve to the same document. A
+    // silent resolution to a DIFFERENT document — not the padding choice itself — is the
+    // dangerous failure mode this assertion exists to catch; it must fail loud if that ever
+    // stops being true, never quietly diverge.
+    const getSpec1 = runLore(["get", "SPEC-1", "--json"], dir);
+    expect(getSpec1.exitCode).toBe(0);
+    const spec1Envelope = JSON.parse(getSpec1.stdout) as JsonEnvelope<{ doc: DocRecord }>;
+
+    const getSpec001 = runLore(["get", "SPEC-001", "--json"], dir);
+    expect(getSpec001.exitCode).toBe(0);
+    const spec001Envelope = JSON.parse(getSpec001.stdout) as JsonEnvelope<{ doc: DocRecord }>;
+
+    expect(spec001Envelope.data!.doc.id).toBe(spec1Envelope.data!.doc.id);
+    expect(spec001Envelope.data!.doc.slug).toBe(spec1Envelope.data!.doc.slug);
+    expect(spec1Envelope.data!.doc.slug).toBe(specA.slug);
+    expect(spec001Envelope.data!.doc.ordinal).toBe(1);
+    expect(spec1Envelope.data!.doc.ordinal).toBe(1);
   });
 
   it("REGRESSION: a second --apply run is idempotent — empty report, zero writes, byte-unchanged corpus DB", () => {
