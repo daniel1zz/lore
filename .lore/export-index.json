@@ -5892,6 +5892,22 @@
     "01KZVAXZQAT4S9F4HGQT45YTT9": {
       "human_id": "TASK-713",
       "file_path": "docs/requirements/task/TASK-713-mirror-export-never-rewrites-an-existing-file-whos.md"
+    },
+    "01KZVJCYK02VF9M5M7R1HJPAAK": {
+      "human_id": "KN-447",
+      "file_path": "docs/requirements/knowledge/KN-447-assessment-land-multi-session-concurrency-p1.md"
+    },
+    "01KZVJGD2X7DBRH8XNZSCEMXF5": {
+      "human_id": "TASK-714",
+      "file_path": "docs/requirements/task/TASK-714-the-lore-session-trailer-is-inert-whenever-core-ho.md"
+    },
+    "01KZVJH0171C7QQ1RQXWBES5JV": {
+      "human_id": "TASK-715",
+      "file_path": "docs/requirements/task/TASK-715-ac-own-5-s-oracle-exercises-only-the-pure-verdict.md"
+    },
+    "01KZVJGDB7SJ0ZD7FS3T97F7ZD": {
+      "human_id": "TASK-716",
+      "file_path": "docs/requirements/task/TASK-716-lore-territory-s-discovery-set-is-claim-derived-so.md"
     }
   }
 }

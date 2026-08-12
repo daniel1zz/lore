@@ -13,6 +13,7 @@ phases:
   - {name: "binding", description: "Write-side ownership facts: claim.branch, Lore-Session commit trailer, populated active_sessions[].branches"}
   - {name: "surface", description: "Read surfaces: lore territory --json and lore session list|show with probed liveness"}
   - {name: "replay", description: "Replay oracle proving the 2026-08-11 diagnosis is reproducible through lore alone, plus the merge-protocol doc change"}
+  - {name: "remediation", description: "Close the confirmed assess findings: an inert trailer, a claim-derived discovery set, a pure-function-only oracle, and a stale test title"}
 ---
 ## Goal
 
