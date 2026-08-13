@@ -5932,6 +5932,22 @@
     "01KZWF5EFFNWW673QYEEPNCMVT": {
       "human_id": "TASK-720",
       "file_path": "docs/requirements/task/TASK-720-the-two-mirror-exporters-disagree-bun-run-mirror-e.md"
+    },
+    "01KZWMYKK7RYGWZY3T19V3KS88": {
+      "human_id": "TASK-721",
+      "file_path": "docs/requirements/task/TASK-721-the-cwd-blind-spot-is-one-defect-at-two-call-sites.md"
+    },
+    "01KZWMXYXADHEPPZWVN1Q2EQNQ": {
+      "human_id": "TASK-722",
+      "file_path": "docs/requirements/task/TASK-722-the-two-mirror-exporters-disagree-because-drift-de.md"
+    },
+    "01KZWMWFN9VXRDNJMKFAW0Y7GF": {
+      "human_id": "TASK-723",
+      "file_path": "docs/requirements/task/TASK-723-the-defect-channel-has-no-adopt-verb-a-filed-repor.md"
+    },
+    "01KZWMCHD8W2KYSG1VGNCH950Y": {
+      "human_id": "TASK-724",
+      "file_path": "docs/requirements/task/TASK-724-ac-gd-3-d-direction-2-borrows-a-real-stale-mirror.md"
     }
   }
 }
