@@ -5980,6 +5980,14 @@
     "01KZWVCPCTKAVXZ3068HRZ8SGK": {
       "human_id": "TASK-727",
       "file_path": "docs/requirements/task/TASK-727-lore-review-truncates-the-parent-spec-before-the-j.md"
+    },
+    "01KZWYPEQBTCT8XF72D29R7X4Q": {
+      "human_id": "TASK-728",
+      "file_path": "docs/requirements/task/TASK-728-lore-done-tells-you-to-archive-a-plan-whose-declar.md"
+    },
+    "01KZWZS5F3JJ6709EYRTP142RG": {
+      "human_id": "TASK-729",
+      "file_path": "docs/requirements/task/TASK-729-lore-list-silently-omits-invalidated-docs-and-repo.md"
     }
   }
 }

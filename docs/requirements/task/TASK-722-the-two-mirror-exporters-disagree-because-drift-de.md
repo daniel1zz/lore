@@ -42,16 +42,43 @@ while both mirror files still read `status: draft`.
 It compares count and slug parity only — its own OK line says `file CONTENT is not
 compared`. So all three commands agree the mirror is fine while it is materially wrong.
 
-## 4. The suite's exporter DOES write frontmatter — and that contradicts AC-OX-1
+## 4. RESOLVED 2026-08-13 — the AC's oracle was NOT blind; "mid-run" meant a different run
 
-`bun run test:bun` rewrote exactly the SPEC-142 line the routine exporters had just
-refused, dirtying the tree mid-run and tripping `assertRepoCorpusClean` in
-`spec-loop-e2e.bun.test.ts`. AC-OX-1 of this spec asserts "No test invokes the mirror
-exporter in WRITE mode anywhere under scripts/tests or packages/lore/tests" — that write
-happened anyway, so either the AC's oracle does not reach the path that performed it or
-the write comes from a surface the AC does not enumerate. ⛔ Determine which BEFORE fixing
-anything: an AC that is green while the behaviour it forbids is observable is the more
-serious of the two defects here.
+⚠️ This section previously posed a two-way question ("either the AC's oracle does not
+reach the path that performed it, or the write comes from a surface the AC does not
+enumerate") and instructed the implementer to determine which BEFORE fixing anything.
+**Both branches were wrong**, and the question is now closed by measurement — do not
+re-open it or spend budget re-investigating.
+
+The write came from exactly the call the AC names: `runMirrorScript([])` in
+`scripts/tests/spec-mirror-export.test.ts`, 12 occurrences. The apparent contradiction
+("`test:bun` runs only `.bun.test.ts`, so it cannot be that vitest file") dissolves at
+`package.json`: `test` is `bun scripts/oracle-lock.ts sh -c "bun run test:vitest && bun
+run test:bun && bun run check:spec-mirror"`. The vitest phase runs FIRST, in the same
+`bun run test` invocation, and its 12 write-mode calls regenerate every mirror file's
+frontmatter (`export-docs-service.ts` writes `status: ${doc.status}` on every export).
+By the time `test:bun`'s `assertRepoCorpusClean("before")` ran moments later, the dirt
+from the preceding phase was already on disk. "Mid-run" meant mid the overall run, not
+mid `test:bun`. Every `.bun.test.ts` file touching mirror/export-docs was read and each
+one isolates to an `mkdtemp` throwaway corpus.
+
+AC-OX-1 was never green while its forbidden behaviour was observable — it carried ZERO
+evidence and had never been evaluated (bare `·` in `lore ac list`, against
+`⚑✔(n/0, 1 attested)` on AC-OX-2/3/4). So no AC needs widening, and this is ordinary
+unstarted work rather than a governance emergency. The read-only conversion landed in
+main as `300d9609`; AC-OX-1 is now attested FAIL at exit 1 for an unrelated reason (see §5).
+
+## 5. What `--check` DOES catch, measured — KD4 conflated two blind spots
+
+`bun scripts/export-spec-mirror.ts --check` exits **2** and names, per type, every corpus
+doc with no mirror file at all, printing the reconcile command. So count/slug parity is
+NOT blind to a missing mirror — it caught 3 such docs on 2026-08-13 and said so.
+
+The real blind spot is narrower and must be stated precisely: a mirror file that EXISTS
+but whose CONTENT disagrees with the corpus. Body drift is compared (one file flagged);
+frontmatter is not (`export-docs-service.ts`, "blind to frontmatter by design"), so a
+`status` transition is invisible to all three of `mirror:export --check`,
+`lore export-docs --force`, and `check:spec-mirror`.
 
 ## Consequence to fix, stated as a falsifiable outcome
 

@@ -108,9 +108,16 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [spec] Multi-session concurrency: queryable ownership, checkout-scoped exclusion, probed liveness (approved)
-- [task] The two mirror exporters disagree: bun run mirror:export never rewrites a changed file but the test suite does, so the documented 're-export and commit before the run' remedy is unreachable (draft)
+- [spec] Oracle exclusivity in a shared checkout: a mirror check that cannot repair itself, a pollution guard that sees mirror content, a gitignored probe namespace, and a serialized suite (approved)
+- [task] lore list silently omits invalidated docs and reports a self-consistent total, so a corpus-wide census is wrong by exactly the hidden population with no signal that anything was filtered (draft)
 - [task] The --cwd blind spot is a CLASS, not one function: lore done's unfiltered-run floor also strips only a 'cd' prefix, so obeying this repo's own no-cd discipline makes a task un-archivable (draft)
+- [task] lore done tells you to archive a plan whose declared phases are mostly EMPTY: 'every child task is archived' cannot distinguish a finished plan from one that was never decomposed (draft)
+- [task] lore set --content-file silently accepts a replacement that deletes most of a document, with no volume-delta warning and no confirmation (draft)
+- [task] lore assess scores findings against files listed in its OWN truncation manifest, so a path the judge never saw is reported as a MAJOR gap (draft)
+- [spec] Multi-session concurrency: queryable ownership, checkout-scoped exclusion, probed liveness (approved)
+- [task] lore review truncates the parent spec before the judge sees it, so the judge scores absent text as a missing-definition defect and escalates the whole plan (draft)
+- [task] The defect channel has no adopt verb: a filed report can be closed but never given an owner, so every accepted defect stays plan-less forever (draft)
+- [task] The two mirror exporters disagree: bun run mirror:export never rewrites a changed file but the test suite does, so the documented 're-export and commit before the run' remedy is unreachable (draft)
 - [task] mirror:export never rewrites an existing file whose rendered content changed, and check:spec-mirror compares only count and slug parity — so every archived task reads 'draft' in the mirror while both commands report OK (draft)
 - [adr] Multi-session coordination is decentralised: file locks plus process probing, no resident daemon (approved)
 - [task] The oracle-file-existence precheck understands only the 'cd <dir> &&' form the repo's own discipline forbids, so a compliant command is refused as a missing file (draft)
@@ -155,7 +162,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] Five governance-tooling gaps measured while resuming handoff-90: a dispatch gate that cannot resume a worktree, an unreachable unfiltered-anchor requirement, a scoped oracle that rebuilds a shared binary, an AC ceiling that squeezes out rationale, and a judge verdict on a truncated spec (approved)
 - [knowledge] Attestation is structurally one-sided: lore verify can attest greens but never reds, and the done-gate's unfiltered-run requirement is unreachable from AC oracles that all carry -t (approved)
 - [knowledge] Eight findings from landing four governance specs: a bunx-installed compiler that made me overrule a true record, a designed behaviour I reported as a defect, and six review rounds converging on missing data (approved)
-- [spec] Oracle exclusivity in a shared checkout: a mirror check that cannot repair itself, a pollution guard that sees mirror content, a gitignored probe namespace, and a serialized suite (approved)
 - [knowledge] Seven findings from planning the bootstrap-fixpoint slice: a plan-scoped anchor mutex and its equally blind report, a hook that misnames its own refusal, an asymmetric AC demotion, the self-exempting-oracle pair, and four probes of my own that nearly lied (approved)
 - [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
 - [knowledge] Nine findings from landing the mirror-id-unify merge: two concurrent sessions poisoning one checkout, a suite mutually exclusive with its own corpus, an ordinal reversion loop the merge armed, an AI judge that read a rename backwards, and an exclusivity probe of mine that lied (approved)

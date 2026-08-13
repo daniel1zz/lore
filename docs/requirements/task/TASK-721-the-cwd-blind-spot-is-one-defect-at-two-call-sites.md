@@ -3,7 +3,7 @@ id: TASK-721
 type: task
 role: plan
 title: "The cwd blind spot is one defect at two call sites: both derive the working directory by regexing a 'cd' prefix this repo's own discipline forbids"
-status: draft
+status: archived
 priority: critical
 created: 2026-08-13
 updated: 2026-08-13

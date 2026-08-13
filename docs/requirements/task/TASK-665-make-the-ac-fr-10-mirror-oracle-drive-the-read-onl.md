@@ -3,11 +3,11 @@ id: TASK-665
 type: task
 role: plan
 title: "Make the AC-FR-10 mirror oracle drive the read-only check instead of the write-mode exporter so it can actually fail and stops dirtying the live corpus"
-status: draft
+status: archived
 priority: high
 phase: "readonly-oracle"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-13
 tags: []
 parent: PLAN-124
 plan: PLAN-124
