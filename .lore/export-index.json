@@ -5988,6 +5988,14 @@
     "01KZWZS5F3JJ6709EYRTP142RG": {
       "human_id": "TASK-729",
       "file_path": "docs/requirements/task/TASK-729-lore-list-silently-omits-invalidated-docs-and-repo.md"
+    },
+    "01KZX0B7XG60SX7XK0PQX505PN": {
+      "human_id": "KN-455",
+      "file_path": "docs/requirements/knowledge/KN-455-eleven-findings-from-resuming-handoff-102-with-thr.md"
+    },
+    "01KZX0G3G9QJ0NCYGRRXAE59YF": {
+      "human_id": "TASK-730",
+      "file_path": "docs/requirements/task/TASK-730-the-mirror-prune-does-not-retire-a-mapping-whose-d.md"
     }
   }
 }
