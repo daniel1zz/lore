@@ -10,18 +10,26 @@
  *      `checkGap19Scope` / `evaluateLedger`) — in-memory content strings, no
  *      subprocess, no corpus.
  *   2. An end-to-end SSOT fixture (`mkdtemp` + `lore init`, NEVER this repo's own
- *      `.lore/`) proving direction 1 of AC-GD-3(d): an injected corpus doc with a
- *      bare token, mirror absent (a fresh throwaway corpus has no
- *      `docs/requirements/` at all), makes `main()` exit exactly 3.
+ *      `.lore/`) proving BOTH directions of AC-GD-3(d), each owning both ends of
+ *      its own comparison rather than borrowing one from this repo's tree:
+ *      direction 1 — an injected corpus doc with a bare token, mirror absent (a
+ *      fresh throwaway corpus has no `docs/requirements/` at all), makes
+ *      `main()` exit exactly 3; direction 2 — a clean corpus doc PLUS a mirror
+ *      file the test itself writes under the same fixture root, deliberately
+ *      stale (pre-rename `G1`, control-asserted right after writing), still
+ *      makes `main()` exit 0 — corpus-keyed, never mirror-keyed.
  *   3. The real-repo-tree arming assertion (`describe("check-gap-namespace: real
- *      repo tree (task oracle) ...")`) — this is BOTH this checker's production
- *      wiring (this repo's established convention for a dev-repo-only static
- *      checker: armed by `bun run test` via a real-tree `main()` call, never
- *      `hooks/pre-push` — see the script's own module header and
+ *      repo tree (task oracle) ...")`) — this repo's production wiring (this
+ *      repo's established convention for a dev-repo-only static checker: armed
+ *      by `bun run test` via a real-tree `main()` call, never `hooks/pre-push`
+ *      — see the script's own module header and
  *      `task-three-of-five-static-checkers-are-inert-no-exported-main`) AND
- *      direction 2 of AC-GD-3(d) (clean corpus + a genuinely, independently
- *      dirty exported mirror -> still exits 0) AND AC-GD-3(g)/(h) (exits 0
- *      against the LIVE renamed ledger, GAP-19's scope line is correct).
+ *      AC-GD-3(g)/(h) (exits 0 against the LIVE renamed ledger, GAP-19's scope
+ *      line is correct). Whether this repo's OWN exported mirror happens to be
+ *      stale or fresh at any given moment is irrelevant here and is no longer
+ *      checked by this assertion — that comparison is owned entirely by the
+ *      direction-2 fixture above, which cannot be reddened by repairing this
+ *      repo's mirror.
  *
  * Six-dimension coverage:
  *   HAPPY:      GAP-<n> tokens never flagged; a well-formed entry parses with
@@ -49,8 +57,9 @@
  *               that only a fourth field can tell apart
  *   REGRESSION: the real live ledger's unowned-gap set is asserted by SET
  *               EQUALITY against the spec's pinned membership, not just a
- *               count; the real mirror is independently confirmed dirty
- *               while the real corpus-driven run stays exit 0
+ *               count; a constructed clean-corpus-plus-stale-mirror fixture
+ *               (both ends owned by the test) proves the checker stays
+ *               exit-0 regardless of mirror state
  *
  * @spec_ref spec-governance-defaults-must-ship-and-every-recorded-gap-must (D4, D4a, D4b, D4c, D4d, D5, D6, AC-GD-3)
  * @spec_ref task-build-the-gap-namespace-checker-and-the-unowned-gap-report
@@ -58,7 +67,7 @@
 
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -501,6 +510,43 @@ describe("check-gap-namespace: SSOT fixture (mkdtemp + lore init, never this rep
   }, 30000);
 });
 
+describe("check-gap-namespace: SSOT fixture (mkdtemp + lore init, never this repo's own .lore/) — AC-GD-3(d) direction 2", () => {
+  it("HAPPY: a clean corpus doc PLUS a mirror file the test itself writes under the SAME fixture root, deliberately stale (pre-rename G1), still makes main() exit 0 — corpus-keyed, not mirror-keyed", () => {
+    const cwd = initFixtureCorpus();
+    try {
+      // Clean end of the comparison: the corpus doc `main()` actually reads uses
+      // the post-rename GAP-1 spelling throughout.
+      const doc = createKnowledgeDoc(
+        cwd,
+        "Fixture gap ledger, clean (direction 2)",
+        "## GAP-1 (HALF-CLOSED) — fixture\n<!-- gap: id=GAP-1 status=half-closed owning_spec=none open_half_carried_by=GAP-2 -->\n",
+      );
+
+      // Dirty end of the comparison: constructed by the test, not borrowed from
+      // this repo's own docs/requirements/ — a mirror file under the fixture's
+      // OWN root, deliberately left at the pre-rename G1 spelling.
+      const mirrorDir = join(cwd, "docs/requirements/knowledge");
+      mkdirSync(mirrorDir, { recursive: true });
+      const mirrorPath = join(mirrorDir, "KN-fixture-stale-mirror.md");
+      writeFileSync(
+        mirrorPath,
+        "## G1 (HALF-CLOSED) — fixture\n<!-- gap: id=G1 status=half-closed owning_spec=none open_half_carried_by=G2 -->\n",
+        "utf8",
+      );
+
+      // Control: read the fixture mirror back and confirm it really is stale —
+      // a file the test failed to write is the same shape as a clean one.
+      const mirrorContent = readFileSync(mirrorPath, "utf8");
+      expect(mirrorContent).toContain("## G1 (HALF-CLOSED");
+      expect(mirrorContent).not.toContain("## GAP-1 (HALF-CLOSED");
+
+      expect(main(cwd, doc.slug)).toBe(0);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 30000);
+});
+
 // ─── Arming: the REAL repo tree + REAL corpus (task oracle) ────────────────
 //
 // This is this checker's PRODUCTION WIRING (see the script's own module
@@ -511,26 +557,20 @@ describe("check-gap-namespace: SSOT fixture (mkdtemp + lore init, never this rep
 // and would break there since this checker's target doc does not exist in
 // any `lore init`-created project).
 //
-// It is ALSO AC-GD-3(d) direction 2 (clean corpus + an INDEPENDENTLY,
-// genuinely dirty exported mirror -> still exits 0, proving the checker is
-// corpus-keyed, never mirror-keyed) and AC-GD-3(g)/(h) (exits 0 against the
-// LIVE renamed ledger; GAP-19's scope line is correct) all in one assertion.
+// It is ALSO AC-GD-3(g)/(h) (exits 0 against the LIVE renamed ledger; GAP-19's
+// scope line is correct). Whether this repo's OWN exported mirror happens to
+// be stale or fresh right now is irrelevant to this assertion and is
+// deliberately NOT checked here — that comparison (corpus-keyed, not
+// mirror-keyed) is owned entirely by the direction-2 fixture above, which
+// constructs both ends itself and so cannot be reddened by repairing this
+// repo's mirror.
 //
 // READ-ONLY against this repo's own `.lore/`: `main()`'s only corpus access
 // is one `lore get <slug> --json` (a GET), so this creates, edits, and
 // deletes exactly zero corpus docs.
 
-describe("check-gap-namespace: real repo tree (task oracle) — AC-GD-3(d)(g)(h)", () => {
-  it("REGRESSION/HAPPY: exits 0 against the LIVE renamed ledger via the corpus, even though the exported mirror is independently confirmed to still be dirty — corpus-keyed, not mirror-keyed (D4b)", () => {
-    const mirrorPath = join(
-      REPO_ROOT,
-      "docs/requirements/knowledge/KN-170-attestation-is-structurally-one-sided-lore-verify.md",
-    );
-    const mirrorContent = readFileSync(mirrorPath, "utf8");
-    // Control: confirm the exported mirror really is stale right now (still pre-rename `G1`, never `GAP-1`).
-    expect(mirrorContent).toContain("## G1 (HALF-CLOSED");
-    expect(mirrorContent).not.toContain("## GAP-1 (HALF-CLOSED");
-
+describe("check-gap-namespace: real repo tree (task oracle) — AC-GD-3(g)(h)", () => {
+  it("REGRESSION/HAPPY: exits 0 against the LIVE renamed ledger via the corpus (D4b)", () => {
     const exitCode = main(); // production defaults: this repo's root + the real LEDGER_SLUG
     expect(exitCode).toBe(0);
   }, 30000);
