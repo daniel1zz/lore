@@ -3,7 +3,7 @@ id: SPEC-142
 type: spec
 role: spec
 title: "Multi-session concurrency: queryable ownership, checkout-scoped exclusion, probed liveness"
-status: draft
+status: approved
 priority: medium
 created: 2026-08-12
 updated: 2026-08-13
