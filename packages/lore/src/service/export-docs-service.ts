@@ -263,6 +263,40 @@ export interface ExportReport {
    * exactly one of those four, never both — see the write loop's `identityStale` branch).
    */
   identity_repaired: string[];
+  /**
+   * task-the-two-mirror-exporters-disagree-because-drift-detection (2026-08-13) — file paths
+   * whose on-disk FRONTMATTER SCALAR fields (`status`, `priority`, `title`, `tags`, `phase` —
+   * every field {@link buildFrontmatterString} derives directly from `doc`, excluding the
+   * identity fields `identity_repaired` already covers and the wall-clock `created`/`updated`
+   * dates) disagreed with the doc's CURRENT corpus values while the BODY still matched, and
+   * were unconditionally rewritten to converge — independent of `opts.force`, because a
+   * corpus-authoritative field (e.g. a `status` transition) has exactly one correct value, never
+   * a hand-edit judgement call the way body content is. This is what makes a status-only drift
+   * (measured baseline 2026-08-13: 202 mirror files reading a stale `status:` after their corpus
+   * doc's status changed with the body byte-unchanged) actually REPAIRABLE by `bun run
+   * mirror:export` / `lore export-docs` with no flags — before this field existed, the body-only
+   * comparison below was blind to every one of these fields (same root cause `identity_repaired`
+   * was added to fix for `id`/`parent`/`plan`/`links`, generalized here to the remaining scalar
+   * frontmatter surface). Never populated together with `skipped_clean`/`drift`/`overwritten`/
+   * `identity_repaired` for the SAME path.
+   */
+  frontmatter_repaired: string[];
+  /**
+   * task-the-two-mirror-exporters-disagree-because-drift-detection (2026-08-13) — file paths
+   * whose frontmatter scalar staleness (see {@link frontmatter_repaired}) was DETECTED but could
+   * NOT be safely repaired, for one of two reasons, both named here rather than silently folded
+   * into `skipped_clean` (which would misreport a file this run could not actually verify or fix
+   * as clean — the "a report that can only print OK" defect this field exists to kill):
+   *   1. The on-disk frontmatter block could not be parsed at all (missing/malformed `status`,
+   *      `priority`, `title`, or `tags`) — staleness is UNDECIDABLE, so this run can prove
+   *      neither "clean" nor "stale" and must say so rather than guess `skipped_clean`.
+   *   2. The BODY *also* drifted (the existing `report.drift` case) and `opts.force` was not
+   *      passed — repairing the frontmatter alone would still require rewriting the body, which
+   *      is not an approved action without `--force`, so this run declines the WHOLE file rather
+   *      than silently patching half of it. Also present in `report.drift` for this case (finer-
+   *      grained information, not a replacement for it).
+   */
+  frontmatter_declined: string[];
 }
 
 /**
@@ -411,6 +445,8 @@ export class ExportDocsService {
       repaired,
       ordinal_warnings: ordinalWarnings,
       identity_repaired: [],
+      frontmatter_repaired: [],
+      frontmatter_declined: [],
     };
 
     // Computes this doc's CURRENT, correct identity refs (parent/plan/links human_ids) from the
@@ -543,8 +579,45 @@ export class ExportDocsService {
         const fileBody = extractBodyFromMd(fileMd);
         const fileNorm = canonicaliseBody(fileBody);
         const corpusNorm = canonicaliseBody(resolvedBody);
+        const bodyStale = fileNorm !== corpusNorm;
 
-        if (fileNorm === corpusNorm) {
+        // task-the-two-mirror-exporters-disagree-because-drift-detection (2026-08-13) — the
+        // SAME staleness question the identity check above asks, generalized from the identity
+        // fields (id/parent/plan/links) to the remaining scalar frontmatter fields that are
+        // ALSO pure, deterministic projections of `doc` and therefore ALSO invisible to the
+        // body-only comparison above by construction (a `status` transition changes not one
+        // byte of `resolvedBody`). See `ExportReport.frontmatter_repaired`'s own doc comment for
+        // the full mechanism and measured baseline.
+        const onDiskScalar = extractFrontmatterScalarFields(fileMd);
+        const freshScalar = computeFreshScalarFields(doc);
+        const scalarUndecidable = onDiskScalar === null;
+        const scalarStale = !scalarUndecidable && canonicalizeScalarFields(onDiskScalar) !== canonicalizeScalarFields(freshScalar);
+
+        if (!bodyStale) {
+          // Body content matches — but the file's frontmatter scalar fields may still be
+          // stale (or unreadable), independent of `opts.force`: see `frontmatter_repaired`'s
+          // own doc comment for why this is unconditional, unlike body drift below.
+          if (scalarUndecidable) {
+            report.frontmatter_declined.push(mapping.file_path);
+            continue;
+          }
+          if (scalarStale) {
+            if (opts.dryRun) {
+              report.frontmatter_repaired.push(mapping.file_path);
+              continue;
+            }
+            try {
+              const fileContent = buildFileContent(doc, resolvedBody, freshRefs);
+              writeFileSync(absFilePath, fileContent, "utf8");
+            } catch (e) {
+              report.errors.push(
+                `${mapping.file_path}: frontmatter-repair rewrite failed — ${e instanceof Error ? e.message : String(e)}`,
+              );
+              continue;
+            }
+            report.frontmatter_repaired.push(mapping.file_path);
+            continue;
+          }
           report.skipped_clean.push(mapping.file_path);
           continue;
         }
@@ -556,6 +629,13 @@ export class ExportDocsService {
         if (!opts.force) {
           report.drift.push(mapping.file_path);
           process.stderr.write(`⚠ drift: ${mapping.file_path}\n`);
+          if (scalarStale) {
+            // Frontmatter is ALSO stale, but fixing it here would require rewriting the body
+            // too (buildFileContent regenerates the whole file) — not an approved action
+            // without --force. Name it explicitly rather than letting `report.drift` alone
+            // stand in for "and nothing else is wrong" (AC-OX-5c: a decline must be honest).
+            report.frontmatter_declined.push(mapping.file_path);
+          }
           continue;
         }
 
@@ -1433,6 +1513,112 @@ function extractFrontmatterIdentityRefs(
   }
 
   return { parentHumanId, planHumanId, links };
+}
+
+/**
+ * The frontmatter SCALAR fields — every field {@link buildFrontmatterString} derives directly
+ * and deterministically from `doc`'s own columns, EXCLUDING the identity fields
+ * {@link FreshIdentityRefs} already covers (`id`/`parent`/`plan`/`links`) and the wall-clock
+ * `created`/`updated` dates (deliberately excluded — see
+ * {@link computeFreshScalarFields}'s own doc comment for why). This is the shape both
+ * {@link computeFreshScalarFields} (current corpus truth) and
+ * {@link extractFrontmatterScalarFields} (on-disk claim) produce, so the write loop's staleness
+ * comparison (task-the-two-mirror-exporters-disagree-because-drift-detection, 2026-08-13) always
+ * compares like with like.
+ */
+interface FrontmatterScalarFields {
+  status: string;
+  priority: string;
+  title: string;
+  tags: string[];
+  phase: string | undefined;
+}
+
+/**
+ * Computes the CURRENT, correct scalar frontmatter fields for `doc` — direct reads of the doc's
+ * own columns, never a guess or a regex derivation (task-the-two-mirror-exporters-disagree-
+ * because-drift-detection, 2026-08-13). Deliberately excludes `created`/`updated`: those track
+ * wall-clock write time rather than a single corpus-authoritative FACT the way `status`/
+ * `priority`/`title`/`tags`/`phase` do, so treating a same-run `updated_at` change as "frontmatter
+ * drift" would make nearly every export touch nearly every file's mirror for no observable
+ * reason beyond the date stamp — a noisy trigger nothing measured or asked for, unlike the other
+ * five fields which have exactly one correct value at any moment and no legitimate reason to
+ * ever disagree with the file that claims to mirror them.
+ *
+ * @param doc - Full DocRecord from corpus.
+ */
+function computeFreshScalarFields(doc: DocRecord): FrontmatterScalarFields {
+  const phaseStr = typeof doc.extra["phase"] === "string" ? doc.extra["phase"] : undefined;
+  return {
+    status: doc.status,
+    priority: doc.priority,
+    title: doc.title,
+    tags: [...doc.tags],
+    phase: phaseStr,
+  };
+}
+
+/**
+ * Extracts the SAME scalar frontmatter shape {@link computeFreshScalarFields} computes, but read
+ * from an ALREADY-WRITTEN file's frontmatter — the on-disk half of the
+ * task-the-two-mirror-exporters-disagree-because-drift-detection (2026-08-13) staleness
+ * comparison. Same strict-frontmatter + `parseYaml` pattern as
+ * {@link extractFrontmatterIdentityRefs}, but STRICTER on the three fields
+ * {@link buildFrontmatterString} unconditionally writes for every doc (`status`/`priority`/
+ * `title`): a missing or wrong-typed value there means the frontmatter block itself cannot be
+ * trusted, so this returns `null` (staleness UNDECIDABLE) rather than degrading those three to
+ * an absent value the way {@link extractFrontmatterIdentityRefs} degrades its OPTIONAL fields —
+ * a caller that silently read "no status field" as "not stale" would misreport an unreadable
+ * file as clean (see `ExportReport.frontmatter_declined`'s own doc comment). `tags`/`phase` DO
+ * degrade (to `[]`/`undefined`) on a missing/malformed value, matching `tags`' own optional-
+ * looking-but-not-required shape in practice and `phase`'s genuinely optional one.
+ *
+ * @param mdContent - Full file content (as read from disk).
+ * @returns The parsed scalar fields, or `null` if the file has no strict frontmatter block, the
+ *   frontmatter isn't valid YAML, or `status`/`priority`/`title` is missing or not a string.
+ */
+function extractFrontmatterScalarFields(mdContent: string): FrontmatterScalarFields | null {
+  const normalized = mdContent.replace(/\r\n/g, "\n");
+  const split = splitFrontmatter(normalized, "strict");
+  if (!split.ok) return null;
+  let fm: unknown;
+  try {
+    fm = parseYaml(split.frontmatter);
+  } catch {
+    return null;
+  }
+  if (!fm || typeof fm !== "object") return null;
+  const record = fm as Record<string, unknown>;
+
+  const status = record["status"];
+  const priority = record["priority"];
+  const title = record["title"];
+  if (typeof status !== "string" || typeof priority !== "string" || typeof title !== "string") {
+    return null;
+  }
+
+  const rawTags = record["tags"];
+  const tags = Array.isArray(rawTags) ? rawTags.filter((t): t is string => typeof t === "string") : [];
+  const phase = typeof record["phase"] === "string" ? record["phase"] : undefined;
+
+  return { status, priority, title, tags, phase };
+}
+
+/**
+ * Canonical comparison string for a {@link FrontmatterScalarFields} value — used ONLY to compare
+ * two scalar-field sets for equality, never written anywhere. `tags` is compared IN ORDER
+ * (unlike {@link canonicalizeIdentityRefs}'s `links` sort): tags are a direct copy of `doc.tags`
+ * on both sides (never independently re-ordered by a store join the way `findLinks` is), so an
+ * order-sensitive comparison introduces no false-positive risk here.
+ */
+function canonicalizeScalarFields(fields: FrontmatterScalarFields): string {
+  return JSON.stringify({
+    status: fields.status,
+    priority: fields.priority,
+    title: fields.title,
+    tags: fields.tags,
+    phase: fields.phase ?? null,
+  });
 }
 
 /**
