@@ -6,7 +6,7 @@ title: "Memory hygiene part 3: doc-code drift oracle (H3)"
 status: approved
 priority: high
 created: 2026-07-12
-updated: 2026-07-27
+updated: 2026-08-11
 tags: [memory-hygiene, drift, code-anchors, spec-045]
 parent: PRD-001
 ---
@@ -54,7 +54,7 @@ not a mutation.
 - **D2 — Pure drift core in `@lore/core`** (new `packages/core/src/code-anchors.ts`,
   browser-safe, no fs, no wall-clock): `parseCodeAnchor`, `scanExportedSymbols(source)`,
   and `computeDrift(declared, probes)` → `{consistent, drifts: Array<{spec_id,
-  spec_slug, spec_status, anchor, kind}>}` with `kind ∈ file_missing | dir_missing |
+  doc_slug, doc_type, spec_id, spec_status, anchor, kind}>}` with `kind ∈ file_missing | dir_missing |
   dir_empty | symbol_missing | node_type_mismatch | probe_error` (six kinds — a path
   that exists as the WRONG node type — dir anchor hitting a file or vice versa — is
   `node_type_mismatch`, never collapsed into `*_missing`, review T8; a probe that
@@ -98,7 +98,7 @@ not a mutation.
   (zero specs declare anchors) → `armed: false` stated loud, exit 0. Every drift row
   renders `spec-slug → anchor (kind)` PLUS a literal repair hint (review U5):
   `fix: lore anchor rm <spec-slug> '<anchor>' (or update the path/export)`. Output
-  ordering is deterministic (sort by spec_slug, then anchor). `--json` emits
+  ordering is deterministic (sort by doc_slug, then anchor). `--json` emits
   `data.code_drift = {armed, enabled, consistent, specs_checked, status_breakdown,
   drifts[]}` — the scanned population is countable, never implicit (review U7: ALL
   non-deleted specs are checked regardless of status — a draft spec anchoring
@@ -305,6 +305,24 @@ Zero LLM calls — this is the deterministic leg of §16. No writes on drift, ev
 lexical scan trades documented false positives for a guaranteed absence of false
 negatives (G11) — including under probe errors, which surface as drift, never as a
 truncated scan.
+
+
+## Superseded clauses (2026-08-11)
+
+⛔ Two field names above were RENAMED by `spec-a-write-side-fact-with-no-read-side-address-counts-with-no` §M2, which widened this
+oracle from spec-only to spec + knowledge. The text above has been updated in place; recorded
+here so a reader who remembers the old spelling learns it is gone rather than assuming a typo:
+
+- `DriftRow.spec_slug` → **`doc_slug`**, plus a REQUIRED **`doc_type`** so a knowledge breach
+  can never be read as a spec's. Zero occurrences of the old spelling remain under
+  `packages/**` / `scripts/**`.
+- `DriftCheckResult.specs_checked` is unchanged but no longer the whole population: a sibling
+  **`knowledge_checked`** now counts knowledge docs declaring ≥1 anchor. A report quoting only
+  `specs_checked` no longer describes everything the scan covered.
+- ⛔ Still spec-flavoured on a knowledge row, tracked by
+  `task-finish-the-drift-row-rename-spec-id-and-spec-status-still`: `spec_id` / `spec_status`,
+  and `code_anchor_specs` / `countArmedSpecs` (deliberately spec-only — the name states its
+  population, so a knowledge-only-armed corpus reports 0 there while `checkDrift` is armed).
 
 
 ## Acceptance Criteria (structured)

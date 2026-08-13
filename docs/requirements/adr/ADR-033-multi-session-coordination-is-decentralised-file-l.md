@@ -3,7 +3,7 @@ id: ADR-033
 type: adr
 role: decision
 title: "Multi-session coordination is decentralised: file locks plus process probing, no resident daemon"
-status: draft
+status: approved
 priority: medium
 created: 2026-08-12
 updated: 2026-08-12
@@ -67,11 +67,11 @@ failure measured above happened on the mutable side.
 
 ## Decision
 
-Multi-session coordination is DECENTRALISED. Coordination state lives in files
-under `.lore/`; liveness is established by probing the operating system; there is
-no resident coordinator process.
+Multi-session coordination is DECENTRALISED. Coordination state lives in files on
+the local filesystem; liveness is established by probing the operating system;
+there is no resident coordinator process.
 
-Four commitments follow:
+Five commitments follow:
 
 1. **No daemon.** The coordinator role is played by lock files plus process
    probing, never by a long-running arbiter.
@@ -86,6 +86,26 @@ Four commitments follow:
    timestamp does not mean alive and a stale one does not mean dead.
 4. **Communication is advisory and separate from exclusion.** Sessions may
    exchange messages, but no message exchange creates mutual exclusion.
+5. **State location follows scope, in two tiers.** An earlier revision of this
+   record said flatly that coordination state lives under `.lore/`. Implementing
+   L0 showed that to be too coarse, and the distinction it was missing is the
+   one that matters:
+   - **Authoritative exclusion state** — locks and leases — lives under `.lore/`,
+     because it is scoped to THIS checkout and a reader must be able to find it
+     by looking at the repo it is blocked on. A lock whose location does not
+     name its checkout cannot answer "who holds this working tree".
+   - **Advisory liveness beacons** live in machine-scoped storage OUTSIDE any
+     repo (`os.tmpdir()`), because they are scoped to a PROCESS, not a checkout,
+     and because a beacon that lands inside a repo can be committed by accident.
+     The checkout dimension is supplied by the corpus claim it is joined against
+     (`claim.worktree`), not by the beacon's own path.
+
+   ⛔ Neither tier may be conflated with a corpus write. The standing rule
+   forbidding writes to a repo's own `.lore/` refers to the DOCUMENT STORE. A
+   lock file at `.lore/<name>.lock` is not a corpus write, and reading the rule
+   as if it were is what pushed L0's heartbeat into `os.tmpdir()` — a choice this
+   record now ratifies for beacons specifically, but which was reached by
+   misreading rather than by design.
 
 ## Quality Attributes Affected
 
@@ -125,6 +145,29 @@ Four commitments follow:
 - Two lock classes mean two failure models to test rather than one.
 - Cross-machine operation cannot be made authoritative by this decision and must
   be explicitly reported as advisory rather than silently weaker.
+
+**Known precondition P2 must satisfy before its lease can be authoritative**
+
+L0 records a liveness beacon carrying `process.ppid` — the parent of the
+short-lived `lore` CLI invocation, which is the invoking shell, not necessarily
+the long-lived orchestrator. The implementation discloses this in
+`SessionService.recordOwnHeartbeat`'s JSDoc rather than presenting it as an
+orchestrator pid. It is sufficient for L0's question ("is a process behind this
+session still alive") and NOT sufficient for a lease that refuses another
+session's writes.
+
+⛔ P2 must therefore capture the orchestrator's own pid and start time, not the
+CLI's parent, and must not inherit L0's beacon as if it already did. An exclusion
+decision resting on a shell's pid would refuse or permit on the wrong identity —
+and a lease that permits on the wrong identity is indistinguishable from a lease
+that correctly found no conflict, which is the failure mode this whole record
+exists to prevent.
+
+The reason L0 could not simply put `{pid, started_at}` on `TaskClaim` is worth
+recording as a process fact, not a technical one: the claim's owning files were
+anchored to a DIFFERENT task in the same plan, so the agent implementing liveness
+had no permission to extend the claim and built a parallel store instead. The
+anchor split, not the implementer, produced the second mechanism.
 
 **Unchanged**
 

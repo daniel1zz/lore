@@ -6,7 +6,7 @@ title: "Session Layer (multi-session collaboration & context continuity) (domain
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-08-01
 tags: []
 parent: PRD-001
 ---
@@ -20,6 +20,52 @@ parent: PRD-001
 - **S4 Two-tier worktree seat model (committed v0.10)** — a *plan seat* (worktree on branch `plan/<slug>`, bound to a plan — never to a session) is the cross-session home for a feature's execution: sessions serially occupy it (SPEC-047 auto-derives the actor from the branch), code-state WIP commits to the plan branch between sessions (the handoff doc carries corpus context; the plan branch carries code context), and short-lived task/subagent worktrees fork from and merge back to it; the plan branch merges to main exactly once, at plan close — aligning the git integration boundary with the plan-close gate (SPEC-054) and `lore assess`. `lore seat` (the sugar SPEC-047 explicitly deferred, now committed) mechanizes the seat lifecycle: `seat <plan>` (entry: readiness check + rebase + worktree add + branch naming), `seat list` (enumerate active seats — load-bearing for choosing among >1 concurrent plan seat), `seat resume` (re-enter an existing seat). Bootstrap's `resume_hint` becomes seat-aware: `lore bootstrap` gains a seat-signal input (branch or worktree, supplied by the SessionStart hook from its SPEC-047 detection — today `bootstrap(by, now)` carries no such signal, a named design change) and inside a seat resolves to that seat's plan thread, never the corpus-global newest handoff; behavior is specified per equivalence class (main checkout / seat worktree / task-worktree-under-seat / detached HEAD), each with its own oracle. Seat discipline is mechanized, not aspirational: WIP MUST be committed to the seat branch before session end (the seat briefing states it; `lore handoff` warns on a dirty seat tree); deleting a seat worktree with unmerged commits is REFUSED by `lore seat` (escape: explicit `--force` naming the branch that still holds the commits); a cross-plan merge conflict at plan→main is a LOUD rejected merge resolved on the integration checkout, never a silent overwrite. Honest limits (recorded, not hidden): the anchor-overlap gate is plan-scoped — cross-plan file conflicts surface only at plan→main merge (mitigation: disjoint file scopes across concurrent plans as a planning-time discipline); single-task plans collapse to one tier (a worktree straight off main, merged and removed at task end). Cost counter-metric tracked alongside G13: live branch count + seat branch lifetime + merges-per-plan vs the pre-seat baseline — if the seat tier's integration cost exceeds its disambiguation benefit on this data, the two-tier model reverts to single-tier (kill criterion, §8 family).
 
 Non-goals: no live message bus between sessions (the corpus is the medium); no daemon (freshness TTL-computed like claims); no seat lock service (git's own index.lock + serialized merges on the integration checkout suffice).
+
+### Session-start handoff neutrality (SPEC-096, live 2026-07-27)
+
+The tier-1 session-start injection no longer nominates a single `resume_hint` (seat-scoped runs keep it — a seat IS a resume context); instead the injection presents a neutral open-thread directory. Handoff derivation filters archived/deprecated/invalidated docs so dead threads never resurface, and the corpus-workflow governance prose carries the never-self-resume prohibition: a session consumes handoffs it did not write — it never re-enters its own.
+
+### Resume-ticket accounting is bounded from BOTH ends (live 2026-08-01)
+
+S2's handoff replay is bounded from above by the ticket render and from below by
+an accounting duty: a consumed resume ticket prints one ordinal-tagged line per
+item behind a cardinality line, and the session may not end until every printed
+item carries a disposition — `done`, or `deferred:<reason>`. The obligation is to
+ACCOUNT, not to complete: a ticket whose items are all legitimately out of scope
+closes cleanly once each carries its own deferral reason.
+
+Three properties make that floor real rather than declarative, each landed after
+its predecessor was measured inert:
+
+- **The verdict travels the Stop block channel** (`spec-resume-ticket-coverage-floor-blocking-channel-arming`
+  H1/H2). An exit-1 status is a NON-blocking Stop status and was measured to
+  change nothing — 0 of 130 turns complied — while the same model complied 10/10
+  when the same obligation arrived as a stdout `{"decision":"block"}` carrying a
+  required-output template. The exit status now carries no verdict at all.
+- **Arming keys on the tool that PRODUCED the ticket** (H4), not on text that
+  merely contains one, so auditing or quoting an archived handoff imposes no
+  fabricated duty; and dispositions accumulate across the whole post-ticket
+  transcript (H5), so one accounting closes an item permanently instead of
+  re-arming every turn.
+- **The satisfaction side is bounded too** (`spec-resume-coverage-floor-the-satisfaction-boundaries-a`
+  S1/S2): a deferral without a non-empty reason closes nothing — the reason is
+  what keeps an unconditionally-armed floor from degrading into noise — and a
+  disposition emitted on a SIDECHAIN (subagent) chain cannot discharge the duty,
+  while arming stays chain-blind. The asymmetry is deliberate: a subagent that
+  consumes a ticket obliges the main agent to account for it in output the
+  operator actually reads, and no subagent output can silently discharge it.
+
+Honest limit, recorded rather than hidden: the sidechain rule is a tightening
+against an UNSTATED environment assumption, not against a live vector. On the
+harness measured 2026-08-01, subagent turns go to separate
+`<session-id>/subagents/agent-<id>.jsonl` files and never appear in the main-chain
+transcript a Stop hook hands the verb, so shadow-discharge was unreachable — the
+rule exists so that a future harness merging the chains cannot silently satisfy
+an obligation the operator never sees. That environment fact is deliberately NOT
+an acceptance criterion (S3): asserting where the harness writes its transcripts
+would test the harness, and would go red on a change that is not a lore
+regression.
+
 
 ## Acceptance Criteria (structured)
 

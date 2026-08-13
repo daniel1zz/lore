@@ -6,7 +6,7 @@ title: "Multi-session concurrency: queryable ownership, checkout-scoped exclusio
 status: approved
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-13
 tags: []
 parent: PRD-001
 links:
@@ -242,8 +242,8 @@ capability.
   script: test — bun test packages/lore/tests/unit/service/claim-branch-binding.bun.test.ts 2>&1 && echo 'AC-OWN-2 PASS: claim.branch persisted; unmeasurable branch records unmeasured not unowned'
 - [✔] [script] AC-OWN-3: active_sessions[].branches is non-empty whenever the claiming session worktree has a branch, replacing the always-empty value measured on 2026-08-11
   script: test — bun test packages/lore/tests/unit/service/active-sessions-branches.bun.test.ts 2>&1 && echo 'AC-OWN-3 PASS: active_sessions[].branches populated from the claiming worktree'
-- [✔] [script] AC-OWN-4: a commit created under a claim carries the Lore-Session git trailer, readable via git log --format=%(trailers:key=Lore-Session,valueonly)
-  script: test — bun test packages/lore/tests/unit/adapters/cli/lore-session-trailer.bun.test.ts 2>&1 && echo 'AC-OWN-4 PASS: commits under a claim carry the Lore-Session trailer'
+- [✔] [script] AC-OWN-4: a commit created under a claim carries the Lore-Session git trailer, readable via git log --format=%(trailers:key=Lore-Session,valueonly); and a commit created in that SAME worktree after a `lore release` of that claim carries NO such trailer. Both directions MUST be driven through TaskWorkflowService live call sites (claim binds, release unbinds) — an oracle that calls the real-git-port exports directly proves only that the exported capability works, which is the exact unwired state this criterion exists to refuse.
+  script: test — bun test packages/lore/tests/unit/adapters/cli/lore-session-trailer.bun.test.ts 2>&1 && echo 'AC-OWN-4 PASS: claim binds and release unbinds the Lore-Session trailer, both through TaskWorkflowService live call sites'
 - [✔] [script] AC-OWN-5: lore session list derives each liveness verdict from the orchestrator pid plus process start time and never from claim age; a live pid with a mismatched start time is reported dead
   script: test — bun test packages/lore/tests/unit/service/session-liveness-probe.bun.test.ts 2>&1 && echo 'AC-OWN-5 PASS: liveness probed via pid+start-time, never inferred from claim age'
 - [✘] [script] AC-REPLAY-1: against a fixture seeded with exactly 2 sessions and 3 branches (one mine, one foreign holding exactly 1 unmerged commit, one unowned), a replay of lore invocations alone yields the EXACT expected value for each of the four facts the 2026-08-11 diagnosis required: foreign branch set, unmerged commit count per branch, holder session_id per branch, liveness verdict per session; the assertion fails if any of the four is an empty set, so a silent no-op cannot pass

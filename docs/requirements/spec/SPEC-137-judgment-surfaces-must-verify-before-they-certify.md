@@ -154,6 +154,32 @@ onto the assess-verification work this spec lands.
 ⛔ Anything that arms the clause before those three are answered will either block the whole
 back-catalogue or grant a forgeable amnesty. Do not "just add the flag".
 
+- **D6 — the CLI and MCP callers must PASS `diffSource`, and that wiring is part of D1/D2, not a
+  follow-up.** Measured 2026-08-11, immediately after AC-JV-1 earned an attested pass: `commands/assess.ts`
+  and the MCP `tools.ts` never thread `opts.diffSource` into the service, so **every live `lore assess`
+  run resolves to `paths_verified.unchecked`** — the path verification D1/D2/D3 specify is unreachable from
+  the only surfaces a user or agent drives. The capability is real, tested, and dead.
+
+  ⛔ This is an ANCHOR-AND-SCOPE DEFECT IN THIS SPEC, not an implementer failure, and it is recorded that
+  way deliberately. The implementer who reported it was outside both its task's anchors and this Scope
+  list; it flagged the gap unprompted rather than silently widening its own change, which is exactly the
+  required behaviour. The defect is that this spec's Scope named the four implementation files and NOT the
+  two call sites — so an AC could go green, attested, with the feature switched off in production.
+
+  ⛔ It is also the FIFTH measured instance of one standing shape in this repo: an added column nobody
+  writes, an added function nobody calls, an added parameter no caller passes, an accepted option no CLI
+  threads (`verifyFalsifier`, fixed the same day), and now a resolved `diffSource` no adapter supplies.
+  The mechanical rule that follows: **a spec whose decisions add a parameter, field, or option MUST list
+  the CALL SITES in Scope alongside the definition sites, and the AC MUST drive the outermost surface.**
+  AC-JV-5 exists to enforce that here rather than restating it as advice.
+
+  ⛔ Numbered **5, not 4**: the plan's `close-gate` phase already reserves `AC-JV-4` for the DEFERRED
+  attestationFloor falsifier clause (see Deferred). `ac add` for the wiring criterion was first issued as
+  `AC-JV-4`, which would have made one id mean two different things across two live documents — caught
+  immediately and removed via `ac rm --force`, then re-added as `AC-JV-5`. ⛔ If the attestationFloor clause
+  is ever built it takes `AC-JV-4`, the id the plan already names; do not renumber it to close the gap in
+  the sequence.
+
 ## Scope
 
 - `packages/core/src/assessment.ts` — D1's `paths` field, D3's `unverifiable_findings[]` and
@@ -161,10 +187,13 @@ back-catalogue or grant a forgeable amnesty. Do not "just add the flag".
 - `packages/lore/src/ai/assess-template.ts` — D1's prompt requirement, D4's exclusion before truncation
 - `packages/lore/src/service/ai-provider-service.ts` — D2/D3's verification and stripping pass
 - `packages/lore/src/service/verify-runner-service.ts` — D5's execution-root resolution
+- `packages/lore/src/adapters/cli/commands/assess.ts` and `packages/lore/src/adapters/mcp/tools.ts` —
+  **D6's production wiring of `diffSource`** (added 2026-08-11; see D6 for why this was missing)
 - New oracle files, each the declared `--command` of one AC:
   - `packages/lore/tests/unit/service/assess-path-verification.bun.test.ts` — AC-JV-1
   - `packages/lore/tests/unit/ai/assess-diff-mirror-exclusion.bun.test.ts` — AC-JV-2
   - `packages/lore/tests/unit/service/falsifier-execution-root.bun.test.ts` — AC-JV-3
+  - `packages/lore/tests/integration/cli/assess-diff-source-wiring.test.ts` — AC-JV-5
 
 ## Out of Scope
 
@@ -223,12 +252,16 @@ id→mechanism mapping is normative:
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-JV-1: Assess findings are path-verified against the ASSESSED commit resolved from extra.diff_source, with all three outcomes asserted in one oracle: (a) a finding declaring a path absent at that commit moves to unverifiable_findings[] carrying the failing path and the commit it was checked against, is counted in paths_verified.unverifiable, and is excluded from the scored set; (b) a finding whose declared path exists at the assessed commit but NOT in the worktree is KEPT, because the assessed commit is the referent and HEAD is not; (c) the stored overall_score is left byte-identical to what the judge emitted, never recomputed. A missing commit fails LOUD naming the commit rather than being read as an absent path
+- [✔] [script] AC-JV-1: Assess findings are path-verified against the ASSESSED commit resolved from extra.diff_source, with all three outcomes asserted in one oracle: (a) a finding declaring a path absent at that commit moves to unverifiable_findings[] carrying the failing path and the commit it was checked against, is counted in paths_verified.unverifiable, and is excluded from the scored set; (b) a finding whose declared path exists at the assessed commit but NOT in the worktree is KEPT, because the assessed commit is the referent and HEAD is not; (c) the stored overall_score is left byte-identical to what the judge emitted, never recomputed. A missing commit fails LOUD naming the commit rather than being read as an absent path
   script: test — bun test packages/lore/tests/unit/service/assess-path-verification.bun.test.ts 2>&1 && echo "AC-JV-1 PASS: absent-at-commit findings withdrawn and recorded, absent-in-worktree-only findings kept, score untouched, missing commit loud"
-- [·] [script] AC-JV-2: The assess diff excludes the generated mirror before truncation: given a diff containing BOTH a docs/requirements/** hunk and a source hunk, the built prompt contains the source path and does NOT contain the mirror path. Asserted by presence and absence of the two specific paths, never by a size comparison, which a truncation could satisfy by accident. The exclusion list is a single named constant with one definition site
+- [✔] [script] AC-JV-2: The assess diff excludes the generated mirror before truncation: given a diff containing BOTH a docs/requirements/** hunk and a source hunk, the built prompt contains the source path and does NOT contain the mirror path. Asserted by presence and absence of the two specific paths, never by a size comparison, which a truncation could satisfy by accident. The exclusion list is a single named constant with one definition site
   script: test — bun test packages/lore/tests/unit/ai/assess-diff-mirror-exclusion.bun.test.ts 2>&1 && echo "AC-JV-2 PASS: mirror hunk absent and source hunk present in the built prompt"
-- [·] [script] AC-JV-3: verifyFalsifier resolves its execution root through SPEC-063's resolveVerifyExecutionRoot, so a falsifier invoked from a linked worktree scratches off THAT worktree and its command observes an uncommitted change made only there. The reverse control is mandatory and asserted in the same oracle: resolving via config.repoRoot (the pre-change path, which findLoreDbPath walks UP to the main checkout) must NOT observe that change — without it the test cannot distinguish resolved-correctly from happened-to-pass
+- [✔] [script] AC-JV-3: verifyFalsifier resolves its execution root through SPEC-063's resolveVerifyExecutionRoot, so a falsifier invoked from a linked worktree scratches off THAT worktree and its command observes an uncommitted change made only there. The reverse control is mandatory and asserted in the same oracle: resolving via config.repoRoot (the pre-change path, which findLoreDbPath walks UP to the main checkout) must NOT observe that change — without it the test cannot distinguish resolved-correctly from happened-to-pass
   script: test — bun test packages/lore/tests/unit/service/falsifier-execution-root.bun.test.ts 2>&1 && echo "AC-JV-3 PASS: worktree-rooted falsifier sees the worktree uncommitted change and the config.repoRoot control does not"
+- [✔] [script] AC-JV-5: PRODUCTION WIRING of diffSource, asserted at the OUTERMOST surface a user drives, never at the service boundary: (a) running lore assess against a throwaway corpus with extra.diff_source present resolves an ASSESSED COMMIT and the stored assessment paths_verified.checked is > 0 — measured 2026-08-11, the pre-fix value was paths_verified.unchecked on EVERY live run because commands/assess.ts never threaded opts.diffSource; (b) the same assertion for the MCP surface via tools.ts, since two adapters can drift independently and one being wired proves nothing about the other; (c) a finding declaring a path absent at that resolved commit lands in unverifiable_findings[] in the STORED doc, so the assertion is on persisted state, not on an in-memory return value; (d) the REVERSE CONTROL is mandatory: with extra.diff_source ABSENT the stored assessment records paths_verified.unchecked and a reason, proving the wired path is what produced the checked result rather than a default that happens to look right. ⛔ A service-level test satisfies NONE of this — AC-JV-1 already had an attested pass while the feature was switched off in production, which is why this criterion drives the CLI and MCP entry points instead. ⛔ Numbered 5, not 4: the plan reserves AC-JV-4 for the DEFERRED attestationFloor falsifier clause, and reusing that id would make one token mean two things in two live documents — the exact ambiguity this session is elsewhere remediating
+  script: test — bunx vitest run packages/lore/tests/integration/cli/assess-diff-source-wiring.test.ts 2>&1 && echo "AC-JV-5 PASS: CLI and MCP assess both thread diff_source so paths_verified.checked > 0 in the stored doc, and the diff_source-absent control still records unchecked"
+- [·] [script] AC-JV-6: The comments that RECORDED the diffSource wiring gap are updated in lockstep with the gap being closed, because a comment truthfully documenting a gap becomes a FALSE assertion the moment that gap is fixed. Measured on main after AC-JV-5 merged: ai-provider-service.ts:87 still says opts.diffSource is currently supplied by NO production caller, :89 still says so every live lore assess run today, :1193 still says pass its already-resolved diffSource local through here — Until then this stays, and :1199 still says no production caller supplies it yet. All four are now false. Oracle: a grep-shaped assertion proving each stale phrase is ABSENT and that the replacement text names the two live call sites (adapters/cli/commands/assess.ts and adapters/mcp/tools.ts) in a form a reader can mechanically check, ⛔ never a bare claim that it was fixed. ⛔ This is the SECOND instance in one session of the standing lesson that fixing a gap and updating the comment recording it are ONE acceptance unit — both times the anchor set covered the implementation site and not the comment site, so the implementer could only flag
+  script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-comment-currency.test.ts 2>&1 && echo "AC-JV-6 PASS: all four stale diffSource-gap phrases are absent and the replacement names both live call sites"
 
 ## Code anchors
 

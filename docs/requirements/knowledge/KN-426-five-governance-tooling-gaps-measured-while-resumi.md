@@ -14,10 +14,10 @@ links:
 ---
 # Overview
 
-Five governance-tooling gaps measured on 2026-08-11 while resuming
+Six governance-tooling gaps measured on 2026-08-11 while resuming
 `knowledge-handoff-agent-main-orchestrator-90`. Each is logged because **an EXTRA ACTION was required to
 work around it** — the workaround itself is the trigger, per the standing rule that doing extra work to
-satisfy or bypass a gate IS the signal that gate has a hole. Three are new; **one is a fresh measured
+satisfy or bypass a gate IS the signal that gate has a hole. Five are new; **one is a fresh measured
 instance of `GAP-1`, which is recorded as half-closed and is not** (its content half is still open, and
 this is the second independent way it bites).
 
@@ -136,13 +136,63 @@ a truncated judge prompt produces a verdict nobody can tell is partial.
 `input_completeness` field, and `lore approve` should refuse (or loudly warn) on a verdict whose input was
 truncated.
 
+## GAP-25 (NEW, and the most consequential of the six) — `mirror:export` does not update an EXISTING file's content, and no check compares content
+
+**Measured 2026-08-11 with a before/after hash, on `main`, twice.** The gap ledger doc was renamed in the
+corpus (`G<n>` → `GAP-<n>`, corpus v37 then v39). Then:
+
+```
+before md5: dfceb97235d3e373bcd2ad8aff36ad4b
+bun run mirror:export   → exit 0, every type reported OK
+after  md5: dfceb97235d3e373bcd2ad8aff36ad4b   ← IDENTICAL
+```
+
+The mirror file still carried **16** `## G<n>` headings and **0** `## GAP-<n>`, with no
+`legacy-gap-aliases` fence — i.e. the entire rename was invisible in the mirror while the exporter
+reported success. The same run DID create a brand-new file (`TASK-666-*.md`), so the exporter writes NEW
+docs and silently skips CONTENT updates to existing ones.
+
+⛔ **And nothing catches it, by design-as-stated**: `mirror:export`'s own success line says
+*"count and slug parity; **file CONTENT is not compared**"*, and `check:spec-mirror` is the same
+`runCheck`. So the corpus↔mirror pair has an existence oracle and NO content oracle.
+
+**Scale, sampled from docs this session edited:**
+
+| mirror file | expected new content | present? |
+|---|---|---|
+| `SPEC-137-*` (S3 spec) | `D6` / `D4d` | **NO** |
+| `PLAN-122-*` (S4 plan) | `D4a` | **NO** |
+| `SPEC-138-*` (S4 spec) | `D4a` | yes |
+| `SPEC-138-*` (S4 spec) | `REVISION RECORD` (round 5) | **NO** |
+
+`SPEC-138` is the tell: it holds content from an intermediate state and not the final one. Its `D4a` text
+arrived only because a WORKTREE agent happened to run `mirror:export` at a moment when `D4a` existed — the
+documented anti-pattern — and that snapshot was then merged. ⛔ So the only path by which mirror content
+ever became current is the one path the rules forbid, and the sanctioned path (export from `main`) is a
+content no-op.
+
+⛔ This is the exact standing lesson *"SSOT↔installed asset pairs need content-parity assertions; manifest
+presence proves nothing"*, now measured on the corpus↔mirror pair — the pair whose whole purpose is to be
+the human-readable projection of the SSOT. A reader who greps `docs/requirements/` today can read a spec
+decision that was superseded hours ago and see nothing wrong.
+
+⛔ It also invalidates a claim made earlier in this same session: an orchestrator report stated the mirror
+had been "re-exported and committed on `main`". The export ran and exited 0; the CONTENT did not sync. That
+report was wrong, and it was wrong because it trusted the exporter's OK line — which is precisely the
+failure mode this entry describes.
+
+**Status**: `open`, no owning spec. Two things are needed and they are separable: (1) `exportDocs` must
+rewrite an existing file whose rendered content differs from the corpus; (2) `runCheck` must gain a
+content-hash comparison, so a stale mirror is a RED and not a silent pass. ⛔ Do not fix only (1) — without
+(2) the next skip is invisible again.
+
 ## Scope
 
-All five entries are `open` with no owning spec. `GAP-20`, `GAP-22`, `GAP-23`, `GAP-24` are new;
+All six entries are `open` with no owning spec. `GAP-20`, `GAP-22`, `GAP-23`, `GAP-24`, `GAP-25` are new;
 `GAP-21` is a second measured mechanism for `GAP-1`'s open content half and ⛔ does not supersede it.
 
 ⛔ These ids continue the `GAP-<n>` namespace established in
 `knowledge-attestation-is-structurally-one-sided-lore-verify-can` on 2026-08-11 (ids `GAP-1`…`GAP-19`
-there). They are NOT yet mirrored into that ledger's structured entries, so the unowned-gap report
+there). ⛔ `GAP-25` is the one to fix FIRST — it is the reason a reader cannot trust `docs/requirements/` at all. They are NOT yet mirrored into that ledger's structured entries, so the unowned-gap report
 `AC-GD-3(f)` pins at exactly eight members does NOT count them — ⛔ whoever folds these in must update
 that AC's pinned set in the same change, or set equality reddens.

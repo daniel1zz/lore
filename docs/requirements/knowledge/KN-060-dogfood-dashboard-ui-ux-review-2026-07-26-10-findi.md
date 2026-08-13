@@ -3,7 +3,7 @@ id: KN-060
 type: knowledge
 role: knowledge
 title: "Dogfood — dashboard UI/UX review 2026-07-26 (10 findings, fix batch + 4 deferred decisions)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26
@@ -236,3 +236,14 @@ Expected: single-column stack below a breakpoint; nav wraps or collapses.
 
 Fix batch tracked as lore task: task-dashboard-ui-ux-dogfood-fix-batch-light-prose-contrast
 Screenshots archived in the dogfood session scratchpad (ephemeral); report text here is the durable record.
+
+
+## Resolution addendum (same day)
+
+All four deferred items were decided (user delegated: long-term best practice) and landed the same day:
+- ISSUE-004 → NewDocModal ARIA-complete parent combobox (parent-suggestions.ts, PARENT_TYPE_CONTRACT reuse)
+- ISSUE-006 → ADR adr-dashboard-cookie-session-writes-attribute-author-via; CorpusService attributeCreatedBy + auth.ts resolveDocWriteOpts; browser-verified Author=resolved actor
+- ISSUE-007 → ADR adr-planphasestatus-projects-declared-extra-phases-alongside; PlanPhaseEntry union (phase-doc | declared, orphaned flagged); SPEC-077 doc updated as-built (v11); /execution renders declared scorecards
+- ISSUE-008 → ADR adr-dashboard-review-queues-include-in-review-docs-ahead-of; review-queue.ts merges draft + in-review, in-review first with StatusPill
+
+Fix batches: a588fb2 (7-issue frontend batch) + follow-up (PendingPanel title floor) + parent-picker/queues + attribution/phase-projection + declared-phase rendering. All oracle evidence on the three adhoc tasks; full-suite green except concurrent SPEC-080 RED tests (that session, not ours).

@@ -3,10 +3,10 @@ id: TASK-492
 type: task
 role: plan
 title: "AC-IC-1 harness runs out of sampling budget under load while the contract itself holds"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-08-12
 tags: []
 parent: PRD-001
 ---
@@ -151,3 +151,52 @@ measurement. Re-run these three on a genuinely quiet host (ambient load < 2, no 
 `bun` processes) before closing. Also re-evaluate `MAX_ATTEMPTS = 800` then: it is now
 reached by nothing (50 attempts sufficed in all three runs), so its ~225s worst case is
 no longer paid, but the constant was sized against a defect that no longer exists.
+
+## Closing measurement 2026-08-12 @ `b8c115d6` — the load-matched control now exists
+
+The blocker recorded above was "the idle-host confirmation was NOT obtained". It is now
+obtained, and the criterion I wrote for it was WRONG in a way worth recording.
+
+**The criterion was mis-specified.** I wrote "ambient load < 2, no foreign bun processes".
+`< 2` was an arbitrary stand-in for "idle"; the number that actually discriminates is the
+load at which this harness DEMONSTRABLY FAILED, which was measured twice: ambient **3.18**
+(orchestrator's pre-fix run on unmodified `main`, 12/50 collected, 788 excluded) and ambient
+**~3.9** (implementer's two failing runs, 12/50, 788 excluded, both 800/800 attempts). A
+threshold below both of those is what proves discrimination; `< 2` merely made the criterion
+harder to satisfy without making it more informative — and on this machine (two-plus
+concurrent Claude sessions, five resident MCP servers) it was never going to be satisfiable,
+which is how it survived 12 days unmet.
+
+Three consecutive runs at `b8c115d6`, `dist/lore` rebuilt first (the root binary was stale by
+~1.5h of commits — false-oracle vector 4), counts printed by the harness itself:
+
+| Run | ambient load at start | collected | excluded | attempts | elapsed |
+|---|---|---|---|---|---|
+| 1 | 4.44 | 50/50 | **0** | 50/800 | 16.2s |
+| 2 | 3.91 | 50/50 | **0** | 50/800 | 15.8s |
+| 3 | **2.84** | 50/50 | **0** | 50/800 | 15.8s |
+
+Run 3's ambient load is BELOW both measured failing loads, with zero foreign `bun test`
+batches running (checked: `pgrep -f "bun test"` returned 0 before the sequence). Run 1 doubles
+as the under-load arm. Six green runs now span ambient 2.84 → 8.82; exclusions are identically
+zero at every point, with no degradation as load falls.
+
+**The A/B control was already in hand and I had not recognised it**: 3.18 pre-fix → 12/50 with
+788 exclusions, versus 2.84 post-fix → 50/50 with 0 exclusions. Same machine, same harness,
+comparable load, opposite verdicts. That is the load-matched discrimination the "idle host"
+phrasing was groping for.
+
+**Independent hardening by another session, `a02ef284`**: `MIN_CONCLUSIVE_RUNS` is now
+`TARGET_RUNS` (50), so the `degraded` band — a reduced sample reported as a loud GREEN — no
+longer exists; a shortfall of any size is RED. That closes the residual concern recorded
+above (a floor of 20 is weak protection when the exclusion rule itself can excuse governed-path
+failures). The harness now reads `floor 50` in its census, and all six runs cleared it outright.
+
+`MAX_ATTEMPTS = 800` is left alone: every run since the root-cause fix terminated at exactly
+50 attempts, so the ceiling is never approached and its ~225s worst case is never paid. It is
+now dead headroom rather than a cost, and the file has since been edited by another session —
+churning the constant would buy nothing.
+
+Both root-cause fixes verified still present at this commit: `sqlite-store.ts:218` issues
+`PRAGMA busy_timeout` before `journal_mode` (:220), and `issue-report.ts` still carries
+`GOVERNED_PATH_FRAME_TOKEN_PATTERNS` / `hasGovernedPathFrame`.

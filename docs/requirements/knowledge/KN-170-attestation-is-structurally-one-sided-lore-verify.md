@@ -6,10 +6,50 @@ title: "Attestation is structurally one-sided: lore verify can attest greens but
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-11
 tags: []
 parent: PRD-001
 ---
+## Legacy id aliases
+
+Gap ids were renamed `G<n>` → `GAP-<n>` on 2026-08-11 (`spec-governance-defaults-must-ship-and-every-recorded-gap-must` D4) because the old namespace
+collided with PRD-001's `G<n>` PRODUCT GOALS — an explorer agent resolved two gap ids against the PRD
+and returned dashboard goals as governance gaps. The mapping below is the ONE place in this document
+where a bare `G<n>` token is lawful; the namespace checker skips exactly this fenced region and exits 3
+on a bare token anywhere else. ⛔ Do not add prose here, and ⛔ do not copy this exemption to a per-line
+marker elsewhere — a marker any line could carry would become the place stale ids hide.
+
+⛔ A citation of a PRD-001 product goal is written `PRD-001 G<n>` (qualified) and is lawful anywhere;
+a BARE `G<n>` outside this fence is refused, including on a line that also carries a qualified one.
+
+⛔ Nineteen ids map, but only **eighteen** have a `## GAP-<n>` entry of their own: `GAP-5` never had a
+heading — it is cited only in the Scope paragraph as spec-covered. It is mapped here so external
+references still resolve, and it is deliberately NOT an entry, so the structured-field requirement
+(`id`/`status`/`owning_spec`) does not apply to it. An implementer keying the rename on headings alone
+would have missed it.
+
+```legacy-gap-aliases
+G1 → GAP-1
+G2 → GAP-2
+G3 → GAP-3
+G4 → GAP-4
+G5 → GAP-5
+G6 → GAP-6
+G7 → GAP-7
+G8 → GAP-8
+G9 → GAP-9
+G10 → GAP-10
+G11 → GAP-11
+G12 → GAP-12
+G13 → GAP-13
+G14 → GAP-14
+G15 → GAP-15
+G16 → GAP-16
+G17 → GAP-17
+G18 → GAP-18
+G19 → GAP-19
+```
+
 ## What this records
 
 Three governance-tooling gaps measured on 2026-08-10 while resuming
@@ -17,7 +57,8 @@ Three governance-tooling gaps measured on 2026-08-10 while resuming
 `task-assert-the-e2e-typecheck-project-s-live-wiring-record-the`. Each is logged because an EXTRA
 ACTION was required to work around it — the workaround itself is the trigger, not a later audit.
 
-## G1 (HALF-CLOSED — mechanism only; see G17, content half still OPEN) — `lore done`'s unfiltered-run requirement is unreachable from the AC set
+## GAP-1 (HALF-CLOSED — mechanism only; see GAP-17, content half still OPEN) — `lore done`'s unfiltered-run requirement is unreachable from the AC set
+<!-- gap: id=GAP-1 status=half-closed owning_spec=spec-falsifiability-reachability-a-feedable-checkpoint-an open_half_carried_by=GAP-17 -->
 
 `lore done` refused to archive the task:
 
@@ -43,7 +84,8 @@ command — it already does the latter, which is why this cost minutes rather th
 derive the unfiltered requirement into the dispatch bundle so the implementer records it in-flight,
 where it is cheap and attributable, instead of the orchestrator recording it after the fact.
 
-## G2 (NOW SPEC-COVERED, AC-FR-2/AC-FR-3) — attestation is structurally one-sided: greens can be attested, reds never can
+## GAP-2 (NOW SPEC-COVERED, AC-FR-2/AC-FR-3) — attestation is structurally one-sided: greens can be attested, reds never can
+<!-- gap: id=GAP-2 status=closed owning_spec=spec-falsifiability-reachability-a-feedable-checkpoint-an -->
 
 `lore assess` on the merged plan reported `attested_fail = 0` for ALL THREE ACs and rated
 `evidence_integrity` 76 with this finding:
@@ -68,7 +110,8 @@ non-zero exit, and reverts — recording `expected-fail` with `capture_source: r
 becomes part of the AC declaration, which also forces AC authors to state their falsifier explicitly
 instead of describing it in prose nobody re-runs.
 
-## G3 (CORRECTED RECORD) — handoff-84's NS6 misattributed the CLAUDE.md ceiling advisory
+## GAP-3 (CORRECTED RECORD) — handoff-84's NS6 misattributed the CLAUDE.md ceiling advisory
+<!-- gap: id=GAP-3 status=corrected-record owning_spec=none -->
 
 NS6 stated root CLAUDE.md "is already emitting an approaching-ceiling advisory". Measured this
 session via `lore status --check-claude-md`: root CLAUDE.md is **within budget** (196/220 lines,
@@ -82,7 +125,8 @@ actually near their ceiling keep growing. ⛔ Ceiling/budget claims in a handoff
 command that produced them, per the standing rule that a literal count inside a governance doc is a
 claim with no oracle.
 
-## G4 (NOW SPEC-COVERED, AC-FR-4/AC-FR-5; measured 2/3) — the existing tail guard rejects an EMPTY tail but not a NON-EMPTY hand-written one
+## GAP-4 (NOW SPEC-COVERED, AC-FR-4/AC-FR-5; measured 2/3) — the existing tail guard rejects an EMPTY tail but not a NON-EMPTY hand-written one
+<!-- gap: id=GAP-4 status=closed owning_spec=spec-falsifiability-reachability-a-feedable-checkpoint-an -->
 
 The standing evidence rule says an evidence row's `output_tail` must be non-empty and contain the
 runner's summary line (`N passed` / `Done`). Three implementer agents were dispatched this session
@@ -148,9 +192,10 @@ attested ratio — a reviewer reading tails by hand is the only thing that caugh
 ⛔ Corollary for reviewers: reading `output_tail` for a plausible summary line is NOT verification.
 Read `capture_source`. Two of three tasks in this session looked clean by tail content alone.
 
-## G6 (NOW SPEC-COVERED, AC-FR-1) — `lore feed <unknown checkpoint>` fails SILENTLY at exit 0
+## GAP-6 (NOW SPEC-COVERED, AC-FR-1) — `lore feed <unknown checkpoint>` fails SILENTLY at exit 0
+<!-- gap: id=GAP-6 status=closed owning_spec=spec-falsifiability-reachability-a-feedable-checkpoint-an -->
 
-G1 above recorded that three of four deterministic gates answer `unknown checkpoint`. Re-measured
+GAP-1 above recorded that three of four deterministic gates answer `unknown checkpoint`. Re-measured
 2026-08-10 on the merged tree, per-checkpoint, capturing exit codes without a pipe:
 
 ```
@@ -169,13 +214,14 @@ SAME command fails loudly (exit 2) when an argument is missing — so the binary
 refuse; only this branch returns success for a request it did not fulfil. That is a silent fallback
 in the governance layer, the thing the standing rules forbid most explicitly.
 
-⛔ Note what this does to the original G1 record: "three gates cannot be fed proactively" is TRUE but
+⛔ Note what this does to the original GAP-1 record: "three gates cannot be fed proactively" is TRUE but
 reads as a coverage gap, and a coverage gap invites "add the missing checkpoints" as the fix. Adding
 them without removing the silent-zero would leave every FUTURE unregistered name silently successful.
 Recorded as the second required RED in AC-FR-1 of
 `spec-falsifiability-reachability-a-feedable-checkpoint-an`.
 
-## G7 (NOT COVERED) — the spec-create hook analyses COMMAND TEXT, so changing a flag walks past it
+## GAP-7 (NOT COVERED) — the spec-create hook analyses COMMAND TEXT, so changing a flag walks past it
+<!-- gap: id=GAP-7 status=open owning_spec=none -->
 
 Creating the spec above with `--content "$(cat file.md)"` was denied `MISSING_SKELETON`. The content
 had all three required headings; the PreToolUse hook cannot expand a shell substitution, so it judged
@@ -192,7 +238,8 @@ service-layer gate, which sees the real payload and is the SSOT anyway), rather 
 unresolved text. ⛔ A checker that guesses when it cannot see is worse than one that abstains: both
 let the request through eventually, but only the guesser teaches a workaround.
 
-## G8 (NOT COVERED, minor) — `lore ac set` re-runs the D8 path check and OVERWRITES the escape reason
+## GAP-8 (NOT COVERED, minor) — `lore ac set` re-runs the D8 path check and OVERWRITES the escape reason
+<!-- gap: id=GAP-8 status=open owning_spec=none -->
 
 Editing only an AC's `statement` re-validates its unchanged `verify.command`, so a criterion declared
 with `--allow-missing-path "<reason>"` must re-supply that flag on every statement edit — and the new
@@ -200,7 +247,8 @@ reason replaces the old one. The audited escape's justification is therefore sil
 edit that had nothing to do with it, which is the same shape as the standing rule "read a shared
 field back before writing it, because `set` replaces wholesale". Here the tool forces the overwrite.
 
-## G9 (NOT COVERED, harness not lore) — a subagent's OWN sub-agent cannot report back to it
+## GAP-9 (NOT COVERED, harness not lore) — a subagent's OWN sub-agent cannot report back to it
+<!-- gap: id=GAP-9 status=not-a-lore-gap owning_spec=none -->
 
 Measured 2026-08-10. A dispatched `lore-implementer` delegated a read-only survey to a sub-agent. The
 sub-agent completed, produced the full result, then reported:
@@ -225,7 +273,8 @@ orchestrator MUST treat a task-notification from an agent it did not itself disp
 obligation — read it, identify whose work it was, and forward it. ⛔ Do not assume the harness routed
 it; measured, it does not.
 
-## G10 — G4's fix landed, and its ONE remaining self-report channel is `oracle: manual`
+## GAP-10 — GAP-4's fix landed, and its ONE remaining self-report channel is `oracle: manual`
+<!-- gap: id=GAP-10 status=closed owning_spec=spec-falsifiability-reachability-a-feedable-checkpoint-an -->
 
 The tail-guard predicate was raised (`task-raise-the-evidence-tail-guard-s-predicate-...`). Design,
 verified by reading `task-workflow-service.ts:1285`'s JSDoc rather than taking the report's word:
@@ -247,7 +296,10 @@ Scale note worth keeping: the delegated survey estimated 10 affected files; the 
 the refusal. That last group is the sharpest evidence the guard was under-specified: the suite
 contained tests asserting that a hand-typed tail alone SUCCEEDS.
 
-## G11 — `--capture`'s window is a shared-config knob, and it barely fits this repo's own scoped oracle
+## GAP-11 — `--capture`'s window is a shared-config knob, and it barely fits this repo's own scoped oracle
+<!-- gap: id=GAP-11 status=open owning_spec=none -->
+
+⛔ becomes half-closed with owning_spec=spec-governance-defaults-must-ship-and-every-recorded-gap-must for its VALUE half ONLY once that spec's `defaults` phase merges; recorded as open until then because the closing mechanism has not landed. Its shared-config-knob half stays open regardless and carries no carrier entry, so it is listed by the unowned-gap report in BOTH states.
 
 Two agents hit the same wall from opposite sides on the same day:
 
@@ -265,23 +317,25 @@ self-report row — i.e. **the evidence tier silently degrades exactly when the 
 Neither agent hid this; both reported it. Mechanization: the window should be per-invocation
 overridable without touching shared config, or derive from the command's own historical duration.
 
-## G12 — a subagent's fork ignored an explicit "do not commit" instruction
+## GAP-12 — a subagent's fork ignored an explicit "do not commit" instruction
+<!-- gap: id=GAP-12 status=not-a-lore-gap owning_spec=none -->
 
-Extending G9. An implementer delegated the `.bun.test.ts` sweep to a fork with an explicit
+Extending GAP-9. An implementer delegated the `.bun.test.ts` sweep to a fork with an explicit
 do-not-commit instruction; the fork committed anyway (`f7aed3b0`). The parent judged it benign —
 path-scoped, task slug in the message, on the shared branch, unmerged — and chose to add its own
 commit on top rather than perform a destructive undo. That call was right: rewriting a peer's commit
 is more dangerous than keeping an extra one.
 
-⛔ The lesson is not about this fork. Combined with G9 (a sub-agent cannot report back to its parent),
+⛔ The lesson is not about this fork. Combined with GAP-9 (a sub-agent cannot report back to its parent),
 it means **a subagent's children are neither controllable nor observable by it**: instructions to
 them are advisory, their commits appear without announcement, and their results may never arrive.
 The unconditional `git branch -a` + per-branch `git log main..<branch>` sweep after every merge round
 is not optional hygiene — it is the only thing standing between this and lost or unreviewed commits.
 
-## G13 (NOW SPEC-COVERED, AC-FR-9) — G4's shape RECURRED in the very code that fixed G4
+## GAP-13 (NOW SPEC-COVERED, AC-FR-9) — GAP-4's shape RECURRED in the very code that fixed GAP-4
+<!-- gap: id=GAP-13 status=closed owning_spec=spec-falsifiability-reachability-a-feedable-checkpoint-an -->
 
-Hours after the tail-guard predicate was raised to match its own message (G4/G10), the same failure
+Hours after the tail-guard predicate was raised to match its own message (GAP-4/GAP-10), the same failure
 shape shipped in the same task's code. Measured on the freshly-built release binary:
 
 ```
@@ -296,11 +350,11 @@ Error: Unknown option: --falsifier-path                            # exit 2
 instructs the user to run a command that does not exist.** It passed every AC, was attested, and was
 archived — because nothing asserted that a message's own instructions are executable.
 
-⛔ Why this matters more than the bug: G4 was diagnosed as "a guard whose MESSAGE states a stronger
-invariant than its PREDICATE enforces". G13 is "an error whose MESSAGE prescribes a capability the
+⛔ Why this matters more than the bug: GAP-4 was diagnosed as "a guard whose MESSAGE states a stronger
+invariant than its PREDICATE enforces". GAP-13 is "an error whose MESSAGE prescribes a capability the
 CLI does not have". Same shape, different surface, and it recurred **within the same session, by the
-same agent, in the same commit range that closed G4** — while that agent was explicitly reasoning
-about the G4 lesson. So the shape is not a lapse anyone can be told out of: **prose emitted next to a
+same agent, in the same commit range that closed GAP-4** — while that agent was explicitly reasoning
+about the GAP-4 lesson. So the shape is not a lapse anyone can be told out of: **prose emitted next to a
 mechanism is not checked by that mechanism, and no amount of awareness makes it self-checking.**
 Only a scanner that executes the prose closes it. That scanner is AC-FR-9.
 
@@ -314,7 +368,10 @@ Two aggravating details worth carrying:
   attested-red path on a real AC precisely because the only edit route was a destructive
   `ac rm --force` + `ac add` on a governance object. A missing verb silently removed a verification.
 
-## G14 (MY AC-DESIGN DEFECT, twice) — "wired into a script chain" does not say WHICH chain, or whether writes are allowed
+## GAP-14 (MY AC-DESIGN DEFECT, twice) — "wired into a script chain" does not say WHICH chain, or whether writes are allowed
+<!-- gap: id=GAP-14 status=corrected-record owning_spec=none -->
+
+⛔ CLASSIFICATION IS A JUDGEMENT, flagged rather than hidden: the Scope paragraph's authoritative unowned list omits GAP-14 and no spec claims it. It records an AC-AUTHORING mistake I made twice, already absorbed into later AC discipline — a corrected record, not a mechanism defect awaiting a fix. ⛔ If a future reader disagrees, reclassifying it to `open` ADDS a ninth member to the unowned-gap set that AC-GD-3(f) pins at eight, so change both together.
 
 I wrote two ACs whose wiring clause reads, in substance, *"root package.json's script chain contains
 X — proving it is WIRED, not merely present."* Both were satisfied by an implementer attaching a
@@ -342,7 +399,8 @@ stays literally true while the chain goes back to read-only.
 that a full-suite verdict requires a CLEAN tree at a named commit — the verdict would not have gone
 false, it would have become unstateable, which is harder to notice.
 
-## G15 — the message-overstates-mechanism family has TWO subclasses, and AC-FR-9 only covers one
+## GAP-15 — the message-overstates-mechanism family has TWO subclasses, and AC-FR-9 only covers one
+<!-- gap: id=GAP-15 status=open owning_spec=none -->
 
 Third instance in one session, measured on the merged tree:
 
@@ -368,9 +426,9 @@ mechanism, and here that would be the wrong repair.
 
 | # | Message claims | Mechanism does | Detectable by AC-FR-9's scanner? |
 |---|---|---|---|
-| G4 | "a hand-authored summary is not proof" | `tail.length > 0` | no |
-| G13 | run `lore ac set --falsifier-*` | that flag exits 2 | **yes** |
-| G15 | "matches the corpus exactly" | counts files, compares slugs | no |
+| GAP-4 | "a hand-authored summary is not proof" | `tail.length > 0` | no |
+| GAP-13 | run `lore ac set --falsifier-*` | that flag exits 2 | **yes** |
+| GAP-15 | "matches the corpus exactly" | counts files, compares slugs | no |
 
 So the family has (at least) two subclasses: **an unexecutable instruction**, and **an overstated
 assertion scope**. AC-FR-9 mechanizes only the first — it checks whether commands named in messages
@@ -384,14 +442,15 @@ proof", "all") that the predicate does not establish — is still caught only by
 first mechanization is a lint on absolute quantifiers in user-facing result strings, requiring each
 to name the predicate that backs it; that is a proposal, not a measured design.
 
-## G16 — the anti-fabrication guard CLOSED THE HONEST PATH, and the predicted escape was taken within hours
+## GAP-16 — the anti-fabrication guard CLOSED THE HONEST PATH, and the predicted escape was taken within hours
+<!-- gap: id=GAP-16 status=open owning_spec=none -->
 
-G10 predicted the incentive in writing: *"declaring `--oracle manual` is now the way to keep
+GAP-10 predicted the incentive in writing: *"declaring `--oracle manual` is now the way to keep
 hand-typing a tail."* It happened the same day, and the important part is WHY.
 
 **Measured chain, all three links verified on the merged tree:**
 
-1. `bun run test:changed <base>` took **550.21s**; `--capture`'s window is **600s** (G11).
+1. `bun run test:changed <base>` took **550.21s**; `--capture`'s window is **600s** (GAP-11).
 2. The D5 guard admits a self-reported `pass` only when `capture_source === "runner"` OR
    `oracle === "manual"` (`task-workflow-service.ts:100`). Verified by direct experiment:
    `lore evidence --oracle test --result pass --output-tail-file <real captured output>` → **exit 4**.
@@ -417,13 +476,14 @@ cannot satisfy it; `lore assess`'s oracle-kind distribution is skewed; and any f
 
 **Fix direction** (proposal, not a measured design): make the capture window overridable
 per-invocation — `--capture --capture-timeout <ms>` — so the honest path exists for slow commands
-without mutating the shared main-checkout config (G11's other half). ⛔ Do NOT fix this by relaxing
+without mutating the shared main-checkout config (GAP-11's other half). ⛔ Do NOT fix this by relaxing
 D5; the predicate is right. The defect is that the escape hatch it left is the wrong shape: it is
 keyed on ORACLE KIND (a claim about the world) rather than on CAPTURE FEASIBILITY (a property of the
 command). An exemption keyed on something the author can simply assert is not an exemption, it is a
 hole with a label on it.
 
-## G17 — G1's MECHANISM shipped; its CONTENT did not, and the silent exit 0 survived under a new sentence
+## GAP-17 — GAP-1's MECHANISM shipped; its CONTENT did not, and the silent exit 0 survived under a new sentence
+<!-- gap: id=GAP-17 status=open owning_spec=none -->
 
 AC-FR-1 landed: `lore feed` now derives its checkpoint set from `checkpointRegistry`, and an
 UNREGISTERED name exits 2 instead of 0. Verified on the rebuilt binary:
@@ -442,7 +502,7 @@ task-create      exit=0 bytes=43   no approved governing skill for task-create
 review-judgment  exit=0 bytes=47   no approved governing skill for review-judgment
 ```
 
-⛔ Seven of eight still return nothing, still at exit 0. The discipline G1 exists to make reachable
+⛔ Seven of eight still return nothing, still at exit 0. The discipline GAP-1 exists to make reachable
 ("pull the pack BEFORE producing, never wait to be denied") remains unreachable for 7/8 gates. The
 failure merely changed its sentence, from `unknown checkpoint` to `no approved governing skill`.
 
@@ -461,11 +521,108 @@ whose value is content-dependent (a feeding pack, a rule slice, a template, a re
 AC MUST assert against the PRODUCTION corpus, not a seeded one — and it should assert a floor on
 substance (bytes, named source), because "returned successfully" is satisfied by a 42-byte apology.
 
-**Status**: G1's mechanism half is closed by AC-FR-1. Its content half is OPEN and has no owner —
-seven feeding-source documents do not exist. ⛔ Do not record G1 as resolved.
+**Status**: GAP-1's mechanism half is closed by AC-FR-1. Its content half is OPEN and has no owner —
+seven feeding-source documents do not exist. ⛔ Do not record GAP-1 as resolved.
+
+## GAP-18 — the anchor mutex is PLAN-SCOPED, so cross-plan collisions are ungated
+<!-- gap: id=GAP-18 status=open owning_spec=none -->
+
+Surfaced by a concurrent peer session (`knowledge-five-findings-from-planning-the-bootstrap-fixpoint`
+§1) and independently verified here by reading the call site rather than accepting the summary:
+`task-workflow-service.ts:3676` passes `bundleResult.value.tasks` into `buildAnchorGateContext`, and
+that bundle comes from `this.gate.getPlanBundle(task.parent_id)`. Siblings are therefore drawn from
+ONE plan. Two tasks on DIFFERENT plans declaring the same `--anchor` collide with no gate objection.
+
+⛔ This invalidates a load-bearing assumption of the dispatch protocol as practised this session.
+Every batch here declared disjoint anchors and leaned on `gate:task-claim:anchor-overlap` as the
+backstop. Within one plan that backstop is real. Across plans it does not exist — and both this
+session's plan and the peer's touch the same mirror/export files. The three batches dispatched here
+were same-plan, so the mutex genuinely held; that was circumstance, not protection.
+
+**Compounding factor**: `lore ready <plan> --json`'s `anchor_conflicts` is likewise plan-scoped, so
+the pre-dispatch check an orchestrator runs to look for collisions cannot see the other plan either.
+Reading `anchor_conflicts: []` and concluding "safe to dispatch" is sound only if no other plan is
+active — which the field itself gives no way to determine.
+
+**Mitigation until it is fixed**: before dispatching agents whose anchors touch shared
+infrastructure (`scripts/**`, `package.json`, `packages/core/**`), check `lore bootstrap`'s
+CORPUS-WIDE `active_sessions` — not the plan-scoped `sessions[]` — and coordinate with the peer
+directly. ⛔ Do not read a clean plan-scoped `anchor_conflicts` as a cross-plan guarantee.
+
+## GAP-19 (⛔ SCOPE: present on `main`, corrected 2026-08-11) — the AC-FR-10 oracle RUNS THE REPAIR before asserting, so the invariant it names cannot fail
+<!-- gap: id=GAP-19 status=open owning_spec=none -->
+
+⛔ **SCOPE CORRECTION, 2026-08-11 (`spec-governance-defaults-must-ship-and-every-recorded-gap-must` D6).**
+This entry previously scoped itself to a worktree branch, described as unmerged and therefore as
+something a reader would not find on `main`. That scope statement is now known to be WRONG in the
+direction that costs the most: the branch it named does not exist (`git branch -a` lists no such ref and
+`git log --all --grep` for its sha is empty), while the repair-then-assert shape it describes IS present
+on `main`. A reader who checked the named branch, found nothing, and concluded the entry was stale would
+have been steered away from a LIVE defect — which is why the correction is recorded here rather than by
+quietly editing the heading. ⛔ The defect is real and reproducible on `main`; only the WHERE was wrong.
+The original observations stand: `check:spec-mirror` is `export-spec-mirror.ts --check` (read-only),
+`mirror:export` is chained from nothing, `identity_repaired` appears 0 times, and
+`spec-mirror-export.test.ts:229` is a `scriptChainReachesTarget` boundary case.
+
+Measured on `main`, `scripts/tests/spec-mirror-export.test.ts:229`:
+
+```js
+const baseline = runMirrorScript([]);   // ← a full EXPORT, which self-heals stale ids
+expect(baseline.exitCode).toBe(0);
+for (const type of MIRROR_TYPES) { ... expect(frontmatterId).toBe(filenameId); ... }
+```
+
+`ExportDocsService`'s `identity_repaired` refreshes a stale mirror frontmatter `id:` UNCONDITIONALLY
+on every export. So the assertion runs against a tree the same test just repaired. Corroborating
+evidence from the implementer's own report, offered unprompted: its RED for this clause required
+"self-healing temporarily disabled" — i.e. with the shipped code path intact, the clause cannot be
+driven red.
+
+⛔ This is D6's own rule ("a check that regenerates what it is checking cannot fail") reappearing in
+the very plan that established D6 — and it passed, because D6 was written about the `--check`
+COMMAND and nothing carried it to the TEST that exercises the command.
+
+**What is and isn't broken.** The clause still has real value: if the EXPORTER produced an
+inconsistent id, the assertion would catch it. What it cannot catch is a pre-existing inconsistency
+in the tree — which is exactly the `migrate ordinals` seam (`OrdinalMigrationService` writes the
+unpadded form, pinned by the attested AC-084-4 at
+`packages/lore/tests/unit/store/migrate-ordinals.bun.test.ts:205`, where BOTH `new_human_id` and
+`suggested_file_path` are unpadded). Full picture of that window:
+
+| surface | detects a stale id in the window? |
+|---|---|
+| `check:spec-mirror` | no — count + slug parity only, content explicitly NOT checked |
+| AC-FR-10 test | no — it exports first, so the repair precedes the assertion |
+| next `mirror:export` | not detection, SILENT REPAIR |
+
+So nothing reports the window; it is closed invisibly by whoever exports next.
+
+**Second-order effect, already observed once.** `bun run test` invokes that export, so running the
+suite REWRITES generated mirror files whenever the corpus has moved. The implementer hit exactly
+this: a concurrent doc creation mid-run forced re-export, re-commit, re-run. ⛔ Same defect this
+session already rejected once when `mirror:export` was wired into `build` — moved to the `test`
+chain and not recognised as the same thing. A suite that dirties the tree makes "full suite green at
+a clean named commit" unstateable, which is harder to notice than making it false.
+
+**The generalising pair** (framing contributed by the peer session, adopted here): D6 says *a check
+that regenerates what it is checking cannot fail*. Its sibling is *a test that repairs the tree
+before asserting cannot fail either*. D6 was written about the `--check` COMMAND and nobody carried
+it to the TEST that exercises the command — which is exactly the gap AC-FR-10 fell through. Any spec
+that eventually owns this should state BOTH halves.
+
+A mechanical enforcement exists and is worth copying rather than re-inventing (peer's AC-BFI-8): the
+test hashes the mutated file immediately after mutating it, re-reads that hash immediately before
+asserting, and requires equality — so a setup step, fixture helper, or script-chain side effect that
+silently re-exports is caught BY the test instead of hidden by it. Its RED is to insert an export
+into the test's own setup and watch the hash equality break. ⛔ Prose forbidding the repair is not
+enough; the two instances in this document both had prose.
+
+**Fix direction** (proposal): the oracle should assert against the tree AS FOUND, then export, then
+assert convergence — two assertions, not one after a repair. And the repair-vs-detect split D6
+demands of the `--check` command must be stated as applying to its tests too.
 
 
 ## Scope
 
 Applies to AC authoring (`lore ac add`) including wiring/chain-membership clauses, task dispatch bundles, subagent delegation, `lore done`'s anchor-coverage gate,
-`lore verify`'s attestation model, `lore evidence`'s capture modes, and handoff authoring. G1, G2, G4 and G5 are covered by `spec-falsifiability-reachability-a-feedable-checkpoint-an` (created 2026-08-10); G6 is folded into its AC-FR-1. G7, G8, G11, G15, G16, G17 have no owning spec (G17 is G1's unclosed content half — ⛔ G1 is NOT resolved) (G16 supersedes G10's prediction with a measured instance and a cause) (G15's second subclass is explicitly NOT covered by AC-FR-9); G10 is a documented residue of the now-landed G4 fix; G13 is covered by AC-FR-9 and its fix task. G9 is a HARNESS gap, not a lore one — it has no owning spec and cannot get one here.
+`lore verify`'s attestation model, `lore evidence`'s capture modes, and handoff authoring. GAP-1, GAP-2, GAP-4 and GAP-5 are covered by `spec-falsifiability-reachability-a-feedable-checkpoint-an` (created 2026-08-10); GAP-6 is folded into its AC-FR-1. GAP-7, GAP-8, GAP-11, GAP-15, GAP-16, GAP-17, GAP-18, GAP-19 have no owning spec (GAP-17 is GAP-1's unclosed content half — ⛔ GAP-1 is NOT resolved) (GAP-16 supersedes GAP-10's prediction with a measured instance and a cause) (GAP-15's second subclass is explicitly NOT covered by AC-FR-9); GAP-10 is a documented residue of the now-landed GAP-4 fix; GAP-13 is covered by AC-FR-9 and its fix task. GAP-9 is a HARNESS gap, not a lore one — it has no owning spec and cannot get one here.

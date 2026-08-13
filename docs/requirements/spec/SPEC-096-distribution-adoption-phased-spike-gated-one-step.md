@@ -6,7 +6,7 @@ title: "Distribution & Adoption (phased, spike-gated one-step install) (domain o
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-27
 tags: []
 parent: PRD-001
 ---
@@ -28,6 +28,13 @@ parent: PRD-001
 **Non-goals**: no redistribution of skills we don't own (`tdd`/`to-prd`/`brainstorming`/other superpowers-plugin skills are declared *external dependencies*, never repackaged); no self-update / auto-upgrade daemon; no silent postinstall wiring of the global config; no "sentinel"-inference of ownership (the manifest is authoritative); AI-provider & sync prerequisites are documented, not bundled; win32 is not first-class scope until its own phase.
 
 **Open technical questions (resolve before the owning specs lock)**: the exact Claude Code global-MCP registration surface (`~/.claude.json` vs `settings.json.mcpServers` vs `.mcp.json`); the P3 Bun cross-compile + multi-file-embed feasibility spike.
+
+### Governance prose: runtime injection, not installed files (SPEC-083 + SPEC-085, live 2026-07-26/27)
+
+Machine installs no longer carry governance prose snapshots. `corpus-workflow.md` and `seat-briefing.md` are RETIRED from the install set (SSOT `RETIRED_FROM_INSTALL_PATHS` in `real-asset-source.ts`, honored by both the install walk and `setup --check`'s embedded-manifest classification); session-start hooks spawn the binary's own `lore governance` / `lore governance --seat-briefing` verbs instead — prose is always versioned with the binary, eliminating the installed-copy staleness class. Previously installed copies degrade to the generic `orphaned` setup-check class. The `governance/` install directory is retired entirely; the npm packaged-asset list stays install-set-independent.
+
+**Project CLAUDE.md content contract (landed 2026-07-27, spec-project-claude-md-content-contract-governance-injected)**: the memory-file convention is itself a distributed surface — one contract SSOT consumed by three pipes: the prose contract ships inside the package and is served at runtime by `lore governance claude-md` (SPEC-083 verb pattern, retired from the machine install set); numeric ceilings live ONLY in `context.memory_files.*` zod defaults (`@lore/core` config), overridable per repo; deterministic enforcement is `lore status --check-claude-md` (config-only, works pre-corpus) wired as the pre-push pair's fourth check (fail-open when lore/.lore absent, `enabled: false` opt-out, `--no-verify`). The `lore setup --project` CLAUDE.md stub carries a pointer to the verb, and the vendored `lore-init-context` skill consumes the contract at generation time and runs the check as its final oracle — its own taxonomy prose was deleted (single-SSOT). Target-vs-ceiling split: the prose cites the official under-200-lines authoring target; the enforced ceilings are deliberately looser (adoption metric guard) and caught the repo's own five module-file breaches on first run (all remediated same-day, snapshots in corpus).
+
 
 ## Acceptance Criteria (structured)
 

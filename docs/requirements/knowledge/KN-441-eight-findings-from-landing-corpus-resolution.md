@@ -2,7 +2,7 @@
 id: KN-441
 type: knowledge
 role: knowledge
-title: "Eight findings from landing corpus-resolution provenance: two ACs pinned to mechanisms that do not exist, and two assess MAJORs that were truncation artifacts"
+title: "Eleven findings from landing corpus-resolution provenance: two ACs pinned to mechanisms that do not exist, two assess MAJORs that were truncation artifacts, and a peer session rewriting the tooling underneath"
 status: approved
 priority: medium
 created: 2026-08-12
@@ -90,3 +90,56 @@ But `loadLoreApp` (`adapters/cli/loader.ts:355`) overrides that default for ever
 `lore done ... | tail` reported `EXIT=0`. That was `tail`'s exit code; `lore done` had been refused by the attestation gate. The repo's own discipline says exit codes are not measured through pipes, and the failure text happened to be visible, which is the only reason it was noticed.
 
 **Mechanization**: redirect to a file, read `$?` immediately, print it, then read the file. Every subsequent command this session used that shape.
+
+
+## 9. `lore evidence --capture` still requires the recorder to declare pass/fail, so NS3's remedy is half a remedy
+
+NS3 of the resumed handoff said to record merged-tree broad-suite runs as evidence rather than as transcript facts, noting that `--capture` satisfies the done-gate's `capture_source: runner` check. It does. But `--result` is a REQUIRED argument even with `--capture`: the tool spawns the command and captures its output, and then the recorder types the verdict. The first attempt failed outright with `Missing required argument: --result`, so the suite did not run at all.
+
+This is the repo's already-recorded `--capture` caveat reaching its logical end: the OUTPUT is machine-produced, the VERDICT is not. A row can therefore read `result: pass` over a tail whose last line is `exited with code 1`, and nothing in the data model objects.
+
+**CORRECTION, measured after this finding was first written.** The paragraph above overstates the gap, and the correction matters more than the original claim. Attempting to record the final green run as `--result pass` with `--output-tail-file` pointing at the REAL runner log was REFUSED:
+
+> a self-reported result "pass" is not provable by a hand-authored output_tail alone — a fabricated summary (even one embedding real-looking numbers) satisfies a bare non-empty check exactly as well as a genuine one, which this rule exists because it measurably happened.
+
+So the gate does enforce the important half: **a `pass` cannot be self-reported at all** — it requires `--capture` (runner-spawned) or `--oracle manual`. My genuine 890-second log, whose exit code I had persisted to a file, was correctly refused, because the gate cannot tell my real log from a fabricated one.
+
+What remains open is narrower: with `--capture`, the recorder still TYPES the result, so `--result pass` over a capture that exited 1 is still accepted. The gap is "the verdict may contradict the captured exit code", not "the verdict is free-form".
+
+**SECOND CORRECTION, measured again.** The recommended mechanization above ALSO already exists. Driving `--capture --result pass` against a suite that exited 1 produced:
+
+> `--capture` ran `--command` and observed exit code 1 — declared `--result "pass"` does not match (pass requires exit 0; fail/expected-fail requires nonzero). Recorded nothing; fix `--result` or `--command` and retry.
+
+So there is no gap at all. `lore evidence --capture` refuses a self-reported tail for a `pass`, AND cross-checks the declared result against the exit code it observed, AND records nothing when they disagree. Finding 9 as originally written described a hole that does not exist, and its first correction proposed a fix that was already shipped.
+
+**The meta-lesson, which is the only durable part of this finding**: I wrote both the original claim and its first correction from the shape of the CLI's argument list, not from driving it. Twice. This is the same error this session recorded twice about ACs pinned to unmeasured mechanisms — committed by me, inside the document recording it, and caught only because the tool refused me.
+
+Reading a flag's help text is not measuring its behaviour. The instrument that finally produced the truth was the same one both times: run the command and read what it says.
+
+**What NS3 should have said**: the merged-tree broad-suite run belongs in the corpus, and `lore evidence --capture` records it soundly — runner-spawned output, exit-code-checked verdict, nothing recorded on disagreement. It is weaker than `lore verify` in exactly one respect (no `attestation` block binding it to a declared AC command), and that is a traceability difference, not a trust difference.
+
+## 10. A peer session was committing to `main` in the same checkout throughout, and the tooling under me changed mid-session
+
+Four implementer agents independently reported the same two failures in `migrate-ordinals-compiled.bun.test.ts` (`expect("SPEC-1")` receiving `"SPEC-001"`). I treated four independent reproductions as strong evidence of a genuine pre-existing defect. That was correct — the file's own header at `:28-32` records the re-baseline that stranded the assertion — but the resolution came from outside this session: commits `fffecb5d` / `7cfd4a15`, authored by a peer session at 15:26:11, six minutes after my own mirror commit at 15:19:47.
+
+The same peer landed `4ee02af2` / `22bc3888`, which taught the git safety gate to assess non-force `git worktree remove` and added a 30-minute reflog liveness window. That is why my first two worktree removals succeeded and my third was blocked: **the gate under me was replaced while I was using it.** Nothing in my session signalled the change; I inferred it from `git log` only because the block surprised me.
+
+I also briefly hypothesised the migrate-ordinals failures were a stale-binary or mirror-drift artifact, on the strength of the test passing 6/6 after I rebuilt `dist/`. That hypothesis was wrong, and measurement is what refuted it — `git log` on the file showed a peer's fix, not my rebuild.
+
+**Root cause**: a shared checkout has no session-visible change feed. `git log` answers it, but only if you think to ask, and you only think to ask after something surprising happens.
+
+**Mechanization**: before drawing any conclusion about a failure that "four agents reproduced", diff `main` against the commit your agents branched from. Independent reproduction of a SHARED environmental cause is not independent evidence — every one of those four agents branched from the same tree and inherited the same stranded assertion.
+
+## 11. The broad suite's two remaining failures were my own uncommitted corpus writes, and the mechanism is already written down
+
+`bun run test` on the merged tree: 2048 pass, 2 fail, 9595 expect() calls, 2050 tests across 204 files, 938-983s. Both failures are `spec-loop-e2e.bun.test.ts`'s `repo-pollution-guard`, firing before and after the suite, naming exactly four paths: `.lore/export-index.json`, `PLAN-128`, `SPEC-141`, `KN-441`.
+
+Those are the plan archival, the spec correction to v27, and this document — every one of them a corpus write I made AFTER my mirror re-export at 15:19:47.
+
+The root CLAUDE.md already carries this: "ANY corpus write reddens the next full-suite run until the mirror is re-exported AND committed." I re-exported at the right moment and then kept writing.
+
+**Mechanization**: the ordering is the fix, and it is not intuitive enough to leave to memory — close-out must be a fixed sequence: finish EVERY corpus write (assessment, corrections, follow-up tasks, retro, handoff) → `bun run mirror:export` → commit → THEN run the broad suite. A close-out that interleaves writes and verification will redden on its own artifacts every time, and the redness looks exactly like a regression until someone reads the four offending paths.
+
+**I then violated this rule twice more, in the same session, after writing it.** Editing this very document to add corrections 9 and 10 dirtied the mirror again, and the next broad-suite capture reddened on the pollution guard again — once naming `KN-441`, which is this file. The rule is correct and I still could not follow it from memory, because "record what you just learned" and "verify the tree is clean" are both close-out steps and nothing orders them.
+
+**Stronger mechanization**: the ordering must be enforced, not remembered. `lore evidence --capture` could refuse to spawn while `git status --short .lore docs/requirements` is non-empty, with a message naming the export command — the same shape as the pollution guard, moved one step earlier so it fails in one second instead of fifteen minutes. Three of this session's five broad-suite runs were spent discovering corpus dirt that a pre-flight check would have named instantly.

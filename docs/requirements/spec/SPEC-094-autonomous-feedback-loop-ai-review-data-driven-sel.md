@@ -6,7 +6,7 @@ title: "Autonomous Feedback Loop (AI review, data-driven self-optimization) (dom
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-29
 tags: []
 parent: PRD-001
 ---
@@ -108,6 +108,30 @@ The v1 assess rubric is one-dimensional (per-AC evidencing) and its `gaps`/`reco
 - **Golden-set regression gate (the L2 harness arrives early)**: promoting a new assess prompt/rubric version requires non-inferiority on replayed historical assessments labeled by human outcomes (the existing assessment docs + SPEC-035 calibration overrides are the seed corpus). The same data discipline §14.3 applies to autonomy applies to the instrument itself — no rubric version ships on vibes.
 
 Baseline instrument-defect evidence: `knowledge-assess-material-budget-distortion` (3× systematic under-scoring, 30-50 points), `knowledge-assess-usage-patterns` (#1 scope mismatch, #9 ±2 score noise), `knowledge-round-3-findings` (judge session contamination — since fixed by SPEC-030), §14 intro's unconsumed-recommendations gap.
+
+### 14.8 Attestation reachability & exemption taxonomy (committed 2026-07-28)
+
+The evidence-trustworthiness line (SPEC-039 trusted runner → SPEC-069 attestation floor) assumed every plan can reach `lore verify`; the 2026-07-27 audit-remediation plan (cross-spec, PRD-parented) proved the assumption silently false — the floor denied at close time with a recovery command that could not run, and the only escape was an untyped exemption boolean. Landing spec `spec-verify-reachability-plan-promote-early-warning` (2/2 tasks attested-verified, closed without exemption) hardens the boundary three ways: (1) a plan-promote ADVISORY (never a deny — cross-spec plans stay legal) warning at promote time when `lore verify` will be structurally unreachable (no spec-tier ancestor, or zero script-mode ACs); (2) the ATTESTATION_FLOOR_NOT_MET feeding pack now branches on the same reachability derivation — it never again recommends an impossible `lore verify`; (3) exemptions are typed: `extra.attestation_exempt_kind ∈ {red-tdd, no-oracle, pipeline-unreachable, other}` is REQUIRED whenever `attestation_exempt: true` (fail-loud, no legacy fallback), so audit readers can distinguish "unverified" from "verified but unattestable". Deferred by decision (future spec candidate): resolving verify ACs across `implements`-linked specs for multi-spec plans — the model-level fix; this round only makes the single-parent boundary honest.
+
+
+### 14.9 Two-runner regression selection (committed 2026-07-28)
+
+Oracle-quality hardening one layer below attestation: the worktree regression sweep `vitest --changed` is structurally blind to `.bun.test.ts` consumers (two-runner convention), demonstrated when SPEC's exemption-kind change broke bun-side cascade fixtures behind a green 4504-test vitest sweep. Landing spec `spec-two-runner-changed-test-selection-deterministic-test`: `bun run test:changed [<base>]` selects across BOTH runners via transitive reverse-dependency BFS over a regex import graph, with named dependency-closure escapes (`dist/lore`-spawning binary-consumers auto-included on any src change, `bun run build` forced first — the stale-dist false-oracle lesson mechanized at selection time) and mandatory accounting (per-runner counts + per-file reason tags; zero-selection under src changes warns loudly). Known bounded limitation: dynamic imports are excluded by design, so the selector's own test (which dynamic-imports the script) is reachable only as a changed-test, not transitively.
+
+### 14.10 Loop instrumentation + enforcement arrives (landed 2026-07-28)
+
+Three mechanisms closed long-standing gaps this section had DESCRIBED but never measured or enforced. All three are landed, attested, and merged.
+
+**Measurement (SPEC-102, trace layer).** §14's premise is data-driven self-optimization, but until now the loop had no read-side data at all: gate SKIPS were audited while gate DENIES vanished, and nothing recorded whether a doc was ever read. `trace_events` (migration-011) is a local-only, fire-and-forget, append-only stream over reads (`get`/`search`/`feed`/`context_bundle`) and gate denies, aggregated by `lore trace stats`. First measurement, same day, across three corpora: **832 of this corpus's docs had never been read**, guyin 161, babyai 455 — the "write-automation exceeds read-consumption" asymmetry became a tracked number instead of an impression. Deny data arrived immediately too (spec-create 4 · review-judgment 2 · plan-close 2 · task-claim 1), which is how the freshness gate below was scoped correctly rather than guessed. Deliberately NOT replicated to Turso: raw search queries are local-only, and team-visible read logs would need their own opt-in spec.
+
+**Enforcement of I1, early (SPEC-103, tiered review).** §14.4's I1 (approver ≠ author) was stated as an invariant but nothing enforced it: measured reality was 40 of 40 approvals performed by the writing orchestrator itself. `ReviewService.approve` now REQUIRES a ReviewJudgment for the doc's CURRENT version for configured durable types (default spec+adr), with worst-decision-wins per version so a reject cannot be outrolled by re-running the judge, and two audited escapes (`--override-judgment <id>` for a named judgment — including a stale-version one, which is frequently the blocker — and `--override-no-judgment` for the never-judged case). This is I1's deterministic half arriving BEFORE the 14.3 staged-unlock machinery, not a replacement for it: staged unlock stays data-gated exactly as specified. Ledger sub_types (assessment/retro/handoff/uat) exit the review-object universe entirely and are therefore exempt from the 14.3 state machine by design — there is no approval decision to automate for a台账 record.
+
+**Honest limit on I1 today.** `ai_provenance` is stamped only when the active provider can report a real model id (the `ModelAwareProvider` capability, implemented by `HttpAIProvider`); it is OMITTED rather than filled with the provider name when it cannot. `claude-cli` shells out and genuinely cannot know its own model, so on this corpus provenance is absent and **I1 collision detection is N/A** — the judgment-required gate is the whole protection here. A dishonest tuple that could never collide was removed in favor of an honest absence.
+
+**Feedback-loop hygiene (SPEC-106, assessment freshness).** An assessment that TRIGGERS follow-up work silently goes stale by its own success: measured this session, two plans' assessments ran before the hardening those very assessments spawned. `lore assess` was timestamp-blind and nothing marked a stored assessment superseded. The `plan-close` gate now carries an `assessmentFreshness` predicate — closure is denied when the plan's newest `evidence`/`done` AUDIT row postdates its newest linked assessment (audit rows, not doc mtime, so anchor adds and link writes never false-positive). `lore assess` itself only warns: gating the remedy on the condition it cures would deadlock. Staleness is computed read-side, never stored.
+
+**What this changes for §14's staging.** R1's "audit completeness" and "judgment coverage" exit metrics now have instrumentation behind them, and the calibration data §14.3 needs can finally accumulate against real deny/judgment traffic rather than hypothetical volume. The kill criterion is unchanged and still applies.
+
 
 ## Acceptance Criteria (structured)
 

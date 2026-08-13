@@ -6,7 +6,7 @@ title: "Output Contract & Document Taxonomy (domain overview)"
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-27
 tags: []
 parent: PRD-001
 ---
@@ -47,6 +47,14 @@ Remaining SPEC-032 scope: `lore.tree.yaml` authoring, `spec_kind` Zod enum + `mi
 ### 13.5 Dashboard = PRD projection
 
 Dashboard home = resolveMdx-rendered living PRD (SPEC-004 machinery: ChildrenOf / RecentDecisions / ActivePlans / HealthStats) + pending-review and ready-task panels. Product current shape = the resolved PRD; iteration history = version log + assessment timeline; decisions = RecentDecisions + adr filter. Full page rewrite specified in SPEC-033. Positioning broadened by §21 (owner, 2026-07-24): the dashboard evolves toward a general admin console; this Home-as-resolved-PRD directive is unchanged by that broadening.
+
+### 13.6 Ordinal identity (corpus-allocated, SPEC-084 — live since 2026-07-27)
+
+- **`SPEC-N` / `ADR-N` are corpus-allocated ordinals, never authored.** `docs.ordinal` (INTEGER, partial UNIQUE index `(type, ordinal) WHERE ordinal IS NOT NULL`, soft-deleted rows included → numbers are never reused) is the sole identity authority; titles are pure prose — a title matching `^(SPEC|ADR)-\d+\b` is rejected (VALIDATION_ERROR) on BOTH write paths (create schema superRefine + `set` title patch).
+- **Allocation**: store-atomic at create (`insertWithAllocatedOrdinal`, MAX+1 over the index, bounded retry, loud `ORDINAL_ALLOCATION_EXHAUSTED`); exempt→numbered kind flips via `allocateOrdinalForExisting`; `domain-overview` kind carries NULL ordinal. Repair-only targeted assignment via internal `assignOrdinalForRepair` (D7 path, no public flag).
+- **Display**: composed at read time by core `formatDocDisplayId`/`composeDocDisplayTitle` (single composition site, import-graph-pinned); the composed string is never stored. `lore get SPEC-84`/`spec-084`/zero-padded forms resolve via `resolveDoc`'s ordinal-ref step; export `human_id` reads the column (SPEC-021 A1 allocator retired for numbered types).
+- **History anchor**: one-shot `lore migrate ordinals` executed 2026-07-27 (94 kept / 12 changed; triple-080 collision endgame: 80 = bootstrap-injection projection, 81 = PRD-as-outline, 82 = audit-hardening-2). Pre-migration numbers in git history/prose are immutable scars (D10) — content search still finds them.
+
 
 ## Acceptance Criteria (structured)
 

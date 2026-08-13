@@ -3,13 +3,15 @@ id: KN-168
 type: knowledge
 role: knowledge
 title: "Triple SPEC-080 numbering collision across concurrent sessions (2026-07-26)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-27
 tags: []
 parent: PRD-001
 ---
+> ⚠ INVALIDATED 2026-07-27T01:50:22.186Z — superseded by spec-084-corpus-allocated-ordinal-identity-store-atomic-spec; Manual-resolution protocol superseded: SPEC-084 repair migration executed live 2026-07-27 (94 kept / 12 changed, 80=bootstrap-injection, 81=PRD-as-outline, 82=audit-hardening-2); ordinal collisions now impossible by construction (DB partial unique index + schema guard)
+
 ## What happened
 Three concurrent Claude sessions on the same machine each derived 'next spec number' independently and minted a SPEC-080 within the same hours: (1) audit-hardening part 2 (this session; renumbered to SPEC-081, slug spec-081-audit-hardening-part-2-gate-skip-observability-push), (2) spec-080-prd-as-outline-contract-structured-outline-domain, (3) spec-080-bootstrap-injection-projection-tier-1-tier-2-payload. All three were independently approved before anyone noticed. Git history additionally interleaves commits labeled 'SPEC-080' from three different feature families, and RED-scenario test files from the prd-as-outline session made main's typecheck fail while their implementation tasks were still in flight — a full-repo regression AC (this plan's AC-080-5) became temporarily unsatisfiable through no fault of the plan's own changes.
 
