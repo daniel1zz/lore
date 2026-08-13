@@ -469,14 +469,12 @@ async function writeClaimSessionMarker(cwd: string, sessionId: string): Promise<
  * git work tree all degrade to a silent no-op rather than blocking whatever
  * lifecycle step (release) triggered this call.
  *
- * ⛔ Not yet wired into `TaskWorkflowService.release` — that requires an
- * edit to `task-workflow-service.ts`, outside this module's own file, and
- * outside task-the-lore-session-trailer-is-inert-whenever-core-hookspath's
- * declared anchor (`real-git-port.ts` only). Until a follow-up task adds the
- * injected-port call symmetric to `installClaimTrailerBinding`'s existing
- * `_claimImpl` call site, this exported capability is correct and covered
- * (`lore-session-trailer.bun.test.ts`'s RELEASE cases exercise it directly)
- * but not yet reachable through `lore release`.
+ * Wired into `TaskWorkflowService._releaseImpl` (`task-workflow-service.ts`)
+ * via the `releaseClaimTrailerBinding` injected constructor port, symmetric to
+ * `installClaimTrailerBinding`'s existing `_claimImpl` call site — this
+ * exported capability is reachable through `lore release`, exercised through
+ * that live call site (never called directly) by
+ * `lore-session-trailer.bun.test.ts`'s RELEASE describe block.
  *
  * @param cwd - The worktree path the claim being released was bound to
  *   (`TaskClaim.worktree` at release time).

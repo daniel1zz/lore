@@ -361,7 +361,12 @@ import type { GateDependencies } from "./gate-enforcer.js";
 // CorpusService). See real-git-port.ts's own module doc for the full
 // rationale and its precedent (`measureWorktreeCleanliness`'s pre-existing
 // ad hoc `git` subprocess calls, already inline in THIS file below).
-import { detectWorktreeBranch, bindClaimSessionForTrailer, type BranchMeasurement } from "../adapters/real-git-port.js";
+import {
+  detectWorktreeBranch,
+  bindClaimSessionForTrailer,
+  unbindClaimSessionForTrailer,
+  type BranchMeasurement,
+} from "../adapters/real-git-port.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -1889,6 +1894,19 @@ export class TaskWorkflowService {
    *   both a worktree AND a measured session_id are present — never awaited
    *   into `claim()`'s own `Result` (a hook-install/marker-write failure must
    *   never fail a claim).
+   * @param releaseClaimTrailerBinding - AC-OWN-4 injected port — the release-side
+   *   counterpart of `installClaimTrailerBinding` above, best-effort, ADVISORY
+   *   (see its own JSDoc): clears the marker `installClaimTrailerBinding` wrote
+   *   for the RELEASED claim's own `{worktree, session_id}`, so a LATER commit
+   *   made in that worktree no longer carries the released claim's
+   *   `Lore-Session:` trailer. Defaults to the REAL implementation
+   *   (`real-git-port.ts::unbindClaimSessionForTrailer`) for the same
+   *   no-app.ts-wiring-needed reason `installClaimTrailerBinding` is. Called
+   *   from `_releaseImpl` ONLY on the CONFIRMED-release path, after
+   *   `writeTaskExtra` succeeds, and ONLY when the claim BEING RELEASED
+   *   carried both a worktree AND a measured session_id — never awaited into
+   *   `release()`'s own `Result` (a marker-clear failure must never fail a
+   *   release).
    */
   constructor(
     private readonly store: StoreInterface,
@@ -1920,6 +1938,10 @@ export class TaskWorkflowService {
       worktree: string,
       sessionId: string,
     ) => Promise<void> = bindClaimSessionForTrailer,
+    private readonly releaseClaimTrailerBinding: (
+      worktree: string,
+      sessionId: string,
+    ) => Promise<void> = unbindClaimSessionForTrailer,
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
@@ -2651,12 +2673,31 @@ export class TaskWorkflowService {
     const reasonNote = opts.reason !== undefined ? `: ${opts.reason}` : "";
     const summary = `Released by ${opts.by}${forcedNote}${reasonNote}`;
 
-    return this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "release", {
+    const writeResult = await this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "release", {
       by: opts.by,
       force: opts.force === true,
       previous_holder: existingClaim.by,
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
+
+    // reason: AC-OWN-4 second defect (task-the-lore-session-trailer-is-inert-
+    // whenever-core-hookspath) — best-effort, ADVISORY side effect of a
+    // CONFIRMED successful release (never on the CLAIM_CONFLICT/no-claim/
+    // worktree-guard error returns above, so a release that never actually
+    // lands never clears a marker). Only attempted when the RELEASED claim
+    // itself carried BOTH a worktree and a measured session_id — pass
+    // `existingClaim.session_id` (the RELEASED claim's own captured session),
+    // NEVER `opts.by`'s/the releasing caller's current session: a `--force`
+    // release by a different actor must not unbind using the releaser's own
+    // session (releaseClaimTrailerBinding's compare-and-delete makes a
+    // mismatched id a safe no-op — see that function's own JSDoc). Never
+    // awaited into this method's own Result — see releaseClaimTrailerBinding's
+    // own JSDoc.
+    if (writeResult.ok && existingClaim.worktree !== undefined && existingClaim.session_id !== undefined) {
+      await this.releaseClaimTrailerBinding(existingClaim.worktree, existingClaim.session_id);
+    }
+
+    return writeResult;
   }
 
   // ── done ─────────────────────────────────────────────────────────────────

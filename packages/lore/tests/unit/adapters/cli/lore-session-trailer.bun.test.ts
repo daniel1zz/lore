@@ -61,18 +61,21 @@
  * The marker's second defect — `writeClaimSessionMarker` had no clearing
  * path on release, so a released worktree's later commits kept the stale
  * trailer — is fixed by the newly-exported `unbindClaimSessionForTrailer`
- * (real-git-port.ts). ⛔ NOT YET wired into `TaskWorkflowService.release`:
- * that edit belongs to `task-workflow-service.ts`, outside this task's
- * declared anchor (`real-git-port.ts` only) — see that function's own
- * JSDoc. The block below exercises the exported port DIRECTLY, honestly
- * proving the mechanism rather than a not-yet-existing wiring path:
+ * (real-git-port.ts), now WIRED into `TaskWorkflowService._releaseImpl` via
+ * the `releaseClaimTrailerBinding` injected port (task-workflow-service.ts),
+ * mirroring `installClaimTrailerBinding`'s existing `_claimImpl` call site.
+ * The block below drives the unbind ONLY through
+ * `taskWorkflowService.release(...)` — never by calling the exported port
+ * directly — so it proves the WIRING, not merely the underlying capability:
  *
  *   "a released claim's session no longer taints later commits" describe block:
- *     STATE:    unbinding with the SAME session id that bound it clears the
- *               marker — a LATER commit carries no trailer
- *     NEGATIVE: unbinding with a MISMATCHED session id is a no-op — it never
- *               erases a DIFFERENT, still-live claim's marker (the exact
- *               cross-contamination compare-and-delete exists to prevent)
+ *     STATE:    releasing a claim via `taskWorkflowService.release(...)`
+ *               clears the marker it bound — a LATER commit in that same
+ *               worktree carries no trailer
+ *     NEGATIVE: releasing an OLDER claim whose worktree marker was already
+ *               overwritten by a SECOND, newer claim on the same worktree is
+ *               a no-op through the service exactly as it is at the port
+ *               level — it never erases the newer, still-live claim's marker
  *
  * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-4
  */
@@ -87,7 +90,6 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../../src/service/task-workflow-service.js";
-import { bindClaimSessionForTrailer, unbindClaimSessionForTrailer } from "../../../../src/adapters/real-git-port.js";
 
 // ─── Real git-repo fixtures (throwaway `mkdtemp` — NEVER this repo's own tree) ──
 
@@ -394,34 +396,49 @@ describe("core.hooksPath outside the git dir but inside the repo still gets the 
 });
 
 describe("a released claim's session no longer taints later commits (AC-OWN-4, second defect)", () => {
-  it("STATE: unbinding with the SAME session id clears the marker — a later commit carries no trailer", async () => {
+  it("STATE: taskWorkflowService.release clears the marker it bound — a later commit carries no trailer", async () => {
     const { repoRoot } = makeRepo();
-    const sessionId = sessionIdDiscriminator("release-state-1234");
+    const { corpusService, taskWorkflowService } = makeServices({
+      CLAUDE_CODE_SESSION_ID: "release-state-5678",
+    });
+    const { taskId } = await createPlanAndTask(corpusService);
 
-    await bindClaimSessionForTrailer(repoRoot, sessionId);
-    commitFile(repoRoot, "before-release.txt", "content\n", "commit while the binding is still active");
-    expect(readLoreSessionTrailer(repoRoot)).toBe(sessionId);
+    const claimResult = await taskWorkflowService.claim(taskId, { by: "alice", worktree: repoRoot });
+    expect(claimResult.ok).toBe(true);
+    commitFile(repoRoot, "before-release.txt", "content\n", "commit while the claim is still active");
+    expect(readLoreSessionTrailer(repoRoot)).toBe(sessionIdDiscriminator("release-state-5678"));
 
-    await unbindClaimSessionForTrailer(repoRoot, sessionId);
+    const releaseResult = await taskWorkflowService.release(taskId, { by: "alice" });
+    expect(releaseResult.ok).toBe(true);
+
     commitFile(repoRoot, "after-release.txt", "content\n", "commit after the claim was released");
     expect(readLoreSessionTrailer(repoRoot)).toBe("");
   });
 
-  it("NEGATIVE: unbinding with a MISMATCHED session id never erases a different, still-live claim's marker", async () => {
+  it("NEGATIVE: releasing an older claim whose marker was already overwritten by a newer claim is a no-op — the newer claim's marker survives", async () => {
     const { repoRoot } = makeRepo();
-    const releasedSessionId = sessionIdDiscriminator("released-session-1111");
-    const liveSessionId = sessionIdDiscriminator("live-session-2222");
+    const { corpusService: corpusA, taskWorkflowService: serviceA } = makeServices({
+      CLAUDE_CODE_SESSION_ID: "aaaa3333-release-negative-first",
+    });
+    const { corpusService: corpusB, taskWorkflowService: serviceB } = makeServices({
+      CLAUDE_CODE_SESSION_ID: "bbbb4444-release-negative-second",
+    });
+    const { taskId: firstTaskId } = await createPlanAndTask(corpusA);
+    const { taskId: secondTaskId } = await createPlanAndTask(corpusB);
 
-    await bindClaimSessionForTrailer(repoRoot, releasedSessionId);
-    // reason: a DIFFERENT claim re-binds this SAME worktree before the
-    // original claim's (stale) release call ever reaches this function —
-    // mirrors AC-OWN-4's own STATE case ("re-claiming overwrites the
-    // marker"), just staged as the PRECONDITION here instead of the assertion.
-    await bindClaimSessionForTrailer(repoRoot, liveSessionId);
+    const firstClaim = await serviceA.claim(firstTaskId, { by: "alice", worktree: repoRoot });
+    expect(firstClaim.ok).toBe(true);
+    // reason: a DIFFERENT task claims the SAME worktree before the first
+    // claim's (stale) release call ever runs — mirrors AC-OWN-4's own STATE
+    // case ("re-claiming overwrites the marker"), just staged as the
+    // precondition here instead of the assertion.
+    const secondClaim = await serviceB.claim(secondTaskId, { by: "bob", worktree: repoRoot });
+    expect(secondClaim.ok).toBe(true);
 
-    await unbindClaimSessionForTrailer(repoRoot, releasedSessionId);
+    const releaseResult = await serviceA.release(firstTaskId, { by: "alice" });
+    expect(releaseResult.ok).toBe(true);
 
-    commitFile(repoRoot, "after-mismatched-unbind.txt", "content\n", "commit after a mismatched unbind attempt");
-    expect(readLoreSessionTrailer(repoRoot)).toBe(liveSessionId);
+    commitFile(repoRoot, "after-mismatched-release.txt", "content\n", "commit after a stale claim's release");
+    expect(readLoreSessionTrailer(repoRoot)).toBe(sessionIdDiscriminator("bbbb4444-release-negative-second"));
   });
 });
