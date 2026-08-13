@@ -3,10 +3,10 @@ id: KN-029
 type: knowledge
 role: knowledge
 title: "MDX placeholder parser flags JSX inside fenced code blocks"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-08
 tags: [outline, eval, bug]
 parent: PRD-001
 ---

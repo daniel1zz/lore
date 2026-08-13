@@ -3,7 +3,7 @@ id: TASK-673
 type: task
 role: plan
 title: "The open-report ceiling is the upstream corpus own declared policy, never a compiled constant"
-status: draft
+status: archived
 priority: medium
 phase: "cap-policy"
 created: 2026-08-11

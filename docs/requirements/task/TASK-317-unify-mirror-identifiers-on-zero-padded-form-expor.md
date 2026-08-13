@@ -3,7 +3,7 @@ id: TASK-317
 type: task
 role: plan
 title: "Unify mirror identifiers on zero-padded form, export all six doc types, and drive links_broken to zero so the full suite goes green"
-status: draft
+status: archived
 priority: medium
 phase: "mirror"
 created: 2026-08-11

@@ -3,9 +3,9 @@ id: TASK-075
 type: task
 role: plan
 title: "T1 core: acceptance schema + ORACLE_KINDS SSOT + ac_ref"
-status: draft
+status: archived
 priority: critical
-phase: core-schema
+phase: "core-schema"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

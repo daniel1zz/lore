@@ -3,7 +3,7 @@ id: TASK-666
 type: task
 role: plan
 title: "Thread diff_source through the CLI and MCP assess adapters so path verification is reachable from the surfaces users drive"
-status: draft
+status: archived
 priority: medium
 phase: "assess-verify"
 created: 2026-08-11

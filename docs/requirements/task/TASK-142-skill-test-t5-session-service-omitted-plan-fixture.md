@@ -3,11 +3,11 @@ id: TASK-142
 type: task
 role: plan
 title: "[Skill:test] T5 session-service omitted-plan fixture (extend-only)"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 2: Surfaces (parallel)"
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-29
 tags: []
 parent: PLAN-032
 plan: PLAN-032

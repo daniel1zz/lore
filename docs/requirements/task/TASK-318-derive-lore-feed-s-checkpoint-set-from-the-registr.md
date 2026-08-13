@@ -3,11 +3,11 @@ id: TASK-318
 type: task
 role: plan
 title: "Derive lore feed's checkpoint set from the registry, make an unregistered name exit 2 instead of 0, and emit an enforcer-side evaluation trace for every checkpoint"
-status: draft
+status: archived
 priority: medium
 phase: "gate-reachability"
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-11
 tags: []
 parent: PLAN-076
 plan: PLAN-076

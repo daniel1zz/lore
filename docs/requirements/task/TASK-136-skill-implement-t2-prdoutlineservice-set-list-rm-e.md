@@ -3,7 +3,7 @@ id: TASK-136
 type: task
 role: plan
 title: "[Skill:implement] T2 PrdOutlineService (set/list/rm/exempt, CAS+version+audit) + CorpusService.set guards + renderOutlineContent"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: Core schemas & outline writer"
 created: 2026-07-26

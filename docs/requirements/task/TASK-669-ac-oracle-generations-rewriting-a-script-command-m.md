@@ -3,7 +3,7 @@ id: TASK-669
 type: task
 role: plan
 title: "AC oracle generations: rewriting a script command marks prior-generation evidence without mutating a single row"
-status: draft
+status: archived
 priority: medium
 phase: "cap-honesty"
 created: 2026-08-11

@@ -3,7 +3,7 @@ id: TASK-310
 type: task
 role: plan
 title: "spec-promote base >=1-AC rule is spec_kind-agnostic — SPEC-080 C2's 'domain-overview needs no ACs' is unimplementable; make the AC floor profile-aware or codify the parity-AC pattern"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26

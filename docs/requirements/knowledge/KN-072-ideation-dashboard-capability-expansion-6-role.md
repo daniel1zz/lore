@@ -3,10 +3,10 @@ id: KN-072
 type: knowledge
 role: knowledge
 title: "Ideation — Dashboard capability expansion (6-role brainstorm, 2026-07-24)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 tags: [dashboard, ideation, product]
 parent: PRD-001
 links:

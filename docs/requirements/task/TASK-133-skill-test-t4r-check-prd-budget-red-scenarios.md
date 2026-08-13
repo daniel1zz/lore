@@ -3,7 +3,7 @@ id: TASK-133
 type: task
 role: plan
 title: "[Skill:test] T4r --check-prd-budget — RED scenarios"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: Oracles & gate predicate"
 created: 2026-07-26

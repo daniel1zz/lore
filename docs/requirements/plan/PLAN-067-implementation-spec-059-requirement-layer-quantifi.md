@@ -3,10 +3,10 @@ id: PLAN-067
 type: plan
 role: plan
 title: "Implementation — SPEC-059 requirement-layer quantifiability lint"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-20
-updated: 2026-07-20
+updated: 2026-07-26
 tags: []
 parent: SPEC-059
 ---

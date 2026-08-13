@@ -29,6 +29,25 @@
  *     tree, which breaks this repo's own "a full-suite verdict requires a CLEAN tree" standing rule
  *     — the same failure shape `lore assess` already flagged elsewhere as "a check command with a
  *     write side effect surprises callers and CI."
+ *
+ *     task-the-two-mirror-exporters-disagree-because-drift-detection (2026-08-13) — this mode's
+ *     write loop now ALSO converges a status-only (or other scalar-frontmatter-only) drift
+ *     unconditionally, with NO code change needed in THIS file: `ExportDocsService.exportDocs`'s
+ *     write loop gained a frontmatter-scalar staleness check (`frontmatter_repaired`/
+ *     `frontmatter_declined` on `ExportReport` — see that module's own doc comments) that fires
+ *     independent of `opts.force`, the same way the pre-existing identity check (`id`/`parent`/
+ *     `plan`/`links`) already does — because a `status`/`priority`/`title`/`tags`/`phase` value
+ *     is a corpus-authoritative fact with exactly one correct answer, never a hand-edit judgement
+ *     call the way body content is. Since THIS file's `runExport`/`main` call that service
+ *     directly with no intervening logic of their own, `bun run mirror:export` (no flags) now
+ *     repairs a status-only drift for the SAME reason `lore export-docs` (the other caller of the
+ *     same service) does — one shared mechanism, not a duplicated one. ⛔ This is deliberately
+ *     NOT the same thing as wiring a `--force` flag through to `ExportDocsOptions.force` here:
+ *     BODY content drift still requires the existing, unchanged, explicit `--force` opt-in (SPEC-
+ *     021 Amendment A2) — that axis is untouched by this task, which is scoped to the frontmatter-
+ *     only case where the body is provably byte-identical (`scripts/tests/mirror-frontmatter-
+ *     drift.test.ts` proves both halves against a throwaway corpus, driving this exact `main()`
+ *     entry point).
  *   - `bun run check:spec-mirror` (`--check` flag, this file's other mode) — READ-ONLY. Never
  *     calls `exportDocs`, never writes a byte. A run that finds drift reports the SAME drift on
  *     every subsequent run until something else (a real export) fixes it — see D6's own text: "a

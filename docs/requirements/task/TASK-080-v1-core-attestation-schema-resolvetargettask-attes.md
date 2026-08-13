@@ -3,9 +3,9 @@ id: TASK-080
 type: task
 role: plan
 title: "V1 core: attestation schema + resolveTargetTask + attested coverage + verify config"
-status: draft
+status: archived
 priority: critical
-phase: core
+phase: "core"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

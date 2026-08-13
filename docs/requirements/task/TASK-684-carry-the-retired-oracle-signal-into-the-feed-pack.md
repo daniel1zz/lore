@@ -3,11 +3,11 @@ id: TASK-684
 type: task
 role: plan
 title: "Carry the retired-oracle signal into the feed pack so a dispatched implementer does not read it as plain green"
-status: draft
+status: archived
 priority: medium
 phase: "read-surfaces"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 tags: []
 parent: PLAN-127
 plan: PLAN-127

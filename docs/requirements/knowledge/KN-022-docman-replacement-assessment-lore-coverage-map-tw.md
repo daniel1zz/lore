@@ -3,10 +3,10 @@ id: KN-022
 type: knowledge
 role: knowledge
 title: "DocMan replacement assessment — Lore coverage map + two remaining gaps"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-06
-updated: 2026-07-06
+updated: 2026-07-08
 tags: [docman, positioning, roadmap-candidate]
 parent: PRD-001
 ---

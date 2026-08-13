@@ -3,7 +3,7 @@ id: TASK-123
 type: task
 role: plan
 title: "[Skill:verify] T9 Close-out: full suites + lore verify + assess + arming decision handoff"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 4: Corpus migration & close-out"
 created: 2026-07-26

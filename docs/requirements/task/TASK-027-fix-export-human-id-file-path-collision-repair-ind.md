@@ -3,7 +3,7 @@ id: TASK-027
 type: task
 role: plan
 title: "Fix export human-ID + file-path collision, repair index"
-status: active
+status: archived
 priority: critical
 created: 2026-07-02
 updated: 2026-07-02

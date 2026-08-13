@@ -3,7 +3,7 @@ id: KN-032
 type: knowledge
 role: knowledge
 title: "Anthropic Official Agent-Loop Engineering — Research Digest"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-08
 updated: 2026-07-08

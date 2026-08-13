@@ -3,11 +3,11 @@ id: TASK-717
 type: task
 role: plan
 title: "Thread real local-branch enumeration from the git port through lore territory into partitionTerritory's now-ready localBranches parameter"
-status: draft
+status: archived
 priority: medium
 phase: "remediation"
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-13
 tags: []
 parent: PLAN-129
 plan: PLAN-129

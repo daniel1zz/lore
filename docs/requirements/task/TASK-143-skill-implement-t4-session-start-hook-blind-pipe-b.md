@@ -3,11 +3,11 @@ id: TASK-143
 type: task
 role: plan
 title: "[Skill:implement] T4 session-start hook blind-pipe + backstop"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 2: Surfaces (parallel)"
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-29
 tags: []
 parent: PLAN-032
 plan: PLAN-032

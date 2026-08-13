@@ -3,10 +3,10 @@ id: KN-050
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-043 Implementation — bi-temporal invalidation (2026-07-11)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-14
 tags: []
 parent: PLAN-027
 links:

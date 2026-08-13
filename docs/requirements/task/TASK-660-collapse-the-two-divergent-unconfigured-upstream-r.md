@@ -3,7 +3,7 @@ id: TASK-660
 type: task
 role: plan
 title: "Collapse the two divergent unconfigured-upstream remedies into one builder and land the feedback stanza so report-issue works in lore's own repo"
-status: draft
+status: archived
 priority: high
 phase: "remedy"
 created: 2026-08-11

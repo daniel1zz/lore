@@ -3,7 +3,7 @@ id: TASK-716
 type: task
 role: plan
 title: "lore territory's discovery set is claim-derived, so an unclaimed local branch is dropped rather than filed unowned"
-status: draft
+status: archived
 priority: medium
 phase: "remediation"
 created: 2026-08-12

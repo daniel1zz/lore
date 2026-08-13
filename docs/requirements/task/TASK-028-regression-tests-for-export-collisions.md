@@ -3,7 +3,7 @@ id: TASK-028
 type: task
 role: plan
 title: "Regression tests for export collisions"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-02
 updated: 2026-07-02

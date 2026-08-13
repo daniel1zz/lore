@@ -3,9 +3,9 @@ id: TASK-079
 type: task
 role: plan
 title: "V2 runner: recordVerifiedEvidence + VerifyRunnerService + spawn split"
-status: draft
+status: archived
 priority: critical
-phase: runner
+phase: "runner"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

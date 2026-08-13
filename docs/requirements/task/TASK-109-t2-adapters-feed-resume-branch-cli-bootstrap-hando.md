@@ -3,10 +3,10 @@ id: TASK-109
 type: task
 role: plan
 title: "T2 adapters — feed resume branch, CLI bootstrap/handoff, MCP tools, create.ts SSOT repair"
-status: draft
+status: archived
 priority: high
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-11
 tags: []
 parent: PLAN-025
 plan: PLAN-025

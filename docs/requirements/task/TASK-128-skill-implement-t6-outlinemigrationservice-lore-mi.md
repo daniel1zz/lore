@@ -3,7 +3,7 @@ id: TASK-128
 type: task
 role: plan
 title: "[Skill:implement] T6 OutlineMigrationService + lore migrate prd-to-outline (--dry-run, per-section, idempotent)"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 3: Migration machinery"
 created: 2026-07-26

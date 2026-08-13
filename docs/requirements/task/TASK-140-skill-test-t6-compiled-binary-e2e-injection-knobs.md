@@ -3,11 +3,11 @@ id: TASK-140
 type: task
 role: plan
 title: "[Skill:test] T6 compiled-binary e2e: --injection + knobs + --json pin"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3: Verification"
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-29
 tags: []
 parent: PLAN-032
 plan: PLAN-032

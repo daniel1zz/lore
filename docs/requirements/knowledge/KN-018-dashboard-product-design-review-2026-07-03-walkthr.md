@@ -3,10 +3,10 @@ id: KN-018
 type: knowledge
 role: knowledge
 title: "Dashboard product/design review — 2026-07-03 walkthrough findings"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-07-08
 tags: [dashboard, review, ux, spec-031]
 parent: SPEC-031
 ---

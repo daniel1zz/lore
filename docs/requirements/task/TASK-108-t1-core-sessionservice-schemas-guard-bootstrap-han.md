@@ -3,7 +3,7 @@ id: TASK-108
 type: task
 role: plan
 title: "T1 core + SessionService — schemas, guard, bootstrap/handoff/resume logic"
-status: draft
+status: archived
 priority: high
 created: 2026-07-10
 updated: 2026-07-10

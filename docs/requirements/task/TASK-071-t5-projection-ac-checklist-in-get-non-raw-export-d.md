@@ -3,9 +3,9 @@ id: TASK-071
 type: task
 role: plan
 title: "T5 projection: AC checklist in get non-raw + export-docs"
-status: draft
+status: archived
 priority: medium
-phase: assess-projection
+phase: "assess-projection"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

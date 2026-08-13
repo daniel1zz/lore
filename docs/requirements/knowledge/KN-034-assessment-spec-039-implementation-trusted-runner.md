@@ -3,7 +3,7 @@ id: KN-034
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-039 Implementation — trusted runner (2026-07-08)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-08
 updated: 2026-07-08

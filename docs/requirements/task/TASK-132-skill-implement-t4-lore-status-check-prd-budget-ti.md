@@ -3,7 +3,7 @@ id: TASK-132
 type: task
 role: plan
 title: "[Skill:implement] T4 lore status --check-prd-budget (tiered budgets, content-flight, detail-link hop check, advisory knob)"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: Oracles & gate predicate"
 created: 2026-07-26

@@ -3,7 +3,7 @@ id: TASK-139
 type: task
 role: plan
 title: "[Skill:test] T1r core outline schemas — RED scenarios"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: Core schemas & outline writer"
 created: 2026-07-26

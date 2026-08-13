@@ -3,10 +3,10 @@ id: TASK-403
 type: task
 role: plan
 title: "The git safety gate's worktree rule matches only --force, and its header calls non-force removal safe — so it passed a removal of a LIVE peer's worktree on an unmerged branch, while the exact blocking predicate already sat one branch away at line 363"
-status: draft
+status: archived
 priority: high
 created: 2026-08-02
-updated: 2026-08-02
+updated: 2026-08-12
 tags: []
 parent: PRD-001
 links:

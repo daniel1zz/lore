@@ -3,7 +3,7 @@ id: TASK-311
 type: task
 role: plan
 title: "attestation-floor feeding pack names tasks but the exemption mechanism is plan-level — pack should state the plan-level repair (extra.attestation_exempt on the PLAN) instead of per-task listing that misleads into writing dead task-level fields"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26

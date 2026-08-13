@@ -3,10 +3,10 @@ id: KN-052
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-044 staleness probes H2 (watchdog-stall recovery + stale-binary rebuild protocol + composition-root anchor gap)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-07-14
 tags: [retro, spec-044, staleness, memory-hygiene]
 parent: PLAN-028
 ---

@@ -3,10 +3,10 @@ id: KN-125
 type: knowledge
 role: knowledge
 title: "Handoff — agent:main-orchestrator"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-23
-updated: 2026-07-24
+updated: 2026-07-27
 tags: []
 parent: PRD-001
 ---

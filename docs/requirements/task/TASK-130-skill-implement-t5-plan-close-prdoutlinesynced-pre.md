@@ -3,7 +3,7 @@ id: TASK-130
 type: task
 role: plan
 title: "[Skill:implement] T5 plan-close prdOutlineSynced predicate + exemption surfacing in lore status"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: Oracles & gate predicate"
 created: 2026-07-26

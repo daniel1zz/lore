@@ -3,7 +3,7 @@ id: TASK-127
 type: task
 role: plan
 title: "Dashboard UI/UX dogfood fix batch — light-prose contrast, home responsive, PendingPanel overlap, chip a11y, NewDocModal default, count invalidation, phase empty-state copy"
-status: draft
+status: archived
 priority: high
 created: 2026-07-26
 updated: 2026-07-26

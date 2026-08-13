@@ -3,10 +3,10 @@ id: KN-030
 type: knowledge
 role: knowledge
 title: "assess diff truncation systematically hides tests from the judge"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-07
-updated: 2026-07-07
+updated: 2026-07-08
 tags: [assess, ai, bug]
 parent: PRD-001
 ---

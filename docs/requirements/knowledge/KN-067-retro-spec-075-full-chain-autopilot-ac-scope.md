@@ -3,10 +3,10 @@ id: KN-067
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-075 full-chain autopilot: ac_scope discipline, first-use gaps ×2, SPEC-061 zero-match miss, grounded review"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 tags: [retro, spec-075, autopilot, verify]
 parent: PLAN-042
 links:

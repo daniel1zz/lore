@@ -3,7 +3,7 @@ id: PLAN-003
 type: plan
 role: plan
 title: "SPEC-025 Implementation — Task Workflow Metadata"
-status: active
+status: archived
 priority: medium
 created: 2026-07-02
 updated: 2026-07-02

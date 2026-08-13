@@ -3,9 +3,9 @@ id: TASK-074
 type: task
 role: plan
 title: "T2 adapters: oracle enum consolidation + evidence --ac + MCP ac_ref"
-status: draft
+status: archived
 priority: high
-phase: service-cli
+phase: "service-cli"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

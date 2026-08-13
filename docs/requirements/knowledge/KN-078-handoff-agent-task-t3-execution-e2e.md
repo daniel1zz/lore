@@ -3,10 +3,10 @@ id: KN-078
 type: knowledge
 role: knowledge
 title: "Handoff — agent:task-t3-execution-e2e"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-25
-updated: 2026-07-25
+updated: 2026-08-01
 tags: []
 parent: PLAN-041
 ---

@@ -3,10 +3,10 @@ id: TASK-281
 type: task
 role: plan
 title: "Implement SPEC-053 advisory[] + review v2 prompt + render"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-26
 tags: []
 parent: PLAN-071
 plan: PLAN-071

@@ -3,7 +3,7 @@ id: TASK-693
 type: task
 role: plan
 title: "The wire-contract mirror comment in issue-reports-routes.ts describes a gap that AC-DC-12 already closed"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-12
 updated: 2026-08-12

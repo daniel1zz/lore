@@ -3,10 +3,10 @@ id: KN-049
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-043 memory hygiene H1 (3-lens review pattern-priming + side-door audit + honest surface inventory)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-14
 tags: [retro, spec-043, validity, memory-hygiene]
 parent: PLAN-027
 ---

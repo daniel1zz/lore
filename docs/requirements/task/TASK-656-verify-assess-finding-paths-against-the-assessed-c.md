@@ -3,7 +3,7 @@ id: TASK-656
 type: task
 role: plan
 title: "Verify assess finding paths against the assessed commit, withdraw unverifiable findings without dropping them silently, and exclude the generated mirror from the diff"
-status: draft
+status: archived
 priority: high
 phase: "assess-verify"
 created: 2026-08-11

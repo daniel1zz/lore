@@ -3,7 +3,7 @@ id: TASK-691
 type: task
 role: plan
 title: "Collapse the two resolvers, move DB discovery out of utils.ts, and kill its three false header claims"
-status: draft
+status: archived
 priority: medium
 phase: "resolver"
 created: 2026-08-12

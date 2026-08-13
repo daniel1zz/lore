@@ -3,10 +3,10 @@ id: KN-106
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-062 config write layer (2026-07-21)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-07-24
+updated: 2026-07-26
 tags: []
 parent: PLAN-062
 links:

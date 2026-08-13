@@ -3,10 +3,10 @@ id: TASK-283
 type: task
 role: plan
 title: "Implement SPEC-055 requirement completeness oracle"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-26
 tags: []
 parent: PLAN-073
 plan: PLAN-073

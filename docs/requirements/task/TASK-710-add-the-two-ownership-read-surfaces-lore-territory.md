@@ -3,7 +3,7 @@ id: TASK-710
 type: task
 role: plan
 title: "Add the two ownership read surfaces: lore territory and lore session, both registered in the CLI registry"
-status: draft
+status: archived
 priority: medium
 phase: "surface"
 created: 2026-08-12

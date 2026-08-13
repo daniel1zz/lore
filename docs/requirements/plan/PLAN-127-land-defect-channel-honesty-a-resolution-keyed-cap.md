@@ -3,10 +3,10 @@ id: PLAN-127
 type: plan
 role: plan
 title: "Land defect-channel honesty: a resolution-keyed cap, two non-derogatory terminal states, corpus-naming reads, and AC oracle generations"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 tags: []
 parent: SPEC-139
 phases:

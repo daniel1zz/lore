@@ -3,7 +3,7 @@ id: TASK-718
 type: task
 role: plan
 title: "Wire unbindClaimSessionForTrailer into lore release, the third wiring gap this plan's anchor design forced an implementer to leave open"
-status: draft
+status: archived
 priority: medium
 phase: "remediation"
 created: 2026-08-12

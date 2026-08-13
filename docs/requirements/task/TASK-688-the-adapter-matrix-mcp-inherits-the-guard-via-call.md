@@ -3,7 +3,7 @@ id: TASK-688
 type: task
 role: plan
 title: "The adapter matrix: MCP inherits the guard via caller_cwd, and the HTTP exemption is spied not assumed"
-status: draft
+status: archived
 priority: medium
 phase: "guard"
 created: 2026-08-12

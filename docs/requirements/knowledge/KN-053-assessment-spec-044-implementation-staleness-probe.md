@@ -3,10 +3,10 @@ id: KN-053
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-044 Implementation — staleness probes (2026-07-12)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-07-14
 tags: []
 parent: PLAN-028
 links:

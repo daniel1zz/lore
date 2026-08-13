@@ -3,10 +3,10 @@ id: KN-080
 type: knowledge
 role: knowledge
 title: "Pre-existing e2e seed/gate debt: dashboard spec-create seeds are gate-rejected"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-22
-updated: 2026-07-24
+updated: 2026-07-26
 tags: []
 parent: PLAN-059
 links:

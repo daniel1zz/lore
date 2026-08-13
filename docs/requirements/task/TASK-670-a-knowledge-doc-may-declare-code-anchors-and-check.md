@@ -3,7 +3,7 @@ id: TASK-670
 type: task
 role: plan
 title: "A knowledge doc may declare code anchors, and check-drift scans them with the breach attributed to its doc type"
-status: draft
+status: archived
 priority: medium
 phase: "reachable-facts"
 created: 2026-08-11

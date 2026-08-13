@@ -3,7 +3,7 @@ id: PLAN-005
 type: plan
 role: plan
 title: "SPEC-021 hardening — export collision fixes"
-status: active
+status: archived
 priority: medium
 created: 2026-07-02
 updated: 2026-07-02

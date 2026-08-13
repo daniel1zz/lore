@@ -3,10 +3,10 @@ id: KN-068
 type: knowledge
 role: knowledge
 title: "Retro — adhoc-channel autopilot run: SPEC-069 claim gap + SPEC-061 zero-match + NewDocModal decision (2026-07-24)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 tags: []
 parent: PLAN-055
 links:

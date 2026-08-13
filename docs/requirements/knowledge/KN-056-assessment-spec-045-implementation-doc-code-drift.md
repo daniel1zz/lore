@@ -3,10 +3,10 @@ id: KN-056
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-045 Implementation — doc-code drift oracle (2026-07-12)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-07-14
 tags: []
 parent: PLAN-029
 links:

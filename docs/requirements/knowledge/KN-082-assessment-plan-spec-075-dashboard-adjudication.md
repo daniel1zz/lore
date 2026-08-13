@@ -3,10 +3,10 @@ id: KN-082
 type: knowledge
 role: knowledge
 title: "Assessment: Plan — SPEC-075 dashboard adjudication workbench + route telemetry (2026-07-24)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-26
 tags: []
 parent: PLAN-042
 links:

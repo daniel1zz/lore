@@ -3,10 +3,10 @@ id: KN-024
 type: knowledge
 role: knowledge
 title: "Assess material-budget distortion on multi-task plan diffs"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-06
-updated: 2026-07-06
+updated: 2026-07-08
 tags: [assess, calibration, feedback-loop, spec-026, spec-037-input]
 parent: PRD-001
 ---

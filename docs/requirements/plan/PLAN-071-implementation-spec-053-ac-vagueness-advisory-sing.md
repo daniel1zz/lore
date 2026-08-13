@@ -3,10 +3,10 @@ id: PLAN-071
 type: plan
 role: plan
 title: "Implementation — SPEC-053 AC-vagueness advisory (single slice)"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-26
 tags: []
 parent: SPEC-053
 ---

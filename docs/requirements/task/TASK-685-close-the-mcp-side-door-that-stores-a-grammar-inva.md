@@ -3,11 +3,11 @@ id: TASK-685
 type: task
 role: plan
 title: "Close the MCP side door that stores a grammar-invalid knowledge code_anchors entry as a silent false green"
-status: draft
+status: archived
 priority: medium
 phase: "reachable-facts"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 tags: []
 parent: PLAN-126
 plan: PLAN-126
