@@ -24,9 +24,15 @@ The governing decision — decentralised coordination, no resident daemon, two l
 classes, probed liveness, communication separate from exclusion — is recorded in
 the companion ADR. This spec defines the mechanisms that implement it.
 
-**Goal**: after this spec lands, a session can answer "who is touching what right
-now" using only lore commands, and cannot silently write a resource another live
-session is writing.
+**Goal, scoped to what actually gates**: after L0 lands, a session can answer
+"who is touching what right now" using only lore commands — ownership is
+queryable from both truth sources and liveness is probed rather than inferred.
+
+⛔ Exclusion is NOT delivered by that. "A session cannot silently write a resource
+another live session is writing" is the goal of L1 (P2/P3), whose criteria are
+prose only and gate nothing today (see §Acceptance Criteria). Until they land,
+this spec makes concurrent work VISIBLE, not SAFE — and a reader who takes
+visibility for safety has the failure mode this document exists to remove.
 
 **Non-goals**
 
@@ -92,9 +98,11 @@ Two invariants carried from existing lore behaviour:
 Refusals name their holder — `session_id` and worktree path — copying git's
 `fatal: 'feature' is already used by worktree at <path>`.
 
-GAP-A is closed here: the exclusion decision domain moves from plan to
-checkout/corpus, and `lore ready`'s `anchor_conflicts` moves with it. Fixing only
-one of the two leaves a half that still looks complete.
+GAP-A closes WHEN THIS LAYER LANDS, not before: the exclusion decision domain
+moves from plan to checkout/corpus, and `lore ready`'s `anchor_conflicts` moves
+with it. Fixing only one of the two leaves a half that still looks complete. ⛔ As
+of L0 this is an unstarted commitment — the anchor mutex is still plan-scoped and
+`anchor_conflicts: []` is still not evidence of safety.
 
 **L2 — Communication (advisory).** `.lore/mailbox/<session_id>/` file delivery,
 readable and writable by any runtime, so it ships to consumers. The Claude Code
@@ -131,6 +139,11 @@ Locking the build instead was rejected: acquiring the lock requires running
 
 ## Risk Registry
 
+⛔ Every mitigation below that names an AC-EXCL / AC-LOCK / AC-SCOPE / AC-BIN /
+AC-MSG criterion describes a control that does NOT yet exist — those eleven are
+prose only (see §Acceptance Criteria). Until the phase that declares them lands,
+the corresponding risk is UNMITIGATED, not mitigated-by-a-pending-check.
+
 | Risk | Severity | Mitigation |
 |---|---|---|
 | The mechanism passes vacuously — lock files exist but exclude nothing | High | Every exclusion AC contends two real processes and asserts the loser's EXACT exit code plus holder identity in output; each observed red at least once |
@@ -156,9 +169,46 @@ disarmed.
 
 ## Acceptance Criteria
 
-Structured criteria are declared via `lore ac add`. Every script-mode command
-prints a summary line on the success path, because a silent oracle can only leave
-an attested pass with an empty output tail.
+### What actually gates today, and what does not
+
+⛔ Read this before citing any criterion below as a control. The seventeen
+criteria in this section are NOT equivalent in force:
+
+- **Six are DECLARED and GATING** — AC-OWN-1 through AC-OWN-5 and AC-REPLAY-1.
+  They exist as structured criteria (`lore ac add`), `lore verify` executes them,
+  and `lore done` refuses a task whose declared scope names one without an
+  attested pass. These cover L0 only.
+- **Eleven are PROSE CONTRACT ONLY, and gate nothing** — AC-EXCL-1 through
+  AC-EXCL-5, AC-LOCK-1 through AC-LOCK-3, AC-SCOPE-1, AC-BIN-1 and AC-MSG-1.
+  They state what P2, P3 and P4 must satisfy. No tool reads them, no run can fail
+  because of them, and nothing prevents a P2 task from being archived without
+  them.
+
+They are deliberately undeclared rather than merely unwritten: pinning an oracle
+to a file path that does not exist, whose shape is being guessed, is how a
+criterion ends up with no runnable oracle at all. They are declared at the start
+of the phase that implements them, once the file layout is measured rather than
+predicted.
+
+The consequence for everything else in this document: wherever the Risk Registry
+or the layer descriptions name one of those eleven as the thing that catches a
+risk, that is a COMMITMENT for the phase in question, not an active control. In
+particular, GAP-A and GAP-B are NOT closed by this spec as it stands — GAP-A
+closes when L1 moves the exclusion domain from plan to checkout AND the same
+oracle spans two plans; GAP-B closes when L1's resource locks cover the three
+singletons. Only GAP-C and GAP-D are closed by the six gating criteria.
+
+⛔ Command shape: every script-mode command names its test file as a path from
+the repo root (`bun test packages/lore/tests/...`). Two independent floors —
+`oracle-file-existence.ts::extractCdPrefixTarget` and
+`attestation-completeness.ts::commandRunsFileUnfiltered` — recognise only a
+literal `cd <dir> &&` prefix as root-shifting, and this repo forbids a `cd` in
+front of a measurement. The root-relative form is the only shape that satisfies
+both floors and the discipline at once. Measured 2026-08-13; filed as
+`01KZV3XFFY7SEZ9E11NZDC81W8` and `01KZVPHGEMFYWRW3JYB8RYP8F1`.
+
+Every script-mode command prints a summary line on the success path, because a
+silent oracle can only leave an attested pass with an empty output tail.
 
 The governing oracle for the whole spec is AC-REPLAY-1: the 2026-08-11 diagnosis
 is reproducible using lore commands alone. It asserts that a conclusion can be
@@ -187,14 +237,14 @@ capability.
 ## Acceptance Criteria (structured)
 
 - [✔] [script] AC-OWN-1: lore territory --json partitions every worktree and branch corpus-wide into mine / foreign / unowned / unmeasured; the four buckets are disjoint and their union equals the total discovered set (sum-equals-total asserted over a seeded corpus); a branch that cannot be classified is filed under unmeasured and is NEVER dropped; every foreign entry names its holder session_id and worktree path
-  script: test — bun test --cwd packages/lore tests/unit/adapters/cli/territory-partition.bun.test.ts 2>&1 && echo 'AC-OWN-1 PASS: territory partitions branches corpus-wide and names each foreign holder'
+  script: test — bun test packages/lore/tests/unit/adapters/cli/territory-partition.bun.test.ts 2>&1 && echo 'AC-OWN-1 PASS: territory partitions branches corpus-wide and names each foreign holder'
 - [✔] [script] AC-OWN-2: lore claim persists claim.branch from the caller worktree; when no branch is measurable the record is unmeasured, never unowned
-  script: test — bun test --cwd packages/lore tests/unit/service/claim-branch-binding.bun.test.ts 2>&1 && echo 'AC-OWN-2 PASS: claim.branch persisted; unmeasurable branch records unmeasured not unowned'
+  script: test — bun test packages/lore/tests/unit/service/claim-branch-binding.bun.test.ts 2>&1 && echo 'AC-OWN-2 PASS: claim.branch persisted; unmeasurable branch records unmeasured not unowned'
 - [✔] [script] AC-OWN-3: active_sessions[].branches is non-empty whenever the claiming session worktree has a branch, replacing the always-empty value measured on 2026-08-11
-  script: test — bun test --cwd packages/lore tests/unit/service/active-sessions-branches.bun.test.ts 2>&1 && echo 'AC-OWN-3 PASS: active_sessions[].branches populated from the claiming worktree'
+  script: test — bun test packages/lore/tests/unit/service/active-sessions-branches.bun.test.ts 2>&1 && echo 'AC-OWN-3 PASS: active_sessions[].branches populated from the claiming worktree'
 - [✔] [script] AC-OWN-4: a commit created under a claim carries the Lore-Session git trailer, readable via git log --format=%(trailers:key=Lore-Session,valueonly)
-  script: test — bun test --cwd packages/lore tests/unit/adapters/cli/lore-session-trailer.bun.test.ts 2>&1 && echo 'AC-OWN-4 PASS: commits under a claim carry the Lore-Session trailer'
+  script: test — bun test packages/lore/tests/unit/adapters/cli/lore-session-trailer.bun.test.ts 2>&1 && echo 'AC-OWN-4 PASS: commits under a claim carry the Lore-Session trailer'
 - [✔] [script] AC-OWN-5: lore session list derives each liveness verdict from the orchestrator pid plus process start time and never from claim age; a live pid with a mismatched start time is reported dead
-  script: test — bun test --cwd packages/lore tests/unit/service/session-liveness-probe.bun.test.ts 2>&1 && echo 'AC-OWN-5 PASS: liveness probed via pid+start-time, never inferred from claim age'
+  script: test — bun test packages/lore/tests/unit/service/session-liveness-probe.bun.test.ts 2>&1 && echo 'AC-OWN-5 PASS: liveness probed via pid+start-time, never inferred from claim age'
 - [✘] [script] AC-REPLAY-1: against a fixture seeded with exactly 2 sessions and 3 branches (one mine, one foreign holding exactly 1 unmerged commit, one unowned), a replay of lore invocations alone yields the EXACT expected value for each of the four facts the 2026-08-11 diagnosis required: foreign branch set, unmerged commit count per branch, holder session_id per branch, liveness verdict per session; the assertion fails if any of the four is an empty set, so a silent no-op cannot pass
-  script: test — bun test --cwd packages/lore tests/integration/territory-replay.bun.test.ts 2>&1 && echo 'AC-REPLAY-1 PASS: the 2026-08-11 diagnosis is reproducible through lore commands alone'
+  script: test — bun test packages/lore/tests/integration/territory-replay.bun.test.ts 2>&1 && echo 'AC-REPLAY-1 PASS: the 2026-08-11 diagnosis is reproducible through lore commands alone'

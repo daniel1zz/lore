@@ -5920,6 +5920,18 @@
     "01KZVPHGEMFYWRW3JYB8RYP8F1": {
       "human_id": "TASK-719",
       "file_path": "docs/requirements/task/TASK-719-the-cwd-blind-spot-is-a-class-not-one-function-lor.md"
+    },
+    "01KZWFA8FAGK1TSN15SAYFMH5B": {
+      "human_id": "KN-448",
+      "file_path": "docs/requirements/knowledge/KN-448-handoff-agent-main-orchestrator.md"
+    },
+    "01KZWFBRBMC8ZH5A0R0YF002Z1": {
+      "human_id": "KN-449",
+      "file_path": "docs/requirements/knowledge/KN-449-handoff-agent-main-orchestrator.md"
+    },
+    "01KZWF5EFFNWW673QYEEPNCMVT": {
+      "human_id": "TASK-720",
+      "file_path": "docs/requirements/task/TASK-720-the-two-mirror-exporters-disagree-bun-run-mirror-e.md"
     }
   }
 }
