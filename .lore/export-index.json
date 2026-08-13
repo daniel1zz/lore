@@ -5996,6 +5996,10 @@
     "01KZX0G3G9QJ0NCYGRRXAE59YF": {
       "human_id": "TASK-730",
       "file_path": "docs/requirements/task/TASK-730-the-mirror-prune-does-not-retire-a-mapping-whose-d.md"
+    },
+    "01KZX0PGZKZRS2FE5RM790N7S1": {
+      "human_id": "KN-456",
+      "file_path": "docs/requirements/knowledge/KN-456-handoff-agent-main-orchestrator.md"
     }
   }
 }
