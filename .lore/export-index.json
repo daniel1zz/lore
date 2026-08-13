@@ -5916,6 +5916,10 @@
     "01KZVN9Q8HN9D7RGS2MRW8FYVC": {
       "human_id": "TASK-718",
       "file_path": "docs/requirements/task/TASK-718-wire-unbindclaimsessionfortrailer-into-lore-releas.md"
+    },
+    "01KZVPHGEMFYWRW3JYB8RYP8F1": {
+      "human_id": "TASK-719",
+      "file_path": "docs/requirements/task/TASK-719-the-cwd-blind-spot-is-a-class-not-one-function-lor.md"
     }
   }
 }
