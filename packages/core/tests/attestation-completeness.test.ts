@@ -530,13 +530,30 @@ describe("commandRunsFileUnfiltered", () => {
   });
 
   it("BOUNDARY: an unrecognised cd-prefix shape (missing '&&') fails closed rather than guessing an offset", () => {
-    // "cd packages/lore bun test tests/x.bun.test.ts" has no "&&" — stripCdPrefix
-    // leaves it untouched, so the (unstripped) command is tokenized as-is and no
-    // token equals the repo-root-relative target — never a false positive.
+    // "cd packages/lore bun test tests/x.bun.test.ts" has no "&&" separator, so
+    // the cd and the test invocation sit in ONE segment — extractCdPrefixTarget
+    // derives no offset (its own "no separator precedes the invocation" rule),
+    // the command is tokenized as-is, and no token equals the repo-root-relative
+    // target — never a false positive.
     const command = "cd packages/lore bun test tests/integration/verify-executor.bun.test.ts";
     expect(
       commandRunsFileUnfiltered(command, "packages/lore/tests/integration/verify-executor.bun.test.ts"),
     ).toBe(false);
+  });
+
+  it("REGRESSION: a NON-leading cd segment (this repo's own mandated compiled-e2e shape) now folds the offset in — task-the-cwd-blind-spot-is-one-defect-at-two-call-sites-both", () => {
+    // Before this fix, this module's own `stripCdPrefix` only recognised a cd
+    // segment at the very START of the command (anchored via `^`). The mandated
+    // compiled-e2e form (`bun run build && cd <dir> && bun test <file>`,
+    // documented verbatim in `extractCdPrefixTarget`'s own JSDoc) puts the cd in
+    // the SECOND segment — `stripCdPrefix` derived offset "" for it, so this
+    // exact case returned false. Delegating to `extractCdPrefixTarget` (which
+    // scans the WHOLE `&&`/`;` chain) fixes it.
+    const command =
+      "bun run build && cd packages/lore && bun test tests/integration/verify-executor.bun.test.ts";
+    expect(
+      commandRunsFileUnfiltered(command, "packages/lore/tests/integration/verify-executor.bun.test.ts"),
+    ).toBe(true);
   });
 
   it("ERROR: an empty command string never throws, degrades to false", () => {

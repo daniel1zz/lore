@@ -99,11 +99,14 @@
  *     target `filePath` (never a substring/"looks like a path" test) — this
  *     is deliberate: it is what makes the predicate immune to vitest's bare
  *     POSITIONAL filename filter (`vitest run <substring>`, no flag at all)
- *     without having to special-case that flag. Anything this module's
- *     `stripCdPrefix`/token comparison doesn't recognise (nested `cd`,
- *     subshells, glob expansion, `bun run <script>` indirection) fails
- *     CLOSED — no match found, never a fabricated one — forcing a clearer
- *     evidence command rather than risking a false positive.
+ *     without having to special-case that flag. Anything
+ *     `extractCdPrefixTarget`/token comparison doesn't recognise (a `--cwd
+ *     <dir>` flag, nested `cd`, subshells, glob expansion, `bun run <script>`
+ *     indirection) fails CLOSED — no match found, never a fabricated one —
+ *     forcing a clearer evidence command (a full repo-root-relative path, no
+ *     embedded `cd`/`--cwd`, run from the repo/worktree root — already
+ *     recognised, see {@link commandRunsFileUnfiltered}'s own examples)
+ *     rather than risking a false positive.
  *
  * Side-effect class: pure
  *
@@ -118,8 +121,17 @@
  *   unfiltered-file-run detector, §"Unfiltered-File-Run Detection" below);
  *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.1,
  *   AC-OX-1 (`findDiscoveryRefusal`, §"Discovery-Refusal Detection" below —
- *   task-add-finddiscoveryrefusal-to-lore-core-with-a-live-runner)
+ *   task-add-finddiscoveryrefusal-to-lore-core-with-a-live-runner);
+ *   task-the-cwd-blind-spot-is-one-defect-at-two-call-sites-both (this
+ *   module's own cd-prefix stripper was a SECOND, narrower reimplementation
+ *   of `extractCdPrefixTarget`'s whole-chain scan — removed in favor of the
+ *   import below, see {@link commandRunsFileUnfiltered}'s own updated JSDoc)
  */
+
+// `extractCdPrefixTarget` is a sibling pure/browser-safe primitive in
+// `@lore/core` (no Node builtins, no IO) — importing it here does not affect
+// this module's own "Side-effect class: pure" invariant above.
+import { extractCdPrefixTarget } from "./oracle-file-existence.js";
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
 
@@ -905,46 +917,12 @@ function commandHasAnyCaseFilter(command: string): boolean {
   );
 }
 
-/** Matches ONE leading `cd <dir> && ` segment — see {@link stripCdPrefix}. */
-const CD_PREFIX_PATTERN = /^\s*cd\s+(\S+)\s*&&\s*/;
-
-/**
- * Strips zero or more leading `cd <dir> && ` segments off `command`,
- * returning the accumulated repo-relative directory offset and the
- * remaining command string (the actual invocation to tokenize).
- *
- * Handles ONLY this exact, observed shape — the real bound-command example
- * this task's dispatch measured is `cd packages/lore && bun test
- * tests/integration/verify-executor.bun.test.ts`. Nothing fancier is
- * attempted: no `;`-joined `cd`, no subshells, no `cd -`, no glob expansion.
- * An unrecognised prefix shape is simply left unstripped (`offset` stays
- * `""`), which means {@link commandRunsFileUnfiltered}'s token comparison
- * falls through to a repo-root-relative match and correctly fails to find
- * the anchor — the FAIL-CLOSED direction this module's header promises: a
- * legitimately cd-offset command this parser doesn't recognise never
- * produces a FALSE MATCH, it just isn't recognised as attesting (forcing a
- * clearer evidence command rather than risking a silent false positive).
- *
- * @example
- * stripCdPrefix("cd packages/lore && bun test tests/a.bun.test.ts")
- * // => { offset: "packages/lore", rest: "bun test tests/a.bun.test.ts" }
- *
- * @example
- * stripCdPrefix("bunx vitest run packages/core/tests/a.test.ts")
- * // => { offset: "", rest: "bunx vitest run packages/core/tests/a.test.ts" }
- */
-function stripCdPrefix(command: string): { offset: string; rest: string } {
-  let offset = "";
-  let rest = command;
-  let match = CD_PREFIX_PATTERN.exec(rest);
-  while (match !== null) {
-    const dir = match[1] ?? "";
-    offset = offset.length > 0 ? `${offset}/${dir}` : dir;
-    rest = rest.slice(match[0].length);
-    match = CD_PREFIX_PATTERN.exec(rest);
-  }
-  return { offset, rest };
-}
+// reason: this module used to carry its OWN, private cd-prefix stripper here
+// (`stripCdPrefix`, matching ONLY a LEADING `cd <dir> && ` segment via a
+// `^`-anchored regex). It has been REMOVED in favor of importing
+// `extractCdPrefixTarget` (top of file) from `oracle-file-existence.ts`,
+// which already scans the WHOLE `&&`/`;` chain correctly — see that import's
+// own `// reason:` comment for the measured defect this closes.
 
 /**
  * Collapses `./`/empty/repeated-slash segments for path COMPARISON only —
@@ -964,12 +942,18 @@ function normalizeForComparison(rawPath: string): string {
  * anchor — see {@link isTestFileAnchor}) WITHOUT any recognised case-name
  * filter (task-every-ac-oracle-is-t-scoped-so-the-file-passes-is-attested).
  *
- * "Runs `filePath`" means: after stripping a leading `cd <dir> &&` chain
- * ({@link stripCdPrefix}) and tokenizing what remains, at least one non-flag
- * token, joined to the accumulated `cd` offset, is EXACTLY `filePath` (after
- * collapsing `./`/redundant slashes on both sides for comparison — see
- * {@link normalizeForComparison}). Exact token identity — never a
- * substring/prefix test — is what makes this predicate immune to vitest's
+ * "Runs `filePath`" means: deriving the `cd`-chain offset via
+ * `extractCdPrefixTarget` (the SAME whole-`&&`/`;`-chain-scanning primitive
+ * `oracle-file-existence.ts`'s declaration-time file-existence precheck
+ * uses — task-the-cwd-blind-spot-is-one-defect-at-two-call-sites-both: this
+ * module previously carried its own, narrower, LEADING-segment-only cd
+ * stripper that missed this repo's own mandated
+ * `bun run build && cd packages/lore && bun test <file>` shape) and
+ * tokenizing the FULL command, at least one non-flag token, joined to that
+ * offset, is EXACTLY `filePath` (after collapsing `./`/redundant slashes on
+ * both sides for comparison — see {@link normalizeForComparison}). Exact
+ * token identity — never a substring/prefix test — is what makes this
+ * predicate immune to vitest's
  * bare positional filename filter without special-casing it (see
  * {@link UNFILTERED_RUN_CASE_FILTER_TOKENS}'s own doc).
  *
@@ -991,6 +975,16 @@ function normalizeForComparison(rawPath: string): string {
  * ); // => true — the `cd` offset is folded into the comparison
  *
  * @example
+ * // The `cd` is NOT the leading segment — this repo's own mandated
+ * // compiled-e2e shape (`extractCdPrefixTarget`'s own JSDoc). REGRESSION
+ * // fixed by delegating to that whole-chain scanner instead of this
+ * // module's former leading-anchor-only `stripCdPrefix`.
+ * commandRunsFileUnfiltered(
+ *   "bun run build && cd packages/lore && bun test tests/integration/verify-executor.bun.test.ts",
+ *   "packages/lore/tests/integration/verify-executor.bun.test.ts",
+ * ); // => true
+ *
+ * @example
  * commandRunsFileUnfiltered(
  *   "bunx vitest run packages/core/tests/attestation-completeness.test.ts -t 'one case'",
  *   "packages/core/tests/attestation-completeness.test.ts",
@@ -1004,9 +998,18 @@ function normalizeForComparison(rawPath: string): string {
 export function commandRunsFileUnfiltered(command: string, filePath: string): boolean {
   if (commandHasAnyCaseFilter(command)) return false;
 
-  const { offset, rest } = stripCdPrefix(command);
+  // reason: `extractCdPrefixTarget` returns ONLY the derived offset (or
+  // `null`), not a "rest of the command with the cd segment(s) stripped" —
+  // unlike the old `stripCdPrefix`, there is no stripped `rest` to tokenize.
+  // Tokenizing the FULL `command` instead is deliberate and safe: the `cd`
+  // segment's own tokens ("cd", the directory argument, "&&") never equal
+  // `target` once joined to `offset` (see this function's own JSDoc example
+  // for the non-leading-cd case), so nothing is lost by not stripping them —
+  // and every test-file token past the `cd` chain is still compared exactly
+  // as before.
+  const offset = extractCdPrefixTarget(command) ?? "";
   const target = normalizeForComparison(filePath);
-  const tokens = tokenizeCommand(rest);
+  const tokens = tokenizeCommand(command);
 
   for (const token of tokens) {
     if (token.length === 0 || token.startsWith("-")) continue;
