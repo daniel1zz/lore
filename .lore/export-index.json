@@ -5960,6 +5960,10 @@
     "01KZWP2CHRJ83DC7HMW8Z4TM90": {
       "human_id": "KN-452",
       "file_path": "docs/requirements/knowledge/KN-452-assessment-land-multi-session-concurrency-p1.md"
+    },
+    "01KZWPDJ2ZWNAXT09QBFNZPVXB": {
+      "human_id": "KN-453",
+      "file_path": "docs/requirements/knowledge/KN-453-handoff-agent-main-orchestrator.md"
     }
   }
 }
