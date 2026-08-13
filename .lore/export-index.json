@@ -5948,6 +5948,18 @@
     "01KZWMCHD8W2KYSG1VGNCH950Y": {
       "human_id": "TASK-724",
       "file_path": "docs/requirements/task/TASK-724-ac-gd-3-d-direction-2-borrows-a-real-stale-mirror.md"
+    },
+    "01KZWP768TZKTF86ASATENQYDT": {
+      "human_id": "KN-450",
+      "file_path": "docs/requirements/knowledge/KN-450-retired-from-root-claude-md-2026-08-13-four-standi.md"
+    },
+    "01KZWP6070GAPXE1DFCVYY2FCY": {
+      "human_id": "KN-451",
+      "file_path": "docs/requirements/knowledge/KN-451-seven-findings-from-landing-the-release-side-trail.md"
+    },
+    "01KZWP2CHRJ83DC7HMW8Z4TM90": {
+      "human_id": "KN-452",
+      "file_path": "docs/requirements/knowledge/KN-452-assessment-land-multi-session-concurrency-p1.md"
     }
   }
 }
