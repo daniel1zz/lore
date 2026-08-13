@@ -6000,6 +6000,10 @@
     "01KZX0PGZKZRS2FE5RM790N7S1": {
       "human_id": "KN-456",
       "file_path": "docs/requirements/knowledge/KN-456-handoff-agent-main-orchestrator.md"
+    },
+    "01KZX19V1EF8EMYG490BKZ078M": {
+      "human_id": "KN-457",
+      "file_path": "docs/requirements/knowledge/KN-457-handoff-agent-main-orchestrator.md"
     }
   }
 }

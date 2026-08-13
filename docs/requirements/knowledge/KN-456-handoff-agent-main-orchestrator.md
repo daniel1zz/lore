@@ -10,6 +10,8 @@ updated: 2026-08-13
 tags: []
 parent: PLAN-124
 ---
+> ⚠ INVALIDATED 2026-08-13T07:45:14.975Z — superseded by knowledge-handoff-agent-main-orchestrator-104; Its NS2 asserted the bun test half had never completed on this tree; it completed at 269e415b with 2141 pass / 0 fail / 212 files / persisted exit 0. A next-step that tells the reader to run something already run, and implies an unverified half, is a stale assertion in the one field lore feed actually renders.
+
 # Handoff — agent:main-orchestrator
 
 SCOPE: 12 decisions + 6 next steps = 18 items to account for
