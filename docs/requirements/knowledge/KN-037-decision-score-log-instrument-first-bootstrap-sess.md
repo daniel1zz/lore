@@ -3,10 +3,10 @@ id: KN-037
 type: knowledge
 role: knowledge
 title: "Decision-score log — instrument-first bootstrap session (2026-07-10)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-14
 tags: [autonomy, decision-log, score-gated, spec-040]
 parent: PRD-001
 ---

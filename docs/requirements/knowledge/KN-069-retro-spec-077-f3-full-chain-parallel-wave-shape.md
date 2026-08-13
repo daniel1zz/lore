@@ -3,10 +3,10 @@ id: KN-069
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-077 F3 full chain: parallel-wave shape drift, vacuous e2e, concurrent-session coexistence (2026-07-25)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-07-25
+updated: 2026-07-26
 tags: []
 parent: PLAN-041
 links:

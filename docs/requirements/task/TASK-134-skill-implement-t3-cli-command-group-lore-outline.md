@@ -3,7 +3,7 @@ id: TASK-134
 type: task
 role: plan
 title: "[Skill:implement] T3 CLI command group lore outline (set/list/rm/exempt)"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: Core schemas & outline writer"
 created: 2026-07-26

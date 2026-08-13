@@ -3,11 +3,11 @@ id: TASK-687
 type: task
 role: plan
 title: "Widen the declared-AC port to carry criteria so the evidence stamp stops duplicating the task-plan-spec walk"
-status: draft
+status: archived
 priority: medium
 phase: "cap-honesty"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 tags: []
 parent: PLAN-127
 plan: PLAN-127

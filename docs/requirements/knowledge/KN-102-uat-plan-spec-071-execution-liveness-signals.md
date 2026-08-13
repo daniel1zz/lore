@@ -3,10 +3,10 @@ id: KN-102
 type: knowledge
 role: knowledge
 title: "UAT — plan-spec-071-execution-liveness-signals"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-26
 tags: []
 parent: PLAN-051
 links:

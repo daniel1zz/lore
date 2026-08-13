@@ -3,11 +3,11 @@ id: TASK-674
 type: task
 role: plan
 title: "Re-baseline the compiled migrate-ordinals e2e to the padded human_id form that commit 63164c20 left behind"
-status: draft
+status: archived
 priority: medium
 phase: "readonly"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 tags: []
 parent: PLAN-125
 plan: PLAN-125

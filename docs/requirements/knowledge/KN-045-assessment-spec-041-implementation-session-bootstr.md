@@ -3,10 +3,10 @@ id: KN-045
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-041 Implementation — session bootstrap + lossless handoff (2026-07-10)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-14
 tags: []
 parent: PLAN-025
 links:

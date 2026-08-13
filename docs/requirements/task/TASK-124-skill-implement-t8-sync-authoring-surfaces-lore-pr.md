@@ -3,7 +3,7 @@ id: TASK-124
 type: task
 role: plan
 title: "[Skill:implement] T8 Sync authoring surfaces: lore-product skill asset + root CLAUDE.md"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 4: Corpus migration & close-out"
 created: 2026-07-26

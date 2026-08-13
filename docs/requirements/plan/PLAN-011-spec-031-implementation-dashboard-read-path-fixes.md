@@ -3,7 +3,7 @@ id: PLAN-011
 type: plan
 role: plan
 title: "SPEC-031 Implementation — dashboard read-path fixes + typography"
-status: active
+status: archived
 priority: medium
 created: 2026-07-03
 updated: 2026-07-03

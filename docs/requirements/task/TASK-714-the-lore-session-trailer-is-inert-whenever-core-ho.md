@@ -3,7 +3,7 @@ id: TASK-714
 type: task
 role: plan
 title: "The Lore-Session trailer is inert whenever core.hooksPath is outside the git dir, which is this repo's own configuration"
-status: draft
+status: archived
 priority: medium
 phase: "remediation"
 created: 2026-08-12

@@ -3,7 +3,7 @@ id: TASK-125
 type: task
 role: plan
 title: "[Skill:verify] T7b Live-corpus core condensation §1-§13 + owner-decision ADR extraction"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 4: Corpus migration & close-out"
 created: 2026-07-26

@@ -3,7 +3,7 @@ id: PLAN-018
 type: plan
 role: plan
 title: "SPEC-038 Implementation — AC-as-code"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-08
 updated: 2026-07-08

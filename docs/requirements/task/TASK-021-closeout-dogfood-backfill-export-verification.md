@@ -3,9 +3,9 @@ id: TASK-021
 type: task
 role: plan
 title: "Closeout: dogfood backfill + export + verification"
-status: active
+status: archived
 priority: medium
-phase: closeout
+phase: "closeout"
 created: 2026-07-02
 updated: 2026-07-02
 tags: []

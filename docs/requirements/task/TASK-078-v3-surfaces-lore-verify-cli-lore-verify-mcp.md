@@ -3,9 +3,9 @@ id: TASK-078
 type: task
 role: plan
 title: "V3 surfaces: lore verify CLI + lore_verify MCP"
-status: draft
+status: archived
 priority: high
-phase: surfaces
+phase: "surfaces"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

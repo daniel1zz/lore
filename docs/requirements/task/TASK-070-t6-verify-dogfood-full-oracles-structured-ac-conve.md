@@ -3,9 +3,9 @@ id: TASK-070
 type: task
 role: plan
 title: "T6 verify + dogfood: full oracles, structured-AC conversion, docs sync"
-status: draft
+status: archived
 priority: critical
-phase: verify-dogfood
+phase: "verify-dogfood"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

@@ -3,7 +3,7 @@ id: TASK-655
 type: task
 role: plan
 title: "Make MirrorHumanId a nominal type on exportIndexMappingSchema.human_id with one sanctioned cast at the parse boundary, and guard that escape with a cast-site rule"
-status: draft
+status: archived
 priority: high
 phase: "brand"
 created: 2026-08-11

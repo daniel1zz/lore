@@ -3,7 +3,7 @@ id: PLAN-006
 type: plan
 role: plan
 title: "SPEC-027 Implementation — Dashboard Hardening"
-status: approved
+status: archived
 priority: high
 created: 2026-07-03
 updated: 2026-07-03

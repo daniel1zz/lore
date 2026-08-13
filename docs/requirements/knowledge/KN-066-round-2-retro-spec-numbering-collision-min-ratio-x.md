@@ -3,10 +3,10 @@ id: KN-066
 type: knowledge
 role: knowledge
 title: "Round-2 retro: spec numbering collision, min_ratio x2, reject-status trap bit twice, e2e rot window"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 tags: [retro, spec-073, spec-074, autopilot, dogfood]
 parent: PLAN-044
 links:

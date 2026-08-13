@@ -3,7 +3,7 @@ id: TASK-709
 type: task
 role: plan
 title: "Prove sufficiency: replay the 2026-08-11 diagnosis through lore alone and retire the git-topology merge protocol"
-status: draft
+status: archived
 priority: medium
 phase: "replay"
 created: 2026-08-12

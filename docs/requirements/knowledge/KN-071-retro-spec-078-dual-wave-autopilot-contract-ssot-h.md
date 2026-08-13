@@ -3,10 +3,10 @@ id: KN-071
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-078 dual-wave autopilot: contract-SSOT held, evidence-display gaps drove the score"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-07-25
+updated: 2026-07-26
 tags: []
 parent: PLAN-038
 ---

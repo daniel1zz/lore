@@ -3,11 +3,11 @@ id: TASK-144
 type: task
 role: plan
 title: "[Skill:implement] T3 CLI --injection flag + config threading"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: Surfaces (parallel)"
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-29
 tags: []
 parent: PLAN-032
 plan: PLAN-032

@@ -3,7 +3,7 @@ id: TASK-708
 type: task
 role: plan
 title: "Bind ownership: a claim records its branch, commits carry the Lore-Session trailer, and active_sessions reports branches"
-status: draft
+status: archived
 priority: medium
 phase: "binding"
 created: 2026-08-12

@@ -3,9 +3,9 @@ id: TASK-073
 type: task
 role: plan
 title: "T3 service: AcService + ac verbs + resolveDeclaredAcIds port"
-status: draft
+status: archived
 priority: critical
-phase: service-cli
+phase: "service-cli"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

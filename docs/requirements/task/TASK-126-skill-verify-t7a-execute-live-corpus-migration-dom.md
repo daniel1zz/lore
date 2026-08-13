@@ -3,7 +3,7 @@ id: TASK-126
 type: task
 role: plan
 title: "[Skill:verify] T7a Execute live-corpus migration — domain sections §14-§22 (dry-run gated)"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 4: Corpus migration & close-out"
 created: 2026-07-26

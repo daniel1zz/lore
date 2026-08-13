@@ -3,7 +3,7 @@ id: TASK-671
 type: task
 role: plan
 title: "The knowledge sub-type is a retrieval filter applied in the store query, so pagination windows the filtered set"
-status: draft
+status: archived
 priority: medium
 phase: "sub-type-filter"
 created: 2026-08-11

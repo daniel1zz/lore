@@ -3,10 +3,10 @@ id: TASK-204
 type: task
 role: plan
 title: "T1 — lintStatement extraction + requirement-layer wiring + six-dimension tests"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-20
-updated: 2026-07-24
+updated: 2026-07-26
 tags: []
 parent: PLAN-067
 plan: PLAN-067

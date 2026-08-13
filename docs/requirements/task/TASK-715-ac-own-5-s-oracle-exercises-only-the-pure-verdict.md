@@ -3,7 +3,7 @@ id: TASK-715
 type: task
 role: plan
 title: "AC-OWN-5's oracle exercises only the pure verdict function, and the replay test's title still denies a fact it now asserts"
-status: draft
+status: archived
 priority: medium
 phase: "remediation"
 created: 2026-08-12

@@ -3,9 +3,9 @@ id: TASK-072
 type: task
 role: plan
 title: "T4 assess: structured-AC prompt + ac_id containment"
-status: draft
+status: archived
 priority: high
-phase: assess-projection
+phase: "assess-projection"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

@@ -3,7 +3,7 @@ id: TASK-661
 type: task
 role: plan
 title: "Raise capture_timeout_ms and max_diff_chars to the values this repo proved it needs, and build the shipped-default drift checker"
-status: draft
+status: archived
 priority: high
 phase: "defaults"
 created: 2026-08-11

@@ -3,9 +3,9 @@ id: TASK-077
 type: task
 role: plan
 title: "V4 render: assess v5 attested annotation + ac list attested prefix"
-status: draft
+status: archived
 priority: medium
-phase: surfaces
+phase: "surfaces"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

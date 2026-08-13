@@ -3,10 +3,10 @@ id: KN-038
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-040 instrument-first bootstrap (PRD v0.8 + 3-lens spec review + T1-T3 worktree delivery + v6 first live run)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-14
 tags: [retro, spec-040, instrument, autonomy, worktree]
 parent: PLAN-020
 ---

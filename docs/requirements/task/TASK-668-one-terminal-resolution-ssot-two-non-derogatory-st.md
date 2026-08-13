@@ -3,7 +3,7 @@ id: TASK-668
 type: task
 role: plan
 title: "One terminal-resolution SSOT, two non-derogatory states, and a cap that counts resolution instead of raw status"
-status: draft
+status: archived
 priority: medium
 phase: "cap-honesty"
 created: 2026-08-11

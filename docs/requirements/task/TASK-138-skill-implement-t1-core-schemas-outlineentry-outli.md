@@ -3,7 +3,7 @@ id: TASK-138
 type: task
 role: plan
 title: "[Skill:implement] T1 core schemas: outlineEntry/outline_budget/prd_sync_exempt + SPEC_KINDS domain-overview + verification profile"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: Core schemas & outline writer"
 created: 2026-07-26

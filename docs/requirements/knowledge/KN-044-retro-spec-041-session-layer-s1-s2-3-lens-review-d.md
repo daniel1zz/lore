@@ -3,10 +3,10 @@ id: KN-044
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-041 session layer S1+S2 (3-lens review + dual worktree delivery + v6 second live run + export-bug root-cause)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-10
-updated: 2026-07-10
+updated: 2026-07-14
 tags: [retro, spec-041, session, instrument]
 parent: PLAN-025
 ---

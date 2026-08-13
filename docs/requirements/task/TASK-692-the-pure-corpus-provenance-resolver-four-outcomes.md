@@ -3,7 +3,7 @@ id: TASK-692
 type: task
 role: plan
 title: "The pure corpus-provenance resolver: four outcomes decided from supplied facts, zero IO"
-status: draft
+status: archived
 priority: medium
 phase: "resolver"
 created: 2026-08-12

@@ -3,10 +3,10 @@ id: KN-020
 type: knowledge
 role: knowledge
 title: "SPEC-032 tech review + revisions (needs-revision → applied)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-07-08
 tags: [spec-032, review]
 parent: SPEC-032
 ---

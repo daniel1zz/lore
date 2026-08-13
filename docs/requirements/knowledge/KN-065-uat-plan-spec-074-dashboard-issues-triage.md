@@ -3,10 +3,10 @@ id: KN-065
 type: knowledge
 role: knowledge
 title: "UAT — plan-spec-074-dashboard-issues-triage"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 tags: []
 parent: PLAN-043
 links:

@@ -3,10 +3,10 @@ id: KN-055
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-045 drift oracle H3 (memory-hygiene trilogy complete; shell-quoted content trap; FsProbe stat-collapse deviation)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-12
-updated: 2026-07-12
+updated: 2026-07-14
 tags: [retro, spec-045, drift, memory-hygiene]
 parent: PLAN-029
 ---

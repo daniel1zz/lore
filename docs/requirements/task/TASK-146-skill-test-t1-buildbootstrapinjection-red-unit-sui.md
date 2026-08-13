@@ -3,11 +3,11 @@ id: TASK-146
 type: task
 role: plan
 title: "[Skill:test] T1 buildBootstrapInjection RED unit suite"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: Core contract"
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-07-29
 tags: []
 parent: PLAN-032
 plan: PLAN-032

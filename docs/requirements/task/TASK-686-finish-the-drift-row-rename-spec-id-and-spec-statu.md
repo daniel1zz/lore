@@ -3,11 +3,11 @@ id: TASK-686
 type: task
 role: plan
 title: "Finish the drift-row rename: spec_id and spec_status still carry spec-flavoured names on knowledge rows"
-status: draft
+status: archived
 priority: medium
 phase: "reachable-facts"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-12
 tags: []
 parent: PLAN-126
 plan: PLAN-126

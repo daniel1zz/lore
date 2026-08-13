@@ -3,7 +3,7 @@ id: KN-033
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-038 Implementation — AC-as-code (2026-07-08)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-08
 updated: 2026-07-08

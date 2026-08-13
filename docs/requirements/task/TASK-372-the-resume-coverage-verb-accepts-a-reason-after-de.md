@@ -3,10 +3,10 @@ id: TASK-372
 type: task
 role: plan
 title: "The resume-coverage verb accepts a reason after deferred: but rejects one after done, and reports the explained completion as 'still unaccounted' — the asymmetry costs a Stop round-trip and discourages the more informative disposition"
-status: draft
+status: archived
 priority: low
 created: 2026-08-02
-updated: 2026-08-03
+updated: 2026-08-12
 tags: []
 parent: PRD-001
 ---

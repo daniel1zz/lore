@@ -3,10 +3,10 @@ id: KN-010
 type: knowledge
 role: knowledge
 title: "Assessment: SPEC-028 Implementation — assess input transparency (2026-07-03)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-03
-updated: 2026-07-03
+updated: 2026-07-08
 tags: []
 parent: PLAN-007
 links:

@@ -3,10 +3,10 @@ id: KN-064
 type: knowledge
 role: knowledge
 title: "SPEC-072 autopilot execution retro: reverse-import oracle gap, exempt-field surface gap, ratio design tension"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-25
+updated: 2026-07-26
 tags: [retro, spec-072, autopilot, attestation, dogfood]
 parent: PLAN-045
 links:

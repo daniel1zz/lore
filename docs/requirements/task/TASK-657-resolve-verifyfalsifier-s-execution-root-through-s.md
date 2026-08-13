@@ -3,7 +3,7 @@ id: TASK-657
 type: task
 role: plan
 title: "Resolve verifyFalsifier's execution root through SPEC-063 so a falsifier run from a linked worktree sees that worktree's uncommitted code"
-status: draft
+status: archived
 priority: high
 phase: "falsifier-root"
 created: 2026-08-11

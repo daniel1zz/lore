@@ -3,7 +3,7 @@ id: TASK-141
 type: task
 role: plan
 title: "[Skill:verify] T7 attested sweep + spec anchors + live smoke"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3: Verification"
 created: 2026-07-26

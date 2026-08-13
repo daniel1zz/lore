@@ -3,10 +3,10 @@ id: TASK-282
 type: task
 role: plan
 title: "Implement SPEC-054 UAT verdict + plan-close gate"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-18
-updated: 2026-07-18
+updated: 2026-07-26
 tags: []
 parent: PLAN-072
 plan: PLAN-072

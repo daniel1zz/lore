@@ -3,7 +3,7 @@ id: TASK-712
 type: task
 role: plan
 title: "Add a per-branch unmerged-commit count to GitPort and surface it in lore territory, the one fact AC-REPLAY-1 proved unreachable"
-status: draft
+status: archived
 priority: medium
 phase: "replay"
 created: 2026-08-12

@@ -3,10 +3,10 @@ id: TASK-195
 type: task
 role: plan
 title: "SPEC-069 adhoc tasks are unclaimable: task-claim gate crashes walking a prd parent"
-status: draft
+status: archived
 priority: medium
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-07-26
 tags: []
 parent: PRD-001
 ---

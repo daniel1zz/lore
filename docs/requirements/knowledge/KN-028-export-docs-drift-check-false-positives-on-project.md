@@ -3,7 +3,7 @@ id: KN-028
 type: knowledge
 role: knowledge
 title: "export-docs drift check false-positives on projected docs"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-07
 updated: 2026-07-07

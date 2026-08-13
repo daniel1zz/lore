@@ -5964,6 +5964,22 @@
     "01KZWPDJ2ZWNAXT09QBFNZPVXB": {
       "human_id": "KN-453",
       "file_path": "docs/requirements/knowledge/KN-453-handoff-agent-main-orchestrator.md"
+    },
+    "01KZWW82VMC3NFTHN3ZZ7QK8W0": {
+      "human_id": "KN-454",
+      "file_path": "docs/requirements/knowledge/KN-454-p2-session-lease-layout-measured-not-predicted.md"
+    },
+    "01KZWXKD0ZED5Q8B5R4JJCQ3ZH": {
+      "human_id": "TASK-725",
+      "file_path": "docs/requirements/task/TASK-725-lore-set-content-file-silently-accepts-a-replaceme.md"
+    },
+    "01KZWW60FGGEC2GK1FB36A7BD5": {
+      "human_id": "TASK-726",
+      "file_path": "docs/requirements/task/TASK-726-lore-assess-scores-findings-against-files-listed-i.md"
+    },
+    "01KZWVCPCTKAVXZ3068HRZ8SGK": {
+      "human_id": "TASK-727",
+      "file_path": "docs/requirements/task/TASK-727-lore-review-truncates-the-parent-spec-before-the-j.md"
     }
   }
 }

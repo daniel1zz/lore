@@ -3,7 +3,7 @@ id: TASK-667
 type: task
 role: plan
 title: "Every trace-stats count is derived from a member list the same command can enumerate"
-status: draft
+status: archived
 priority: medium
 phase: "reachable-facts"
 created: 2026-08-11

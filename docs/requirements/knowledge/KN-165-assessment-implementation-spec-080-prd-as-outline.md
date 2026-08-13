@@ -3,7 +3,7 @@ id: KN-165
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-080 PRD-as-outline contract (2026-07-26)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26

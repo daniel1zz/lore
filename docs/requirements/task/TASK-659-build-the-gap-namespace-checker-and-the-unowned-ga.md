@@ -3,7 +3,7 @@ id: TASK-659
 type: task
 role: plan
 title: "Build the gap-namespace checker and the unowned-gap report so a GAP reference resolves without guessing which document was meant"
-status: draft
+status: archived
 priority: medium
 phase: "namespace"
 created: 2026-08-11

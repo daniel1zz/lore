@@ -3,7 +3,7 @@ id: TASK-689
 type: task
 role: plan
 title: "The foreign-write guard: intent is a claim-lease fact, and three cells prove it two-sided"
-status: draft
+status: archived
 priority: medium
 phase: "guard"
 created: 2026-08-12

@@ -3,7 +3,7 @@ id: PLAN-019
 type: plan
 role: plan
 title: "SPEC-039 Implementation — trusted runner"
-status: approved
+status: archived
 priority: medium
 created: 2026-07-08
 updated: 2026-07-08

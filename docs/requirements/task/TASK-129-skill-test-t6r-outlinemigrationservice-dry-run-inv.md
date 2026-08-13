@@ -3,7 +3,7 @@ id: TASK-129
 type: task
 role: plan
 title: "[Skill:test] T6r OutlineMigrationService dry-run invariants — RED scenarios"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 3: Migration machinery"
 created: 2026-07-26

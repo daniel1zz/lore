@@ -3,7 +3,7 @@ id: TASK-137
 type: task
 role: plan
 title: "[Skill:test] T2r PrdOutlineService + set-guard — RED scenarios"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: Core schemas & outline writer"
 created: 2026-07-26

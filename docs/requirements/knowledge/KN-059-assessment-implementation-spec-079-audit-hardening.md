@@ -3,7 +3,7 @@ id: KN-059
 type: knowledge
 role: knowledge
 title: "Assessment: Implementation — SPEC-079 audit hardening (provenance + actor + chain) (2026-07-26)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-26
 updated: 2026-07-26

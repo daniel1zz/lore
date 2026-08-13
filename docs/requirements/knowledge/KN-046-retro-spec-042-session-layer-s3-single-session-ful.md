@@ -3,10 +3,10 @@ id: KN-046
 type: knowledge
 role: knowledge
 title: "Retro — SPEC-042 session layer S3 (single-session full cycle: 3-lens review + dual worktree + UAT parity catch)"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-11
-updated: 2026-07-11
+updated: 2026-07-14
 tags: [retro, spec-042, session, instrument]
 parent: PLAN-026
 ---

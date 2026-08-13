@@ -3,10 +3,10 @@ id: KN-062
 type: knowledge
 role: knowledge
 title: "UAT — plan-implementation-spec-078-dashboard-multi-project-dual-wave"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-07-25
+updated: 2026-07-26
 tags: []
 parent: PLAN-038
 links:

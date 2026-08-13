@@ -3,9 +3,9 @@ id: TASK-076
 type: task
 role: plan
 title: "V5 verify-dogfood: full oracles + lore verify self-acceptance + docs"
-status: draft
+status: archived
 priority: critical
-phase: verify-dogfood
+phase: "verify-dogfood"
 created: 2026-07-08
 updated: 2026-07-08
 tags: []

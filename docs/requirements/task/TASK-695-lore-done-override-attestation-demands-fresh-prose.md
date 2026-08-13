@@ -3,7 +3,7 @@ id: TASK-695
 type: task
 role: plan
 title: "lore done --override-attestation demands fresh prose that restates evidence rows already on the task — let it CITE a recorded row instead, with refusals that keep the cheaper path from being the weaker one"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-12
 updated: 2026-08-12

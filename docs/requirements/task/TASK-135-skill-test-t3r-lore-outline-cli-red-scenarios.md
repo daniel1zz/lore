@@ -3,7 +3,7 @@ id: TASK-135
 type: task
 role: plan
 title: "[Skill:test] T3r lore outline CLI — RED scenarios"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: Core schemas & outline writer"
 created: 2026-07-26
