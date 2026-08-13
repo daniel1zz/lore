@@ -13,13 +13,22 @@
  *      CLI, for an independent live-corpus read) as SUBPROCESSES against THIS repo's OWN live
  *      corpus and OWN `docs/requirements/spec/` — never a throwaway `mkdtemp` corpus. This is
  *      deliberate, not a violation of "never write to the repo's own `.lore/` corpus from tests":
- *      that prohibition is about creating/editing/deleting DOCS (the corpus DB); this task's own
- *      deliverable IS `docs/requirements/spec/*.md` + `.lore/export-index.json` — generated,
- *      regenerable projections meant to be committed (this task's own scope note: "Exporting 141
- *      specs will produce a large diff of generated files. That is expected; commit them.").
- *      Every e2e test below RE-ESTABLISHES a clean baseline by actually running the real exporter
- *      before asserting anything, and restores it afterward (`finally`) — so this file's
- *      assertions never depend on execution order or on state left over from a manual run.
+ *      that prohibition is about creating/editing/deleting DOCS (the corpus DB), and this file
+ *      never does that either.
+ *
+ *      ⛔ AC-OX-1 (`spec-oracle-exclusivity-in-a-shared-checkout-a-mirror-check`): every
+ *      subprocess call into `export-spec-mirror.ts` below passes `--check` — the READ-ONLY
+ *      drift-report path — and NEVER the bare, write-mode invocation. A prior revision of this
+ *      file called the write-mode exporter as a "re-establish a clean baseline" step before
+ *      every e2e assertion; that made the oracle unfalsifiable (it silently repaired real drift
+ *      before any assertion could see it) and, when this file ran as part of `bun run
+ *      test:vitest` (which precedes `test:bun` in `bun run test`), it left the live corpus mirror
+ *      REWRITTEN on disk — the exact mid-run corpus write `assertRepoCorpusClean` in
+ *      `spec-loop-e2e.bun.test.ts` was built to catch. Every test below that seeds its OWN drift
+ *      (deleting a file, corrupting a frontmatter `id:`, corrupting a `links:` entry) restores by
+ *      writing back the EXACT bytes it captured before mutating — never by re-invoking the
+ *      exporter — so a seeded drift stays a genuine, falsifiable RED instead of being repaired
+ *      first.
  *
  * AC-FR-6's own text: "Asserted against the LIVE corpus count, never a literal typed into the
  * test" — every e2e assertion below re-derives the corpus spec count via a REAL `lore list --type
@@ -108,7 +117,12 @@ function runLore(args: string[]): RunResult {
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 
-/** Spawns the REAL `export-spec-mirror.ts` — the exact `bun run mirror:export` / `bun run check:spec-mirror` path, driven directly (mirrors `check-ac-ref-integrity.test.ts`'s `runDetector`). */
+/**
+ * Spawns the REAL `export-spec-mirror.ts`, driven directly (mirrors `check-ac-ref-integrity.test.ts`'s
+ * `runDetector`). ⛔ AC-OX-1: every call site in THIS file passes `["--check"]` — the
+ * `bun run check:spec-mirror` READ-ONLY path — and never `[]` (the `bun run mirror:export`
+ * write-mode path, which would write to this repo's own live corpus mirror from a test).
+ */
 function runMirrorScript(args: string[]): RunResult {
   const result = spawnSync("bun", ["run", MIRROR_SCRIPT, ...args], {
     cwd: REPO_ROOT,
@@ -237,7 +251,7 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
   it(
     "HAPPY (a+b): for every mirrored doc type, on-disk file count equals the live corpus count, and every mirror file's frontmatter id: is byte-identical to its filename's zero-padded leading identifier",
     () => {
-      const baseline = runMirrorScript([]);
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       let totalFilesChecked = 0;
@@ -276,7 +290,7 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
   it(
     "HAPPY (c): the migration-coverage eval over the REAL docs/requirements reports links_broken === 0",
     async () => {
-      const baseline = runMirrorScript([]);
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       const app = makeThrowawayApp();
@@ -292,7 +306,7 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
   it(
     "RED (a) — live: deleting one exported file of any type makes the per-type count parity check fail, naming that type and slug",
     () => {
-      const baseline = runMirrorScript([]);
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       // "plan" (never spec — AC-FR-6/AC-FR-7 already cover spec's own RED cases) — any doc with
@@ -306,6 +320,7 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
       }
       const mapping = mappings[target.id] as ExportIndexMapping;
       const absPath = join(REPO_ROOT, mapping.file_path);
+      const original = readFileSync(absPath, "utf8");
 
       unlinkSync(absPath);
       try {
@@ -321,9 +336,10 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
         expect(parity.ok).toBe(false);
         expect(parity.missing).toContainEqual({ slug: target.slug, reason: "file_absent" });
       } finally {
-        const restore = runMirrorScript([]);
-        expect(restore.exitCode).toBe(0);
-        expect(existsSync(absPath)).toBe(true);
+        // Restore via the captured original bytes directly — never the write-mode exporter
+        // (AC-OX-1): a genuine drift check must never repair what it just detected.
+        writeFileSync(absPath, original, "utf8");
+        expect(readFileSync(absPath, "utf8")).toBe(original);
       }
     },
     60_000,
@@ -332,7 +348,7 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
   it(
     "RED (b) — live: rewriting one mirror file's frontmatter id: to the non-padded form fails, naming that exact file",
     () => {
-      const baseline = runMirrorScript([]);
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       const type: MirrorDocType = "adr";
@@ -374,7 +390,7 @@ describe("all-types-parity-and-id-format: AC-FR-10 end-to-end against the REAL p
   it(
     "RED (c) — live: pointing one cross-type reference at a non-existent id makes migration-coverage's links_broken non-zero",
     async () => {
-      const baseline = runMirrorScript([]);
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       // A plan mirror file with at least one links: entry — PLAN-115 (audit-remediation, cited
@@ -547,11 +563,11 @@ describe("export-covers-corpus: AC-FR-6 end-to-end against the REAL package.json
   });
 
   it(
-    "export-covers-corpus: HAPPY — after running the real exporter against the real corpus, on-disk file count EQUALS the LIVE corpus spec count and every corpus spec slug is present as a file",
+    "export-covers-corpus: HAPPY — the read-only checker (AC-OX-1: never the write-mode exporter) reports on-disk file count EQUALS the LIVE corpus spec count and every corpus spec slug is present as a file",
     () => {
-      const exportResult = runMirrorScript([]);
-      expect(exportResult.exitCode).toBe(0);
-      expect(exportResult.stdout).toContain("OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).");
+      const checkResult = runMirrorScript(["--check"]);
+      expect(checkResult.exitCode).toBe(0);
+      expect(checkResult.stdout).toContain("OK — every corpus spec has a mirror file (count and slug parity; file CONTENT is not compared).");
 
       // Independent, fresh re-derivation — never trusts the script's own self-report.
       const { specs, mappings, fileCountOnDisk, fileExists } = measureLiveParity();
@@ -566,19 +582,21 @@ describe("export-covers-corpus: AC-FR-6 end-to-end against the REAL package.json
   );
 
   it(
-    "export-covers-corpus: NEGATIVE (RED b, live) — deleting one exported file after export makes the parity check fail, NAMING that exact slug",
+    "export-covers-corpus: NEGATIVE (RED b, live) — deleting one exported file makes the parity check fail, NAMING that exact slug",
     () => {
-      // Re-establish a known-clean baseline first — this test never assumes a prior test's state.
-      const baseline = runMirrorScript([]);
+      // Verify a clean baseline first (read-only — AC-OX-1) — this test never assumes a prior
+      // test's state, and never repairs it either.
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       const before = measureLiveParity();
       const target = before.specs.find((s) => before.mappings[s.id] !== undefined);
       if (target === undefined) {
-        throw new Error("test setup: no corpus spec has an export-index mapping after a clean export — cannot induce RED b");
+        throw new Error("test setup: no corpus spec has an export-index mapping after a clean baseline — cannot induce RED b");
       }
       const mapping = before.mappings[target.id]!;
       const absPath = join(REPO_ROOT, mapping.file_path);
+      const original = readFileSync(absPath, "utf8");
 
       unlinkSync(absPath);
       try {
@@ -590,11 +608,10 @@ describe("export-covers-corpus: AC-FR-6 end-to-end against the REAL package.json
         expect(parity.ok).toBe(false);
         expect(parity.missing).toContainEqual({ slug: target.slug, reason: "file_absent" });
       } finally {
-        // Restore — the exporter is idempotent/convergent, so re-running it recreates exactly
-        // the deleted file and nothing else.
-        const restore = runMirrorScript([]);
-        expect(restore.exitCode).toBe(0);
-        expect(existsSync(absPath)).toBe(true);
+        // Restore via the captured original bytes directly — never the write-mode exporter
+        // (AC-OX-1): a genuine drift check must never repair what it just detected.
+        writeFileSync(absPath, original, "utf8");
+        expect(readFileSync(absPath, "utf8")).toBe(original);
       }
     },
     30000,
@@ -605,9 +622,9 @@ describe("export-covers-corpus: AC-FR-6 end-to-end against the REAL package.json
 
 describe("drift-check-is-separate: AC-FR-7 end-to-end against the REAL script + REAL live corpus", () => {
   it(
-    "drift-check-is-separate: HAPPY — after a clean export, running --check twice in a row reports OK both times",
+    "drift-check-is-separate: HAPPY — after verifying a clean baseline, running --check twice in a row reports OK both times",
     () => {
-      const baseline = runMirrorScript([]);
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       const first = runMirrorScript(["--check"]);
@@ -624,16 +641,17 @@ describe("drift-check-is-separate: AC-FR-7 end-to-end against the REAL script + 
   it(
     "drift-check-is-separate: NEGATIVE — with one mirror file deleted, --check exits EXACTLY MIRROR_DRIFT_EXIT_CODE and names the missing slug on BOTH consecutive runs, never regenerating the file",
     () => {
-      const baseline = runMirrorScript([]);
+      const baseline = runMirrorScript(["--check"]);
       expect(baseline.exitCode).toBe(0);
 
       const before = measureLiveParity();
       const target = before.specs.find((s) => before.mappings[s.id] !== undefined);
       if (target === undefined) {
-        throw new Error("test setup: no corpus spec has an export-index mapping after a clean export — cannot induce this scenario");
+        throw new Error("test setup: no corpus spec has an export-index mapping after a clean baseline — cannot induce this scenario");
       }
       const mapping = before.mappings[target.id]!;
       const absPath = join(REPO_ROOT, mapping.file_path);
+      const original = readFileSync(absPath, "utf8");
 
       unlinkSync(absPath);
       try {
@@ -650,9 +668,10 @@ describe("drift-check-is-separate: AC-FR-7 end-to-end against the REAL script + 
         expect(secondCheck.stdout + secondCheck.stderr).toContain(target.slug);
         expect(existsSync(absPath)).toBe(false);
       } finally {
-        const restore = runMirrorScript([]);
-        expect(restore.exitCode).toBe(0);
-        expect(existsSync(absPath)).toBe(true);
+        // Restore via the captured original bytes directly — never the write-mode exporter
+        // (AC-OX-1): a genuine drift check must never repair what it just detected.
+        writeFileSync(absPath, original, "utf8");
+        expect(readFileSync(absPath, "utf8")).toBe(original);
       }
     },
     30000,
