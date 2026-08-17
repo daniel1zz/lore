@@ -107,6 +107,7 @@ links:
   - {id: SPEC-140, type: governs}
   - {id: SPEC-141, type: governs}
   - {id: SPEC-142, type: governs}
+  - {id: SPEC-143, type: governs}
 ---
 ## Overview
 

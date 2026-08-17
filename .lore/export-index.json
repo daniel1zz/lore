@@ -6056,6 +6056,18 @@
     "01M0772R7DNTQNZREM1XM5RBWX": {
       "human_id": "KN-470",
       "file_path": "docs/requirements/knowledge/KN-470-assessment-land-bootstrap-fixpoint-integrity-binar.md"
+    },
+    "01M07TSMJWB7CYAHFAZCHC123F": {
+      "human_id": "SPEC-143",
+      "file_path": "docs/requirements/spec/SPEC-143-corpus-truthfulness-a-verdict-must-carry-the-state.md"
+    },
+    "01M07TYRQ2FWDZ56A7YDZGXDFK": {
+      "human_id": "ADR-035",
+      "file_path": "docs/requirements/adr/ADR-035-verdict-staleness-is-measured-by-blast-radius-neve.md"
+    },
+    "01M07TYR8P3JQZVY9JD61GCHYR": {
+      "human_id": "ADR-034",
+      "file_path": "docs/requirements/adr/ADR-034-a-record-with-no-state-stamp-is-acceptable-but-nev.md"
     }
   }
 }
