@@ -3,11 +3,11 @@ id: TASK-653
 type: task
 role: plan
 title: "Ship the anchor-coverage exemption ledger and arm the ratchet with its reverse stale-exemption check"
-status: draft
+status: archived
 priority: medium
 phase: "anchor-ratchet"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-17
 tags: []
 parent: PLAN-121
 plan: PLAN-121
