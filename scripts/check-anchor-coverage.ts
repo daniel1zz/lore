@@ -688,21 +688,26 @@ export async function main(dbPathOverride?: string, repoRootOverride?: string): 
     );
 
     if (report.findings.length > 0) {
+      const firedKinds: AnchorCoverageFinding["kind"][] = [];
       for (const kind of FINDING_KIND_ORDER) {
         const group = report.findings.filter((finding) => finding.kind === kind);
         if (group.length === 0) continue;
+        firedKinds.push(kind);
         console.error(`\ncheck-anchor-coverage: ${renderSectionHeading(kind, group.length)}\n`);
         for (const finding of group) console.error(renderFinding(finding));
         console.error(`\n${renderRepairHint(kind)}`);
       }
+      // reason: the verdict MUST be the LAST line — see the OK path's identical note.
+      // Only the kinds that actually fired are named, using their bare `kind`
+      // identifiers rather than the prose headings above: a reader (and a test)
+      // must be able to tell WHICH invariant broke from this one line without the
+      // line itself asserting the phrasing of invariants that did NOT fire.
+      console.error(
+        `\ncheck-anchor-coverage: FAILED — ${report.findings.length} finding(s) in ${firedKinds.length} ` +
+          `class(es): ${firedKinds.join(", ")}.`,
+      );
       return 1;
     }
-
-    console.log(
-      `check-anchor-coverage: OK — every unanchored live spec carries a ledger disposition ` +
-        `(${report.cohortCounts.deliberate} deliberate / ${report.cohortCounts.debt} debt), and every row still ` +
-        `matches real, unpaid debt.`,
-    );
 
     if (report.dispositioned.length > 0) {
       // reason: printing only a COUNT is the exact defect
@@ -716,6 +721,19 @@ export async function main(dbPathOverride?: string, repoRootOverride?: string): 
         console.log(`    ${formatReasonForDisplay(row.reason)}`);
       }
     }
+
+    // reason: the verdict is printed LAST, AFTER the (60-row and growing) echo above,
+    // and never only before it. Measured this task: with the verdict emitted first,
+    // `lore evidence --capture`'s 4000-byte output-tail window kept only the trailing
+    // rows and dropped the verdict entirely — an evidence record that proves a run
+    // happened but not what it concluded. Any consumer that keeps a TAIL (evidence
+    // capture, CI log excerpt, a shell `| tail`) sees the verdict only if it is last.
+    // ⛔ Do not "tidy" this by moving it back up next to the census line.
+    console.log(
+      `\ncheck-anchor-coverage: OK — ${report.dispositioned.length} of ${report.unanchored} unanchored live ` +
+        `spec(s) dispositioned (${report.cohortCounts.deliberate} deliberate / ${report.cohortCounts.debt} debt); ` +
+        `0 finding(s).`,
+    );
 
     return 0;
   } finally {

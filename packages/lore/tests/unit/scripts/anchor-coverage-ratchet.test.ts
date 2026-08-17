@@ -225,6 +225,31 @@ describe("check-anchor-coverage: the shipped ledger dispositions every unanchore
   );
 
   it(
+    "REGRESSION: the verdict is the LAST line on BOTH paths — a tail-window consumer must see what the run concluded, not only the trailing per-row echo",
+    () => {
+      // Measured this task: with the OK verdict printed BEFORE the 60-row disposition
+      // echo, `lore evidence --capture`'s 4000-byte output-tail window kept only the
+      // trailing rows and dropped the verdict — an evidence record proving a run
+      // happened but not what it decided. This pins the ordering so that regression
+      // cannot return silently.
+      const green = runChecker(REPO_ROOT);
+      expect(green.exitCode).toBe(0);
+      const lastGreenLine = green.stdout.trimEnd().split("\n").at(-1);
+      expect(lastGreenLine).toMatch(/^check-anchor-coverage: OK — .*0 finding\(s\)\.$/);
+
+      const shipped = loadShippedLedger();
+      const victim = [...shipped.entries].sort((a, b) => (a.slug < b.slug ? -1 : 1))[0] as LedgerEntry;
+      const mutated = copyLedger(shipped);
+      mutated.entries = mutated.entries.filter((e) => e.slug !== victim.slug);
+      const red = runCheckerWithLedger(REPO_ROOT, mutated);
+      expect(red.exitCode).toBe(1);
+      const lastRedLine = red.stderr.trimEnd().split("\n").at(-1);
+      expect(lastRedLine).toMatch(/^check-anchor-coverage: FAILED — 1 finding\(s\) in 1 class\(es\): missing_disposition\.$/);
+    },
+    60000,
+  );
+
+  it(
     "RED (a) PAIRED: deleting one shipped ledger row makes the IDENTICAL run exit EXACTLY 1 and NAME that slug; restoring the row exits EXACTLY 0",
     () => {
       const shipped = loadShippedLedger();
