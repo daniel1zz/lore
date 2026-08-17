@@ -187,6 +187,55 @@ Until such a check exists, the dispatcher MUST read a task's body and its `file_
 other before dispatching, and read each AC's statement against its own `verify.command`. That is a
 prose mitigation for a mechanizable defect, and should be treated as a stopgap, not a fix.
 
+## G8 — editing the SHIPPING hook selects none of the tests that guard it
+
+Measured on the AC-BFI-3 change set (`hooks/pre-push`, `assets/project/pre-push`,
+`packages/lore/src/generated/assets-manifest.ts`): `bun run test:changed --list` selected 169 files,
+and `packages/lore/tests/unit/assets/pre-push-parity.test.ts` — the dedicated oracle for exactly that
+byte-identical pair — was NOT among them. `pre-push-claude-md-trip.bun.test.ts` was, but only as one
+of 157 files pulled in by the **binary-consumer** rule, i.e. because the manifest lives under
+`packages/` and its change triggered a build. Neither hook file selected anything on its own.
+
+Two compounding causes, both structural:
+
+1. The selector's file universe is `packages/*/src/**`, `packages/*/tests/**` and `scripts/**`
+   (`loadFileMap`). **`hooks/**` and `assets/**` are outside it entirely** — the two paths that ARE
+   the shipping surface for every consumer of `lore setup --project`.
+2. The tree-scanning-oracle rule exists precisely to catch a changed file outside the traced
+   universe, but it matches on CONTENT MARKERS. `pre-push-parity.test.ts` builds its targets as
+   `join(REPO_ROOT, "hooks", "pre-push")`, so no literal path string exists for the rule to see. This
+   is the documented residual (a), here landing on the highest-stakes pair in the repo.
+
+Consequence: a change touching ONLY `hooks/pre-push` — entirely plausible, and the exact shape of a
+consumer-visible regression — runs neither the parity oracle nor any hook trip test, and `test:changed`
+reports a confident green. It is not even a loud zero, because unrelated rules keep the selection
+non-empty.
+
+Mechanization, in order of cost: (a) add a literal `"hooks/pre-push"` / `"assets/project/pre-push"`
+string to the parity test so the tree-scanning rule can see it — one line, works today; (b) widen the
+universe with an `assets/**` + `hooks/**` rule so shipping-surface files select their guards by
+construction. (a) alone leaves the next unmarked scan test invisible, so (b) is the real fix and (a) is
+the stopgap.
+
+## G9 — `lore evidence` offers no attested tier for an oracle too expensive to re-run
+
+`--output-tail-file` is (correctly) refused for a non-manual `pass`: a hand-authored tail proves
+nothing. The only sanctioned upgrade is `--capture`, which RE-RUNS the command — for a 15-minute
+`test:changed` that means paying the full cost again purely to relabel `capture_source`. The
+implementing agent's honest resolution was to record the row as `--oracle manual` carrying the genuine
+runner log and say so in the command field, which is truthful but files a runner-produced result under
+the weakest tier.
+
+Root cause: the tier is derived from HOW the row was produced (did this command re-run under lore?)
+rather than from WHETHER the artifact is machine-attributable. A runner log plus its exit code, written
+by the runner to a path lore can stat, is stronger evidence than a `--capture` re-run of a command the
+caller supplied — and lore already knows this, since that is the exact argument its own `attestation`
+docs make against `--capture`.
+
+Mechanization: accept a runner-written exit-code file (`cmd > log 2>&1; echo $? > log.exit`) as an
+attested source — lore reads both, and the caller never authors either. That closes the gap without
+weakening the rule that a caller-authored tail is worthless.
+
 ## What the ratchet caught on its first real use
 
 Declaring anchors on `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor` — which was itself

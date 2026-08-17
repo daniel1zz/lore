@@ -3,11 +3,11 @@ id: TASK-650
 type: task
 role: plan
 title: "Wire the binary-provenance check into both byte-identical pre-push copies"
-status: draft
+status: archived
 priority: medium
 phase: "binary-provenance"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-17
 tags: []
 parent: PLAN-121
 plan: PLAN-121
