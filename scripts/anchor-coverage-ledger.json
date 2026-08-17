@@ -49,11 +49,6 @@
       "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-06-08; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
     },
     {
-      "slug": "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor",
-      "cohort": "debt",
-      "reason": "Anchor debt: created 2026-08-11, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
-    },
-    {
       "slug": "spec-cjk-aware-slugify-pinyin-transliteration-lore-set-slug-repa",
       "cohort": "debt",
       "reason": "Anchor debt: created 2026-07-23, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
