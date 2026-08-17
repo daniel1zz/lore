@@ -6004,6 +6004,10 @@
     "01M06NHPRK84XK4F951RADXR8M": {
       "human_id": "KN-458",
       "file_path": "docs/requirements/knowledge/KN-458-an-ac-id-is-spec-local-but-every-prose-reference.md"
+    },
+    "01M06SG8FZ1T0JYVG6WS9C7CW3": {
+      "human_id": "KN-459",
+      "file_path": "docs/requirements/knowledge/KN-459-assessment-land-oracle-exclusivity-a-mirror-check.md"
     }
   }
 }
