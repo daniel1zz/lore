@@ -230,16 +230,24 @@ export async function runCheck(app: App, repoRoot: string = REPO_ROOT): Promise<
  * measured, never assumed from `report.errors.length === 0` alone.
  *
  * ⛔ Soft-deleted-doc orphans (measured 2026-08-11, task-unify-mirror-identifiers-on-zero-padded-
- * form-export-all): `ExportDocsService.exportDocs`'s own reconcile/prune-adjacent logic only ever
- * revisits docs in its OWN `findMany({type})` result, which defaults to `exclude_deleted: true`
- * — a doc soft-deleted AFTER being mirrored is invisible to it forever, so its stale mapping
- * (and file) would otherwise never be pruned even though `.md` files under a mirror dir must
- * equal the LIVE (non-deleted) corpus count for AC-FR-10a. Fix: before pruning, this function
- * additionally intersects the fresh mappings against the SAME live (non-deleted) doc-id set this
- * pass just fetched per type — a mapping whose doc id is no longer live is treated as an orphan
- * exactly like a mapping with no doc backing it at all, even though `.lore/export-index.json`
- * itself still names it. (Empirically: doc `01KWVPCJBKHPTBZQBPMXZK0B99`, a soft-deleted
- * `knowledge` assessment, inflated the on-disk knowledge count to 416 against a 415 live count.)
+ * form-export-all; MAPPING side closed 2026-08-17, task-the-mirror-prune-does-not-retire-a-
+ * mapping-whose-doc-was): a doc soft-deleted AFTER being mirrored used to keep BOTH a stale
+ * `.lore/export-index.json` mapping AND its on-disk file forever — `ExportDocsService.exportDocs`'s
+ * own reconcile logic only ever revisited docs in its `findMany({type})` result (`exclude_deleted:
+ * true` by default), so a soft-deleted doc's mapping was invisible to it. That MAPPING half is now
+ * fixed AT THE SOURCE: `exportDocs` (export-docs-service.ts) fetches a second, type-scoped
+ * population INCLUDING soft-deleted docs and retires (deletes) any mapping whose doc resolves to
+ * one of them, via `retireDeletedDocMappings` — the fresh `.lore/export-index.json` this function
+ * reads below (`loadMirrorMappings`, after every type's `exportDocs()` call has returned) already
+ * excludes that mapping, not merely this function's OWN `liveDocIds` intersection. The intersection
+ * below is retained as a second, harmless line of defense (it also protects against a caller that
+ * bypasses `exportDocs`'s own retirement, or a version skew between this script and the service),
+ * but it is no longer the ONLY mechanism preventing the stale mapping from persisting — the FILE
+ * side (a `.md` no longer referenced by any mapping) still relies on `pruneOrphanMirrorFiles`
+ * below exactly as before. (Empirically: doc `01KWVPCJBKHPTBZQBPMXZK0B99`, a soft-deleted
+ * `knowledge` assessment, kept BOTH its mapping and (until a prior prune run) its file — the
+ * mapping alone survived in `.lore/export-index.json` for weeks after the file was gone, which is
+ * the exact defect task-the-mirror-prune-does-not-retire-a-mapping-whose-doc-was fixes.)
  *
  * @throws {SpecMirrorError} `corpus_unreadable` if the underlying `exportDocs`/`listFull` call
  *   for ANY type fails outright (a store-level error, not a per-doc one — those land in that
@@ -260,8 +268,11 @@ export async function runExport(app: App, repoRoot: string = REPO_ROOT): Promise
   }
 
   // Live (non-deleted) doc-id set across every mirrored type — see the "soft-deleted-doc
-  // orphans" note above. Same default `exclude_deleted: true` ExportDocsService itself uses, so
-  // this set is exactly "what SHOULD still be mirrored", never a broader or narrower one.
+  // orphans" note above (mapping side now retired at the SOURCE by `exportDocs` itself; this
+  // is a second, defensive derivation for the FILE-pruning purpose below, not the only thing
+  // standing between a soft-deleted doc and a stale mapping). Same default `exclude_deleted:
+  // true` ExportDocsService itself uses, so this set is exactly "what SHOULD still be
+  // mirrored", never a broader or narrower one.
   const liveDocIds = new Set<string>();
   for (const type of MIRROR_TYPES) {
     const docsResult = await app.corpusService.listFull({ type });

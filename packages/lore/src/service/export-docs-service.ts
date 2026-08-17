@@ -416,7 +416,25 @@ export class ExportDocsService {
     if (!docsResult.ok) return docsResult;
     const allDocs = docsResult.value;
 
-    const indexResult = await buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir);
+    // task-the-mirror-prune-does-not-retire-a-mapping-whose-doc-was (2026-08-17) — a SEPARATE
+    // fetch, INCLUDING soft-deleted docs, scoped by the SAME `opts.type` filter as `allDocs`
+    // above. This is what lets `buildOrExtendIndex` distinguish "this docId never existed at
+    // all" (an orphan RESERVATION several existing tests rely on staying inert forever —
+    // `repairCollisions`/`reconcileOrdinalMappings`'s own "not this reconciler's concern"
+    // stance toward a mapping with no backing DocRecord) from "this docId existed and was
+    // soft-deleted" (the ONLY case this task's retirement step may act on). Reusing the SAME
+    // type filter also means a per-type call's retirement check can never see a DIFFERENT
+    // type's doc at all — a spec-scoped pass's `everKnownDocIds` simply never contains a
+    // knowledge doc's id, deleted or not, so no separate directory-scope guard is needed.
+    // Never reused for anything else in this method — `allDocs` above stays the SAME live-only
+    // population every other phase (topo sort, Phase 2 write loop) already depends on.
+    const everKnownDocsResult = await this.store.findMany(
+      opts.type ? { type: opts.type, exclude_deleted: false } : { exclude_deleted: false },
+    );
+    if (!everKnownDocsResult.ok) return everKnownDocsResult;
+    const everKnownDocIds = new Set(everKnownDocsResult.value.map((d) => d.id));
+
+    const indexResult = await buildOrExtendIndex(indexPath, docsBaseDir, allDocs, opts.projectDir, everKnownDocIds);
     if (!indexResult.ok) return indexResult;
     const { index, repaired, ordinalWarnings, reconciledDocIds } = indexResult.value;
 
@@ -820,8 +838,12 @@ function maxNumberForPrefix(prefix: string, humanIds: string[]): number {
  *
  * @param indexPath - Absolute path to .lore/export-index.json.
  * @param docsBaseDir - Absolute path to docs/requirements/.
- * @param docs - All active corpus docs to reconcile.
+ * @param docs - All active (live) corpus docs to reconcile.
  * @param projectDir - Absolute project root (for resolving file_path during self-heal).
+ * @param everKnownDocIds - Every doc id that exists at all (live OR soft-deleted) under the
+ *   SAME type scope `docs` was fetched with — see `retireDeletedDocMappings`'s own doc
+ *   comment for why this is the discriminator between a retirable (soft-deleted) mapping and
+ *   an inert orphan reservation (docId that never existed).
  * @returns ok({index, repaired, ordinalWarnings, reconciledDocIds}) with all docs mapped; err on
  *   allocation exhaustion or store failure.
  */
@@ -830,6 +852,7 @@ async function buildOrExtendIndex(
   docsBaseDir: string,
   docs: DocRecord[],
   projectDir: string,
+  everKnownDocIds: ReadonlySet<string>,
 ): Promise<
   Result<
     { index: ExportIndex; repaired: string[]; ordinalWarnings: string[]; reconciledDocIds: Set<string> },
@@ -849,6 +872,16 @@ async function buildOrExtendIndex(
   const ordinalReconcile = reconcileOrdinalMappings(index, docs);
   repaired.push(...ordinalReconcile.repairLog);
   const reconciledDocIds = ordinalReconcile.reconciledDocIds;
+
+  // task-the-mirror-prune-does-not-retire-a-mapping-whose-doc-was (2026-08-17) — a THIRD
+  // "strip the stale mapping" pass, same repairLog array, same "runs before counter
+  // seeding" placement as the two above: a mapping whose doc was soft-deleted (or never
+  // existed) since being mirrored is retired here so a corpus-wide parity oracle stops
+  // seeing it forever. `everKnownDocIds` is scoped by the SAME `opts.type` filter `docs`
+  // itself was fetched with (see `exportDocs`'s own comment on that fetch), so a per-type
+  // call can never mistake an OTHER type's mapping for a genuine orphan — that mapping's
+  // docId simply never appears in a type-narrowed `everKnownDocIds` at all.
+  repaired.push(...retireDeletedDocMappings(index, docs, everKnownDocIds));
 
   const ordinalWarnings: string[] = [];
 
@@ -1135,6 +1168,93 @@ function reconcileOrdinalMappings(
   }
 
   return { repairLog, reconciledDocIds };
+}
+
+/**
+ * Retires an export-index mapping whose doc was SOFT-DELETED since being mirrored — it still
+ * belongs to `everKnownDocIds` (it resolves to a real DocRecord) but no longer to the LIVE
+ * population THIS PASS is authoritative for
+ * (task-the-mirror-prune-does-not-retire-a-mapping-whose-doc-was, 2026-08-17). Measured on
+ * the real corpus: `pruneOrphanMirrorFiles` (scripts/export-spec-mirror-core.ts, invoked
+ * only by `bun run mirror:export`'s `runExport`) already deletes the ORPHANED FILE once its
+ * mapping is gone from the FRESH index it reads back after export — but nothing ever
+ * removed the mapping ITSELF, so `.lore/export-index.json` kept naming a deleted doc
+ * forever (measured: doc `01KWVPCJBKHPTBZQBPMXZK0B99`, soft-deleted 2026-07-18, still
+ * mapped weeks later with its file already gone) and every corpus-wide parity oracle
+ * (AC-OX-6) reported it as a permanent, unfixable-by-re-running defect. This is the
+ * missing half, landed HERE — not in the script — so every `exportDocs` caller (`lore
+ * export-docs`, `bun run mirror:export`, the MCP/HTTP surfaces) retires it identically,
+ * never only the one surface that happened to expose the gap.
+ *
+ * Scoped by `everKnownDocIds`, NOT merely "docId absent from `docs`" — two DIFFERENT reasons
+ * a docId can be absent from `docs` (the LIVE population), and only one of them is retirable:
+ *
+ *   1. The doc EXISTS but is soft-deleted (`deleted_at` set) — retirable. This is the actual
+ *      task scope.
+ *   2. The docId never existed in the store AT ALL (a hand-seeded or historical "orphan"
+ *      mapping several EXISTING tests deliberately rely on as an inert human_id/file_path
+ *      RESERVATION — `repairCollisions`/`reconcileOrdinalMappings`'s own "not this
+ *      reconciler's concern" stance toward `doc === undefined`) — NOT retirable. Conflating
+ *      this with case 1 is a regression this function's own test suite measured directly: an
+ *      existing fixture pins a doc titled "SPEC-040 — Late Claimant" falling back to
+ *      SPEC-041 because an unrelated orphan mapping already "reserves" SPEC-040 — an early
+ *      version of this function retired that reservation too, letting the new doc's own
+ *      title-declared number (SPEC-041's Amendment A1 path) claim SPEC-040 right back,
+ *      silently reintroducing the exact human_id-collision risk that reservation exists to
+ *      prevent.
+ *
+ * `everKnownDocIds` (fetched by `exportDocs` via a SEPARATE `findMany({..., exclude_deleted:
+ * false})` call, scoped by the SAME `opts.type` filter as `docs`) is what tells these two
+ * cases apart: case 1's docId IS in `everKnownDocIds` (it resolves to a real, if deleted,
+ * DocRecord); case 2's docId is in NEITHER set. Reusing the SAME type filter also means a
+ * per-type call's `everKnownDocIds` can never contain an OTHER type's doc id at all — a
+ * spec-scoped pass simply never sees a knowledge doc's id, deleted or not, so no separate
+ * directory-scope guard is needed on top of this.
+ *
+ * ⛔ Never deletes the on-disk file — mirrors this module's own established "strip the
+ * INDEX entry only" contract (see the two repair functions above: a stale mapping is
+ * dropped so a later pass can act on it, but the file itself is left for a SEPARATE
+ * cleanup step). Here, that separate step is `pruneOrphanMirrorFiles`: once this mapping
+ * is gone from the SAVED index (`saveIndexAtomic` runs immediately after this function's
+ * caller returns), the file is "no longer mapped to any corpus doc" on the very next
+ * prune, exactly like any other orphan file — no new file-deletion code path needed.
+ *
+ * @param index the export index being built/extended THIS run (mutated in place).
+ * @param docs the LIVE (non-deleted) doc population `exportDocs` fetched for its `opts.type`
+ *   scope (or every type, when `opts.type` is unset) — the SAME `findMany` result the rest
+ *   of this pass uses, never a separately-fetched population.
+ * @param everKnownDocIds every doc id that exists at all (live OR soft-deleted), under the
+ *   SAME type scope `docs` was fetched with — see above for why this is the retirable-vs-
+ *   inert-orphan discriminator.
+ * @returns human-readable repair-log lines (empty when nothing was retired) — pushed into
+ *   the SAME `ExportReport.repaired` array `reconcileOrdinalMappings`/`repairCollisions`
+ *   already populate, so a caller sees this action without a new report field to consume.
+ */
+function retireDeletedDocMappings(
+  index: ExportIndex,
+  docs: DocRecord[],
+  everKnownDocIds: ReadonlySet<string>,
+): string[] {
+  const repairLog: string[] = [];
+  const liveDocIds = new Set(docs.map((d) => d.id));
+
+  for (const [docId, mapping] of Object.entries(index.mappings)) {
+    if (liveDocIds.has(docId)) continue; // still live — nothing to retire
+
+    if (!everKnownDocIds.has(docId)) {
+      continue; // never existed at all (for THIS pass's type scope) — an inert orphan reservation, not this function's concern
+    }
+
+    delete index.mappings[docId];
+    const line =
+      `deleted-doc-retire: doc ${docId} was mapped to ${mapping.human_id} / ${mapping.file_path} ` +
+      `but resolves to a SOFT-DELETED corpus doc — retiring the mapping; the orphaned mirror ` +
+      `file itself is left for pruneOrphanMirrorFiles to remove`;
+    repairLog.push(line);
+    process.stderr.write(`⚠ export-index deleted-doc-retire: ${line}\n`);
+  }
+
+  return repairLog;
 }
 
 /**
