@@ -108,7 +108,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [knowledge] Six governance gaps measured while landing the anchor-coverage ratchet (approved)
+- [knowledge] Governance gaps measured while landing the anchor-coverage ratchet (approved)
 - [knowledge] Retired from root CLAUDE.md: eight pointer-less standing lessons (approved)
 - [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
 - [spec] Oracle exclusivity in a shared checkout: a mirror check that cannot repair itself, a pollution guard that sees mirror content, a gitignored probe namespace, and a serialized suite (approved)

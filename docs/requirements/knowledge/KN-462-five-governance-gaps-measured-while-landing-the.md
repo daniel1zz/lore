@@ -2,7 +2,7 @@
 id: KN-462
 type: knowledge
 role: knowledge
-title: "Six governance gaps measured while landing the anchor-coverage ratchet"
+title: "Governance gaps measured while landing the anchor-coverage ratchet"
 status: approved
 priority: medium
 created: 2026-08-17
@@ -151,6 +151,41 @@ invariant and assert the hook's exit code, plus a second independent condition (
 in the hook's own output). Both halves are needed: exit code alone can come from an unrelated earlier
 check in the same hook, and output alone does not prove the push is blocked. The parity diff stays as-is
 — it answers a different question (does the consumer copy carry it).
+
+## G7 — a governance doc contradicting ITSELF has no oracle, and it happened three times in one session
+
+The three defects below are not independent; they are one shape. In each, a single lore document
+states a constraint in prose and then, in another of its own fields, violates that same constraint.
+Nothing in lore compares a document's fields against each other, so every one of them was found by a
+human-ish read at dispatch time rather than by any check.
+
+| Doc | Field A (the rule) | Field B (breaks it) |
+|---|---|---|
+| `spec-…-an-anchor` AC-BFI-5 | statement: "SET EQUALITY … **never the literal 55**" | `verify.command` echo: "55 rows: 11 deliberate / 44 debt" (真值 60 / 11 / 49) |
+| `spec-…-an-anchor` AC-BFI-2 | statement: "⛔ asserts exit == 3, **never 'non-zero'**" | `verify.command` echo: "dev-stale=exact-nonzero" |
+| `task-embed-build-provenance-…` | body: "Derivation belongs in the **service layer**" | `file_anchors`: four paths, **no service file** — the task forbade its own solution |
+
+The third is the costly one: it burned a full agent dispatch (152k tokens, 10 minutes) that could only
+end in a STOP-and-report, because the task's write scope structurally excluded the layer its own
+constraints mandated. The agent behaved correctly; the task was unsatisfiable as written.
+
+Root cause: lore validates each field against a SCHEMA, never against the document's other fields. A
+statement and a command are both free text to the validator; a body and an anchor list are two
+unrelated columns. Internal consistency is exactly the property a reviewer is worst at (the two halves
+are far apart in the rendered doc) and a machine would be best at.
+
+Mechanization, cheapest first:
+1. At `lore ac add|set`: if the statement contains a negative literal ("never the literal N", "never
+   'X'"), assert the command does not contain N / X. Both cases above are caught by a substring test.
+2. At `lore create task` / `lore anchor add`: extract path-like and layer-like tokens from the task
+   body (`service layer`, `packages/…/x.ts`) and warn when the anchor set covers none of them. Advisory
+   is enough — the author is present.
+3. Generally: any check comparing two fields of ONE document is cheap, needs no corpus scan, and this
+   session showed the failure rate is not low.
+
+Until such a check exists, the dispatcher MUST read a task's body and its `file_anchors` against each
+other before dispatching, and read each AC's statement against its own `verify.command`. That is a
+prose mitigation for a mechanizable defect, and should be treated as a stopgap, not a fix.
 
 ## What the ratchet caught on its first real use
 
