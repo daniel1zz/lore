@@ -3,11 +3,11 @@ id: TASK-730
 type: task
 role: plan
 title: "The mirror prune does not retire a mapping whose doc was soft-deleted, so KN-025 keeps its mirror file and index entry forever and short-circuits the whole bun test half"
-status: draft
+status: archived
 priority: critical
 phase: "readonly-oracle"
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-17
 tags: []
 parent: PLAN-124
 plan: PLAN-124
