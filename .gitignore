@@ -1,5 +1,14 @@
 dist/
 node_modules/
+# @tanstack/router-cli codegen scratch. `bun run typecheck` and the dashboard
+# prebuild both invoke the generator, which writes here, so leaving it
+# untracked-but-not-ignored made every local typecheck/build dirty the tree.
+# That had teeth: `lore evidence --result pass` and `lore release` refuse on a
+# dirty tree and their remedy text says to `git add` the offending path, i.e.
+# it instructs committing generated output; and SPEC-134's `build_dirty` reads
+# true for every local build. Measured 2026-08-17 in a fresh worktree
+# (.tanstack/tmp/), where the generator writes on first run.
+packages/dashboard/.tanstack/
 # .lore/ contents are local (db, WAL, key) EXCEPT export-index.json —
 # SPEC-021: the corpus↔file ID map is git-tracked and team-shared.
 # audit-anchor.json (SPEC-079 G3) is the SAME kind of exception — the
