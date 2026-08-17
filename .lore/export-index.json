@@ -6008,6 +6008,10 @@
     "01M06SG8FZ1T0JYVG6WS9C7CW3": {
       "human_id": "KN-459",
       "file_path": "docs/requirements/knowledge/KN-459-assessment-land-oracle-exclusivity-a-mirror-check.md"
+    },
+    "01M06TPEH575V4AZH3BP3YMCBN": {
+      "human_id": "KN-460",
+      "file_path": "docs/requirements/knowledge/KN-460-a-concurrent-write-silently-invalidates-the-other.md"
     }
   }
 }
