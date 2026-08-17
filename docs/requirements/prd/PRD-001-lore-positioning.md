@@ -109,6 +109,9 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
 - [spec] Oracle exclusivity in a shared checkout: a mirror check that cannot repair itself, a pollution guard that sees mirror content, a gitignored probe namespace, and a serialized suite (approved)
+- [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
+- [knowledge] A concurrent write silently invalidates the other party's verdict: the orchestrator polluted its own implementer's corpus-reading tests, and a peer merge staled a full-suite green (approved)
+- [knowledge] An AC id is spec-local but every prose reference treats it as global: 51 exact ids are claimed by more than one live spec (draft)
 - [task] lore list silently omits invalidated docs and reports a self-consistent total, so a corpus-wide census is wrong by exactly the hidden population with no signal that anything was filtered (draft)
 - [task] The --cwd blind spot is a CLASS, not one function: lore done's unfiltered-run floor also strips only a 'cd' prefix, so obeying this repo's own no-cd discipline makes a task un-archivable (draft)
 - [task] lore done tells you to archive a plan whose declared phases are mostly EMPTY: 'every child task is archived' cannot distinguish a finished plan from one that was never decomposed (draft)
@@ -163,7 +166,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] Attestation is structurally one-sided: lore verify can attest greens but never reds, and the done-gate's unfiltered-run requirement is unreachable from AC oracles that all carry -t (approved)
 - [knowledge] Eight findings from landing four governance specs: a bunx-installed compiler that made me overrule a true record, a designed behaviour I reported as a defect, and six review rounds converging on missing data (approved)
 - [knowledge] Seven findings from planning the bootstrap-fixpoint slice: a plan-scoped anchor mutex and its equally blind report, a hook that misnames its own refusal, an asymmetric AC demotion, the self-exempting-oracle pair, and four probes of my own that nearly lied (approved)
-- [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
 - [knowledge] Nine findings from landing the mirror-id-unify merge: two concurrent sessions poisoning one checkout, a suite mutually exclusive with its own corpus, an ordinal reversion loop the merge armed, an AI judge that read a rename backwards, and an exclusivity probe of mine that lied (approved)
 - [spec] Falsifiability reachability: a feedable checkpoint, an attestable red, a guard that means what it says, and a mirror whose drift trips (approved)
 - [knowledge] Four governance-tooling gaps measured while resuming handoff-82: a silent pass, an undecomposable count, three unfeedable gates, and the eighth false-oracle vector (approved)
