@@ -125,17 +125,10 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 **Standing lessons** — one line each, scope only. Full text: `knowledge-retired-from-root-claude-md-the-19-dogfooding`, `knowledge-retired-from-root-claude-md-2026-08-13-three-standing`; pre-2026-07-22 history: `docs/claude-md-archive/dogfood-eval-log.md` (FROZEN).
 
 - False oracles — exit-code-true ≠ measured-the-right-thing; six vectors, four mechanized, two open. `knowledge-retro-a-silently-inert-cli-flag-is-the-fifth-false`
-- Contiguous-substring matchers degrade silently to no-match — key on lone tokens + independent negative conditions.
-- SSOT↔installed asset pairs need content-parity assertions; manifest presence proves nothing.
-- Every distribution pipe and gate-read field needs an install→visible / author→trip end-to-end oracle.
-- Worktree dispatch: `bun install` FIRST; verify `git log` on the branch BEFORE merge+cleanup.
+- Eight pointer-less lessons were evicted VERBATIM and remain normative — substring matchers, SSOT↔asset parity, distribution oracles, worktree dispatch order, `spawnSync`/`set -e`, main-checkout actor, path-scoped commits, clean-tree verdicts: `knowledge-retired-from-root-claude-md-eight-pointer-less`
 - The global `lore` symlinks into the main checkout's `dist/` — ⛔ never rebuild while an agent runs; merging ≠ releasing. `knowledge-the-global-lore-is-a-symlink-into-the-main-checkout-s`
-- `spawnSync` on a growing `--json` payload needs explicit `maxBuffer`; ⛔ `set -e` is INERT in the agent shell — chain with `&&` and assert resulting state after every batch.
-- Main-checkout oracle runs need `LORE_ACTOR=agent:main-orchestrator` — nothing enforces it.
 - Distribution-first: name the delivery surface or it does not exist for consumers. `adr-distribution-first-every-improvement-names-its-consumer`
 - Spec close-outs write NOTHING to this file. `adr-claude-md-specs-section-is-pointer-only-per-spec-index`
-- In a shared checkout, commit PATH-SCOPED (`git commit -m "<msg>" -- <paths>`).
-- A full-suite verdict requires a CLEAN tree at a named commit.
 - A new deterministic gate retroactively invalidates the back-catalog — budget the sweep + a written exemption in the SAME slice. `knowledge-retro-a-newly-built-gate-leaves-every-pre-existing`
 - A backgrounded oracle's completion notice reports the SHELL's exit code — persist `$?` and read it back; a ceiling kill reports 143. `knowledge-a-backgrounded-command-s-completion-notice-reports`
 - Human renders are lossy projections; fixing ONE consumer leaves the seam lossy; list columns truncate — key on the ID. ⛔ Worse UNLISTED: `lore list` silently drops invalidated docs while `total` and per-type sums stay self-consistent (1475 vs 1495 under `--include-invalid`) — a census is wrong by the hidden population with NO signal (read 21 orphans against a true 1). Every census MUST pass `--include-invalid`. `knowledge-eleven-findings-from-resuming-handoff-102-with-three`
@@ -152,6 +145,7 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - ⛔ After ANY corpus write converge the mirror: `bun run mirror:export` NOW repairs status/frontmatter unconditionally (2026-08-13; the old "no invocable command re-exports a status change" claim is FALSE), BODY drift needs `lore export-docs --force`, and the suite no longer writes the mirror. `--check` catches a MISSING file, never a wrong one. ⛔ `bun run test` is an `&&` chain — one vitest red SHORT-CIRCUITS the whole bun half. Same retro.
 - ⛔ An `assess` MAJOR can be exactly BACKWARDS — one read a rename's SOURCE side as the result and indicted a filename that same commit FIXED. Machine-check every finding that names a path before scoring it; path existence is decidable, never a judgment. Same doc.
 - ⛔ MEASURE a field/command before pinning an AC's oracle to it, and never pair that pin with a clause REFUSING the alternative in the same round: pinning `lore status --json` (which surfaces `ai_defaults` but NOT arbitrary resolved config) while forbidding a hand-rebuilt merge left an AC with no runnable oracle at all. Tightening an oracle can DESTROY it. `knowledge-five-governance-tooling-gaps-measured-while-resuming`
+- ⛔ `active_sessions` measures CLAIM LEASES, not machine occupancy: a session that runs the suite, exports the mirror or rebuilds the binary without claiming a task produces no row. Measured empty while the main checkout was 15m into `bun run test` and had rewritten `dist/lore` 19s earlier. Empty ≠ safe to rebuild; `oracle-lock.ts` already knows the truth and should feed it. `knowledge-five-governance-gaps-measured-while-landing-the`
 
 ### AI Default Behavior by Caller Surface (SPEC-024)
 
