@@ -272,6 +272,36 @@ result — they are the signature of a probe that never ran; (3) the Bash tool's
 `$var` holding a command line does not split — build argv with `"$@"` or an array, never by relying on
 word splitting.
 
+## G11 — `anchor_conflicts` counts ARCHIVED tasks, so the pre-dispatch safety read carries noise
+
+Observed while extending a task's anchors mid-flight. `lore ready <plan> --json` reported:
+
+    anchor_conflicts: [{ task_slug: "task-wire-the-binary-provenance-check-into-both-byte-identical",
+                         holder: "agent:prepush-anchor-ratchet",
+                         paths: ["hooks/pre-push", "assets/project/pre-push", ".../assets-manifest.ts"] }]
+
+That task was `archived` minutes earlier (`lore done` → `approved -> active -> archived`). Its anchors
+should have left the contention set with it. The live holder named in the row is a DIFFERENT task that
+legitimately holds those paths — so the row is a real overlap attributed to a dead task.
+
+This is the same defect family as the already-recorded `lore ready --json .records` containing archived
+entries with `ready:false`: the report is computed over all of a plan's tasks rather than its live ones.
+The consequence differs by direction, and both are bad:
+
+- False positive (what happened): a dispatcher reading "conflicts is non-empty" holds back a dispatch
+  that was actually safe.
+- False negative (the dangerous one): a genuine conflict sits in a list padded with archived rows and
+  gets skimmed past. There is no field distinguishing the two — the row shape is identical.
+
+Note this compounds with the already-recorded plan-scoping defect: `anchor_conflicts` is plan-scoped, so
+it simultaneously MISSES every cross-plan collision and INVENTS collisions from its own archived tasks.
+An empty list proves nothing and a non-empty list means nothing without reading each row's task status.
+
+Mechanization: filter the contention set to non-archived tasks where it is computed
+(`buildAnchorGateContext` / `getPlanBundle`), the same predicate the ready-set already needs. One
+oracle covering both directions: archive a task holding path P, then assert P no longer appears in
+`anchor_conflicts` while a live holder of P still does.
+
 ## What the ratchet caught on its first real use
 
 Declaring anchors on `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor` — which was itself
