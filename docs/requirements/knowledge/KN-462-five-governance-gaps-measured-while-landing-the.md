@@ -236,6 +236,42 @@ Mechanization: accept a runner-written exit-code file (`cmd > log 2>&1; echo $? 
 attested source — lore reads both, and the caller never authors either. That closes the gap without
 weakening the rule that a caller-authored tail is worthless.
 
+## G10 — the orchestrator's own probes failed twice, and a broken probe looks exactly like a broken subject
+
+Both failures were mine, in the verification step that exists precisely to avoid trusting an agent's
+self-report. Both produced a RED that had nothing to do with what was being measured.
+
+**Instance 1 — the quoting killed the PATH.** Probing whether the new pre-push hook actually blocks on
+a stale binary, I wrote `PATH='<dir>:$PATH'` inside a `bash -c` string. Single quotes, so `$PATH` never
+expanded; every command in the hook became not-found. Result: hook exit **127**, zero bytes of output,
+`grep -c "binary provenance"` → 0. The reverse control ALSO exited 127, which should have been the tell
+— instead both halves were "red", which reads as "the feature does nothing". Had I stopped there I
+would have reported a working implementation as broken.
+
+**Instance 2 — zsh does not word-split.** Checking all five pre-push gates in a loop:
+`for c in "status --check-tree --check-drift" …; do ./dist/lore $c; done`. In bash the unquoted `$c`
+splits into three arguments; **in zsh it does not**, so the binary received one argument
+`"status --check-tree --check-drift"`, rejected it as an unknown command, and returned 1 — five times.
+The uniform `exit=1` across five unrelated checks read as a total gate collapse. The true result, after
+switching to `"$@"`, was 3/0/0/0/0.
+
+Common root cause: **a probe that fails to execute and a subject that fails the check produce the same
+observable** — non-zero exit, no matching output. Every false-oracle lesson in this repo is about the
+green direction (something passed that should not); this is the red direction, and it is just as
+capable of sending a session down the wrong path — Instance 1 would have condemned correct code,
+Instance 2 would have triggered an investigation into five healthy gates.
+
+What I did right elsewhere and skipped here: the AC-BFI-5 verification ran an UNMUTATED copy first and
+asserted it exits 0 — a live control proving the harness itself works before trusting any red it
+produces. Neither failing probe had one.
+
+Mechanization: (1) every ad-hoc probe gets a live control that must PASS before any red from that
+harness is believed — this is the same discipline the ACs already demand of implementers, and the
+orchestrator is not exempt; (2) treat exit 127 and a zero-byte artifact as HARNESS FAULT, never as a
+result — they are the signature of a probe that never ran; (3) the Bash tool's shell is zsh, so
+`$var` holding a command line does not split — build argv with `"$@"` or an array, never by relying on
+word splitting.
+
 ## What the ratchet caught on its first real use
 
 Declaring anchors on `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor` — which was itself
