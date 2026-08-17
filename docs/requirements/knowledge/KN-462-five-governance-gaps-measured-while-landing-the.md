@@ -2,7 +2,7 @@
 id: KN-462
 type: knowledge
 role: knowledge
-title: "Five governance gaps measured while landing the anchor-coverage ratchet"
+title: "Six governance gaps measured while landing the anchor-coverage ratchet"
 status: approved
 priority: medium
 created: 2026-08-17
@@ -117,6 +117,40 @@ Third data point on the demotion asymmetry already recorded for `ac set` (demote
 not). `lore anchor add` writes `extra.code_anchors` on an approved spec and leaves it `approved`
 (v34 → v35 observed). So the set of `extra` writes that bypass re-review is larger than the AC pair:
 an approval certifies neither the AC set nor the anchor set as a reader sees them later.
+
+## G6 — the wiring AC that exists to prevent inert capability is itself grep-shaped
+
+`AC-BFI-9` (and its D1 twin `AC-BFI-3`) exist precisely because "capability and production wiring must
+be the SAME acceptance unit" — a checker no pipeline calls is inert. Their oracle is
+`diff hooks/pre-push assets/project/pre-push && grep -c check-anchor-coverage hooks/pre-push && echo …`.
+
+That oracle is satisfied by a COMMENT. A line reading `# check-anchor-coverage: TODO` in `hooks/pre-push`
+passes the grep, passes the parity diff (if mirrored into the asset copy), and produces an attested
+green for an AC whose entire purpose is proving the check runs. The failure mode the criterion was
+written to exclude is reachable through the criterion itself.
+
+Measured context that makes this concrete: `hooks/pre-push` currently invokes FOUR checks, all of them
+`lore …` subcommands — not one `bun run check:*`. Every `check:*` npm script in `package.json`
+(`check:test-budgets`, `check:ac-ref-integrity`, `check:no-nul-bytes`, …) is therefore push-invisible,
+which the root CLAUDE.md already records for test-shaped oracles. So `check-anchor-coverage` will be
+the first non-`lore` check in that hook, and nothing in AC-BFI-9 forces it to actually execute.
+
+Incidental finding: the grep string is `check-anchor-coverage` with HYPHENS, so wiring the hook as
+`bun run check:anchor-coverage` (colon) would fail the grep. The AC silently constrains the
+implementation to the direct `bun scripts/check-anchor-coverage.ts` form. That is a fine outcome, but
+it is accidental rather than declared, and it means `package.json` needs no new script — the concern
+raised by the implementing agent resolves to "not needed", not "out of scope".
+
+Root cause: a wiring AC was written as a PRESENCE assertion over the pipeline's source text, when the
+property it means to assert is BEHAVIOURAL — "an offending tree makes this hook exit non-zero".
+Presence is the cheapest observable, and it is the one that a self-documenting file over-matches, the
+same mirror-face the marker-census lesson already names.
+
+Mechanization: a wiring AC MUST drive the surface. Run the hook itself against a tree that violates the
+invariant and assert the hook's exit code, plus a second independent condition (the finding text appears
+in the hook's own output). Both halves are needed: exit code alone can come from an unrelated earlier
+check in the same hook, and output alone does not prove the push is blocked. The parity diff stays as-is
+— it answers a different question (does the consumer copy carry it).
 
 ## What the ratchet caught on its first real use
 

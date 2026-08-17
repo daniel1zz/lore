@@ -6,12 +6,14 @@ title: "Handoff — agent:main-orchestrator"
 status: approved
 priority: medium
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-17
 tags: []
 parent: PLAN-124
 links:
   - {id: KN-456, type: supersedes}
 ---
+> ⚠ INVALIDATED 2026-08-17T03:03:52.651Z — superseded by knowledge-handoff-agent-main-orchestrator-105; Superseded by ticket 105: AC-OX-6 is now green and both blocked tasks are archived, so 104's NS1/NS2/NS5 are complete; 105 carries the surviving items plus this session's new findings
+
 # Handoff — agent:main-orchestrator
 
 SCOPE: 13 decisions + 6 next steps = 19 items to account for
