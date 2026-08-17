@@ -3,11 +3,11 @@ id: TASK-652
 type: task
 role: plan
 title: "Register an anchor-coverage enumerator on the existing COUNT_FIELD_ENUMERATORS seam"
-status: draft
+status: archived
 priority: medium
 phase: "anchor-ratchet"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-17
 tags: []
 parent: PLAN-121
 plan: PLAN-121

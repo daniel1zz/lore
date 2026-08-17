@@ -108,8 +108,8 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [knowledge] bun run test:changed — full selection contract and its three residuals (approved)
 - [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
+- [knowledge] bun run test:changed — full selection contract and its three residuals (approved)
 - [knowledge] Governance gaps measured while landing the anchor-coverage ratchet (approved)
 - [spec] Oracle exclusivity in a shared checkout: a mirror check that cannot repair itself, a pollution guard that sees mirror content, a gitignored probe namespace, and a serialized suite (approved)
 - [knowledge] The AC coverage badge ignores fail_superseded, so a criterion re-proved by a newer attested pass renders as failed forever in its spec and its mirror (approved)

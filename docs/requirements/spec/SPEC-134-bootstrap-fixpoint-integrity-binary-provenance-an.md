@@ -238,3 +238,4 @@ inert. ⛔ A criterion never observed red is not evidence
 - packages/lore/tests/integration/binary-provenance-check.test.ts
 - hooks/pre-push
 - assets/project/pre-push
+- packages/lore/tests/integration/anchor-coverage-surface.test.ts
