@@ -9,6 +9,8 @@ created: 2026-08-17
 updated: 2026-08-17
 tags: []
 parent: PRD-001
+links:
+  - {id: PLAN-121, type: informs}
 ---
 # Five governance gaps measured while landing the anchor-coverage ratchet
 

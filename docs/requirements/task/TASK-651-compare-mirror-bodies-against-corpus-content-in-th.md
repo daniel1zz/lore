@@ -3,11 +3,11 @@ id: TASK-651
 type: task
 role: plan
 title: "Compare mirror bodies against corpus content in the spec-mirror check"
-status: draft
+status: archived
 priority: medium
 phase: "mirror-content"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-17
 tags: []
 parent: PLAN-121
 plan: PLAN-121
