@@ -50,7 +50,12 @@
  * fields has a matching entry in `COUNT_FIELD_ENUMERATORS` below, reachable
  * via `lore status --enumerate <field>` (AC-FR-5's own binding-on-future-
  * counts requirement) — a new count with no enumerator is the exact gap that
- * flag exists to make impossible to ship silently.
+ * flag exists to make impossible to ship silently. `code_anchor_specs` (the
+ * SPEC-045 D5 declared-anchor count, reported by the plain run alongside them)
+ * is registered there too as of AC-BFI-4 (spec-bootstrap-fixpoint-integrity-
+ * binary-provenance-an-anchor): the anchor-coverage ratchet's own population
+ * must be READABLE, not merely countable, and it is enumerated through this
+ * one seam rather than a parallel bespoke coverage block.
  *
  * --check-tree and --check-drift COMPOSE (SPEC-045 D5 restructure — neither check
  * early-exits the process anymore; both are value-returning, combined at the end):
@@ -116,6 +121,7 @@ import {
 import { buildRealFsProbe } from "../../real-fs-probe.js";
 import {
   deriveAcCoverageState,
+  err,
   extractEvidence,
   formatMemoryFileBudgetSubstitution,
   ok,
@@ -660,16 +666,82 @@ async function collectCaptureSourceMembers(
 }
 
 /**
- * SSOT registry mapping every `*_count` field `lore status --json` reports
- * to the function that ENUMERATES its members (task-raise-the-evidence-
- * tail-guard-s-predicate-to-its-own, AC-FR-5). `lore status --enumerate
- * <field>` (below) and the normal-status branch's own displayed counts BOTH
- * consume this registry — a count is never computed independently of its
- * enumerator, so `count === enumerator().length` holds by construction, not
- * by convention. ⛔ Adding a new `*_count` field WITHOUT a matching entry
- * here is the exact gap AC-FR-5 exists to close — `lore status --enumerate
- * <that-field>` will refuse with VALIDATION_ERROR naming it, which is the
- * generic test's own RED (b) case.
+ * The MEMBER LIST behind `lore status --json`'s `code_anchor_specs` — every
+ * LIVE spec that DECLARES at least one `extra.code_anchors` entry, by slug,
+ * sorted (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor,
+ * AC-BFI-4). Before this existed, `code_anchor_specs` was a bare number: the
+ * anchor-coverage ratchet's own population could be counted but not READ, so
+ * "which specs are anchored?" required a throwaway script — the exact shape
+ * AC-FR-5 forbids, sitting on the field this slice ratchets.
+ *
+ * ⛔ "LIVE spec" here is NOT a new definition — it is
+ * `corpusService.listFull({type: "spec"})`, bound by `buildListSpecs`, which is
+ * the SAME query `countArmedSpecs` consumes for the published count and the SAME
+ * population `scripts/check-anchor-coverage.ts` (the ratchet) and
+ * `scripts/export-spec-mirror.ts` name. `store.findMany` defaults
+ * `exclude_deleted: true` and applies no invalidation filter, so this census can
+ * never be wrong by a hidden invalidated population. A second definition of
+ * "live spec" is precisely the defect this seam exists to prevent.
+ *
+ * ⛔ The membership predicate below (a non-empty `extra.code_anchors` array)
+ * re-expresses `countArmedSpecs`'s own, because that shared helper returns the
+ * COUNT and this seam needs the SET. To keep the duplication safe the SAME spec
+ * list is then fed BACK through the real `countArmedSpecs` and a disagreement is
+ * a loud `STORE_ERROR` (CLI exit 1) rather than a silently drifted member list —
+ * the identical cross-check `check-anchor-coverage.ts::runCheck` performs, for
+ * the identical reason. Zero extra corpus reads: the second pass walks the
+ * already-fetched array.
+ *
+ * @param app - A wired `App` instance
+ * @returns Sorted slugs of every anchor-declaring live spec; `code_anchor_specs`
+ *   is this list's `.length` at both the `--json` and the `--enumerate` surface.
+ */
+async function collectCodeAnchorSpecMembers(
+  app: ReturnType<typeof loadLoreApp>["app"],
+): Promise<Result<string[], LoreError>> {
+  const specsResult = await buildListSpecs(app)();
+  if (!specsResult.ok) return specsResult;
+  const specs = specsResult.value;
+
+  const members = specs
+    .filter((spec) => {
+      const raw = spec.extra["code_anchors"];
+      return Array.isArray(raw) && raw.length > 0;
+    })
+    .map((spec) => spec.slug)
+    .sort();
+
+  const sharedCountResult = await countArmedSpecs(() => Promise.resolve(ok(specs)));
+  if (!sharedCountResult.ok) return sharedCountResult;
+  if (sharedCountResult.value !== members.length) {
+    return err({
+      code: "STORE_ERROR",
+      message:
+        `code_anchor_specs: this command's anchored-spec member list holds ${members.length} spec(s) but the shared ` +
+        `flows/drift-flow.ts::countArmedSpecs counted ${sharedCountResult.value} over the SAME ${specs.length} live ` +
+        `spec(s) — the two anchor-declaration predicates have drifted; reconcile them before trusting either number.`,
+    });
+  }
+
+  return ok(members);
+}
+
+/**
+ * SSOT registry mapping every COUNT field `lore status --json` reports to the
+ * function that ENUMERATES its members (task-raise-the-evidence-tail-guard-s-
+ * predicate-to-its-own, AC-FR-5). `lore status --enumerate <field>` (below) and
+ * the normal-status branch's own displayed counts BOTH consume this registry — a
+ * count is never computed independently of its enumerator, so
+ * `count === enumerator().length` holds by construction, not by convention.
+ * ⛔ Adding a new count field WITHOUT a matching entry here is the exact gap
+ * AC-FR-5 exists to close — `lore status --enumerate <that-field>` will refuse
+ * with VALIDATION_ERROR naming it, which is the generic test's own RED (b) case.
+ *
+ * ⛔ Registry membership is keyed on being a COUNT, never on the `_count`
+ * SUFFIX: `code_anchor_specs` (AC-BFI-4) is a count whose name predates this
+ * seam, and reading the naming convention as the rule is how it shipped for
+ * months as a bare number nobody could enumerate. A renamed field would have
+ * broken every existing consumer, so the registry accommodates the name.
  */
 const COUNT_FIELD_ENUMERATORS: Record<
   string,
@@ -692,6 +764,7 @@ const COUNT_FIELD_ENUMERATORS: Record<
     if (!membersResult.ok) return membersResult;
     return ok(membersResult.value.selfReport);
   },
+  code_anchor_specs: async (app) => collectCodeAnchorSpecMembers(app),
 };
 
 /**
@@ -855,7 +928,7 @@ export default defineCommand({
     enumerate: {
       type: "string",
       description:
-        "Enumerate the MEMBERS behind a *_count field the plain run reports (e.g. pass_unfalsified_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count). Unknown field → exit 4, naming it and the known set.",
+        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, code_anchor_specs). Unknown field → exit 4, naming it and the known set.",
     },
   },
   async run({ args }) {
@@ -1386,13 +1459,20 @@ export default defineCommand({
       // SPEC-045 §Design Decisions D5 — store-only "declared code_anchors" count,
       // ZERO filesystem probing (unlike --check-drift). Shared helper `lore
       // bootstrap` also splices in (flows/drift-flow.ts::countArmedSpecs).
-      const armedSpecsResult = await countArmedSpecs(buildListSpecs(app));
-      if (!armedSpecsResult.ok) {
-        process.stderr.write(formatError(armedSpecsResult.error) + "\n");
-        process.exitCode = exitCode(armedSpecsResult.error);
+      //
+      // reason: AC-BFI-4 — the number is the ENUMERATOR's member-list length, the
+      // same list `lore status --enumerate code_anchor_specs` prints, never a
+      // separately-tallied counter (`collectCodeAnchorSpecMembers` still runs the
+      // shared `countArmedSpecs` over that same list and fails loud on a
+      // disagreement, so `lore bootstrap`'s independent call cannot drift from
+      // this one in silence).
+      const codeAnchorSpecMembersResult = await collectCodeAnchorSpecMembers(app);
+      if (!codeAnchorSpecMembersResult.ok) {
+        process.stderr.write(formatError(codeAnchorSpecMembersResult.error) + "\n");
+        process.exitCode = exitCode(codeAnchorSpecMembersResult.error);
         return;
       }
-      const codeAnchorSpecs = armedSpecsResult.value;
+      const codeAnchorSpecs = codeAnchorSpecMembersResult.value.length;
 
       // SPEC-058 §Scope — discoverability for existing corpora (config-only, no IO).
       const verificationProfileKinds = configuredVerificationProfileKinds(config);
