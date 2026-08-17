@@ -163,6 +163,20 @@ export interface ExportDocsOptions {
   /**
    * When true, compute and report what would happen but write nothing.
    * Files will appear in report.created without actually being written.
+   *
+   * ⛔ This flag is LOAD-BEARING for a read-only caller, not merely an optimization: since
+   * 2026-08-17 `scripts/export-spec-mirror.ts`'s `runContentCheck` (the `bun run check:spec-mirror`
+   * body comparison, AC-BFI-8 of `spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor`)
+   * calls this method with `dryRun: true` precisely BECAUSE the body verdict must come from the
+   * pipeline that writes the files rather than a second, silently divergent copy. Every write site
+   * in `exportDocs` — the Phase-1 `saveIndexAtomic`, the `mkdirSync`, the identity-repair /
+   * frontmatter-repair / force-overwrite `writeFileSync` calls, and `writeFileExclusive` — is
+   * behind a `dryRun` guard or an early `continue`, and that must stay true. A new write that
+   * escapes the guard would turn a drift CHECK into a self-repairing export, which reports clean on
+   * its second consecutive run and can therefore never fail. Regression oracle:
+   * `scripts/tests/spec-mirror-content-drift.test.ts` (two consecutive `--check` runs over one
+   * mutated body must report identical drift, and that file's hash must be unchanged across the
+   * assertion window).
    */
   dryRun: boolean;
   /** Restrict export to one document type. When absent, all types are exported. */

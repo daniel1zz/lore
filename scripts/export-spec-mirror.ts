@@ -48,15 +48,24 @@
  *     only case where the body is provably byte-identical (`scripts/tests/mirror-frontmatter-
  *     drift.test.ts` proves both halves against a throwaway corpus, driving this exact `main()`
  *     entry point).
- *   - `bun run check:spec-mirror` (`--check` flag, this file's other mode) — READ-ONLY. Never
- *     calls `exportDocs`, never writes a byte. A run that finds drift reports the SAME drift on
- *     every subsequent run until something else (a real export) fixes it — see D6's own text: "a
- *     check that regenerates what it is checking can never fail." THIS is the mode wired into the
+ *   - `bun run check:spec-mirror` (`--check` flag, this file's other mode) — READ-ONLY: never
+ *     writes a byte. A run that finds drift reports the SAME drift on every subsequent run until
+ *     something else (a real export) fixes it — see D6's own text: "a check that regenerates what
+ *     it is checking can never fail." THIS is the mode wired into the
  *     `test` script chain (`package.json`) — see AC-FR-6's own oracle
  *     (`scripts/tests/spec-mirror-export.test.ts`), which asserts the chain reaches THIS FILE
  *     (`export-spec-mirror.ts`, the script AC-FR-6 names), never a specific mode-flag string —
  *     `check:spec-mirror` invokes this exact file, so the criterion holds while the wired command
  *     stays read-only.
+ *
+ *     ⛔ "Never calls `exportDocs`" was true of this mode until 2026-08-17 and is now HALF true —
+ *     a prior version of this bullet stated it flatly. `runCheck` (count + slug parity) still
+ *     never calls it. `runContentCheck` (bodies, AC-BFI-8, task-compare-mirror-bodies-against-
+ *     corpus-content-in-the-spec) DOES, with `dryRun: true` and never `force` — the read-only
+ *     shape in which that method reports its body verdict without writing. The reason is SSOT, not
+ *     convenience: the body comparison belongs to the pipeline that writes the files, and a second
+ *     copy here would drift from it silently. See `runContentCheck`'s own doc comment for the
+ *     enumerated write-guard audit and the two oracles that pin the read-only property.
  *
  * ## Why the pure/fs-only logic lives in a sibling `-core.ts` module
  *
@@ -93,7 +102,10 @@
  *   - `runExport` — IO, WRITES. Calls `ExportDocsService.exportDocs` once per {@link
  *     MirrorDocType}, prunes orphans across every mirrored directory, then re-derives parity via
  *     `runCheck` so the export's own report reflects ground truth, never an assumed success.
- *   - `runCheck` — IO, READ-ONLY. Never calls `exportDocs` — see the module-level warning above.
+ *   - `runCheck` — IO, READ-ONLY. Count + slug parity only; never calls `exportDocs`.
+ *   - `runContentCheck` — IO, READ-ONLY. BODY comparison (AC-BFI-8) via a `dryRun: true`
+ *     `exportDocs` probe; writes nothing. Called from `main`'s check mode only, never from
+ *     `runExport` — so `bun run mirror:export`'s behaviour and exit codes are unchanged by it.
  *   - `main` — IO. CLI dispatch (`--check` selects check mode); never calls `process.exit` itself.
  *   - Everything under "Pure/fs-only surface" below is re-exported from `export-spec-mirror-core.js`
  *     for callers that only need one import site.
@@ -103,19 +115,23 @@
  * `.lore/export-index.json` (both git-tracked deliverables — expected to be committed, per this
  * task's own scope note). `main` also writes to stdout/stderr.
  *
- * Exit codes (⛔ "parity"/"OK" below means COUNT + SLUG PRESENCE ONLY — file CONTENT is never
- * compared; see `computeMirrorParity`'s own doc comment in `export-spec-mirror-core.ts` for why
- * that scope is deliberate, and for the caller-facing wording every "OK" message below must match):
- *   0 — clean. Export mode: 0 per-doc export errors across EVERY type AND every corpus doc of
- *       every mirrored type has a mirror file (on-disk count === corpus count per type, every
- *       mapped file exists). Check mode: same parity condition across all six types, read-only.
- *   {@link MIRROR_DRIFT_EXIT_CODE} (2) — check mode found >=1 corpus doc (any mirrored type) not
- *       mirrored on disk (either never exported, or its mapped file is absent); OR export mode
+ * Exit codes (⛔ the word "parity" below means COUNT + SLUG PRESENCE ONLY — see
+ * `computeMirrorParity`'s own doc comment in `export-spec-mirror-core.ts` for why that FUNCTION's
+ * scope is deliberate, and for the caller-facing wording every parity "OK" message must match.
+ * Body content is a SEPARATE verdict, `runContentCheck`, in check mode only):
+ *   0 — clean. Export mode: 0 per-doc export errors across EVERY type AND parity for every type.
+ *       Check mode: parity for all six types AND every mirrored body matches its corpus document.
+ *   {@link MIRROR_DRIFT_EXIT_CODE} (2) — check mode found, for any mirrored type, >=1 corpus doc
+ *       not mirrored on disk (never exported, or its mapped file is absent) OR >=1 mirror file
+ *       whose BODY no longer matches its corpus document (AC-BFI-8, named by slug); OR export mode
  *       completed with 0 per-doc errors but still failed to reach parity for some type
  *       (defensive — should not occur, since `exportDocs` either creates or reports an error for
  *       every doc it processes).
  *   {@link MIRROR_HARD_FAILURE_EXIT_CODE} (4) — a per-doc export error, an unreadable or
- *       schema-invalid `.lore/export-index.json`, or a corpus read failure, for ANY type.
+ *       schema-invalid `.lore/export-index.json`, a corpus read failure, or a drifted mirror file
+ *       attributable to no corpus doc, for ANY type. ⛔ 2 and 4 must stay distinguishable: 4 means
+ *       the tool could not decide, 2 means it decided the mirror is stale. A test asserting merely
+ *       "non-zero" cannot tell a detection from a crash.
  *
  * Usage:
  *   bun scripts/export-spec-mirror.ts            # export ALL SIX types (writes)
@@ -135,16 +151,20 @@ import {
   MIRROR_HARD_FAILURE_EXIT_CODE,
   SpecMirrorError,
   computeMirrorParity,
+  computeMirrorContentDrift,
   loadMirrorMappings,
   countMdFilesFlat,
   pruneOrphanMirrorFiles,
   scriptChainReachesTarget,
   printParity,
+  printContentDrift,
   printExportReport,
   type MirrorDocType,
   type MirrorParityResult,
   type MirrorParityMissing,
   type MirrorExportReportLike,
+  type MirrorContentDivergence,
+  type MirrorContentDriftResult,
 } from "./export-spec-mirror-core.js";
 
 // Pure/fs-only surface — re-exported so a caller needing both halves has one import site.
@@ -156,12 +176,20 @@ export {
   MIRROR_HARD_FAILURE_EXIT_CODE,
   SpecMirrorError,
   computeMirrorParity,
+  computeMirrorContentDrift,
   loadMirrorMappings,
   countMdFilesFlat,
   pruneOrphanMirrorFiles,
   scriptChainReachesTarget,
 };
-export type { MirrorDocType, MirrorParityResult, MirrorParityMissing, MirrorExportReportLike };
+export type {
+  MirrorDocType,
+  MirrorParityResult,
+  MirrorParityMissing,
+  MirrorExportReportLike,
+  MirrorContentDivergence,
+  MirrorContentDriftResult,
+};
 
 const __filename = fileURLToPath(import.meta.url);
 /** This file's own repo root — see module header "Why `projectDir` is derived from THIS FILE's own path". */
@@ -254,6 +282,87 @@ export async function runCheck(app: App, repoRoot: string = REPO_ROOT): Promise<
  *   type's `report.errors` instead); propagates `loadMirrorMappings`'s / `runCheck`'s errors for
  *   the post-write reconcile + verification pass.
  */
+/** Body-comparison verdict across every {@link MirrorDocType} — one `MirrorContentDriftResult` per type plus an AND across all six. */
+export interface MirrorContentAllTypesResult {
+  readonly perType: Readonly<Record<MirrorDocType, MirrorContentDriftResult>>;
+  /** `true` iff every type's own `perType[type].ok` is `true`. */
+  readonly ok: boolean;
+}
+
+/**
+ * Read-only BODY comparison across all six types (AC-BFI-8) — the second half of `--check`,
+ * deliberately separate from {@link runCheck} so that function's count+slug contract, and
+ * {@link runExport}'s use of it, are untouched.
+ *
+ * ## Why this calls the exporter, and why that is still read-only
+ *
+ * The body comparison is `ExportDocsService.exportDocs`'s own — the SAME pipeline that writes the
+ * files (MDX placeholders spliced, SPEC-043 invalidation banner prepended, NUL bytes sanitized,
+ * `extractBodyFromMd` + `canonicaliseBody`). Under `dryRun: true` it reports that verdict in
+ * `report.drift` and writes NOTHING: every write site in that method — `saveIndexAtomic` (the
+ * Phase-1 index save), `mkdirSync`, the identity-repair / frontmatter-repair / force-overwrite
+ * `writeFileSync` calls, and `writeFileExclusive` — is behind a `dryRun` guard or an early
+ * `continue`. Verified 2026-08-17 by enumerating those sites AND empirically: a full six-type
+ * `dryRun: true` pass over the live corpus left `git status --porcelain` empty.
+ *
+ * ⛔ `force` is NEVER passed here. With `force: true` the same call would OVERWRITE every drifted
+ * file, turning this check into a repairer — the precise failure AC-BFI-8 (i) forbids ("a check
+ * that regenerates what it is checking can never fail"). That condition is mechanized, not merely
+ * asserted here: `scripts/tests/spec-mirror-content-drift.test.ts` runs `--check` twice
+ * consecutively over a mutated body and requires the SAME drift both times, and separately
+ * requires the mutated file's hash to be unchanged across the whole assertion window.
+ *
+ * @throws {SpecMirrorError} `corpus_unreadable` (the probe or the doc list failed for some type, or
+ *   the probe reported per-doc errors) / `content_unattributable` (a drifted file no corpus doc of
+ *   its type owns) — both map to {@link MIRROR_HARD_FAILURE_EXIT_CODE}, never the drift code.
+ */
+export async function runContentCheck(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorContentAllTypesResult> {
+  const mappings = loadMirrorMappings(repoRoot);
+
+  const perType = {} as Record<MirrorDocType, MirrorContentDriftResult>;
+  for (const type of MIRROR_TYPES) {
+    const probeResult = await app.exportDocsService.exportDocs({ projectDir: repoRoot, dryRun: true, type });
+    if (!probeResult.ok) {
+      throw new SpecMirrorError("corpus_unreadable", `content probe failed for type ${type}: ${JSON.stringify(probeResult.error)}`, {
+        error: probeResult.error,
+        type,
+      });
+    }
+    // reason: a per-doc error means this type's report is INCOMPLETE — some doc's body was never
+    // compared. Folding that into "no drift found" would print OK over an unanswered question, so
+    // it is raised as a hard failure (exit 4) rather than left to the drift code (exit 2).
+    if (probeResult.value.errors.length > 0) {
+      throw new SpecMirrorError(
+        "corpus_unreadable",
+        `content probe reported ${probeResult.value.errors.length} per-doc error(s) for type ${type}: ${probeResult.value.errors.join("; ")}`,
+        { errors: probeResult.value.errors, type },
+      );
+    }
+
+    const docsResult = await app.corpusService.listFull({ type });
+    if (!docsResult.ok) {
+      throw new SpecMirrorError("corpus_unreadable", `failed to list corpus ${type} docs for the content probe: ${JSON.stringify(docsResult.error)}`, {
+        error: docsResult.error,
+        type,
+      });
+    }
+    const docs = docsResult.value.docs.map((doc) => ({ id: doc.id, slug: doc.slug }));
+
+    const contentResult = computeMirrorContentDrift(docs, mappings, probeResult.value);
+    if (contentResult.unresolvedFilePaths.length > 0) {
+      throw new SpecMirrorError(
+        "content_unattributable",
+        `${contentResult.unresolvedFilePaths.length} drifted ${type} mirror file(s) belong to no corpus ${type}: ${contentResult.unresolvedFilePaths.join(", ")}`,
+        { unresolvedFilePaths: contentResult.unresolvedFilePaths, type },
+      );
+    }
+    perType[type] = contentResult;
+  }
+
+  const ok = MIRROR_TYPES.every((type) => perType[type].ok);
+  return { perType, ok };
+}
+
 export async function runExport(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorExportResult> {
   const perType = {} as Record<MirrorDocType, MirrorExportReportLike>;
   for (const type of MIRROR_TYPES) {
@@ -324,9 +433,14 @@ export async function main(
   try {
     if (checkMode) {
       const parity = await runCheck(app, repoRoot);
+      const content = await runContentCheck(app, repoRoot);
       let allOk = true;
       for (const type of MIRROR_TYPES) {
         if (!printParity("check", type, parity.perType[type])) allOk = false;
+        // reason: printed unconditionally, immediately after the parity line whose parenthetical
+        // says "file CONTENT is not compared" — that parenthetical is scoped to `computeMirrorParity`
+        // and would read as a command-level claim without this line answering content right there.
+        if (!printContentDrift(type, content.perType[type])) allOk = false;
       }
       return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
     }
