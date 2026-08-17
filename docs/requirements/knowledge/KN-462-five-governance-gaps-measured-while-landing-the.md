@@ -206,16 +206,33 @@ Two compounding causes, both structural:
    `join(REPO_ROOT, "hooks", "pre-push")`, so no literal path string exists for the rule to see. This
    is the documented residual (a), here landing on the highest-stakes pair in the repo.
 
-Consequence: a change touching ONLY `hooks/pre-push` — entirely plausible, and the exact shape of a
-consumer-visible regression — runs neither the parity oracle nor any hook trip test, and `test:changed`
-reports a confident green. It is not even a loud zero, because unrelated rules keep the selection
-non-empty.
+Consequence, and it is conditional — corrected 2026-08-17 after measuring both cases:
 
-Mechanization, in order of cost: (a) add a literal `"hooks/pre-push"` / `"assets/project/pre-push"`
-string to the parity test so the tree-scanning rule can see it — one line, works today; (b) widen the
-universe with an `assets/**` + `hooks/**` rule so shipping-surface files select their guards by
-construction. (a) alone leaves the next unmarked scan test invisible, so (b) is the real fix and (a) is
-the stopgap.
+- A change touching ONLY the two hook files is **refused, not silently passed**: measured
+  `vitest: selected 0`, `bun: selected 0`, `FAIL: 0 tests selected despite 2 changed file(s)`, exit 1.
+  Loud-zero does its job. An earlier revision of this section claimed otherwise; that was wrong.
+- A change touching a hook file **plus anything the rules do match** — e.g.
+  `packages/lore/src/generated/assets-manifest.ts`, which editing `assets/` normally requires
+  regenerating — selects non-empty, silences loud-zero, and still omits both hook guards. **That** is
+  the silent green, and it is the realistic shape of a hook change, not an edge case.
+
+⛔ **The cheap fix does not work. Measured, implemented, reverted in conclusion — do not retry it.**
+This section previously prescribed "(a) add a literal `hooks/pre-push` string to the parity test — one
+line, works today". An agent implemented exactly that and reported the selection byte-identical before
+and after: still 0 selected, still exit 1. Two independent blockers in `scripts/changed-tests.ts`:
+membership gates on `BARE_MAIN_INVOCATION_RE = /\bmain\(\)/` (a bare `main()` call — literal paths never
+enter that decision), and scope excludes the paths anyway (`"packages-test-tree"` requires
+`startsWith("packages/")`; `"repo-tracked-text-source"` defers to `hasTextSourceExtension`, which I
+verified returns **false** for both extensionless hook paths and true for `scripts/changed-tests.ts`).
+
+That the prescription came from the orchestrator and was refuted by the implementer is the right
+outcome and worth naming: the bundle said "if it still does not appear, the marker approach is wrong
+and I want to know that, not a workaround", and that is what came back. An instruction to report
+failure is only real if the reporter is not penalised for using it.
+
+Remaining mechanization: rule (d) needs a hook/asset scope, or the universe needs widening — both are
+changes to `scripts/changed-tests.ts`. Until then, any change touching `hooks/**` or `assets/**` MUST
+run `pre-push-parity.test.ts` and `pre-push-binary-provenance-trip.bun.test.ts` by hand.
 
 ## G9 — `lore evidence` offers no attested tier for an oracle too expensive to re-run
 

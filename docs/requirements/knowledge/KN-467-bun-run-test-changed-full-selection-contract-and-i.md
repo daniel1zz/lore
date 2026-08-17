@@ -41,9 +41,15 @@ running it.
 A NON-EMPTY changed-file set that selects 0 tests exits 1, in BOTH `--list` and executing mode — never
 a silent green. The only legitimate 0-selection exit-0 is a genuinely EMPTY changed-file set.
 
-⛔ Loud-zero does NOT protect against under-selection. If any rule matches anything, the selection is
-non-empty and loud-zero stays quiet, even when the tests that actually guard the change were all
-missed. Residual 3 below is exactly that case.
+Measured 2026-08-17 on a change set of exactly `hooks/pre-push` + `assets/project/pre-push`:
+`vitest: selected 0`, `bun: selected 0`, `FAIL: 0 tests selected despite 2 changed file(s)`, exit 1.
+So a hook-only edit is REFUSED, not silently passed. That is the good case.
+
+⛔ But loud-zero does NOT protect against under-selection. The moment the change set also contains any
+file the rules do match — e.g. `packages/lore/src/generated/assets-manifest.ts`, which a hook edit
+normally requires regenerating — the selection is non-empty, loud-zero stays quiet, and the tests that
+actually guard the hook are still absent. That combination is the realistic shape of a hook change, and
+it IS a silent green. Residual (c) below.
 
 ## Three measured residuals
 
@@ -64,8 +70,27 @@ happens to live under `packages/`. A commit touching ONLY `hooks/pre-push` — t
 (c) compounds with (a): rule 4 exists to cover exactly this, but the parity test builds its targets as
 `join(REPO_ROOT, "hooks", "pre-push")`, leaving no literal string to match.
 
-Fixes, cheapest first: add literal `"hooks/pre-push"` / `"assets/project/pre-push"` strings to the
-parity test (works today, one line, but leaves the next unmarked scan test invisible); widen the
-universe with an `assets/**` + `hooks/**` rule so shipping-surface files select their guards by
-construction (the real fix). Full analysis: `knowledge-five-governance-gaps-measured-while-landing-the`
-§G8.
+### ⛔ The obvious fix does not work — measured, do not retry it
+
+An earlier revision of this doc (and of the retro's §G8) proposed "add literal `"hooks/pre-push"` /
+`"assets/project/pre-push"` strings to the parity test so rule (d) can see it — one line, works today".
+**That is false.** It was implemented, the literals were committed, and the selection was byte-identical
+before and after: still 0 selected, still exit 1. Two independent blockers in `scripts/changed-tests.ts`:
+
+1. **Membership** gates on `BARE_MAIN_INVOCATION_RE = /\bmain\(\)/` (line 509, tested at 545) — a test
+   qualifies as a tree-scanning oracle only if it contains a bare `main()` invocation. Literal path
+   strings never enter that decision, and the parity test has no reason to call `main()`.
+2. **Scope** excludes these paths regardless of content: `"packages-test-tree"` requires
+   `startsWith("packages/")`, and `"repo-tracked-text-source"` defers to `hasTextSourceExtension`,
+   which returns **false** for an extensionless file (verified directly: `hooks/pre-push` → false,
+   `assets/project/pre-push` → false, `scripts/changed-tests.ts` → true). The function's own JSDoc uses
+   `hooks/pre-push` as its worked example of `hasNoExtension`.
+
+The literals were kept anyway — they make the suite greppable — but they buy no selection.
+
+**The only real fix is a change to `scripts/changed-tests.ts`**: give rule (d) a hook/asset scope, or
+widen the universe so shipping-surface files select their guards by construction. Until then, a change
+touching `hooks/**` or `assets/**` must run `packages/lore/tests/unit/assets/pre-push-parity.test.ts`
+and `packages/lore/tests/integration/pre-push-binary-provenance-trip.bun.test.ts` BY HAND.
+
+Full analysis: `knowledge-five-governance-gaps-measured-while-landing-the` §G8.
