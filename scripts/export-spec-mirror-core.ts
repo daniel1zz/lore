@@ -14,6 +14,11 @@
  * Public surface:
  *   - `computeMirrorParity` — PURE. Given the corpus's (id, slug) pairs, the loaded export-index
  *     mappings, an injected `fileExists` probe, and the real on-disk file count, decides parity.
+ *   - `computeMirrorContentDrift` — PURE. Given a READ-ONLY (`dryRun: true`) `ExportDocsService`
+ *     report plus the (id, slug) pairs and index mappings, translates that report's FILE PATHS
+ *     into corpus SLUGS and classifies each as body-divergent or body-undecidable
+ *     (AC-BFI-8). See "Body content IS compared, since 2026-08-17" below.
+ *   - `printContentDrift` — IO (stdout/stderr). Presentation only, for the above.
  *   - `scriptChainReachesTarget` — PURE. Walks a `package.json` `scripts` map from a root script
  *     name through `bun|npm|npx|yarn run <name>` references (cycle-safe) to decide whether some
  *     script's value ultimately contains `targetSubstring` — the AC-FR-6 "wired, not merely
@@ -29,6 +34,25 @@
  *     (`prd`/`spec`/`adr`/`knowledge`/`plan`/`task`, deliberately excluding `phase` — see
  *     `MIRROR_TYPES`'s own doc comment) and their repo-relative directories.
  *   - `printParity` / `printExportReport` — IO (stdout/stderr). Presentation only.
+ *
+ * ## Body content IS compared, since 2026-08-17 — but by a DIFFERENT function than parity
+ *
+ * `computeMirrorParity` below still answers COUNT + SLUG PRESENCE only, and its own doc comment
+ * says so; that scope is unchanged. What changed (task-compare-mirror-bodies-against-corpus-
+ * content-in-the-spec, AC-BFI-8) is that `export-spec-mirror.ts --check` now runs a SECOND,
+ * independent probe alongside it — `runContentCheck` there, `computeMirrorContentDrift` here —
+ * so the COMMAND compares bodies even though the parity FUNCTION does not. Both verdicts print;
+ * either one failing exits {@link MIRROR_DRIFT_EXIT_CODE}.
+ *
+ * ⛔ The body comparison is NOT reimplemented here. `ExportDocsService.exportDocs`'s write loop
+ * has always computed it (`extractBodyFromMd` + `canonicaliseBody` against the SAME resolved body
+ * it would write — MDX placeholders spliced, SPEC-043 invalidation banner prepended, NUL bytes
+ * sanitized), and a `dryRun: true` call reports that verdict in `report.drift` while writing
+ * nothing. Reproducing any part of that pipeline here would give the check a second, silently
+ * divergent notion of "matches the corpus" — the exact defect `ExportDocsService`'s own header
+ * calls out ("the SAME resolveDocBody(doc) output is used for BOTH the drift comparison and the
+ * on-write content"). This module therefore only TRANSLATES that report (file paths -> slugs) and
+ * prints it.
  *
  * ## Orphan pruning — why this exists at all
  *
@@ -103,7 +127,13 @@ export const MIRROR_HARD_FAILURE_EXIT_CODE = 4;
  */
 export class SpecMirrorError extends Error {
   constructor(
-    public readonly code: "corpus_unreadable" | "index_unreadable" | "index_invalid_json" | "index_invalid_schema",
+    public readonly code:
+      | "corpus_unreadable"
+      | "index_unreadable"
+      | "index_invalid_json"
+      | "index_invalid_schema"
+      /** A drifted mirror file no corpus doc of its type owns — see {@link MirrorContentDriftResult.unresolvedFilePaths}. */
+      | "content_unattributable",
     message: string,
     public readonly context?: Record<string, unknown>,
   ) {
@@ -133,21 +163,28 @@ export interface MirrorParityResult {
  * `scripts/check-test-budgets.ts`'s `checkLedger(..., pathExists)` seam) so this is unit-testable
  * without touching disk.
  *
- * ⛔ NOT CHECKED: file CONTENT. This function verifies only (1) COUNT — `fileCountOnDisk ===
+ * ⛔ NOT CHECKED BY THIS FUNCTION: file CONTENT. It verifies only (1) COUNT — `fileCountOnDisk ===
  * specs.length` — and (2) SLUG PRESENCE — every spec's mapped `file_path` exists on disk. It never
- * reads a mirror file's body and never compares it against the corpus doc's current content, so a
- * spec whose corpus content changed since its LAST export (e.g. an AC evidence marker moving from
- * `[·]` to `[✔]`) still reports `ok: true` here — this is DELIBERATE (AC-FR-6 asks for count +
- * slug parity; content-diffing on every `bun run test` would be slow, and AC evidence markers
- * change often enough that a content check would be red almost permanently), never an oversight.
- * `runExport`'s underlying `ExportDocsService.exportDocs` DOES detect content drift separately
- * (its own `report.drift` array, printed by `printExportReport`) — that is a DIFFERENT, narrower
- * signal this function never consults, and `runCheck` (read-only, no export) has no equivalent at
- * all. Every caller-facing string describing "parity"/"OK" (see `printParity`, and
- * `export-spec-mirror.ts`'s own exit-code table) MUST name this same count-and-slug-only scope —
- * never say "matches the corpus" or "in sync" without qualifying it, which would overclaim content
- * fidelity this function does not provide (measured incident 2026-08-10: the two success/failure
- * strings originally said "mirror matches the corpus exactly", which is untrue of file content).
+ * reads a mirror file's body, so a spec whose corpus content changed since its LAST export still
+ * reports `ok: true` HERE. Every caller-facing string describing this function's "parity"/"OK"
+ * (see `printParity`, and `export-spec-mirror.ts`'s own exit-code table) MUST name this same
+ * count-and-slug-only scope — never say "matches the corpus" or "in sync" unqualified, which would
+ * overclaim fidelity this function does not provide (measured incident 2026-08-10: the two
+ * success/failure strings originally said "mirror matches the corpus exactly", which is untrue of
+ * file content).
+ *
+ * ⛔ The COMMAND, however, DOES compare bodies as of 2026-08-17 — do not read the paragraph above
+ * as "nothing checks content", which is what it meant until that date. `export-spec-mirror.ts`'s
+ * `runContentCheck` + {@link computeMirrorContentDrift} are the second probe; see this module's
+ * header section "Body content IS compared, since 2026-08-17". The prior justification for having
+ * no content check ("content-diffing on every `bun run test` would be slow, and AC evidence
+ * markers change often enough that a content check would be red almost permanently") was retired
+ * by measurement, not by preference: a full six-type `dryRun: true` pass over the live corpus took
+ * 4086 ms for 1511 docs and reported 0 drift / 0 identity_repaired / 0 frontmatter drift
+ * (measured 2026-08-17, task-compare-mirror-bodies-against-corpus-content-in-the-spec), i.e. the
+ * comparison is neither slow nor permanently red. What IS true is that the mirror must be
+ * converged after a corpus write — `lore export-docs --force` for bodies — which is already
+ * standing discipline (root CLAUDE.md).
  *
  * @param specs every corpus spec's (id, slug) pair — the FULL live set, never pre-filtered.
  * @param mappings the loaded `.lore/export-index.json` mappings, keyed by doc ULID.
@@ -175,6 +212,117 @@ export function computeMirrorParity(
   }
   const ok = missing.length === 0 && fileCountOnDisk === specs.length;
   return { corpusSpecCount: specs.length, fileCountOnDisk, missing, ok };
+}
+
+/**
+ * One corpus doc whose mirror file EXISTS (so {@link computeMirrorParity} is satisfied) but whose
+ * body is not the corpus's current projection — named by slug, the identity a reader can act on.
+ */
+export interface MirrorContentDivergence {
+  readonly slug: string;
+  /** Repo-relative mirror path, from the doc's export-index mapping — a locator, never the identity. */
+  readonly filePath: string;
+  /**
+   * `body_divergent` — the exporter's own body comparison said the on-disk body differs from the
+   * corpus projection (`report.drift`). `body_undecidable` — the exporter never REACHED the body
+   * comparison for this file because its identity frontmatter is stale and forces an unconditional
+   * rewrite first (`report.identity_repaired`; see `ExportDocsService`'s write loop, which
+   * `continue`s before comparing bodies). Reported as divergence rather than dropped: the body
+   * question is genuinely unanswered for that file, and a check that printed OK over an unanswered
+   * question would be exactly the vacuous pass AC-BFI-8 exists to forbid.
+   */
+  readonly reason: "body_divergent" | "body_undecidable";
+}
+
+/** Full body-comparison verdict for ONE {@link MirrorDocType}. */
+export interface MirrorContentDriftResult {
+  /** Sorted by slug — deterministic output, so two consecutive runs are byte-comparable (AC-BFI-8 (i)). */
+  readonly divergences: readonly MirrorContentDivergence[];
+  /**
+   * Drifted paths the probe could NOT attribute to any corpus doc of this type — the export index
+   * and the corpus disagree about which doc owns a file. ⛔ Deliberately NOT folded into {@link ok}:
+   * this is a HARD failure (the caller raises {@link SpecMirrorError} `content_unattributable` ->
+   * {@link MIRROR_HARD_FAILURE_EXIT_CODE}), never the drift exit code, so "the mirror is stale" and
+   * "the tool cannot tell whose file this is" stay distinguishable.
+   */
+  readonly unresolvedFilePaths: readonly string[];
+  /** `true` iff `divergences` is empty. Says nothing about {@link unresolvedFilePaths} — see there. */
+  readonly ok: boolean;
+}
+
+/**
+ * Translates a READ-ONLY (`dryRun: true`) `ExportDocsService.exportDocs` report into slug-named
+ * body divergences — PURE, no IO (AC-BFI-8).
+ *
+ * ⛔ This function does not COMPARE anything: `report` already carries the exporter's own verdict,
+ * computed by the one pipeline that also writes the files. See this module's header section "Body
+ * content IS compared, since 2026-08-17" for why re-deriving the comparison here would be a defect
+ * rather than a convenience.
+ *
+ * A doc with NO index mapping is skipped rather than reported: it has no mirror file at all, which
+ * is {@link computeMirrorParity}'s `no_mapping` finding, not a content question. Nothing is
+ * silently dropped — every drifted path not claimed by some doc lands in `unresolvedFilePaths`.
+ *
+ * @param docs every corpus doc of ONE type as (id, slug) pairs — the same list `computeMirrorParity`
+ *   receives, never pre-filtered.
+ * @param mappings the loaded `.lore/export-index.json` mappings, keyed by doc ULID.
+ * @param report the `dryRun: true` export report for that SAME type.
+ * @returns the verdict; never throws.
+ */
+export function computeMirrorContentDrift(
+  docs: readonly { readonly id: string; readonly slug: string }[],
+  mappings: Readonly<Record<string, ExportIndexMapping>>,
+  report: MirrorExportReportLike,
+): MirrorContentDriftResult {
+  const driftPaths = new Set(report.drift);
+  const undecidablePaths = new Set(report.identity_repaired);
+
+  const divergences: MirrorContentDivergence[] = [];
+  const attributed = new Set<string>();
+  for (const doc of docs) {
+    const filePath = mappings[doc.id]?.file_path;
+    if (filePath === undefined) continue;
+    const reason = driftPaths.has(filePath) ? "body_divergent" : undecidablePaths.has(filePath) ? "body_undecidable" : undefined;
+    if (reason === undefined) continue;
+    divergences.push({ slug: doc.slug, filePath, reason });
+    attributed.add(filePath);
+  }
+  divergences.sort((a, b) => a.slug.localeCompare(b.slug));
+
+  const unresolvedFilePaths = [...driftPaths, ...undecidablePaths].filter((path) => !attributed.has(path)).sort();
+  return { divergences, unresolvedFilePaths, ok: divergences.length === 0 };
+}
+
+/**
+ * Prints one type's body-comparison verdict, NAMING every divergent slug (AC-BFI-8) — IO
+ * (stdout/stderr), presentation only.
+ *
+ * ⛔ The remediation named on failure is `lore export-docs --force`, NOT `bun run mirror:export`:
+ * the latter's write loop leaves a body-drifted file untouched unless `force` is set (see
+ * `ExportDocsService`'s `if (!opts.force) { report.drift.push(...) }` branch), so telling a reader
+ * to run it would be a command that provably cannot fix what was just reported.
+ *
+ * @returns `true` iff this type's bodies all match (mirrors `result.ok`, so a caller aggregating
+ *   across {@link MIRROR_TYPES} does not re-derive it). ⛔ Says nothing about
+ *   `result.unresolvedFilePaths` — the caller must raise that separately as a hard failure.
+ */
+export function printContentDrift(type: MirrorDocType, result: MirrorContentDriftResult): boolean {
+  if (result.ok) {
+    console.log(`export-spec-mirror (content): OK — every mirrored ${type} body matches its corpus document.`);
+    return true;
+  }
+  console.error(
+    `\nexport-spec-mirror (content): ${result.divergences.length} corpus ${type}(s) whose mirror body no longer matches the corpus:\n`,
+  );
+  for (const entry of result.divergences) {
+    const detail =
+      entry.reason === "body_divergent"
+        ? "body differs from the corpus document"
+        : "body not comparable — stale identity frontmatter pre-empts the body check";
+    console.error(`  ${entry.slug} — ${detail} (${entry.filePath})`);
+  }
+  console.error(`\nRun \`lore export-docs --force\` to reconcile ${mirrorDirRelative(type)} bodies with the corpus.`);
+  return false;
 }
 
 /**
@@ -338,6 +486,15 @@ export interface MirrorExportReportLike {
  * this produces the BYTE-IDENTICAL strings this file always printed ("corpus spec(s)", "every
  * corpus spec has a mirror file") — the existing AC-FR-6/AC-FR-7 e2e tests assert those exact
  * substrings and are deliberately left unchanged.
+ *
+ * ⛔ The OK line's "file CONTENT is not compared" parenthetical is scoped to THIS verdict and is
+ * still literally true of {@link computeMirrorParity}. It is NOT a statement about the command:
+ * since 2026-08-17 `--check` also prints {@link printContentDrift}'s own verdict line, immediately
+ * after this one, and body divergence there fails the run. The parenthetical is pinned byte-for-byte
+ * by three `toContain` assertions in `scripts/tests/spec-mirror-export.test.ts` (~lines 570/632/636)
+ * plus a header note in `packages/lore/tests/integration/mirror-check-read-only.bun.test.ts`, none
+ * of which were in scope for the task that armed the content check — rewording it to name the
+ * command-level scope means updating those call sites in the SAME change, never this string alone.
  *
  * @returns `true` when this type's parity is OK (mirrors `parity.ok`, so a caller aggregating
  *   across {@link MIRROR_TYPES} doesn't need to re-derive it) and prints the type's own
