@@ -1,0 +1,307 @@
+{
+  "baseline_date": "2026-08-17",
+  "adr": "adr-a-newly-armed-structural-oracle-enforces-from-a-baseline",
+  "note": "Every row below was MEASURED against this repo's live corpus on 2026-08-17 by the same query the checker runs (`corpusService.listFull({type: 'spec'})`, partitioned by a non-empty `extra.code_anchors`): 151 live specs, 91 anchored, 60 unanchored. None of these slugs or cohorts is transcribed from an earlier snapshot — the spec's own 2026-08-11 baseline of 142/87/55 was already stale by 5 specs when this ledger was written, which is why `scripts/check-anchor-coverage.ts` enforces SET EQUALITY against a fresh measurement and never a literal count. The cohort split is fixed by each spec's created_at against the 2026-07-14 backfill instant and is re-derived (not trusted) on every run. A row here is a recorded, justified absence of an anchor — never a suppression: the checker fails loud both when an unanchored spec has no row and when a row's spec has since been anchored.",
+  "entries": [
+    {
+      "slug": "spec-075-dashboard-adjudication-workbench-route-telemetry-prd",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-24, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-077-dashboard-execution-read-surface-prd-21-f3",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-25, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-083-governance-prose-runtime-injection-retire-the",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-084-corpus-allocated-ordinal-identity-store-atomic-spec",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-085-seat-briefing-runtime-injection-retire-the-installed",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-a-write-side-fact-with-no-read-side-address-counts-with-no",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-11, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-ai-assistance-in-lore-set-and-lore-link",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-06-30; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-assessment-freshness-plan-close-denies-a-stale-assessment",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-28, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-auth-agent-credentials",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-06-08; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-11, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-cjk-aware-slugify-pinyin-transliteration-lore-set-slug-repa",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-23, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-context-provenance-injected-corpus-global-state-and-a",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-30, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-cookie-auth-cli-managed-local-bootstrap",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-06-28; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-corpus-resolution-carries-provenance-and-a-foreign-write",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-12, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-declaring-ac-scope-is-required-at-task-creation-so-the",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-01, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-default-no-ai-for-agent-and-mcp-execution-paths",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-06-30; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-domain-overview-autonomous-feedback-loop-ai-review-data-driven-self-optimization",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-dashboard-console-admin-console-evolution-adjudication-workbench-first",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-dashboard-multi-project-single-instance-switcher-over-the-machine-s-registered-corpora",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-distribution-adoption-phased-spike-gated-one-step-install",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-extension-hooks-system-direction-pointer-only-no-commitment",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-memory-hygiene-knowledge-trustworthiness-over-time",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-output-contract-document-taxonomy",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-phase-execution-model-plan-phase-checklist-supersedes-fine-grained-task-pre-decomposition",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-provenance",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-session-layer-multi-session-collaboration-context-continuity",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-domain-overview-upstream-issue-feedback-loop-consumer-reported-defects-corpus",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-26, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-eager-libsql-load-makes-every-command-depend-on-a-healthy",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-31, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-evidence-output-tail-integrity-a-self-reported-non-pass",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-01, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-falsifiability-reachability-a-feedable-checkpoint-an",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-10, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-governance-visibility-an-armed-gate-that-vacuously-passes",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-10, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-issue-closure-loop-computed-resolution-agent-reachable",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-29, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-lifecycle-archival-plan-close-cascade-deterministic",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-27, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-lore-assess-project-evidence-rows-instead-of-embedding-the",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-01, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-monorepo-skeleton-bun-workspaces-p1-layout",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-06-28; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-multi-session-concurrency-queryable-ownership-checkout",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-12, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-10, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-plan-close-predicates-measure-invariants-an-applicability",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-30, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-plan-closure-must-be-loud-terminality-divergence-silent",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-28, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-resume-ticket-coverage-floor-blocking-channel-arming",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-01, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-session-start-handoff-neutrality-injection-drops-resume",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-27, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-027-dashboard-hardening-write-path-integrity-delete-re",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-07-03; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-spec-029-assess-reliability-reasoning-length-resilience-sur",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-07-03; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-spec-031-dashboard-read-path-contract-fixes-markdown-typogr",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-07-03; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-spec-033-dashboard-as-living-prd-projection-human-adjudicat",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-07-06; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-spec-036-dashboard-browsing-ux-breadcrumb-tag-status-filter",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-07-07; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-spec-037-dashboard-execution-tracking-surface-readiness-rou",
+      "cohort": "deliberate",
+      "reason": "Left deliberately unanchored by the 2026-07-14 code-anchor backfill (knowledge-convergence-backfill-code-anchor-adoption-armed-gate-f step 2, which anchored 38 of the then-49 specs). Created 2026-07-07; its implementation is spread across files with no clean anchor, so declaring one would manufacture permanent false drift in `lore status --check-drift` rather than describe anything real. Retire this row in the same commit that declares a real, measured anchor for it."
+    },
+    {
+      "slug": "spec-spec-048-distribution-part-2-npm-single-platform-publish-tt",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-16, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-053-ai-advisory-ac-vagueness-supplement-on-lore-review",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-18, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-054-uat-verdict-as-plan-close-gate",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-18, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-055-requirement-ac-completeness-oracle",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-18, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-065-cli-ergonomics-unique-id-prefix-resolution-single",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-23, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-066-git-safety-gate-heredoc-string-literal-awareness-c",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-23, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-067-ai-surface-robustness-assess-timeout-floor-partial",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-23, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-069-execution-time-attestation-floor-ad-hoc-task-chann",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-23, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-spec-ac-quantifiability-gate-design-time-standardization-en",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-17, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-strict-flag-hardening-single-dash-multi-char-tokens-fail",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-24, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-the-defect-channel-cannot-be-honestly-maintained-an",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-11, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-typecheck-coverage-two-named-blind-spots-and-the-stale",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-08-10, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-version-snapshots-capture-slug-values-spec-068-d5-follow-up",
+      "cohort": "debt",
+      "reason": "Anchor debt: created 2026-07-24, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    }
+  ]
+}
