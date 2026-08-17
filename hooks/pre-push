@@ -1,6 +1,8 @@
 #!/bin/sh
 # Corpus conformance gate (lore-doctor recurrence prevention, 2026-07-14).
-# Blocks push when tree structure or code anchors drift from the corpus blueprint,
+# Blocks push when the `lore` binary issuing every verdict below was not built
+# from this source (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor,
+# AC-BFI-3), when tree structure or code anchors drift from the corpus blueprint,
 # when the audit hash chain has been tampered with (SPEC-080 G5), when the
 # root PRD outline exceeds its tiered char budgets (SPEC-080 Phase 3, armed
 # 2026-07-26 after 5 observed clean plan-closes; threshold was 2), or when a
@@ -11,6 +13,30 @@
 command -v lore >/dev/null 2>&1 || exit 0
 [ -d "$(git rev-parse --show-toplevel)/.lore" ] || exit 0
 export CLAUDECODE=1
+# Provenance runs FIRST: every check below is only as trustworthy as the binary
+# issuing it. Unlike the four `-ne 0` blocks that follow, this one dispatches on
+# the exact code, because 3 (built from a different commit) and 4 (compiled with
+# no build commit at all) need different remedies and collapsing them would give
+# a build defect the advice for a stale build. An npm-installed `lore` whose
+# build commit is unknown to this repo exits 0 with `skipped`, so a consumer is
+# never blocked by this check.
+lore status --check-binary-provenance
+code=$?
+case "$code" in
+  0) ;;
+  3)
+    echo "pre-push: binary provenance check failed (exit $code) — this \`lore\` was built from a different commit than the tree you are pushing, so every corpus verdict it issues is untrustworthy; rebuild with \`bun run build\` or push with --no-verify" >&2
+    exit 1
+    ;;
+  4)
+    echo "pre-push: binary provenance check failed (exit $code) — this compiled \`lore\` carries no build commit at all, which is a build defect; rebuild with \`bun run build\` and check scripts/build.ts's \`define\` injection, or push with --no-verify" >&2
+    exit 1
+    ;;
+  *)
+    echo "pre-push: binary provenance check failed (exit $code) — \`lore status --check-binary-provenance\` could not classify this binary (a \`lore\` predating the flag exits 2 on the unknown flag); upgrade or rebuild \`lore\`, diagnose with that command, or push with --no-verify" >&2
+    exit 1
+    ;;
+esac
 lore status --check-tree --check-drift
 code=$?
 if [ "$code" -ne 0 ]; then
