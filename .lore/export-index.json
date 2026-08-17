@@ -6028,6 +6028,14 @@
     "01M06X2JFZCK23WWMDRX715NJ2": {
       "human_id": "KN-464",
       "file_path": "docs/requirements/knowledge/KN-464-the-ac-coverage-badge-ignores-fail-superseded-so-a.md"
+    },
+    "01M06YMW0A3ZAV0A9HWMWPETG4": {
+      "human_id": "KN-465",
+      "file_path": "docs/requirements/knowledge/KN-465-assessment-land-oracle-exclusivity-a-mirror-check.md"
+    },
+    "01M06XQ7J9M8HTQ3GXBCHHVGDV": {
+      "human_id": "TASK-731",
+      "file_path": "docs/requirements/task/TASK-731-the-oracle-mutex-s-production-lock-path-has-no-ora.md"
     }
   }
 }

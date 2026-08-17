@@ -3,10 +3,10 @@ id: PLAN-124
 type: plan
 role: plan
 title: "Land oracle exclusivity: a mirror check that can fail, a guard that sees mirror content, a gitignored probe namespace, and a serialized suite"
-status: approved
+status: archived
 priority: high
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-17
 tags: []
 parent: SPEC-136
 phases:
