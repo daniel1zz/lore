@@ -13,6 +13,14 @@
  * Fix: an onLoad plugin intercepts libsql/index.js and rewrites the single dynamic
  * require line to a static require of the resolved absolute .node path.
  * Bun embeds any .node file that appears as a static string literal require.
+ *
+ * Also embeds BUILD PROVENANCE (spec-bootstrap-fixpoint-integrity-binary-
+ * provenance-an-anchor, AC-BFI-1): the commit this binary was built from, that
+ * tree's cleanliness, and the build timestamp — injected as a JSON string
+ * literal through `Bun.build`'s `define`, read back by
+ * `packages/lore/src/service/binary-provenance.ts`. See `readBuildProvenance`
+ * below for the fail-loud contract, and the `define` block near `Bun.build`
+ * for why it is computed at that exact point in the sequence.
  */
 
 import { join, dirname } from "path";
@@ -34,6 +42,18 @@ import {
 
 const root = join(import.meta.dir, "..");
 const entrypoint = join(root, "packages", "lore", "src", "index.ts");
+// ⛔ The output path is FIXED, and an earlier revision of this slice was wrong
+// to make it overridable. A `LORE_BUILD_OUTFILE` escape let the two
+// binary-provenance test suites build without racing each other on one path —
+// but `bun run build` ALSO rewrites `packages/lore/src/generated/
+// assets-manifest.ts` on every run, so a build that skipped `dist/lore` left a
+// generated source NEWER than the binary. That is precisely the condition
+// `tests/integration/helpers/assert-fresh-binary.ts` refuses, and it took
+// `dashboard-command.bun.test.ts` and `gate-hooks.bun.test.ts` down with it
+// (measured 2026-08-17 in one `bun run test:changed` run). Keeping the
+// destination fixed keeps "a build happened" and "dist/lore is current" the
+// same fact. Suites needing their own artifact build here and COPY it — see
+// those two suites' `beforeAll`.
 const outfile = join(root, "dist", "lore");
 
 /** Resolves the absolute path to the native .node file for the current platform. */
@@ -109,6 +129,56 @@ function makeLibsqlPlugin(nativeNodePath: string): BunPlugin {
         return { contents: rewritten, loader: "js" };
       });
     },
+  };
+}
+
+/**
+ * Reads the build tree's provenance: the commit being built from, whether that
+ * tree carried uncommitted changes, and when. Shape MUST match
+ * `packages/lore/src/service/binary-provenance.ts`'s `buildProvenanceSchema`
+ * (Zod-validated at read time in the binary, so a drift here surfaces as a
+ * `provenance-missing` BUILD DEFECT rather than silently).
+ *
+ * ⛔ FAILS LOUD when git is unavailable rather than injecting a placeholder: a
+ * binary that cannot say which commit it came from is exactly the artifact
+ * `lore status --check-binary-provenance` exists to refuse, and the earliest,
+ * loudest place to refuse it is here. This is safe for consumers — the npm
+ * tarball ships a PREBUILT `dist/lore` and runs no build step (`npm-pkg/` has
+ * only `postinstall.mjs`), so no consumer path reaches this function.
+ */
+function readBuildProvenance(repoRoot: string): {
+  build_commit: string;
+  build_dirty: boolean;
+  built_at: string;
+} {
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" });
+  if (head.status !== 0) {
+    throw new Error(
+      `[build] Cannot read the build commit: 'git rev-parse HEAD' exited ${String(head.status)} in ${repoRoot}. ` +
+        `A lore binary must carry the commit it was built from (AC-BFI-1); refusing to build a provenance-less one.\n` +
+        `stderr: ${head.stderr ?? ""}`,
+    );
+  }
+  const buildCommit = head.stdout.trim();
+  if (!/^[0-9a-f]{40}$/.test(buildCommit)) {
+    throw new Error(
+      `[build] 'git rev-parse HEAD' returned "${buildCommit}", which is not a 40-hex commit sha. ` +
+        `Refusing to embed it as build provenance.`,
+    );
+  }
+
+  const porcelain = spawnSync("git", ["status", "--porcelain"], { cwd: repoRoot, encoding: "utf8" });
+  if (porcelain.status !== 0) {
+    throw new Error(
+      `[build] Cannot read the build tree's cleanliness: 'git status --porcelain' exited ` +
+        `${String(porcelain.status)} in ${repoRoot}.\nstderr: ${porcelain.stderr ?? ""}`,
+    );
+  }
+
+  return {
+    build_commit: buildCommit,
+    build_dirty: porcelain.stdout.trim().length > 0,
+    built_at: new Date().toISOString(),
   };
 }
 
@@ -230,12 +300,40 @@ console.log(
   `  Assets manifest: ${assetsManifest.entries.length} files, tree_digest ${assetsManifest.tree_digest} (verified fresh)`,
 );
 
+// ─── Build provenance injection (spec-bootstrap-fixpoint-integrity-binary-
+// provenance-an-anchor, AC-BFI-1) ────────────────────────────────────────────
+// MUST be computed HERE, after every generation step above and immediately
+// before `Bun.build` — `build_dirty` is a claim about the tree the binary is
+// compiled from, and the assets-manifest / dashboard-assets steps above can
+// themselves change that tree. Computing it earlier would embed "clean" into a
+// binary compiled from a tree those steps had since dirtied.
+//
+// `dist/` is gitignored, so `Bun.build`'s own output below can never move this
+// flag after the fact.
+//
+// Delivered via `Bun.build`'s `define`, NOT a generated source file: the
+// substitution reaches the compiled bundle only, so `bun run dev` keeps
+// carrying no provenance BY CONSTRUCTION (measured: same source compiled
+// without `define` reads `null` through the `typeof` guard rather than
+// throwing). The consumer is
+// `packages/lore/src/service/binary-provenance.ts::readEmbeddedBuildProvenance`
+// — the identifier name below MUST stay byte-identical to that module's
+// `declare const`.
+const buildProvenance = readBuildProvenance(root);
+console.log(
+  `  Provenance: ${buildProvenance.build_commit}` +
+    `${buildProvenance.build_dirty ? " (DIRTY tree)" : ""} at ${buildProvenance.built_at}`,
+);
+
 const result = await Bun.build({
   entrypoints: [entrypoint],
   target: "bun",
   minify: true,
   compile: { outfile },
   plugins: [makeLibsqlPlugin(nativeNodePath)],
+  define: {
+    __LORE_BUILD_PROVENANCE__: JSON.stringify(JSON.stringify(buildProvenance)),
+  },
 });
 
 if (!result.success) {

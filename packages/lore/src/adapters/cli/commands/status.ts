@@ -73,6 +73,26 @@
  * app-backed branch those five flags fold into). Passing --check-claude-md
  * alongside any of those flags runs ONLY the memory-file check; see that
  * branch for exit codes.
+ *
+ * --check-binary-provenance is likewise standalone, and sits AHEAD of every
+ * other flag in this command (spec-bootstrap-fixpoint-integrity-binary-
+ * provenance-an-anchor, AC-BFI-2): it answers "was this verdict issued by a
+ * binary built from this source?", which conditions the trustworthiness of
+ * every other verdict, and it needs only the cwd's git repo — never the corpus.
+ * Exit codes, all EXACT: dev-synced 0 · dev-stale 3 (naming BOTH shas) ·
+ * not-a-dev-checkout 0 with the literal token `skipped` · running from source 0
+ * with `skipped` · a COMPILED binary carrying no provenance 4 (a build defect,
+ * deliberately not folded into `skipped`). Rationale for the five-state /
+ * three-exit split, and for why a dirty tree at HEAD stays dev-synced, lives in
+ * `service/binary-provenance.ts`'s D1/D2 header blocks.
+ *
+ * Dispatch precedence inside this command, highest first:
+ *   --check-binary-provenance → --enumerate → --check-claude-md →
+ *   the app-backed --check-* family → the plain run.
+ * The first three are mutually exclusive by design (each returns), so combining
+ * them runs only the highest; the app-backed family composes internally as
+ * documented above. This precedence is asserted by
+ * `tests/integration/binary-provenance-check.test.ts`.
  */
 
 import { defineCommand } from "citty";
@@ -120,6 +140,17 @@ import {
   type OutlineBudgetLike,
   type PrdBudgetBreach,
 } from "../../../service/prd-budget-check.js";
+import {
+  BINARY_PROVENANCE_EXIT_CODES,
+  classifyBinaryProvenance,
+  createRealGitProvenanceProbe,
+  formatBinaryProvenanceStatusLine,
+  gatherBinaryProvenanceFacts,
+  isCompiledBinary,
+  provenanceOrNull,
+  readEmbeddedBuildProvenance,
+  renderBinaryProvenanceVerdict,
+} from "../../../service/binary-provenance.js";
 import { renderExemptPlansSection } from "../../../flows/status-prd-sync-flow.js";
 import {
   computeIssueResolution,
@@ -816,6 +847,11 @@ export default defineCommand({
       description:
         "Lint project memory files (CLAUDE.md by default) against corpus-governed line/byte ceilings, always reporting used/ceiling/remaining headroom. Config-only, never loads the corpus DB. Breach → exit 3; a near-ceiling advisory warning never changes the exit code.",
     },
+    "check-binary-provenance": {
+      type: "boolean",
+      description:
+        "Compare THIS binary's embedded build commit against the cwd repo. dev-synced → 0; dev-stale (built from another commit of this repo) → 3, naming both shas; not a dev checkout (build commit unknown here, e.g. an installed lore) → 0, 'skipped'. Git-only, never loads the corpus DB. Standalone — takes precedence over every other flag.",
+    },
     enumerate: {
       type: "string",
       description:
@@ -823,6 +859,48 @@ export default defineCommand({
     },
   },
   async run({ args }) {
+    // ── check-binary-provenance branch (spec-bootstrap-fixpoint-integrity-
+    // binary-provenance-an-anchor, AC-BFI-2) ────────────────────────────────
+    // reason: dispatched FIRST, ahead of --enumerate and --check-claude-md.
+    // Every other verdict this process can issue is only as trustworthy as the
+    // binary issuing it, so "is this binary built from this source?" is the one
+    // question that must be answerable before any other flag runs. Standalone
+    // like --check-claude-md and for the same Module-Boundary reason: the
+    // classification depends solely on the cwd's git repo, so it must never
+    // reach loadLoreApp/bun:sqlite — which also means it can never touch the
+    // repo's own .lore/. Thin adapter: the ambient reads and the git port are
+    // assembled here, every decision lives in service/binary-provenance.ts.
+    if (args["check-binary-provenance"] === true) {
+      const embedded = readEmbeddedBuildProvenance();
+      const verdict = classifyBinaryProvenance(
+        gatherBinaryProvenanceFacts({
+          embedded,
+          is_compiled: isCompiledBinary(Bun.main),
+          cwd: process.cwd(),
+          probe: createRealGitProvenanceProbe(),
+        }),
+      );
+      const rendered = renderBinaryProvenanceVerdict(verdict);
+
+      if (args.json) {
+        // `summary` is carried into the payload so a --json consumer reads the
+        // SAME tokens (`skipped`, both shas) a stdout reader does — one
+        // rendering, two surfaces, never a second phrasing that can drift.
+        console.log(
+          JSON.stringify(
+            { ok: true, data: { binary_provenance_check: { ...verdict, summary: rendered.summary } } },
+            null,
+            2,
+          ),
+        );
+      } else {
+        for (const line of rendered.lines) console.log(line);
+      }
+
+      process.exitCode = BINARY_PROVENANCE_EXIT_CODES[verdict.kind];
+      return;
+    }
+
     // reason: AC-FR-5 (task-raise-the-evidence-tail-guard-s-predicate-to-its-
     // own) — dispatched BEFORE every other flag: enumeration is a read-only,
     // standalone query over the same COUNT_FIELD_ENUMERATORS registry the
@@ -1368,6 +1446,12 @@ export default defineCommand({
       const captureSourceRunnerCount = captureSourceMembersResult.value.runner.length;
       const captureSourceSelfReportCount = captureSourceMembersResult.value.selfReport.length;
 
+      // spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor (AC-BFI-1)
+      // — WHICH BINARY produced everything above. Ambient-only (no corpus, no
+      // git spawn): it reports what this binary CARRIES; comparing that against
+      // a repo is `--check-binary-provenance`'s job.
+      const embeddedProvenance = readEmbeddedBuildProvenance();
+
       if (args.json) {
         console.log(
           JSON.stringify(
@@ -1387,6 +1471,10 @@ export default defineCommand({
                 unredeemed_allow_missing_path_count: unredeemedAllowMissingPathCount,
                 capture_source_runner_count: captureSourceRunnerCount,
                 capture_source_self_report_count: captureSourceSelfReportCount,
+                // ALWAYS present, `null` included (same convention as
+                // `invalid_docs`) — an omitted key would let a consumer read
+                // "absent" as "this binary is fine".
+                binary_provenance: provenanceOrNull(embeddedProvenance),
               },
             },
             null,
@@ -1491,6 +1579,12 @@ export default defineCommand({
           "self-reported (across every task/phase evidence entry — report-only, see " +
           "spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)",
       );
+
+      // spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor (AC-BFI-1)
+      // — printed UNCONDITIONALLY, including the "none embedded" case, same
+      // "never a silent count" discipline as `Retracted:` above: not knowing
+      // which binary issued this report is itself the fact worth printing.
+      console.log(formatBinaryProvenanceStatusLine(embeddedProvenance));
 
       // M3 (AC-FALS-10) — same "only when > 0" discipline as open_stale_candidates/
       // codeAnchorSpecs above; silent when unavailable (no companion source
