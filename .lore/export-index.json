@@ -6024,6 +6024,10 @@
     "01M06W0ZHXJNGQBM57DAN95G0Z": {
       "human_id": "KN-463",
       "file_path": "docs/requirements/knowledge/KN-463-retired-from-root-claude-md-eight-pointer-less.md"
+    },
+    "01M06X2JFZCK23WWMDRX715NJ2": {
+      "human_id": "KN-464",
+      "file_path": "docs/requirements/knowledge/KN-464-the-ac-coverage-badge-ignores-fail-superseded-so-a.md"
     }
   }
 }
