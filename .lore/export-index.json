@@ -6068,6 +6068,10 @@
     "01M07TYR8P3JQZVY9JD61GCHYR": {
       "human_id": "ADR-034",
       "file_path": "docs/requirements/adr/ADR-034-a-record-with-no-state-stamp-is-acceptable-but-nev.md"
+    },
+    "01M07VV9EW7QNT0MB4DM1ZDC4F": {
+      "human_id": "KN-471",
+      "file_path": "docs/requirements/knowledge/KN-471-a-declared-property-with-no-measuring-oracle-and-t.md"
     }
   }
 }
