@@ -38,7 +38,12 @@
  *               step is still present in both copies — the new
  *               `lore audit --verify` step is additive, not a replacement.
  *
+ * ⛔ THIS SUITE IS NOT AUTOMATICALLY REACHED BY A HOOK-ONLY CHANGE. See
+ * {@link REPO_HOOK_RELATIVE}'s doc comment for the measured reason and for what
+ * does protect that change set today (the selector's loud-zero refusal).
+ *
  * @spec_ref AC-080-3
+ * @spec_ref spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor AC-BFI-9
  */
 
 import { describe, it, expect } from "vitest";
@@ -51,8 +56,37 @@ import { fileURLToPath } from "node:url";
 // 5 levels up from this file's own directory.
 
 const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
-const REPO_HOOK_PATH = join(REPO_ROOT, "hooks", "pre-push");
-const ASSET_HOOK_PATH = join(REPO_ROOT, "assets", "project", "pre-push");
+
+/**
+ * The two repo-relative paths this suite judges, written as LITERAL strings
+ * (never assembled from `join("hooks", "pre-push")` segments) so `grep
+ * 'hooks/pre-push'` finds this file — the only mechanism by which a human or a
+ * future selector rule can discover that this suite is the oracle for that pair.
+ *
+ * ⛔ MEASURED, so nobody re-derives it optimistically: adding these literals does
+ * NOT make `bun run test:changed` select this file on a hook-only change set, and
+ * they are not here for that. `scripts/changed-tests.ts`'s tree-scanning rule (d)
+ * gates membership on {@link BARE_MAIN_INVOCATION_RE} — a bare `main()` call this
+ * suite has no reason to contain — and BOTH of its scopes exclude these paths
+ * anyway: `"packages-test-tree"` requires `startsWith("packages/")`, and
+ * `"repo-tracked-text-source"` defers to `hasTextSourceExtension`, which is false
+ * for an extensionless file (its own doc comment uses `hooks/pre-push` as the
+ * worked example of `hasNoExtension`). `hooks/**` and `assets/**` are outside the
+ * selector's file universe entirely. Closing that hole needs a change to
+ * `scripts/changed-tests.ts`, not to this file. See
+ * `knowledge-bun-run-test-changed-full-selection-contract-and-its`.
+ *
+ * What DOES protect a hook-only change today is the selector's loud-zero rule:
+ * measured 2026-08-17, a change set of exactly these two paths selects 0 tests
+ * and `test:changed` exits 1 naming both as unselected, rather than reporting a
+ * hollow green. That is a refusal to answer, not coverage — this suite still has
+ * to be run deliberately, or reached via a full-suite run.
+ */
+const REPO_HOOK_RELATIVE = "hooks/pre-push";
+const ASSET_HOOK_RELATIVE = "assets/project/pre-push";
+
+const REPO_HOOK_PATH = join(REPO_ROOT, REPO_HOOK_RELATIVE);
+const ASSET_HOOK_PATH = join(REPO_ROOT, ASSET_HOOK_RELATIVE);
 
 describe("pre-push hook pair — content parity + audit-verify wiring (SPEC-080 G5)", () => {
   it("HAPPY: both hook copies exist on disk", () => {
@@ -86,6 +120,20 @@ describe("pre-push hook pair — content parity + audit-verify wiring (SPEC-080 
     const assetHook = readFileSync(ASSET_HOOK_PATH, "utf8");
     expect(repoHook).toContain("--check-claude-md");
     expect(assetHook).toContain("--check-claude-md");
+  });
+
+  // AC-BFI-9 (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor):
+  // the anchor-coverage ratchet is the hook's LAST step. Pinned on the real
+  // INVOCATION token `check-anchor-coverage.ts` rather than the bare
+  // `check-anchor-coverage` the criterion's own grep uses, because the bare form
+  // also matches a comment — the exact G6 gap the behavioural trip suite
+  // (packages/lore/tests/integration/pre-push-binary-provenance-trip.bun.test.ts)
+  // exists to close, and there is no reason to reproduce it here.
+  it("HAPPY: both hook copies invoke the anchor-coverage ratchet script (AC-BFI-9)", () => {
+    const repoHook = readFileSync(REPO_HOOK_PATH, "utf8");
+    const assetHook = readFileSync(ASSET_HOOK_PATH, "utf8");
+    expect(repoHook).toContain("scripts/check-anchor-coverage.ts");
+    expect(assetHook).toContain("scripts/check-anchor-coverage.ts");
   });
 
   it("NEGATIVE: the byte-identity check is not a tautological always-pass", () => {

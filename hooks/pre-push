@@ -7,7 +7,10 @@
 # root PRD outline exceeds its tiered char budgets (SPEC-080 Phase 3, armed
 # 2026-07-26 after 5 observed clean plan-closes; threshold was 2), or when a
 # project memory file (CLAUDE.md) exceeds its corpus-governed line/byte
-# ceiling (AC-CMC-4, spec-project-claude-md-content-contract-governance-injected).
+# ceiling (AC-CMC-4, spec-project-claude-md-content-contract-governance-injected),
+# or when anchor coverage decays in either direction — a live spec declaring no
+# code anchors and carrying no ledger row, or a ledger row outliving the debt it
+# names (AC-BFI-9, same spec as the provenance step).
 # Fail-open contract (same as g1-g4 gate shims): no lore binary / no .lore -> allow.
 # Bypass: git push --no-verify
 command -v lore >/dev/null 2>&1 || exit 0
@@ -60,5 +63,33 @@ code=$?
 if [ "$code" -ne 0 ]; then
   echo "pre-push: CLAUDE.md budget check failed (exit $code) — trim the over-ceiling file(s) (lore status --check-claude-md) or run \`lore governance claude-md\` for the content contract, or push with --no-verify" >&2
   exit 1
+fi
+# Anchor-coverage ratchet, LAST because it is the only step here that is not the
+# `lore` binary: it is a REPO SCRIPT (scripts/check-anchor-coverage.ts), so the
+# fail-open preamble above — which gates on `lore` and `.lore/` — does not cover
+# it. A third-party project that installed this hook via `lore setup --project`
+# has no such script and no ledger to check, so presence of the script AND of
+# `bun` is the guard. ⛔ That guard is an `if`, never a `|| exit 0`: a missing
+# checker must not short-circuit a hook that has already passed five real checks.
+# Like the provenance step, it dispatches on the EXACT code rather than `-ne 0`:
+# the checker exits 1 for a repo-invariant failure (a ledger/anchor mismatch the
+# pusher must resolve) and 2 when the scan itself could not complete (unreadable
+# ledger, corpus read error, or its two population predicates disagreeing) —
+# collapsing them would hand a broken scan the advice for a real violation.
+anchor_coverage_checker="$(git rev-parse --show-toplevel)/scripts/check-anchor-coverage.ts"
+if [ -f "$anchor_coverage_checker" ] && command -v bun >/dev/null 2>&1; then
+  bun "$anchor_coverage_checker"
+  code=$?
+  case "$code" in
+    0) ;;
+    1)
+      echo "pre-push: anchor-coverage ratchet failed (exit $code) — the report above names every offending spec: an unanchored live spec needs \`lore anchor add <spec> <path#Symbol>\` or a row in scripts/anchor-coverage-ledger.json, and a ledger row whose spec is now anchored must be deleted; or push with --no-verify" >&2
+      exit 1
+      ;;
+    *)
+      echo "pre-push: anchor-coverage ratchet could not complete its scan (exit $code) — this is a checker/ledger defect, not unanchored specs; diagnose with \`bun scripts/check-anchor-coverage.ts\`, or push with --no-verify" >&2
+      exit 1
+      ;;
+  esac
 fi
 exit 0
