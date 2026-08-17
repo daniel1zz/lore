@@ -3,11 +3,11 @@ id: TASK-722
 type: task
 role: plan
 title: "The two mirror exporters disagree because drift detection is body-only: no invocable command can repair a status-only drift, yet the suite rewrites it mid-run"
-status: draft
+status: archived
 priority: critical
 phase: "readonly-oracle"
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-17
 tags: []
 parent: PLAN-124
 plan: PLAN-124
