@@ -3,11 +3,11 @@ id: TASK-654
 type: task
 role: plan
 title: "Embed build provenance into the binary and add the three-state --check-binary-provenance"
-status: draft
+status: archived
 priority: medium
 phase: "binary-provenance"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-17
 tags: []
 parent: PLAN-121
 plan: PLAN-121

@@ -12,6 +12,8 @@ parent: PLAN-124
 links:
   - {id: KN-457, type: supersedes}
 ---
+> ⚠ INVALIDATED 2026-08-17T04:14:45.908Z — superseded by knowledge-handoff-agent-main-orchestrator-106; Superseded by ticket 106: the exclusivity plan is now CLOSED (AC-OX-7 landed with an independently-run falsifier), so 105's NS1/NS2/NS6 are complete; 106 carries the surviving items plus this round's findings
+
 # Handoff — agent:main-orchestrator
 
 SCOPE: 7 decisions + 7 next steps = 14 items to account for

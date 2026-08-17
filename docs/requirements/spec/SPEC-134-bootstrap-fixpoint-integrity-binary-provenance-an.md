@@ -125,10 +125,15 @@ assets manifest is regenerated, or the change does not ship.
 Follows `adr-a-newly-armed-structural-oracle-enforces-from-a-baseline` verbatim; this slice invents
 no new enforcement shape.
 
-1. **Report with members.** `lore status --json` gains `code_anchor_coverage` carrying
-   `anchored` / `total` / `ratio` **and `unanchored_slugs[]`**. A corpus-wide count with no member
-   list is a governance defect in its own right (AC-FR-5 in the falsifiability spec establishes the
-   rule; `knowledge-four-governance-tooling-gaps-measured-while-resuming` records the cost).
+1. **Report with members, through the EXISTING seam.** A corpus-wide count with no member list is
+   a governance defect in its own right (AC-FR-5 in the falsifiability spec establishes the rule;
+   `knowledge-four-governance-tooling-gaps-measured-while-resuming` records the cost). ⛔ The member
+   list is served by registering an enumerator for the existing `code_anchor_specs` count field on
+   `COUNT_FIELD_ENUMERATORS`, so `lore status --enumerate code_anchor_specs` returns it — NOT by a
+   parallel bespoke `code_anchor_coverage` block. **AC-BFI-4 is authoritative on this shape**; an
+   earlier revision of this line specified the bespoke block and was corrected 2026-08-17 after a
+   review flagged the two halves of this spec prescribing different surfaces for one thing
+   (`knowledge-five-governance-gaps-measured-while-landing-the` G7).
 2. **Ledger, not a glob.** `scripts/anchor-coverage-ledger.json` — shaped after
    `scripts/ac-ref-exemption-ledger.json` — holds one row per unanchored spec: slug, cohort
    (`deliberate` | `debt`), and the reason. It ships with all **55** rows dispositioned: the 11
@@ -203,9 +208,9 @@ inert. ⛔ A criterion never observed red is not evidence
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-BFI-1: PROVENANCE EMBEDDED AND PINNED TO THE REAL BUILD TREE (D1): a binary produced by `bun run build` carries the commit it was built from, and `lore status --json` exposes binary_provenance{build_commit, build_dirty, built_at}. ⛔ Shape assertions alone are insufficient — a hardcoded 40-hex placeholder satisfies /^[0-9a-f]{40}$/ — so the test MUST assert build_commit EQUALS the actual HEAD sha of the tree it just built, read independently via 'git rev-parse HEAD' at test time, and build_dirty EQUALS the actual porcelain-emptiness of that tree. RED (both required, and (b) is the one that catches the real failure mode): (a) remove the injection entirely and the field must be absent/null, failing; (b) replace the injection with a well-formed CONSTANT sha of correct shape — the equality-to-real-HEAD assertion must still fail, proving the oracle discriminates a measured value from a plausible fake.
+- [✔] [script] AC-BFI-1: PROVENANCE EMBEDDED AND PINNED TO THE REAL BUILD TREE (D1): a binary produced by `bun run build` carries the commit it was built from, and `lore status --json` exposes binary_provenance{build_commit, build_dirty, built_at}. ⛔ Shape assertions alone are insufficient — a hardcoded 40-hex placeholder satisfies /^[0-9a-f]{40}$/ — so the test MUST assert build_commit EQUALS the actual HEAD sha of the tree it just built, read independently via 'git rev-parse HEAD' at test time, and build_dirty EQUALS the actual porcelain-emptiness of that tree. RED (both required, and (b) is the one that catches the real failure mode): (a) remove the injection entirely and the field must be absent/null, failing; (b) replace the injection with a well-formed CONSTANT sha of correct shape — the equality-to-real-HEAD assertion must still fail, proving the oracle discriminates a measured value from a plausible fake.
   script: test — bunx vitest run packages/lore/tests/unit/status/binary-provenance.test.ts 2>&1 && echo 'AC-BFI-1 PASS: lore status --json carries binary_provenance{build_commit,build_dirty,built_at} from a real build'
-- [·] [script] AC-BFI-2: THREE-STATE CHECK WITH EXACT EXITS (D1): `lore status --check-binary-provenance` distinguishes all three states with these exact exit codes — dev-synced (build commit == corpus repo HEAD) exits EXACTLY 0; dev-stale (build commit is a commit in this repo but not HEAD) exits EXACTLY 3, joining the existing --check-* drift family whose measured code is 3 (verified 2026-08-11: 'lore status --check-tree --check-drift' on 3 plan-terminality drifts exits 3), AND its output names BOTH shas; not-a-dev-checkout (build commit unknown to this repo — the npm-installed consumer case) exits EXACTLY 0 with the literal token 'skipped' in its output. RED (both machine-checkable): (a) collapse not-a-dev-checkout into dev-stale and the consumer case must exit 3 instead of 0, failing; (b) collapse dev-stale into a pass and the stale case must exit 0 instead of 3, failing. ⛔ The test asserts exit == 3, never 'non-zero': a check crashing before it inspects anything also exits non-zero and has zero discriminating power.
+- [✔] [script] AC-BFI-2: THREE-STATE CHECK WITH EXACT EXITS (D1): `lore status --check-binary-provenance` distinguishes all three states with these exact exit codes — dev-synced (build commit == corpus repo HEAD) exits EXACTLY 0; dev-stale (build commit is a commit in this repo but not HEAD) exits EXACTLY 3, joining the existing --check-* drift family whose measured code is 3 (verified 2026-08-11: 'lore status --check-tree --check-drift' on 3 plan-terminality drifts exits 3), AND its output names BOTH shas; not-a-dev-checkout (build commit unknown to this repo — the npm-installed consumer case) exits EXACTLY 0 with the literal token 'skipped' in its output. RED (both machine-checkable): (a) collapse not-a-dev-checkout into dev-stale and the consumer case must exit 3 instead of 0, failing; (b) collapse dev-stale into a pass and the stale case must exit 0 instead of 3, failing. ⛔ The test asserts exit == 3, never 'non-zero': a check crashing before it inspects anything also exits non-zero and has zero discriminating power.
   script: test — bunx vitest run packages/lore/tests/integration/binary-provenance-check.test.ts 2>&1 && echo "AC-BFI-2 PASS: dev-synced exits 0, dev-stale exits exactly 3 naming both shas, not-a-dev-checkout exits 0 with the skipped token"
 - [·] [script] AC-BFI-3: PRE-PUSH WIRING, BOTH COPIES (D1): the binary-provenance check is invoked from hooks/pre-push, and hooks/pre-push is byte-identical to assets/project/pre-push — proving the check is WIRED into the shipping surface, not merely present in the repo. RED: wire only hooks/pre-push and leave assets/project/pre-push untouched — the byte-identity diff must fail, so a consumer-invisible fix cannot pass. Runnable TODAY; measured red 2026-08-11 by segment (parity segment exit 0, wiring segment exit 1), proving the red comes from the missing wiring and not from a pre-existing parity break.
   script: lint — diff hooks/pre-push assets/project/pre-push && grep -c check-binary-provenance hooks/pre-push && echo 'AC-BFI-3 PASS: both pre-push copies byte-identical AND invoke --check-binary-provenance'
@@ -228,3 +233,6 @@ inert. ⛔ A criterion never observed red is not evidence
 - scripts/anchor-coverage-ledger.json
 - packages/lore/tests/unit/scripts/anchor-coverage-ratchet.test.ts
 - packages/lore/tests/unit/scripts/anchor-coverage-stale-exemption.test.ts
+- packages/lore/src/service/binary-provenance.ts
+- packages/lore/tests/unit/status/binary-provenance.test.ts
+- packages/lore/tests/integration/binary-provenance-check.test.ts
