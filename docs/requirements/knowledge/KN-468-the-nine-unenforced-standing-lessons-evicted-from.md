@@ -85,9 +85,18 @@ Source: `knowledge-five-findings-from-planning-the-bootstrap-fixpoint`
 ### 8. After ANY corpus write, converge the mirror
 `bun run mirror:export` repairs status/frontmatter unconditionally; BODY drift needs
 `lore export-docs --force`; `--check` catches a MISSING file, never a wrong one.
-**Needs**: a pre-push mirror-convergence check. Verified 2026-08-17 — `hooks/pre-push` runs five
-checks (`--check-binary-provenance`, `--check-tree --check-drift`, `audit --verify`,
-`--check-prd-budget`, `--check-claude-md`) and **not one of them looks at mirror convergence**.
+**Needs**: WIRING, not new code — `scripts/export-spec-mirror.ts --check` (npm script
+`check:spec-mirror`) already refuses on an unconverged mirror. It runs inside `bun run test` and
+**not** inside `hooks/pre-push`, which is why nothing catches this at push time.
+
+⚠️ CORRECTION 2026-08-17, same day this doc was written: an earlier version of this entry said
+`hooks/pre-push` runs FIVE checks. It runs **SIX** — the sixth is the anchor-coverage ratchet at
+lines 79-90. The error was mine and it is instructive: I grepped `^lore |^bun ` , which anchors to
+column 0, and the sixth check is invoked as an INDENTED `bun "$anchor_coverage_checker"` inside an
+`if` block. The pattern matched nothing there and **said nothing about having missed it** — the
+same silent-degradation-to-no-match failure the substring-matcher lesson already warns about,
+committed while writing the ledger of unenforced lessons. The surviving claim is unchanged and was
+re-verified against the full file: **none of the six looks at mirror convergence**.
 Cost of its absence, same day: `lore done` ran before the mirror converged, AC-OX-6 went red for
 61 seconds, and that red is now permanently rendered as `[✘]` on a closed spec (see
 `knowledge-the-ac-coverage-badge-ignores-fail-superseded-so-a`).
