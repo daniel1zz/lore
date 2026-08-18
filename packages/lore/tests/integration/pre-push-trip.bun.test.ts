@@ -549,3 +549,94 @@ describe("AC-BFI-9: the pre-push hook actually RUNS the anchor-coverage ratchet"
     }
   });
 });
+
+describe("AC-BFI-11: the rename and every record of the old name are one acceptance unit", () => {
+  // ⛔ The needle is built from two fragments, joined at runtime, so THIS
+  // FILE's own source never contains the pre-rename literal as one
+  // contiguous run. If it did, case (a)'s repo-wide grep below would match
+  // this very file and be red forever (or worse, get "fixed" by narrowing
+  // the search to exclude this file — a silent weakening of the check it
+  // exists to run). See the CONTROL case immediately below for proof the
+  // two fragments concatenate to the intended literal.
+  const OLD_BASENAME_FRAGMENT_1 = "pre-push-binary";
+  const OLD_BASENAME_FRAGMENT_2 = "-provenance-trip";
+  const OLD_BASENAME_LITERAL = OLD_BASENAME_FRAGMENT_1 + OLD_BASENAME_FRAGMENT_2;
+  const OLD_TEST_FILE_PATH = join(
+    REPO_ROOT,
+    "packages",
+    "lore",
+    "tests",
+    "integration",
+    `${OLD_BASENAME_LITERAL}.bun.test.ts`,
+  );
+  const THIS_FILE_PATH = new URL(import.meta.url).pathname;
+
+  it("CONTROL: the old-basename needle concatenates correctly and actually detects the shape it targets", () => {
+    // Cross-check via a DIFFERENT split point than the one used to build
+    // OLD_BASENAME_LITERAL above — a typo in either split would make the two
+    // disagree, so this is not just re-asserting the same construction.
+    const crossCheckSplit = "pre-push-binary-prov" + "enance-trip";
+    expect(OLD_BASENAME_LITERAL).toBe(crossCheckSplit);
+    // ⛔ Deliberately NOT a `.toBe(OLD_BASENAME_FRAGMENT_1 + OLD_BASENAME_FRAGMENT_2
+    // spelled out again as one quoted literal)` here — that would put the
+    // pre-rename basename into THIS file's own source as one contiguous run,
+    // making case (a)'s repo-wide grep below self-defeating (measured: it
+    // did, on the first attempt at this test — see git history of this file).
+    expect(OLD_BASENAME_LITERAL.length).toBe(31);
+    expect(OLD_BASENAME_LITERAL.startsWith("pre-push-binary")).toBe(true);
+    expect(OLD_BASENAME_LITERAL.endsWith("provenance-trip")).toBe(true);
+
+    // Proves the needle actually matches the literal shape it targets, using
+    // plain string search (no git) — the "it detects what it claims to
+    // detect" control that case (a)'s git grep depends on.
+    const fixtureWithNeedle = `see ${OLD_BASENAME_LITERAL}.bun.test.ts for the old name`;
+    const fixtureWithoutNeedle = "see pre-push-trip.bun.test.ts for the current name";
+    expect(fixtureWithNeedle.includes(OLD_BASENAME_LITERAL)).toBe(true);
+    expect(fixtureWithoutNeedle.includes(OLD_BASENAME_LITERAL)).toBe(false);
+  });
+
+  it("(a) no tracked file outside docs/requirements contains the pre-rename literal — offenders are NAMED, not just booleaned", () => {
+    const run = spawnSync("git", ["grep", "-n", "-I", OLD_BASENAME_LITERAL, "--", ":(exclude)docs/requirements"], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+    });
+    if (run.status === null) {
+      throw new Error(`git grep was killed by signal ${String(run.signal)} — no exit code to assert`);
+    }
+    // git grep: 0 = match found, 1 = no match, >1 = a real error (bad
+    // revision, bad pathspec, etc.) — never coerced into a boolean.
+    if (run.status === 0) {
+      throw new Error(
+        `found the pre-rename literal "${OLD_BASENAME_LITERAL}" outside docs/requirements — ` +
+          `every offending location below must be re-converged:\n${run.stdout}`,
+      );
+    }
+    if (run.status !== 1) {
+      throw new Error(
+        `git grep exited ${String(run.status)} (expected 0 or 1) — stderr: ${run.stderr}`,
+      );
+    }
+    expect(run.status).toBe(1);
+  });
+
+  it("(b) the pre-rename path does not exist on disk", () => {
+    expect(existsSync(OLD_TEST_FILE_PATH)).toBe(false);
+  });
+
+  it("(c) this file's own diagnostic prefix is the new basename, never the old one", () => {
+    const ownSource = readFileSync(THIS_FILE_PATH, "utf8");
+    expect(ownSource.includes("pre-push-trip:")).toBe(true);
+    expect(ownSource.includes(`${OLD_BASENAME_LITERAL}:`)).toBe(false);
+  });
+
+  it("(d) lore status --check-drift exits 0, proving this spec's code_anchor was repointed to the renamed file", () => {
+    const run = spawnSync(DIST_BINARY, ["status", "--check-drift"], { cwd: REPO_ROOT, encoding: "utf8" });
+    if (run.status === null) {
+      throw new Error(`lore status was killed by signal ${String(run.signal)} — no exit code to assert`);
+    }
+    if (run.status !== 0) {
+      throw new Error(`lore status --check-drift exited ${String(run.status)}: ${run.stdout}${run.stderr}`);
+    }
+    expect(run.status).toBe(0);
+  });
+});
