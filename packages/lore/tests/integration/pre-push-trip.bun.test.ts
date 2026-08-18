@@ -156,7 +156,7 @@ function makeShimBinDir(label: string, code: number): string {
 beforeAll(() => {
   if (!existsSync(join(REPO_ROOT, "scripts", "build.ts"))) {
     throw new Error(
-      `pre-push-binary-provenance-trip: REPO_ROOT resolved to "${REPO_ROOT}", which has no scripts/build.ts — ` +
+      `pre-push-trip: REPO_ROOT resolved to "${REPO_ROOT}", which has no scripts/build.ts — ` +
         `the up-level count in this file's REPO_ROOT is wrong.`,
     );
   }
