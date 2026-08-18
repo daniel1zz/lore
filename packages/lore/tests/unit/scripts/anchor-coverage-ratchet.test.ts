@@ -46,11 +46,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveCorpus } from "../../../src/adapters/cli/corpus-resolution.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -446,5 +447,178 @@ describe("check-anchor-coverage: the ratchet blocks new debt (AC-BFI-6)", () => 
       }
     },
     120000,
+  );
+});
+
+// ─── AC-BFI-10: ledger membership independently of the checker ─────────────
+
+/**
+ * Independently measures the set of unanchored live-spec SLUGS — without
+ * spawning `scripts/check-anchor-coverage.ts`, and without reading any of its
+ * stdout, stderr, or exit code. Reads `.lore/lore.db` directly through the
+ * `sqlite3` CLI (already this repo's documented measurement tool — see this
+ * spec's own `SELECT COUNT(*) FROM docs WHERE type='spec' ...` example),
+ * replicating ONLY the checker's own documented "live spec" population
+ * (`type='spec' AND deleted_at IS NULL`, no status filter — see
+ * `scripts/check-anchor-coverage.ts`'s module header, "What 'live spec' means
+ * here") and its anchored predicate (a non-empty `extra.code_anchors` array,
+ * mirroring `isSpecAnchored` there) — via a COMPLETELY DIFFERENT code path
+ * (raw SQL over a DB snapshot, never `createApp`/`corpusService.listFull`/the
+ * checker's own `isSpecAnchored`), so a regression in the checker's set
+ * logic (e.g. collapsing to a pure count) cannot also corrupt this witness.
+ *
+ * DB path resolution reuses `corpus-resolution.ts::resolveCorpus` — the SAME
+ * vitest-safe module `findLoreDbPath` delegates to (see its own header) — so
+ * this resolves the identical corpus the checker subprocess would find from
+ * the same `cwd`, including the worktree → main-checkout fallback (SPEC M4)
+ * this repo's dispatch protocol relies on. This is a SHARED resolution
+ * helper, never the checker under test, so using it does not reopen the
+ * circularity AC-BFI-10 closes.
+ *
+ * Reads a `.backup` SNAPSHOT, never the live file directly — several sibling
+ * agents may hold the real corpus open/writing concurrently under this
+ * repo's worktree-dispatch protocol (same discipline as
+ * `gate-feeding-fresh-install.test.ts`), so a live read risks `SQLITE_BUSY`.
+ *
+ * @param repoRoot - Directory to resolve the corpus from (mirrors the
+ *   checker subprocess's `cwd`)
+ * @returns The set of live spec slugs with NO non-empty `extra.code_anchors`
+ * @throws when no real corpus can be resolved from `repoRoot`, the scan
+ *   comes back empty, or the `sqlite3` CLI is unavailable/fails — never
+ *   silently returns an empty set, which would make every comparison below
+ *   vacuously "equal"
+ */
+function measureUnanchoredLiveSpecSlugsIndependently(repoRoot: string): Set<string> {
+  const resolved = resolveCorpus(repoRoot);
+  if (resolved === undefined || resolved.provenance === "undetermined") {
+    throw new Error(
+      `AC-BFI-10 independent measurement: could not resolve a real corpus db from ${repoRoot} ` +
+        `(provenance: ${resolved?.provenance ?? "none"}) — refusing to report an empty set as a false agreement.`,
+    );
+  }
+  const repoDbPath = resolved.path;
+
+  const snapshotDir = mkdtempSync(join(tmpdir(), "lore-anchor-cov-independent-"));
+  const snapshotDbPath = join(snapshotDir, "snapshot.db");
+  try {
+    // SQLite Online Backup API via the sqlite3 CLI — same discipline as
+    // gate-feeding-fresh-install.test.ts's `.backup`: the ORIGINAL file is
+    // opened for reading only; everything downstream operates on the snapshot.
+    execFileSync("sqlite3", [repoDbPath, `.backup ${snapshotDbPath}`], { encoding: "utf8" });
+
+    const raw = execFileSync(
+      "sqlite3",
+      ["-json", snapshotDbPath, "SELECT slug, extra FROM docs WHERE type='spec' AND deleted_at IS NULL;"],
+      { encoding: "utf8", maxBuffer: 20 * 1024 * 1024 },
+    );
+    const rows = JSON.parse(raw.trim().length > 0 ? raw : "[]") as Array<{ slug: string; extra: string | null }>;
+    if (rows.length === 0) {
+      throw new Error("AC-BFI-10 independent measurement: scanned 0 live specs — a real corpus cannot be this empty.");
+    }
+
+    const unanchored = new Set<string>();
+    for (const row of rows) {
+      let extra: unknown = {};
+      if (row.extra !== null && row.extra !== undefined) {
+        try {
+          extra = JSON.parse(row.extra);
+        } catch {
+          extra = {};
+        }
+      }
+      const codeAnchors = (extra as Record<string, unknown>)["code_anchors"];
+      const isAnchored = Array.isArray(codeAnchors) && codeAnchors.length > 0;
+      if (!isAnchored) unanchored.add(row.slug);
+    }
+    return unanchored;
+  } finally {
+    rmSync(snapshotDir, { recursive: true, force: true });
+  }
+}
+
+/** Set-difference in both directions, sorted, for a deterministic failure message. */
+function diffSlugSets(
+  measured: ReadonlySet<string>,
+  ledgerSlugs: ReadonlySet<string>,
+): { readonly missingFromLedger: readonly string[]; readonly extraInLedger: readonly string[] } {
+  return {
+    missingFromLedger: [...measured].filter((slug) => !ledgerSlugs.has(slug)).sort(),
+    extraInLedger: [...ledgerSlugs].filter((slug) => !measured.has(slug)).sort(),
+  };
+}
+
+describe("AC-BFI-10: ledger membership is asserted as a slug set, independently of the checker", () => {
+  it(
+    "HAPPY: the independently-measured unanchored slug SET equals the shipped ledger's slug SET — computed WITHOUT reading the checker's stdout or exit code",
+    () => {
+      const independentlyMeasured = measureUnanchoredLiveSpecSlugsIndependently(REPO_ROOT);
+      const shipped = loadShippedLedger();
+      const shippedSlugs = new Set(shipped.entries.map((entry) => entry.slug));
+
+      const diff = diffSlugSets(independentlyMeasured, shippedSlugs);
+      expect(
+        diff.missingFromLedger,
+        `unanchored live spec(s) measured independently of the checker but ABSENT from the ledger's slug set: ${JSON.stringify(diff.missingFromLedger)}`,
+      ).toEqual([]);
+      expect(
+        diff.extraInLedger,
+        `ledger row(s) naming slug(s) NOT independently measured as unanchored live specs: ${JSON.stringify(diff.extraInLedger)}`,
+      ).toEqual([]);
+    },
+    60000,
+  );
+
+  it(
+    "RED PAIRED (declared falsifier): overwriting one ledger row's slug with ANOTHER already-ledgered slug — row COUNT unchanged, so the cardinality assertion alone would stay green — makes the SET assertion fail, NAMING the omitted slug",
+    () => {
+      // The exact falsifier this AC's oracle declares: both rows already exist in
+      // the shipped ledger, so replacing one slug with the other changes NOTHING
+      // about `entries.length` — only membership (one slug duplicated, one omitted).
+      const VICTIM_OMITTED = "spec-075-dashboard-adjudication-workbench-route-telemetry-prd";
+      const VICTIM_DUPLICATED = "spec-077-dashboard-execution-read-surface-prd-21-f3";
+
+      const shipped = loadShippedLedger();
+      const rowToMutate = shipped.entries.find((entry) => entry.slug === VICTIM_OMITTED);
+      const otherRow = shipped.entries.find((entry) => entry.slug === VICTIM_DUPLICATED);
+      expect(rowToMutate, `declared falsifier requires ${VICTIM_OMITTED} to already be a ledger row`).toBeDefined();
+      expect(otherRow, `declared falsifier requires ${VICTIM_DUPLICATED} to already be a ledger row`).toBeDefined();
+
+      const independentlyMeasured = measureUnanchoredLiveSpecSlugsIndependently(REPO_ROOT);
+
+      // Preconditions ONLY on the two slugs this test mutates — never a full-corpus
+      // equality check here. That global check is the HAPPY case above; coupling
+      // THIS causal test to the entire corpus being ledger-clean would make it fail
+      // for a reason that has nothing to do with the declared falsifier whenever
+      // some OTHER live spec has drifted (a real, previously-measured condition:
+      // `spec-corpus-truthfulness-a-verdict-must-carry-the-state-it` landed with no
+      // anchor and no ledger row on 2026-08-17, independently of this task).
+      expect(
+        independentlyMeasured.has(VICTIM_OMITTED),
+        `${VICTIM_OMITTED} must independently measure as unanchored for this falsifier to mean anything`,
+      ).toBe(true);
+      expect(
+        independentlyMeasured.has(VICTIM_DUPLICATED),
+        `${VICTIM_DUPLICATED} must independently measure as unanchored for this falsifier to mean anything`,
+      ).toBe(true);
+
+      const mutated = copyLedger(shipped);
+      (mutated.entries.find((entry) => entry.slug === VICTIM_OMITTED) as LedgerEntry).slug = VICTIM_DUPLICATED;
+
+      // The row COUNT is unchanged — this is exactly what leaves the OLD
+      // assertion (`shipped.entries.length === unanchored`) blind to this
+      // mutation: it only ever compared cardinality.
+      expect(mutated.entries.length).toBe(shipped.entries.length);
+
+      const mutatedSlugs = new Set(mutated.entries.map((entry) => entry.slug));
+      expect(mutatedSlugs.has(VICTIM_OMITTED), `${VICTIM_OMITTED}'s row was overwritten, not duplicated`).toBe(false);
+
+      const diff = diffSlugSets(independentlyMeasured, mutatedSlugs);
+
+      // RED: VICTIM_OMITTED no longer appears anywhere in the mutated ledger's
+      // slug set (its row was OVERWRITTEN, not duplicated) even though the
+      // corpus still measures it as unanchored — the set assertion must name it.
+      expect(diff.missingFromLedger).toContain(VICTIM_OMITTED);
+    },
+    60000,
   );
 });
