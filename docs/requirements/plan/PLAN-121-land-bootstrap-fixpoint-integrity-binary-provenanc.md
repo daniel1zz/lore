@@ -3,10 +3,10 @@ id: PLAN-121
 type: plan
 role: plan
 title: "Land bootstrap fixpoint integrity: binary provenance, the anchor-coverage ratchet, and mirror content drift"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-18
 tags: []
 parent: SPEC-134
 phases:

@@ -16,6 +16,7 @@ links:
   - {id: KN-458, type: relates-to}
   - {id: ADR-034, type: relates-to}
   - {id: ADR-035, type: relates-to}
+  - {id: KN-471, type: relates-to}
 ---
 # Architecture: Corpus Truthfulness — a verdict must carry the state it describes, and a post-arming stamp-less record is never green
 

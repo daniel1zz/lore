@@ -3,10 +3,10 @@ id: KN-469
 type: knowledge
 role: knowledge
 title: "Handoff — agent:main-orchestrator"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-18
 tags: []
 parent: PLAN-121
 ---

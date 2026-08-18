@@ -6072,6 +6072,10 @@
     "01M07VV9EW7QNT0MB4DM1ZDC4F": {
       "human_id": "KN-471",
       "file_path": "docs/requirements/knowledge/KN-471-a-declared-property-with-no-measuring-oracle-and-t.md"
+    },
+    "01M0AENBT108ZDP1582H5YFRAK": {
+      "human_id": "KN-472",
+      "file_path": "docs/requirements/knowledge/KN-472-handoff-agent-main-orchestrator.md"
     }
   }
 }
