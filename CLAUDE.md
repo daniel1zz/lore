@@ -43,7 +43,7 @@ bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
 bun run test:bun          # cd packages/lore && bun test .bun.test
 bun run test              # both runners in sequence
 bun run test:changed [<base>]  # deterministic worktree oracle (default base: merge-base main HEAD); --list previews
-                               # ⛔ UNDER-SELECTS in three measured ways; `hooks/**` + `assets/**` are outside its universe. A hook-ONLY change set IS refused (loud-zero, exit 1), but hook + any matched file — e.g. the assets manifest that editing `assets/` forces you to regenerate — selects non-empty, silences loud-zero, and STILL omits both hook guards: run `pre-push-parity.test.ts` + `pre-push-binary-provenance-trip.bun.test.ts` BY HAND. ⛔ The literal-path-marker fix was implemented and measured INERT (membership needs a bare `main()`; scope rejects extensionless paths) — do not retry it. `knowledge-bun-run-test-changed-full-selection-contract-and-its`
+                               # ⛔ UNDER-SELECTS in three measured ways; `hooks/**` + `assets/**` are outside its universe. A hook-ONLY change set IS refused (loud-zero, exit 1), but hook + any matched file — e.g. the assets manifest that editing `assets/` forces you to regenerate — selects non-empty, silences loud-zero, and STILL omits both hook guards: run `pre-push-parity.test.ts` + `pre-push-trip.bun.test.ts` BY HAND. ⛔ The literal-path-marker fix was implemented and measured INERT (membership needs a bare `main()`; scope rejects extensionless paths) — do not retry it. `knowledge-bun-run-test-changed-full-selection-contract-and-its`
 
 # Run a single vitest test file
 bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts

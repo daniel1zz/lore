@@ -127,7 +127,7 @@ describe("pre-push hook pair — content parity + audit-verify wiring (SPEC-080 
   // INVOCATION token `check-anchor-coverage.ts` rather than the bare
   // `check-anchor-coverage` the criterion's own grep uses, because the bare form
   // also matches a comment — the exact G6 gap the behavioural trip suite
-  // (packages/lore/tests/integration/pre-push-binary-provenance-trip.bun.test.ts)
+  // (packages/lore/tests/integration/pre-push-trip.bun.test.ts)
   // exists to close, and there is no reason to reproduce it here.
   it("HAPPY: both hook copies invoke the anchor-coverage ratchet script (AC-BFI-9)", () => {
     const repoHook = readFileSync(REPO_HOOK_PATH, "utf8");
