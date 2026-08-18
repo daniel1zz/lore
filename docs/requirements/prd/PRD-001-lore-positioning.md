@@ -108,10 +108,18 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [knowledge] Eleven findings from landing corpus-resolution provenance: two ACs pinned to mechanisms that do not exist, two assess MAJORs that were truncation artifacts, and a peer session rewriting the tooling underneath (approved)
+- [knowledge] Evicted from the service module doc: the AcService and DriftCheckService Service Map rows, verbatim (approved)
+- [knowledge] Seven findings from landing the release-side trailer unbind: a body-only mirror detector, a test that required the defect to persist, and an assess that scored MAJORs against files it called unverifiable (approved)
+- [knowledge] Retired from root CLAUDE.md 2026-08-13: four standing lessons evicted verbatim to free bytes for a correction (approved)
+- [knowledge] A declared property with no measuring oracle, and the red-first vs falsifier deadlock that leaves every early AC's discriminating power asserted rather than demonstrated (draft)
+- [spec] Corpus truthfulness: a verdict must carry the state it describes, and a post-arming stamp-less record is never green (approved)
+- [adr] Verdict staleness is measured by blast radius, never by git ancestry — a peer merge preserves ancestry while invalidating the verdict (approved)
+- [adr] A record with no state stamp is acceptable but never green: a third class, not a pass and not a refusal (approved)
+- [knowledge] The nine UNENFORCED standing lessons, evicted from CLAUDE.md with the mechanism each one still needs (draft)
 - [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
 - [knowledge] bun run test:changed — full selection contract and its three residuals (approved)
 - [knowledge] Governance gaps measured while landing the anchor-coverage ratchet (approved)
-- [knowledge] The nine UNENFORCED standing lessons, evicted from CLAUDE.md with the mechanism each one still needs (draft)
 - [spec] Oracle exclusivity in a shared checkout: a mirror check that cannot repair itself, a pollution guard that sees mirror content, a gitignored probe namespace, and a serialized suite (approved)
 - [knowledge] The AC coverage badge ignores fail_superseded, so a criterion re-proved by a newer attested pass renders as failed forever in its spec and its mirror (approved)
 - [knowledge] Retired from root CLAUDE.md: eight pointer-less standing lessons (approved)

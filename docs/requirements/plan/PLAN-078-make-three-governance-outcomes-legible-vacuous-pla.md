@@ -3,10 +3,10 @@ id: PLAN-078
 type: plan
 role: plan
 title: "Make three governance outcomes legible: vacuous plan-close passes, silent AC demotions, and the empty feeding pack a fresh install receives"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-18
 tags: []
 parent: SPEC-131
 phases:

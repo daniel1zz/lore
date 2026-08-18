@@ -6,8 +6,9 @@ title: "Evicted from the service module doc: the AcService and DriftCheckService
 status: approved
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-18
 tags: []
+parent: PRD-001
 ---
 ## Overview
 

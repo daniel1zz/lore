@@ -6,12 +6,14 @@ title: "Handoff — agent:main-orchestrator"
 status: approved
 priority: medium
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-18
 tags: []
 parent: PLAN-124
 links:
   - {id: KN-461, type: supersedes}
 ---
+> ⚠ INVALIDATED 2026-08-18T12:49:01.370Z — superseded by knowledge-handoff-agent-main-orchestrator-108; Superseded by ticket 108: 106's NS1 (worktree cleanup) is done for my own worktree, and the whole SPEC-143 slice plus the CLAUDE.md North Star landed after it was written; 108 carries the surviving items and this session's findings
+
 # Handoff — agent:main-orchestrator
 
 SCOPE: 7 decisions + 7 next steps = 14 items to account for

@@ -6,8 +6,9 @@ title: "Eleven findings from landing corpus-resolution provenance: two ACs pinne
 status: approved
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-18
 tags: []
+parent: PRD-001
 ---
 Session 2026-08-12, `agent:main-orchestrator`, resuming `knowledge-handoff-agent-main-orchestrator-96`. Five plan tasks plus one adhoc task landed, all attested on the merged tree. These are the findings the round produced, each with the mechanism that would have caught it.
 

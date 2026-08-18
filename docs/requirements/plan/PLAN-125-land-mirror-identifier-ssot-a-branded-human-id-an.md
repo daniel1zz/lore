@@ -3,10 +3,10 @@ id: PLAN-125
 type: plan
 role: plan
 title: "Land mirror identifier SSOT: a branded human_id, an idempotent migrate-export seam, and a drift check that writes nothing"
-status: approved
+status: archived
 priority: high
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-08-18
 tags: []
 parent: SPEC-135
 phases:

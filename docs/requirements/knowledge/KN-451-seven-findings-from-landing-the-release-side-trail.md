@@ -6,8 +6,9 @@ title: "Seven findings from landing the release-side trailer unbind: a body-only
 status: approved
 priority: medium
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-18
 tags: []
+parent: PRD-001
 ---
 Session 2026-08-13, agent:main-orchestrator, resuming
 `knowledge-handoff-agent-main-orchestrator-101`. Seven findings, each with the

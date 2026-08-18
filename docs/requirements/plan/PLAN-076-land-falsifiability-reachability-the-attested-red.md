@@ -3,10 +3,10 @@ id: PLAN-076
 type: plan
 role: plan
 title: "Land falsifiability reachability: the attested-red runner, a guard that means what it says, feedable checkpoints, and a mirror whose drift trips"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-18
 tags: []
 parent: SPEC-133
 phases:

@@ -6,8 +6,9 @@ title: "Retired from root CLAUDE.md 2026-08-13: four standing lessons evicted ve
 status: approved
 priority: medium
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-18
 tags: []
+parent: PRD-001
 ---
 Verbatim text of three standing lessons evicted from the root `CLAUDE.md` on
 2026-08-13 to free bytes under its `max_bytes` ceiling (the guard refused a

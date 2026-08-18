@@ -3,10 +3,10 @@ id: PLAN-077
 type: plan
 role: plan
 title: "Close two typecheck blind spots and correct the stale comments that understate them"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-08-18
 tags: []
 parent: SPEC-132
 phases:
