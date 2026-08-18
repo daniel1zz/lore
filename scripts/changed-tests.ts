@@ -100,6 +100,29 @@
  *          reached `main` twice in one day (task
  *          `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`).
  *
+ *          A THIRD scope, `"hooks-and-assets-pair"`, was added later (task
+ *          `task-teach-changed-tests-membership-and-tree-scan-scope-about`,
+ *          AC-TC-4) for the two pre-push guard suites
+ *          (`packages/lore/tests/unit/assets/pre-push-parity.test.ts`,
+ *          `packages/lore/tests/integration/pre-push-trip.bun.test.ts`),
+ *          which judge `hooks/pre-push` and `assets/project/pre-push`
+ *          directly via `readFileSync`/`spawnSync` rather than a directory
+ *          walk. `hooks/**` and `assets/**` are OUTSIDE `loadFileMap`'s
+ *          universe entirely (below), so those two paths were previously
+ *          invisible to every rule in this file at once: a hook-only change
+ *          set was refused by loud-zero (step 6), but hook + ANY OTHER
+ *          matched file (e.g. the assets manifest a real `assets/` edit
+ *          forces you to regenerate) selected non-empty, silenced loud-zero,
+ *          and still omitted both guards — a confident false green. Neither
+ *          real guard suite contains a bare `main()`, so this scope's
+ *          membership signal is a different content marker (the literal
+ *          `hooks/pre-push` / `assets/project/pre-push` substrings both
+ *          suites already carry, unedited, in their own doc comments and
+ *          path constants — see `HOOK_OR_ASSET_PAIR_MARKER_RE`), and its
+ *          scope check is a plain `hooks/`/`assets/` prefix rather than
+ *          `hasTextSourceExtension`, which returns `false` for both real
+ *          paths precisely because they are extensionless.
+ *
  *      Rule (d)'s membership/scope derivation was one of three explicitly
  *      weighed options (task requirement): (i) a CONTENT MARKER in the test
  *      file, the same shape (c) already uses — CHOSEN, for the reason above;
@@ -452,9 +475,18 @@ const LORE_OR_CORE_SRC_PREFIX_RE = /^packages\/(?:lore|core)\/src\//;
  * `scripts/check-no-nul-bytes.ts`'s `main()`, which scans every git-tracked
  * file in the ENTIRE repo matching {@link hasTextSourceExtension}'s allowlist
  * — a strictly WIDER scope than `"packages-test-tree"`, not limited to
- * `packages/` or to test files at all.
+ * `packages/` or to test files at all. `"hooks-and-assets-pair"` is neither —
+ * it does not scan a directory tree at runtime at all; it judges exactly two
+ * fixed files (`hooks/pre-push`, `assets/project/pre-push`) via a direct
+ * `readFileSync`. It reuses rule (d) anyway (rather than inventing a fifth
+ * rule) because the underlying escape is identical: the files it reaches are
+ * invisible to import tracing, so membership + scope must both come from
+ * content markers, exactly like the two real tree-scanning oracles (task
+ * `task-teach-changed-tests-membership-and-tree-scan-scope-about`, AC-TC-4).
+ * See `HOOK_OR_ASSET_PAIR_MARKER_RE` for why bare `main()` — the membership
+ * signal the other two scopes require — does not apply to this one.
  */
-export type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source";
+export type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source" | "hooks-and-assets-pair";
 
 /**
  * A bare (zero-argument) invocation of the test's own imported `main` entry —
@@ -522,26 +554,60 @@ const BARE_MAIN_INVOCATION_RE = /\bmain\(\)/;
 const REPO_TRACKED_TEXT_SOURCE_MARKER_RE = /\bhasTextSourceExtension\b/;
 
 /**
+ * Content marker for the `"hooks-and-assets-pair"` scope — the LITERAL
+ * `hooks/pre-push` / `assets/project/pre-push` substrings, present UNEDITED
+ * in both real guard suites' own doc comments and path constants today
+ * (`packages/lore/tests/unit/assets/pre-push-parity.test.ts`'s
+ * `REPO_HOOK_RELATIVE`/`ASSET_HOOK_RELATIVE`; `.../integration/pre-push-trip
+ * .bun.test.ts`'s doc comment at "one (not `hooks/pre-push`) is what makes
+ * the test consumer-relevant" and "actually executes (`assets/project/pre
+ * -push`, ..."). Neither file contains a bare `main()` invocation — they
+ * drive their subject via `readFileSync`/`spawnSync`, not a full-tree walk —
+ * so `BARE_MAIN_INVOCATION_RE` structurally cannot be this scope's membership
+ * signal; this marker is the SAME shape (a content marker already present
+ * for another reason, reused rather than invented — the same principle
+ * `REPO_TRACKED_TEXT_SOURCE_MARKER_RE` above documents) applied to a
+ * different fact these two files already assert about themselves.
+ *
+ * ⛔ MEASURED: adding these literals to a test file WITHOUT also widening this
+ * selector's own membership/scope predicates buys nothing — that was tried
+ * and found INERT (`knowledge-bun-run-test-changed-full-selection-contract-
+ * and-its`). This marker only has effect because `classifyTreeScanningOracle`
+ * and `isChangedFileInTreeScanScope` below were BOTH changed to recognize it;
+ * neither change alone is sufficient (AC-TC-4's own falsifying revert check).
+ */
+const HOOK_OR_ASSET_PAIR_MARKER_RE = /hooks\/pre-push|assets\/project\/pre-push/;
+
+/**
  * Classify `path`/`content` as a tree-scanning oracle test and, if so, which
  * scope it judges — rule (d)'s membership + scope derivation, entirely from
  * content markers already present in the test's own source (never a
  * hardcoded filename list — AC-1 of
- * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`). A file only
- * qualifies if it is itself a test file (`isTestFile`) AND contains a bare
- * `main()` invocation (`BARE_MAIN_INVOCATION_RE`) — proof it drives its
- * module's real, unmocked full-tree scan, the same "reaches its subject by a
- * means other than static import" shape rule (c) already handles for
- * subprocess spawns (D2). Among qualifying files, one additionally importing
- * `hasTextSourceExtension` is judged against the WIDER repo-tracked-text-source
- * scope; any other qualifying file defaults to the narrower
- * `"packages-test-tree"` scope — conservative in the SAFE direction only when
- * the wider marker is absent (AC-2: a future tree-scanning oracle nobody has
- * taught this function about yet still gets the narrower scope rather than
- * being silently dropped, since `isTestFile` + bare `main()` alone already
- * qualifies it).
+ * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`). Two
+ * independent membership paths, checked in this order:
+ *
+ *   1. `HOOK_OR_ASSET_PAIR_MARKER_RE` — a test file naming either real
+ *      hook-copy path is judged against the narrow, fixed
+ *      `"hooks-and-assets-pair"` scope. Checked FIRST because these two
+ *      guard suites contain neither a bare `main()` call nor an
+ *      `hasTextSourceExtension` import, so path (2) below would never see
+ *      them; order here does not exclude path (2) for a DIFFERENT file that
+ *      happened to match both (none do today).
+ *   2. The pre-existing path: a bare `main()` invocation
+ *      (`BARE_MAIN_INVOCATION_RE`) — proof the file drives its module's
+ *      real, unmocked full-tree scan, the same "reaches its subject by a
+ *      means other than static import" shape rule (c) already handles for
+ *      subprocess spawns (D2). Among these, one additionally importing
+ *      `hasTextSourceExtension` is judged against the WIDER
+ *      repo-tracked-text-source scope; any other qualifying file defaults to
+ *      the narrower `"packages-test-tree"` scope — conservative in the SAFE
+ *      direction only when the wider marker is absent (AC-2: a future
+ *      tree-scanning oracle nobody has taught this function about yet still
+ *      gets the narrower scope rather than being silently dropped).
  */
 export function classifyTreeScanningOracle(path: string, content: string): TreeScanScope | undefined {
   if (!isTestFile(path)) return undefined;
+  if (HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)) return "hooks-and-assets-pair";
   if (!BARE_MAIN_INVOCATION_RE.test(content)) return undefined;
   return REPO_TRACKED_TEXT_SOURCE_MARKER_RE.test(content) ? "repo-tracked-text-source" : "packages-test-tree";
 }
@@ -553,9 +619,17 @@ export function classifyTreeScanningOracle(path: string, content: string): TreeS
  * per-file list — the same shape as `LORE_OR_CORE_SRC_PREFIX_RE` above).
  * `"repo-tracked-text-source"` defers entirely to the imported
  * `hasTextSourceExtension` — no re-hardcoded extension list here.
+ * `"hooks-and-assets-pair"` is a structural PREFIX condition exactly like
+ * `"packages-test-tree"`'s, deliberately NOT routed through
+ * `hasTextSourceExtension` — both `hooks/pre-push` and `assets/project/
+ * pre-push` are extensionless, and `hasTextSourceExtension` returns `false`
+ * for exactly that shape (its own doc comment uses `hooks/pre-push` as the
+ * worked example), which is the second of the two measured blockers this
+ * scope exists to lift.
  */
 export function isChangedFileInTreeScanScope(changedPath: string, scope: TreeScanScope): boolean {
   if (scope === "repo-tracked-text-source") return hasTextSourceExtension(changedPath);
+  if (scope === "hooks-and-assets-pair") return changedPath.startsWith("hooks/") || changedPath.startsWith("assets/");
   return changedPath.startsWith("packages/") && isTestFile(changedPath);
 }
 

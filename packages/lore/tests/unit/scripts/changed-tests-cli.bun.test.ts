@@ -280,3 +280,186 @@ describe("getChangedFiles porcelain-path parsing — modified (' M') files are n
     }
   });
 });
+
+describe("AC-TC-4: hooks-only and assets-only change sets select both pre-push guards", () => {
+  /**
+   * The two repo-relative paths the real pre-push guard suites occupy —
+   * `packages/lore/tests/unit/assets/pre-push-parity.test.ts` and
+   * `packages/lore/tests/integration/pre-push-trip.bun.test.ts`. This fixture
+   * reproduces them at the SAME paths (never the real files themselves — this
+   * task's file anchors do not include them) so the selector's real-repo
+   * `loadFileMap` walk (`packages/*\/tests/**\/*.ts`) picks them up exactly as
+   * it would in production.
+   */
+  const PARITY_TEST_RELATIVE = "packages/lore/tests/unit/assets/pre-push-parity.test.ts";
+  const TRIP_TEST_RELATIVE = "packages/lore/tests/integration/pre-push-trip.bun.test.ts";
+
+  /**
+   * Fixture content for the two guard tests. Each one carries the SAME
+   * `hooks/pre-push` / `assets/project/pre-push` literal substrings the real
+   * suites already contain, UNEDITED, in their own doc comments and path
+   * constants (verified by `grep -n 'hooks/pre-push\|assets/project/pre-push'`
+   * against both real files before this task changed anything) — this is not
+   * a marker manufactured for this fixture, it reproduces the membership
+   * signal `scripts/changed-tests.ts` must recognize in the PRODUCTION files
+   * without this task ever touching them (out of its file anchors).
+   */
+  const FIXTURE_PARITY_TEST_CONTENT = [
+    "// Fixture stand-in for packages/lore/tests/unit/assets/pre-push-parity.test.ts",
+    "// Real suite compares hooks/pre-push against assets/project/pre-push byte-for-byte.",
+    'import { describe, it, expect } from "vitest";',
+    'describe("pre-push hook pair fixture", () => {',
+    '  it("stands in for the real parity suite", () => {',
+    '    expect("hooks/pre-push").toBeTruthy();',
+    '    expect("assets/project/pre-push").toBeTruthy();',
+    "  });",
+    "});",
+    "",
+  ].join("\n");
+
+  const FIXTURE_TRIP_TEST_CONTENT = [
+    "// Fixture stand-in for packages/lore/tests/integration/pre-push-trip.bun.test.ts",
+    "// Real suite drives hooks/pre-push (repo copy) and assets/project/pre-push (shipped copy).",
+    'import { describe, it, expect } from "bun:test";',
+    'describe("pre-push trip fixture", () => {',
+    '  it("stands in for the real trip suite", () => {',
+    '    expect("hooks/pre-push").toBeTruthy();',
+    '    expect("assets/project/pre-push").toBeTruthy();',
+    "  });",
+    "});",
+    "",
+  ].join("\n");
+
+  /**
+   * Builds a synthetic repo (mkdtemp, NEVER this repo's own git state) with:
+   * `packages/core/package.json` (the exports SSOT `loadCoreAliasMap`
+   * unconditionally reads), one real `packages/lore/src`/`packages/lore/tests`
+   * reverse-dependency pair (the "some OTHER matched file" the mixed-case
+   * scenarios change alongside the hook/asset edit), a `hooks/pre-push` file,
+   * an `assets/project/pre-push` file, and the two fixture guard tests above
+   * at their real repo-relative paths. Everything is committed once; each
+   * `it` below applies its own uncommitted diff on top via `git status
+   * --porcelain` (same pattern as the porcelain-parsing suite above).
+   */
+  function makeHookAssetFixtureRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), "lore-changed-tests-hooks-assets-"));
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "hooks-assets-fixture@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "Hooks Assets Fixture"], { cwd: root });
+
+    mkdirSync(join(root, "packages", "core"), { recursive: true });
+    writeFileSync(
+      join(root, "packages", "core", "package.json"),
+      JSON.stringify({ exports: { ".": "./src/index.ts", "./node": "./src/node.ts" } }),
+    );
+
+    mkdirSync(join(root, "packages", "lore", "src"), { recursive: true });
+    mkdirSync(join(root, "packages", "lore", "tests"), { recursive: true });
+    writeFileSync(join(root, "packages", "lore", "src", "unrelated-thing.ts"), "export const unrelatedThing = 1;\n");
+    writeFileSync(
+      join(root, "packages", "lore", "tests", "unrelated-thing.test.ts"),
+      'import { unrelatedThing } from "../src/unrelated-thing.js";\nexport const _use = unrelatedThing;\n',
+    );
+
+    mkdirSync(join(root, "packages", "lore", "tests", "unit", "assets"), { recursive: true });
+    writeFileSync(join(root, PARITY_TEST_RELATIVE), FIXTURE_PARITY_TEST_CONTENT);
+    mkdirSync(join(root, "packages", "lore", "tests", "integration"), { recursive: true });
+    writeFileSync(join(root, TRIP_TEST_RELATIVE), FIXTURE_TRIP_TEST_CONTENT);
+
+    mkdirSync(join(root, "hooks"), { recursive: true });
+    writeFileSync(join(root, "hooks", "pre-push"), "#!/bin/sh\necho fixture hook v1\n");
+    mkdirSync(join(root, "assets", "project"), { recursive: true });
+    writeFileSync(join(root, "assets", "project", "pre-push"), "#!/bin/sh\necho fixture hook v1\n");
+
+    execFileSync("git", ["add", "-A"], { cwd: root });
+    execFileSync("git", ["commit", "-q", "-m", "seed"], { cwd: root });
+
+    return root;
+  }
+
+  /** Runs `--list HEAD` against `fixtureRoot` and returns exit code + stdout/stderr. */
+  function runListAgainst(fixtureRoot: string): { exitCode: number; stdout: string; stderr: string } {
+    const result = Bun.spawnSync(["bun", join(REPO_ROOT, "scripts", "changed-tests.ts"), "--list", "HEAD"], {
+      cwd: fixtureRoot,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return {
+      exitCode: result.exitCode,
+      stdout: result.stdout.toString("utf8"),
+      stderr: result.stderr.toString("utf8"),
+    };
+  }
+
+  /**
+   * Both guard tests, tagged with their expected `(tree-scan-oracle)` reason —
+   * asserting the reason tag (not merely path presence) rules out the guard
+   * showing up for an unrelated reason (e.g. `transitive`) that would not
+   * actually prove the hooks/assets scope fix.
+   */
+  function expectBothGuardsSelected(stdout: string): void {
+    expect(stdout, `expected the parity guard in:\n${stdout}`).toContain(`${PARITY_TEST_RELATIVE} (tree-scan-oracle)`);
+    expect(stdout, `expected the trip guard in:\n${stdout}`).toContain(`${TRIP_TEST_RELATIVE} (tree-scan-oracle)`);
+  }
+
+  it("PURE hooks-only change set selects both pre-push guards", () => {
+    const fixtureRoot = makeHookAssetFixtureRepo();
+    try {
+      writeFileSync(join(fixtureRoot, "hooks", "pre-push"), "#!/bin/sh\necho fixture hook v2 — hooks-only edit\n");
+
+      const { exitCode, stdout, stderr } = runListAgainst(fixtureRoot);
+      expect(exitCode, `expected exit 0, stderr:\n${stderr}\nstdout:\n${stdout}`).toBe(0);
+      expectBothGuardsSelected(stdout);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("PURE assets-only change set selects both pre-push guards", () => {
+    const fixtureRoot = makeHookAssetFixtureRepo();
+    try {
+      writeFileSync(join(fixtureRoot, "assets", "project", "pre-push"), "#!/bin/sh\necho fixture hook v2 — assets-only edit\n");
+
+      const { exitCode, stdout, stderr } = runListAgainst(fixtureRoot);
+      expect(exitCode, `expected exit 0, stderr:\n${stderr}\nstdout:\n${stdout}`).toBe(0);
+      expectBothGuardsSelected(stdout);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("MIXED hooks + another matched file still selects both pre-push guards (the dangerous case: selection is already non-empty from the OTHER file)", () => {
+    const fixtureRoot = makeHookAssetFixtureRepo();
+    try {
+      writeFileSync(join(fixtureRoot, "hooks", "pre-push"), "#!/bin/sh\necho fixture hook v2 — mixed edit\n");
+      writeFileSync(join(fixtureRoot, "packages", "lore", "src", "unrelated-thing.ts"), "export const unrelatedThing = 2;\n");
+
+      const { exitCode, stdout, stderr } = runListAgainst(fixtureRoot);
+      expect(exitCode, `expected exit 0, stderr:\n${stderr}\nstdout:\n${stdout}`).toBe(0);
+      // The OTHER file's own selection must still be present — this is what
+      // makes the case "already non-empty" before the guards are considered.
+      expect(stdout).toContain("packages/lore/tests/unrelated-thing.test.ts");
+      // And the two guards must ALSO be present — a selector that silences
+      // loud-zero via the unrelated file while still omitting the guards is
+      // exactly the false green this AC exists to exclude.
+      expectBothGuardsSelected(stdout);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("MIXED assets + another matched file still selects both pre-push guards", () => {
+    const fixtureRoot = makeHookAssetFixtureRepo();
+    try {
+      writeFileSync(join(fixtureRoot, "assets", "project", "pre-push"), "#!/bin/sh\necho fixture hook v2 — mixed edit\n");
+      writeFileSync(join(fixtureRoot, "packages", "lore", "src", "unrelated-thing.ts"), "export const unrelatedThing = 2;\n");
+
+      const { exitCode, stdout, stderr } = runListAgainst(fixtureRoot);
+      expect(exitCode, `expected exit 0, stderr:\n${stderr}\nstdout:\n${stdout}`).toBe(0);
+      expect(stdout).toContain("packages/lore/tests/unrelated-thing.test.ts");
+      expectBothGuardsSelected(stdout);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+});
