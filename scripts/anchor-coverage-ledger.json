@@ -69,6 +69,11 @@
       "reason": "Anchor debt: created 2026-08-12, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
     },
     {
+      "slug": "spec-corpus-truthfulness-a-verdict-must-carry-the-state-it",
+      "cohort": "debt",
+      "reason": "Anchor debt with a known cause: approved 2026-08-17 and, measured 2026-08-18, it governs ZERO plans and zero landed implementation, so there is no code to anchor to yet — declaring one now would be a synthesized anchor, which this ledger's own note forbids. This row is the newly-armed ratchet catching the very next spec created after its baseline, which is the ratchet working, not a defect in it. Retire this row in the same commit that declares real, measured anchors when SPEC-143's first plan lands."
+    },
+    {
       "slug": "spec-declaring-ac-scope-is-required-at-task-creation-so-the",
       "cohort": "debt",
       "reason": "Anchor debt: created 2026-08-01, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
