@@ -547,6 +547,35 @@ function diffSlugSets(
   };
 }
 
+/**
+ * AC-BFI-12's fix: the ONE assertion path both the HAPPY case and its declared
+ * falsifier case call. Before this existed, the HAPPY case wrote its own
+ * `expect(...).toEqual([])` pair and the "RED PAIRED (declared falsifier)"
+ * case below wrote a second, independent `expect(diff.missingFromLedger).
+ * toContain(...)` — two different assertions over the same `diffSlugSets`
+ * output. Deleting or weakening the HAPPY case's pair left the falsifier
+ * case's own, unrelated `toContain` fully intact, so NOTHING reddened
+ * (measured 2026-08-19: both stayed green). Routing both call sites through
+ * this one function means a mutation that weakens the check here breaks BOTH
+ * — the falsifier case below asserts this function THROWS on a mismatch, so
+ * turning it into a no-op is caught there, not just silently accepted by the
+ * HAPPY case it would otherwise only weaken alone.
+ *
+ * Throws vitest's own AssertionError (via `expect(...).toEqual([])`) the
+ * instant either half of the slug-set diff is non-empty, naming the slugs.
+ */
+function assertLedgerSlugSetMatchesMeasured(measured: ReadonlySet<string>, ledgerSlugs: ReadonlySet<string>): void {
+  const diff = diffSlugSets(measured, ledgerSlugs);
+  expect(
+    diff.missingFromLedger,
+    `unanchored live spec(s) measured independently of the checker but ABSENT from the ledger's slug set: ${JSON.stringify(diff.missingFromLedger)}`,
+  ).toEqual([]);
+  expect(
+    diff.extraInLedger,
+    `ledger row(s) naming slug(s) NOT independently measured as unanchored live specs: ${JSON.stringify(diff.extraInLedger)}`,
+  ).toEqual([]);
+}
+
 describe("AC-BFI-10: ledger membership is asserted as a slug set, independently of the checker", () => {
   it(
     "HAPPY: the independently-measured unanchored slug SET equals the shipped ledger's slug SET — computed WITHOUT reading the checker's stdout or exit code",
@@ -555,21 +584,15 @@ describe("AC-BFI-10: ledger membership is asserted as a slug set, independently 
       const shipped = loadShippedLedger();
       const shippedSlugs = new Set(shipped.entries.map((entry) => entry.slug));
 
-      const diff = diffSlugSets(independentlyMeasured, shippedSlugs);
-      expect(
-        diff.missingFromLedger,
-        `unanchored live spec(s) measured independently of the checker but ABSENT from the ledger's slug set: ${JSON.stringify(diff.missingFromLedger)}`,
-      ).toEqual([]);
-      expect(
-        diff.extraInLedger,
-        `ledger row(s) naming slug(s) NOT independently measured as unanchored live specs: ${JSON.stringify(diff.extraInLedger)}`,
-      ).toEqual([]);
+      // Same function the falsifier case below calls — see its definition
+      // for why this sharing is the point (AC-BFI-12).
+      assertLedgerSlugSetMatchesMeasured(independentlyMeasured, shippedSlugs);
     },
     60000,
   );
 
   it(
-    "RED PAIRED (declared falsifier): overwriting one ledger row's slug with ANOTHER already-ledgered slug — row COUNT unchanged, so the cardinality assertion alone would stay green — makes the SET assertion fail, NAMING the omitted slug",
+    "RED PAIRED (declared falsifier): overwriting one ledger row's slug with ANOTHER already-ledgered slug — row COUNT unchanged, so the cardinality assertion alone would stay green — makes the SHARED assertion function throw, NAMING the omitted slug",
     () => {
       // The exact falsifier this AC's oracle declares: both rows already exist in
       // the shipped ledger, so replacing one slug with the other changes NOTHING
@@ -591,7 +614,12 @@ describe("AC-BFI-10: ledger membership is asserted as a slug set, independently 
       // for a reason that has nothing to do with the declared falsifier whenever
       // some OTHER live spec has drifted (a real, previously-measured condition:
       // `spec-corpus-truthfulness-a-verdict-must-carry-the-state-it` landed with no
-      // anchor and no ledger row on 2026-08-17, independently of this task).
+      // anchor and no ledger row on 2026-08-17. DISPOSITIONED 2026-08-18 in commit
+      // 2c606027 — NOT by adding a code_anchor (it still has none: `lore get
+      // spec-corpus-truthfulness-a-verdict-must-carry-the-state-it --json` shows
+      // `extra.code_anchors` absent/empty), but by adding a `cohort: "debt"` row for
+      // it in scripts/anchor-coverage-ledger.json, which is why it independently
+      // measures as unanchored above yet no longer diverges from the ledger).
       expect(
         independentlyMeasured.has(VICTIM_OMITTED),
         `${VICTIM_OMITTED} must independently measure as unanchored for this falsifier to mean anything`,
@@ -612,12 +640,16 @@ describe("AC-BFI-10: ledger membership is asserted as a slug set, independently 
       const mutatedSlugs = new Set(mutated.entries.map((entry) => entry.slug));
       expect(mutatedSlugs.has(VICTIM_OMITTED), `${VICTIM_OMITTED}'s row was overwritten, not duplicated`).toBe(false);
 
-      const diff = diffSlugSets(independentlyMeasured, mutatedSlugs);
-
-      // RED: VICTIM_OMITTED no longer appears anywhere in the mutated ledger's
-      // slug set (its row was OVERWRITTEN, not duplicated) even though the
-      // corpus still measures it as unanchored — the set assertion must name it.
-      expect(diff.missingFromLedger).toContain(VICTIM_OMITTED);
+      // RED via the SAME assertion path the HAPPY case above calls (AC-BFI-12):
+      // VICTIM_OMITTED no longer appears anywhere in the mutated ledger's slug
+      // set (its row was OVERWRITTEN, not duplicated) even though the corpus
+      // still measures it as unanchored, so the shared function must throw,
+      // naming VICTIM_OMITTED. If a future edit weakens or deletes the
+      // function's internal `expect` calls, this assertion is what catches
+      // it — not a second, independently-written check.
+      expect(() => assertLedgerSlugSetMatchesMeasured(independentlyMeasured, mutatedSlugs)).toThrow(
+        new RegExp(VICTIM_OMITTED.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      );
     },
     60000,
   );

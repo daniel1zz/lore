@@ -629,14 +629,38 @@ describe("AC-BFI-11: the rename and every record of the old name are one accepta
     expect(ownSource.includes(`${OLD_BASENAME_LITERAL}:`)).toBe(false);
   });
 
-  it("(d) lore status --check-drift exits 0, proving this spec's code_anchor was repointed to the renamed file", () => {
-    const run = spawnSync(DIST_BINARY, ["status", "--check-drift"], { cwd: REPO_ROOT, encoding: "utf8" });
-    if (run.status === null) {
-      throw new Error(`lore status was killed by signal ${String(run.signal)} — no exit code to assert`);
+  it("(d) lore status --check-drift exits 0 AND the spec's stored anchor value NAMES the renamed file — not just some existing file", () => {
+    // `--check-drift` exiting 0 is consistent with `code_anchor` having been
+    // repointed to ANY file that exists on disk — it proves nothing about
+    // WHICH file. AC-BFI-12 closes that gap: read the stored value itself.
+    const driftRun = spawnSync(DIST_BINARY, ["status", "--check-drift"], { cwd: REPO_ROOT, encoding: "utf8" });
+    if (driftRun.status === null) {
+      throw new Error(`lore status was killed by signal ${String(driftRun.signal)} — no exit code to assert`);
     }
-    if (run.status !== 0) {
-      throw new Error(`lore status --check-drift exited ${String(run.status)}: ${run.stdout}${run.stderr}`);
+    if (driftRun.status !== 0) {
+      throw new Error(`lore status --check-drift exited ${String(driftRun.status)}: ${driftRun.stdout}${driftRun.stderr}`);
     }
-    expect(run.status).toBe(0);
+    expect(driftRun.status).toBe(0);
+
+    // Read-only against this repo's OWN corpus (never a write — see this
+    // file's header and project CLAUDE.md's `.lore/` discipline) through the
+    // same DIST_BINARY the drift check above just ran, so both assertions are
+    // issued by the identical fresh binary.
+    const SPEC_SLUG = "spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor";
+    const getRun = spawnSync(DIST_BINARY, ["get", SPEC_SLUG, "--json"], { cwd: REPO_ROOT, encoding: "utf8" });
+    if (getRun.status === null) {
+      throw new Error(`lore get ${SPEC_SLUG} was killed by signal ${String(getRun.signal)} — no exit code to assert`);
+    }
+    if (getRun.status !== 0) {
+      throw new Error(`lore get ${SPEC_SLUG} --json exited ${String(getRun.status)}: ${getRun.stdout}${getRun.stderr}`);
+    }
+    const parsed = JSON.parse(getRun.stdout) as {
+      readonly data?: { readonly doc?: { readonly extra?: { readonly code_anchors?: readonly string[] } } };
+    };
+    const codeAnchors = parsed.data?.doc?.extra?.code_anchors ?? [];
+    expect(
+      codeAnchors.some((anchor) => anchor.endsWith("pre-push-trip.bun.test.ts")),
+      `${SPEC_SLUG}'s code_anchors must name pre-push-trip.bun.test.ts (the renamed file), not merely point at SOME existing file: ${JSON.stringify(codeAnchors)}`,
+    ).toBe(true);
   });
 });
