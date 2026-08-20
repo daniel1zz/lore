@@ -3,10 +3,10 @@ id: KN-449
 type: knowledge
 role: knowledge
 title: "Handoff — agent:main-orchestrator"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-13
-updated: 2026-08-13
+updated: 2026-08-18
 tags: []
 parent: PLAN-129
 links:

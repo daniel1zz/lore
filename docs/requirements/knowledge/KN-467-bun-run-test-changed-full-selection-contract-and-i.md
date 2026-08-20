@@ -2,17 +2,17 @@
 id: KN-467
 type: knowledge
 role: knowledge
-title: "bun run test:changed — full selection contract and its three residuals"
+title: "bun run test:changed — full selection contract and its residuals, one of which is now closed"
 status: approved
 priority: medium
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-19
 tags: []
 parent: PRD-001
 links:
   - {id: PLAN-121, type: informs}
 ---
-# `bun run test:changed` — full selection contract and its three residuals
+# `bun run test:changed` — full selection contract and its residuals
 
 Evicted from root CLAUDE.md 2026-08-17 when an edit tripped the eviction floor. That file now carries
 a one-line pointer here. The authoritative implementation contract is the module header of
@@ -47,11 +47,12 @@ Measured 2026-08-17 on a change set of exactly `hooks/pre-push` + `assets/projec
 `vitest: selected 0`, `bun: selected 0`, `FAIL: 0 tests selected despite 2 changed file(s)`, exit 1.
 So a hook-only edit is REFUSED, not silently passed. That is the good case.
 
-⛔ But loud-zero does NOT protect against under-selection. The moment the change set also contains any
-file the rules do match — e.g. `packages/lore/src/generated/assets-manifest.ts`, which a hook edit
-normally requires regenerating — the selection is non-empty, loud-zero stays quiet, and the tests that
-actually guard the hook are still absent. That combination is the realistic shape of a hook change, and
-it IS a silent green. Residual (c) below.
+⛔ But loud-zero does NOT protect against under-selection IN GENERAL. The moment the change set also
+contains any file the rules do match — e.g. `packages/lore/src/generated/assets-manifest.ts`, which a
+hook edit normally requires regenerating — the selection is non-empty and loud-zero stays quiet, so it
+cannot be the guard against a missing test. That reasoning still holds for residuals (a) and (b).
+
+For the hook/asset case specifically it is now CLOSED — see residual (c) below.
 
 ## Three measured residuals
 
@@ -61,7 +62,7 @@ is invisible to rule 4. Naming the path in a comment is enough to make it visibl
 **(b) reverse-dep walks STATIC imports only.** A test reaching its target through `await import()` in a
 function body is NEVER selected. Measured. Run dynamic consumers by hand.
 
-**(c) `hooks/**` and `assets/**` are outside the universe entirely.** Measured 2026-08-17 on the
+**(c) `hooks/**` and `assets/**` were outside the universe entirely — CLOSED 2026-08-18, `16a24f00` (merged `b316d010`).** Measured 2026-08-17 on the
 AC-BFI-3 change set: editing `hooks/pre-push` and `assets/project/pre-push` selected NEITHER
 `packages/lore/tests/unit/assets/pre-push-parity.test.ts` (the dedicated oracle for that byte-identical
 pair) NOR any hook trip test on their own account. 169 files were selected, of which 157 came from the
@@ -91,8 +92,33 @@ before and after: still 0 selected, still exit 1. Two independent blockers in `s
 The literals were kept anyway — they make the suite greppable — but they buy no selection.
 
 **The only real fix is a change to `scripts/changed-tests.ts`**: give rule (d) a hook/asset scope, or
-widen the universe so shipping-surface files select their guards by construction. Until then, a change
-touching `hooks/**` or `assets/**` must run `packages/lore/tests/unit/assets/pre-push-parity.test.ts`
-and `packages/lore/tests/integration/pre-push-binary-provenance-trip.bun.test.ts` BY HAND.
+widen the universe so shipping-surface files select their guards by construction.
+
+### That fix LANDED 2026-08-18 — `16a24f00`, merged `b316d010` (AC-TC-4)
+
+⛔ The "do not retry it" above is scoped to the MARKER-ONLY change, and only to that. The prescribed
+fix works, and it works precisely because it changes BOTH blockers in one commit — which is the whole
+lesson: the earlier attempt was inert not because markers are the wrong signal, but because a fix to
+one of two conjunctive gates buys nothing.
+
+What landed:
+- A third `TreeScanScope` value, `"hooks-and-assets-pair"`.
+- Membership via `HOOK_OR_ASSET_PAIR_MARKER_RE = /hooks\/pre-push|assets\/project\/pre-push/` matched
+  against test CONTENT — bypassing the `BARE_MAIN_INVOCATION_RE` gate. The literals it matches were
+  ALREADY present, unedited, in both guard files' own doc comments and path constants; nothing was
+  added to the tests to make them visible.
+- Scope via a plain `hooks/` / `assets/` prefix test, bypassing `hasTextSourceExtension` — which is
+  what made extensionless paths unreachable.
+
+Measured on the shipped CLI with real git data, not only in the suite: with `hooks/pre-push` in the
+diff, `bun scripts/changed-tests.ts --list <base>` selects BOTH
+`packages/lore/tests/unit/assets/pre-push-parity.test.ts` and
+`packages/lore/tests/integration/pre-push-trip.bun.test.ts`. Both code sites were independently proven
+load-bearing: reverting either ALONE reproduces the original four failures.
+
+⛔ Residuals (a) and (b) are NOT closed, so "run it by hand" still applies to them — a
+subprocess/tree-scanning test naming no literal path, and any consumer reaching its target through a
+dynamic `await import()`. And `vitest --changed` remains structurally blind to `.bun.test.ts` files,
+which is a separate gap this fix does not touch.
 
 Full analysis: `knowledge-five-governance-gaps-measured-while-landing-the` §G8.

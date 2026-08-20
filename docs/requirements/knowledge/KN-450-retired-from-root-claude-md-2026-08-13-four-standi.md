@@ -10,7 +10,7 @@ updated: 2026-08-18
 tags: []
 parent: PRD-001
 ---
-Verbatim text of three standing lessons evicted from the root `CLAUDE.md` on
+Verbatim text of four standing lessons evicted from the root `CLAUDE.md` on
 2026-08-13 to free bytes under its `max_bytes` ceiling (the guard refused a
 one-line correction with 10 bytes of headroom, which is what forced the
 eviction). Nothing here is retracted — each remains in force. They were chosen

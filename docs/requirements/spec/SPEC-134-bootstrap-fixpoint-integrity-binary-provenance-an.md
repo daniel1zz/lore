@@ -6,7 +6,7 @@ title: "Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratc
 status: approved
 priority: medium
 created: 2026-08-11
-updated: 2026-08-17
+updated: 2026-08-20
 tags: []
 parent: PRD-001
 ---
@@ -136,9 +136,12 @@ no new enforcement shape.
    (`knowledge-five-governance-gaps-measured-while-landing-the` G7).
 2. **Ledger, not a glob.** `scripts/anchor-coverage-ledger.json` — shaped after
    `scripts/ac-ref-exemption-ledger.json` — holds one row per unanchored spec: slug, cohort
-   (`deliberate` | `debt`), and the reason. It ships with all **55** rows dispositioned: the 11
+   (`deliberate` | `debt`), and the reason. It dispositions EVERY currently-unanchored live spec,
+   enforced as set equality against a freshly measured set rather than a pinned count — **AC-BFI-5
+   is authoritative on the predicate.** At the 2026-08-11 baseline that was 55 rows: the 11
    pre-backfill specs as `deliberate` quoting the 2026-07-14 rationale, the 44 post-backfill specs
-   as `debt`. ⛔ Writing a row is preferred over synthesizing an anchor: declaring 44 imprecise
+   as `debt`. Measured again 2026-08-18, the file held 59 rows as the corpus grew — which is why the
+   count is dated here and de-pinned in the criterion. ⛔ Writing a row is preferred over synthesizing an anchor: declaring 44 imprecise
    anchors would satisfy the checker while producing 44 paths indistinguishable, afterwards, from
    measured ones.
 3. **Ratchet from baseline, not tree-green.** The check fails when a spec outside the ledger has no
@@ -172,8 +175,9 @@ claim immediately before dispatch.
 
 **In scope.** `bun run build`'s provenance embedding; `lore status`'s JSON surface and its new
 `--check-binary-provenance` / anchor-coverage checks; `scripts/anchor-coverage-ledger.json` and its
-checker; the content comparison inside the existing spec-mirror `--check`; and the two pre-push
-hook copies that must stay byte-identical.
+checker; the content comparison inside the existing spec-mirror `--check`; the two pre-push
+hook copies that must stay byte-identical; the ledger test's independence from the checker it
+tests; and the pre-push trip test's name together with every tracked record of its old name.
 
 **Out of scope (non-goals).**
 
@@ -194,12 +198,39 @@ set — read them with `lore ac list <this-spec>`. Summarised by decision:
   check distinguishes all three states (`dev-synced` / `dev-stale` / `not-a-dev-checkout`) with
   exact documented exit codes, naming both shas when stale; and it is wired into BOTH byte-identical
   pre-push copies.
-- **D2** — coverage is reported with its member list, not a bare count; the ledger disposition
-  covers all 55 currently-unanchored specs; a new unanchored spec outside the ledger fails the check
-  by name; and a ledger row whose spec has since been anchored fails loud as a stale exemption.
+- **D2** — coverage is reported with its member list, not a bare count; the ledger dispositions
+  every currently-unanchored live spec, enforced as SET EQUALITY against a fresh measurement rather
+  than a pinned count (an earlier revision of this bullet pinned "55", which was already false once
+  the corpus grew); a new unanchored spec outside the ledger fails the check by name; and a ledger
+  row whose spec has since been anchored fails loud as a stale exemption.
 - **D3** — a mirror file whose body diverges from its corpus document is reported by slug, the check
   does not repair what it inspects (two consecutive runs report identically), and its exit code is
   exact rather than merely non-zero.
+
+- **Follow-ups — AC-BFI-10 and AC-BFI-11, appended 2026-08-18 after the first plan had already
+  closed.** (i) The ledger test must assert membership as a slug set it computes ITSELF instead of
+  delegating that half to the checker's exit code — the checker is the subject under test, so
+  delegating makes the test and AC-BFI-5 go vacuously green together, with no independent witness
+  anywhere. (ii) The pre-push trip test, which holds BOTH the AC-BFI-3 and the AC-BFI-9 suite, is
+  renamed to `pre-push-trip.bun.test.ts`, and all four tracked records of the old name — this spec's
+  own `code_anchors`, the sibling parity-test comment, the file's internal diagnostic prefix, and
+  root `CLAUDE.md` — converge in the SAME change and are asserted by cases inside the renamed suite.
+
+- **Second-order follow-ups — AC-BFI-12 and AC-BFI-13, added 2026-08-19.** `lore assess` found,
+  AFTER AC-BFI-10 and AC-BFI-11 were both attested and their tasks archived, that neither
+  criterion's in-suite falsifier actually discriminated: AC-BFI-10's red case exercised a helper
+  rather than the happy case's assertion, so weakening that assertion reddened nothing; and
+  AC-BFI-11's case (d) proved only that `--check-drift` exits 0, which any existing anchor
+  satisfies. AC-BFI-12 requires one SHARED assertion function across the happy and falsifier
+  paths (plus refreshing the comment that commit `2c606027` turned stale), and AC-BFI-13
+  requires case (d) to assert the anchor's stored VALUE. ⛔ AC-BFI-13's own red is recorded as
+  UNMEASURED debt, not as satisfied: forcing it needs a throwaway-corpus fixture, because the
+  only anchor under test lives in this repo's corpus, which tests may never write.
+
+  These two exist because attestation certified an oracle whose falsifier was inert. Attestation
+  proves a command ran and exited 0; it says nothing about whether the assertions inside it can
+  fail. That gap is what `assess` caught, and it is why `assess` is load-bearing here rather than
+  advisory-in-practice.
 
 Every criterion above carries a declared falsifier: the RED case that must fail if the mechanism is
 inert. ⛔ A criterion never observed red is not evidence
@@ -226,6 +257,14 @@ inert. ⛔ A criterion never observed red is not evidence
   script: test — bunx vitest run scripts/tests/spec-mirror-content-drift.test.ts 2>&1 && echo 'AC-BFI-8 PASS: body divergence detected by slug, exact exit code, and two consecutive runs report identically'
 - [✔] [script] AC-BFI-9: ANCHOR-RATCHET WIRING, BOTH COPIES (D2): the anchor-coverage checker is invoked from hooks/pre-push, and hooks/pre-push stays byte-identical to assets/project/pre-push — the D2 sibling of AC-BFI-3, because a checker that exists but runs in no pipeline enforces nothing. ⛔ This exists because capability and production wiring must be the SAME acceptance unit: AC-BFI-5/6/7 all invoke the checker directly and would go green on a checker no pipeline ever calls. RED: land the checker with both pre-push copies untouched and this must fail; wire only hooks/pre-push and the byte-identity diff must fail, so a consumer-invisible fix cannot pass. Runnable TODAY and MUST be red before the D2 phase lands.
   script: lint — diff hooks/pre-push assets/project/pre-push && grep -c check-anchor-coverage hooks/pre-push && echo 'AC-BFI-9 PASS: both pre-push copies byte-identical AND invoke check-anchor-coverage'
+- [✘] [script] AC-BFI-10: THE LEDGER TEST MUST NOT DELEGATE MEMBERSHIP BACK TO THE CHECKER (AC-BFI-5 follow-up): packages/lore/tests/unit/scripts/anchor-coverage-ratchet.test.ts's happy case currently asserts only shipped.entries.length === unanchored, and its own comment states that the checker's exit 0 supplies the membership half. That is circular: the checker is the very thing under test, so if its set-equality logic regressed to a pure count the test would stay green AND AC-BFI-5's oracle (the checker itself) would exit 0 — the AC would be vacuously green with no independent witness. The test MUST compute the unanchored live-spec slug set INDEPENDENTLY of the checker's output or exit code, and compare it as a SET to the slug set read from scripts/anchor-coverage-ledger.json, failing with the differing slugs NAMED. Cardinality may remain as an additional assertion but must not be the only one. Covered by the describe block titled 'AC-BFI-10: ledger membership is asserted as a slug set, independently of the checker' in that same file. RED: swap two slugs that both already appear in the ledger — row count is unchanged, so the cardinality assertion stays green, while the set now duplicates one slug and omits another and the set assertion must fail naming the omitted slug.
+  script: test — bunx vitest run packages/lore/tests/unit/scripts/anchor-coverage-ratchet.test.ts 2>&1 && echo 'AC-BFI-10 PASS: the ledger test compares slug SETS derived independently of the checker, not just cardinality'
+- [✔] [script] AC-BFI-11: THE RENAME AND EVERY RECORD OF THE OLD NAME ARE ONE ACCEPTANCE UNIT (NS5): packages/lore/tests/integration/pre-push-trip.bun.test.ts holds TWO suites — AC-BFI-3 at line 198 and AC-BFI-9 at line 295 — so the pre-rename name asserted a scope narrower than its contents. Four records of the old name must stay converged, and THE TEST FILE ITSELF must assert all four as ordinary cases: (a) no tracked file outside docs/requirements contains the literal pre-push-binary-provenance-trip (the historical mirror is deliberately excluded); (b) the pre-rename path does not exist; (c) this file's own diagnostic prefix is pre-push-trip:; (d) lore status --check-drift exits 0, proving this spec's code_anchor was repointed. RED: revert any one record site and the matching case must fail NAMING it. RE-BASELINED 2026-08-18 IN FLIGHT, by the AC's author, after the rename had already landed. ORIGINAL COMMAND chained the four checks as shell preconditions ahead of the runner: 'test -f <new> && test ! -e <old> && ! git grep -qI <old-literal> -- :(exclude)docs/requirements && lore status --check-drift && bun test <new>'. EXACT FAILURE IT PRODUCED: the command exited 0 and the suite reported 13 pass / 0 fail, yet 'lore verify' returned 'AC-BFI-11 inconclusive (ran 1 of 3 declared paths)' exit 3 — countExplicitPathArgs in packages/core/src/attestation-completeness.ts tokenizes the WHOLE && chain and counts every .test.ts-shaped token, so the two existence-check paths inflated declared_paths to 3 while only 1 ever reached a runner. No attestation was issued, so 'lore done' refused the task with an attestation-floor denial. WHY THIS IS A CORRECTION AND NOT A WEAKENING: all four checks are preserved and now run UNDER the runner — reported in its summary, permanent, and individually falsifiable — instead of as an unreported shell preamble. The oracle gains attestation and loses no assertion. The SHAPE was unattestable, not the facts.
+  script: test — bun test packages/lore/tests/integration/pre-push-trip.bun.test.ts 2>&1 && echo 'AC-BFI-11 PASS: rename landed and all four records of the old name are asserted converged by cases inside the renamed suite'
+- [✔] [script] AC-BFI-12: A DECLARED FALSIFIER MUST DRIVE THE SAME ASSERTION PATH IT CLAIMS TO FALSIFY (vitest half): AC-BFI-10's in-suite 'RED PAIRED' case mutated an IN-MEMORY ledger copy and asserted only diffSlugSets(...).missingFromLedger — the helper, not the assertion. Weakening the HAPPY set expectations therefore left BOTH that case AND the externally declared ledger-mutation falsifier green: nothing reddened, and the circular-oracle defect AC-BFI-10 exists to close reappeared one level down. Found by lore assess AFTER AC-BFI-10 was attested and its task archived. REQUIRED: the happy path and the falsifier path call ONE shared assertion function (assertLedgerSlugSetMatchesMeasured), so no single mutation satisfies one without the other. SAME ACCEPTANCE UNIT: the comment recording that spec-corpus-truthfulness-a-verdict-must-carry-the-state-it carried no anchor and no ledger row must name its disposition — commit 2c606027, 2026-08-18, which added a cohort:debt LEDGER ROW and NOT a code_anchor — keeping its rationale for not coupling the causal test to full-corpus cleanliness. RED, measured 2026-08-19: gut the shared function's body to expect(true).toBe(true) and the falsifier case must go red ('expected [Function] to throw an error') while the happy case stays green. Before the fix that same mutation left BOTH green — that green was the defect. RE-BASELINED 2026-08-19 in flight by the AC's author. ORIGINAL COMMAND chained TWO runners: 'bunx vitest run <ratchet> && bun test <trip>'. EXACT FAILURE: lore verify returned inconclusive, exit 3, under_match, declared_paths 2 / executed_files 1 — countExplicitPathArgs credits only ONE runner invocation per chain, so no attestation was issuable and lore done would refuse. Split by runner: this AC keeps the vitest file, AC-BFI-13 carries the bun file. CORRECTION NOT WEAKENING: both files stay asserted, by two attestable oracles instead of one unattestable one.
+  script: test — bunx vitest run packages/lore/tests/unit/scripts/anchor-coverage-ratchet.test.ts 2>&1 && echo 'AC-BFI-12 PASS: the AC-BFI-10 happy case and its declared falsifier call one shared assertion function, and the stale disposition comment names its commit'
+- [✔] [script] AC-BFI-13: CASE (d) MUST ASSERT THE ANCHOR'S STORED VALUE, NOT ONLY THAT DRIFT IS CLEAN (the bun-runner half split out of AC-BFI-12): AC-BFI-11's case (d) asserted that 'lore status --check-drift' exits 0. That is consistent with this spec's code_anchor having been repointed to ANY existing file, so it did not prove the rename converged the corpus side of the four-record unit. REQUIRED: case (d) keeps the exit-0 assertion AND additionally reads the spec's code_anchors through the freshness-asserted DIST_BINARY constant — never a bare 'lore' on PATH, which resolves to this machine's global symlink rather than the worktree binary — and asserts that some entry ENDS WITH the renamed trip suite's basename. RED: repoint the anchor at another existing file; case (d) must go red WHILE --check-drift still exits 0, and that pairing is the whole discriminator, since drift-clean alone cannot tell a correct anchor from a merely existing one. ⛔ THIS RED IS NOT YET MEASURED, and that is recorded here rather than hidden: constructing it requires mutating a code_anchor, and the only anchor under test lives in this repo's own corpus, which tests may never write (root CLAUDE.md). The implementer began a throwaway-corpus construction and did not finish it; no red was fabricated and none is claimed. So this criterion's discriminating power is currently ARGUED from the assertion's shape, not demonstrated by a measured failure. Closing that debt needs a throwaway-corpus fixture owning its own spec and anchor. NOTE ON THE COMMAND'S WORDING: the success echo deliberately avoids spelling any bare test-file basename, because lore ac add's path precheck tokenizes the WHOLE command string and read a basename inside the echo prose as a missing path (measured 2026-08-19).
+  script: test — bun test packages/lore/tests/integration/pre-push-trip.bun.test.ts 2>&1 && echo 'AC-BFI-13 PASS: case (d) asserts the spec code_anchor value names the renamed trip suite, in addition to --check-drift exiting 0'
 
 ## Code anchors
 
@@ -239,7 +278,7 @@ inert. ⛔ A criterion never observed red is not evidence
 - hooks/pre-push
 - assets/project/pre-push
 - packages/lore/tests/integration/anchor-coverage-surface.test.ts
-- packages/lore/tests/integration/pre-push-binary-provenance-trip.bun.test.ts
 - packages/lore/tests/unit/assets/pre-push-parity.test.ts
 - scripts/export-spec-mirror.ts
 - scripts/tests/spec-mirror-content-drift.test.ts
+- packages/lore/tests/integration/pre-push-trip.bun.test.ts

@@ -6,7 +6,7 @@ title: "Session Layer (multi-session collaboration & context continuity) (domain
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-08-01
+updated: 2026-08-18
 tags: []
 parent: PRD-001
 ---
@@ -65,6 +65,33 @@ an obligation the operator never sees. That environment fact is deliberately NOT
 an acceptance criterion (S3): asserting where the harness writes its transcripts
 would test the harness, and would go red on a change that is not a lore
 regression.
+
+### Ownership is queryable, and liveness is honest about what it cannot see (live 2026-08-13)
+
+Two read surfaces landed by `plan-land-multi-session-concurrency-p1-queryable-ownership-of`
+make "who owns this?" answerable without asking a human:
+
+- `lore territory` partitions every worktree and branch corpus-wide into
+  **mine / foreign / unowned / unmeasured** (AC-OWN-1). Before it existed, a session
+  deciding whether a worktree was safe to remove had only git metadata, which cannot
+  distinguish "a peer is mid-session here" from "abandoned and already merged" — the
+  question that caused a near-loss of 726 lines of unmerged work.
+- `lore session list` / `lore session show <id>` joins corpus claims against PROBED
+  process liveness (AC-OWN-5).
+
+The load-bearing property is the fourth partition value. Liveness is measurable ONLY
+for a session that has itself run the command at least once on this machine; a peer
+that never has reports `unmeasured`, NOT `dead`. So an empty or silent liveness answer
+is a measurement limit that the output states, rather than a claim that nobody is
+working. ⛔ A caller must never read `unmeasured` — or `lore bootstrap`'s
+`active_sessions` coming back empty — as evidence that no peer session is live.
+Measured 2026-08-18: a peer session held this checkout, committed to `main` mid-turn
+and pruned its own worktree, while `active_sessions` read `[]` throughout, exactly as
+the contract permits.
+
+⛔ A session-collapse report is never repaired by prescribing a more unique
+`LORE_ACTOR`: identity uniqueness and liveness measurability are different properties,
+and only the second is what these surfaces report.
 
 
 ## Acceptance Criteria (structured)

@@ -3,10 +3,10 @@ id: PLAN-129
 type: plan
 role: plan
 title: "Land multi-session concurrency P1: queryable ownership of worktrees, branches and sessions"
-status: active
+status: archived
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-18
 tags: []
 parent: SPEC-142
 phases:

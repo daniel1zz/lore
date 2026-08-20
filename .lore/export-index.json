@@ -6084,6 +6084,50 @@
     "01M0AH78P49RXBT1CE2FRAHHD6": {
       "human_id": "KN-474",
       "file_path": "docs/requirements/knowledge/KN-474-assessment-land-mirror-identifier-ssot-a-branded.md"
+    },
+    "01M0AJBS3EREMRV7ZE2JX1T4J5": {
+      "human_id": "KN-475",
+      "file_path": "docs/requirements/knowledge/KN-475-governance-gaps-measured-while-resuming-handoff-10.md"
+    },
+    "01M0CEDPE10FRJ42NQKYT1YDX7": {
+      "human_id": "KN-476",
+      "file_path": "docs/requirements/knowledge/KN-476-assessment-teach-the-change-scoped-selector-about.md"
+    },
+    "01M0AN94Y9JG43W2NJ1TFAMKWZ": {
+      "human_id": "KN-477",
+      "file_path": "docs/requirements/knowledge/KN-477-assessment-close-the-two-bootstrap-fixpoint-follow.md"
+    },
+    "01M0AJ91AVQ9BKTEWN4BFV63N0": {
+      "human_id": "KN-478",
+      "file_path": "docs/requirements/knowledge/KN-478-three-mechanism-facts-that-lived-only-in-source.md"
+    },
+    "01M0AMKKMR8WNVAXYNK1B27TV8": {
+      "human_id": "PLAN-130",
+      "file_path": "docs/requirements/plan/PLAN-130-teach-the-change-scoped-selector-about-hooks-and-a.md"
+    },
+    "01M0AJ1VVBD4T8GXXR3C5P629C": {
+      "human_id": "PLAN-131",
+      "file_path": "docs/requirements/plan/PLAN-131-close-the-two-bootstrap-fixpoint-follow-ups-a-ledg.md"
+    },
+    "01M0ANDAB7HWFF2E01J7Q4CCDD": {
+      "human_id": "TASK-732",
+      "file_path": "docs/requirements/task/TASK-732-make-both-new-falsifiers-discriminate-share-one-as.md"
+    },
+    "01M0CH5S5R4WCHH8RJMH2X1S8V": {
+      "human_id": "TASK-733",
+      "file_path": "docs/requirements/task/TASK-733-make-tree-scan-scopes-additive-instead-of-pre-empt.md"
+    },
+    "01M0AMM60446Y7AW0QCQRDGVTP": {
+      "human_id": "TASK-734",
+      "file_path": "docs/requirements/task/TASK-734-teach-changed-tests-membership-and-tree-scan-scope.md"
+    },
+    "01M0AJ34B4208F41Q9YMQ2BBCW": {
+      "human_id": "TASK-735",
+      "file_path": "docs/requirements/task/TASK-735-rename-the-pre-push-trip-test-to-match-the-two-sui.md"
+    },
+    "01M0AJ2H4VV9NZ9H1W9FVSXFZB": {
+      "human_id": "TASK-736",
+      "file_path": "docs/requirements/task/TASK-736-make-the-anchor-coverage-ledger-test-assert-slug-s.md"
     }
   }
 }
