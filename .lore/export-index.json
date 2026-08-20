@@ -6136,6 +6136,10 @@
     "01M0FS2EJRQNWBH7APS5KMKVJ8": {
       "human_id": "KN-480",
       "file_path": "docs/requirements/knowledge/KN-480-assessment-teach-the-change-scoped-selector-about.md"
+    },
+    "01M0FSRY2Q7F8W12A0C6JCMGRD": {
+      "human_id": "KN-481",
+      "file_path": "docs/requirements/knowledge/KN-481-handoff-agent-main-orchestrator.md"
     }
   }
 }
