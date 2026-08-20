@@ -182,7 +182,7 @@ type AliasMap = Readonly<Record<string, string>>;
 type SelectionReason = "changed-test" | "transitive" | "binary-consumer" | "tree-scan-oracle";
 type TestRunner = "vitest" | "bun";
 type BinaryConsumerKind = "compiled" | "source";
-type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source";
+type TreeScanScope = "packages-test-tree" | "repo-tracked-text-source" | "hooks-and-assets-pair";
 interface SelectedFile {
   path: string;
   reason: SelectionReason;
@@ -214,7 +214,7 @@ type IsTestFileFn = (path: string) => boolean;
 type IsBunTestFileFn = (path: string) => boolean;
 type ClassifyBinaryConsumerFn = (path: string, content: string) => BinaryConsumerKind | undefined;
 type IsBinaryConsumerCandidateFn = (path: string, content: string) => boolean;
-type ClassifyTreeScanningOracleFn = (path: string, content: string) => TreeScanScope | undefined;
+type ClassifyTreeScanningOracleFn = (path: string, content: string) => ReadonlySet<TreeScanScope> | undefined;
 type ChangedFileMatchesTreeScanScopeFn = (changedPath: string, scope: TreeScanScope) => boolean;
 type SelectAffectedTestsFn = (params: { changedFiles: readonly string[]; fileMap: FileMap; aliasMap: AliasMap }) => SelectionResult;
 type FormatAccountingFn = (selection: SelectionResult) => string;
@@ -381,7 +381,7 @@ describe("changed-tests selector — classifyTreeScanningOracle (rule (d))", () 
       "});",
     ].join("\n");
 
-    expect(classifyTreeScanningOracle(path, content)).toBe("packages-test-tree");
+    expect(classifyTreeScanningOracle(path, content)).toEqual(new Set(["packages-test-tree"]));
   });
 
   it("HAPPY: the REAL check-no-nul-bytes.test.ts shape (bare main() AND an hasTextSourceExtension import) classifies as repo-tracked-text-source", () => {
@@ -398,7 +398,7 @@ describe("changed-tests selector — classifyTreeScanningOracle (rule (d))", () 
       "});",
     ].join("\n");
 
-    expect(classifyTreeScanningOracle(path, content)).toBe("repo-tracked-text-source");
+    expect(classifyTreeScanningOracle(path, content)).toEqual(new Set(["repo-tracked-text-source"]));
   });
 
   it("NEGATIVE: a non-test SOURCE file containing both markers is NOT classified — isTestFile gates entry regardless of content, mirroring classifyBinaryConsumer's own boundary case", () => {
@@ -435,7 +435,50 @@ describe("changed-tests selector — classifyTreeScanningOracle (rule (d))", () 
     const path = "scripts/tests/comment-only.test.ts";
     const content = "// this test used to call main() directly but no longer does\nexpect(1).toBe(1);";
 
-    expect(classifyTreeScanningOracle(path, content)).toBe("packages-test-tree");
+    expect(classifyTreeScanningOracle(path, content)).toEqual(new Set(["packages-test-tree"]));
+  });
+});
+
+describe("changed-tests selector — classifyTreeScanningOracle scopes are ADDITIVE, never pre-emptive (AC-TC-5, task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and)", () => {
+  /**
+   * Six REAL governance/gate test files that legitimately match BOTH
+   * membership signals at once: they mention `hooks/pre-push` /
+   * `assets/project/pre-push` in a doc comment or code string (never as an
+   * executable path — none of these six files actually drive the pre-push
+   * hooks) AND independently carry a bare `main()` tree-scan invocation. A
+   * pre-emptive (first-match-wins) `classifyTreeScanningOracle` — the shape
+   * this function had before this task — checked the hooks/assets marker
+   * FIRST and returned immediately on a match, silently DROPPING each file's
+   * real `"packages-test-tree"` / `"repo-tracked-text-source"` scope the
+   * moment AC-TC-4 added that marker. Read from the REAL checked-out files
+   * (never a synthetic stand-in) so this proves the production classifier
+   * against production content, not a fixture's approximation of it.
+   */
+  const RETAINED_SCOPE_CASES: ReadonlyArray<{
+    readonly path: string;
+    readonly priorScope: "packages-test-tree" | "repo-tracked-text-source";
+  }> = [
+    { path: "packages/lore/tests/unit/assets/pre-push-parity.test.ts", priorScope: "repo-tracked-text-source" },
+    { path: "scripts/tests/check-no-nul-bytes.test.ts", priorScope: "repo-tracked-text-source" },
+    { path: "scripts/tests/check-ac-ref-integrity.test.ts", priorScope: "packages-test-tree" },
+    { path: "scripts/tests/check-gap-namespace.test.ts", priorScope: "packages-test-tree" },
+    { path: "scripts/tests/check-no-timer-retry.test.ts", priorScope: "packages-test-tree" },
+    { path: "scripts/tests/check-ordinal-write-sites.test.ts", priorScope: "packages-test-tree" },
+  ];
+
+  it("REGRESSION: each of the six real multi-scope files retains its prior tree-scan scope AND gains hooks-and-assets-pair — never narrowed to hooks-and-assets-pair alone", () => {
+    const narrowed: string[] = [];
+    for (const { path, priorScope } of RETAINED_SCOPE_CASES) {
+      const content = readFileSync(join(REPO_ROOT, path), "utf8");
+      const scopes = classifyTreeScanningOracle(path, content);
+      const scopeList = scopes === undefined ? "undefined" : `{${[...scopes].sort().join(", ")}}`;
+      const hasPrior = scopes !== undefined && scopes.has(priorScope);
+      const hasHookAsset = scopes !== undefined && scopes.has("hooks-and-assets-pair");
+      if (!hasPrior || !hasHookAsset) {
+        narrowed.push(`${path}: expected {${priorScope}, hooks-and-assets-pair}, got ${scopeList}`);
+      }
+    }
+    expect(narrowed, `scope narrowed for:\n${narrowed.join("\n")}`).toEqual([]);
   });
 });
 
