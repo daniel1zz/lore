@@ -123,6 +123,22 @@
  *          `hasTextSourceExtension`, which returns `false` for both real
  *          paths precisely because they are extensionless.
  *
+ *          `classifyTreeScanningOracle` originally CHECKED this new marker
+ *          first and RETURNED on match, before the pre-existing `main()`
+ *          path ever ran — a pre-emptive pick, not an additive one. Six real
+ *          governance test files (see `HOOK_OR_ASSET_PAIR_MARKER_RE`'s own
+ *          doc comment) legitimately match BOTH signals — they document the
+ *          pre-push hook in prose while ALSO being genuine `"packages-
+ *          test-tree"` / `"repo-tracked-text-source"` tree-scanning oracles
+ *          — so that pre-emptive return silently NARROWED each one's real
+ *          scope the moment AC-TC-4 landed, regressing rule (d) for files it
+ *          already correctly covered before. Fixed (task
+ *          `task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and`,
+ *          AC-TC-5) by making `classifyTreeScanningOracle` return the UNION
+ *          of every matching scope (a `Set`, never a single "first match
+ *          wins" value) and having this rule fire on a match against ANY
+ *          member of that set — never on the OLD 3-way exclusive choice.
+ *
  *      Rule (d)'s membership/scope derivation was one of three explicitly
  *      weighed options (task requirement): (i) a CONTENT MARKER in the test
  *      file, the same shape (c) already uses — CHOSEN, for the reason above;
@@ -575,41 +591,69 @@ const REPO_TRACKED_TEXT_SOURCE_MARKER_RE = /\bhasTextSourceExtension\b/;
  * and-its`). This marker only has effect because `classifyTreeScanningOracle`
  * and `isChangedFileInTreeScanScope` below were BOTH changed to recognize it;
  * neither change alone is sufficient (AC-TC-4's own falsifying revert check).
+ *
+ * ⛔ MEASURED (AC-TC-5, `task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and`):
+ * exported (not module-private) so a test can pin this exact literal against
+ * the two REAL guard files' own content, rather than only against synthetic
+ * fixture strings that merely mimic the marker. Six real files — all of them
+ * governance/gate test suites that legitimately document the pre-push hook in
+ * prose (`hooks/pre-push`, `assets/project/pre-push` appear in a doc comment
+ * or code string, never as an executable path) — ALSO independently qualify
+ * under the pre-existing `BARE_MAIN_INVOCATION_RE` path below
+ * (`packages/lore/tests/unit/assets/pre-push-parity.test.ts`,
+ * `scripts/tests/check-no-nul-bytes.test.ts`,
+ * `scripts/tests/check-ac-ref-integrity.test.ts`,
+ * `scripts/tests/check-gap-namespace.test.ts`,
+ * `scripts/tests/check-no-timer-retry.test.ts`,
+ * `scripts/tests/check-ordinal-write-sites.test.ts`) — a PRE-EMPTIVE
+ * single-scope return (checking this marker first and returning immediately)
+ * silently DROPPED each file's real `"packages-test-tree"` /
+ * `"repo-tracked-text-source"` scope the moment this marker started matching
+ * it, which is exactly backwards: this marker's presence is evidence the file
+ * ALSO judges the hooks/assets pair, never proof it stops judging whatever it
+ * judged before.
  */
-const HOOK_OR_ASSET_PAIR_MARKER_RE = /hooks\/pre-push|assets\/project\/pre-push/;
+export const HOOK_OR_ASSET_PAIR_MARKER_RE = /hooks\/pre-push|assets\/project\/pre-push/;
 
 /**
- * Classify `path`/`content` as a tree-scanning oracle test and, if so, which
+ * Classify `path`/`content` as a tree-scanning oracle test and, if so, EVERY
  * scope it judges — rule (d)'s membership + scope derivation, entirely from
  * content markers already present in the test's own source (never a
  * hardcoded filename list — AC-1 of
- * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`). Two
- * independent membership paths, checked in this order:
+ * `task-test-changed-s-fourth-invisible-edge-a-tree-scanning`). Returns a
+ * possibly-multi-member `Set` because the two membership signals are
+ * ADDITIVE, not mutually exclusive — a single test file can legitimately
+ * carry both:
  *
  *   1. `HOOK_OR_ASSET_PAIR_MARKER_RE` — a test file naming either real
- *      hook-copy path is judged against the narrow, fixed
- *      `"hooks-and-assets-pair"` scope. Checked FIRST because these two
- *      guard suites contain neither a bare `main()` call nor an
- *      `hasTextSourceExtension` import, so path (2) below would never see
- *      them; order here does not exclude path (2) for a DIFFERENT file that
- *      happened to match both (none do today).
- *   2. The pre-existing path: a bare `main()` invocation
- *      (`BARE_MAIN_INVOCATION_RE`) — proof the file drives its module's
- *      real, unmocked full-tree scan, the same "reaches its subject by a
- *      means other than static import" shape rule (c) already handles for
- *      subprocess spawns (D2). Among these, one additionally importing
- *      `hasTextSourceExtension` is judged against the WIDER
- *      repo-tracked-text-source scope; any other qualifying file defaults to
- *      the narrower `"packages-test-tree"` scope — conservative in the SAFE
- *      direction only when the wider marker is absent (AC-2: a future
- *      tree-scanning oracle nobody has taught this function about yet still
- *      gets the narrower scope rather than being silently dropped).
+ *      hook-copy path adds the narrow, fixed `"hooks-and-assets-pair"` scope.
+ *   2. A bare `main()` invocation (`BARE_MAIN_INVOCATION_RE`) — proof the
+ *      file drives its module's real, unmocked full-tree scan, the same
+ *      "reaches its subject by a means other than static import" shape rule
+ *      (c) already handles for subprocess spawns (D2) — adds EITHER the
+ *      wider `"repo-tracked-text-source"` scope (when the file also imports
+ *      `hasTextSourceExtension`) or the narrower `"packages-test-tree"`
+ *      scope (AC-2: a future tree-scanning oracle nobody has taught this
+ *      function about yet still gets the narrower scope rather than being
+ *      silently dropped).
+ *
+ * ⛔ MEASURED (AC-TC-5): checking these two paths in sequence and RETURNING
+ * on the first match — the shape this function used before this task — is a
+ * regression, not merely an ordering choice: six real files (see
+ * `HOOK_OR_ASSET_PAIR_MARKER_RE`'s own doc comment) satisfy BOTH paths
+ * simultaneously, and returning only path (1)'s scope silently narrowed each
+ * one's real selection scope the moment AC-TC-4 added path (1). The return
+ * type is therefore a `Set`, and the union of scopes is what callers must
+ * treat as "matches ANY of these" — never "matches the first one found."
  */
-export function classifyTreeScanningOracle(path: string, content: string): TreeScanScope | undefined {
+export function classifyTreeScanningOracle(path: string, content: string): ReadonlySet<TreeScanScope> | undefined {
   if (!isTestFile(path)) return undefined;
-  if (HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)) return "hooks-and-assets-pair";
-  if (!BARE_MAIN_INVOCATION_RE.test(content)) return undefined;
-  return REPO_TRACKED_TEXT_SOURCE_MARKER_RE.test(content) ? "repo-tracked-text-source" : "packages-test-tree";
+  const scopes = new Set<TreeScanScope>();
+  if (HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)) scopes.add("hooks-and-assets-pair");
+  if (BARE_MAIN_INVOCATION_RE.test(content)) {
+    scopes.add(REPO_TRACKED_TEXT_SOURCE_MARKER_RE.test(content) ? "repo-tracked-text-source" : "packages-test-tree");
+  }
+  return scopes.size > 0 ? scopes : undefined;
 }
 
 /**
@@ -673,17 +717,20 @@ export function selectAffectedTests(params: {
   // runtime (classifyTreeScanningOracle) is selected whenever ANY file in the
   // FULL raw changedFiles list (not just knownChanged/fileMap-filtered — a
   // "repo-tracked-text-source" scope reaches files entirely outside this
-  // selector's traced universe, e.g. a doc under docs/) falls within ITS OWN
-  // declared scan scope. Per-oracle, not a single blanket trigger for the
-  // whole set — a change that matches only the narrower scope must not also
-  // drag in an oracle whose scope excludes it (AC-3: no existing rule is
-  // weakened, and this rule itself must stay scoped, never "select every
-  // tree-scanning oracle on any change whatsoever").
+  // selector's traced universe, e.g. a doc under docs/) falls within ANY ONE
+  // of ITS OWN declared scan scopes — a test can hold >=1 scope at once (AC-TC-5:
+  // classifyTreeScanningOracle's scopes are additive, never a single "first
+  // match wins" pick), so this rule fires on a match against ANY member. Per-
+  // oracle, not a single blanket trigger for the whole set — a change that
+  // matches only the narrower scope must not also drag in an oracle whose
+  // scopes exclude it (AC-3: no existing rule is weakened, and this rule
+  // itself must stay scoped, never "select every tree-scanning oracle on any
+  // change whatsoever").
   for (const [path, content] of fileMap) {
     if (reasonByPath.has(path)) continue; // (a)/(c) already decided this file
-    const scope = classifyTreeScanningOracle(path, content);
-    if (scope === undefined) continue;
-    if (changedFiles.some((f) => isChangedFileInTreeScanScope(f, scope))) {
+    const scopes = classifyTreeScanningOracle(path, content);
+    if (scopes === undefined) continue;
+    if (changedFiles.some((f) => [...scopes].some((scope) => isChangedFileInTreeScanScope(f, scope)))) {
       reasonByPath.set(path, "tree-scan-oracle");
     }
   }

@@ -25,7 +25,7 @@ import { describe, expect, it, beforeAll } from "bun:test";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../../..");
@@ -73,15 +73,28 @@ let isSelectionReason: (value: string) => boolean;
  * accounting output can never legitimately contain an out-of-vocabulary tag.
  */
 let KNOWN_REASON_TAG_RE: RegExp;
+/**
+ * `scripts/changed-tests.ts`'s own `HOOK_OR_ASSET_PAIR_MARKER_RE` — imported
+ * (not re-transcribed) so the AC-TC-5 pinning describe block below tests the
+ * EXACT literal the production classifier uses, never an independent copy
+ * that could silently drift out of sync with it.
+ */
+let HOOK_OR_ASSET_PAIR_MARKER_RE: RegExp;
+/** `scripts/changed-tests.ts`'s own `classifyTreeScanningOracle` — see the AC-TC-5 describe block below. */
+let classifyTreeScanningOracle: (path: string, content: string) => ReadonlySet<string> | undefined;
 
 beforeAll(async () => {
   const mod: {
     SELECTION_REASONS: readonly string[];
     isSelectionReason: (value: string) => boolean;
+    HOOK_OR_ASSET_PAIR_MARKER_RE: RegExp;
+    classifyTreeScanningOracle: (path: string, content: string) => ReadonlySet<string> | undefined;
   } = await import(CHANGED_TESTS_SPECIFIER);
   SELECTION_REASONS = mod.SELECTION_REASONS;
   isSelectionReason = mod.isSelectionReason;
   KNOWN_REASON_TAG_RE = new RegExp(`\\((${SELECTION_REASONS.join("|")})\\)`);
+  HOOK_OR_ASSET_PAIR_MARKER_RE = mod.HOOK_OR_ASSET_PAIR_MARKER_RE;
+  classifyTreeScanningOracle = mod.classifyTreeScanningOracle;
 });
 
 describe("bun run test:changed CLI — --list HEAD (AC-TC-2)", () => {
@@ -461,5 +474,43 @@ describe("AC-TC-4: hooks-only and assets-only change sets select both pre-push g
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("AC-TC-5: the hooks/assets marker is pinned against the two REAL guard files, not only fixture stand-ins (task-make-tree-scan-scopes-additive-instead-of-pre-emptive-and)", () => {
+  /**
+   * The AC-TC-4 suite above proves the classifier recognizes the marker
+   * using FIXTURE strings that merely reproduce the real suites' literal
+   * substrings — it never reads the real files, so a future edit that
+   * accidentally rewords `packages/lore/tests/unit/assets/pre-push-parity
+   * .test.ts` or `packages/lore/tests/integration/pre-push-trip.bun.test.ts`
+   * out of matching `HOOK_OR_ASSET_PAIR_MARKER_RE` would go undetected by any
+   * test in this repo. This block closes that gap by reading the two REAL,
+   * checked-out files from disk and asserting the PRODUCTION regex — and the
+   * production classifier built on it — actually recognizes them.
+   */
+  const REAL_PARITY_TEST_PATH = "packages/lore/tests/unit/assets/pre-push-parity.test.ts";
+  const REAL_TRIP_TEST_PATH = "packages/lore/tests/integration/pre-push-trip.bun.test.ts";
+
+  it("HAPPY: HOOK_OR_ASSET_PAIR_MARKER_RE matches the REAL pre-push-parity.test.ts content read from disk", () => {
+    const content = readFileSync(join(REPO_ROOT, REAL_PARITY_TEST_PATH), "utf8");
+    expect(HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)).toBe(true);
+  });
+
+  it("HAPPY: HOOK_OR_ASSET_PAIR_MARKER_RE matches the REAL pre-push-trip.bun.test.ts content read from disk", () => {
+    const content = readFileSync(join(REPO_ROOT, REAL_TRIP_TEST_PATH), "utf8");
+    expect(HOOK_OR_ASSET_PAIR_MARKER_RE.test(content)).toBe(true);
+  });
+
+  it("REGRESSION: classifyTreeScanningOracle on the REAL pre-push-parity.test.ts keeps BOTH its prior repo-tracked-text-source scope AND hooks-and-assets-pair — never narrowed to hooks-and-assets-pair alone", () => {
+    const content = readFileSync(join(REPO_ROOT, REAL_PARITY_TEST_PATH), "utf8");
+    const scopes = classifyTreeScanningOracle(REAL_PARITY_TEST_PATH, content);
+    expect(scopes).toEqual(new Set(["repo-tracked-text-source", "hooks-and-assets-pair"]));
+  });
+
+  it("HAPPY: classifyTreeScanningOracle on the REAL pre-push-trip.bun.test.ts classifies as hooks-and-assets-pair (this file has no bare main() call, so it never had a prior tree-scan scope to retain)", () => {
+    const content = readFileSync(join(REPO_ROOT, REAL_TRIP_TEST_PATH), "utf8");
+    const scopes = classifyTreeScanningOracle(REAL_TRIP_TEST_PATH, content);
+    expect(scopes).toEqual(new Set(["hooks-and-assets-pair"]));
   });
 });
