@@ -34,8 +34,22 @@ closed or left open — there is no transition that turns it into owned work. So
 queue is monotonic, it reached the cap, and the cap now refuses the channel's own
 input.
 
-⛔ The available workaround is the wrong one. Closing a report to free a slot marks
-an unresolved defect resolved, which is exactly the lie the corpus must not carry —
+### The obvious escape was TESTED and it is not available
+
+Before concluding this, two of the ten were checked for staleness rather than assumed
+stale — the two claiming the mirror exporters disagree
+(`01KZVAXZQAT4S9F4HGQT45YTT9`, `01KZWF5EFFNWW673QYEEPNCMVT`). AC-BFI-8 had since landed
+a mirror CONTENT check, so it was plausible they had been fixed and could be honestly
+closed to free slots.
+
+Measured 2026-08-20: injected a two-line body drift into a mirror file, ran
+`bun run mirror:export` with NO `--force`, and the drift survived untouched
+(`git diff` still dirty). Only `lore export-docs --force` converges it. Both reports are
+therefore STILL VALID. Closing them would have been a false closure — and it would have
+looked exactly like a legitimate one afterwards.
+
+⛔ So there is no honest way to free a slot. Closing a report to make room marks an
+unresolved defect resolved, which is exactly the lie the corpus must not carry —
 and it would be indistinguishable afterwards from a real fix. The cap is doing its
 job; the missing adopt verb is the defect. Until it exists, gaps land in knowledge
 docs like this one, which no `--check` reads, so the reporting discipline degrades

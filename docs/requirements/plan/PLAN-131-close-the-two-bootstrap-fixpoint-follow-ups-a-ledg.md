@@ -3,10 +3,10 @@ id: PLAN-131
 type: plan
 role: plan
 title: "Close the two bootstrap-fixpoint follow-ups: a ledger test that stops delegating membership to the checker, and a rename that carries its four records with it"
-status: approved
+status: archived
 priority: high
 created: 2026-08-18
-updated: 2026-08-18
+updated: 2026-08-20
 tags: []
 parent: SPEC-134
 phases:

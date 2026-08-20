@@ -6,7 +6,7 @@ title: "Autonomous Feedback Loop (AI review, data-driven self-optimization) (dom
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-29
+updated: 2026-08-20
 tags: []
 parent: PRD-001
 ---
@@ -117,6 +117,38 @@ The evidence-trustworthiness line (SPEC-039 trusted runner → SPEC-069 attestat
 ### 14.9 Two-runner regression selection (committed 2026-07-28)
 
 Oracle-quality hardening one layer below attestation: the worktree regression sweep `vitest --changed` is structurally blind to `.bun.test.ts` consumers (two-runner convention), demonstrated when SPEC's exemption-kind change broke bun-side cascade fixtures behind a green 4504-test vitest sweep. Landing spec `spec-two-runner-changed-test-selection-deterministic-test`: `bun run test:changed [<base>]` selects across BOTH runners via transitive reverse-dependency BFS over a regex import graph, with named dependency-closure escapes (`dist/lore`-spawning binary-consumers auto-included on any src change, `bun run build` forced first — the stale-dist false-oracle lesson mechanized at selection time) and mandatory accounting (per-runner counts + per-file reason tags; zero-selection under src changes warns loudly). Known bounded limitation: dynamic imports are excluded by design, so the selector's own test (which dynamic-imports the script) is reachable only as a changed-test, not transitively.
+
+### 14.9.1 The selector's universe and its scope algebra (committed 2026-08-20)
+
+Two coverage properties of §14.9's selector, both measured rather than reasoned about, because
+both were silent while the selector reported success.
+
+**The shipping surface was outside the universe.** `hooks/**` and `assets/**` — the files that
+ARE the push gate — selected no tests on their own account. A hook-ONLY change set was refused
+correctly with loud-zero, exit 1, so the hole was invisible in the case anyone would test. The
+realistic case is hook + any matched file, and editing `assets/` FORCES regenerating the assets
+manifest, which is a matched file: the selection came back non-empty, loud-zero stayed quiet, and
+both pre-push guards were still absent. ⛔ Loud-zero is therefore not a coverage guarantee — it
+only detects the empty selection, never the wrong one.
+
+**Scope classification is a SET, not a first match.** The fix above added a third tree-scan scope
+and, by returning on first match, stripped every other scope from any test that also qualified.
+Two tree-scanning oracles lost `repo-tracked-text-source`, the broadest scope, and stopped being
+selected for ANY repo-tracked text change; four lost `packages-test-tree`. So one under-selection
+hole was closed and a wider one opened, in the same commit, and `lore assess` found it only after
+the closing criterion was attested and its task archived.
+
+The invariant that follows, and it generalises past this selector: **a change to selection must
+declare which scopes it ADDS and prove it removes none.** Membership and scope are conjunctive
+gates — an earlier attempt that fixed only membership was measured completely inert — so a
+selection fix is never a one-line change, and the proof obligation runs in both directions.
+
+Coverage is asserted against the REAL guard files, not fixture stand-ins: a suite that writes its
+own fixture text at the guard paths proves only that the selector recognises text the suite itself
+authored, and stays green through any reformat of the file that actually ships.
+
+Residual, unchanged: dynamic imports are still excluded by design, and a tree-scanning test that
+names no literal path is still invisible.
 
 ### 14.10 Loop instrumentation + enforcement arrives (landed 2026-07-28)
 

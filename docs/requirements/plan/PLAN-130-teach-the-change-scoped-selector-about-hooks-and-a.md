@@ -3,10 +3,10 @@ id: PLAN-130
 type: plan
 role: plan
 title: "Teach the change-scoped selector about hooks/ and assets/, so a hook edit can no longer silence the two tests that prove pre-push is wired"
-status: approved
+status: archived
 priority: high
 created: 2026-08-18
-updated: 2026-08-19
+updated: 2026-08-20
 tags: []
 parent: SPEC-101
 phases:

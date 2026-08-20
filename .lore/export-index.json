@@ -6128,6 +6128,14 @@
     "01M0AJ2H4VV9NZ9H1W9FVSXFZB": {
       "human_id": "TASK-736",
       "file_path": "docs/requirements/task/TASK-736-make-the-anchor-coverage-ledger-test-assert-slug-s.md"
+    },
+    "01M0FR5EF4CRE7E8S414SJ8DRC": {
+      "human_id": "KN-479",
+      "file_path": "docs/requirements/knowledge/KN-479-assessment-close-the-two-bootstrap-fixpoint-follow.md"
+    },
+    "01M0FS2EJRQNWBH7APS5KMKVJ8": {
+      "human_id": "KN-480",
+      "file_path": "docs/requirements/knowledge/KN-480-assessment-teach-the-change-scoped-selector-about.md"
     }
   }
 }

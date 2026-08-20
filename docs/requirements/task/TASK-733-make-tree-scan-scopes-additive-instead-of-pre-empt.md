@@ -3,7 +3,7 @@ id: TASK-733
 type: task
 role: plan
 title: "Make tree-scan scopes additive instead of pre-emptive, and pin the marker literals in the two real guard files"
-status: draft
+status: archived
 priority: critical
 phase: "additivity"
 created: 2026-08-19

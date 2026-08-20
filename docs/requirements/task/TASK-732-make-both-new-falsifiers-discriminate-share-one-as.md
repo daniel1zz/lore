@@ -3,7 +3,7 @@ id: TASK-732
 type: task
 role: plan
 title: "Make both new falsifiers discriminate: share one assertion path, assert the anchor's stored value, and refresh the comment my ledger fix invalidated"
-status: draft
+status: archived
 priority: high
 phase: "follow-ups"
 created: 2026-08-18
