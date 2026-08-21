@@ -64,8 +64,10 @@ import { ProjectIdentityLabel } from "@/components/ProjectIdentityLabel";
  * consumers). The AC-DC-12 oracle asserts the two copies agree member-for-member,
  * so the duplication cannot drift; see `IssuesList.tsx`'s copy for the full
  * TONE-GROUP rationale (`superseded`/`duplicate` are the NON-DEROGATORY terminal
- * states and must share neither `rejected`'s nor `fixed`'s bucket). Exported for
- * that oracle to drive directly.
+ * states and must share neither `rejected`'s nor `fixed`'s bucket; `adopted`,
+ * §M7, joins `resolving`'s bucket — both are non-derogatory AND undecided,
+ * unlike `superseded`/`duplicate`/`closed`, which are non-derogatory but
+ * FINAL). Exported for that oracle to drive directly.
  *
  * ⛔ EXHAUSTIVE via the `never` binding after the switch, with NO `default:`
  * clause — a `default` would absorb a state added to `IssueResolution` and render
@@ -76,6 +78,7 @@ export function resolutionBadgeVariant(resolution: IssueResolution): NonNullable
     case "open":
       return "outline";
     case "resolving":
+    case "adopted":
       return "secondary";
     case "fixed":
       return "default";

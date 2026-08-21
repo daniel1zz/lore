@@ -1,25 +1,38 @@
 /**
- * `lore issue resolve <issue> --state rejected|wontfix|superseded|duplicate
- *   --reason <r> [--superseded-by <doc> | --duplicate-of <doc>] [--by <actor>] [--json]`
+ * `lore issue resolve <issue> --state rejected|wontfix|superseded|duplicate|adopted
+ *   --reason <r> [--superseded-by <doc> | --duplicate-of <doc> | --adopted-by <doc>]
+ *   [--by <actor>] [--json]`
  *
- * The four writable states and their pointer requirements are CONSUMED from
- * `service/issue-resolution.js`'s SSOT (`EXPLICIT_TERMINAL_RESOLUTIONS` +
- * `reachOfTerminalResolution`), ⛔ never re-listed here — AC-DC-9 asserts one
+ * The five writable states and their pointer requirements are CONSUMED from
+ * `service/issue-resolution.js`'s SSOT (`EXPLICIT_RESOLUTIONS` +
+ * `reachOfExplicitResolution`), ⛔ never re-listed here — AC-DC-9 asserts one
  * definition site repo-wide.
  *
  * spec-the-defect-channel-cannot-be-honestly-maintained-an §M3 added the two
- * NON-DEROGATORY states. Each REQUIRES its pointer, and the pointer MUST resolve
- * to an existing doc BEFORE anything is written (AC-DC-4): a `superseded` state
- * with a dangling pointer retires a real defect report while recording nothing a
- * reader could follow, which is operationally the same silent trash can as
- * `rejected` — the defect §M3 fixes, not a milder version of the fix. Both
- * states are members of the shared terminal set, so they also RELEASE
- * open-report cap quota (§M1) and stay visible under `lore issues --resolved`.
+ * NON-DEROGATORY TERMINAL states. Each REQUIRES its pointer, and the pointer
+ * MUST resolve to an existing doc BEFORE anything is written (AC-DC-4): a
+ * `superseded` state with a dangling pointer retires a real defect report while
+ * recording nothing a reader could follow, which is operationally the same
+ * silent trash can as `rejected` — the defect §M3 fixes, not a milder version
+ * of the fix. Both states are members of the shared terminal set, so they also
+ * RELEASE open-report cap quota (§M1) and stay visible under `lore issues
+ * --resolved`.
+ *
+ * §M7 added `adopted` — non-terminal (does NOT join
+ * `TERMINAL_ISSUE_RESOLUTIONS`; stays visible under `--resolved`'s complement),
+ * but ALSO frees cap quota through the separate `QUOTA_FREEING_RESOLUTIONS`
+ * seam. Its pointer (`--adopted-by`) carries an ADDITIONAL constraint no other
+ * pointer here has: the resolved doc's `type` MUST be `plan` or `task` (checked
+ * AFTER existence/self-reference, BEFORE any write — {@link wrongPointerTypeError}) —
+ * an owner that cannot itself do work would let `adopted` become a quieter
+ * `rejected`, which is the defect §M7 exists to avoid.
  *
  * D3 (spec-issue-closure-loop-computed-resolution-agent-reachable) — the ONLY
- * writer of `extra.issue_report.resolution`, an explicit terminal state that
- * WINS over resolves-edge computation (`computeIssueResolution`'s precedence
- * rule 1 — `../../../service/issue-resolution.js`, landed by P1). `--state
+ * writer of `extra.issue_report.resolution`. The four TERMINAL explicit states
+ * WIN over resolves-edge computation (`computeIssueResolution`'s precedence
+ * rule 1 — `../../../service/issue-resolution.js`, landed by P1); `adopted`
+ * does NOT — a `resolves` edge landing later still promotes it to
+ * `fixed`/`resolving` (that same module's precedence rule 2/4, §M7). `--state
  * fixed` is REJECTED unconditionally, BEFORE any doc lookup: the only path to
  * a `fixed` resolution is a `resolves` edge (`lore link --type resolves
  * <fixer> <issue>`) whose source doc reaches `active`/`archived` (D1/D2).
@@ -42,15 +55,16 @@
  * Exit codes: 0 success; 3 DOC_NOT_FOUND (unknown --issue); 4
  * VALIDATION_ERROR (`--state fixed`, an unrecognized --state value, empty/
  * missing --reason, a target lacking `extra.issue_report`, a REQUIRED pointer
- * that is missing / unresolvable / self-referential, or a pointer flag passed
- * for a state that takes none — an unresolvable pointer is re-typed from
- * DOC_NOT_FOUND so every pointer refusal shares one exit code, see
- * {@link unresolvablePointerError}); 5 STALE_VERSION (concurrent write race on
- * the target task).
+ * that is missing / unresolvable / self-referential / wrong-typed (`adopted`
+ * only), or a pointer flag passed for a state that takes none — an
+ * unresolvable pointer is re-typed from DOC_NOT_FOUND so every pointer
+ * refusal shares one exit code, see {@link unresolvablePointerError}); 5
+ * STALE_VERSION (concurrent write race on the target task).
  *
  * Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D3,
  *   AC-ICL-3, AC-ICL-4;
- *   spec-the-defect-channel-cannot-be-honestly-maintained-an §M3, AC-DC-4.
+ *   spec-the-defect-channel-cannot-be-honestly-maintained-an §M3, AC-DC-4;
+ *   §M7, AC-DC-15.
  */
 
 import { defineCommand } from "citty";
@@ -59,29 +73,31 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import {
   hasIssueReport,
   computeIssueResolution,
-  EXPLICIT_TERMINAL_RESOLUTIONS,
-  reachOfTerminalResolution,
-  type ExplicitTerminalResolution,
+  checkResolutionPointer,
+  EXPLICIT_RESOLUTIONS,
+  reachOfExplicitResolution,
+  type ExplicitResolution,
 } from "../../../service/issue-resolution.js";
 import type { LoreError } from "@lore/core";
 
 /**
  * The states this command may persist — CONSUMED from
  * `service/issue-resolution.js`'s SSOT, ⛔ never re-listed here
- * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1/§M3, AC-DC-9).
- * `"fixed"`/`"closed"` are structurally absent from that subset because their
- * declared route is not `issue-resolve`; see {@link fixedNotSettableError}.
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1/§M3/§M7,
+ * AC-DC-9). `"fixed"`/`"closed"` are structurally absent from that subset
+ * because their declared route is not `issue-resolve`; see
+ * {@link fixedNotSettableError}.
  */
-const VALID_STATE_LIST = [...EXPLICIT_TERMINAL_RESOLUTIONS].join(", ");
+const VALID_STATE_LIST = [...EXPLICIT_RESOLUTIONS].join(", ");
 
 /** True iff `value` is a state `lore issue resolve` may write. */
-function isExplicitTerminalState(value: string): value is ExplicitTerminalResolution {
-  return (EXPLICIT_TERMINAL_RESOLUTIONS as ReadonlySet<string>).has(value);
+function isExplicitResolutionState(value: string): value is ExplicitResolution {
+  return (EXPLICIT_RESOLUTIONS as ReadonlySet<string>).has(value);
 }
 
 /** One `--state`-to-pointer-flag binding, derived from the reach table's declared pointer requirement. */
 interface PointerFlagBinding {
-  readonly state: ExplicitTerminalResolution;
+  readonly state: ExplicitResolution;
   /** The user-facing flag, e.g. `--superseded-by`. */
   readonly flag: string;
   /** The citty args key (the flag minus its leading dashes). */
@@ -90,22 +106,24 @@ interface PointerFlagBinding {
   readonly extraKey: string;
   /** Noun phrase for what the pointer must name — read from the SSOT, never re-worded per refusal. */
   readonly names: string;
+  /** When present, the resolved pointer doc's `type` MUST be one of these (§M7's `adopted` only). */
+  readonly allowedDocTypes?: readonly string[];
 }
 
 /**
  * Every state that REQUIRES a pointer, derived from
- * `reachOfTerminalResolution` — so adding a third pointer-carrying state needs
+ * `reachOfExplicitResolution` — so adding a fourth pointer-carrying state needs
  * no edit here beyond the `args` declaration below.
  *
  * ⛔ Coupling worth knowing about: citty needs its flags declared STATICALLY in
- * `args`, so the two flag names appear literally there as well. They cannot
+ * `args`, so the flag names appear literally there as well. They cannot
  * drift SILENTLY — a flag present in the table but missing from `args` makes the
  * required pointer unsuppliable, i.e. every attempt at that state fails loud,
  * and `tests/integration/cli/issue-resolve-pointer-required.bun.test.ts` drives
  * both flags end-to-end.
  */
-const POINTER_FLAG_BINDINGS: readonly PointerFlagBinding[] = [...EXPLICIT_TERMINAL_RESOLUTIONS].flatMap((state) => {
-  const pointer = reachOfTerminalResolution(state).pointer;
+const POINTER_FLAG_BINDINGS: readonly PointerFlagBinding[] = [...EXPLICIT_RESOLUTIONS].flatMap((state) => {
+  const pointer = reachOfExplicitResolution(state).pointer;
   if (pointer === null) return [];
   return [
     {
@@ -114,6 +132,12 @@ const POINTER_FLAG_BINDINGS: readonly PointerFlagBinding[] = [...EXPLICIT_TERMIN
       argName: pointer.flag.replace(/^-+/, ""),
       extraKey: pointer.extra_key,
       names: pointer.names,
+      // reason: `exactOptionalPropertyTypes` distinguishes "key absent" from
+      // "key present with value undefined" — spreading only when defined keeps
+      // an M3 pointer's binding with NO `allowedDocTypes` key at all, matching
+      // the interface's own "optional means absent, never present-undefined"
+      // contract used everywhere else in this codebase.
+      ...(pointer.allowed_doc_types !== undefined ? { allowedDocTypes: pointer.allowed_doc_types } : {}),
     },
   ];
 });
@@ -192,7 +216,7 @@ function missingPointerError(binding: PointerFlagBinding): LoreError {
 }
 
 /** A pointer flag was supplied for a state that takes no pointer — a contradiction, never silently dropped. */
-function pointerForWrongStateError(binding: PointerFlagBinding, state: ExplicitTerminalResolution): LoreError {
+function pointerForWrongStateError(binding: PointerFlagBinding, state: ExplicitResolution): LoreError {
   return {
     code: "VALIDATION_ERROR",
     field: binding.argName,
@@ -220,6 +244,31 @@ function unresolvablePointerError(binding: PointerFlagBinding, value: string, ca
       `(${describeLoreErrorWithCode(cause)}) — nothing was written. A ${binding.state} resolution must ` +
       `name ${binding.names}, otherwise it is a silent trash can.`,
     value,
+  };
+}
+
+/**
+ * §M7 — the pointer resolved to a REAL doc (existence and self-reference both
+ * already passed), but its `type` is not one of `binding.allowedDocTypes`.
+ * `adopted` is the only state that declares this constraint (M3's
+ * `superseded`/`duplicate` pointers accept any doc): an owner that is not
+ * itself a `plan` or `task` cannot do the work the adoption claims will
+ * happen, which is the "constrained party must not control the ceiling"
+ * failure §M2/§M6 already record, applied to WHO may free quota by adopting.
+ */
+function wrongPointerTypeError(
+  binding: PointerFlagBinding,
+  pointerDoc: { slug: string; type: string },
+  allowedDocTypes: readonly string[],
+): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: binding.argName,
+    message:
+      `${binding.flag} '${pointerDoc.slug}' resolves to a doc of type '${pointerDoc.type}', but --state ` +
+      `${binding.state} requires one of: ${allowedDocTypes.join(", ")} — naming ${binding.names}. Without a ` +
+      "live plan or task as owner, adoption would free quota with nobody accountable for the claim.",
+    value: pointerDoc.slug,
   };
 }
 
@@ -257,7 +306,7 @@ export default defineCommand({
       meta: {
         name: "resolve",
         description:
-          "Record an explicit terminal resolution (rejected/wontfix) on a filed issue report",
+          "Record an explicit resolution (rejected/wontfix/superseded/duplicate/adopted) on a filed issue report",
       },
       args: {
         issue: {
@@ -267,13 +316,13 @@ export default defineCommand({
         },
         state: {
           type: "string",
-          description: `Explicit terminal state: ${[...EXPLICIT_TERMINAL_RESOLUTIONS].join(" | ")} ('fixed' is computed, never accepted here)`,
+          description: `Explicit resolution: ${[...EXPLICIT_RESOLUTIONS].join(" | ")} ('fixed'/'closed' are computed, never accepted here)`,
         },
         reason: {
           type: "string",
           description: "Human-readable reason (required, non-empty)",
         },
-        // reason: citty resolves flags from a STATIC args map, so these two
+        // reason: citty resolves flags from a STATIC args map, so these three
         // names are declared literally even though their requiredness,
         // storage key and error messages all derive from
         // `POINTER_FLAG_BINDINGS`. See that const's own comment.
@@ -284,6 +333,11 @@ export default defineCommand({
         "duplicate-of": {
           type: "string",
           description: "REQUIRED with --state duplicate: the doc (id or slug) this report duplicates",
+        },
+        "adopted-by": {
+          type: "string",
+          description:
+            "REQUIRED with --state adopted: the LIVE plan or task (id or slug) that now owns this claim",
         },
         by: {
           type: "string",
@@ -306,7 +360,7 @@ export default defineCommand({
           return;
         }
 
-        if (state === undefined || !isExplicitTerminalState(state)) {
+        if (state === undefined || !isExplicitResolutionState(state)) {
           const error = invalidStateError(state);
           process.stderr.write(formatError(error) + "\n");
           process.exitCode = exitCode(error);
@@ -361,26 +415,63 @@ export default defineCommand({
             return;
           }
 
-          // §M3 — resolve the REQUIRED pointer against the live corpus BEFORE
-          // any write. A pointer that names nothing would make `superseded`
-          // indistinguishable from a silent trash can, so this refusal must
-          // happen while zero bytes have been written.
+          // §M3/§M7 — resolve the REQUIRED pointer against the live corpus
+          // BEFORE any write, then hand the OUTCOME to `checkResolutionPointer`
+          // — the ONE decision (`service/issue-resolution.js`, AC-DC-15) every
+          // pointer-carrying state's refusal goes through, never a second
+          // CLI-local re-implementation of the same rules. A pointer that
+          // names nothing (or the wrong thing) would make `superseded`/
+          // `adopted` indistinguishable from a silent trash can, so every
+          // refusal here must happen while zero bytes have been written.
           let resolvedPointer: Record<string, string> = {};
           if (requiredPointer !== undefined) {
             const pointerResult = await app.corpusService.get(pointerValue);
-            if (!pointerResult.ok) {
-              const error = unresolvablePointerError(requiredPointer, pointerValue, pointerResult.error);
+            const resolvedTarget = pointerResult.ok
+              ? { id: pointerResult.value.doc.id, type: pointerResult.value.doc.type }
+              : undefined;
+            const pointerSpec = {
+              flag: requiredPointer.flag,
+              extra_key: requiredPointer.extraKey,
+              names: requiredPointer.names,
+              ...(requiredPointer.allowedDocTypes !== undefined
+                ? { allowed_doc_types: requiredPointer.allowedDocTypes }
+                : {}),
+            };
+            const verdict = checkResolutionPointer(pointerSpec, pointerValue, resolvedTarget, issueDoc.id);
+
+            if (!verdict.ok) {
+              let error: LoreError;
+              if (verdict.reason === "unresolvable" && !pointerResult.ok) {
+                error = unresolvablePointerError(requiredPointer, pointerValue, pointerResult.error);
+              } else if (verdict.reason === "self-reference") {
+                error = selfPointerError(requiredPointer, issueDoc.slug);
+              } else if (verdict.reason === "wrong-type" && pointerResult.ok) {
+                error = wrongPointerTypeError(
+                  requiredPointer,
+                  pointerResult.value.doc,
+                  requiredPointer.allowedDocTypes ?? [],
+                );
+              } else {
+                // reason: "missing" is already refused earlier (argv-only,
+                // before loadLoreApp) and can never reach this point with a
+                // non-empty pointerValue; kept as a defensive, fail-loud
+                // catch-all rather than a silent fallthrough — a genuine
+                // reason/lookup mismatch here is a bug in this wiring, not a
+                // caller input to accept quietly.
+                error = missingPointerError(requiredPointer);
+              }
               process.stderr.write(formatError(error) + "\n");
               process.exitCode = exitCode(error);
               return;
+            }
+
+            // reason: `verdict.ok` guarantees `resolvedTarget !== undefined`,
+            // which is only ever set from a successful lookup — so
+            // `pointerResult.ok` here is guaranteed, not merely assumed.
+            if (!pointerResult.ok) {
+              throw new Error("unreachable: checkResolutionPointer accepted an unresolved pointer");
             }
             const pointerDoc = pointerResult.value.doc;
-            if (pointerDoc.id === issueDoc.id) {
-              const error = selfPointerError(requiredPointer, issueDoc.slug);
-              process.stderr.write(formatError(error) + "\n");
-              process.exitCode = exitCode(error);
-              return;
-            }
             // reason: the RESOLVED id is persisted, never the id-or-slug the
             // caller typed — a slug is editable (`CorpusService.set` accepts a
             // slug patch), so storing one would let a rename silently dangle
@@ -417,10 +508,14 @@ export default defineCommand({
 
           const updated = setResult.value;
 
-          // reason: demonstrates D2's precedence rule end-to-end (the explicit
-          // state we just wrote wins over any resolves-edge computation) using
-          // the SAME navigation.related data get() already fetched above — no
-          // second store round trip. `related` mixes in/out non-parent links
+          // reason: demonstrates D2's precedence rule end-to-end using the SAME
+          // navigation.related data get() already fetched above — no second
+          // store round trip. For the four TERMINAL explicit states this is the
+          // explicit write winning over any resolves-edge computation; for §M7's
+          // `adopted` a PRE-EXISTING resolves edge (present before this command
+          // ran) still outranks it, per that module's own precedence — this call
+          // reports whichever of the two is actually true, never assumes the
+          // write we just made is what wins. `related` mixes in/out non-parent links
           // without exposing direction; a `resolves`-typed entry on an issue
           // task is, in every write-time-validated shape (D1b), an INBOUND edge
           // from a fixer doc, so treating each match's `id`/`status` as a

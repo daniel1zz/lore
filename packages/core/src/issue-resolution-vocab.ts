@@ -4,12 +4,15 @@
  *
  * Public surface:
  *   - `NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS` / `NonTerminalIssueResolution` —
- *     the two states in which a filed report still needs triage eyes.
+ *     the three states in which a filed report's claim has no final verdict
+ *     yet: `open`/`resolving` (still needs triage eyes) and `adopted` (§M7 —
+ *     has a live owner, but the claim itself is still undecided).
  *   - `TERMINAL_ISSUE_RESOLUTION_MEMBERS` / `TerminalIssueResolution` — the six
  *     states in which it does not (and, per
  *     spec-the-defect-channel-cannot-be-honestly-maintained-an §M1, no longer
- *     occupies open-report cap quota).
- *   - `ISSUE_RESOLUTION_MEMBERS` / `IssueResolution` — the whole 8-state
+ *     occupies open-report cap quota). `adopted` frees quota by a DIFFERENT,
+ *     additive seam (§M7) and is deliberately excluded from this set.
+ *   - `ISSUE_RESOLUTION_MEMBERS` / `IssueResolution` — the whole 9-state
  *     vocabulary, DERIVED by spreading the two halves above.
  *
  * Invariants:
@@ -62,9 +65,20 @@
  */
 
 /**
- * The states in which a filed issue report still needs triage eyes: `open` (no
- * signal yet) and `resolving` (a `resolves` edge exists but its source doc has
- * not reached a terminal lifecycle status).
+ * The states in which a filed report's CLAIM has not been given a final
+ * verdict: `open` (no signal yet), `resolving` (a `resolves` edge exists but
+ * its source doc has not reached a terminal lifecycle status), and `adopted`
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M7 — the claim
+ * now has a live `plan`/`task` owner, but nobody has yet said whether the
+ * defect is real, fixed, or wrong; a `resolves` edge landing later still
+ * upgrades it to `fixed`/`resolving` — see `computeIssueResolution`'s own
+ * precedence in `packages/lore/src/service/issue-resolution.ts`).
+ *
+ * ⛔ `adopted` is deliberately NOT terminal, and NOT a milder `rejected`:
+ * §M1's cap narrowing frees its quota through a SEPARATE seam
+ * (`QUOTA_FREEING_RESOLUTIONS` in the service module) precisely so `adopted`
+ * can keep needing eyes (it stays visible under `--resolved`'s complement)
+ * while still not occupying the reporter's rate-limited slot forever.
  *
  * Enumerable at runtime — not merely a type — so every consumer that must
  * iterate the WHOLE vocabulary (a badge mapper, a filter, a parity oracle) reads
@@ -74,10 +88,12 @@
  *
  * @example
  *   NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS.includes("open") // => true
+ *   NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS.includes("adopted") // => true
+ *   NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS.includes("rejected") // => false
  */
-export const NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS = ["open", "resolving"] as const;
+export const NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS = ["open", "resolving", "adopted"] as const;
 
-/** A resolution in which the report still needs triage eyes. */
+/** A resolution in which the report's claim carries no final verdict yet — includes `adopted`, which has an owner but no verdict. */
 export type NonTerminalIssueResolution = (typeof NON_TERMINAL_ISSUE_RESOLUTION_MEMBERS)[number];
 
 /**
@@ -135,10 +151,14 @@ export type TerminalIssueResolution = (typeof TERMINAL_ISSUE_RESOLUTION_MEMBERS)
  * What each state means and how it is REACHED is the service module's contract,
  * not this one's: `rejected`/`wontfix`/`superseded`/`duplicate` are explicitly
  * written by `lore issue resolve --state` (or, for `rejected` only, implied by a
- * recorded review-workflow rejection); `fixed` is reachable ONLY via a `resolves`
- * edge to a terminal source doc and is never hand-set; `closed` is the issue
- * task's own doc status reaching `archived` with no traceable fix source. See
- * `computeIssueResolution` in `packages/lore/src/service/issue-resolution.ts`.
+ * recorded review-workflow rejection); `adopted` is explicitly written the same
+ * way, REQUIRING a live `plan`/`task` owner pointer (§M7), and is DEMOTED by a
+ * later `resolves` edge (`computeIssueResolution`'s precedence ranks a fix
+ * actually landing above an adoption placeholder); `fixed` is reachable ONLY
+ * via a `resolves` edge to a terminal source doc and is never hand-set;
+ * `closed` is the issue task's own doc status reaching `archived` with no
+ * traceable fix source. See `computeIssueResolution` in
+ * `packages/lore/src/service/issue-resolution.ts`.
  */
 export type IssueResolution = NonTerminalIssueResolution | TerminalIssueResolution;
 
@@ -153,7 +173,7 @@ export type IssueResolution = NonTerminalIssueResolution | TerminalIssueResoluti
  * array — reference-identical, never a copy).
  *
  * @example
- *   ISSUE_RESOLUTION_MEMBERS.length // => 8
+ *   ISSUE_RESOLUTION_MEMBERS.length // => 9
  *   ISSUE_RESOLUTION_MEMBERS[0]     // => "open"
  */
 export const ISSUE_RESOLUTION_MEMBERS = [
