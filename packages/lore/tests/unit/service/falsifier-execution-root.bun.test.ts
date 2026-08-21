@@ -239,12 +239,17 @@ const BASE_CONFIG = {
 /**
  * The falsifier mutates `target.txt` (unrelated to the resolution mechanism
  * under test — its own exact-match declared-vs-observed contract is
- * `attested-red.test.ts`'s concern, not this file's). The command's exit code
- * is CONSTANT (`exit 5`) regardless of which tree state it runs against, so
- * this AC's own falsifier-match bookkeeping never depends on execution-root
- * resolution — the resolution's effect shows up ONLY in `output_tail`
- * (`cat extra.txt`'s captured stdout), decoupling "did resolution work" from
- * "does the match/mismatch machinery work" (already covered elsewhere).
+ * `attested-red.test.ts`'s concern, not this file's). The command exits 0
+ * while `target.txt` still contains MAGIC_MARKER (the UNMUTATED state —
+ * required post-AC-FR-11: the green control this file's own
+ * `verifyFalsifier` calls now runs the command BEFORE any mutation and
+ * demands exit 0 there, so a command that exits nonzero unconditionally would
+ * never reach the mutated spawn at all, regardless of execution-root
+ * resolution) and exits 5 once the mutation removes it — matching the
+ * falsifier's declared `expected_exit_code`. `cat extra.txt` runs on BOTH
+ * exits either way, so the resolution's effect still shows up ONLY in
+ * `output_tail`, decoupling "did resolution work" from "does the
+ * match/mismatch machinery work" (already covered elsewhere).
  */
 function makeCriterion(): AcceptanceCriterion {
   return {
@@ -253,7 +258,7 @@ function makeCriterion(): AcceptanceCriterion {
     verify: {
       mode: "script",
       oracle: "other",
-      command: "cat extra.txt; exit 5",
+      command: "cat extra.txt; grep -q MAGIC_MARKER target.txt && exit 0 || exit 5",
       falsifier: { path: "target.txt", find: "MAGIC_MARKER", replace: "", expected_exit_code: 5 },
     },
   };
@@ -493,7 +498,7 @@ function declareFalsifiableAc(dir: string, specSlug: string): void {
       "--oracle",
       "other",
       "--command",
-      "cat extra.txt; exit 5",
+      "cat extra.txt; grep -q MAGIC_MARKER target.txt && exit 0 || exit 5",
       "--falsifier-path",
       "target.txt",
       "--falsifier-find",

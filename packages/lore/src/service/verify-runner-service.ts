@@ -9,15 +9,19 @@
  *   verifyPlan(planIdOrSlug, opts) → runs every (or a filtered subset of) script-mode
  *     AC declared on the plan's parent spec against the resolved target task
  *   verifyFalsifier(planIdOrSlug, acId, opts) → spec-falsifiability-reachability-
- *     a-feedable-checkpoint-an §D2/D3/D4's ATTESTED-RED runner: applies ONE
- *     declared AC's `verify.falsifier` mutation inside a SCRATCH git worktree
+ *     a-feedable-checkpoint-an §D2/D3/D4's ATTESTED-RED runner: runs ONE
+ *     declared AC's own UNMUTATED command inside a SCRATCH git worktree
  *     (never the working tree — see the "Attested-Red Falsifier Runner"
- *     section below), runs the AC's command there, and records a
- *     runner-issued `result: "expected-fail"` evidence row ONLY when the
- *     observed exit code equals the falsifier's declared value exactly.
- *     Wholly separate from the four-step pipeline below — no M2 approval
- *     gate, no completeness/freshness guards (those all reason about the
- *     CHECKED-IN tree, which this path never executes against).
+ *     section below) as a GREEN CONTROL (AC-FR-11) BEFORE applying anything;
+ *     a nonzero/timed-out control records `result: "inconclusive"` with NO
+ *     `attestation` and stops right there. Only once that control exits 0
+ *     does it apply the AC's `verify.falsifier` mutation, run the AC's
+ *     command again, and record a runner-issued `result: "expected-fail"`
+ *     evidence row ONLY when the observed exit code equals the falsifier's
+ *     declared value exactly. Wholly separate from the four-step pipeline
+ *     below — no M2 approval gate, no completeness/freshness guards (those
+ *     all reason about the CHECKED-IN tree, which this path never executes
+ *     against).
  *
  * createFalsifierScratchWorktree / removeFalsifierScratchWorktree /
  * applyFalsifierMutation (plain exported functions, not class methods — see
@@ -358,14 +362,25 @@ export interface VerifyPlanResult {
 // there would require the tree to be temporarily BROKEN, which no attested
 // evidence-recording path can ever do. `VerifyRunnerService.verifyFalsifier`
 // (below the class-opening comment) is the SEPARATE entry point that can: it
-// creates a SCRATCH git worktree (never the caller's working tree — D3),
-// applies the AC's own DECLARED `falsifier` mutation (D2) there, runs the
-// AC's command in that isolated copy, and records a runner-issued
-// `result: "expected-fail"` evidence row (`capture_source: "runner"`) ONLY
-// when the observed exit code equals the EXACT value the falsifier declares
-// (D4 — never "non-zero"). A mismatch, a missing declaration, or a
-// mutation-apply failure (stale `find` text, a nonexistent `path`) all
-// refuse loud and record NOTHING — this path never mints a passing red.
+// creates a SCRATCH git worktree (never the caller's working tree — D3), runs
+// a GREEN CONTROL — the AC's own command, UNMUTATED, in that SAME scratch
+// worktree — BEFORE applying anything (AC-FR-11, closing the false-match
+// vector measured 2026-08-21: a scratch worktree missing `node_modules`, an
+// untracked test file, or a gitignored `dist/lore` binary exits nonzero on
+// its OWN, with no mutation involved, and no exit code can tell that apart
+// from a genuine assertion failure — the distinguishing signal only exists in
+// whether the UNMUTATED command already fails). A nonzero/timed-out green
+// control records `result: "inconclusive"` with NO `attestation` block and
+// aborts before the mutation is even attempted — this path never mints a
+// proven red out of an unrunnable environment. Only once the green control
+// exits 0 does this path apply the AC's own DECLARED `falsifier` mutation
+// (D2), run the AC's command again in that same isolated copy, and record a
+// runner-issued `result: "expected-fail"` evidence row (`capture_source:
+// "runner"`) ONLY when the observed exit code equals the EXACT value the
+// falsifier declares (D4 — never "non-zero"). A mismatch, a missing
+// declaration, or a mutation-apply failure (stale `find` text, a nonexistent
+// `path`) all refuse loud and record NOTHING — this path never mints a
+// passing red.
 //
 // The three functions below are PLAIN EXPORTED functions (not private class
 // methods, and NOT constructor-injected ports like `executor`/`getPlanBundle`)
@@ -393,15 +408,32 @@ export interface FalsifierScratchWorktree {
   readonly parentDir: string;
 }
 
-/** Result of one {@link VerifyRunnerService.verifyFalsifier} call. */
+/**
+ * Result of one {@link VerifyRunnerService.verifyFalsifier} call.
+ *
+ * `result` discriminates the TWO recordable outcomes (AC-FR-11):
+ *   - `"expected-fail"` — the green control (unmutated command) exited 0, the
+ *     mutation was applied, and the mutated command's exit code matched the
+ *     falsifier's declared value exactly. `exit_code` is the MUTATED command's
+ *     observed exit code. Mirrors this type's pre-AC-FR-11 sole behavior.
+ *   - `"inconclusive"` — the green control itself exited nonzero (or timed
+ *     out) BEFORE any mutation was attempted. `exit_code` is the GREEN
+ *     CONTROL's own observed exit code (never a mutated-command value, since
+ *     no mutation ran). The recorded evidence row carries no `attestation`.
+ * A third outcome — the falsifier's declared exit code not matching the
+ * mutated command's actual one — is NOT representable here: it is a
+ * declaration bug, refused loud via `err(VALIDATION_ERROR)`, never reaching
+ * this success type (unchanged from pre-AC-FR-11 behavior).
+ */
 export interface FalsifierRunResult {
   readonly task: { id: DocId; slug: string };
   readonly ac_id: string;
-  /** The falsifier's declared value (echoed back for the caller's own reporting). */
+  /** The falsifier's declared value (echoed back for the caller's own reporting; not necessarily observed when `result === "inconclusive"`). */
   readonly expected_exit_code: number;
-  /** The mutated command's ACTUAL observed exit code. */
+  /** See this interface's own header — the mutated command's exit code for `"expected-fail"`, the green control's for `"inconclusive"`. */
   readonly exit_code: number;
   readonly output_tail: string;
+  readonly result: "expected-fail" | "inconclusive";
 }
 
 /**
@@ -1493,7 +1525,12 @@ export class VerifyRunnerService {
    *   resolution) falls back to `{root: config.repoRoot, mode: "corpus_root"}` —
    *   byte-identical to this method's pre-AC-JV-3 behavior (the REGRESSION half of
    *   AC-JV-3's own oracle).
-   * @returns {@link FalsifierRunResult} on a genuine, recorded attested red.
+   * @returns {@link FalsifierRunResult} — either a genuine, recorded attested
+   *   red (`result: "expected-fail"`) or, when AC-FR-11's green control found
+   *   the scratch environment itself unusable BEFORE any mutation was
+   *   attempted, a recorded-but-unattested `result: "inconclusive"` outcome.
+   *   Both are `ok(...)`, never an error — an unusable environment is a
+   *   legitimate, machine-determined outcome, not a launch failure.
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (no parent spec / no structured
    *   ACs / unknown acId / not script-mode / no declared falsifier / an exit
    *   code that doesn't match the falsifier's declared value / a stale
@@ -1588,31 +1625,44 @@ export class VerifyRunnerService {
   }
 
   /**
-   * The mutate/spawn/compare/record sequence behind {@link verifyFalsifier}
-   * (steps 3-8 of that method's own class-level walkthrough) — split out so
-   * `verifyFalsifier`'s bundle/criterion resolution stays readable. Assumes
-   * ALL of that resolution already succeeded (criterion is script-mode and
-   * carries `falsifier`, target task resolved).
+   * The green-control/mutate/spawn/compare/record sequence behind
+   * {@link verifyFalsifier} (steps 3-9 of that method's own class-level
+   * walkthrough) — split out so `verifyFalsifier`'s bundle/criterion
+   * resolution stays readable. Assumes ALL of that resolution already
+   * succeeded (criterion is script-mode and carries `falsifier`, target task
+   * resolved).
    *
    *   3. {@link createFalsifierScratchWorktree} off the resolved execution root
    *      (AC-JV-3 — `opts.executionRoot?.root ?? config.repoRoot`, WITH
    *      `captureUncommitted: true` iff that resolution's `mode` is `"worktree"`).
-   *   4. {@link applyFalsifierMutation} inside the scratch worktree.
-   *   5. Spawn the AC's `verify.command` from the SCRATCH worktree (via the
-   *      SAME injected `executor` port `verifyPlan` uses — `buildVerifySpawnSpec`
-   *      with `repoRoot: scratch.worktreeDir`).
-   *   6. Compare the observed exit code to `falsifier.expected_exit_code`
+   *   4. GREEN CONTROL (AC-FR-11) — spawn the AC's `verify.command` UNMUTATED
+   *      in that SAME scratch worktree, via the SAME injected `executor` port
+   *      and `buildVerifySpawnSpec` shape step 6 below also uses. Exit 0 (not
+   *      timed out) means the environment is usable — fall through to step 5
+   *      unchanged. A nonzero exit or a timeout means the SCRATCH ENVIRONMENT
+   *      itself can't run this command at all (missing `node_modules`, an
+   *      untracked file the command depends on, a gitignored `dist/lore`) —
+   *      record `result: "inconclusive"` with NO `attestation` block (never
+   *      "expected-fail") and RETURN, never reaching step 5. This is checked
+   *      BEFORE the mutation exists anywhere, so a mutation-apply failure can
+   *      never be confused with an unusable environment either.
+   *   5. {@link applyFalsifierMutation} inside the scratch worktree — reached
+   *      ONLY when step 4's green control exited 0.
+   *   6. Spawn the AC's (now mutated) `verify.command` from the SCRATCH
+   *      worktree (the SAME injected `executor` port and `buildVerifySpawnSpec`
+   *      shape step 4 already used, with `repoRoot: scratch.worktreeDir`).
+   *   7. Compare the observed exit code to `falsifier.expected_exit_code`
    *      EXACTLY (D4) — a mismatch refuses loud, recording NOTHING (never a
    *      passing red for a declaration that doesn't match reality).
-   *   7. On a match, append a runner-composed annotation naming the AC id
+   *   8. On a match, append a runner-composed annotation naming the AC id
    *      and the mutation to the REAL captured `output_tail` (never
    *      REPLACING it — "a token naming what failed" alongside the genuine
    *      command output, not instead of it) and record ONE
    *      `result: "expected-fail"` / `capture_source: "runner"` evidence row
    *      via the injected `recordVerifiedEvidence` port.
-   *   8. {@link removeFalsifierScratchWorktree} in a `finally` — best-effort;
+   *   9. {@link removeFalsifierScratchWorktree} in a `finally` — best-effort;
    *      see that function's own JSDoc for why its failure (or never running
-   *      at all, on a genuine crash between step 4 and step 8) can't corrupt
+   *      at all, on a genuine crash between step 4 and step 9) can't corrupt
    *      the original tree (D3 holds independently of whether this step
    *      ever runs).
    */
@@ -1639,16 +1689,99 @@ export class VerifyRunnerService {
     const scratch = createResult.value;
 
     try {
-      const mutateResult = applyFalsifierMutation(scratch.worktreeDir, falsifier);
-      if (!mutateResult.ok) return mutateResult;
-
       // SPEC-039 §M2 — env resolved the SAME way `_runVerification` resolves
       // it for the ordinary green-path run (allowlist filter still applies
-      // to a falsifier run's spawned command).
+      // to a falsifier run's spawned command). Resolved ONCE, before the
+      // green control, and reused for the mutated spawn below (step 6) — the
+      // two spawns share every input except the mutation itself.
       const resolvedEnv = resolveVerifyEnv(this.config.processEnv, {
         allowlist: this.config.envAllowlist,
         passthroughAll: this.config.envPassthroughAll,
       });
+
+      // ─── Step 4 — GREEN CONTROL (AC-FR-11) ──────────────────────────────
+      // Same `buildVerifySpawnSpec` shape, same `repoRoot: scratch.worktreeDir`,
+      // same injected `executor` port the mutated spawn (step 6) uses below —
+      // this call is BEFORE `applyFalsifierMutation` runs, so it observes the
+      // scratch worktree exactly as `git worktree add`/`git stash create`
+      // (createFalsifierScratchWorktree) left it, unmutated.
+      const greenSpawnSpec = buildVerifySpawnSpec(criterion, {
+        repoRoot: scratch.worktreeDir,
+        defaultTimeoutMs: this.config.defaultTimeoutMs,
+        ...(resolvedEnv !== undefined ? { env: resolvedEnv } : {}),
+        acRef: criterion.id,
+      });
+      const greenResult = await this.executor(greenSpawnSpec);
+      if (!greenResult.ok) {
+        const detail =
+          "message" in greenResult.error ? greenResult.error.message : greenResult.error.code;
+        return err({
+          code: "STORE_ERROR",
+          message:
+            `attested-red run for AC "${criterion.id}" aborted — the green control (the ` +
+            `AC's own UNMUTATED command) failed to launch (${detail}) in the scratch ` +
+            "worktree, before any mutation was attempted. No evidence recorded.",
+        });
+      }
+      const greenUsable = !greenResult.value.timedOut && greenResult.value.exitCode === 0;
+      if (!greenUsable) {
+        // reason: the scratch environment itself can't run this command at
+        // all — no exit code distinguishes that from a genuine assertion
+        // failure (this file's "Attested-Red Falsifier Runner" header), so
+        // this MUST be checked before any mutation exists anywhere. Record
+        // `inconclusive` with NO `attestation` (never a proven red minted
+        // out of an environment failure) and return WITHOUT ever calling
+        // `applyFalsifierMutation` or spawning the command a second time.
+        const greenAnnotation =
+          `[attested-red] AC "${criterion.id}": green control failed — the UNMUTATED ` +
+          `command exited ${greenResult.value.exitCode}` +
+          `${greenResult.value.timedOut ? " (timed out)" : ""} in the scratch worktree before ` +
+          "any falsifier mutation was applied. The scratch environment itself is unusable " +
+          "(e.g. missing node_modules, a command-referenced file that exists only untracked, " +
+          "or a gitignored dist/lore binary) — recording inconclusive rather than proceeding " +
+          "to mutate-and-compare, which could otherwise misattribute an environment failure " +
+          "as a machine-proven red.";
+        const greenCombinedOutputTail = tailChars(
+          greenResult.value.outputTail.length > 0
+            ? `${greenResult.value.outputTail}\n${greenAnnotation}`
+            : greenAnnotation,
+          FALSIFIER_OUTPUT_TAIL_MAX_CHARS,
+        );
+        const inconclusiveRecordResult = await this.recordVerifiedEvidence(
+          task.id,
+          {
+            oracle: criterion.verify.oracle,
+            command: criterion.verify.command,
+            result: "inconclusive",
+            recorded_by: opts.by,
+            capture_source: "runner",
+            ac_ref: criterion.id,
+            output_tail: greenCombinedOutputTail,
+            // reason: NO `attestation` key at all (AC-FR-11) — this row proves
+            // only that the green control ran and failed, never that a
+            // mutation was applied and compared; `attestation` on an
+            // "expected-fail" row promises exactly that stronger claim.
+          },
+          opts.nowIso,
+        );
+        if (!inconclusiveRecordResult.ok) return inconclusiveRecordResult;
+
+        return ok({
+          task: { id: task.id, slug: task.slug },
+          ac_id: criterion.id,
+          expected_exit_code: falsifier.expected_exit_code,
+          exit_code: greenResult.value.exitCode,
+          output_tail: greenCombinedOutputTail,
+          result: "inconclusive",
+        });
+      }
+
+      // ─── Step 5 — apply the mutation (green control proved the
+      //     environment usable) ───────────────────────────────────────────
+      const mutateResult = applyFalsifierMutation(scratch.worktreeDir, falsifier);
+      if (!mutateResult.ok) return mutateResult;
+
+      // ─── Step 6 — spawn the MUTATED command ─────────────────────────────
       const spawnSpec = buildVerifySpawnSpec(criterion, {
         repoRoot: scratch.worktreeDir,
         defaultTimeoutMs: this.config.defaultTimeoutMs,
@@ -1729,6 +1862,7 @@ export class VerifyRunnerService {
         expected_exit_code: falsifier.expected_exit_code,
         exit_code: exitCode,
         output_tail: combinedOutputTail,
+        result: "expected-fail",
       });
     } finally {
       // D3 — best-effort; see removeFalsifierScratchWorktree's own JSDoc for
