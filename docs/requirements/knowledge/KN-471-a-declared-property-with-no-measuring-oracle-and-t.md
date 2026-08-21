@@ -6,7 +6,7 @@ title: "A declared property with no measuring oracle, and the red-first vs falsi
 status: draft
 priority: high
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-20
 tags: []
 parent: PRD-001
 ---
@@ -19,6 +19,18 @@ implementer discretion — the gap between "the AC says X" and "something checks
 Recorded separately rather than folded into the spec because editing an approved doc resets it to
 `draft` and would discard a fresh review judgment; these are refinements to redeem when the
 implementing tasks are cut, not corrections to the design.
+
+⛔ **STATUS 2026-08-20 — ALL THREE REDEEMED, and the expectation above was wrong on timing.** They
+were redeemed BEFORE the plan was cut, not while cutting it, precisely because `lore ac set` demotes
+the spec to `draft` and hard-blocks every descendant claim — redeeming mid-plan would have wedged
+every implementer. Landed as SPEC-143 revision records R2 (AC-CT-1 uniqueness oracle), R3→R8
+(AC-CT-4 unresolvable radius, corrected twice) and R4 (AC-CT-6 size-independence + the p95
+replacement). Redemption also surfaced three things this document did not anticipate: a fourth
+instance of the same defect class (G5 was a goal no AC asserted → AC-CT-8), a FIFTH classification
+with no declared gate behaviour (→ AC-CT-9), and one BLOCKING escalation where the redemption of
+advisory 3 itself broke the design. Full account, with the reachability and `git diff` measurements
+that inverted it: `knowledge-redeeming-three-advisories-produced-two-more-rounds`. The falsifier-debt
+tooling gap analysed below is NOT redeemed and still needs its own spec.
 
 ## The three measured instances
 
@@ -57,8 +69,10 @@ be declared *after* the code lands.
 
 ⛔ **There is a structural tension here, not merely an inconvenience**: red-first requires the AC to
 precede the implementation; the falsifier facility requires the implementation to precede the
-declaration. Every one of the 7 ACs on the corpus-truthfulness spec therefore carries its falsifier
-as PROSE ("MANDATORY FALSIFIER once implemented: …") rather than as structured fields.
+declaration. EVERY criterion on the corpus-truthfulness spec therefore carries its falsifier
+as PROSE ("MANDATORY FALSIFIER once implemented: …") rather than as structured fields. ⛔ Do not
+pin a count here — it read "7" until 2026-08-20, when redemption of these very advisories added
+AC-CT-8 and AC-CT-9.
 
 And as the judge put it precisely: **nothing named there forces that deferral to be redeemed.** A
 prose "MANDATORY … once implemented" is exactly the TODO shape this project's own discipline

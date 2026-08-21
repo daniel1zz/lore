@@ -6140,6 +6140,38 @@
     "01M0FSRY2Q7F8W12A0C6JCMGRD": {
       "human_id": "KN-481",
       "file_path": "docs/requirements/knowledge/KN-481-handoff-agent-main-orchestrator.md"
+    },
+    "01M0H2G209XQD8KPJMP7Z9GQY2": {
+      "human_id": "KN-482",
+      "file_path": "docs/requirements/knowledge/KN-482-handoff-agent-main-orchestrator.md"
+    },
+    "01M0H2DDE1D1KKJZX19EXZPQA8": {
+      "human_id": "KN-483",
+      "file_path": "docs/requirements/knowledge/KN-483-the-falsifier-mechanism-is-shipped-but-inert-a.md"
+    },
+    "01M0GQ3DVNVAXKAEBK7XADE01Z": {
+      "human_id": "KN-484",
+      "file_path": "docs/requirements/knowledge/KN-484-redeeming-three-advisories-produced-two-more-round.md"
+    },
+    "01M0H2TDD9HA6FQ7N26TA59B9K": {
+      "human_id": "TASK-737",
+      "file_path": "docs/requirements/task/TASK-737-arm-pass-unfalsified-as-a-blocking-gate-and-first.md"
+    },
+    "01M0H2SG17T25X83YR50W30YN4": {
+      "human_id": "TASK-738",
+      "file_path": "docs/requirements/task/TASK-738-compute-the-frozen-file-list-population-as-content.md"
+    },
+    "01M0H2RTNYPAW1AY6M9E8NZSGB": {
+      "human_id": "TASK-739",
+      "file_path": "docs/requirements/task/TASK-739-clear-the-29-criterion-pass-unfalsified-backlog-ac.md"
+    },
+    "01M0H2QRYEX1AEEH1R28XMFN6X": {
+      "human_id": "TASK-740",
+      "file_path": "docs/requirements/task/TASK-740-build-the-corpus-fail-census-at-the-path-ac-ox-11.md"
+    },
+    "01M0H2Q0MM3BHFA3Z1QP4YRT1F": {
+      "human_id": "TASK-741",
+      "file_path": "docs/requirements/task/TASK-741-correct-the-three-mistyped-ac-oracle-commands-and.md"
     }
   }
 }
