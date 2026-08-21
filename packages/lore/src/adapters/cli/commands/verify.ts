@@ -550,7 +550,10 @@ export default defineCommand({
           // this is NOT a proven red.
           console.log(
             `Green control failed for ${ac_id} (task ${task.slug}): the UNMUTATED command ` +
-              `exited ${observedExitCode} in the scratch worktree — result:inconclusive, no ` +
+              // reason: -1 is the runner's sentinel for a LAUNCH failure (no process ever
+              // exited), so rendering it as an exit status would read as a real verdict.
+              `${observedExitCode === -1 ? "FAILED TO LAUNCH" : `exited ${observedExitCode}`}` +
+              ` in the scratch worktree — result:inconclusive, no ` +
               "attestation recorded. Nothing was mutated. Fix the scratch environment " +
               "(node_modules / untracked files / dist/lore) or the AC's command, then retry.",
           );
