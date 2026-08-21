@@ -260,14 +260,17 @@ export function splitCommandSegments(command: string): string[] {
  * `bun run <script> …`, `playwright test …` (again with or without `bunx`),
  * and a direct invocation of the compiled `dist/lore` binary itself (this
  * repo's own dogfooding shape — SPEC-061 AC-061-9's own worked example is
- * `./dist/lore verify plan-1 <paths…>`; {@link COMPILED_BINARY_TOKEN_PATTERN}
- * is the SAME SSOT pattern `attestation-completeness.ts`'s
- * `commandReferencesCompiledBinary` consumes — promoted here, not
- * duplicated, so "does this command spawn the compiled binary" has exactly
- * one definition). A segment matching NONE of these five is not a runner
- * invocation at all — a `cd`, an `echo`, a `git grep`, a `test -f`
- * shell-builtin check, or anything else — and is classified
- * `"unclassified"`.
+ * `./dist/lore verify plan-1 <paths…>`; the fifth arm tests this segment's
+ * LEADING token against a pattern DERIVED from
+ * {@link COMPILED_BINARY_TOKEN_PATTERN}'s `.source` — see
+ * `LEADING_COMPILED_BINARY_PATTERN`'s own JSDoc for why "leading" and
+ * "anywhere" are deliberately different scopes for two different
+ * consumers, `attestation-completeness.ts`'s `commandReferencesCompiledBinary`
+ * being the "anywhere" one — while "what does a dist/lore PATH look like"
+ * still has exactly one textual definition). A segment matching NONE of
+ * these five is not a runner invocation at all — a `cd`, an `echo`, a
+ * `git grep`, a `test -f` shell-builtin check, or anything else — and is
+ * classified `"unclassified"`.
  */
 export type RecognizedRunner = "vitest" | "bun-test" | "bun-run" | "playwright" | "lore-cli";
 
@@ -302,6 +305,51 @@ const PLAYWRIGHT_SEGMENT_PATTERN = /^\s*(?:bunx\s+)?playwright\s+test\b/;
 export const COMPILED_BINARY_TOKEN_PATTERN = /\bdist\/lore\b/;
 
 /**
+ * Matches a segment whose LEADING (first whitespace-delimited) token IS a
+ * path to the compiled `dist/lore` binary — the segment-classification
+ * counterpart of {@link COMPILED_BINARY_TOKEN_PATTERN}, which deliberately
+ * keeps its "anywhere in the whole command" semantics for
+ * `attestation-completeness.ts`'s `commandReferencesCompiledBinary` (a
+ * freshness-check TRIGGER: even a `dist/lore` invocation buried later in an
+ * `&&` chain still needs a freshness check before the chain's result is
+ * trusted, so "anywhere" is the CORRECT scope for that consumer).
+ *
+ * `classifyCommandSegment`'s job is different: identify what SHAPE this ONE
+ * already-`&&`/`;`-split segment IS, exactly like its other four arms
+ * (`^\s*(?:bunx\s+)?vitest\b`, etc.) — none of which test "does this segment
+ * CONTAIN the word vitest anywhere", because a segment whose invocation is
+ * something else entirely (an `echo` whose success prose happens to mention
+ * "vitest", say) is obviously not a vitest invocation. The fifth arm using
+ * {@link COMPILED_BINARY_TOKEN_PATTERN} unanchored was exactly that same
+ * mistake for the compiled binary (task-re-anchor-the-compiled-binary-
+ * classifier-arm-and-credit, AC-061-22 — gap 8 reintroduced through this
+ * narrower door, in the very commit that closed it): an `echo` success line
+ * mentioning `dist/lore` in prose was classified as a `"lore-cli"` runner
+ * invocation, re-admitting the exact phantom-token defect AC-061-20 exists
+ * to close.
+ *
+ * `^\s*\S*` bounds the search to the segment's first token only — `\S*`
+ * cannot cross a whitespace character, so it can never reach into a SECOND
+ * token (an argument, or prose after the leading command word). Within that
+ * bound, {@link COMPILED_BINARY_TOKEN_PATTERN}'s own `\b…\b` word-boundary
+ * requirement is reused verbatim (via its `.source`) rather than
+ * re-typed — so "what does a dist/lore PATH look like" still has exactly
+ * one definition; only the "where in the string is it allowed to appear"
+ * scope differs between the two consumers.
+ *
+ * @example
+ *   LEADING_COMPILED_BINARY_PATTERN.test("./dist/lore verify plan-1") // => true
+ *   LEADING_COMPILED_BINARY_PATTERN.test("/repo/dist/lore --version") // => true
+ * @example
+ *   // "dist/lore" is present, but not as the segment's LEADING token.
+ *   LEADING_COMPILED_BINARY_PATTERN.test("test -f dist/lore") // => false
+ *   LEADING_COMPILED_BINARY_PATTERN.test('echo "ships dist/lore"') // => false
+ */
+const LEADING_COMPILED_BINARY_PATTERN = new RegExp(
+  `^\\s*\\S*${COMPILED_BINARY_TOKEN_PATTERN.source}`,
+);
+
+/**
  * Classifies ONE `&&`/`;`-split command segment as a {@link RecognizedRunner}
  * invocation, or `"unclassified"` when its shape matches none of the five
  * (task-promote-splitcommandsegments-to-the-one-segmentation-seam, AC-061-18).
@@ -334,7 +382,7 @@ export function classifyCommandSegment(segment: string): ClassifiedSegment {
   if (PLAYWRIGHT_SEGMENT_PATTERN.test(segment)) return { segment, runner: "playwright" };
   if (BUN_TEST_SEGMENT_PATTERN.test(segment)) return { segment, runner: "bun-test" };
   if (BUN_RUN_SEGMENT_PATTERN.test(segment)) return { segment, runner: "bun-run" };
-  if (COMPILED_BINARY_TOKEN_PATTERN.test(segment)) return { segment, runner: "lore-cli" };
+  if (LEADING_COMPILED_BINARY_PATTERN.test(segment)) return { segment, runner: "lore-cli" };
   return { segment, runner: "unclassified" };
 }
 

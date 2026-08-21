@@ -525,6 +525,25 @@ export interface ExecutedUnits {
 const BUN_SUMMARY_PATTERN = /\bRan\s+(\d+)\s+tests?\s+across\s+(\d+)\s+files?\b/i;
 
 /**
+ * {@link BUN_SUMMARY_PATTERN}, global-flagged so `stdout.matchAll(...)` can
+ * credit EVERY bun-summary occurrence in one stdout (task-re-anchor-the-
+ * compiled-binary-classifier-arm-and-credit, AC-061-23) — a stdout chaining
+ * two bun-test invocations emits two of these lines. Declared as its OWN
+ * constant (`new RegExp(SOURCE.source, SOURCE.flags + "g")`) rather than
+ * adding `g` to {@link BUN_SUMMARY_PATTERN} itself: `.test()`/`.exec()`
+ * calls elsewhere on a global regex carry `lastIndex` state between calls,
+ * so widening the single-match constant in place would make ITS callers
+ * order-dependent too. `matchAll` never mutates the pattern object passed
+ * to it (the spec has it iterate a fresh clone), so reusing this same
+ * exported-once constant across unrelated calls to {@link parseExecutedUnits}
+ * is safe.
+ */
+const BUN_SUMMARY_PATTERN_GLOBAL = new RegExp(
+  BUN_SUMMARY_PATTERN.source,
+  `${BUN_SUMMARY_PATTERN.flags}g`,
+);
+
+/**
  * vitest's run-summary tail, e.g. `"Test Files  1 passed (1)"` or, with a
  * mixed pass/fail breakdown, `"Test Files  3 failed | 4 passed (7)"`. The
  * parenthesised number is always the TOTAL file count vitest processed,
@@ -532,6 +551,12 @@ const BUN_SUMMARY_PATTERN = /\bRan\s+(\d+)\s+tests?\s+across\s+(\d+)\s+files?\b/
  * "how many files were actually executed" means for this guard.
  */
 const VITEST_SUMMARY_PATTERN = /Test Files\s+.*?\((\d+)\)/;
+
+/** {@link VITEST_SUMMARY_PATTERN}, global-flagged — see {@link BUN_SUMMARY_PATTERN_GLOBAL}'s JSDoc for why a sibling constant rather than an in-place `g` flag. */
+const VITEST_SUMMARY_PATTERN_GLOBAL = new RegExp(
+  VITEST_SUMMARY_PATTERN.source,
+  `${VITEST_SUMMARY_PATTERN.flags}g`,
+);
 
 /**
  * vitest's separate case-count summary line, e.g. `"Tests  4 passed (4)"` or
@@ -547,6 +572,12 @@ const VITEST_SUMMARY_PATTERN = /Test Files\s+.*?\((\d+)\)/;
  * field invariant), not parsed as zero.
  */
 const VITEST_TESTS_LINE_PATTERN = /\bTests\s+(.*?)\((\d+)\)/;
+
+/** {@link VITEST_TESTS_LINE_PATTERN}, global-flagged — see {@link BUN_SUMMARY_PATTERN_GLOBAL}'s JSDoc for why a sibling constant rather than an in-place `g` flag. */
+const VITEST_TESTS_LINE_PATTERN_GLOBAL = new RegExp(
+  VITEST_TESTS_LINE_PATTERN.source,
+  `${VITEST_TESTS_LINE_PATTERN.flags}g`,
+);
 
 /**
  * Matches one `<N> passed` / `<N> failed` segment inside a vitest "Tests"
@@ -601,25 +632,34 @@ function countMatchedVitestCases(testsLineBody: string): number {
 /**
  * Recognises the run-summary tail of the two runners this repo uses (bun
  * test, vitest) and extracts the TOTAL count of files (and, when parseable,
- * tests) actually executed — SUMMED ACROSS EVERY recognised summary present
- * in `stdout`, not just the first one found (task-promote-
- * splitcommandsegments-to-the-one-segmentation-seam, AC-061-19). Never
- * throws — arbitrary or garbled stdout that matches neither pattern degrades
- * to `null`.
+ * tests) actually executed — SUMMED ACROSS EVERY recognised summary
+ * OCCURRENCE present in `stdout`, whether that occurrence is a DIFFERENT
+ * runner (AC-061-19, task-promote-splitcommandsegments-to-the-one-
+ * segmentation-seam) or the SAME runner invoked twice (AC-061-23, task-
+ * re-anchor-the-compiled-binary-classifier-arm-and-credit — AC-061-19's own
+ * fix summed across the two PATTERNS via one non-global `.exec()` call
+ * each, which happened to also fix the mixed-runner shape it measured, but
+ * left two invocations of the SAME runner under-credited exactly like the
+ * original incident). Never throws — arbitrary or garbled stdout that
+ * matches neither pattern degrades to `null`.
  *
  * This repo has TWO runners BY DESIGN (`.bun.test.ts` files under `bun test`,
  * everything else under vitest), so a single captured stdout legitimately
  * carries both summaries when an AC's oracle command chains one runner after
- * the other (`bunx vitest run a.test.ts && bun test b.bun.test.ts`).
- * Pre-fix, this function tried the bun pattern, RETURNED on a match, and
- * never even looked for vitest's — a stdout with both summaries credited
- * only the first-tried runner. Measured 2026-08-19: a chained
- * vitest-then-bun command where both files genuinely ran green (16/16 and
- * 18/18) recorded `executed_files: 1` against `declared_paths: 2`,
+ * the other (`bunx vitest run a.test.ts && bun test b.bun.test.ts`), and its
+ * own split-by-runner oracle practice makes chaining TWO invocations of the
+ * SAME runner just as likely. Measured 2026-08-19 (AC-061-19's own incident):
+ * a chained vitest-then-bun command where both files genuinely ran green
+ * (16/16 and 18/18) recorded `executed_files: 1` against `declared_paths: 2`,
  * `completeness: under_match`, `result: inconclusive`, `lore verify` exit 3
- * — a criterion spanning both runners was structurally unattestable. A
- * stdout carrying only ONE summary is byte-identical to pre-fix behaviour
- * (the other pattern simply never matches, contributing nothing to the sum).
+ * — a criterion spanning both runners was structurally unattestable.
+ * Measured 2026-08-21 (AC-061-23, on merged main after AC-061-19 landed): a
+ * stdout carrying TWO vitest summaries (5 passed then 7 passed, chained)
+ * returned `{files: 1, tests: 5}` where `{files: 2, tests: 12}` is correct
+ * — the exact same under-credit, for the same-runner shape AC-061-19's own
+ * test suite never exercised. A stdout carrying only ONE summary of either
+ * runner is byte-identical to pre-fix behaviour (the other pattern simply
+ * never matches, contributing nothing to the sum).
  *
  * @param stdout - Captured process output (stdout+stderr concatenated,
  *   typically the tail-truncated `output_tail` a verify run recorded — each
@@ -661,25 +701,42 @@ export function parseExecutedUnits(stdout: string): ExecutedUnits | null {
   let tests: number | undefined;
   let matchedAnySummary = false;
 
-  const bunMatch = BUN_SUMMARY_PATTERN.exec(stdout);
-  if (bunMatch !== null) {
+  // reason (task-re-anchor-the-compiled-binary-classifier-arm-and-credit,
+  // AC-061-23): `matchAll` REQUIRES a global-flagged pattern, and — this is
+  // the load-bearing part — it iterates over an internally-cloned RegExp
+  // rather than the module-level constant itself, so repeated calls into
+  // this function across DIFFERENT stdouts never observe (or mutate) a
+  // shared `lastIndex`. A hand-rolled `while ((m = PATTERN.exec(stdout)))`
+  // loop over the shared const would be the exact anti-pattern this AC
+  // warns against: PATTERN.lastIndex would carry over between calls, making
+  // this function's result depend on what a PREVIOUS, unrelated call last
+  // searched for.
+  for (const bunMatch of stdout.matchAll(BUN_SUMMARY_PATTERN_GLOBAL)) {
     matchedAnySummary = true;
     tests = (tests ?? 0) + Number(bunMatch[1]);
     files += Number(bunMatch[2]);
   }
 
-  const vitestMatch = VITEST_SUMMARY_PATTERN.exec(stdout);
-  if (vitestMatch !== null) {
+  let vitestFilesMatched = false;
+  for (const vitestMatch of stdout.matchAll(VITEST_SUMMARY_PATTERN_GLOBAL)) {
     matchedAnySummary = true;
+    vitestFilesMatched = true;
     files += Number(vitestMatch[1]);
-    const testsMatch = VITEST_TESTS_LINE_PATTERN.exec(stdout);
-    if (testsMatch !== null) {
+  }
+
+  if (vitestFilesMatched) {
+    // Every vitest invocation in `stdout` emits its "Tests" breakdown line
+    // immediately after its "Test Files" line, so summing matched-case
+    // counts across ALL "Tests" line occurrences (AC-061-23) credits the
+    // SAME set of invocations `vitestFilesMatched` already counted files
+    // for — no positional pairing needed. A stdout with no "Tests" line at
+    // all (file-count line captured but the tail-truncated the case-count
+    // line) leaves `tests` exactly as bun's share (if any) already left it
+    // — never a fabricated count for vitest's share.
+    for (const testsMatch of stdout.matchAll(VITEST_TESTS_LINE_PATTERN_GLOBAL)) {
       const testsLineBody = testsMatch[1] ?? "";
       tests = (tests ?? 0) + countMatchedVitestCases(testsLineBody);
     }
-    // else: vitest's file-count line matched but its separate "Tests" line
-    // did not get captured — `tests` stays whatever bun's match (if any)
-    // already contributed, never a fabricated count for vitest's share.
   }
 
   if (!matchedAnySummary) return null;
