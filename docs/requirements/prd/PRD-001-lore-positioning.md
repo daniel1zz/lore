@@ -108,6 +108,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [knowledge] AC coverage counts evidence by plan lineage and ignores ac_scope, and an oracle generation cannot see its own test file being rewritten (draft)
 - [spec] The defect channel cannot be honestly maintained: an unreleasable cap whose remedy is inert, two reads that disagree on which corpus, and no non-derogatory supersession (approved)
 - [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
 - [spec] Attestation completeness guard: detect zero-match / under-match test oracles (approved)

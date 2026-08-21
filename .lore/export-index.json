@@ -6200,6 +6200,10 @@
     "01M0H3HHE36NMFNBQY57WB11PX": {
       "human_id": "TASK-745",
       "file_path": "docs/requirements/task/TASK-745-promote-splitcommandsegments-to-the-one-segmentati.md"
+    },
+    "01M0H4PVX9WDFARF6AE835JFJZ": {
+      "human_id": "KN-485",
+      "file_path": "docs/requirements/knowledge/KN-485-ac-coverage-counts-evidence-by-plan-lineage-and.md"
     }
   }
 }
