@@ -47,6 +47,7 @@ import {
 } from "../src/attestation-completeness.js";
 import {
   extractTestFileTokens,
+  classifyCommandSegment,
   classifyCommandSegments,
 } from "../src/oracle-file-existence.js";
 
@@ -173,6 +174,74 @@ describe("runner-segment-scope", () => {
   });
 });
 
+// ─── task-re-anchor-the-compiled-binary-classifier-arm-and-credit ──────────
+// ─── AC-061-22: a runner segment is identified by its LEADING invocation, ──
+// ─── never by a substring anywhere in it (gap 8 reintroduced by its own ───
+// ─── fix, found by `lore assess` AFTER AC-061-18/20 were attested and ─────
+// ─── merged) ────────────────────────────────────────────────────────────
+//
+// Pre-fix, `classifyCommandSegment` anchored its first four arms at `^\s*`
+// but tested the fifth (`COMPILED_BINARY_TOKEN_PATTERN`) ANYWHERE in the
+// segment — so a success echo merely MENTIONING "dist/lore" in prose (this
+// repo's own AC statements do so routinely) was classified as a "lore-cli"
+// runner invocation, re-admitting gap 8 (the exact defect AC-061-20 closes)
+// through a narrower door, in the very commit that closed it.
+//
+// RED: revert the compiled-binary arm to
+// `COMPILED_BINARY_TOKEN_PATTERN.test(segment)` (unanchored) and the
+// echo-prose case below re-reports the phantom token / re-classifies the
+// segment as a runner.
+describe("leading-token-classification", () => {
+  it("REGRESSION (measured 2026-08-21 on merged main, gap 8 reintroduced): a compiled-binary mention inside echo prose leaves the segment unclassified, and the whole-command counts drop back to correct", () => {
+    const command =
+      'bunx vitest run packages/core/tests/a.test.ts 2>&1 && echo "PASS: dist/lore rebuilt, see packages/lore/tests/e2e/x.bun.test.ts"';
+    // reason: pre-fix this classified as ["vitest", "lore-cli"] — the echo
+    // segment matched COMPILED_BINARY_TOKEN_PATTERN anywhere, so it was
+    // treated as a dist/lore runner invocation and its bare basename was
+    // extracted as a second declared path (countExplicitPathArgs -> 2).
+    expect(classifyCommandSegments(command).map((c) => c.runner)).toEqual([
+      "vitest",
+      "unclassified",
+    ]);
+    expect(countExplicitPathArgs(command)).toBe(1);
+    expect(extractTestFileTokens(command)).toEqual(["packages/core/tests/a.test.ts"]);
+  });
+
+  it("HAPPY: AC-061-9's real dogfooding shape ('./dist/lore verify plan-1 <paths>') still classifies as a runner — the anchor tightening must not re-break it", () => {
+    expect(classifyCommandSegment("./dist/lore verify plan-1 packages/x.test.ts").runner).toBe(
+      "lore-cli",
+    );
+  });
+
+  it("HAPPY: an absolute leading path to the compiled binary still classifies as a runner", () => {
+    expect(classifyCommandSegment("/repo/dist/lore --version").runner).toBe("lore-cli");
+  });
+
+  it("BOUNDARY: a bare leading 'dist/lore' (no './' prefix) still classifies as a runner", () => {
+    expect(classifyCommandSegment("dist/lore verify plan-1").runner).toBe("lore-cli");
+  });
+
+  it("NEGATIVE: a non-runner segment naming dist/lore only in a NON-leading token stays unclassified", () => {
+    // reason: `test -f` is a shell builtin, not an invocation of the
+    // binary — "dist/lore" here is an ARGUMENT to `test -f`, not the
+    // segment's own leading token. Pre-fix (anywhere-in-segment test) this
+    // classified as "lore-cli".
+    expect(classifyCommandSegment("test -f dist/lore").runner).toBe("unclassified");
+  });
+
+  it("BOUNDARY: a substring collision ('mydist/lore', no path-separator boundary before the leading token) is never a false positive", () => {
+    expect(classifyCommandSegment("mydist/lore-helper.ts --check").runner).toBe("unclassified");
+  });
+
+  it("STATE: two consecutive classifications of the SAME echo-prose segment return the identical verdict (no shared-pattern state leakage across calls)", () => {
+    const segment = 'echo "PASS: dist/lore rebuilt"';
+    const first = classifyCommandSegment(segment);
+    const second = classifyCommandSegment(segment);
+    expect(second).toEqual(first);
+    expect(second.runner).toBe("unclassified");
+  });
+});
+
 describe("parseExecutedUnits", () => {
   it("HAPPY: parses a vitest single-file-passed tail to {files: 1}", () => {
     const stdout = "some preamble\n\n Test Files  1 passed (1)\n Tests  4 passed (4)\n";
@@ -243,6 +312,78 @@ describe("multi-runner-credit", () => {
   it("REGRESSION CONTROL: a single bun-only summary stays byte-identical to pre-fix behavior", () => {
     const stdout = "...\nRan 963 tests across 70 files. [1.2s]\n";
     expect(parseExecutedUnits(stdout)).toEqual({ files: 70, tests: 963 });
+  });
+});
+
+// ─── task-re-anchor-the-compiled-binary-classifier-arm-and-credit ──────────
+// ─── AC-061-23: EVERY occurrence of a runner summary is credited, not one ──
+// ─── per PATTERN (AC-061-19 delivered only half its stated property) ─────
+//
+// Pre-fix, `parseExecutedUnits` called `BUN_SUMMARY_PATTERN.exec(stdout)`
+// once and `VITEST_SUMMARY_PATTERN.exec(stdout)` once — both non-global
+// regexes — so it summed across the two PATTERNS, never across every
+// occurrence of the SAME pattern. A stdout chaining two invocations of the
+// SAME runner (this repo's split-by-runner oracle practice makes this shape
+// MORE likely, not less) under-credits exactly like the AC-061-19 incident
+// it was supposed to close — AC-061-19's own test suite is green only
+// because it exercises the mixed vitest+bun shape, never two-of-the-same.
+//
+// RED: restore either single non-global `.exec()` call and the
+// two-same-runner case below reports 1 file where 2 genuinely ran.
+describe("every-summary-occurrence", () => {
+  it("REGRESSION (measured 2026-08-21 on merged main): two vitest summaries in ONE stdout sum to {files:2, tests:12}, not {files:1, tests:5}", () => {
+    const stdout =
+      " Test Files  1 passed (1)\n      Tests  5 passed (5)\n" +
+      " Test Files  1 passed (1)\n      Tests  7 passed (7)\n";
+    // reason: pre-fix, VITEST_SUMMARY_PATTERN.exec(stdout) matched only the
+    // FIRST "Test Files" line (non-global regex, single call) — the second
+    // summary was invisible to this function entirely.
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 2, tests: 12 });
+  });
+
+  it("HAPPY: two bun summaries in ONE stdout sum across both occurrences too (the fix is not vitest-only)", () => {
+    const stdout = "Ran 5 tests across 1 files. [0.1s]\nRan 7 tests across 2 files. [0.2s]\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 3, tests: 12 });
+  });
+
+  it("REGRESSION CONTROL: the mixed vitest-plus-bun shape AC-061-19 measured stays byte-identical", () => {
+    const stdout =
+      " Test Files  1 passed (1)\n      Tests  16 passed (16)\n" +
+      "Ran 18 tests across 1 files. [0.4s]\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 2, tests: 34 });
+  });
+
+  it("REGRESSION CONTROL: a stdout with exactly ONE summary is byte-identical to pre-fix behaviour (vitest-only)", () => {
+    const stdout = "some preamble\n\n Test Files  1 passed (1)\n Tests  4 passed (4)\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 1, tests: 4 });
+  });
+
+  it("REGRESSION CONTROL: a stdout with exactly ONE summary is byte-identical to pre-fix behaviour (bun-only)", () => {
+    const stdout = "...\nRan 963 tests across 70 files. [1.2s]\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 70, tests: 963 });
+  });
+
+  it("STATE: two consecutive calls with the SAME two-summary stdout return identical results (no shared-regex lastIndex leakage across calls)", () => {
+    const stdout =
+      " Test Files  1 passed (1)\n      Tests  5 passed (5)\n" +
+      " Test Files  1 passed (1)\n      Tests  7 passed (7)\n";
+    const first = parseExecutedUnits(stdout);
+    const second = parseExecutedUnits(stdout);
+    expect(second).toEqual(first);
+    expect(second).toEqual({ files: 2, tests: 12 });
+  });
+
+  it("STATE: a two-summary call followed by a one-summary call is NOT contaminated by the first call's shared-regex state", () => {
+    const twoSummaryStdout =
+      " Test Files  1 passed (1)\n      Tests  5 passed (5)\n" +
+      " Test Files  1 passed (1)\n      Tests  7 passed (7)\n";
+    const oneSummaryStdout = "some preamble\n\n Test Files  1 passed (1)\n Tests  4 passed (4)\n";
+    parseExecutedUnits(twoSummaryStdout);
+    // reason: if the fix mutated a SHARED module-level global regex's
+    // lastIndex instead of using matchAll/a fresh clone, this second,
+    // unrelated call would silently read stale lastIndex state and either
+    // under-match or throw — the function must stay ORDER-INDEPENDENT.
+    expect(parseExecutedUnits(oneSummaryStdout)).toEqual({ files: 1, tests: 4 });
   });
 });
 
