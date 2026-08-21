@@ -39,20 +39,31 @@
  * the identical set today; the broader one is chosen deliberately because
  * retracting or archiving a spec must not become a way to leave the ratchet.
  *
- * ## The anchored predicate is cross-checked, never merely re-derived
+ * ## The anchored predicate is imported, not re-implemented (AC-BFI-14)
  *
- * `isSpecAnchored` re-implements `countArmedSpecs`'s predicate (a non-empty
- * `extra.code_anchors` array) because this checker needs the SET, not the count
- * that shared helper returns. To make the duplication safe, {@link runCheck} then
- * feeds the very same spec list back through the real `countArmedSpecs` and refuses
- * to report at all if the two disagree ({@link AnchorPredicateDisagreementError}) —
- * so a future change to the shared predicate fails loud here instead of silently
- * drifting this oracle's population.
+ * `isSpecAnchored` used to be a second hand-written copy of `countArmedSpecs`'s
+ * predicate (a non-empty `extra.code_anchors` array); this checker needs the SET
+ * that predicate partitions, not the count `countArmedSpecs` returns, but that no
+ * longer requires a private redefinition — `flows/drift-flow.ts::isSpecAnchored`
+ * is now the ONE production definition, imported here AND by
+ * `commands/status.ts::collectCodeAnchorSpecMembers` (spec-bootstrap-fixpoint-
+ * integrity-binary-provenance-an-anchor AC-BFI-14, which also collapsed a THIRD,
+ * previously undocumented copy in that file). {@link runCheck} still cross-checks
+ * this module's partition count against `countArmedSpecs` on the SAME spec list
+ * ({@link AnchorPredicateDisagreementError}) — by construction the two calls can
+ * no longer disagree through the shared predicate itself (same function, same
+ * data), so this guards specifically against a FUTURE hand-edit that reintroduces
+ * divergent inline logic at either call site while bypassing the import; the
+ * repo-wide uniqueness scan (`anchor-coverage-ratchet.test.ts`'s
+ * `anchored-predicate-ssot` suite) is the STATIC counterpart that catches the same
+ * regression at test time, over the whole tree, not just this one cross-check.
  *
  * ## Public surface
  *
- *   - `isSpecAnchored(spec)` / `expectedCohortFor(createdAt)` /
- *     `classifyLedgerReason(reason)` — the pure predicates (no IO).
+ *   - `isSpecAnchored` — re-exported from `flows/drift-flow.ts` for callers that
+ *     already import this module; NOT a second definition (AC-BFI-14).
+ *   - `expectedCohortFor(createdAt)` / `classifyLedgerReason(reason)` — the pure
+ *     ledger predicates (no IO).
  *   - `checkAnchorCoverage(specs, entries)` — pure; the whole verdict.
  *   - `AnchorCoverageLedgerEntrySchema` / `AnchorCoverageLedgerFileSchema` /
  *     `parseAnchorCoverageLedgerFile` / `loadLedgerFromDisk` — the ledger boundary.
@@ -91,7 +102,12 @@ import { z } from "zod";
 import { ok, type DocRecord, type LoreError } from "@lore/core";
 import { createApp, type App } from "../packages/lore/src/app.js";
 import { findLoreDbPath } from "../packages/lore/src/adapters/cli/utils.js";
-import { countArmedSpecs } from "../packages/lore/src/flows/drift-flow.js";
+import { countArmedSpecs, isSpecAnchored } from "../packages/lore/src/flows/drift-flow.js";
+
+// Re-exported (not re-defined, AC-BFI-14) so any existing consumer of this
+// module's `isSpecAnchored` export still resolves — the shared definition now
+// lives at `flows/drift-flow.ts::isSpecAnchored`; see this file's header.
+export { isSpecAnchored };
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = join(__filename, "..", "..");
@@ -194,10 +210,18 @@ export class CorpusReadError extends Error {
 }
 
 /**
- * This module's local anchored-predicate disagreed with the shared
- * `flows/drift-flow.ts::countArmedSpecs` over the SAME spec list. Fails the run
- * loud (exit 2) rather than reporting a population one of the two considers wrong —
- * see the module header's cross-check note.
+ * This module's partition of `specs` by {@link isSpecAnchored} disagreed in
+ * COUNT with `flows/drift-flow.ts::countArmedSpecs` over the SAME spec list.
+ * Fails the run loud (exit 2) rather than reporting a population one of the
+ * two considers wrong — see the module header's cross-check note.
+ *
+ * ⛔ Post-AC-BFI-14, BOTH sides call the identical `isSpecAnchored` export
+ * over the identical `specs` array, so this can no longer fire through the
+ * predicate itself drifting — it fires only if a FUTURE edit reintroduces
+ * divergent inline logic at one of the two call sites while bypassing the
+ * import (the repo-wide uniqueness scan in `anchor-coverage-ratchet.test.ts`'s
+ * `anchored-predicate-ssot` suite catches that same regression statically,
+ * before it ever reaches this runtime check).
  */
 export class AnchorPredicateDisagreementError extends Error {
   constructor(
@@ -205,9 +229,9 @@ export class AnchorPredicateDisagreementError extends Error {
     public readonly sharedAnchoredCount: number,
   ) {
     super(
-      `check-anchor-coverage: local anchored-spec predicate counted ${localAnchoredCount} but the shared ` +
+      `check-anchor-coverage: local anchored-spec partition counted ${localAnchoredCount} but the shared ` +
         `flows/drift-flow.ts::countArmedSpecs counted ${sharedAnchoredCount} over the same spec list — ` +
-        `the two definitions have drifted; reconcile them before trusting this oracle.`,
+        `one of the two call sites has bypassed the shared isSpecAnchored predicate; reconcile before trusting this oracle.`,
     );
     this.name = "AnchorPredicateDisagreementError";
   }
@@ -301,23 +325,8 @@ export function loadLedgerFromDisk(repoRoot: string): AnchorCoverageLedgerFile {
 }
 
 // ─── Pure predicates ───────────────────────────────────────────────────────
-
-/**
- * Whether a spec declares at least one code anchor — the SAME predicate
- * `flows/drift-flow.ts::countArmedSpecs` applies (a non-empty `extra.code_anchors`
- * array), re-expressed here because this oracle needs the partitioned SET rather
- * than that helper's count. {@link runCheck} cross-checks the two on every run.
- *
- * @param spec - A live spec record
- * @returns `true` iff `extra.code_anchors` is a non-empty array
- * @example
- * isSpecAnchored({ extra: { code_anchors: ["src/a.ts"] } } as DocRecord); // => true
- * isSpecAnchored({ extra: {} } as DocRecord);                             // => false
- */
-export function isSpecAnchored(spec: DocRecord): boolean {
-  const raw = spec.extra["code_anchors"];
-  return Array.isArray(raw) && raw.length > 0;
-}
+// `isSpecAnchored` used to be defined here; it is now imported from
+// `flows/drift-flow.ts` (AC-BFI-14) and re-exported above.
 
 /**
  * The cohort a spec MUST be filed under, derived from its creation instant alone —
@@ -524,8 +533,9 @@ export function checkAnchorCoverage(
 
 /**
  * Fetches every live spec and runs {@link checkAnchorCoverage} over it, then
- * cross-checks this module's local anchored predicate against the shared
- * `countArmedSpecs` on the SAME list.
+ * cross-checks this module's `isSpecAnchored` partition count against the
+ * shared `countArmedSpecs` on the SAME list (see {@link AnchorPredicateDisagreementError}
+ * for what this can and cannot catch post-AC-BFI-14).
  *
  * @param app - A wired `App` (tests inject one built over a throwaway corpus)
  * @param ledger - The already-validated ledger

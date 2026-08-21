@@ -114,6 +114,7 @@ import {
   buildListSpecs,
   countArmedSpecs,
   disabledCodeDriftPayload,
+  isSpecAnchored,
   renderDriftSectionLines,
   runDrift,
   type CodeDriftPayload,
@@ -683,14 +684,22 @@ async function collectCaptureSourceMembers(
  * never be wrong by a hidden invalidated population. A second definition of
  * "live spec" is precisely the defect this seam exists to prevent.
  *
- * ⛔ The membership predicate below (a non-empty `extra.code_anchors` array)
- * re-expresses `countArmedSpecs`'s own, because that shared helper returns the
- * COUNT and this seam needs the SET. To keep the duplication safe the SAME spec
- * list is then fed BACK through the real `countArmedSpecs` and a disagreement is
- * a loud `STORE_ERROR` (CLI exit 1) rather than a silently drifted member list —
- * the identical cross-check `check-anchor-coverage.ts::runCheck` performs, for
- * the identical reason. Zero extra corpus reads: the second pass walks the
- * already-fetched array.
+ * ⛔ The membership predicate below is `flows/drift-flow.ts::isSpecAnchored` —
+ * the ONE production definition (spec-bootstrap-fixpoint-integrity-binary-
+ * provenance-an-anchor AC-BFI-14; this call site used to hand-write a second
+ * copy of the same two-line test, a THIRD copy alongside `check-anchor-
+ * coverage.ts`'s, undocumented until AC-BFI-14's repo-wide scan found it).
+ * `isSpecAnchored` classifies; `countArmedSpecs` counts over the identical
+ * predicate. This seam needs the SET, so the SAME spec list is still fed
+ * BACK through `countArmedSpecs` and a disagreement is a loud `STORE_ERROR`
+ * (CLI exit 1) rather than a silently drifted member list — the identical
+ * cross-check `check-anchor-coverage.ts::runCheck` performs, for the identical
+ * reason. Post-AC-BFI-14 both sides call the same `isSpecAnchored` export over
+ * the same array, so this can only fire on a FUTURE hand-edit that bypasses the
+ * import at one of the two sites — the repo-wide uniqueness scan
+ * (`anchor-coverage-ratchet.test.ts`'s `anchored-predicate-ssot` suite) catches
+ * that regression statically. Zero extra corpus reads: the second pass walks
+ * the already-fetched array.
  *
  * @param app - A wired `App` instance
  * @returns Sorted slugs of every anchor-declaring live spec; `code_anchor_specs`
@@ -704,10 +713,7 @@ async function collectCodeAnchorSpecMembers(
   const specs = specsResult.value;
 
   const members = specs
-    .filter((spec) => {
-      const raw = spec.extra["code_anchors"];
-      return Array.isArray(raw) && raw.length > 0;
-    })
+    .filter(isSpecAnchored)
     .map((spec) => spec.slug)
     .sort();
 
@@ -719,7 +725,7 @@ async function collectCodeAnchorSpecMembers(
       message:
         `code_anchor_specs: this command's anchored-spec member list holds ${members.length} spec(s) but the shared ` +
         `flows/drift-flow.ts::countArmedSpecs counted ${sharedCountResult.value} over the SAME ${specs.length} live ` +
-        `spec(s) — the two anchor-declaration predicates have drifted; reconcile them before trusting either number.`,
+        `spec(s) — one of the two call sites has bypassed the shared isSpecAnchored predicate; reconcile before trusting either number.`,
     });
   }
 
