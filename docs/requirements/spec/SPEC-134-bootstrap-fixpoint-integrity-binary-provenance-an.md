@@ -236,6 +236,90 @@ Every criterion above carries a declared falsifier: the RED case that must fail 
 inert. ⛔ A criterion never observed red is not evidence
 (`spec-oracle-tier-falsifiability-a-criterion-never-observed-red`).
 
+## Re-baseline — AC-BFI-14, 2026-08-21: its own enumeration was wrong and its oracle caught it
+
+⛔ Recorded because an AC edited after it has been GREEN is indistinguishable in the audit
+trail from covering up a failure, however justified. AC-BFI-14 had an ATTESTED pass
+(exit 0) at the time of this edit; the oracle command is BYTE-UNCHANGED.
+
+**Original statement, opening clause, verbatim:**
+
+> ONE PRODUCTION DEFINITION OF THE ANCHORED PREDICATE, WITH THE INDEPENDENT WITNESS PINNED TO IT BY A DIFFERENTIAL TABLE (AC-BFI-10 follow-up; larger than that note claimed). Measured 2026-08-21: 'anchored iff extra.code_anchors is a non-empty array' exists in THREE hand-written copies — isSpecAnchored (scripts/check-anchor-coverage.ts), countArmedSpecs (packages/lore/src/flows/drift-flow.ts, which feeds the PUBLISHED code_anchor_specs field of lore status --json), and the raw-SQL witness inside the ratchet test. Nothing binds them, so the ratchet and the published count can drift apart silently. TWO HALVES, not to be collapsed: (1) the two PRODUCTION copies become ONE exported predicate bot
+
+**The exact observation that prompted the change.** The statement asserted THREE hand-written
+copies and named them: `isSpecAnchored` (`scripts/check-anchor-coverage.ts`),
+`countArmedSpecs` (`packages/lore/src/flows/drift-flow.ts`), and the raw-SQL witness inside
+the ratchet test. The implementer's repo-wide scan — the oracle this criterion declares, run
+for real — reported **three files, not one**, because a THIRD PRODUCTION copy existed that the
+statement did not name: `collectCodeAnchorSpecMembers` at
+`packages/lore/src/adapters/cli/commands/status.ts:708-709`, added by an earlier already-merged
+AC-BFI-4 task. Verified independently against the pre-merge tree
+(`git show 7699bf6d:packages/lore/src/adapters/cli/commands/status.ts` → the inline
+`Array.isArray(raw) && raw.length > 0` at those lines).
+
+So the true population was FOUR sites — three production plus the witness — and the statement
+had counted the witness as one of the three while missing a real production copy.
+
+**Why this is a correction and not a weakening.** Nothing about the obligation changed: the
+oracle is still the repo-wide scan, still finds exactly one construction site, and the
+witness's separateness is still refused-to-be-collapsed. Only the DESCRIPTIVE enumeration was
+wrong, and the criterion's own text already said an enumerated file list "cannot observe that
+and is explicitly NOT the oracle" — which is exactly why the scan caught the author's error
+instead of inheriting it. The edit also adds the sentence marking the enumeration descriptive
+and pointing here, so the next reader does not take the list as authoritative.
+
+**The consequential defect this exposed is in the TASK, not the AC.** The task's
+`file_anchors` were derived from the wrong enumeration, so `status.ts` was never anchored —
+and it IS an anchor of the concurrently-live
+`task-land-the-adopted-resolution-state-its-required-owner` in another plan. The implementer
+therefore had to choose between violating a mutex it could not see and failing an AC it could
+not satisfy. It chose to fix and flag, which was the right call. ⛔ The general rule: when an
+AC's oracle is a repo-wide scan, the task's anchor set CANNOT be enumerated by hand, because
+the scan's universe is unknown until it runs. Full analysis:
+`knowledge-a-repo-wide-oracle-cannot-have-hand-enumerated-file`.
+
+## Falsifiers declared 2026-08-21, post-fix, by the orchestrator
+
+Per this plan's declared sequencing, the implementers did not run `lore ac set` (it demotes
+this spec and would have frozen the sibling claim). Declared after both merges:
+
+- `AC-BFI-14` → mutate `isSpecAnchored` in `packages/lore/src/flows/drift-flow.ts` from the
+  non-empty-array test to a mere `!== undefined`, expected exit 1.
+- `AC-BFI-15` → repoint the fixture spec to `ANCHOR_FILE_A` instead of `ANCHOR_FILE_B`, so
+  the RED-direction assertion has nothing to detect, expected exit 1.
+
+⛔ Both are declared while this plan is LIVE and are run through `lore verify --falsify`
+before it archives. A falsifier whose governing plan is archived can never be re-run — all 8
+pre-existing declarations in this corpus are already dead for exactly that reason
+(`knowledge-the-falsifier-mechanism-is-shipped-but-inert-a` F2).
+
+## ⛔ CORRECTION 2026-08-21 — the two `--falsify` rows on AC-BFI-14/15 are VACUOUS
+
+The falsifier declarations recorded above are correct in content. The runs made through them
+are NOT evidence, and this section exists so no reader of `lore ac list`'s `⚑` marker or of the
+two `result: "expected-fail"` / `capture_source: "runner"` rows concludes otherwise.
+
+`lore verify --falsify` builds a scratch git worktree, applies the mutation there, and compares
+ONLY the exit code. That worktree has no `node_modules`, so both commands died at module
+resolution — `Cannot find package 'vitest'` for AC-BFI-14, `Cannot find module '@lore/core'`
+for AC-BFI-15 — before any assertion ran. Both exited 1; both declared 1; both were recorded as
+proven reds. ⛔ The mutation was never exercised.
+
+Where the discriminating power for these two criteria ACTUALLY comes from: the implementers'
+in-worktree reds, which are self-reported but carry genuine assertion failures — the uniqueness
+scan reporting `expected [ …(2) ] to deeply equal [ Array(1) ]` while naming the injected file,
+and the differential table reporting `witness classified anchored=false but the shared
+isSpecAnchored classified anchored=true`. For these two ACs the self-reported rows are the
+evidence and the runner-attested rows are the artifact.
+
+Full mechanism, required fix, and the reason a better exit code cannot solve it:
+`knowledge-lore-verify-falsify-compares-only-the-exit-code-so-an`.
+
+Also re-measured 2026-08-21 after `lore assess` flagged both as edited-but-not-re-verified —
+both hold, evidence recorded on `task-collapse-the-two-production-copies-of-the-anchored`:
+`AC-BFI-4`'s oracle (`anchor-coverage-surface.test.ts`) 7/7 pass exit 0, and `AC-BFI-10`'s
+(`anchor-coverage-ratchet.test.ts`, unfiltered) 26/26 pass exit 0.
+
 
 ## Acceptance Criteria (structured)
 
@@ -265,9 +349,9 @@ inert. ⛔ A criterion never observed red is not evidence
   script: test — bunx vitest run packages/lore/tests/unit/scripts/anchor-coverage-ratchet.test.ts 2>&1 && echo 'AC-BFI-12 PASS: the AC-BFI-10 happy case and its declared falsifier call one shared assertion function, and the stale disposition comment names its commit'
 - [✔] [script] AC-BFI-13: CASE (d) MUST ASSERT THE ANCHOR'S STORED VALUE, NOT ONLY THAT DRIFT IS CLEAN (the bun-runner half split out of AC-BFI-12): AC-BFI-11's case (d) asserted that 'lore status --check-drift' exits 0. That is consistent with this spec's code_anchor having been repointed to ANY existing file, so it did not prove the rename converged the corpus side of the four-record unit. REQUIRED: case (d) keeps the exit-0 assertion AND additionally reads the spec's code_anchors through the freshness-asserted DIST_BINARY constant — never a bare 'lore' on PATH, which resolves to this machine's global symlink rather than the worktree binary — and asserts that some entry ENDS WITH the renamed trip suite's basename. RED: repoint the anchor at another existing file; case (d) must go red WHILE --check-drift still exits 0, and that pairing is the whole discriminator, since drift-clean alone cannot tell a correct anchor from a merely existing one. ⛔ THIS RED IS NOT YET MEASURED, and that is recorded here rather than hidden: constructing it requires mutating a code_anchor, and the only anchor under test lives in this repo's own corpus, which tests may never write (root CLAUDE.md). The implementer began a throwaway-corpus construction and did not finish it; no red was fabricated and none is claimed. So this criterion's discriminating power is currently ARGUED from the assertion's shape, not demonstrated by a measured failure. Closing that debt needs a throwaway-corpus fixture owning its own spec and anchor. NOTE ON THE COMMAND'S WORDING: the success echo deliberately avoids spelling any bare test-file basename, because lore ac add's path precheck tokenizes the WHOLE command string and read a basename inside the echo prose as a missing path (measured 2026-08-19).
   script: test — bun test packages/lore/tests/integration/pre-push-trip.bun.test.ts 2>&1 && echo 'AC-BFI-13 PASS: case (d) asserts the spec code_anchor value names the renamed trip suite, in addition to --check-drift exiting 0'
-- [·] [script] AC-BFI-14: ONE PRODUCTION DEFINITION OF THE ANCHORED PREDICATE, WITH THE INDEPENDENT WITNESS PINNED TO IT BY A DIFFERENTIAL TABLE (AC-BFI-10 follow-up; larger than that note claimed). Measured 2026-08-21: 'anchored iff extra.code_anchors is a non-empty array' exists in THREE hand-written copies — isSpecAnchored (scripts/check-anchor-coverage.ts), countArmedSpecs (packages/lore/src/flows/drift-flow.ts, which feeds the PUBLISHED code_anchor_specs field of lore status --json), and the raw-SQL witness inside the ratchet test. Nothing binds them, so the ratchet and the published count can drift apart silently. TWO HALVES, not to be collapsed: (1) the two PRODUCTION copies become ONE exported predicate both import, asserted REPO-WIDE — a scan of packages/** and scripts/** finds exactly one construction of the non-empty-array test on code_anchors in executable code, so a fourth copy in an unnamed file goes red; an enumerated file list cannot observe that and is explicitly NOT the oracle. (2) The TEST WITNESS KEEPS ITS OWN IMPLEMENTATION — importing the shared predicate into the witness is REFUSED, because its separateness is exactly what AC-BFI-10 buys and a shared implementation lets one regression corrupt subject and witness together. It is bound instead by a DIFFERENTIAL case table over a constructed fixture: absent key, empty array, non-array value, non-empty array, and a row with deleted_at set; witness and shared predicate must agree on every row. RED, both required: (a) add a second inline non-empty-array test on code_anchors anywhere in executable code and the uniqueness scan fails naming that file; (b) flip one row in the witness only and the agreement assertion fails naming that case. Covered by the describe block named anchored-predicate-ssot.
+- [✔] [script] AC-BFI-14: ONE PRODUCTION DEFINITION OF THE ANCHORED PREDICATE, WITH THE INDEPENDENT WITNESS PINNED TO IT BY A DIFFERENTIAL TABLE (AC-BFI-10 follow-up). 'Anchored iff extra.code_anchors is a non-empty array' was hand-written in FOUR places: three PRODUCTION copies — isSpecAnchored (scripts/check-anchor-coverage.ts), countArmedSpecs (packages/lore/src/flows/drift-flow.ts, feeding the PUBLISHED code_anchor_specs field), and collectCodeAnchorSpecMembers (packages/lore/src/adapters/cli/commands/status.ts, that field's own --enumerate member list) — plus the raw-SQL witness in the ratchet test. Nothing bound them, so the ratchet, the published count and its enumerator could drift apart silently. ⛔ This enumeration is DESCRIPTIVE and was measured WRONG once (see the re-baseline log): the oracle is the repo-wide scan, never this list — which is why the scan found the copy the list missed. TWO HALVES, not to be collapsed: (1) all PRODUCTION copies become ONE exported predicate every site imports, asserted REPO-WIDE — a scan of packages/** and scripts/** finds exactly one construction of the non-empty-array test on code_anchors in executable code, so a further copy in a file nobody listed goes red. (2) The TEST WITNESS KEEPS ITS OWN IMPLEMENTATION — importing the shared predicate into the witness is REFUSED, because its separateness is exactly what AC-BFI-10 buys and a shared implementation lets one regression corrupt subject and witness together. It is bound instead by a DIFFERENTIAL case table over a constructed fixture: absent key, empty array, non-array value, non-empty array, and a row with deleted_at set; witness and shared predicate must agree on every row. RED, both required: (a) add a second inline non-empty-array test on code_anchors anywhere in executable code and the uniqueness scan fails naming that file; (b) flip one row in the witness only and the agreement assertion fails naming that case. Covered by the describe block named anchored-predicate-ssot.
   script: test — bunx vitest run packages/lore/tests/unit/scripts/anchor-coverage-ratchet.test.ts -t anchored-predicate-ssot 2>&1 && echo 'AC-BFI-14 PASS: exactly one production definition repo-wide, and the independent witness agrees on all five boundary cases while keeping its own implementation'
-- [·] [script] AC-BFI-15: AC-BFI-13'S RED IS MACHINE-MEASURED AGAINST A THROWAWAY CORPUS, NOT CARRIED AS DECLARED DEBT (the bun-runner half). AC-BFI-13 reads THIS repo's own spec code_anchors through the dist binary, so the only way to force its red is to repoint a live corpus anchor — a destructive edit to the team's knowledge base, which is why the red was recorded as declared-but-unmeasured debt instead of run. Measured 2026-08-21 corpus-wide (knowledge-the-falsifier-mechanism-is-shipped-but-inert-a F3): 279 expected-fail evidence rows exist and exactly 2 carry an attestation block, so 'a red is recorded' and 'the oracle was machine-proven to discriminate' currently differ by 138x. This AC closes that gap for one criterion instead of restating the discipline. REQUIRED: case (d)'s assertion runs against a corpus created by mkdtemp plus lore init, holding its OWN spec whose code_anchors this test writes and then repoints, driven by the freshness-asserted DIST_BINARY constant — never a bare lore on PATH, and never this repo's .lore/. The passing direction asserts the anchor value names the expected file AND --check-drift exits 0; the failing direction repoints that fixture spec's anchor to a different existing file and asserts the SAME assertion path exits nonzero naming the anchor it found. ⛔ Asserting only that drift is clean is what AC-BFI-13 already does and is insufficient: a clean drift is consistent with the anchor having been repointed to ANY existing file. RED: delete the repoint step and the failing-direction case must stop failing. Covered by the describe block named fixture-forced-anchor-red.
+- [✔] [script] AC-BFI-15: AC-BFI-13'S RED IS MACHINE-MEASURED AGAINST A THROWAWAY CORPUS, NOT CARRIED AS DECLARED DEBT (the bun-runner half). AC-BFI-13 reads THIS repo's own spec code_anchors through the dist binary, so the only way to force its red is to repoint a live corpus anchor — a destructive edit to the team's knowledge base, which is why the red was recorded as declared-but-unmeasured debt instead of run. Measured 2026-08-21 corpus-wide (knowledge-the-falsifier-mechanism-is-shipped-but-inert-a F3): 279 expected-fail evidence rows exist and exactly 2 carry an attestation block, so 'a red is recorded' and 'the oracle was machine-proven to discriminate' currently differ by 138x. This AC closes that gap for one criterion instead of restating the discipline. REQUIRED: case (d)'s assertion runs against a corpus created by mkdtemp plus lore init, holding its OWN spec whose code_anchors this test writes and then repoints, driven by the freshness-asserted DIST_BINARY constant — never a bare lore on PATH, and never this repo's .lore/. The passing direction asserts the anchor value names the expected file AND --check-drift exits 0; the failing direction repoints that fixture spec's anchor to a different existing file and asserts the SAME assertion path exits nonzero naming the anchor it found. ⛔ Asserting only that drift is clean is what AC-BFI-13 already does and is insufficient: a clean drift is consistent with the anchor having been repointed to ANY existing file. RED: delete the repoint step and the failing-direction case must stop failing. Covered by the describe block named fixture-forced-anchor-red.
   script: test — bun test packages/lore/tests/integration/pre-push-trip.bun.test.ts 2>&1 && echo 'AC-BFI-15 PASS: the anchor-value assertion is forced red inside a throwaway corpus that owns its own spec, and green with the anchor correct, both driven by the dist binary'
 
 ## Code anchors

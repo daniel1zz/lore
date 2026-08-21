@@ -6204,6 +6204,14 @@
     "01M0H4PVX9WDFARF6AE835JFJZ": {
       "human_id": "KN-485",
       "file_path": "docs/requirements/knowledge/KN-485-ac-coverage-counts-evidence-by-plan-lineage-and.md"
+    },
+    "01M0H73DAVNDCSTTNR3Z6DMRWC": {
+      "human_id": "KN-486",
+      "file_path": "docs/requirements/knowledge/KN-486-lore-verify-falsify-compares-only-the-exit-code-so.md"
+    },
+    "01M0H6XHQYCTJ8149Q4VR2ZTRA": {
+      "human_id": "KN-487",
+      "file_path": "docs/requirements/knowledge/KN-487-assessment-close-the-two-bootstrap-fixpoint-follow.md"
     }
   }
 }

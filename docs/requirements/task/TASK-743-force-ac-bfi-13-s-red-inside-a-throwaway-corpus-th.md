@@ -3,7 +3,7 @@ id: TASK-743
 type: task
 role: plan
 title: "Force AC-BFI-13's red inside a throwaway corpus that owns its own spec and anchor"
-status: draft
+status: archived
 priority: high
 phase: "two-follow-ups"
 created: 2026-08-21

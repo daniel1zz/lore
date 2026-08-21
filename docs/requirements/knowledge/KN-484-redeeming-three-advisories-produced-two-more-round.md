@@ -6,7 +6,7 @@ title: "Redeeming three advisories produced two more rounds of the same defect, 
 status: approved
 priority: medium
 created: 2026-08-20
-updated: 2026-08-20
+updated: 2026-08-21
 tags: []
 parent: PRD-001
 links:
@@ -27,8 +27,47 @@ Scope: one session, no code written. SPEC-143 went `approved` → `draft` → `a
 | R4 | AC-CT-6 | "work CONSTANT with respect to corpus size" — byte-equality measures side-effect freedom, not work performed |
 | R6 | AC-CT-8 (new) | G5 was a declared GOAL measured only by a QA scenario; no AC asserted it |
 | R7 | AC-CT-1/6/8 | "produces a string literal" (undefined), "under 2s" (no machine), "matching its stdout" (no pattern) |
+| — | AC-CT-9 | `attestationFloor` accepts `unmeasured` and shows it as its own bucket — but `stampCurrency`'s return type has no such value |
 
 ⛔ **All four were found by the review judge. None by the author's self-check** — and the author was, at the moment of writing R7, composing revision records ABOUT under-measured criteria. This is not an attention failure; it is what an AC looks like when written by a producer who already knows what they meant.
+
+## 1b. The FIFTH occurrence, and this one the judge missed too
+
+Found 2026-08-21 while running the plan skill's upstream-document gate, one day after the spec was
+re-approved at 0.79 with no blocking questions.
+
+AC-CT-9 (added in R8) asserts that `attestationFloor` ACCEPTS an `unmeasured`-radius record and that
+`unmeasured` appears as **its own labelled bucket** in the `capture_source` distribution. The Scope
+table and Migration Plan step 6 were updated to match — both now name five classes. But **C2's
+interface signature was not**:
+
+```
+stampCurrency(…, blastRadiusChanged: boolean | "unmeasured")
+  → { class: "bound" | "stale" | "unbound" | "legacy_unbound", … }
+```
+
+Four values. The mermaid node says four. And ADR-034 pins four in prose: "`stampCurrency` returns one
+of `bound | stale | unbound | legacy_unbound`, never a boolean." So when the stamp is present and the
+radius is unmeasurable, the declared signature can only return `bound` — claiming "compared, unchanged"
+— or `stale` — claiming "changed". Both are false, and avoiding exactly that was the judge's original
+blocking question.
+
+⛔ **The review judge did NOT catch this**, and its consistency dimension explicitly reported the
+opposite: "The Scope table and the AC set agree on every named symbol and file." That statement is
+true and useless here — the contradiction is not between a symbol and a file, it is between a
+**component's type signature** and a **criterion's prose assertion**. Nothing in the review pipeline
+compares those two. Neither does any deterministic check: `schema`, `parent_contract`, `tree_position`
+and `link_integrity` all passed.
+
+⇒ The defect class from §1 has a sharper edge than "the author writes loosely". Here the author wrote
+a precise, measurable criterion — and simply did not open the component section that had to carry it.
+The reviewing mechanisms are organised around documents and symbols, not around **the contract a
+criterion implies for the component named in it**.
+
+**Resolution chosen 2026-08-21**: an ORTHOGONAL field rather than a fifth enum value. Stamp presence
+and radius measurability are two independent axes; collapsing them into one enum was the modelling
+error that made the contradiction possible. ADR-034's substantive decision (the non-forgeable
+`arming_rev` cutoff) is untouched, so it needs an amendment, not a successor.
 
 ## 2. Fixing an under-specification can introduce a new one
 
@@ -91,4 +130,8 @@ AC-CT-1's RULE 2 guarantees "no second state-to-glyph projection **in four known
 
 - **Falsifier debt.** All nine SPEC-143 criteria carry prose falsifiers ("MANDATORY FALSIFIER once implemented") because `--falsifier-find` requires the literal string on disk while red-first requires the AC first. Nothing counts or forces redemption of these. Needs its own spec; `--falsifier-deferred <reason>` remains the better of the two candidate designs.
 - **Diagram/prose drift.** No oracle reads mermaid nodes or component prose against the AC set.
+- **Criterion-to-component contract drift.** Nothing compares a criterion's prose assertion against the
+  TYPE SIGNATURE of the component it names — the §1b defect. The AI judge's consistency dimension checks
+  symbol and file agreement and reports PASS while the contradiction stands; no deterministic check looks
+  at this at all. This is the one failure mode in this session that survived every existing gate.
 - **The defect class in §1 itself.** Four occurrences, all caught by an ADVISORY judge whose output is by definition non-binding. A deterministic check — "every AC clause stating a property names the command that decides it" — does not exist, and the AI lint that does exist (`ac_quantifiability`) passed all of the four while flagging only the numeric ones.

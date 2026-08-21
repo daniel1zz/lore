@@ -108,14 +108,15 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
+- [knowledge] lore verify --falsify compares only the exit code, so an uninstalled scratch worktree mints a proven red out of a module-not-found error (approved)
+- [spec] Attestation completeness guard: detect zero-match / under-match test oracles (draft)
+- [knowledge] Redeeming three advisories produced two more rounds of the same defect, and the judge's escalation caught a real design break no self-check did (approved)
 - [knowledge] AC coverage counts evidence by plan lineage and ignores ac_scope, and an oracle generation cannot see its own test file being rewritten (draft)
 - [spec] The defect channel cannot be honestly maintained: an unreleasable cap whose remedy is inert, two reads that disagree on which corpus, and no non-derogatory supersession (approved)
-- [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
-- [spec] Attestation completeness guard: detect zero-match / under-match test oracles (approved)
 - [knowledge] Handoff — agent:main-orchestrator (approved)
 - [knowledge] The falsifier mechanism is shipped but inert: a coverage field blind to 692 criteria, and 8 declarations with no live execution path (approved)
 - [knowledge] A declared property with no measuring oracle, and the red-first vs falsifier deadlock that leaves every early AC's discriminating power asserted rather than demonstrated (draft)
-- [knowledge] Redeeming three advisories produced two more rounds of the same defect, and the judge's escalation caught a real design break no self-check did (approved)
 - [spec] Corpus truthfulness: a verdict must carry the state it describes, and a post-arming stamp-less record is never green (approved)
 - [spec] Autonomous Feedback Loop (AI review, data-driven self-optimization) (domain overview) (approved)
 - [spec] Two-runner changed-test selection — deterministic test:changed replaces vitest-only regression sweep (approved)

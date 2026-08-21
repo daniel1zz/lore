@@ -3,7 +3,7 @@ id: TASK-744
 type: task
 role: plan
 title: "Collapse the two production copies of the anchored predicate into one export and pin the ratchet witness with a differential table"
-status: draft
+status: archived
 priority: high
 phase: "two-follow-ups"
 created: 2026-08-21
