@@ -24,6 +24,12 @@
  *   countArmedSpecs(listSpecs) — store-only "N specs declare code_anchors" count,
  *     ZERO fs probing — the shared helper `lore status` (plain) and `lore
  *     bootstrap` both splice in (D5, D7 review U8).
+ *   isSpecAnchored(doc) — the ONE production definition of "anchored" (a
+ *     non-empty `extra.code_anchors` array), THE single export both
+ *     `countArmedSpecs` here and `scripts/check-anchor-coverage.ts`'s partition
+ *     import — collapsed from two hand-written copies onto this one site
+ *     (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor AC-BFI-14).
+ *     Pure, zero IO — safe to call on any DocRecord, spec or not.
  *   sortDrifts(drifts) — deterministic (doc_slug, then anchor) ordering (D5).
  *   renderDriftRepairHint(row) — the literal `fix: lore anchor rm <doc-slug>
  *     '<anchor>' (or update the path/export)` repair command (D5, review U5).
@@ -251,10 +257,38 @@ export const SYMBOL_MISSING_FOOTNOTE =
   "(`export const {a, b} = obj`) — a symbol_missing row may be a false positive from one of these forms.";
 
 /**
+ * The ONE production definition of "anchored" — `true` iff `doc.extra.code_anchors`
+ * is a non-empty array (spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor
+ * AC-BFI-14). Pure, zero IO, zero grammar verification (a malformed entry still
+ * counts as "declared" here — verifying each entry's `path[#Symbol]` shape is
+ * `code-anchors.ts::parseCodeAnchor`'s job, not this predicate's).
+ *
+ * Before AC-BFI-14 this exact two-line test was hand-written in THREE places —
+ * this function (as `countArmedSpecs`'s inline loop body), `scripts/check-anchor-
+ * coverage.ts::isSpecAnchored`, and `commands/status.ts::collectCodeAnchorSpecMembers`
+ * — with no import between them, so the ratchet and the two published counts
+ * (`lore status --json`'s `code_anchor_specs` and its `--enumerate` member list)
+ * could drift apart silently. All three now call this one export; the ratchet
+ * test's OWN independent SQL witness (`anchor-coverage-ratchet.test.ts::
+ * measureUnanchoredLiveSpecSlugsIndependently`) deliberately does NOT — its
+ * separateness is what AC-BFI-10 bought and AC-BFI-14 does not undo it.
+ *
+ * @param doc - Any DocRecord (spec or not — callers narrow the population,
+ *   this predicate only classifies)
+ * @returns `true` iff `doc.extra["code_anchors"]` is a non-empty array
+ * @example
+ * isSpecAnchored({ extra: { code_anchors: ["src/a.ts"] } } as DocRecord); // => true
+ * isSpecAnchored({ extra: {} } as DocRecord);                             // => false
+ */
+export function isSpecAnchored(doc: DocRecord): boolean {
+  const raw = doc.extra["code_anchors"];
+  return Array.isArray(raw) && raw.length > 0;
+}
+
+/**
  * Store-only "N specs declare code_anchors" count (D5, D7 review U8) — ZERO
- * filesystem probing. This is a DECLARATION count (any spec whose stored
- * `extra.code_anchors` is a non-empty array), not a grammar-verified or
- * drift-verified count.
+ * filesystem probing. This is a DECLARATION count ({@link isSpecAnchored}),
+ * not a grammar-verified or drift-verified count.
  *
  * ⛔ SPEC-SCOPED BY DECISION, and therefore NARROWER than
  * `DriftCheckResult.armed`: `--check-drift` also scans KNOWLEDGE docs
@@ -278,8 +312,7 @@ export async function countArmedSpecs(
   if (!specsResult.ok) return specsResult;
   let count = 0;
   for (const doc of specsResult.value) {
-    const raw = doc.extra["code_anchors"];
-    if (Array.isArray(raw) && raw.length > 0) count++;
+    if (isSpecAnchored(doc)) count++;
   }
   return ok(count);
 }

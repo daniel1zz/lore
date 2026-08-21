@@ -47,11 +47,16 @@
 
 import { describe, it, expect } from "vitest";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveCorpus } from "../../../src/adapters/cli/corpus-resolution.js";
+// AC-BFI-14's shared predicate — imported ONLY by the "one production
+// definition" assertions below, never by measureUnanchoredLiveSpecSlugsIndependently
+// (that function is the independent witness AC-BFI-10 bought; see its header).
+import { isSpecAnchored } from "../../../src/flows/drift-flow.js";
+import type { DocRecord } from "@lore/core";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +66,10 @@ const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..");
 const CHECKER_SCRIPT = join(REPO_ROOT, "scripts", "check-anchor-coverage.ts");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 const ACTOR = "agent:anchor-coverage-fixture-test";
+const PACKAGES_DIR = join(REPO_ROOT, "packages");
+const SCRIPTS_DIR = join(REPO_ROOT, "scripts");
+/** The ONE authorized construction site of the anchored predicate (AC-BFI-14). */
+const SHARED_PREDICATE_HOME_REL = join("packages", "lore", "src", "flows", "drift-flow.ts");
 
 /**
  * Duplicated from the checker's own `LEDGER_RELATIVE_PATH` because that module
@@ -488,6 +497,30 @@ describe("check-anchor-coverage: the ratchet blocks new debt (AC-BFI-6)", () => 
  *   silently returns an empty set, which would make every comparison below
  *   vacuously "equal"
  */
+
+/**
+ * The witness's OWN per-row anchored classification (a non-empty
+ * `extra.code_anchors` array) — extracted out of {@link measureUnanchoredLiveSpecSlugsIndependently}'s
+ * loop body so BOTH that function AND the AC-BFI-14 differential table below
+ * call this ONE local copy, instead of the differential table re-typing a
+ * second textual copy that could silently go stale relative to the real
+ * witness. This is still NOT `flows/drift-flow.ts::isSpecAnchored` — it is a
+ * SEPARATE, locally-owned function, on a completely different code path (a
+ * raw `extra` JSON value read off a SQL row, never a `DocRecord`, never
+ * `createApp`/`corpusService`) — that separateness is exactly what AC-BFI-10
+ * bought, and AC-BFI-14 explicitly refuses to collapse it into the shared
+ * predicate (see this file's header and the `anchored-predicate-ssot` suite
+ * below).
+ *
+ * @param extra - A spec row's already-JSON-parsed `extra` column (or `{}` if
+ *   the column was null/unparseable — mirrors the caller's own fallback)
+ * @returns `true` iff `extra["code_anchors"]` is a non-empty array
+ */
+function classifyExtraAsAnchoredByWitness(extra: unknown): boolean {
+  const codeAnchors = (extra as Record<string, unknown>)["code_anchors"];
+  return Array.isArray(codeAnchors) && codeAnchors.length > 0;
+}
+
 function measureUnanchoredLiveSpecSlugsIndependently(repoRoot: string): Set<string> {
   const resolved = resolveCorpus(repoRoot);
   if (resolved === undefined || resolved.provenance === "undetermined") {
@@ -526,9 +559,7 @@ function measureUnanchoredLiveSpecSlugsIndependently(repoRoot: string): Set<stri
           extra = {};
         }
       }
-      const codeAnchors = (extra as Record<string, unknown>)["code_anchors"];
-      const isAnchored = Array.isArray(codeAnchors) && codeAnchors.length > 0;
-      if (!isAnchored) unanchored.add(row.slug);
+      if (!classifyExtraAsAnchoredByWitness(extra)) unanchored.add(row.slug);
     }
     return unanchored;
   } finally {
@@ -653,4 +684,280 @@ describe("AC-BFI-10: ledger membership is asserted as a slug set, independently 
     },
     60000,
   );
+});
+
+// ─── AC-BFI-14: one production definition of the anchored predicate, pinned ─
+// to the independent witness by a differential table ───────────────────────
+//
+// Two halves, deliberately not collapsed into each other (see this file's own
+// AC-BFI-10 header and drift-flow.ts::isSpecAnchored's header):
+//   (1) the anchored-predicate (a non-empty extra.code_anchors array) now has
+//       exactly ONE production construction site repo-wide
+//       (flows/drift-flow.ts::isSpecAnchored) — asserted by a STRUCTURAL scan
+//       over packages/** and scripts/**, never an enumerated file list, so a
+//       fourth copy in a file nobody named still goes red. Measured 2026-08-21
+//       while building this suite: an UNDOCUMENTED third production copy
+//       existed in commands/status.ts::collectCodeAnchorSpecMembers (added by
+//       task-register-an-anchor-coverage-enumerator-on-the-existing, AC-BFI-4,
+//       and missed by this AC's own "the three copies" table) — collapsed onto
+//       the same import as part of landing this suite, which is exactly the
+//       scan's designed discriminating power working as intended, not a
+//       synthetic drill.
+//   (2) measureUnanchoredLiveSpecSlugsIndependently (AC-BFI-10's witness) KEEPS
+//       its own implementation — importing the shared predicate into it is
+//       explicitly refused — and is instead bound to the shared predicate by a
+//       DIFFERENTIAL case table over a constructed fixture.
+
+/**
+ * Removes `//` and block comments, string-aware (a `//` inside a string
+ * literal is not a comment) — same algorithm as
+ * `terminal-resolution-ssot.test.ts`'s precedent scanner. Replaces removed
+ * bytes with spaces so surviving characters keep their original line offsets.
+ */
+function stripCommentsForScan(source: string): string {
+  const out = source.split("");
+  let index = 0;
+  let quote: string | null = null;
+  while (index < source.length) {
+    const char = source[index] as string;
+    const next = source[index + 1];
+    if (quote !== null) {
+      if (char === "\\") {
+        index += 2;
+        continue;
+      }
+      if (char === quote) quote = null;
+      index += 1;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === "`") {
+      quote = char;
+      index += 1;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      while (index < source.length && source[index] !== "\n") {
+        out[index] = " ";
+        index += 1;
+      }
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
+        if (source[index] !== "\n") out[index] = " ";
+        index += 1;
+      }
+      if (index < source.length) {
+        out[index] = " ";
+        out[index + 1] = " ";
+        index += 2;
+      }
+      continue;
+    }
+    index += 1;
+  }
+  return out.join("");
+}
+
+/**
+ * Every `.ts`/`.tsx` file under `dir`, skipping `node_modules`/`dist`/
+ * generated files AND every test file/tests directory. The Half-1 scan is
+ * deliberately scoped to EXECUTABLE (production) code: Half 2 above keeps
+ * measureUnanchoredLiveSpecSlugsIndependently's own copy of this idiom on
+ * purpose, so scanning test files here would make the two halves of this AC
+ * directly contradict each other.
+ */
+function collectExecutableSourceFiles(dir: string, into: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue;
+      if (entry.name === "tests" || entry.name === "test") continue;
+      collectExecutableSourceFiles(full, into);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (entry.name.endsWith(".gen.ts")) continue;
+    if (entry.name.endsWith(".test.ts") || entry.name.endsWith(".test.tsx") || entry.name.endsWith(".bun.test.ts")) continue;
+    if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) into.push(full);
+  }
+  return into;
+}
+
+/** The idiom itself: `Array.isArray(X) && X.length > 0` for one identifier `X`. */
+const ANCHORED_PREDICATE_IDIOM_RE = /Array\.isArray\((\w+)\)\s*&&\s*\1\.length\s*>\s*0/g;
+/**
+ * The SECOND, INDEPENDENT condition the idiom match must be paired with
+ * (per the marker-census-over-matches lesson): a `code_anchors` token nearby,
+ * as a quoted string (bracket-access form, e.g. `extra["code_anchors"]`) or a
+ * dotted property access. Without this, the scan would also flag the
+ * IDENTICAL idiom guarding unrelated fields elsewhere in this repo
+ * (`corpus-service.ts`'s `phasesBefore`/`evidenceBefore`/`acScope` all use
+ * `Array.isArray(x) && x.length > 0` for THEIR OWN fields) — see the
+ * REGRESSION case below for a live demonstration.
+ */
+const CODE_ANCHORS_TOKEN_RE = /"code_anchors"|'code_anchors'|`code_anchors`|\.code_anchors\b/;
+
+/**
+ * Finds every "construction of the non-empty-array test on code_anchors" in
+ * `source`: the idiom above, PAIRED with a `code_anchors` token within 400
+ * characters immediately before or 200 after the match (the extraction
+ * statement always precedes the check in every real site measured — see the
+ * module comment above). Comments are stripped first, so a doc block quoting
+ * both halves of the idiom is not a construction site (REGRESSION case below).
+ *
+ * @returns One 1-based line number per matched construction site.
+ */
+function findAnchoredPredicateConstructionSites(source: string): number[] {
+  const stripped = stripCommentsForScan(source);
+  const lines: number[] = [];
+  let match: RegExpExecArray | null;
+  ANCHORED_PREDICATE_IDIOM_RE.lastIndex = 0;
+  while ((match = ANCHORED_PREDICATE_IDIOM_RE.exec(stripped)) !== null) {
+    const idx = match.index;
+    const before = stripped.slice(Math.max(0, idx - 400), idx);
+    const after = stripped.slice(idx, idx + 200);
+    if (CODE_ANCHORS_TOKEN_RE.test(before) || CODE_ANCHORS_TOKEN_RE.test(after)) {
+      lines.push(stripped.slice(0, idx).split("\n").length);
+    }
+  }
+  return lines;
+}
+
+/**
+ * Fails loud if the 5-levels-up REPO_ROOT arithmetic is wrong — an EMPTY scan
+ * universe is the same shape as a clean one, so the universe's own root is
+ * asserted rather than assumed (root CLAUDE.md, seventh false-oracle vector).
+ */
+function assertScanRepoRoot(): void {
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { name?: string };
+  expect(pkg.name).toBe("lore-workspace");
+}
+
+describe("anchored-predicate-ssot: AC-BFI-14 half 1 — exactly one production definition of the anchored predicate", () => {
+  it("anchored-predicate-ssot: exactly one construction site exists under packages/** and scripts/**, and it is flows/drift-flow.ts", () => {
+    assertScanRepoRoot();
+
+    const files: string[] = [];
+    collectExecutableSourceFiles(PACKAGES_DIR, files);
+    collectExecutableSourceFiles(SCRIPTS_DIR, files);
+    // Positive trace of execution — an empty universe would otherwise pass
+    // this test vacuously.
+    expect(files.length).toBeGreaterThan(100);
+
+    const sitesByFile = new Map<string, number>();
+    for (const file of files) {
+      const lines = findAnchoredPredicateConstructionSites(readFileSync(file, "utf8"));
+      if (lines.length > 0) {
+        sitesByFile.set(relative(REPO_ROOT, file).split(sep).join(sep), lines.length);
+      }
+    }
+
+    expect(
+      [...sitesByFile.entries()].map(([file, count]) => `${file} (${count})`),
+      "exactly one file may construct the anchored (non-empty extra.code_anchors array) predicate — " +
+        "an enumerated file list is not a substitute for this scan, and a fourth copy in an unnamed " +
+        "file must be caught right here",
+    ).toEqual([`${SHARED_PREDICATE_HOME_REL} (1)`]);
+  });
+
+  it("anchored-predicate-ssot: the scanner FIRES on a synthetic second copy (make-it-red control, in-memory only — this file never contains a real second copy)", () => {
+    const synthetic = [
+      "function isAnchoredCopy(spec: { extra: Record<string, unknown> }): boolean {",
+      '  const raw = spec.extra["code_anchors"];',
+      "  return Array.isArray(raw) && raw.length > 0;",
+      "}",
+    ].join("\n");
+    expect(findAnchoredPredicateConstructionSites(synthetic).length).toBe(1);
+  });
+
+  it("anchored-predicate-ssot: the SAME idiom guarding an UNRELATED field is NOT flagged (regression: the second condition prevents over-matching)", () => {
+    // The identical idiom this repo already uses for ac_scope
+    // (corpus-service.ts) and phasesBefore/evidenceBefore — none of these are
+    // copies of the anchored predicate, and the scan must not treat them as
+    // such just because they share a shape.
+    const unrelated = [
+      'const acScope = spec.extra["ac_scope"];',
+      "if (Array.isArray(acScope) && acScope.length > 0) {",
+      "  // ...",
+      "}",
+    ].join("\n");
+    expect(findAnchoredPredicateConstructionSites(unrelated).length).toBe(0);
+  });
+
+  it("anchored-predicate-ssot: a doc-comment quoting both halves of the idiom is NOT a construction site (regression: comments/prose are stripped first)", () => {
+    const commentOnly = [
+      "/**",
+      ' * mirrors `Array.isArray(raw) && raw.length > 0` on `extra["code_anchors"]`',
+      " * — documented here, never executed.",
+      " */",
+      "const x = 1;",
+    ].join("\n");
+    expect(findAnchoredPredicateConstructionSites(commentOnly).length).toBe(0);
+  });
+});
+
+// ─── AC-BFI-14 half 2: the differential case table ──────────────────────────
+
+interface AnchoredPredicateFixtureRow {
+  readonly name: string;
+  readonly extra: Record<string, unknown>;
+  readonly deletedAt?: string;
+}
+
+/**
+ * The five constructed boundary rows AC-BFI-14 names verbatim — never the live
+ * corpus. `deletedAt` on the fifth row exercises a dimension NEITHER
+ * implementation examines (both classify purely off `extra.code_anchors`), so
+ * agreement on that row proves neither implementation silently starts
+ * conflating "soft-deleted" with "unanchored".
+ */
+const ANCHORED_PREDICATE_FIXTURE_ROWS: readonly AnchoredPredicateFixtureRow[] = [
+  { name: "code_anchors absent", extra: {} },
+  { name: "code_anchors: [] (empty array)", extra: { code_anchors: [] } },
+  { name: "code_anchors: a non-array value", extra: { code_anchors: "src/a.ts" } },
+  { name: "code_anchors: a non-empty array", extra: { code_anchors: ["src/a.ts"] } },
+  {
+    name: "code_anchors: a non-empty array, AND deleted_at set",
+    extra: { code_anchors: ["src/a.ts"] },
+    deletedAt: "2026-08-20T00:00:00.000Z",
+  },
+];
+
+/**
+ * The ONE shared assertion path for every row (mirrors AC-BFI-12's
+ * `assertLedgerSlugSetMatchesMeasured` discipline: one function both the
+ * happy suite and a future falsifier call, so weakening it cannot leave one
+ * caller green and the other honest). Compares
+ * {@link classifyExtraAsAnchoredByWitness} (the witness's OWN, separately
+ * maintained logic) against `flows/drift-flow.ts::isSpecAnchored` (the ONE
+ * shared production predicate) on the SAME row, naming the row on
+ * disagreement.
+ */
+function assertWitnessAgreesWithSharedPredicate(row: AnchoredPredicateFixtureRow): void {
+  const witnessResult = classifyExtraAsAnchoredByWitness(row.extra);
+  const sharedResult = isSpecAnchored({ extra: row.extra, deleted_at: row.deletedAt ?? null } as DocRecord);
+  expect(
+    witnessResult,
+    `case "${row.name}": witness classified anchored=${witnessResult} but the shared isSpecAnchored classified anchored=${sharedResult}`,
+  ).toBe(sharedResult);
+}
+
+describe("anchored-predicate-ssot: AC-BFI-14 half 2 — the independent witness agrees with the shared predicate on every boundary case", () => {
+  for (const row of ANCHORED_PREDICATE_FIXTURE_ROWS) {
+    it(`anchored-predicate-ssot: HAPPY — witness and shared predicate agree on "${row.name}"`, () => {
+      assertWitnessAgreesWithSharedPredicate(row);
+    });
+  }
+
+  it("anchored-predicate-ssot: all five rows classify as expected (sanity on the fixture itself, not just cross-agreement)", () => {
+    const expected = [false, false, false, true, true];
+    ANCHORED_PREDICATE_FIXTURE_ROWS.forEach((row, index) => {
+      expect(classifyExtraAsAnchoredByWitness(row.extra), `witness, case "${row.name}"`).toBe(expected[index]);
+      expect(
+        isSpecAnchored({ extra: row.extra, deleted_at: row.deletedAt ?? null } as DocRecord),
+        `shared predicate, case "${row.name}"`,
+      ).toBe(expected[index]);
+    });
+  });
 });
