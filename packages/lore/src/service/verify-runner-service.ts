@@ -370,10 +370,13 @@ export interface VerifyPlanResult {
 // its OWN, with no mutation involved, and no exit code can tell that apart
 // from a genuine assertion failure — the distinguishing signal only exists in
 // whether the UNMUTATED command already fails). A nonzero/timed-out green
-// control records `result: "inconclusive"` with NO `attestation` block and
-// aborts before the mutation is even attempted — this path never mints a
-// proven red out of an unrunnable environment. Only once the green control
-// exits 0 does this path apply the AC's own DECLARED `falsifier` mutation
+// control — OR one that fails to LAUNCH at all (e.g. ENOENT on the scratch
+// worktree's own copy of the command) — records `result: "inconclusive"` with
+// NO `attestation` block and aborts before the mutation is even attempted —
+// this path never mints a proven red out of an unrunnable environment, and
+// never lets that same "unrunnable" fact vanish into an unrecorded error
+// just because the failure happened one step earlier (at spawn, not exit).
+// Only once the green control exits 0 does this path apply the AC's own DECLARED `falsifier` mutation
 // (D2), run the AC's command again in that same isolated copy, and record a
 // runner-issued `result: "expected-fail"` evidence row (`capture_source:
 // "runner"`) ONLY when the observed exit code equals the EXACT value the
@@ -1528,15 +1531,20 @@ export class VerifyRunnerService {
    * @returns {@link FalsifierRunResult} — either a genuine, recorded attested
    *   red (`result: "expected-fail"`) or, when AC-FR-11's green control found
    *   the scratch environment itself unusable BEFORE any mutation was
-   *   attempted, a recorded-but-unattested `result: "inconclusive"` outcome.
-   *   Both are `ok(...)`, never an error — an unusable environment is a
-   *   legitimate, machine-determined outcome, not a launch failure.
+   *   attempted — including when the green control's OWN spawn failed to
+   *   LAUNCH at all, not merely exited nonzero — a recorded-but-unattested
+   *   `result: "inconclusive"` outcome. Both are `ok(...)`, never an error —
+   *   an unusable scratch environment is a legitimate, machine-determined
+   *   outcome, not a launch failure that vanishes with no corpus trace.
    * @throws DOC_NOT_FOUND, VALIDATION_ERROR (no parent spec / no structured
    *   ACs / unknown acId / not script-mode / no declared falsifier / an exit
    *   code that doesn't match the falsifier's declared value / a stale
-   *   mutation), STORE_ERROR (scratch worktree creation failed / command
-   *   launch failed), STALE_VERSION (a concurrent evidence writer raced this
-   *   run's `recordVerifiedEvidence` call)
+   *   mutation), STORE_ERROR (scratch worktree creation failed, OR the
+   *   falsifier-MUTATED command's launch failed at step 6 — the UNMUTATED
+   *   green control's own launch failure at step 4 is deliberately NOT in
+   *   this list: it is recorded as `result: "inconclusive"` instead, per the
+   *   MINOR fix above), STALE_VERSION (a concurrent evidence writer raced
+   *   this run's `recordVerifiedEvidence` call)
    */
   async verifyFalsifier(
     planIdOrSlug: string,
@@ -1639,13 +1647,21 @@ export class VerifyRunnerService {
    *      in that SAME scratch worktree, via the SAME injected `executor` port
    *      and `buildVerifySpawnSpec` shape step 6 below also uses. Exit 0 (not
    *      timed out) means the environment is usable — fall through to step 5
-   *      unchanged. A nonzero exit or a timeout means the SCRATCH ENVIRONMENT
-   *      itself can't run this command at all (missing `node_modules`, an
-   *      untracked file the command depends on, a gitignored `dist/lore`) —
-   *      record `result: "inconclusive"` with NO `attestation` block (never
-   *      "expected-fail") and RETURN, never reaching step 5. This is checked
-   *      BEFORE the mutation exists anywhere, so a mutation-apply failure can
-   *      never be confused with an unusable environment either.
+   *      unchanged. A nonzero exit, a timeout, OR the spawn failing to LAUNCH
+   *      at all (`executor` itself returning `err(...)`, e.g. ENOENT) all
+   *      mean the SCRATCH ENVIRONMENT itself can't run this command at all
+   *      (missing `node_modules`, an untracked file the command depends on,
+   *      a gitignored `dist/lore`) — record `result: "inconclusive"` with NO
+   *      `attestation` block (never "expected-fail") and RETURN, never
+   *      reaching step 5. This is checked BEFORE the mutation exists
+   *      anywhere, so a mutation-apply failure can never be confused with an
+   *      unusable environment either. A LAUNCH failure records the SAME
+   *      `inconclusive` shape as an exited-nonzero green control (they are
+   *      the same class of "this environment cannot run the command" fact —
+   *      neither vanishes into an unrecorded `STORE_ERROR`); its `exit_code`
+   *      field is `-1` (no process ever exited to report one, mirroring the
+   *      `timed_out: true` / `exit_code: -1` convention this codebase already
+   *      uses for a not-really-an-exit-code observation).
    *   5. {@link applyFalsifierMutation} inside the scratch worktree — reached
    *      ONLY when step 4's green control exited 0.
    *   6. Spawn the AC's (now mutated) `verify.command` from the SCRATCH
@@ -1712,38 +1728,53 @@ export class VerifyRunnerService {
         acRef: criterion.id,
       });
       const greenResult = await this.executor(greenSpawnSpec);
-      if (!greenResult.ok) {
-        const detail =
-          "message" in greenResult.error ? greenResult.error.message : greenResult.error.code;
-        return err({
-          code: "STORE_ERROR",
-          message:
-            `attested-red run for AC "${criterion.id}" aborted — the green control (the ` +
-            `AC's own UNMUTATED command) failed to launch (${detail}) in the scratch ` +
-            "worktree, before any mutation was attempted. No evidence recorded.",
-        });
-      }
-      const greenUsable = !greenResult.value.timedOut && greenResult.value.exitCode === 0;
+      // reason: a LAUNCH failure (`greenResult.ok === false`, e.g. ENOENT —
+      // the scratch worktree's own copy of the command binary is missing)
+      // is the SAME class of "this scratch environment cannot run the
+      // command" fact as an exited-nonzero/timed-out green control below —
+      // both mean the environment, not the mutation, is at fault, and both
+      // MUST leave the identical `inconclusive` corpus trace. Before this
+      // fix, a launch failure returned `err(STORE_ERROR)` here and recorded
+      // NOTHING — the MINOR finding this branch closes (spec-falsifiability-
+      // reachability-a-feedable-checkpoint-an, task-drive-the-falsify-cli-
+      // branch-and-assert-the-persisted).
+      const greenUsable = greenResult.ok && !greenResult.value.timedOut && greenResult.value.exitCode === 0;
       if (!greenUsable) {
         // reason: the scratch environment itself can't run this command at
-        // all — no exit code distinguishes that from a genuine assertion
-        // failure (this file's "Attested-Red Falsifier Runner" header), so
-        // this MUST be checked before any mutation exists anywhere. Record
-        // `inconclusive` with NO `attestation` (never a proven red minted
-        // out of an environment failure) and return WITHOUT ever calling
-        // `applyFalsifierMutation` or spawning the command a second time.
-        const greenAnnotation =
-          `[attested-red] AC "${criterion.id}": green control failed — the UNMUTATED ` +
-          `command exited ${greenResult.value.exitCode}` +
-          `${greenResult.value.timedOut ? " (timed out)" : ""} in the scratch worktree before ` +
-          "any falsifier mutation was applied. The scratch environment itself is unusable " +
-          "(e.g. missing node_modules, a command-referenced file that exists only untracked, " +
-          "or a gitignored dist/lore binary) — recording inconclusive rather than proceeding " +
-          "to mutate-and-compare, which could otherwise misattribute an environment failure " +
-          "as a machine-proven red.";
+        // all — no exit code distinguishes an exited-nonzero run from a
+        // genuine assertion failure (this file's "Attested-Red Falsifier
+        // Runner" header), and a launch failure is stronger evidence of the
+        // same fact. This MUST be checked before any mutation exists
+        // anywhere. Record `inconclusive` with NO `attestation` (never a
+        // proven red minted out of an environment failure) and return
+        // WITHOUT ever calling `applyFalsifierMutation` or spawning the
+        // command a second time.
+        const greenAnnotation = greenResult.ok
+          ? `[attested-red] AC "${criterion.id}": green control failed — the UNMUTATED ` +
+            `command exited ${greenResult.value.exitCode}` +
+            `${greenResult.value.timedOut ? " (timed out)" : ""} in the scratch worktree before ` +
+            "any falsifier mutation was applied. The scratch environment itself is unusable " +
+            "(e.g. missing node_modules, a command-referenced file that exists only untracked, " +
+            "or a gitignored dist/lore binary) — recording inconclusive rather than proceeding " +
+            "to mutate-and-compare, which could otherwise misattribute an environment failure " +
+            "as a machine-proven red."
+          : `[attested-red] AC "${criterion.id}": green control FAILED TO LAUNCH (` +
+            `${"message" in greenResult.error ? greenResult.error.message : greenResult.error.code}) ` +
+            "in the scratch worktree, before any falsifier mutation was applied. The scratch " +
+            "environment itself is unusable (e.g. a gitignored dist/lore binary or an untracked " +
+            "dependency missing from the scratch copy) — recording inconclusive rather than " +
+            "aborting with no corpus trace, which could otherwise leave an unrunnable " +
+            "environment indistinguishable from a run that was never attempted.";
+        // reason: `-1` — no process ever exited when the launch itself
+        // failed, so there is no real exit code to report; mirrors this
+        // codebase's existing `timed_out: true` / `exit_code: -1` convention
+        // for a "not really an exit code" observation (see
+        // `packages/core/src/task-workflow.test.ts`'s `baseEntry` fixture).
+        const greenExitCode = greenResult.ok ? greenResult.value.exitCode : -1;
+        const greenPriorOutputTail = greenResult.ok ? greenResult.value.outputTail : "";
         const greenCombinedOutputTail = tailChars(
-          greenResult.value.outputTail.length > 0
-            ? `${greenResult.value.outputTail}\n${greenAnnotation}`
+          greenPriorOutputTail.length > 0
+            ? `${greenPriorOutputTail}\n${greenAnnotation}`
             : greenAnnotation,
           FALSIFIER_OUTPUT_TAIL_MAX_CHARS,
         );
@@ -1758,8 +1789,8 @@ export class VerifyRunnerService {
             ac_ref: criterion.id,
             output_tail: greenCombinedOutputTail,
             // reason: NO `attestation` key at all (AC-FR-11) — this row proves
-            // only that the green control ran and failed, never that a
-            // mutation was applied and compared; `attestation` on an
+            // only that the green control ran (or tried to) and failed, never
+            // that a mutation was applied and compared; `attestation` on an
             // "expected-fail" row promises exactly that stronger claim.
           },
           opts.nowIso,
@@ -1770,7 +1801,7 @@ export class VerifyRunnerService {
           task: { id: task.id, slug: task.slug },
           ac_id: criterion.id,
           expected_exit_code: falsifier.expected_exit_code,
-          exit_code: greenResult.value.exitCode,
+          exit_code: greenExitCode,
           output_tail: greenCombinedOutputTail,
           result: "inconclusive",
         });
