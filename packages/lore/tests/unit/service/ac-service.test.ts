@@ -886,3 +886,103 @@ describe("STATE — allow-missing-path-unredeemed: the D8 escape is tracked unti
     expect(countResult.value).toBe(0);
   });
 });
+
+// ─── task-promote-splitcommandsegments-to-the-one-segmentation-seam ────────
+// ─── AC-061-20: SERVICE LAYER — addCriterion/setCriterion accept echo ──────
+// ─── prose but still refuse a genuinely missing runner-segment path ───────
+//
+// `checkDeclaredPathExistence` (this file's own module) composes
+// `findMissingOracleFiles` (`@lore/core`), which now scopes
+// `extractTestFileTokens` to recognised RUNNER segments only. A bare test
+// basename mentioned inside a human-readable `echo` success message is
+// prose, not a runner argument, and must never be extracted — but a runner
+// segment that genuinely names a nonexistent path must still be refused, per
+// D8's own escape-hatch design (widening the check to "accept everything" is
+// the false accept this AC's second half exists to rule out).
+//
+// RED (both halves required, per the AC's own text):
+//   (a) revert `extractTestFileTokens` to a flat, unsegmented
+//       `command.match(...)` over the raw string — the echo-prose case below
+//       is refused again (the basename is (mis)extracted and reported
+//       missing).
+//   (b) point the RUNNER segment itself at a nonexistent path — the refusal
+//       must still fire with the D8 `--allow-missing-path` message intact.
+describe("echo-prose-not-a-path — addCriterion declared-path-existence scoped to runner segments (AC-061-20)", () => {
+  it("HAPPY: accepts a declaration whose only extra path-shaped token is prose inside a success echo", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+
+    const result = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: {
+          mode: "script",
+          oracle: "test",
+          command:
+            "bunx vitest run packages/x/real.test.ts && echo 'ran real.test.ts successfully'",
+        },
+      }),
+      {
+        // Only the REAL runner-segment path resolves — the echo's bare
+        // basename ("real.test.ts" joined onto /repo) would fail this check
+        // if it were ever extracted, which is exactly what pre-fix behavior
+        // did (see this describe block's RED note (a)).
+        pathContext: {
+          fileExists: (p) => p.endsWith("packages/x/real.test.ts"),
+          cwd: "/repo",
+        },
+      },
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("NEGATIVE/REGRESSION: still refuses when the RUNNER segment itself names a genuinely missing path, echo prose notwithstanding", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+
+    const result = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: {
+          mode: "script",
+          oracle: "test",
+          command: "bunx vitest run packages/x/ghost.test.ts && echo 'done, no test named here'",
+        },
+      }),
+      { pathContext: { fileExists: () => false, cwd: "/repo" } },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    expect(result.error.message).toContain("packages/x/ghost.test.ts");
+  });
+
+  it("BOUNDARY: an echo mentioning the SAME basename as a genuinely-missing runner-segment path still refuses, naming the real path", async () => {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+
+    const result = await acService.addCriterion(
+      specId,
+      criterion({
+        verify: {
+          mode: "script",
+          oracle: "test",
+          command:
+            "bunx vitest run packages/x/ghost.test.ts && echo 'expected ghost.test.ts to exist'",
+        },
+      }),
+      { pathContext: { fileExists: () => false, cwd: "/repo" } },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") return;
+    // The refusal names the REAL runner-segment path, not the echo's bare
+    // basename (which is never even extracted post-fix).
+    expect(result.error.message).toContain("packages/x/ghost.test.ts");
+  });
+});

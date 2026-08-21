@@ -7,13 +7,19 @@
  * — mirrors `ac-quality.ts`/`staleness.ts`'s shape.
  *
  * Public surface:
- *   - countExplicitPathArgs(command) — counts argv tokens in a shell command
- *     string that look like explicit test-file path arguments, ignoring the
- *     command's own flags and their values.
+ *   - countExplicitPathArgs(command) — counts argv tokens that look like
+ *     explicit test-file path arguments, ignoring the command's own flags
+ *     and their values, SCOPED to the command's recognised runner segments
+ *     only (task-promote-splitcommandsegments-to-the-one-segmentation-seam,
+ *     AC-061-18 — segmentation/classification delegated to `@lore/core`'s
+ *     `oracle-file-existence.ts::splitCommandSegments`/`classifyCommandSegment`,
+ *     never a second, local re-derivation of either).
  *   - parseExecutedUnits(stdout) — recognises the run-summary tail of the two
  *     runners this repo uses (vitest / bun test), returning how many files
- *     (and, when parseable, tests) were actually executed; `null` when no
- *     known summary line is present.
+ *     (and, when parseable, tests) were actually executed, SUMMED ACROSS
+ *     EVERY recognised summary present in one stdout (AC-061-19 — a stdout
+ *     chaining both runners credits BOTH, not just the first tried); `null`
+ *     when NEITHER known summary line is present.
  *   - commandHasCaseFilter(command) — detects a `-t`/`--testNamePattern` case
  *     filter on the command (task "verify trust extensions" Part B).
  *   - extractCaseFilterPatterns(command) — the VALUES of those same flags (the
@@ -128,10 +134,24 @@
  *   import below, see {@link commandRunsFileUnfiltered}'s own updated JSDoc)
  */
 
-// `extractCdPrefixTarget` is a sibling pure/browser-safe primitive in
-// `@lore/core` (no Node builtins, no IO) — importing it here does not affect
-// this module's own "Side-effect class: pure" invariant above.
-import { extractCdPrefixTarget } from "./oracle-file-existence.js";
+// `extractCdPrefixTarget`, `splitCommandSegments`, `classifyCommandSegment`,
+// and `COMPILED_BINARY_TOKEN_PATTERN` are sibling pure/browser-safe primitives
+// in `@lore/core` (no Node builtins, no IO) — importing them here does not
+// affect this module's own "Side-effect class: pure" invariant above.
+// `splitCommandSegments`/`classifyCommandSegment` are `countExplicitPathArgs`'s
+// segmentation seam (task-promote-splitcommandsegments-to-the-one-
+// segmentation-seam, AC-061-18) — this module deliberately does NOT
+// reimplement segment-splitting or runner-shape classification a second time;
+// see `countExplicitPathArgs`'s own JSDoc. `COMPILED_BINARY_TOKEN_PATTERN` is
+// `commandReferencesCompiledBinary`'s own pattern, promoted to the sibling
+// module once `classifyCommandSegment` needed the identical check for its
+// "lore-cli" runner shape — SSOT, never a second regex literal here.
+import {
+  extractCdPrefixTarget,
+  splitCommandSegments,
+  classifyCommandSegment,
+  COMPILED_BINARY_TOKEN_PATTERN,
+} from "./oracle-file-existence.js";
 
 // ─── Explicit Path-Argument Counting ────────────────────────────────────────
 
@@ -173,10 +193,25 @@ function tokenizeCommand(command: string): string[] {
  * (a real positional path argument is never swallowed merely for following a
  * boolean flag with no value of its own, e.g. `--dry-run packages/x.test.ts`).
  *
+ * Scoped to RUNNER SEGMENTS only (task-promote-splitcommandsegments-to-the-
+ * one-segmentation-seam, AC-061-18): `command` is split via
+ * {@link splitCommandSegments} (`@lore/core`'s ONE segmentation seam — this
+ * function does NOT walk the raw, unsegmented string) and each segment is
+ * classified via {@link classifyCommandSegment}. A segment that is not a
+ * recognised runner invocation (`cd`, `echo`, `git grep`, `test -f`, …)
+ * contributes NO path tokens, regardless of what path-shaped text it
+ * contains — this is the fix for the AC-060-7-adjacent defect measured
+ * 2026-08-18: a compound `&&` chain's shell-builtin existence checks
+ * (`test -f <path> && ...`) inflated this count by walking the WHOLE chain
+ * as one flat argv list, so `lore verify` reported "ran 1 of 3 declared
+ * paths" for an AC whose oracle genuinely ran its one real test file.
+ *
  * @param command - The full shell command string (e.g. a script-mode AC's
  *   `verify.command`)
- * @returns The number of recognised explicit test-file path arguments; `0`
- *   for a command that declares none (e.g. `bun run test`, `bun run typecheck`)
+ * @returns The number of recognised explicit test-file path arguments found
+ *   in `command`'s recognised runner segment(s); `0` for a command that
+ *   declares none (e.g. `bun run test`, `bun run typecheck`) OR whose only
+ *   path-shaped tokens sit in a non-runner segment
  *
  * @example
  * countExplicitPathArgs(
@@ -191,9 +226,36 @@ function tokenizeCommand(command: string): string[] {
  *
  * @example
  * countExplicitPathArgs("bunx vitest run --reporter json") // => 0 — flag + its value, no paths
+ *
+ * @example
+ * // the `test -f` shell-builtin segment is NOT a runner invocation — its
+ * // path-shaped argument is never counted, even though the segment named a
+ * // real `.test.ts`-suffixed path.
+ * countExplicitPathArgs(
+ *   "test -f packages/x.test.ts && bun test packages/y.test.ts",
+ * );
+ * // => 1
  */
 export function countExplicitPathArgs(command: string): number {
-  const tokens = tokenizeCommand(command);
+  let count = 0;
+  for (const segment of splitCommandSegments(command)) {
+    if (classifyCommandSegment(segment).runner === "unclassified") continue;
+    count += countExplicitPathArgsInSegment(segment);
+  }
+  return count;
+}
+
+/**
+ * Per-segment worker for {@link countExplicitPathArgs} — the ORIGINAL
+ * flag/flag-value-aware counting logic, now scoped to run over one
+ * already-classified-as-a-runner segment rather than a whole unsegmented
+ * command string. Kept as a separate function (rather than inlined) so the
+ * segmentation loop above stays a one-line-per-segment reduction, not a
+ * nested tangle of the two concerns ("which segments count" vs. "how many
+ * paths does THIS segment declare").
+ */
+function countExplicitPathArgsInSegment(segment: string): number {
+  const tokens = tokenizeCommand(segment);
   let count = 0;
 
   for (let i = 0; i < tokens.length; i++) {
@@ -538,18 +600,35 @@ function countMatchedVitestCases(testsLineBody: string): number {
 
 /**
  * Recognises the run-summary tail of the two runners this repo uses (bun
- * test, then vitest) and extracts the count of files actually executed.
- * Never throws — arbitrary or garbled stdout that matches neither pattern
- * degrades to `null`.
+ * test, vitest) and extracts the TOTAL count of files (and, when parseable,
+ * tests) actually executed — SUMMED ACROSS EVERY recognised summary present
+ * in `stdout`, not just the first one found (task-promote-
+ * splitcommandsegments-to-the-one-segmentation-seam, AC-061-19). Never
+ * throws — arbitrary or garbled stdout that matches neither pattern degrades
+ * to `null`.
+ *
+ * This repo has TWO runners BY DESIGN (`.bun.test.ts` files under `bun test`,
+ * everything else under vitest), so a single captured stdout legitimately
+ * carries both summaries when an AC's oracle command chains one runner after
+ * the other (`bunx vitest run a.test.ts && bun test b.bun.test.ts`).
+ * Pre-fix, this function tried the bun pattern, RETURNED on a match, and
+ * never even looked for vitest's — a stdout with both summaries credited
+ * only the first-tried runner. Measured 2026-08-19: a chained
+ * vitest-then-bun command where both files genuinely ran green (16/16 and
+ * 18/18) recorded `executed_files: 1` against `declared_paths: 2`,
+ * `completeness: under_match`, `result: inconclusive`, `lore verify` exit 3
+ * — a criterion spanning both runners was structurally unattestable. A
+ * stdout carrying only ONE summary is byte-identical to pre-fix behaviour
+ * (the other pattern simply never matches, contributing nothing to the sum).
  *
  * @param stdout - Captured process output (stdout+stderr concatenated,
- *   typically the tail-truncated `output_tail` a verify run recorded — the
- *   summary line is emitted near the end of both runners' output, so a tail
- *   truncation essentially never loses it)
- * @returns `{files}` (plus `tests` when a case count was also parseable —
- *   always for bun, iff the "Tests" line was captured for vitest) when a
- *   known summary is found; `null` when no known runner-summary line is
- *   present
+ *   typically the tail-truncated `output_tail` a verify run recorded — each
+ *   runner's summary line is emitted near the end of ITS OWN output, so a
+ *   tail truncation essentially never loses either one)
+ * @returns `{files}` (plus `tests` when at least one matched summary's case
+ *   count was parseable — always for bun, iff the "Tests" line was captured
+ *   for vitest) summed across every recognised summary found; `null` when
+ *   NEITHER pattern matched at all
  *
  * @example
  * parseExecutedUnits("...\nTest Files  1 passed (1)\nTests  4 passed (4)\n")
@@ -558,6 +637,14 @@ function countMatchedVitestCases(testsLineBody: string): number {
  * @example
  * parseExecutedUnits("...\nRan 963 tests across 70 files. [1.2s]\n")
  * // => { files: 70, tests: 963 }
+ *
+ * @example
+ * // BOTH summaries present in one stdout — summed, not first-match-wins.
+ * parseExecutedUnits(
+ *   " Test Files  1 passed (1)\n      Tests  16 passed (16)\n" +
+ *     "Ran 18 tests across 1 files. [0.4s]\n",
+ * );
+ * // => { files: 2, tests: 34 }
  *
  * @example
  * // A -t filter that matched nothing: every test in the loaded file is
@@ -570,25 +657,33 @@ function countMatchedVitestCases(testsLineBody: string): number {
  * parseExecutedUnits("some unrelated tool output\n") // => null
  */
 export function parseExecutedUnits(stdout: string): ExecutedUnits | null {
+  let files = 0;
+  let tests: number | undefined;
+  let matchedAnySummary = false;
+
   const bunMatch = BUN_SUMMARY_PATTERN.exec(stdout);
   if (bunMatch !== null) {
-    const tests = Number(bunMatch[1]);
-    const files = Number(bunMatch[2]);
-    return { files, tests };
+    matchedAnySummary = true;
+    tests = (tests ?? 0) + Number(bunMatch[1]);
+    files += Number(bunMatch[2]);
   }
 
   const vitestMatch = VITEST_SUMMARY_PATTERN.exec(stdout);
   if (vitestMatch !== null) {
-    const files = Number(vitestMatch[1]);
+    matchedAnySummary = true;
+    files += Number(vitestMatch[1]);
     const testsMatch = VITEST_TESTS_LINE_PATTERN.exec(stdout);
     if (testsMatch !== null) {
       const testsLineBody = testsMatch[1] ?? "";
-      return { files, tests: countMatchedVitestCases(testsLineBody) };
+      tests = (tests ?? 0) + countMatchedVitestCases(testsLineBody);
     }
-    return { files };
+    // else: vitest's file-count line matched but its separate "Tests" line
+    // did not get captured — `tests` stays whatever bun's match (if any)
+    // already contributed, never a fabricated count for vitest's share.
   }
 
-  return null;
+  if (!matchedAnySummary) return null;
+  return tests === undefined ? { files } : { files, tests };
 }
 
 // ─── Completeness Verdict ────────────────────────────────────────────────────
@@ -722,19 +817,19 @@ export function judgeCompleteness(input: CompletenessJudgeInput): CompletenessVe
 // ─── Compiled-Binary Freshness (Part A) ─────────────────────────────────────
 
 /**
- * Matches a command token that is (or ends in) a path to the compiled
- * `dist/lore` binary — `\b` before "dist" requires the preceding character
- * (if any) to be a non-word character (`/`, whitespace, start-of-string),
- * so a token like `mydist/lore-helper.ts` (no path-separator boundary before
- * "dist") never false-matches.
- */
-const COMPILED_BINARY_PATTERN = /\bdist\/lore\b/;
-
-/**
  * Detects whether `command` spawns the compiled `dist/lore` binary (as
  * opposed to running from source, e.g. `bun run src/index.ts` — which this
  * guard is not concerned with, since source-run commands are fresh by
  * construction).
+ *
+ * Consumes {@link COMPILED_BINARY_TOKEN_PATTERN} — promoted to
+ * `oracle-file-existence.ts` (task-promote-splitcommandsegments-to-the-one-
+ * segmentation-seam) once `classifyCommandSegment` needed the IDENTICAL
+ * "does this token reference dist/lore" check for its own 5th recognised
+ * runner shape (a direct `./dist/lore <subcommand> …` dogfooding
+ * invocation, AC-061-9's own worked example). This function no longer
+ * declares its own copy of the pattern — see that constant's own JSDoc for
+ * the full boundary-matching rationale.
  *
  * @param command - The full shell command string.
  * @returns `true` iff a `dist/lore` path token is present.
@@ -750,7 +845,7 @@ const COMPILED_BINARY_PATTERN = /\bdist\/lore\b/;
  * // => false — no path-separator boundary before "dist"
  */
 export function commandReferencesCompiledBinary(command: string): boolean {
-  return COMPILED_BINARY_PATTERN.test(command);
+  return COMPILED_BINARY_TOKEN_PATTERN.test(command);
 }
 
 /**
