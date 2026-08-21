@@ -42,12 +42,13 @@ export interface IssuesListProps {
  * every member of the vocabulary — rendering the whole component to observe one
  * pure mapping would be a far weaker oracle.
  *
- * TONE GROUPS — eight resolution states, four Badge variants
+ * TONE GROUPS — nine resolution states, four Badge variants
  * (`ui/badge.tsx`'s cva table), so the variant carries TONE and the badge's own
  * text carries identity:
  *   - `outline`     — still needs triage eyes (`open`)
- *   - `secondary`   — neutral: a fix in flight (`resolving`), or terminal with
- *                     NO judgement against the report (`superseded`,
+ *   - `secondary`   — neutral: a fix in flight (`resolving`) or an owner
+ *                     assigned but undecided (`adopted`, §M7), or terminal
+ *                     with NO judgement against the report (`superseded`,
  *                     `duplicate`, `closed`)
  *   - `default`     — the report produced a fix (`fixed`)
  *   - `destructive` — a judgement AGAINST the report (`rejected`, `wontfix`)
@@ -58,6 +59,11 @@ export interface IssuesListProps {
  * "silent trash can operationally indistinguishable from rejected" failure §M3
  * exists to fix. They must also not share `fixed`'s bucket — that WAS the
  * pre-2026-08-11 defect. Both constraints are pinned by the AC-DC-12 oracle.
+ * `adopted` (§M7) shares `resolving`'s bucket rather than a bucket of its own:
+ * both are non-derogatory AND UNDECIDED (as opposed to `superseded`/
+ * `duplicate`/`closed`, which are non-derogatory but FINAL) — `adopted` MUST
+ * NOT be `destructive` (it is not a judgement against the report) and MUST NOT
+ * be `default` (nothing has been fixed yet).
  *
  * ⛔ EXHAUSTIVE via the `never` binding after the switch, with NO `default:`
  * clause. A `default` would absorb a state added to `IssueResolution` and render
@@ -71,6 +77,7 @@ export function resolutionBadgeVariant(resolution: IssueResolution): NonNullable
     case "open":
       return "outline";
     case "resolving":
+    case "adopted":
       return "secondary";
     case "fixed":
       return "default";

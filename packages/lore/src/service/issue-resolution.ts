@@ -30,37 +30,55 @@
  *
  * Public surface:
  *   - `IssueResolution` / `TerminalIssueResolution` — re-exported from
- *     `@lore/core`; the 8-state computed resolution (`open | resolving` plus the
- *     six TERMINAL states).
+ *     `@lore/core`; the 9-state computed resolution (`open | resolving |
+ *     adopted` plus the six TERMINAL states).
  *   - `TERMINAL_ISSUE_RESOLUTIONS` — the SSOT member set of terminal
  *     resolutions as a `ReadonlySet` (spec-the-defect-channel-cannot-be-honestly-
  *     maintained-an §M1), built from `@lore/core`'s single member-array literal:
- *     `commands/issues.ts`'s `--open`/`--resolved` filter AND
- *     `IssueReportService`'s open-report-cap narrowing both IMPORT it from here.
- *     A second construction of that member set anywhere under `packages/**` is a
- *     RED test (AC-DC-9), because the copies that existed before this SSOT
- *     drifted in exactly the way that made a resolved report keep occupying cap
- *     quota.
+ *     `commands/issues.ts`'s `--open`/`--resolved` filter imports it. ⛔
+ *     `adopted` is NOT a member (§M7) — it frees quota through the SEPARATE
+ *     `QUOTA_FREEING_RESOLUTIONS` seam below, precisely so it can keep showing
+ *     as unfinished under `--resolved`'s complement. A second construction of
+ *     the TERMINAL member set anywhere under `packages/**` is a RED test
+ *     (AC-DC-9), because the copies that existed before this SSOT drifted in
+ *     exactly the way that made a resolved report keep occupying cap quota.
+ *   - `QUOTA_FREEING_RESOLUTIONS` — §M7's cap-narrowing seam:
+ *     `TERMINAL_ISSUE_RESOLUTIONS` plus `adopted`. `IssueReportService`'s
+ *     open-report-cap narrowing imports THIS, never `TERMINAL_ISSUE_RESOLUTIONS`
+ *     directly, so quota-occupancy and terminal-ness stay two separately
+ *     answerable questions (AC-DC-14(b)).
  *   - `TERMINAL_RESOLUTION_REACH` / `TerminalResolutionReach` — per terminal
  *     state, the ROUTE that reaches it and the pointer it REQUIRES. This is
  *     what lets the cap refusal render a remedy that works instead of a
  *     hand-authored list of verbs that can silently rot (§M1's structured
  *     refusal payload).
  *   - `EXPLICIT_TERMINAL_RESOLUTIONS` / `ExplicitTerminalResolution` — the
- *     hand-settable subset (`route === "issue-resolve"`), DERIVED from the
- *     reach table rather than re-listed: `lore issue resolve --state` accepts
- *     exactly these, and `fixed`/`closed` are structurally unreachable there.
- *   - `computeIssueResolution` — derives the resolution from, highest
- *     precedence first: (a) any explicit terminal state recorded at
- *     `extra.issue_report.resolution` (D3), (b) the `resolves` in-edges
- *     pointing at the issue plus each source doc's lifecycle status (D2
- *     `fixed`/`resolving`), (c) a recorded review-workflow rejection (D2
- *     `rejected` reached WITHOUT D3 — the caller supplies this as a plain
- *     boolean since the audit trail it comes from lives outside this
- *     store-free module), (d) the issue task's OWN doc status being
- *     `archived` (D2 `closed` — an upstream maintainer terminated it with no
- *     traceable fix source ever recorded, the shape of every report closed
- *     BEFORE this mechanism existed).
+ *     hand-settable TERMINAL subset (`route === "issue-resolve"`), DERIVED from
+ *     the reach table rather than re-listed: `fixed`/`closed` are structurally
+ *     unreachable there.
+ *   - `EXPLICIT_RESOLUTIONS` / `ExplicitResolution` /
+ *     `reachOfExplicitResolution` / `ADOPTED_RESOLUTION_POINTER` — the WIDER
+ *     hand-settable set `lore issue resolve --state` actually accepts:
+ *     `EXPLICIT_TERMINAL_RESOLUTIONS` plus §M7's `adopted`, whose pointer
+ *     (`--adopted-by`) additionally REQUIRES the resolved doc's type to be
+ *     `plan` or `task` — the one pointer requirement with a type constraint,
+ *     because an owner that cannot itself do work defeats the point of §M7.
+ *   - `checkResolutionPointer` — the ONE decision `lore issue resolve` calls
+ *     for EVERY pointer-carrying state's refusal (missing / unresolvable /
+ *     self-reference / wrong-type), given a lookup the CLI already performed.
+ *     Store-free like every other export here, so AC-DC-15's pointer-refusal
+ *     verdicts are testable under vitest with zero fixtures.
+ *   - `isDanglingAdoption` — §M7's dangling-claim predicate (AC-DC-16): given
+ *     a report's COMPUTED resolution and its `adopted_by` owner's current
+ *     status, is this an abandoned adoption? `commands/status.ts`'s
+ *     `adopted_abandoned_count` field calls this once per filed report;
+ *     store-free like every other export here.
+ *   - `computeIssueResolution` — derives the resolution; see that function's
+ *     own JSDoc for the full 7-step precedence (§M7 inserted `adopted` between
+ *     resolves-edge computation and the review-rejection/`closed` fallback,
+ *     rather than at the top with the other explicit states — a `resolves`
+ *     edge landing later must be able to promote an `adopted` report to
+ *     `fixed`/`resolving`).
  *   - `hasIssueReport` — defensive `extra.issue_report` presence predicate;
  *     the SAME guard `CorpusService.link`'s write-time validation (D1b) uses
  *     to reject a `resolves` edge whose target isn't an issue task.
@@ -68,21 +86,23 @@
  * Invariants:
  *   - `TERMINAL_ISSUE_RESOLUTIONS` is the SSOT member set and every consumer
  *     IMPORTS it; it is DERIVED from `@lore/core`'s
- *     `TERMINAL_ISSUE_RESOLUTION_MEMBERS`, never re-listed here. Its two further
- *     derived views (`EXPLICIT_TERMINAL_RESOLUTIONS`, the
- *     `ExplicitTerminalResolution` type) are computed from
- *     `TERMINAL_RESOLUTION_REACH`, never re-listed — see those symbols' own docs.
- *   - Precedence, highest first: explicit terminal state (D3) > resolves-edge
- *     computation (`fixed`/`resolving`) > recorded review rejection
- *     (`rejected`) > archived doc status (`closed`) > `open`. A `resolves`
- *     edge landing on an already-terminal issue never overrides it, and ANY
- *     resolves edge (even one that computes `resolving`, not yet `fixed`)
- *     outranks both the review-rejection signal and the archived-doc-status
- *     signal — a fix already in flight is more informative than either.
- *     There is no path in this module that returns `fixed` from an explicit
- *     write; `fixed` is reachable ONLY through a `resolves` edge whose
- *     source doc has reached `active`/`archived` (spec's "no hand-set fixed
- *     anywhere in the system").
+ *     `TERMINAL_ISSUE_RESOLUTION_MEMBERS`, never re-listed here. Its further
+ *     derived views (`EXPLICIT_TERMINAL_RESOLUTIONS`/`ExplicitTerminalResolution`,
+ *     `EXPLICIT_RESOLUTIONS`/`ExplicitResolution`, `QUOTA_FREEING_RESOLUTIONS`)
+ *     are computed from it or from `TERMINAL_RESOLUTION_REACH`, never re-listed
+ *     — see those symbols' own docs.
+ *   - Precedence, highest first: explicit TERMINAL state (D3) > resolves-edge
+ *     computation (`fixed`/`resolving`) > explicit `adopted` (§M7) > recorded
+ *     review rejection (`rejected`) > archived doc status (`closed`) > `open`.
+ *     A `resolves` edge landing on an already-terminal issue never overrides
+ *     it, and ANY resolves edge (even one that computes `resolving`, not yet
+ *     `fixed`) outranks `adopted`, the review-rejection signal, AND the
+ *     archived-doc-status signal — a fix already in flight is more
+ *     informative than any of them. There is no path in this module that
+ *     returns `fixed` from an explicit write; `fixed` is reachable ONLY
+ *     through a `resolves` edge whose source doc has reached
+ *     `active`/`archived` (spec's "no hand-set fixed anywhere in the
+ *     system").
  *   - `hasRecordedReviewRejection` exists because `ReviewService.reject`
  *     (SPEC-005) deliberately never transitions a doc OFF `draft` — the
  *     audit trail, not `doc.status`, is the sole record of a rejection, so a
@@ -154,11 +174,20 @@ export type TerminalResolutionRoute = "issue-resolve" | "resolves-link" | "revie
  * pointer-carrying state cannot inherit another state's wording by falling
  * through a `state === "duplicate" ? … : …` ternary — every refusal that has to
  * describe the pointer reads this field.
+ *
+ * `allowed_doc_types` is OPTIONAL and, when present, narrows WHICH doc types the
+ * resolved pointer target may have — checked by the CLI AFTER existence and
+ * self-reference (§M3's `superseded`/`duplicate` pointers take no such
+ * constraint, so it stays `undefined` for them; §M7's `adopted` REQUIRES a live
+ * `plan` or `task`, because an adopt verb that accepted any doc would let a
+ * caller free quota by "owning" the claim with, say, another issue report —
+ * accountable to nothing).
  */
 export interface TerminalResolutionPointer {
   readonly flag: string;
   readonly extra_key: string;
   readonly names: string;
+  readonly allowed_doc_types?: readonly string[];
 }
 
 /**
@@ -283,6 +312,234 @@ export function reachOfTerminalResolution(state: TerminalIssueResolution): Termi
 }
 
 /**
+ * §M7's `adopted` pointer reach — NOT part of {@link TERMINAL_RESOLUTION_REACH}
+ * (that table's `satisfies Record<TerminalIssueResolution, …>` binding is what
+ * gives AC-DC-9's "one construction site" its compile-time teeth, and `adopted`
+ * is deliberately NOT terminal — see `issue-resolution-vocab.ts`). Declared here
+ * as its own constant rather than folded into that table, so widening the
+ * terminal record's key type is never required to add a non-terminal
+ * explicit-writable state.
+ *
+ * `allowed_doc_types: ["plan", "task"]` is the part with no M3 precedent: a
+ * `superseded`/`duplicate` pointer accepts ANY existing doc, but an `adopted`
+ * pointer with no type constraint would let a caller free quota by pointing at,
+ * say, another issue report — "owned" by nothing that can actually do work.
+ */
+export const ADOPTED_RESOLUTION_POINTER: TerminalResolutionPointer = {
+  flag: "--adopted-by",
+  extra_key: "adopted_by",
+  names: "the plan or task that now owns this claim",
+  allowed_doc_types: ["plan", "task"],
+};
+
+/**
+ * Every EXPLICIT-WRITABLE resolution — {@link ExplicitTerminalResolution} plus
+ * §M7's `adopted` — the states `lore issue resolve --state` may persist and
+ * {@link readExplicitResolutionState} recognises inside a stored `extra`.
+ *
+ * A wider union than {@link ExplicitTerminalResolution} on purpose: `adopted` is
+ * hand-settable (`route === "issue-resolve"`, same as `rejected`/`superseded`/
+ * etc.) but is NOT terminal, so it cannot be derived from
+ * {@link TERMINAL_RESOLUTION_REACH} the way the four terminal explicit states
+ * are.
+ */
+export type ExplicitResolution = ExplicitTerminalResolution | "adopted";
+
+/**
+ * The SSOT explicit-writable member set as a membership set — every value
+ * `lore issue resolve --state` accepts. Built by extending
+ * {@link EXPLICIT_TERMINAL_RESOLUTIONS} with `adopted`, never by re-listing the
+ * four terminal ones.
+ *
+ * @example
+ *   EXPLICIT_RESOLUTIONS.has("adopted")    // => true
+ *   EXPLICIT_RESOLUTIONS.has("duplicate")  // => true
+ *   EXPLICIT_RESOLUTIONS.has("fixed")      // => false (computed only, never hand-set)
+ */
+export const EXPLICIT_RESOLUTIONS: ReadonlySet<ExplicitResolution> = new Set<ExplicitResolution>([
+  ...EXPLICIT_TERMINAL_RESOLUTIONS,
+  "adopted",
+]);
+
+/**
+ * The reach facts for any explicit-writable resolution, terminal or `adopted` —
+ * the union {@link reachOfTerminalResolution} does not cover. `lore issue
+ * resolve`'s CLI wiring reads pointer requirements through THIS function, never
+ * through `reachOfTerminalResolution` directly, so `adopted`'s reach never needs
+ * a special-cased second call site.
+ *
+ * @param state - any explicit-writable resolution
+ * @returns that state's route plus its required pointer (`null` when it takes none)
+ * @example
+ *   reachOfExplicitResolution("adopted").pointer?.flag        // => "--adopted-by"
+ *   reachOfExplicitResolution("superseded").pointer?.flag     // => "--superseded-by"
+ */
+export function reachOfExplicitResolution(state: ExplicitResolution): TerminalResolutionReach {
+  if (state === "adopted") {
+    return { route: "issue-resolve", pointer: ADOPTED_RESOLUTION_POINTER };
+  }
+  return reachOfTerminalResolution(state);
+}
+
+/**
+ * The ONE seam `IssueReportService`'s step-6 cap narrowing reads to decide
+ * "does this candidate still occupy quota?" (spec-the-defect-channel-cannot-be-
+ * honestly-maintained-an §M1 + §M7, AC-DC-14(b)). A report's computed resolution
+ * frees quota iff it is a member of THIS set — {@link TERMINAL_ISSUE_RESOLUTIONS}
+ * plus `adopted` — compared AS A SET, never against a remembered literal list.
+ *
+ * Kept separate from {@link TERMINAL_ISSUE_RESOLUTIONS} rather than folding
+ * `adopted` into it: `adopted` is NOT terminal (`--resolved`'s complement must
+ * keep showing it as unfinished, AC-DC-14(a)), so widening the terminal set
+ * itself would silently change what `--resolved`/`lore issues --open` shows.
+ * Quota-freeing and terminal-ness are two DIFFERENT questions about a
+ * resolution, and §M7 is precisely the state where they diverge.
+ *
+ * @example
+ *   QUOTA_FREEING_RESOLUTIONS.has("adopted")    // => true
+ *   QUOTA_FREEING_RESOLUTIONS.has("superseded") // => true (also terminal)
+ *   QUOTA_FREEING_RESOLUTIONS.has("resolving")  // => false
+ */
+export const QUOTA_FREEING_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<IssueResolution>([
+  ...TERMINAL_ISSUE_RESOLUTION_MEMBERS,
+  "adopted",
+]);
+
+/**
+ * A resolved pointer target's minimal identity, as read from the live corpus
+ * by the CLI's doc lookup (`CorpusService.get`) — just enough for
+ * {@link checkResolutionPointer} to judge self-reference and type.
+ */
+export interface ResolvedPointerTarget {
+  readonly id: string;
+  readonly type: string;
+}
+
+/**
+ * Why a pointer failed {@link checkResolutionPointer}'s verdict — `"missing"`
+ * (no value supplied), `"unresolvable"` (the value does not resolve to an
+ * existing doc), `"self-reference"` (it names the report being resolved),
+ * `"wrong-type"` (resolves fine, but not to a doc type
+ * {@link TerminalResolutionPointer.allowed_doc_types} permits — only
+ * `adopted`'s pointer declares this constraint, §M7).
+ */
+export type PointerCheckFailureReason = "missing" | "unresolvable" | "self-reference" | "wrong-type";
+
+/**
+ * Pure verdict over an ALREADY-ATTEMPTED pointer resolution
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M3/§M7,
+ * AC-DC-4/AC-DC-15) — the ONE decision `lore issue resolve`'s CLI wiring
+ * consults for every pointer-carrying state, so a fourth pointer-carrying
+ * state added later needs no NEW validation branch, only a new
+ * {@link TerminalResolutionPointer} declaration.
+ *
+ * Deliberately store-free like every other export in this module: the actual
+ * corpus lookup (the I/O) happens in the CLI BEFORE calling this function;
+ * this function only judges the OUTCOME that lookup already produced, which
+ * is what makes it 100% decidable — and testable under vitest with zero
+ * fixtures, no `InMemoryStore`, no async.
+ *
+ * @param pointer - the reach table's declared pointer requirement for this state
+ * @param pointerValue - the trimmed `--flag` value the caller supplied; `""`
+ *   means absent
+ * @param resolvedTarget - the doc the CLI's lookup for `pointerValue`
+ *   returned, or `undefined` if that lookup failed (does not resolve to an
+ *   existing doc)
+ * @param issueDocId - the report being resolved's own doc id (self-reference check)
+ * @returns `{ok: true}` when the pointer satisfies every declared
+ *   requirement; otherwise `{ok: false, reason}` naming the FIRST failing
+ *   check, in the fixed precedence missing > unresolvable > self-reference >
+ *   wrong-type (each check assumes every prior one already passed, so a
+ *   caller cannot ask "was it ALSO wrong-type" about a pointer that was never
+ *   supplied)
+ * @example
+ *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "", undefined, "issue-1")
+ *     // => {ok: false, reason: "missing"}
+ *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "plan-x", undefined, "issue-1")
+ *     // => {ok: false, reason: "unresolvable"} (lookup failed)
+ *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "issue-1", {id: "issue-1", type: "task"}, "issue-1")
+ *     // => {ok: false, reason: "self-reference"}
+ *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "spec-x", {id: "spec-x", type: "spec"}, "issue-1")
+ *     // => {ok: false, reason: "wrong-type"} (spec is neither plan nor task)
+ *   checkResolutionPointer(ADOPTED_RESOLUTION_POINTER, "task-x", {id: "task-x", type: "task"}, "issue-1")
+ *     // => {ok: true}
+ */
+export function checkResolutionPointer(
+  pointer: TerminalResolutionPointer,
+  pointerValue: string,
+  resolvedTarget: ResolvedPointerTarget | undefined,
+  issueDocId: string,
+): { ok: true } | { ok: false; reason: PointerCheckFailureReason } {
+  if (pointerValue.length === 0) {
+    return { ok: false, reason: "missing" };
+  }
+  if (resolvedTarget === undefined) {
+    return { ok: false, reason: "unresolvable" };
+  }
+  if (resolvedTarget.id === issueDocId) {
+    return { ok: false, reason: "self-reference" };
+  }
+  if (pointer.allowed_doc_types !== undefined && !pointer.allowed_doc_types.includes(resolvedTarget.type)) {
+    return { ok: false, reason: "wrong-type" };
+  }
+  return { ok: true };
+}
+
+/**
+ * Everything {@link isDanglingAdoption} needs about ONE issue report's
+ * `adopted` claim: its COMPUTED resolution (never the raw stored field —
+ * see that predicate's own JSDoc for why) and its owner's CURRENT lifecycle
+ * status, or `undefined` when the owner doc no longer resolves.
+ */
+export interface AdoptionAbandonmentCheckInput {
+  readonly computedResolution: IssueResolution;
+  readonly ownerStatus: DocStatus | undefined;
+}
+
+/**
+ * §M7's dangling-claim predicate (spec-the-defect-channel-cannot-be-honestly-
+ * maintained-an §M7, AC-DC-16) — a corpus-wide count is `lore status`'s
+ * `adopted_abandoned_count` field's job (`commands/status.ts`'s
+ * `collectAdoptedAbandonedMembers`, which calls this predicate per report);
+ * this function is the ONE decidable-from-stored-fields judgment both that
+ * enumerator and this AC's oracle exercise.
+ *
+ * TWO conjuncts, both decidable, NEITHER guessed:
+ *   1. `computedResolution === "adopted"` — NOT the raw stored
+ *      `resolution.state` field. `computeIssueResolution`'s own precedence
+ *      already demotes a report to `fixed`/`resolving` the moment a
+ *      `resolves` edge lands, EVEN IF the stored field still literally says
+ *      `adopted` (nobody bothered re-resolving it) — so this conjunct alone
+ *      subsumes BOTH "the stored state is adopted" AND "the report carries
+ *      no terminal resolution" from the governing spec's three-conjunct
+ *      prose: a report a real fix has since landed on computes something
+ *      other than `adopted` and is correctly excluded here.
+ *   2. `ownerStatus` is `"archived"` or `"deprecated"` — the owner doc
+ *      reached a terminal lifecycle status. A LIVE owner (any other status,
+ *      including one this function has never heard of) excludes the report:
+ *      the claim is still being worked, not abandoned. `undefined` (the
+ *      owner doc no longer resolves — deleted) ALSO excludes it: this
+ *      predicate asserts "archived without a fix", never "vanished".
+ *
+ * ⛔ "the defect was not actually fixed" is deliberately NOT a third
+ * conjunct — no stored field records that, and guessing would make this
+ * predicate a judgment call rather than a fact.
+ *
+ * @example
+ *   isDanglingAdoption({computedResolution: "adopted", ownerStatus: "archived"})   // => true
+ *   isDanglingAdoption({computedResolution: "adopted", ownerStatus: "deprecated"}) // => true
+ *   isDanglingAdoption({computedResolution: "adopted", ownerStatus: "draft"})      // => false (live owner)
+ *   isDanglingAdoption({computedResolution: "adopted", ownerStatus: undefined})    // => false (owner vanished, not abandoned)
+ *   isDanglingAdoption({computedResolution: "fixed", ownerStatus: "archived"})     // => false (a real fix landed — conjunct 1 fails)
+ */
+export function isDanglingAdoption(input: AdoptionAbandonmentCheckInput): boolean {
+  if (input.computedResolution !== "adopted") {
+    return false;
+  }
+  return input.ownerStatus === "archived" || input.ownerStatus === "deprecated";
+}
+
+/**
  * Minimal issue-task shape `computeIssueResolution` needs: its `extra` bag,
  * plus (optionally) its own current lifecycle `status` — needed ONLY for
  * D2's `closed` state (an issue archived with no resolves in-edge and no
@@ -335,24 +592,30 @@ export function hasIssueReport(extra: unknown): boolean {
 }
 
 /**
- * Defensive reader for an explicit terminal resolution
+ * Defensive reader for an explicit resolution
  * (`extra.issue_report.resolution.state`), written only by the downstream
- * `lore issue resolve --state <explicit terminal state>` verb (D3 +
- * spec-the-defect-channel-cannot-be-honestly-maintained-an §M3, out of this
+ * `lore issue resolve --state <explicit resolution>` verb (D3 +
+ * spec-the-defect-channel-cannot-be-honestly-maintained-an §M3/§M7, out of this
  * module's scope — this reader just consumes the shape that verb writes).
  *
- * Recognised values come from {@link EXPLICIT_TERMINAL_RESOLUTIONS}, never a
- * local list: when §M3 added `superseded`/`duplicate`, the set widened here
- * automatically, and a hand-written comparison chain would have kept computing
- * `open` for a report that WAS explicitly resolved — the exact class of silent
- * under-reporting §M1's cap defect was made of.
+ * Recognised values come from {@link EXPLICIT_RESOLUTIONS}, never a local list:
+ * when §M3 added `superseded`/`duplicate` (and §M7 later added `adopted`), the
+ * set widened here automatically, and a hand-written comparison chain would
+ * have kept computing `open` for a report that WAS explicitly resolved — the
+ * exact class of silent under-reporting §M1's cap defect was made of.
+ *
+ * ⛔ Returning `adopted` here does NOT mean {@link computeIssueResolution}
+ * returns it unconditionally — `adopted`'s precedence sits BELOW resolves-edge
+ * computation (a fix actually landing outranks an adoption placeholder), unlike
+ * the four terminal explicit states, which win over everything. See that
+ * function's own precedence list.
  *
  * @param extra - the issue task's raw `extra` field
- * @returns the recorded {@link ExplicitTerminalResolution} when present and
+ * @returns the recorded {@link ExplicitResolution} when present and
  *   well-shaped; `undefined` otherwise (absent, malformed, a computed-only
  *   state someone hand-wrote, or any other value)
  */
-function readExplicitResolutionState(extra: unknown): ExplicitTerminalResolution | undefined {
+function readExplicitResolutionState(extra: unknown): ExplicitResolution | undefined {
   if (extra === null || typeof extra !== "object" || Array.isArray(extra)) {
     return undefined;
   }
@@ -366,9 +629,7 @@ function readExplicitResolutionState(extra: unknown): ExplicitTerminalResolution
   }
   const state = (resolution as Record<string, unknown>)["state"];
   if (typeof state !== "string") return undefined;
-  return (EXPLICIT_TERMINAL_RESOLUTIONS as ReadonlySet<string>).has(state)
-    ? (state as ExplicitTerminalResolution)
-    : undefined;
+  return (EXPLICIT_RESOLUTIONS as ReadonlySet<string>).has(state) ? (state as ExplicitResolution) : undefined;
 }
 
 /**
@@ -376,23 +637,37 @@ function readExplicitResolutionState(extra: unknown): ExplicitTerminalResolution
  * clock or a store; the caller supplies every doc up front.
  *
  * Precedence (highest first):
- *   1. An explicit terminal state at `extra.issue_report.resolution.state`
+ *   1. An explicit TERMINAL state at `extra.issue_report.resolution.state`
  *      (any member of {@link EXPLICIT_TERMINAL_RESOLUTIONS}, i.e.
  *      `rejected`/`wontfix`/`superseded`/`duplicate`) — wins over everything
- *      below.
+ *      below, INCLUDING a resolves-edge. A hand-recorded terminal verdict is
+ *      final by construction; nothing computed can override it.
  *   2. `fixed` — at least one `resolvesInEdges` entry whose joined
  *      `sourceDocs` status is `active` or `archived`.
  *   3. `resolving` — at least one `resolvesInEdges` entry exists, but no
  *      joined source doc is terminal. (2) and (3) together mean ANY
- *      `resolvesInEdges` entry outranks both (4) and (5) below — a fix
- *      already in flight is more informative than either signal.
- *   4. `rejected` — no `resolvesInEdges` entry, and `hasRecordedReviewRejection`
- *      is `true` (a `ReviewService.reject` audit entry exists for this doc;
- *      SPEC-005 never moves the doc's own status off `draft`, so this
- *      boolean is the ONLY signal for this case — see this module's header).
- *   5. `closed` — no `resolvesInEdges` entry, no recorded review rejection,
- *      and `issue.status === "archived"`.
- *   6. `open` — none of the above.
+ *      `resolvesInEdges` entry outranks everything below, INCLUDING an
+ *      explicit `adopted` state (§M7) — a fix already in flight, even one not
+ *      yet landed, is more informative than an adoption placeholder or either
+ *      of the fallback signals in (5)/(6). This is WHY `adopted` sits below
+ *      resolves-edge computation rather than above it like the terminal
+ *      states in (1): a `resolves` edge added to a report that was
+ *      `adopted` earlier must be able to promote it to `fixed`/`resolving`
+ *      without anyone re-running `lore issue resolve` (AC-DC-16's dangling-
+ *      claim census depends on exactly this — a report cannot be BOTH
+ *      genuinely fixed and counted as an abandoned adoption).
+ *   4. `adopted` — an explicit `adopted` state (§M7) at
+ *      `extra.issue_report.resolution.state`, and no `resolvesInEdges` entry
+ *      exists. Non-terminal: does NOT join {@link TERMINAL_ISSUE_RESOLUTIONS},
+ *      so `--resolved`'s complement keeps showing it as unfinished.
+ *   5. `rejected` — no `resolvesInEdges` entry, no explicit `adopted` state,
+ *      and `hasRecordedReviewRejection` is `true` (a `ReviewService.reject`
+ *      audit entry exists for this doc; SPEC-005 never moves the doc's own
+ *      status off `draft`, so this boolean is the ONLY signal for this case —
+ *      see this module's header).
+ *   6. `closed` — no `resolvesInEdges` entry, no explicit `adopted` state, no
+ *      recorded review rejection, and `issue.status === "archived"`.
+ *   7. `open` — none of the above.
  *
  * @param issue - the issue task; only `extra` and (optionally) `status` are read
  * @param resolvesInEdges - every `resolves` edge whose `to` is this issue
@@ -429,6 +704,16 @@ function readExplicitResolutionState(extra: unknown): ExplicitTerminalResolution
  *   computeIssueResolution({extra: {}, status: "archived"}, [], []) // => "closed"
  *   computeIssueResolution({extra: {}, status: "archived"}, [], [], true) // => "rejected"
  *     // (recorded review rejection outranks the archived-doc-status signal)
+ *   computeIssueResolution(
+ *     {extra: {issue_report: {resolution: {state: "adopted", adopted_by: "task-x"}}}},
+ *     [],
+ *     [],
+ *   ) // => "adopted" (no resolves edge yet)
+ *   computeIssueResolution(
+ *     {extra: {issue_report: {resolution: {state: "adopted", adopted_by: "task-x"}}}},
+ *     [{from_id: "spec-1"}],
+ *     [{id: "spec-1", status: "archived"}],
+ *   ) // => "fixed" (a fix actually landed — outranks the adoption placeholder)
  */
 export function computeIssueResolution(
   issue: IssueTaskLike,
@@ -437,25 +722,36 @@ export function computeIssueResolution(
   hasRecordedReviewRejection = false,
 ): IssueResolution {
   const explicitState = readExplicitResolutionState(issue.extra);
-  if (explicitState !== undefined) {
+
+  // Rule 1 — an explicit TERMINAL state wins over everything, including a
+  // resolves-edge. `adopted` is deliberately excluded from this early return:
+  // it falls through to rule 2 so a later resolves-edge can still promote it.
+  if (explicitState !== undefined && explicitState !== "adopted") {
     return explicitState;
   }
 
-  if (resolvesInEdges.length === 0) {
-    if (hasRecordedReviewRejection) {
-      return "rejected";
-    }
-    if (issue.status === "archived") {
-      return "closed";
-    }
-    return "open";
+  // Rule 2/3 — ANY resolves-edge outranks `adopted` (rule 4) and the
+  // fallback signals below it (rules 5/6): a fix in flight is more
+  // informative than an adoption placeholder.
+  if (resolvesInEdges.length > 0) {
+    const statusBySourceId = new Map(sourceDocs.map((doc) => [doc.id, doc.status]));
+    const hasTerminalSource = resolvesInEdges.some((edge) => {
+      const status = statusBySourceId.get(edge.from_id);
+      return status === "active" || status === "archived";
+    });
+    return hasTerminalSource ? "fixed" : "resolving";
   }
 
-  const statusBySourceId = new Map(sourceDocs.map((doc) => [doc.id, doc.status]));
-  const hasTerminalSource = resolvesInEdges.some((edge) => {
-    const status = statusBySourceId.get(edge.from_id);
-    return status === "active" || status === "archived";
-  });
+  // Rule 4 — the explicit `adopted` placeholder, no fix in flight.
+  if (explicitState === "adopted") {
+    return "adopted";
+  }
 
-  return hasTerminalSource ? "fixed" : "resolving";
+  if (hasRecordedReviewRejection) {
+    return "rejected";
+  }
+  if (issue.status === "archived") {
+    return "closed";
+  }
+  return "open";
 }

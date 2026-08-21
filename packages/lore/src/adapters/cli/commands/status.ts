@@ -161,6 +161,7 @@ import { renderExemptPlansSection } from "../../../flows/status-prd-sync-flow.js
 import {
   computeIssueResolution,
   hasIssueReport,
+  isDanglingAdoption,
   type ResolutionSourceDocLike,
   type ResolvesInEdgeLike,
 } from "../../../service/issue-resolution.js";
@@ -727,6 +728,82 @@ async function collectCodeAnchorSpecMembers(
 }
 
 /**
+ * The MEMBER LIST behind `lore status --json`'s `adopted_abandoned_count`
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16) —
+ * every filed issue report `isDanglingAdoption` (`service/issue-resolution.js`,
+ * the ONE judgment this function defers to rather than re-deriving) rules a
+ * DANGLING adoption. This function's only job is assembling that predicate's
+ * two inputs per report, both read fresh (never cached from write time,
+ * because the pointer must "stay honest after the fact"):
+ *
+ *   - `computedResolution` — `computeIssueResolution` over the report's
+ *     `extra` plus its CURRENT `resolves` in-edges (the SAME per-doc
+ *     derivation `collectCodeAnchorSpecMembers`'s sibling read surfaces use).
+ *     A report a real fix has since landed on computes `fixed`/`resolving`,
+ *     not `adopted`, EVEN THOUGH its stored `resolution.state` field still
+ *     literally says `adopted` — `isDanglingAdoption`'s own JSDoc explains why
+ *     that is correct, not a bug.
+ *   - `ownerStatus` — the CURRENT lifecycle status of the doc
+ *     `resolution.adopted_by` names, or `undefined` when that pointer is
+ *     absent (malformed/legacy `extra`) or no longer resolves (the owner doc
+ *     was deleted).
+ *
+ * Same "N candidates -> N per-doc `get()` calls" CLI-scale trade-off
+ * `commands/issues.ts::readLocalRows` already documents for the identical
+ * resolves-edge read.
+ *
+ * @param app - a wired `App` instance
+ * @returns sorted slugs of every dangling adoption; `adopted_abandoned_count`
+ *   is this list's `.length` at both the `--json` and the `--enumerate` surface
+ */
+async function collectAdoptedAbandonedMembers(
+  app: ReturnType<typeof loadLoreApp>["app"],
+): Promise<Result<string[], LoreError>> {
+  const listResult = await app.corpusService.listFull({ type: "task" });
+  if (!listResult.ok) return listResult;
+
+  const issueTasks = listResult.value.docs.filter((d) => hasIssueReport(d.extra));
+  const members: string[] = [];
+
+  for (const task of issueTasks) {
+    const getResult = await app.corpusService.get(task.id);
+    // reason: a task that matched listFull() but vanished before this
+    // per-doc get() (deleted between the two calls) degrades to "excluded
+    // from this census" rather than aborting the whole command — the same
+    // graceful-partial-result shape `readLocalRows` accepts for its own
+    // per-doc lookup loop.
+    if (!getResult.ok) continue;
+
+    const resolvesInEdges = getResult.value.navigation.related.filter((r) => r.link_type === "resolves");
+    const computed = computeIssueResolution(
+      task,
+      resolvesInEdges.map((r) => ({ from_id: r.id })),
+      resolvesInEdges.map((r) => ({ id: r.id, status: r.status })),
+    );
+
+    const issueReport = task.extra["issue_report"] as Record<string, unknown> | undefined;
+    const resolution = issueReport?.["resolution"] as Record<string, unknown> | undefined;
+    const adoptedBy = typeof resolution?.["adopted_by"] === "string" ? (resolution["adopted_by"] as string) : undefined;
+    // reason: `adopted_by` is REQUIRED at write time (AC-DC-15) — an absent
+    // value here means a malformed/legacy `extra`, not a live report; the
+    // owner-status lookup below degrades to `undefined` in that case, which
+    // `isDanglingAdoption` already treats as "not abandoned" (never crash).
+    const ownerResult = adoptedBy === undefined ? undefined : await app.corpusService.get(adoptedBy);
+    // reason: the owner doc no longer resolves (deleted, or never declared) —
+    // cannot assert "archived/deprecated" about a doc that does not exist;
+    // `isDanglingAdoption` treats an `undefined` owner status as excluded.
+    const ownerStatus = ownerResult?.ok === true ? ownerResult.value.doc.status : undefined;
+
+    // §M7, AC-DC-16 — the ONE dangling-claim judgment, never re-derived here.
+    if (!isDanglingAdoption({ computedResolution: computed, ownerStatus })) continue;
+
+    members.push(task.slug);
+  }
+
+  return ok(members.sort());
+}
+
+/**
  * SSOT registry mapping every COUNT field `lore status --json` reports to the
  * function that ENUMERATES its members (task-raise-the-evidence-tail-guard-s-
  * predicate-to-its-own, AC-FR-5). `lore status --enumerate <field>` (below) and
@@ -765,6 +842,7 @@ const COUNT_FIELD_ENUMERATORS: Record<
     return ok(membersResult.value.selfReport);
   },
   code_anchor_specs: async (app) => collectCodeAnchorSpecMembers(app),
+  adopted_abandoned_count: async (app) => collectAdoptedAbandonedMembers(app),
 };
 
 /**
@@ -928,7 +1006,7 @@ export default defineCommand({
     enumerate: {
       type: "string",
       description:
-        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, code_anchor_specs). Unknown field → exit 4, naming it and the known set.",
+        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
     },
   },
   async run({ args }) {
@@ -1526,6 +1604,19 @@ export default defineCommand({
       const captureSourceRunnerCount = captureSourceMembersResult.value.runner.length;
       const captureSourceSelfReportCount = captureSourceMembersResult.value.selfReport.length;
 
+      // spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16
+      // — corpus-wide count of DANGLING `adopted` claims (owner archived/
+      // deprecated without the defect ever being fixed). REPORT-ONLY, same
+      // discipline as every other count on this branch. The count is this
+      // list's `.length`, never a separately-tallied counter (AC-FR-5).
+      const adoptedAbandonedMembersResult = await collectAdoptedAbandonedMembers(app);
+      if (!adoptedAbandonedMembersResult.ok) {
+        process.stderr.write(formatError(adoptedAbandonedMembersResult.error) + "\n");
+        process.exitCode = exitCode(adoptedAbandonedMembersResult.error);
+        return;
+      }
+      const adoptedAbandonedCount = adoptedAbandonedMembersResult.value.length;
+
       // spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor (AC-BFI-1)
       // — WHICH BINARY produced everything above. Ambient-only (no corpus, no
       // git spawn): it reports what this binary CARRIES; comparing that against
@@ -1551,6 +1642,7 @@ export default defineCommand({
                 unredeemed_allow_missing_path_count: unredeemedAllowMissingPathCount,
                 capture_source_runner_count: captureSourceRunnerCount,
                 capture_source_self_report_count: captureSourceSelfReportCount,
+                adopted_abandoned_count: adoptedAbandonedCount,
                 // ALWAYS present, `null` included (same convention as
                 // `invalid_docs`) — an omitted key would let a consumer read
                 // "absent" as "this binary is fine".
@@ -1658,6 +1750,18 @@ export default defineCommand({
         `Capture source: ${captureSourceRunnerCount} runner-captured / ${captureSourceSelfReportCount} ` +
           "self-reported (across every task/phase evidence entry — report-only, see " +
           "spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)",
+      );
+
+      // spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16
+      // — printed UNCONDITIONALLY (including 0), same "never a silent count"
+      // discipline as every other count above: abandonment must stay visible
+      // even when nothing is dangling, or the count itself becomes the kind of
+      // silent gap §M7 exists to close. Enumerate exact members via
+      // `lore status --enumerate adopted_abandoned_count`. REPORT-ONLY.
+      console.log(
+        `Adopted-and-abandoned reports: ${adoptedAbandonedCount} ` +
+          "('adopted' claims whose owner plan/task reached archived/deprecated with the report still carrying " +
+          "no terminal resolution — report-only, see spec-the-defect-channel-cannot-be-honestly-maintained-an §M7)",
       );
 
       // spec-bootstrap-fixpoint-integrity-binary-provenance-an-anchor (AC-BFI-1)

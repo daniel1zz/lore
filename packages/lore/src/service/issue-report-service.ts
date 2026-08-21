@@ -18,10 +18,21 @@
  *
  * Invariants:
  *   - The step-6 cap counts COMPUTED RESOLUTION, never raw lifecycle status
- *     (§M1). `countOpenReports` supplies candidates; each candidate's
- *     `port.getResolution` result is checked against the shared
- *     `TERMINAL_ISSUE_RESOLUTIONS` SSOT, and only non-terminal candidates hold a
- *     slot. ⛔ A resolution READ FAILURE keeps its slot (fail closed) and is
+ *     (§M1/§M7). `countOpenReports` supplies candidates; each candidate's
+ *     `port.getResolution` result frees its slot when it is a member of the
+ *     shared `TERMINAL_ISSUE_RESOLUTIONS` SSOT (AC-DC-9's pinned import — this
+ *     narrowing is one of that criterion's two named consumers, alongside
+ *     `lore issues`' listing filter) OR when it is §M7's `adopted` (a single
+ *     sentinel comparison, checked SEPARATELY rather than folded into the
+ *     terminal set — `adopted` deliberately stays OUT of that set so
+ *     `--resolved`'s complement keeps showing it as unfinished, AC-DC-14(a)).
+ *     Together the two checks realise the "terminal plus adopted" seam
+ *     `QUOTA_FREEING_RESOLUTIONS` (`issue-resolution.js`) declares canonically
+ *     for AC-DC-14(b)'s test to drive this exact behaviour against, state by
+ *     state — that export exists for the test, not consumed here, precisely
+ *     so this file keeps its AC-DC-9-pinned direct `TERMINAL_ISSUE_RESOLUTIONS`
+ *     import rather than swapping it for a same-shaped but differently-named
+ *     seam. ⛔ A resolution READ FAILURE keeps its slot (fail closed) and is
  *     reported in both observable places — never treated as "resolved".
  *   - ZERO writes before `createDraft` (step 8) succeeds — every check
  *     before it is read-only or pure. `receipts.append` (step 9) runs
@@ -606,6 +617,16 @@ export class IssueReportService {
         // need triage, so it holds no slot — a FACT, not a fallback.
         if (live === null) continue;
         if (TERMINAL_ISSUE_RESOLUTIONS.has(live.resolution)) continue;
+        // §M7, AC-DC-14(b): `adopted` ALSO frees this slot, WITHOUT joining
+        // the terminal set itself — folding it into `TERMINAL_ISSUE_RESOLUTIONS`
+        // would silently change what `--resolved`'s complement shows (AC-DC-9
+        // pins that set's sole construction site AND that both this narrowing
+        // and the `lore issues` listing filter consume it unmodified). This is
+        // a single sentinel comparison, never a re-typed member LIST — the
+        // canonical "quota-freeing = terminal plus adopted" declaration lives
+        // in `QUOTA_FREEING_RESOLUTIONS` (`issue-resolution.js`), which
+        // AC-DC-14's test drives this exact behaviour against, state by state.
+        if (live.resolution === "adopted") continue;
         blocking.push({ id, resolution: live.resolution });
       }
 
