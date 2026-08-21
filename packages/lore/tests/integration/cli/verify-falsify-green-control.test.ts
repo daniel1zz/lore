@@ -281,62 +281,71 @@ describe("AC-FR-12 — SURFACE + PERSISTENCE: lore verify --falsify green-contro
     }
   });
 
-  it("AC-FR-12: exit 3, message names the green control, and the persisted row reads back inconclusive with no attestation", () => {
-    const acId = "AC-FR-12-GREEN";
-    const prdSlug = createPrd(tmpDir, "Falsify Green Control PRD");
-    const specSlug = createSpec(tmpDir, "Falsify Green Control Spec", prdSlug);
-    // command depends on a file that will be created AFTER this fixture's one commit
-    // and NEVER `git add`-ed — see the file header for why this reliably makes the
-    // scratch worktree's copy of the command fail (it never carries untracked content).
-    declareScriptAcWithFalsifier(tmpDir, specSlug, acId, "cat dependency.txt", {
-      path: "dependency.txt",
-      find: "hello",
-      replace: "goodbye",
-      exitCode: 1,
-    });
-    const planSlug = createPlan(tmpDir, "Falsify Green Control Plan", specSlug);
-    const taskSlug = createTask(tmpDir, planSlug, "Falsify Green Control Task", [acId]);
+  it(
+    "AC-FR-12: exit 3, message names the green control, and the persisted row reads back inconclusive with no attestation",
+    // reason: 20s budget (spec-a-test-case-s-timeout-budget-must-be-declared-when-its D1) —
+    // this test spawns 7 real `bun run` CLI subprocesses (create prd/spec/plan/task, ac
+    // add, verify, get) plus 2 git commands; mirrors `verify.test.ts`'s AC-VRF-10.N1 own
+    // 15s budget for its comparable 9-subprocess fixture, sized up slightly for the extra
+    // `git init`/`git add`/`git commit` calls this fixture also performs.
+    { timeout: 20_000 },
+    () => {
+      const acId = "AC-FR-12-GREEN";
+      const prdSlug = createPrd(tmpDir, "Falsify Green Control PRD");
+      const specSlug = createSpec(tmpDir, "Falsify Green Control Spec", prdSlug);
+      // command depends on a file that will be created AFTER this fixture's one commit
+      // and NEVER `git add`-ed — see the file header for why this reliably makes the
+      // scratch worktree's copy of the command fail (it never carries untracked content).
+      declareScriptAcWithFalsifier(tmpDir, specSlug, acId, "cat dependency.txt", {
+        path: "dependency.txt",
+        find: "hello",
+        replace: "goodbye",
+        exitCode: 1,
+      });
+      const planSlug = createPlan(tmpDir, "Falsify Green Control Plan", specSlug);
+      const taskSlug = createTask(tmpDir, planSlug, "Falsify Green Control Task", [acId]);
 
-    // Commit the corpus's current state — `dependency.txt` does not exist on disk yet,
-    // so it is absent from HEAD entirely (not merely uncommitted).
-    execFileSync("git", ["add", "-A"], { cwd: tmpDir });
-    execFileSync("git", [...GIT_AUTHOR_ARGS, "commit", "-q", "-m", "initial corpus state"], { cwd: tmpDir });
+      // Commit the corpus's current state — `dependency.txt` does not exist on disk yet,
+      // so it is absent from HEAD entirely (not merely uncommitted).
+      execFileSync("git", ["add", "-A"], { cwd: tmpDir });
+      execFileSync("git", [...GIT_AUTHOR_ARGS, "commit", "-q", "-m", "initial corpus state"], { cwd: tmpDir });
 
-    // Create it now, and deliberately never `git add` it — untracked.
-    writeFileSync(join(tmpDir, "dependency.txt"), "hello\n");
+      // Create it now, and deliberately never `git add` it — untracked.
+      writeFileSync(join(tmpDir, "dependency.txt"), "hello\n");
 
-    // ⛔ Measured WITHOUT a pipe — `RunResult.exitCode` comes straight from
-    // `spawnSync`'s own `.status`, never through a shell pipeline that would report a
-    // downstream command's exit status instead of this one's.
-    const result = runLore(
-      ["verify", planSlug, "--task", taskSlug, "--falsify", acId, "--by", "falsify-oracle-test"],
-      tmpDir,
-    );
+      // ⛔ Measured WITHOUT a pipe — `RunResult.exitCode` comes straight from
+      // `spawnSync`'s own `.status`, never through a shell pipeline that would report a
+      // downstream command's exit status instead of this one's.
+      const result = runLore(
+        ["verify", planSlug, "--task", taskSlug, "--falsify", acId, "--by", "falsify-oracle-test"],
+        tmpDir,
+      );
 
-    // RED (a) — an EXACT equality, not `!== 0` / truthy: a CLI branch hardcoding
-    // "success, exit 0" fails this immediately.
-    expect(result.exitCode).toBe(3);
-    expect(result.stdout).toContain("Green control failed");
-    expect(result.stdout).toContain(acId);
-    expect(result.stdout).toContain("result:inconclusive");
-    expect(result.stdout).toContain("no attestation recorded");
+      // RED (a) — an EXACT equality, not `!== 0` / truthy: a CLI branch hardcoding
+      // "success, exit 0" fails this immediately.
+      expect(result.exitCode).toBe(3);
+      expect(result.stdout).toContain("Green control failed");
+      expect(result.stdout).toContain(acId);
+      expect(result.stdout).toContain("result:inconclusive");
+      expect(result.stdout).toContain("no attestation recorded");
 
-    // Read the row back out of the corpus via a SEPARATE real `lore get --json`
-    // subprocess call — never an injected recorder spy.
-    const readBack = runLore(["get", taskSlug, "--json"], tmpDir);
-    expect(readBack.exitCode).toBe(0);
-    const parsed = JSON.parse(readBack.stdout) as { data: { doc: DocRecord } };
-    const evidence = extractEvidence(parsed.data.doc);
+      // Read the row back out of the corpus via a SEPARATE real `lore get --json`
+      // subprocess call — never an injected recorder spy.
+      const readBack = runLore(["get", taskSlug, "--json"], tmpDir);
+      expect(readBack.exitCode).toBe(0);
+      const parsed = JSON.parse(readBack.stdout) as { data: { doc: DocRecord } };
+      const evidence = extractEvidence(parsed.data.doc);
 
-    // RED (b) — a runner that skipped the record entirely leaves `evidence` with no
-    // matching row; `.find` returns `undefined` and `toBeDefined()` fails loud.
-    const row = evidence.find((e) => e.ac_ref === acId);
-    expect(row).toBeDefined();
-    expect(row?.result).toBe("inconclusive");
-    expect(row?.attestation).toBeUndefined();
-    expect(row?.capture_source).toBe("runner");
-    expect(row?.recorded_by).toBe("falsify-oracle-test");
-  });
+      // RED (b) — a runner that skipped the record entirely leaves `evidence` with no
+      // matching row; `.find` returns `undefined` and `toBeDefined()` fails loud.
+      const row = evidence.find((e) => e.ac_ref === acId);
+      expect(row).toBeDefined();
+      expect(row?.result).toBe("inconclusive");
+      expect(row?.attestation).toBeUndefined();
+      expect(row?.capture_source).toBe("runner");
+      expect(row?.recorded_by).toBe("falsify-oracle-test");
+    },
+  );
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
