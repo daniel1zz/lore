@@ -819,6 +819,9 @@ describe("AC-FR-11 — green-control", () => {
       expect(sha256OfFile(targetPath)).toBe(hashBefore);
       expect(gitStatusPorcelain(repoRoot)).toBe(statusBefore);
     },
+    // reason: 3 spawn-helper calls (spec-a-test-case-s-timeout-budget-must-be-declared-when-its D1
+    // judges DECLARATION, never the number); observed runtime is ~1.8s.
+    { timeout: 20_000 },
   );
 
   it(
