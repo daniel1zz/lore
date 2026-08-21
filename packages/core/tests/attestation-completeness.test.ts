@@ -45,6 +45,10 @@ import {
   commandRunsFileUnfiltered,
   findDiscoveryRefusal,
 } from "../src/attestation-completeness.js";
+import {
+  extractTestFileTokens,
+  classifyCommandSegments,
+} from "../src/oracle-file-existence.js";
 
 describe("countExplicitPathArgs", () => {
   it("HAPPY: counts the literal AC-060-7 three-path command as 3", () => {
@@ -89,6 +93,86 @@ describe("countExplicitPathArgs", () => {
   });
 });
 
+// ─── task-promote-splitcommandsegments-to-the-one-segmentation-seam ────────
+// ─── AC-061-18: path extraction is scoped to runner segments, never the ────
+// ─── whole chain ─────────────────────────────────────────────────────────
+//
+// Both `countExplicitPathArgs` (this file's module) and `extractTestFileTokens`
+// (`../src/oracle-file-existence.js`) now split a command via the ONE shared
+// `splitCommandSegments` seam and classify each segment via
+// `classifyCommandSegment` before extracting anything from it — a segment
+// that is not a recognised runner invocation contributes NO path tokens,
+// and it is reported as `"unclassified"` (via `classifyCommandSegments`)
+// rather than silently folded into an aggregate zero.
+//
+// RED (both consumers, named explicitly per the AC): revert either
+// `countExplicitPathArgs` or `extractTestFileTokens` to a flat, unsegmented
+// scan over the raw command string, and the corresponding case below fails
+// by re-admitting the phantom token from the non-runner segment (the
+// `test -f`/`echo` cases assert exact counts/arrays, not just "some value" —
+// a flat scan produces a DIFFERENT, specific wrong answer, not merely "not
+// this one").
+describe("runner-segment-scope", () => {
+  it("HAPPY: countExplicitPathArgs never counts a path-shaped token sitting in a non-runner `test -f` segment", () => {
+    const command = "test -f packages/x.test.ts && bun test packages/y.test.ts";
+    // reason: pre-fix (flat tokenizeCommand over the whole raw string) this
+    // returned 2 — both `packages/x.test.ts` (from the `test -f` shell
+    // builtin, not a runner) and `packages/y.test.ts` (the real bun test
+    // argument) were counted as declared paths.
+    expect(countExplicitPathArgs(command)).toBe(1);
+  });
+
+  it("HAPPY: extractTestFileTokens never extracts a bare test basename mentioned only in an echo's success prose", () => {
+    const command =
+      "bun test packages/x/real.bun.test.ts && echo 'ran real.bun.test.ts successfully'";
+    // reason: pre-fix (a single `command.match(...)` over the raw string)
+    // this returned BOTH tokens — the echo's bare basename was extracted as
+    // if it were a second declared path, which is the exact AC-061-20/D8 gap
+    // 8 shape (measured 2026-08-19: a real, existing integration test path
+    // was refused solely because its own success echo also spelled its
+    // basename).
+    expect(extractTestFileTokens(command)).toEqual(["packages/x/real.bun.test.ts"]);
+  });
+
+  it("NEGATIVE: a chain of ONLY non-runner segments (git grep / test builtins) never contributes a path token to either extractor", () => {
+    const command =
+      '! git grep -qI "packages/ghost.test.ts" -- . && test -f packages/other.test.ts';
+    expect(countExplicitPathArgs(command)).toBe(0);
+    expect(extractTestFileTokens(command)).toEqual([]);
+  });
+
+  it("BOUNDARY: a runner segment that itself declares zero paths (`bun run typecheck`) is NOT the same state as an unclassified segment", () => {
+    const command = "echo 'preflight' && bun run typecheck";
+    const classified = classifyCommandSegments(command);
+    expect(classified).toHaveLength(2);
+    expect(classified[0]?.runner).toBe("unclassified");
+    expect(classified[1]?.runner).toBe("bun-run");
+    // Both segments contribute 0 declared paths, but for DIFFERENT reasons —
+    // the echo segment is not a runner at all, `bun run typecheck` is a
+    // recognised runner invocation that simply names no path.
+    expect(countExplicitPathArgs(command)).toBe(0);
+  });
+
+  it("REGRESSION: a segment whose shape is not one of the four recognised runner invocations is reported 'unclassified', never silently merged into a runner's own zero-path count", () => {
+    const command = "cd packages/lore && bun test tests/x.bun.test.ts";
+    const classified = classifyCommandSegments(command);
+    expect(classified.map((c) => c.runner)).toEqual(["unclassified", "bun-test"]);
+    // reason: this is the "never silently as zero" requirement made
+    // mechanically checkable — a caller inspecting `classified` can always
+    // tell "this module didn't recognise this segment's shape" from "this IS
+    // a runner segment that declares nothing", which an aggregate count
+    // alone (0) could never distinguish.
+  });
+
+  it("STATE (AC-060-7 shape end-to-end, REGRESSION control): the classic single-segment three-path command is UNCHANGED by segmentation", () => {
+    const command =
+      "bun run test:vitest packages/lore/tests/unit/setup-service.test.ts " +
+      "packages/lore/tests/unit/assets-ssot.test.ts " +
+      "packages/lore/tests/unit/real-setup-ports.test.ts";
+    expect(countExplicitPathArgs(command)).toBe(3);
+  });
+});
+
 describe("parseExecutedUnits", () => {
   it("HAPPY: parses a vitest single-file-passed tail to {files: 1}", () => {
     const stdout = "some preamble\n\n Test Files  1 passed (1)\n Tests  4 passed (4)\n";
@@ -111,6 +195,54 @@ describe("parseExecutedUnits", () => {
 
   it("NEGATIVE: empty stdout returns null", () => {
     expect(parseExecutedUnits("")).toBeNull();
+  });
+});
+
+// ─── task-promote-splitcommandsegments-to-the-one-segmentation-seam ────────
+// ─── AC-061-19: executed-unit credit sums EVERY recognised runner summary ──
+// ─── present in one captured stdout ─────────────────────────────────────
+//
+// Pre-fix, `parseExecutedUnits` tried the bun pattern and RETURNED
+// immediately on a match, never even looking for vitest's — a stdout
+// carrying both summaries (this repo's genuinely-dual-runner shape:
+// `.bun.test.ts` under `bun test`, everything else under vitest) credited
+// only the first-tried runner.
+//
+// RED: restore the first-match-wins `if (bunMatch !== null) { return ...; }`
+// / `if (vitestMatch !== null) { return ...; }` shape, and the two-summary
+// case below reports `{files: 1}` (bun's share alone) where 2 files
+// genuinely ran — the exact under-credit this AC closes.
+describe("multi-runner-credit", () => {
+  it("HAPPY: a stdout carrying BOTH a vitest and a bun summary sums files and tests across both, not first-match-wins", () => {
+    const stdout =
+      " Test Files  1 passed (1)\n      Tests  16 passed (16)\n" +
+      "Ran 18 tests across 1 files. [0.4s]\n";
+    // reason: pre-fix, the bun pattern is tried FIRST and matches here, so
+    // this returned {files: 1, tests: 18} — vitest's file and its 16
+    // matched cases were silently dropped.
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 2, tests: 34 });
+  });
+
+  it("STATE (measured 2026-08-19 shape): judgeCompleteness reads the SUMMED total, crediting both runners against 2 declared paths as complete", () => {
+    const stdout =
+      " Test Files  1 passed (1)\n      Tests  16 passed (16)\n" +
+      "Ran 18 tests across 1 files. [0.4s]\n";
+    const executedUnits = parseExecutedUnits(stdout);
+    // reason: pre-fix this was under_match (executedUnits.files === 1 <
+    // declaredPaths === 2) — the incident's exact
+    // "executed_files: 1, declared_paths: 2, completeness: under_match"
+    // shape, with both files having genuinely run green.
+    expect(judgeCompleteness({ declaredPaths: 2, executedUnits })).toBe("complete");
+  });
+
+  it("REGRESSION CONTROL: a single vitest-only summary stays byte-identical to pre-fix behavior", () => {
+    const stdout = "some preamble\n\n Test Files  1 passed (1)\n Tests  4 passed (4)\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 1, tests: 4 });
+  });
+
+  it("REGRESSION CONTROL: a single bun-only summary stays byte-identical to pre-fix behavior", () => {
+    const stdout = "...\nRan 963 tests across 70 files. [1.2s]\n";
+    expect(parseExecutedUnits(stdout)).toEqual({ files: 70, tests: 963 });
   });
 });
 

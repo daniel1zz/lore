@@ -14,8 +14,21 @@
  * Public surface:
  *   - FileExistsPort — the injectable filesystem-existence check (real
  *     caller: `fs.existsSync`; tests inject a fake).
+ *   - splitCommandSegments(command) — the ONE segmentation seam (task-
+ *     promote-splitcommandsegments-to-the-one-segmentation-seam): splits a
+ *     shell command chain into its `&&`/`;`-separated segments, quote-aware.
+ *     Every consumer that needs to reason about "which part of this chain is
+ *     the actual test-runner invocation" calls THIS, never a second parser —
+ *     see `classifyCommandSegment`'s own header for why a second walker over
+ *     the unsegmented string was the root defect this promotion closes.
+ *   - classifyCommandSegment(segment) / classifyCommandSegments(command) —
+ *     labels one (or every) `&&`/`;` segment as a recognised test-runner
+ *     invocation or `"unclassified"` — the shared predicate both
+ *     `extractTestFileTokens` (this file) and `countExplicitPathArgs`
+ *     (`attestation-completeness.ts`) scope their path extraction to, so
+ *     "what counts as a runner segment" has exactly one definition.
  *   - extractTestFileTokens(command) — pull test-file-like path tokens out of
- *     a shell command string.
+ *     a shell command string, scoped to its recognised runner segments only.
  *   - extractCdPrefixTarget(command) — derive the working directory a
  *     command's test-file tokens resolve against: the LAST `cd <path>`
  *     segment of the `&&`/`;` chain that precedes the test invocation, if any.
@@ -37,6 +50,17 @@
  *     names nothing checkable is never blocked by anything built on top of
  *     this primitive (both consumers' own scope gates decide separately
  *     whether an EMPTY result should refuse or pass through).
+ *   - `extractTestFileTokens` scans ONLY the segments `classifyCommandSegment`
+ *     recognises as a runner invocation (task-promote-splitcommandsegments-
+ *     to-the-one-segmentation-seam, AC-061-18/20/21) — a path-shaped token
+ *     sitting in an `echo`/`cd`/`git grep`/etc. segment is prose or a shell
+ *     builtin argument, never a test-file argument a runner will receive, and
+ *     is NEVER extracted regardless of its shape. A segment that is not a
+ *     recognised runner invocation is `classifyCommandSegment`'s
+ *     `"unclassified"`, never silently treated as "a runner that happens to
+ *     declare zero paths" — the two are observably different states so a
+ *     caller can tell "nothing to see here" from "this module didn't
+ *     recognise this shape at all".
  *   - `findMissingOracleFiles` is permissive about WHERE a named file lives
  *     (cd-derived root, bare cwd, any `additionalCwds`, `corpusRoot`) and
  *     strict about WHETHER it exists anywhere plausible — a token counts as
@@ -73,15 +97,18 @@ const TEST_FILE_TOKEN_PATTERN =
   /[^\s"'`]+\.(?:bun\.test\.ts|test\.tsx|test\.ts|spec\.ts)\b/g;
 
 /**
- * Extracts every test-file-like path token from a raw shell command string.
+ * Extracts every test-file-like path token from a raw shell command string,
+ * scanning ONLY the `&&`/`;` segments {@link classifyCommandSegment}
+ * recognises as a test-runner invocation.
  *
- * Deliberately naive tokenization — no shell-grammar parsing. A flag value
- * that happens to not end in a recognized test-file suffix (e.g. `-t "AC-1
- * happy path"`) never matches, since the pattern requires the suffix. A
- * command referencing no recognizable test file returns `[]` — this is a
- * deliberate fail-open (see this module's own Invariants): a command with no
- * extractable token cannot be checked for existence, so neither consumer's
- * precheck blocks it. This is the EXACT structural blind spot
+ * Deliberately naive tokenization within a recognised segment — no
+ * shell-grammar parsing. A flag value that happens to not end in a
+ * recognized test-file suffix (e.g. `-t "AC-1 happy path"`) never matches,
+ * since the pattern requires the suffix. A command referencing no
+ * recognizable test file returns `[]` — this is a deliberate fail-open (see
+ * this module's own Invariants): a command with no extractable token cannot
+ * be checked for existence, so neither consumer's precheck blocks it. This is
+ * the EXACT structural blind spot
  * spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a's AC-OX-4
  * pins by name: `bun run test`, `bun run typecheck`, a `test $(grep -rln ...
  * | wc -l) -eq 0` form, a `bun run dev -- setup --dry-run ...` form, and a
@@ -90,9 +117,23 @@ const TEST_FILE_TOKEN_PATTERN =
  * before it) can never refuse them — asserted explicitly, never hidden
  * behind a green run.
  *
+ * A SECOND, independent reason a token now goes unextracted (task-promote-
+ * splitcommandsegments-to-the-one-segmentation-seam, AC-061-18/20): a segment
+ * that is not a recognised runner invocation — a `cd`, an `echo`, a `git
+ * grep`, a `test -f` shell-builtin check — contributes NO tokens even when
+ * its text happens to contain a `.test.ts`-suffixed substring (a bare test
+ * basename mentioned inside a human-readable success `echo` is prose, not an
+ * argument any runner will ever receive). Pre-fix, this function scanned the
+ * WHOLE raw command string with one global regex, so that basename was
+ * extracted as if it were a real path argument and then reported missing by
+ * `findMissingOracleFiles` — measured 2026-08-19, `AcService.addCriterion`
+ * refused a declaration naming a real, existing integration test solely
+ * because its own success echo also spelled that file's basename.
+ *
  * @param command - the exact command string recorded via `lore evidence --command`
  *   or declared via `lore ac add`/`lore ac set --command`
  * @returns de-duplicated, order-preserving list of path-like test-file tokens
+ *   found in the command's recognised runner segment(s) only
  * @example
  *   extractTestFileTokens("bunx vitest run packages/lore/tests/foo.test.ts")
  *   // => ["packages/lore/tests/foo.test.ts"]
@@ -100,15 +141,25 @@ const TEST_FILE_TOKEN_PATTERN =
  *   // => ["packages/x.test.ts"]
  *   extractTestFileTokens("bun run typecheck")
  *   // => []
+ * @example
+ *   // the echo segment is NOT a runner invocation — its basename is prose,
+ *   // never extracted, even though it matches the test-file suffix pattern.
+ *   extractTestFileTokens(
+ *     "bun test packages/x/real.bun.test.ts && echo 'ran real.bun.test.ts'",
+ *   );
+ *   // => ["packages/x/real.bun.test.ts"]
  */
 export function extractTestFileTokens(command: string): string[] {
-  const matches = command.match(TEST_FILE_TOKEN_PATTERN) ?? [];
   const seen = new Set<string>();
   const tokens: string[] = [];
-  for (const token of matches) {
-    if (seen.has(token)) continue;
-    seen.add(token);
-    tokens.push(token);
+  for (const { segment, runner } of classifyCommandSegments(command)) {
+    if (runner === "unclassified") continue;
+    const matches = segment.match(TEST_FILE_TOKEN_PATTERN) ?? [];
+    for (const token of matches) {
+      if (seen.has(token)) continue;
+      seen.add(token);
+      tokens.push(token);
+    }
   }
   return tokens;
 }
@@ -144,11 +195,21 @@ function stripWrappingQuotes(token: string): string {
  * Quote characters are kept in the emitted segment text so the cd-segment
  * matcher's own quote alternatives still see (and strip) them.
  *
+ * Promoted to a module export (task-promote-splitcommandsegments-to-the-one-
+ * segmentation-seam) so `attestation-completeness.ts`'s `countExplicitPathArgs`
+ * reuses THIS parser instead of walking the raw, unsegmented command string a
+ * second time — two independent walkers over one string are two definitions
+ * of "what counts as a path here", and pre-fix they disagreed in opposite
+ * directions (one over-counted a compound chain's shell-builtin arguments as
+ * declared test paths, the other under-counted by scanning only the first
+ * segment). This function is now the ONE place that answers "where does this
+ * command chain split".
+ *
  * @param command - the exact command string being analyzed
  * @returns the segments in source order; a command with no separator yields
  *   exactly one segment (never `[]`, even for an empty command)
  */
-function splitCommandSegments(command: string): string[] {
+export function splitCommandSegments(command: string): string[] {
   const segments: string[] = [];
   let current = "";
   let openQuote: string | null = null;
@@ -187,6 +248,109 @@ function splitCommandSegments(command: string): string[] {
 
   segments.push(current);
   return segments;
+}
+
+/**
+ * The FIVE test-runner-invocation SHAPES this repo's `script:test`/
+ * `script:e2e` acceptance-criterion commands actually declare — measured
+ * 2026-08-21 (task-promote-splitcommandsegments-to-the-one-segmentation-seam,
+ * AC-061-18) against this repo's own `package.json` scripts and its corpus's
+ * declared `verify.command` strings: `vitest run …` (with or without a
+ * leading `bunx` launcher — some declared commands omit it), `bun test …`,
+ * `bun run <script> …`, `playwright test …` (again with or without `bunx`),
+ * and a direct invocation of the compiled `dist/lore` binary itself (this
+ * repo's own dogfooding shape — SPEC-061 AC-061-9's own worked example is
+ * `./dist/lore verify plan-1 <paths…>`; {@link COMPILED_BINARY_TOKEN_PATTERN}
+ * is the SAME SSOT pattern `attestation-completeness.ts`'s
+ * `commandReferencesCompiledBinary` consumes — promoted here, not
+ * duplicated, so "does this command spawn the compiled binary" has exactly
+ * one definition). A segment matching NONE of these five is not a runner
+ * invocation at all — a `cd`, an `echo`, a `git grep`, a `test -f`
+ * shell-builtin check, or anything else — and is classified
+ * `"unclassified"`.
+ */
+export type RecognizedRunner = "vitest" | "bun-test" | "bun-run" | "playwright" | "lore-cli";
+
+/**
+ * One `&&`/`;`-split command segment ({@link splitCommandSegments}),
+ * paired with {@link classifyCommandSegment}'s verdict for it.
+ */
+export interface ClassifiedSegment {
+  readonly segment: string;
+  readonly runner: RecognizedRunner | "unclassified";
+}
+
+const VITEST_SEGMENT_PATTERN = /^\s*(?:bunx\s+)?vitest\b/;
+const BUN_TEST_SEGMENT_PATTERN = /^\s*bun\s+test\b/;
+const BUN_RUN_SEGMENT_PATTERN = /^\s*bun\s+run\s+\S+/;
+const PLAYWRIGHT_SEGMENT_PATTERN = /^\s*(?:bunx\s+)?playwright\s+test\b/;
+
+/**
+ * Matches a command token that is (or ends in) a path to the compiled
+ * `dist/lore` binary — `\b` before "dist" requires the preceding character
+ * (if any) to be a non-word character (`/`, whitespace, start-of-string), so
+ * a token like `mydist/lore-helper.ts` (no path-separator boundary before
+ * "dist") never false-matches. THE SSOT for this shape: promoted here from
+ * `attestation-completeness.ts` (task-promote-splitcommandsegments-to-the-
+ * one-segmentation-seam) once `classifyCommandSegment` needed the identical
+ * check — `attestation-completeness.ts`'s `commandReferencesCompiledBinary`
+ * now imports THIS constant rather than declaring its own copy, so "does a
+ * command reference the compiled binary" has exactly one definition despite
+ * two independent call sites (whole-command freshness-check triggering vs.
+ * per-segment runner classification).
+ */
+export const COMPILED_BINARY_TOKEN_PATTERN = /\bdist\/lore\b/;
+
+/**
+ * Classifies ONE `&&`/`;`-split command segment as a {@link RecognizedRunner}
+ * invocation, or `"unclassified"` when its shape matches none of the five
+ * (task-promote-splitcommandsegments-to-the-one-segmentation-seam, AC-061-18).
+ *
+ * `"unclassified"` is a DISTINCT verdict from "a runner segment that happens
+ * to declare zero paths" (e.g. `bun run typecheck`, which classifies as
+ * `"bun-run"`) — collapsing the two would silently fold "this module has no
+ * idea what this segment is" into the same "nothing to see here" a genuinely
+ * path-less runner invocation produces. AC-061-18 requires the opposite: a
+ * confident wrong answer (silently treating an unrecognised shape as
+ * contributing zero, indistinguishably from a recognised one) is the failure
+ * mode this guards against, not an absent one — every caller built on this
+ * function can tell the two states apart via the `runner` field.
+ *
+ * @param segment - one element of {@link splitCommandSegments}'s output —
+ *   never re-splits it further (a segment by definition contains no
+ *   unquoted `&&`/`;`)
+ * @example
+ *   classifyCommandSegment("bunx vitest run x.test.ts")
+ *   // => { segment: "bunx vitest run x.test.ts", runner: "vitest" }
+ * @example
+ *   classifyCommandSegment("./dist/lore verify plan-1 x.test.ts")
+ *   // => { segment: "./dist/lore verify plan-1 x.test.ts", runner: "lore-cli" }
+ * @example
+ *   classifyCommandSegment("echo 'ran x.test.ts'")
+ *   // => { segment: "echo 'ran x.test.ts'", runner: "unclassified" }
+ */
+export function classifyCommandSegment(segment: string): ClassifiedSegment {
+  if (VITEST_SEGMENT_PATTERN.test(segment)) return { segment, runner: "vitest" };
+  if (PLAYWRIGHT_SEGMENT_PATTERN.test(segment)) return { segment, runner: "playwright" };
+  if (BUN_TEST_SEGMENT_PATTERN.test(segment)) return { segment, runner: "bun-test" };
+  if (BUN_RUN_SEGMENT_PATTERN.test(segment)) return { segment, runner: "bun-run" };
+  if (COMPILED_BINARY_TOKEN_PATTERN.test(segment)) return { segment, runner: "lore-cli" };
+  return { segment, runner: "unclassified" };
+}
+
+/**
+ * Splits `command` via {@link splitCommandSegments} and classifies EVERY
+ * resulting segment via {@link classifyCommandSegment} — never drops a
+ * segment from the result, so a caller can always audit "which parts of this
+ * chain did this module actually recognise" rather than reading only an
+ * aggregate count that a non-runner segment silently disappeared into.
+ *
+ * @param command - the exact command string being analyzed
+ * @returns one {@link ClassifiedSegment} per `&&`/`;` segment, in source
+ *   order; never `[]` ({@link splitCommandSegments} never returns one)
+ */
+export function classifyCommandSegments(command: string): ClassifiedSegment[] {
+  return splitCommandSegments(command).map(classifyCommandSegment);
 }
 
 /**
