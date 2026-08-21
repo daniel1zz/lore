@@ -664,3 +664,187 @@ describe("AC-BFI-11: the rename and every record of the old name are one accepta
     ).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AC-BFI-15 — AC-BFI-13's red, machine-measured against a throwaway corpus
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("AC-BFI-15 fixture-forced-anchor-red: the anchor-value assertion is forced red inside a throwaway corpus that owns its own spec and anchor", () => {
+  // ── Why a fixture, not this repo's own corpus ─────────────────────────────
+  // AC-BFI-11 case (d) above (line 632) reads THIS repo's own spec's
+  // code_anchors through DIST_BINARY. Forcing THAT assertion red would mean
+  // repointing a live corpus anchor — a destructive edit to the team's
+  // knowledge base (project CLAUDE.md `.lore/` discipline). So AC-BFI-13
+  // could only ARGUE its discriminating power from the assertion's shape,
+  // never MEASURE a real failure. This suite closes that gap: a throwaway
+  // corpus that owns its own spec and its own anchor, so repointing it is
+  // free.
+  //
+  // ── Fixture design ─────────────────────────────────────────────────────
+  // ONE throwaway corpus (mkdtemp + `lore init`, never this repo's `.lore/`),
+  // holding TWO specs and TWO real on-disk files:
+  //   greenSpecSlug — anchors ANCHOR_FILE_A, never mutated (the GREEN case).
+  //   redSpecSlug   — starts anchoring ANCHOR_FILE_A too, then its own case
+  //                   repoints it to ANCHOR_FILE_B (the RED case).
+  // Two independent specs (rather than one spec mutated in place) so the two
+  // `it` blocks below have no execution-order dependency on each other.
+  // Both fixture files exist on disk throughout, so `--check-drift` reports
+  // the SAME "consistent" verdict whichever one a spec's anchor names — that
+  // pairing (drift clean + assertion red) is the whole discriminator AC-BFI-13
+  // was written to prove and could not measure; asserting drift-clean alone
+  // is consistent with the anchor having been repointed to ANY existing file.
+  let fixtureRoot = "";
+  let fixtureCorpusDir = "";
+  let fixtureDb = "";
+  let greenSpecSlug = "";
+  let redSpecSlug = "";
+  const ANCHOR_FILE_A = "anchor-target-a.ts";
+  const ANCHOR_FILE_B = "anchor-target-b.ts";
+
+  /** Runs `lore status --check-drift` via DIST_BINARY, cwd inside the fixture corpus. */
+  function checkDriftExitCode(cwd: string): number {
+    const run = spawnSync(DIST_BINARY, ["status", "--check-drift"], { cwd, encoding: "utf8" });
+    if (run.status === null) {
+      throw new Error(`lore status --check-drift was killed by signal ${String(run.signal)} — no exit code to assert`);
+    }
+    return run.status;
+  }
+
+  /**
+   * THE SAME assertion path AC-BFI-11's case (d) drives against this repo's
+   * own corpus (lines 632-665 above), generalized to a fixture cwd / spec /
+   * expected basename so this suite can force it both green and red off ONE
+   * shared function — the AC-BFI-12 "happy case and its falsifier call one
+   * shared assertion function" discipline applied to this sibling case.
+   * Throws (never returns a boolean) so `expect(() => ...).not.toThrow()` /
+   * `.toThrow(/pattern/)` drive both directions, and the thrown message NAMES
+   * every anchor it actually found — never a bare "assertion failed".
+   */
+  function assertAnchorValueNames(cwd: string, specSlug: string, expectedBasename: string): void {
+    const getRun = spawnSync(DIST_BINARY, ["get", specSlug, "--json"], { cwd, encoding: "utf8" });
+    if (getRun.status === null) {
+      throw new Error(`lore get ${specSlug} was killed by signal ${String(getRun.signal)} — no exit code to assert`);
+    }
+    if (getRun.status !== 0) {
+      throw new Error(`lore get ${specSlug} --json exited ${String(getRun.status)}: ${getRun.stdout}${getRun.stderr}`);
+    }
+    const parsed = JSON.parse(getRun.stdout) as {
+      readonly data?: { readonly doc?: { readonly extra?: { readonly code_anchors?: readonly string[] } } };
+    };
+    const codeAnchors = parsed.data?.doc?.extra?.code_anchors ?? [];
+    const found = codeAnchors.some((anchor) => anchor.endsWith(expectedBasename));
+    if (!found) {
+      throw new Error(
+        `expected ${specSlug}'s code_anchors to name a path ending with "${expectedBasename}", ` +
+          `but found: ${JSON.stringify(codeAnchors)}`,
+      );
+    }
+  }
+
+  beforeAll(async () => {
+    fixtureRoot = mkdtempSync(join(tmpdir(), "lore-bfi15-anchor-red-"));
+    fixtureCorpusDir = fixtureRoot;
+
+    // Two real files this fixture owns — the "different existing file" the RED
+    // direction repoints to must actually exist, or drift would report it
+    // missing and the exit-0/exit-0 pairing (the whole discriminator) would
+    // never arise.
+    writeFileSync(join(fixtureCorpusDir, ANCHOR_FILE_A), "export const anchorTargetA = true;\n", "utf8");
+    writeFileSync(join(fixtureCorpusDir, ANCHOR_FILE_B), "export const anchorTargetB = true;\n", "utf8");
+
+    const initRun = spawnSync(DIST_BINARY, ["init", "--name", "bfi15-anchor-red-fixture"], {
+      cwd: fixtureCorpusDir,
+      encoding: "utf8",
+      env: { ...process.env, CLAUDECODE: "1" },
+    });
+    if (initRun.status !== 0) {
+      throw new Error(`lore init failed in the AC-BFI-15 fixture corpus: ${initRun.stdout}${initRun.stderr}`);
+    }
+
+    // Never this repo's own `.lore/` — a fresh db file inside the throwaway
+    // corpus this suite just initialized.
+    fixtureDb = join(fixtureCorpusDir, ".lore", "lore.db");
+    const app = createApp(fixtureDb);
+    try {
+      const prd = await app.corpusService.create({
+        type: "prd",
+        title: "BFI15 Anchor Red Fixture Root",
+        content: "Throwaway root PRD for the AC-BFI-15 fixture-forced-anchor-red suite.",
+      });
+      if (!prd.ok) throw new Error(`fixture PRD create failed: ${JSON.stringify(prd.error)}`);
+
+      const skeleton = (label: string): string =>
+        [
+          "## Overview",
+          `A throwaway spec (${label}) that exists only to own a code_anchors entry this suite reads.`,
+          "## Scope",
+          "Anchors a single fixture file this suite created on disk.",
+          "## Acceptance Criteria",
+          "- AC-1: this spec's code_anchors names the fixture file this suite created.",
+        ].join("\n\n");
+
+      const greenSpec = await app.corpusService.create({
+        type: "spec",
+        title: "BFI15 Anchor Red Fixture Spec Green",
+        content: skeleton("green — never repointed"),
+        parent_id: prd.value.id,
+        extra: { spec_kind: "tech", code_anchors: [ANCHOR_FILE_A] },
+      });
+      if (!greenSpec.ok) throw new Error(`fixture green-spec create failed: ${JSON.stringify(greenSpec.error)}`);
+      greenSpecSlug = greenSpec.value.slug;
+
+      const redSpec = await app.corpusService.create({
+        type: "spec",
+        title: "BFI15 Anchor Red Fixture Spec Red",
+        content: skeleton("red — repointed by its own case below"),
+        parent_id: prd.value.id,
+        extra: { spec_kind: "tech", code_anchors: [ANCHOR_FILE_A] },
+      });
+      if (!redSpec.ok) throw new Error(`fixture red-spec create failed: ${JSON.stringify(redSpec.error)}`);
+      redSpecSlug = redSpec.value.slug;
+    } finally {
+      app.close();
+    }
+  }, 300_000);
+
+  afterAll(() => {
+    if (fixtureRoot.length > 0) rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  it("GREEN: the fixture spec's stored anchor names the expected file, and --check-drift exits 0", () => {
+    expect(checkDriftExitCode(fixtureCorpusDir)).toBe(0);
+    expect(() => assertAnchorValueNames(fixtureCorpusDir, greenSpecSlug, ANCHOR_FILE_A)).not.toThrow();
+  });
+
+  it("RED: repointing the fixture spec's anchor to a different existing file makes the IDENTICAL assertion path fail, naming the anchor it actually found, WHILE --check-drift still exits 0", async () => {
+    // Repoint via `DriftCheckService.setCodeAnchors` — the sanctioned RMW
+    // writer for `code_anchors` (the same seam `lore anchor set` uses),
+    // never a hand-rolled `corpusService.set({ extra: ... })` wholesale
+    // replace.
+    const app = createApp(fixtureDb);
+    let anchorsAfterRepoint: readonly string[];
+    try {
+      if (app.driftCheckService === undefined) {
+        throw new Error("driftCheckService is not wired on this App — cannot repoint the fixture anchor");
+      }
+      const repointed = await app.driftCheckService.setCodeAnchors(redSpecSlug, [ANCHOR_FILE_B]);
+      if (!repointed.ok) throw new Error(`repoint failed: ${JSON.stringify(repointed.error)}`);
+      anchorsAfterRepoint = repointed.value;
+    } finally {
+      app.close();
+    }
+    // Sanity on the write itself, independent of the two assertions below.
+    expect(anchorsAfterRepoint.some((anchor) => anchor.endsWith(ANCHOR_FILE_B))).toBe(true);
+
+    // The discriminator's first half: drift stays clean — ANCHOR_FILE_B exists
+    // too — so a clean drift alone would say nothing went wrong.
+    expect(checkDriftExitCode(fixtureCorpusDir)).toBe(0);
+    // The discriminator's second half: the SAME function the GREEN case just
+    // proved passing must now throw, because the stored anchor no longer names
+    // ANCHOR_FILE_A, and its message NAMES what it actually found (B) rather
+    // than a bare "assertion failed".
+    expect(() => assertAnchorValueNames(fixtureCorpusDir, redSpecSlug, ANCHOR_FILE_A)).toThrow(
+      new RegExp(ANCHOR_FILE_B.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
+  });
+});
