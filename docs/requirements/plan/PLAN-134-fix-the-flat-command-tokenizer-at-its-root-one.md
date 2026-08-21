@@ -3,7 +3,7 @@ id: PLAN-134
 type: plan
 role: plan
 title: "Fix the flat command tokenizer at its root: one segmentation seam for all three path-parsing call sites"
-status: approved
+status: archived
 priority: high
 created: 2026-08-21
 updated: 2026-08-21

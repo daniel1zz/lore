@@ -6232,6 +6232,30 @@
     "01M0H8XP5JZTR8Q7BH6HV6YRM4": {
       "human_id": "TASK-748",
       "file_path": "docs/requirements/task/TASK-748-lore-verify-falsify-compares-only-the-exit-code-so.md"
+    },
+    "01M0HBASBYFSTVY5PK45F6S9DG": {
+      "human_id": "KN-490",
+      "file_path": "docs/requirements/knowledge/KN-490-handoff-agent-main-orchestrator.md"
+    },
+    "01M0HB27FY9DTZFY8VVJJF3KBR": {
+      "human_id": "KN-491",
+      "file_path": "docs/requirements/knowledge/KN-491-assessment-fix-the-flat-command-tokenizer-at-its-r.md"
+    },
+    "01M0HAJ810BYS33D2KEFKKTY3F": {
+      "human_id": "KN-492",
+      "file_path": "docs/requirements/knowledge/KN-492-assessment-fix-the-flat-command-tokenizer-at-its-r.md"
+    },
+    "01M0HADX5FQ2184G6NQXVCMDXB": {
+      "human_id": "KN-493",
+      "file_path": "docs/requirements/knowledge/KN-493-a-repo-wide-oracle-cannot-have-hand-enumerated-fil.md"
+    },
+    "01M0HB8MCW3YPH92XJND910W93": {
+      "human_id": "TASK-749",
+      "file_path": "docs/requirements/task/TASK-749-wire-the-discovery-refusal-guard-into-the-evidence.md"
+    },
+    "01M0H9F7Z61CHSVTM82BAQ8RVN": {
+      "human_id": "TASK-750",
+      "file_path": "docs/requirements/task/TASK-750-settle-the-ac-dc-9-ac-dc-14-b-conflict-then-collap.md"
     }
   }
 }

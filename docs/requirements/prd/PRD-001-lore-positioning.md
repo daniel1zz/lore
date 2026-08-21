@@ -108,6 +108,8 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] Oracle executability: a runner's discovery refusal is not a measurement, and must never mint a red (approved)
+- [knowledge] A repo-wide oracle cannot have hand-enumerated file anchors, and four more orchestration-layer errors measured in one session (approved)
 - [spec] Attestation completeness guard: detect zero-match / under-match test oracles (approved)
 - [task] lore verify --falsify compares only the exit code, so an unrunnable scratch worktree mints a proven red from a module-not-found error (draft)
 - [spec] The defect channel cannot be honestly maintained: an unreleasable cap whose remedy is inert, two reads that disagree on which corpus, and no non-derogatory supersession (approved)
@@ -195,7 +197,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [spec] Falsifiability reachability: a feedable checkpoint, an attestable red, a guard that means what it says, and a mirror whose drift trips (approved)
 - [knowledge] Four governance-tooling gaps measured while resuming handoff-82: a silent pass, an undecomposable count, three unfeedable gates, and the eighth false-oracle vector (approved)
 - [spec] Typecheck coverage: two named blind spots, and the stale comments that understate them (approved)
-- [spec] Oracle executability: a runner's discovery refusal is not a measurement, and must never mint a red (approved)
 - [knowledge] An attested pass is not evidence of production wiring: three instances of the same AC-design defect in one session, all found after attestation (approved)
 - [spec] Governance visibility: an armed gate that vacuously passes lends its authority to everything it waves through (approved)
 - [knowledge] Handoff — agent:widen-coverage-derivation (approved)

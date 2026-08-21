@@ -3,7 +3,7 @@ id: TASK-747
 type: task
 role: plan
 title: "Re-anchor the compiled-binary classifier arm and credit every runner summary occurrence"
-status: draft
+status: archived
 priority: critical
 phase: "root-fix"
 created: 2026-08-21
