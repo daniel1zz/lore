@@ -101,3 +101,50 @@ files. ⛔ Consequence: the `task-claim` anchor-overlap gate is BLIND to this ta
 touches twelve specs that many other plans descend from, which is the widest corpus blast
 radius of any task in this plan. Check `lore ready --json` for concurrent sessions
 immediately before claiming, and again before each spec's demote/approve cycle.
+
+# ⛔ CROSS-THREAD BLOCKER — read this before declaring a single falsifier
+
+Added 2026-08-21 by the session resuming handoff 109, after discovering that a DIFFERENT
+session closed `knowledge-handoff-agent-main-orchestrator-110` four minutes earlier. That
+thread measured two facts that break this task's obvious method. Both are reproduce-able;
+neither was known when the phase table for M6.4 was written.
+
+Source: `knowledge-the-falsifier-mechanism-is-shipped-but-inert-a` (read it in full — every
+figure there names the command that produced it).
+
+**F1 — `pass_unfalsified_count` is blind to 692 of 769 script-mode criteria.**
+`deriveAcCoverageState` (`packages/core/src/acceptance.ts:676`) returns `attested_pass`
+BEFORE it can ever return `pass_unfalsified`. So any criterion holding a runner-attested
+pass is structurally invisible to this field, no matter how many times it was never
+falsified. Measured funnel: 769 distinct script-mode ids → 700 attested → 8 declaring a
+falsifier → 2 machine-proven to discriminate. ⛔ That precedence is CORRECT and specified
+(`AC-FALS-3`); it is not a defect to fix here. The consequence for THIS task is:
+**driving `AC-OX-6`'s number to 0 does not achieve the goal AC-OX-6 was written for.** The
+29 are a real subset worth fixing, but closing them leaves 692 criteria whose discriminating
+power is still unproven, and the field will read 0 anyway.
+
+**F2 — a falsifier is declared on a long-lived SPEC but executable only through a live PLAN.**
+`lore verify --falsify` requires the plan positional and refuses the ad-hoc `--task` channel;
+`resolveTargetTask` (`packages/core/src/task-workflow.ts:995`) then needs a fresh claim in
+that plan. All 8 criteria that currently declare a falsifier have an ARCHIVED governing plan
+(AC-TC-5, AC-TC-2, AC-BFI-10, AC-MIS-2, AC-MIS-6, AC-OX-1, AC-OX-7, AC-OWN-4), so not one of
+them can be re-run today. ⛔ **Therefore declaring 29 falsifiers under this plan mints 29
+DEAD declarations** — runnable while this plan is live, unrunnable the moment it archives.
+They would look identical to live ones afterwards.
+
+## What this changes, concretely
+
+1. ⛔ Do NOT satisfy this task by adding `--falsifier-*` declarations to 29 criteria and
+   archiving. That produces the exact artifact handoff 110's KD1 warns about.
+2. The prerequisite is a **plan-independent falsifier execution path** — handoff 110 NS1
+   names the shape: a repo ratchet script invoked from `hooks/pre-push`, the way
+   `scripts/check-anchor-coverage.ts` already is. That work belongs to 110's thread, not
+   this one. ⛔ It is a PREREQUISITE, not a follow-up.
+3. So this task is BLOCKED on that path existing. Until then the honest options are: leave it
+   unclaimed, or re-baseline `AC-OX-6` — and a re-baseline MUST be recorded in the spec's
+   re-baseline log with the original text, this measurement, and why it is a correction
+   rather than a weakening.
+4. ⛔ Re-measure before acting. `pass_unfalsified_count` was 29 at 2026-08-21T02:45Z, and
+   `unredeemed_allow_missing_path_count` moved 9 → 11 during this very session while only ONE
+   declaration was added by it — the rest came from a concurrent session. Any figure in this
+   document is a snapshot, and this repo has at least three peer sessions able to write.

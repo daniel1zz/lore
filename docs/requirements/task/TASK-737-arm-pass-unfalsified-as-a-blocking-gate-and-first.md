@@ -88,3 +88,37 @@ blind to the widest-blast-radius change in this plan.
 Expected neighbourhood (read first, do not assume):
 - `packages/core/src/config.ts` (`resolveGateEnabled`)
 - `packages/lore/src/service/` (gates run in the service layer, per the cross-cutting rule)
+
+# ⛔ CROSS-THREAD BLOCKER — this gate cannot be armed on `pass_unfalsified_count`
+
+Added 2026-08-21 by the session resuming handoff 109, after finding that another session had
+closed `knowledge-handoff-agent-main-orchestrator-110` minutes earlier. Source:
+`knowledge-the-falsifier-mechanism-is-shipped-but-inert-a`.
+
+`pass_unfalsified_count` is structurally blind to 692 of 769 script-mode criteria:
+`deriveAcCoverageState` (`packages/core/src/acceptance.ts:676`) returns `attested_pass`
+before `pass_unfalsified` can ever be reached, so every attested criterion is invisible to
+the field. The precedence is correct and specified (`AC-FALS-3`) — the field is simply not a
+measure of discriminating power. **A gate armed on it inherits the blind spot and would
+certify 90% of the corpus as fine while measuring nothing about it.** That is the
+"armed gate that vacuously passes" failure this repo already has a spec for.
+
+Two hard constraints carried over from handoff 110 NS1, both measured:
+
+- **(a) The new coverage signal MUST be an ORTHOGONAL field**, never a widening of the
+  7-state enum — `AC-FALS-3` deliberately ranks `attested_pass` above `pass_unfalsified`, so
+  widening the enum would contradict a specified, tested precedence. Discriminating power and
+  evidence strength are independent dimensions and must be reported as two numbers.
+- **(b) The gate and the back-catalog sweep MUST land in the SAME slice.** 821 existing
+  criteria would violate the gate on day one.
+
+And one prerequisite that is NOT a follow-up: a **plan-independent falsifier execution path**
+must exist first. `lore verify --falsify` needs a live plan, so all 8 existing falsifier
+declarations are already unrunnable (their plans are archived). Arming a gate that merely
+requires a DECLARATION therefore mints dead declarations — green at spec-promote time,
+unrunnable one archive later. Shape named by 110: a repo ratchet script invoked from
+`hooks/pre-push`, as `scripts/check-anchor-coverage.ts` already is.
+
+⇒ This task is BLOCKED behind handoff 110's tech spec (110 NS1: open it via `/lore-design`).
+⛔ Do not arm anything on `pass_unfalsified_count`. If the eventual design keeps this task at
+all, its AC must pin the ORTHOGONAL field, and only after measuring that the field exists.

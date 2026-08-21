@@ -6,7 +6,7 @@ title: "The defect channel cannot be honestly maintained: an unreleasable cap wh
 status: approved
 priority: medium
 created: 2026-08-11
-updated: 2026-08-12
+updated: 2026-08-21
 tags: []
 parent: PRD-001
 ---
@@ -231,10 +231,145 @@ assertion that the service's list is reference-identical to core's array and rea
 `import … from "@lore/core"`, so "consumed by the listing filter and the cap count" stays
 machine-checked rather than merely asserted in prose.
 
+# Addendum — M7: the missing NON-TERMINAL exit, measured 2026-08-18/21
+
+⛔ Appended after the original slice landed. M1–M6 shipped and WORK — verified 2026-08-21:
+`TERMINAL_ISSUE_RESOLUTIONS` is exported and consumed by both the listing filter and the cap
+count, `resolveOpenReportCap` reads the upstream's own config, and `superseded`/`duplicate`
+join `rejected`/`wontfix` as non-derogatory terminal states. The channel is still stuck, and
+the reason is a state M1–M6 never contemplated.
+
+## The measurement
+
+`lore issues --all` in this corpus, 2026-08-21: 32 reports, of which **10 filed by the `lore`
+project itself are `open`** — the cap is full and refuses every new report from this project.
+Filed 2026-08-12/13, all still `draft`.
+
+Every exit M1–M6 provides is TERMINAL and asserts something about the CLAIM:
+
+| state | what it asserts |
+|---|---|
+| `rejected` / `wontfix` | the defect is not going to be fixed |
+| `superseded` / `duplicate` | a different record now carries the claim |
+
+None of them fits the actual situation of all ten: **the defect is real, accepted, and not yet
+done.** The queue is therefore monotonic by construction — a report can only leave by having
+its claim retired, so an accepted-but-unfinished defect occupies quota forever.
+
+⛔ The escape was TESTED, not assumed. Two of the ten (the mirror-exporter pair,
+`01KZVAXZQAT4S9F4HGQT45YTT9` and `01KZWF5EFFNWW673QYEEPNCMVT`) were re-probed on 2026-08-20
+because `AC-BFI-8` had since landed a mirror CONTENT check and they might honestly be
+closable. A two-line body drift was injected into a mirror file and `bun run mirror:export`
+was run with no `--force`: the drift SURVIVED untouched. Both reports are still valid. Closing
+one to free a slot would mark an unresolved defect resolved, and afterwards would be
+indistinguishable from a real fix. **There is no honest way to free a slot today.**
+
+## The consequence this spec must own
+
+Because the channel refuses input, four further governance gaps measured 2026-08-18/19 were
+written into `knowledge-four-governance-gaps-measured-while-resuming-handoff` instead — a
+document **no `--check` reads**. So the standing "report a tool gap immediately" discipline has
+degraded from enforced to advisory, and nothing announced the change. That is the same failure
+shape as an armed gate that vacuously passes: the mechanism appears present and is not.
+
+## M7 — `adopted`, a non-terminal, quota-freeing exit that REQUIRES an owner
+
+`lore issue resolve --state adopted --adopted-by <plan-or-task>`:
+
+- **Non-derogatory and NON-TERMINAL.** It asserts nothing about the claim's validity — only
+  that the claim now has an owner in the corpus. It therefore does NOT join
+  `TERMINAL_ISSUE_RESOLUTIONS`, and `--resolved` must keep showing it as unfinished.
+- **Frees quota.** The cap counts reports with no owner and no terminal resolution. This is the
+  one place M7 touches M1: the cap's candidate set is narrowed by `TERMINAL_ISSUE_RESOLUTIONS`
+  ∪ `{adopted}`, resolved through ONE seam so "what occupies quota" has a single definition.
+- **The pointer is REQUIRED and must resolve to a live `plan` or `task`.** Without it,
+  `adopted` degrades into a silent trash can operationally indistinguishable from `rejected` —
+  which is the defect, not the fix. Same reasoning M3 already applies to `superseded`.
+- **The pointer must stay honest after the fact.** An `adopted` report whose owner was archived
+  WITHOUT the defect being fixed is a dangling claim, and it must be visible as one: a
+  corpus-wide count of adopted-with-terminal-owner, enumerable like every other count field
+  (`AC-FR-5`'s rule — every count has a sibling that names its members). ⛔ This is the part
+  that keeps `adopted` from becoming a laundering path: adopting is cheap, and the only thing
+  stopping it from being a quieter `rejected` is that abandonment is COUNTED.
+
+⛔ Explicitly NOT in M7: auto-creating the owning plan or task. An adopt verb that mints its
+own owner would let a caller free quota without anyone deciding to do the work, which is the
+same "a ceiling the constrained party controls" objection M2 and M6 already record.
+
+## Addendum note — the prose criteria list above is PARTIAL, by measurement
+
+⛔ The numbered §Acceptance Criteria summary earlier in this document enumerates `AC-DC-1`
+through `AC-DC-9` only. More criteria have been declared since, by later slices and by M7.
+Found 2026-08-21 by this spec's own `lore review` pass under the `completeness` dimension —
+the drift was invisible to every deterministic pre-check, because prose is not an oracle.
+
+The authoritative surface is `lore ac list <this spec>` (or `lore get <this spec> --json`).
+⛔ No count is restated here on purpose: a literal corpus figure inside a governance document
+is a claim with no oracle, and this repo has already measured one such figure off by 20x. Read
+the list; do not read a number out of prose.
+
+## Authoring note for M7's criteria
+
+`AC-DC-16` and `AC-DC-17` were TIGHTENED immediately after their first `lore review`, before
+either had been run and before either held any evidence. This is authoring, not a re-baseline —
+recorded here anyway so the edit is visible rather than inferred from a version bump:
+
+- `AC-DC-16` originally keyed the dangling-claim predicate on the owner going terminal
+  "WITHOUT the defect being fixed". The judge correctly noted that no field records "fixed", so
+  an implementer would have had to pick a reading, and the two seeded reds could not
+  discriminate between the candidate readings. Replaced with three conjuncts that are all
+  decidable from stored fields, plus a third red seed that isolates the one the original pair
+  could not.
+- `AC-DC-17` said "the freshness-asserted dist binary" without naming the threshold or the
+  behaviour on failure. Replaced with an explicit pre-flight: `--check-binary-provenance` must
+  exit EXACTLY 0, and a stale binary FAILS the suite rather than skipping it — a skipped wiring
+  check is indistinguishable from a passing one.
+
+Both changes narrow what a green run can mean. Neither relaxes an obligation.
+
+## Re-baseline — AC-DC-1, 2026-08-21, caused by M7
+
+⛔ Recorded because an AC edited after it has been green is indistinguishable in the audit
+trail from covering up a failure, however justified the edit.
+
+**Original statement (verbatim, the clause that changed):** "ALL 10 resolved with a
+non-derogatory terminal state, then the 11th report is ACCEPTED (exit 0)".
+
+**The exact observation that prompted the change:** this spec's `lore review` pass on
+2026-08-21, `ac_quantifiability` advisory on AC-DC-1 — "'resolved with a non-derogatory
+terminal state' leaves the state unnamed, and M3 defines two candidates (superseded,
+duplicate) with different required pointers while M7 adds a third exit that is deliberately
+non-terminal. An implementer picking 'adopted' here would be testing the M7 path rather than
+the M1/M3 one." ⛔ There was no failing run. AC-DC-1 is green with two attested passes; the
+oracle command is BYTE-UNCHANGED.
+
+**Why this is a correction and not a weakening:** the ambiguity did not exist when AC-DC-1 was
+written — M7, added earlier today in this same document, is what created a third
+non-derogatory exit and thereby made an already-attested criterion's prose ambiguous for the
+next reader. The edit NARROWS the admissible state set (must be a member of
+`TERMINAL_ISSUE_RESOLUTIONS`, `adopted` explicitly excluded) and adds a named RED. Nothing
+that satisfied the old text and exercised M1/M3 stops satisfying the new text; what stops
+satisfying it is exercising M7 instead, which was never the intent.
+
+## Known advisory NOT fixed here — AC-DC-2's render half
+
+The same review pass flagged AC-DC-2: its stderr half says every blocking id "appears in the
+human stderr render alongside its resolution", and "alongside" names no position, delimiter or
+column — so an id and a resolution occurring anywhere in the buffer satisfy it even if the
+render paired them wrongly. Every sibling render assertion in this spec declares an anchor
+(`Corpus: ` as a first-line prefix, columns headed exactly `Severity`/`Category`, a literal
+bracketed marker); this one does not.
+
+⛔ Left unfixed deliberately, and recorded rather than dropped: it is a pre-existing defect in
+a criterion with two attested passes, it was NOT introduced by M7, and tightening it belongs
+with a slice that can run its red. ⛔ It is NOT in the defect channel because that channel is
+at its cap and refuses input — which is the situation M7 exists to end. This paragraph is the
+only record; when M7 lands, file it.
+
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-DC-1: End-to-end over two throwaway corpora: 10 reports filed, ALL 10 resolved with a non-derogatory terminal state, then the 11th report is ACCEPTED (exit 0) — the exact sequence measured refused (exit 4, byte-identical cap message) on 2026-08-11.
+- [✔] [script] AC-DC-1: End-to-end over two throwaway corpora: 10 reports filed, ALL 10 resolved with a non-derogatory TERMINAL state — one that IS a member of TERMINAL_ISSUE_RESOLUTIONS, i.e. superseded or duplicate under M3, and explicitly NOT M7's 'adopted', which frees quota by a different mechanism and is deliberately non-terminal — then the 11th report is ACCEPTED (exit 0). This is the exact sequence measured refused (exit 4, byte-identical cap message) on 2026-08-11. ⛔ The state is named rather than left to the implementer because M7 introduced a third non-derogatory exit after this criterion was written and attested; without the exclusion, an implementer could satisfy this criterion while exercising the M7 path and never touch the M1/M3 mechanism it exists to pin. RED: revert M1's candidate narrowing to raw lifecycle status and the 11th report must be refused again.
   script: test — bun test packages/lore/tests/integration/cli/issue-cap-quota-release.bun.test.ts 2>&1 && echo "AC-DC-1 PASS: a non-derogatory resolution releases cap quota end-to-end through the real CLI"
 - [✔] [script] AC-DC-2: The cap refusal's structured LoreError.value payload carries blocking[] with one {id, resolution} entry per blocking report AND quota_freeing_states[]; the test asserts quota_freeing_states equals TERMINAL_ISSUE_RESOLUTIONS as SETS (never against a remembered literal list), and that every blocking id in the payload appears in the human stderr render alongside its resolution — so the refusal can never advertise a verb that does not free quota.
   script: test — bun test packages/lore/tests/integration/cli/issue-cap-refusal-message.bun.test.ts 2>&1 && echo "AC-DC-2 PASS: every blocking id in the cap refusal carries its computed resolution and only working verbs are named"
@@ -260,3 +395,11 @@ machine-checked rather than merely asserted in prose.
   script: test — bunx vitest run packages/dashboard/tests/unit/issue-resolution-union-parity.test.ts 2>&1 && echo "AC-DC-12 PASS: the dashboard resolution vocabulary is type-tied to the core union and both switches are exhaustive"
 - [✔] [script] AC-DC-13: The oracle-generation stamp reads its criteria from the INJECTED declared-AC port, and the duplicate task-to-plan-to-spec traversal is GONE rather than merely unused. ONE vitest file carries both halves. (a) BEHAVIOUR, the discriminator: injecting a declared-AC port that returns a criterion whose oracle_generation DIFFERS from what a store walk over the same task would find makes the stamp follow the PORT -- so a surviving second traversal goes RED, which a mere existence check could never detect -- and the same run asserts the ad-hoc task path reads the port too. (b) CENSUS in the same file: a search over packages/lore/src and packages/core/src finds ZERO occurrences of the identifier findGoverningAcceptanceCriteria and ZERO occurrences of the residual note that recorded the gap (the literal phrase BOUNDED second traversal) -- the note documenting a gap dies in the same change as the gap.
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-port-carries-criteria.test.ts 2>&1 && echo "AC-DC-13 PASS: the oracle-generation stamp reads criteria from the injected port and the duplicate traversal is gone from the tree"
+- [·] [script] AC-DC-14: ADOPTION FREES QUOTA WITHOUT RETIRING THE CLAIM — the exact sequence that is refused today. With the cap filled by N open reports, resolving ONE with --state adopted --adopted-by <live plan or task> makes report N+1 ACCEPTED. Two controls that must hold in the SAME run, or 'adopted' has silently become a quieter 'rejected': (a) the adopted report is STILL listed as unfinished by --resolved's complement, i.e. adopted is NOT a member of TERMINAL_ISSUE_RESOLUTIONS; (b) the quota-occupancy decision is resolved through ONE seam whose member set is compared AS A SET against TERMINAL_ISSUE_RESOLUTIONS plus adopted, never against a remembered literal list. Baseline measured 2026-08-21: 10 reports filed by this project, all open, all draft, filed 2026-08-12/13, and the cap refuses every new one. Two of the ten were re-probed for staleness on 2026-08-20 rather than assumed stale, and both were still valid — so no honest closure was available. RED: make adopted terminal and control (a) must fail; drop the pointer requirement and AC-DC-15 must fail.
+  script: test — bunx vitest run packages/lore/tests/unit/service/issue-resolution.test.ts -t adopted-frees-quota 2>&1 && echo 'AC-DC-14 PASS: an adopted report frees quota, stays listed as unfinished, and occupancy is decided by one seam compared as a set'
+- [·] [script] AC-DC-15: THE OWNER POINTER IS REQUIRED AND MUST RESOLVE TO A LIVE PLAN OR TASK, AND A REFUSAL WRITES NOTHING. --state adopted with no --adopted-by, with an unresolvable id, or with a target whose type is neither plan nor task is refused loudly (exit 4), and the target report's extra is BYTE-IDENTICAL afterwards. Same reasoning M3 already applies to superseded: without a required pointer, adopted degrades into a silent trash can operationally indistinguishable from rejected, which is the defect rather than the fix. ⛔ Assert the exit code is EXACTLY 4, never merely non-zero — a command that dies early for an unrelated reason also exits non-zero, and that is how a reverse control ends up with no discriminating power. RED: accept an absent pointer and the first case must fail; make the write happen before validation and the byte-identity assertion must fail.
+  script: test — bunx vitest run packages/lore/tests/unit/service/issue-resolution.test.ts -t adopted-pointer-required 2>&1 && echo 'AC-DC-15 PASS: absent, unresolvable and wrong-type owners are each refused with exit exactly 4 and the target extra unchanged'
+- [·] [script] AC-DC-16: ABANDONMENT IS COUNTED, AND THE COUNT NAMES ITS MEMBERS. A dangling adopted claim is defined by STORED FIELDS ONLY, never by judgement: a report whose issue_report.resolution.state is 'adopted' AND whose adopted_by target resolves to a doc with status archived or deprecated AND which itself carries NO terminal resolution (its state is not a member of TERMINAL_ISSUE_RESOLUTIONS). All three conjuncts are decidable from the store; ⛔ 'the defect was not actually fixed' is deliberately NOT a conjunct, because no field records it and an implementer would have to guess which surface to read. lore status reports a corpus-wide count of exactly that population, with a sibling enumeration returning member ids whose length EQUALS the reported number — the rule AC-FR-5 establishes for every count field. ⛔ This is the load-bearing half of M7, not a nicety: adopting is cheap, and the only thing preventing 'adopted' from becoming a quieter 'rejected' is that abandonment is visible and attributable. RED, three seeds required, each isolating one conjunct: (a) adopted + archived owner + no terminal resolution must be counted, naming it; (b) adopted + LIVE owner must NOT appear; (c) adopted + archived owner but carrying a terminal resolution must NOT appear. Seeds (b) and (c) are what stop the count from degenerating into 'every adopted report'.
+  script: test — bunx vitest run packages/lore/tests/unit/service/issue-resolution.test.ts -t adopted-abandonment-count 2>&1 && echo 'AC-DC-16 PASS: adopted reports with terminal owners are counted, enumerated, and live-owner reports are excluded'
+- [·] [script] AC-DC-17: PRODUCTION WIRING, COMPILED BINARY (the bun-runner half, split from AC-DC-14 because this repo's two runners cannot share one attestable command): from a throwaway corpus created by mkdtemp plus lore init, driven by the compiled dist binary, a real lore issue resolve --state adopted --adopted-by <live task> frees quota so the next lore report-issue is ACCEPTED, and lore issues still shows the adopted row as unfinished. BINARY FRESHNESS IS ASSERTED, NOT ASSUMED, and the threshold is named: before spawning anything the suite runs 'lore status --check-binary-provenance' via the resolved dist path and requires exit EXACTLY 0 (dev-synced, built from this repo's HEAD); a nonzero provenance verdict FAILS the suite loudly naming the built-from commit and HEAD, and ⛔ never skips — a skipped wiring check is indistinguishable from a passing one. ⛔ Resolve the binary through the same dist-path constant the sibling e2e suites already import; never a bare 'lore' on PATH, which resolves to this machine's global symlink rather than this build. ⛔ Never this repo's own .lore/ corpus. RED: revert the cap's candidate narrowing and the accept case must exit 4; point the suite at a deliberately stale binary and the provenance assertion must fail rather than skip.
+  script: e2e — bun test packages/lore/tests/e2e/issue-adopt-compiled.bun.test.ts 2>&1 && echo 'AC-DC-17 PASS: the compiled CLI frees quota on adopt, accepts the next report, and still lists the adopted row as unfinished'

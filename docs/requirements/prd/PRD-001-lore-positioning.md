@@ -108,6 +108,9 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] The defect channel cannot be honestly maintained: an unreleasable cap whose remedy is inert, two reads that disagree on which corpus, and no non-derogatory supersession (approved)
+- [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
+- [spec] Attestation completeness guard: detect zero-match / under-match test oracles (approved)
 - [knowledge] Handoff — agent:main-orchestrator (approved)
 - [knowledge] The falsifier mechanism is shipped but inert: a coverage field blind to 692 criteria, and 8 declarations with no live execution path (approved)
 - [knowledge] A declared property with no measuring oracle, and the red-first vs falsifier deadlock that leaves every early AC's discriminating power asserted rather than demonstrated (draft)
@@ -116,7 +119,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [spec] Autonomous Feedback Loop (AI review, data-driven self-optimization) (domain overview) (approved)
 - [spec] Two-runner changed-test selection — deterministic test:changed replaces vitest-only regression sweep (approved)
 - [knowledge] Governance gaps measured while resuming handoff 107, and why most are recorded here instead of in the defect channel (approved)
-- [spec] Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift (approved)
 - [knowledge] bun run test:changed — full selection contract and its residuals, one of which is now closed (approved)
 - [spec] Session Layer (multi-session collaboration & context continuity) (domain overview) (approved)
 - [knowledge] Retired from root CLAUDE.md 2026-08-13: four standing lessons evicted verbatim to free bytes for a correction (approved)
@@ -172,7 +174,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] The wire-contract mirror comment in issue-reports-routes.ts describes a gap that AC-DC-12 already closed (archived)
 - [task] A worktree nested inside the main checkout resolves the LIVE corpus, so any corpus-writing test run from it pollutes the shared corpus (draft)
 - [spec] A write-side fact with no read-side address: counts with no member list, a doc type with no drift oracle, and a taxonomy with no filter (approved)
-- [spec] The defect channel cannot be honestly maintained: an unreleasable cap whose remedy is inert, two reads that disagree on which corpus, and no non-derogatory supersession (approved)
 - [knowledge] Fifteen findings from fixing a consumer defect list: an unreleasable quota, an attested path left ungated while the self-report path is gated, and four gaps in my own ACs (approved)
 - [task] The issues-resolution e2e fixture calls --adhoc with no --ac-scope, which cb526317 made a refusal (draft)
 - [task] test:changed's alias map is blind to @/ and @lore/lore, so every dashboard component test is unselectable when its component changes (draft)
@@ -396,7 +397,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [adr] Answers to the three blocking questions on the 2026-07-28 product-direction grill (approved)
 - [adr] An escalate gates every doc type; a reject stays scoped to spec and adr (approved)
 - [adr] A gate premised on the agent's judgment being untrustworthy must have NO agent-settable override (approved)
-- [spec] Attestation completeness guard: detect zero-match / under-match test oracles (approved)
 - [spec] plan-close predicates measure invariants: an applicability verdict in the type, per-claimed-AC attested coverage, and attributable domain-doc sync (approved)
 - [knowledge] Handoff supersession keys on (plan, actor) — concurrent sessions sharing an actor archive each other's live tickets (approved)
 - [knowledge] Session process review — 2026-07-31 ten-agent two-wave run: 7/7 deterministic clean, four plans closed through a self-disabled gate (approved)

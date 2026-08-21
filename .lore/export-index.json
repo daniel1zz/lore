@@ -6172,6 +6172,34 @@
     "01M0H2Q0MM3BHFA3Z1QP4YRT1F": {
       "human_id": "TASK-741",
       "file_path": "docs/requirements/task/TASK-741-correct-the-three-mistyped-ac-oracle-commands-and.md"
+    },
+    "01M0H49F81WHY5JAQPS038WJA6": {
+      "human_id": "PLAN-132",
+      "file_path": "docs/requirements/plan/PLAN-132-land-m7-an-adopted-state-that-frees-defect-channel.md"
+    },
+    "01M0H3P61DHA1W1AS6KG4HBWFX": {
+      "human_id": "PLAN-133",
+      "file_path": "docs/requirements/plan/PLAN-133-close-the-two-bootstrap-fixpoint-follow-ups-one-an.md"
+    },
+    "01M0H3FSMHY8YA8EDH2N6YV6PY": {
+      "human_id": "PLAN-134",
+      "file_path": "docs/requirements/plan/PLAN-134-fix-the-flat-command-tokenizer-at-its-root-one.md"
+    },
+    "01M0H4ARTGYFS97M76KTWRCAP6": {
+      "human_id": "TASK-742",
+      "file_path": "docs/requirements/task/TASK-742-land-the-adopted-resolution-state-its-required-own.md"
+    },
+    "01M0H3R8HJPEQBYDD0EM2NFVJ1": {
+      "human_id": "TASK-743",
+      "file_path": "docs/requirements/task/TASK-743-force-ac-bfi-13-s-red-inside-a-throwaway-corpus-th.md"
+    },
+    "01M0H3QEE5X18K9ZV8RE9X1W3A": {
+      "human_id": "TASK-744",
+      "file_path": "docs/requirements/task/TASK-744-collapse-the-two-production-copies-of-the-anchored.md"
+    },
+    "01M0H3HHE36NMFNBQY57WB11PX": {
+      "human_id": "TASK-745",
+      "file_path": "docs/requirements/task/TASK-745-promote-splitcommandsegments-to-the-one-segmentati.md"
     }
   }
 }
