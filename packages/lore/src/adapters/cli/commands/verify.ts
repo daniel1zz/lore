@@ -21,14 +21,23 @@
  * spec-judgment-surfaces-must-verify-before-they-certify-machine §D5 — see the
  * branch's own inline comment below) — via
  * `VerifyRunnerService.verifyFalsifier` → `createFalsifierScratchWorktree`,
- * applies the named AC's declared `verify.falsifier` mutation there (NEVER the
- * caller's working tree), runs the AC's command in that isolated copy, and
- * records a runner-issued `result: "expected-fail"` / `capture_source: "runner"`
- * evidence row ONLY when the observed exit code equals the falsifier's
- * declared value exactly — a mismatch or a missing/stale declaration refuses
- * loud (exit per `exitCode(error)`) and records NOTHING. Requires the PLAN
- * positional (refuses `--task`-only ad-hoc invocations, exit 2) and skips ONLY
- * the ordinary four-step pipeline's M2 approval gate (a falsifier run always
+ * runs a GREEN CONTROL — the named AC's own command, UNMUTATED, in that
+ * scratch worktree (AC-FR-11, spec-falsifiability-reachability-a-feedable-
+ * checkpoint-an §AC-FR-11) — BEFORE applying anything: a scratch environment
+ * missing `node_modules`, an untracked file the command depends on, or a
+ * gitignored `dist/lore` binary exits nonzero on its OWN, with no mutation
+ * involved, and prints "Green control failed ... result:inconclusive, no
+ * attestation recorded" (exit 3) rather than a proven red. Only once that
+ * control exits 0 does it apply the named AC's declared `verify.falsifier`
+ * mutation there (NEVER the caller's working tree), run the AC's command
+ * again in that isolated copy, and record a runner-issued
+ * `result: "expected-fail"` / `capture_source: "runner"` evidence row ONLY
+ * when the observed exit code equals the falsifier's declared value exactly
+ * (printed as "Attested red recorded ... result:expected-fail", exit 0) — a
+ * mismatch or a missing/stale declaration refuses loud (exit per
+ * `exitCode(error)`) and records NOTHING. Requires the PLAN positional
+ * (refuses `--task`-only ad-hoc invocations, exit 2) and skips ONLY the
+ * ordinary four-step pipeline's M2 approval gate (a falsifier run always
  * executes a mutated tree, so "already-seen command" never applies) — the
  * SAME `executionRoot` the ordinary pipeline resolves and threads into
  * `verifyPlan` is threaded into this branch's `verifyFalsifier` call too, not
@@ -117,7 +126,11 @@
  *       command exited 0 but did not actually execute every test-file path it
  *       declared) — the SAME "oracle found a problem" bucket `status
  *       --check-drift` already uses. Takes precedence over exit 1 when a run
- *       has both an inconclusive AND a genuinely-failed AC.
+ *       has both an inconclusive AND a genuinely-failed AC. ALSO the
+ *       `--falsify` branch's own AC-FR-11 outcome: the green control (the
+ *       AC's own UNMUTATED command) exited nonzero/timed out in the scratch
+ *       worktree, so no mutation was ever attempted — printed as "Green
+ *       control failed ... result:inconclusive" rather than a silent 0.
  *   4 = VALIDATION_ERROR (plan has no parent spec / spec has no structured ACs
  *       / unknown --ac id / ambiguous target task)
  *   5 = STALE_VERSION (a concurrent writer raced an evidence write)
@@ -501,8 +514,14 @@ export default defineCommand({
           process.exitCode = exitCode(falsifyResult.error);
           return;
         }
-        const { task, ac_id, expected_exit_code, exit_code: observedExitCode, output_tail } =
-          falsifyResult.value;
+        const {
+          task,
+          ac_id,
+          expected_exit_code,
+          exit_code: observedExitCode,
+          output_tail,
+          result: falsifyOutcome,
+        } = falsifyResult.value;
         if (args.json) {
           console.log(
             JSON.stringify(
@@ -514,12 +533,26 @@ export default defineCommand({
                   expected_exit_code,
                   exit_code: observedExitCode,
                   output_tail,
-                  result: "expected-fail",
+                  result: falsifyOutcome,
                 },
               },
               null,
               2,
             ),
+          );
+        } else if (falsifyOutcome === "inconclusive") {
+          // AC-FR-11 — the green control (the AC's own UNMUTATED command)
+          // already exited nonzero in the scratch worktree, so no mutation
+          // was ever applied and no expected-fail was recorded. Printed to
+          // stdout (not stderr) since this IS the run's successful outcome —
+          // a legitimate determination, not a launch error — but the wording
+          // and the non-zero exit code below both make unmistakably clear
+          // this is NOT a proven red.
+          console.log(
+            `Green control failed for ${ac_id} (task ${task.slug}): the UNMUTATED command ` +
+              `exited ${observedExitCode} in the scratch worktree — result:inconclusive, no ` +
+              "attestation recorded. Nothing was mutated. Fix the scratch environment " +
+              "(node_modules / untracked files / dist/lore) or the AC's command, then retry.",
           );
         } else {
           console.log(
@@ -527,7 +560,12 @@ export default defineCommand({
               `(declared ${expected_exit_code}) — result:expected-fail, capture_source:runner.`,
           );
         }
-        process.exitCode = 0;
+        // AC-FR-11 — mirrors the ordinary four-step pipeline's own exit-code
+        // convention below (this file's module-header table: "3 = ... OR at
+        // least one executed AC's ... guard downgraded its result to
+        // inconclusive") rather than inventing a second meaning for 3 on this
+        // branch: an inconclusive green control is never a silent success.
+        process.exitCode = falsifyOutcome === "inconclusive" ? 3 : 0;
         return;
       }
 

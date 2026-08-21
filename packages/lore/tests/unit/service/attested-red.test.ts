@@ -1,7 +1,8 @@
 /**
- * Attested-red runner oracle for AC-FR-2 / AC-FR-3
+ * Attested-red runner oracle for AC-FR-2 / AC-FR-3 / AC-FR-11
  * (spec-falsifiability-reachability-a-feedable-checkpoint-an §D2/D3/D4,
- * task-build-the-attested-red-runner-a-declared-falsifier-applied).
+ * task-build-the-attested-red-runner-a-declared-falsifier-applied,
+ * task-run-the-unmutated-green-control-before-the-mutation-and).
  *
  * Unlike the pre-existing `verify-runner-service.test.ts` suite, this file
  * exercises `VerifyRunnerService.verifyFalsifier` with a REAL `executor`
@@ -44,6 +45,45 @@
  *               crash) ALSO leaves the original repo untouched — the
  *               isolation guarantee is not an accident of an unfinished run
  *
+ * AC-FR-11 dimension mapping (`describe("AC-FR-11 — green-control", ...)`
+ * below — a SEPARATE feature from AC-FR-2/AC-FR-3 above: the green control
+ * this task adds runs the AC's UNMUTATED command BEFORE any mutation exists):
+ *   HAPPY:      a scratch worktree missing an UNTRACKED-only dependency file
+ *               (measured defect vector — `git worktree add`/`git stash
+ *               create` never carry untracked content) makes the green
+ *               control itself exit nonzero → records `result:"inconclusive"`
+ *               with NO `attestation`, and NEVER applies the mutation —
+ *               EVEN THOUGH that failure's exit code numerically COINCIDES
+ *               with the falsifier's own declared `expected_exit_code`
+ *               (deliberately, so this test doubles as the permanently-pinned
+ *               RED case: an implementation that skips the green control, or
+ *               compares it against the declared code instead of `=== 0`,
+ *               would wrongly record `"expected-fail"` here)
+ *   NEGATIVE:   mandatory reverse control, same command/falsifier — the
+ *               SAME dependency file, this time TRACKED and committed, makes
+ *               the green control exit 0 and the run proceeds to a normal
+ *               mutated `"expected-fail"` — proving the HAPPY failure above
+ *               is really about the file being untracked, not a broken
+ *               fixture
+ *   ERROR:      a DIFFERENT genuine cause — a green control command that
+ *               fails via Node module resolution (`require()` of a package
+ *               nobody installed, mirroring the measured "no usable
+ *               node_modules" defect vector) — also downgrades to
+ *               `inconclusive`, proving the green control is a generic exit-
+ *               code check, not special-cased to the file-presence shape
+ *               HAPPY/NEGATIVE use
+ *   STATE:      after a green-control-failure run, the ORIGINAL repo is
+ *               STILL byte-identical and `git status --porcelain` STILL
+ *               empty (AC-FR-3's isolation guarantee extends to this new,
+ *               earlier-exiting path — recording evidence is not exempt)
+ *   BOUNDARY:   a green control that TIMES OUT (never exits at all, rather
+ *               than exiting nonzero) is treated exactly like a nonzero exit
+ *               — `!timedOut && exitCode === 0` is the ONE usability
+ *               condition, not "any observed exit code at all"
+ *   REGRESSION: a green-control failure records EXACTLY one evidence row —
+ *               the mutate/spawn/compare/record sequence never partially
+ *               fires a second write attempt after the early return
+ *
  * RED-FIRST verification note (recorded in the task's evidence log at the
  * moment each was red, not re-derived here):
  *   - AC-FR-2's "declare an exit code the mutation does not actually
@@ -58,8 +98,13 @@
  *     inside the SIGKILL probe script below, confirming the hash-comparison
  *     assertion failed, then reverting — see this task's final report for
  *     the exact command/output.
+ *   - AC-FR-11's RED is the `green-control: HAPPY` test below, run against
+ *     the pre-fix `_runFalsifier` (no green control at all): it recorded
+ *     `result:"expected-fail"` with a full `attestation` block for a scratch
+ *     worktree that never had a chance to run the real command — see this
+ *     task's completion report for the exact command/output pair.
  *
- * @spec_ref AC-FR-2, AC-FR-3
+ * @spec_ref AC-FR-2, AC-FR-3, AC-FR-11
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -222,6 +267,65 @@ const STANDARD_FALSIFIER: AcFalsifier = {
   replace: "",
   expected_exit_code: 7,
 };
+
+// ─── AC-FR-11 fixtures (green control) ─────────────────────────────────────
+
+/**
+ * Same seed as {@link makeThrowawayGitRepo} (tracked `target.txt` containing
+ * MAGIC_MARKER), PLUS a second file, `only-in-worktree.txt`, whose presence
+ * {@link makeGreenControlCriterion}'s command depends on.
+ *
+ * `trackDependency: false` (AC-FR-11's own measured defect vector — "absent
+ * untracked file") leaves it UNTRACKED: `createFalsifierScratchWorktree`'s
+ * default `git worktree add --detach <dir> HEAD` checks out only COMMITTED
+ * content, so the scratch worktree structurally cannot see an untracked
+ * file, no matter how the AC's command is written.
+ *
+ * `trackDependency: true` is the MANDATORY reverse control (mirrors
+ * `falsifier-execution-root.bun.test.ts`'s own HAPPY+NEGATIVE pairing
+ * convention) — the IDENTICAL command and falsifier, in a scratch worktree
+ * that DOES carry the dependency, proving a green-control failure in the
+ * sibling test genuinely comes from the file being untracked, not from some
+ * unrelated command mistake.
+ */
+function makeThrowawayGitRepoWithDependency(trackDependency: boolean): { repoRoot: string } {
+  const { repoRoot } = makeThrowawayGitRepo();
+  writeFileSync(join(repoRoot, "only-in-worktree.txt"), "dependency present\n", "utf8");
+  if (trackDependency) {
+    execFileSync("git", ["add", "-A"], { cwd: repoRoot });
+    execFileSync("git", ["commit", "-q", "-m", "track only-in-worktree.txt too"], { cwd: repoRoot });
+  }
+  return { repoRoot };
+}
+
+/**
+ * The green-control fixtures' AC (AC-FR-11): green (unmutated) iff BOTH
+ * `only-in-worktree.txt` exists AND `target.txt` still contains
+ * MAGIC_MARKER; red (mutated) once the mutation removes MAGIC_MARKER —
+ * either way landing on the SAME `exit 5` fallback branch.
+ *
+ * That fallback is DELIBERATELY reused for both failure shapes: the
+ * falsifier's own `expected_exit_code` below is ALSO `5`, so a scratch
+ * worktree that's merely missing the untracked dependency produces a
+ * green-control exit code that numerically COINCIDES with the falsifier's
+ * declared value. An implementation that skips the green control (or
+ * compares its exit code against `falsifier.expected_exit_code` instead of
+ * strictly `=== 0`) would see exit 5 and wrongly record `"expected-fail"` —
+ * asserting `result: "inconclusive"` against this exact coincidence is what
+ * makes the `green-control: HAPPY` test below a permanently-pinned RED case.
+ */
+function makeGreenControlCriterion(): AcceptanceCriterion {
+  return {
+    id: "AC-GREEN-1",
+    statement: "only-in-worktree.txt exists AND target.txt contains MAGIC_MARKER",
+    verify: {
+      mode: "script",
+      oracle: "test",
+      command: "test -f only-in-worktree.txt && grep -q MAGIC_MARKER target.txt && exit 0 || exit 5",
+      falsifier: { path: "target.txt", find: "MAGIC_MARKER", replace: "", expected_exit_code: 5 },
+    },
+  };
+}
 
 // ─── AC-FR-2 ────────────────────────────────────────────────────────────────
 
@@ -527,6 +631,268 @@ describe("AC-FR-3 — working-tree-untouched", () => {
       } catch {
         /* best-effort */
       }
+    },
+  );
+});
+
+// ─── AC-FR-11 ───────────────────────────────────────────────────────────────
+
+describe("AC-FR-11 — green-control", () => {
+  it(
+    "green-control: HAPPY (also the permanently-pinned RED case) — a scratch worktree missing an untracked-only dependency file records inconclusive, never expected-fail, even though the observed exit code coincides with the falsifier's declared value",
+    async () => {
+      // reason: dependency left UNTRACKED (trackDependency: false) — the
+      // measured defect vector this AC exists to close.
+      const { repoRoot } = makeThrowawayGitRepoWithDependency(false);
+      const criterion = makeGreenControlCriterion();
+      const plan = makePlan();
+      const spec = makeSpec([criterion]);
+      const task = makeTask();
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+      if (criterion.verify.mode !== "script" || criterion.verify.falsifier === undefined) {
+        throw new Error("fixture invariant violated — see makeGreenControlCriterion");
+      }
+      const falsifier = criterion.verify.falsifier;
+
+      const recorder = makeRecordVerifiedEvidence();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+        ...BASE_CONFIG,
+        repoRoot,
+      });
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "attested-red-tester",
+        nowIso: "2026-08-21T00:00:00.000Z",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // The green control's OWN exit code (the missing-dependency fallback
+      // branch) — numerically equal to `falsifier.expected_exit_code` by
+      // deliberate fixture construction (see makeGreenControlCriterion), yet
+      // the outcome below must still be "inconclusive", never "expected-fail".
+      expect(result.value.exit_code).toBe(5);
+      expect(falsifier.expected_exit_code).toBe(5);
+      expect(result.value.result).toBe("inconclusive");
+      expect(result.value.ac_id).toBe("AC-GREEN-1");
+
+      expect(recorder.calls).toHaveLength(1);
+      const entry = recorder.calls[0]!.entry;
+      expect(entry.result).toBe("inconclusive");
+      expect(entry.capture_source).toBe("runner");
+      expect(entry.ac_ref).toBe("AC-GREEN-1");
+      // AC-FR-11 — NO attestation block on an inconclusive green-control row.
+      expect(entry.attestation).toBeUndefined();
+      expect(entry.output_tail).toContain("green control");
+      expect(entry.output_tail).toContain("AC-GREEN-1");
+
+      // The mutation was never applied — target.txt (the falsifier's own
+      // target) is untouched both in spirit (D3) and in fact.
+      expect(readFileSync(join(repoRoot, "target.txt"), "utf8")).toContain("MAGIC_MARKER");
+    },
+  );
+
+  it(
+    "green-control: NEGATIVE (mandatory reverse control) — the SAME command and falsifier with the dependency file TRACKED passes the green control and records the mutated expected-fail exactly as before",
+    async () => {
+      const { repoRoot } = makeThrowawayGitRepoWithDependency(true);
+      const criterion = makeGreenControlCriterion();
+      const plan = makePlan();
+      const spec = makeSpec([criterion]);
+      const task = makeTask();
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+
+      const recorder = makeRecordVerifiedEvidence();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+        ...BASE_CONFIG,
+        repoRoot,
+      });
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "attested-red-tester",
+        nowIso: "2026-08-21T00:00:00.000Z",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.result).toBe("expected-fail");
+      expect(result.value.exit_code).toBe(5);
+
+      expect(recorder.calls).toHaveLength(1);
+      const entry = recorder.calls[0]!.entry;
+      expect(entry.result).toBe("expected-fail");
+      expect(entry.capture_source).toBe("runner");
+      expect(entry.attestation?.exit_code).toBe(5);
+      expect(entry.attestation?.runner).toBe("lore-cli");
+    },
+  );
+
+  it(
+    "green-control: ERROR — a green control that fails via Node module resolution (a DIFFERENT genuine cause than the HAPPY/NEGATIVE pair's file presence) also records inconclusive, never expected-fail",
+    async () => {
+      const { repoRoot } = makeThrowawayGitRepo();
+      const criterion: AcceptanceCriterion = {
+        id: "AC-GREEN-MODULE-1",
+        statement: "a package nobody installed can be required",
+        verify: {
+          mode: "script",
+          oracle: "test",
+          // reason: mirrors the measured "no usable node_modules" defect
+          // vector genuinely — `node -e "require(...)"` against a package
+          // name that certainly does not exist fails with a real
+          // MODULE_NOT_FOUND, exit 1, never a scripted/stubbed exit code.
+          command: 'node -e "require(\'lore-attested-red-nonexistent-pkg-xyz\')"',
+          falsifier: { path: "target.txt", find: "MAGIC_MARKER", replace: "", expected_exit_code: 1 },
+        },
+      };
+      const plan = makePlan();
+      const spec = makeSpec([criterion]);
+      const task = makeTask();
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+
+      const recorder = makeRecordVerifiedEvidence();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+        ...BASE_CONFIG,
+        repoRoot,
+      });
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "attested-red-tester",
+        nowIso: "2026-08-21T00:00:00.000Z",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.result).toBe("inconclusive");
+
+      expect(recorder.calls).toHaveLength(1);
+      const entry = recorder.calls[0]!.entry;
+      expect(entry.result).toBe("inconclusive");
+      expect(entry.attestation).toBeUndefined();
+      expect(entry.output_tail).toContain("Cannot find module");
+    },
+  );
+
+  it(
+    "green-control: STATE — after a green-control-failure run, the ORIGINAL repo is byte-identical and git status stays clean (AC-FR-3's isolation guarantee extends to this earlier-exiting path)",
+    async () => {
+      const { repoRoot } = makeThrowawayGitRepoWithDependency(false);
+      const targetPath = join(repoRoot, "target.txt");
+      const hashBefore = sha256OfFile(targetPath);
+      // reason: `only-in-worktree.txt` is DELIBERATELY untracked (the fixture
+      // under test) — it legitimately shows up as `?? only-in-worktree.txt`
+      // in `repoRoot`'s OWN status both before and after this run, so the
+      // isolation proof below compares against THIS baseline (captured before
+      // the falsifier run touches anything) rather than asserting a
+      // hardcoded-empty status, which would conflate "this repo carries
+      // untracked fixture noise" with "the falsifier run modified something".
+      const statusBefore = gitStatusPorcelain(repoRoot);
+
+      const criterion = makeGreenControlCriterion();
+      const plan = makePlan();
+      const spec = makeSpec([criterion]);
+      const task = makeTask();
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+
+      const recorder = makeRecordVerifiedEvidence();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+        ...BASE_CONFIG,
+        repoRoot,
+      });
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "attested-red-tester",
+        nowIso: "2026-08-21T00:00:00.000Z",
+      });
+      expect(result.ok).toBe(true); // sanity — the run itself succeeded and recorded
+      if (!result.ok) return;
+      expect(result.value.result).toBe("inconclusive");
+
+      expect(sha256OfFile(targetPath)).toBe(hashBefore);
+      expect(gitStatusPorcelain(repoRoot)).toBe(statusBefore);
+    },
+  );
+
+  it(
+    "green-control: BOUNDARY — a green control that TIMES OUT (rather than exiting nonzero) is treated exactly like a nonzero exit, never like a proven red",
+    async () => {
+      const { repoRoot } = makeThrowawayGitRepo();
+      const criterion: AcceptanceCriterion = {
+        id: "AC-GREEN-TIMEOUT-1",
+        statement: "the command completes within the configured timeout",
+        verify: {
+          mode: "script",
+          oracle: "test",
+          command: "sleep 5", // reason: genuinely never exits within the tiny timeout below
+          falsifier: { path: "target.txt", find: "MAGIC_MARKER", replace: "", expected_exit_code: 124 },
+        },
+      };
+      const plan = makePlan();
+      const spec = makeSpec([criterion]);
+      const task = makeTask();
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+
+      const recorder = makeRecordVerifiedEvidence();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+        ...BASE_CONFIG,
+        repoRoot,
+        defaultTimeoutMs: 300, // reason: far shorter than `sleep 5` — a genuine timeout, not a stub
+      });
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "attested-red-tester",
+        nowIso: "2026-08-21T00:00:00.000Z",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.result).toBe("inconclusive");
+
+      expect(recorder.calls).toHaveLength(1);
+      const entry = recorder.calls[0]!.entry;
+      expect(entry.result).toBe("inconclusive");
+      expect(entry.attestation).toBeUndefined();
+    },
+    10_000,
+  );
+
+  it(
+    "green-control: REGRESSION — a green-control failure records EXACTLY one evidence row, never a partial second write from the mutate/spawn/compare sequence it short-circuits",
+    async () => {
+      const { repoRoot } = makeThrowawayGitRepoWithDependency(false);
+      const criterion = makeGreenControlCriterion();
+      const plan = makePlan();
+      const spec = makeSpec([criterion]);
+      const task = makeTask();
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+
+      const recorder = makeRecordVerifiedEvidence();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(getPlanBundle, recorder.fn, realExecutor, {
+        ...BASE_CONFIG,
+        repoRoot,
+      });
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "attested-red-tester",
+        nowIso: "2026-08-21T00:00:00.000Z",
+      });
+
+      expect(result.ok).toBe(true);
+      // EXACTLY one — never zero (the outcome IS recordable) and never two
+      // (no leftover second write attempt from a mutate/spawn that never ran).
+      expect(recorder.calls).toHaveLength(1);
     },
   );
 });
