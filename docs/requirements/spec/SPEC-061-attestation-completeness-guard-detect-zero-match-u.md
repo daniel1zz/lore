@@ -3,7 +3,7 @@ id: SPEC-061
 type: spec
 role: spec
 title: "Attestation completeness guard: detect zero-match / under-match test oracles"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-21
 updated: 2026-08-21
@@ -172,6 +172,40 @@ AC-060-7/8 pair.
    only evidence is `inconclusive` currently renders `·`, indistinguishable
    from "no evidence at all" — a reporting gap, not a correctness one.
 
+## ⛔ CORRECTION 2026-08-21 — every `--falsify` row on AC-061-18/19/20/21 is VACUOUS
+
+Four falsifiers were declared on these criteria and run through `lore verify --falsify`. All
+recorded `result: "expected-fail"`, `capture_source: "runner"`, observed exit 1 matching the
+declared 1. **None of them exercised its mutation.** The recorded tails, read afterwards:
+
+- `AC-061-18`, `AC-061-19`, `AC-061-20` — `Could not resolve 'vitest/config' in vitest.config.ts`
+  / `Cannot find package 'vitest'`. One of the AC-061-18 rows even shows a `bun install` having
+  run (`Resolved, downloaded and extracted [172] / Saved lockfile`) and STILL failing to resolve,
+  so an install step alone does not fix the scratch worktree.
+- `AC-061-21`, first row — `The following filters did not match any test files: packages/lore/tests/e2e/ac-add-path-precheck-compiled.bun.test.ts`. The
+  file was untracked, and the scratch worktree is built from `git stash create` WITHOUT
+  `--include-untracked`, so the file under test simply was not there.
+- `AC-061-21`, second row — `stale-binary guard: … does not exist`. `dist/lore` is gitignored, so
+  the compiled binary the e2e drives is never present in the scratch copy.
+
+Three distinct causes, one shared consequence: every one exits 1, and 1 is the natural declared
+value for "this mutation should make the test fail". So the false-match rate for
+compiled-binary and node_modules-dependent criteria in this repo is effectively total.
+
+**Where the real discriminating power for these four comes from**, and it IS real: the
+implementer's manual RED→GREEN cycle — reverting both functions to their pre-fix flat-scan and
+first-match-wins shapes, rebuilding `dist/lore`, and running all three vitest filters plus the
+compiled e2e, which failed exactly as predicted (phantom-token counts; `{files:1,tests:18}`
+instead of `{files:2,tests:34}`; the echo-prose refusal firing again) — then restoring and
+re-running green. Those rows are self-reported and they are the evidence.
+
+⛔ The implementer reported this gap itself rather than adjusting a declared exit code to
+manufacture a discriminating-looking result. That is the behaviour that surfaced cause 2 and 3;
+neither was reachable from the run's own exit status.
+
+Full mechanism, why no exit code can fix it, and the required repair:
+`knowledge-lore-verify-falsify-compares-only-the-exit-code-so-an`.
+
 
 ## Acceptance Criteria (structured)
 
@@ -221,6 +255,10 @@ AC-060-7/8 pair.
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-service.test.ts -t echo-prose-not-a-path 2>&1 && echo 'AC-061-20 PASS: the service accepts a declaration whose only extra path-shaped token is echo prose, and still refuses a genuinely missing runner-segment path'
 - [✔] [script] AC-061-21: PRODUCTION WIRING, COMPILED BINARY (the bun-runner half split out of AC-061-20 because this repo's two runners cannot share one attestable command): driven from a throwaway corpus by the compiled dist binary, a real lore ac add whose command ends in a success echo mentioning a bare test basename is ACCEPTED and writes the criterion, while the same invocation naming a nonexistent path in its runner segment exits 4 and writes NOTHING. ⛔ This exists because an attested service-layer pass certifies an unreachable capability when the AC's prose promises a user-facing surface: gap 8 was measured AT THE CLI, so the CLI is what must be driven. ⛔ Never assume a lore on PATH is this build — resolve the binary through the freshness-asserted dist constant the sibling e2e suites already use. RED: revert the extractor and this suite's accept case must exit 4.
   script: e2e — bun test packages/lore/tests/e2e/ac-add-path-precheck-compiled.bun.test.ts 2>&1 && echo 'AC-061-21 PASS: the compiled CLI accepts the echo-prose declaration, writes the criterion, and still exits 4 writing nothing for a genuinely missing runner-segment path'
+- [·] [script] AC-061-22: A RUNNER SEGMENT IS IDENTIFIED BY ITS LEADING INVOCATION, NEVER BY A SUBSTRING ANYWHERE IN IT (gap 8 reintroduced by its own fix, found by lore assess after AC-061-18/20 were attested and merged). Measured 2026-08-21 on merged main: classifyCommandSegment anchors four arms at ^\s* (VITEST_SEGMENT_PATTERN, PLAYWRIGHT_SEGMENT_PATTERN, BUN_TEST_SEGMENT_PATTERN, BUN_RUN_SEGMENT_PATTERN) but tests the fifth, COMPILED_BINARY_TOKEN_PATTERN = /\bdist\/lore\b/, ANYWHERE in the segment. Probe run against the merged source: for the command 'bunx vitest run packages/core/tests/a.test.ts 2>&1 && echo "PASS: dist/lore rebuilt, see packages/lore/tests/e2e/x.bun.test.ts"' the classifier returned [vitest, lore-cli], extractTestFileTokens returned BOTH paths including the one that exists only inside the echo prose, and countExplicitPathArgs returned 2 where 1 is correct. ⛔ So the exact defect AC-061-20 closes is live again for every success echo that mentions the compiled binary — and this repo's own AC statements mention dist/lore routinely, so the blast radius is the criteria most likely to be authored next. REQUIRED: the compiled-binary arm identifies a segment by its LEADING token like the other four; a mention inside a quoted echo argument classifies the segment as unclassified and contributes NO path tokens. ⛔ Keep AC-061-9's real dogfooding shape ('./dist/lore verify plan-1 <paths>') classified as a runner — that is why the anchor was loosened, and re-tightening it must not re-break that. RED: revert the arm to an unanchored substring test and the echo-prose case must report 2 declared paths again. Covered by the describe block named leading-token-classification.
+  script: test — bunx vitest run packages/core/tests/attestation-completeness.test.ts -t leading-token-classification 2>&1 && echo 'AC-061-22 PASS: a compiled-binary mention inside echo prose leaves the segment unclassified and contributes no path tokens, while a real leading dist/lore invocation still classifies as a runner'
+- [·] [script] AC-061-23: EVERY OCCURRENCE OF A RUNNER SUMMARY IS CREDITED, NOT ONE PER PATTERN (AC-061-19 delivered half its stated property). Measured 2026-08-21 on merged main: parseExecutedUnits calls BUN_SUMMARY_PATTERN.exec(stdout) once and VITEST_SUMMARY_PATTERN.exec(stdout) once, both non-global regexes, so it sums across the two PATTERNS rather than across every summary present. Probe against the merged source: a stdout holding TWO vitest summaries ('Test Files 1 passed (1) / Tests 5 passed (5)' followed by 'Test Files 1 passed (1) / Tests 7 passed (7)') returned {files:1,tests:5} where {files:2,tests:12} is correct, while the mixed vitest-plus-bun case returned {files:2,tests:12} correctly. So AC-061-19's oracle is green because it exercises only the mixed case that gap 7 measured. ⛔ The consequence is the same under-match refusal AC-061-19 exists to remove, for any AC chaining two invocations of the SAME runner — a shape this repo's split-by-runner practice makes more likely, not less. REQUIRED: scan all occurrences (matchAll or a global-flagged clone; ⛔ never mutate a shared regex's lastIndex, which makes the function order-dependent), summing files and tests across every match; a stdout with exactly one summary stays byte-identical in behaviour. RED: restore either single exec call and the two-same-runner case must report 1 file where 2 ran. Covered by the describe block named every-summary-occurrence.
+  script: test — bunx vitest run packages/core/tests/attestation-completeness.test.ts -t every-summary-occurrence 2>&1 && echo 'AC-061-23 PASS: two summaries from the same runner sum to two files, the mixed-runner case is unchanged, and the single-summary path is byte-identical'
 
 ## Code anchors
 

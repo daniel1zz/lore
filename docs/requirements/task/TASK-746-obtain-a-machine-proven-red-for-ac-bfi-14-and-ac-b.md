@@ -84,3 +84,29 @@ in the spec's own correction section. Do not treat them as satisfying this task.
 None declared. Route 2 touches no tracked file (mutate, measure, revert). Route 1's edits live
 under `packages/lore/src/service/` and belong to a different spec, so they must be anchored by
 the task opened there, not by this one.
+
+# ⛔ CORRECTION to this task's own premise, same day
+
+The section above says archiving the plan "would make AC-BFI-14 and AC-BFI-15 permanently
+unprovable". **That is an overstatement and it is corrected here rather than left standing.**
+
+What `knowledge-the-falsifier-mechanism-is-shipped-but-inert-a` §F2 actually measured is that
+the 8 pre-existing falsifier declarations "cannot be re-verified TODAY", because no LIVE plan
+carries them — not that they are unprovable forever. `lore verify --falsify` needs a plan
+positional and a task in that plan whose `ac_scope` includes the criterion. Nothing prevents a
+FUTURE plan from carrying a task with `--ac-scope AC-BFI-14 --ac-scope AC-BFI-15` and running
+the falsifiers there. That is ordinary work, not an impossibility.
+
+So the accurate statement of the cost: archiving ends the CURRENT window and moves the re-proof
+into a future slice. Keeping this plan open is a convenience, not a rescue.
+
+This task therefore remains the tracking item for the gap, and its scope is unchanged — but
+⛔ nobody should quote the "permanently unprovable" claim, including from this document's own
+earlier section or from the commit message that introduced it
+(`98702546 docs(mirror): hold the plan open with the work that is actually unfinished`).
+
+Session-wide measurement that supersedes the two-row figure above: **every `lore verify
+--falsify` invocation of 2026-08-21 was vacuous — 11 rows across 10 criteria on 3 specs, a 100%
+false-match rate**, with three distinct causes (no usable `node_modules`; untracked files absent
+because the scratch worktree comes from `git stash create` without `--include-untracked`;
+`dist/lore` gitignored so a compiled-binary oracle has no binary). All three exit 1.

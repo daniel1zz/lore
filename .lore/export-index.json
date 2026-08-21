@@ -6216,6 +6216,22 @@
     "01M0H7A5EYEP2Q4NQGN3VS2BRM": {
       "human_id": "TASK-746",
       "file_path": "docs/requirements/task/TASK-746-obtain-a-machine-proven-red-for-ac-bfi-14-and-ac-b.md"
+    },
+    "01M0H999WCEYQSWRMGEMF5FTAB": {
+      "human_id": "KN-488",
+      "file_path": "docs/requirements/knowledge/KN-488-assessment-land-m7-an-adopted-state-that-frees-def.md"
+    },
+    "01M0H93S140X684AMFE2MPWGCB": {
+      "human_id": "KN-489",
+      "file_path": "docs/requirements/knowledge/KN-489-assessment-fix-the-flat-command-tokenizer-at-its-r.md"
+    },
+    "01M0H9CFBPQGJRQW0M9AJX99Q0": {
+      "human_id": "TASK-747",
+      "file_path": "docs/requirements/task/TASK-747-re-anchor-the-compiled-binary-classifier-arm-and-c.md"
+    },
+    "01M0H8XP5JZTR8Q7BH6HV6YRM4": {
+      "human_id": "TASK-748",
+      "file_path": "docs/requirements/task/TASK-748-lore-verify-falsify-compares-only-the-exit-code-so.md"
     }
   }
 }

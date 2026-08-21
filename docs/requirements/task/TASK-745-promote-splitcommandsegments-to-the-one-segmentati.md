@@ -3,7 +3,7 @@ id: TASK-745
 type: task
 role: plan
 title: "Promote splitCommandSegments to the one segmentation seam and make all three path-parsing consumers read runner segments"
-status: draft
+status: archived
 priority: high
 phase: "root-fix"
 created: 2026-08-21

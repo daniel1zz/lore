@@ -13,6 +13,7 @@ links:
   - {id: KN-483, type: relates-to}
   - {id: SPEC-134, type: relates-to}
   - {id: SPEC-133, type: relates-to}
+  - {id: SPEC-061, type: relates-to}
 ---
 Measured 2026-08-21. The corpus's ONLY mechanism for machine-proving that an acceptance
 criterion's oracle can actually fail is `lore verify --falsify`. It compares the observed exit
@@ -118,3 +119,51 @@ OPEN rather than archived, even though both its tasks are archived and its work 
 falsifier is only re-runnable while its governing plan is live
 (`knowledge-the-falsifier-mechanism-is-shipped-but-inert-a` F2). Archiving it now would make
 AC-BFI-14 and AC-BFI-15 permanently unprovable the moment the runner is fixed.
+
+## ⛔ SCOPE CORRECTION, same day — it is not two rows, it is EVERY run, with THREE causes
+
+This doc originally named two vacuous rows. Measured a few hours later against the same
+session's second batch: **every `lore verify --falsify` invocation of the session was vacuous** —
+7+ rows across 6 criteria on 2 specs. The count is not the point; the three distinct causes are,
+because a fix addressing only the first leaves the mechanism broken.
+
+| # | cause | observed tail | which criteria |
+|---|---|---|---|
+| 1 | the scratch worktree has no usable `node_modules` | `Could not resolve 'vitest/config'` / `Cannot find package 'vitest'` / `Cannot find module '@lore/core'` | AC-BFI-14, AC-BFI-15, AC-061-18, AC-061-19, AC-061-20 |
+| 2 | UNTRACKED files are absent — the worktree comes from `git stash create` WITHOUT `--include-untracked` | `The following filters did not match any test files: <the new test file>` | AC-061-21 |
+| 3 | `dist/lore` is gitignored, so a compiled-binary oracle has no binary | `stale-binary guard: … does not exist` | AC-061-21 |
+
+⛔ Cause 1 is NOT simply "nobody runs `bun install`". One AC-061-18 row's tail opens with
+`Resolving dependencies / Resolved, downloaded and extracted [172] / Saved lockfile` and then
+STILL fails to resolve `vitest/config`. So an install step was attempted and did not make the
+tree runnable — a repair that just adds `bun install` would not have fixed even that row.
+
+⛔ Cause 2 is the sharpest, because it inverts the mechanism's purpose: a red-first AC's test file
+is by definition NEW, and a new file is untracked until committed. So `--falsify` is structurally
+LEAST able to verify exactly the criteria the red-first discipline is built around.
+
+All three exit 1, and 1 is the natural declared value for "this mutation should make the test
+fail". So for this repo the false-match rate is effectively total, not occasional.
+
+## Revised minimum fix
+
+The green-control step proposed above is still the single highest-value repair and it catches all
+three causes with no new declaration syntax: run the UNMUTATED command in the same scratch
+worktree first, and if that does not pass, record `inconclusive` and say which of "cannot run
+here" it hit. ⛔ Adding `--include-untracked` and an install step are necessary but not
+sufficient — cause 3 needs the build artifact, and cause 1 survived an install. The control is
+what makes the mechanism honest regardless of how many environment causes exist.
+
+## What actually caught each cause
+
+Nothing in the run. `lore verify --falsify` exited 0 and printed
+`exit 1 (declared 1) — result:expected-fail` every time.
+
+- Causes 1: `lore assess` reading the evidence tails, hours after the rows were written and after
+  the orchestrator had already reported them to a human as machine-proven.
+- Causes 2 and 3: the implementer agent inspecting its own row's tail and reporting the gap
+  instead of adjusting the declared exit code to manufacture a discriminating-looking result. ⛔
+  Worth naming as the behaviour that worked: it had a green-looking artifact in hand and
+  contradicted it.
+
+Neither route was available to the deterministic layer, which is the whole finding.

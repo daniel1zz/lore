@@ -3,7 +3,7 @@ id: TASK-742
 type: task
 role: plan
 title: "Land the adopted resolution state, its required owner pointer, the abandonment count, and the compiled-CLI wiring"
-status: draft
+status: archived
 priority: high
 phase: "m7"
 created: 2026-08-21
@@ -11,6 +11,8 @@ updated: 2026-08-21
 tags: []
 parent: PLAN-132
 plan: PLAN-132
+links:
+  - {id: TASK-723, type: resolves}
 ---
 # Task Objective
 
