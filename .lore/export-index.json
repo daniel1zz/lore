@@ -6408,6 +6408,10 @@
     "01M0PGEVAQTD9V0B2YCP29PXDR": {
       "human_id": "KN-503",
       "file_path": "docs/requirements/knowledge/KN-503-assessment-make-a-falsifier-s-scratch-worktree.md"
+    },
+    "01M0PGNB0F4FWFHAT7Y3947X97": {
+      "human_id": "KN-504",
+      "file_path": "docs/requirements/knowledge/KN-504-handoff-agent-main-orchestrator.md"
     }
   }
 }
