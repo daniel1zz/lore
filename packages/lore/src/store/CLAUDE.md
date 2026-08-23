@@ -8,7 +8,7 @@ Async persistence abstraction. `StoreInterface` is the single contract every ser
 - `TursoStore` (`@libsql/client`) — embedded replica for `sync.enabled` mode.
 - `InMemoryStore` — unit-test double; substring search instead of FTS5.
 
-Row mappers, FTS5 query escaping, and JSON helpers are shared in `store-shared.ts`.
+Row mappers, FTS5 query escaping, and JSON helpers are shared in `store-shared.ts`. `escapeFtsQuery` wraps each whitespace-separated piece of user input in `"…"` phrase quotes and doubles any internal `"`, which renders every FTS5 operator (`-`, `()`, `*`, `OR`, `AND`, `NOT`, `:`) inert rather than blocklisting them; empty input short-circuits and never reaches `MATCH`.
 
 Full pre-eviction file (per-invariant empirical measurements, incident chains, per-spec design decisions) is archived verbatim: `lore get knowledge-module-claude-md-snapshot-packages-lore-src-store`.
 

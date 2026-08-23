@@ -80,10 +80,7 @@ packages/lore/src/eval/           ← read-only evaluation scenarios (lore eval)
 
 **StoreInterface is async** — methods return `Promise<Result<T, LoreError>>`. This is the contract both `SQLiteStore` (wraps sync `bun:sqlite` calls) and `TursoStore` (`@libsql/client`, natively async) implement. `InMemoryStore` is the test double. Services depend on `StoreInterface`, never on a concrete store.
 
-**Store selection (D-007)** — `createApp(dbPath, config?)`:
-- No config / `sync.enabled !== true` → `SQLiteStore` (local-only, returned directly as `App`).
-- `sync.enabled: true` + `remote_url` + valid `LORE_SYNC_TOKEN` env var → `TursoStore` (embedded replica) wrapped in `Result<App>`.
-- Sync enabled, credentials missing → `err(VALIDATION_ERROR)` (from `resolveSyncCredentials`, propagated verbatim); TursoStore construction fails → `err(STORE_ERROR)`. **No silent fallback** to SQLiteStore — offline writes must not land only-local.
+**Store selection (D-007)** — `createApp(dbPath, config?)`: no `sync.enabled` → `SQLiteStore` (returned directly as `App`); `sync.enabled` + `remote_url` + valid `LORE_SYNC_TOKEN` → `TursoStore` embedded replica in `Result<App>`. ⛔ **No silent fallback**: missing credentials → `err(VALIDATION_ERROR)` (verbatim from `resolveSyncCredentials`), construction failure → `err(STORE_ERROR)`. Offline writes must not land only-local.
 
 **Import style (monorepo)** — path aliases `@core/*`, `@store/*`, `@service/*`, `@adapters/*` are retired. Cross-package imports use `@lore/core` (resolved via Bun workspaces). Intra-package imports within `packages/lore/` use relative `.js` paths. No `resolve.alias` in vitest.
 
@@ -93,7 +90,7 @@ packages/lore/src/eval/           ← read-only evaluation scenarios (lore eval)
 
 **`bun:sqlite` is external to vitest** — `vitest.config.ts` marks `bun:sqlite` as an SSR external and excludes it from `optimizeDeps`. Tests that touch `SQLiteStore` must use `bun test`, not vitest. CLI loader (`src/adapters/cli/loader.ts`) is bun-only to isolate `bun:sqlite` from vitest-reachable utility modules.
 
-**FTS5 query escaping (`escapeFtsQuery` in `store-shared.ts`)** — user search input is wrapped per whitespace-piece in `"…"` phrase quotes, with internal `"` escaped to `""`. Neutralises FTS5 operators (`-`, `()`, `*`, `OR`, `AND`, `NOT`, `:`). Empty input → short-circuit, never reaches FTS5 MATCH.
+**FTS5 escaping** (`escapeFtsQuery`, `store-shared.ts`) — each whitespace piece phrase-quoted, internal `"` doubled, so FTS5 operators are inert; empty input short-circuits before MATCH.
 
 ### Service Layer (`packages/lore/src/service/`)
 
@@ -161,6 +158,7 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 - ⛔ An `assess` MAJOR can be exactly BACKWARDS — one read a rename's SOURCE side as the result and indicted a filename that same commit FIXED. Machine-check every finding that names a path before scoring it; path existence is decidable, never a judgment. Same doc.
 - ⛔ MEASURE a field/command before pinning an AC's oracle to it, and never pair that pin with a clause REFUSING the alternative in the same round: pinning `lore status --json` (which surfaces `ai_defaults` but NOT arbitrary resolved config) while forbidding a hand-rebuilt merge left an AC with no runnable oracle at all. Tightening an oracle can DESTROY it. `knowledge-five-governance-tooling-gaps-measured-while-resuming`
 - ⛔ `lore ac list`'s count is scoped by the recording task's PLAN LINEAGE and IGNORES `ac_scope` — polarity inverted from the flag's own help. Attested rows from a task that declared the AC go uncounted; a task declaring none is counted. And `oracle_generation` bumps only when `verify.command` changes, so a stable command over a rewritten test file reads green forever. `knowledge-ac-coverage-counts-evidence-by-plan-lineage-and`
+- ⛔ `--capture` NOW ATTESTS (SPEC-143 C5) and clears `lore done`'s attested floor — the old "`--capture` ≠ attested" rule is FALSE for rows written after it. Narrower fields than `verify`; the floor does not distinguish. `knowledge-lore-evidence-capture-now-clears-the-attested-floor`
 
 ### AI Default Behavior by Caller Surface (SPEC-024)
 
@@ -192,12 +190,6 @@ Module-specific context lives alongside the code:
 
 Lore is itself the knowledge store — query it through its own CLI rather than reading docs by path:
 
-- `lore search <query>` — FTS5 full-text search over the corpus
-- `lore get <id-or-slug>` — read a document (add `--resolve-mdx` to expand placeholders)
-- `lore list --type <type>` — filter docs by type (`prd | spec | adr | plan | knowledge | task`)
-- `lore tree` — view the document hierarchy (root → specs → tasks)
-- `lore pending` — list docs awaiting review
-- `lore log <id-or-slug>` — version history; `lore diff <id> --from N --to M` for unified diff
-- `lore status` — corpus-level health snapshot
+- `search` (FTS5) / `get` (`--resolve-mdx` expands placeholders) / `list --type` / `tree` / `pending` / `log` + `diff --from N --to M` / `status`. Flags: `--help` on each — never transcribed here.
 - ⛔ The corpus is the ONLY spec index — read the governing spec (`lore get SPEC-0NN`, or `lore search`) before changing a module; exported mirrors live under `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`, zero-padded 3-digit ids (`bun run mirror:export` / `check:spec-mirror`).
 <!-- /auto:dynamic-context -->
