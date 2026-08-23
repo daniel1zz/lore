@@ -32,6 +32,13 @@
  *     (`not_measured` — a pass-only fact whose `falsified` fails runtime well-
  *     formedness, closing M1's fail-open on an absent/malformed count). See this
  *     function's own JSDoc for the complete seven-row table.
+ *   - AC_COVERAGE_STATES / AcCoverageState / projectAcCoverageGlyph(state) /
+ *     AC_COVERAGE_GLYPH_ALPHABET — SPEC-143 component C4: the ONE state-to-glyph
+ *     projection, `switch`-exhaustive with a `never` arm so an eighth state fails
+ *     `bun run typecheck` instead of rendering as some other state's glyph. Its
+ *     GLOBAL uniqueness is not a claim: `scripts/check-ac-state-renderers.ts
+ *     --rule glyph-projection` refuses a second projection anywhere outside this
+ *     file, and imports `AC_COVERAGE_GLYPH_ALPHABET` rather than re-listing it.
  *   - isAcInDeclaredScope(declaredScope, acId) — the ONE declared-`ac_scope`
  *     membership predicate (adr-lore-verify-s-attested-evidence-scope-belongs-to-the-task
  *     §Public Interface), consumed by `lore verify`'s selection + refusals
@@ -671,9 +678,7 @@ export function computeAcCoverage(
  * deriveAcCoverageState({ ac_id: "AC-5", mode: "script", pass: 1, fail: 0, refs: [], attested_pass: 0, attested_fail: 0, falsified: undefined as unknown as number });
  * // => "not_measured" (M5) — falsified fails runtime well-formedness despite the type claim
  */
-export function deriveAcCoverageState(
-  fact: AcCoverageFact,
-): "fail" | "fail_superseded" | "attested_pass" | "not_measured" | "pass_unfalsified" | "pass" | "none" {
+export function deriveAcCoverageState(fact: AcCoverageFact): AcCoverageState {
   if (fact.fail > 0) {
     return isSupersededByNewerAttestedPass(fact.refs) ? "fail_superseded" : "fail";
   }
@@ -684,6 +689,131 @@ export function deriveAcCoverageState(
   }
   return "none";
 }
+
+// ─── SPEC-143 C4: the ONE state-to-glyph projection ────────────────────────
+
+/**
+ * The seven states {@link deriveAcCoverageState} can return, in PRECEDENCE ORDER
+ * (row 1 first) — the same order as that function's own seven-row table.
+ *
+ * Declared as a value (not only as a type) so a consumer can ENUMERATE the states
+ * without transcribing them: {@link AC_COVERAGE_GLYPH_ALPHABET} is derived from this
+ * array by mapping {@link projectAcCoverageGlyph} over it, which is what lets
+ * `scripts/check-ac-state-renderers.ts` import the alphabet instead of keeping its own
+ * copy (SPEC-143 AC-CT-1 R9: a guard holding a duplicate list silently guards a stale
+ * alphabet the moment the projection changes a glyph).
+ *
+ * ⛔ Adding a member here is a BEHAVIOUR change, not an extension — see
+ * {@link deriveAcCoverageState}'s own note on why `oracle_generation` did not become an
+ * eighth state. An eighth member also fails the build at
+ * {@link projectAcCoverageGlyph}'s `never` arm until that switch handles it, which is
+ * the point: the compiler, not a reviewer, is what refuses a silently-unrendered state.
+ */
+export const AC_COVERAGE_STATES = [
+  "fail",
+  "fail_superseded",
+  "attested_pass",
+  "not_measured",
+  "pass_unfalsified",
+  "pass",
+  "none",
+] as const;
+
+/**
+ * One of {@link deriveAcCoverageState}'s seven return values — the named form of what
+ * used to be an inline seven-member union repeated at every consumer that wanted to
+ * annotate it (`commands/ac.ts::withCoverageState` still spells it
+ * `ReturnType<typeof deriveAcCoverageState>`, which is the same set).
+ */
+export type AcCoverageState = (typeof AC_COVERAGE_STATES)[number];
+
+/**
+ * Projects one {@link AcCoverageState} to the SINGLE glyph that renders it — SPEC-143
+ * component C4, the only state-to-glyph projection in this codebase.
+ *
+ * WHY THIS EXISTS AT ALL, stated as the defect it removes: before it,
+ * `packages/lore/src/service/outline-service.ts::acCoveragePrefix` re-derived its own
+ * three-glyph verdict straight from `fact.fail > 0` / `fact.pass > 0`, so `"fail"` and
+ * `"fail_superseded"` BOTH printed `✘` and `"attested_pass"`, `"not_measured"`,
+ * `"pass_unfalsified"` and `"pass"` all printed `✔`. Two live criteria carrying
+ * attested passes (SPEC-136 AC-OX-1 and AC-OX-6) therefore rendered as failures in the
+ * exported spec body. Rendering was not injective, which is the first corpus property
+ * the project's North Star names.
+ *
+ * INJECTIVITY IS THE CONTRACT: the seven arms return seven PAIRWISE-DISTINCT glyphs.
+ * That is not asserted here in prose — it is measured by
+ * `packages/core/tests/unit/ac-coverage-glyph.test.ts` (which enumerates all seven
+ * through real facts and compares the glyph set size to 7) and its global uniqueness is
+ * measured by `scripts/check-ac-state-renderers.ts --rule glyph-projection`, which
+ * refuses a SECOND projection anywhere outside this file.
+ *
+ * ⛔ The glyphs are deliberately CONTINUOUS with the three the old renderer used —
+ * `fail` keeps `✘`, `pass` keeps `✔`, `none` keeps `·` — so the four newly-distinct
+ * states are the only rendering that changes. `⚑` (attested) and `⚠` (a malformed
+ * `falsified` count) match `commands/ac.ts::coverageBadge`'s existing badge vocabulary
+ * for the same two states; `⊘` (superseded) and `○` (green but never observed red) are
+ * new and carry no prior meaning in this codebase.
+ *
+ * ⛔ A branded `AcCoverageGlyph` return type was considered and REJECTED (SPEC-143 C4,
+ * R2): it has zero discriminating power over the one real defect, because
+ * `acCoveragePrefix` never named the type — its own bare string-literal union return
+ * type was exactly what made it invisible to a type-level guard. The guard is the site
+ * scan, not the type.
+ *
+ * @param state - Any {@link deriveAcCoverageState} output.
+ * @returns The one glyph for that state; the seven results are pairwise distinct.
+ * @throws {Error} Only when reached with a value outside {@link AcCoverageState} at
+ *   RUNTIME — which the `never` arm has already refused at COMPILE time, so this can
+ *   only fire on an unvalidated cast. Deliberately loud: the alternative is a state
+ *   rendering as some other state's glyph, which is the exact class of lie this
+ *   projection exists to remove.
+ * @example
+ * projectAcCoverageGlyph("fail_superseded"); // => "⊘" — never the plain "✘" of "fail"
+ * @example
+ * projectAcCoverageGlyph(deriveAcCoverageState(fact)); // the only supported call shape
+ */
+export function projectAcCoverageGlyph(state: AcCoverageState): string {
+  switch (state) {
+    case "fail":
+      return "✘";
+    case "fail_superseded":
+      return "⊘";
+    case "attested_pass":
+      return "⚑";
+    case "not_measured":
+      return "⚠";
+    case "pass_unfalsified":
+      return "○";
+    case "pass":
+      return "✔";
+    case "none":
+      return "·";
+    default: {
+      // reason: the exhaustiveness arm SPEC-143 AC-CT-1 pins with a compile-failure
+      // fixture — widening `AcCoverageState` by one member makes this assignment
+      // TS2322 ("not assignable to type 'never'") and breaks `bun run typecheck`
+      // before any renderer can silently fall through to a default glyph.
+      const unhandled: never = state;
+      throw new Error(`projectAcCoverageGlyph: unhandled AcCoverageState ${JSON.stringify(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * The glyph ALPHABET {@link projectAcCoverageGlyph} emits, DERIVED by projecting every
+ * member of {@link AC_COVERAGE_STATES} — never a second hand-written list.
+ *
+ * ⛔ This is the export `scripts/check-ac-state-renderers.ts` imports for RULE 2's
+ * glyph-yielding condition (SPEC-143 AC-CT-1 R9). Because it is derived, changing a
+ * glyph in the switch above changes what the scan looks for in the SAME edit; a
+ * re-listed copy inside the scan would have kept guarding the old alphabet, which is
+ * this spec's own guarded-vs-guardian drift reproduced inside the guard.
+ *
+ * Order matches {@link AC_COVERAGE_STATES} (precedence order), and the entries are
+ * pairwise distinct — the property `packages/core/tests/unit/ac-coverage-glyph.test.ts`
+ * measures.
+ */
+export const AC_COVERAGE_GLYPH_ALPHABET: readonly string[] = AC_COVERAGE_STATES.map(projectAcCoverageGlyph);
 
 /**
  * Runtime well-formedness check for {@link AcCoverageFact.falsified} (M5,

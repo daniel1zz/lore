@@ -328,6 +328,30 @@ function scriptAc(id: string, overrides: Partial<AcceptanceCriterion> = {}): Acc
   };
 }
 
+/**
+ * ⛔ RE-BASELINED 2026-08-23 BY SPEC-143 (C4 + D7), recorded in place because an
+ * "AC red → edit the AC → green" edit and a covered-up failure are indistinguishable
+ * in an audit unless the correction states all three of these:
+ *
+ * 1. THE COMMAND: `bunx vitest run packages/lore/tests/unit/service/outline-render.test.ts
+ *    packages/lore/tests/unit/service/outline-service.test.ts` (SPEC-038 AC-ACODE-9's
+ *    own declared oracle).
+ * 2. THE EXACT FAILURE it produced: 3 failed / 63 passed — every assertion expecting
+ *    `[✔]` for a `pass>0, fail=0, attested_pass=0, falsified=0` fact received `[○]`.
+ * 3. WHY THIS IS A CORRECTION AND NOT A WEAKENING: that fact's
+ *    `deriveAcCoverageState` verdict is `"pass_unfalsified"` — green, but this oracle
+ *    was never observed able to go red — and it is a DIFFERENT state from `"pass"`.
+ *    The old renderer printed `✔` for BOTH, which is the non-injective rendering
+ *    SPEC-143 exists to remove; these assertions were pinning the defect. The
+ *    expectations below got STRICTER, not looser: each now names the one glyph its own
+ *    state projects to, and the `fail` / `fail_superseded` pair added at the bottom of
+ *    this describe block asserts a distinction the old renderer could not express at
+ *    all. ⛔ Do not "simplify" these back to three glyphs.
+ *
+ * Glyphs are written LITERALLY here rather than read from `projectAcCoverageGlyph`: a
+ * test that computes its expectation from the code under test cannot fail when that
+ * code changes a glyph, and noticing such a change is the entire point.
+ */
 function fact(ac_id: string, pass: number, fail: number): AcCoverageFact {
   return { ac_id, mode: "script", pass, fail, refs: [], attested_pass: 0, attested_fail: 0, falsified: 0 };
 }
@@ -351,7 +375,9 @@ describe("renderResolvedToMarkdown — acceptance criteria checklist (SPEC-038 �
 
     expect(renderResolvedToMarkdown(resolved)).toBe(
       "# Spec Body\n\n## Acceptance Criteria (structured)\n\n" +
-        "- [✔] [script] AC-1: Statement for AC-1\n  script: test — bun test",
+        // `falsified: 0` on a non-attested pass is "pass_unfalsified", NOT "pass" — see
+        // the re-baseline note on `fact()`.
+        "- [○] [script] AC-1: Statement for AC-1\n  script: test — bun test",
     );
   });
 
@@ -470,9 +496,12 @@ describe("renderResolvedToMarkdown — acceptance criteria checklist (SPEC-038 �
     };
 
     const rendered = renderResolvedToMarkdown(resolved);
-    expect(rendered).toContain("- [✔] [script] AC-1:");
+    expect(rendered).toContain("- [○] [script] AC-1:");
     expect(rendered).toContain("- [✘] [script] AC-2:");
     expect(rendered).toContain("- [·] [script] AC-3:");
+    // The three are pairwise distinct, which is the property that used to hold by
+    // accident (three states, three glyphs) and now holds by construction (seven).
+    expect(new Set(["○", "✘", "·"]).size).toBe(3);
   });
 
   it("REGRESSION: MDX placeholder splicing still happens when acceptanceCriteria is also present", () => {
@@ -492,7 +521,57 @@ describe("renderResolvedToMarkdown — acceptance criteria checklist (SPEC-038 �
     const rendered = renderResolvedToMarkdown(resolved);
     expect(rendered).toBe(
       "- [spec] Spec One (draft)\n\n## Acceptance Criteria (structured)\n\n" +
-        "- [✔] [script] AC-1: Statement for AC-1\n  script: test — bun test",
+        "- [○] [script] AC-1: Statement for AC-1\n  script: test — bun test",
     );
+  });
+
+  it("NEGATIVE: a fail and a SUPERSEDED fail no longer render the same glyph (SPEC-143 C4, the defect)", () => {
+    // ⛔ THE DEFECT THIS ASSERTS IS GONE — the reason SPEC-143 D7 amended AC-ACODE-9 in
+    // the same commit as the renderer. `acCoveragePrefix` used to read `fact.fail > 0`
+    // raw, so a criterion whose only red evidence is STRICTLY OLDER than a
+    // runner-attested pass rendered byte-identically to a live failure. SPEC-136's
+    // AC-OX-1 and AC-OX-6 are two live instances: both hold attested passes and both
+    // rendered as failures in the exported spec body.
+    //
+    // ⛔ Smallest mutation that reddens this: collapse `case "fail_superseded"` into
+    // `case "fail"` in `projectAcCoverageGlyph` (packages/core/src/acceptance.ts).
+    const liveFail: AcCoverageFact = {
+      ac_id: "AC-LIVE-FAIL", mode: "script", pass: 1, fail: 1,
+      attested_pass: 0, attested_fail: 0, falsified: 1, refs: [],
+    };
+    const supersededFail: AcCoverageFact = {
+      ac_id: "AC-SUPERSEDED", mode: "script", pass: 1, fail: 1,
+      attested_pass: 1, attested_fail: 0, falsified: 1,
+      refs: [
+        { task_id: "t1", result: "fail", recorded_at: "2026-08-01T00:00:00.000Z" },
+        { task_id: "t2", result: "pass", attested: true, recorded_at: "2026-08-02T00:00:00.000Z" },
+      ],
+    };
+    const attestedPass: AcCoverageFact = {
+      ac_id: "AC-ATTESTED", mode: "script", pass: 1, fail: 0,
+      attested_pass: 1, attested_fail: 0, falsified: 0, refs: [],
+    };
+
+    const resolved: ResolvedDoc = {
+      content: "Body",
+      resolvedComponents: [],
+      warnings: [],
+      acceptanceCriteria: {
+        criteria: [scriptAc("AC-LIVE-FAIL"), scriptAc("AC-SUPERSEDED"), scriptAc("AC-ATTESTED")],
+        coverage: [liveFail, supersededFail, attestedPass],
+      },
+    };
+
+    const rendered = renderResolvedToMarkdown(resolved);
+    // The live failure keeps the glyph it always had — this half is the CONTROL, without
+    // which the assertion below could pass on a renderer that lost the fail glyph entirely.
+    expect(rendered).toContain("- [✘] [script] AC-LIVE-FAIL:");
+    // …and the superseded one is now something else, whatever the single projection says.
+    expect(rendered).not.toContain("- [✘] [script] AC-SUPERSEDED:");
+    expect(rendered).toContain("- [⊘] [script] AC-SUPERSEDED:");
+    // An attested pass is distinct from BOTH the plain pass glyph and the
+    // "pass_unfalsified" one — the other collapse the old three-glyph rule performed.
+    expect(rendered).toContain("- [⚑] [script] AC-ATTESTED:");
+    expect(new Set(["✘", "⊘", "⚑"]).size).toBe(3);
   });
 });

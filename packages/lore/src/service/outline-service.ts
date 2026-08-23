@@ -56,8 +56,10 @@ import type { LoreError } from "@lore/core";
 import {
   specAcceptanceCriteriaSchema,
   computeAcCoverage,
+  deriveAcCoverageState,
   extractValidity,
   isInvalidated,
+  projectAcCoverageGlyph,
   renderValidityBanner,
   type AcceptanceCriterion,
   type AcCoverageFact,
@@ -801,8 +803,13 @@ export class OutlineService {
    * plan via {@link isPlanMember} — `extra.plan_id`, never a bare `parent_id` match,
    * task-eight-more-plan-member-queries-still-key-on-parent-id) — a spec with no plan
    * yields an empty task set, which `computeAcCoverage` turns into `{pass:0, fail:0}`
-   * for every criterion (renders as the "·" undetermined prefix, matching AC-ACODE-9's
-   * "无 plan 时全部 ·" rule without a separate branch). All store errors propagate
+   * for every criterion — a `"none"`-state row, which {@link acCoveragePrefix} renders
+   * through `@lore/core`'s single projection (`projectAcCoverageGlyph` in
+   * `packages/core/src/acceptance.ts`) rather than by a separate no-plan branch here.
+   * ⛔ SPEC-143 D7: the glyph for that state is whatever that `switch`'s `case "none"`
+   * arm returns — this comment deliberately does NOT name the character, because the
+   * prior version of this line DID (as part of the retired three-glyph rule) and became
+   * a stale assertion the moment the seven-glyph projection landed. All store errors propagate
    * immediately (same policy as `resolveComponent`'s call sites above). The store has
    * no `extra.plan_id` filter, so tasks are fetched ONCE corpus-wide (`type: "task"`)
    * and split per plan in memory — mirrors `AcService.findTasksUnderPlans`'s identical
@@ -1008,15 +1015,38 @@ function renderComponentMarkdown(component: ResolvedComponent): string {
 // ─── SPEC-038 §6: Structured Acceptance Criteria Checklist ─────────────────
 
 /**
- * Coverage badge for one AC: `✔` (evidenced pass, no fail), `✘` (any fail — takes
- * priority over pass), `·` (undetermined — no plan under the spec, or a plan with
- * no matching evidence yet). Mirrors AC-ACODE-9's coverage-prefix rule exactly.
+ * Coverage glyph for one AC — a pure DELEGATION to `@lore/core`'s single projection
+ * (`packages/core/src/acceptance.ts::projectAcCoverageGlyph`, SPEC-143 component C4)
+ * over `@lore/core`'s single precedence derivation (`deriveAcCoverageState`, same
+ * file). This function contains no glyph and no precedence rule of its own.
+ *
+ * ⛔ WHAT IT USED TO BE, and why the change is not cosmetic (SPEC-143 D7): it read
+ * `fact.fail > 0` / `fact.pass > 0` RAW and returned one of three glyphs, so it
+ * printed `✘` for BOTH `"fail"` and `"fail_superseded"` and `✔` for all four of
+ * `"attested_pass"` / `"not_measured"` / `"pass_unfalsified"` / `"pass"`. SPEC-136's
+ * AC-OX-1 and AC-OX-6 hold attested passes that supersede older fails and were
+ * therefore rendered as failures in the exported spec body. Rendering is now
+ * injective: seven states, seven distinct glyphs.
+ *
+ * ⛔ THE PROSE THIS REPLACES WAS A CLAIM, AND IT IS NOW FALSE — do not restore it.
+ * The old JSDoc said "Mirrors AC-ACODE-9's coverage-prefix rule exactly". SPEC-038's
+ * AC-ACODE-9 was AMENDED IN THE SAME COMMIT as this change to state the seven-glyph
+ * rule; the three-glyph rule it used to imply no longer exists anywhere. The
+ * mechanically checkable statement of what this renders is
+ * `projectAcCoverageGlyph`'s own `switch` in `packages/core/src/acceptance.ts` — read
+ * that, never a transcription of it here.
+ *
+ * `fact === undefined` (the criterion has no coverage row at all, which
+ * `computeAcCoverage` produces for a spec with no plan) routes through the projection
+ * as the `"none"` state rather than returning a literal glyph, so this function stays
+ * free of the glyph alphabet — the property
+ * `scripts/check-ac-state-renderers.ts --rule glyph-projection` enforces.
+ *
+ * @param fact - The criterion's coverage row, or `undefined` when it has none.
+ * @returns One glyph from `AC_COVERAGE_GLYPH_ALPHABET`.
  */
-function acCoveragePrefix(fact: AcCoverageFact | undefined): "✔" | "✘" | "·" {
-  if (fact === undefined) return "·";
-  if (fact.fail > 0) return "✘";
-  if (fact.pass > 0) return "✔";
-  return "·";
+function acCoveragePrefix(fact: AcCoverageFact | undefined): string {
+  return projectAcCoverageGlyph(fact === undefined ? "none" : deriveAcCoverageState(fact));
 }
 
 /**
@@ -1085,7 +1115,9 @@ function renderCodeAnchorsBlock(anchors: string[]): string {
  *
  * @param criteria - Declared acceptance criteria, in declaration order.
  * @param coverage - One {@link AcCoverageFact} per criterion (same order), or `[]`
- *   when the spec has no plan (every entry renders with the "·" prefix).
+ *   when the spec has no plan (every entry then renders the `"none"` state's glyph,
+ *   whichever `projectAcCoverageGlyph`'s `case "none"` arm returns — SPEC-143 D7 forbids
+ *   transcribing the character here, see {@link acCoveragePrefix}).
  */
 function renderAcceptanceCriteriaBlock(criteria: AcceptanceCriterion[], coverage: AcCoverageFact[]): string {
   const coverageByAcId = new Map(coverage.map((fact) => [fact.ac_id, fact]));

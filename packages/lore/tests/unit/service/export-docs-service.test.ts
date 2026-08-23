@@ -495,7 +495,21 @@ describe("REGRESSION — a spec with declared acceptance criteria exports withou
     if (specFilePath === undefined) return;
     const firstBody = readFileSync(join(projectDir, specFilePath), "utf8");
     expect(firstBody).toContain("## Acceptance Criteria (structured)");
-    expect(firstBody).toContain("- [✔] [script] AC-1: First criterion");
+    // ⛔ RE-BASELINED 2026-08-23 BY SPEC-143 (C4 + D7). The three facts an audit needs:
+    //  1. COMMAND: `bunx vitest run packages/lore/tests/unit/service/export-docs-service.test.ts`
+    //  2. EXACT FAILURE it produced: 1 failed / 52 passed —
+    //     `expected '---\nid: SPEC-001\n…' to contain '- [✔] [script] AC-1: First criterion'`.
+    //  3. WHY A CORRECTION, NOT A WEAKENING: AC-1's single evidence row is a
+    //     NON-ATTESTED pass, so its `deriveAcCoverageState` verdict is
+    //     `"pass_unfalsified"` — green, but never observed able to go red — which is a
+    //     DIFFERENT state from `"pass"`. The old renderer printed `✔` for both. This
+    //     assertion is now STRICTER: it pins the one glyph that state projects to, and
+    //     it would redden if `pass_unfalsified` ever collapsed back into `pass`.
+    //     AC-2 (no evidence at all) is `"none"` and its glyph is unchanged — that
+    //     untouched half is the CONTROL proving the rendering path still works.
+    // This is the EXPORTED SPEC BODY, i.e. the exact surface on which SPEC-136's
+    // AC-OX-1 and AC-OX-6 were rendering their attested passes as failures.
+    expect(firstBody).toContain("- [○] [script] AC-1: First criterion");
     expect(firstBody).toContain("- [·] [ai] AC-2: Second criterion");
 
     // Second export against the SAME unchanged corpus state — must be clean.
