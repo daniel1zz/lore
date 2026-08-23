@@ -3,7 +3,7 @@ id: TASK-778
 type: task
 role: plan
 title: "[Skill:implement] ResolutionProjector invoked from lore issue resolve"
-status: draft
+status: archived
 priority: high
 phase: "P5: Projection + reads"
 created: 2026-08-23

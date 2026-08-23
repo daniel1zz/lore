@@ -3,7 +3,7 @@ id: TASK-780
 type: task
 role: plan
 title: "[Skill:implement] delete the SQLite transport modules, retire its keys without removing them"
-status: draft
+status: archived
 priority: high
 phase: "P4: Transport removal"
 created: 2026-08-23

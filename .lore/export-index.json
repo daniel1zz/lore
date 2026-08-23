@@ -6536,6 +6536,86 @@
     "01M0Q12BDD1X84APX46QT70D8K": {
       "human_id": "TASK-795",
       "file_path": "docs/requirements/task/TASK-795-skill-test-ghrunner-auth-env-scrub-and-error-taxon.md"
+    },
+    "01M0Q2PAC0P3TSZ3C9P1AAKWHH": {
+      "human_id": "SPEC-146",
+      "file_path": "docs/requirements/spec/SPEC-146-claude-md-governance-content-dimension-checks-wire.md"
+    },
+    "01M0Q4WVVJH5EV51WJCJFTDCRS": {
+      "human_id": "KN-511",
+      "file_path": "docs/requirements/knowledge/KN-511-the-orphan-branch-sweep-asks-a-content-question-wi.md"
+    },
+    "01M0Q6XWEPNTMKCFE4AF0DM7WC": {
+      "human_id": "KN-512",
+      "file_path": "docs/requirements/knowledge/KN-512-a-worktree-without-its-own-bun-install-silently-te.md"
+    },
+    "01M0Q4X6THKN8E39VHXM1DWZMM": {
+      "human_id": "KN-513",
+      "file_path": "docs/requirements/knowledge/KN-513-evicted-from-the-cli-module-doc-lore-status-s-chec.md"
+    },
+    "01M0Q3PWYBR4RX1JYE7P8JA7WG": {
+      "human_id": "KN-514",
+      "file_path": "docs/requirements/knowledge/KN-514-three-mechanism-gaps-measured-while-dispatching-th.md"
+    },
+    "01M0Q3MZ2S87TBD04R3S6C91R0": {
+      "human_id": "KN-515",
+      "file_path": "docs/requirements/knowledge/KN-515-a-falsifier-declaration-is-an-unverified-causal.md"
+    },
+    "01M0Q3AWW1AYDJWSS28D6MZN15": {
+      "human_id": "PLAN-139",
+      "file_path": "docs/requirements/plan/PLAN-139-implementation-claude-md-content-dimension-checks.md"
+    },
+    "01M0QG827D25WS06ZE6J55XK79": {
+      "human_id": "TASK-796",
+      "file_path": "docs/requirements/task/TASK-796-skill-implement-official-line-target-constant-plus.md"
+    },
+    "01M0QFJNCQZB80XBVAFQZX67C4": {
+      "human_id": "TASK-797",
+      "file_path": "docs/requirements/task/TASK-797-skill-test-red-oracle-for-the-two-always-on-adviso.md"
+    },
+    "01M0QCSJDFQGBZCTZVT7VF2X36": {
+      "human_id": "TASK-798",
+      "file_path": "docs/requirements/task/TASK-798-skill-test-red-oracles-for-the-five-reference-gram.md"
+    },
+    "01M0QE4J9B7BQW9W9QNRQY0A1J": {
+      "human_id": "TASK-799",
+      "file_path": "docs/requirements/task/TASK-799-skill-implement-reference-grammar-repair-for-five.md"
+    },
+    "01M0QCRXND4F18VPDS92RS5JXZ": {
+      "human_id": "TASK-800",
+      "file_path": "docs/requirements/task/TASK-800-skill-docs-evict-narrative-from-service-claude-md.md"
+    },
+    "01M0Q9FQSPEJQ44MSQBRC7DQZ0": {
+      "human_id": "TASK-801",
+      "file_path": "docs/requirements/task/TASK-801-skill-test-red-oracles-for-slug-pointer-resolution.md"
+    },
+    "01M0Q9GER85GSJJWFAEQPDDNE4": {
+      "human_id": "TASK-802",
+      "file_path": "docs/requirements/task/TASK-802-skill-implement-checkslugpointers-on-a-new-check-m.md"
+    },
+    "01M0QC0W3YWMZGYEKGQVCCF7EE": {
+      "human_id": "TASK-803",
+      "file_path": "docs/requirements/task/TASK-803-skill-test-retire-or-rewrite-the-severity-vs-cap-c.md"
+    },
+    "01M0QB34N4STDA9TQFDJ68CEHA": {
+      "human_id": "TASK-804",
+      "file_path": "docs/requirements/task/TASK-804-skill-test-retire-or-rewrite-ac-dc-17-whose-subjec.md"
+    },
+    "01M0Q9VX7Y9J0CFP1ACDKXG9KC": {
+      "human_id": "TASK-805",
+      "file_path": "docs/requirements/task/TASK-805-skill-implement-contract-prose-rules-section-rewor.md"
+    },
+    "01M0Q62M5WCZP6M6HYFJ81G6XV": {
+      "human_id": "TASK-806",
+      "file_path": "docs/requirements/task/TASK-806-skill-implement-wire-a-real-resolutionlabelport-so.md"
+    },
+    "01M0Q3GT76XFMWJZZDCZHF8V0E": {
+      "human_id": "TASK-807",
+      "file_path": "docs/requirements/task/TASK-807-skill-test-red-oracles-for-the-three-way-split-the.md"
+    },
+    "01M0Q3HD4QFGNV06V36CKMRY0K": {
+      "human_id": "TASK-808",
+      "file_path": "docs/requirements/task/TASK-808-skill-implement-three-way-split-runmemoryfilecheck.md"
     }
   }
 }

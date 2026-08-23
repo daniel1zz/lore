@@ -3,7 +3,7 @@ id: TASK-782
 type: task
 role: plan
 title: "[Skill:implement] migrate the 12 filed reports with a mandatory dry-run pass"
-status: draft
+status: archived
 priority: high
 phase: "P3: Migration"
 created: 2026-08-23

@@ -3,7 +3,7 @@ id: TASK-776
 type: task
 role: plan
 title: "[Skill:implement] lore issues --verify plus batched read-side severity and category filters"
-status: draft
+status: archived
 priority: high
 phase: "P5: Projection + reads"
 created: 2026-08-23

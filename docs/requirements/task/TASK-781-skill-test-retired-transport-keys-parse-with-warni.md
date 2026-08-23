@@ -3,7 +3,7 @@ id: TASK-781
 type: task
 role: plan
 title: "[Skill:test] retired transport keys parse with warnings while strict mode holds — RED"
-status: draft
+status: archived
 priority: high
 phase: "P4: Transport removal"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-780, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-14 of the governing spec; Invariant 4

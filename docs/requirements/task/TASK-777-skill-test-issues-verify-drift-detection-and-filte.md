@@ -3,7 +3,7 @@ id: TASK-777
 type: task
 role: plan
 title: "[Skill:test] issues --verify drift detection and filtered-total honesty — RED"
-status: draft
+status: archived
 priority: high
 phase: "P5: Projection + reads"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-776, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-5 and AC-GI-12 of the governing spec

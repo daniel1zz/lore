@@ -3,7 +3,7 @@ id: TASK-794
 type: task
 role: plan
 title: "[Skill:implement] GhRunner as the single gh subprocess seam, with three distinct error codes"
-status: draft
+status: archived
 priority: critical
 phase: "P0: Runner + error taxonomy"
 created: 2026-08-23

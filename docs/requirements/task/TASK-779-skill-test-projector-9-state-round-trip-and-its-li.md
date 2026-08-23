@@ -3,7 +3,7 @@ id: TASK-779
 type: task
 role: plan
 title: "[Skill:test] projector 9-state round trip and its live call site — RED"
-status: draft
+status: archived
 priority: high
 phase: "P5: Projection + reads"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-778, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-4 of the governing spec; Invariant 3 (no zero-caller capability); Invariant 6 (resolution stays corpus-computed)

@@ -3,7 +3,7 @@ id: TASK-789
 type: task
 role: plan
 title: "[Skill:implement] delete the six cap symbols and retire the cap config key without removing it"
-status: draft
+status: archived
 priority: critical
 phase: "P1: Cap removal"
 created: 2026-08-23

@@ -3,7 +3,7 @@ id: TASK-790
 type: task
 role: plan
 title: "[Skill:test] retired cap key parses with a warning while strict mode stays intact — RED"
-status: draft
+status: archived
 priority: critical
 phase: "P1: Cap removal"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-789, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-10 of the governing spec; Invariant 4; Risk PR-2

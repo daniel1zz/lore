@@ -3,7 +3,7 @@ id: TASK-792
 type: task
 role: plan
 title: "[Skill:implement] lore setup --check read-only health probe for the gh channel"
-status: draft
+status: archived
 priority: medium
 phase: "P0: Runner + error taxonomy"
 created: 2026-08-23

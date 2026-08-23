@@ -3,7 +3,7 @@ id: TASK-785
 type: task
 role: plan
 title: "[Skill:implement] ReceiptLogV2 two-phase log on a new path, legacy rows still readable"
-status: draft
+status: archived
 priority: high
 phase: "P2: Intake"
 created: 2026-08-23

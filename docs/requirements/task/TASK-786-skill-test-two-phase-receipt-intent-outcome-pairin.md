@@ -3,7 +3,7 @@ id: TASK-786
 type: task
 role: plan
 title: "[Skill:test] two-phase receipt intent/outcome pairing RED scenarios"
-status: draft
+status: archived
 priority: high
 phase: "P2: Intake"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-785, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-3 of the governing spec; Risk R4 (halfway create-then-PATCH)

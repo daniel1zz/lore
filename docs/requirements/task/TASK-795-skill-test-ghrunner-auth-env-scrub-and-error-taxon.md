@@ -3,7 +3,7 @@ id: TASK-795
 type: task
 role: plan
 title: "[Skill:test] GhRunner auth, env-scrub and error-taxonomy RED scenarios"
-status: draft
+status: archived
 priority: high
 phase: "P0: Runner + error taxonomy"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-794, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-2 and AC-GI-8 of spec-the-defect-channel-reaches-no-machine-but-its-own-github

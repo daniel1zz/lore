@@ -3,7 +3,7 @@ id: TASK-783
 type: task
 role: plan
 title: "[Skill:test] migration integrity and dry-run RED scenarios"
-status: draft
+status: archived
 priority: high
 phase: "P3: Migration"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-782, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-11 of the governing spec; Risk PR-5 (halfway create-then-PATCH)

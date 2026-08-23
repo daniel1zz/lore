@@ -3,7 +3,7 @@ id: TASK-791
 type: task
 role: plan
 title: "[Skill:test] regression guard — a GitHub close cannot yield a corpus fixed resolution"
-status: draft
+status: archived
 priority: high
 phase: "P0: Runner + error taxonomy"
 created: 2026-08-23

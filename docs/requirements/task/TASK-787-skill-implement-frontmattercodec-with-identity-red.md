@@ -3,7 +3,7 @@ id: TASK-787
 type: task
 role: plan
 title: "[Skill:implement] frontMatterCodec with identity redaction in @lore/core"
-status: draft
+status: archived
 priority: high
 phase: "P2: Intake"
 created: 2026-08-23

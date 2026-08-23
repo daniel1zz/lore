@@ -3,7 +3,7 @@ id: TASK-788
 type: task
 role: plan
 title: "[Skill:test] front-matter round trip and identity redaction RED scenarios"
-status: draft
+status: archived
 priority: high
 phase: "P2: Intake"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-787, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-6 of the governing spec; Risk R1 (public disclosure)

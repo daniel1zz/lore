@@ -3,7 +3,7 @@ id: TASK-784
 type: task
 role: plan
 title: "[Skill:test] cross-machine reachability e2e against a dedicated target repo — RED"
-status: draft
+status: archived
 priority: critical
 phase: "P2: Intake"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-774, type: blocks}
 ---
 Estimate: M
 Source: AC-GI-1 of the governing spec; Decisions Log D-3 (dedicated permanent e2e target repo); Invariant 2 (no vacuous pass)

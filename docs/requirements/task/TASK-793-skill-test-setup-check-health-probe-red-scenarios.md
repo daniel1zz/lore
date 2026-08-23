@@ -3,7 +3,7 @@ id: TASK-793
 type: task
 role: plan
 title: "[Skill:test] setup --check health probe RED scenarios"
-status: draft
+status: archived
 priority: medium
 phase: "P0: Runner + error taxonomy"
 created: 2026-08-23
@@ -11,8 +11,6 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-138
 plan: PLAN-138
-links:
-  - {id: TASK-792, type: blocks}
 ---
 Estimate: S
 Source: AC-GI-2 of the governing spec; QA-2's remedy-discoverability half
