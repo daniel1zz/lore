@@ -42,8 +42,8 @@ import {
   computeHeadroom,
   computeHeadroomWarnings,
   lintMemoryFiles,
-  type MemoryFileRecord,
-} from "../../../src/service/claude-md-check.js";
+} from "../../../src/service/claude-md-budget.js";
+import type { MemoryFileRecord } from "../../../src/service/claude-md-findings.js";
 
 // ─── Fixture builders (mirrors claude-md-check.test.ts's convention) ───────
 

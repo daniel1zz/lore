@@ -59,10 +59,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { resolveMemoryFileBudgets, type MemoryFileBudgets } from "@lore/core";
-import {
-  lintMemoryFiles,
-  type MemoryFileRecord,
-} from "../../../src/service/claude-md-check.js";
+import { lintMemoryFiles } from "../../../src/service/claude-md-budget.js";
+import type { MemoryFileRecord } from "../../../src/service/claude-md-findings.js";
 
 // ─── Local shape mirrors for the NOT-YET-EXISTING exports ──────────────────
 //
@@ -104,7 +102,12 @@ async function loadAdmissionFns(): Promise<{
   checkReferenceExistence: CheckReferenceExistenceFn;
   detectNarrativeSmells: DetectNarrativeSmellsFn;
 }> {
-  const modulePathParts = ["..", "..", "..", "src", "service", "claude-md-check.js"];
+  // reason: split away from claude-md-check.js (spec-claude-md-governance-
+  // content-dimension-checks-wire-the, N12) — both functions now live in
+  // claude-md-admission.ts. Kept as a non-literal `.join("/")` specifier to
+  // minimize this pinned RED test's diff — see the module header for why
+  // the dodge exists.
+  const modulePathParts = ["..", "..", "..", "src", "service", "claude-md-admission.js"];
   const modulePath = modulePathParts.join("/");
   const mod = (await import(modulePath)) as {
     checkReferenceExistence: CheckReferenceExistenceFn;

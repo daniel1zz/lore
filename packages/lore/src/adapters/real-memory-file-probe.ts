@@ -3,10 +3,10 @@
  * claude-md-content-contract-governance-injected) — walks a repo tree
  * collecting every memory file matching `budgets.filenames` (default
  * `["CLAUDE.md"]`), classifying the repo-root-level match as `role: "root"`
- * and every nested match as `role: "module"`. Feeds `lintMemoryFiles`
- * (`../service/claude-md-check.js`) the SAME way `real-fs-probe.ts` feeds
- * `DriftCheckService` — the CLI adapter reads files here, the lint service
- * itself stays pure/store-free.
+ * and every nested match as `role: "module"`. Feeds `runMemoryFileChecks`
+ * (`../service/claude-md-admission.js`) the SAME way `real-fs-probe.ts` feeds
+ * `DriftCheckService` — the CLI adapter reads files here, the check services
+ * themselves stay pure/store-free.
  *
  * Public surface:
  *   discoverMemoryFiles(repoRoot, filenames) — the discovery walk.
@@ -32,7 +32,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import type { MemoryFileRecord } from "../service/claude-md-check.js";
+import type { MemoryFileRecord } from "../service/claude-md-findings.js";
 
 /** Directory basenames never descended into, at any depth. */
 const EXCLUDED_DIR_NAMES: ReadonlySet<string> = new Set([

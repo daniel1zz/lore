@@ -95,7 +95,12 @@ type LintMemoryFilesFn = (
  * missing module fails every scenario individually.
  */
 async function loadLintMemoryFiles(): Promise<LintMemoryFilesFn> {
-  const modulePathParts = ["..", "..", "..", "src", "service", "claude-md-check.js"];
+  // reason: split away from claude-md-check.js (spec-claude-md-governance-
+  // content-dimension-checks-wire-the, N12) — lintMemoryFiles now lives in
+  // claude-md-budget.ts. Kept as a non-literal `.join("/")` specifier
+  // (rather than promoted to a static import) to minimize this pinned RED
+  // test's diff — see the module header for why the dodge exists.
+  const modulePathParts = ["..", "..", "..", "src", "service", "claude-md-budget.js"];
   const modulePath = modulePathParts.join("/");
   const mod = (await import(modulePath)) as { lintMemoryFiles: LintMemoryFilesFn };
   return mod.lintMemoryFiles;
