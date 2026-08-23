@@ -3,7 +3,7 @@ id: PLAN-135
 type: plan
 role: plan
 title: "Make a falsifier's scratch worktree runnable and observable: hybrid dependency materialization, wired and falsified end to end"
-status: approved
+status: archived
 priority: high
 created: 2026-08-23
 updated: 2026-08-23
@@ -14,6 +14,7 @@ phases:
   - {name: "P2-runner-coverage-and-cleanup"}
   - {name: "P3-production-wiring"}
   - {name: "P4-declare-falsifiers"}
+  - {name: "P5-close-assess-findings"}
 ---
 Implements `spec-a-falsifier-s-scratch-worktree-must-be-runnable-and` (approved
 v17, 8 criteria AC-SD-1..8), under
