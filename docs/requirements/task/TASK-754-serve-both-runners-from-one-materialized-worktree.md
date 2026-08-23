@@ -3,7 +3,7 @@ id: TASK-754
 type: task
 role: plan
 title: "Serve both runners from one materialized worktree, and make cleanup unable to delete through a symlink"
-status: draft
+status: archived
 priority: medium
 phase: "P2-runner-coverage-and-cleanup"
 created: 2026-08-23

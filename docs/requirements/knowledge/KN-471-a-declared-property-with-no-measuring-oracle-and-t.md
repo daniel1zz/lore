@@ -3,10 +3,10 @@ id: KN-471
 type: knowledge
 role: knowledge
 title: "A declared property with no measuring oracle, and the red-first vs falsifier deadlock that leaves every early AC's discriminating power asserted rather than demonstrated"
-status: draft
+status: approved
 priority: high
 created: 2026-08-17
-updated: 2026-08-20
+updated: 2026-08-23
 tags: []
 parent: PRD-001
 ---
