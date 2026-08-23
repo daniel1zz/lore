@@ -92,7 +92,7 @@ describe("captureOracleCommand window — HAPPY", () => {
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.value.captureSource).toBe("runner");
+    expect(outcome.value.provenance.capture_source).toBe("runner");
     expect(outcome.value.observedExitCode).toBe(0);
     expect(outcome.value.outputTail).toContain("inside-the-window");
   });
@@ -208,7 +208,7 @@ describe("captureOracleCommand window — BOUNDARY", () => {
 
     expect(tooSmall.ok).toBe(false);
     expect(generous.ok).toBe(true);
-    if (generous.ok) expect(generous.value.captureSource).toBe("runner");
+    if (generous.ok) expect(generous.value.provenance.capture_source).toBe("runner");
   });
 
   it("CAPWIN-B2: DEFAULT_CAPTURE_TIMEOUT_MS is 1200000 (raised 2026-08-11 — see config.ts evidence.capture_timeout_ms JSDoc) — an omitted timeoutMs preserves the configured window exactly", () => {
@@ -329,7 +329,7 @@ describe("captureOracleCommand window — REGRESSION", () => {
 
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.value.captureSource).toBe("runner");
+    expect(outcome.value.provenance.capture_source).toBe("runner");
     expect(outcome.value.observedExitCode).toBe(1);
     expect(outcome.value.outputTail).toContain("boom");
   });

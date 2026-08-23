@@ -77,12 +77,31 @@
  *     write through either adapter stamps `capture_source` explicitly, and the
  *     absence of capture stamps `"self-report"` rather than omitting the field.
  *
+ * ⛔ SPEC-143 AC-CT-2 (2026-08-23): the `"runner"` label no longer travels alone.
+ * Every successful capture returns it PAIRED with a measured `attestation` block
+ * ({@link CapturedProvenance}) built from `spawnResult.status`, the monotonic
+ * `elapsedMs`, and the measured "did not time out" fact — numbers this function has
+ * always computed and never persisted. A label with nothing behind it was the
+ * measured defect; the pair is what makes it unrepresentable.
+ *
  * @module
  */
 
 import { spawnSync } from "node:child_process";
 
-import { resolveCaptureTimeoutMs, tailChars, type CaptureSource, type LoreError } from "@lore/core";
+import { resolveCaptureTimeoutMs, tailChars, type CaptureSource, type EvidenceEntry, type LoreError } from "@lore/core";
+
+// reason: TYPE-ONLY (erased at compile time — this adds NO runtime edge from an
+// adapter into the service layer, and nothing new is loaded when a vitest file
+// imports this module). It exists so {@link CapturedProvenance} spells its fields
+// as a COMPILE-TIME claim about the evidence write boundary instead of a
+// convention. Load-bearing, not decorative: TypeScript exempts SPREAD properties
+// from excess-property checking, and both adapters splat that pair into their
+// `addEvidence` input — so a rename on either side would silently DROP the
+// attestation and re-mint exactly the false trust label AC-CT-2 refuses, with no
+// error raised anywhere. Deriving the field types from `EvidenceInput` turns that
+// silent drop into a build failure.
+import type { EvidenceInput } from "../service/task-workflow-service.js";
 
 /**
  * Default capture window in ms, DERIVED from the config schema rather than
@@ -159,12 +178,88 @@ export interface CaptureRequest {
 }
 
 /**
+ * The persisted `attestation` block's shape, DERIVED from the ONE Zod schema that
+ * defines it (`@lore/core::evidenceEntrySchema`) rather than restated. A local
+ * re-declaration of its fields would be the dual-write this repo refuses
+ * everywhere else, and would go stale the moment that schema gains a field.
+ */
+export type CaptureAttestation = NonNullable<EvidenceEntry["attestation"]>;
+
+/**
+ * The provenance PAIR a captured evidence row must carry: the `"runner"` label AND
+ * the measured attestation standing behind it, in ONE object that cannot be
+ * half-forwarded.
+ *
+ * ⛔ THIS SHAPE IS THE MECHANISM FOR SPEC-143 AC-CT-2 ("NO FALSE TRUST LABEL"),
+ * not a convenience. Measured defect, 2026-08-17: `--capture` stamped
+ * `capture_source: "runner"` and wrote NO `attestation`, so an implementer
+ * sincerely reported its pass as attested because the row said `runner` — and had
+ * no second source to catch that with. A row that LOOKS compliant is more
+ * dangerous than a bare self-report. The numbers were ALREADY measured right here
+ * ({@link CaptureSuccess.observedExitCode}, {@link CaptureSuccess.elapsedMs});
+ * nothing ever carried them onto the persisted row. So this is a WRITE-THROUGH
+ * fix, not new measurement (SPEC-143 §C5).
+ *
+ * WHY A PAIR RATHER THAN TWO SIBLING FIELDS: the predecessor handed out
+ * `captureSource` on its own and both adapters forwarded exactly that — a label
+ * with nothing behind it. The label and its evidence are now inseparable at the
+ * type level, so an adapter physically cannot forward one without the other. Field
+ * names are snake_case and their types derive from {@link EvidenceInput}, so this
+ * object splats straight into an evidence write and a rename breaks the build.
+ *
+ * ⛔ NAMED CONSEQUENCE, not a side effect for someone to discover later: `lore
+ * done`'s attested-pass floor is `result === "pass" && attestation !== undefined`
+ * (`service/task-workflow-service.ts`), so from this change on a `lore evidence
+ * --capture --result pass` row SATISFIES that floor where previously only `lore
+ * verify` could. SPEC-143 §C5 states that upstream effect deliberately
+ * ("`deriveAcCoverageState`'s `attested_pass` / `fail_superseded` branches are
+ * starved today precisely because captures never attest"). What still separates a
+ * `lore verify` row is visible ON the row and never inferred: an AC-declared
+ * command that passed command-provenance approval (`first_seen`), a completeness
+ * verdict over the runner's own reported test files
+ * (`completeness`/`executed_files`), and the tree it ran in
+ * (`execution_root`/`execution_mode`) — all four ABSENT here by construction, see
+ * the reason at the build site in {@link captureOracleCommand}.
+ */
+export interface CapturedProvenance {
+  /**
+   * Always `"runner"` — derived from {@link EvidenceInput} and narrowed, so this
+   * field can only ever mean "this process spawned the command and observed its
+   * real exit code".
+   */
+  readonly capture_source: EvidenceInput["capture_source"] & "runner";
+  /**
+   * The measured attestation, REQUIRED here — unlike on the write boundary, where
+   * it stays optional for self-reported rows and the legacy back-catalogue.
+   */
+  readonly capture_attestation: NonNullable<EvidenceInput["capture_attestation"]>;
+}
+
+/**
+ * Provenance for ANY evidence write: the captured pair, or the self-report label
+ * that carries no attestation because nothing measured one.
+ *
+ * Exported so each adapter declares ONE provenance variable whose type admits no
+ * third possibility — in particular not a `"runner"` label with the attestation
+ * omitted, which is unrepresentable in this union by construction.
+ */
+export type EvidenceProvenance =
+  | CapturedProvenance
+  | { readonly capture_source: Extract<CaptureSource, "self-report"> };
+
+/**
  * A successful capture: the tail is the child's REAL combined output and the
- * label is fixed to `"runner"` (never parameterised — see this module's header).
+ * provenance pair is fixed to `"runner"` plus a measured attestation (never
+ * parameterised — see this module's header and {@link CapturedProvenance}).
  */
 export interface CaptureSuccess {
   outputTail: string;
-  captureSource: Extract<CaptureSource, "runner">;
+  /**
+   * The label AND the attestation behind it, inseparable — splat this into the
+   * evidence write (`...captured.value.provenance`), never pick one field out of
+   * it. It replaced the bare `captureSource` field for exactly that reason.
+   */
+  provenance: CapturedProvenance;
   /** The child's real exit code, as observed by this process. */
   observedExitCode: number;
   /** Echoed back so a caller (and its tests) can assert WHERE the command actually ran. */
@@ -202,12 +297,15 @@ export type CaptureOutcome = { ok: true; value: CaptureSuccess } | { ok: false; 
  * @param request - command, explicit cwd, the caller's declared result, and
  *   optionally the capture window (`timeoutMs`; omitted → {@link
  *   DEFAULT_CAPTURE_TIMEOUT_MS})
- * @returns `{ ok: true }` with a runner-labelled tail plus the measured
- *   `elapsedMs`, or `{ ok: false }` with a `VALIDATION_ERROR` — on which the caller
- *   MUST record nothing at all
+ * @returns `{ ok: true }` with a runner-labelled tail, the measured `elapsedMs`, and
+ *   the {@link CapturedProvenance} pair the caller splats into its evidence write,
+ *   or `{ ok: false }` with a `VALIDATION_ERROR` — on which the caller MUST record
+ *   nothing at all
  * @example
  * captureOracleCommand({ command: "true", cwd: "/repo", declaredResult: "pass" });
- * // => { ok: true, value: { captureSource: "runner", observedExitCode: 0, elapsedMs: 4, … } }
+ * // => { ok: true, value: { provenance: { capture_source: "runner", capture_attestation:
+ * //      { runner: "lore-cli", exit_code: 0, duration_ms: 4, timed_out: false } },
+ * //      observedExitCode: 0, elapsedMs: 4, … } }
  * @example
  * captureOracleCommand({ command: "false", cwd: "/repo", declaredResult: "pass" });
  * // => { ok: false, error: VALIDATION_ERROR on field "result" (exit 1 vs declared pass) }
@@ -347,11 +445,49 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
   }
 
   const combined = [spawnResult.stdout, spawnResult.stderr].filter((s) => s.length > 0).join("\n");
+  // reason: SPEC-143 AC-CT-2 write-through — every number below was already
+  // measured above; this is where they finally reach the persisted row instead of
+  // dying in this function (see {@link CapturedProvenance} for the measured defect,
+  // and for why the label and the attestation are ONE object).
+  //
+  //   `exit_code`   — `spawnResult.status`, the same value the declared/observed
+  //                   cross-check above just ran on, so the row cannot disagree
+  //                   with the check that admitted it.
+  //   `duration_ms` — the monotonic `elapsedMs` this function already reports, read
+  //                   from the SAME local as `CaptureSuccess.elapsedMs`, so the two
+  //                   representations can never drift.
+  //   `timed_out`   — `false` is MEASURED here, not assumed: the ETIMEDOUT/elapsed
+  //                   branch above RETURNS on a timeout, so reaching this line is
+  //                   itself the observation that no timeout occurred. (A timed-out
+  //                   capture records nothing at all — never a row with
+  //                   `timed_out: true`.)
+  //   `runner`      — `"lore-cli"`, the only member of `ATTESTATION_RUNNERS`, and
+  //                   honest on BOTH surfaces: the process that performed this
+  //                   spawn is the lore binary itself (a CLI subprocess or the MCP
+  //                   stdio server), never a remote or third-party runner.
+  //
+  // ⛔ FOUR attestation fields are deliberately ABSENT, and their absence is the
+  // honest reading rather than an oversight: `first_seen` (SPEC-039 §M2) means a
+  // command passed command-provenance approval, which `--capture` does not run;
+  // `completeness`/`executed_files` (SPEC-061) are the verify runner's verdict over
+  // a DECLARED test-file list this path has none of; `execution_root`/
+  // `execution_mode` (SPEC-063) must be written BOTH-or-NEITHER by
+  // `resolveVerifyExecutionRoot`, so putting `request.cwd` into one of them alone
+  // would break that invariant and invent a resolution that never happened.
+  const provenance: CapturedProvenance = {
+    capture_source: "runner",
+    capture_attestation: {
+      runner: "lore-cli",
+      exit_code: spawnResult.status,
+      duration_ms: elapsedMs,
+      timed_out: false,
+    },
+  };
   return {
     ok: true,
     value: {
       outputTail: tailChars(combined, CAPTURE_TAIL_CHARS),
-      captureSource: "runner",
+      provenance,
       observedExitCode: spawnResult.status,
       cwd: request.cwd,
       elapsedMs,

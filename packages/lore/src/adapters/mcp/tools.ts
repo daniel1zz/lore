@@ -208,7 +208,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
-import type { LoreError, LoreConfig, CaptureSource, CorpusProvenance } from "@lore/core";
+import type { LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
@@ -269,7 +269,7 @@ import {
   findCapturedFailDiscoveryRefusal,
   describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
-import { captureOracleCommand } from "../evidence-capture.js";
+import { captureOracleCommand, type EvidenceProvenance } from "../evidence-capture.js";
 import { IssueReportService } from "../../service/issue-report-service.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
 import { existsSync } from "node:fs";
@@ -2005,7 +2005,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     let capturedTail: string | undefined;
     // Absence stamps "self-report" EXPLICITLY (never omitted, never inferred
     // from the tail's shape) — same invariant the CLI holds.
-    let captureSource: CaptureSource = "self-report";
+    //
+    // reason: SPEC-143 AC-CT-2 — a PROVENANCE PAIR, not a bare label (the
+    // predecessor was `let captureSource: CaptureSource = "self-report"`). A
+    // "runner" label with no attestation behind it is unrepresentable in
+    // `EvidenceProvenance`, which is what stops this surface from re-minting the
+    // measured false-trust row.
+    let provenance: EvidenceProvenance = { capture_source: "self-report" };
 
     if (captureRequested) {
       // reason: MCP-SPECIFIC refusal with no CLI counterpart — a fresh CLI
@@ -2052,7 +2058,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         return errorContent(captured.error);
       }
       capturedTail = captured.value.outputTail;
-      captureSource = captured.value.captureSource;
+      // reason: SPEC-143 AC-CT-2 — assign the WHOLE provenance pair (label +
+      // measured attestation), never a bare label. See `CapturedProvenance` in
+      // `../evidence-capture.js` for the measured defect; the CLI's `--capture`
+      // branch does the identical thing, so neither surface can write a row that
+      // says "runner" with nothing behind it.
+      provenance = captured.value.provenance;
 
       // reason: discovery-refusal guard (task-wire-the-discovery-refusal-guard-
       // into-the-evidence-capture, spec-oracle-executability-a-runner-s-
@@ -2212,10 +2223,18 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       // — stamped on EVERY MCP write, exactly as the CLI stamps it, so the two
       // surfaces are no longer asymmetric about provenance. Derived above from
       // whether THIS server ran the command; never a caller-supplied value.
-      // `appendEvidenceEntry` still overrides this to "runner" for any row
-      // carrying an `attestation` (unreachable from this tool by design — see
-      // this module's "attestation is never an accepted field" invariant).
-      capture_source: captureSource,
+      //
+      // reason: SPEC-143 AC-CT-2 — splatted as a PAIR. On the capture path it
+      // carries `capture_source: "runner"` AND the `capture_attestation` this
+      // server measured, which `promoteCapturedAttestation` writes into the row's
+      // `attestation`. That is now the ONE way a public write reaches
+      // `attestation`; the raw `attestation` FIELD is still not accepted from a
+      // caller (this module's own invariant), and `appendEvidenceEntry` still
+      // forces `"runner"` for any row carrying one. ⛔ Never narrow this spread to
+      // `capture_source: provenance.capture_source` — spread properties escape
+      // excess-property checking, so that regression compiles silently and
+      // re-mints the false trust label.
+      ...provenance,
       ...(args.ac_ref !== undefined ? { ac_ref: args.ac_ref } : {}),
       ...(args.checklist_ref !== undefined ? { checklist_ref: args.checklist_ref } : {}),
       // reason: task-lore-evidence-add-and-lore-release-over-mcp-get-no —

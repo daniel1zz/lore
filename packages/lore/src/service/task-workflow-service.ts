@@ -83,6 +83,22 @@
  *   never silently strips the key. `recordVerifiedEvidence` is the only method that
  *   accepts `attestation`, and it is never wired to a CLI/MCP surface (VerifyRunnerService
  *   is its sole caller, bound in app.ts the same way `resolveDeclaredAcIds` is bound).
+ * @invariant `capture_attestation` (SPEC-143 AC-CT-2) is the ONE measured channel through
+ *   which a PUBLIC write may reach `attestation`, and it does NOT weaken the invariant
+ *   directly above: the `attestation` key itself is still refused on `addEvidence`, and
+ *   the only producer of a `capture_attestation` is
+ *   `adapters/evidence-capture.ts::captureOracleCommand`, which returns it INSEPARABLY
+ *   paired with the `"runner"` label it earned by spawning the command in this same
+ *   process (`CapturedProvenance`). {@link promoteCapturedAttestation} moves it into the
+ *   `attestation` slot at the ONE point both `_addEvidenceImpl`s hand off to their shared
+ *   append. WHY THE SPLIT IS REAL AND NOT A RENAMED BYPASS: a caller supplying
+ *   `attestation` asserts a verdict it did not necessarily measure, whereas a caller
+ *   supplying `capture_attestation` is forwarding numbers THIS process observed — and
+ *   `appendEvidenceEntry` already forces `capture_source: "runner"` for any row carrying
+ *   an attestation, so the incoherent pair (self-report label + measured attestation) is
+ *   unrepresentable rather than merely refused. Measured defect this closes (2026-08-17):
+ *   a `--capture` row said `runner` and carried NO attestation, so an implementer
+ *   sincerely reported its pass as attested and had no second source to catch that with.
  * @invariant addEvidence rejects a self-reported `result: "fail"`/`"expected-fail"`
  *   carrying no `output_tail`, or one that is whitespace-only after trimming
  *   (spec-evidence-output-tail-integrity-a-self-reported-non-pass §D1/§D3,
@@ -575,7 +591,9 @@ export interface DoneResult {
 /**
  * Evidence input for {@link TaskWorkflowService.addEvidence} — recorded_at is set by the
  * service. `attestation` is structurally EXCLUDED (SPEC-039 §2 D2, §4 AC-VRF-2) — it is
- * runner-issued only, via {@link TaskWorkflowService.recordVerifiedEvidence}. addEvidence
+ * runner-issued only, via {@link TaskWorkflowService.recordVerifiedEvidence} or (for a
+ * row this process itself spawned and measured) the `capture_attestation` channel
+ * documented on that field below. addEvidence
  * additionally runs a runtime check against the raw input object (not just this type) so
  * an `as EvidenceInput` cast on an untyped candidate cannot smuggle the field past the
  * type system — see the class-level @invariant. `result` is likewise narrowed to EXCLUDE
@@ -608,6 +626,27 @@ export type EvidenceInput = Omit<
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
   /** REQUIRED — see this type's own header comment. The value the caller can actually PROVE, never a convenient default. */
   capture_source: CaptureSource;
+  /**
+   * The attestation MEASURED by this process's own capture spawn (SPEC-143 AC-CT-2) —
+   * distinct from the excluded `attestation` key, and refused-by-construction rather
+   * than by trust: its only producer is
+   * `adapters/evidence-capture.ts::captureOracleCommand`, which hands it back
+   * INSEPARABLE from the `"runner"` label in one `CapturedProvenance` object that both
+   * adapters splat whole. {@link promoteCapturedAttestation} moves it into the
+   * `attestation` slot at the single point where either `_addEvidenceImpl` hands off to
+   * its shared append.
+   *
+   * OPTIONAL, and its absence is meaningful rather than lenient: a self-reported row has
+   * nothing to put here (no spawn happened), and a `"runner"`-labelled row written
+   * BEFORE this channel existed cannot retroactively grow one. The false trust label
+   * AC-CT-2 refuses is therefore still REPRESENTABLE in stored data on purpose — the
+   * `lore done` refusal wording and the `capture_source` distributions exist precisely to
+   * report on those legacy rows, and a hard refusal here would make them unconstructible
+   * (measured: `tests/unit/service/done-attestation-refusal-wording.test.ts`'s
+   * `unattestedRunnerPass` fixture is exactly that shape, deliberately). What this change
+   * guarantees is narrower and checkable: no PRODUCTION CAPTURE PATH can mint one.
+   */
+  capture_attestation?: EvidenceEntry["attestation"];
   /** See {@link ClaimOpts.source}. */
   source?: string;
   /** See {@link ReleaseOpts.callerCwd} — same field, same Q3 mismatch use, `commands/evidence.ts` is this one's populator. Never persisted onto the written evidence entry (consumed pre-write only, see `_addEvidenceImpl`). */
@@ -1442,6 +1481,48 @@ const ALLOWED_SHORT_EVIDENCE_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Moves a measured `capture_attestation` into the `attestation` slot the shared append
+ * path reads (SPEC-143 AC-CT-2) — the ONE place the promotion happens, called by BOTH
+ * `TaskWorkflowService._addEvidenceImpl` and `PhaseWorkflowService._addEvidenceImpl`
+ * (imported, never mirrored — the same SSOT precedent {@link
+ * rejectMissingNonPassOutputTail} and {@link rejectBlankClaimWorktree} already set for
+ * that file).
+ *
+ * ⛔ ONE function rather than a "check it" + "copy it" pair, deliberately: a caller that
+ * ran only half of such a pair would either drop the measurement (re-minting the false
+ * trust label) or write it unvalidated. There is nothing to half-do here.
+ *
+ * TOTAL and non-destructive: an entry with no `capture_attestation` (every self-reported
+ * write) comes back structurally unchanged, so this is on the identity path for every
+ * pre-SPEC-143 caller. Nothing is inferred and no default is invented — a row gets an
+ * attestation if and only if a capture measured one.
+ *
+ * The `capture_source` field is left exactly as the caller passed it: `appendEvidenceEntry`
+ * already FORCES `"runner"` for any row carrying an attestation, so the incoherent
+ * combination (self-report label + measured attestation) cannot survive the write even
+ * if some future caller assembles it. That pre-existing override is why this function
+ * needs no validation branch of its own.
+ *
+ * @param entry - the public evidence input, possibly carrying a measured capture attestation
+ * @returns the same entry shaped for the shared append path, with `attestation` set iff a
+ *   `capture_attestation` was measured
+ * @example
+ * promoteCapturedAttestation({ …, capture_source: "self-report" });
+ * // => { …, capture_source: "self-report" }  (no attestation — nothing measured one)
+ * @example
+ * promoteCapturedAttestation({ …, capture_source: "runner",
+ *   capture_attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 41, timed_out: false } });
+ * // => { …, capture_source: "runner", attestation: { runner: "lore-cli", exit_code: 0, … } }
+ */
+export function promoteCapturedAttestation(entry: EvidenceInput): VerifiedEvidenceInput {
+  const { capture_attestation: measured, ...rest } = entry;
+  return {
+    ...rest,
+    ...(measured !== undefined ? { attestation: measured } : {}),
+  };
+}
+
+/**
  * Rejects an `addEvidence` `command` that looks like a placeholder/probe string
  * rather than a runnable command (task task-reject-placeholder-command-strings-
  * at-evidence-write-time) — a 2026-07-29 incident recorded 3 evidence entries
@@ -2110,7 +2191,13 @@ export class TaskWorkflowService {
       if (worktreeError !== null) return err(worktreeError);
     }
 
-    return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
+    // reason: SPEC-143 AC-CT-2 — the ONE hand-off point where a measured capture
+    // attestation becomes the row's `attestation`. Runs LAST, after every
+    // self-report guard above, so a captured row is held to exactly the same
+    // admission checks it always was; the promotion changes what gets WRITTEN, never
+    // what gets ADMITTED. Shared with PhaseWorkflowService (SSOT — see
+    // promoteCapturedAttestation's own JSDoc for why it is one function, not a pair).
+    return this.appendEvidenceEntry(idOrSlug, promoteCapturedAttestation(entry), entry.recorded_by, now);
   }
 
   /**
@@ -2816,13 +2903,25 @@ export class TaskWorkflowService {
     }
 
     const evidence = readEvidence(task);
+    // ⛔ WHAT SATISFIES THIS FLOOR CHANGED 2026-08-23 (SPEC-143 AC-CT-2), and the
+    // comment that used to sit below asserted the opposite — it called a self-report
+    // "the ONLY shape any CLI/MCP `lore evidence` write can produce", which stopped
+    // being true the moment `--capture` started writing the attestation it had always
+    // measured. Two shapes now clear this floor:
+    //   • `lore verify`            — `recordVerifiedEvidence`, an AC-DECLARED command
+    //   • `lore evidence --capture`— `promoteCapturedAttestation`, an agent-CHOSEN command
+    // Both really spawned something and observed a real exit code, which is what this
+    // floor tests. They are NOT equally strong, and the difference is readable ON the
+    // row rather than inferred: only a verify row can carry `first_seen` (command
+    // provenance), `completeness`/`executed_files` (SPEC-061), and
+    // `execution_root`/`execution_mode` (SPEC-063). A consumer that needs the stronger
+    // class must test for those fields — never re-derive it from `capture_source`,
+    // which both shapes set to `"runner"`.
     const hasAttestedPass = evidence.some((e) => e.result === "pass" && e.attestation !== undefined);
     let overrideReason: string | undefined;
     if (!hasAttestedPass) {
       // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
-      // self-reported result:pass (the ONLY shape any CLI/MCP `lore evidence` write
-      // can produce; attestation is runner-issued only, recordVerifiedEvidence's own
-      // @invariant above) is no longer sufficient to archive. `opts.overrideReason`
+      // self-reported result:pass is not sufficient to archive. `opts.overrideReason`
       // is the ONE audited bypass — checked here, not before this branch, so a task
       // that already holds an attested pass never even looks at it (never "always
       // audit"). A zero-length trimmed reason is refused identically to an absent

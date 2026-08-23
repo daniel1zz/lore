@@ -292,7 +292,6 @@ import {
   ORACLE_KINDS,
   resolveCaptureTimeoutMs,
   tailChars,
-  type CaptureSource,
   type LoreError,
   type OracleKind,
 } from "@lore/core";
@@ -309,7 +308,7 @@ import {
   describePrecheckRoots,
   describeDerivedCdTarget,
 } from "../evidence-precheck.js";
-import { captureOracleCommand } from "../../evidence-capture.js";
+import { captureOracleCommand, type EvidenceProvenance } from "../../evidence-capture.js";
 
 const VALID_RESULTS = ["pass", "fail", "expected-fail"] as const;
 
@@ -406,7 +405,15 @@ export default defineCommand({
     // from the tail's shape): "runner" only when --capture actually spawned
     // --command and this process observed its real exit code; "self-report"
     // for every other case (the two --output-tail flags, or no tail at all).
-    let captureSource: CaptureSource = "self-report";
+    //
+    // reason: SPEC-143 AC-CT-2 — this is a PROVENANCE PAIR, not a bare label. The
+    // predecessor was `let captureSource: CaptureSource = "self-report"`, and the
+    // measured defect is exactly what that shape permitted: the "runner" label was
+    // forwarded on its own while the attestation the capture had already measured
+    // was dropped on the floor. `EvidenceProvenance` cannot express a "runner"
+    // label without its attestation, so the row this command writes is either
+    // genuinely attested or not labelled runner — never the third thing.
+    let provenance: EvidenceProvenance = { capture_source: "self-report" };
     /** Non-empty only on a successful `--capture` — see the assignment site's reason. */
     let captureMargin = "";
 
@@ -453,7 +460,9 @@ export default defineCommand({
         return;
       }
       outputTail = captured.value.outputTail;
-      captureSource = captured.value.captureSource;
+      // reason: the WHOLE pair, assigned as one value — never destructured into a
+      // label here (SPEC-143 AC-CT-2; see the declaration above).
+      provenance = captured.value.provenance;
       // reason: margin observability (the governing task's "Silence (b)") — the
       // window closing was invisible until the run that crossed it. Reporting
       // elapsed-vs-window on EVERY successful capture is what makes it visible,
@@ -630,8 +639,15 @@ export default defineCommand({
         // reason: task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the —
         // ALWAYS stamped, never omitted, never inferred from the tail's shape (see
         // this file's module header and TaskWorkflowService's own capture_source
-        // invariant for the full discriminator contract).
-        capture_source: captureSource,
+        // invariant for the full discriminator contract). Splatted as a PAIR
+        // (SPEC-143 AC-CT-2): on the --capture path this carries both
+        // `capture_source: "runner"` AND the `capture_attestation` measured by the
+        // spawn above, which `promoteCapturedAttestation` turns into the row's
+        // `attestation`. ⛔ Never replace this spread with `capture_source:
+        // provenance.capture_source` — that is the exact false-trust write this
+        // criterion exists to refuse, and TypeScript cannot catch it (spread
+        // properties escape excess-property checking).
+        ...provenance,
         ...(outputTail !== undefined ? { output_tail: outputTail } : {}),
         ...(typeof args.ac === "string" ? { ac_ref: args.ac } : {}),
         ...(typeof args["checklist-ref"] === "string" ? { checklist_ref: args["checklist-ref"] } : {}),

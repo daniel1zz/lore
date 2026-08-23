@@ -177,6 +177,15 @@ import {
   rejectBlankClaimWorktree,
   computeArchiveWalk,
   rejectMissingNonPassOutputTail,
+  // reason: SPEC-143 AC-CT-2 — a measured `capture_attestation` reaches the
+  // `attestation` slot through ONE shared function, because `lore evidence
+  // --capture` dispatches to THIS service whenever its target is a phase doc
+  // (`commands/evidence.ts` and `mcp/tools.ts` both retry here on the
+  // {field:"type", value:"phase"} rejection, with the SAME input object). A second
+  // copy of the promotion is how the two doc types would start disagreeing about
+  // what a `"runner"` label means — the divergence hazard this file's own
+  // `rejectBlankClaimWorktree`/`computeArchiveWalk` imports already answer.
+  promoteCapturedAttestation,
   // reason: task-phaseworkflowservice-claim-captures-no-session-id-so-every
   // §Required fix 1/2 — the session-instance capture is SHARED with
   // `TaskWorkflowService.claim`, never mirrored here. `resolveClaimSessionId`
@@ -591,7 +600,11 @@ export class PhaseWorkflowService {
     const tailCheck = rejectMissingNonPassOutputTail(entry.result, entry.output_tail);
     if (!tailCheck.ok) return tailCheck;
 
-    return this.appendEvidenceEntry(idOrSlug, entry, entry.recorded_by, now);
+    // reason: SPEC-143 AC-CT-2 parity with TaskWorkflowService._addEvidenceImpl's
+    // identical hand-off — runs LAST, after every admission guard, so a captured
+    // phase-doc row is held to exactly the same checks and only what gets WRITTEN
+    // changes. Shared implementation imported above (SSOT), not re-derived here.
+    return this.appendEvidenceEntry(idOrSlug, promoteCapturedAttestation(entry), entry.recorded_by, now);
   }
 
   // ── recordChecklistVerifiedEvidence ─────────────────────────────────────
