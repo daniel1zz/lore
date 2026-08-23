@@ -199,6 +199,12 @@ function loreErrorMessage(error: LoreError): string {
         `write contention: ${error.operation} could not write ${error.corpus_path} within the ` +
         `declared ${error.bound_ms}ms bound (contending source: ${error.source})`
       );
+    case "AUTH_REQUIRED":
+      return `auth required: ${error.message}`;
+    case "TRANSPORT_UNAVAILABLE":
+      return `transport unavailable: ${error.message}`;
+    case "RATE_LIMITED":
+      return `rate limited: ${error.message} (reset ${error.reset})`;
   }
 }
 
