@@ -66,11 +66,15 @@
  *     guessing which scope is "the" workspace scope. An unscoped workspace
  *     member (no `@scope/` prefix at all) is refused the same way.
  *   - Fails loud (`VALIDATION_ERROR` / `STORE_ERROR`), never a silent partial
- *     layout: a missing `mainRepoRoot/node_modules`, an unreadable
- *     `package.json`, a member missing its own `name` field, a scratch nested
- *     path absent for a main-checkout nested `node_modules`, or a pre-existing
- *     `scratchWorktreeDir/node_modules` all refuse before any symlink is
- *     created.
+ *     layout, for: a missing `mainRepoRoot/node_modules`, a `package.json`
+ *     that EXISTS but is unreadable/unparsable, a member missing its own
+ *     `name` field, a scratch nested path absent for a main-checkout nested
+ *     `node_modules`, or a pre-existing `scratchWorktreeDir/node_modules` —
+ *     all refuse before any symlink is created. The ONE deliberate
+ *     exception: a workspace-base-dir directory with NO `package.json` at
+ *     all is not a workspace member and is silently excluded rather than
+ *     aborting the whole call (see `deriveWorkspaceMembers`'s own doc —
+ *     Finding 2 of task-make-the-falsifier-s-negative-control-a-permanent-runnable).
  *   - Does NOT create, remove, or know about git worktrees — that lifecycle
  *     belongs to `createFalsifierScratchWorktree`/`removeFalsifierScratchWorktree`
  *     (`verify-runner-service.ts`), which this module is deliberately not wired
@@ -184,13 +188,19 @@ function readJsonFile(path: string, describedAs: string): Result<unknown, LoreEr
  * adding a workspace package to `mainRepoRoot` between two calls changes this
  * function's output with zero code change here.
  *
- * @returns One {@link WorkspaceMember} per matched, valid directory (in the
- *   order `readdirSync` reports them), or a `VALIDATION_ERROR` naming exactly
- *   what could not be read/parsed: `mainRepoRoot/package.json` missing or
- *   unparsable, its `workspaces` field missing/not-an-array/empty, an
- *   unsupported glob shape, a matched directory missing its own
- *   `package.json`, or a member `package.json` missing a non-empty `name`
- *   string.
+ * @returns One {@link WorkspaceMember} per matched directory that HAS its own
+ *   `package.json` (in the order `readdirSync` reports them), or a
+ *   `VALIDATION_ERROR` naming exactly what could not be read/parsed:
+ *   `mainRepoRoot/package.json` missing or unparsable, its `workspaces`
+ *   field missing/not-an-array/empty, an unsupported glob shape, or — for a
+ *   matched directory that DOES carry a `package.json` — that file being
+ *   unreadable/unparsable or missing a non-empty `name` string. A matched
+ *   directory with NO `package.json` at all is not treated as a workspace
+ *   member and is silently excluded from the returned array rather than
+ *   failing loud — see the `existsSync` check inside the loop below for why
+ *   that one case does not raise (task-make-the-falsifier-s-negative-control-a-permanent-runnable,
+ *   Finding 2: a stray non-member directory under a workspace base dir must
+ *   not abort materialization for the whole repo).
  */
 export function deriveWorkspaceMembers(mainRepoRoot: string): Result<WorkspaceMember[], LoreError> {
   const rootPackageJsonPath = join(mainRepoRoot, "package.json");
@@ -236,6 +246,20 @@ export function deriveWorkspaceMembers(mainRepoRoot: string): Result<WorkspaceMe
     }
     for (const dirName of dirEntryNames) {
       const memberPackageJsonPath = join(baseDirAbs, dirName, "package.json");
+      // reason: a directory under a workspace base dir with NO package.json
+      // at all (a stray build artifact, an aborted rename, an editor scratch
+      // dir) is not a workspace member and must not abort materialization
+      // for the ENTIRE repo — that is Finding 2 of
+      // task-make-the-falsifier-s-negative-control-a-permanent-runnable,
+      // measured against the literal `if (!memberJsonResult.ok) return
+      // memberJsonResult;` shape this replaces. A directory that DOES carry
+      // a package.json but fails to read/parse it, or is missing/has an
+      // unscoped `name`, stays a LOUD failure below (unchanged): at that
+      // point the directory has declared itself a package, and something
+      // about that declaration is broken — a real defect worth failing on,
+      // never silently masked. Do not widen this `existsSync` check into
+      // swallowing those cases too.
+      if (!existsSync(memberPackageJsonPath)) continue;
       const memberJsonResult = readJsonFile(memberPackageJsonPath, "workspaceMember.package.json");
       if (!memberJsonResult.ok) return memberJsonResult;
       const memberParsed = memberPackageJsonSchema.safeParse(memberJsonResult.value);
