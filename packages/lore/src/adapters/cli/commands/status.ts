@@ -28,6 +28,14 @@
  *   exit code deliberately does NOT change for a substitution — see
  *   `formatMemoryFileBudgetSubstitution`'s doc for the two shipped hooks that
  *   fail open on any undocumented verdict.
+ * With --check-memory-pointers: verify every backtick-quoted corpus-slug
+ *   pointer inside project memory files resolves against THIS corpus
+ *   (spec-claude-md-governance-content-dimension-checks-wire-the, Phase 2,
+ *   N14) — a NEW flag joining the app-backed --check-* family below (it
+ *   needs the corpus, unlike --check-claude-md, which is corpus-free and
+ *   hardcodes every slug as "existing" so the check structurally never fires
+ *   there). Breach → exit 3, folded into the SAME exit-precedence tier as
+ *   --check-drift/--check-requirements/--check-prd-budget/--check-issues.
  * With --json: output check result(s) as a JSON envelope.
  *
  * The PLAIN run (no --check-* flag) additionally reports, UNCONDITIONALLY and
@@ -73,11 +81,13 @@
  *
  * --check-claude-md is a SEPARATE, standalone dispatch — it does NOT compose
  * with --check-tree/--check-drift/--check-requirements/--check-prd-budget/
- * --check-issues in one combined run (spec Module Boundary invariant 2: this
- * check must never reach `loadLoreApp`/`bun:sqlite`, so it cannot share the
- * app-backed branch those five flags fold into). Passing --check-claude-md
- * alongside any of those flags runs ONLY the memory-file check; see that
- * branch for exit codes.
+ * --check-issues/--check-memory-pointers in one combined run (spec Module
+ * Boundary invariant 2: this check must never reach `loadLoreApp`/
+ * `bun:sqlite`, so it cannot share the app-backed branch those six flags
+ * fold into — --check-memory-pointers is the ONE flag in that family that
+ * NEEDS the corpus, per N14). Passing --check-claude-md alongside any of
+ * those flags runs ONLY the memory-file check; see that branch for exit
+ * codes.
  *
  * --check-binary-provenance is likewise standalone, and sits AHEAD of every
  * other flag in this command (spec-bootstrap-fixpoint-integrity-binary-
@@ -127,6 +137,7 @@ import {
   formatMemoryFileBudgetSubstitution,
   ok,
   resolveDriftEnabled,
+  resolveMemoryFileBudgets,
   resolveMemoryFileBudgetsFromConfigResult,
   resolveStaleAfterDays,
   SPEC_KINDS,
@@ -174,8 +185,8 @@ import {
 // setup-check.ts's identical precedent for this exact import.
 import { loadConfig } from "@lore/core/node";
 import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
-import { computeHeadroom, computeHeadroomWarnings } from "../../../service/claude-md-budget.js";
 import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
+import type { MemoryFileFinding } from "../../../service/claude-md-findings.js";
 import {
   buildCheckClaudeMdJsonPayload,
   formatCheckClaudeMdHuman,
@@ -458,6 +469,33 @@ function renderIssuesSection(payload: IssueCheckPayload): void {
       `  - ${row.slug} [stale open]: reported ${row.reported_at}, ${row.age_days}d old, still open ` +
         `(fix: triage via \`lore issue resolve ${row.slug} --state rejected|wontfix --reason <r>\`, or link a fixing doc via \`lore link ... --type resolves ${row.slug}\`)`,
     );
+  }
+}
+
+/**
+ * `--check-memory-pointers`'s `{checked, consistent, ...}` result shape
+ * (Phase 2, N14, spec-claude-md-governance-content-dimension-checks-wire-the)
+ * — mirrors the requirements/prd-budget/issues sections' own convention.
+ * `findings` is `runMemoryFileChecks(...).deterministic` UNCHANGED (every
+ * deterministic kind, not filtered to `slug_pointer_missing` alone — the
+ * SAME composition entry `--check-claude-md` consumes, differing only in
+ * which `docExists` predicate was injected).
+ */
+interface MemoryPointersPayload {
+  checked: number;
+  consistent: boolean;
+  findings: MemoryFileFinding[];
+}
+
+/** Text rendering for the `--check-memory-pointers` section (Phase 2, N14). */
+function renderMemoryPointersSection(payload: MemoryPointersPayload): void {
+  if (payload.consistent) {
+    console.log(`Memory pointers: within budget (${payload.checked} memory file(s) checked).`);
+    return;
+  }
+  console.log(`Memory pointers: BREACHED (${payload.checked} memory file(s) checked):`);
+  for (const finding of payload.findings) {
+    console.log(`  - ${finding.message}`);
   }
 }
 
@@ -980,6 +1018,11 @@ export default defineCommand({
       description:
         "Lint project memory files (CLAUDE.md by default) against corpus-governed line/byte ceilings, always reporting used/ceiling/remaining headroom. Config-only, never loads the corpus DB. Breach → exit 3; a near-ceiling advisory warning never changes the exit code.",
     },
+    "check-memory-pointers": {
+      type: "boolean",
+      description:
+        "Verify every backtick-quoted corpus-slug pointer inside project memory files resolves against this corpus (spec-claude-md-governance-content-dimension-checks-wire-the, N14). Loads the corpus DB — unlike --check-claude-md, which cannot resolve a slug. Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget/--check-issues.",
+    },
     "check-binary-provenance": {
       type: "boolean",
       description:
@@ -1086,6 +1129,7 @@ export default defineCommand({
     const checkPrdBudgetRequested = args["check-prd-budget"] === true;
     const checkIssuesRequested = args["check-issues"] === true;
     const checkClaudeMdRequested = args["check-claude-md"] === true;
+    const checkMemoryPointersRequested = args["check-memory-pointers"] === true;
 
     // ── check-claude-md branch (spec-project-claude-md-content-contract-governance-injected §D9) ──
     // reason: MUST short-circuit BEFORE loadLoreApp — the spec's Module
@@ -1110,26 +1154,25 @@ export default defineCommand({
       const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
       // reason: runMemoryFileChecks (service/claude-md-admission.ts) is the
       // SOLE composition entry both this branch and flows/context-flow.ts
-      // route through (AC-COMPOSE-1) — neither calls an individual capacity
-      // or content check directly. `fileExists` resolves candidate paths
-      // against THIS process's cwd (the same root `discoverMemoryFiles`
-      // walked); `docExists` is a Phase-2+ predicate — no check in this
-      // slice consumes it yet — and must never reach the corpus DB here
-      // either way: Module Boundary invariant 2 forbids loadLoreApp/
-      // bun:sqlite in this branch, so a real corpus lookup is deferred to
-      // whichever future check actually calls it.
-      const { deterministic: findings, advisory } = runMemoryFileChecks(files, budgets, {
+      // route through (AC-COMPOSE-1) — neither calls an individual metric
+      // function directly, and that now includes the headroom-reporting pair
+      // (N15: they route THROUGH this entry too, no longer a bypass).
+      // `fileExists` resolves candidate paths against THIS process's cwd
+      // (the same root `discoverMemoryFiles` walked); `docExists` is
+      // hardcoded `() => true` here — every slug "exists" from this
+      // branch's point of view, so the slug-pointer metric structurally
+      // never fires on `--check-claude-md` (N14: this check must never
+      // reach the corpus DB — Module Boundary invariant 2 — a real
+      // corpus-backed lookup is `--check-memory-pointers`'s job, below).
+      const {
+        deterministic: findings,
+        advisory,
+        headroom,
+        warnings,
+      } = runMemoryFileChecks(files, budgets, {
         fileExists: (p) => existsSync(join(process.cwd(), p)),
         docExists: () => true,
       });
-      // Headroom/warnings are a REPORTING layer alongside the ceiling lint —
-      // task-lore-status-check-claude-md-reports-a-saturated-file-as: they
-      // never affect `findings` or the exit code below (still `findings.length
-      // > 0 ? 3 : 0`, byte-identical breach semantics to before this change).
-      // Deliberately outside `runMemoryFileChecks`'s composition (AC-COMPOSE-1
-      // does not ban these two — see claude-md-budget.ts's own header).
-      const headroom = computeHeadroom(files, budgets);
-      const warnings = computeHeadroomWarnings(headroom);
 
       const renderInput: CheckClaudeMdRenderInput = { findings, advisory, headroom, warnings, budgetResolution };
 
@@ -1143,13 +1186,14 @@ export default defineCommand({
       return;
     }
 
-    // ── check-tree / check-drift / check-requirements / check-prd-budget / check-issues branch (D5 restructure) ────
+    // ── check-tree / check-drift / check-requirements / check-prd-budget / check-issues / check-memory-pointers branch (D5 restructure + N14) ────
     if (
       checkTreeRequested ||
       checkDriftRequested ||
       checkRequirementsRequested ||
       checkPrdBudgetRequested ||
-      checkIssuesRequested
+      checkIssuesRequested ||
+      checkMemoryPointersRequested
     ) {
       const { app, config } = loadLoreApp();
       try {
@@ -1415,14 +1459,48 @@ export default defineCommand({
           issuesInconsistent = !issuesPayload.consistent;
         }
 
-        // ---- Exit precedence (D5, pinned; SPEC-055/SPEC-080/issue-closure-loop fold into the drift tier) ----
+        // ---- Memory pointers section (Phase 2, N14, spec-claude-md-governance-content-dimension-checks-wire-the) ----
+        // reason: mirrors the requirements/prd-budget/issues sections immediately above —
+        // this flag joins the corpus-loading family SPECIFICALLY because slug existence
+        // requires the corpus (unlike --check-claude-md, which is corpus-free by SPEC-095
+        // D9 and hardcodes docExists to always-true). Routes through the SAME sole
+        // composition entry that branch uses (AC-COMPOSE-1) — only the injected `docExists`
+        // predicate differs.
+        let memoryPointersPayload: MemoryPointersPayload | undefined;
+        let memoryPointersInconsistent = false;
+        if (checkMemoryPointersRequested) {
+          const budgets = resolveMemoryFileBudgets(config);
+          const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
+
+          const allDocsResult = await app.corpusService.list({});
+          if (!allDocsResult.ok) {
+            process.stderr.write(formatError(allDocsResult.error) + "\n");
+            process.exitCode = exitCode(allDocsResult.error);
+            return;
+          }
+          const knownSlugs = new Set(allDocsResult.value.docs.map((d) => d.slug));
+
+          const { deterministic: memoryPointerFindings } = runMemoryFileChecks(files, budgets, {
+            fileExists: (p) => existsSync(join(process.cwd(), p)),
+            docExists: (slug) => knownSlugs.has(slug),
+          });
+          memoryPointersPayload = {
+            checked: files.length,
+            consistent: memoryPointerFindings.length === 0,
+            findings: memoryPointerFindings,
+          };
+          memoryPointersInconsistent = memoryPointerFindings.length > 0;
+        }
+
+        // ---- Exit precedence (D5, pinned; SPEC-055/SPEC-080/issue-closure-loop/N14 fold into the drift tier) ----
         let finalExit: number;
         if (
           treeInconsistent ||
           driftInconsistent ||
           requirementsInconsistent ||
           prdBudgetInconsistent ||
-          issuesInconsistent
+          issuesInconsistent ||
+          memoryPointersInconsistent
         ) {
           finalExit = 3;
         } else if (blueprintUnarmable) {
@@ -1444,6 +1522,7 @@ export default defineCommand({
           if (requirementsPayload !== undefined) data["requirement_coverage"] = requirementsPayload;
           if (prdBudgetPayload !== undefined) data["prd_budget"] = prdBudgetPayload;
           if (issuesPayload !== undefined) data["issues"] = issuesPayload;
+          if (memoryPointersPayload !== undefined) data["memory_pointers"] = memoryPointersPayload;
           console.log(JSON.stringify({ ok: true, data }, null, 2));
         } else {
           for (const line of treeRenderLines) console.log(line);
@@ -1462,6 +1541,7 @@ export default defineCommand({
           }
           if (prdBudgetPayload !== undefined) renderPrdBudgetSection(prdBudgetPayload);
           if (issuesPayload !== undefined) renderIssuesSection(issuesPayload);
+          if (memoryPointersPayload !== undefined) renderMemoryPointersSection(memoryPointersPayload);
         }
 
         process.exitCode = finalExit;

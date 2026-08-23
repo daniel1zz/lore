@@ -56,9 +56,11 @@ export const REQUIRED_ENTRY = "runMemoryFileChecks";
 
 /**
  * Individual metric functions no production call site may reference
- * directly — verbatim from AC-COMPOSE-1's statement (includes the two
- * Phase-2 functions, which do not exist yet, as a forward guard: this check
- * must not need editing again when they land).
+ * directly — verbatim from AC-COMPOSE-1's statement. `computeHeadroom`/
+ * `computeHeadroomWarnings` joined this list under N15: Phase 1 shipped
+ * them as direct calls from `status.ts` OUTSIDE `runMemoryFileChecks` while
+ * the spec's Module Boundary declared that entry sole — this list omitting
+ * exactly those two names is what let a false "sole entry" claim stand.
  */
 export const BANNED_METRIC_FUNCTIONS: readonly string[] = [
   "lintMemoryFiles",
@@ -66,6 +68,8 @@ export const BANNED_METRIC_FUNCTIONS: readonly string[] = [
   "detectNarrativeSmells",
   "checkSlugPointers",
   "measureEmphasis",
+  "computeHeadroom",
+  "computeHeadroomWarnings",
 ];
 
 /** Loud precondition failure — a state in which this oracle cannot measure what it claims to. */

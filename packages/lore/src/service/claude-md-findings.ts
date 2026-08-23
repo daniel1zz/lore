@@ -69,14 +69,28 @@ export interface MemoryFileRecord {
 // ─── Deterministic finding (capacity — claude-md-budget.ts) ─────────────────
 
 /**
- * Which check a {@link MemoryFileFinding} reports a breach of — both come
- * from `claude-md-budget.ts`'s `lintMemoryFiles`. `eviction_required` is the
- * only one that fires while the file is still WITHIN its ceiling (see that
- * module's three-band table). ⛔ `reference_missing` is deliberately NOT
+ * Which check a {@link MemoryFileFinding} reports a breach of. `max_lines`/
+ * `max_bytes`/`eviction_required` come from `claude-md-budget.ts`'s
+ * `lintMemoryFiles` — `eviction_required` is the only one of the three that
+ * fires while the file is still WITHIN its ceiling (see that module's
+ * three-band table). `slug_pointer_missing` (Phase 2, N14) and
+ * `emphasis_saturated` (Phase 2, N5/N6) come from `claude-md-admission.ts`'s
+ * `checkSlugPointers`/`measureEmphasis` — both DETERMINISTIC like the
+ * capacity kinds, but neither is a capacity breach: `slug_pointer_missing`
+ * fires on a dangling corpus-slug reference (gated on the caller's injected
+ * `docExists`, never a line/byte measurement); `emphasis_saturated` fires on
+ * a SINGLE marker-density threshold, deliberately NOT the three-band ceiling
+ * machinery (N5 — density is not a capacity metric, so its finding carries
+ * no warn/evict fraction field). ⛔ `reference_missing` is deliberately NOT
  * here — N13 (spec-claude-md-governance-content-dimension-checks-wire-the)
  * migrated it to {@link AdvisoryFindingKind}; see this module's header.
  */
-export type MemoryFileFindingKind = "max_lines" | "max_bytes" | "eviction_required";
+export type MemoryFileFindingKind =
+  | "max_lines"
+  | "max_bytes"
+  | "eviction_required"
+  | "slug_pointer_missing"
+  | "emphasis_saturated";
 
 /**
  * One deterministic, exit-relevant admission-check finding — flat and
@@ -103,10 +117,24 @@ export interface MemoryFileFinding {
   kind: MemoryFileFindingKind;
   /** The linted file's declared role. */
   role?: MemoryFileRole;
-  /** The measured line count or byte count. */
+  /**
+   * The measured line count or byte count (`max_lines`/`max_bytes`/
+   * `eviction_required`), or the measured emphasis-marker density in
+   * markers-per-KB (`emphasis_saturated`). ABSENT for `slug_pointer_missing`
+   * (one finding per distinct dangling slug, not a count — mirrors
+   * `AdvisoryFinding.measured`'s same absence rule for `reference_missing`).
+   */
   measured?: number;
-  /** The ceiling that was exceeded (or, for `eviction_required`, crossed). */
+  /**
+   * The ceiling that was exceeded (or, for `eviction_required`, crossed) —
+   * line/byte ceiling for the capacity kinds, or the resolved
+   * `memory_files.emphasis.max_per_kb` for `emphasis_saturated`. ⛔ Never a
+   * warn/evict FRACTION — those stay exclusive to the three-band capacity
+   * kinds (N5: density is not a capacity metric).
+   */
   ceiling?: number;
+  /** Present only for `slug_pointer_missing` — the dangling backtick-quoted corpus-slug token as it appeared in content. */
+  reference?: string;
   /** Human-readable summary — always names `path`. */
   message: string;
 }
