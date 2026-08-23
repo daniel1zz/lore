@@ -33,18 +33,32 @@
  *     typed deterministic from the day it shipped but had ZERO production
  *     call sites, so this migration retracts a false claim rather than
  *     removing enforcement.
+ *   - `line_length`/`target_distance` (N9, spec-claude-md-governance-content-
+ *     dimension-checks-wire-the) are the two ALWAYS-ON advisory metrics —
+ *     one pair emitted per discovered file by
+ *     `claude-md-admission.ts`'s `measureLineLengths`/
+ *     `measureTargetDistances`, computed independent of
+ *     `budgets.enabled` (unlike `headroom_warning`) so they never depend on
+ *     the capacity ceiling being switched on. Both carry `measured` AND
+ *     `path` (the CONTAINER file's path — a different semantic use of
+ *     `path` than `reference_missing`'s "the missing target's path", see
+ *     below). Neither ever affects the exit code, at any value, forever —
+ *     Anthropic defines the 200-line figure as a target, not a limit.
  *   - `AdvisoryFinding.measured` is OPTIONAL: present for
- *     `iso_date_density`/`status_word` (an occurrence count) and
- *     `headroom_warning` (remaining headroom), ABSENT for `reference_missing`
- *     (one finding per distinct dangling reference, not a count) — which
- *     instead carries `path`/`reference`.
+ *     `iso_date_density`/`status_word` (an occurrence count), `headroom_warning`
+ *     (remaining headroom), `line_length` (the file's longest line, in UTF-8
+ *     bytes), and `target_distance` (line count minus
+ *     `claude-md-admission.ts`'s `OFFICIAL_LINE_TARGET`, negative/zero/
+ *     positive); ABSENT for `reference_missing` (one finding per distinct
+ *     dangling reference, not a count) — which instead carries
+ *     `path`/`reference`.
  *
  * Side-effect class: pure (types only — zero imports, zero logic)
  *
  * Source: spec-claude-md-governance-content-dimension-checks-wire-the,
- * AC-WIRE-1/AC-WIRE-2/AC-COMPOSE-1/AC-PURE-1; spec-project-claude-md-content-
- * contract-governance-injected, AC-CMC-1; spec-context-verb-family-two-zone-
- * claude-md-anatomy-lore, AC-CTX-2.
+ * AC-WIRE-1/AC-WIRE-2/AC-COMPOSE-1/AC-PURE-1/AC-ADV-1; spec-project-claude-md-
+ * content-contract-governance-injected, AC-CMC-1; spec-context-verb-family-
+ * two-zone-claude-md-anatomy-lore, AC-CTX-2.
  */
 
 // ─── Memory File Record (caller-assembled, e.g. by real-memory-file-probe.ts) ─
@@ -159,9 +173,18 @@ export interface MemoryFileFinding {
  * `claude-md-admission.ts`'s `detectNarrativeSmells`/
  * `checkReferenceExistence`. `reference_missing` joined this union via N13
  * (spec-claude-md-governance-content-dimension-checks-wire-the) — see this
- * module's header.
+ * module's header. `line_length`/`target_distance` (N9, same spec) are the
+ * two ALWAYS-ON advisories emitted by `claude-md-admission.ts`'s
+ * `measureLineLengths`/`measureTargetDistances` — one pair per discovered
+ * file, on every run, never exit-relevant.
  */
-export type AdvisoryFindingKind = "iso_date_density" | "status_word" | "headroom_warning" | "reference_missing";
+export type AdvisoryFindingKind =
+  | "iso_date_density"
+  | "status_word"
+  | "headroom_warning"
+  | "reference_missing"
+  | "line_length"
+  | "target_distance";
 
 /**
  * One advisory observation — structurally SEPARATE from
@@ -173,12 +196,19 @@ export interface AdvisoryFinding {
   /**
    * Occurrence count for `iso_date_density`/`status_word`; remaining
    * headroom (`ceiling - used`, same value as `MetricHeadroom.remaining`)
-   * for `headroom_warning`. ABSENT for `reference_missing` — that check
-   * reports one finding per distinct dangling reference, not an aggregate
-   * count.
+   * for `headroom_warning`; the file's longest physical line in UTF-8 bytes
+   * for `line_length`; line count minus `OFFICIAL_LINE_TARGET` (negative,
+   * zero, or positive) for `target_distance`. ABSENT for `reference_missing`
+   * — that check reports one finding per distinct dangling reference, not an
+   * aggregate count.
    */
   measured?: number;
-  /** Present only for `reference_missing` — the missing (normalized) reference target's path. */
+  /**
+   * Present for `reference_missing` (the missing, normalized reference
+   * target's path) AND for `line_length`/`target_distance` (there, the
+   * CONTAINER file's own path — a different semantic use of the same field:
+   * "what this finding is ABOUT" rather than "what it points AT").
+   */
   path?: string;
   /** Present only for `reference_missing` — the raw backtick-quoted token as it appeared in content, fragment included. */
   reference?: string;

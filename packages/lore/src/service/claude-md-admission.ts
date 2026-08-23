@@ -25,13 +25,32 @@
  *     slug "exists", so the check never fires there — N14's own gating
  *     mechanism, not a separate code path), while `--check-memory-pointers`
  *     (a NEW corpus-loading flag) injects a real corpus-backed lookup.
+ *   - The exported 200-line official memory-file target constant, declared
+ *     further below in this same module ([S]
+ *     code.claude.com/docs/en/memory.md) — a plain exported module constant,
+ *     deliberately NOT part of `@lore/core`'s `contextConfigSchema` (Phase 4,
+ *     N9 — see this module's own `measureTargetDistances` doc for why).
+ *     ⛔ Its own declaration is this file's FIRST occurrence of its literal
+ *     name, on purpose (AC-ADV-1's own declared falsifier does a naive
+ *     first-occurrence text replace keyed on that exact identifier — an
+ *     earlier prose mention, even inside a comment, would make the falsifier
+ *     rewrite a comment instead of the real declaration and silently stay
+ *     green; empirically verified against this exact file before landing
+ *     this task). Every other mention of the name in this file (including
+ *     this bullet) deliberately avoids spelling it out before that point.
+ *   - measureLineLengths(files) / measureTargetDistances(files, target) —
+ *     ADVISORY, ALWAYS ON (Phase 4, N9), `kind: "line_length"` /
+ *     `kind: "target_distance"` — one pair per file in `files`, computed
+ *     independent of `budgets.enabled` and NEVER exit-relevant, at any
+ *     value, forever.
  *   - runMemoryFileChecks(files, budgets, deps) — the SOLE composition
  *     entry (spec §Module Boundary), returning `{ deterministic, advisory,
  *     headroom, warnings }`: folds `claude-md-budget.ts`'s `lintMemoryFiles`
  *     + `computeHeadroom` + `computeHeadroomWarnings` together with this
- *     module's `checkReferenceExistence` + `detectNarrativeSmells`
- *     (advisory) + `checkSlugPointers` + `measureEmphasis` (deterministic)
- *     across every file. `status.ts` and `flows/context-flow.ts` call ONLY
+ *     module's `checkReferenceExistence` + `detectNarrativeSmells` +
+ *     `measureLineLengths` + `measureTargetDistances` (advisory) +
+ *     `checkSlugPointers` + `measureEmphasis` (deterministic) across every
+ *     file. `status.ts` and `flows/context-flow.ts` call ONLY
  *     this — neither may reference an individual metric function directly
  *     (two independent call sites composing their own subset is the exact
  *     drift this mechanism shipped with: `checkReferenceExistence`/
@@ -115,13 +134,21 @@
  *     then appends `checkSlugPointers`/`measureEmphasis` findings per file —
  *     this composition never re-derives or filters a deterministic verdict,
  *     only adds to it and computes advisory findings alongside it.
+ *   - `measureLineLengths`/`measureTargetDistances` are computed from `files`
+ *     DIRECTLY, never from `computeHeadroom`'s output — unlike
+ *     `headroom_warning`, they do not depend on `budgets.enabled` (Phase 4,
+ *     N9: "always-on" means independent of the capacity check's own global
+ *     kill switch too, mirroring `checkReferenceExistence`/
+ *     `detectNarrativeSmells`'s own unconditional stance). Both emit exactly
+ *     one finding per file in `files`, including a 0-line/0-byte file — never
+ *     suppressed by a falsy-zero `measured` value (AC-ADV-1 ERROR/BOUNDARY).
  *
  * Side-effect class: pure
  *
  * Source: spec-claude-md-governance-content-dimension-checks-wire-the,
  * AC-WIRE-1/AC-WIRE-2/AC-COMPOSE-1/AC-PURE-1/AC-SLUG-1/AC-SLUG-2/AC-EMPH-1/
- * AC-EMPH-2/AC-GRAM-1; spec-context-verb-family-two-zone-claude-md-anatomy-lore,
- * AC-CTX-2.
+ * AC-EMPH-2/AC-GRAM-1/AC-ADV-1; spec-context-verb-family-two-zone-claude-md-
+ * anatomy-lore, AC-CTX-2.
  */
 
 import { docTypeSchema, normalizeFileAnchors, type MemoryFileBudgets } from "@lore/core";
@@ -590,6 +617,150 @@ export function measureEmphasis(content: string, maxPerKb: number): MemoryFileFi
   ];
 }
 
+// ─── Always-on advisories: line length + target distance (Phase 4, N9) ──────
+// ⛔ Both are advisory FOREVER — Anthropic defines the 200-line target
+// declared immediately below as a design goal, not a limit ([S]
+// code.claude.com/docs/en/memory.md), and this module's own three-band
+// capacity metrics (claude-md-budget.ts) already own the deterministic,
+// exit-relevant ceiling. Neither function below ever contributes to
+// `deterministic` or `budgets.enabled`'s gate.
+
+/**
+ * Anthropic's own documented target for a CLAUDE.md-style memory file ([S]
+ * code.claude.com/docs/en/memory.md: "keep it under 200 lines") — a FIXED
+ * external citation, not a per-repo tunable, so it lives here as a plain
+ * exported module constant, deliberately NOT part of `@lore/core`'s
+ * `contextConfigSchema` (spec §Module Boundary, N9): the config schema's
+ * ceilings are per-repo numbers needing exactly ONE writer under this
+ * project's anti-dual-write convention (a human decides and tunes each one);
+ * this number is nobody's to tune — it is Anthropic's guidance, restated
+ * nowhere else in this codebase. Conflating the two would place two
+ * different classes of number under a rule written for only one of them.
+ * {@link measureTargetDistances} takes this as an explicit parameter at its
+ * call site (never re-reads it as a free variable), so the ONLY place `200`
+ * is ever written down is this one declaration.
+ */
+export const OFFICIAL_LINE_TARGET = 200;
+
+/**
+ * Line count for {@link measureTargetDistances} — a LOCAL duplicate of
+ * `claude-md-budget.ts`'s own `countLines` formula
+ * (`content.split("\n").length`, minus 1 when content ends with `"\n"`), not
+ * an import of it: `target_distance` is "always on" independent of
+ * `budgets.enabled` (mirrors `checkReferenceExistence`/
+ * `detectNarrativeSmells`'s own unconditional stance above), so it must not
+ * depend on `computeHeadroom`'s budgets-gated output, and `claude-md-budget.ts`
+ * does not export its version (out of this task's file-anchor boundary).
+ * ⛔ Both formulas MUST stay identical — a future divergence would make
+ * `target_distance.measured` disagree with the SAME file's
+ * `computeHeadroom(...).lines.used`, which every AC-ADV-1 scenario asserts
+ * agree.
+ */
+function countMemoryFileLines(content: string): number {
+  const parts = content.split("\n");
+  return content.endsWith("\n") ? parts.length - 1 : parts.length;
+}
+
+/**
+ * Longest physical line in `content`, measured in UTF-8 bytes — mirrors
+ * `claude-md-budget.ts`'s "never `.length`/UTF-16 code units" byte-
+ * measurement convention. This is the signal the contract's reflow clause
+ * names (`assets/governance/claude-md-contract.md`, "Do not split a line
+ * only to reduce the reported LINE COUNT" / "a genuinely long line is hard
+ * to scan"): splitting one long line into two REDUCES the line count `lore
+ * status --check-claude-md` reports elsewhere while adding a byte, so a
+ * signal keyed on the longest line (not the line count) stays truthful
+ * either way. `0` for empty content (an empty split still yields one
+ * zero-length line) — never `undefined`, so the caller never has to
+ * special-case "no lines" before reporting.
+ */
+function longestLineBytes(content: string): number {
+  let max = 0;
+  for (const line of content.split("\n")) {
+    const bytes = Buffer.byteLength(line, "utf8");
+    if (bytes > max) max = bytes;
+  }
+  return max;
+}
+
+/**
+ * One `line_length` {@link AdvisoryFinding} PER file in `files` — ALWAYS
+ * emitted, including for a 0-line/0-byte file (`longestLineBytes("") === 0`
+ * is still reported, never suppressed as a falsy zero — AC-ADV-1 ERROR
+ * dimension). ADVISORY ONLY, exit-code-independent forever (Phase 4, N9):
+ * reports each file's longest-line byte length so a hard-to-scan line stays
+ * visible even though nothing in this mechanism enforces wrapping it.
+ * Computed directly from `files`, independent of `budgets.enabled` (see this
+ * module's header Invariants).
+ *
+ * @param files - Discovered memory files (see {@link MemoryFileRecord}).
+ * @returns One `line_length` finding per file, in file order. Empty array
+ *   only when `files` is empty (never vacuously true otherwise — every file
+ *   present gets an entry).
+ * @example
+ * measureLineLengths([{ path: "CLAUDE.md", role: "root", content: "short\n" }]);
+ * // => [{ kind: "line_length", path: "CLAUDE.md", measured: 5, message: "..." }]
+ */
+export function measureLineLengths(files: MemoryFileRecord[]): AdvisoryFinding[] {
+  return files.map((file): AdvisoryFinding => {
+    const maxBytes = longestLineBytes(file.content);
+    return {
+      kind: "line_length",
+      path: file.path,
+      measured: maxBytes,
+      message: `${file.path}: longest line is ${maxBytes} byte(s) — a genuinely long line is hard to scan (advisory only, exit code unaffected)`,
+    };
+  });
+}
+
+/**
+ * One `target_distance` {@link AdvisoryFinding} PER file in `files` —
+ * `measured` is that file's line count MINUS `officialLineTarget` (negative
+ * when under target, exactly `0` at it, positive when over) — ALWAYS
+ * emitted, never suppressed by a falsy-zero `measured` value at exactly the
+ * target (AC-ADV-1 BOUNDARY dimension). ADVISORY ONLY, exit-code-independent
+ * forever, at ANY distance in EITHER direction (Phase 4, N9): Anthropic
+ * defines the target as a design goal, not a limit ([S]
+ * code.claude.com/docs/en/memory.md) — rendering it as a breach would
+ * misstate that definition, which is exactly why this finding can never
+ * influence `runMemoryFileChecks`'s `deterministic` array or the CLI's exit
+ * code. A REAL ceiling breach (`claude-md-budget.ts`'s `max_lines`) still
+ * decides the exit code independently, alongside this finding, never
+ * crowded out by it.
+ *
+ * @param files - Discovered memory files (see {@link MemoryFileRecord}).
+ * @param officialLineTarget - {@link OFFICIAL_LINE_TARGET}, passed explicitly
+ *   rather than read as a module-level free variable inside this function —
+ *   keeps it an independently-testable pure unit and keeps every restatement
+ *   of "200" traceable to the one call site that reads the constant.
+ * @returns One `target_distance` finding per file, in file order. Empty
+ *   array only when `files` is empty.
+ * @example
+ * measureTargetDistances([{ path: "CLAUDE.md", role: "root", content: "a\nb\n" }], 200);
+ * // => [{ kind: "target_distance", path: "CLAUDE.md", measured: -198, message: "..." }]
+ */
+export function measureTargetDistances(
+  files: MemoryFileRecord[],
+  officialLineTarget: number,
+): AdvisoryFinding[] {
+  return files.map((file): AdvisoryFinding => {
+    const lineCount = countMemoryFileLines(file.content);
+    const delta = lineCount - officialLineTarget;
+    const distanceMessage =
+      delta <= 0
+        ? `${Math.abs(delta)} line(s) under`
+        : `${delta} line(s) over`;
+    return {
+      kind: "target_distance",
+      path: file.path,
+      measured: delta,
+      message:
+        `${file.path}: ${lineCount} line(s), ${distanceMessage} the official ${officialLineTarget}-line ` +
+        `target (code.claude.com/docs/en/memory.md) — a design goal, not a limit; advisory only, exit code unaffected`,
+    };
+  });
+}
+
 // ─── Composition (the SOLE entry — spec §Module Boundary, AC-COMPOSE-1) ────
 
 /**
@@ -608,13 +779,17 @@ export interface AdmissionDeps {
  * The SOLE composition entry for the memory-file admission mechanism (spec
  * §Module Boundary, N15) — folds `claude-md-budget.ts`'s `lintMemoryFiles` +
  * `computeHeadroom` + `computeHeadroomWarnings` together with this module's
- * `checkReferenceExistence` + `detectNarrativeSmells` (advisory) +
+ * `checkReferenceExistence` + `detectNarrativeSmells` +
+ * `measureLineLengths` + `measureTargetDistances` (advisory) +
  * `checkSlugPointers` + `measureEmphasis` (deterministic) across every file
  * in `files`. `adapters/cli/commands/status.ts` and `flows/context-flow.ts`
  * call ONLY this (AC-COMPOSE-1) — see this module's header for why.
  * `checkSlugPointers`/`measureEmphasis` return findings with no `path`/
  * `role` (they see only `content`) — this function fills both in from the
  * file being linted before appending to `deterministic`.
+ * `measureLineLengths`/`measureTargetDistances` already carry their own
+ * `path` (batch functions over the full `files` array, see their own docs)
+ * so they need no such post-fill.
  *
  * @param files - Discovered memory files (see {@link MemoryFileRecord}).
  * @param budgets - Corpus-governed ceilings + `emphasis.max_per_kb`,
@@ -623,16 +798,18 @@ export interface AdmissionDeps {
  * @param deps - `{ fileExists, docExists }` — see {@link AdmissionDeps}.
  * @returns `deterministic` — `lintMemoryFiles`'s output, followed by every
  *   `checkSlugPointers`/`measureEmphasis` finding, in file order. `advisory`
- *   — every `checkReferenceExistence` + `detectNarrativeSmells` finding
- *   across all `files`, in file order. `headroom` — `computeHeadroom`'s
- *   output. `warnings` — `computeHeadroomWarnings(headroom)`.
+ *   — every `measureLineLengths` + `measureTargetDistances` finding (one
+ *   pair per file, ALWAYS, independent of `budgets.enabled`), followed by
+ *   every `checkReferenceExistence` + `detectNarrativeSmells` finding, across
+ *   all `files`. `headroom` — `computeHeadroom`'s output. `warnings` —
+ *   `computeHeadroomWarnings(headroom)`.
  * @example
  * runMemoryFileChecks(
  *   [{ path: "CLAUDE.md", role: "root", content: "See `gone.ts`." }],
  *   resolveMemoryFileBudgets(config),
  *   { fileExists: () => false, docExists: () => true },
  * );
- * // => { deterministic: [], advisory: [{ kind: "reference_missing", ... }], headroom: [...], warnings: [] }
+ * // => { deterministic: [], advisory: [{ kind: "line_length", ... }, { kind: "target_distance", ... }, { kind: "reference_missing", ... }], headroom: [...], warnings: [] }
  */
 export function runMemoryFileChecks(
   files: MemoryFileRecord[],
@@ -646,7 +823,12 @@ export function runMemoryFileChecks(
 } {
   const deterministic = lintMemoryFiles(files, budgets);
 
-  const advisory: AdvisoryFinding[] = [];
+  // Always-on advisories (Phase 4, N9) — computed directly from `files`,
+  // independent of `budgets.enabled`, one pair per file.
+  const advisory: AdvisoryFinding[] = [
+    ...measureLineLengths(files),
+    ...measureTargetDistances(files, OFFICIAL_LINE_TARGET),
+  ];
   for (const file of files) {
     advisory.push(...checkReferenceExistence(file.content, deps.fileExists, file.path));
     advisory.push(...detectNarrativeSmells(file.content));
