@@ -222,6 +222,88 @@ function isWellFormedOracleGeneration(value: number | undefined): value is numbe
   return Number.isInteger(value) && (value as number) >= ORACLE_GENERATION_INITIAL;
 }
 
+// ─── SPEC-143 C1 — StateStamp + the immutable arming cutoff ─────────────────
+// ─── (browser-safe: pure data, no git, no store, no clock) ──────────────────
+
+/**
+ * The identity of the state a verdict was measured against — SPEC-143 C1's
+ * value object, and the missing half of every verdict this corpus stores today.
+ *
+ * Two coordinates because code state and corpus state move INDEPENDENTLY: a
+ * peer can land a commit without writing a doc, and can write a doc without
+ * touching the tree. One coordinate would make one of those invisible.
+ *
+ * - `tree_digest` — the code state (git tree identity, resolved by the caller's
+ *   `GitPort`; this module computes nothing).
+ * - `corpus_rev` — the corpus state, `MAX(audit.id)`. Free to read: `audit.id`
+ *   is `INTEGER PRIMARY KEY AUTOINCREMENT`, so `SELECT MAX(id)` is a rightmost
+ *   B-tree descent, and the audit hash chain already commits the content behind
+ *   that integer.
+ * - `captured_at` — when the two coordinates above were read, so a stamp can be
+ *   audited against the audit trail's own timestamps.
+ *
+ * ⛔ NEVER an mtime: git rewrites mtimes, so they are unusable as identity.
+ * ⛔ PRESENT-IFF-COMPUTED. The stamp is `.optional()` on
+ * {@link EvidenceEntry.attestation} for the same load-bearing reason
+ * `attestation` itself is (see that field's invariant): `extractEvidence` parses
+ * a task's WHOLE evidence array in one call, so a required field would
+ * fail-close every array holding one pre-SPEC-143 row and silently zero that
+ * task's entire evidence log. An ABSENT stamp is a FACT with a name —
+ * `gate-predicates.ts::StampClass` classifies it `unbound` or `legacy_unbound`
+ * against {@link ARMING_REV} — never a default-to-current.
+ *
+ * @example
+ * stateStampSchema.parse({
+ *   tree_digest: "7ab1d742c0f9e1b6a3d5c8e2f4b7a9d0c1e3f5a7",
+ *   corpus_rev: 14992,
+ *   captured_at: "2026-08-23T06:30:00.000Z",
+ * });
+ */
+export const stateStampSchema = z.object({
+  /** Git tree identity of the code state — resolved by the caller, never derived here. */
+  tree_digest: z.string().min(1),
+  /** `MAX(audit.id)` at capture time — the corpus state's monotone, append-only coordinate. */
+  corpus_rev: z.number().int().min(0),
+  /** ISO 8601 instant the two coordinates above were read (caller's time seam, D10). */
+  captured_at: z.string().min(1),
+});
+
+/** Derived TypeScript type for one state stamp — see {@link stateStampSchema}. */
+export type StateStamp = z.infer<typeof stateStampSchema>;
+
+/**
+ * The immutable arming cutoff: the `MAX(audit.id)` value that separates evidence
+ * written BEFORE state-binding was armed from evidence written after it
+ * (SPEC-143 G3, `adr-a-record-with-no-state-stamp-is-acceptable-but-never-green`).
+ *
+ * A stamp-less row at or below this id classifies `legacy_unbound` and is
+ * ACCEPTED by every floor that accepts it today, so arming retro-fails nothing
+ * (N2). A stamp-less row ABOVE it classifies `unbound` and satisfies no floor.
+ *
+ * ⛔ DATA, NOT A COMPUTATION — nothing re-derives it at runtime. `audit.id` sits
+ * on an append-only, hash-chain-verified table, so an integer cutoff on it
+ * cannot be backdated or renumbered; a cutoff derived at read time, or a
+ * timestamp cutoff, WOULD be mintable by choosing when to write. A migration
+ * that loses this constant must fail loud rather than default to `0` — `0`
+ * reclassifies the entire back-catalogue as `unbound` and wedges every open plan
+ * (that is also AC-CT-3's declared falsifier (b)).
+ *
+ * MEASURED 2026-08-23 on this repository's live corpus: `SELECT MAX(id) FROM
+ * audit` = 14992 (read-only probe against `.lore/lore.db`; no `lore` subcommand
+ * exposes the integer, which is a reported tooling gap). The spec text's earlier
+ * figure of 6176 was measured 2026-08-17 and is 2.4x stale — pinning it would
+ * reclassify ~8800 already-written rows as post-arming `unbound`.
+ *
+ * ⛔ RE-CAPTURE DUTY, unenforced by any gate today: this constant is DECLARED
+ * here by the type-foundation task but the ARMING COMMIT is the one that first
+ * makes a floor CONSUME it (SPEC-143 AC-CT-3). That commit MUST re-read
+ * `MAX(audit.id)` and update this literal in the same commit — a cutoff older
+ * than the arming point retro-classifies every row written in between as
+ * `unbound`, which is the mass-wedge N2 and G5 both forbid. Nothing refuses a
+ * violation of this paragraph; it is prose, and it is counted as such.
+ */
+export const ARMING_REV = 14992;
+
 /**
  * One oracle verification record, appended to task.extra.verification_evidence.
  * Append-only — entries are never edited or removed, only added (up to the 50-entry cap
@@ -428,6 +510,18 @@ export const evidenceEntrySchema = z.object({
        * recorded under SPEC-063.
        */
       execution_mode: z.enum(["corpus_root", "worktree"]).optional(),
+      /**
+       * The state this attested run was measured against (SPEC-143 C1) — see
+       * {@link stateStampSchema}. OPTIONAL and PRESENT-IFF-COMPUTED: every
+       * pre-SPEC-143 attestation carries none and still parses (REGRESSION),
+       * and its ABSENCE is classified against {@link ARMING_REV} by
+       * `gate-predicates.ts::StampClass` (`legacy_unbound` at or below the
+       * cutoff, `unbound` above it) rather than read as "current".
+       * ⛔ Written by the runner only, on the same terms as the enclosing
+       * `attestation` object: `VerifyRunnerService` stamps it around the
+       * command (SPEC-143 AC-CT-5), and no public write path may supply it.
+       */
+      state_stamp: stateStampSchema.optional(),
     })
     .optional(),
 });

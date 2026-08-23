@@ -1580,3 +1580,140 @@ export function assessmentFreshness(
   }
   return { ok: true };
 }
+
+// ─── SPEC-143 C2 (R9) — the TWO-AXIS stamp currency types, and the single ───
+// ─── projection that reads them ─────────────────────────────────────────────
+
+/**
+ * The STAMP axis of a verdict's currency — whether the row is bound to a named
+ * state at all, and when it is not, which side of the immutable arming cutoff
+ * (`@lore/core`'s `ARMING_REV`, task-workflow.ts) it was written on.
+ *
+ * - `"stamped"` — the row carries a `StateStamp`. Whether that binding is still
+ *   CURRENT is the RADIUS axis's question, never this one's.
+ * - `"unbound"` — no stamp, `recordedAuditId > ARMING_REV`. Satisfies NO floor:
+ *   after arming, a stamp-less row is a verdict about an unnamed state
+ *   (SPEC-143 G3, `adr-a-record-with-no-state-stamp-is-acceptable-but-never-green`).
+ * - `"legacy_unbound"` — no stamp, `recordedAuditId <= ARMING_REV`. ACCEPTED by
+ *   every floor that accepts it today, which is precisely what makes arming
+ *   non-retro-invalidating (SPEC-143 N2).
+ *
+ * ⛔ THREE values, never a boolean: "unstamped before arming" and "unstamped
+ * after arming" carry OPPOSITE gate consequences, so collapsing them either
+ * retro-fails the entire back-catalogue or grandfathers every future row. Same
+ * argument as {@link SessionComparison} above, one axis over.
+ */
+export type StampClass = "stamped" | "unbound" | "legacy_unbound";
+
+/**
+ * The RADIUS axis — whether a peer commit landed inside the verdict's blast
+ * radius, or whether that comparison could not be made at all.
+ *
+ * Structurally identical to `adapters/real-git-port.ts::BranchMeasurement`, for
+ * the reason that type's own JSDoc states: "not measured" and "measured, and
+ * nothing changed" are different facts with OPPOSITE safe defaults.
+ *
+ * ⛔ NEVER `boolean | "unmeasured"`. SPEC-143 C3 retired exactly that
+ * primitive-plus-sentinel shape: a consumer reading the sentinel in a boolean
+ * position gets `truthy`/`falsy` instead of a type error, and reports an
+ * unmeasured radius as a measured one. The discriminant makes that unwriteable
+ * rather than merely discouraged, which is why AC-CT-9(c) spends a compile-time
+ * oracle on it.
+ *
+ * Contrast {@link SessionComparison}, deliberately a BARE three-valued string:
+ * it carries no payload, so it needs no discriminated object. This one carries
+ * `changed`, so it does.
+ */
+export type RadiusMeasurement =
+  | { readonly status: "measured"; readonly changed: boolean }
+  | { readonly status: "unmeasured" };
+
+/**
+ * The two-axis currency of one verdict-bearing row: what `stampCurrency` (the
+ * SPEC-143 AC-CT-3 / AC-CT-4 predicate, landing in this module) returns and what
+ * {@link readStampVerdict} projects onto a single reading.
+ *
+ * ⛔ TWO ORTHOGONAL AXES, never one collapsed enum (SPEC-143 R9 corrected
+ * exactly this defect). A four-valued enum is the PARTIALLY-expanded product of
+ * these axes and is missing one cell — stamp present, radius unmeasurable — and
+ * every existing name is a FALSE verdict for that cell: `bound` claims
+ * "compared, unchanged", `stale` claims "changed", `unbound` contradicts
+ * ADR-034's own "carrying no stamp" definition. Keeping the enum and bolting on
+ * a side field only relocates the falsehood from the type into consumer
+ * discipline, which SPEC-143 G1 forbids.
+ *
+ * `reason`/`field` mirror {@link PredicateResult}'s machine-readable failure
+ * sub-discriminators, so a floor renders WHY a row is refused from the value it
+ * already has instead of re-deriving it.
+ */
+export interface StampCurrency {
+  readonly stamp: StampClass;
+  readonly radius: RadiusMeasurement;
+  readonly reason?: string;
+  readonly field?: string;
+}
+
+/**
+ * The five mutually-exclusive terminal readings of the (stamp × radius) product
+ * — and the buckets SPEC-143 AC-CT-9's stamp-verdict distribution counts, with
+ * `radius_unmeasured` carrying its own count rather than being folded into a
+ * neighbour.
+ */
+export type StampVerdict = "bound" | "stale" | "radius_unmeasured" | "unbound" | "legacy_unbound";
+
+/**
+ * Projects a two-axis {@link StampCurrency} onto its one terminal reading — the
+ * SINGLE place `bound` / `stale` / `radius_unmeasured` are derived. Those three
+ * are never stored (SPEC-143 C2); storing them would let a persisted reading
+ * disagree with the axes it was computed from.
+ *
+ * TOTAL over the 3x3 product, pure, and side-effect free (module invariant: no
+ * store, no IO, no clock).
+ *
+ * AXIS PRECEDENCE is load-bearing, not incidental: the STAMP axis is read FIRST,
+ * so `unbound` + `unmeasured` still reads `unbound` (a refusal) while `stamped`
+ * + `unmeasured` reads `radius_unmeasured` (which the floor accepts). Reading
+ * the radius first would let an unmeasurable radius launder a post-arming
+ * stamp-less row into an accepted reading — AC-CT-9's precedence control exists
+ * for exactly that inversion, and the reason the RED oracle asserts every radius
+ * arm gives the SAME reading for both unbound classes.
+ *
+ * @param currency - both axes, ALREADY resolved by the caller (the shape
+ *   {@link assessmentFreshness} proved: the caller pre-resolves, the predicate
+ *   does no IO).
+ * @returns exactly one of the five {@link StampVerdict} readings.
+ * @example
+ * readStampVerdict({ stamp: "stamped", radius: { status: "measured", changed: false } }); // => "bound"
+ * @example
+ * readStampVerdict({ stamp: "stamped", radius: { status: "measured", changed: true } }); // => "stale"
+ * @example
+ * readStampVerdict({ stamp: "stamped", radius: { status: "unmeasured" } }); // => "radius_unmeasured"
+ * @example
+ * readStampVerdict({ stamp: "unbound", radius: { status: "unmeasured" } }); // => "unbound" — stamp axis first
+ * @example
+ * readStampVerdict({ stamp: "legacy_unbound", radius: { status: "measured", changed: true } });
+ *   // => "legacy_unbound" — the radius never leaks into a stamp-axis reading
+ */
+export function readStampVerdict(currency: StampCurrency): StampVerdict {
+  switch (currency.stamp) {
+    case "unbound":
+      return "unbound";
+    case "legacy_unbound":
+      return "legacy_unbound";
+    case "stamped": {
+      const { radius } = currency;
+      if (radius.status === "unmeasured") {
+        return "radius_unmeasured";
+      }
+      return radius.changed ? "stale" : "bound";
+    }
+    default: {
+      // Exhaustiveness gate — a FOURTH `StampClass` member fails `tsc` on this
+      // line, never silently projects onto an existing reading. SPEC-143
+      // AC-CT-9(c) pins the diagnostic to THIS function's own line range, so
+      // relocating the check out of `readStampVerdict` reddens that oracle.
+      const _exhaustive: never = currency.stamp;
+      return _exhaustive;
+    }
+  }
+}
