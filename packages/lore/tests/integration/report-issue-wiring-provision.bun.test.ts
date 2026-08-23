@@ -446,8 +446,16 @@ describe("provisionFeedbackUpstream", () => {
     const parseResult = FeedbackConfigSchema.safeParse(reparsed.feedback);
     expect(parseResult.success).toBe(true);
     if (parseResult.success) {
-      expect(parseResult.data.upstream?.corpus_path).toBe(candidate.corpus_path);
-      expect(parseResult.data.upstream?.root_prd).toBe(candidate.root_prd);
+      // reason: `upstream` is now a union of the legacy SQLite shape and the
+      // GitHub shape (spec-the-defect-channel-reaches-no-machine-but-its-own-
+      // github P2) — `candidate` here is always the legacy shape, so a
+      // presence check on `corpus_path` narrows without weakening the assertion.
+      const upstream = parseResult.data.upstream;
+      expect(upstream !== undefined && "corpus_path" in upstream).toBe(true);
+      if (upstream !== undefined && "corpus_path" in upstream) {
+        expect(upstream.corpus_path).toBe(candidate.corpus_path);
+        expect(upstream.root_prd).toBe(candidate.root_prd);
+      }
     }
   });
 });

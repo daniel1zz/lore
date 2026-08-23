@@ -1,7 +1,21 @@
 /**
  * lore report-issue --title <t> --description <d> --expected <e> --actual <a>
- *   [--repro-command <cmd>] [--severity <s>] [--category <c>] [--auto-config] [--json]
+ *   [--repro-command <cmd>] [--severity <s>] [--category <c>] [--tags <t1,t2>] [--auto-config] [--json]
  * lore report-issue --list [--json]
+ *
+ * ── GitHub intake path (spec-the-defect-channel-reaches-no-machine-but-its-own-github P2, AC-GI-1) ──
+ * When `feedback.upstream` resolves to the GITHUB shape (`{repo: "owner/name"}`
+ * rather than the legacy `{corpus_path, root_prd}`), filing goes through a
+ * SEPARATE live path — `report-issue-wiring.ts::fileGithubIssue`, itself
+ * calling `GitHubIntakePort` — never `IssueReportService`, which only ever
+ * spoke the legacy SQLite-shaped upstream. `--severity`/`--category` become
+ * REQUIRED (not optional) on this path: `frontMatterCodec`'s closed
+ * six-field set has no undeclared-label representation, unlike the legacy
+ * path's `extra.issue_report` (which omits the key entirely when undeclared).
+ * `--tags` (new, comma-separated) is GitHub-path-only; the legacy path has
+ * no tags field at all. `--list` against this shape is refused loudly (a
+ * later phase's own read surface, `GitHubIntakePort.listIssues`) rather than
+ * silently falling back to a legacy-only render.
  *
  * ── §M4/§M6 (spec-the-defect-channel-cannot-be-honestly-maintained-an) ──
  * `--list` NAMES the corpus its rows describe: its first human output line is
@@ -102,10 +116,13 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import { resolveActorWithSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable, resolveActor } from "../utils.js";
 import {
   buildIssueReportDeps,
+  fileGithubIssue,
+  isGithubUpstreamCfg,
   provisionFeedbackUpstream,
   resolveConsumerCorpusRoot,
   resolveDeclaredCorpusPath,
@@ -130,6 +147,7 @@ const REPORT_FLAGS = [
   "repro-command",
   "severity",
   "category",
+  "tags",
 ] as const;
 
 /** The report-filing flags that are REQUIRED when NOT using `--list`. */
@@ -283,6 +301,12 @@ export default defineCommand({
       type: "string",
       description: `Ordering-only free-text category label, max ${ISSUE_CATEGORY_MAX_LENGTH} chars — never changes whether a report is accepted (optional)`,
     },
+    tags: {
+      type: "string",
+      description:
+        "Comma-separated reporter-supplied tags (spec-the-defect-channel-reaches-no-machine-but-its-own-github " +
+        "front-matter field 'tags') — GitHub-configured upstream only; omit for none.",
+    },
     "auto-config": {
       type: "boolean",
       description:
@@ -359,6 +383,96 @@ export default defineCommand({
         return;
       }
       const effectiveCfg = effectiveCfgResult.value;
+
+      // ─── GitHub-configured upstream: a SEPARATE live path (GitHubIntakePort +
+      // frontMatterCodec + ReceiptLogV2), never IssueReportService — see
+      // report-issue-wiring.ts::fileGithubIssue's own header for why. `--list`
+      // against this shape is not yet wired (a later phase's read surface) —
+      // refused loudly rather than crashing on the legacy-only `corpus_path`
+      // field below.
+      if (isGithubUpstreamCfg(effectiveCfg)) {
+        if (isList) {
+          process.stderr.write(
+            formatError({
+              code: "VALIDATION_ERROR",
+              field: "feedback.upstream",
+              message:
+                "--list against a GitHub-configured feedback.upstream is not yet supported by this command " +
+                "(the GitHub-backed read surface is a later phase of spec-the-defect-channel-reaches-no-machine-" +
+                "but-its-own-github). Configure the legacy feedback.upstream.{corpus_path,root_prd} shape to use " +
+                "--list today.",
+            }) + "\n",
+          );
+          process.exitCode = 4;
+          return;
+        }
+
+        if (triageLabels.severity === undefined || triageLabels.category === undefined) {
+          const missingFlags = [
+            triageLabels.severity === undefined ? "--severity" : undefined,
+            triageLabels.category === undefined ? "--category" : undefined,
+          ].filter((flag): flag is string => flag !== undefined);
+          process.stderr.write(
+            `Usage error: filing into a GitHub-configured feedback.upstream requires ` +
+              `${missingFlags.join(" and ")} (the front-matter schema's severity/category fields are not optional).\n`,
+          );
+          process.exit(2);
+        }
+
+        const tagsArg = args.tags;
+        const tags =
+          typeof tagsArg === "string" && tagsArg.trim().length > 0
+            ? tagsArg
+                .split(",")
+                .map((tag) => tag.trim())
+                .filter((tag) => tag.length > 0)
+            : [];
+
+        const { actor, source: actorSource } = resolveActorWithSource(undefined, process.env);
+        const reproCommand = args["repro-command"];
+
+        const githubResult = await fileGithubIssue(
+          {
+            title: args.title as string,
+            description: args.description as string,
+            expected: args.expected as string,
+            actual: args.actual as string,
+            ...(typeof reproCommand === "string" ? { repro_command: reproCommand } : {}),
+            severity: triageLabels.severity,
+            category: triageLabels.category,
+            tags,
+          },
+          effectiveCfg,
+          {
+            consumerCorpusRoot: corpusRoot,
+            corpusService: app.corpusService,
+            actor,
+            actorSource,
+          },
+        );
+
+        if (!githubResult.ok) {
+          process.stderr.write(formatError(githubResult.error) + "\n");
+          process.exitCode = exitCode(githubResult.error);
+          return;
+        }
+
+        if (args.json) {
+          console.log(JSON.stringify({ ok: true, data: githubResult.value }, null, 2));
+          return;
+        }
+
+        console.log(
+          `${githubResult.value.retried ? "Already filed" : "Filed"} as issue #${githubResult.value.number} (${githubResult.value.url})`,
+        );
+        if (githubResult.value.dedup_degraded) {
+          console.log("Warning: duplicate-report check degraded (advisory search failed) — filed anyway.");
+        }
+        if (githubResult.value.possible_duplicates.length > 0) {
+          console.log(`Possible duplicates: ${githubResult.value.possible_duplicates.join(", ")}`);
+        }
+        return;
+      }
 
       // §M4 — the corpus these rows describe: the CONFIGURED UPSTREAM (that is
       // what `list()` joins the local receipt ledger against), absolutized through
