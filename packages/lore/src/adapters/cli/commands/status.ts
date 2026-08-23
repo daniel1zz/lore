@@ -325,11 +325,12 @@ interface IssueCheckPayload {
 }
 
 /**
- * Defensive `extra.issue_report.reported_at` reader — mirrors
- * `packages/core/src/issue-report.ts::readReporterProject`'s guard shape
- * (duplicated rather than imported: that reader is scoped to a different
- * field for a different caller, and `extra.issue_report` is deliberately
- * untyped passthrough — see that module's own header). A malformed/legacy
+ * Defensive `extra.issue_report.reported_at` reader — mirrors the same
+ * null/array/typeof guard shape every defensive `extra.issue_report` reader
+ * in this codebase uses (duplicated rather than imported: every such reader
+ * is scoped to a different field for a different caller, and
+ * `extra.issue_report` is deliberately untyped passthrough — see
+ * `packages/core/src/issue-report.ts`'s own header). A malformed/legacy
  * `extra`, or an `issue_report` missing/mistyped `reported_at`, degrades to
  * `undefined` rather than throwing.
  */

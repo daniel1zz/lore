@@ -21,7 +21,10 @@
  *               SPECIFIED contract, see AC-IC-5 note at that case),
  *               AC-072-11 (MCP round-trip)
  *   NEGATIVE:   AC-072-2 (unconfigured feedback.upstream)
- *   BOUNDARY:   AC-072-6 (rate cap at exactly OPEN_REPORT_CAP=10)
+ *   BOUNDARY:   AC-072-6 RETIRED as a rate-cap boundary (spec-the-defect-
+ *               channel-reaches-no-machine-but-its-own-github P1 deletes the
+ *               cap outright) — its case now asserts the INVERSE: filing well
+ *               past the former ceiling never refuses for quota reasons
  *   ERROR:      AC-072-3 (root_prd mismatch), AC-072-4 (version skew),
  *               AC-072-5 (sync-enabled upstream), AC-072-11 (missing `by`)
  *   STATE:      AC-072-10 (a review-rejected report computes 'rejected' with
@@ -533,16 +536,25 @@ describe("AC-072-5: sync-enabled upstream is rejected (v1 SQLite-only constraint
   });
 });
 
-// ─── AC-072-6: rate cap ───────────────────────────────────────────────────────
+// ─── AC-072-6 RETIRED: the former rate cap is deleted outright ──────────────
+//
+// spec-the-defect-channel-reaches-no-machine-but-its-own-github P1 deletes
+// the per-reporter open-report rate cap this case used to exercise (AC-GI-9's
+// task: "delete the six cap symbols and retire the cap config key without
+// removing it"). The case below is the INVERSE of what it asserted before:
+// filing well past the former ceiling of 10 must NEVER refuse for quota
+// reasons — this is the task's own AC bullet ("more open reports than the
+// former ceiling ... does not refuse for quota reasons"), proven here through
+// the REAL compiled-binary spawn path rather than only at the unit layer.
 
-describe("AC-072-6: rate cap refuses the 11th open report", () => {
+describe("AC-072-6 retired: filing past the former open-report ceiling never refuses for quota reasons", () => {
   // reason: 11 sequential dist/lore spawns exceed bun:test's default 5000ms timeout.
-  it("AC-072-6: 11th open report exits 4 listing the 10 open ids; upstream task count stays 10", () => {
+  it("AC-072-6 retired: 11 sequential reports (one past the former cap of 10) ALL exit 0; upstream task count is 11", () => {
     const { upstream, consumerRoot } = makeTwin("ac6");
     track(upstream.root, consumerRoot);
 
     const filedIds: string[] = [];
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= 11; i++) {
       const { result, data } = runJson<{ ok: true; data: { upstream_doc_id: string } }>(
         [
           "report-issue",
@@ -557,24 +569,18 @@ describe("AC-072-6: rate cap refuses the 11th open report", () => {
         ],
         { cwd: consumerRoot, env: { LORE_ACTOR: "agent:ac6-reporter" } },
       );
+      // The former cap refused a filer's 11th open report with exit 4; with
+      // the cap deleted, every one of these 11 filings — the same reporter,
+      // all still open upstream — succeeds identically.
       expect(result.exitCode).toBe(0);
       filedIds.push(data.data.upstream_doc_id);
     }
-    expect(filedIds).toHaveLength(10);
-
-    const eleventh = run(
-      ["report-issue", "--title", "Report 11", "--description", "desc", "--expected", "exit 0", "--actual", "exit 4"],
-      { cwd: consumerRoot, env: { LORE_ACTOR: "agent:ac6-reporter" } },
-    );
-    expect(eleventh.exitCode).toBe(4);
-    for (const id of filedIds) {
-      expect(eleventh.stderr).toContain(id);
-    }
+    expect(filedIds).toHaveLength(11);
 
     const taskCount = runJson<{ ok: true; data: { total: number } }>(["list", "--type", "task"], {
       cwd: upstream.root,
     });
-    expect(taskCount.data.data.total).toBe(10);
+    expect(taskCount.data.data.total).toBe(11);
   }, 30_000);
 });
 

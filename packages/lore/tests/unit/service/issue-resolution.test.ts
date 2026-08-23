@@ -25,10 +25,7 @@
  * @spec_ref spec-issue-closure-loop-computed-resolution-agent-reachable AC-ICL-1, AC-ICL-2, AC-ICL-10, AC-ICL-11
  */
 
-import { describe, it, expect, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import {
@@ -37,25 +34,16 @@ import {
   checkResolutionPointer,
   isDanglingAdoption,
   ADOPTED_RESOLUTION_POINTER,
-  QUOTA_FREEING_RESOLUTIONS,
-  TERMINAL_ISSUE_RESOLUTIONS,
   type ResolutionSourceDocLike,
   type ResolvesInEdgeLike,
 } from "../../../src/service/issue-resolution.js";
-import { IssueReportService } from "../../../src/service/issue-report-service.js";
-import { ReceiptLog } from "../../../src/service/receipt-log.js";
 import {
   linkTypeSchema,
-  buildIssueReportExtra,
-  ok,
   ISSUE_RESOLUTION_MEMBERS,
   type CreateDocInput,
   type DocRecord,
   type DocStatus,
-  type IssueResolution,
-  type LoreConfig,
 } from "@lore/core";
-import type { UpstreamPort } from "../../../src/flows/upstream-context-flow.js";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -383,179 +371,20 @@ describe("P2: computeIssueResolution — recorded review rejection (hasRecordedR
   });
 });
 
-// ─── §M7: `adopted` — a non-terminal, quota-freeing exit that REQUIRES an   ──
-// ─── owner (spec-the-defect-channel-cannot-be-honestly-maintained-an §M7,  ──
-// ─── AC-DC-14, AC-DC-15, AC-DC-16)                                         ──
-
-const TMP_ROOT = tmpdir();
-const fixturesToClean: string[] = [];
-afterAll(() => {
-  for (const path of fixturesToClean) {
-    try {
-      rmSync(path, { recursive: true, force: true });
-    } catch {
-      // reason: best-effort cleanup, mirrors every sibling integration
-      // suite's afterAll (e.g. issue-cap-refusal-message.bun.test.ts).
-    }
-  }
-});
-
-/** A REAL `ReceiptLog` over a throwaway file — `IssueReportDeps.receipts` carries a private field, so a structural fake needs a cast; a real instance over a throwaway path avoids that entirely. */
-function makeThrowawayReceiptLog(): ReceiptLog {
-  const dir = mkdtempSync(join(TMP_ROOT, "lore-dc14-receipts-"));
-  fixturesToClean.push(dir);
-  return new ReceiptLog(join(dir, "issue-receipts.jsonl"));
-}
-
-const NOW_ISO = "2026-08-21T00:00:00.000Z";
-
-interface CandidateSpec {
-  readonly id: string;
-  /** The computed resolution `getResolution` reports for this candidate. */
-  readonly resolution: IssueResolution;
-}
-
-/** Builds a fake `UpstreamPort` over `candidates` — mirrors the fake-port shape `issue-cap-refusal-message.bun.test.ts` establishes, adapted for this vitest file (no compiled-binary spawn needed at this layer). */
-function makeFakeUpstreamForCap(candidates: readonly CandidateSpec[]): UpstreamPort {
-  const byId = new Map(candidates.map((c) => [c.id, c.resolution]));
-  return {
-    async resolveRootDoc() {
-      return ok({ id: "01ROOTPRD", slug: "prd-lore" });
-    },
-    async listOpenAdhocDrafts() {
-      return ok(
-        candidates.map((candidate) => ({
-          id: candidate.id,
-          status: "draft",
-          extra: buildIssueReportExtra({
-            reporter_project: "consumer-a",
-            reporter_actor: "agent:consumer-a",
-            lore_version: "0.9.0",
-            expected: "e",
-            actual: "a",
-            reported_at: NOW_ISO,
-            possible_duplicates: [],
-          }),
-        })),
-      );
-    },
-    async searchDuplicates() {
-      return ok([]);
-    },
-    async createDraft(input) {
-      return ok({ id: `01NEWDOC-${input.title.length}` });
-    },
-    async getResolution(id) {
-      const resolution = byId.get(id);
-      if (resolution === undefined) return ok(null);
-      return ok({ status: "draft" as DocStatus, resolution });
-    },
-    async listIssueReports() {
-      return ok([]);
-    },
-    close() {
-      /* no connection to close in the fake */
-    },
-  };
-}
-
-/** Constructs an `IssueReportService` over `port`, with the upstream's own `feedback.inbound.open_report_cap` set to `cap` — AC-DC-3's own configurable-ceiling seam, reused here to keep this test's fixtures small (cap 3, not the shipped default 10). */
-function makeServiceWithCap(port: UpstreamPort, cap: number): IssueReportService {
-  return new IssueReportService({
-    loadUpstreamConfig: () => ok({ feedback: { inbound: { open_report_cap: cap } } } as LoreConfig),
-    probe: () => ok({ user_version: 7 }),
-    expectedSchemaVersion: 7,
-    openUpstream: () => ok(port),
-    receipts: makeThrowawayReceiptLog(),
-    loreVersion: "0.9.0",
-    reporterProject: "consumer-a",
-    writeWaitMs: 1234,
-    now: () => NOW_ISO,
-  });
-}
-
-const CAP = 3;
-const BASE_INPUT = {
-  title: "m7 adoption probe",
-  description: "desc",
-  expected: "exit 0",
-  actual: "exit 4",
-};
-const BASE_CFG = { corpus_path: "/tmp/upstream-corpus-does-not-need-to-exist", root_prd: "prd-lore" };
-
-describe("AC-DC-14: adopted-frees-quota — adoption frees quota without retiring the claim", () => {
-  it("adopted-frees-quota HAPPY: a cap filled by N open reports refuses the N+1th; adopting ONE (--state adopted) admits it", async () => {
-    // Baseline: CAP candidates, all still "open" (blocking) — filing refused.
-    const openCandidates: CandidateSpec[] = Array.from({ length: CAP }, (_, i) => ({
-      id: `01OPENCAND${i}`,
-      resolution: "open",
-    }));
-    const refusedResult = await makeServiceWithCap(makeFakeUpstreamForCap(openCandidates), CAP).report(
-      BASE_INPUT,
-      BASE_CFG,
-    );
-    expect(refusedResult.ok).toBe(false);
-
-    // Adopt ONE of the CAP candidates — its computed resolution is now
-    // "adopted" instead of "open". The exact refused-then-admitted sequence
-    // AC-DC-1 pins for M1/M3's terminal states, replayed here for M7's
-    // non-terminal exit.
-    const adoptedCandidates: CandidateSpec[] = openCandidates.map((c, i) =>
-      i === 0 ? { ...c, resolution: "adopted" as IssueResolution } : c,
-    );
-    const admittedResult = await makeServiceWithCap(makeFakeUpstreamForCap(adoptedCandidates), CAP).report(
-      BASE_INPUT,
-      BASE_CFG,
-    );
-    expect(admittedResult.ok).toBe(true);
-  });
-
-  it("adopted-frees-quota control (a): adopted is NOT a member of TERMINAL_ISSUE_RESOLUTIONS — --resolved's complement keeps showing it as unfinished", () => {
-    expect(TERMINAL_ISSUE_RESOLUTIONS.has("adopted")).toBe(false);
-    // Reverse control: every OTHER member of QUOTA_FREEING_RESOLUTIONS besides
-    // "adopted" IS terminal — this isolates that the exclusion is specific to
-    // "adopted", not a broken membership test that would pass for anything.
-    for (const state of QUOTA_FREEING_RESOLUTIONS) {
-      if (state === "adopted") continue;
-      expect(TERMINAL_ISSUE_RESOLUTIONS.has(state)).toBe(true);
-    }
-  });
-
-  it("adopted-frees-quota control (b): quota occupancy is decided through ONE seam, compared AS A SET against TERMINAL_ISSUE_RESOLUTIONS plus adopted — never a remembered literal list", async () => {
-    // The seam itself, as a SET comparison against the two live production
-    // exports — never a literal list typed into this test.
-    const expectedSeam = new Set<string>([...TERMINAL_ISSUE_RESOLUTIONS, "adopted"]);
-    expect(new Set(QUOTA_FREEING_RESOLUTIONS)).toEqual(expectedSeam);
-
-    // The REAL production narrowing, driven end-to-end for EVERY resolution
-    // in the whole vocabulary (not just "adopted") — a candidate's admission
-    // must agree with QUOTA_FREEING_RESOLUTIONS.has(state) in every case, so
-    // this is a full membership isomorphism check against the seam, not a
-    // spot check on one value.
-    for (const state of ISSUE_RESOLUTION_MEMBERS) {
-      const candidates: CandidateSpec[] = [
-        ...Array.from({ length: CAP - 1 }, (_, i) => ({ id: `01FILLER${i}`, resolution: "open" as IssueResolution })),
-        { id: "01SPECIAL", resolution: state },
-      ];
-      const result = await makeServiceWithCap(makeFakeUpstreamForCap(candidates), CAP).report(BASE_INPUT, BASE_CFG);
-      expect(result.ok, `state "${state}": expected ok=${QUOTA_FREEING_RESOLUTIONS.has(state)}`).toBe(
-        QUOTA_FREEING_RESOLUTIONS.has(state),
-      );
-    }
-  });
-
-  it("adopted-frees-quota NEGATIVE/REGRESSION: a candidate that is NOT freed still blocks — the seam does not over-admit", async () => {
-    // All CAP candidates "resolving" (a fix in flight, non-terminal, NOT in
-    // QUOTA_FREEING_RESOLUTIONS) — filing must still be refused. Isolates
-    // that the seam is not vacuously permissive.
-    const stillBlocking: CandidateSpec[] = Array.from({ length: CAP }, (_, i) => ({
-      id: `01RESOLVING${i}`,
-      resolution: "resolving",
-    }));
-    const result = await makeServiceWithCap(makeFakeUpstreamForCap(stillBlocking), CAP).report(BASE_INPUT, BASE_CFG);
-    expect(result.ok).toBe(false);
-  });
-});
+// ─── §M7: `adopted` — a non-terminal exit that REQUIRES an owner            ──
+// ─── (spec-the-defect-channel-cannot-be-honestly-maintained-an §M7,        ──
+// ─── AC-DC-15, AC-DC-16)                                                   ──
+//
+// ⛔ The cap-narrowing behavioural cases that used to live here (AC-DC-14 —
+// "adoption frees open-report cap quota") are RETIRED: spec-the-defect-
+// channel-reaches-no-machine-but-its-own-github P1 deletes the open-report
+// rate cap outright, along with its six named implementation symbols
+// (enumerated in that spec's Scope section, deliberately not repeated here as
+// literal identifiers — AC-GI-9's oracle is a case-sensitive scan for exactly
+// those six strings across `packages/**`, this file included). There is no
+// quota left for `adopted` to free. `checkResolutionPointer`/
+// `isDanglingAdoption` below are pure functions unrelated to the cap and are
+// unaffected.
 
 describe("AC-DC-15: adopted-pointer-required — the owner pointer is required and must resolve to a live plan or task", () => {
   const ISSUE_DOC_ID = "01ISSUEDOC0000000000000000";

@@ -38,17 +38,13 @@
  *     this codebase's `loader.ts` uses for the LOCAL corpus, called here against
  *     whatever root `IssueReportService.report`/`.list` pass in (the consumer's
  *     configured `feedback.upstream.corpus_path`, never this process's own cwd).
- *     It carries TWO upstream-declared facts, both the upstream's own to decide:
- *     `sync.enabled` (v1 target support) and `feedback.inbound.open_report_cap`
- *     (the open-report ceiling, spec-the-defect-channel-cannot-be-honestly-
- *     maintained-an §M2 — resolved by `IssueReportService` via `@lore/core`'s
- *     `resolveOpenReportCap`, from the config THIS port returns).
- *   - ⛔ Nothing here resolves the open-report ceiling, and nothing should:
- *     `resolveUpstreamWriteWaitMs` below is resolved wiring-side because the
- *     bound is a property of the CONSUMER's connection (`consumerConfig`), while
- *     the ceiling is a property of the UPSTREAM's queue — a config this wiring
- *     never loads. Resolving it here would require a second read of the upstream
- *     file and would silently re-site the policy on the consumer's side.
+ *     It carries the one upstream-declared fact the upstream's own to decide:
+ *     `sync.enabled` (v1 target support). ⛔ RETIRED (spec-the-defect-channel-
+ *     reaches-no-machine-but-its-own-github P1): this config used to ALSO carry
+ *     a per-reporter open-report rate-cap ceiling, resolved through a
+ *     `@lore/core` seam — that enforcement (and its six named implementation
+ *     symbols) is deleted outright, so this load now serves the sync-mode
+ *     check alone.
  *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
  *     handler despite internally calling `findLoreDbPath` (which
  *     `process.exit(1)`s on a miss) — `loadLoreApp()` already called it once,

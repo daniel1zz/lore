@@ -50,7 +50,7 @@
  * `@lore/core` package alias, never a relative path into another package's
  * `src/` — mirrored by every existing packages/lore/tests/unit/service/*.test.ts
  * file that exercises a pure `@lore/core` function (e.g. issue-report.test.ts's
- * `matchRootPrd`/`countOpenReports`/`buildIssueReportExtra`). Until the paired
+ * `matchRootPrd`/`buildIssueReportExtra`). Until the paired
  * implementation task lands AND re-exports these names from
  * `packages/core/src/index.ts`, every import below fails at module-load time —
  * that is the expected RED: a missing export, not a malformed test.

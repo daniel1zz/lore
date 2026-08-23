@@ -8,10 +8,9 @@
  *     yet: `open`/`resolving` (still needs triage eyes) and `adopted` (§M7 —
  *     has a live owner, but the claim itself is still undecided).
  *   - `TERMINAL_ISSUE_RESOLUTION_MEMBERS` / `TerminalIssueResolution` — the six
- *     states in which it does not (and, per
- *     spec-the-defect-channel-cannot-be-honestly-maintained-an §M1, no longer
- *     occupies open-report cap quota). `adopted` frees quota by a DIFFERENT,
- *     additive seam (§M7) and is deliberately excluded from this set.
+ *     states in which it does not. `adopted` (§M7) is deliberately excluded
+ *     from this set even though it has an owner — see that member's own note
+ *     below for why.
  *   - `ISSUE_RESOLUTION_MEMBERS` / `IssueResolution` — the whole 9-state
  *     vocabulary, DERIVED by spreading the two halves above.
  *
@@ -74,11 +73,10 @@
  * upgrades it to `fixed`/`resolving` — see `computeIssueResolution`'s own
  * precedence in `packages/lore/src/service/issue-resolution.ts`).
  *
- * ⛔ `adopted` is deliberately NOT terminal, and NOT a milder `rejected`:
- * §M1's cap narrowing frees its quota through a SEPARATE seam
- * (`QUOTA_FREEING_RESOLUTIONS` in the service module) precisely so `adopted`
- * can keep needing eyes (it stays visible under `--resolved`'s complement)
- * while still not occupying the reporter's rate-limited slot forever.
+ * ⛔ `adopted` is deliberately NOT terminal, and NOT a milder `rejected`: it
+ * stays visible under `--resolved`'s complement precisely because it still
+ * needs eyes — an owner exists, but nobody has yet said whether the claim is
+ * real, fixed, or wrong.
  *
  * Enumerable at runtime — not merely a type — so every consumer that must
  * iterate the WHOLE vocabulary (a badge mapper, a filter, a parity oracle) reads
@@ -99,10 +97,9 @@ export type NonTerminalIssueResolution = (typeof NON_TERMINAL_ISSUE_RESOLUTION_M
 /**
  * ⛔ THE one construction site of the terminal-issue-resolution member set
  * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1, AC-DC-9). Every
- * consumer — the `lore issues` listing filter, `IssueReportService`'s cap
- * narrowing, `lore issue resolve --state`'s validator, the cap refusal's
- * `quota_freeing_states`, the dashboard's two badge switches — derives from THIS
- * array or from a view built out of it.
+ * consumer — the `lore issues` listing filter, `lore issue resolve --state`'s
+ * validator, the dashboard's two badge switches — derives from THIS array or
+ * from a view built out of it.
  *
  * ⛔ Adding a member here is a three-line change with two compile-time
  * obligations, both of which fail LOUD rather than defaulting: the service's
@@ -113,14 +110,11 @@ export type NonTerminalIssueResolution = (typeof NON_TERMINAL_ISSUE_RESOLUTION_M
  * either). ⛔ Do NOT re-list these tokens in a second set or array anywhere
  * under `packages/**` — a repo-wide scan asserts this is the only such literal
  * (`packages/lore/tests/unit/service/terminal-resolution-ssot.test.ts`). The two
- * copies that existed before this SSOT drifted in exactly the way that made a
- * resolved report keep occupying cap quota.
+ * copies that existed before this SSOT drifted, silently, from the union.
  *
  * Order is HAND-SETTABLE FIRST (`route === "issue-resolve"`, per the service's
  * reach table), then the two computed-only states: it is the order the
- * `--state` help text and the cap refusal's remedy table render in, and the
- * actionable verbs belong at the top of a refusal a caller is reading to get
- * unblocked.
+ * `--state` help text renders in, and the actionable verbs belong first.
  *
  * @example
  *   TERMINAL_ISSUE_RESOLUTION_MEMBERS.includes("superseded") // => true
@@ -135,7 +129,7 @@ export const TERMINAL_ISSUE_RESOLUTION_MEMBERS = [
   "closed",
 ] as const;
 
-/** A terminal resolution — a state in which a report no longer needs triage eyes and no longer occupies cap quota. */
+/** A terminal resolution — a state in which a report no longer needs triage eyes. */
 export type TerminalIssueResolution = (typeof TERMINAL_ISSUE_RESOLUTION_MEMBERS)[number];
 
 /**

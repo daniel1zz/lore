@@ -2,12 +2,14 @@
  * RED scenarios for AC-GI-10 (spec-the-defect-channel-reaches-no-machine-but-
  * its-own-github): `feedback.inbound.open_report_cap` is a RETIRED config key
  * that must go on parsing forever — the key is never removed from
- * `FeedbackConfigSchema`, only its runtime consumers (`resolveOpenReportCap`,
- * `OPEN_REPORT_CAP`, and four sibling symbols) are deleted by the paired
- * implementation task (`task-skill-delete-the-six-cap-symbols-and-retire-the-
- * cap-config-key-without-removing-it`). This file is the RED half of that
- * red/green pair: it must fail against TODAY's schema and turn green only
- * once that task lands `open_report_cap` as `.optional()` plus a
+ * `FeedbackConfigSchema`, only its six runtime consumer symbols (enumerated in
+ * that spec's Scope section — deliberately not repeated here as literal
+ * identifiers, since AC-GI-9's oracle is a case-sensitive scan of exactly
+ * those six strings across `packages/**`, this file included) are deleted by
+ * the paired implementation task (`task-skill-delete-the-six-cap-symbols-and-
+ * retire-the-cap-config-key-without-removing-it`). This file is the RED half
+ * of that red/green pair: it must fail against TODAY's schema and turn green
+ * only once that task lands `open_report_cap` as `.optional()` plus a
  * by-name `console.warn`.
  *
  * Runner: vitest (no `bun:sqlite` import anywhere in this file or its
@@ -89,10 +91,10 @@ describe("feedback-config-compat: retired open_report_cap key parses with a warn
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       // `FeedbackConfigSchema.safeParse({})` is this codebase's own idiom for
-      // "no feedback section configured at all" (see
-      // `resolveOpenReportCap`'s fallback in config.ts, which falls back
-      // THROUGH `FeedbackConfigSchema.parse({})` rather than restating a
-      // number) — not a partial `inbound` fixture.
+      // "no feedback section configured at all" (config.ts's other
+      // `resolve*` helpers fall back THROUGH a schema parse of `{}` rather
+      // than restating a shipped default as a literal) — not a partial
+      // `inbound` fixture.
       const result = FeedbackConfigSchema.safeParse({});
 
       expect(result.success).toBe(true);

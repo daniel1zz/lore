@@ -208,11 +208,20 @@ describe("face 2: buildIssueReportExtra's JSDoc records WHY the scope is empty r
     expect(block).toContain("--adhoc");
   });
 
-  it("NEGATIVE (inverse control): the block is buildIssueReportExtra's own, not countOpenReports'", () => {
+  it("NEGATIVE (inverse control): the block is buildIssueReportExtra's own, not matchRootPrd's", () => {
+    // reason: the ORIGINAL witness here was a rate-cap candidate-selection
+    // predicate, deleted by spec-the-defect-channel-reaches-no-machine-but-
+    // its-own-github P1 (cap removal — that spec's own Scope section
+    // enumerates the six retired symbol names; not repeated here, since
+    // AC-GI-9's oracle is a case-sensitive scan for exactly those six strings
+    // across `packages/**`, this file included). `matchRootPrd` is a
+    // still-existing sibling export in the same file, preserving the exact
+    // same isolation check — the extractor must grab buildIssueReportExtra's
+    // OWN jsdoc block, never a neighbour's.
     const source = readSource(ISSUE_REPORT);
     const block = jsdocBlockAbove(source, /^export function buildIssueReportExtra\(/);
-    expect(source).toContain("export function countOpenReports(");
-    expect(block).not.toContain("countOpenReports");
+    expect(source).toContain("export function matchRootPrd(");
+    expect(block).not.toContain("matchRootPrd");
   });
 
   it("STATE: the documented behaviour is the ACTUAL behaviour — the built extra really carries an empty array", () => {
