@@ -6384,6 +6384,10 @@
     "01M0P7021G29A2J7C0GXDZGBFN": {
       "human_id": "TASK-772",
       "file_path": "docs/requirements/task/TASK-772-skill-test-two-axis-type-foundation-red-test-scena.md"
+    },
+    "01M0P9MPJBK5K5CEGH4TM4QYSY": {
+      "human_id": "KN-499",
+      "file_path": "docs/requirements/knowledge/KN-499-four-gaps-measured-while-landing-the-discovery.md"
     }
   }
 }

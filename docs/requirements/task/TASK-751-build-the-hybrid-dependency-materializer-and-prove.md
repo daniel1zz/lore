@@ -3,7 +3,7 @@ id: TASK-751
 type: task
 role: plan
 title: "Build the hybrid dependency materializer and prove mutation observability, not just runnability"
-status: draft
+status: archived
 priority: medium
 phase: "P1-materialization-core"
 created: 2026-08-23

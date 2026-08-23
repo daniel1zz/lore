@@ -9,6 +9,8 @@ created: 2026-08-17
 updated: 2026-08-21
 tags: []
 parent: PRD-001
+links:
+  - {id: PLAN-137, type: informs}
 ---
 **ADR decision status**: proposed. (Distinct from this document's corpus lifecycle `status`, which is `draft` until reviewed and approved — the two fields track different things and neither is wrong when they differ.)
 **Date**: 2026-08-17

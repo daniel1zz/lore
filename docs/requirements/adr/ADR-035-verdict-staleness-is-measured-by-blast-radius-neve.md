@@ -9,6 +9,8 @@ created: 2026-08-17
 updated: 2026-08-17
 tags: []
 parent: PRD-001
+links:
+  - {id: PLAN-137, type: informs}
 ---
 **Status**: proposed
 **Date**: 2026-08-17
