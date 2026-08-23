@@ -15,6 +15,8 @@ This repository's shared knowledge, plans, and tasks live in the local Lore corp
 
 This file's content contract (what belongs here vs. the corpus, and the line/byte ceiling) is printed by `lore governance claude-md` — read it before editing this file by hand.
 
+Instructions that should not load every session belong in `.claude/rules/*.md` (path-scoped via `paths:` frontmatter), not in this file — see the content contract above for the full rule.
+
 If the `lore-*` skills, agents, or governance hooks are not installed on this machine (e.g. a fresh clone on a new machine), run `lore setup` first — it installs the machine-level assets that inject the full corpus-governed workflow (FEED/PRODUCE/EXECUTE/CLOSE) into every session. If the `lore` binary itself is missing, obtain it through your team's install channel before anything else. This stub is only a pointer; the workflow discipline arrives through that injection.
 
 Run `/lore-init-context` to populate the module index below once this codebase has real structure worth documenting.
