@@ -88,6 +88,17 @@ export function loreErrorToStatus(error: LoreError): number {
     // when/if a verify route is added. Source: SPEC-039 §M2.
     case "NEEDS_APPROVAL":
       return 422;
+    // reason: GhRunner's three error codes (spec-the-defect-channel-reaches-no-machine-
+    // but-its-own-github, AC-GI-2) have no HTTP route today (gh is CLI/MCP-only, same
+    // status as NEEDS_APPROVAL/AI_PROVIDER_ERROR above) — mapped to their nearest HTTP
+    // status semantics for when/if a gh-backed route is added, rather than left to the
+    // 500 catch-all.
+    case "AUTH_REQUIRED":
+      return 401;
+    case "TRANSPORT_UNAVAILABLE":
+      return 503;
+    case "RATE_LIMITED":
+      return 429;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

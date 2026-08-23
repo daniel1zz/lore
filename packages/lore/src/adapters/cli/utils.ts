@@ -88,7 +88,7 @@ export { findLoreDbPath } from "./corpus-resolution.js";
  * Map a LoreError code to a CLI exit code per SPEC-003 §5.
  *
  * @param error - LoreError from a service call
- * @returns numeric exit code (1 | 3 | 4 | 5 | 6 | 7)
+ * @returns numeric exit code (1 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10)
  */
 export function exitCode(error: LoreError): number {
   switch (error.code) {
@@ -127,6 +127,20 @@ export function exitCode(error: LoreError): number {
       return 7;
     case "STORE_ERROR":
       return 1;
+    case "AUTH_REQUIRED":
+      // reason: exit 8 reserved for GhRunner's auth taxonomy (gh missing or unauthenticated) —
+      // distinct from every other bucket so a caller can detect "fix your local gh install/login"
+      // without parsing stderr. Never retryable, unlike the two codes below.
+      // Source: spec-the-defect-channel-reaches-no-machine-but-its-own-github, AC-GI-2
+      return 8;
+    case "TRANSPORT_UNAVAILABLE":
+      // reason: exit 9 — GhRunner's network/transport failure, retryable and distinct from
+      // AUTH_REQUIRED (risk R2's oracle requires the two be observably different).
+      return 9;
+    case "RATE_LIMITED":
+      // reason: exit 10 — GhRunner's rate-limit failure, carries a `reset` epoch a caller can
+      // use to back off; distinct from both AUTH_REQUIRED and TRANSPORT_UNAVAILABLE.
+      return 10;
     default: {
       // exhaustive check — TypeScript should warn if a code is missing
       const _exhaustive: never = error;
@@ -267,6 +281,15 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
         `  Command: ${error.command}\n` +
         "  Pass --allow-new-commands to approve automatically, or run interactively (TTY, no --json) to confirm."
       );
+    case "AUTH_REQUIRED":
+      // reason: error.message already names the exact remedy literal (constructed once,
+      // inside gh-runner.ts, per AC-GI-7's single-source requirement — this module never
+      // re-derives or duplicates it). This renderer only echoes it back out.
+      return `Error: ${error.message}\n  This will not succeed on retry until the local machine's gh install/login state is fixed.`;
+    case "TRANSPORT_UNAVAILABLE":
+      return `Error: ${error.message}\n  This is a transient network condition — retrying may succeed.`;
+    case "RATE_LIMITED":
+      return `Error: ${error.message}\n  Rate limit resets at epoch ${String(error.reset)} — wait before retrying.`;
     default: {
       const _exhaustive: never = error;
       void _exhaustive;

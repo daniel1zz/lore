@@ -4,7 +4,7 @@
  * Source: SPEC-001 §5
  */
 
-/** Discriminated union of all service-layer errors. 13 error codes total (17 with AI_PROVIDER_ERROR + CLAIM_CONFLICT + NEEDS_APPROVAL + WRITE_CONTENTION). */
+/** Discriminated union of all service-layer errors. 13 error codes total (20 with AI_PROVIDER_ERROR + CLAIM_CONFLICT + NEEDS_APPROVAL + WRITE_CONTENTION + AUTH_REQUIRED + TRANSPORT_UNAVAILABLE + RATE_LIMITED). */
 export type LoreError =
   | { code: "DOC_NOT_FOUND"; id: string; suggestions?: string[] }
   | { code: "SLUG_NOT_FOUND"; slug: string; suggestions?: string[] }
@@ -99,6 +99,60 @@ export type LoreError =
       bound_ms: number;
       /** Contending session/PID/host, or the literal `unknown-source` when unresolvable. */
       source: string;
+    }
+  /**
+   * `GhRunner` (the single `gh` subprocess seam, spec-the-defect-channel-
+   * reaches-no-machine-but-its-own-github, Scope entry "GhRunner") could not
+   * authenticate with GitHub — either the `gh` binary itself is missing
+   * (child `execFile` rejected with `.code === "ENOENT"`) or it is installed
+   * but has no logged-in account (the child's stderr names `gh`'s own
+   * remedy). The two remedy literals (`cli.github.com` for the missing-binary
+   * case, `gh auth login` for the unauthenticated case) are constructed ONLY
+   * inside `gh-runner.ts` — never here — so a repo-wide scan for those
+   * literals has exactly one legitimate source (AC-GI-7).
+   *
+   * NEVER retryable: retrying the identical call cannot succeed until an
+   * operator fixes the local machine's `gh` install/login state, unlike
+   * `TRANSPORT_UNAVAILABLE` below.
+   * CLI exit code: 8 (distinct from every other bucket, including the other
+   * two new GhRunner codes).
+   * Source: spec-the-defect-channel-reaches-no-machine-but-its-own-github, Scope "GhRunner", AC-GI-2
+   */
+  | {
+      code: "AUTH_REQUIRED";
+      /** Names the exact remedy (`cli.github.com` or the literal `gh auth login`), verbatim from `gh-runner.ts`. */
+      message: string;
+      retryable: false;
+    }
+  /**
+   * `GhRunner`'s child `gh` process failed at the network/transport layer
+   * (its stderr named a DNS/connectivity failure reaching GitHub's API) —
+   * never an auth or a generic validation problem.
+   *
+   * RETRYABLE: a transient network condition, distinct from `AUTH_REQUIRED`
+   * (risk R2's oracle, AC-GI-2, requires this distinction to be observable).
+   * CLI exit code: 9.
+   * Source: spec-the-defect-channel-reaches-no-machine-but-its-own-github, Scope "GhRunner"
+   */
+  | {
+      code: "TRANSPORT_UNAVAILABLE";
+      message: string;
+      retryable: true;
+    }
+  /**
+   * GitHub's API rate limit rejected a `GhRunner` call. Carries the parsed
+   * `X-RateLimit-Reset` epoch-seconds value verbatim (from the child's
+   * stderr) so a caller can decide how long to back off, rather than
+   * blindly retrying immediately.
+   * CLI exit code: 10.
+   * Source: spec-the-defect-channel-reaches-no-machine-but-its-own-github, Scope "GhRunner"
+   */
+  | {
+      code: "RATE_LIMITED";
+      message: string;
+      /** Epoch seconds parsed from `gh`'s `X-RateLimit-Reset` response header. */
+      reset: number;
+      retryable: true;
     };
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */
