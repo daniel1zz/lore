@@ -3,7 +3,7 @@ id: ADR-037
 type: adr
 role: decision
 title: "A tracker is replaceable, a corpus is not — GitHub is the defect channel's intake, never its resolution SSOT"
-status: draft
+status: approved
 priority: critical
 created: 2026-08-23
 updated: 2026-08-23
@@ -12,8 +12,9 @@ parent: PRD-001
 ---
 # A tracker is replaceable, a corpus is not — GitHub is the defect channel's intake, never its resolution SSOT
 
-**Status**: accepted
 **Date**: 2026-08-23
+
+⛔ This document does NOT restate its own decision status. The authoritative value lives in `extra.decision_status` (readable via `lore get <slug> --json`), and a prose copy here would be a second store of one fact — the exact drift a reviewer caught on 2026-08-23, when a body reading "accepted" sat inside a doc whose lifecycle status was `draft`.
 
 ## Context
 
@@ -63,6 +64,21 @@ Reporter metadata lives in the issue **body**, not in labels, because the REST d
 | Bidirectional sync + reconciler | full 9-state fidelity visible on both sides | a reconciler and a drift detector maintained forever for a channel measured at 12 reports in 11 days; two writable copies have no single truth; reconciler failure is silent | Cost review named it the largest hidden cost in the proposal; violates SSOT |
 | Implement `transport: "http"` against a `lore serve` endpoint | stays inside lore's own model, no third party | every consumer needs a reachable, authenticated upstream server, plus token distribution and its own abuse controls — rebuilding what GitHub already operates | Build-vs-buy: this is an issue tracker |
 | Leave it local, document the limitation | zero work | the channel's stated purpose is unachievable; the fresh-install test keeps failing | Does not address the defect |
+
+## Disposition of the Superseded Mechanisms
+
+The parent PRD's G14 required **four** R-5 safety rails to be oracle-tested. This decision retires three of them, so each is dispositioned explicitly rather than left to inference. G14 was amended in the same round (PRD v75→v76) so the goal and this record cannot disagree.
+
+| Original rail | Disposition | Why |
+|---|---|---|
+| identity pin (upstream root PRD match) | **Superseded** by an authenticated target check: assert `gh api user` login, pass the repo explicitly, never infer it from a git remote or `GH_REPO` | A hosted tracker has no root-PRD analogue, and `gh`'s own target inference is attacker-influencable |
+| version-skew reject | **Not applicable** | It compared the consumer's schema version against the upstream corpus's `PRAGMA user_version`. GitHub exposes no such version |
+| sync-upstream reject | **Not applicable** | It refused when the upstream ran a Turso replica, to prevent a write landing only-local. There is no replica in a GitHub intake path |
+| rate cap | **Deleted** | Abuse control belongs to the tracker. Measured 2026-08-23: 10 open reports against a ceiling of 10 refused every new report while 6 criticals sat untriaged — the cap was punishing honest reporters, not spammers |
+
+**The 12 reports already filed through the local path** keep their corpus records — they are full `task` docs carrying `extra.issue_report`, and stripping them to pointers would make `fixed`/`resolving` unreachable. Each gains `extra.issue_report.github = {repo, number}` and a minted `idempotency_key` during migration (spec Migration Plan P3).
+
+**SPEC-072 is superseded, not revised** — a `supersedes` edge from the new spec records it. Its transport design (a local `corpus_path` opened as SQLite) is the thing being replaced; its command surface, receipt-log concept and `UpstreamPort` seam all survive in narrowed form. It is no longer the spec of record for this channel.
 
 ## Consequences
 

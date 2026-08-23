@@ -3,7 +3,7 @@ id: PLAN-138
 type: plan
 role: plan
 title: "Land the GitHub-intake defect channel: runner, cap removal, intake, migration, transport removal, projection"
-status: draft
+status: approved
 priority: critical
 created: 2026-08-23
 updated: 2026-08-23
@@ -30,7 +30,8 @@ Goal in one line: a consumer on any machine can file a lore defect, because inta
 
 Verified at every Phase Gate. A violation blocks the phase even in unattended mode.
 
-1. **Full-repo typecheck is exit 0.** Not scoped, not cached. P1 deletes 109 references across six source files; a partial deletion leaves a tree that cannot typecheck, and a worktree that cannot typecheck cannot produce evidence.
+1. **Typecheck is exit 0 — at the right scope for the level being checked.** A TASK is held to a SCOPED typecheck (its own package, `packages/core/tsconfig.json` or `packages/lore/tsconfig.json`) plus its own test files. FULL-repo typecheck (`bun run typecheck`, which includes `packages/lore/tsconfig.tests.json`) is a PHASE-GATE and P6 obligation, never a single task's.
+   ⛔ Revised mid-execution, 2026-08-23: the original wording demanded full-repo exit 0 from every implement task. Under TDD injection that is unsatisfiable by construction — sibling RED test files reference modules whose paired implementations are still in flight in other worktrees, so full-repo typecheck is exit 2 for the whole duration of a wave, through no fault of the task being checked. Measured: `receipt-log-v2` landed green (5/5, and v1's suite still 6/6) while full-repo typecheck was exit 2 with every error in five OTHER agents' RED files and zero mentioning receipt-log-v2. The implementer refused to record a pass on an AC it could not satisfy and said so — the corpus stayed honest, and the defect was in the AC, not the work. Neither cached nor scoped-away at the phase gate: P1's 109-reference deletion still gets a full-repo check when its phase closes.
 2. **No AC discharges via a skipped or absent test.** A skipped test that reports green is a vacuous pass. Every AC's oracle must run unconditionally — no env-var gating, no `.skip`, no "0 tests found" passing.
 3. **Every new capability has a live production call site in the same phase.** Adding a module whose only caller is its own unit test is the recorded four-times-measured false-green of this repo. Each implement task's AC names the call site, and the phase gate checks it.
 4. **No config key is ever deleted — only `.optional()`-ised with a warning.** `FeedbackConfigSchema` is `.strict()` at three levels and `.lore/config.yaml` is gitignored, so a deleted key breaks a whole machine's command surface with no rollback path.
@@ -49,15 +50,31 @@ Verified at every Phase Gate. A violation blocks the phase even in unattended mo
 
 # Estimation Summary
 
-**[ESTIMATION]** Total: ~24 session-units | P0: 4 | P1: 4 | P2: 9 | P3: 3 | P4: 2 | P5: 5 | P6: 1 | Critical path: ~12 session-units
+**[ESTIMATION]** Total: ~24 session-units | P0: 4 | P1: 4 | P2: 9 | P3: 3 | P4: 2 | P5: 5 | P6: 1 | Critical path: 14 session-units (derived, 7 nodes)
 
-⚠ Both thresholds the plan skill warns on are exceeded (total > 10, critical path > 6). Recorded rather than hidden. The plan is not split into sub-plans because the six phases are a single irreversible migration sequence with one rollback boundary (P4); splitting it would put the irreversible phase in a different plan from the phases that gate it.
+⚠ Both thresholds the plan skill warns on are exceeded (total > 10, critical path > 6 — the derived critical path is 14). Recorded rather than hidden. The plan is not split into sub-plans because the six phases are a single irreversible migration sequence with one rollback boundary (P4); splitting it would put the irreversible phase in a different plan from the phases that gate it.
 
 # Critical Path
 
-T1 → T2 → T6 → T7 → T12 → T13 → T14 → T15 → T16 → T17 → T20 → T21 → T22
+⛔ DERIVED from the `blocks` graph, not hand-written. Re-derive with `lore ready <plan> --json` and a longest-weighted-path walk over `unmet_blockers` (valid while no task is archived); do not trust this text after the graph changes. A previous revision of this section listed 13 nodes containing **four edges that do not exist** — it had been produced by renumbering labels mechanically without re-deriving the sequence, which is exactly the "document asserts what the mechanism does not back" defect this project's own North Star names. Found by the pre-dispatch audit, 2026-08-23.
 
-P0's runner gates everything (T2), P1's cap removal gates every file P2+ touches (T7), and the intake rewiring (T13) gates migration, transport removal and projection. The wide parallelism is in wave 1 only: T1, T3, T5, T8, T10, T18 are anchor-disjoint and logically independent.
+**7 nodes, 14 session-units:**
+
+T6 → T7 → T13 → T14 → T15 → T17 → T22
+
+| Label | Task | Estimate |
+|---|---|---|
+| T6 | test-retired-cap-key-parses-with-a-warning-while | S |
+| T7 | implement-delete-the-six-cap-symbols-and-retire-the | L |
+| T13 | implement-githubintakeport-and-the-live-filing-path | L |
+| T14 | test-migration-integrity-and-dry-run-red-scenarios | S |
+| T15 | implement-migrate-the-12-filed-reports-with-a | M |
+| T17 | implement-delete-the-sqlite-transport-modules-retire | M |
+| T22 | test-final-verification-full-suite-attested-ac | M |
+
+Three other chains tie at 7 nodes (T8→T9→T13→… , T10→T11→T13→… , T12→T13→…) because P2's three capability modules all converge on the intake rewiring. T13 is therefore the single narrowest point in the plan: four separate chains pass through it.
+
+**Nine tasks have zero blockers and are wave-1 eligible** (machine-checked): T1, T3, T5, T6, T8, T10, T12, T16, T18. T20 is NOT among them — it is blocked by T13, despite being a test-authoring task like the other nine.
 
 # Phase Descriptions
 
@@ -113,3 +130,5 @@ P0's runner gates everything (T2), P1's cap removal gates every file P2+ touches
 - **D-3 A dedicated permanent e2e target repo.** AC-GI-1 asserts filing *succeeds*, so its oracle must make a real network call — a fake runner would assert something weaker than the AC's own statement, and an env-gated skip is a vacuous pass (Invariant 2). Filing into `daniel1zz/lore` would pollute the product's tracker, and the local gh token lacks `delete_repo`, so a test cannot clean up a scratch repo it creates. Resolution: one permanent target repo used by nothing else. **This creates a second repo under the user's account and must be reported at the end of the run.**
 - **D-4 AC-GI-13 is a standalone regression guard with no implementation pair.** It locks in existing `computeIssueResolution` behaviour before anything moves, which is when a regression guard is worth most. A test task with no paired implement task is intentional here, not an omission.
 - **D-5 A task-quality audit returned NEEDS_WORK and its three findings were fixed before dispatch, not after.** (a) The parent PRD's G14 named the rate cap as one of four R-5 safety rails required to be oracle-tested, while this plan deletes it — G14 was amended (PRD v75→v76) and each of the four rails dispositioned in the ADR, rather than leaving the goal and the design in contradiction. (b) The ADR's body restated its own decision status and disagreed with its lifecycle status; the prose copy was removed so `extra.decision_status` is the only store, and the ADR was carried to `approved` before the irreversible P4 can be gated on it. (c) The `T<n>` labels resolved to nothing and the highest label exceeded the task count; the Task Label Map above closes both. A fourth finding — that `frontMatterCodec` had only a behavioural call-site check, so an inline reimplementation inside the intake port would pass every AC while leaving the codec a zero-caller module — was fixed by adding a structural import assertion to T13's AC.
+- **D-6 The audit's second iteration found the Critical Path prose fabricated four edges; it was re-derived mechanically rather than reworded.** The alternative on offer was to relabel the section "narrative phase order, not literal blocks-edges" — rejected, because a critical path that is not the critical path has no scheduling value, and softening the label would have preserved the wrong numbers under a weaker claim. The corrected path is machine-derived and carries its own re-derivation command. Both the node count (13→7) and the weighted estimate (12→14) were wrong before.
+- **D-7 Invariant 1's scope was wrong and was corrected mid-flight rather than waived.** A per-task full-repo typecheck requirement is unsatisfiable during TDD waves (sibling RED files break the tests tsconfig until their own implementations land). Split by level: scoped at task, full-repo at phase gate and P6. ⛔ Not softened to "typecheck passes eventually" — the full-repo check keeps a named owner (T22) and a named gate, because P1 deletes 109 references and a partial deletion that only passes a scoped check is exactly the failure Risk PR-2 describes.
