@@ -36,7 +36,15 @@ import type { HeadroomReport } from "../../service/claude-md-budget.js";
 export interface CheckClaudeMdRenderInput {
   /** `runMemoryFileChecks(...).deterministic` — decides the exit code (unrendered here). */
   findings: MemoryFileFinding[];
-  /** `runMemoryFileChecks(...).advisory` — reference/narrative-smell findings, never exit-relevant. */
+  /**
+   * `runMemoryFileChecks(...).advisory` — reference/narrative-smell findings
+   * PLUS the two always-on `line_length`/`target_distance` metrics (one pair
+   * per discovered file, Phase 4 N9) — never exit-relevant. Rendered in the
+   * `--json` payload only (see {@link buildCheckClaudeMdJsonPayload}); this
+   * module's human-readable rendering never prints `advisory` directly,
+   * mirroring the existing convention for `reference_missing`/
+   * `iso_date_density`/`status_word`.
+   */
   advisory: AdvisoryFinding[];
   /** `computeHeadroom(...)` — used/ceiling/remaining, printed every run regardless of breach. */
   headroom: HeadroomReport[];
