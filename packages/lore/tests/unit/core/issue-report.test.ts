@@ -65,11 +65,26 @@ describe("feedback-schema", () => {
   });
 
   it("feedback-schema: rejects an unknown key nested under feedback.upstream (strict)", () => {
+    // ⛔ REWRITTEN (P4, spec-the-defect-channel-reaches-no-machine-but-its-
+    // own-github): the ORIGINAL fixture used `transport: "http"` as its
+    // "unknown key" probe, commented "P2 seam, not yet a real field — must
+    // reject as a typo today". P4 makes `transport` a real (retired,
+    // parses-but-ignored) field — `z.enum(["sqlite","http"]).optional()` on
+    // `FeedbackConfigSchema`'s legacy branch, AC-GI-14 — so `{..., transport:
+    // "http"}` now parses SUCCESSFULLY. Re-running the original assertion
+    // against unchanged code (measured, confirmed): `expect(result.success
+    // ).toBe(false)` fails with `expected true to be false`. This is a
+    // correction, not a weakening: the STRICT-MODE property this case exists
+    // to guard (an unrecognised key is still rejected) is unaffected by
+    // retiring `transport` — the probe just needs a key that is STILL
+    // genuinely unknown, so it now uses `totally_unrelated_typo` (mirroring
+    // `transport-config-compat.test.ts`'s own NEGATIVE scenario, which pins
+    // the identical strict-mode-survives-the-targeted-exemptions property).
     const withUnknownKey = {
       upstream: {
         corpus_path: "/Users/dev/upstream-repo",
         root_prd: "prd-x",
-        transport: "http", // P2 seam, not yet a real field — must reject as a typo today
+        totally_unrelated_typo: "oops",
       },
     };
     const result = FeedbackConfigSchema.safeParse(withUnknownKey);

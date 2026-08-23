@@ -11,9 +11,16 @@
  * UNCONFIGURED consumer too (`feedback.upstream` absent from `.lore/config.yaml`) —
  * but SPEC-072's config is provisioned by no init/setup path, so a fresh consumer was
  * never told the reporting channel exists. The unconfigured branch now returns a
- * distinct one-line provision-guidance hint (pointing at `lore report-issue
- * --auto-config`, SPEC-OOB's self-provision entry point) instead of `null`. The
- * CONFIGURED branch's wording is UNCHANGED (SPEC-073 AC-073-1 regression floor).
+ * distinct one-line provision-guidance hint instead of `null`. The CONFIGURED
+ * branch's wording is UNCHANGED (SPEC-073 AC-073-1 regression floor).
+ *
+ * ⛔ REWRITTEN (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-github):
+ * the unconfigured hint used to point at `lore report-issue --auto-config`
+ * (SPEC-OOB's self-provisioning entry point). That flag AND the mechanism it
+ * drove are deleted outright in P4 — self-provisioning only ever produced the
+ * now-retired legacy SQLite shape. Pointing a caller at a flag that no longer
+ * exists would be this hint's own fail-loud module lying to its caller; the
+ * hint now names `feedback.upstream.repo` (the GitHub shape) directly instead.
  *
  * Public surface:
  *   - `buildReportIssueHint(errClass, upstreamConfigured)` — the sole hint-text builder.
@@ -28,8 +35,7 @@
  *     `LoreConfig` object — callers derive it via
  *     `report-issue-wiring.ts::resolveFeedbackUpstreamCfg`, so this module stays
  *     import-light (zero dependencies) and safe to import from ANY seam regardless of
- *     that seam's own vitest-reachability (unlike `report-issue-wiring.ts`, which
- *     value-imports `bun:sqlite` transitively via `../../store/sqlite-store.js`).
+ *     that seam's own vitest-reachability.
  *   - Pure: no IO, no `process.exit`, no config parsing. Callers are responsible for
  *     wrapping the call in a `try/catch` if there's any risk of a caller-side crash —
  *     this function itself has no failure mode (string interpolation only) but the
@@ -43,7 +49,8 @@
  * Side-effect class: pure
  *
  * Source: SPEC-073 §Design, §Scope; SPEC-OOB §Design ("Hint SSOT unchanged... the
- *   unconfigured branch gains a return value instead of `null`")
+ *   unconfigured branch gains a return value instead of `null`"); P4 of
+ *   spec-the-defect-channel-reaches-no-machine-but-its-own-github (wording rewrite).
  */
 
 /** The two error classes this hint ever renders for; every other case renders `null`. */
@@ -62,8 +69,8 @@ export type ReportIssueHintErrClass = "gate" | "internal" | null;
  *   `feedback.upstream` set (via
  *   `report-issue-wiring.ts::resolveFeedbackUpstreamCfg(config) !== undefined`).
  *   Configured → the direct filing hint (SPEC-073, unchanged). Unconfigured → a
- *   distinct provision-guidance hint pointing at `lore report-issue --auto-config`
- *   (SPEC-OOB's self-provision entry point) instead of assuming a reachable channel.
+ *   distinct provision-guidance hint naming `feedback.upstream.repo` instead of
+ *   assuming a reachable channel.
  * @returns the single hint line (no trailing newline, no embedded `\n` — callers
  *   append their own), or `null` when `errClass === null` (byte-absent from stderr —
  *   REGRESSION-safe: the non-gate/non-internal case must reproduce the pre-SPEC-073
@@ -75,8 +82,8 @@ export type ReportIssueHintErrClass = "gate" | "internal" | null;
  *   //     --actual <what-happened>` to file it."
  *   buildReportIssueHint("gate", false)
  *   // => "If, after re-checking your own input, you still judge this a lore
- *   //     reporting gap: run `lore report-issue --auto-config` to self-provision the
- *   //     reporting channel, then re-run with --title/--expected/--actual to file it."
+ *   //     reporting gap: configure feedback.upstream.repo (e.g. \"owner/repo\") in
+ *   //     .lore/config.yaml, then re-run with --title/--expected/--actual to file it."
  *   buildReportIssueHint(null, true)    // => null (not a gate/internal error)
  *   buildReportIssueHint(null, false)   // => null (not a gate/internal error)
  */
@@ -88,9 +95,9 @@ export function buildReportIssueHint(
   if (!upstreamConfigured) {
     return (
       "If, after re-checking your own input, you still judge this a lore reporting " +
-      "gap: run `lore report-issue --auto-config` to self-provision the reporting " +
-      "channel, then re-run with --title <short-title> --expected " +
-      "<what-you-expected> --actual <what-happened> to file it."
+      'gap: configure feedback.upstream.repo (e.g. "owner/repo") in .lore/config.yaml, ' +
+      "then re-run with --title <short-title> --expected <what-you-expected> " +
+      "--actual <what-happened> to file it."
     );
   }
   return (

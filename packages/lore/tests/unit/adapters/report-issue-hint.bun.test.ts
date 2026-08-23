@@ -56,12 +56,19 @@ const HINT_TOKEN = "lore report-issue";
 const REVERIFY_TOKEN = "re-checking";
 /**
  * Provision-guidance token (SPEC-OOB §Design + task-t5-unlock-the-spec-073-hint-s-
- * unconfigured-branch: "pointing at the provision path (the --auto-config command)")
- * — the literal flag every future unconfigured-branch hint must name, distinguishing
- * the NEW self-provision guidance line from the pre-existing configured-branch hint
- * (which carries {@link HINT_TOKEN} + {@link REVERIFY_TOKEN} but never this token).
+ * unconfigured-branch) — the literal substring every unconfigured-branch hint must
+ * name, distinguishing the provision-guidance line from the pre-existing
+ * configured-branch hint (which carries {@link HINT_TOKEN} + {@link REVERIFY_TOKEN}
+ * but never this token).
+ *
+ * ⛔ REWRITTEN (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-github):
+ * was `"--auto-config"` — that self-provisioning flag is deleted outright (its only
+ * output, the legacy SQLite shape, is itself retired), so `report-issue-hint.ts`'s
+ * unconfigured branch now names `feedback.upstream.repo` (the GitHub shape) instead.
+ * Every property this token gates ("exactly one provision-guidance line, distinct
+ * from the configured branch") is unchanged — only the literal wording moved.
  */
-const PROVISION_TOKEN = "--auto-config";
+const PROVISION_TOKEN = "feedback.upstream.repo";
 
 interface RunResult {
   readonly stdout: string;
@@ -118,14 +125,23 @@ function initCorpus(tmpDir: string): void {
  * Full-replace `config.yaml` write declaring `feedback.upstream` — mirrors
  * `cli-loader.bun.test.ts`'s `writeConfig` convention (no partial-merge writer
  * exists for `saveConfig`, so every field this corpus needs is restated here).
+ *
+ * ⛔ REWRITTEN (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-
+ * github): was the legacy `{corpus_path, root_prd}` shape. This test only
+ * ever needed `upstreamConfigured` (`resolveFeedbackUpstreamCfg(config) !==
+ * undefined`) to read `true` — it never files or lists a real report. The
+ * legacy shape now ALSO emits a `console.warn` retirement notice on every
+ * config parse (config.ts's `FeedbackConfigSchema`), which would pollute
+ * every exact-stderr assertion in this file that configures an upstream at
+ * all. The GitHub shape carries no such side effect and is the one that
+ * still does something post-P4.
  */
 function configureUpstream(tmpDir: string): void {
   const result = saveConfig(tmpDir, {
     project: { name: "report-issue-hint-probe", author: "tester" },
     feedback: {
       upstream: {
-        corpus_path: "/tmp/lore-report-issue-hint-test-upstream",
-        root_prd: "prd-upstream-root",
+        repo: "acme/lore-report-issue-hint-test-upstream",
       },
     },
   } as never);
@@ -184,7 +200,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     expect(result.stdout).toContain("PARENT_REQUIRED");
   });
 
-  it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial now carries exactly 1 provision-guidance line naming --auto-config (SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
+  it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial now carries exactly 1 provision-guidance line naming feedback.upstream.repo (SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-gate-unc-"));
     initCorpus(tmpDir);
     // deliberately NOT calling configureUpstream() — init's own default
@@ -257,7 +273,7 @@ describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exac
     expect(result.stderr).toContain(HINT_TOKEN);
   });
 
-  it("STATE: unconfigured consumer's SAME corrupted-db failure state now carries exactly 1 provision-guidance line naming --auto-config (underlying error message unchanged; SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
+  it("STATE: unconfigured consumer's SAME corrupted-db failure state now carries exactly 1 provision-guidance line naming feedback.upstream.repo (underlying error message unchanged; SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lore-hint-corrupt-unc-"));
     initCorpus(tmpDir);
     corruptDb(tmpDir);
@@ -271,7 +287,7 @@ describe("AC-073-3: internal-error hint — a corrupted .lore/lore.db earns exac
 });
 
 describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-denial gains exactly 1 provision-guidance line, configured gate-denial stays byte-identical to the AC-073-1 baseline", () => {
-  it("AC-OOB-6: unconfigured consumer earns exactly 1 --auto-config provision-guidance line (RED — today 0); configured consumer's hint stays byte-identical to the SPEC-073 baseline (regression floor)", () => {
+  it("AC-OOB-6: unconfigured consumer earns exactly 1 provision-guidance line (RED — today 0); configured consumer's hint stays byte-identical to the SPEC-073 baseline (regression floor)", () => {
     // ---- Direction 1: UNCONFIGURED consumer — the self-lock scenario. ----
     // Deliberately NOT calling configureUpstream(): a fresh consumer whose
     // `.lore/config.yaml` has no `feedback.upstream` at all is exactly the state
@@ -290,12 +306,13 @@ describe("AC-OOB-6: self-lock broken, both directions — unconfigured gate-deni
     rmSync(tmpDir, { recursive: true, force: true });
 
     expect(unconfigured.exitCode).toBe(4);
-    // RED: `buildReportIssueHint(errClass, false)` unconditionally returns `null`
-    // today (see report-issue-hint.ts: `if (errClass === null || !upstreamConfigured)
-    // return null`), so `emitGateReportIssueHint` writes nothing and this stderr is
-    // byte-EMPTY (0 lines) — this is a missing-behaviour failure, not a wording typo.
-    // It stays RED until T5 (GREEN) changes the unconfigured branch to return a
-    // provision-guidance line naming `--auto-config`.
+    // HISTORICAL RED (task T5, SPEC-OOB): `buildReportIssueHint(errClass, false)`
+    // used to unconditionally return `null`, so `emitGateReportIssueHint` wrote
+    // nothing and this stderr was byte-EMPTY (0 lines). T5 (GREEN) changed the
+    // unconfigured branch to return a provision-guidance line — P4 of
+    // spec-the-defect-channel-reaches-no-machine-but-its-own-github later
+    // rewrote that line's wording (see `PROVISION_TOKEN`'s own JSDoc) without
+    // touching this structural "exactly 1 line" property.
     expect(countLinesContaining(unconfigured.stderr, PROVISION_TOKEN)).toBe(1);
     // Independent structural condition (not just "the token appears somewhere"):
     // the ENTIRE stderr is exactly one non-empty physical line.

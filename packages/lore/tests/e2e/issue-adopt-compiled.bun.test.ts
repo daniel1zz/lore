@@ -77,9 +77,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { SQLiteStore } from "../../src/store/sqlite-store.js";
+import { CorpusService } from "../../src/service/corpus-service.js";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's, never a
 //     bare `lore` on PATH) ─────────────────────────────────────────────────
@@ -110,7 +112,7 @@ interface RunResult {
  * corpus-free tmp dir would answer "not a dev checkout", not the dev-synced
  * verdict this suite needs). Every OTHER call site in this file passes a
  * `mkdtemp`-created fixture root, each asserted under tmp at ITS OWN creation
- * site (`makeUpstream`/`makeConsumer`) — never this repo's own `.lore/`.
+ * site (`makeUpstream`) — never this repo's own `.lore/`.
  */
 function run(args: string[], opts: { cwd: string; env?: Record<string, string> }): RunResult {
   const proc = Bun.spawnSync([DIST_LORE, ...args], {
@@ -197,8 +199,20 @@ afterAll(() => {
   }
 });
 
-// ─── Twin-corpus fixture: upstream (owns the queue + the owner plan) plus  ──
-// ─── consumer (files reports against it)                                  ──
+// ─── Single-corpus fixture: the corpus that owns the queue + the owner plan ──
+//
+// ⛔ REWRITTEN (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-
+// github): this used to be a TWIN-corpus fixture — a separate "consumer"
+// filed reports via `lore report-issue` against this "upstream", configured
+// with the legacy `feedback.upstream.{corpus_path,root_prd}` shape. That
+// legacy SQLite transport is deleted outright in P4 — filing through it now
+// refuses loudly by design. This file's ACTUAL subject, §M7's `adopted`
+// mechanism on `lore issue resolve`, has never depended on HOW a report was
+// created. `fileReport` now constructs that shape DIRECTLY via `SQLiteStore`
+// + `CorpusService` (the established in-process bun-test seeding pattern —
+// see `tests/unit/store/schema-probe.bun.test.ts`'s own header), and every
+// downstream CLI operation runs with `cwd: upstream.root` (unchanged from
+// before, since that is where the doc actually lives).
 
 interface UpstreamFixture {
   readonly root: string;
@@ -219,28 +233,43 @@ function makeUpstream(): UpstreamFixture {
   return { root, rootPrdSlug: prd.data.data.slug };
 }
 
-function makeConsumer(upstream: UpstreamFixture): string {
-  const root = mkdtempSync(join(TMP_ROOT, "lore-dc17-consumer-"));
-  assertUnderTmp(root);
-  fixturesToClean.push(root);
-  expect(run(["init"], { cwd: root }).exitCode).toBe(0);
-  appendFileSync(
-    join(root, ".lore", "config.yaml"),
-    ["feedback:", "  upstream:", `    corpus_path: ${upstream.root}`, `    root_prd: ${upstream.rootPrdSlug}`, ""].join(
-      "\n",
-    ),
-  );
-  return root;
-}
-
-/** Files one report, asserting exit 0; returns its upstream doc id. */
-function fileReport(consumerRoot: string, title: string): string {
-  const { result, data } = runJson<{ ok: true; data: { upstream_doc_id: string } }>(
-    ["report-issue", "--title", title, "--description", "desc", "--expected", "exit 0", "--actual", "exit 4"],
-    { cwd: consumerRoot, env: { LORE_ACTOR: "agent:dc17-reporter" } },
-  );
-  expect(result.exitCode, `expected report-issue to succeed: ${result.stderr}`).toBe(0);
-  return data.data.upstream_doc_id;
+/**
+ * Seeds one issue-report draft task DIRECTLY into `upstream.root` via
+ * `SQLiteStore` + `CorpusService`, replicating the now-deleted legacy
+ * `UpstreamPort.createDraft`'s exact shape: `extra.adhoc: true`, NO
+ * `parent_id` (the omission is deliberate — `CorpusService._createImpl`'s
+ * own `--adhoc` auto-parenting special case, which resolves the corpus's
+ * root PRD as parent, fires ONLY when `parent_id` is omitted; passing it
+ * explicitly would instead hit the normal `PARENT_TYPE_CONTRACT` check, which
+ * does not allow `task` under `prd`). Returns the created task's id.
+ */
+async function fileReport(upstream: UpstreamFixture, title: string): Promise<string> {
+  const store = new SQLiteStore(join(upstream.root, ".lore", "lore.db"));
+  const corpusService = new CorpusService(store);
+  try {
+    const result = await corpusService.create({
+      type: "task",
+      title,
+      content: "desc",
+      extra: {
+        adhoc: true,
+        ac_scope: [],
+        issue_report: {
+          reporter_project: "test-seed (direct)",
+          reporter_actor: "agent:dc17-reporter",
+          lore_version: "0.0.0-test",
+          expected: "exit 0",
+          actual: "exit 4",
+          reported_at: new Date().toISOString(),
+          possible_duplicates: [],
+        },
+      },
+    });
+    if (!result.ok) throw new Error(`direct seed create failed: ${JSON.stringify(result.error)}`);
+    return result.value.id;
+  } finally {
+    store.close();
+  }
 }
 
 interface IssuesJsonRow {
@@ -253,9 +282,8 @@ interface IssuesJsonPayload {
 }
 
 describe("AC-DC-17 rewritten: production wiring, compiled binary — adopted is non-terminal and requires a live owner pointer", () => {
-  it("NEGATIVE/HAPPY/BOUNDARY/STATE: --adopted-by is refused without a resolvable owner, accepted with a live plan, and the adopted report reads back as non-terminal", () => {
+  it("NEGATIVE/HAPPY/BOUNDARY/STATE: --adopted-by is refused without a resolvable owner, accepted with a live plan, and the adopted report reads back as non-terminal", async () => {
     const upstream = makeUpstream();
-    const consumerRoot = makeConsumer(upstream);
 
     // §M7 — the owner MUST be a live plan or task; never auto-created by
     // this suite's own report-filing (out of scope, same as the mechanism's
@@ -270,7 +298,7 @@ describe("AC-DC-17 rewritten: production wiring, compiled binary — adopted is 
     expect(ownerPlan.result.exitCode, `owner plan creation failed: ${ownerPlan.result.stderr}`).toBe(0);
     const ownerPlanId = ownerPlan.data.data.id;
 
-    const reportId = fileReport(consumerRoot, "dc17 report needing adoption");
+    const reportId = await fileReport(upstream, "dc17 report needing adoption");
 
     // NEGATIVE (a) — no `--adopted-by` at all: argv-only refusal, before
     // `loadLoreApp()` ever runs, so it provably writes zero bytes.
@@ -320,8 +348,11 @@ describe("AC-DC-17 rewritten: production wiring, compiled binary — adopted is 
     // BOUNDARY/STATE — `lore issues` (default: unresolved-only) still carries
     // the adopted report's id, with computed resolution EXACTLY "adopted" —
     // the non-terminal claim §M7 requires, read back through the compiled
-    // CLI's OWN read surface (never re-derived by this test).
-    const issuesListing = runJson<IssuesJsonPayload>(["issues"], { cwd: consumerRoot });
+    // CLI's OWN read surface (never re-derived by this test). Reads
+    // `cwd: upstream.root` directly (P4 rewrite: no more separate consumer —
+    // that is where the doc actually lives, and local reads are unaffected
+    // by the retired transport).
+    const issuesListing = runJson<IssuesJsonPayload>(["issues"], { cwd: upstream.root });
     expect(issuesListing.result.exitCode, `lore issues failed: ${issuesListing.result.stderr}`).toBe(0);
     const adoptedRow = issuesListing.data.data.reports.find((r) => r.id === reportId);
     expect(adoptedRow, `adopted report ${reportId} must still appear in the default (unresolved-only) listing`).toBeDefined();

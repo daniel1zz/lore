@@ -215,7 +215,7 @@ import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@
 import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFileAnchors } from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
-import { ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
+import { buildUnconfiguredUpstreamRemedy, ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
 import { resolveSubTypeFilter } from "../../service/corpus-service.js";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
@@ -270,7 +270,6 @@ import {
   describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
 import { captureOracleCommand, type EvidenceProvenance } from "../evidence-capture.js";
-import { IssueReportService } from "../../service/issue-report-service.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../service/task-workflow-service.js";
 import { existsSync } from "node:fs";
 
@@ -929,8 +928,10 @@ export const LoreRequirementAddSchema = z.object({
 /**
  * Input schema for lore_report_issue (SPEC-072 T5) — files a structured
  * lore-defect report into this CONSUMER corpus's configured upstream
- * (`feedback.upstream.{corpus_path,root_prd}` in `.lore/config.yaml`), thin
- * pipe over `IssueReportService.report`. `by` is required — same MCP
+ * (`feedback.upstream.repo` in `.lore/config.yaml` — GitHub only, see this
+ * tool's own handler for why: `IssueReportService`, which used to speak the
+ * legacy SQLite shape, is deleted outright in P4 of spec-the-defect-channel-
+ * reaches-no-machine-but-its-own-github). `by` is required — same MCP
  * actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`/
  * `lore_ready`/`lore_review`/`lore_verify` (MCP callers pass actor identity
  * explicitly; the CLI's `resolveActor` fallback chain does not apply here).
@@ -944,8 +945,7 @@ export const LoreRequirementAddSchema = z.object({
  * one, making the column's meaning depend on which surface filed the row. ⛔ The
  * severity vocabulary is `ISSUE_SEVERITIES` (the shared SSOT), never a re-typed
  * `z.enum([...])` literal list, and ⛔ neither label changes any admission
- * decision on this surface either — `IssueReportService.report`'s cap narrowing
- * takes no severity argument at all.
+ * decision on this surface either.
  */
 export const LoreReportIssueSchema = z.object({
   by: z.string().min(1),
@@ -2891,28 +2891,32 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
     "File a structured lore-defect report into this corpus's configured upstream (feedback.upstream in .lore/config.yaml) — lands as a draft ad-hoc task in the upstream pending-review queue",
     LoreReportIssueSchema,
     async (args) => {
-      // Lazy import: report-issue-wiring value-imports flows/upstream-context-flow →
-      // SQLiteStore → bun:sqlite; a static import here would drag bun:sqlite into the
-      // vitest graph of every tools.ts consumer (mcp-tools.test.ts). Deferring to call
-      // time keeps the module vitest-loadable (same isolation move as the CLI loader).
-      const { buildIssueReportDeps, isGithubUpstreamCfg, resolveConsumerCorpusRoot, resolveFeedbackUpstreamCfg } =
-        await import("../cli/report-issue-wiring.js");
-      const corpusRoot = resolveConsumerCorpusRoot();
-      // reason: the consumer config is threaded in explicitly (not defaulted)
-      // so `feedback.upstream.write_wait_ms` is honoured on THIS surface too —
-      // buildIssueReportDeps takes it positionally for exactly that reason
-      // (spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4).
-      const deps = buildIssueReportDeps(corpusRoot, getConfig?.());
-      const service = new IssueReportService(deps);
+      // ⛔ RETIRED (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-
+      // github): this handler used to lazy-import `report-issue-wiring.js`'s
+      // `buildIssueReportDeps` and pipe straight into `IssueReportService.report`
+      // for a legacy-shaped `feedback.upstream`. `IssueReportService` and the
+      // SQLite `UpstreamPort` it drove are deleted outright — this tool now
+      // refuses EVERY configured shape (legacy SQLite is retired; GitHub is a
+      // later phase's own wiring task, unchanged from before) and only the
+      // "unconfigured" condition differs in wording from before.
+      //
+      // Lazy import kept for the SAME isolation reason it existed before:
+      // `report-issue-wiring.js` value-imports `gh-runner.js`/
+      // `github-intake-port.js`, whose transitive deps a static import here
+      // would drag into the vitest graph of every tools.ts consumer
+      // (mcp-tools.test.ts).
+      const { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } = await import("../cli/report-issue-wiring.js");
       const cfg = resolveFeedbackUpstreamCfg(getConfig?.());
 
-      // reason: `IssueReportService` only ever spoke the legacy SQLite-shaped
-      // upstream (spec-the-defect-channel-reaches-no-machine-but-its-own-
-      // github P2 moved the LIVE filing path to `GitHubIntakePort` instead —
-      // see `report-issue-wiring.ts::fileGithubIssue`). Wiring THIS MCP tool
-      // onto that new path is a separate task's own scope; refuse loudly here
-      // rather than silently mis-typing the GitHub shape into a legacy call.
-      if (cfg !== undefined && isGithubUpstreamCfg(cfg)) {
+      if (cfg === undefined) {
+        return errorContent(buildUnconfiguredUpstreamRemedy());
+      }
+
+      // reason: the LIVE filing path is `GitHubIntakePort`, via
+      // `report-issue-wiring.ts::fileGithubIssue` — wiring THIS MCP tool onto
+      // it is a separate task's own scope; refuse loudly here rather than
+      // silently mis-typing the GitHub shape into a call with no implementation.
+      if (isGithubUpstreamCfg(cfg)) {
         return errorContent({
           code: "VALIDATION_ERROR",
           field: "feedback.upstream",
@@ -2923,24 +2927,17 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         });
       }
 
-      const result = await service.report(
-        {
-          title: args.title,
-          description: args.description,
-          expected: args.expected,
-          actual: args.actual,
-          by: args.by,
-          ...(args.repro_command !== undefined ? { repro_command: args.repro_command } : {}),
-          // §M6 ordering-only labels — key OMITTED when the caller declared none,
-          // so an undeclared label stays absent from `extra.issue_report` rather
-          // than becoming a fabricated default (same contract the CLI upholds).
-          ...(args.severity !== undefined ? { severity: args.severity } : {}),
-          ...(args.category !== undefined ? { category: args.category } : {}),
-        },
-        cfg,
-      );
-      if (!result.ok) return errorContent(result.error);
-      return textContent(result.value);
+      // legacy-shaped `feedback.upstream` — retired (P4): `IssueReportService`
+      // and the SQLite `UpstreamPort` it drove no longer exist to file through.
+      return errorContent({
+        code: "VALIDATION_ERROR",
+        field: "feedback.upstream",
+        message:
+          "this corpus's feedback.upstream is configured with the retired SQLite shape " +
+          "({root_prd, ...}) — SQLite-based issue reporting was removed " +
+          "(spec-the-defect-channel-reaches-no-machine-but-its-own-github P4). Reconfigure " +
+          'feedback.upstream.repo (e.g. "owner/repo") to file issue reports via GitHub.',
+      });
     },
   );
 }

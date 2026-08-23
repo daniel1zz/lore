@@ -1,58 +1,48 @@
 /**
  * lore report-issue --title <t> --description <d> --expected <e> --actual <a>
- *   [--repro-command <cmd>] [--severity <s>] [--category <c>] [--tags <t1,t2>] [--auto-config] [--json]
+ *   [--repro-command <cmd>] [--severity <s>] [--category <c>] [--tags <t1,t2>] [--json]
  * lore report-issue --list [--json]
  *
  * ── GitHub intake path (spec-the-defect-channel-reaches-no-machine-but-its-own-github P2, AC-GI-1) ──
- * When `feedback.upstream` resolves to the GITHUB shape (`{repo: "owner/name"}`
- * rather than the legacy `{corpus_path, root_prd}`), filing goes through a
- * SEPARATE live path — `report-issue-wiring.ts::fileGithubIssue`, itself
- * calling `GitHubIntakePort` — never `IssueReportService`, which only ever
- * spoke the legacy SQLite-shaped upstream. `--severity`/`--category` become
+ * Filing goes through `report-issue-wiring.ts::fileGithubIssue`, itself
+ * calling `GitHubIntakePort`, whenever `feedback.upstream` resolves to the
+ * GITHUB shape (`{repo: "owner/name"}`). `--severity`/`--category` are
  * REQUIRED (not optional) on this path: `frontMatterCodec`'s closed
- * six-field set has no undeclared-label representation, unlike the legacy
- * path's `extra.issue_report` (which omits the key entirely when undeclared).
- * `--tags` (new, comma-separated) is GitHub-path-only; the legacy path has
- * no tags field at all. `--list` against this shape is refused loudly (a
- * later phase's own read surface, `GitHubIntakePort.listIssues`) rather than
- * silently falling back to a legacy-only render.
+ * six-field set has no undeclared-label representation. `--tags`
+ * (comma-separated) is likewise GitHub-path-only. `--list` against this
+ * shape is refused loudly (a later phase's own read surface,
+ * `GitHubIntakePort.listIssues`) rather than silently falling back to
+ * anything.
+ *
+ * ── The legacy SQLite shape is RETIRED (P4, spec-the-defect-channel-reaches-
+ * no-machine-but-its-own-github) ──
+ * A `feedback.upstream` configured with the legacy `{root_prd, ...}` shape
+ * (no `repo`) is refused loudly on EVERY invocation of this command —
+ * `IssueReportService` and the SQLite `UpstreamPort` it drove are deleted
+ * outright, so there is no transport left to file or list through for that
+ * shape. `corpus_path`/`transport` still PARSE (warned-on-by-name at config
+ * load, see `@lore/core`'s `FeedbackConfigSchema`) but nothing here acts on
+ * them — the refusal names `feedback.upstream.repo` as the way forward.
+ * ⛔ `--auto-config` and its self-provisioning machinery
+ * (`resolveUpstreamFromInstalledBinary`/`provisionFeedbackUpstream`,
+ * spec-out-of-box-reporting-channel-report-issue-self-provisions T3/T4) are
+ * deleted WITH it: self-provisioning only ever produced the now-unusable
+ * legacy shape, so keeping the flag would let a caller "successfully"
+ * configure something that does nothing.
  *
  * ── §M4/§M6 (spec-the-defect-channel-cannot-be-honestly-maintained-an) ──
  * `--list` NAMES the corpus its rows describe: its first human output line is
  * `formatIssueCorpusLine(...)`'s fixed `Corpus: ` prefix plus the CONFIGURED
  * UPSTREAM's absolute path, and `--json` carries the same value as
- * `data.corpus_path`. The sibling `lore issues` now emits the identical header for
+ * `data.corpus_path`. The sibling `lore issues` emits the identical header for
  * the corpus IT read, which is how the measured 0-vs-12 divergence (see that
- * file's header) becomes visible from either surface instead of requiring a reader
- * to know which side each command talks to.
+ * file's header) becomes visible from either surface instead of requiring a
+ * reader to know which side each command talks to.
  *
  * `--severity`/`--category` are ORDERING-ONLY triage labels the FILER declares
- * (§M6). They are written into `extra.issue_report`, read back off the UPSTREAM
- * doc, and rendered as columns on BOTH read surfaces. ⛔ They change NO admission
- * decision: severity is self-declared by the party the cap constrains, so letting
- * it bucket/exempt/evict quota would put the ceiling under that party's control
- * (the same reason §M2 sites the ceiling upstream). `IssueReportService.report`'s
- * step-6 narrowing takes no severity argument, so this holds by construction.
- *
- * `--list`'s row render also carries the state-neutral `resolution_reason` and,
- * new here, a `Pointer` column for the doc a NON-DEROGATORY terminal state points
- * at (`--superseded-by`/`--duplicate-of`, §M3). This render was the third of the
- * three sites the KNOWN GAP in `flows/upstream-context-flow.ts::getResolution`
- * named: while the reason field was called `rejection_reason` and no column
- * existed, a `superseded` report was operationally indistinguishable from a
- * rejected one — §M3's capability implemented and unreachable.
- *
- * Files a structured lore-defect report directly into a configured upstream
- * corpus (SPEC-072), landing there as a draft ad-hoc task in the upstream
- * pending-review queue. `--list` shows this consumer corpus's filed history,
- * joined LIVE with the upstream DEFECT's computed resolution (D6,
- * spec-issue-closure-loop-computed-resolution-agent-reachable; including
- * rejection/wontfix reasons, `UpstreamPort.getResolution`) — a separate
- * read-only mode, mutually exclusive with the report-filing flags. The raw
- * upstream doc status is demoted to a secondary debugging column
- * (`doc_status`); it is NOT the primary signal a reporting agent should read
- * anymore (a `draft` issue task whose fix shipped as a separate archived doc
- * now correctly prints `fixed`, not `draft`).
+ * (§M6). They are written into the issue's front matter, read back off the
+ * UPSTREAM issue, and rendered as columns on read surfaces. ⛔ They change NO
+ * admission decision.
  *
  * `--list` and any of `--title`/`--description`/`--expected`/`--actual`/
  * `--repro-command` together is a usage error (exit 2, checked BEFORE any
@@ -65,49 +55,31 @@
  * then session tier, then OS username — no `--by` flag on this command, since
  * SPEC-072's task packet declares only the flags in this header).
  *
- * ── Self-provisioning (spec-out-of-box-reporting-channel-report-issue-self-provisions T4) ──
- * When `feedback.upstream` is unconfigured, this is the ONE seam that decides
- * WHEN to call `report-issue-wiring.ts`'s `resolveUpstreamFromInstalledBinary`/
- * `provisionFeedbackUpstream` (that module intentionally never wires the CLI
- * flag itself — see its own header). `--auto-config` is the explicit,
- * non-interactive approval a non-TTY caller must pass before this command
- * self-provisions: absent it, `resolveEffectiveUpstreamCfg` below returns
- * `IssueReportService`'s exported `buildUnconfiguredUpstreamRemedy()` — the
- * SAME actionable error for BOTH the filing path and `--list` (single wording
- * SSOT, AC-OOB-1), and now ALSO the identical error `IssueReportService.report()`
- * itself returns on the same condition
+ * When `feedback.upstream` is unconfigured at all, `resolveEffectiveUpstreamCfg`
+ * below returns `@lore/core`'s exported `buildUnconfiguredUpstreamRemedy()` —
+ * the SAME actionable error for BOTH the filing path and `--list` (single
+ * wording SSOT, AC-OOB-1), and now ALSO the identical error the MCP
+ * `lore_report_issue` tool returns on the same condition
  * (spec-governance-defaults-must-ship-and-every-recorded-gap-must D3,
- * AC-GD-2). Collapsing onto that ONE shared, imported builder — rather than
- * this file's own now-deleted `buildAutoConfigRequiredError` — is what makes
- * "the CLI's remedy" and "the service's remedy" the same remedy BY
- * CONSTRUCTION, not by two literals that happen to read alike today
- * (AC-GD-2(a) asserts this three ways: one definition site scanned by literal
- * text, both layers importing that one symbol, and byte-identical output).
- * AC-OOB-1's own constraint — the text MUST name `--auto-config` and MUST
- * carry ZERO hand-edit-YAML template value lines — is why the shared builder
- * states the two required config KEYS in dotted-path prose rather than a
- * copy-pasteable YAML block (see `buildUnconfiguredUpstreamRemedy`'s own
- * JSDoc). An ALREADY-configured `feedback.upstream` short-circuits straight
- * through without ever attempting resolution, `--auto-config` or not
- * (AC-OOB-4a).
+ * AC-GD-2). Collapsing onto that ONE shared, imported builder is what makes
+ * "the CLI's remedy" and every other surface's remedy the same remedy BY
+ * CONSTRUCTION, not by two literals that happen to read alike today.
  *
- * Every failure from `IssueReportService` is a `LoreError`, mapped through the
- * normal `exitCode()`/`formatError()` pipeline — most report-filing failures
- * are `VALIDATION_ERROR` (exit 4): unconfigured `feedback.upstream` (now the
- * `--auto-config` provision hint above, not hand-edit-YAML prose), root-PRD
- * mismatch, version skew, upstream `sync.enabled`, and the per-reporter
- * open-report cap.
+ * Every failure is a `LoreError`, mapped through the normal
+ * `exitCode()`/`formatError()` pipeline — most report-filing failures are
+ * `VALIDATION_ERROR` (exit 4): unconfigured `feedback.upstream`, a
+ * legacy-shaped `feedback.upstream` (now refused, see above), or (GitHub
+ * path) a target/auth failure from `GitHubIntakePort`.
  *
  * Source: SPEC-072 §4 Public Interface, §5 check sequence, §11 Downstream
  * Handoff; task-skill-implement-t5-wiring-cli-report-issue-mcp-lore-report;
- * spec-out-of-box-reporting-channel-report-issue-self-provisions §Design,
- * §Acceptance Criteria AC-OOB-1..5.
+ * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4.
  */
 
 import { defineCommand } from "citty";
 import {
+  buildUnconfiguredUpstreamRemedy,
   err,
-  formatIssueCorpusLine,
   isIssueSeverity,
   ISSUE_CATEGORY_MAX_LENGTH,
   ISSUE_SEVERITIES,
@@ -118,19 +90,14 @@ import {
 } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, formatTable, resolveActor } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 import {
-  buildIssueReportDeps,
   fileGithubIssue,
   isGithubUpstreamCfg,
-  provisionFeedbackUpstream,
   resolveConsumerCorpusRoot,
-  resolveDeclaredCorpusPath,
   resolveFeedbackUpstreamCfg,
-  resolveUpstreamFromInstalledBinary,
   type UpstreamCfg,
 } from "../report-issue-wiring.js";
-import { buildUnconfiguredUpstreamRemedy, IssueReportService } from "../../../service/issue-report-service.js";
 
 /**
  * The report-filing flags — mutually exclusive with `--list` (checked as a group).
@@ -154,44 +121,41 @@ const REPORT_FLAGS = [
 const REQUIRED_REPORT_FLAGS = ["title", "description", "expected", "actual"] as const;
 
 /**
- * Resolves the `UpstreamCfg` THIS invocation should act against, deciding
- * WHEN to self-provision — the orchestration `report-issue-wiring.ts`
- * deliberately leaves to its caller (see that module's header).
+ * Resolves the `UpstreamCfg` this invocation should act against.
  *
- * - Already configured (`cfg !== undefined`) → returned UNCHANGED, and
- *   resolution/provisioning is NEVER attempted, `--auto-config` or not
- *   (AC-OOB-4a's byte-identical, resolution-free short-circuit).
- * - Unconfigured + `--auto-config` NOT passed → `err({@link
- *   buildUnconfiguredUpstreamRemedy})` (AC-OOB-1 / AC-GD-2 — the SAME shared
- *   builder `IssueReportService.report()` returns on the identical
- *   condition, imported from that module rather than rebuilt here).
- * - Unconfigured + `--auto-config` passed → resolves via
- *   `resolveUpstreamFromInstalledBinary` (pure reads + identity pin,
- *   AC-OOB-5) then, only on success, writes via `provisionFeedbackUpstream`
- *   (AC-OOB-2/3/4b) — either failure is returned VERBATIM, zero config bytes
- *   written on a resolution failure (AC-OOB-3).
+ * ⛔ RETIRED (P4): this used to ALSO self-provision an unconfigured
+ * `feedback.upstream` from the running binary's own installed corpus
+ * location when `--auto-config` was passed — deleted along with the
+ * SQLite-shaped output it produced (see this file's own header).
  *
  * @param cfg - this consumer's current `feedback.upstream` config, or
  *   `undefined` when unconfigured (`resolveFeedbackUpstreamCfg`'s result)
- * @param autoConfig - whether `--auto-config` was passed on this invocation
- * @param consumerCorpusRoot - this consumer corpus's own root (see
- *   `resolveConsumerCorpusRoot`) — where a provisioning write, if any, lands
+ * @returns `cfg` unchanged when configured;
+ *   `err({@link buildUnconfiguredUpstreamRemedy})` otherwise (AC-OOB-1 /
+ *   AC-GD-2 — the SAME shared builder every other surface returns on the
+ *   identical condition)
  */
-async function resolveEffectiveUpstreamCfg(
-  cfg: UpstreamCfg | undefined,
-  autoConfig: boolean,
-  consumerCorpusRoot: string,
-): Promise<Result<UpstreamCfg, LoreError>> {
+function resolveEffectiveUpstreamCfg(cfg: UpstreamCfg | undefined): Result<UpstreamCfg, LoreError> {
   if (cfg !== undefined) return ok(cfg);
-  if (!autoConfig) return err(buildUnconfiguredUpstreamRemedy());
+  return err(buildUnconfiguredUpstreamRemedy());
+}
 
-  const resolveResult = await resolveUpstreamFromInstalledBinary();
-  if (!resolveResult.ok) return resolveResult;
-
-  const provisionResult = provisionFeedbackUpstream(consumerCorpusRoot, resolveResult.value);
-  if (!provisionResult.ok) return provisionResult;
-
-  return ok(resolveResult.value);
+/**
+ * The refusal for a `feedback.upstream` configured with the retired legacy
+ * SQLite shape (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-
+ * github) — fires on BOTH `--list` and filing mode, before any further
+ * dispatch, since neither has a transport left to run against that shape.
+ */
+function buildLegacyUpstreamRetiredError(): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "feedback.upstream",
+    message:
+      "this corpus's feedback.upstream is configured with the retired SQLite shape " +
+      "({root_prd, ...}) — SQLite-based issue reporting was removed " +
+      "(spec-the-defect-channel-reaches-no-machine-but-its-own-github P4). Reconfigure " +
+      'feedback.upstream.repo (e.g. "owner/repo") to file/list issue reports via GitHub.',
+  };
 }
 
 /**
@@ -307,13 +271,6 @@ export default defineCommand({
         "Comma-separated reporter-supplied tags (spec-the-defect-channel-reaches-no-machine-but-its-own-github " +
         "front-matter field 'tags') — GitHub-configured upstream only; omit for none.",
     },
-    "auto-config": {
-      type: "boolean",
-      description:
-        "Non-interactive approval to self-provision an unconfigured feedback.upstream from " +
-        "this install's own upstream corpus (required on a non-TTY; a TTY may still confirm " +
-        "interactively). Never attempted when feedback.upstream is already configured.",
-    },
     list: {
       type: "boolean",
       description: "List previously filed reports with live upstream status, instead of filing a new one",
@@ -371,12 +328,9 @@ export default defineCommand({
     const { app, config } = loadLoreApp();
     try {
       const corpusRoot = resolveConsumerCorpusRoot();
-      const deps = buildIssueReportDeps(corpusRoot, config);
-      const service = new IssueReportService(deps);
       const cfg = resolveFeedbackUpstreamCfg(config);
-      const autoConfig = args["auto-config"] === true;
 
-      const effectiveCfgResult = await resolveEffectiveUpstreamCfg(cfg, autoConfig, corpusRoot);
+      const effectiveCfgResult = resolveEffectiveUpstreamCfg(cfg);
       if (!effectiveCfgResult.ok) {
         process.stderr.write(formatError(effectiveCfgResult.error) + "\n");
         process.exitCode = exitCode(effectiveCfgResult.error);
@@ -384,204 +338,98 @@ export default defineCommand({
       }
       const effectiveCfg = effectiveCfgResult.value;
 
-      // ─── GitHub-configured upstream: a SEPARATE live path (GitHubIntakePort +
-      // frontMatterCodec + ReceiptLogV2), never IssueReportService — see
-      // report-issue-wiring.ts::fileGithubIssue's own header for why. `--list`
-      // against this shape is not yet wired (a later phase's read surface) —
-      // refused loudly rather than crashing on the legacy-only `corpus_path`
-      // field below.
-      if (isGithubUpstreamCfg(effectiveCfg)) {
-        if (isList) {
-          process.stderr.write(
-            formatError({
-              code: "VALIDATION_ERROR",
-              field: "feedback.upstream",
-              message:
-                "--list against a GitHub-configured feedback.upstream is not yet supported by this command " +
-                "(the GitHub-backed read surface is a later phase of spec-the-defect-channel-reaches-no-machine-" +
-                "but-its-own-github). Configure the legacy feedback.upstream.{corpus_path,root_prd} shape to use " +
-                "--list today.",
-            }) + "\n",
-          );
-          process.exitCode = 4;
-          return;
-        }
-
-        if (triageLabels.severity === undefined || triageLabels.category === undefined) {
-          const missingFlags = [
-            triageLabels.severity === undefined ? "--severity" : undefined,
-            triageLabels.category === undefined ? "--category" : undefined,
-          ].filter((flag): flag is string => flag !== undefined);
-          process.stderr.write(
-            `Usage error: filing into a GitHub-configured feedback.upstream requires ` +
-              `${missingFlags.join(" and ")} (the front-matter schema's severity/category fields are not optional).\n`,
-          );
-          process.exit(2);
-        }
-
-        const tagsArg = args.tags;
-        const tags =
-          typeof tagsArg === "string" && tagsArg.trim().length > 0
-            ? tagsArg
-                .split(",")
-                .map((tag) => tag.trim())
-                .filter((tag) => tag.length > 0)
-            : [];
-
-        const { actor, source: actorSource } = resolveActorWithSource(undefined, process.env);
-        const reproCommand = args["repro-command"];
-
-        const githubResult = await fileGithubIssue(
-          {
-            title: args.title as string,
-            description: args.description as string,
-            expected: args.expected as string,
-            actual: args.actual as string,
-            ...(typeof reproCommand === "string" ? { repro_command: reproCommand } : {}),
-            severity: triageLabels.severity,
-            category: triageLabels.category,
-            tags,
-          },
-          effectiveCfg,
-          {
-            consumerCorpusRoot: corpusRoot,
-            corpusService: app.corpusService,
-            actor,
-            actorSource,
-          },
-        );
-
-        if (!githubResult.ok) {
-          process.stderr.write(formatError(githubResult.error) + "\n");
-          process.exitCode = exitCode(githubResult.error);
-          return;
-        }
-
-        if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: githubResult.value }, null, 2));
-          return;
-        }
-
-        console.log(
-          `${githubResult.value.retried ? "Already filed" : "Filed"} as issue #${githubResult.value.number} (${githubResult.value.url})`,
-        );
-        if (githubResult.value.dedup_degraded) {
-          console.log("Warning: duplicate-report check degraded (advisory search failed) — filed anyway.");
-        }
-        if (githubResult.value.possible_duplicates.length > 0) {
-          console.log(`Possible duplicates: ${githubResult.value.possible_duplicates.join(", ")}`);
-        }
+      // ─── Legacy SQLite-shaped upstream: retired, refused loudly (P4) — see
+      // this file's own header. Checked BEFORE any list/filing dispatch since
+      // neither has a transport left to run against this shape.
+      if (!isGithubUpstreamCfg(effectiveCfg)) {
+        const retiredError = buildLegacyUpstreamRetiredError();
+        process.stderr.write(formatError(retiredError) + "\n");
+        process.exitCode = exitCode(retiredError);
         return;
       }
 
-      // §M4 — the corpus these rows describe: the CONFIGURED UPSTREAM (that is
-      // what `list()` joins the local receipt ledger against), absolutized through
-      // the SAME seam `lore issues` uses so the two surfaces render one path one
-      // way. Resolved BEFORE the read so the header is present even on the
-      // degraded all-rows-`unreachable` path.
-      const listedCorpusPath = resolveDeclaredCorpusPath(effectiveCfg.corpus_path);
-
+      // ─── GitHub-configured upstream: the LIVE path (GitHubIntakePort +
+      // frontMatterCodec + ReceiptLogV2) — see report-issue-wiring.ts::
+      // fileGithubIssue's own header. `--list` against this shape is not yet
+      // wired (a later phase's read surface) — refused loudly.
       if (isList) {
-        const result = await service.list(effectiveCfg);
-        if (!result.ok) {
-          process.stderr.write(formatError(result.error) + "\n");
-          process.exitCode = exitCode(result.error);
-          return;
-        }
-
-        if (args.json) {
-          console.log(
-            JSON.stringify({ ok: true, data: { corpus_path: listedCorpusPath, rows: result.value } }, null, 2),
-          );
-          return;
-        }
-
-        // ⛔ FIRST, before the empty-listing line: the empty case is exactly where
-        // a missing corpus header goes unnoticed, and it is the shape the measured
-        // defect produced on the sibling surface.
-        console.log(formatIssueCorpusLine(listedCorpusPath));
-
-        if (result.value.length === 0) {
-          console.log("No reports filed yet from this corpus.");
-          return;
-        }
-
-        // reason: "Resolution" (D6's computed resolution) is now the PRIMARY
-        // signal; "Doc Status" (the upstream doc's raw lifecycle status) is
-        // demoted to a debugging detail, per this file's own header. "Reason" is
-        // fed by the STATE-NEUTRAL `resolution_reason` and "Pointer" by
-        // `resolution_pointer`, so a `superseded`/`duplicate` retirement shows both
-        // WHY and WHAT-INSTEAD instead of reading like an unexplained rejection
-        // (§M3's capability was unreachable from this render until both landed).
-        // "Severity"/"Category" are §M6's ordering-only labels, read back off the
-        // upstream doc's own `extra.issue_report`.
-        const headers = [
-          "Doc ID",
-          "Title",
-          "Filed At",
-          "Resolution",
-          "Doc Status",
-          "Severity",
-          "Category",
-          "Reason",
-          "Pointer",
-        ];
-        const rows = result.value.map((row) => [
-          row.upstream_doc_id,
-          row.title,
-          row.at,
-          row.status,
-          row.doc_status ?? "",
-          row.severity ?? "",
-          row.category ?? "",
-          row.resolution_reason ?? "",
-          row.resolution_pointer ?? "",
-        ]);
-        console.log(formatTable(headers, rows));
-
-        const allWarnings = result.value.flatMap((row) => row.warnings ?? []);
-        if (allWarnings.length > 0) {
-          console.log("\nWarnings:");
-          for (const warning of new Set(allWarnings)) {
-            console.log(`  - ${warning}`);
-          }
-        }
+        process.stderr.write(
+          formatError({
+            code: "VALIDATION_ERROR",
+            field: "feedback.upstream",
+            message:
+              "--list against a GitHub-configured feedback.upstream is not yet supported by this command " +
+              "(the GitHub-backed read surface is a later phase of spec-the-defect-channel-reaches-no-machine-" +
+              "but-its-own-github).",
+          }) + "\n",
+        );
+        process.exitCode = 4;
         return;
       }
 
-      const by = resolveActor();
+      if (triageLabels.severity === undefined || triageLabels.category === undefined) {
+        const missingFlags = [
+          triageLabels.severity === undefined ? "--severity" : undefined,
+          triageLabels.category === undefined ? "--category" : undefined,
+        ].filter((flag): flag is string => flag !== undefined);
+        process.stderr.write(
+          `Usage error: filing into a GitHub-configured feedback.upstream requires ` +
+            `${missingFlags.join(" and ")} (the front-matter schema's severity/category fields are not optional).\n`,
+        );
+        process.exit(2);
+      }
+
+      const tagsArg = args.tags;
+      const tags =
+        typeof tagsArg === "string" && tagsArg.trim().length > 0
+          ? tagsArg
+              .split(",")
+              .map((tag) => tag.trim())
+              .filter((tag) => tag.length > 0)
+          : [];
+
+      const { actor, source: actorSource } = resolveActorWithSource(undefined, process.env);
       const reproCommand = args["repro-command"];
-      const result = await service.report(
+
+      const githubResult = await fileGithubIssue(
         {
           title: args.title as string,
           description: args.description as string,
           expected: args.expected as string,
           actual: args.actual as string,
-          by,
           ...(typeof reproCommand === "string" ? { repro_command: reproCommand } : {}),
-          // §M6: already-validated labels, keys omitted when undeclared.
-          ...triageLabels,
+          severity: triageLabels.severity,
+          category: triageLabels.category,
+          tags,
         },
         effectiveCfg,
+        {
+          consumerCorpusRoot: corpusRoot,
+          corpusService: app.corpusService,
+          actor,
+          actorSource,
+        },
       );
 
-      if (!result.ok) {
-        process.stderr.write(formatError(result.error) + "\n");
-        process.exitCode = exitCode(result.error);
+      if (!githubResult.ok) {
+        process.stderr.write(formatError(githubResult.error) + "\n");
+        process.exitCode = exitCode(githubResult.error);
         return;
       }
 
       if (args.json) {
-        console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+        console.log(JSON.stringify({ ok: true, data: githubResult.value }, null, 2));
         return;
       }
 
-      console.log(`Filed upstream as ${result.value.upstream_doc_id}`);
-      if (result.value.dedup_degraded) {
+      console.log(
+        `${githubResult.value.retried ? "Already filed" : "Filed"} as issue #${githubResult.value.number} (${githubResult.value.url})`,
+      );
+      if (githubResult.value.dedup_degraded) {
         console.log("Warning: duplicate-report check degraded (advisory search failed) — filed anyway.");
       }
-      if (result.value.possible_duplicates.length > 0) {
-        console.log(`Possible duplicates: ${result.value.possible_duplicates.join(", ")}`);
+      if (githubResult.value.possible_duplicates.length > 0) {
+        console.log(`Possible duplicates: ${githubResult.value.possible_duplicates.join(", ")}`);
       }
     } finally {
       app.close();

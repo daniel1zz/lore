@@ -81,11 +81,9 @@ vi.mock("../../../src/adapters/cli/loader.js", () => ({
 }));
 
 // See the sibling `resolution-label-non-authority.test.ts`'s header for why
-// `bun:sqlite` itself (not just `loader.js`) must be mocked: `issues.ts`
-// also statically imports `flows/upstream-context-flow.js` and
-// `report-issue-wiring.js`, both of which reach `bun:sqlite` independently
-// at module-load time. Every fixture here configures `config: {}`, so the
-// real upstream/`Database` code path never actually runs.
+// this mock is kept (historically load-bearing pre-P4 of spec-the-defect-
+// channel-reaches-no-machine-but-its-own-github, harmless now). Every
+// fixture here configures `config: {}`, so the local read path always runs.
 vi.mock("bun:sqlite", () => ({
   Database: class {},
 }));

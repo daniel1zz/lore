@@ -1,29 +1,63 @@
 /**
  * @spec_ref spec-governance-defaults-must-ship-and-every-recorded-gap-must
- *   AC-GD-2 (D3 — "one condition, one remedy, and it works in the upstream
- *   OWN repo").
+ *   AC-GD-2 (D3 — "one condition, one remedy").
  *
- * Proves `lore report-issue`'s two formerly-independent "feedback.upstream is
- * unconfigured" remedies — `report-issue.ts`'s CLI-layer builder (deleted:
- * `buildAutoConfigRequiredError`) and `issue-report-service.ts`'s
- * service-layer builder (renamed: `buildUnconfiguredUpstreamError` →
- * `buildUnconfiguredUpstreamRemedy`) — are now ONE shared builder, so the
- * prescribed remedy cannot drift between the CLI and the MCP/service surface
- * again.
+ * Proves `lore report-issue`'s "feedback.upstream is unconfigured" remedy
+ * has exactly ONE definition site, imported (never rebuilt) by every
+ * consuming surface.
+ *
+ * ⛔ REWRITTEN IN-FLIGHT (P4, spec-the-defect-channel-reaches-no-machine-but-
+ * its-own-github) — recorded per the standing in-flight-oracle-edit
+ * discipline, three things: original command, the failure it produced, why
+ * this is a correction and not a weakening.
+ *   - Original command: `bun test tests/unit/adapters/report-issue-single-remedy.bun.test.ts`
+ *     against this file's PRE-P4 content, run after P4's source edits landed
+ *     (`buildUnconfiguredUpstreamRemedy` relocated from the now-deleted
+ *     `service/issue-report-service.ts` to `@lore/core`'s `issue-report.ts`;
+ *     `IssueReportService` deleted outright; `--auto-config` removed).
+ *   - Exact failure: a TypeScript module-resolution error on this file's own
+ *     `import { buildUnconfiguredUpstreamRemedy, IssueReportService, type
+ *     IssueReportDeps } from "../../../src/service/issue-report-service.js"`
+ *     (the module no longer exists), plus — even hand-patched past that —
+ *     AC-GD-2(a)(i)'s own scan asserting the remedy fragment appears
+ *     EXACTLY ONCE under `packages/**` would find TWO locations (the new
+ *     `@lore/core` site plus this test file's OWN literal copy of the old
+ *     message text used for the CLI-vs-service byte-identity comparison,
+ *     since the OLD message text changed), and AC-GD-2(d)'s happy-half
+ *     (`lore report-issue --list` exits 0 against this repo's own corpus)
+ *     would fail because this repo's own `.lore/config.yaml` carries the
+ *     LEGACY shape, which P4 refuses loudly by design.
+ *   - Why correction, not weakening: every property this file pins —
+ *     ONE definition site, BOTH layers importing that one symbol, and the
+ *     CLI's stderr matching the shared builder's own text byte-for-byte —
+ *     still holds after P4 and is still asserted below, unweakened. What
+ *     changed is WHERE the builder lives (relocated, not duplicated) and
+ *     WHAT it says (updated because `--auto-config` and the legacy shape it
+ *     provisioned no longer exist — see `buildUnconfiguredUpstreamRemedy`'s
+ *     own JSDoc for that rationale). The ONE case retired outright
+ *     (AC-GD-2(d)'s happy half) asserted a capability — `lore report-issue`
+ *     working end-to-end against a LEGACY-configured real corpus — that P4
+ *     deliberately removes; no rewritten assertion could make that case
+ *     pass without re-implementing the very transport this phase deletes.
+ *   - The former NEGATIVE case (byte-identical CLI-vs-`IssueReportService`
+ *     comparison) is likewise REWRITTEN, not retired: `IssueReportService`
+ *     is gone, so there is no second orchestrator layer left to compare the
+ *     CLI against — the surviving property is narrower (CLI stderr equals
+ *     the shared builder's own output) but is the same fact this file's
+ *     ORIGINAL comparison was actually testing transitively, since the old
+ *     service-layer call was itself a thin pass-through to the same builder.
  *
  * Mechanism: spawns `bun run src/index.ts report-issue ...` (Bun.spawnSync)
- * against a THROWAWAY `mkdtemp` + `lore init` corpus for the CLI-path half of
- * AC-GD-2(a)(iii) — NOT the compiled `dist/lore` binary, so this file needs
- * no `bun run build` first (mirrors `evidence-pipe-wiring.bun.test.ts`'s own
- * `INDEX_TS` pattern). AC-GD-2(d) is the ONE clause that reads THIS repo's
- * own corpus, and it does so read-only (`--list` performs no write).
+ * against a THROWAWAY `mkdtemp` + `lore init` corpus — NOT the compiled
+ * `dist/lore` binary, so this file needs no `bun run build` first (mirrors
+ * `evidence-pipe-wiring.bun.test.ts`'s own `INDEX_TS` pattern).
  *
  * Six-dimension coverage:
- *   HAPPY:      AC-GD-2(d) happy half — `--list` exits 0 against this repo's
- *               own corpus once `feedback.upstream` is configured
- *   NEGATIVE:   AC-GD-2(a)(iii) — the CLI subprocess and a direct
- *               `IssueReportService.report()` call, on the identical
- *               condition, emit BYTE-IDENTICAL remedy text
+ *   HAPPY:      n/a post-P4 — see "why correction" above for AC-GD-2(d)'s
+ *               retired happy half.
+ *   NEGATIVE:   AC-GD-2(a)(iii) — the CLI subprocess's stderr, on the
+ *               unconfigured condition, equals the shared builder's own
+ *               output byte-for-byte
  *   BOUNDARY:   AC-GD-2(a)(i) — the pinned (>=40 contiguous chars,
  *               containing `feedback.upstream`) fragment occurs EXACTLY once
  *               across `packages/**`, excluding test files
@@ -31,12 +65,9 @@
  *               throwaway corpus with no `feedback.upstream` configured at
  *               all (the pre-D3 baseline, still reachable)
  *   STATE:      AC-GD-2(a)(ii) — `report-issue.ts`'s own source statically
- *               imports the ONE shared symbol by name and no longer defines
- *               a competing local builder
- *   REGRESSION: AC-GD-2(b) disclosure substrings, plus the still-live
- *               AC-072-2 (dotted-path config keys) and AC-OOB-1
- *               (`--auto-config` named, zero hand-edit-YAML template lines)
- *               floors this shared text must keep satisfying
+ *               imports the ONE shared symbol by name (now from `@lore/core`)
+ *               and defines no competing local builder
+ *   REGRESSION: AC-GD-2(b) disclosure substrings still hold post-rewrite
  *
  * Source: spec-governance-defaults-must-ship-and-every-recorded-gap-must D3,
  *   AC-GD-2.
@@ -46,24 +77,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LoreError } from "@lore/core";
-import {
-  buildUnconfiguredUpstreamRemedy,
-  IssueReportService,
-  type IssueReportDeps,
-} from "../../../src/service/issue-report-service.js";
-
-/**
- * Narrows a generic `LoreError` to its `message` field via cast — this
- * builder's own declared return type is the broad `LoreError` union (only 4
- * of its variants carry `message`), so TS cannot see the literal
- * `code: "VALIDATION_ERROR"` at this call site. Mirrors the SAME idiom
- * `tests/unit/service/issue-report-service.test.ts` already uses for this
- * exact function's predecessor.
- */
-function loreErrorMessage(error: LoreError): string {
-  return (error as { message: string }).message;
-}
+import { buildUnconfiguredUpstreamRemedy } from "@lore/core";
 
 // tests/unit/adapters/ -> tests/unit/ -> tests/ -> packages/lore/ (3 levels up).
 const PROJECT_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -71,7 +85,6 @@ const REPO_ROOT = join(PROJECT_ROOT, "..", "..");
 const PACKAGES_DIR = join(REPO_ROOT, "packages");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 const CLI_COMMAND_SOURCE_PATH = join(PROJECT_ROOT, "src/adapters/cli/commands/report-issue.ts");
-const SERVICE_SOURCE_PATH = join(PROJECT_ROOT, "src/service/issue-report-service.ts");
 
 interface RunResult {
   readonly stdout: string;
@@ -84,14 +97,8 @@ interface RunResult {
  * (not compiled-binary) so this file needs no `bun run build` first. Exit
  * code read directly from `Bun.spawnSync`'s own `exitCode` field.
  *
- * @param homeOverride - `true` (default) redirects `$HOME` to `cwd` so a
- *   THROWAWAY corpus never resolves the REAL machine's XDG global config —
- *   the shape every OTHER call site here needs. The one call against
- *   `REPO_ROOT` (AC-GD-2(d)) passes `false`: overriding `$HOME` to the repo
- *   root itself would make `bun`/`lore` materialise a stray
- *   `<REPO_ROOT>/Library/Caches/` (measured — an earlier draft of this file
- *   did exactly that), and this call deliberately targets the REAL
- *   environment this repo's real consumers run in.
+ * @param homeOverride - redirects `$HOME` to `cwd` so a THROWAWAY corpus
+ *   never resolves the REAL machine's XDG global config.
  */
 function runLore(args: string[], cwd: string, homeOverride = true): RunResult {
   const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
@@ -180,7 +187,8 @@ afterAll(() => {
 
 describe("AC-GD-2(a)(i): ONE definition site for the shared remedy's literal text", () => {
   it("AC-GD-2(a)(i): the pinned (>=40 char, containing feedback.upstream) fragment occurs EXACTLY once across packages/**, excluding test files", () => {
-    const fragment = loreErrorMessage(buildUnconfiguredUpstreamRemedy()).slice(0, 60);
+    const message = buildUnconfiguredUpstreamRemedy();
+    const fragment = ("message" in message ? message.message : "").slice(0, 60);
     expect(fragment.length).toBeGreaterThanOrEqual(40);
     expect(fragment).toContain("feedback.upstream");
 
@@ -190,89 +198,56 @@ describe("AC-GD-2(a)(i): ONE definition site for the shared remedy's literal tex
     const { count, locations } = countLiteralOccurrences(files, fragment);
     expect(count).toBe(1);
     expect(locations).toHaveLength(1);
-    expect(locations[0]).toContain("service/issue-report-service.ts");
+    expect(locations[0]).toContain("core/src/issue-report.ts");
   });
 });
 
-describe("AC-GD-2(a)(ii): both consumers import the ONE shared symbol by name", () => {
-  it("AC-GD-2(a)(ii): report-issue.ts imports buildUnconfiguredUpstreamRemedy from issue-report-service.js and defines no competing local builder", () => {
+describe("AC-GD-2(a)(ii): the CLI imports the ONE shared symbol by name", () => {
+  it("AC-GD-2(a)(ii): report-issue.ts imports buildUnconfiguredUpstreamRemedy from @lore/core and defines no competing local builder", () => {
     const cliSource = readFileSync(CLI_COMMAND_SOURCE_PATH, "utf8");
-    expect(cliSource).toMatch(
-      /import\s*\{[^}]*\bbuildUnconfiguredUpstreamRemedy\b[^}]*\}\s*from\s*["']\.\.\/\.\.\/\.\.\/service\/issue-report-service\.js["']/,
-    );
-    // The deleted, formerly-divergent CLI-local builder's DECLARATION must be
-    // gone (a historical mention in a comment, e.g. "now-deleted
-    // buildAutoConfigRequiredError", is fine and expected — only a live
-    // re-declaration would reintroduce the drift risk).
+    expect(cliSource).toMatch(/import\s*\{[^}]*\bbuildUnconfiguredUpstreamRemedy\b[^}]*\}\s*from\s*["']@lore\/core["']/);
+    // The deleted, formerly-divergent local builders' DECLARATIONS must be
+    // gone (a historical mention in a comment is fine and expected — only a
+    // live re-declaration would reintroduce the drift risk).
     expect(cliSource).not.toContain("function buildAutoConfigRequiredError");
     expect(cliSource).not.toContain("function buildUnconfiguredUpstreamRemedy");
-
-    const serviceSource = readFileSync(SERVICE_SOURCE_PATH, "utf8");
-    expect(serviceSource).toContain("export function buildUnconfiguredUpstreamRemedy");
-    // And the OLD service-layer name is gone too, not left as a second export.
-    expect(serviceSource).not.toContain("function buildUnconfiguredUpstreamError");
   });
 });
 
-describe("AC-GD-2(a)(iii) + (d) error half: driving both paths against an unconfigured corpus", () => {
-  it("AC-GD-2(a)(iii): the CLI subprocess and a direct IssueReportService.report() call emit BYTE-IDENTICAL remedy text on the identical unconfigured condition", async () => {
-    // ── CLI path: throwaway corpus, no feedback.upstream, no --auto-config.
+describe("AC-GD-2(a)(iii) error half: the CLI's unconfigured refusal matches the shared builder byte-for-byte", () => {
+  it("AC-GD-2(a)(iii): the CLI subprocess's stderr, on an unconfigured feedback.upstream, equals buildUnconfiguredUpstreamRemedy()'s own text", () => {
+    // Throwaway corpus, no feedback.upstream configured at all.
     const cliResult = runLore(
       ["report-issue", "--title", "t", "--description", "d", "--expected", "e", "--actual", "a"],
       dir,
     );
-    expect(cliResult.exitCode).toBe(4); // AC-GD-2(d) error half — still the pre-D3 exit code
+    expect(cliResult.exitCode).toBe(4); // AC-GD-2(d) error half — still the pre-D3 baseline
 
     const expectedPrefix = "Error: Validation failed on field 'feedback.upstream': ";
     expect(cliResult.stderr.startsWith(expectedPrefix)).toBe(true);
     const cliMessage = cliResult.stderr.slice(expectedPrefix.length).replace(/\n$/, "");
     expect(cliMessage.length).toBeGreaterThan(0);
 
-    // ── Service path: cfg === undefined short-circuits at report()'s step 1,
-    // strictly before any `deps` member is touched — an empty deps object is
-    // therefore a legitimate double for this one call.
-    const service = new IssueReportService({} as IssueReportDeps);
-    const serviceResult = await service.report(
-      { title: "t", description: "d", expected: "e", actual: "a", by: "test" },
-      undefined,
-    );
-    expect(serviceResult.ok).toBe(false);
-    if (serviceResult.ok) throw new Error("unreachable: cfg=undefined must fail");
-    const serviceMessage = loreErrorMessage(serviceResult.error);
-
-    expect(cliMessage).toBe(serviceMessage);
-    expect(cliMessage).toBe(loreErrorMessage(buildUnconfiguredUpstreamRemedy()));
+    const remedy = buildUnconfiguredUpstreamRemedy();
+    const builderMessage = "message" in remedy ? remedy.message : "";
+    expect(cliMessage).toBe(builderMessage);
   });
 });
 
 describe("AC-GD-2(b): disclosure as three literal substrings", () => {
   it("AC-GD-2(b): the shared remedy text contains .lore/config.yaml, git-tracked, and shared", () => {
-    const message = loreErrorMessage(buildUnconfiguredUpstreamRemedy());
+    const remedy = buildUnconfiguredUpstreamRemedy();
+    const message = "message" in remedy ? remedy.message : "";
     expect(message).toContain(".lore/config.yaml");
     expect(message).toContain("git-tracked");
     expect(message).toContain("shared");
   });
 });
 
-describe("REGRESSION: still-live AC-072-2 and AC-OOB-1 floors on the now-shared text", () => {
-  it("REGRESSION: names both feedback.upstream.corpus_path and feedback.upstream.root_prd (AC-072-2), names --auto-config, and carries zero hand-edit-YAML template value lines (AC-OOB-1)", () => {
-    const message = loreErrorMessage(buildUnconfiguredUpstreamRemedy());
-    expect(message).toContain("feedback.upstream.corpus_path");
-    expect(message).toContain("feedback.upstream.root_prd");
-    expect(message).toContain("--auto-config");
-    expect(message).not.toContain("corpus_path: /path/to");
-    expect(message).not.toContain("root_prd: prd-lore");
-  });
-});
-
-describe("AC-GD-2(d) happy half: the remedy works in the upstream's OWN repo", () => {
-  it("AC-GD-2(d): lore report-issue --list exits 0 against THIS repo's own corpus (read-only) — was measured exit 4 before D3 landed the feedback: stanza", () => {
-    // Deliberately run from inside THIS worktree, not the throwaway `dir`:
-    // `findLoreDbPath()`'s walk-up finds no local `.lore/lore.db` here and
-    // falls back to the corpus this repo's own consumers all share (root
-    // CLAUDE.md: "the global `lore` symlinks into the main checkout's
-    // dist/" — the SAME fallback mechanism resolves config.yaml here).
-    const result = runLore(["report-issue", "--list"], REPO_ROOT, false);
-    expect(result.exitCode).toBe(0);
+describe("REGRESSION: the remedy still names the GitHub configuration path (P4 rewrite)", () => {
+  it("REGRESSION: names feedback.upstream.repo — the only shape that still does something post-P4", () => {
+    const remedy = buildUnconfiguredUpstreamRemedy();
+    const message = "message" in remedy ? remedy.message : "";
+    expect(message).toContain("feedback.upstream.repo");
   });
 });

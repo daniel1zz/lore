@@ -25,10 +25,11 @@
  *     `draft`, there is no distinct "rejected" `DocStatus`) — so a rejected
  *     report's `status` is indistinguishable from a never-yet-reviewed one.
  *     The audit trail is the ONLY record of "this draft was actually
- *     rejected". This mirrors the EXACT decision shape
- *     `flows/upstream-context-flow.ts::UpstreamPort.getDocStatus` already
- *     uses for the SAME invariant (latest `"reject"` audit entry wins unless
- *     superseded by a later `"approve"`), generalized here from a single-doc
+ *     rejected". This mirrors the EXACT decision shape SPEC-072's own
+ *     (now-deleted, P4 of spec-the-defect-channel-reaches-no-machine-but-its-
+ *     own-github) SQLite `UpstreamPort.getDocStatus` used for the SAME
+ *     invariant (latest `"reject"` audit entry wins unless superseded by a
+ *     later `"approve"`), generalized here from a single-doc
  *     `queryAudit({doc_id, action: "reject", limit: 1})` lookup to two
  *     BATCHED whole-corpus queries (`action: "reject"` / `action: "approve"`,
  *     via `app.auditService.query`) — one round trip per action covering
@@ -213,11 +214,10 @@ function hasOpenIssueReportShape(doc: DocRecord): boolean {
  * result. `queryAudit`'s documented contract orders rows `timestamp DESC`
  * (newest first — see `StoreInterface.queryAudit`), so the FIRST row seen per
  * `doc_id` while iterating is that doc's most recent entry for the action;
- * this is the same "index 0 wins" reasoning
- * `flows/upstream-context-flow.ts::getDocStatus` uses for its own
- * `limit: 1`-scoped single-doc read, generalized here to one UNSCOPED
- * (`doc_id` omitted) query covering every doc's most recent entry for that
- * action in a single round trip.
+ * this is the same "index 0 wins" reasoning the now-deleted SQLite
+ * `UpstreamPort.getDocStatus` used for its own `limit: 1`-scoped single-doc
+ * read, generalized here to one UNSCOPED (`doc_id` omitted) query covering
+ * every doc's most recent entry for that action in a single round trip.
  *
  * @param entries - a `queryAudit({action: "..."})` result (single action,
  *   every doc, newest-first)
@@ -236,12 +236,11 @@ function latestAuditTimestampByDoc(entries: readonly AuditEntry[]): Map<string, 
 /**
  * Whether a doc's most recent `"reject"` audit entry is NEWER than its most
  * recent `"approve"` entry — i.e. the doc was rejected and has NOT since been
- * re-approved. Mirrors the decision shape
- * `flows/upstream-context-flow.ts::UpstreamPort.getDocStatus` uses (a later
- * approve supersedes an earlier reject; a doc never rejected at all is never
- * excluded), generalized from that function's single-doc lookup to the
- * batched maps {@link latestAuditTimestampByDoc} builds across every
- * candidate at once.
+ * re-approved. Mirrors the decision shape the now-deleted SQLite
+ * `UpstreamPort.getDocStatus` used (a later approve supersedes an earlier
+ * reject; a doc never rejected at all is never excluded), generalized from
+ * that function's single-doc lookup to the batched maps
+ * {@link latestAuditTimestampByDoc} builds across every candidate at once.
  *
  * @param docId - candidate doc id
  * @param rejectedAt - doc_id -> latest `"reject"` audit timestamp (see {@link latestAuditTimestampByDoc})

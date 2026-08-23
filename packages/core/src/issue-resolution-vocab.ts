@@ -21,8 +21,7 @@
  *     is reached, lives in `packages/lore/src/service/issue-resolution.ts` —
  *     which imports this module and re-exports these names, so its consumers
  *     (`commands/issues.ts`, `commands/issue.ts`, `commands/status.ts`,
- *     `issue-report-service.ts`, `issue-reports-routes.ts`,
- *     `upstream-context-flow.ts`, `corpus-service.ts`) keep one import site.
+ *     `issue-reports-routes.ts`, `corpus-service.ts`) keep one import site.
  *   - ⛔ ZERO imports, by design. This module sits in the browser-safe
  *     `@lore/core` barrel (`index.ts`), whose transitive closure must never
  *     top-level-import a Node builtin: Vite's dev-mode `fs` stub throws on
