@@ -3,11 +3,11 @@ id: TASK-749
 type: task
 role: plan
 title: "Wire the discovery-refusal guard into the evidence capture path, with a control that keeps genuine reds recordable"
-status: draft
+status: archived
 priority: high
 phase: "mechanism"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-08-23
 tags: []
 parent: PLAN-079
 plan: PLAN-079

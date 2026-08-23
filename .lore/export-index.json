@@ -6320,6 +6320,70 @@
     "01M0HGKJMF4J3W7QMJCE5622ZQ": {
       "human_id": "TASK-757",
       "file_path": "docs/requirements/task/TASK-757-run-the-unmutated-green-control-before-the-mutatio.md"
+    },
+    "01M0P6XACDZA95MWYMAYY7D5J3": {
+      "human_id": "PLAN-137",
+      "file_path": "docs/requirements/plan/PLAN-137-land-corpus-truthfulness-part-a-the-two-axis-type.md"
+    },
+    "01M0P7530HA2XZJQZ8VYX3904P": {
+      "human_id": "TASK-758",
+      "file_path": "docs/requirements/task/TASK-758-skill-test-plan-gate-verification-on-merged-main-d.md"
+    },
+    "01M0P74DY83QNMG01T8DZFHGZQ": {
+      "human_id": "TASK-759",
+      "file_path": "docs/requirements/task/TASK-759-skill-implement-probeoccupancy-and-the-skipped-and.md"
+    },
+    "01M0P74DM22R1VWQPFN9RVX65F": {
+      "human_id": "TASK-760",
+      "file_path": "docs/requirements/task/TASK-760-skill-test-occupancy-skipped-and-continue-with-its.md"
+    },
+    "01M0P74D8MR38SAG8Z5E4BFA79": {
+      "human_id": "TASK-761",
+      "file_path": "docs/requirements/task/TASK-761-skill-implement-verifyrunnerservice-stamps-pre-and.md"
+    },
+    "01M0P74CXNFHZEYZ8F52VAF54Q": {
+      "human_id": "TASK-762",
+      "file_path": "docs/requirements/task/TASK-762-skill-test-pre-post-stamp-demotion-with-a-real-com.md"
+    },
+    "01M0P74CM4FKA0TDCS9K1PGDE7": {
+      "human_id": "TASK-763",
+      "file_path": "docs/requirements/task/TASK-763-skill-implement-blastradiuschanged-returns.md"
+    },
+    "01M0P74C9S2HDNY3GEN1SRSZFV": {
+      "human_id": "TASK-764",
+      "file_path": "docs/requirements/task/TASK-764-skill-test-blast-radius-staleness-red-test-scenari.md"
+    },
+    "01M0P74BZXBM6G7Z6J6PQBSVW6": {
+      "human_id": "TASK-765",
+      "file_path": "docs/requirements/task/TASK-765-skill-implement-stamp-axis-classified-by-the-immut.md"
+    },
+    "01M0P74BN2ANG63PT4K2YR8PRT": {
+      "human_id": "TASK-766",
+      "file_path": "docs/requirements/task/TASK-766-skill-test-stamp-axis-and-the-arming-cutoff-red-te.md"
+    },
+    "01M0P71SCJCN7DA4NK7GGW5708": {
+      "human_id": "TASK-767",
+      "file_path": "docs/requirements/task/TASK-767-skill-implement-projectaccoverageglyph-the-two-rul.md"
+    },
+    "01M0P71S12Y617BF0NGEVP0HVQ": {
+      "human_id": "TASK-768",
+      "file_path": "docs/requirements/task/TASK-768-skill-test-glyph-projection-and-the-two-rule-rende.md"
+    },
+    "01M0P71RP69QW6Y57P8K3ZTGZF": {
+      "human_id": "TASK-769",
+      "file_path": "docs/requirements/task/TASK-769-skill-implement-evidence-capture-writes-a-real-att.md"
+    },
+    "01M0P71RAPDZ0AW98RHDHSV9GN": {
+      "human_id": "TASK-770",
+      "file_path": "docs/requirements/task/TASK-770-skill-test-evidence-capture-attestation-red-test-s.md"
+    },
+    "01M0P702M4V3MVWKHKP46TWDEQ": {
+      "human_id": "TASK-771",
+      "file_path": "docs/requirements/task/TASK-771-skill-implement-two-axis-type-foundation-stampclas.md"
+    },
+    "01M0P7021G29A2J7C0GXDZGBFN": {
+      "human_id": "TASK-772",
+      "file_path": "docs/requirements/task/TASK-772-skill-test-two-axis-type-foundation-red-test-scena.md"
     }
   }
 }
