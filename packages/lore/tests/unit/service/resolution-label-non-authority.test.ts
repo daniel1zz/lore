@@ -122,19 +122,20 @@ vi.mock("../../../src/adapters/cli/loader.js", () => ({
   loadLoreApp: loadLoreAppMock,
 }));
 
-// `commands/issues.ts` ALSO statically imports `../../../flows/upstream-
-// context-flow.js` and `../report-issue-wiring.js`, both of which reach
-// `bun:sqlite` on their OWN import graphs (`store/sqlite-store.ts` and
-// `flows/upstream-probe.ts` both `import { Database } from "bun:sqlite"`
-// at module scope) — independently of `loader.js`, and unconditionally at
-// MODULE LOAD TIME regardless of which branch a test's fixture ever
-// exercises at runtime. Mocking `bun:sqlite` itself (rather than chasing
-// every current and future intermediate file that happens to import it)
-// is the one intervention that short-circuits the whole family in one
-// place; every fixture in this file configures `config: {}` (no
-// `feedback.upstream`), so `resolveIssueReadSource` always resolves
-// "local" and none of the real upstream/`Database` code ever actually
-// RUNS — only its module-scope `import` needs to resolve without error.
+// `commands/issues.ts` ALSO statically imports `../report-issue-wiring.js`.
+// ⛔ HISTORICAL (kept defensively): before P4 of spec-the-defect-channel-
+// reaches-no-machine-but-its-own-github, `commands/issues.ts` and
+// `report-issue-wiring.js` both reached `bun:sqlite` independently of
+// `loader.js`, at MODULE LOAD TIME, via the (now-deleted) SQLite-shaped
+// legacy upstream port — regardless of which branch a test's fixture ever
+// exercised at runtime. That import graph no longer exists post-P4, but
+// this mock is left in place rather than removed on the strength of a
+// static read: it is harmless when unneeded (nothing in this file asserts
+// on `bun:sqlite` behavior), and re-verifying "is it STILL unneeded" on
+// every future change to this file's import graph is a burden a stale
+// mock does not impose. Every fixture in this file configures `config: {}`
+// (no `feedback.upstream`), so `resolveIssueReadSource` always resolves
+// "local" regardless.
 vi.mock("bun:sqlite", () => ({
   Database: class {},
 }));

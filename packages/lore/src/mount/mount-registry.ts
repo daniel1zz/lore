@@ -33,7 +33,7 @@
  *     once" discipline, same division of labor as `probeUpstreamDb` owning
  *     only the probe itself, not call-once discipline).
  *
- * bun-only module: imports `probeUpstreamDb`, which imports `bun:sqlite`
+ * bun-only module: imports `probeSchemaVersion`, which imports `bun:sqlite`
  * transitively. Must NEVER be imported by `routes.ts` or any vitest-reachable
  * module — mirrors the CLI `loader.ts` bun-only discipline (root CLAUDE.md
  * "`bun:sqlite` is external to vitest"). `./types.ts` stays the vitest-safe
@@ -44,7 +44,9 @@
  * classified-mountable entry; `closeAll` closes every mounted `App`).
  *
  * Source: SPEC-078 D2, D6, D7, R-11; `packages/lore/src/mount/types.ts` (T3);
- * `packages/lore/src/flows/upstream-probe.ts` (readonly-probe precedent).
+ * `packages/lore/src/store/schema-probe.ts` (readonly-probe primitive this
+ * module reuses — relocated there in P4 of spec-the-defect-channel-reaches-
+ * no-machine-but-its-own-github, unrelated to this module's own purpose).
  */
 
 import { existsSync } from "node:fs";
@@ -52,7 +54,7 @@ import { join } from "node:path";
 
 import type { DashboardConfig } from "@lore/core";
 
-import { probeUpstreamDb } from "../flows/upstream-probe.js";
+import { probeSchemaVersion } from "../store/schema-probe.js";
 import { LATEST_SCHEMA_VERSION } from "../store/sqlite-store.js";
 import type { MountEntry, MountRegistry, MountRegistryDeps } from "./types.js";
 
@@ -111,16 +113,16 @@ async function classifyAndMount<TApp>(
     };
   }
 
-  const probeResult = probeUpstreamDb(dbPath);
+  const probeResult = probeSchemaVersion(dbPath);
   if (!probeResult.ok) {
     // reason: a readonly-probe failure (corrupt file, permissions, not a
     // SQLite file) is indistinguishable from "no usable corpus here" at this
     // layer — classified as "missing" rather than "error" because it never
     // reached createApp and carries no createApp-specific diagnosis.
-    // `probeUpstreamDb` only ever constructs a STORE_ERROR-shaped failure in
-    // practice, but its signature is the full `LoreError` union — the `"message"
-    // in error` narrow keeps this correct even if that ever changes, rather
-    // than asserting the narrower shape.
+    // `probeSchemaVersion` only ever constructs a STORE_ERROR-shaped failure
+    // in practice, but its signature is the full `LoreError` union — the
+    // `"message" in error` narrow keeps this correct even if that ever
+    // changes, rather than asserting the narrower shape.
     const { error } = probeResult;
     return {
       name,

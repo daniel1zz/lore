@@ -1,19 +1,21 @@
 /**
- * Read-only schema-version probe for an UPSTREAM lore corpus (SPEC-072
- * `lore report-issue`). This module exists solely so `buildUpstreamContext`
- * (`upstream-context-flow.ts`) can answer "is this upstream corpus's schema
- * at the version this consumer's `SQLiteStore` expects?" WITHOUT ever
- * constructing a real (migrating) `SQLiteStore` against a database this
- * process does not own — `SQLiteStore`'s constructor unconditionally runs
- * `runMigrations()` (`sqlite-store.ts` lines ~82-83, 114-190), which has no
- * readonly mode. Opening the file via `new Database(dbPath, { readonly:
- * true })` instead is a STRUCTURAL guarantee (bun:sqlite/SQLite itself
- * refuses writes on a readonly-flagged connection), not a discipline one —
- * a version-skewed or actively-synced upstream corpus can be probed with
- * zero risk of silently upgrading (or corrupting) its schema.
+ * Read-only `PRAGMA user_version` schema probe for an arbitrary `bun:sqlite`
+ * corpus file. Relocated here (spec-the-defect-channel-reaches-no-machine-
+ * but-its-own-github P4) from a now-deleted SPEC-072 `flows/` module —
+ * that module's OWN reason to exist was SPEC-072's SQLite-shaped upstream
+ * `UpstreamPort`, which P4 removes; this probe outlives it because
+ * `mount/mount-registry.ts` (SPEC-078 D2) has always reused it for an
+ * UNRELATED purpose — classifying a dashboard-registry project's corpus
+ * schema version BEFORE ever constructing a real `App` against it — and that
+ * consumer survives P4 untouched. Renamed from `probeUpstreamDb` to
+ * {@link probeSchemaVersion}: the old name asserted an "upstream
+ * issue-reporting" framing this function never actually had (it opens
+ * WHATEVER `dbPath` it is given; `mount-registry.ts`'s own corpus is never
+ * an "upstream" in the defect-channel sense), and a name that lies about
+ * scope is worse than one that merely under-describes it.
  *
  * Public surface:
- *   - `probeUpstreamDb(dbPath, writeWaitMs?)` — opens `dbPath` readonly,
+ *   - `probeSchemaVersion(dbPath, writeWaitMs?)` — opens `dbPath` readonly,
  *     reads `PRAGMA user_version`, closes the connection, returns the
  *     value. Every failure (missing file, corrupt file, PRAGMA read error)
  *     is returned as `err(...)`, never thrown — this function must be safe
@@ -27,33 +29,23 @@
  *   - NEVER throws — every `bun:sqlite` exception is caught and mapped to
  *     `err({code: "STORE_ERROR", ...})`.
  *   - **`writeWaitMs`, when passed, applies `PRAGMA busy_timeout` to THIS
- *     readonly connection before the `PRAGMA user_version` read**
- *     (task-fix-the-spec-072-cross-corpus-database-is-locked-race). Every
+ *     readonly connection before the `PRAGMA user_version` read** — every
  *     `bun:sqlite` connection defaults `busy_timeout` to 0 regardless of the
  *     `readonly` flag, so a reader that races a concurrent writer's `BEGIN
- *     IMMEDIATE` (`SQLiteStore.insertWithProvenance`) can hit `SQLITE_BUSY`
- *     ("database is locked") on the read itself — measured: the SPEC-072
- *     cross-corpus concurrency test failed with exactly this message
- *     BEFORE any write-path contention was even reached, because this probe
- *     runs first (`openValidatedUpstream` step 4, and again inside
- *     `buildUpstreamContext`'s TOCTOU re-check) and had no bound at all.
- *     This is the SAME native SQLite busy-handler `SQLiteStore.init` already
- *     applies to the write connection (SPEC-078 D9) — not a JS-level
- *     retry/backoff loop, so it does not trip D3's `setTimeout|sleep|backoff`
- *     ban. Callers pass the SAME declared bound (`feedback.upstream
- *     .write_wait_ms` / `DEFAULT_WRITE_WAIT_MS`, `@lore/core`'s ONE home for
- *     that number) they use for the real write connection, so a reader and a
- *     writer contending for the same corpus wait out the SAME window.
- *     Omitted → 0 (today's behavior, unchanged) for callers outside the
- *     report-issue concurrency contract (e.g. `mount/mount-registry.ts`'s
- *     dashboard mount probe).
+ *     IMMEDIATE` can hit `SQLITE_BUSY` ("database is locked") on the read
+ *     itself (`packages/lore/src/store/CLAUDE.md`'s own standing lesson: "ANY
+ *     `bun:sqlite` handle opened against a corpus another process may write
+ *     needs it"). This is the SAME native SQLite busy-handler `SQLiteStore.init`
+ *     already applies to the write connection (SPEC-078 D9) — not a JS-level
+ *     retry/backoff loop. Omitted → 0 (unchanged behavior for every current
+ *     caller — `mount/mount-registry.ts`'s dashboard mount probe never passes
+ *     it).
  *
  * Side-effect class: IO (opens/closes a readonly file handle; no writes).
  *
- * Source: SPEC-072 §3 Structure, §4 Public Interface
- * (`flows/upstream-probe.ts`), §7 Design Decisions ("Schema precheck");
- * spec-report-issue-has-no-specified-concurrency-contract-ac-072 D4
- * (declared bounded wait, surfaced on expiry).
+ * Source: SPEC-072 §3 Structure, §4 Public Interface (as `flows/upstream-
+ * probe.ts`, pre-P4), §7 Design Decisions ("Schema precheck"); SPEC-078 D2
+ * (`mount/mount-registry.ts`'s reuse).
  */
 
 import { Database } from "bun:sqlite";
@@ -66,7 +58,7 @@ import type { LoreError } from "@lore/core";
  * target database — SQLite rejects any write attempt on a readonly-flagged
  * connection at the engine level.
  *
- * @param dbPath - absolute path to the upstream corpus's `.lore/lore.db`
+ * @param dbPath - absolute path to the corpus's `.lore/lore.db`
  * @param writeWaitMs - optional `PRAGMA busy_timeout` (ms) applied to THIS
  *   connection before the `PRAGMA user_version` read, so a reader racing a
  *   concurrent writer's `BEGIN IMMEDIATE` waits out the SAME declared bound
@@ -78,10 +70,10 @@ import type { LoreError } from "@lore/core";
  *   SQLite file), the busy_timeout PRAGMA itself fails, or the
  *   `user_version` read fails (including a `writeWaitMs` expiry)
  * @example
- *   const result = probeUpstreamDb("/path/to/upstream/.lore/lore.db", 2000);
+ *   const result = probeSchemaVersion("/path/to/corpus/.lore/lore.db");
  *   if (result.ok) console.log(result.value.user_version); // e.g. 7
  */
-export function probeUpstreamDb(
+export function probeSchemaVersion(
   dbPath: string,
   writeWaitMs?: number,
 ): Result<{ user_version: number }, LoreError> {
@@ -91,7 +83,7 @@ export function probeUpstreamDb(
   } catch (error) {
     return err({
       code: "STORE_ERROR",
-      message: `cannot open upstream corpus database readonly at '${dbPath}': ${
+      message: `cannot open corpus database readonly at '${dbPath}': ${
         error instanceof Error ? error.message : String(error)
       }`,
       ...(error instanceof Error ? { cause: error } : {}),
@@ -100,13 +92,12 @@ export function probeUpstreamDb(
 
   try {
     if (writeWaitMs !== undefined) {
-      // reason: bind parameters are not allowed in a PRAGMA statement — same
-      // constraint `SQLiteStore.init` documents for the write connection.
-      // `writeWaitMs` is a number threaded from `resolveUpstreamWriteWaitMs`
-      // (Zod `.int().nonnegative()`-validated at config parse), never caller
-      // text, so interpolation here carries no injection risk. This PRAGMA
-      // is a per-connection VM setting — it cannot mutate the database file,
-      // so it stays inside this function's "no writes" invariant.
+      // reason: bind parameters are not allowed in a PRAGMA statement.
+      // `writeWaitMs` is a number the caller resolved from validated config
+      // or a constant, never caller text, so interpolation here carries no
+      // injection risk. This PRAGMA is a per-connection VM setting — it
+      // cannot mutate the database file, so it stays inside this function's
+      // "no writes" invariant.
       db.run(`PRAGMA busy_timeout = ${writeWaitMs}`);
     }
     const row = db.query("PRAGMA user_version").get() as { user_version: number } | null;

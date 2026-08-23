@@ -36,13 +36,33 @@
  *
  * Source: spec-the-defect-channel-cannot-be-honestly-maintained-an §M3, AC-DC-4;
  *   task-one-terminal-resolution-ssot-two-non-derogatory-states-and.
+ *
+ * ⛔ SEEDING REWRITTEN (P4, spec-the-defect-channel-reaches-no-machine-but-
+ * its-own-github): this file used to seed each issue-report task by spawning
+ * `lore report-issue` from a SEPARATE "consumer" corpus configured with the
+ * legacy `feedback.upstream.{corpus_path,root_prd}` shape pointing at this
+ * file's real subject, `upstreamRoot`. That legacy SQLite transport (and the
+ * `IssueReportService`/`UpstreamPort` pair that implemented it) is deleted
+ * outright in P4 — filing through it now refuses loudly by design. This
+ * file's ACTUAL subject, AC-DC-4's pointer-requirement validation on `lore
+ * issue resolve`, has never depended on HOW a report was created — only that
+ * one exists with the right shape. `seedIssueReport` now constructs that
+ * shape DIRECTLY via `SQLiteStore` + `CorpusService` against `upstreamRoot`
+ * (the established in-process bun-test seeding pattern for exactly this
+ * situation — see `tests/unit/store/schema-probe.bun.test.ts`'s own header),
+ * so every downstream assertion (all of which already ran with
+ * `cwd: fixture.upstreamRoot`) is unchanged. The "consumer" corpus and its
+ * `feedback.upstream` config are removed entirely — nothing in this file
+ * ever read them for anything but seeding.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
 
 /** packages/lore/tests/integration/cli -> this worktree's root (5 levels up). */
 const WORKTREE_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
@@ -114,7 +134,6 @@ const fixturesToClean: string[] = [];
 
 interface Fixture {
   readonly upstreamRoot: string;
-  readonly consumerRoot: string;
   readonly rootPrdId: string;
   readonly rootPrdSlug: string;
 }
@@ -130,25 +149,50 @@ function makeFixture(prefix: string): Fixture {
   );
   expect(prd.result.exitCode).toBe(0);
 
-  const consumerRoot = mkdtempSync(join(TMP_ROOT, `lore-dc4-consumer-${prefix}-`));
-  assertUnderTmp(consumerRoot);
-  fixturesToClean.push(consumerRoot);
-  expect(run(["init"], { cwd: consumerRoot }).exitCode).toBe(0);
-  appendFileSync(
-    join(consumerRoot, ".lore", "config.yaml"),
-    ["feedback:", "  upstream:", `    corpus_path: ${upstreamRoot}`, `    root_prd: ${prd.data.data.slug}`, ""].join("\n"),
-  );
-
-  return { upstreamRoot, consumerRoot, rootPrdId: prd.data.data.id, rootPrdSlug: prd.data.data.slug };
+  return { upstreamRoot, rootPrdId: prd.data.data.id, rootPrdSlug: prd.data.data.slug };
 }
 
-function fileReport(fixture: Fixture, title: string): string {
-  const filed = runJson<{ ok: true; data: { upstream_doc_id: string } }>(
-    ["report-issue", "--title", title, "--description", "d", "--expected", "e", "--actual", "a"],
-    { cwd: fixture.consumerRoot },
-  );
-  expect(filed.result.exitCode).toBe(0);
-  return filed.data.data.upstream_doc_id;
+/**
+ * Seeds one issue-report draft task DIRECTLY into `fixture.upstreamRoot` via
+ * `SQLiteStore` + `CorpusService` — replicates the exact shape the now-deleted
+ * legacy `UpstreamPort.createDraft` used to write: `extra.adhoc: true` and NO
+ * `parent_id` at all, deliberately — `CorpusService._createImpl`'s own
+ * `--adhoc` auto-parenting special case (only fires when `parent_id` is
+ * OMITTED) resolves the corpus's root PRD as parent; passing `parent_id`
+ * explicitly here would instead route through the NORMAL `PARENT_TYPE_CONTRACT`
+ * check, which does not allow `task` under `prd` (only under `plan`) and is
+ * exactly the mismatch `createDraft`'s own auto-parenting exists to bridge.
+ * `status: "draft"` is `CorpusService.create`'s default for a `task`. See
+ * this file's own header for why direct construction replaces the retired
+ * CLI filing path.
+ */
+async function fileReport(fixture: Fixture, title: string): Promise<string> {
+  const store = new SQLiteStore(join(fixture.upstreamRoot, ".lore", "lore.db"));
+  const corpusService = new CorpusService(store);
+  try {
+    const result = await corpusService.create({
+      type: "task",
+      title,
+      content: "d",
+      extra: {
+        adhoc: true,
+        ac_scope: [],
+        issue_report: {
+          reporter_project: "test-seed (direct)",
+          reporter_actor: "agent:dc4-seed",
+          lore_version: "0.0.0-test",
+          expected: "e",
+          actual: "a",
+          reported_at: new Date().toISOString(),
+          possible_duplicates: [],
+        },
+      },
+    });
+    if (!result.ok) throw new Error(`direct seed create failed: ${JSON.stringify(result.error)}`);
+    return result.value.id;
+  } finally {
+    store.close();
+  }
 }
 
 beforeAll(() => {
@@ -177,9 +221,9 @@ afterAll(() => {
 });
 
 describe("AC-DC-4: a non-derogatory terminal state without a resolving pointer is refused and writes nothing", () => {
-  it("AC-DC-4: --state superseded with NO --superseded-by exits 4 and leaves extra byte-identical", () => {
+  it("AC-DC-4: --state superseded with NO --superseded-by exits 4 and leaves extra byte-identical", async () => {
     const fixture = makeFixture("missing-superseded");
-    const issueId = fileReport(fixture, "report awaiting supersession");
+    const issueId = await fileReport(fixture, "report awaiting supersession");
     const before = snapshotDoc(fixture.upstreamRoot, issueId);
 
     const refused = run(["issue", "resolve", issueId, "--state", "superseded", "--reason", "a better report exists"], {
@@ -193,9 +237,9 @@ describe("AC-DC-4: a non-derogatory terminal state without a resolving pointer i
     expect(after.version).toBe(before.version);
   }, 120_000);
 
-  it("AC-DC-4: --state duplicate with NO --duplicate-of exits 4 and leaves extra byte-identical", () => {
+  it("AC-DC-4: --state duplicate with NO --duplicate-of exits 4 and leaves extra byte-identical", async () => {
     const fixture = makeFixture("missing-duplicate");
-    const issueId = fileReport(fixture, "report awaiting duplicate marking");
+    const issueId = await fileReport(fixture, "report awaiting duplicate marking");
     const before = snapshotDoc(fixture.upstreamRoot, issueId);
 
     const refused = run(["issue", "resolve", issueId, "--state", "duplicate", "--reason", "same as another report"], {
@@ -209,9 +253,9 @@ describe("AC-DC-4: a non-derogatory terminal state without a resolving pointer i
     expect(after.version).toBe(before.version);
   }, 120_000);
 
-  it("AC-DC-4: a pointer that resolves to NO doc exits 4 (validation, not a bare not-found) and writes nothing", () => {
+  it("AC-DC-4: a pointer that resolves to NO doc exits 4 (validation, not a bare not-found) and writes nothing", async () => {
     const fixture = makeFixture("dangling-pointer");
-    const issueId = fileReport(fixture, "report with a dangling supersession pointer");
+    const issueId = await fileReport(fixture, "report with a dangling supersession pointer");
     const before = snapshotDoc(fixture.upstreamRoot, issueId);
 
     const refused = run(
@@ -246,9 +290,9 @@ describe("AC-DC-4: a non-derogatory terminal state without a resolving pointer i
     expect(afterDuplicate.version).toBe(before.version);
   }, 120_000);
 
-  it("AC-DC-4: a pointer flag passed for a state that takes none is refused (exit 4), nothing written", () => {
+  it("AC-DC-4: a pointer flag passed for a state that takes none is refused (exit 4), nothing written", async () => {
     const fixture = makeFixture("pointer-for-wrong-state");
-    const issueId = fileReport(fixture, "report resolved as rejected with a stray pointer");
+    const issueId = await fileReport(fixture, "report resolved as rejected with a stray pointer");
     const before = snapshotDoc(fixture.upstreamRoot, issueId);
 
     const refused = run(
@@ -263,9 +307,9 @@ describe("AC-DC-4: a non-derogatory terminal state without a resolving pointer i
     expect(after.version).toBe(before.version);
   }, 120_000);
 
-  it("AC-DC-4: a RESOLVING pointer is accepted, stored as the resolved doc ID, and every sibling extra key survives", () => {
+  it("AC-DC-4: a RESOLVING pointer is accepted, stored as the resolved doc ID, and every sibling extra key survives", async () => {
     const fixture = makeFixture("happy");
-    const issueId = fileReport(fixture, "report legitimately superseded");
+    const issueId = await fileReport(fixture, "report legitimately superseded");
     const before = snapshotDoc(fixture.upstreamRoot, issueId);
 
     // The caller types the SLUG; the stored pointer must be the resolved ID.
@@ -298,10 +342,10 @@ describe("AC-DC-4: a non-derogatory terminal state without a resolving pointer i
     expect(data.data.reports.find((row) => row.id === issueId)?.resolution).toBe("superseded");
   }, 120_000);
 
-  it("AC-DC-4: re-resolving as the other pointer state replaces the resolution wholesale — no stale pointer lingers", () => {
+  it("AC-DC-4: re-resolving as the other pointer state replaces the resolution wholesale — no stale pointer lingers", async () => {
     const fixture = makeFixture("state-replace");
-    const primaryId = fileReport(fixture, "the surviving report");
-    const issueId = fileReport(fixture, "the report that changes its terminal state");
+    const primaryId = await fileReport(fixture, "the surviving report");
+    const issueId = await fileReport(fixture, "the report that changes its terminal state");
 
     expect(
       run(
@@ -323,9 +367,9 @@ describe("AC-DC-4: a non-derogatory terminal state without a resolving pointer i
     expect(resolution["superseded_by"]).toBeUndefined();
   }, 120_000);
 
-  it("AC-DC-4: rejected still needs no pointer, and --state fixed is still refused unconditionally (regression)", () => {
+  it("AC-DC-4: rejected still needs no pointer, and --state fixed is still refused unconditionally (regression)", async () => {
     const fixture = makeFixture("regression");
-    const issueId = fileReport(fixture, "report resolved the pre-existing way");
+    const issueId = await fileReport(fixture, "report resolved the pre-existing way");
 
     const rejected = run(["issue", "resolve", issueId, "--state", "rejected", "--reason", "not a lore defect"], {
       cwd: fixture.upstreamRoot,

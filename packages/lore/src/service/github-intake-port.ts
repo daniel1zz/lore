@@ -2,10 +2,10 @@
  * `GitHubIntakePort` — the four-op transport GitHub intake talks through
  * (spec-the-defect-channel-reaches-no-machine-but-its-own-github, Scope
  * entry `GitHubIntakePort`; AC-GI-1). Replaces the six-method corpus-shaped
- * `UpstreamPort` (`flows/upstream-context-flow.ts`) for the LIVE filing
- * path only — the legacy SQLite path (`IssueReportService` + `UpstreamPort`)
- * stays selectable per the spec's Migration Plan P2 row and is UNTOUCHED by
- * this module.
+ * SQLite `UpstreamPort` for the LIVE filing path. That legacy port and its
+ * `IssueReportService` orchestrator were deleted outright in P4 of the same
+ * spec — untouched by THIS module at the time it landed (P2, "SQLite path
+ * still selectable"), but gone as of P4.
  *
  * Public surface:
  *   - `GitHubIntakePort` — `new GitHubIntakePort(options)`, then

@@ -708,46 +708,80 @@ function warnRetiredOpenReportCapKey(): void {
 }
 
 /**
+ * The by-name deprecation warning for a config still carrying
+ * `feedback.upstream.corpus_path` or the retired `transport` seam
+ * (spec-the-defect-channel-reaches-no-machine-but-its-own-github P4,
+ * AC-GI-14) — fired from `FeedbackConfigSchema`'s legacy `upstream` branch for
+ * EACH present retired key (never just the first — a config carrying both
+ * gets two calls, one per key, so an else-if bug that only ever names one
+ * cannot hide behind this function's own signature).
+ *
+ * @param key - the retired key this call is naming (`"corpus_path"` or `"transport"`)
+ */
+function warnRetiredUpstreamTransportKey(key: "corpus_path" | "transport"): void {
+  console.warn(
+    `lore: feedback.upstream.${key} is retired and no longer consumed (the SQLite upstream ` +
+      "transport it configured was removed) — the value parses but is ignored. Configure " +
+      "feedback.upstream.repo (GitHub) to file/read issue reports.",
+  );
+}
+
+/**
  * Upstream issue-reporting configuration (SPEC-072 §4 Public Interface) —
- * consent to file `lore report-issue` reports into a configured upstream
- * corpus. Mirrors `SyncConfigSchema`'s nesting shape (a `.strict()` object
- * nested one level under its own top-level section, both levels `.strict()`
- * so a typo fails loud at config-parse time rather than silently no-opping).
+ * consent to file `lore report-issue` reports into a configured upstream.
+ * Mirrors `SyncConfigSchema`'s nesting shape (a `.strict()` object nested one
+ * level under its own top-level section, both levels `.strict()` so a typo
+ * fails loud at config-parse time rather than silently no-opping).
  *
  * @invariant `upstream` is OPTIONAL — its absence means "not configured",
- *   which `IssueReportService`'s §5 check-sequence step 1 treats as a
- *   fail-loud `VALIDATION_ERROR` naming BOTH `corpus_path` and `root_prd`
- *   (configuring this section IS the consent act, SPEC-072 Overview) — there
- *   is no partial/silent-degrade state.
+ *   which every caller treats as a fail-loud `VALIDATION_ERROR` (configuring
+ *   this section IS the consent act, SPEC-072 Overview) — there is no
+ *   partial/silent-degrade state.
  * @invariant `upstream`, once present, is one of TWO mutually-exclusive
  *   shapes (spec-the-defect-channel-reaches-no-machine-but-its-own-github
  *   P2, AC-GI-1 scenario 5) — a plain `z.union`, not a discriminated union,
  *   because neither shape carries a literal tag field of its own (adding one
  *   would be a THIRD breaking change on top of the transport switch itself):
- *     1. the LEGACY SQLite shape — `corpus_path` + `root_prd` (both
- *        REQUIRED together — a missing `corpus_path` names no filesystem
- *        location to probe; a missing `root_prd` disables the R-5a
- *        identity-pin check entirely) plus optional `write_wait_ms`. Kept
- *        alive per the migration plan's P2 row ("SQLite path still
- *        selectable") — `IssueReportService`/`flows/upstream-context-flow.ts`
- *        consume this shape UNCHANGED.
+ *     1. the LEGACY SQLite shape — `root_prd` REQUIRED (disabling the R-5a
+ *        identity-pin check entirely with none would be unrecoverable) plus
+ *        two RETIRED, parse-but-ignored fields (P4, see the invariant below):
+ *        `corpus_path` and `transport`. `write_wait_ms` is also optional and
+ *        likewise now unconsumed by any live code path — kept parseable for
+ *        the identical machine-wide-parse-failure reason.
  *     2. the GITHUB shape — `repo` alone (`"owner/repo"`), the target
  *        `GitHubIntakePort`'s `verifyTarget`/`fileIssue`/`listIssues` resolve
  *        ONCE from config and pass explicitly (risk R2 — never `-R` inferred
  *        from a git remote). `.strict()` on EACH branch is what makes the two
  *        shapes mutually exclusive: a config carrying both `repo` and
- *        `corpus_path` matches neither branch and fails loud, rather than
+ *        `root_prd` matches neither branch and fails loud, rather than
  *        silently picking one.
  *   `z.union` tries each branch in declaration order and reports the first
  *   branch's issues verbatim when a value matches neither — acceptable here
  *   because the two shapes' required-key sets do not overlap, so a
  *   malformed config almost always reads as "missing X" for whichever
  *   branch it came closer to, not a generic union failure.
+ * @invariant `corpus_path` and `transport` (legacy shape only) are RETIRED
+ *   (spec-the-defect-channel-reaches-no-machine-but-its-own-github P4,
+ *   AC-GI-14) — `corpus_path` named the upstream repo root a live SQLite
+ *   `UpstreamPort` used to open; `transport` was an unimplemented seam that
+ *   never had a second value. Both modules that gave these fields meaning
+ *   (the SQLite `UpstreamPort` and its readonly schema probe) are deleted
+ *   outright in P4. Same treatment and same reason as `inbound.open_report_cap`
+ *   below: `FeedbackConfigSchema` is `.strict()`, and `.lore/config.yaml` is
+ *   gitignored, so a config still carrying either key from a pre-P4 binary
+ *   would otherwise fail to parse machine-wide with no rollback path. A
+ *   present value still PARSES (never a fail-loud refusal for these keys
+ *   alone) but is warned-on BY NAME via `console.warn`
+ *   (`warnRetiredUpstreamTransportKey` below). No code path may act on
+ *   either field; they exist only so an old config file keeps parsing.
  * @invariant `root_prd` (legacy shape only) accepts EITHER the upstream root
  *   PRD's slug or its id (see `issue-report.ts::matchRootPrd`) — deliberately
  *   untyped as a plain non-empty string rather than two separate optional
  *   fields, since the consumer author only ever knows one or the other at
- *   config time.
+ *   config time. Unlike `corpus_path`/`transport`, `root_prd` is NOT retired
+ *   by P4 — nothing in this spec's Migration Plan names it, so it stays
+ *   REQUIRED on the legacy branch even though no code path reads it either
+ *   (a config carrying only `root_prd` still needs a branch to match).
  * @invariant `stale_after_days` (D5b, spec-issue-closure-loop-computed-
  *   resolution-agent-reachable) is INDEPENDENT of `upstream` — it governs the
  *   UPSTREAM-side `lore status --check-issues` stale-open-report detector
@@ -780,10 +814,22 @@ export const FeedbackConfigSchema = z
       .union([
         z
           .object({
-            /** Absolute path to the upstream repo ROOT (the shape `lore init` produces — a `.lore/lore.db` lives directly under it). */
-            corpus_path: z.string().min(1),
-            /** Expected upstream root-PRD slug OR id (R-5a identity pin, SPEC-072 §5 step 5). */
+            /**
+             * RETIRED (P4, AC-GI-14) — see this schema's own invariants above.
+             * Used to be the absolute path to the upstream repo root a live
+             * SQLite `UpstreamPort` opened directly; that module is deleted, so
+             * this field now parses-but-is-ignored, warned-on BY NAME.
+             */
+            corpus_path: z.string().min(1).optional(),
+            /** Expected upstream root-PRD slug OR id (R-5a identity pin, SPEC-072 §5 step 5). NOT retired by P4 — see this schema's own invariants above. */
             root_prd: z.string().min(1),
+            /**
+             * RETIRED (P4, AC-GI-14) — the unimplemented transport-selection
+             * seam this comment used to describe as "named, NOT implemented".
+             * Never had a second value to select between; parses-but-is-ignored
+             * for the same machine-wide-parse-failure reason as `corpus_path`.
+             */
+            transport: z.enum(["sqlite", "http"]).optional(),
             /**
              * The DECLARED bounded wait (ms) a `lore report-issue` write may spend
              * waiting for another writer to release the upstream corpus, before
@@ -794,10 +840,28 @@ export const FeedbackConfigSchema = z
              * number a reader sees in stderr is by construction the number that
              * was applied. Absent → {@link DEFAULT_WRITE_WAIT_MS}, resolved by
              * {@link resolveUpstreamWriteWaitMs} (never re-derived at a read site).
+             * ⛔ Like `corpus_path`, this bound has no live consumer once P4's
+             * SQLite `UpstreamPort` is deleted — kept parseable, unconsumed,
+             * for the identical reason; not warned-on separately since it is
+             * inert only as a CONSEQUENCE of `corpus_path` being unusable, not
+             * a key AC-GI-14 names.
              */
             write_wait_ms: z.number().int().nonnegative().optional(),
           })
-          .strict(),
+          .strict()
+          .superRefine((val) => {
+            // reason: a side-effecting refinement, not a shape check — mirrors
+            // `inbound`'s own `.transform()` precedent (see
+            // `warnRetiredOpenReportCapKey`) but deliberately does NOT drop the
+            // retired fields from the parsed value the way that transform does:
+            // dropping them would narrow this branch's inferred TS type to a
+            // literal `corpus_path: undefined`/`transport: undefined`, which
+            // gains nothing (no code path reads either field after P4 regardless
+            // of whether the parsed value still carries it) and would gratuitously
+            // break assignability for any future literal of this branch's shape.
+            if (val.corpus_path !== undefined) warnRetiredUpstreamTransportKey("corpus_path");
+            if (val.transport !== undefined) warnRetiredUpstreamTransportKey("transport");
+          }),
         z
           .object({
             /**

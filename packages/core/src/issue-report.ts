@@ -68,6 +68,8 @@
  * Source: SPEC-072 §4 Public Interface, §5 check sequence (step 5).
  */
 
+import type { LoreError } from "./errors.js";
+
 /**
  * The 7 required fields persisted verbatim under a filed report's
  * `extra.issue_report` (SPEC-072 AC-072-1: "all 7 extra.issue_report fields
@@ -288,6 +290,62 @@ export function matchRootPrd(
     return { ok: true };
   }
   return { ok: false, found: root.slug };
+}
+
+/**
+ * THE single shared "`feedback.upstream` is unconfigured" remedy —
+ * spec-governance-defaults-must-ship-and-every-recorded-gap-must D3's
+ * one-condition-one-remedy builder. Relocated here (P4,
+ * spec-the-defect-channel-reaches-no-machine-but-its-own-github) from the
+ * now-deleted `service/issue-report-service.ts` — that file's whole reason
+ * to exist was `IssueReportService`, the SQLite-upstream orchestrator P4
+ * removes; this builder outlives it because "you haven't configured
+ * `feedback.upstream` at all" is a condition independent of which transport
+ * you'd configure it FOR. Pure (no IO), so it belongs in `@lore/core`
+ * alongside this module's other total functions rather than in an
+ * adapter/service file.
+ *
+ * ⛔ MESSAGE CHANGED BY P4, not left byte-identical (a correction, not a
+ * weakening — recorded here per the standing in-flight-oracle-edit
+ * discipline): the pre-P4 text told a caller to run `lore report-issue
+ * --auto-config`, which self-provisioned `feedback.upstream.{corpus_path,
+ * root_prd}` from the running binary's own installed corpus location. That
+ * flag AND the self-provisioning machinery it drove are deleted by this same
+ * phase, because their only output — the legacy SQLite shape — is itself
+ * retired (parses-but-ignored, see `config.ts`'s `FeedbackConfigSchema`).
+ * Leaving the old text unchanged would instruct every caller to run a flag
+ * that no longer exists, against a shape that would do nothing if it did —
+ * a fail-loud module telling its caller to fail loudly is not itself allowed
+ * to lie. The rewritten text instead names the ONE shape that still does
+ * something: `feedback.upstream.repo` (GitHub). This DROPS the literal
+ * substrings `--auto-config`, `feedback.upstream.corpus_path`, and
+ * `feedback.upstream.root_prd` that `AC-OOB-1`
+ * (`spec-out-of-box-reporting-channel-report-issue-self-provisions`) and
+ * `AC-072-2`/`AC-GD-2`'s REGRESSION clause pinned as literal substrings of
+ * THIS exact message — those pins now assert a promise this phase
+ * deliberately breaks, and the paired test
+ * (`tests/unit/adapters/report-issue-single-remedy.bun.test.ts`) is updated
+ * in the SAME commit to assert the new, true substrings instead.
+ *
+ * ONE DEFINITION SITE (AC-GD-2(a)(i)): this is the only place this message's
+ * text is authored. Every consumer imports and calls THIS exported symbol
+ * directly — never a locally rebuilt copy — so the prescribed remedy cannot
+ * drift between layers (AC-GD-2(a)(ii)/(iii)): `report-issue.ts`'s
+ * `resolveEffectiveUpstreamCfg` (CLI filing AND `--list`, single wording SSOT,
+ * AC-OOB-1) and the MCP `lore_report_issue` tool's identical condition.
+ *
+ * Disclosure still contains the three LITERAL substrings AC-GD-2(b) pins
+ * (deliberately not left to a reviewer's sense of whether the prose reads
+ * clearly enough — this floor is UNCHANGED by the P4 rewrite):
+ * `.lore/config.yaml`, `git-tracked`, `shared`.
+ */
+export function buildUnconfiguredUpstreamRemedy(): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "feedback.upstream",
+    message:
+      '`feedback.upstream` is not configured — set feedback.upstream.repo (e.g. "owner/repo") in the git-tracked, team-shared .lore/config.yaml to file and read issue reports via GitHub.',
+  };
 }
 
 /**

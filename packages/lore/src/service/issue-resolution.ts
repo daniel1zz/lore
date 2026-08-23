@@ -43,9 +43,9 @@
  *     before this SSOT drifted.
  *   - `TERMINAL_RESOLUTION_REACH` / `TerminalResolutionReach` — per terminal
  *     state, the ROUTE that reaches it and the pointer it REQUIRES. This is
- *     what lets `upstream-context-flow.ts` read a non-derogatory state's
- *     pointer off the extra_key the state ITSELF declares, rather than a
- *     hand-authored key pair that can silently drift from the state it names.
+ *     what lets a reader project a non-derogatory state's pointer off the
+ *     extra_key the state ITSELF declares, rather than a hand-authored key
+ *     pair that can silently drift from the state it names.
  *   - `EXPLICIT_TERMINAL_RESOLUTIONS` / `ExplicitTerminalResolution` — the
  *     hand-settable TERMINAL subset (`route === "issue-resolve"`), DERIVED from
  *     the reach table rather than re-listed: `fixed`/`closed` are structurally
@@ -101,9 +101,12 @@
  *     audit trail, not `doc.status`, is the sole record of a rejection, so a
  *     review-rejected report is indistinguishable from an untouched one by
  *     status alone. This module stays store-free, so it cannot query that
- *     audit trail itself; the caller (`flows/upstream-context-flow.ts`'s
- *     `UpstreamPort.getResolution`, D6/D7) does that lookup and passes the
- *     boolean result in. Without this, a review-rejected report would
+ *     audit trail itself; a caller with an audit read (D6/D7) does that
+ *     lookup and passes the boolean result in — the now-deleted SQLite
+ *     `UpstreamPort.getResolution` (P4, spec-the-defect-channel-reaches-no-
+ *     machine-but-its-own-github) was one such caller;
+ *     `commands/issues.ts`'s LOCAL branch is NOT (its own header names this
+ *     as a residual gap). Without this, a review-rejected report would
  *     compute `open` (or `closed`, once archived) while still carrying a
  *     rejection reason — the exact self-contradicting row §20 F3/F4 forbid.
  *   - Both exported functions read `extra` defensively (the same null/array/
@@ -138,8 +141,7 @@ import {
  *
  * They are re-exported from this module because every server-side consumer
  * (`commands/issues.ts`, `commands/issue.ts`, `commands/status.ts`,
- * `issue-report-service.ts`, `issue-reports-routes.ts`,
- * `upstream-context-flow.ts`) reads the vocabulary and the computation from ONE
+ * `issue-reports-routes.ts`) reads the vocabulary and the computation from ONE
  * import site — the relocation must not fan a second `@lore/core` import out
  * across all of them.
  *
@@ -647,9 +649,9 @@ function readExplicitResolutionState(extra: unknown): ExplicitResolution | undef
  * @param hasRecordedReviewRejection - `true` iff the caller has independently
  *   confirmed a review-workflow rejection audit entry exists for this issue
  *   doc (D2; the audit-log lookup itself happens OUTSIDE this store-free
- *   module — see `flows/upstream-context-flow.ts::getResolution`). Defaults
- *   to `false` so every pre-existing caller that predates this parameter
- *   keeps compiling and behaving unchanged.
+ *   module — the now-deleted SQLite `UpstreamPort.getResolution` was one such
+ *   caller). Defaults to `false` so every pre-existing caller that predates
+ *   this parameter keeps compiling and behaving unchanged.
  * @returns the computed `IssueResolution`
  * @example
  *   computeIssueResolution({extra: {}}, [], []) // => "open"

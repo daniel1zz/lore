@@ -20,15 +20,20 @@
  * so the one an agent is steered toward reported `0`, which reads as "the queue
  * is empty, file freely" — and the CAP counts the side `--list` can see.
  *
- * Resolution now runs through ONE decision seam, `@lore/core`'s
- * `resolveIssueReadSource`:
- *   - `feedback.upstream` configured → THAT corpus (the default).
- *   - `--local` → the cwd corpus, whatever the config says.
- *   - unconfigured → the cwd corpus, exactly as before.
- * ⛔ An upstream that is configured but cannot be opened is a LOUD refusal, never
- * a downgrade to cwd: a fallback would print a clean empty listing, which is
- * byte-identical in shape to "the queue is genuinely empty" — the defect's exact
- * failure mode, reintroduced as a "safety" net.
+ * Resolution runs through ONE decision seam, `@lore/core`'s
+ * `resolveIssueReadSource` — but as of P4 (spec-the-defect-channel-reaches-
+ * no-machine-but-its-own-github) this command NEVER feeds it a legacy
+ * `corpus_path`: that field is retired (parses-but-ignored) since the SQLite
+ * `UpstreamPort` it named is deleted outright, so a legacy-shaped
+ * `feedback.upstream` is now indistinguishable, HERE, from "unconfigured" —
+ * `resolveIssueReadSource` therefore resolves to the LOCAL (cwd) corpus for
+ * both. A GITHUB-shaped `feedback.upstream` is a SEPARATE, still-loud
+ * refusal (see below): its read surface (`GitHubIntakePort.listIssues`) is a
+ * later phase's own task, not yet wired here.
+ *   - `feedback.upstream` GITHUB-shaped → refused loudly (exit 4) unless
+ *     `--local`, naming the later-phase gap.
+ *   - `feedback.upstream` legacy-shaped, or unconfigured, or `--local` passed
+ *     → the cwd corpus.
  *
  * Every run NAMES the corpus it read (§M4's declared render contract): the human
  * output's FIRST line is `formatIssueCorpusLine(...)`'s fixed `Corpus: ` prefix
@@ -38,22 +43,17 @@
  * those identically and the second one is the state that caused the defect).
  *
  * ── HOW each corpus is read ──
- * The UPSTREAM branch goes through `flows/upstream-context-flow.ts`'s
- * `UpstreamPort.listIssueReports` — the same narrow, schema-version-probed
- * cross-corpus seam `lore report-issue` uses, whose per-report facts are derived
- * at the SAME site `--list`'s `getResolution` uses. That shared derivation is
- * §M4's actual mechanism: the two surfaces can no longer disagree about one
- * report because there is one computation.
- *
- * The LOCAL branch keeps `loadLoreApp()` + `CorpusService` (unchanged: telemetry
- * stays wired, and a local corpus at an older schema keeps being migrated by the
- * normal loader path rather than newly refused by the upstream probe).
- * ⛔ RESIDUAL, named rather than silently inherited: the local branch computes
- * resolution WITHOUT the audit-trail review-rejection lookback the upstream
- * branch performs (`hasRecordedReviewRejection`), because `CorpusService` exposes
- * no audit read. A locally-review-rejected report therefore reads `open` here and
- * `rejected` via `--list`. Pre-existing (this file never had the lookback), out of
- * §M4's scope, and reachable only when reading one's OWN corpus with `--local`.
+ * `readLocalRows`/`collectLocalVerifyTargets` read via `loadLoreApp()` +
+ * `CorpusService` — the ONLY read path this file has left as of P4 (the
+ * SQLite-shaped `UpstreamPort` read path, `readUpstreamRows`/
+ * `collectUpstreamVerifyTargets`, is deleted outright along with the
+ * bun:sqlite-backed module it opened).
+ * ⛔ RESIDUAL, named rather than silently inherited: this branch computes
+ * resolution WITHOUT the audit-trail review-rejection lookback the deleted
+ * upstream branch used to perform (`hasRecordedReviewRejection`), because
+ * `CorpusService` exposes no audit read. A locally-review-rejected report
+ * therefore reads `open` here. Pre-existing (this file never had the
+ * lookback for the LOCAL branch specifically), out of §M4's scope.
  *
  * Default `--open` — resolution NOT IN `TERMINAL_ISSUE_RESOLUTIONS`
  * (`../../../service/issue-resolution.js`, the SSOT member set — CONSUMED here,
@@ -144,8 +144,7 @@ import {
 } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { relativeTime, formatTable, exitCode, formatError } from "../utils.js";
-import { isGithubUpstreamCfg, resolveDeclaredCorpusPath, resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
-import { buildUpstreamContext, type UpstreamIssueReportRow } from "../../../flows/upstream-context-flow.js";
+import { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
 import {
   hasIssueReport,
   computeIssueResolution,
@@ -302,20 +301,16 @@ export default defineCommand({
     }
     const categoryFilter = typeof args.category === "string" ? args.category : undefined;
 
-    // reason: loadLoreApp() is called on BOTH branches, not just the local one.
-    // It is this command's only source for the consumer's own parsed config
-    // (`feedback.upstream`) and for the cwd corpus root, and it is also the
-    // established choke point for the missing-`.lore/lore.db` exit and the
-    // telemetry/callerSurface wiring every CLI command shares. On the upstream
-    // branch its App is simply not read from — the cost is one local SQLite
-    // handle, and the alternative (a bespoke findLoreDbPath + loadProjectConfig
-    // pair here) would be a second, independently-drifting startup path.
+    // reason: loadLoreApp() is this command's only source for the consumer's
+    // own parsed config (`feedback.upstream`) and for the cwd corpus root,
+    // and it is also the established choke point for the missing-
+    // `.lore/lore.db` exit and the telemetry/callerSurface wiring every CLI
+    // command shares.
     const { app, dbPath, config } = loadLoreApp();
     try {
       const upstreamCfg = resolveFeedbackUpstreamCfg(config);
       // reason: a GitHub-shaped upstream (spec-the-defect-channel-reaches-no-
-      // machine-but-its-own-github P2) has no `corpus_path` for this legacy
-      // SQLite-shaped read surface to open — refused loudly (never silently
+      // machine-but-its-own-github P2) is refused loudly (never silently
       // treated as "no upstream configured", which would misreport a REAL
       // configuration as absent) unless `--local` bypasses upstream reading
       // entirely. The GitHub-backed read surface (`GitHubIntakePort.listIssues`)
@@ -335,12 +330,19 @@ export default defineCommand({
         process.exitCode = 4;
         return;
       }
+      // reason: `upstreamCorpusPath` is ALWAYS undefined here (P4,
+      // spec-the-defect-channel-reaches-no-machine-but-its-own-github) — the
+      // legacy `feedback.upstream.corpus_path` field is retired
+      // (parses-but-ignored: no `UpstreamPort` implementation exists anymore
+      // to open it against), and the GitHub-shaped case is already refused
+      // above. `resolveIssueReadSource`'s `"upstream"` variant is therefore
+      // structurally unreachable from THIS call site until a future task
+      // wires a GitHub-backed read source — kept as a real (never
+      // constructed) branch below rather than deleted from the shared
+      // decision function, which other future callers may still need.
       const source = resolveIssueReadSource({
         localCorpusRoot: dirname(dirname(dbPath)),
-        upstreamCorpusPath:
-          upstreamCfg === undefined || isGithubUpstreamCfg(upstreamCfg)
-            ? undefined
-            : resolveDeclaredCorpusPath(upstreamCfg.corpus_path),
+        upstreamCorpusPath: undefined,
         forceLocal: args.local === true,
       });
 
@@ -354,9 +356,7 @@ export default defineCommand({
       }
 
       const rowsResult =
-        source.kind === "upstream"
-          ? await readUpstreamRows(source.corpus_path, mode)
-          : await readLocalRows(app, mode);
+        source.kind === "upstream" ? unsupportedUpstreamReadError<IssueRow[]>() : await readLocalRows(app, mode);
       if (!rowsResult.ok) {
         process.stderr.write(formatError(rowsResult.error) + "\n");
         process.exitCode = exitCode(rowsResult.error);
@@ -379,32 +379,33 @@ export default defineCommand({
 type RowsResult = Result<IssueRow[], LoreError>;
 
 /**
- * Reads the CONFIGURED UPSTREAM corpus through the narrow, schema-probed
- * `UpstreamPort` — the same seam `lore report-issue` uses, so both read surfaces
- * consume ONE per-report derivation (§M4).
+ * `resolveIssueReadSource`'s `"upstream"` variant is structurally
+ * unreachable from this file (see the `run()` call site's own comment) — P4
+ * (spec-the-defect-channel-reaches-no-machine-but-its-own-github) deleted
+ * the SQLite `UpstreamPort` this branch used to open, and the legacy
+ * `feedback.upstream` shape that would have named a target for it is now
+ * retired (parses-but-ignored). Kept as a REAL, named error rather than an
+ * `assertUnreachable`/`throw` so a future caller that does manage to
+ * construct an `"upstream"` source (e.g. a GitHub-backed read source, not
+ * yet wired) gets an honest `Result` instead of a crash.
  *
- * @param corpusPath - the absolute upstream corpus root
- * @param mode - the resolution filter to apply
- * @returns the projected rows; `err(...)` VERBATIM from `buildUpstreamContext`
- *   (missing db, schema-version mismatch, unopenable file) — ⛔ never swallowed
- *   into an empty listing
+ * Generic over the success type `T` (never actually produced — this
+ * function only ever returns the `err(...)` branch) so the SAME helper
+ * serves both {@link RowsResult} (the plain listing) and
+ * `Result<VerifyTarget[], LoreError>` (`--verify`) call sites without a
+ * `Result<IssueRow[], ...>` return type wrongly narrowing what the caller
+ * may assign it to.
  */
-async function readUpstreamRows(corpusPath: string, mode: "open" | "resolved" | "all"): Promise<RowsResult> {
-  const portResult = buildUpstreamContext(corpusPath);
-  if (!portResult.ok) return portResult;
-  const port = portResult.value;
-  try {
-    const reportsResult = await port.listIssueReports();
-    if (!reportsResult.ok) return reportsResult;
-    const rows: IssueRow[] = [];
-    for (const report of reportsResult.value as UpstreamIssueReportRow[]) {
-      if (!includedByMode(mode, report.resolution)) continue;
-      rows.push(projectIssueRow(report, report.resolution));
-    }
-    return ok(rows);
-  } finally {
-    port.close();
-  }
+function unsupportedUpstreamReadError<T>(): Result<T, LoreError> {
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "feedback.upstream",
+    message:
+      "reading a configured feedback.upstream via 'lore issues' has no implementation for this " +
+      "shape (the SQLite upstream transport was removed in P4 of spec-the-defect-channel-reaches-" +
+      "no-machine-but-its-own-github; a GitHub-backed read source is a later phase). Pass --local " +
+      "to read this corpus's own issue reports instead.",
+  });
 }
 
 /**
@@ -632,34 +633,6 @@ async function collectLocalVerifyTargets(app: ReturnType<typeof loadLoreApp>["ap
 }
 
 /**
- * Collects every UPSTREAM issue-report task carrying a GitHub ref,
- * regardless of resolution — the same `UpstreamPort.listIssueReports` seam
- * {@link readUpstreamRows} uses, keeping each report's ALREADY-computed
- * `resolution` (`UpstreamIssueFacts`, derived at the same site `--list`
- * uses) rather than re-deriving it, and its raw `extra` to extract the
- * GitHub pointer.
- */
-async function collectUpstreamVerifyTargets(corpusPath: string): Promise<Result<VerifyTarget[], LoreError>> {
-  const portResult = buildUpstreamContext(corpusPath);
-  if (!portResult.ok) return portResult;
-  const port = portResult.value;
-  try {
-    const reportsResult = await port.listIssueReports();
-    if (!reportsResult.ok) return reportsResult;
-
-    const targets: VerifyTarget[] = [];
-    for (const report of reportsResult.value as UpstreamIssueReportRow[]) {
-      const github = readGithubIssueRef(report.extra);
-      if (github === undefined) continue;
-      targets.push({ id: report.id, slug: report.slug, resolution: report.resolution, github });
-    }
-    return ok(targets);
-  } finally {
-    port.close();
-  }
-}
-
-/**
  * Reads back the CURRENT `resolution:*` label for every `target`, batched
  * into exactly ONE `GhRunner.run(["api", ...])` call PER DISTINCT REPO
  * (AC-GI-12: the call count for N=1 equals N=50 when every target shares a
@@ -797,8 +770,12 @@ function renderVerifyResult(source: IssueReadSource, divergences: readonly Resol
  * {@link fetchGithubLabelResolutions}).
  */
 async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean): Promise<void> {
+  // reason: `source.kind === "upstream"` is structurally unreachable from
+  // this file's own `resolveIssueReadSource` call site — see `run()`'s
+  // comment there. Handled as a real error, not `assertUnreachable`, for the
+  // same reason `unsupportedUpstreamReadError` is.
   const targetsResult =
-    source.kind === "upstream" ? await collectUpstreamVerifyTargets(source.corpus_path) : await collectLocalVerifyTargets(app);
+    source.kind === "upstream" ? unsupportedUpstreamReadError<VerifyTarget[]>() : await collectLocalVerifyTargets(app);
   if (!targetsResult.ok) {
     process.stderr.write(formatError(targetsResult.error) + "\n");
     process.exitCode = exitCode(targetsResult.error);

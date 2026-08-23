@@ -24,12 +24,14 @@ import {
 import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
-// SPEC-072 (upstream issue reporting) §3 Structure — re-exported here (beside
-// the migration chain it describes) from a bun:sqlite-free sibling module so
-// vitest-reachable code (e.g. flows/upstream-probe.ts, a later phase of this
-// spec) can import the version ceiling without pulling bun:sqlite into the
-// vitest module graph. See schema-version.ts's own JSDoc for the "why a
-// separate module" rationale and the bump-together invariant.
+// Re-exported here (beside the migration chain it describes) from a
+// bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
+// store/schema-probe.ts's `probeSchemaVersion`, consumed by
+// mount/mount-registry.ts) import the version ceiling from the SAME module
+// they already import SQLiteStore from, while any genuinely vitest-reachable
+// caller can import it from schema-version.ts directly without pulling
+// bun:sqlite into the vitest module graph. See schema-version.ts's own
+// JSDoc for the bump-together invariant.
 export { LATEST_SCHEMA_VERSION } from "./schema-version.js";
 import type {
   AuditEntry,
