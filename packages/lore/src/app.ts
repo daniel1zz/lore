@@ -97,7 +97,13 @@ import { buildPhaseServices } from "./adapters/cli/phase-wiring.js";
 import type { PhaseWorkflowService } from "./service/phase-workflow-service.js";
 import type { PhaseChecklistService } from "./service/phase-checklist-service.js";
 import type { PhaseMigrationService } from "./service/phase-migration-service.js";
-import type { ResolutionProjector } from "./service/resolution-projector.js";
+import { ResolutionProjector } from "./service/resolution-projector.js";
+// reason: task-skill-implement-wire-a-real-resolutionlabelport-so-the — the
+// ONE production ResolutionLabelPort, wired unconditionally on both store
+// branches below (see the `resolutionProjector` field's own JSDoc for why
+// this is no longer "optional here, absent in production").
+import { GhResolutionLabelPort } from "./service/resolution-label-port.js";
+import { GhRunner, createNodeGhExecFile } from "./service/gh-runner.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -435,25 +441,16 @@ export interface App {
    * lands — this is the live call site the projector is reachable from,
    * never a `new ResolutionProjector(...)` built inline in that file.
    *
-   * ⛔ UNLIKE every other optional field on this interface, this one is NOT
-   * "optional here, always wired in production": `createApp` does not
-   * construct an instance below, on EITHER store branch, because no
-   * `ResolutionLabelPort` implementation exists yet — `GhRunner`
-   * (`service/gh-runner.ts`) is landed but its own module header names only
-   * FOUR intended callers (`GitHubIntakePort`, `lore setup --check`, `lore
-   * issues --verify`, the P3 migration), and none of them is this field.
-   * Building a `GhRunner`-backed label writer correctly needs a read-then-
-   * converge sequence (list the issue's current labels, drop any stale
-   * `resolution:*` one, add the new one) that has no test coverage or
-   * anchor in the task that added this field
-   * (task-skill-implement-resolutionprojector-invoked-from-lore) — fabricating
-   * one here without tests would be worse than leaving the seam open. Until a
-   * follow-up task supplies a real port and constructs `new
-   * ResolutionProjector(port)` on both `buildAppFromSqlite`/
-   * `buildAppFromTurso` below, `lore issue resolve` records the corpus
-   * verdict correctly but the GitHub label is never updated — the call site
-   * degrades to a no-op (`app.resolutionProjector === undefined`), never a
-   * refusal.
+   * Wired unconditionally on BOTH store branches below, via
+   * `GhResolutionLabelPort` (`service/resolution-label-port.ts`) — the
+   * `GhRunner`-backed `ResolutionLabelPort` that lists an issue's current
+   * labels, drops any stale `resolution:*` sibling, and adds the current
+   * one (task-skill-implement-wire-a-real-resolutionlabelport-so-the).
+   * Optional on this interface for the same "pre-existing hand-built App
+   * test stubs stay valid" reason every other optional field here documents
+   * — a bare `new XService(store)`-shaped construction of
+   * `buildAppFromSqlite`/`buildAppFromTurso` predates this field and stays
+   * valid without a mechanical touch; every REAL `createApp()` call gets one.
    */
   resolutionProjector?: ResolutionProjector;
   /**
@@ -864,6 +861,16 @@ function buildAppFromSqlite(
       resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath(),
       store.appendAuditEntry.bind(store),
     ),
+    // reason: task-skill-implement-wire-a-real-resolutionlabelport-so-the —
+    // ResolutionProjector over the real GhRunner-backed ResolutionLabelPort.
+    // GhRunner takes NO repoRoot/config (unlike SeatService's RealGitPort
+    // above) — its only real dependency is `createNodeGhExecFile()`, the
+    // production `execFile` wrapper — so this, like `RealGitPort(repoRoot)`
+    // above, is constructed fresh inline rather than threaded down as a
+    // createApp parameter.
+    resolutionProjector: new ResolutionProjector(
+      new GhResolutionLabelPort(new GhRunner({ execFile: createNodeGhExecFile() })),
+    ),
     // reason: TraceStatsService (SPEC-102) is store-only, no telemetry, same
     // shape as AuditService/DriftCheckService — always constructed regardless
     // of trace.enabled (a disabled corpus just reports all-zero counts).
@@ -1187,6 +1194,12 @@ function buildAppFromTurso(
     globalConfigService: new GlobalConfigService(
       resolveGlobalConfigPath() ?? resolveGlobalConfigWritePath(),
       store.appendAuditEntry.bind(store),
+    ),
+    // reason: task-skill-implement-wire-a-real-resolutionlabelport-so-the —
+    // see buildAppFromSqlite's identical comment; GhRunner needs no
+    // repoRoot/config, so this is constructed fresh inline here too.
+    resolutionProjector: new ResolutionProjector(
+      new GhResolutionLabelPort(new GhRunner({ execFile: createNodeGhExecFile() })),
     ),
     // reason: TraceStatsService (SPEC-102) reads from `store` (the TursoStore
     // embedded replica, local reads) — same shape as buildAppFromSqlite's
