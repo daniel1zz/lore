@@ -2895,7 +2895,7 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       // SQLiteStore → bun:sqlite; a static import here would drag bun:sqlite into the
       // vitest graph of every tools.ts consumer (mcp-tools.test.ts). Deferring to call
       // time keeps the module vitest-loadable (same isolation move as the CLI loader).
-      const { buildIssueReportDeps, resolveConsumerCorpusRoot, resolveFeedbackUpstreamCfg } =
+      const { buildIssueReportDeps, isGithubUpstreamCfg, resolveConsumerCorpusRoot, resolveFeedbackUpstreamCfg } =
         await import("../cli/report-issue-wiring.js");
       const corpusRoot = resolveConsumerCorpusRoot();
       // reason: the consumer config is threaded in explicitly (not defaulted)
@@ -2905,6 +2905,23 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       const deps = buildIssueReportDeps(corpusRoot, getConfig?.());
       const service = new IssueReportService(deps);
       const cfg = resolveFeedbackUpstreamCfg(getConfig?.());
+
+      // reason: `IssueReportService` only ever spoke the legacy SQLite-shaped
+      // upstream (spec-the-defect-channel-reaches-no-machine-but-its-own-
+      // github P2 moved the LIVE filing path to `GitHubIntakePort` instead —
+      // see `report-issue-wiring.ts::fileGithubIssue`). Wiring THIS MCP tool
+      // onto that new path is a separate task's own scope; refuse loudly here
+      // rather than silently mis-typing the GitHub shape into a legacy call.
+      if (cfg !== undefined && isGithubUpstreamCfg(cfg)) {
+        return errorContent({
+          code: "VALIDATION_ERROR",
+          field: "feedback.upstream",
+          message:
+            `this corpus's feedback.upstream is GitHub-configured (repo: ${cfg.repo}) — filing via ` +
+            "lore_report_issue (MCP) is not yet supported for that shape (a later phase of spec-the-" +
+            "defect-channel-reaches-no-machine-but-its-own-github). Use the CLI's `lore report-issue` instead.",
+        });
+      }
 
       const result = await service.report(
         {

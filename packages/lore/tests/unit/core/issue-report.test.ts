@@ -39,10 +39,18 @@ describe("feedback-schema", () => {
     const result = FeedbackConfigSchema.safeParse(raw);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.upstream?.corpus_path).toBe("/Users/dev/upstream-repo");
-      expect(result.data.upstream?.root_prd).toBe(
-        "prd-lore-internal-first-ai-team-knowledge-platform",
-      );
+      // reason: `upstream` is now a union of the legacy SQLite shape and the
+      // GitHub shape (spec-the-defect-channel-reaches-no-machine-but-its-own-
+      // github P2) — `raw` above is the legacy shape, so a presence check on
+      // `corpus_path` narrows without weakening either assertion.
+      const upstream = result.data.upstream;
+      expect(upstream !== undefined && "corpus_path" in upstream).toBe(true);
+      if (upstream !== undefined && "corpus_path" in upstream) {
+        expect(upstream.corpus_path).toBe("/Users/dev/upstream-repo");
+        expect(upstream.root_prd).toBe(
+          "prd-lore-internal-first-ai-team-knowledge-platform",
+        );
+      }
     }
 
     // absence of feedback entirely is also valid (unconfigured, no consent yet)

@@ -719,14 +719,35 @@ function warnRetiredOpenReportCapKey(): void {
  *   fail-loud `VALIDATION_ERROR` naming BOTH `corpus_path` and `root_prd`
  *   (configuring this section IS the consent act, SPEC-072 Overview) — there
  *   is no partial/silent-degrade state.
- * @invariant Both `corpus_path` and `root_prd` are REQUIRED once `upstream`
- *   is present — there is no meaningful default for either (a missing
- *   `corpus_path` names no filesystem location to probe; a missing
- *   `root_prd` disables the R-5a identity-pin check entirely).
- * @invariant `root_prd` accepts EITHER the upstream root PRD's slug or its
- *   id (see `issue-report.ts::matchRootPrd`) — deliberately untyped as a
- *   plain non-empty string rather than two separate optional fields, since
- *   the consumer author only ever knows one or the other at config time.
+ * @invariant `upstream`, once present, is one of TWO mutually-exclusive
+ *   shapes (spec-the-defect-channel-reaches-no-machine-but-its-own-github
+ *   P2, AC-GI-1 scenario 5) — a plain `z.union`, not a discriminated union,
+ *   because neither shape carries a literal tag field of its own (adding one
+ *   would be a THIRD breaking change on top of the transport switch itself):
+ *     1. the LEGACY SQLite shape — `corpus_path` + `root_prd` (both
+ *        REQUIRED together — a missing `corpus_path` names no filesystem
+ *        location to probe; a missing `root_prd` disables the R-5a
+ *        identity-pin check entirely) plus optional `write_wait_ms`. Kept
+ *        alive per the migration plan's P2 row ("SQLite path still
+ *        selectable") — `IssueReportService`/`flows/upstream-context-flow.ts`
+ *        consume this shape UNCHANGED.
+ *     2. the GITHUB shape — `repo` alone (`"owner/repo"`), the target
+ *        `GitHubIntakePort`'s `verifyTarget`/`fileIssue`/`listIssues` resolve
+ *        ONCE from config and pass explicitly (risk R2 — never `-R` inferred
+ *        from a git remote). `.strict()` on EACH branch is what makes the two
+ *        shapes mutually exclusive: a config carrying both `repo` and
+ *        `corpus_path` matches neither branch and fails loud, rather than
+ *        silently picking one.
+ *   `z.union` tries each branch in declaration order and reports the first
+ *   branch's issues verbatim when a value matches neither — acceptable here
+ *   because the two shapes' required-key sets do not overlap, so a
+ *   malformed config almost always reads as "missing X" for whichever
+ *   branch it came closer to, not a generic union failure.
+ * @invariant `root_prd` (legacy shape only) accepts EITHER the upstream root
+ *   PRD's slug or its id (see `issue-report.ts::matchRootPrd`) — deliberately
+ *   untyped as a plain non-empty string rather than two separate optional
+ *   fields, since the consumer author only ever knows one or the other at
+ *   config time.
  * @invariant `stale_after_days` (D5b, spec-issue-closure-loop-computed-
  *   resolution-agent-reachable) is INDEPENDENT of `upstream` — it governs the
  *   UPSTREAM-side `lore status --check-issues` stale-open-report detector
@@ -756,27 +777,40 @@ function warnRetiredOpenReportCapKey(): void {
 export const FeedbackConfigSchema = z
   .object({
     upstream: z
-      .object({
-        /** Absolute path to the upstream repo ROOT (the shape `lore init` produces — a `.lore/lore.db` lives directly under it). */
-        corpus_path: z.string().min(1),
-        /** Expected upstream root-PRD slug OR id (R-5a identity pin, SPEC-072 §5 step 5). */
-        root_prd: z.string().min(1),
-        /**
-         * The DECLARED bounded wait (ms) a `lore report-issue` write may spend
-         * waiting for another writer to release the upstream corpus, before
-         * refusing LOUDLY (spec-report-issue-has-no-specified-concurrency-
-         * contract-ac-072 D4 — "the wait bound is declared in config and
-         * surfaced on expiry"). Applied as the upstream connection's `PRAGMA
-         * busy_timeout` and echoed VERBATIM in the refusal message, so the
-         * number a reader sees in stderr is by construction the number that
-         * was applied. Absent → {@link DEFAULT_WRITE_WAIT_MS}, resolved by
-         * {@link resolveUpstreamWriteWaitMs} (never re-derived at a read site).
-         */
-        write_wait_ms: z.number().int().nonnegative().optional(),
-        // P2 seam (named, NOT implemented, SPEC-072 §Extension Seams):
-        // transport: z.enum(["sqlite","http"]).default("sqlite")
-      })
-      .strict()
+      .union([
+        z
+          .object({
+            /** Absolute path to the upstream repo ROOT (the shape `lore init` produces — a `.lore/lore.db` lives directly under it). */
+            corpus_path: z.string().min(1),
+            /** Expected upstream root-PRD slug OR id (R-5a identity pin, SPEC-072 §5 step 5). */
+            root_prd: z.string().min(1),
+            /**
+             * The DECLARED bounded wait (ms) a `lore report-issue` write may spend
+             * waiting for another writer to release the upstream corpus, before
+             * refusing LOUDLY (spec-report-issue-has-no-specified-concurrency-
+             * contract-ac-072 D4 — "the wait bound is declared in config and
+             * surfaced on expiry"). Applied as the upstream connection's `PRAGMA
+             * busy_timeout` and echoed VERBATIM in the refusal message, so the
+             * number a reader sees in stderr is by construction the number that
+             * was applied. Absent → {@link DEFAULT_WRITE_WAIT_MS}, resolved by
+             * {@link resolveUpstreamWriteWaitMs} (never re-derived at a read site).
+             */
+            write_wait_ms: z.number().int().nonnegative().optional(),
+          })
+          .strict(),
+        z
+          .object({
+            /**
+             * The GitHub intake target, `"owner/repo"` (spec-the-defect-
+             * channel-reaches-no-machine-but-its-own-github, Scope entry
+             * `GitHubIntakePort`; risk R2). Resolved ONCE here and passed
+             * EXPLICITLY into every `gh api repos/<repo>/...` call — never
+             * inferred from a git remote via `-R`.
+             */
+            repo: z.string().min(1).regex(/^[^/\s]+\/[^/\s]+$/, "must be 'owner/repo'"),
+          })
+          .strict(),
+      ])
       .optional(),
     /** Days past which an OPEN issue report is flagged stale by `lore status --check-issues` (D5b). Default: 14. */
     stale_after_days: z.number().int().positive().default(14),
@@ -1745,7 +1779,13 @@ export const DEFAULT_WRITE_WAIT_MS = 2000;
  *   resolveUpstreamWriteWaitMs({ ..., feedback: { upstream: { corpus_path: "x", root_prd: "y", write_wait_ms: 500 } } }) // => 500
  */
 export function resolveUpstreamWriteWaitMs(config: LoreConfig | undefined): number {
-  const writeWaitMs = config?.["feedback"]?.["upstream"]?.["write_wait_ms"];
+  const upstream = config?.["feedback"]?.["upstream"];
+  // reason: `upstream` is now a union of the legacy SQLite shape (which may
+  // carry `write_wait_ms`) and the GitHub shape (which never does, spec-the-
+  // defect-channel-reaches-no-machine-but-its-own-github P2) — a plain `?.`
+  // chain through a union member that lacks the key is a TS error, not a
+  // runtime concern, so the presence check is explicit here.
+  const writeWaitMs = upstream !== undefined && "write_wait_ms" in upstream ? upstream.write_wait_ms : undefined;
   return typeof writeWaitMs === "number" ? writeWaitMs : DEFAULT_WRITE_WAIT_MS;
 }
 
@@ -2109,6 +2149,36 @@ function describeConfigIssue(issue: z.ZodIssue): { field: string; message: strin
       field: offendingPaths[0] ?? containerField,
       message: `${offendingPaths.join(", ")}: unrecognized key${plural}${hint}`,
     };
+  }
+  if (issue.code === z.ZodIssueCode.invalid_union) {
+    // reason: a `z.union` of mutually-exclusive object shapes (e.g.
+    // `FeedbackConfigSchema.upstream`'s legacy-SQLite-vs-GitHub split, spec-
+    // the-defect-channel-reaches-no-machine-but-its-own-github P2) reports
+    // ONE top-level `invalid_union` issue when EVERY branch fails, which
+    // would otherwise collapse to a bare "feedback.upstream: Invalid input"
+    // — discarding the per-branch detail a reader needs to find the actual
+    // typo. Pick the branch with the FEWEST issues (the one closest to a
+    // match — a value that already satisfies one branch's required keys
+    // fails that branch with only its genuinely-wrong keys, while every
+    // OTHER branch additionally reports "missing required key" for every
+    // field the value never intended to supply) and recurse into ITS most
+    // specific issue, preferring `unrecognized_keys` the same way the
+    // top-level case above does. Ties keep the FIRST-declared branch,
+    // matching this file's existing precedent of favouring declaration
+    // order (`parseConfig`'s own `aiIssue ?? issues[0]`).
+    const branchIssueLists = issue.unionErrors.map((branchError) => branchError.issues);
+    const fewestIssues = branchIssueLists.reduce<z.ZodIssue[] | undefined>((chosen, candidate) => {
+      if (chosen === undefined) return candidate;
+      return candidate.length < chosen.length ? candidate : chosen;
+    }, undefined);
+    if (fewestIssues !== undefined && fewestIssues.length > 0) {
+      // reason: `fewestIssues[0]` is safe — `.length > 0` was just checked —
+      // but `noUncheckedIndexedAccess` cannot see that through the `??`, so
+      // the non-null assertion documents a runtime-proven fact, not a guess.
+      const preferred =
+        fewestIssues.find((candidate) => candidate.code === z.ZodIssueCode.unrecognized_keys) ?? fewestIssues[0]!;
+      return describeConfigIssue(preferred);
+    }
   }
   return { field: containerField, message: `${containerField}: ${issue.message}` };
 }

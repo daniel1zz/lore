@@ -100,7 +100,7 @@ import {
 } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { relativeTime, formatTable, exitCode, formatError } from "../utils.js";
-import { resolveDeclaredCorpusPath, resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
+import { isGithubUpstreamCfg, resolveDeclaredCorpusPath, resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
 import { buildUpstreamContext, type UpstreamIssueReportRow } from "../../../flows/upstream-context-flow.js";
 import {
   hasIssueReport,
@@ -242,10 +242,34 @@ export default defineCommand({
     const { app, dbPath, config } = loadLoreApp();
     try {
       const upstreamCfg = resolveFeedbackUpstreamCfg(config);
+      // reason: a GitHub-shaped upstream (spec-the-defect-channel-reaches-no-
+      // machine-but-its-own-github P2) has no `corpus_path` for this legacy
+      // SQLite-shaped read surface to open — refused loudly (never silently
+      // treated as "no upstream configured", which would misreport a REAL
+      // configuration as absent) unless `--local` bypasses upstream reading
+      // entirely. The GitHub-backed read surface (`GitHubIntakePort.listIssues`)
+      // is a later phase's own task, out of this task's scope.
+      if (upstreamCfg !== undefined && isGithubUpstreamCfg(upstreamCfg) && args.local !== true) {
+        process.stderr.write(
+          formatError({
+            code: "VALIDATION_ERROR",
+            field: "feedback.upstream",
+            message:
+              "this corpus's feedback.upstream is GitHub-configured (repo: " +
+              `${upstreamCfg.repo}) — reading it via 'lore issues' is not yet supported ` +
+              "(a later phase of spec-the-defect-channel-reaches-no-machine-but-its-own-github). " +
+              "Pass --local to read this corpus's own issue reports instead.",
+          }) + "\n",
+        );
+        process.exitCode = 4;
+        return;
+      }
       const source = resolveIssueReadSource({
         localCorpusRoot: dirname(dirname(dbPath)),
         upstreamCorpusPath:
-          upstreamCfg === undefined ? undefined : resolveDeclaredCorpusPath(upstreamCfg.corpus_path),
+          upstreamCfg === undefined || isGithubUpstreamCfg(upstreamCfg)
+            ? undefined
+            : resolveDeclaredCorpusPath(upstreamCfg.corpus_path),
         forceLocal: args.local === true,
       });
 
