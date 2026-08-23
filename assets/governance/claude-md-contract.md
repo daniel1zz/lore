@@ -67,21 +67,68 @@ misplaced. That is a silent SSOT violation manufactured by the budget itself.
    does not exist is the same defect class as a dangling code anchor.
 4. Keep the rule, drop the story. If a block is load-bearing discipline,
    compress it to the ⛔ rule and evict the narrative that motivated it.
+5. **The stub IS an index entry.** It answers to the Index-Entry Contract
+   (below) the same as any other list line: one line, scope keywords only,
+   no restated conclusion. A "one line" that grew back into a paragraph
+   still carrying the measurement it was meant to evict has not evicted
+   anything — it has only renamed the place the fact sits. Measured on
+   this repo's own root file: 21 eviction stubs on record, several of them
+   multi-line paragraphs still holding the numbers they were supposed to
+   leave behind.
 
 ### What is never the fix
 
 - ⛔ **Do not raise the ceiling or the floor.** The ceiling exists because an
   unbounded memory file is itself the failure mode; raising it converts a
   loud block into a slow silent regression.
-- ⛔ **Do not reflow long lines into short ones.** Bytes and lines are
-  measured independently, and files approach the limit on bytes; splitting
-  lines makes the binding metric worse.
+- ⛔ **Do not split a line only to reduce the reported LINE COUNT.** Bytes
+  are the binding ceiling (Target vs Ceiling, above) — splitting one line
+  into two adds a newline byte and reduces nothing the ceiling actually
+  measures. Measured on this repo's own root file: 121 bytes/line average,
+  1529 bytes at the longest line, and climbing, while the 200-line target
+  keeps reading as "met." Line count and byte count are measured
+  independently; only the byte count binds.
+- This does not forbid the separate, advisory `line_length` signal `lore
+  status --check-claude-md` reports per file. A genuinely long line is hard
+  to scan, and that signal exists to flag it — it reports the line, it does
+  not license reflowing it in place to game the count above. Shortening a
+  line by moving its content elsewhere is fine; splitting it in place to
+  lower the line count is the thing this rule forbids.
 - ⛔ **Do not record the fact in another module's file.** A module's own
   facts belong in that module's own file. Displacement is invisible to every
   check here — the check measures saturation, never relocation — so it is
   the one failure this mechanism cannot catch for you.
 - ⛔ **Do not disable the check for the file you are editing.** The opt-out
   is global and deliberate; there is no per-file exemption.
+
+## Path-Scoped Rules — `.claude/rules/`
+
+A memory file that outgrows its budget has a second destination besides the
+corpus: Anthropic's own documented remedy is a path-scoped rule file ([S]
+code.claude.com/docs/en/memory.md — "use path-scoped rules so instructions
+load only when Claude works with matching files").
+
+- Rule files live at `.claude/rules/*.md`, one topic per file — this is a
+  second home for narrow, file-type-specific guidance, not a second dumping
+  ground for whatever no longer fits above.
+- `paths:` YAML frontmatter scopes a rule so it loads **only** when Claude
+  reads a file matching that glob. That scoping is what makes a rule
+  cheaper than an `@import` or another CLAUDE.md paragraph: a session that
+  never touches the matching paths never pays for the rule at all.
+- A rule with **no** `paths:` frontmatter loads every session, at the same
+  priority as `.claude/CLAUDE.md` — moving a block there without adding
+  `paths:` is not a cheaper home, it is the same cost under a new filename.
+- `~/.claude/rules/` is the user-level equivalent, scoped the same way.
+- Rules vs. skills: a rule is resident (whole-session if unscoped) or
+  path-triggered; a skill loads only on invocation. A fact a given file
+  type needs every time it is touched belongs in a rule; a multi-step
+  procedure an agent runs on demand belongs in a skill.
+
+⛔ Moving a block to `rules/` counts as an eviction only if the destination
+is itself budgeted. An unscoped rule, or a scoped rule nobody measures, just
+relocates the bloat this contract's Eviction Rule already names as the
+failure mode — the content still loads, still costs, and now nothing here
+reports it.
 
 ## What Goes In vs What Stays Out
 
@@ -142,6 +189,10 @@ only**. State what the item covers, not what it concluded or how it got
 there — that belongs in the corpus doc the line points to. An index entry
 that grows past a line is no longer an index entry; split the detail out and
 leave the pointer.
+
+An eviction stub (the one line the Eviction Rule leaves behind) is a member
+of this rule, not an exception to it — the same "one line, scope keywords
+only" shape applies whether the line indexes a corpus doc or a module file.
 
 ## Style Guidance
 
