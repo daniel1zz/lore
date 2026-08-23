@@ -37,10 +37,14 @@
  *     `AdvisoryFinding`s — entering the near-ceiling band is worth a loud
  *     line in the report, but is NOT itself a breach; `lintMemoryFiles` alone
  *     ever decides breach/exit-code.
- *   ⛔ `computeHeadroom`/`computeHeadroomWarnings` are deliberately OUTSIDE
- *   `runMemoryFileChecks`'s composition — they are a REPORTING layer, never
- *   a check, and stay directly callable by `status.ts`
- *   (AC-COMPOSE-1's banned-function list does not include them).
+ *   `computeHeadroom`/`computeHeadroomWarnings` are a REPORTING layer, never
+ *   a check — but they route THROUGH `claude-md-admission.ts`'s
+ *   `runMemoryFileChecks` like every other metric in this mechanism (N15):
+ *   Phase 1 shipped them as direct calls from `status.ts`, bypassing the
+ *   declared sole entry, while AC-COMPOSE-1's banned-function list omitted
+ *   exactly those two names — a self-consistent pair of statements that were
+ *   jointly false. `status.ts`/`flows/context-flow.ts` must not call either
+ *   directly any more.
  *
  * Three ordered bands per metric (task-a-module-claude-md-at-its-byte-ceiling-
  * silently-relocates). Both fractions come from `budgets`, never from a

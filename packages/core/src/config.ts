@@ -961,6 +961,9 @@ export type SetupConfig = z.infer<typeof SetupConfigSchema>;
  *   `evict` at or below `warn` makes the advisory band empty and unreachable —
  *   a silent semantic inversion, the exact failure class this project's
  *   no-silent-fallback rule exists to prevent.
+ * @invariant `emphasis.max_per_kb` (Phase 2, N5/N6) is a SEPARATE,
+ *   single-threshold block — marker density is not capacity, so it never
+ *   reuses `warn_threshold_fraction`/`evict_threshold_fraction`.
  */
 export const contextConfigSchema = z
   .object({
@@ -1034,6 +1037,40 @@ export const contextConfigSchema = z
          * corpus and leave a one-line pointer (`lore governance claude-md`).
          */
         evict_threshold_fraction: z.number().min(0).max(1).default(0.97),
+        /**
+         * `emphasis.max_per_kb` — the SINGLE deterministic threshold for
+         * `claude-md-admission.ts`'s `measureEmphasis` (Phase 2, N5/N6,
+         * spec-claude-md-governance-content-dimension-checks-wire-the):
+         * marker density (⛔/IMPORTANT/MUST/NEVER per KB) above which a
+         * memory file is `emphasis_saturated`. ⛔ Deliberately NOT the
+         * three-band ceiling machinery above (N5) — marker density is not a
+         * capacity metric, so this block carries no warn/evict fraction,
+         * only one ceiling.
+         *
+         * Default `3` — measured on this repo 2026-08-23 (before this
+         * change): every real memory file sits between 0 and ~1.46
+         * markers/KB (root, the densest). N6 requires the shipped default to
+         * sit ABOVE this repo's measured spread so ZERO files trip on
+         * landing (D3's install-must-not-fail reasoning, unchanged); `3` is
+         * more than double the measured max, comfortably short of the
+         * spec's own cited over-dense example (a user-global file measured
+         * at 4.0/KB), and is a small, legible integer — never an arbitrary
+         * float — matching this schema's existing style for tunable
+         * ceilings.
+         *
+         * ⛔ Version floor: `.strict()` on this object means a `.lore/
+         * config.yaml` declaring `memory_files.emphasis` is REJECTED by any
+         * `lore` binary built before this field shipped (spec-claude-md-
+         * governance-content-dimension-checks-wire-the, Phase 2) — the same
+         * inherent floor every past `.strict()` key addition to this schema
+         * has carried (spec Risks).
+         */
+        emphasis: z
+          .object({
+            max_per_kb: z.number().positive().default(3),
+          })
+          .strict()
+          .default({}),
       })
       .strict()
       .superRefine((value, ctx) => {
