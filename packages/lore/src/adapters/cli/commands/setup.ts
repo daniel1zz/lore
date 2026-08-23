@@ -29,7 +29,16 @@
  * (mutually exclusive with `--uninstall`/`--dry-run`; `--check --project` is
  * an explicit, named-exit-2 Scope-Alt — never a silent global-only check).
  * Thin pipe over `../setup-check.js::runSetupCheck` — see that module's own
- * doc for the zero-mutation-beyond-the-check-cache invariant.
+ * doc for the zero-mutation-beyond-the-check-cache invariant. Immediately
+ * after that asset-freshness section, `--check` ALSO runs a second,
+ * independent read-only section (task
+ * task-skill-implement-lore-setup-check-read-only-health-probe, AC-GI-2's
+ * pre-flight discoverability half, Migration Plan P0) — a GitHub-channel
+ * health probe over `../setup-github-health.js::runGitHubHealthCheck`,
+ * wired here via `runGitHubChannelHealthCheck` below. It never touches any
+ * file the asset-freshness section reads or writes, and never downgrades
+ * an already-nonzero exit code from that section — see
+ * `runGitHubChannelHealthCheck`'s own doc.
  *
  * `--project --uninstall` (SPEC-060 §Design D2) is a FIFTH mode
  * (`"project-uninstall"`, `../setup-args.js::SetupMode`) reversing a prior
@@ -90,6 +99,11 @@
  *       the rendered/JSON receipt already names the manual
  *       `claude mcp add`/`remove` recovery command (mirrors `verify.ts`'s
  *       "ran fine, one part failed" exit-1 bucket)
+ *   `--check` ONLY, from its second (GitHub-channel) section, and only when
+ *   the asset-freshness section reported a clean exit (see
+ *   `runGitHubChannelHealthCheck`'s own doc for why it never downgrades an
+ *   already-nonzero code): 8 = the CLI binary is missing or unauthenticated,
+ *   1 = it is authenticated but the configured target could not be read.
  *
  * Source: SPEC-046 §Design, §Scope; task AC-046-E.
  */
@@ -141,6 +155,8 @@ import {
 } from "../setup-args.js";
 import { exitCode, formatError } from "../utils.js";
 import { runSetupCheck } from "../setup-check.js";
+import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
+import { createGhRunnerHealthProbe, ghHealthExitCode, runGitHubHealthCheck } from "../setup-github-health.js";
 
 // ─── Repo-root resolution (dev mode only — see setup-args.ts's module doc) ──
 // packages/lore/src/adapters/cli/commands/setup.ts -> repo root is 6 levels up.
@@ -602,6 +618,39 @@ function mcpOutcomeExitCode(receipt: SetupReceipt): number {
   return receipt.mcp === "failed" ? 1 : 0;
 }
 
+/**
+ * Runs the GitHub-channel health probe (`../setup-github-health.js`, task
+ * task-skill-implement-lore-setup-check-read-only-health-probe, AC-GI-2's
+ * pre-flight discoverability half) as a second, independent section of
+ * `lore setup --check`'s output — see this file's `--check` dispatch below.
+ * Read-only: constructs its own `GhRunner` with the real subprocess
+ * executor, never anything this file's asset-freshness check (`runSetupCheck`)
+ * already wrote or read.
+ *
+ * Never DOWNGRADES an already-nonzero exit code from the asset-freshness
+ * check that ran just before this — if that check is already reporting a
+ * problem (`process.exitCode` not 0), this section still PRINTS its own
+ * finding but leaves the exit code alone, so the FIRST-detected problem
+ * stays the one a caller's `$?` reports; a clean asset check (`0`) is the
+ * only state this is allowed to override.
+ */
+async function runGitHubChannelHealthCheck(opts: { json: boolean }): Promise<void> {
+  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile() }));
+  const report = await runGitHubHealthCheck({ runner });
+
+  if (opts.json) {
+    console.log(JSON.stringify({ ok: report.ok, data: { github_channel: report } }, null, 2));
+  } else if (report.ok) {
+    console.log(`✓ GitHub feedback channel reachable — ${report.message}`);
+  } else {
+    process.stderr.write(`✗ GitHub feedback channel unavailable: ${report.message}\n`);
+  }
+
+  if (!report.ok && (process.exitCode === 0 || process.exitCode === undefined)) {
+    process.exitCode = ghHealthExitCode(report.condition);
+  }
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export default defineCommand({
@@ -681,6 +730,7 @@ export default defineCommand({
         homeDir: homedir(),
       });
       await runSetupCheck({ targetDir: checkTargetDir, json });
+      await runGitHubChannelHealthCheck({ json });
       return;
     }
 
