@@ -340,7 +340,16 @@ describe("claude-md wiring — narrative smells reach the CLI without affecting 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
     expect(result.exitCode).toBe(0);
-    expect(parsed.data?.claude_md?.advisory ?? []).toEqual([]);
+    // Narrowed (Phase 4 re-baseline): this case exists to prove the NARRATIVE-SMELL
+    // detectors do not fire on empty content. The always-on advisories added by
+    // AC-ADV-1 (`line_length`, `target_distance`) are emitted for EVERY discovered
+    // file including an empty one, by design, so asserting the whole array is empty
+    // asserts a property this case never intended to cover.
+    const narrativeKinds = ["reference_missing", "iso_date_density", "status_word"];
+    const narrative = (parsed.data?.claude_md?.advisory ?? []).filter((a: { kind: string }) =>
+      narrativeKinds.includes(a.kind),
+    );
+    expect(narrative).toEqual([]);
   });
 
   it("STATE: several advisory kinds firing at once (dangling reference + dense ISO dates + status wording) never changes the exit code", () => {
