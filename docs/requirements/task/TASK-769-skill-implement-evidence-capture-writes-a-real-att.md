@@ -11,9 +11,9 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-137
 plan: PLAN-137
-links:
-  - {id: TASK-758, type: blocks}
 ---
+> ⚠ INVALIDATED 2026-08-23T05:30:14.870Z — superseded by task-skill-test-evidence-capture-attestation-red-test-scenarios; Absorbed into the surviving task as its stage GREEN. lore done's third floor (findMissingUnfilteredTestFileRuns, task-workflow-service.ts:2934) has no escape hatch and demands an unfiltered result:pass per declared .test.ts anchor, so a RED-only task owning the failing test file can never archive and deadlocks whatever blocks on it. One task, two sequential claims by two agents, zero overrides.
+
 Estimate: S
 Approach: per SPEC-143 C5 — the adapter ALREADY measures spawnResult.status, elapsedMs and timed_out and simply never writes them. This is a write-through fix, not new measurement.
 Source: SPEC-143 C5 and AC-CT-2 (v51).

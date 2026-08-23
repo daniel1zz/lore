@@ -11,9 +11,9 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-137
 plan: PLAN-137
-links:
-  - {id: TASK-758, type: blocks}
 ---
+> ⚠ INVALIDATED 2026-08-23T05:32:32.200Z — superseded by task-skill-test-blast-radius-staleness-red-test-scenarios; Absorbed into the surviving paired task as its stage GREEN. lore done's third floor (findMissingUnfilteredTestFileRuns, task-workflow-service.ts:2934) has no escape hatch and demands an unfiltered result:pass per declared .test.ts anchor, so a RED-only task owning the failing test file can never archive and deadlocks whatever blocks on it. One task, two sequential claims by two agents.
+
 Estimate: M
 Approach: per SPEC-143 C3 and AC-CT-4 (v51). Implementation MUST be `git diff --quiet <recorded HEAD> HEAD -- <pathspecs>`; the return type is RadiusMeasurement from P0, NOT `boolean | "unmeasured"` (retired in R9 as the loose primitive-plus-sentinel union real-git-port.ts forbids in its own source). Memoize per distinct digest — measured ~10.9ms per spawn, ruinous per row.
 Source: SPEC-143 C3, AC-CT-4, D4, Revision Record R8 (the measured git exit semantics).

@@ -11,13 +11,9 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-137
 plan: PLAN-137
-links:
-  - {id: TASK-766, type: blocks}
-  - {id: TASK-764, type: blocks}
-  - {id: TASK-762, type: blocks}
-  - {id: TASK-760, type: blocks}
-  - {id: TASK-758, type: blocks}
 ---
+> ⚠ INVALIDATED 2026-08-23T05:32:31.702Z — superseded by task-skill-test-two-axis-type-foundation-red-test-scenarios; Absorbed into the surviving paired task as its stage GREEN. lore done's third floor (findMissingUnfilteredTestFileRuns, task-workflow-service.ts:2934) has no escape hatch and demands an unfiltered result:pass per declared .test.ts anchor, so a RED-only task owning the failing test file can never archive and deadlocks whatever blocks on it. One task, two sequential claims by two agents.
+
 Estimate: M
 Approach: per SPEC-143 C1 + C2 (v51). RadiusMeasurement is structurally identical to packages/lore/src/adapters/real-git-port.ts::BranchMeasurement — a discriminated union, NEVER a primitive-plus-sentinel union; that file's own source states the rule and the reason.
 Source: SPEC-143 Components C1/C2 and Revision Record R9; sibling precedents BranchMeasurement (object union) and gate-predicates.ts::SessionComparison (bare three-valued string, used where no payload is carried).

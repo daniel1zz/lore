@@ -11,9 +11,9 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-137
 plan: PLAN-137
-links:
-  - {id: TASK-758, type: blocks}
 ---
+> ⚠ INVALIDATED 2026-08-23T05:32:32.032Z — superseded by task-skill-test-stamp-axis-and-the-arming-cutoff-red-test; Absorbed into the surviving paired task as its stage GREEN. lore done's third floor (findMissingUnfilteredTestFileRuns, task-workflow-service.ts:2934) has no escape hatch and demands an unfiltered result:pass per declared .test.ts anchor, so a RED-only task owning the failing test file can never archive and deadlocks whatever blocks on it. One task, two sequential claims by two agents.
+
 Estimate: M
 Approach: per SPEC-143 C2 and AC-CT-3 (v51), and ADR-034 as amended 2026-08-21. Classification uses arming_rev — MAX(id) FROM audit captured once in the arming commit and stored as a constant — compared against the row's audit.id. ⛔ A timestamp cutoff is explicitly rejected: it would be mintable by choosing when to write, while audit.id sits on an append-only hash-chained table.
 Source: SPEC-143 C2, AC-CT-3, Revision Records R1/R9; ADR-034 Amendment.

@@ -6412,6 +6412,130 @@
     "01M0PGNB0F4FWFHAT7Y3947X97": {
       "human_id": "KN-504",
       "file_path": "docs/requirements/knowledge/KN-504-handoff-agent-main-orchestrator.md"
+    },
+    "01M0PM9Q50RKW9663PWNCRDMSA": {
+      "human_id": "SPEC-145",
+      "file_path": "docs/requirements/spec/SPEC-145-the-defect-channel-reaches-no-machine-but-its-own.md"
+    },
+    "01M0PM7CR1YAYHG3MJ347D1NFP": {
+      "human_id": "ADR-037",
+      "file_path": "docs/requirements/adr/ADR-037-a-tracker-is-replaceable-a-corpus-is-not-github-is.md"
+    },
+    "01M0PNYCWDF62HBGHV0M4BR6PH": {
+      "human_id": "KN-505",
+      "file_path": "docs/requirements/knowledge/KN-505-lore-evidence-capture-now-clears-the-attested-floo.md"
+    },
+    "01M0PPV502QA4HVESP4NET4FN2": {
+      "human_id": "KN-506",
+      "file_path": "docs/requirements/knowledge/KN-506-a-gate-at-the-end-of-a-chain-is-never-invoked-whil.md"
+    },
+    "01M0PNH3N5KHY5QGZZVFHS7R6Z": {
+      "human_id": "KN-507",
+      "file_path": "docs/requirements/knowledge/KN-507-five-gaps-from-landing-plan-a-s-type-foundation-tw.md"
+    },
+    "01M0PMETY9M5H3WS3HCZPNM7FS": {
+      "human_id": "KN-508",
+      "file_path": "docs/requirements/knowledge/KN-508-lore-feed-s-readiness-line-counts-retracted-tasks.md"
+    },
+    "01M0PJDZRXJJSJ2XXRWB3CMHDB": {
+      "human_id": "KN-509",
+      "file_path": "docs/requirements/knowledge/KN-509-handoff-agent-main-orchestrator.md"
+    },
+    "01M0PJ789V7T31QYYR163TP77Q": {
+      "human_id": "KN-510",
+      "file_path": "docs/requirements/knowledge/KN-510-ten-measured-gaps-from-landing-plan-a-wave-1-and-t.md"
+    },
+    "01M0Q10DWA0J2BS9HDRBVQ41HS": {
+      "human_id": "PLAN-138",
+      "file_path": "docs/requirements/plan/PLAN-138-land-the-github-intake-defect-channel-runner-cap-r.md"
+    },
+    "01M0Q17A5R205T56K3PAB3Y5G4": {
+      "human_id": "TASK-774",
+      "file_path": "docs/requirements/task/TASK-774-skill-implement-githubintakeport-and-the-live-fili.md"
+    },
+    "01M0Q19TS7RZQRAWES8CGEWCXF": {
+      "human_id": "TASK-775",
+      "file_path": "docs/requirements/task/TASK-775-skill-test-final-verification-full-suite-attested.md"
+    },
+    "01M0Q19TEH4G90NM0SE6SJ6S4G": {
+      "human_id": "TASK-776",
+      "file_path": "docs/requirements/task/TASK-776-skill-implement-lore-issues-verify-plus-batched-re.md"
+    },
+    "01M0Q19T42RYR8S0WHN8JC5KR1": {
+      "human_id": "TASK-777",
+      "file_path": "docs/requirements/task/TASK-777-skill-test-issues-verify-drift-detection-and-filte.md"
+    },
+    "01M0Q19SSXMEVP2771ERSSTN76": {
+      "human_id": "TASK-778",
+      "file_path": "docs/requirements/task/TASK-778-skill-implement-resolutionprojector-invoked-from-l.md"
+    },
+    "01M0Q19SE9P1DD2GGN511F2CXM": {
+      "human_id": "TASK-779",
+      "file_path": "docs/requirements/task/TASK-779-skill-test-projector-9-state-round-trip-and-its-li.md"
+    },
+    "01M0Q19S30XFD2KVNARPN595BV": {
+      "human_id": "TASK-780",
+      "file_path": "docs/requirements/task/TASK-780-skill-implement-delete-the-sqlite-transport-module.md"
+    },
+    "01M0Q19RS7C584PZZPQ1RBQW47": {
+      "human_id": "TASK-781",
+      "file_path": "docs/requirements/task/TASK-781-skill-test-retired-transport-keys-parse-with-warni.md"
+    },
+    "01M0Q19RF6WWEM7HHKNC2ZTX22": {
+      "human_id": "TASK-782",
+      "file_path": "docs/requirements/task/TASK-782-skill-implement-migrate-the-12-filed-reports-with.md"
+    },
+    "01M0Q19QZ5J71J2CR7HTGNH466": {
+      "human_id": "TASK-783",
+      "file_path": "docs/requirements/task/TASK-783-skill-test-migration-integrity-and-dry-run-red-sce.md"
+    },
+    "01M0Q179NFXB39XCH5A9ZA4G94": {
+      "human_id": "TASK-784",
+      "file_path": "docs/requirements/task/TASK-784-skill-test-cross-machine-reachability-e2e-against.md"
+    },
+    "01M0Q15ZSRC5XTHC50AZ174PA7": {
+      "human_id": "TASK-785",
+      "file_path": "docs/requirements/task/TASK-785-skill-implement-receiptlogv2-two-phase-log-on-a-ne.md"
+    },
+    "01M0Q15ZFPM7F5MKPHFFGA8Q5Z": {
+      "human_id": "TASK-786",
+      "file_path": "docs/requirements/task/TASK-786-skill-test-two-phase-receipt-intent-outcome-pairin.md"
+    },
+    "01M0Q15Z49X6G56DHECJVC25FP": {
+      "human_id": "TASK-787",
+      "file_path": "docs/requirements/task/TASK-787-skill-implement-frontmattercodec-with-identity-red.md"
+    },
+    "01M0Q15YT7PTN2XCS8WA5R0QQ1": {
+      "human_id": "TASK-788",
+      "file_path": "docs/requirements/task/TASK-788-skill-test-front-matter-round-trip-and-identity-re.md"
+    },
+    "01M0Q15YGQFP1CVEVXN5QD8FK2": {
+      "human_id": "TASK-789",
+      "file_path": "docs/requirements/task/TASK-789-skill-implement-delete-the-six-cap-symbols-and-ret.md"
+    },
+    "01M0Q15Y0TX3CQKG4YKEFMZCNN": {
+      "human_id": "TASK-790",
+      "file_path": "docs/requirements/task/TASK-790-skill-test-retired-cap-key-parses-with-a-warning-w.md"
+    },
+    "01M0Q14208DS1QQ1HAG4NBYA6Z": {
+      "human_id": "TASK-791",
+      "file_path": "docs/requirements/task/TASK-791-skill-test-regression-guard-a-github-close-cannot.md"
+    },
+    "01M0Q141PHYXR3PB0AD7188YER": {
+      "human_id": "TASK-792",
+      "file_path": "docs/requirements/task/TASK-792-skill-implement-lore-setup-check-read-only-health.md"
+    },
+    "01M0Q141APJ8Y3T1914YHM106T": {
+      "human_id": "TASK-793",
+      "file_path": "docs/requirements/task/TASK-793-skill-test-setup-check-health-probe-red-scenarios.md"
+    },
+    "01M0Q12BY2VGN8J37HMZC78520": {
+      "human_id": "TASK-794",
+      "file_path": "docs/requirements/task/TASK-794-skill-implement-ghrunner-as-the-single-gh-subproce.md"
+    },
+    "01M0Q12BDD1X84APX46QT70D8K": {
+      "human_id": "TASK-795",
+      "file_path": "docs/requirements/task/TASK-795-skill-test-ghrunner-auth-env-scrub-and-error-taxon.md"
     }
   }
 }

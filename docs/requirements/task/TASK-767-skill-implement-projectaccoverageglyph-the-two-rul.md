@@ -11,9 +11,9 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-137
 plan: PLAN-137
-links:
-  - {id: TASK-758, type: blocks}
 ---
+> ⚠ INVALIDATED 2026-08-23T05:32:31.859Z — superseded by task-skill-test-glyph-projection-and-the-two-rule-renderer-scan; Absorbed into the surviving paired task as its stage GREEN. lore done's third floor (findMissingUnfilteredTestFileRuns, task-workflow-service.ts:2934) has no escape hatch and demands an unfiltered result:pass per declared .test.ts anchor, so a RED-only task owning the failing test file can never archive and deadlocks whatever blocks on it. One task, two sequential claims by two agents.
+
 Estimate: L
 Approach: per SPEC-143 C4, C8 and D7 (v51). projectAcCoverageGlyph sits beside deriveAcCoverageState in packages/core/src/acceptance.ts and declares the glyph ALPHABET; the scan IMPORTS that alphabet and never re-lists it. Scan shape follows scripts/check-plan-membership-sites.ts (exit 1 = violation, exit EXACTLY 2 = scan broke).
 Source: SPEC-143 Components C4/C8, Trade-off D7, Revision Records R2/R7/R9.

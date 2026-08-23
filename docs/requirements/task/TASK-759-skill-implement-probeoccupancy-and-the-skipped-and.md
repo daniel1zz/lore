@@ -11,9 +11,9 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-137
 plan: PLAN-137
-links:
-  - {id: TASK-758, type: blocks}
 ---
+> ⚠ INVALIDATED 2026-08-23T05:32:32.534Z — superseded by task-skill-test-occupancy-skipped-and-continue-with-its-live; Absorbed into the surviving paired task as its stage GREEN. lore done's third floor (findMissingUnfilteredTestFileRuns, task-workflow-service.ts:2934) has no escape hatch and demands an unfiltered result:pass per declared .test.ts anchor, so a RED-only task owning the failing test file can never archive and deadlocks whatever blocks on it. One task, two sequential claims by two agents.
+
 Estimate: M
 Approach: per SPEC-143 C6 and AC-CT-8 (v51). probeOccupancy() reports MACHINE occupancy — a live pid holding the checkout-level lock — as opposed to active_sessions, which reports INTENT occupancy (claim leases with a TTL). Export it read-only from scripts/oracle-lock.ts.
 Source: SPEC-143 C6, AC-CT-8, QA-5, goal G5.

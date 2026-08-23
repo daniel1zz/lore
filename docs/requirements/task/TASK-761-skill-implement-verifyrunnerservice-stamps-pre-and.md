@@ -11,9 +11,9 @@ updated: 2026-08-23
 tags: []
 parent: PLAN-137
 plan: PLAN-137
-links:
-  - {id: TASK-758, type: blocks}
 ---
+> ⚠ INVALIDATED 2026-08-23T05:32:32.365Z — superseded by task-skill-test-pre-post-stamp-demotion-with-a-real-commit-in; Absorbed into the surviving paired task as its stage GREEN. lore done's third floor (findMissingUnfilteredTestFileRuns, task-workflow-service.ts:2934) has no escape hatch and demands an unfiltered result:pass per declared .test.ts anchor, so a RED-only task owning the failing test file can never archive and deadlocks whatever blocks on it. One task, two sequential claims by two agents.
+
 Estimate: L
 Approach: per SPEC-143 AC-CT-5 and C5 (v51). The runner captures the state stamp BEFORE the command and re-reads it AFTER; differing values demote the row. INJECTION SEAM IS PINNED: a real commit in a throwaway git repo landing between the two reads.
 Source: SPEC-143 AC-CT-5, C5.
