@@ -1,8 +1,10 @@
 /**
  * Hybrid dependency materializer oracle for AC-SD-1 / AC-SD-2 / AC-SD-3 / AC-SD-4
+ * / AC-SD-5 / AC-SD-8
  * (spec-a-falsifier-s-scratch-worktree-must-be-runnable-and,
  * adr-a-falsifier-s-scratch-worktree-gets-dependencies-by-hybrid,
- * task-build-the-hybrid-dependency-materializer-and-prove).
+ * task-build-the-hybrid-dependency-materializer-and-prove,
+ * task-serve-both-runners-from-one-materialized-worktree-and-make).
  *
  * Every fixture here is a THROWAWAY `mkdtemp` + `git init` repo — NEVER this
  * repo's own working tree (see CLAUDE.md: never write to this repo's own
@@ -67,8 +69,43 @@
  *     own `node_modules/@fixture/*` link targets (instead of only ever
  *     writing under the scratch tree), then running
  *     `-t "main checkout untouched"`.
+ *   - AC-SD-5 / AC-SD-8 are different in kind from AC-SD-1..4: their own
+ *     production surfaces (`materializeFalsifierDependencies`,
+ *     `removeFalsifierScratchWorktree`) are OUT OF this task's file anchors
+ *     (the former belongs to the task that landed it; wiring cleanup safety
+ *     is this task's only permitted source change, and it needed none — see
+ *     below). So each RED here was produced by temporarily UNDOING the "RED"
+ *     it()'s own bug-simulation step (never a change to production code),
+ *     observing the SAME assertion that stays green today fail for real, then
+ *     restoring it — the equivalent proof that the assertion has
+ *     discriminating power without touching a file outside this task's anchor:
+ *     - AC-SD-5 RED(i): temporarily commented out the `rmSync(...".bin")` line
+ *       in "both runners: ERROR (RED i...)", then ran `-t "both runners"` —
+ *       `expect(vitestRun.status).not.toBe(0)` failed because the untouched
+ *       `.bin` redirect let the vitest invocation exit 0, proving the
+ *       assertion actually depends on that omission.
+ *     - AC-SD-5 RED(ii): temporarily inserted a real
+ *       `materializeFalsifierDependencies` call into "both runners: BOUNDARY
+ *       (RED ii...)" (contradicting its own "deliberately never called"
+ *       comment), then ran `-t "both runners"` — `expect(bunTestRun.status).not.toBe(0)`
+ *       failed because materialization made the bun half green, proving the
+ *       assertion actually depends on materialization being skipped.
+ *     - AC-SD-8 RED(i): temporarily replaced the `followSymlinksRecursiveDelete`
+ *       call in "cleanup cannot escape: ERROR (RED i...)" with the real
+ *       `removeFalsifierScratchWorktree`, then ran `-t "cleanup cannot escape"`
+ *       — `expect(existsSync(sentinelPath)).toBe(false)` failed because the
+ *       real (safe) cleanup left the sentinel intact, proving the assertion
+ *       actually depends on the buggy follow-symlinks shape being exercised.
+ *     - AC-SD-8 RED(ii): temporarily called the real
+ *       `removeFalsifierScratchWorktree` inside "cleanup cannot escape:
+ *       NEGATIVE (RED ii...)" instead of doing nothing, then ran
+ *       `-t "cleanup cannot escape"` — `expect(existsSync(scratch.parentDir)).toBe(true)`
+ *       failed because real cleanup actually removed it, proving the assertion
+ *       actually depends on cleanup being skipped.
+ *     Exact commands/observed exit codes are recorded in this task's evidence
+ *     log, not re-derived here.
  *
- * @spec_ref AC-SD-1, AC-SD-2, AC-SD-3, AC-SD-4
+ * @spec_ref AC-SD-1, AC-SD-2, AC-SD-3, AC-SD-4, AC-SD-5, AC-SD-8
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -88,7 +125,7 @@ import {
   cpSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { createHash } from "node:crypto";
 import {
   materializeFalsifierDependencies,
@@ -638,34 +675,42 @@ describe("main checkout untouched", () => {
     15000,
   );
 
-  it("main checkout untouched: ERROR (RED i, permanently pinned) — mutating a tracked file directly in the main checkout is detected by the digest check", () => {
-    const { repoRoot } = makeFixtureMainRepo();
-    const digestBefore = digestGitLsFiles(repoRoot);
+  it(
+    "main checkout untouched: ERROR (RED i, permanently pinned) — mutating a tracked file directly in the main checkout is detected by the digest check",
+    () => {
+      const { repoRoot } = makeFixtureMainRepo();
+      const digestBefore = digestGitLsFiles(repoRoot);
 
-    // simulate a buggy implementation that mutates the WORKING TREE directly
-    // instead of a scratch copy, with no revert.
-    writeFileSync(join(repoRoot, "packages", "core", "index.js"), 'module.exports = { PROBE: "LEAKED" };\n', "utf8");
+      // simulate a buggy implementation that mutates the WORKING TREE directly
+      // instead of a scratch copy, with no revert.
+      writeFileSync(join(repoRoot, "packages", "core", "index.js"), 'module.exports = { PROBE: "LEAKED" };\n', "utf8");
 
-    expect(digestGitLsFiles(repoRoot)).not.toBe(digestBefore);
-  });
+      expect(digestGitLsFiles(repoRoot)).not.toBe(digestBefore);
+    },
+    15000,
+  );
 
-  it("main checkout untouched: NEGATIVE (RED ii, permanently pinned) — a single hardcoded path misses a mutation the full derived-set digest catches", () => {
-    const { repoRoot } = makeFixtureMainRepo();
-    const narrowRelPath = join("packages", "core", "index.js");
-    const fullDigestBefore = digestGitLsFiles(repoRoot);
-    const narrowDigestBefore = digestSinglePath(repoRoot, narrowRelPath);
+  it(
+    "main checkout untouched: NEGATIVE (RED ii, permanently pinned) — a single hardcoded path misses a mutation the full derived-set digest catches",
+    () => {
+      const { repoRoot } = makeFixtureMainRepo();
+      const narrowRelPath = join("packages", "core", "index.js");
+      const fullDigestBefore = digestGitLsFiles(repoRoot);
+      const narrowDigestBefore = digestSinglePath(repoRoot, narrowRelPath);
 
-    // mutate a DIFFERENT tracked file than the one the narrow check watches.
-    writeFileSync(join(repoRoot, "packages", "extra", "index.js"), "module.exports = { LEAKED: true };\n", "utf8");
+      // mutate a DIFFERENT tracked file than the one the narrow check watches.
+      writeFileSync(join(repoRoot, "packages", "extra", "index.js"), "module.exports = { LEAKED: true };\n", "utf8");
 
-    expect(digestGitLsFiles(repoRoot), "the full, git-ls-files-derived digest must catch this").not.toBe(
-      fullDigestBefore,
-    );
-    expect(
-      digestSinglePath(repoRoot, narrowRelPath),
-      "a single hardcoded path must MISS a mutation to a different tracked file — proving why the path set must be enumerated, not chosen",
-    ).toBe(narrowDigestBefore);
-  });
+      expect(digestGitLsFiles(repoRoot), "the full, git-ls-files-derived digest must catch this").not.toBe(
+        fullDigestBefore,
+      );
+      expect(
+        digestSinglePath(repoRoot, narrowRelPath),
+        "a single hardcoded path must MISS a mutation to a different tracked file — proving why the path set must be enumerated, not chosen",
+      ).toBe(narrowDigestBefore);
+    },
+    15000,
+  );
 
   it("main checkout untouched: STATE (RED iii, permanently pinned) — repointing the main checkout's own scope link targets is detected and named", () => {
     const { repoRoot } = makeFixtureMainRepo();
@@ -683,5 +728,272 @@ describe("main checkout untouched", () => {
       (name) => scopeLinksAfter[name] !== scopeLinksBefore[name],
     );
     expect(changedEntries).toEqual(["core"]);
+  });
+});
+
+// ─── AC-SD-5 ────────────────────────────────────────────────────────────────
+
+/**
+ * Finds the nearest ancestor of `startDir` (inclusive) carrying a
+ * `package.json` AND a REAL, INSTALLED `node_modules/.bin` — i.e. "the
+ * checked-out repo with installed dependencies this test suite is actually
+ * running from," never a hardcoded machine-specific path. Checking
+ * `node_modules` alone is NOT enough: running `vitest` itself lazily creates
+ * a bare `node_modules/.vite*` optimize-deps cache with no `.bin` and no real
+ * packages (measured directly in this task's own dispatched worktree, which
+ * otherwise has no `node_modules` of its own at all), which would satisfy a
+ * weaker check while still being unusable as a `materializeFalsifierDependencies`
+ * source. `.bin` is the signal a genuine package-manager install populates
+ * and a bare vitest cache never does.
+ *
+ * A worktree dispatched under THIS repo's own `.claude/worktrees/<name>`
+ * convention (root CLAUDE.md "Worktree 并发安全") has no `node_modules` of its
+ * own; this walk lands on the ancestor checkout that does — mirroring the
+ * SAME ancestor `node_modules` resolution that already lets this test file's
+ * own `@lore/core` bare-specifier imports (transitively, via
+ * `in-memory-store.ts`/`sqlite-store.ts`) succeed when this suite itself runs
+ * from inside such a worktree. Throws (never a silent fallback) when no
+ * ancestor qualifies — AC-SD-5 needs a real, dependency-installed checkout to
+ * source both runners from; a caller running this suite with no such
+ * ancestor gets a loud, named failure instead of a false pass or a false red.
+ */
+function findNearestRepoRootWithNodeModules(startDir: string): string {
+  let dir = startDir;
+  for (;;) {
+    if (existsSync(join(dir, "node_modules", ".bin")) && existsSync(join(dir, "package.json"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      throw new Error(
+        `no ancestor of "${startDir}" has both a package.json and an installed node_modules/.bin — AC-SD-5 requires a real, dependency-installed checkout to source the two runners from.`,
+      );
+    }
+    dir = parent;
+  }
+}
+
+/** Relative to the real repo root — an existing, fast, dependency-requiring vitest target (imports `@lore/core` transitively via `in-memory-store.ts`). */
+const REAL_VITEST_TARGET_REL = join("packages", "lore", "tests", "unit", "store", "paging.test.ts");
+/** Relative to `packages/lore` — an existing, known-good `.bun.test.ts` target (imports `@lore/core` transitively via `sqlite-store.ts`). */
+const REAL_BUN_TEST_TARGET_REL = join("tests", "unit", "store", "sqlite-store.bun.test.ts");
+
+describe("both runners", () => {
+  it(
+    "both runners: HAPPY — one materialized scratch worktree runs a vitest target and a .bun.test.ts target, each exiting exactly 0 with its own summary line",
+    () => {
+      const mainRepoRoot = findNearestRepoRootWithNodeModules(process.cwd());
+      const scratch = createScratch(mainRepoRoot);
+      const materialized = materializeFalsifierDependencies(scratch.worktreeDir, mainRepoRoot);
+      expect(materialized.ok).toBe(true);
+      if (!materialized.ok) return;
+
+      // vitest half — driven via the scratch tree's OWN materialized
+      // `node_modules/.bin/vitest`, never `bunx`'s separate "automatically
+      // installing into a global shared cache if not installed in
+      // node_modules" fallback (`bunx --help`'s own words): that fallback can
+      // mask a broken `.bin` redirect on any machine that already has vitest
+      // cached globally (measured on this dev machine), which is exactly the
+      // green-only trap RED(i) below exists to catch.
+      // `NO_COLOR` (universal convention, https://no-color.org) forces plain
+      // output regardless of the OUTER vitest process's own TTY detection —
+      // without it, a `COLORTERM`/`FORCE_COLOR` inherited from an interactive
+      // parent shell embeds ANSI escape codes INSIDE the summary line (e.g.
+      // between "Files" and "1"), breaking the plain-substring check below
+      // even though the run genuinely passed (measured directly).
+      const plainOutputEnv = { ...process.env, NO_COLOR: "1" };
+      const vitestBin = join(scratch.worktreeDir, "node_modules", ".bin", "vitest");
+      const vitestRun = spawnSync(vitestBin, ["run", REAL_VITEST_TARGET_REL], {
+        cwd: scratch.worktreeDir,
+        encoding: "utf8",
+        env: plainOutputEnv,
+      });
+      const vitestOutput = `${vitestRun.stdout ?? ""}${vitestRun.stderr ?? ""}`;
+      expect(vitestRun.status, `vitest output:\n${vitestOutput}`).toBe(0);
+      expect(vitestOutput).toContain("Test Files  1 passed");
+
+      // bun test half — a real `.bun.test.ts` file, run from `packages/lore`
+      // (its own package root, matching `bun run test:bun`'s own cwd).
+      const bunTestRun = spawnSync("bun", ["test", REAL_BUN_TEST_TARGET_REL], {
+        cwd: join(scratch.worktreeDir, "packages", "lore"),
+        encoding: "utf8",
+        env: plainOutputEnv,
+      });
+      const bunOutput = `${bunTestRun.stdout ?? ""}${bunTestRun.stderr ?? ""}`;
+      expect(bunTestRun.status, `bun test output:\n${bunOutput}`).toBe(0);
+      expect(bunOutput).toContain("0 fail");
+    },
+    30000,
+  );
+
+  it(
+    "both runners: ERROR (RED i, permanently pinned) — omitting the dotted .bin entry from the symlinked set breaks the vitest invocation",
+    () => {
+      const mainRepoRoot = findNearestRepoRootWithNodeModules(process.cwd());
+      const scratch = createScratch(mainRepoRoot);
+      const materialized = materializeFalsifierDependencies(scratch.worktreeDir, mainRepoRoot);
+      expect(materialized.ok).toBe(true);
+      if (!materialized.ok) return;
+
+      // simulate "omit dotted entries (notably .bin) from the symlinked set"
+      // by deleting the `.bin` symlink this REAL materialize call itself just
+      // created — never a code change to the materializer (out of this
+      // task's anchor).
+      rmSync(join(scratch.worktreeDir, "node_modules", ".bin"), { force: true });
+
+      const vitestBin = join(scratch.worktreeDir, "node_modules", ".bin", "vitest");
+      const vitestRun = spawnSync(vitestBin, ["run", REAL_VITEST_TARGET_REL], {
+        cwd: scratch.worktreeDir,
+        encoding: "utf8",
+      });
+      // THE TRAP, pinned permanently: there is no `.bin/vitest` to spawn at
+      // all — `spawnSync` never reaches a real exit code (0), reporting the
+      // failure via `.error` (ENOENT) instead. Both are asserted: `status`
+      // alone (never 0, whether null/undefined) plus a defined `.error`,
+      // proving the HAPPY test's IDENTICAL invocation above actually depends
+      // on the `.bin` redirect materialization built.
+      expect(vitestRun.status, "expected the vitest invocation to fail once .bin is omitted").not.toBe(0);
+      expect(vitestRun.error).toBeDefined();
+    },
+    30000,
+  );
+
+  it(
+    "both runners: BOUNDARY (RED ii, permanently pinned) — the SAME bun command exits nonzero when materialization is skipped, proving materialization (not the bun runner alone) makes the bun half green",
+    () => {
+      const mainRepoRoot = findNearestRepoRootWithNodeModules(process.cwd());
+      const scratch = createScratch(mainRepoRoot);
+      // materializeFalsifierDependencies deliberately never called — this is
+      // AC-SD-5's own required control: without it, `node_modules` does not
+      // exist in the scratch tree at all.
+
+      const bunTestRun = spawnSync("bun", ["test", REAL_BUN_TEST_TARGET_REL], {
+        cwd: join(scratch.worktreeDir, "packages", "lore"),
+        encoding: "utf8",
+      });
+      const bunOutput = `${bunTestRun.stdout ?? ""}${bunTestRun.stderr ?? ""}`;
+      // THE TRAP, pinned permanently: with no materialized node_modules at
+      // all, bare-specifier resolution of `@lore/core` fails outright — never
+      // treated as a proven red by anything else in this suite, exactly
+      // mirroring "mutation observability"'s own BOUNDARY test one describe
+      // block up.
+      expect(
+        bunTestRun.status,
+        `expected a nonzero exit with materialization skipped; output:\n${bunOutput}`,
+      ).not.toBe(0);
+      expect(bunOutput.toLowerCase()).toContain("cannot find module");
+    },
+    30000,
+  );
+});
+
+// ─── AC-SD-8 ────────────────────────────────────────────────────────────────
+
+/**
+ * Recursively deletes `dirPath`, WRONGLY dereferencing symlinks first instead
+ * of unlinking them — the REJECTED cleanup shape AC-SD-8's RED(i) exists to
+ * catch. NEVER used by production code (`removeFalsifierScratchWorktree`
+ * itself is never modified by this function or by this task — see this
+ * task's own completion report for why measurement showed it already safe).
+ */
+function followSymlinksRecursiveDelete(dirPath: string): void {
+  for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+    const fullPath = join(dirPath, entry.name);
+    if (entry.isSymbolicLink()) {
+      // THE BUG: deletes what the symlink POINTS TO (dereferenced via
+      // `realpathSync`), instead of unlinking the symlink entry itself —
+      // exactly the destructive shape this AC exists to refuse.
+      rmSync(realpathSync(fullPath), { recursive: true, force: true });
+    } else if (entry.isDirectory()) {
+      followSymlinksRecursiveDelete(fullPath);
+    } else {
+      rmSync(fullPath, { force: true });
+    }
+  }
+}
+
+describe("cleanup cannot escape", () => {
+  it("cleanup cannot escape: HAPPY/REGRESSION — a sentinel inside the main checkout's node_modules survives a real materialize + cleanup cycle, and the scratch parent is gone", () => {
+    const { repoRoot } = makeFixtureMainRepo();
+    // The sentinel lives INSIDE the named third-party entry ("vitest") that
+    // materialization symlinks straight from the main checkout — mirroring
+    // the real "400+ symlinks pointing INTO the developer's real
+    // node_modules" shape this AC's own prose describes, never a bare
+    // top-level file that no symlink chain would ever reach through.
+    const sentinelPath = join(repoRoot, "node_modules", "vitest", "SENTINEL.txt");
+    const sentinelContent = `sentinel-${Date.now()}\n`;
+    writeFileSync(sentinelPath, sentinelContent, "utf8");
+
+    try {
+      const scratch = createScratch(repoRoot);
+      const materialized = materializeFalsifierDependencies(scratch.worktreeDir, repoRoot);
+      expect(materialized.ok).toBe(true);
+
+      removeFalsifierScratchWorktree(repoRoot, scratch);
+      // reason: already cleaned up — don't let afterEach double-remove it.
+      createdScratches.pop();
+
+      expect(existsSync(scratch.parentDir)).toBe(false);
+      expect(existsSync(sentinelPath)).toBe(true);
+      expect(readFileSync(sentinelPath, "utf8")).toBe(sentinelContent);
+    } finally {
+      // reason: this task's own context digest — a sentinel written into a
+      // real node_modules must be cleaned up by the test even on failure.
+      // `repoRoot` itself is a THROWAWAY fixture already destined for
+      // `createdRepos`'s own afterEach removal, but this explicit unlink
+      // keeps the sentinel from surviving even a thrown assertion above it.
+      rmSync(sentinelPath, { force: true });
+    }
+  });
+
+  it("cleanup cannot escape: ERROR (RED i, permanently pinned) — a symlink-FOLLOWING recursive delete destroys the sentinel inside the main checkout's node_modules", () => {
+    const { repoRoot } = makeFixtureMainRepo();
+    const sentinelPath = join(repoRoot, "node_modules", "vitest", "SENTINEL.txt");
+    const sentinelContent = `sentinel-${Date.now()}\n`;
+    writeFileSync(sentinelPath, sentinelContent, "utf8");
+
+    try {
+      const scratch = createScratch(repoRoot);
+      const materialized = materializeFalsifierDependencies(scratch.worktreeDir, repoRoot);
+      expect(materialized.ok).toBe(true);
+
+      // The REJECTED cleanup shape — never calls the production
+      // `removeFalsifierScratchWorktree`.
+      followSymlinksRecursiveDelete(join(scratch.worktreeDir, "node_modules"));
+
+      // THE TRAP, pinned permanently: the "vitest" entry was a symlink INTO
+      // the MAIN checkout's own node_modules/vitest — a follow-symlinks
+      // delete destroys ITS contents, wrongly taking the sentinel with it.
+      expect(
+        existsSync(sentinelPath),
+        "expected the buggy symlink-following delete to WRONGLY destroy the sentinel",
+      ).toBe(false);
+
+      // best-effort: the scratch worktree's node_modules is now
+      // partially/fully destroyed by the deliberately-destructive probe
+      // above; still attempt real removal so this entry doesn't linger.
+      createdScratches.pop();
+      try {
+        removeFalsifierScratchWorktree(repoRoot, scratch);
+      } catch {
+        /* best-effort */
+      }
+    } finally {
+      rmSync(sentinelPath, { force: true });
+    }
+  });
+
+  it("cleanup cannot escape: NEGATIVE (RED ii, permanently pinned) — a no-op cleanup cannot satisfy the scratch-parent-absent half", () => {
+    const { repoRoot } = makeFixtureMainRepo();
+    const scratch = createScratch(repoRoot);
+    const materialized = materializeFalsifierDependencies(scratch.worktreeDir, repoRoot);
+    expect(materialized.ok).toBe(true);
+
+    // The REJECTED no-op cleanup — deliberately never calls
+    // `removeFalsifierScratchWorktree` at all (this AC's own wording: "the
+    // test cannot be satisfied by simply not deleting anything"). Real
+    // removal still happens via the shared `afterEach`, since `scratch` stays
+    // in `createdScratches`.
+    expect(existsSync(scratch.parentDir), "a no-op cleanup must fail this half").toBe(true);
   });
 });
