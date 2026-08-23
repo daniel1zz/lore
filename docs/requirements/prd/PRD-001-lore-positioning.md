@@ -108,14 +108,14 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [knowledge] A symlinked node_modules makes the green control pass while every cross-package mutation goes invisible: runnability and observability are two properties (draft)
+- [knowledge] A symlinked node_modules makes the green control pass while every cross-package mutation goes invisible: runnability and observability are two properties (approved)
+- [adr] A falsifier's scratch worktree gets dependencies by hybrid symlink, with the workspace scope redirected inward — runnability and mutation observability are separate assertions (approved)
 - [spec] A falsifier's scratch worktree must be runnable AND observable: hybrid dependency materialization with the workspace scope redirected inward (approved)
 - [knowledge] Five gaps measured while landing the discovery-refusal guard's second write path: a mirror that reports OK without comparing content, an unattachable red, a quota that drops the newest evidence, a wrapper exit code, and an adopted verdict silently overruled (approved)
 - [knowledge] A declared property with no measuring oracle, and the red-first vs falsifier deadlock that leaves every early AC's discriminating power asserted rather than demonstrated (approved)
 - [task] lore verify --falsify compares only the exit code, so an unrunnable scratch worktree mints a proven red from a module-not-found error (draft)
 - [knowledge] Redeeming three advisories produced two more rounds of the same defect, and the judge's escalation caught a real design break no self-check did (approved)
 - [spec] Oracle executability: a runner's discovery refusal is not a measurement, and must never mint a red (approved)
-- [adr] A falsifier's scratch worktree gets dependencies by hybrid symlink, with the workspace scope redirected inward — runnability and mutation observability are separate assertions (draft)
 - [spec] Corpus truthfulness: a verdict must carry the state it describes, and a post-arming stamp-less record is never green (approved)
 - [task] lore done's test-anchor refusal demands an ATTESTED unfiltered pass, but its predicate never checks attestation — an unattested --capture row satisfies it (draft)
 - [knowledge] The green-control pattern, and its cost: a falsifier that can never go red replaces one that always could (approved)

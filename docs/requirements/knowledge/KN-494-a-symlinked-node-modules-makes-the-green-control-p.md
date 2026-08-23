@@ -3,7 +3,7 @@ id: KN-494
 type: knowledge
 role: knowledge
 title: "A symlinked node_modules makes the green control pass while every cross-package mutation goes invisible: runnability and observability are two properties"
-status: draft
+status: approved
 priority: high
 created: 2026-08-23
 updated: 2026-08-23

@@ -3,7 +3,7 @@ id: ADR-036
 type: adr
 role: decision
 title: "A falsifier's scratch worktree gets dependencies by hybrid symlink, with the workspace scope redirected inward — runnability and mutation observability are separate assertions"
-status: draft
+status: approved
 priority: high
 created: 2026-08-23
 updated: 2026-08-23
@@ -108,3 +108,52 @@ risk is recorded below rather than paid for up front.
 - `git stash create`'s missing untracked files and gitignored `dist/lore` remain
   causes of a legitimate `inconclusive`. This decision addresses ONLY the
   dependency cause.
+
+## Reviewer questions, answered by measurement
+
+The review judge escalated this ADR with three blocking questions. Each is
+answered here from a run, not from reasoning — and the first one is this ADR's
+own generalization turned back on it, which is the right instinct.
+
+**Q1 — for the hybrid row "cross-package mutation visible", was the failure a
+genuine failure from the mutated source, or a module-resolution/startup error
+inside the scratch tree?** A genuine transform-time failure on the mutated file.
+The observed output was an esbuild error naming the SCRATCH path:
+
+```
+<scratch>/packages/core/src/index.ts:82:37: ERROR: Unexpected "="
+  82 |  export const __PROBE_SYNTAX_ERROR_ = = = ;
+```
+
+A module-resolution error names a specifier and produces `ERR_MODULE_NOT_FOUND`
+(that is exactly the shape the no-`node_modules` row produced). The two are
+distinguished by OUTPUT, never by exit code — both are 1 — which is why the
+criterion this ADR authorizes (AC-SD-3) requires exit EXACTLY 1 **and** the
+output to CONTAIN the mutated file's scratch path, and pairs it with an
+in-worktree green control that must exit 0 first. `AC-SD-5`'s companion control
+pins the other direction: a scratch worktree with materialization SKIPPED fails
+the green control itself rather than yielding a spurious red.
+
+**Q2 — do workspace packages resolve via source, or via gitignored `dist/`
+output that `git stash create` cannot carry?** Source. `packages/core/package.json`
+declares `"main": "src/index.ts"` and `"exports": { ".": "./src/index.ts",
+"./node": "./src/node.ts" }`. `packages/*/dist` is gitignored and
+`packages/core/dist` does not exist at all. So a bare-specifier import of
+`@lore/core` resolves to TRACKED SOURCE, which `git stash create` does carry
+into the scratch tree — that is precisely why redirecting the workspace scope
+inward makes a mutation observable. The green-control row was measured on
+`bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts`, which
+imports `@lore/core` by bare specifier and its subject by relative path, i.e. it
+exercises both resolution modes in one command.
+
+⛔ Consequence worth stating: this decision's correctness DEPENDS on workspace
+packages resolving to tracked source. If a workspace package ever switches its
+`exports` to a gitignored `dist/`, the scratch tree loses that package's build
+output and the green control starts failing for that reason alone — the
+mechanism degrades to `inconclusive`, not to a false red, but it degrades.
+
+**Q3 — which AC owns each new consequence?** Named landing points, so neither is
+unfalsifiable:
+- mutation observability → **AC-SD-3** (`spec-a-falsifier-s-scratch-worktree-must-be-runnable-and`), with its green control in the same worktree.
+- workspace member set DERIVED, never enumerated → **AC-SD-2**, whose RED adds a package to the fixture and requires a redirect for it with no code change.
+- shared-third-party residual risk → deliberately NOT owned by an AC; it is accepted and unmitigated above, and `AC-SD-4`'s digest covers `git ls-files` output, which excludes `node_modules`.
