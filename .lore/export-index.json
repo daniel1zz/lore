@@ -6388,6 +6388,10 @@
     "01M0P9MPJBK5K5CEGH4TM4QYSY": {
       "human_id": "KN-499",
       "file_path": "docs/requirements/knowledge/KN-499-four-gaps-measured-while-landing-the-discovery.md"
+    },
+    "01M0P9PTN8GCTZSXSGKYFDCFFY": {
+      "human_id": "KN-500",
+      "file_path": "docs/requirements/knowledge/KN-500-handoff-agent-main-orchestrator.md"
     }
   }
 }
