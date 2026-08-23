@@ -49,8 +49,15 @@
 
 // ─── Memory File Record (caller-assembled, e.g. by real-memory-file-probe.ts) ─
 
-/** A discovered project memory file's role — governs which ceiling pair applies. */
-export type MemoryFileRole = "root" | "module";
+/**
+ * A discovered project memory file's role — governs which ceiling pair
+ * applies. `"rules"` (N7, spec-claude-md-governance-content-dimension-checks-
+ * wire-the) is a THIRD, separate role from `"module"` — a
+ * `.claude/rules/**\/*.md` path-scoped snippet, never a whole module's
+ * standing discipline — so its ceiling breach messages never misreport
+ * "module ceiling" against a file that isn't one.
+ */
+export type MemoryFileRole = "root" | "module" | "rules";
 
 /**
  * One memory file's facts as measured by the caller (typically

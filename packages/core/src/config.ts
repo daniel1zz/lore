@@ -1024,6 +1024,33 @@ export const contextConfigSchema = z
           .strict()
           .default({}),
         /**
+         * Ceiling for `.claude/rules/**\/*.md` path-scoped rule files — a
+         * THIRD, separate ceiling pair (N7,
+         * spec-claude-md-governance-content-dimension-checks-wire-the),
+         * never a reuse of `module`'s. Two reasons a shared ceiling was
+         * rejected: `claude-md-budget.ts`'s messages template the file's own
+         * `role` verbatim (`` `exceeding the ${file.role} ${metric} ceiling` ``),
+         * so a rules file breaching a borrowed `module` ceiling would still
+         * read "module ceiling" in its own finding — a false label for a file
+         * that is never a module memory file; and the two populations have
+         * different natural sizes — a rule file is a single path-scoped
+         * instruction snippet (`paths:`-frontmatter-gated, loaded only when
+         * its glob matches), never a whole module's standing discipline.
+         * Default `100` lines / `8192` bytes — half of `module`'s ceiling,
+         * sized for a narrow single-topic snippet rather than a multi-section
+         * module doc; no back-catalog of real `.claude/rules/` files exists
+         * yet to measure against (this spec ships the discovery mechanism
+         * itself), so the default is reasoned from the files' intended scope,
+         * not a repo measurement.
+         */
+        rules: z
+          .object({
+            max_lines: z.number().int().positive().default(100),
+            max_bytes: z.number().int().positive().default(8192),
+          })
+          .strict()
+          .default({}),
+        /**
          * Fraction (0–1) of a ceiling at which `computeHeadroom`
          * (`packages/lore/src/service/claude-md-check.ts`) marks a metric as
          * "approaching" — an ADVISORY-only warning surfaced by `lore status
@@ -1203,7 +1230,7 @@ export const LoreConfigSchema = z
      * Project memory-file (CLAUDE.md) governance configuration
      * (spec-project-claude-md-content-contract-governance-injected §D1/D8).
      * When absent, {@link resolveMemoryFileBudgets} returns the schema
-     * defaults (root 300L/30720B, module 200L/16384B, enabled: true).
+     * defaults (root 300L/30720B, module 200L/16384B, rules 100L/8192B, enabled: true).
      */
     context: contextConfigSchema.optional(),
     /**
@@ -1950,7 +1977,7 @@ export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined)
  * Mirrors {@link resolveStalenessDefaults}/{@link resolveDriftEnabled} —
  * absence of the whole config, the `context` section, or
  * `context.memory_files` specifically all fall back to the schema defaults
- * (root 300L/30720B, module 200L/16384B, enabled: true,
+ * (root 300L/30720B, module 200L/16384B, rules 100L/8192B, enabled: true,
  * filenames: ["CLAUDE.md"], warn_threshold_fraction: 0.9). Unlike
  * {@link resolveBootstrapInjectionBudgets}, this returns the section's own
  * snake_case shape verbatim — no camelCase projection — since
@@ -1959,12 +1986,12 @@ export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined)
  * `MemoryFileFinding` shape is itself snake_case-free-form.
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `{enabled, filenames, root: {max_lines, max_bytes}, module: {max_lines, max_bytes}, warn_threshold_fraction}`
+ * @returns `{enabled, filenames, root: {max_lines, max_bytes}, module: {max_lines, max_bytes}, rules: {max_lines, max_bytes}, warn_threshold_fraction}`
  * @example
  *   resolveMemoryFileBudgets(undefined)
- *   // => { enabled: true, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384}, warn_threshold_fraction: 0.9 }
+ *   // => { enabled: true, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384}, rules: {max_lines: 100, max_bytes: 8192}, warn_threshold_fraction: 0.9 }
  *   resolveMemoryFileBudgets({ ..., context: { memory_files: { enabled: false } } })
- *   // => { enabled: false, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384}, warn_threshold_fraction: 0.9 }
+ *   // => { enabled: false, filenames: ["CLAUDE.md"], root: {max_lines: 300, max_bytes: 30720}, module: {max_lines: 200, max_bytes: 16384}, rules: {max_lines: 100, max_bytes: 8192}, warn_threshold_fraction: 0.9 }
  */
 export function resolveMemoryFileBudgets(config: LoreConfig | undefined): MemoryFileBudgets {
   return (config?.context ?? contextConfigSchema.parse({})).memory_files;
