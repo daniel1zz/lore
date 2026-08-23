@@ -146,7 +146,7 @@ Building Lore is itself run **through** the Lore-governed workflow (corpus chain
 
 **Standing lessons** — one line each, scope only. Full text: `knowledge-retired-from-root-claude-md-the-19-dogfooding`, `knowledge-retired-from-root-claude-md-2026-08-13-three-standing`; pre-2026-07-22 history: `docs/claude-md-archive/dogfood-eval-log.md` (FROZEN).
 
-- False oracles — exit-code-true ≠ measured-the-right-thing; V7: one exit code cannot tell "it failed" from "never ran" — pair with a GREEN control. `knowledge-the-green-control-pattern-and-its-cost-a-falsifier`
+- False oracles — exit-code-true ≠ measured-the-right-thing; V7 pair a GREEN control; V8 it proves the harness STARTED, never that it SEES the copy it runs. `knowledge-a-symlinked-node-modules-makes-the-green-control-pass`
 - Eight pointer-less lessons were evicted VERBATIM and remain normative — substring matchers, SSOT↔asset parity, distribution oracles, worktree dispatch order, `spawnSync`/`set -e`, main-checkout actor, path-scoped commits, clean-tree verdicts: `knowledge-retired-from-root-claude-md-eight-pointer-less`
 - ⛔ NINE lessons were evicted as UNENFORCED — nothing refuses them if violated. They stay NORMATIVE, and each names the mechanism it still needs: `knowledge-the-nine-unenforced-standing-lessons-evicted-from`. That count is the honest distance to unattended operation. A `plan-close` prose copy was also dropped: the gate enforces it (`lore gate plan-close --explain` is the SSOT).
 - Distribution-first: name the delivery surface or it does not exist for consumers. `adr-distribution-first-every-improvement-names-its-consumer`
