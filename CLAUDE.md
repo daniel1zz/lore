@@ -43,7 +43,7 @@ bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
 bun run test:bun          # cd packages/lore && bun test .bun.test
 bun run test              # both runners in sequence
 bun run test:changed [<base>]  # deterministic worktree oracle (default base: merge-base main HEAD); --list previews
-                               # ⛔ STILL UNDER-SELECTS: a tree-scanning test naming no literal path, and any consumer reaching its target through a dynamic `await import()` — run those BY HAND. Also structurally blind to `.bun.test.ts` via `vitest --changed`. The `hooks/**` + `assets/**` gap is CLOSED (`16a24f00`, AC-TC-4): a hook or asset edit now selects both pre-push guards, verified on the shipped CLI with real git data. ⛔ The marker-ONLY fix was measured INERT — membership and scope are two conjunctive gates and both must change. `knowledge-bun-run-test-changed-full-selection-contract-and-its`
+                               # ⛔ STILL UNDER-SELECTS: a tree-scanning test naming no literal path, and any consumer reaching its target through a dynamic `await import()` — run those BY HAND. Also structurally blind to `.bun.test.ts` via `vitest --changed`. ⛔ It also OVER-selects: a high-fan-in edit selected 623 files = the full suite a worktree forbids, so it is UNUSABLE there — hand-pick direct consumers, re-verify on main. `hooks/**`+`assets/**` is CLOSED (`16a24f00`, AC-TC-4). ⛔ The marker-ONLY fix was measured INERT — membership and scope are two conjunctive gates and both must change. `knowledge-bun-run-test-changed-full-selection-contract-and-its`
 
 # Run a single vitest test file
 bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts
