@@ -6396,6 +6396,14 @@
     "01M0PCHRFHPQHKTJ5QY94Q5YKT": {
       "human_id": "KN-501",
       "file_path": "docs/requirements/knowledge/KN-501-handoff-agent-main-orchestrator.md"
+    },
+    "01M0PEBZ8Q9EVZ79AYJ5Y0HZN0": {
+      "human_id": "TASK-773",
+      "file_path": "docs/requirements/task/TASK-773-make-the-falsifier-s-negative-control-a-permanent.md"
+    },
+    "01M0PE3J73N9D8J5547Z086XW3": {
+      "human_id": "KN-502",
+      "file_path": "docs/requirements/knowledge/KN-502-assessment-make-a-falsifier-s-scratch-worktree.md"
     }
   }
 }

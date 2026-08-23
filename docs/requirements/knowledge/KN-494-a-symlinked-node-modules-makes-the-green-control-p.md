@@ -140,3 +140,107 @@ false at the predicate, not merely misleading in prose. Filed as
    one call. ⇒ A plan body naming a defect id is a candidate for an automatic
    edge, or at minimum for a `plan-close` advisory; today the only thing standing
    between "fixed" and "still blocking the channel" is an agent remembering.
+
+## F6 — the fix works: eight attested reds, and the negative control that proves it is not saying yes to everything
+
+Measured 2026-08-23 after the hybrid layout landed and was wired into `_runFalsifier`.
+`lore verify --falsify` over all eight AC-SD criteria recorded **eight attested
+reds** — each `exit 1 (declared 1) — result:expected-fail, capture_source:runner`.
+Before this, the same mechanism produced 11 of 11 FALSE reds (pre-green-control)
+and then 0 reds at all (post-green-control, every `oracle: test` criterion
+`inconclusive`). This is the first population of genuine machine-proven reds it
+has ever produced.
+
+⛔ Eight affirmative reds do not establish discriminating power — the mechanism
+could equally have learned to say yes to everything, and an affirmative run
+cannot tell those apart. So a NEGATIVE control was run: one throwaway criterion
+whose falsifier find-text was replaced with ITSELF (an inert mutation) and whose
+declared exit code was 1. Result:
+
+> exit 4 — `AC "AC-SD-NEG"'s declared falsifier claims exit code 1, but the
+> mutated command actually exited 0 — the declaration does not match reality.
+> Nothing recorded.`
+
+Correct refusal. The mechanism discriminates in both directions.
+
+## F7 — a refused falsify run records NOTHING, so the control that proves discriminating power is structurally unprovable from the corpus
+
+⛔ This is F6's sting, and `lore assess` scored it a MAJOR on `evidence_integrity`
+— correctly, and no oracle caught it. "Nothing recorded" is the right behaviour
+for a mismatched declaration (a refusal is not a measurement), but it means the
+negative control leaves NO queryable trace. The only place the exit-4 refusal
+existed afterwards was free text in a `--override-attestation` reason. So:
+
+> **The affirmative half of a falsifier campaign is attested and auditable; the
+> negative half is neither. A reader six months later can verify that eight reds
+> were machine-proven, and cannot verify that the mechanism was ever capable of
+> saying no.**
+
+Fix in flight: `scripts/falsifier-negative-control.ts`, a runnable oracle that
+builds a throwaway corpus and asserts BOTH polarities — inert falsifier → exit
+exactly 4 with nothing persisted, discriminating falsifier → exit exactly 0 with
+an attested row persisted. Recording that script's own run is how the control
+becomes evidence. ⛔ Generalizable: whenever a tool's correct response to a bad
+input is to record nothing, proving the tool's discriminating power needs a
+SEPARATE oracle that records the refusal itself.
+
+## F8 — the plan's own test suite shipped a vacuous control, and only `assess` caught it
+
+`assess` also raised a MINOR that machine-checked out as exactly right.
+AC-SD-1's `RED (i)` permanently-pinned control — the one whose entire job is to
+prove the rejected plain-symlink layout is detected — was **vacuous**. Its helper
+`findEscapingScopeEntries` calls `isInside(realpathSync(entry), scratchDirAbs)`:
+it resolves the ENTRY but not the BASE. On macOS `/var` is a symlink to
+`/private/var`, so a base taken straight from `mkdtemp` never prefix-matches a
+resolved entry, and EVERY scope entry is reported as escaping.
+
+Measured against the real module with a CORRECT hybrid layout:
+
+| base passed to the comparison | escaping entries reported |
+|---|---|
+| un-resolved (`/var/...`, what RED(i) passed) | `["core","dashboard","lore"]` |
+| `realpathSync`'d (`/private/var/...`, what the HAPPY test passed) | `[]` |
+
+So the control asserted a result it would have obtained from a correct layout.
+Fixed by resolving the base; proved discriminating afterwards by pointing that
+same test at a correct layout, which then failed with
+`expected [] to deeply equal [ 'consumer', 'core', 'extra' ]`.
+
+⛔ What makes this the sharpest finding of the session: this is the exact defect
+class the whole spec exists to close — a control with no discriminating power —
+occurring INSIDE that spec's own test suite, and it survived a red-first
+implementer, two later agents extending the same file, an orchestrator-run
+independent falsification, and an ATTESTED `--falsify` pass on AC-SD-1. It
+survived attestation because the criterion's describe holds four tests and the
+sound HAPPY one carried the red. ⇒ **A `-t <describe>` oracle attests the
+describe, not each test in it; one vacuous test inside a passing describe is
+invisible to `lore verify` by construction.** Neither the green control nor the
+falsifier nor the attestation floor can see it. `lore assess` reading the test
+source did.
+
+## F9 — one stray directory under `packages/` aborts materialization
+
+Also from `assess`, machine-checked: `materializeFalsifierDependencies` discovers
+nested `packages/*/node_modules` by iterating the DERIVED workspace-member list,
+while AC-SD-1(e)'s prose says it enumerates `packages/*/node_modules`.
+`deriveWorkspaceMembers` returns `err` on any directory under a workspace base
+dir with no readable `package.json` (`if (!memberJsonResult.ok) return
+memberJsonResult;`). Therefore a single stray directory under `packages/` — a
+scratch dir, an unpacked tarball — makes materialization fail for the entire
+repo, and a nested `node_modules` under a non-member directory is invisible.
+No current member is affected, so this is latent, not live. Prose-versus-code
+divergence again: the AC says "enumerating", the code says "derived list".
+
+## F10 — a latent hole the appended-note design leaves open
+
+`_runFalsifier` treats a materialization failure as non-fatal: the reason is
+appended to whichever annotation the run records, and execution falls through to
+the green control. The argument for it is sound TODAY — every way materialization
+can fail also leaves the scratch tree without usable `node_modules`, so the green
+control fails and the row is `inconclusive`. ⛔ But the materializer ALSO refuses
+loud when the scratch tree ALREADY has a `node_modules` entry, and that path is
+unreachable only because the scratch worktree comes from `git stash create`
+WITHOUT `--include-untracked`. Adding `--include-untracked` — explicitly named as
+future scope in the ADR — could make the green control pass over a tree whose
+workspace links were never redirected inward, i.e. re-open the F2 escape through
+the error path. Recorded now because the guard that would catch it does not exist.
