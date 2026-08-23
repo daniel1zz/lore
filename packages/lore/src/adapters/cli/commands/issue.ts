@@ -59,12 +59,27 @@
  * only), or a pointer flag passed for a state that takes none — an
  * unresolvable pointer is re-typed from DOC_NOT_FOUND so every pointer
  * refusal shares one exit code, see {@link unresolvablePointerError}); 5
- * STALE_VERSION (concurrent write race on the target task).
+ * STALE_VERSION (concurrent write race on the target task); a NONZERO code
+ * distinct from all of the above ONLY when the corpus write above already
+ * succeeded but the post-write `ResolutionProjector.project` call failed
+ * (network/auth/rate-limit) — the corpus verdict is never discarded for
+ * this, only the GitHub label update, and the underlying `LoreError`'s own
+ * `exitCode()` mapping is echoed unchanged (see the `resolutionProjector`
+ * block at the end of `run()`).
+ *
+ * spec-the-defect-channel-reaches-no-machine-but-its-own-github, Scope
+ * "ResolutionProjector" — ratifying a verdict here is exactly when the
+ * `resolution:<state>` label is re-projected, via `app.resolutionProjector`
+ * (the `App` composition root's own DI seam, never a projector constructed
+ * inline in this file). Write-only: this command never reads a label back
+ * as truth (Per-Field Authority table) — that is the separate AC-GI-5 drift
+ * detector's job.
  *
  * Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D3,
  *   AC-ICL-3, AC-ICL-4;
  *   spec-the-defect-channel-cannot-be-honestly-maintained-an §M3, AC-DC-4;
- *   §M7, AC-DC-15.
+ *   §M7, AC-DC-15;
+ *   spec-the-defect-channel-reaches-no-machine-but-its-own-github, AC-GI-4.
  */
 
 import { defineCommand } from "citty";
@@ -78,6 +93,7 @@ import {
   reachOfExplicitResolution,
   type ExplicitResolution,
 } from "../../../service/issue-resolution.js";
+import { readGithubIssueRef } from "../../../service/resolution-projector.js";
 import type { LoreError } from "@lore/core";
 
 /**
@@ -542,6 +558,34 @@ export default defineCommand({
             console.log(
               `Resolved ${updated.slug} as '${state}'${pointerNote} (${reason}) — resolution: ${computed}`,
             );
+          }
+
+          // spec-the-defect-channel-reaches-no-machine-but-its-own-github,
+          // Scope "ResolutionProjector" + AC-GI-4 — the moment a verdict is
+          // ratified (the write above just landed) is exactly when the label
+          // should be re-projected. `app.resolutionProjector` is the ONLY
+          // production seam this file calls through — never a `new
+          // ResolutionProjector(...)` constructed inline here, which would
+          // make this call site untestable from the app-level DI every other
+          // command uses. Absent (no port wired yet) or no GitHub pointer on
+          // this issue (never filed through the GitHub intake path) both
+          // degrade to "nothing to project" — never a refusal, since the
+          // corpus verdict above already landed regardless.
+          const githubRef = readGithubIssueRef(updated.extra);
+          if (app.resolutionProjector !== undefined && githubRef !== undefined) {
+            const projectResult = await app.resolutionProjector.project(computed, githubRef);
+            if (!projectResult.ok) {
+              // Invariant "Scope-Alt" — projection may be best-effort on a
+              // network failure PROVIDED the corpus verdict still lands (it
+              // already did, above) and the failure is reported loudly,
+              // never swallowed: nonzero exit, distinct from the clean
+              // happy-path exit above, and the underlying reason on stderr.
+              process.stderr.write(
+                `Warning: resolution recorded in the corpus, but the GitHub label was not updated — ` +
+                  `${formatError(projectResult.error)}\n`,
+              );
+              process.exitCode = exitCode(projectResult.error);
+            }
           }
         } finally {
           app.close();

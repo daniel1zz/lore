@@ -97,6 +97,7 @@ import { buildPhaseServices } from "./adapters/cli/phase-wiring.js";
 import type { PhaseWorkflowService } from "./service/phase-workflow-service.js";
 import type { PhaseChecklistService } from "./service/phase-checklist-service.js";
 import type { PhaseMigrationService } from "./service/phase-migration-service.js";
+import type { ResolutionProjector } from "./service/resolution-projector.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -425,6 +426,36 @@ export interface App {
    * Source: SPEC-064 §Design D1.
    */
   globalConfigService?: GlobalConfigService;
+  /**
+   * ResolutionProjector — the one-way projection of a corpus-computed issue
+   * resolution onto a GitHub `resolution:<state>` label (spec-the-defect-
+   * channel-reaches-no-machine-but-its-own-github, Scope "ResolutionProjector",
+   * AC-GI-4). `commands/issue.ts`'s `lore issue resolve` calls
+   * `app.resolutionProjector?.project(...)` right after the corpus write
+   * lands — this is the live call site the projector is reachable from,
+   * never a `new ResolutionProjector(...)` built inline in that file.
+   *
+   * ⛔ UNLIKE every other optional field on this interface, this one is NOT
+   * "optional here, always wired in production": `createApp` does not
+   * construct an instance below, on EITHER store branch, because no
+   * `ResolutionLabelPort` implementation exists yet — `GhRunner`
+   * (`service/gh-runner.ts`) is landed but its own module header names only
+   * FOUR intended callers (`GitHubIntakePort`, `lore setup --check`, `lore
+   * issues --verify`, the P3 migration), and none of them is this field.
+   * Building a `GhRunner`-backed label writer correctly needs a read-then-
+   * converge sequence (list the issue's current labels, drop any stale
+   * `resolution:*` one, add the new one) that has no test coverage or
+   * anchor in the task that added this field
+   * (task-skill-implement-resolutionprojector-invoked-from-lore) — fabricating
+   * one here without tests would be worse than leaving the seam open. Until a
+   * follow-up task supplies a real port and constructs `new
+   * ResolutionProjector(port)` on both `buildAppFromSqlite`/
+   * `buildAppFromTurso` below, `lore issue resolve` records the corpus
+   * verdict correctly but the GitHub label is never updated — the call site
+   * degrades to a no-op (`app.resolutionProjector === undefined`), never a
+   * refusal.
+   */
+  resolutionProjector?: ResolutionProjector;
   /**
    * TraceStatsService — read-only aggregation surface for `lore trace stats`
    * (SPEC-102). Store-only, no telemetry, same DI shape as `AuditService`
