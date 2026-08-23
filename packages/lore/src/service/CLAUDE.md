@@ -71,7 +71,7 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | `UatService` | `record` — sole UAT-verdict write orchestrator; refuses a non-plan target BEFORE doc creation (no orphan, no `--force`) |
 | `DriftCheckService` | `checkDrift` over `extra.code_anchors` for `ANCHOR_SCANNED_DOC_TYPES` (spec + knowledge) — one list read by the scan, the RMW refusal and the CLI alike; owns those RMW verbs. Evicted detail: same doc as `AcService` |
 | `VerificationProjectionService` | `evidencePanel` dashboard projection; zero local derivation math, all of it from `@lore/core` |
-| `SessionService` | `lore bootstrap`'s corpus-wide session pointer-set; per-plan blocker lookup via batch store reads |
+| `SessionService` | `lore bootstrap`'s corpus-wide session pointer-set; per-plan blocker lookup via batch store reads. ⛔ Its `computeTaskCounts` callers (`session-service.ts:332`, `:1117`) filter by `isPlanMember` ONLY — never `isInvalidated` — so `bootstrap`/`feed` readiness counts RETRACTED tasks as ready while `TaskWorkflowService.ready` excludes them; the method's own JSDoc calling itself "the same computation `lore ready` uses" is true of the arithmetic and false of the result. `knowledge-lore-feed-s-readiness-line-counts-retracted-tasks` |
 
 ## Links
 
