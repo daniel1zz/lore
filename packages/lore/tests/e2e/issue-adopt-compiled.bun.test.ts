@@ -1,12 +1,41 @@
 /**
- * AC-DC-17 — compiled-binary e2e, the bun-runner half of §M7's `adopted`
- * mechanism, split from AC-DC-14 because this repo's two test runners cannot
- * share one attestable command (spec-the-defect-channel-cannot-be-honestly-
- * maintained-an §M7). From a throwaway corpus created by `mkdtemp` plus
- * `lore init`, driven by the COMPILED `dist/lore` binary: a real `lore issue
- * resolve --state adopted --adopted-by <live task>` frees quota so the next
- * `lore report-issue` is ACCEPTED, and `lore issues` still shows the adopted
- * row as unfinished.
+ * AC-DC-17 — REWRITTEN (task-skill-test-retire-or-rewrite-ac-dc-17-whose-
+ * subject-cap), not retired. Compiled-binary e2e, the bun-runner half of
+ * §M7's `adopted` mechanism, split from AC-DC-14 because this repo's two
+ * test runners cannot share one attestable command
+ * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, superseded
+ * by spec-the-defect-channel-reaches-no-machine-but-its-own-github).
+ *
+ * ⛔ WHY REWRITTEN, NOT RETIRED: the superseding spec's P1 deletes the
+ * open-report rate cap outright (its six symbols scanned for zero survivors
+ * by AC-GI-9; `task-skill-implement-delete-the-six-cap-symbols-and-retire-
+ * the`). This file's ORIGINAL subject — that an `adopted` resolution FREES
+ * CAP QUOTA — is not merely failing, it is UNFALSIFIABLE: there is no
+ * implementation that could make "quota is freed" true when there is no
+ * quota to free. That half is deleted, not weakened (byte-identical
+ * disposition to `AC-DC-14` in
+ * unit/service/issue-resolution.test.ts and `AC-072-6` in
+ * unit/service/issue-report-cross-corpus.bun.test.ts).
+ *
+ * What SURVIVES §M7, and is what this file now proves through the COMPILED
+ * `dist/lore` binary from a throwaway corpus (`mkdtemp` + `lore init`): a
+ * real `lore issue resolve --state adopted --adopted-by <doc>` (a) REFUSES
+ * a pointer that is missing or does not resolve to a live plan/task, exit
+ * EXACTLY 4, before any write; (b) ACCEPTS a pointer that does resolve, exit
+ * 0; and (c) once accepted, the report's computed resolution reads back as
+ * EXACTLY `"adopted"` and the report STILL appears in `lore issues`'
+ * default (unresolved-only) listing — i.e. `adopted` is non-terminal, never
+ * a substitute for a real terminal verdict. None of this depended on quota
+ * ever existing. `checkResolutionPointer`/`isDanglingAdoption`
+ * (service/issue-resolution.ts) already carry unit coverage of the SAME
+ * claim (AC-DC-15/AC-DC-16, unit/service/issue-resolution.test.ts) — but
+ * only as pure functions fed synthetic inputs. This file remains the ONLY
+ * place in the repo driving that claim through the REAL compiled CLI: real
+ * corpus lookups, real doc-type checks, real `lore issues --json` read-back.
+ * Retiring it outright would leave that wiring with zero surface-level
+ * coverage — the mirror image of
+ * `knowledge-an-attested-pass-is-not-evidence-of-production-wiring`: a
+ * unit-only pass never proves the CLI actually wires the pure decision in.
  *
  * BINARY FRESHNESS IS ASSERTED, NOT ASSUMED. Before spawning anything else,
  * `beforeAll` builds `dist/lore` from THIS worktree (`bun run build`, same
@@ -24,10 +53,12 @@
  * a throwaway `mkdtemp` pair asserted under `os.tmpdir()`.
  *
  * Six-dimension coverage:
- *   HAPPY:      cap filled by N reports, one adopted via the compiled CLI,
- *               the N+1th report is ACCEPTED (exit 0)
- *   NEGATIVE:   before adopting, the N+1th report is refused (exit 4) — the
- *               exact baseline this mechanism exists to fix
+ *   HAPPY:      `--adopted-by <live plan>` resolves and is ACCEPTED (exit 0)
+ *   NEGATIVE:   no `--adopted-by` at all, and an `--adopted-by` naming no
+ *               doc in this corpus, are both REFUSED (exit 4) before any
+ *               write — the exact wiring §M7's pointer requirement exists
+ *               to enforce, now exercised through the real CLI, not a pure
+ *               function
  *   BOUNDARY:   the adopted report's computed resolution is EXACTLY
  *               `"adopted"`, read back via the compiled `lore issues --json`
  *   ERROR:      every exit code asserted EXACTLY (`toBe`, never "non-zero")
@@ -35,13 +66,14 @@
  *               adopted report's id AFTER the accept — the non-terminal
  *               claim §M7 requires (AC-DC-14(a)'s cross-runner counterpart)
  *   REGRESSION: the provenance preflight itself: RED verified by hand
- *               (recorded separately) that reverting the cap's candidate
- *               narrowing makes the accept case exit 4, and that pointing this
- *               suite at a deliberately stale binary makes the provenance
- *               assertion FAIL rather than skip
+ *               (recorded separately) that pointing this suite at a
+ *               deliberately stale binary makes the provenance assertion
+ *               FAIL rather than skip
  *
- * Source: spec-the-defect-channel-cannot-be-honestly-maintained-an §M7,
- *   AC-DC-17; task-land-the-adopted-resolution-state-its-required-owner.
+ * Source: spec-the-defect-channel-reaches-no-machine-but-its-own-github
+ *   (supersedes spec-the-defect-channel-cannot-be-honestly-maintained-an
+ *   §M7, AC-DC-17); task-land-the-adopted-resolution-state-its-required-
+ *   owner; task-skill-test-retire-or-rewrite-ac-dc-17-whose-subject-cap.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -173,20 +205,11 @@ interface UpstreamFixture {
   readonly rootPrdSlug: string;
 }
 
-const CAP = 2;
-
 function makeUpstream(): UpstreamFixture {
   const root = mkdtempSync(join(TMP_ROOT, "lore-dc17-upstream-"));
   assertUnderTmp(root);
   fixturesToClean.push(root);
   expect(run(["init"], { cwd: root }).exitCode).toBe(0);
-
-  // §M2 — a small cap, declared by the UPSTREAM's own config, so this suite
-  // fills it with 2 reports rather than the shipped default of 10.
-  appendFileSync(
-    join(root, ".lore", "config.yaml"),
-    ["feedback:", "  inbound:", `    open_report_cap: ${CAP}`, ""].join("\n"),
-  );
 
   const prd = runJson<{ ok: true; data: { slug: string } }>(
     ["create", "prd", "--title", "Upstream Root PRD (dc17)", "--content", "root prd content"],
@@ -210,14 +233,6 @@ function makeConsumer(upstream: UpstreamFixture): string {
   return root;
 }
 
-/** Attempts one report from `consumerRoot`, WITHOUT asserting success — the observation primitive for both sides of the cap boundary. */
-function tryFileReport(consumerRoot: string, title: string): RunResult {
-  return run(
-    ["report-issue", "--title", title, "--description", "desc", "--expected", "exit 0", "--actual", "exit 4"],
-    { cwd: consumerRoot, env: { LORE_ACTOR: "agent:dc17-reporter" } },
-  );
-}
-
 /** Files one report, asserting exit 0; returns its upstream doc id. */
 function fileReport(consumerRoot: string, title: string): string {
   const { result, data } = runJson<{ ok: true; data: { upstream_doc_id: string } }>(
@@ -237,8 +252,8 @@ interface IssuesJsonPayload {
   data: { reports: IssuesJsonRow[] };
 }
 
-describe("AC-DC-17: production wiring, compiled binary — adopted frees quota end to end", () => {
-  it("HAPPY/NEGATIVE/BOUNDARY/STATE: cap refuses at N, --state adopted --adopted-by <live task> frees a slot, the N+1th is accepted, and the adopted row stays visible as unfinished", () => {
+describe("AC-DC-17 rewritten: production wiring, compiled binary — adopted is non-terminal and requires a live owner pointer", () => {
+  it("NEGATIVE/HAPPY/BOUNDARY/STATE: --adopted-by is refused without a resolvable owner, accepted with a live plan, and the adopted report reads back as non-terminal", () => {
     const upstream = makeUpstream();
     const consumerRoot = makeConsumer(upstream);
 
@@ -255,24 +270,42 @@ describe("AC-DC-17: production wiring, compiled binary — adopted frees quota e
     expect(ownerPlan.result.exitCode, `owner plan creation failed: ${ownerPlan.result.stderr}`).toBe(0);
     const ownerPlanId = ownerPlan.data.data.id;
 
-    // Fill the cap with CAP reports — every one still "open".
-    const filedIds: string[] = [];
-    for (let i = 0; i < CAP; i += 1) {
-      filedIds.push(fileReport(consumerRoot, `dc17 report ${i}`));
-    }
+    const reportId = fileReport(consumerRoot, "dc17 report needing adoption");
 
-    // NEGATIVE — the exact baseline this mechanism fixes: the CAP+1th report
-    // is refused, byte-identical in shape to F1's 2026-08-11 measurement.
-    const refused = tryFileReport(consumerRoot, "dc17 report overflow (pre-adopt)");
-    expect(refused.exitCode).toBe(4);
+    // NEGATIVE (a) — no `--adopted-by` at all: argv-only refusal, before
+    // `loadLoreApp()` ever runs, so it provably writes zero bytes.
+    const missingPointer = run(["issue", "resolve", reportId, "--state", "adopted", "--reason", "no owner given"], {
+      cwd: upstream.root,
+    });
+    expect(missingPointer.exitCode).toBe(4);
 
-    // Adopt the FIRST filed report, via the REAL compiled CLI, against the
-    // corpus that actually holds the doc (upstream).
+    // NEGATIVE (b) — an `--adopted-by` that resolves to nothing in this
+    // corpus: refused for a DIFFERENT reason (unresolvable, not missing),
+    // same exit code — the real corpus lookup this pure-function unit tests
+    // (AC-DC-15) cannot exercise on its own.
+    const unresolvablePointer = run(
+      [
+        "issue",
+        "resolve",
+        reportId,
+        "--state",
+        "adopted",
+        "--adopted-by",
+        "plan-this-slug-does-not-exist-anywhere-dc17",
+        "--reason",
+        "owner does not exist",
+      ],
+      { cwd: upstream.root },
+    );
+    expect(unresolvablePointer.exitCode).toBe(4);
+
+    // HAPPY — a pointer resolving to a live plan is accepted, via the REAL
+    // compiled CLI, against the corpus that actually holds the doc (upstream).
     const adoptResult = run(
       [
         "issue",
         "resolve",
-        filedIds[0] as string,
+        reportId,
         "--state",
         "adopted",
         "--adopted-by",
@@ -284,18 +317,14 @@ describe("AC-DC-17: production wiring, compiled binary — adopted frees quota e
     );
     expect(adoptResult.exitCode, `adopt failed: ${adoptResult.stderr}`).toBe(0);
 
-    // HAPPY — quota freed: the same filing that was JUST refused now succeeds.
-    const accepted = tryFileReport(consumerRoot, "dc17 report overflow (post-adopt)");
-    expect(accepted.exitCode, `expected acceptance after adopting: ${accepted.stderr}`).toBe(0);
-
     // BOUNDARY/STATE — `lore issues` (default: unresolved-only) still carries
     // the adopted report's id, with computed resolution EXACTLY "adopted" —
     // the non-terminal claim §M7 requires, read back through the compiled
     // CLI's OWN read surface (never re-derived by this test).
     const issuesListing = runJson<IssuesJsonPayload>(["issues"], { cwd: consumerRoot });
     expect(issuesListing.result.exitCode, `lore issues failed: ${issuesListing.result.stderr}`).toBe(0);
-    const adoptedRow = issuesListing.data.data.reports.find((r) => r.id === filedIds[0]);
-    expect(adoptedRow, `adopted report ${filedIds[0]} must still appear in the default (unresolved-only) listing`).toBeDefined();
+    const adoptedRow = issuesListing.data.data.reports.find((r) => r.id === reportId);
+    expect(adoptedRow, `adopted report ${reportId} must still appear in the default (unresolved-only) listing`).toBeDefined();
     expect(adoptedRow?.resolution).toBe("adopted");
   });
 });
