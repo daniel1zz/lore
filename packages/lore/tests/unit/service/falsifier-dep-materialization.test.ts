@@ -668,7 +668,12 @@ describe("mutation observability", () => {
       const mutated = runConsumerCommand(scratch.worktreeDir);
       expect(mutated.status).toBe(1);
       expect(mutated.combinedOutput).toContain(mutatedCorePath);
-      expect(isInside(mutatedCorePath, scratch.worktreeDir)).toBe(true);
+      // reason: the previous form compared mutatedCorePath against the very
+      // directory it was JOINED onto — always true, zero information (found by
+      // lore assess, 2026-08-23). This asserts what actually matters: the file
+      // the command failed on is the SCRATCH copy and NOT the main checkout's.
+      expect(isInside(realpathSync(mutatedCorePath), realpathSync(scratch.worktreeDir))).toBe(true);
+      expect(isInside(realpathSync(mutatedCorePath), realpathSync(repoRoot))).toBe(false);
     },
     15000,
   );
