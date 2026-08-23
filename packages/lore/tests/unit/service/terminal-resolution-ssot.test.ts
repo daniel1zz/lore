@@ -3,8 +3,12 @@
  * terminal-issue-resolution MEMBER SET has exactly ONE construction site
  * repo-wide, and the `TERMINAL_ISSUE_RESOLUTIONS` export in
  * `packages/lore/src/service/issue-resolution.ts` DERIVES from it, consumed by
- * BOTH the `lore issues` listing filter and `IssueReportService`'s cap-count
- * narrowing.
+ * the `lore issues` listing filter. ⛔ It used to ALSO be consumed by
+ * `IssueReportService`'s open-report rate-cap narrowing; that consumer was
+ * deleted outright by spec-the-defect-channel-reaches-no-machine-but-its-
+ * own-github P1 (see the in-flight correction comment further down in this
+ * file, immediately before the "make-it-red control" case, for the measured
+ * detail).
  *
  * ⛔ WHERE that one site lives changed on 2026-08-12 and this file's pinned path
  * moved with it (`task-relocate-the-issueresolution-vocabulary-into-lore-core-so`):
@@ -95,7 +99,6 @@ const PACKAGES_DIR = join(REPO_ROOT, "packages");
 const VOCABULARY_REL = join("packages", "core", "src", "issue-resolution-vocab.ts");
 const ISSUE_RESOLUTION_REL = join("packages", "lore", "src", "service", "issue-resolution.ts");
 const ISSUES_COMMAND_REL = join("packages", "lore", "src", "adapters", "cli", "commands", "issues.ts");
-const ISSUE_REPORT_SERVICE_REL = join("packages", "lore", "src", "service", "issue-report-service.ts");
 
 /**
  * Fails loud if the 5-levels-up arithmetic above is wrong — an EMPTY scan
@@ -268,7 +271,7 @@ function findMemberSetConstructionSites(source: string, memberTokens: readonly s
   );
 }
 
-describe("AC-DC-9: one terminal-resolution definition site, consumed by the listing filter and the cap count", () => {
+describe("AC-DC-9: one terminal-resolution definition site, consumed by the listing filter", () => {
   it("AC-DC-9: the terminal-resolution set is exported from issue-resolution.ts with exactly its 6 members", async () => {
     const surface = await loadTerminalResolutionSurface();
 
@@ -355,15 +358,23 @@ describe("AC-DC-9: one terminal-resolution definition site, consumed by the list
     expect(source).not.toMatch(/new Set<IssueResolution>/);
   });
 
-  it("AC-DC-9: issue-report-service.ts imports the shared export and narrows the cap count with it", async () => {
-    assertRepoRoot();
-    const source = readFileSync(join(REPO_ROOT, ISSUE_REPORT_SERVICE_REL), "utf8");
-
-    expect(source).toMatch(/import[\s\S]{0,200}TERMINAL_ISSUE_RESOLUTIONS[\s\S]{0,200}from "\.\/issue-resolution\.js"/);
-    // The narrowing itself: the set is CONSULTED (not merely imported).
-    expect(source).toMatch(/TERMINAL_ISSUE_RESOLUTIONS\.has\(/);
-    expect(source).toMatch(/getResolution\(/);
-  });
+  // ⛔ RETIRED IN-FLIGHT (spec-the-defect-channel-reaches-no-machine-but-its-
+  // own-github P1, cap-removal task): this case used to assert that
+  // issue-report-service.ts imports `TERMINAL_ISSUE_RESOLUTIONS` and consults
+  // it (`.has(`) to narrow a per-reporter open-report rate cap. That cap
+  // enforcement — and the `getResolution` read loop that fed it — is deleted
+  // outright; the file no longer imports this SSOT export or calls `.has(` on
+  // it at all. Re-running the exact original assertion —
+  // `bunx vitest run packages/lore/tests/unit/service/terminal-resolution-ssot.test.ts
+  // -t "issue-report-service.ts imports the shared export"` — now fails on
+  // `expect(source).toMatch(/import[\s\S]{0,200}TERMINAL_ISSUE_RESOLUTIONS.../)`
+  // (measured, confirmed red before this edit). This is a correction, not a
+  // weakening: the OTHER cases in this describe block (one construction site;
+  // the service's exported views deriving from it; `commands/issues.ts`
+  // importing the shared export) still hold and are untouched — only the
+  // illustration naming a now-nonexistent consumer is removed. AC-DC-9's own
+  // invariant (exactly one member-set construction site repo-wide) is
+  // unaffected by a consumer being deleted.
 
   it("AC-DC-9: the scanner FIRES on a synthetic fourth copy (make-it-red control)", async () => {
     const surface = await loadTerminalResolutionSurface();

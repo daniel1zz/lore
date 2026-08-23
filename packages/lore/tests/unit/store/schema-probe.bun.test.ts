@@ -154,7 +154,7 @@ describe("probeUpstreamDb — readonly schema-version probe (SPEC-072)", () => {
 });
 
 describe("buildUpstreamContext — narrow SQLiteStore+CorpusService composition (SPEC-072 §4)", () => {
-  it("HAPPY/STATE: createDraft lands a draft ad-hoc task parented to the seeded root PRD, visible via listOpenAdhocDrafts", async () => {
+  it("HAPPY/STATE: createDraft lands a draft ad-hoc task parented to the seeded root PRD, visible via listIssueReports", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "lore-upstream-context-"));
     mkdirSync(join(tempDir, ".lore"), { recursive: true });
     const dbPath = join(tempDir, ".lore", "lore.db");
@@ -204,7 +204,7 @@ describe("buildUpstreamContext — narrow SQLiteStore+CorpusService composition 
     expect(createResult.ok).toBe(true);
     if (!createResult.ok) return;
 
-    const draftsResult = await ctx.listOpenAdhocDrafts();
+    const draftsResult = await ctx.listIssueReports();
     expect(draftsResult.ok).toBe(true);
     if (draftsResult.ok) {
       expect(draftsResult.value).toHaveLength(1);

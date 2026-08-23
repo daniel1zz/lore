@@ -43,7 +43,8 @@
  *     "no typed-schema field until a pure function reads it") — every nested
  *     field is read DEFENSIVELY (malformed/legacy shape degrades a field to
  *     `""`/`[]`, never a thrown error), mirroring
- *     `packages/core/src/issue-report.ts::readReporterProject`'s guard shape.
+ *     the same null/array/typeof guard shape every defensive
+ *     `extra.issue_report` reader in this codebase uses.
  *   - `open_count` is the count of rows whose COMPUTED `resolution` is
  *     `"open"` (D8, spec-issue-closure-loop-computed-resolution-agent-reachable
  *     — "the nav badge counts computed-open reports rather than draft
@@ -134,8 +135,9 @@ export interface IssueReportRow {
 /**
  * Defensively project a task `DocRecord` into an {@link IssueReportRow},
  * reading its `extra.issue_report` nested payload. Mirrors
- * `packages/core/src/issue-report.ts::readReporterProject`'s guard shape
- * (duplicated rather than imported — that module's reader is scoped to a
+ * the same null/array/typeof guard shape every defensive `extra.issue_report`
+ * reader in this codebase uses (duplicated rather than imported — every such
+ * reader is scoped to a
  * single field for a single caller; this one needs the whole payload shape
  * and lives in a different package layer).
  *
@@ -180,8 +182,8 @@ function projectIssueReportRow(doc: DocRecord, resolution: IssueResolution): Iss
 /**
  * Whether a task `DocRecord` HAS THE SHAPE of a still-open incoming issue
  * report: status ∈ {draft, in-review} AND `extra.issue_report` is present (a
- * non-null, non-array object — the same defensive shape check
- * `readReporterProject`/`countOpenReports` in `@lore/core` use for this same
+ * non-null, non-array object — the same defensive shape check every
+ * `extra.issue_report` reader in this codebase uses for this same
  * nested field). Approved (or later-lifecycle) reports are EXCLUDED by this
  * check — once a reviewer approves a report its `status` itself leaves
  * `draft`/`in-review` (SPEC-074 AC-074-5's "approved reports excluded from

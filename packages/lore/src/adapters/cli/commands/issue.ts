@@ -14,16 +14,15 @@
  * `superseded` state with a dangling pointer retires a real defect report while
  * recording nothing a reader could follow, which is operationally the same
  * silent trash can as `rejected` — the defect §M3 fixes, not a milder version
- * of the fix. Both states are members of the shared terminal set, so they also
- * RELEASE open-report cap quota (§M1) and stay visible under `lore issues
- * --resolved`.
+ * of the fix. Both states are members of the shared terminal set and stay
+ * visible under `lore issues --resolved`.
  *
  * §M7 added `adopted` — non-terminal (does NOT join
- * `TERMINAL_ISSUE_RESOLUTIONS`; stays visible under `--resolved`'s complement),
- * but ALSO frees cap quota through the separate `QUOTA_FREEING_RESOLUTIONS`
- * seam. Its pointer (`--adopted-by`) carries an ADDITIONAL constraint no other
- * pointer here has: the resolved doc's `type` MUST be `plan` or `task` (checked
- * AFTER existence/self-reference, BEFORE any write — {@link wrongPointerTypeError}) —
+ * `TERMINAL_ISSUE_RESOLUTIONS`; stays visible under `--resolved`'s complement
+ * because it has an owner but no verdict yet). Its pointer (`--adopted-by`)
+ * carries an ADDITIONAL constraint no other pointer here has: the resolved
+ * doc's `type` MUST be `plan` or `task` (checked AFTER existence/self-reference,
+ * BEFORE any write — {@link wrongPointerTypeError}) —
  * an owner that cannot itself do work would let `adopted` become a quieter
  * `rejected`, which is the defect §M7 exists to avoid.
  *

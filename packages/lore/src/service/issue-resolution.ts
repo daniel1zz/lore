@@ -36,22 +36,16 @@
  *     resolutions as a `ReadonlySet` (spec-the-defect-channel-cannot-be-honestly-
  *     maintained-an §M1), built from `@lore/core`'s single member-array literal:
  *     `commands/issues.ts`'s `--open`/`--resolved` filter imports it. ⛔
- *     `adopted` is NOT a member (§M7) — it frees quota through the SEPARATE
- *     `QUOTA_FREEING_RESOLUTIONS` seam below, precisely so it can keep showing
- *     as unfinished under `--resolved`'s complement. A second construction of
- *     the TERMINAL member set anywhere under `packages/**` is a RED test
- *     (AC-DC-9), because the copies that existed before this SSOT drifted in
- *     exactly the way that made a resolved report keep occupying cap quota.
- *   - `QUOTA_FREEING_RESOLUTIONS` — §M7's cap-narrowing seam:
- *     `TERMINAL_ISSUE_RESOLUTIONS` plus `adopted`. `IssueReportService`'s
- *     open-report-cap narrowing imports THIS, never `TERMINAL_ISSUE_RESOLUTIONS`
- *     directly, so quota-occupancy and terminal-ness stay two separately
- *     answerable questions (AC-DC-14(b)).
+ *     `adopted` is NOT a member (§M7) — it stays visible under `--resolved`'s
+ *     complement (it has an owner, but the claim itself is still undecided). A
+ *     second construction of the TERMINAL member set anywhere under
+ *     `packages/**` is a RED test (AC-DC-9), because the copies that existed
+ *     before this SSOT drifted.
  *   - `TERMINAL_RESOLUTION_REACH` / `TerminalResolutionReach` — per terminal
  *     state, the ROUTE that reaches it and the pointer it REQUIRES. This is
- *     what lets the cap refusal render a remedy that works instead of a
- *     hand-authored list of verbs that can silently rot (§M1's structured
- *     refusal payload).
+ *     what lets `upstream-context-flow.ts` read a non-derogatory state's
+ *     pointer off the extra_key the state ITSELF declares, rather than a
+ *     hand-authored key pair that can silently drift from the state it names.
  *   - `EXPLICIT_TERMINAL_RESOLUTIONS` / `ExplicitTerminalResolution` — the
  *     hand-settable TERMINAL subset (`route === "issue-resolve"`), DERIVED from
  *     the reach table rather than re-listed: `fixed`/`closed` are structurally
@@ -88,9 +82,8 @@
  *     IMPORTS it; it is DERIVED from `@lore/core`'s
  *     `TERMINAL_ISSUE_RESOLUTION_MEMBERS`, never re-listed here. Its further
  *     derived views (`EXPLICIT_TERMINAL_RESOLUTIONS`/`ExplicitTerminalResolution`,
- *     `EXPLICIT_RESOLUTIONS`/`ExplicitResolution`, `QUOTA_FREEING_RESOLUTIONS`)
- *     are computed from it or from `TERMINAL_RESOLUTION_REACH`, never re-listed
- *     — see those symbols' own docs.
+ *     `EXPLICIT_RESOLUTIONS`/`ExplicitResolution`) are computed from it or from
+ *     `TERMINAL_RESOLUTION_REACH`, never re-listed — see those symbols' own docs.
  *   - Precedence, highest first: explicit TERMINAL state (D3) > resolves-edge
  *     computation (`fixed`/`resolving`) > explicit `adopted` (§M7) > recorded
  *     review rejection (`rejected`) > archived doc status (`closed`) > `open`.
@@ -113,12 +106,11 @@
  *     boolean result in. Without this, a review-rejected report would
  *     compute `open` (or `closed`, once archived) while still carrying a
  *     rejection reason — the exact self-contradicting row §20 F3/F4 forbid.
- *   - Both exported functions read `extra` defensively (mirrors
- *     `issue-report.ts::readReporterProject`'s guard shape, duplicated
- *     rather than imported — that module's own invariant already documents
- *     why `extra.issue_report` stays untyped `extra` passthrough) — a
- *     malformed or legacy `extra` degrades to "no signal" rather than
- *     throwing.
+ *   - Both exported functions read `extra` defensively (the same null/array/
+ *     typeof guard shape every defensive `extra.issue_report` reader in this
+ *     codebase uses — `issue-report.ts`'s own module invariant documents why
+ *     `extra.issue_report` stays untyped `extra` passthrough) — a malformed
+ *     or legacy `extra` degrades to "no signal" rather than throwing.
  *
  * Side-effect class: pure.
  *
@@ -162,7 +154,7 @@ import {
  */
 export type { IssueResolution, TerminalIssueResolution };
 
-/** How a terminal resolution is REACHED — the axis the cap refusal's remedy lines are derived from. */
+/** How a terminal resolution is REACHED — the route `lore issue resolve` (or a `resolves` link, or an archive) uses to set it. */
 export type TerminalResolutionRoute = "issue-resolve" | "resolves-link" | "review-archive";
 
 /**
@@ -248,8 +240,7 @@ export type ExplicitTerminalResolution = {
 
 /**
  * The SSOT terminal-resolution member set as a membership set: a report in one of
- * these states no longer needs triage eyes, and (§M1) no longer occupies
- * open-report cap quota. Built from `@lore/core`'s single
+ * these states no longer needs triage eyes. Built from `@lore/core`'s single
  * {@link TERMINAL_ISSUE_RESOLUTION_MEMBERS} literal — this is a VIEW of that one
  * declaration, never a second listing of it.
  *
@@ -380,30 +371,6 @@ export function reachOfExplicitResolution(state: ExplicitResolution): TerminalRe
   }
   return reachOfTerminalResolution(state);
 }
-
-/**
- * The ONE seam `IssueReportService`'s step-6 cap narrowing reads to decide
- * "does this candidate still occupy quota?" (spec-the-defect-channel-cannot-be-
- * honestly-maintained-an §M1 + §M7, AC-DC-14(b)). A report's computed resolution
- * frees quota iff it is a member of THIS set — {@link TERMINAL_ISSUE_RESOLUTIONS}
- * plus `adopted` — compared AS A SET, never against a remembered literal list.
- *
- * Kept separate from {@link TERMINAL_ISSUE_RESOLUTIONS} rather than folding
- * `adopted` into it: `adopted` is NOT terminal (`--resolved`'s complement must
- * keep showing it as unfinished, AC-DC-14(a)), so widening the terminal set
- * itself would silently change what `--resolved`/`lore issues --open` shows.
- * Quota-freeing and terminal-ness are two DIFFERENT questions about a
- * resolution, and §M7 is precisely the state where they diverge.
- *
- * @example
- *   QUOTA_FREEING_RESOLUTIONS.has("adopted")    // => true
- *   QUOTA_FREEING_RESOLUTIONS.has("superseded") // => true (also terminal)
- *   QUOTA_FREEING_RESOLUTIONS.has("resolving")  // => false
- */
-export const QUOTA_FREEING_RESOLUTIONS: ReadonlySet<IssueResolution> = new Set<IssueResolution>([
-  ...TERMINAL_ISSUE_RESOLUTION_MEMBERS,
-  "adopted",
-]);
 
 /**
  * A resolved pointer target's minimal identity, as read from the live corpus

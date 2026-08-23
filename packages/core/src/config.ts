@@ -19,11 +19,13 @@
  *     fully present or fully absent — there is no partial-config default; absence
  *     means `lore report-issue` is unconfigured and fails loud (this is the
  *     feature's consent act, not a silently-degraded mode)
- *   - §M2 (spec-the-defect-channel-cannot-be-honestly-maintained-an):
- *     `feedback.inbound` is the INBOUND sibling of `feedback.upstream`, never a
- *     child of it — `resolveOpenReportCap` is its ONE resolution seam and reads
- *     the UPSTREAM corpus's own config, so the ceiling belongs to the queue's
- *     owner rather than to the project it constrains
+ *   - `feedback.inbound` is the INBOUND sibling of `feedback.upstream`, never a
+ *     child of it. Its `open_report_cap` key is RETIRED (spec-the-defect-
+ *     channel-reaches-no-machine-but-its-own-github P1, AC-GI-9/AC-GI-10): the
+ *     rate-cap enforcement this key once configured is deleted outright, but
+ *     the key itself stays `.optional()` in the schema PERMANENTLY (never
+ *     removed — see the field's own JSDoc for why) and a present value is
+ *     warned-on-by-name and dropped before the resolved config is ever read.
  *   - SPEC-030 AC-HJ-3: an invalid `ai` block MUST be reported as a VALIDATION_ERROR whose
  *     `field` names the offending key path (e.g. "ai.cli") — callers (loadLoreApp) use
  *     isAiConfigValidationError() to decide fail-loud vs the (unchanged, non-goal) silent
@@ -48,12 +50,6 @@ import { z } from "zod";
 import yaml from "yaml";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
-// reason: `OPEN_REPORT_CAP` is the SHIPPED DEFAULT for
-// `feedback.inbound.open_report_cap` (spec-the-defect-channel-cannot-be-honestly-
-// maintained-an §M2) — imported so the number has ONE home rather than a literal
-// here and a constant there. `issue-report.ts` is pure with ZERO imports of its
-// own, so this edge cannot introduce a cycle and cannot reach a Node builtin.
-import { OPEN_REPORT_CAP } from "./issue-report.js";
 import { TelemetryConfigSchema } from "./telemetry.js";
 import { AiConfigSchema } from "./ai.js";
 import { verificationProfileSchema } from "./verification-profile.js";
@@ -691,6 +687,27 @@ export type TraceConfig = z.infer<typeof TraceConfigSchema>;
 // ─── Feedback Section Schema ────────────────────────────────────────────────
 
 /**
+ * The by-name deprecation warning for a config still carrying
+ * `feedback.inbound.open_report_cap` (spec-the-defect-channel-reaches-no-
+ * machine-but-its-own-github P1, AC-GI-10) — the ONE deliberate side effect
+ * (`console.warn`) this otherwise pure module makes, fired from inside
+ * `FeedbackConfigSchema.inbound`'s `.transform()` whenever a parsed config
+ * carries a present value for the retired key.
+ *
+ * Deliberately NOT throttled the way `resolveGateEnabled`'s legacy-alias
+ * warning is (that one's `phaseClaimAliasWarned` WeakSet exists because a
+ * single command execution calls it ~6 times against the SAME config object,
+ * for different checkpoints): schema PARSING happens once per config load,
+ * so there is no equivalent repeat-call spam to suppress here.
+ */
+function warnRetiredOpenReportCapKey(): void {
+  console.warn(
+    "lore: feedback.inbound.open_report_cap is retired and no longer enforced " +
+      "(the open-report rate cap it configured was removed) — the value parses but is ignored.",
+  );
+}
+
+/**
  * Upstream issue-reporting configuration (SPEC-072 §4 Public Interface) —
  * consent to file `lore report-issue` reports into a configured upstream
  * corpus. Mirrors `SyncConfigSchema`'s nesting shape (a `.strict()` object
@@ -728,12 +745,13 @@ export type TraceConfig = z.infer<typeof TraceConfigSchema>;
  *   ceiling the spammer can raise is not a ceiling. A corpus may legitimately
  *   carry BOTH sections (it files reports upstream AND receives its own).
  * @invariant `inbound` carries a section-level `.default({})` — unlike
- *   `upstream`'s `.optional()` — so `FeedbackConfigSchema.parse({}).inbound
- *   .open_report_cap` is a real, derivable value rather than `undefined`. That
- *   is what lets {@link resolveOpenReportCap} fall back THROUGH the schema
- *   instead of restating the number, and what makes the shipped default visible
- *   to `scripts/check-shipped-defaults.ts` (which seeds every Zod-defaultable
- *   section with `{}` before parsing).
+ *   `upstream`'s `.optional()` — so `feedback.inbound` reads as a real object
+ *   rather than `undefined` even when the caller declares no `feedback`
+ *   section at all, which is what `scripts/check-shipped-defaults.ts` relies
+ *   on (it seeds every Zod-defaultable section with `{}` before parsing).
+ * @invariant `inbound.open_report_cap` is a RETIRED key (spec-the-defect-
+ *   channel-reaches-no-machine-but-its-own-github P1, AC-GI-9/AC-GI-10) — see
+ *   that field's own JSDoc for the parses-forever-but-ignored contract.
  */
 export const FeedbackConfigSchema = z
   .object({
@@ -769,25 +787,45 @@ export const FeedbackConfigSchema = z
     inbound: z
       .object({
         /**
-         * The maximum number of simultaneously-OPEN reports (computed
-         * resolution not terminal) any ONE reporter project may hold in this
-         * corpus before `lore report-issue` refuses to file another
-         * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M2,
-         * originally SPEC-072 §5 step 6 / R-5d). Resolved by
-         * {@link resolveOpenReportCap} from the UPSTREAM corpus's own config —
-         * ⛔ never re-read from `@lore/core`'s `OPEN_REPORT_CAP`, which is now
-         * only this default's source of truth.
+         * RETIRED (spec-the-defect-channel-reaches-no-machine-but-its-own-github
+         * P1, AC-GI-9/AC-GI-10): this key used to configure the maximum number
+         * of simultaneously-OPEN reports one reporter project could hold before
+         * `lore report-issue` refused another — that rate-cap ENFORCEMENT (and
+         * its six implementation symbols, enumerated in that spec's Scope
+         * section, deliberately not repeated here as literal identifiers since
+         * AC-GI-9's oracle is a case-sensitive scan for exactly those six
+         * strings) is deleted outright: with intake moving to a hosted tracker,
+         * abuse control belongs to that tracker, and the cap only ever refused
+         * honest reporters (measured 2026-08-23: 10 open reports against a
+         * ceiling of 10, refusing every new report while 6 criticals sat
+         * untriaged).
          *
-         * `.positive()` + `.int()`: zero would refuse every report while
-         * reading as "configured", and a fraction has no meaning against a
-         * count. ⛔ An out-of-range value is REJECTED at config parse (surfaced
-         * through the normal config-load error path, naming this key) — never
-         * clamped, never silently replaced by the default, because both would
-         * make a typo look like a working policy.
+         * The key is kept `.optional()` PERMANENTLY rather than removed —
+         * `FeedbackConfigSchema` is `.strict()` at all three levels, and
+         * `.lore/config.yaml` is gitignored, so a config still carrying this
+         * key from a pre-P1 binary would otherwise fail to parse on THIS
+         * MACHINE with no rollback path (a decision recorded in that spec's
+         * Scope → Out, not a deferral). A present value still PARSES (never a
+         * fail-loud refusal for this key alone) but is warned-on BY NAME via
+         * `console.warn` (`warnRetiredOpenReportCapKey` below) and then DROPPED
+         * — see the `inbound` object's own `.transform()` immediately below —
+         * before the resolved config ever reaches a reader. No code path may
+         * act on this field; it exists only so an old config file keeps
+         * parsing.
          */
-        open_report_cap: z.number().int().positive().default(OPEN_REPORT_CAP),
+        open_report_cap: z.number().int().positive().optional(),
       })
       .strict()
+      .transform((val) => {
+        // reason: the ONE deliberate side effect (console.warn) in this
+        // otherwise pure module — see `warnRetiredOpenReportCapKey`'s own
+        // JSDoc and the field's above for why this key must warn-then-drop
+        // rather than fail-loud or silently keep working.
+        if (val.open_report_cap !== undefined) {
+          warnRetiredOpenReportCapKey();
+        }
+        return { ...val, open_report_cap: undefined };
+      })
       .default({}),
   })
   .strict();
@@ -1709,52 +1747,6 @@ export const DEFAULT_WRITE_WAIT_MS = 2000;
 export function resolveUpstreamWriteWaitMs(config: LoreConfig | undefined): number {
   const writeWaitMs = config?.["feedback"]?.["upstream"]?.["write_wait_ms"];
   return typeof writeWaitMs === "number" ? writeWaitMs : DEFAULT_WRITE_WAIT_MS;
-}
-
-/**
- * Resolve the effective `feedback.inbound.open_report_cap` ceiling — how many
- * simultaneously-OPEN reports one reporter project may hold in the corpus this
- * config belongs to (spec-the-defect-channel-cannot-be-honestly-maintained-an
- * §M2, AC-DC-3).
- *
- * ⛔ The config passed here is the UPSTREAM corpus's OWN loaded config — the
- * queue owner declares its own depth. Passing the CONSUMER's config would hand
- * the ceiling to the party it constrains (`IssueReportService.report` threads
- * `deps.loadUpstreamConfig`'s result in; nothing else may call this with a
- * consumer config).
- *
- * @invariant THE single resolution seam — `@lore/core`'s `OPEN_REPORT_CAP` is
- *   this default's source of truth and MUST NOT be read as the operative
- *   ceiling anywhere. Mirrors {@link resolveUpstreamWriteWaitMs}'s "never
- *   re-derived at a read site" contract; a second read site would let a
- *   configured ceiling apply on one path and not another, which is
- *   indistinguishable from the config being ignored.
- * @invariant Reads via BRACKET notation, for the SAME reason
- *   {@link resolveStaleAfterDays} and {@link resolveUpstreamWriteWaitMs} do:
- *   `tests/unit/adapters/feedback-read-site-invariant.test.ts` pins
- *   `resolveFeedbackUpstreamCfg` (`report-issue-wiring.ts`) as the SOLE
- *   dot-notation `.feedback` reader, and this is a sibling section read for a
- *   different concern (the inbound ceiling, not upstream provisioning).
- * @invariant Falls back THROUGH the schema (never a restated literal) whenever
- *   the value is absent or not a number. Absence covers both "no `feedback`
- *   section at all" and a hand-built `LoreConfig` test fixture that sets
- *   `feedback: {upstream: {...}}` directly without routing through
- *   `FeedbackConfigSchema.parse` — the same partially-shaped-fixture tolerance
- *   {@link resolveStaleAfterDays} documents. ⛔ This is a DECLARED default for a
- *   defaulted field, not a silent fallback for a required one: an out-of-range
- *   value never reaches here at all (Zod rejects it at parse, so the caller's
- *   config load fails loud), so this branch can only ever mean "unconfigured".
- *
- * @param config - the UPSTREAM corpus's parsed LoreConfig, or undefined when
- *   none was loaded
- * @returns Effective open-report ceiling (a positive integer)
- * @example
- *   resolveOpenReportCap(undefined) // => 10 (the shipped OPEN_REPORT_CAP)
- *   resolveOpenReportCap({ ..., feedback: { inbound: { open_report_cap: 3 } } }) // => 3
- */
-export function resolveOpenReportCap(config: LoreConfig | undefined): number {
-  const cap = config?.["feedback"]?.["inbound"]?.["open_report_cap"];
-  return typeof cap === "number" ? cap : FeedbackConfigSchema.parse({}).inbound.open_report_cap;
 }
 
 /**

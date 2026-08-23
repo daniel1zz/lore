@@ -11,10 +11,9 @@
  * redeclared LOCALLY in this file rather than imported — the real
  * `flows/upstream-context-flow.ts` and `service/issue-report-service.ts`
  * modules do not exist yet, so importing types from them (even `import type`,
- * which still requires module resolution) would break `tsc`. `IssueReportPayload`,
- * `matchRootPrd`, `countOpenReports`, `buildIssueReportExtra`, `OPEN_REPORT_CAP`,
- * `ok`, `err` DO already exist in `@lore/core` (T1, merged) and are imported
- * for real.
+ * which still requires module resolution) would break `tsc`. `ok`/`err`/
+ * `UNKNOWN_CONTENDING_SOURCE` DO already exist in `@lore/core` (T1, merged)
+ * and are imported for real.
  *
  * Module-resolution note (see also receipt-log.test.ts's header): a
  * literal-string `import("../../../src/service/issue-report-service.js")`
@@ -41,7 +40,6 @@ import { fileURLToPath } from "url";
 import {
   ok,
   err,
-  buildIssueReportExtra,
   UNKNOWN_CONTENDING_SOURCE,
   type LoreConfig,
   type LoreError,
@@ -52,7 +50,6 @@ import {
 
 interface LocalUpstreamPort {
   resolveRootDoc(): Promise<Result<{ id: string; slug: string } | null, LoreError>>;
-  listOpenAdhocDrafts(): Promise<Result<Array<{ id: string; status: string; extra?: unknown }>, LoreError>>;
   searchDuplicates(query: string, limit: number): Promise<Result<string[], LoreError>>;
   createDraft(input: {
     title: string;
@@ -60,9 +57,9 @@ interface LocalUpstreamPort {
     extra: Record<string, unknown>;
   }): Promise<Result<{ id: string }, LoreError>>;
   /**
-   * The port's 5th operation (spec-issue-closure-loop-computed-resolution-agent-
-   * reachable D6/D7) — the per-doc COMPUTED resolution the step-6 cap narrowing
-   * consults. Kept structurally typed (plain `string` unions rather than the
+   * The per-doc COMPUTED resolution (spec-issue-closure-loop-computed-
+   * resolution-agent-reachable D6/D7), consumed by `list()`'s receipt-status
+   * join. Kept structurally typed (plain `string` unions rather than the
    * real `DocStatus`/`IssueResolution` imports) for the same reason every other
    * shape in this block is locally redeclared: this file couples to the SUT only
    * through the dynamic-import helper below.
@@ -153,13 +150,8 @@ const DECLARED_WRITE_WAIT_MS = 1234;
 function makeFakePort(overrides: Partial<LocalUpstreamPort> = {}): LocalUpstreamPort {
   return {
     resolveRootDoc: vi.fn(async () => ok({ id: "01ROOTPRD", slug: "prd-lore" })),
-    listOpenAdhocDrafts: vi.fn(async () => ok([])),
     searchDuplicates: vi.fn(async () => ok([])),
     createDraft: vi.fn(async () => ok({ id: "01NEWDOC" })),
-    // Default: every candidate reads back as genuinely still open, so a case
-    // that fills the cap is blocked by NON-terminal reports (the pre-M1
-    // behaviour those assertions were written against) rather than by a
-    // fail-closed read error.
     getResolution: vi.fn(async () => ok({ status: "draft", resolution: "open" })),
     close: vi.fn(),
     ...overrides,
@@ -419,36 +411,23 @@ describe("SPEC-072 IssueReportService (RED — packages/lore/src/service/issue-r
     expect(port.createDraft).not.toHaveBeenCalled();
   });
 
-  it("NEGATIVE: 10 open reports already filed by this reporter_project → VALIDATION_ERROR listing the 10 open ids; createDraft never called", async () => {
+  it("REGRESSION: filing well past the former open-report ceiling never refuses for quota reasons (spec-the-defect-channel-reaches-no-machine-but-its-own-github P1 deletes the cap outright)", async () => {
     const { IssueReportService } = await importIssueReportService();
-    const openTasks = Array.from({ length: 10 }, (_, i) => ({
-      id: `01OPENTASK${i}`,
-      status: "draft",
-      extra: buildIssueReportExtra({
-        reporter_project: "consumer-a",
-        reporter_actor: "agent:consumer-a",
-        lore_version: "0.9.0",
-        expected: "e",
-        actual: "a",
-        reported_at: NOW_ISO,
-        possible_duplicates: [],
-      }),
-    }));
-    const port = makeFakePort({ listOpenAdhocDrafts: vi.fn(async () => ok(openTasks)) });
+    const port = makeFakePort();
     const { deps } = makeFakeDeps({ port, reporterProject: "consumer-a" });
     const service = new IssueReportService(deps);
 
-    const result = await service.report(BASE_INPUT, BASE_CFG);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe("VALIDATION_ERROR");
-      const message = (result.error as { message: string }).message;
-      for (const task of openTasks) {
-        expect(message).toContain(task.id);
-      }
+    // The former cap refused an 11th open report from the SAME reporter with
+    // a byte-identical VALIDATION_ERROR (measured 2026-08-11: 10 filed, 10
+    // resolved rejected, the 11th still refused). With that enforcement
+    // deleted, 11 filings in a row from the same reporter — one past that
+    // former ceiling — must ALL succeed: this service reads no candidate set
+    // and no resolution before `createDraft` any more.
+    for (let i = 0; i < 11; i++) {
+      const result = await service.report(BASE_INPUT, BASE_CFG);
+      expect(result.ok, `filing #${i + 1} unexpectedly refused`).toBe(true);
     }
-    expect(port.createDraft).not.toHaveBeenCalled();
+    expect(port.createDraft).toHaveBeenCalledTimes(11);
   });
 
   it("STATE: searchDuplicates failure degrades to dedup_degraded=true but still proceeds to createDraft (advisory never blocks)", async () => {

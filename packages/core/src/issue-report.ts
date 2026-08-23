@@ -11,19 +11,11 @@
  *     report's `extra.issue_report` (SPEC-072 §4).
  *   - `matchRootPrd` — R-5a identity-pin check: does the upstream corpus's
  *     root PRD match the consumer's configured `feedback.upstream.root_prd`?
- *   - `countOpenReports` — R-5d rate-cap CANDIDATE selection: which of this
- *     reporter project's upstream reports are still at `status: "draft"`? ⛔ Not
- *     the cap decision itself: since spec-the-defect-channel-cannot-be-honestly-
- *     maintained-an §M1, `IssueReportService` narrows this candidate set by each
- *     report's COMPUTED RESOLUTION before comparing against the ceiling. See
- *     this function's own JSDoc for why the raw status cannot answer the
- *     question on its own.
  *   - `buildIssueReportExtra` — assembles the `extra` payload for the
  *     upstream ad-hoc draft task `createDraft` writes.
  *   - `ISSUE_SEVERITIES` / `IssueSeverity` / `isIssueSeverity` — the ORDERING-ONLY
  *     severity vocabulary (§M6). ⛔ Admission-inert by construction: nothing in
- *     this module's cap arithmetic reads it, and `IssueReportService`'s step-6
- *     narrowing takes no severity argument at all.
+ *     this module reads it as an admission decision.
  *   - `readIssueTriageLabels` — the ONE defensive reader for
  *     `extra.issue_report.{severity,category}`, consumed by BOTH read surfaces so
  *     neither can render a label the other cannot see.
@@ -31,12 +23,17 @@
  *     render contract's single composition site.
  *   - `IssueReadSource` / `resolveIssueReadSource` — the ONE decision function for
  *     WHICH corpus an issue read surface reads (§M4).
- *   - `OPEN_REPORT_CAP` — the SHIPPED DEFAULT for the R-5d rate-cap ceiling
- *     (10). ⛔ No longer the operative ceiling: since spec-the-defect-channel-
- *     cannot-be-honestly-maintained-an §M2 it is the Zod default of
- *     `feedback.inbound.open_report_cap`, and the value in force is resolved
- *     from the UPSTREAM corpus's own config by `config.ts`'s
- *     `resolveOpenReportCap`. See this constant's own JSDoc.
+ *
+ * ⛔ RETIRED (spec-the-defect-channel-reaches-no-machine-but-its-own-github P1,
+ *   AC-GI-9): the R-5d open-report rate cap this module used to help enforce is
+ *   deleted outright, along with its six named implementation symbols
+ *   (that spec's own Scope section is the enumeration — deliberately not
+ *   repeated here as literal identifiers, since AC-GI-9's oracle is a
+ *   case-sensitive repo-wide scan for exactly those six strings). The retired
+ *   config key itself is NEVER removed from `FeedbackConfigSchema` (a config
+ *   still carrying it must go on parsing forever, `.lore/config.yaml` being
+ *   gitignored with no rollback path) — see `config.ts`'s inbound-policy field
+ *   for the by-name warn-and-ignore replacement (AC-GI-10).
  *
  * Concurrency contract surface (spec-report-issue-has-no-specified-
  * concurrency-contract-ac-072, §Contract Details) — the SSOT for the DECLARED
@@ -61,23 +58,14 @@
  *   - `extra.issue_report` is deliberately NOT a Zod-validated field on the
  *     shared `taskExtraSchema` (SPEC-072 §11 Downstream Handoff, "P5
  *     admission rule": no typed-schema field until a pure function reads
- *     it) — it stays untyped `extra` passthrough. `countOpenReports` reads
- *     it defensively (mirrors `task-workflow.ts::safeTaskExtra`'s guard
- *     shape) rather than via a schema parse, so a malformed/legacy `extra`
- *     value degrades to "not a match" instead of throwing.
- *   - `countOpenReports`'s task-shape parameter carries `id` in ADDITION to
- *     the `{status, extra}` pair named in the spec's §4 Public Interface
- *     listing — that literal signature is structurally incapable of
- *     producing a meaningful `ids: string[]` result (nothing in `{status,
- *     extra}` alone identifies which upstream doc a match came from), and
- *     R-5d's own failure message ("lists the 10 open ids") needs those doc
- *     ids. Confirmed via the spec's raw markdown (no truncation) before
- *     concluding this is a spec omission, not a misread — documented here so
- *     the next reader doesn't "fix" the extra field back out.
+ *     it) — it stays untyped `extra` passthrough, read defensively by every
+ *     consumer (mirrors `task-workflow.ts::safeTaskExtra`'s guard shape)
+ *     rather than via a schema parse, so a malformed/legacy `extra` value
+ *     degrades to "no signal" instead of throwing.
  *
  * Side-effect class: pure.
  *
- * Source: SPEC-072 §4 Public Interface, §5 check sequence (steps 5, 6).
+ * Source: SPEC-072 §4 Public Interface, §5 check sequence (step 5).
  */
 
 /**
@@ -154,10 +142,11 @@ export interface IssueTriageLabels {
 }
 
 /**
- * The ONE defensive reader for `extra.issue_report.{severity,category}` — mirrors
- * {@link readReporterProject}'s guard shape (a malformed/legacy `extra` degrades
- * to "no labels" rather than throwing, since `extra.issue_report` stays untyped
- * passthrough per this module's own invariant).
+ * The ONE defensive reader for `extra.issue_report.{severity,category}` — the
+ * same null/array/typeof guard shape every other defensive reader in this
+ * module uses (a malformed/legacy `extra` degrades to "no labels" rather than
+ * throwing, since `extra.issue_report` stays untyped passthrough per this
+ * module's own invariant).
  *
  * Consumed by BOTH read surfaces (`commands/issues.ts` via the upstream port, and
  * `IssueReportService.list` via `UpstreamPort.getResolution`) so neither surface
@@ -302,76 +291,6 @@ export function matchRootPrd(
 }
 
 /**
- * Defensive `extra.issue_report.reporter_project` reader — mirrors
- * `task-workflow.ts::safeTaskExtra`'s guard shape (duplicated rather than
- * imported to avoid a reverse dependency from this module into
- * `task-workflow.ts`). A malformed/legacy `extra` (null, array, wrong nested
- * shape) reads as "no reporter_project" rather than throwing.
- *
- * @param extra - a task's raw `extra` field (untyped storage)
- * @returns the nested `issue_report.reporter_project` string, or `undefined`
- *   when absent or the shape doesn't match
- */
-function readReporterProject(extra: unknown): string | undefined {
-  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) {
-    return undefined;
-  }
-  const issueReport = (extra as Record<string, unknown>)["issue_report"];
-  if (issueReport === null || typeof issueReport !== "object" || Array.isArray(issueReport)) {
-    return undefined;
-  }
-  const reporterProject = (issueReport as Record<string, unknown>)["reporter_project"];
-  return typeof reporterProject === "string" ? reporterProject : undefined;
-}
-
-/**
- * R-5d rate-cap CANDIDATE selection: which still-`draft` upstream ad-hoc reports
- * has `reporterProject` already filed? Never the reporter's full filing history.
- *
- * ⛔ This is a NECESSARY but NOT SUFFICIENT condition for "still occupies cap
- * quota", and a previous version of this doc comment claimed otherwise ("a report
- * stops being open the moment it leaves draft"). It never does leave `draft`: no
- * closure verb moves an issue report off it (`lore issue resolve` writes only
- * `extra.issue_report.resolution`, `ReviewService.reject` returns a doc TO
- * `draft`, and `VALID_TRANSITIONS` has no `draft -> archived` edge). Keying the
- * cap on this count alone therefore made it UNRELEASEABLE by any action available
- * to a reporter — measured 2026-08-11: 10 reports filed, all 10 resolved
- * `rejected`, the 11th still refused with a byte-identical message. The caller
- * (`IssueReportService.report` step 6) now narrows this set by each candidate's
- * COMPUTED resolution (`TERMINAL_ISSUE_RESOLUTIONS`,
- * spec-the-defect-channel-cannot-be-honestly-maintained-an §M1) before comparing
- * against the ceiling. ⛔ Do not "fix" that back into this pure function: reading
- * a computed resolution needs the store (resolves in-edges + the audit trail),
- * which this browser-safe module deliberately cannot touch.
- *
- * @param tasks - candidate upstream tasks, each carrying at least its own
- *   `id`, lifecycle `status`, and untyped `extra` (see module invariant above
- *   re: the `id` field)
- * @param reporterProject - the filing reporter's project identity (must
- *   match `extra.issue_report.reporter_project` exactly)
- * @returns `{open, ids}` — the count and the doc ids of every matching task,
- *   in input order (never re-sorted, never deduplicated — the store layer
- *   guarantees distinct ids per row)
- * @example
- *   countOpenReports(
- *     [{id: "t1", status: "draft", extra: {issue_report: {reporter_project: "consumer-a"}}}],
- *     "consumer-a",
- *   ) // => {open: 1, ids: ["t1"]}
- */
-export function countOpenReports(
-  tasks: ReadonlyArray<{ id: string; status: string; extra?: unknown }>,
-  reporterProject: string,
-): { open: number; ids: string[] } {
-  const ids: string[] = [];
-  for (const task of tasks) {
-    if (task.status !== "draft") continue;
-    if (readReporterProject(task.extra) !== reporterProject) continue;
-    ids.push(task.id);
-  }
-  return { open: ids.length, ids };
-}
-
-/**
  * Assembles the `extra` payload for the upstream ad-hoc draft task
  * `UpstreamPort.createDraft` writes. Pure structural wrap — every field of
  * `p` is carried verbatim; no defaulting, no derived fields.
@@ -428,31 +347,6 @@ export function buildIssueReportExtra(p: IssueReportPayload): Record<string, unk
     issue_report: { ...p },
   };
 }
-
-/**
- * The SHIPPED DEFAULT for the R-5d rate-cap ceiling — the maximum number of
- * simultaneously-open reports a single reporter project may have filed upstream
- * before `lore report-issue` refuses to file another (SPEC-072 §5 step 6,
- * AC-072-6).
- *
- * "Open" here means COMPUTED RESOLUTION not in `TERMINAL_ISSUE_RESOLUTIONS`
- * (spec-the-defect-channel-cannot-be-honestly-maintained-an §M1), NOT
- * `status === "draft"` — see {@link countOpenReports}'s own doc for the measured
- * reason those two are not the same question.
- *
- * ⛔ NOT the operative ceiling — do not read this at an enforcement site. Since
- * §M2 the value in force is the UPSTREAM corpus's own declared
- * `feedback.inbound.open_report_cap`, of which this constant is the Zod default:
- * `config.ts`'s `resolveOpenReportCap` is the ONE resolution seam, and
- * `IssueReportService` calls it with the upstream's loaded config. A ceiling the
- * queue's owner cannot set is not a policy, it is a build-time constant — which
- * is exactly the defect §M2 closes. Enforced observably rather than by prose:
- * `tests/integration/cli/issue-cap-configurable.bun.test.ts` (AC-DC-3) drives
- * THREE different operative ceilings — 3, 1, and this default — against one
- * binary, so any code path that read this literal as the ceiling would fail two
- * of the three.
- */
-export const OPEN_REPORT_CAP = 10;
 
 // ─── Concurrency contract (spec-report-issue-has-no-specified-concurrency-contract-ac-072) ───
 //

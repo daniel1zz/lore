@@ -119,14 +119,6 @@ export interface UpstreamPort {
    */
   resolveRootDoc(): Promise<Result<{ id: string; slug: string } | null, LoreError>>;
   /**
-   * @returns every OPEN (status=`draft`) ad-hoc (`extra.adhoc === true`)
-   *   task in the upstream corpus — the candidate set `countOpenReports`
-   *   (`@lore/core`) filters down to one reporter project's own reports
-   */
-  listOpenAdhocDrafts(): Promise<
-    Result<Array<{ id: string; status: string; extra?: unknown }>, LoreError>
-  >;
-  /**
    * Advisory FTS duplicate search — a search failure is the CALLER's concern
    * (surfaced as `dedup_degraded: true`, never blocks filing); this method
    * itself still returns `err(...)` on failure rather than silently
@@ -159,9 +151,10 @@ export interface UpstreamPort {
    * to a debugging detail, no longer the primary signal) and, when a
    * rejection reason is on record, that reason echoed back.
    *
-   * Added AFTER the original 4 ops proved insufficient: none of
-   * `resolveRootDoc`/`listOpenAdhocDrafts`/`searchDuplicates`/`createDraft`
-   * can answer "has this defect actually been fixed or triaged terminal" —
+   * Added AFTER the original 4 ops (one since retired) proved insufficient:
+   * none of `resolveRootDoc`/`searchDuplicates`/`createDraft` (nor the retired
+   * fourth) can answer "has this defect actually been fixed or triaged
+   * terminal" —
    * that needs a join this port didn't expose: every `resolves` in-edge
    * targeting the issue doc, plus each edge's source doc's lifecycle status.
    * Reuses `CorpusService.getResolvesInEdgesForIssues` (D7's ONE cross-doc
@@ -209,13 +202,14 @@ export interface UpstreamPort {
    * the facts {@link getResolution} computes for one — the read `lore issues`
    * consumes (spec-the-defect-channel-cannot-be-honestly-maintained-an §M4).
    *
-   * Added as a 6th op because §M4 makes `lore issues` read the CONFIGURED
-   * UPSTREAM by default, and none of the existing 5 can answer it:
-   * `listOpenAdhocDrafts` is narrowed to `status: "draft"` (so `--all`/`--resolved`
-   * would silently miss an archived report, whose computed resolution is exactly
-   * the `closed` state that listing exists to show) and carries no
-   * `slug`/`title`; `getResolution` answers for one already-known id, which is
-   * the question `report-issue --list` asks from its local receipt ledger, not
+   * Added as a 6th op (one of the pre-existing ops has since been retired)
+   * because §M4 makes `lore issues` read the CONFIGURED UPSTREAM by default,
+   * and no existing op could answer it: the now-retired draft-only listing op
+   * was narrowed to `status: "draft"` (so `--all`/`--resolved` would silently
+   * miss an archived report, whose computed resolution is exactly the
+   * `closed` state that listing exists to show) and carried no `slug`/`title`
+   * either; `getResolution` answers for one already-known id, which is the
+   * question `report-issue --list` asks from its local receipt ledger, not
    * the question a listing asks.
    *
    * ⛔ Resolution is computed by the SAME internal derivation `getResolution`
@@ -570,13 +564,6 @@ export function buildUpstreamContext(
       return ok(rootPrd ? { id: rootPrd.id, slug: rootPrd.slug } : null);
     },
 
-    async listOpenAdhocDrafts() {
-      const result = await store.findMany({ type: "task", status: "draft" });
-      if (!result.ok) return result;
-      const drafts = result.value.filter((task) => task.extra?.["adhoc"] === true);
-      return ok(drafts.map((task) => ({ id: task.id, status: task.status, extra: task.extra })));
-    },
-
     async searchDuplicates(query, limit) {
       const result = await corpusService.search(query);
       if (!result.ok) return result;
@@ -610,10 +597,10 @@ export function buildUpstreamContext(
     },
 
     async listIssueReports() {
-      // Every task, EVERY status — not `status: "draft"` like
-      // `listOpenAdhocDrafts`: a report archived upstream computes `closed`, and
-      // narrowing to draft here would make `--all`/`--resolved` silently omit the
-      // very rows those flags exist to show.
+      // Every task, EVERY status — not narrowed to drafts only: a report
+      // archived upstream computes `closed`, and narrowing to draft here
+      // would make `--all`/`--resolved` silently omit the very rows those
+      // flags exist to show.
       const tasksResult = await store.findMany({ type: "task" });
       if (!tasksResult.ok) return tasksResult;
       const issueTasks = tasksResult.value.filter((task) => hasIssueReport(task.extra));
