@@ -72,27 +72,71 @@
  * all three (it selects the CORPUS, they select the resolution filter).
  *
  * §M6 adds `Severity`/`Category` columns and `--json` keys, read through
- * `@lore/core`'s single `readIssueTriageLabels`. ⛔ ORDERING ONLY — nothing in
- * this listing sorts, groups, or filters by them, and nothing in the cap path
- * reads them at all.
+ * `@lore/core`'s single `readIssueTriageLabels`.
+ *
+ * `--severity <level>` / `--category <value>` (spec-the-defect-channel-
+ * reaches-no-machine-but-its-own-github, Scope "Read-side --severity/
+ * --category filters on lore issues"; AC-GI-12) narrow the ALREADY-PROJECTED
+ * rows to an exact match on that label — no additional `gh` call, since the
+ * corpus-side `extra.issue_report.severity`/`category` copy
+ * `readIssueTriageLabels` already reads is authoritative for BOTH read
+ * branches (an issue's GitHub-body front-matter copy is a second, later
+ * write of the SAME declared value, never a second source of truth).
+ * Filtering happens BEFORE `renderRows` computes `total`, so a filtered
+ * run's `--json` `data.total` is the FILTERED count, never the unfiltered
+ * one — the exact census defect this project's own North Star names
+ * ("filtering leaves a trace in the count... made a census wrong by 21x").
+ *
+ * `--verify` (AC-GI-5) is a DIFFERENT operation from the listing above, not
+ * a flag that narrows it: it scans EVERY issue-report task carrying a
+ * GitHub ref (`readGithubIssueRef`, `service/resolution-projector.js`)
+ * regardless of `--open`/`--resolved`/`--all`/`--severity`/`--category`,
+ * groups them by repo, and reads back each repo's CURRENT issue labels in
+ * exactly ONE batched `GhRunner.run(...)` call per distinct repo — never
+ * one call per issue (AC-GI-12: the call count for N=1 equals N=50). A
+ * target's corpus-computed resolution (`computeIssueResolution`, consumed
+ * verbatim, NEVER re-derived from the label — Per-Field Authority table,
+ * "resolution (9 states) | corpus | resolution:* label | NEVER: drift check
+ * only") is compared against the label's decoded resolution
+ * (`labelToResolution`, same module). `--verify` performs ZERO writes — no
+ * `corpusService.set`, no `gh api ... -X ...` mutation — and renders a
+ * DELIBERATELY SEPARATE `--json` shape (`data.clean`/`data.divergences`),
+ * never `data.reports`: a verify run is a diagnostic report, not a row
+ * listing, and folding the two shapes together would let a caller mistake
+ * "what GitHub currently shows" for "what the corpus says" — precisely the
+ * authority inversion this spec exists to prevent.
  *
  * Exit codes: 0 success (including the zero-report empty-list case, per
- *   AC-ICL-5's explicit "empty list and exit 0" clause); 1 store failure; 2 usage
- *   error (more than one of --open/--resolved/--all passed together); 4 a
- *   configured upstream that cannot be opened/validated (`exitCode()`-mapped).
+ *   AC-ICL-5's explicit "empty list and exit 0" clause, and a clean --verify
+ *   run — no divergence found); 1 store failure; 2 usage error (more than
+ *   one of --open/--resolved/--all passed together, or an unrecognised
+ *   --severity value); 4 a configured upstream that cannot be
+ *   opened/validated (`exitCode()`-mapped); 11 --verify found at least one
+ *   resolution-label divergence — the next integer past `exitCode()`'s own
+ *   highest claimed value (`RATE_LIMITED` -> 10, `adapters/cli/utils.ts`);
+ *   `1` is already STORE_ERROR on this same command (`rowsResult.error`), so
+ *   reusing it for "divergence found" would make an actual store failure and
+ *   a clean-corpus-dirty-label finding indistinguishable on one command.
  *
  * Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D4,
  *   AC-ICL-5, AC-ICL-10; spec-the-defect-channel-cannot-be-honestly-maintained-an
- *   §M4 (AC-DC-5, AC-DC-6) and §M6 (AC-DC-7).
+ *   §M4 (AC-DC-5, AC-DC-6) and §M6 (AC-DC-7);
+ *   spec-the-defect-channel-reaches-no-machine-but-its-own-github, Scope
+ *   "ResolutionProjector"/"GhRunner", Per-Field Authority table, AC-GI-5,
+ *   AC-GI-12.
  */
 
 import { dirname } from "node:path";
 import { defineCommand } from "citty";
+import { z } from "zod";
 import {
+  err,
   formatIssueCorpusLine,
+  isIssueSeverity,
   ok,
   readIssueTriageLabels,
   resolveIssueReadSource,
+  ISSUE_SEVERITIES,
   type IssueReadSource,
   type IssueSeverity,
   type LoreError,
@@ -108,6 +152,8 @@ import {
   TERMINAL_ISSUE_RESOLUTIONS,
   type IssueResolution,
 } from "../../../service/issue-resolution.js";
+import { GhRunner, createNodeGhExecFile } from "../../../service/gh-runner.js";
+import { readGithubIssueRef, labelToResolution, type GithubIssueRef } from "../../../service/resolution-projector.js";
 
 /**
  * One rendered row — the fields D4 names (title, slug, reporter_project,
@@ -214,6 +260,19 @@ export default defineCommand({
       description:
         "Read THIS corpus (the one discovered from cwd) instead of the configured feedback.upstream corpus",
     },
+    severity: {
+      type: "string",
+      description: `Filter to reports whose declared severity exactly matches (${ISSUE_SEVERITIES.join("/")}) — the printed total reflects this filter`,
+    },
+    category: {
+      type: "string",
+      description: "Filter to reports whose declared category exactly matches (case-sensitive) — the printed total reflects this filter",
+    },
+    verify: {
+      type: "boolean",
+      description:
+        "Detect drift between the corpus-computed resolution and each issue's current resolution:* GitHub label — writes nothing, exits 11 on any divergence, 0 when clean",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -230,6 +289,18 @@ export default defineCommand({
     }
     const mode: "open" | "resolved" | "all" =
       args.all === true ? "all" : args.resolved === true ? "resolved" : "open";
+
+    // reason: validated BEFORE loadLoreApp() opens anything — a bad
+    // --severity value is a pure usage error (exit 2, mirrors the
+    // modeFlagsSet check above), never a reason to touch the corpus first
+    // and fail loud only after.
+    const severityFilter = typeof args.severity === "string" ? args.severity : undefined;
+    if (severityFilter !== undefined && !isIssueSeverity(severityFilter)) {
+      process.stderr.write(`Error: --severity must be one of ${ISSUE_SEVERITIES.join("/")}.\n`);
+      process.exitCode = 2;
+      return;
+    }
+    const categoryFilter = typeof args.category === "string" ? args.category : undefined;
 
     // reason: loadLoreApp() is called on BOTH branches, not just the local one.
     // It is this command's only source for the consumer's own parsed config
@@ -273,6 +344,15 @@ export default defineCommand({
         forceLocal: args.local === true,
       });
 
+      // reason: --verify is a DIFFERENT operation from the listing below, not
+      // a narrowing of it (see this file's own header) — dispatched here,
+      // BEFORE the mode-filtered read, so it never inherits --open/--resolved/
+      // --all's filter and never touches --severity/--category.
+      if (args.verify === true) {
+        await runVerify(app, source, args.json === true);
+        return;
+      }
+
       const rowsResult =
         source.kind === "upstream"
           ? await readUpstreamRows(source.corpus_path, mode)
@@ -282,7 +362,13 @@ export default defineCommand({
         process.exitCode = exitCode(rowsResult.error);
         return;
       }
-      renderRows(rowsResult.value, mode, source, args.json === true);
+      // reason: filtering happens HERE, before renderRows computes `total`
+      // off the resulting array's length — so a filtered run's `data.total`
+      // is the FILTERED count, never the unfiltered one (this file's own
+      // header names the census defect a self-consistent-but-unfiltered
+      // total would reproduce).
+      const filteredRows = filterIssueRows(rowsResult.value, severityFilter, categoryFilter);
+      renderRows(filteredRows, mode, source, args.json === true);
     } finally {
       app.close();
     }
@@ -427,4 +513,310 @@ function renderRows(
     r.category ?? "",
   ]);
   console.log(formatTable(headers, tableRows)); // CLI surface
+}
+
+/**
+ * `--severity`/`--category`'s exact-match narrowing over the ALREADY-
+ * PROJECTED rows — see this file's own header for why this reads
+ * `readIssueTriageLabels`'s existing corpus-side copy rather than issuing a
+ * `gh` call: an absent filter value is a no-op (`undefined` skips its own
+ * comparison), so passing neither leaves `rows` untouched.
+ *
+ * @param rows - the mode-filtered, already-projected rows
+ * @param severity - `undefined` when `--severity` was not passed
+ * @param category - `undefined` when `--category` was not passed
+ * @returns the subset of `rows` matching every passed filter — the caller
+ *   MUST compute `total` off THIS return value, never off `rows`
+ */
+function filterIssueRows(rows: IssueRow[], severity: IssueSeverity | undefined, category: string | undefined): IssueRow[] {
+  return rows.filter((row) => {
+    if (severity !== undefined && row.severity !== severity) return false;
+    if (category !== undefined && row.category !== category) return false;
+    return true;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// `--verify` — drift detection between the corpus-computed resolution and
+// each issue's current `resolution:*` GitHub label. See this file's own
+// header for the full contract; AC-GI-5, AC-GI-12.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The `--verify` divergence exit code. See this file's own header "Exit codes" for why `11` and why not `1`. */
+const VERIFY_DIVERGENCE_EXIT_CODE = 11;
+
+/**
+ * Sentinel `github_label_resolution` value when NO label on the issue
+ * decodes to a real {@link IssueResolution} member (missing entirely, or a
+ * label `labelToResolution` does not recognise) — distinct from every real
+ * 9-state member so a reader never mistakes "nothing to decode" for a
+ * genuine state, and always still counts as a divergence (the corpus made
+ * a determination; GitHub showing nothing recognisable is itself drift).
+ */
+const NO_RESOLUTION_LABEL = "none";
+
+/** One issue-report task in scope for `--verify`: its identity, corpus-computed resolution, and GitHub pointer. */
+interface VerifyTarget {
+  readonly id: string;
+  readonly slug: string;
+  readonly resolution: IssueResolution;
+  readonly github: GithubIssueRef;
+}
+
+/** One `--verify` finding — both values named, never just "drift detected". */
+interface ResolutionDivergence {
+  readonly id: string;
+  readonly slug: string;
+  readonly corpus_resolution: IssueResolution;
+  readonly github_label_resolution: string;
+}
+
+/** `gh api repos/<repo>/issues?state=all&per_page=100`'s response shape, narrowed to the two fields `--verify` reads. `.passthrough()`: the real payload carries many more fields this command has no use for. */
+const GithubVerifyLabelSchema = z.object({ name: z.string() }).passthrough();
+const GithubVerifyIssueEntrySchema = z
+  .object({ number: z.number(), labels: z.array(GithubVerifyLabelSchema) })
+  .passthrough();
+const GithubVerifyIssueListSchema = z.array(GithubVerifyIssueEntrySchema);
+
+/**
+ * Defensive `JSON.parse` — `gh api`'s stdout is untrusted external text
+ * relayed unmodified by `GhRunner.run`. Mirrors the identical
+ * `parseJsonSafely` helper `service/github-intake-port.ts` keeps as its own
+ * module-private copy (same module-boundary reasoning: duplicated rather
+ * than imported, since that symbol is not exported and this task's file
+ * anchor is `commands/issues.ts` alone).
+ */
+function parseJsonSafely(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Collects every LOCAL issue-report task carrying a GitHub ref, regardless
+ * of resolution — mirrors {@link readLocalRows}'s per-task resolution
+ * computation exactly (same `listFull` + per-task `get()` +
+ * `computeIssueResolution` call shape) but applies NO mode filter (`--verify`
+ * scans everything, per this file's own header) and keeps the GitHub
+ * pointer (`readGithubIssueRef`) instead of projecting a render row —
+ * a task with no GitHub ref has nothing for `--verify` to check and is
+ * silently excluded, same as `readGithubIssueRef`'s own documented
+ * "never filed via GitHub" contract.
+ */
+async function collectLocalVerifyTargets(app: ReturnType<typeof loadLoreApp>["app"]): Promise<Result<VerifyTarget[], LoreError>> {
+  const listResult = await app.corpusService.listFull({ type: "task" });
+  if (!listResult.ok) return listResult;
+
+  const targets: VerifyTarget[] = [];
+  for (const task of listResult.value.docs.filter((d) => hasIssueReport(d.extra))) {
+    const github = readGithubIssueRef(task.extra);
+    if (github === undefined) continue;
+
+    const getResult = await app.corpusService.get(task.id);
+    // reason: same graceful-partial-result degrade readLocalRows documents
+    // for its own identical per-doc get() — a task that vanished between
+    // the two calls is excluded from this scan, never an abort.
+    if (!getResult.ok) continue;
+
+    const resolvesInEdges = getResult.value.navigation.related.filter((r) => r.link_type === "resolves");
+    const resolution = computeIssueResolution(
+      task,
+      resolvesInEdges.map((r) => ({ from_id: r.id })),
+      resolvesInEdges.map((r) => ({ id: r.id, status: r.status })),
+    );
+    targets.push({ id: task.id, slug: task.slug, resolution, github });
+  }
+  return ok(targets);
+}
+
+/**
+ * Collects every UPSTREAM issue-report task carrying a GitHub ref,
+ * regardless of resolution — the same `UpstreamPort.listIssueReports` seam
+ * {@link readUpstreamRows} uses, keeping each report's ALREADY-computed
+ * `resolution` (`UpstreamIssueFacts`, derived at the same site `--list`
+ * uses) rather than re-deriving it, and its raw `extra` to extract the
+ * GitHub pointer.
+ */
+async function collectUpstreamVerifyTargets(corpusPath: string): Promise<Result<VerifyTarget[], LoreError>> {
+  const portResult = buildUpstreamContext(corpusPath);
+  if (!portResult.ok) return portResult;
+  const port = portResult.value;
+  try {
+    const reportsResult = await port.listIssueReports();
+    if (!reportsResult.ok) return reportsResult;
+
+    const targets: VerifyTarget[] = [];
+    for (const report of reportsResult.value as UpstreamIssueReportRow[]) {
+      const github = readGithubIssueRef(report.extra);
+      if (github === undefined) continue;
+      targets.push({ id: report.id, slug: report.slug, resolution: report.resolution, github });
+    }
+    return ok(targets);
+  } finally {
+    port.close();
+  }
+}
+
+/**
+ * Reads back the CURRENT `resolution:*` label for every `target`, batched
+ * into exactly ONE `GhRunner.run(["api", ...])` call PER DISTINCT REPO
+ * (AC-GI-12: the call count for N=1 equals N=50 when every target shares a
+ * repo, which is the common case — a real caller with issues spread across
+ * multiple repos costs one call per distinct repo, still independent of N).
+ * Constructs its own `GhRunner` directly (mirrors `app.ts`'s identical
+ * construction for `ResolutionProjector` — this task's file anchor,
+ * `commands/issues.ts` alone, cannot add a new module for it).
+ *
+ * ⛔ READ-ONLY BY CONSTRUCTION: every call is `["api", "repos/<repo>/
+ * issues?state=all&per_page=100"]` — no `-X`, ever.
+ *
+ * @param targets - the GitHub-ref-carrying targets to read labels for
+ * @returns a map keyed `"<repo>#<issueNumber>"` to the label's decoded
+ *   {@link IssueResolution}, or `undefined` when no label on that issue
+ *   decodes to a real member; `err(...)` on the first failing `gh` call or
+ *   unparseable response body
+ */
+async function fetchGithubLabelResolutions(
+  targets: readonly VerifyTarget[],
+): Promise<Result<Map<string, IssueResolution | undefined>, LoreError>> {
+  const runner = new GhRunner({ execFile: createNodeGhExecFile() });
+
+  const targetsByRepo = new Map<string, VerifyTarget[]>();
+  for (const target of targets) {
+    const group = targetsByRepo.get(target.github.repo);
+    if (group === undefined) {
+      targetsByRepo.set(target.github.repo, [target]);
+    } else {
+      group.push(target);
+    }
+  }
+
+  const labelResolutions = new Map<string, IssueResolution | undefined>();
+  for (const repo of targetsByRepo.keys()) {
+    const listResult = await runner.run(["api", `repos/${repo}/issues?state=all&per_page=100`]);
+    if (!listResult.ok) return listResult;
+
+    const parsed = GithubVerifyIssueListSchema.safeParse(parseJsonSafely(listResult.value.stdout));
+    if (!parsed.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gh_issues_verify_response",
+        message: `gh returned an issues-list payload --verify could not parse: ${parsed.error.message}`,
+        value: listResult.value.stdout,
+      });
+    }
+
+    for (const entry of parsed.data) {
+      const matchingLabel = entry.labels.find((label) => labelToResolution(label.name) !== undefined);
+      labelResolutions.set(
+        `${repo}#${entry.number}`,
+        matchingLabel === undefined ? undefined : labelToResolution(matchingLabel.name),
+      );
+    }
+  }
+  return ok(labelResolutions);
+}
+
+/**
+ * The comparison itself — Per-Field Authority's "drift check only": the
+ * corpus resolution NEVER moves, a mismatch (including "no recognisable
+ * label at all", {@link NO_RESOLUTION_LABEL}) is simply NAMED, both values
+ * verbatim.
+ */
+function computeDivergences(
+  targets: readonly VerifyTarget[],
+  labelResolutions: ReadonlyMap<string, IssueResolution | undefined>,
+): ResolutionDivergence[] {
+  const divergences: ResolutionDivergence[] = [];
+  for (const target of targets) {
+    const githubResolution = labelResolutions.get(`${target.github.repo}#${target.github.issueNumber}`);
+    if (githubResolution === target.resolution) continue;
+    divergences.push({
+      id: target.id,
+      slug: target.slug,
+      corpus_resolution: target.resolution,
+      github_label_resolution: githubResolution ?? NO_RESOLUTION_LABEL,
+    });
+  }
+  return divergences;
+}
+
+/**
+ * `--verify`'s ONE render — a DELIBERATELY separate shape from
+ * {@link renderRows} (`data.clean`/`data.divergences`, never `data.reports`;
+ * see this file's own header for why). Sets {@link VERIFY_DIVERGENCE_EXIT_CODE}
+ * on any divergence; leaves `process.exitCode` untouched (this repo's own
+ * clean-exit convention, mirrored from every other clean path in this file)
+ * when clean.
+ */
+function renderVerifyResult(source: IssueReadSource, divergences: readonly ResolutionDivergence[], json: boolean): void {
+  const clean = divergences.length === 0;
+
+  if (json) {
+    console.log( // CLI surface
+      JSON.stringify(
+        {
+          ok: true,
+          data: {
+            corpus_path: source.corpus_path,
+            mode: "verify",
+            clean,
+            divergences,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+  } else {
+    console.log(formatIssueCorpusLine(source.corpus_path)); // CLI surface
+    if (clean) {
+      console.log("verify: clean — no resolution-label divergences found."); // CLI surface
+    } else {
+      console.log(`verify: ${divergences.length} divergence(s) found:`); // CLI surface
+      for (const divergence of divergences) {
+        console.log(`  ${divergence.slug}: corpus=${divergence.corpus_resolution} github=${divergence.github_label_resolution}`); // CLI surface
+      }
+    }
+  }
+
+  if (!clean) {
+    process.exitCode = VERIFY_DIVERGENCE_EXIT_CODE;
+  }
+}
+
+/**
+ * `--verify`'s orchestration: collect targets (source-branched, same split
+ * as the plain listing) -> batched label read-back -> compare -> render.
+ * Zero targets short-circuits BEFORE constructing a `GhRunner` at all — a
+ * corpus with no GitHub-filed issue reports has nothing to verify, so no
+ * network call is warranted (never a "zero calls" false green for a corpus
+ * that DOES have targets, since that path always calls
+ * {@link fetchGithubLabelResolutions}).
+ */
+async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: IssueReadSource, json: boolean): Promise<void> {
+  const targetsResult =
+    source.kind === "upstream" ? await collectUpstreamVerifyTargets(source.corpus_path) : await collectLocalVerifyTargets(app);
+  if (!targetsResult.ok) {
+    process.stderr.write(formatError(targetsResult.error) + "\n");
+    process.exitCode = exitCode(targetsResult.error);
+    return;
+  }
+
+  const targets = targetsResult.value;
+  if (targets.length === 0) {
+    renderVerifyResult(source, [], json);
+    return;
+  }
+
+  const labelsResult = await fetchGithubLabelResolutions(targets);
+  if (!labelsResult.ok) {
+    process.stderr.write(formatError(labelsResult.error) + "\n");
+    process.exitCode = exitCode(labelsResult.error);
+    return;
+  }
+
+  renderVerifyResult(source, computeDivergences(targets, labelsResult.value), json);
 }
