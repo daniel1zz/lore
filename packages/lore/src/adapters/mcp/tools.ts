@@ -95,6 +95,22 @@
  * itself was authored and tested earlier but NEITHER adapter called it until
  * this fix, so the guard was dormant on both surfaces.
  *
+ * `lore_evidence_add` gains the discovery-refusal guard (task-wire-the-
+ * discovery-refusal-guard-into-the-evidence-capture, spec-oracle-
+ * executability-a-runner-s-discovery-refusal-is-not-a §M6.2's evidence-path
+ * sibling, AC-OX-12) — a `capture: true` call whose fail-family `result`
+ * (`"fail"`/`"expected-fail"`) is measured against a REAL exit code that
+ * turns out to be a runner's own discovery-refusal phrase (vitest/bun test/
+ * playwright reporting "found no matching test file", never distinguishable
+ * from a genuine assertion failure by exit code alone) now returns `isError`
+ * `VALIDATION_ERROR` instead of recording a `capture_source: "runner"` row
+ * for a run that measured NOTHING. `lore verify`'s own §M6.2 call site
+ * (`../../service/verify-runner-service.ts`) already downgraded this exact
+ * shape to `"inconclusive"` for the ATTESTED path — `findDiscoveryRefusal`
+ * (`@lore/core`) had exactly ONE production consumer before this task. Same
+ * shared-decision CLI/MCP split as every guard above
+ * (`findCapturedFailDiscoveryRefusal`, `../cli/evidence-precheck.js`).
+ *
  * `lore_evidence_add` and `lore_release` now thread `caller_cwd` through to
  * `TaskWorkflowService.addEvidence`/`release`'s uncommitted-worktree
  * attestation guard (defect: task-lore-evidence-add-and-lore-release-over-
@@ -250,6 +266,7 @@ import {
   findMixedRunnerRefusal,
   findCaptureFlagConflict,
   findPipeRefusal,
+  findCapturedFailDiscoveryRefusal,
   describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
 import { captureOracleCommand } from "../evidence-capture.js";
@@ -2036,6 +2053,31 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       }
       capturedTail = captured.value.outputTail;
       captureSource = captured.value.captureSource;
+
+      // reason: discovery-refusal guard (task-wire-the-discovery-refusal-guard-
+      // into-the-evidence-capture, spec-oracle-executability-a-runner-s-
+      // discovery-refusal-is-not-a §M6.2's evidence-path sibling, AC-OX-12) —
+      // gate PARITY with the CLI is structural: both surfaces call the SAME
+      // `findCapturedFailDiscoveryRefusal`, which returns the fully-formed
+      // LoreError rather than a boolean, so scope/code/field/wording cannot
+      // drift between them (same sharing rationale every sibling guard in this
+      // handler already documents). `lore verify`'s own §M6.2 call site
+      // (`service/verify-runner-service.ts`) already downgrades this exact
+      // shape (a runner's discovery-refusal phrase on a nonzero exit — a
+      // ZERO-EXECUTION event, never distinguishable from a genuine assertion
+      // failure by exit code alone) to "inconclusive" for the ATTESTED path;
+      // this closes the SAME gap for THIS server's own capture path, which had
+      // no consumer of `findDiscoveryRefusal` at all before this task.
+      const capturedDiscoveryRefusal = findCapturedFailDiscoveryRefusal({
+        oracle: args.oracle,
+        result: args.result,
+        capture: captureRequested,
+        command: args.command,
+        outputTail: capturedTail,
+      });
+      if (capturedDiscoveryRefusal !== null) {
+        return errorContent(capturedDiscoveryRefusal);
+      }
     }
 
     // reason: from here down, `effectiveOutputTail` is the ONE tail every

@@ -71,19 +71,38 @@
  *     governing spec). LIVE at both call sites since
  *     task-wire-findpiperefusal-into-the-live-lore-evidence-and-mcp — grep
  *     `findPipeRefusal` in `commands/evidence.ts` and `../mcp/tools.ts`.
+ *   - findCapturedFailDiscoveryRefusal(input) — the SIXTH guard hosted here,
+ *     and the FIRST that examines the FAIL direction instead of the PASS
+ *     direction the other five share (task-wire-the-discovery-refusal-guard-
+ *     into-the-evidence-capture, spec-oracle-executability-a-runner-s-
+ *     discovery-refusal-is-not-a §M6.2's evidence-path sibling, AC-OX-12): a
+ *     `--capture`d run whose observed output is one of `@lore/core`'s
+ *     `findDiscoveryRefusal` three ZERO-EXECUTION phrases (vitest/bun test/
+ *     playwright reporting "found no matching test file") is refused rather
+ *     than recorded as a `fail`/`expected-fail` — the exact defect §M6.2
+ *     already fixed for `lore verify`'s attested path, now closed for this
+ *     SECOND write path that mints a red. Consumes `findDiscoveryRefusal`
+ *     VERBATIM, never re-typing its three phrases.
  *
- * All FIVE guards are ADJACENT but INDEPENDENT: the first asks "does the
+ * All SIX guards are ADJACENT but INDEPENDENT: the first asks "does the
  * file this command names exist at all", the second asks "did the filter this
  * command carries match anything — and, when it did not, is the filter itself
  * lexically incapable of matching the title it was pasted from", the third asks "would this command's OWN
  * invoked runner actually run every file it names", the fourth asks "does
  * --capture even make sense for this invocation's other flags", the fifth
  * asks "does this command's own `$?` even belong to the oracle being
- * asserted about, or did a pipe hand it off to something else". They share
- * only the oracle/result scope gate (`isSelfReportedPassInScope`) — except the
- * fourth, which is a pure CLI-usage shape check independent of `result`
+ * asserted about, or did a pipe hand it off to something else", the sixth
+ * asks "did a --capture'd run that exited nonzero actually EXECUTE anything,
+ * or did its runner merely report finding nothing to run". The first FIVE
+ * share the oracle/result scope gate (`isSelfReportedPassInScope`) — except
+ * the fourth, which is a pure CLI-usage shape check independent of `result`
  * entirely (a malformed `--capture` combination is nonsensical regardless of
- * what `--result` claims).
+ * what `--result` claims) — while the SIXTH has its OWN, deliberately
+ * SEPARATE scope gate (fail-family `result`, `capture === true`, `oracle ===
+ * "test"`): widening `isSelfReportedPassInScope` to also cover the fail
+ * direction would be meaningless for a fail (its entire premise, "a claimed
+ * pass's `$?` may be lying", does not apply), the same reasoning D2 in this
+ * guard's own governing spec already applies to the first five.
  *
  * ⛔ CORRECTED (task-promote-the-oracle-file-existence-primitives-into-lore):
  * the "share only the scope gate" sentence above describes what the FIVE
@@ -135,7 +154,11 @@
  *   refusal guard, `commandHasUnsafePipe`/`findPipeRefusal`);
  *   task-promote-the-oracle-file-existence-primitives-into-lore (promotes
  *   guard 1's own primitives to `@lore/core`, spec-oracle-executability-a-
- *   runner-s-discovery-refusal-is-not-a §M6.3/D8)
+ *   runner-s-discovery-refusal-is-not-a §M6.3/D8);
+ *   task-wire-the-discovery-refusal-guard-into-the-evidence-capture (the
+ *   sixth, fail-direction guard, `findCapturedFailDiscoveryRefusal`,
+ *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2's
+ *   evidence-path sibling, AC-OX-12)
  */
 
 import {
@@ -147,6 +170,19 @@ import {
   extractCaseFilterPatterns,
   findRegexMetacharacters,
   parseExecutedUnits,
+  // reason: task-wire-the-discovery-refusal-guard-into-the-evidence-capture
+  // (spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2's
+  // evidence-path sibling, AC-OX-12) — the SIXTH guard hosted here,
+  // findCapturedFailDiscoveryRefusal (defined further down in this file),
+  // consumes this primitive VERBATIM, never re-typing its three refusal
+  // phrases (they live ONLY in @lore/core's attestation-completeness.ts).
+  // NOTE: deliberately no curly-brace JSDoc link markup anywhere in THIS
+  // import block, not even inside a plain comment — AC-061-14's own
+  // regression test scans this exact block for its FIRST closing curly brace
+  // to find the "from" clause, so any stray closing brace earlier in a
+  // comment (measured the hard way while first authoring this note) makes
+  // that scan find nothing at all.
+  findDiscoveryRefusal,
   // reason: the following six symbols are RE-EXPORTED (not just used
   // internally) below — task-promote-the-oracle-file-existence-primitives-
   // into-lore promoted them out of this file into `@lore/core`'s
@@ -1034,6 +1070,152 @@ export function findPipeRefusal(input: {
       "$? observed after a pipe belongs to the LAST stage of the pipeline, not the oracle " +
       "this call means to assert about, so the recorded result cannot have been measured " +
       `against it. ${PIPE_REPAIR_HINT}`,
+    value: input.command,
+  };
+}
+
+// ─── Captured-Fail Discovery-Refusal Guard (task-wire-the-discovery-refusal- ─
+// ─── guard-into-the-evidence-capture, spec-oracle-executability-a-runner-s- ─
+// ─── discovery-refusal-is-not-a §M6.2's evidence-path sibling, AC-OX-12) ────
+
+/**
+ * The SIXTH guard hosted in this module, and the FIRST that examines the
+ * FAIL direction rather than the self-reported PASS direction the other five
+ * share ({@link isSelfReportedPassInScope}). Closes the gap AC-OX-12 names:
+ * `findDiscoveryRefusal` (`@lore/core`'s `attestation-completeness.ts`,
+ * §M6.1) had exactly ONE production consumer before this task —
+ * `service/verify-runner-service.ts`'s §M6.2 call site, which downgrades a
+ * runner's discovery refusal (a ZERO-EXECUTION nonzero exit, e.g. vitest's
+ * "No test files found, exiting with code 1") to `inconclusive` rather than
+ * letting it mint a permanent, indistinguishable-from-a-real-red `fail`. The
+ * SECOND write path that mints a red — `lore evidence --capture` / MCP
+ * `lore_evidence_add` with `capture: true`, both via
+ * `../evidence-capture.js::captureOracleCommand` — never consulted the
+ * primitive at all: a poisoned cwd making `bunx vitest run <path>` print that
+ * exact phrase would have been recorded as a genuine `fail`/`expected-fail`
+ * carrying `capture_source: "runner"`, the corpus's strongest self-report
+ * label, for a run that measured NOTHING.
+ *
+ * // reason: the outcome-shape decision (spec §"You decide the outcome
+ * // shape" in the governing task) is REFUSE LOUDLY (`VALIDATION_ERROR`,
+ * // exit 4 / MCP `isError`), NOT a silent downgrade to `result:
+ * // "inconclusive"`. Three reasons, all load-bearing:
+ * //   1. Every OTHER guard in this module already refuses loudly on the
+ * //      SAME "the recorded outcome cannot have been measured" family of
+ * //      defect ({@link findMixedRunnerRefusal}, {@link findFilteredPassRefusal},
+ * //      {@link findPipeRefusal}) — a sixth guard silently downgrading
+ * //      instead of refusing would be the ONE inconsistent member of its own
+ * //      sibling set, forcing a reader to remember which of six behaves
+ * //      differently.
+ * //   2. `"inconclusive"` is a valid {@link EVIDENCE_RESULTS} member, but
+ * //      BOTH CLI adapters' own `VALID_RESULTS`/`EvidenceOutcome` enums
+ * //      (`commands/evidence.ts`, `../mcp/tools.ts`) restrict `--result`/
+ * //      `result` to `pass | fail | expected-fail` — it is reserved for the
+ * //      RUNNER-ATTESTED `lore verify` path (§M6.2's own call site). Silently
+ * //      substituting a value the caller never typed, and could not have
+ * //      typed, for the value they DID type is exactly the "no silent
+ * //      fallback" violation this repo's own coding discipline names — the
+ * //      caller must SEE the refusal and re-run, not discover later that
+ * //      their `expected-fail` was quietly rewritten.
+ * //   3. A loud refusal costs the caller nothing they were entitled to keep:
+ * //      `--capture` observed a REAL exit code from a REAL spawn that
+ * //      genuinely never executed anything — there is no "genuine measurement
+ * //      of a failure" being thrown away, only a false credential being
+ * //      declined.
+ *
+ * Scope, mirroring `verify-runner-service.ts`'s §M6.2 call site EXACTLY (same
+ * three conjuncts, same order of reasoning):
+ *   - `input.capture !== true` → out of scope. A self-reported `fail`/
+ *     `expected-fail` with a HAND-TYPED tail is the pre-existing, explicitly
+ *     out-of-scope residual this spec's own asymmetry table names ("self-
+ *     reported … NONE" for the fail direction) — nothing here MEASURED that
+ *     tail, so there is nothing for this guard to cross-check it against.
+ *   - `input.oracle !== "test"` → out of scope, byte-identical to §M6.2's own
+ *     `criterion.verify.oracle === "test"` gate. `findDiscoveryRefusal`'s
+ *     three phrases are test-runner discovery phrases (vitest/bun test/
+ *     playwright); widening to `e2e` or any other oracle kind is a SEPARATE
+ *     decision this task does not make (none of §M6.2, this guard's own
+ *     governing spec, or its sibling guards' scope gates do either).
+ *   - `input.result` not in the fail family (`"fail" | "expected-fail"`) →
+ *     out of scope. A captured `pass` can never reach this guard carrying a
+ *     discovery-refusal tail in the first place: {@link captureOracleCommand}
+ *     (`../evidence-capture.js`) cross-checks the declared result against the
+ *     REAL observed exit code BEFORE this guard ever runs, and a discovery
+ *     refusal always exits nonzero — a declared `pass` against that exit
+ *     already fails THAT check and returns `{ok: false}`, recording nothing.
+ *   - `input.outputTail === undefined` → out of scope (fail-open: nothing
+ *     captured, nothing to classify — mirrors every other guard's "cannot be
+ *     checked, so it is not blocked" posture).
+ *
+ * @param input.oracle - the oracle kind as received (untyped `string`, same
+ *   adapter-agnostic reasoning as this module's other guards)
+ * @param input.result - the result as received (CLI `--result` / MCP
+ *   `result`)
+ * @param input.capture - whether `--capture`/`capture: true` was requested
+ *   for this call — REQUIRED, not optional, so a caller can never omit it and
+ *   silently widen this guard onto the self-reported path it deliberately
+ *   excludes
+ * @param input.command - the exact command string being recorded, echoed
+ *   into the refusal's `value` so an operator sees exactly what was refused
+ * @param input.outputTail - the tail `captureOracleCommand` actually
+ *   observed (CLI: `captured.value.outputTail`; MCP: `capturedTail`),
+ *   `undefined` when capture did not run
+ * @returns a `VALIDATION_ERROR` (exit code 4 via `utils.ts::exitCode`) naming
+ *   the refusing runner and its verbatim evidence phrase, or `null` when the
+ *   write may proceed
+ *
+ * @example
+ * findCapturedFailDiscoveryRefusal({
+ *   oracle: "test", result: "expected-fail", capture: true,
+ *   command: "bunx vitest run packages/core/tests/does-not-exist.test.ts",
+ *   outputTail: "No test files found, exiting with code 1\n",
+ * })
+ * // => VALIDATION_ERROR naming "vitest" and the phrase
+ *
+ * @example
+ * findCapturedFailDiscoveryRefusal({
+ *   oracle: "test", result: "expected-fail", capture: true,
+ *   command: "bunx vitest run packages/core/tests/a.test.ts",
+ *   outputTail: "Test Files  1 failed (1)\nTests  1 failed (1)\n",
+ * })
+ * // => null — a GENUINE assertion failure; expected-fail is still recorded
+ *
+ * @example
+ * findCapturedFailDiscoveryRefusal({
+ *   oracle: "test", result: "fail", capture: false,
+ *   command: "bunx vitest run packages/core/tests/does-not-exist.test.ts",
+ *   outputTail: "No test files found, exiting with code 1\n",
+ * })
+ * // => null — capture is false; the self-reported fail direction is this
+ * // task's explicitly out-of-scope residual, not this guard's job
+ */
+export function findCapturedFailDiscoveryRefusal(input: {
+  oracle: string;
+  result: string;
+  capture: boolean;
+  command: string;
+  outputTail?: string;
+}): LoreError | null {
+  if (!input.capture) return null;
+  if (input.oracle !== "test") return null;
+  if (input.result !== "fail" && input.result !== "expected-fail") return null;
+  if (input.outputTail === undefined) return null;
+
+  const refusal = findDiscoveryRefusal(input.outputTail);
+  if (refusal === null) return null;
+
+  return {
+    code: "VALIDATION_ERROR",
+    field: "command",
+    message:
+      `--capture ran --command and observed a ${refusal.runner} discovery refusal ` +
+      `("${refusal.evidence}") — no test executed, so this is a ZERO-EXECUTION event, ` +
+      `not a measured "${input.result}". Recording it as one would mint a permanent, ` +
+      "indistinguishable-from-a-real-red row for a run that measured nothing " +
+      "(spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2's own defect, " +
+      "now closed on this write path too). Fix the test path/filter in --command so the " +
+      "runner actually executes something, then re-run with --capture; or, if the run " +
+      "genuinely never executed anything on purpose, record nothing and investigate why.",
     value: input.command,
   };
 }
