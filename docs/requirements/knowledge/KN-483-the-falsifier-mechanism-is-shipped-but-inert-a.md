@@ -134,3 +134,64 @@ attested, and was archived, because nothing asserted that a message's own
 instructions are executable"). F1 is the same shape at corpus scale rather than
 at one message: `AC-FALS-6` is green and the goal it serves is unmet for 692 of
 769 criteria.
+
+---
+
+## CORRECTION 2026-08-21 — two claims above are withdrawn
+
+Recorded by the same actor, same day, after `knowledge-handoff-agent-main-orchestrator-111`
+measured the runner directly. Both corrections make this document's conclusions
+WEAKER, not stronger.
+
+### C1 — F2's inference was wrong; its measurement stands
+
+The measurement holds: all 8 criteria declaring a falsifier have an archived
+governing plan. The INFERENCE drawn from it — that a plan-independent batch
+execution path is a PREREQUISITE — does not. Handoff 111 KD7 names the
+overstatement explicitly ("'archiving makes falsifiers permanently unprovable'
+was overstated") and NS5 gives the correct reading: **archiving ends the CURRENT
+window only; a future plan carrying those `ac_scope`s can run them.** A new plan
+declaring the ac_scope is sufficient, so no new execution channel is needed.
+
+⇒ Strike "a plan-independent batch execution path is a PREREQUISITE for the
+gate" from F2. What remains true is narrower: no falsifier can be re-run
+*without* a live plan declaring its ac_scope, which is an availability
+constraint on scheduling, not an architectural gap.
+
+### C2 — F3's "2 machine-proven" figure is withdrawn; the true count is UNKNOWN and probably 0
+
+Handoff 111 KD2/KD3 measured the runner itself: **11 of 11 `--falsify`
+invocations recorded `expected-fail` + `capture_source: runner` while never
+executing their mutation** — 10 criteria, 3 specs, a 100% false-match rate.
+Three causes, all exiting 1: absent usable `node_modules`; untracked files
+absent because the scratch worktree comes from `git stash create` WITHOUT
+`--include-untracked`; and `dist/lore` being gitignored. KD3 is the load-bearing
+part: **no choice of exit code can separate a startup failure from an assertion
+failure**, because vitest and bun test both exit 1 for each and `1` is the
+natural declared value for "this mutation should make the test fail". The
+distinguishing signal exists only in the OUTPUT, which the runner never reads.
+
+F3 above counted AC-MIS-2 and AC-TC-2 as "machine-proven to discriminate"
+because their rows carry an attestation. That inference used exactly the
+comparison KD2 proved vacuous. Those two rows predate the 11, but nothing about
+their age exempts them from the same defect — they were produced by the same
+exit-code-only comparison, so their attestation certifies nothing about
+discriminating power either.
+
+⇒ The funnel's last line should read `2 rows whose attestation is not evidence`
+rather than `2 machine-proven to discriminate`. The honest count of criteria
+proven to discriminate is **unknown, with 0 as the defensible floor**, until the
+green control lands and a falsifier is re-run under it.
+
+### What actually unblocks this
+
+`plan-close-the-falsify-green-control-gap-an-unrunnable-scratch` /
+`task-run-the-unmutated-green-control-before-the-mutation-and`, governed by
+**AC-FR-11** on `spec-falsifiability-reachability-a-feedable-checkpoint-an`: run
+the UNMUTATED command in the same scratch worktree first, and record
+`inconclusive` when it fails. One step, catches all three causes, reads no
+output, needs no new syntax.
+
+⛔ Ordering consequence for anything built on top: a gate keyed on falsifier
+DECLARATIONS is meaningless until the RUNNER is trustworthy. Green control comes
+first — not the coverage field of F1, and not the ratchet.

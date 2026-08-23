@@ -28,6 +28,8 @@ Scope: one session, no code written. SPEC-143 went `approved` → `draft` → `a
 | R6 | AC-CT-8 (new) | G5 was a declared GOAL measured only by a QA scenario; no AC asserted it |
 | R7 | AC-CT-1/6/8 | "produces a string literal" (undefined), "under 2s" (no machine), "matching its stdout" (no pattern) |
 | — | AC-CT-9 | `attestationFloor` accepts `unmeasured` and shows it as its own bucket — but `stampCurrency`'s return type has no such value |
+| R10 | AC-CT-9(d) | "delete the duplicate predicate" — verified once, with no ratchet against re-introduction, while AC-CT-7 three criteria away argues exactly why a scan beats a test |
+| R11 | AC-CT-3 | still declared the four-valued return, and its falsifier "make stampCurrency return `bound`" was UNREPRESENTABLE in the new type — an oracle that could never run, reading as coverage |
 
 ⛔ **All four were found by the review judge. None by the author's self-check** — and the author was, at the moment of writing R7, composing revision records ABOUT under-measured criteria. This is not an attention failure; it is what an AC looks like when written by a producer who already knows what they meant.
 
@@ -68,6 +70,37 @@ criterion implies for the component named in it**.
 and radius measurability are two independent axes; collapsing them into one enum was the modelling
 error that made the contradiction possible. ADR-034's substantive decision (the non-forgeable
 `arming_rev` cutoff) is untouched, so it needs an amendment, not a successor.
+
+## 1c. The method was wrong, and that cost six rounds
+
+Eight review rounds ran on this spec. Rounds 2 through 8 EACH found a genuine inconsistency, and each was
+fixed in isolation — which guaranteed the next round would find the next one. That is not the judge being
+thorough; it is the author using the wrong unit of work.
+
+The AC set here is densely cross-referential: AC-CT-3 and AC-CT-9 share a type, AC-CT-10 references
+AC-CT-9, AC-CT-1 references AC-CT-7's rule, AC-CT-4 and AC-CT-9 share a measurement, and the Scope table
+plus Migration Plan reference all of them. ⛔ **Changing any referenced thing obliges a sweep of its
+referents, and R9 changed a type that four other places referenced.** Fixing them one per review round
+was the defect.
+
+What a single closure pass found, once done properly — extract every AC's references to types, symbols and
+files, then check each against the post-change contract:
+
+| Found by | Defect |
+|---|---|
+| escalation | AC-CT-3 still declared the retired four-valued return |
+| escalation | AC-CT-3's falsifier was unrepresentable in the new type — unrunnable, but reading as coverage |
+| escalation | Scope table missing AC-CT-10's new scan and AC-CT-9(d)'s two edited files |
+| **closure pass** | `verify-runner-service.ts` was in NO Scope row, though AC-CT-5 has asserted its seam since the spec was written — a gap predating R9 by the spec's entire life, through seven review rounds |
+| **closure pass** | `export-docs-service.ts`, C7's producer side, likewise absent while AC-CT-6 asserts the `corpus_rev` it writes |
+| **closure pass** | AC-CT-8 declared TWO skip triggers and exercised ONE — and the second, "the export index is contended", asserts an UNREACHABLE state, because C7's integer-compare form exists precisely so it cannot race that file. The wording was inherited verbatim from QA-5, which predates C7's integer form |
+
+Three of six came from the closure pass, not the judge — including one that had survived the spec's whole
+life. ⇒ **The AI judge is good at reading a document; it is not a substitute for computing a closure.**
+
+⛔ Nothing in this repository computes that closure. `lore ac list` prints criteria independently, and the
+judge reads them as prose. The sweep here was manual `grep` plus a hand-written extractor, and it is not
+repeatable by anyone who does not think to do it.
 
 ## 2. Fixing an under-specification can introduce a new one
 
@@ -130,6 +163,9 @@ AC-CT-1's RULE 2 guarantees "no second state-to-glyph projection **in four known
 
 - **Falsifier debt.** All nine SPEC-143 criteria carry prose falsifiers ("MANDATORY FALSIFIER once implemented") because `--falsifier-find` requires the literal string on disk while red-first requires the AC first. Nothing counts or forces redemption of these. Needs its own spec; `--falsifier-deferred <reason>` remains the better of the two candidate designs.
 - **Diagram/prose drift.** No oracle reads mermaid nodes or component prose against the AC set.
+- **AC cross-reference closure.** Nothing computes which criteria reference a changed type, symbol or file,
+  so a contract change is propagated by whoever remembers to look. Measured cost this session: six review
+  rounds, three defects the judge never reported, one of them older than the change that exposed it.
 - **Criterion-to-component contract drift.** Nothing compares a criterion's prose assertion against the
   TYPE SIGNATURE of the component it names — the §1b defect. The AI judge's consistency dimension checks
   symbol and file agreement and reports PASS while the contradiction stands; no deterministic check looks

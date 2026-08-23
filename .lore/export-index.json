@@ -6256,6 +6256,70 @@
     "01M0H9F7Z61CHSVTM82BAQ8RVN": {
       "human_id": "TASK-750",
       "file_path": "docs/requirements/task/TASK-750-settle-the-ac-dc-9-ac-dc-14-b-conflict-then-collap.md"
+    },
+    "01M0P5S81EY861NTNPRSTWTH25": {
+      "human_id": "SPEC-144",
+      "file_path": "docs/requirements/spec/SPEC-144-a-falsifier-s-scratch-worktree-must-be-runnable-an.md"
+    },
+    "01M0P5PSPPQ0PRYAQ6NVJGF8EZ": {
+      "human_id": "ADR-036",
+      "file_path": "docs/requirements/adr/ADR-036-a-falsifier-s-scratch-worktree-gets-dependencies-b.md"
+    },
+    "01M0P5NGE4SY8GB2D4EH5SAYTW": {
+      "human_id": "KN-494",
+      "file_path": "docs/requirements/knowledge/KN-494-a-symlinked-node-modules-makes-the-green-control-p.md"
+    },
+    "01M0HREJV0BKHRTAXAXT91J1BF": {
+      "human_id": "KN-495",
+      "file_path": "docs/requirements/knowledge/KN-495-handoff-agent-main-orchestrator.md"
+    },
+    "01M0HR6280C2SDW3SP8TYHFRZ5": {
+      "human_id": "KN-496",
+      "file_path": "docs/requirements/knowledge/KN-496-assessment-close-the-falsify-green-control-gap-an.md"
+    },
+    "01M0HMZTH0E1PY849M9JCY6X6E": {
+      "human_id": "KN-497",
+      "file_path": "docs/requirements/knowledge/KN-497-the-green-control-pattern-and-its-cost-a-falsifier.md"
+    },
+    "01M0HMR27CQZZVSKPVR90NQ6BM": {
+      "human_id": "KN-498",
+      "file_path": "docs/requirements/knowledge/KN-498-assessment-close-the-falsify-green-control-gap-an.md"
+    },
+    "01M0P67QXNECZM4HFP3QG1F35T": {
+      "human_id": "PLAN-135",
+      "file_path": "docs/requirements/plan/PLAN-135-make-a-falsifier-s-scratch-worktree-runnable-and.md"
+    },
+    "01M0HGHQ23SN3P83DR79RJ8VZQ": {
+      "human_id": "PLAN-136",
+      "file_path": "docs/requirements/plan/PLAN-136-close-the-falsify-green-control-gap-an-unrunnable.md"
+    },
+    "01M0P68VM0QN12DYMW7YNQ54PT": {
+      "human_id": "TASK-751",
+      "file_path": "docs/requirements/task/TASK-751-build-the-hybrid-dependency-materializer-and-prove.md"
+    },
+    "01M0P6A0RQHTHDPASPVRXEVDYY": {
+      "human_id": "TASK-752",
+      "file_path": "docs/requirements/task/TASK-752-declare-a-falsifier-per-criterion-drive-lore-verif.md"
+    },
+    "01M0P69FR9G4W04Q067DM672X6": {
+      "human_id": "TASK-753",
+      "file_path": "docs/requirements/task/TASK-753-wire-materialization-into-the-live-falsifier-path.md"
+    },
+    "01M0P69FE1M6S2GAPS70AX8AHM": {
+      "human_id": "TASK-754",
+      "file_path": "docs/requirements/task/TASK-754-serve-both-runners-from-one-materialized-worktree.md"
+    },
+    "01M0P5ET63P3TBPP1283ZDJD21": {
+      "human_id": "TASK-755",
+      "file_path": "docs/requirements/task/TASK-755-lore-done-s-test-anchor-refusal-demands-an-atteste.md"
+    },
+    "01M0HMWGQETR63CNE8Q9D9TJQW": {
+      "human_id": "TASK-756",
+      "file_path": "docs/requirements/task/TASK-756-drive-the-falsify-cli-branch-and-assert-the-persis.md"
+    },
+    "01M0HGKJMF4J3W7QMJCE5622ZQ": {
+      "human_id": "TASK-757",
+      "file_path": "docs/requirements/task/TASK-757-run-the-unmutated-green-control-before-the-mutatio.md"
     }
   }
 }

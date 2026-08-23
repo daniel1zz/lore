@@ -6,7 +6,7 @@ title: "A record with no state stamp is acceptable but never green: a third clas
 status: approved
 priority: high
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-08-21
 tags: []
 parent: PRD-001
 ---
@@ -41,7 +41,7 @@ A record with no `StateStamp` is classified by **where it sits relative to an im
 - An agent therefore cannot place a *new* row below the cutoff. It cannot renumber, it cannot backdate, and it cannot rewrite history without breaking a chain that an existing independent oracle checks.
 - Contrast a timestamp cutoff, which an agent influences by choosing when to write, and which the security review specifically flagged as mintable.
 
-So `stampCurrency` returns one of `bound | stale | unbound | legacy_unbound`, never a boolean. Precedent for a multi-valued verdict rather than a pass/fail pair already exists: `deriveAcCoverageState` returns `not_measured` precisely to separate "measured and fine" from "never measured".
+So `stampCurrency` never returns a boolean. Precedent for a multi-valued verdict rather than a pass/fail pair already exists: `deriveAcCoverageState` returns `not_measured` precisely to separate "measured and fine" from "never measured". ⛔ AMENDED 2026-08-21 — this sentence originally read "returns one of `bound | stale | unbound | legacy_unbound`". That enum collapsed TWO orthogonal axes into one type and is superseded; see the Amendment section. The argument it was making — multi-valued over boolean — is strengthened, not reversed.
 
 ## Quality Attributes Affected
 
@@ -49,7 +49,7 @@ So `stampCurrency` returns one of `bound | stale | unbound | legacy_unbound`, ne
 |---|---|---|
 | Integrity | + | QA-6 — a row written after arming can never be counted as attested without a stamp, and the cutoff separating it from legacy is not forgeable |
 | Availability (of the unattended loop) | + | No plan retro-fails on the arming commit, because `legacy_unbound` is accepted by the floor |
-| Modifiability | − | Floors learn four cases instead of a boolean, and `arming_rev` becomes a constant that must survive migrations |
+| Modifiability | − | Floors learn a two-axis verdict instead of a boolean (stamp axis first, radius axis only when stamped — see Amendment), and `arming_rev` becomes a constant that must survive migrations |
 | Observability | + | Legacy debt is counted rather than invisible, so the population that still needs re-attestation is queryable |
 
 ## Alternatives Considered
@@ -65,9 +65,40 @@ So `stampCurrency` returns one of `bound | stale | unbound | legacy_unbound`, ne
 
 **Easier**: arming costs no back-catalogue sweep and no plan retro-fails, while a row written *after* arming cannot buy a green by omitting its stamp. The distinction "verified" / "unknown" / "known-legacy" becomes expressible, which the corpus currently cannot state at all.
 
-**Harder**: four-valued logic propagates into every consumer of attestation trust. `arming_rev` is a new constant with migration semantics. And the design is only sound *if the classes are load-bearing on day one* — written but unconsumed, they reproduce the exact defect that motivated this work (`capture_source: "runner"` with no attestation block, a trust label with nothing behind it). Routing all four classes into `attestationFloor` and the `capture_source` distributions is therefore scoped into the same phase, never deferred.
+**Harder**: multi-valued logic propagates into every consumer of attestation trust, and after the 2026-08-21 amendment it is TWO-AXIS rather than four-valued. `arming_rev` is a new constant with migration semantics. And the design is only sound *if the classes are load-bearing on day one* — written but unconsumed, they reproduce the exact defect that motivated this work (`capture_source: "runner"` with no attestation block, a trust label with nothing behind it). Routing every class into `attestationFloor` and the `capture_source` distributions is therefore scoped into the same phase, never deferred — including, per the amendment, the radius axis, whose `unmeasured` state is exactly the kind of written-but-unconsumed label this clause exists to forbid.
 
 **Debt this creates deliberately**: every `legacy_unbound` row is an assertion the corpus cannot fully vouch for. That population is finite, countable, and shrinks only by re-attestation. It must be reported, not hidden — otherwise "accepted by the floor" silently becomes "believed".
+
+## Amendment 2026-08-21 — the four values were two axes, and the radius axis is now explicit
+
+**What is unchanged.** All four substantive decisions of this ADR stand exactly as written: (1) stamp-less rows are classified by an immutable arming cutoff into two classes with different gate behaviour; (2) the cutoff is `audit.id` vs `arming_rev` on an append-only hash-chained table, so it cannot be backdated or renumbered the way a timestamp cutoff could be minted; (3) nothing retro-fails, because `legacy_unbound` is accepted; (4) every class must be consumed by `attestationFloor` and the `capture_source` distributions on day one, never merely written. This amendment corrects the ADR's EXPRESSION, not its decision.
+
+**What was wrong.** `bound | stale | unbound | legacy_unbound` reads as one axis with four values. It is not. `unbound` and `legacy_unbound` are the **stamp axis** — presence, split by the arming cutoff, which is what this ADR actually decided. `bound` and `stale` are the **radius axis** — the result of comparing the recorded state against HEAD over the verdict's blast radius, which is ADR-035's subject. The enum is a partially-expanded product of the two, and it is missing exactly one cell: **stamp present, radius unmeasurable**.
+
+| | radius unchanged | radius changed | radius unmeasured |
+|---|---|---|---|
+| stamp present | `bound` | `stale` | *missing* |
+| stamp absent, post-arming | `unbound` | `unbound` | `unbound` |
+| stamp absent, pre-arming | `legacy_unbound` | `legacy_unbound` | `legacy_unbound` |
+
+The bottom two rows legitimately collapse: a row with no stamp has no recorded HEAD to diff against, so the radius axis is meaningless there. Only the top-right cell is genuinely absent.
+
+**How it surfaced.** SPEC-143's AC-CT-9 asserts that `attestationFloor` accepts a record whose radius is `unmeasured` and that `unmeasured` carries its own labelled bucket. No value in the declared return type could represent that. ⛔ Filling the cell with any existing name yields a false verdict: `bound` claims "compared, unchanged"; `stale` claims "changed"; `unbound` contradicts this ADR's own definition, since the stamp is present. Keeping the enum and adding a side field would move the falsehood from the type into consumer discipline, which SPEC-143's G1 exists to forbid.
+
+**The amended shape.** The stamp axis becomes three-valued and carries only what this ADR decided; the radius axis becomes its own type, structurally identical to `real-git-port.ts::BranchMeasurement`, whose source states the governing rule — a discriminated union, never a loose union of a primitive and a sentinel string, because "not measured" and "known to be absent" are different facts with opposite safe defaults.
+
+```ts
+type StampClass = "stamped" | "unbound" | "legacy_unbound";
+type RadiusMeasurement =
+  | { readonly status: "measured"; readonly changed: boolean }
+  | { readonly status: "unmeasured" };
+```
+
+`bound` and `stale` are retained as DERIVED readings, not stored values — they are the correct names for two cells and they appear in ADR-035, SPEC-143's QA-1 and AC-CT-4. The five mutually-exclusive terminal readings are `bound | stale | radius_unmeasured | unbound | legacy_unbound`.
+
+**Floor precedence, now decidable rather than a judgement call.** The stamp axis is evaluated first and the radius axis is read only when the stamp is present. Therefore `unbound` with an unmeasurable radius still REFUSES, while `stamped` with an unmeasurable radius ACCEPTS. This is what makes "both axes unfavourable" a defined case instead of an implementer choice.
+
+**Why `stamped × unmeasured` is accepted.** Measured over all 831 script-mode ACs in this corpus on 2026-08-20: 55 of them (6%) yield no pathspec at all, and they are dominated by whole-repository oracles such as `bun run typecheck`, whose honest radius IS the whole repository and which would therefore read `stale` after any peer commit. Refusing them would reproduce the mass-wedge outcome this ADR's own Decision section rejects. The acceptance is loud, not silent: the state has its own name and its own bucket.
 
 ## Validation Plan
 

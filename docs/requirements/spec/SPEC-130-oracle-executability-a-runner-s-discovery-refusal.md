@@ -3,10 +3,10 @@ id: SPEC-130
 type: spec
 role: spec
 title: "Oracle executability: a runner's discovery refusal is not a measurement, and must never mint a red"
-status: approved
+status: draft
 priority: medium
 created: 2026-08-10
-updated: 2026-08-21
+updated: 2026-08-23
 tags: []
 parent: PRD-001
 ---

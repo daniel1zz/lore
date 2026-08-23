@@ -6,7 +6,7 @@ title: "Falsifiability reachability: a feedable checkpoint, an attestable red, a
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-08-11
+updated: 2026-08-21
 tags: []
 parent: PRD-001
 ---
@@ -58,10 +58,18 @@ leaves a trace an auditor can query.
 - `lore feed`'s accepted checkpoint set, derived from `checkpointRegistry` rather than a parallel list.
 - A declared-falsifier mechanism for script-mode ACs, and the runner path that applies it in an
   isolated worktree to produce an attested `expected-fail`.
+- A GREEN CONTROL on that runner path (AC-FR-11): the AC's own UNMUTATED command runs in the
+  same scratch worktree BEFORE the mutation, and a nonzero/timed-out control records
+  `inconclusive` with no attestation instead of a machine-proven red. Closes the false-match
+  vector measured 2026-08-21 (11 of 11 invocations recorded `expected-fail` without ever
+  executing their mutation), which no choice of `expected_exit_code` can close because vitest
+  and bun test both exit 1 for a startup failure and an assertion failure alike.
 - `lore evidence`'s tail guard predicate, and `capture_source` visibility in `lore assess` /
   `lore status`.
 - A spec-mirror export script and the drift check that consumes it.
 - A queryable evaluation trace for EVERY deterministic gate checkpoint, not just `plan-close`.
+- Executability of the commands lore's own error messages tell a caller to run (AC-FR-9): every
+  subcommand named in a refusal exists and accepts every flag that message names.
 
 **Out of scope**
 - Clearing the existing `pass_unfalsified` backlog. That work is `plan-land-oracle-executability`'s
@@ -133,3 +141,7 @@ measured in the session preceding this spec.
   script: test — bunx vitest run scripts/tests/error-message-commands-executable.test.ts -t suggested-commands-resolve
 - [✔] [script] AC-FR-10: FULL-CORPUS MIRROR INTEGRITY, asserted against THIS repo's PRODUCTION corpus (never a seeded fixture): (a) for EVERY exported doc type, the mirror file count EQUALS that type's live corpus count read from `lore list --type <t> --json`; (b) every mirror file's frontmatter `id:` is BYTE-IDENTICAL to its filename's leading identifier — zero-padded to 3 digits (SPEC-021, not SPEC-21); (c) the migration-coverage eval over docs/requirements reports links_broken === 0. RED (all three required): (a) delete one exported file of any type -> fails naming the type and slug; (b) rewrite one file's frontmatter id to the non-padded form -> fails naming that file; (c) point one cross-type reference at a non-existent id -> links_broken becomes non-zero and the test fails. ⛔ Measured 2026-08-10 on the merged tree: export-index.json stores human_id 'SPEC-21' while its own file_path says 'SPEC-021' — the inconsistency lives in the SSOT itself; 89 of 142 spec mirrors had filename-vs-id mismatch, producing 88 broken cross-type references (plan 73 / knowledge 14 / adr 1) and turning the full suite red at 1 failed / 493 passed. Non-spec mirrors were also stale: adr 12/30, knowledge 168/399, plan 75/120, task 316/644. ⛔ Zero-padding is the chosen canonical form (user decision 2026-08-10): filenames already use it and it makes lexical order match numeric order.
   script: test — bunx vitest run scripts/tests/spec-mirror-export.test.ts -t all-types-parity-and-id-format
+- [✔] [script] AC-FR-11: Given a scratch worktree in which the AC's own UNMUTATED command already exits nonzero, lore verify --falsify records result inconclusive with no attestation and never records result expected-fail: the green control runs BEFORE the mutation is applied, so an unrunnable scratch environment (absent node_modules, absent untracked test file, absent gitignored binary) cannot mint a machine-proven red.
+  script: test — bunx vitest run packages/lore/tests/unit/service/attested-red.test.ts -t "green-control" && echo "AC-FR-11 PASS: an unrunnable scratch worktree records inconclusive, never expected-fail"
+- [✔] [script] AC-FR-12: SURFACE + PERSISTENCE (the layer AC-FR-11's service-level oracle does not reach): a real lore verify --falsify invocation against a throwaway corpus whose scratch worktree cannot run the command PERSISTS an evidence row with result inconclusive and NO attestation block — asserted by reading the row back out of the corpus, never from an injected recorder spy — AND the CLI prints a message naming the green control and exits 3, not 0. RED (both required): (a) make the CLI branch print success and exit 0 and this must fail; (b) make the runner skip the inconclusive record entirely and the read-back must fail finding the row.
+  script: test — bunx vitest run packages/lore/tests/integration/cli/verify-falsify-green-control.test.ts && echo "AC-FR-12 PASS: the persisted row is inconclusive with no attestation and the CLI exits 3"
