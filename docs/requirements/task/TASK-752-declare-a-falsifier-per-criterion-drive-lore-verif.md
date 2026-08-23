@@ -3,7 +3,7 @@ id: TASK-752
 type: task
 role: plan
 title: "Declare a falsifier per criterion, drive lore verify --falsify over all eight, and close the anchor record"
-status: draft
+status: archived
 priority: medium
 phase: "P4-declare-falsifiers"
 created: 2026-08-23
