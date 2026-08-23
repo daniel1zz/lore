@@ -25,8 +25,11 @@ Scenarios:
 - Given the demoted row, When read back, Then it names WHICH state it was demoted from, not merely that it was demoted.
 - ⛔ Given a fake GitPort returning two differing digests, When the test uses that instead of a real commit, Then that arrangement does NOT satisfy this criterion — it proves only that the comparison executes, never that the runner reads the stamp where a concurrent write can land. Write the real-commit version.
 
+⛔ HOW TO LAND THE COMMIT INSIDE THE WINDOW, so this is not reverse-engineered from the spec's sequence diagram: the runner's order is read-pre-stamp → RUN THE COMMAND → read-post-stamp, so the command the AC declares is ITSELF inside the window. A command that performs a `git commit` in the throwaway repo lands the state change deterministically between the two reads, with no sleep, no race and no polling. The live control is the same fixture with a command that commits nothing.
+
 AC:
 - All four scenarios exist as executable tests, the injection being a real commit in a throwaway repo.
 - RED before implementation.
-- ⛔ Red recorded by THIS agent at the moment it is red (lore evidence --result expected-fail).
+- ⛔ Red recorded by THIS agent at the moment it is red: `lore evidence <this task> --oracle test --command "<cmd>" --result expected-fail --ac AC-CT-5`.
+  ⛔ The `--ac` reference is mandatory, not decoration: without it the red is free prose and "which ACs have an observed-red falsifier" stays unqueryable corpus-wide — the exact residual SPEC-143's own Falsifier-debt section names.
 - ⛔ If the timing window cannot be hit deterministically, STOP and report — do not substitute a fake port, which the spec rejects by name.

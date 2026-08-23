@@ -3,7 +3,7 @@ id: TASK-753
 type: task
 role: plan
 title: "Wire materialization into the live falsifier path and prove it from the CLI, without disarming the green control"
-status: draft
+status: archived
 priority: medium
 phase: "P3-production-wiring"
 created: 2026-08-23

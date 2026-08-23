@@ -6,7 +6,7 @@ title: "Redeeming three advisories produced two more rounds of the same defect, 
 status: approved
 priority: medium
 created: 2026-08-20
-updated: 2026-08-21
+updated: 2026-08-23
 tags: []
 parent: PRD-001
 links:
@@ -30,6 +30,7 @@ Scope: one session, no code written. SPEC-143 went `approved` → `draft` → `a
 | — | AC-CT-9 | `attestationFloor` accepts `unmeasured` and shows it as its own bucket — but `stampCurrency`'s return type has no such value |
 | R10 | AC-CT-9(d) | "delete the duplicate predicate" — verified once, with no ratchet against re-introduction, while AC-CT-7 three criteria away argues exactly why a scan beats a test |
 | R11 | AC-CT-3 | still declared the four-valued return, and its falsifier "make stampCurrency return `bound`" was UNREPRESENTABLE in the new type — an oracle that could never run, reading as coverage |
+| R12 | AC-CT-9(d) | put five stamp-verdict buckets inside the `capture_source` distribution, which buckets a different axis and already sums to the row total on its own |
 
 ⛔ **All four were found by the review judge. None by the author's self-check** — and the author was, at the moment of writing R7, composing revision records ABOUT under-measured criteria. This is not an attention failure; it is what an AC looks like when written by a producer who already knows what they meant.
 
@@ -65,6 +66,19 @@ and `link_integrity` all passed.
 a precise, measurable criterion — and simply did not open the component section that had to carry it.
 The reviewing mechanisms are organised around documents and symbols, not around **the contract a
 criterion implies for the component named in it**.
+
+⛔ **It happened a second time, 2026-08-23, and again only reading the code exposed it.** AC-CT-9(d)
+said "the `capture_source` distribution buckets those five [stamp-verdict readings]". Opening
+`assess-render.ts` to plan against it showed that distribution buckets a DIFFERENT axis — who recorded
+the evidence, `runner` vs self-report — and already sums to the row total by itself. Folding a second
+orthogonal axis into it yields non-exclusive buckets summing to twice the row count, contradicting
+(d)'s own "summing to the row total" clause. Fixed as SPEC-143 R12: two parallel distributions.
+
+Both instances (R9, R12) share a shape worth naming: **the contradiction is between a criterion's prose
+and a RUNTIME STRUCTURE it names**, and neither the AI judge nor any deterministic check reads both
+sides. Nine review rounds passed over R9's; eight passed over R12's. What found them, both times, was
+opening the implementation in order to plan against it — which argues for doing that BEFORE the review
+rounds rather than after.
 
 **Resolution chosen 2026-08-21**: an ORTHOGONAL field rather than a fifth enum value. Stamp presence
 and radius measurability are two independent axes; collapsing them into one enum was the modelling
@@ -158,6 +172,31 @@ AC-CT-1's RULE 2 guarantees "no second state-to-glyph projection **in four known
 - **exit code measured through a pipe.** `lore ac set … | tail -20` reported `EXIT=0` on a validation failure, because `$?` was `tail`'s. Re-measured without the pipe: **exit 4**. The tool was correct; the measurement was not. This repository's own discipline names this exact trap, and it was walked into within the same hour of citing it.
 - **A count written into a governance doc was false within minutes.** The falsifier-debt paragraph said "All seven criteria carry their falsifier as PROSE"; AC-CT-8 landed and made it a lie. Rewritten to "EVERY criterion on this spec". ⛔ Never pin a literal count next to a set you are still editing.
 - **A mermaid node lagged a prior revision by three days.** R1 (2026-08-17) made `stampCurrency` four-valued; the Architecture diagram still rendered three. Caught by the judge's consistency dimension, not by any check. Diagram text is not covered by any oracle in this corpus.
+
+## 7b. The same blindness at the PLAN layer, caught the same way
+
+After the spec finally converged, a plan was cut from it and an independent read-only reviewer audited the
+15 tasks. It returned NEEDS_WORK with five findings; four survived verification. Two generalise past this plan:
+
+- **A task that asserts facts about `main` gets dispatched into a worktree unless it says otherwise.** The
+  plan's gate task asserted the full dual-runner suite, binary provenance against a rebuilt `dist/lore`, and
+  a restored spec status — all properties of the merged main checkout. Nothing in it said "not claimed from a
+  worktree", and the plan's own dispatch model says implementers claim inside their own worktree. A cold-start
+  implementer would therefore have evaluated main-only assertions against worktree artifacts and reported them
+  as speaking for main. ⛔ Any task whose AC names the merged tree must say, in the task, that it is not a
+  worktree claim — the dispatch model does not infer it.
+- **Red-first evidence without `--ac` is unqueryable.** All seven RED-test tasks instructed
+  `lore evidence … --result expected-fail` and none passed `--ac <AC-ID>`, though the flag exists and is
+  documented ("references a structured AC id declared on the plan's parent spec"). Recorded that way, the red
+  is free prose: "which ACs have an observed-red falsifier" has no field to query. ⛔ This would have
+  REPRODUCED the exact residual the spec's own Falsifier-debt section names, inside the plan meant to close it.
+
+A third finding was the familiar shape: the Risk Register claimed "three pairs share files" where enumerating
+all 15 tasks' declared anchors returns exactly one. A count in a governance doc with no oracle, again.
+
+⇒ Worth stating plainly: **the author's self-check missed all four at the plan layer too**, immediately after
+a session in which it had missed seven at the spec layer. The independent pass is not a luxury applied to
+hard documents; it is what substitutes for a mechanism that does not exist.
 
 ## 8. What is still unmechanized after this session
 

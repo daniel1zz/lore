@@ -23,6 +23,8 @@ Covers: AC-CT-5
 
 Blocked by P0 (consumes StateStamp). Highest-risk task in this plan — the seam is timing-sensitive.
 
+⛔ THE WINDOW IS REACHABLE WITHOUT TIMING TRICKS: the runner reads the pre-stamp, RUNS THE COMMAND, then reads the post-stamp — so a command that itself commits in the throwaway repo is deterministically inside the window. Build the seam so that ordering holds; if it does not, that is the defect, not the test.
+
 ⛔ A FAKE GitPort DOES NOT SATISFY THIS. The spec rejects it by name: two differing digests from a stub prove the comparison executes, not that VerifyRunnerService reads the stamp at the seam where a concurrent write can actually land. If the deterministic injection proves impossible, escalate rather than weaken.
 
 AC:

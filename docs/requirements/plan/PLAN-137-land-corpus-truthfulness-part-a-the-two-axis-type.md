@@ -3,7 +3,7 @@ id: PLAN-137
 type: plan
 role: plan
 title: "Land corpus truthfulness part A — the two-axis type foundation and the six implementation chains that consume it"
-status: draft
+status: approved
 priority: medium
 created: 2026-08-23
 updated: 2026-08-23
@@ -19,7 +19,9 @@ links:
 ---
 # Land corpus truthfulness, part A — the two-axis type foundation and the six implementation chains that consume it
 
-Implements SPEC-143 Migration **Phase 1 (honest labels)** and **Phase 2 (the stamp)**, decomposed Interface-First. Part B (a separate plan, cut after this one merges) carries D3 wiring — `attestationFloor`'s two-axis decision and the two parallel distributions — plus final acceptance.
+Builds SPEC-143 Migration **Phase 1 (honest labels)** in full, and the **mechanisms** of Phase 2 (the stamp), decomposed Interface-First. Part B (a separate plan, cut after this one merges) carries D3 wiring — `attestationFloor`'s two-axis decision and the two parallel distributions — plus final acceptance.
+
+⛔ **This plan does NOT complete Phase 2, and saying otherwise would contradict the governing spec.** SPEC-143's Migration step 6 states: "⛔ Phase 2 is not done without this step — that is the difference between a mechanism and a metadata field." Step 6 is AC-CT-9, deferred to part B. Concretely: `blastRadiusChanged` lands here as a correctly-tested pure function that `attestationFloor` does not yet consult for a real gate decision. Every mechanism in P2 is in that state until part B wires it. The plan's own gate task (P3) must report this rather than let a green board imply Phase 2 is closed.
 
 ## Scope and AC coverage
 
@@ -52,7 +54,7 @@ Implements SPEC-143 Migration **Phase 1 (honest labels)** and **Phase 2 (the sta
 | The type foundation is a single point of failure — six consumers depend on it, so a wrong shape means full-line rework | **H** | Any P1/P2 task reports the declared types cannot express its case | T0's AC requires a compile-only consumer fixture exercising all five `StampVerdict` readings and both `RadiusMeasurement` arms BEFORE T0 archives | Halt the wave, revise types in a follow-up task, re-dispatch consumers from the corrected base |
 | AC-CT-5's injection seam is timing-sensitive — a REAL commit must land between the runner's pre-read and post-read, and the spec explicitly refuses a fake `GitPort` | **H** | The test passes with the commit landing outside the window, or flakes across runs | T5 is estimated L and paired with its own RED task whose scenarios pin the ordering; the falsifier (record only the post-run stamp) must be observed red | If the seam cannot be hit deterministically, escalate to the user — ⛔ do NOT weaken to a fake port, which the spec rejects by name |
 | D7 forces AC-ACODE-9 and two JSDoc sites into the SAME commit as the renderer fix, and the `ac set` demotes SPEC-038 to `draft` | **M** | SPEC-038 reads `draft` after T2 merges | T2's bundle states the same-commit requirement explicitly; the main agent runs `lore review` + `lore approve` on SPEC-038 immediately after merging T2 | If a descendant claim is blocked meanwhile, re-approve first and re-dispatch |
-| Anchor overlap between sibling tasks — three pairs share files | **M** | `lore ready --json` reports `anchor_conflicts[]` non-empty | Declared honestly as anchors AND serialized with `blocks` links: T0→T3 (`gate-predicates.ts`), AC-CT-1 and AC-CT-7 merged into ONE task T2 (`check-ac-state-renderers.ts`) | Never leave the conflict to dispatch time — the gate would stall the second agent |
+| Anchor overlap between sibling tasks — measured: exactly ONE pair | **M** | `lore ready --json` reports `anchor_conflicts[]` non-empty | Enumerated over all 15 tasks' declared `file_anchors` 2026-08-23: the only file appearing twice is `packages/lore/src/service/gate-predicates.ts` (T0 and the AC-CT-3 task), already serialized by a `blocks` link. A second potential collision was removed by construction — AC-CT-1 and AC-CT-7 are ONE task because both write `check-ac-state-renderers.ts`. ⛔ An earlier version of this row said "three pairs"; that count was never verifiable against the anchors it claimed to summarise | Never leave a conflict to dispatch time — the gate would stall the second agent |
 | All 10 ACs carry PROSE falsifiers, not structured fields; nothing forces redemption | **M** | A task reports pass without ever having observed its falsifier red | Each implement task's AC requires running the declared mutation once and recording the red | Accepted residual — the mechanism needs its own spec (`knowledge-a-declared-property-with-no-measuring-oracle-and-the`) |
 | A peer session lands commits mid-wave, reddening a worktree for reasons unrelated to the diff | **M** | A worktree suite reddens on files the task never touched | Scoped runs via `bun run test:changed <base>`; full suite only on `main` | Re-verify at the merged tree before attributing failure to the task |
 
@@ -93,6 +95,7 @@ P1 runs fully parallel to P0 (neither of its chains consumes the new types), and
 - All H-impact risks either did not trigger, or triggered and were mitigated with the outcome recorded here.
 - SPEC-038 back to `approved` after T2's D7 amendment.
 - Part B's scope re-confirmed against `lore ac list SPEC-143` before it is cut — the AC set may have moved.
+- ⛔ The completion report states explicitly that SPEC-143 Migration Phase 2 remains OPEN after this plan, AC-CT-9 being outstanding. A plan that closes green while its governing spec's own completion bar is unmet must say so in the same breath.
 
 ## Decisions Log
 

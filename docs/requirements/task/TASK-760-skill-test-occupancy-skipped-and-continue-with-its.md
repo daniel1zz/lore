@@ -27,4 +27,5 @@ Scenarios:
 AC:
 - All three scenarios exist as executable tests against a throwaway corpus.
 - RED before implementation.
-- ⛔ Red recorded by THIS agent at the moment it is red (lore evidence --result expected-fail).
+- ⛔ Red recorded by THIS agent at the moment it is red: `lore evidence <this task> --oracle test --command "<cmd>" --result expected-fail --ac AC-CT-8`.
+  ⛔ The `--ac` reference is mandatory, not decoration: without it the red is free prose and "which ACs have an observed-red falsifier" stays unqueryable corpus-wide — the exact residual SPEC-143's own Falsifier-debt section names.

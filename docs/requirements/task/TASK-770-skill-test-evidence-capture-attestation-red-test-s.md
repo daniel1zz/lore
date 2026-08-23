@@ -28,4 +28,5 @@ Scenarios:
 AC:
 - All four scenarios exist as executable tests against a throwaway corpus.
 - Running them before the implementation is RED, failing because the attestation block is absent — not because the test is malformed.
-- ⛔ Red recorded by THIS agent at the moment it is red: lore evidence <this task> --oracle test --command "<cmd>" --result expected-fail.
+- ⛔ Red recorded by THIS agent at the moment it is red: lore evidence <this task> --oracle test --command "<cmd>" --result expected-fail --ac AC-CT-2.
+  ⛔ The `--ac` reference is mandatory, not decoration: without it the red is recorded as free prose and "which ACs have an observed-red falsifier" stays unqueryable corpus-wide — the exact residual SPEC-143's own Falsifier-debt section names. `lore evidence --help` documents `--ac` as "references a structured AC id declared on the plan's parent spec".
