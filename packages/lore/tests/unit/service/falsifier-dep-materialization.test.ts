@@ -575,6 +575,70 @@ describe("derived workspace set", () => {
     const missedByHandListing = derivedNames.filter((name) => !HAND_LISTED_MEMBERS.includes(name));
     expect(missedByHandListing).toEqual(["fourth"]);
   });
+
+  it("derived workspace set: BOUNDARY (RED, permanently pinned) — a stray directory under packages/ with NO package.json is skipped, not a loud abort for the whole repo", () => {
+    const { repoRoot } = makeFixtureMainRepo();
+    // A stray directory that carries NO package.json at all — e.g. a
+    // leftover build artifact, an aborted rename, an editor scratch dir.
+    // This is not a workspace member (Finding 2 of
+    // task-make-the-falsifier-s-negative-control-a-permanent-runnable: one
+    // such directory used to abort materialization for the WHOLE repo).
+    const packagesDir = join(repoRoot, "packages");
+    const strayDir = join(packagesDir, "stray-build-artifact");
+    mkdirSync(strayDir, { recursive: true });
+    writeFileSync(join(strayDir, "README.txt"), "not a package\n", "utf8");
+
+    // RED, permanently pinned: the REJECTED naive alternative this test
+    // guards against — the pre-fix `deriveWorkspaceMembers` treated EVERY
+    // directory under the base dir as a would-be member and returned `err`
+    // the instant one had no `package.json` (the literal
+    // `if (!memberJsonResult.ok) return memberJsonResult;` shape the finding
+    // named). Reproduced here as a standalone directory scan, never by
+    // editing production code, so this assertion keeps discriminating power
+    // even after the fix: it independently confirms the stray directory
+    // really is the kind of directory that naive shape would have tripped
+    // on, contrasted with the FIXED function's behavior asserted below.
+    const dirEntryNames = readdirSync(packagesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    const directoriesWithNoPackageJson = dirEntryNames.filter(
+      (dirName) => !existsSync(join(packagesDir, dirName, "package.json")),
+    );
+    expect(directoriesWithNoPackageJson).toEqual(["stray-build-artifact"]);
+
+    // The FIXED behavior: deriveWorkspaceMembers must NOT abort, and must
+    // skip the stray directory rather than including or erroring on it.
+    const derived = deriveWorkspaceMembers(repoRoot);
+    expect(derived.ok).toBe(true);
+    if (!derived.ok) return;
+    expect(derived.value.map((m) => m.dirName).sort()).toEqual(["consumer", "core", "extra"]);
+    expect(derived.value.map((m) => m.dirName)).not.toContain("stray-build-artifact");
+
+    // Materialization for the WHOLE repo must also complete — not just
+    // deriveWorkspaceMembers in isolation, which is the actual defect the
+    // finding described ("aborts materialization for the whole repo").
+    const scratch = createScratch(repoRoot);
+    const materialized = materializeFalsifierDependencies(scratch.worktreeDir, repoRoot);
+    expect(materialized.ok).toBe(true);
+  });
+
+  it("derived workspace set: ERROR/REGRESSION — a directory that DOES have a package.json but fails to parse it still aborts loud, proving the stray-directory skip was not silently widened", () => {
+    const { repoRoot } = makeFixtureMainRepo();
+    const brokenDir = join(repoRoot, "packages", "broken-package-json");
+    mkdirSync(brokenDir, { recursive: true });
+    // Deliberately malformed JSON. Unlike the stray-directory case above,
+    // this directory HAS declared itself a package (it carries a
+    // package.json) — the fix must NOT widen its skip to swallow this too.
+    writeFileSync(join(brokenDir, "package.json"), "{ not valid json", "utf8");
+
+    const derived = deriveWorkspaceMembers(repoRoot);
+    expect(derived.ok).toBe(false);
+    if (derived.ok) return;
+    expect(derived.error.code).toBe("VALIDATION_ERROR");
+    if (derived.error.code !== "VALIDATION_ERROR") return;
+    expect(derived.error.message).toContain("broken-package-json");
+    expect(derived.error.message).toContain("not valid JSON");
+  });
 });
 
 // ─── AC-SD-3 ────────────────────────────────────────────────────────────────
