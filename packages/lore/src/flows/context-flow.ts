@@ -61,19 +61,28 @@
  *     knowledge-retro-context-refresh-module-index-walk-pollutes): AFTER
  *     splicing and appending the trailing newline but BEFORE calling
  *     `deps.fs.writeFile`, the spliced candidate is run through
- *     `claude-md-check.ts`'s `lintMemoryFiles` — the SAME ceiling-check
- *     implementation `lore status --check-claude-md` consumes (SSOT: never a
- *     second inline size check here) — against the SAME `resolveFlowBudgets(deps)`
+ *     `service/claude-md-admission.ts`'s `runMemoryFileChecks` — the SAME
+ *     SOLE composition entry `lore status --check-claude-md` consumes (SSOT:
+ *     never a second inline size check here, and never a direct call into
+ *     the underlying capacity lint — AC-COMPOSE-1, spec-claude-md-
+ *     governance-content-dimension-checks-wire-the) — against the SAME
+ *     `resolveFlowBudgets(deps)`
  *     value `collectContextFacts` already used for this call (never a second,
- *     independently-resolved budgets value). Any finding (root role,
- *     `max_lines` or `max_bytes`) refuses the whole call with
- *     `err(VALIDATION_ERROR)` naming every breach and performs NO write — a
- *     within-budget splice is unaffected (byte-identical to pre-check
- *     behavior). `runContextInit` does NOT run this check: its own
- *     already-exists refusal is the narrower, pre-existing guard for that
- *     verb (out of this AC's scope), and `--force` (init-only) never
- *     bypasses `runContextRefresh`'s check either, since refresh has no
- *     `--force` option to bypass with.
+ *     independently-resolved budgets value). Only the DETERMINISTIC half of
+ *     the result gates the write (root role, `max_lines` or `max_bytes`);
+ *     any such finding refuses the whole call with `err(VALIDATION_ERROR)`
+ *     naming every breach and performs NO write — a within-budget splice is
+ *     unaffected (byte-identical to pre-check behavior). The ADVISORY half
+ *     (dangling references, narrative smells) is computed and discarded —
+ *     `runMemoryFileChecks` never lets an advisory finding refuse a write,
+ *     matching every other consumer of this mechanism — so the
+ *     `fileExists`/`docExists` predicates this call supplies are inert
+ *     stand-ins (this verb reports no reference/slug advisories; that
+ *     surface is `lore status --check-claude-md`'s job). `runContextInit`
+ *     does NOT run this check: its own already-exists refusal is the
+ *     narrower, pre-existing guard for that verb (out of this AC's scope),
+ *     and `--force` (init-only) never bypasses `runContextRefresh`'s check
+ *     either, since refresh has no `--force` option to bypass with.
  *
  * Side-effect class: IO (exclusively via the injected `FsWritePort`)
  *
@@ -84,7 +93,7 @@
 import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
-import { lintMemoryFiles } from "../service/claude-md-check.js";
+import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -322,10 +331,19 @@ export async function runContextRefresh(
 
   const finalContent = ensureTrailingNewline(spliceResult.value.content);
 
-  // AC-CTX-8 pre-write admission — SSOT: the SAME check `lore status
-  // --check-claude-md` runs, never a second inline size check (module
-  // header). Runs on the SPLICED candidate, before any write.
-  const findings = lintMemoryFiles([{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }], budgets);
+  // AC-CTX-8 pre-write admission — SSOT: the SAME composition entry `lore
+  // status --check-claude-md` runs (`runMemoryFileChecks`), never a second
+  // inline size check and never a direct call into the underlying capacity
+  // lint (module header, AC-COMPOSE-1). Runs on the SPLICED candidate,
+  // before any write.
+  // Only `.deterministic` gates the write — `.advisory` is computed and
+  // discarded (module header explains why `fileExists`/`docExists` are inert
+  // stand-ins here).
+  const { deterministic: findings } = runMemoryFileChecks(
+    [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
+    budgets,
+    { fileExists: () => true, docExists: () => true },
+  );
   if (findings.length > 0) {
     return err({
       code: "VALIDATION_ERROR",

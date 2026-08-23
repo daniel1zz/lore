@@ -1,0 +1,152 @@
+/**
+ * Shared finding/record types for the memory-file admission mechanism
+ * (spec-claude-md-governance-content-dimension-checks-wire-the) — the ONE
+ * place both `claude-md-budget.ts` (capacity checks: line/byte ceilings) and
+ * `claude-md-admission.ts` (content checks: reference existence, narrative
+ * smells) import their finding/record shapes from, so neither module forks
+ * its own copy. Extracted from the pre-split `claude-md-check.ts` (N12: the
+ * split precedes the new Phase 2+ metrics).
+ *
+ * Public surface:
+ *   - MemoryFileRole / MemoryFileRecord — a discovered memory file's role and
+ *     raw facts (path/role/content), assembled by the caller (typically
+ *     `adapters/real-memory-file-probe.ts`).
+ *   - MemoryFileFindingKind / MemoryFileFinding — DETERMINISTIC, exit-relevant
+ *     findings (`claude-md-budget.ts`'s `lintMemoryFiles` ceiling/eviction
+ *     verdicts).
+ *   - AdvisoryFindingKind / AdvisoryFinding — ADVISORY, NEVER exit-relevant
+ *     findings (`claude-md-admission.ts`'s narrative smells + dangling
+ *     references, `claude-md-budget.ts`'s near-ceiling warnings).
+ *
+ * Invariants:
+ *   - `MemoryFileFinding` is a single FLAT interface, never a `kind`-keyed
+ *     discriminated union — pinned test suites
+ *     (`claude-md-headroom.test.ts`/`claude-md-eviction-floor.test.ts`/
+ *     `claude-md-admission.test.ts`) read `.measured`/`.role`/`.ceiling` off
+ *     a `lintMemoryFiles` result WITHOUT a `kind` narrowing check first (see
+ *     `MemoryFileFinding`'s own `@remark`) — a union makes those fields
+ *     inaccessible without narrowing and fails `tsc --noEmit` against those
+ *     files.
+ *   - `reference_missing` is an `AdvisoryFindingKind`, NOT a
+ *     `MemoryFileFindingKind` (N13 type migration,
+ *     spec-claude-md-governance-content-dimension-checks-wire-the): it was
+ *     typed deterministic from the day it shipped but had ZERO production
+ *     call sites, so this migration retracts a false claim rather than
+ *     removing enforcement.
+ *   - `AdvisoryFinding.measured` is OPTIONAL: present for
+ *     `iso_date_density`/`status_word` (an occurrence count) and
+ *     `headroom_warning` (remaining headroom), ABSENT for `reference_missing`
+ *     (one finding per distinct dangling reference, not a count) — which
+ *     instead carries `path`/`reference`.
+ *
+ * Side-effect class: pure (types only — zero imports, zero logic)
+ *
+ * Source: spec-claude-md-governance-content-dimension-checks-wire-the,
+ * AC-WIRE-1/AC-WIRE-2/AC-COMPOSE-1/AC-PURE-1; spec-project-claude-md-content-
+ * contract-governance-injected, AC-CMC-1; spec-context-verb-family-two-zone-
+ * claude-md-anatomy-lore, AC-CTX-2.
+ */
+
+// ─── Memory File Record (caller-assembled, e.g. by real-memory-file-probe.ts) ─
+
+/** A discovered project memory file's role — governs which ceiling pair applies. */
+export type MemoryFileRole = "root" | "module";
+
+/**
+ * One memory file's facts as measured by the caller (typically
+ * `adapters/real-memory-file-probe.ts`'s filesystem discovery walk).
+ * `content` is the file's raw text — every check in this mechanism performs
+ * its own line/byte/pattern measurement from this single value, never from a
+ * caller-precomputed count.
+ */
+export interface MemoryFileRecord {
+  /** Repo-relative path, used verbatim in finding messages. */
+  path: string;
+  role: MemoryFileRole;
+  content: string;
+}
+
+// ─── Deterministic finding (capacity — claude-md-budget.ts) ─────────────────
+
+/**
+ * Which check a {@link MemoryFileFinding} reports a breach of — both come
+ * from `claude-md-budget.ts`'s `lintMemoryFiles`. `eviction_required` is the
+ * only one that fires while the file is still WITHIN its ceiling (see that
+ * module's three-band table). ⛔ `reference_missing` is deliberately NOT
+ * here — N13 (spec-claude-md-governance-content-dimension-checks-wire-the)
+ * migrated it to {@link AdvisoryFindingKind}; see this module's header.
+ */
+export type MemoryFileFindingKind = "max_lines" | "max_bytes" | "eviction_required";
+
+/**
+ * One deterministic, exit-relevant admission-check finding — flat and
+ * serializable (CLI/JSON rendering is the caller's job — see
+ * `adapters/cli/claude-md-render.ts` — this module never formats output
+ * beyond the `message` field). A single flat shape rather than a
+ * `kind`-discriminated union ON PURPOSE: callers that read `.measured`/
+ * `.role`/`.ceiling` off a `max_lines`/`max_bytes`/`eviction_required`
+ * finding do so without first narrowing on `kind`.
+ *
+ * @remark A `kind`-keyed discriminated union was the first design tried here
+ *   — rejected because pinned test suites read `.measured`/`.role`/
+ *   `.ceiling` off a `lintMemoryFiles` result WITHOUT a `kind` narrowing
+ *   check first (direct `findings[0]?.measured` after only asserting
+ *   `findings[0]?.kind`, which does not narrow for `expect()` calls) — a
+ *   union makes those fields inaccessible without narrowing and fails `tsc
+ *   --noEmit` against those test files. Test shape wins over the union
+ *   pattern this codebase otherwise prefers for state (see
+ *   `references/state-as-data.md`).
+ */
+export interface MemoryFileFinding {
+  /** The linted memory file's path. */
+  path: string;
+  kind: MemoryFileFindingKind;
+  /** The linted file's declared role. */
+  role?: MemoryFileRole;
+  /** The measured line count or byte count. */
+  measured?: number;
+  /** The ceiling that was exceeded (or, for `eviction_required`, crossed). */
+  ceiling?: number;
+  /** Human-readable summary — always names `path`. */
+  message: string;
+}
+
+// ─── Advisory finding (content — claude-md-admission.ts — and headroom
+// warnings — claude-md-budget.ts) ────────────────────────────────────────
+
+/**
+ * Which smell/condition an {@link AdvisoryFinding} flags — NEVER a
+ * {@link MemoryFileFindingKind} (advisory findings are a structurally
+ * SEPARATE family, never merged into or mistaken for a deterministic,
+ * exit-relevant one). `headroom_warning` is emitted by
+ * `claude-md-budget.ts`'s `computeHeadroomWarnings`;
+ * `iso_date_density`/`status_word`/`reference_missing` by
+ * `claude-md-admission.ts`'s `detectNarrativeSmells`/
+ * `checkReferenceExistence`. `reference_missing` joined this union via N13
+ * (spec-claude-md-governance-content-dimension-checks-wire-the) — see this
+ * module's header.
+ */
+export type AdvisoryFindingKind = "iso_date_density" | "status_word" | "headroom_warning" | "reference_missing";
+
+/**
+ * One advisory observation — structurally SEPARATE from
+ * {@link MemoryFileFinding} on purpose: advisory findings must never be
+ * mistakable for, or merged into, a deterministic exit-relevant finding.
+ */
+export interface AdvisoryFinding {
+  kind: AdvisoryFindingKind;
+  /**
+   * Occurrence count for `iso_date_density`/`status_word`; remaining
+   * headroom (`ceiling - used`, same value as `MetricHeadroom.remaining`)
+   * for `headroom_warning`. ABSENT for `reference_missing` — that check
+   * reports one finding per distinct dangling reference, not an aggregate
+   * count.
+   */
+  measured?: number;
+  /** Present only for `reference_missing` — the missing (normalized) reference target's path. */
+  path?: string;
+  /** Present only for `reference_missing` — the raw backtick-quoted token as it appeared in content, fragment included. */
+  reference?: string;
+  /** Human-readable summary. */
+  message: string;
+}

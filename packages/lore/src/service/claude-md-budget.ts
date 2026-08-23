@@ -1,14 +1,17 @@
 /**
  * SPEC-project-claude-md-content-contract-governance-injected /
- * spec-context-verb-family-two-zone-claude-md-anatomy-lore — pure admission
- * checks backing `lore status --check-claude-md`. Mirrors
+ * spec-context-verb-family-two-zone-claude-md-anatomy-lore — pure CAPACITY
+ * checks (line/byte ceilings) for project memory files. Split from the
+ * former `claude-md-check.ts` (spec-claude-md-governance-content-dimension-
+ * checks-wire-the, N12: the split precedes the new Phase 2+ content
+ * metrics): this module owns capacity; content checks (reference existence,
+ * narrative smells) live in the sibling `claude-md-admission.ts`; shared
+ * finding/record types live in `claude-md-findings.ts`. Mirrors
  * `prd-budget-check.ts`'s purity convention: this module never touches a
- * `StoreInterface`, the filesystem, or wall-clock time; every fact it needs
- * (a memory file's path/role/content, the corpus-governed budget, whether a
- * candidate path exists) is passed in by the caller (the CLI adapter reads
- * files via `real-memory-file-probe.ts`, config via
- * `resolveMemoryFileBudgets`, and existence via a caller-owned `fileExists`
- * predicate — this module never calls `fs` itself).
+ * `StoreInterface`, the filesystem, or wall-clock time — every fact it
+ * needs (a memory file's path/role/content, the corpus-governed budget) is
+ * passed in by the caller (the CLI adapter reads files via
+ * `real-memory-file-probe.ts`, config via `resolveMemoryFileBudgets`).
  *
  * Public surface:
  *   - lintMemoryFiles(files, budgets) — the full ceiling oracle: for every
@@ -16,15 +19,10 @@
  *     ceiling breach (never short-circuits after the first) PLUS every metric
  *     that has crossed the eviction floor below the ceiling. DETERMINISTIC,
  *     exit-relevant (`kind: "max_lines" | "max_bytes" | "eviction_required"`).
- *   - checkReferenceExistence(content, fileExists) — DETERMINISTIC,
- *     exit-relevant (`kind: "reference_missing"`): extracts backtick-quoted,
- *     repo-relative-looking path candidates from `content` and reports the
- *     ones `fileExists` says are absent.
- *   - detectNarrativeSmells(content) — ADVISORY ONLY, NEVER exit-relevant:
- *     flags ISO-date density and status wording ("not yet" / "pending" /
- *     TODO-style markers) that suggest transient status narrative leaking
- *     into a standing-discipline file. Returns a wholly separate
- *     `AdvisoryFinding[]` type — never mixed into `MemoryFileFinding[]`.
+ *     ⛔ NOT called directly by any production call site — `claude-md-
+ *     admission.ts`'s `runMemoryFileChecks` is the SOLE composition entry it
+ *     routes through (AC-COMPOSE-1, spec-claude-md-governance-content-
+ *     dimension-checks-wire-the).
  *   - computeHeadroom(files, budgets) — DETERMINISTIC, NEVER exit-relevant:
  *     the reporting counterpart to `lintMemoryFiles` — for EVERY file it
  *     returns the SAME two measurements (`countLines`/`Buffer.byteLength`)
@@ -38,8 +36,11 @@
  *     crossed `budgets.warn_threshold_fraction` of its ceiling) into
  *     `AdvisoryFinding`s — entering the near-ceiling band is worth a loud
  *     line in the report, but is NOT itself a breach; `lintMemoryFiles` alone
- *     ever decides breach/exit-code (mirrors the `detectNarrativeSmells`
- *     advisory/deterministic split, spec §D7).
+ *     ever decides breach/exit-code.
+ *   ⛔ `computeHeadroom`/`computeHeadroomWarnings` are deliberately OUTSIDE
+ *   `runMemoryFileChecks`'s composition — they are a REPORTING layer, never
+ *   a check, and stay directly callable by `status.ts`
+ *   (AC-COMPOSE-1's banned-function list does not include them).
  *
  * Three ordered bands per metric (task-a-module-claude-md-at-its-byte-ceiling-
  * silently-relocates). Both fractions come from `budgets`, never from a
@@ -70,10 +71,11 @@
  *     ON PURPOSE: that one function is the seam `lore status
  *     --check-claude-md`'s exit code, `assets/hooks/claude-md-guard.sh`'s
  *     PostToolUse block, `hooks/pre-push`, and `flows/context-flow.ts`'s
- *     `runContextRefresh` pre-write admission ALL already consume. Adding a
- *     second entry point (a separate `lintEvictionFloor` folded in by each
- *     caller) would have made the rule opt-in per surface — the property this
- *     task exists to remove.
+ *     `runContextRefresh` pre-write admission ALL already consume (via
+ *     `runMemoryFileChecks`'s `deterministic` array, unchanged from
+ *     `lintMemoryFiles`'s own output). Adding a second entry point would
+ *     make the rule opt-in per surface — the property this mechanism exists
+ *     to remove.
  *   - Both `lintMemoryFiles` metrics are ALWAYS measured for every file,
  *     independently — a file over both ceilings produces two findings
  *     (`max_lines` AND `max_bytes`), never just the first one hit (spec §D2:
@@ -89,23 +91,6 @@
  *     catch).
  *   - Each role (`"root"` | `"module"`) is checked against its OWN ceiling
  *     pair from `budgets` — never a single shared ceiling.
- *   - `checkReferenceExistence`'s reference grammar (v1, spec §D6) is
- *     deliberately conservative: a candidate is a backtick-quoted token that
- *     contains `/`, has no whitespace, and does not start with a URL scheme
- *     (`https://` etc.). A `path#Symbol` suffix is a fragment on a file
- *     path — only the file part is existence-checked. Candidate paths are
- *     normalized via `@lore/core`'s `normalizeFileAnchors` — the SAME
- *     normalizer `task.extra.file_anchors` (SPEC-042) uses — rather than
- *     re-deriving segment/leading-slash/`..` rules locally; a candidate that
- *     fails that normalization (e.g. contains `..`) is silently skipped, not
- *     reported (misses are acceptable, false alarms are not — spec Risks).
- *     Existence is decided EXCLUSIVELY via the injected `fileExists`
- *     predicate, never real `fs` access — keeps this module store-free and
- *     fs-free (spec §Module Boundary: "No store/DB dependency anywhere").
- *   - `detectNarrativeSmells` NEVER affects `checkReferenceExistence` or
- *     `lintMemoryFiles`'s output and NEVER affects exit-relevant shape (spec
- *     §D7: "narrative smells NEVER exit-affecting" — advisory findings are a
- *     structurally distinct type, not an extra `kind` on `MemoryFileFinding`).
  *   - `computeHeadroom`'s `warn_threshold_fraction` comes EXCLUSIVELY from the
  *     caller-supplied `budgets` (`@lore/core`'s `contextConfigSchema`,
  *     resolved via `resolveMemoryFileBudgets`) — this module never hardcodes
@@ -114,92 +99,18 @@
  *     "numbers live in config" discipline, not a new one introduced here).
  *   - `computeHeadroom`/`computeHeadroomWarnings` share `lintMemoryFiles`'s
  *     `budgets.enabled === false` short-circuit (empty array) and its SAME
- *     `countLines`/`Buffer.byteLength` measurement functions — this module
- *     is the SOLE SSOT both `lore status --check-claude-md` and
- *     `flows/context-flow.ts`'s `runContextRefresh` pre-write admission
- *     consume; neither surface re-derives its own line/byte measurement.
+ *     `countLines`/`Buffer.byteLength` measurement functions.
  *
  * Side-effect class: pure
  *
  * Source: spec-project-claude-md-content-contract-governance-injected,
  * AC-CMC-1; spec-context-verb-family-two-zone-claude-md-anatomy-lore, AC-CTX-2;
- * task-lore-status-check-claude-md-reports-a-saturated-file-as
+ * task-lore-status-check-claude-md-reports-a-saturated-file-as;
+ * spec-claude-md-governance-content-dimension-checks-wire-the (split, N12).
  */
 
-import { normalizeFileAnchors, type MemoryFileBudgets } from "@lore/core";
-
-// ─── Memory File Record (caller-assembled, e.g. by real-memory-file-probe.ts) ─
-
-/** A discovered project memory file's role — governs which ceiling pair applies. */
-export type MemoryFileRole = "root" | "module";
-
-/**
- * One memory file's facts as measured by the caller (typically
- * `real-memory-file-probe.ts`'s filesystem discovery walk). `content` is the
- * file's raw text — `lintMemoryFiles` does all line/byte measurement itself
- * from this single value (module header's single-measurement-point
- * invariant), never from caller-precomputed counts.
- */
-export interface MemoryFileRecord {
-  /** Repo-relative path, used verbatim in finding messages. */
-  path: string;
-  role: MemoryFileRole;
-  content: string;
-}
-
-// ─── Finding ────────────────────────────────────────────────────────────────
-
-/**
- * Which check a {@link MemoryFileFinding} reports a breach of. `max_lines`,
- * `max_bytes` and `eviction_required` come from `lintMemoryFiles`;
- * `reference_missing` comes from `checkReferenceExistence` (spec §D6/D7) — all
- * four are DETERMINISTIC and exit-relevant. `eviction_required` is the only
- * one that fires while the file is still WITHIN its ceiling (see the module
- * header's three-band table). Narrative smells are NOT a `MemoryFileFindingKind` — they
- * are a wholly separate `AdvisoryFinding`/`AdvisoryFindingKind` family
- * (spec §D7: advisory never shares a shape with deterministic findings).
- */
-export type MemoryFileFindingKind = "max_lines" | "max_bytes" | "reference_missing" | "eviction_required";
-
-/**
- * One deterministic, exit-relevant admission-check finding — flat and
- * serializable (CLI rendering is the caller's job, this module never
- * formats output beyond the `message` field). A single flat shape rather
- * than a `kind`-discriminated union ON PURPOSE: `lintMemoryFiles`'s existing
- * finding construction (`role`/`measured`/`ceiling`, always present) is
- * intentionally UNCHANGED by this extension, and callers that read those
- * fields off a `max_lines`/`max_bytes` finding do so without first
- * narrowing on `kind` (see `claude-md-admission.test.ts`'s REGRESSION case —
- * this shape is the pinned contract). `checkReferenceExistence` findings
- * instead populate `reference` and leave `role`/`measured`/`ceiling` absent
- * (there is no "ceiling" concept for a missing reference).
- *
- * @remark A `kind`-keyed discriminated union (`BudgetFinding |
- *   ReferenceMissingFinding`) was the first design tried here — rejected
- *   because the RED test suite reads `.measured`/`.role`/`.ceiling` off a
- *   `lintMemoryFiles` result WITHOUT a `kind` narrowing check first (direct
- *   `findings[0]?.measured` after only asserting `findings[0]?.kind`, which
- *   does not narrow for `expect()` calls) — a union makes those fields
- *   inaccessible without narrowing and fails `tsc --noEmit` against the
- *   test file, which this task must not edit. Test shape wins over the
- *   union pattern this codebase otherwise prefers for state (see
- *   `references/state-as-data.md`).
- */
-export interface MemoryFileFinding {
-  /** For `max_lines`/`max_bytes`: the linted memory file's path. For `reference_missing`: the missing (normalized) reference target's path. */
-  path: string;
-  kind: MemoryFileFindingKind;
-  /** Present only for `max_lines`/`max_bytes` — the linted file's declared role. */
-  role?: MemoryFileRole;
-  /** Present only for `max_lines`/`max_bytes` — the measured line count or byte count. */
-  measured?: number;
-  /** Present only for `max_lines`/`max_bytes` — the ceiling that was exceeded. */
-  ceiling?: number;
-  /** Present only for `reference_missing` — the raw backtick-quoted token as it appeared in content, fragment included. */
-  reference?: string;
-  /** Human-readable summary — always names `path`. */
-  message: string;
-}
+import type { MemoryFileBudgets } from "@lore/core";
+import type { AdvisoryFinding, MemoryFileRecord, MemoryFileFinding } from "./claude-md-findings.js";
 
 // ─── Measurement ────────────────────────────────────────────────────────────
 
@@ -322,175 +233,6 @@ export function lintMemoryFiles(
   return findings;
 }
 
-// ─── Reference existence (deterministic, AC-CTX-2 / spec §D6) ──────────────
-
-/**
- * Matches a backtick-quoted token with no backtick/whitespace inside — this
- * ALSO naturally excludes shell-command-with-args tokens like `` `bun
- * install` `` (the space breaks the match before a closing backtick is
- * found), so the "no whitespace" grammar rule needs no separate check.
- */
-const BACKTICK_TOKEN_RE = /`([^`\s]+)`/g;
-
-/** Matches a leading URI scheme (`https://`, `ftp://`, ...) — RFC 3986 §3.1 scheme grammar. */
-const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
-
-/**
- * Extracts backtick-quoted, repo-relative-looking path candidates from
- * `content` and reports the ones `fileExists` says are absent (spec §D6
- * grammar v1, deterministic, exit-relevant `kind: "reference_missing"`).
- *
- * Candidate grammar: a backtick-quoted token that contains `/`, has no
- * whitespace, and does not start with a URL scheme. A `path#Symbol` suffix
- * is a fragment on top of a file path — only the file part (text before the
- * first `#`) is existence-checked. Candidates are normalized through
- * `@lore/core`'s `normalizeFileAnchors` (the SAME normalizer
- * `task.extra.file_anchors` uses, SPEC-042) — a candidate that fails that
- * normalization (e.g. an escaping `..` segment) is silently skipped rather
- * than reported, matching the module's "misses acceptable, false alarms
- * not" risk posture. Duplicate missing references (same normalized path)
- * report once, first occurrence order preserved.
- *
- * @param content - Raw file text to scan (e.g. a CLAUDE.md body).
- * @param fileExists - Caller-owned existence predicate — the SOLE source of
- *   truth for "does this path exist"; this module never touches `fs`.
- * @returns One `reference_missing` {@link MemoryFileFinding} per distinct absent reference.
- *   Empty array on empty `content`, when no candidate matches the grammar,
- *   or when every candidate exists.
- * @example
- * checkReferenceExistence(
- *   "See `packages/lore/src/gone.ts` for details.",
- *   (p) => p !== "packages/lore/src/gone.ts",
- * );
- * // => [{ kind: "reference_missing", path: "packages/lore/src/gone.ts", ... }]
- */
-export function checkReferenceExistence(
-  content: string,
-  fileExists: (p: string) => boolean,
-): MemoryFileFinding[] {
-  if (content.length === 0) return [];
-
-  const findings: MemoryFileFinding[] = [];
-  const alreadyReported = new Set<string>();
-
-  for (const match of content.matchAll(BACKTICK_TOKEN_RE)) {
-    const token = match[1];
-    if (token === undefined || !token.includes("/")) continue;
-    if (URL_SCHEME_RE.test(token)) continue;
-
-    const hashIndex = token.indexOf("#");
-    const filePart = hashIndex === -1 ? token : token.slice(0, hashIndex);
-    if (filePart.length === 0) continue;
-
-    const normalized = normalizeFileAnchors([filePart]);
-    if (!normalized.ok) continue; // not a valid repo-relative path (SPEC-042 grammar) — noise, not a finding
-
-    const normalizedPath = normalized.value[0];
-    if (normalizedPath === undefined || alreadyReported.has(normalizedPath)) continue;
-
-    if (!fileExists(normalizedPath)) {
-      alreadyReported.add(normalizedPath);
-      findings.push({
-        kind: "reference_missing",
-        path: normalizedPath,
-        reference: token,
-        message: `\`${normalizedPath}\` is referenced but does not exist`,
-      });
-    }
-  }
-
-  return findings;
-}
-
-// ─── Narrative smells (advisory, AC-CTX-2 / spec §D7) ───────────────────────
-
-/**
- * Which smell/condition an {@link AdvisoryFinding} flags — NEVER a
- * {@link MemoryFileFindingKind}. `headroom_warning` is emitted by
- * {@link computeHeadroomWarnings} (task-lore-status-check-claude-md-reports-
- * a-saturated-file-as); `iso_date_density`/`status_word` by
- * {@link detectNarrativeSmells}.
- */
-export type AdvisoryFindingKind = "iso_date_density" | "status_word" | "headroom_warning";
-
-/**
- * One advisory observation — structurally SEPARATE from
- * {@link MemoryFileFinding} on purpose (spec §D7: advisory findings must
- * never be mistakable for, or merged into, a deterministic exit-relevant
- * finding).
- */
-export interface AdvisoryFinding {
-  kind: AdvisoryFindingKind;
-  /**
-   * Occurrence count for `iso_date_density`/`status_word`; remaining
-   * headroom (`ceiling - used`, same value as the source
-   * {@link MetricHeadroom.remaining}) for `headroom_warning`.
-   */
-  measured: number;
-  /** Human-readable summary. */
-  message: string;
-}
-
-/** ISO-8601 calendar date, e.g. `2026-07-27` — the status-narrative timestamp shape this check flags. */
-const ISO_DATE_RE = /\b\d{4}-\d{2}-\d{2}\b/g;
-
-/**
- * At or above this many ISO-date stamps in one file, dates read as a status
- * timeline (event log) rather than incidental references — an arbitrary but
- * documented threshold, not a config value (advisory-only, spec §D8: no
- * config-declared registry for this kind of heuristic).
- */
-const ISO_DATE_DENSITY_THRESHOLD = 3;
-
-/** Status-narrative wording this check flags, each independently counted. */
-const STATUS_WORD_PATTERNS: ReadonlyArray<{ label: string; re: RegExp }> = [
-  { label: "not yet", re: /\bnot yet\b/gi },
-  { label: "pending", re: /\bpending\b/gi },
-  { label: "TODO-style marker (TODO/FIXME/XXX/HACK)", re: /\b(?:TODO|FIXME|XXX|HACK)\b/g },
-];
-
-/**
- * Flags ISO-date density and status wording that suggest transient status
- * narrative (events, timelines, "not yet done") has leaked into a
- * standing-discipline memory file. ADVISORY ONLY — never affects
- * `checkReferenceExistence`/`lintMemoryFiles` output or any exit code (spec
- * §D7); callers surface these as suggestions, never gate on them.
- *
- * @param content - Raw file text to scan.
- * @returns Zero or more {@link AdvisoryFinding}s. Empty array on empty
- *   `content` or when no smell threshold is met.
- * @example
- * detectNarrativeSmells("Shipped on 2026-07-20, fixed 2026-07-22, closed 2026-07-27.");
- * // => [{ kind: "iso_date_density", measured: 3, message: "..." }]
- */
-export function detectNarrativeSmells(content: string): AdvisoryFinding[] {
-  if (content.length === 0) return [];
-
-  const findings: AdvisoryFinding[] = [];
-
-  const isoMatches = content.match(ISO_DATE_RE) ?? [];
-  if (isoMatches.length >= ISO_DATE_DENSITY_THRESHOLD) {
-    findings.push({
-      kind: "iso_date_density",
-      measured: isoMatches.length,
-      message: `content contains ${isoMatches.length} ISO-date stamps — reads as a status timeline; dated events belong in the lore corpus, not standing discipline`,
-    });
-  }
-
-  for (const { label, re } of STATUS_WORD_PATTERNS) {
-    const matches = content.match(re) ?? [];
-    if (matches.length > 0) {
-      findings.push({
-        kind: "status_word",
-        measured: matches.length,
-        message: `content contains ${matches.length} occurrence(s) of status wording (${label}) — consider whether this belongs in the corpus instead`,
-      });
-    }
-  }
-
-  return findings;
-}
-
 // ─── Headroom reporting (deterministic numbers + advisory warn band) ───────
 // task-lore-status-check-claude-md-reports-a-saturated-file-as: a bare
 // pass/fail on `lintMemoryFiles`'s findings gave an author no way to tell
@@ -520,7 +262,7 @@ export interface MetricHeadroom {
 export interface HeadroomReport {
   /** The measured file's path, verbatim. */
   path: string;
-  role: MemoryFileRole;
+  role: MemoryFileRecord["role"];
   lines: MetricHeadroom;
   bytes: MetricHeadroom;
 }
@@ -586,9 +328,8 @@ export function computeHeadroom(files: MemoryFileRecord[], budgets: MemoryFileBu
 /**
  * Projects {@link computeHeadroom}'s rows whose `.warn` flag is set into
  * {@link AdvisoryFinding}s (`kind: "headroom_warning"`) — ADVISORY ONLY,
- * NEVER exit-relevant (mirrors `detectNarrativeSmells`'s advisory/
- * deterministic split, spec §D7): entering the near-ceiling band is worth a
- * loud line in the report, but is NOT itself a breach.
+ * NEVER exit-relevant: entering the near-ceiling band is worth a loud line
+ * in the report, but is NOT itself a breach.
  *
  * @param reports - {@link computeHeadroom}'s own output for the SAME files
  *   this call is reporting on — never independently recomputed.

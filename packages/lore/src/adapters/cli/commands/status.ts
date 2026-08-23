@@ -174,13 +174,13 @@ import {
 // setup-check.ts's identical precedent for this exact import.
 import { loadConfig } from "@lore/core/node";
 import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
+import { computeHeadroom, computeHeadroomWarnings } from "../../../service/claude-md-budget.js";
+import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
 import {
-  computeHeadroom,
-  computeHeadroomWarnings,
-  lintMemoryFiles,
-  type HeadroomReport,
-  type MemoryFileFinding,
-} from "../../../service/claude-md-check.js";
+  buildCheckClaudeMdJsonPayload,
+  formatCheckClaudeMdHuman,
+  type CheckClaudeMdRenderInput,
+} from "../claude-md-render.js";
 
 /** All CallerSurface values in a stable display order. */
 const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
@@ -458,31 +458,6 @@ function renderIssuesSection(payload: IssueCheckPayload): void {
         `(fix: triage via \`lore issue resolve ${row.slug} --state rejected|wontfix --reason <r>\`, or link a fixing doc via \`lore link ... --type resolves ${row.slug}\`)`,
     );
   }
-}
-
-/**
- * Text rendering for one `--check-claude-md` finding — always names `path`
- * (the finding's own `message` already does this; the extra prefixed line
- * below additionally surfaces the repair pointer once per run, not per
- * finding, see the caller).
- */
-function renderClaudeMdFinding(finding: MemoryFileFinding): void {
-  console.log(`  - ${finding.message}`);
-}
-
-/**
- * Text rendering for one `--check-claude-md` headroom row — printed on
- * EVERY run (task-lore-status-check-claude-md-reports-a-saturated-file-as:
- * a bare pass/fail hid a file 5 bytes from its ceiling as "within budget",
- * so used/ceiling/remaining now render unconditionally, never only on a
- * breach).
- */
-function renderHeadroomLine(report: HeadroomReport): void {
-  console.log(
-    `  ${report.path} (${report.role}): lines ${report.lines.used}/${report.lines.ceiling} ` +
-      `(${report.lines.remaining} remaining), bytes ${report.bytes.used}/${report.bytes.ceiling} ` +
-      `(${report.bytes.remaining} remaining)`,
-  );
 }
 
 /**
@@ -1132,53 +1107,35 @@ export default defineCommand({
       if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
 
       const files = discoverMemoryFiles(process.cwd(), budgets.filenames);
-      const findings = lintMemoryFiles(files, budgets);
-      // Headroom/warnings are a REPORTING layer alongside `lintMemoryFiles` —
+      // reason: runMemoryFileChecks (service/claude-md-admission.ts) is the
+      // SOLE composition entry both this branch and flows/context-flow.ts
+      // route through (AC-COMPOSE-1) — neither calls an individual capacity
+      // or content check directly. `fileExists` resolves candidate paths
+      // against THIS process's cwd (the same root `discoverMemoryFiles`
+      // walked); `docExists` is a Phase-2+ predicate — no check in this
+      // slice consumes it yet — and must never reach the corpus DB here
+      // either way: Module Boundary invariant 2 forbids loadLoreApp/
+      // bun:sqlite in this branch, so a real corpus lookup is deferred to
+      // whichever future check actually calls it.
+      const { deterministic: findings, advisory } = runMemoryFileChecks(files, budgets, {
+        fileExists: (p) => existsSync(join(process.cwd(), p)),
+        docExists: () => true,
+      });
+      // Headroom/warnings are a REPORTING layer alongside the ceiling lint —
       // task-lore-status-check-claude-md-reports-a-saturated-file-as: they
       // never affect `findings` or the exit code below (still `findings.length
       // > 0 ? 3 : 0`, byte-identical breach semantics to before this change).
+      // Deliberately outside `runMemoryFileChecks`'s composition (AC-COMPOSE-1
+      // does not ban these two — see claude-md-budget.ts's own header).
       const headroom = computeHeadroom(files, budgets);
       const warnings = computeHeadroomWarnings(headroom);
 
+      const renderInput: CheckClaudeMdRenderInput = { findings, advisory, headroom, warnings, budgetResolution };
+
       if (args.json) {
-        // `budget_source`/`budget_substitution` are ALWAYS present (`null`
-        // included) — same convention as `invalid_docs`: an omitted key would
-        // let a consumer read "absent" as "nothing was substituted", which is
-        // the exact silence this branch exists to end.
-        console.log(
-          JSON.stringify(
-            {
-              ok: true,
-              data: {
-                claude_md: {
-                  findings,
-                  headroom,
-                  warnings,
-                  budget_source: budgetResolution.source,
-                  budget_substitution:
-                    budgetResolution.source === "substituted-defaults" ? budgetResolution.reason : null,
-                },
-              },
-            },
-            null,
-            2,
-          ),
-        );
+        console.log(JSON.stringify(buildCheckClaudeMdJsonPayload(renderInput), null, 2));
       } else {
-        if (findings.length === 0) {
-          console.log("CLAUDE.md: within budget (0 findings).");
-        } else {
-          console.log(`CLAUDE.md: BREACHED (${findings.length} finding(s)):`);
-          for (const finding of findings) renderClaudeMdFinding(finding);
-          console.log("  fix: trim the file, or run `lore governance claude-md` for the content contract.");
-        }
-
-        for (const report of headroom) renderHeadroomLine(report);
-
-        if (warnings.length > 0) {
-          console.log(`CLAUDE.md: approaching ceiling (${warnings.length} advisory warning(s), exit code unaffected):`);
-          for (const warning of warnings) console.log(`  - ${warning.message}`);
-        }
+        for (const line of formatCheckClaudeMdHuman(renderInput)) console.log(line);
       }
 
       process.exitCode = findings.length > 0 ? 3 : 0;

@@ -77,7 +77,12 @@ import { tmpdir } from "os";
 const PACKAGE_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const LORE_SRC = join(PACKAGE_ROOT, "src");
-const CLAUDE_MD_CHECK_MODULE = join(LORE_SRC, "service", "claude-md-check.ts");
+// spec-claude-md-governance-content-dimension-checks-wire-the (N12) split the
+// former single `claude-md-check.ts` into these two service modules — the
+// Module Boundary Invariant 2 scan below (bottom of this file) now walks
+// BOTH, since either could reintroduce a bun:sqlite/loadLoreApp dependency.
+const CLAUDE_MD_BUDGET_MODULE = join(LORE_SRC, "service", "claude-md-budget.ts");
+const CLAUDE_MD_ADMISSION_MODULE = join(LORE_SRC, "service", "claude-md-admission.ts");
 
 // ─── RunResult type ───────────────────────────────────────────────────────
 
@@ -169,7 +174,7 @@ interface HeadroomReportJson {
  * eviction floor added a second exit-relevant kind alongside the ceiling
  * breaches, and "exit 3" alone no longer says which boundary tripped).
  * Deliberately partial — this is a CLI-output assertion helper, not a mirror of
- * `MemoryFileFinding`, which stays owned by `service/claude-md-check.ts`.
+ * `MemoryFileFinding`, which stays owned by `service/claude-md-findings.ts`.
  */
 interface ClaudeMdFindingJson {
   kind: string;
@@ -473,7 +478,7 @@ function collectImportClosure(entryFile: string): {
     const file = stack.pop()!;
     if (visitedFiles.has(file)) continue;
     if (!existsSync(file)) {
-      throw new Error(`claude-md-check import-graph scan: cannot resolve import target "${file}"`);
+      throw new Error(`memory-file admission import-graph scan: cannot resolve import target "${file}"`);
     }
     visitedFiles.add(file);
 
@@ -492,19 +497,23 @@ function collectImportClosure(entryFile: string): {
   return { visitedFiles, bareSpecifiers };
 }
 
-describe("Module Boundary Invariant 2: claude-md-check.ts never reaches loadLoreApp/bun:sqlite", () => {
-  it("packages/lore/src/service/claude-md-check.ts exists (RED until the paired implement task lands)", () => {
-    expect(existsSync(CLAUDE_MD_CHECK_MODULE)).toBe(true);
-  });
+describe("Module Boundary Invariant 2: claude-md-budget.ts / claude-md-admission.ts never reach loadLoreApp/bun:sqlite", () => {
+  for (const modulePath of [CLAUDE_MD_BUDGET_MODULE, CLAUDE_MD_ADMISSION_MODULE]) {
+    const label = modulePath.replace(LORE_SRC + "/", "");
 
-  it("its transitive import closure never reaches bun:sqlite", () => {
-    const { bareSpecifiers } = collectImportClosure(CLAUDE_MD_CHECK_MODULE);
-    expect(bareSpecifiers.has("bun:sqlite")).toBe(false);
-  });
+    it(`${label} exists`, () => {
+      expect(existsSync(modulePath)).toBe(true);
+    });
 
-  it("its transitive import closure never includes adapters/cli/loader.ts (the loadLoreApp module)", () => {
-    const { visitedFiles } = collectImportClosure(CLAUDE_MD_CHECK_MODULE);
-    const relativePaths = [...visitedFiles].map((f) => f.replace(LORE_SRC + "/", ""));
-    expect(relativePaths).not.toContain("adapters/cli/loader.ts");
-  });
+    it(`${label}'s transitive import closure never reaches bun:sqlite`, () => {
+      const { bareSpecifiers } = collectImportClosure(modulePath);
+      expect(bareSpecifiers.has("bun:sqlite")).toBe(false);
+    });
+
+    it(`${label}'s transitive import closure never includes adapters/cli/loader.ts (the loadLoreApp module)`, () => {
+      const { visitedFiles } = collectImportClosure(modulePath);
+      const relativePaths = [...visitedFiles].map((f) => f.replace(LORE_SRC + "/", ""));
+      expect(relativePaths).not.toContain("adapters/cli/loader.ts");
+    });
+  }
 });
