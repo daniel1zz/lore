@@ -39,14 +39,20 @@
  *     unit coverage, and Phase 1 separately let `computeHeadroom`/
  *     `computeHeadroomWarnings` bypass this entry entirely — N15 closes
  *     both holes in the SAME return shape).
- *   - checkReferenceExistence(content, fileExists) — ADVISORY,
+ *   - checkReferenceExistence(content, fileExists, filePath?) — ADVISORY,
  *     `kind: "reference_missing"` (N13: migrated FROM
  *     `MemoryFileFindingKind` to `AdvisoryFindingKind` — see
  *     `claude-md-findings.ts`'s header. It was typed deterministic and had
  *     zero call sites; this retracts a false claim rather than removing
  *     enforcement). Extracts backtick-quoted, repo-relative-looking path
  *     candidates from `content` and reports the ones `fileExists` says are
- *     absent.
+ *     absent — after excluding N4's four measured false-positive classes
+ *     (npm scope names, glob metacharacters, brace expansion, tilde home
+ *     paths) and non-path noise (verb/enum lists, code fragments), and after
+ *     retrying an absent candidate against `filePath`'s own directory (N4's
+ *     fifth class, module-relative resolution — OPTIONAL third param, since
+ *     the CLI wiring always has a `filePath` to pass but the pure unit suite
+ *     may omit it to exercise root-relative-only behavior).
  *   - detectNarrativeSmells(content) — ADVISORY ONLY, NEVER exit-relevant:
  *     flags ISO-date density (at or above the exported
  *     `ISO_DATE_DENSITY_THRESHOLD`) and status wording ("not yet" /
@@ -67,19 +73,31 @@
  *     density is not a capacity metric).
  *
  * Invariants:
- *   - `checkReferenceExistence`'s reference grammar (v1, spec §D6) is
- *     deliberately conservative: a candidate is a backtick-quoted token that
- *     contains `/`, has no whitespace, and does not start with a URL scheme
- *     (`https://` etc.). A `path#Symbol` suffix is a fragment on a file
- *     path — only the file part is existence-checked. Candidate paths are
- *     normalized via `@lore/core`'s `normalizeFileAnchors` — the SAME
+ *   - `checkReferenceExistence`'s reference grammar (v2, N4 repair — spec
+ *     §D6) is deliberately conservative: a candidate is a backtick-quoted
+ *     token that contains `/`, has no whitespace, does not start with a URL
+ *     scheme (`https://` etc.), is not one of N4's four excluded classes
+ *     (`isExcludedReferenceCandidate`), and passes a charset + shape gate
+ *     (`looksLikePathCandidate`: path-safe characters only, AND either a
+ *     trailing `/` or a dotted extension on its final segment) that drops
+ *     non-path noise (bare verb/enum lists, code fragments) independently of
+ *     the five official classes. A `path#Symbol` suffix is a fragment on a
+ *     file path — only the file part is existence-checked. Candidate paths
+ *     are normalized via `@lore/core`'s `normalizeFileAnchors` — the SAME
  *     normalizer `task.extra.file_anchors` (SPEC-042) uses — rather than
  *     re-deriving segment/leading-slash/`..` rules locally; a candidate that
  *     fails that normalization (e.g. contains `..`) is silently skipped, not
- *     reported (misses are acceptable, false alarms are not — spec Risks).
- *     Existence is decided EXCLUSIVELY via the injected `fileExists`
- *     predicate, never real `fs` access — keeps this module store-free and
- *     fs-free (spec §Module Boundary: "No store/DB dependency anywhere").
+ *     reported (misses are acceptable, false alarms are not — spec Risks). A
+ *     candidate absent at its repo-root-relative location gets ONE more
+ *     resolution attempt when `filePath` is supplied: joined against
+ *     `filePath`'s own directory (`resolvesModuleRelative`, N4's fifth
+ *     class) — module-relative is a convention module docs actually use
+ *     (`commands/set.ts` inside `adapters/cli/CLAUDE.md`), not noise to
+ *     exclude. Existence is decided EXCLUSIVELY via the injected
+ *     `fileExists` predicate, never real `fs` access — keeps this module
+ *     store-free and fs-free (spec §Module Boundary: "No store/DB dependency
+ *     anywhere"), and `dirnameOf`/`joinPaths` are hand-rolled POSIX string
+ *     ops rather than `node:path` for the same reason (AC-PURE-1).
  *   - `detectNarrativeSmells` NEVER affects `checkReferenceExistence`'s
  *     output, `claude-md-budget.ts`'s `lintMemoryFiles` output, or any exit
  *     code (spec §D7: advisory findings are a structurally distinct type,
@@ -102,7 +120,7 @@
  *
  * Source: spec-claude-md-governance-content-dimension-checks-wire-the,
  * AC-WIRE-1/AC-WIRE-2/AC-COMPOSE-1/AC-PURE-1/AC-SLUG-1/AC-SLUG-2/AC-EMPH-1/
- * AC-EMPH-2; spec-context-verb-family-two-zone-claude-md-anatomy-lore,
+ * AC-EMPH-2/AC-GRAM-1; spec-context-verb-family-two-zone-claude-md-anatomy-lore,
  * AC-CTX-2.
  */
 
@@ -128,6 +146,116 @@ const BACKTICK_TOKEN_RE = /`([^`\s]+)`/g;
 /** Matches a leading URI scheme (`https://`, `ftp://`, ...) — RFC 3986 §3.1 scheme grammar. */
 const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
+/** Matches an npm scope name or retired path alias — any token starting with `@` (N4: `@lore/core`, `@libsql/client`, `@core/*`, `@adapters/*`). */
+const NPM_SCOPE_RE = /^@/;
+
+/** Matches a glob metacharacter anywhere in the token (N4: `hooks/**`, `assets/**`). */
+const GLOB_METACHAR_RE = /\*/;
+
+/** Matches a brace-expansion delimiter anywhere in the token (N4: `docs/requirements/{prd,spec,adr,knowledge,plan,task}/`). */
+const BRACE_EXPANSION_RE = /[{}]/;
+
+/** Matches a leading tilde home-path shorthand (N4: `~/.claude/`). */
+const TILDE_HOME_RE = /^~/;
+
+/**
+ * True when `token` is one of the FOUR measured false-positive classes (N4,
+ * spec-claude-md-governance-content-dimension-checks-wire-the — the fifth
+ * class, module-relative resolution, is a RESOLUTION strategy handled
+ * separately by {@link resolvesModuleRelative}, not an exclusion). Checked
+ * against the WHOLE backtick token (before any `#Symbol` fragment is
+ * stripped) — none of the four classes carries a fragment in practice, and
+ * checking the raw token keeps this predicate independent of the fragment-
+ * split step that follows it.
+ */
+function isExcludedReferenceCandidate(token: string): boolean {
+  return (
+    NPM_SCOPE_RE.test(token) ||
+    TILDE_HOME_RE.test(token) ||
+    GLOB_METACHAR_RE.test(token) ||
+    BRACE_EXPANSION_RE.test(token)
+  );
+}
+
+/** Path-safe charset for {@link looksLikePathCandidate} — letters, digits, `.`, `_`, `-`, `/` only. */
+const PATH_CHARSET_RE = /^[A-Za-z0-9._\-/]+$/;
+
+/**
+ * A conservative charset + shape gate for "does this backtick token even
+ * look like a file path" — separate from, and stricter than, the four N4
+ * exclusion classes above. Measured noise this catches (task's own examples,
+ * not one of the five official false-positive classes but pinned all the
+ * same): bare verb/enum lists using `/` as a separator
+ * (`` `add/list/rm/rename` ``, `` `lore_create/get/set/search/...` ``, no
+ * file extension and no trailing slash) and code fragments containing
+ * characters no real repo-relative path uses (`` `<Skeleton/>` ``,
+ * `` `Path=/api` ``, `` `)/` ``, `` `$XDG_STATE_HOME/lore` ``). Misses are
+ * acceptable, false alarms are not (this module's stated risk posture) — a
+ * genuine dangling path lacking BOTH an extension and a trailing slash goes
+ * unreported under this gate, which is an intentional trade, not an oversight.
+ *
+ * @param filePart - The candidate with any `#Symbol` fragment already
+ *   stripped (the same value existence is checked against).
+ * @returns `true` only when `filePart` uses exclusively path-safe characters
+ *   AND either ends with `/` (a directory reference) or its final `/`-
+ *   segment contains a `.` (a file extension).
+ */
+function looksLikePathCandidate(filePart: string): boolean {
+  if (!PATH_CHARSET_RE.test(filePart)) return false;
+  if (filePart.endsWith("/")) return true;
+  const lastSlash = filePart.lastIndexOf("/");
+  const lastSegment = lastSlash === -1 ? filePart : filePart.slice(lastSlash + 1);
+  return lastSegment.includes(".");
+}
+
+/**
+ * POSIX-style `dirname` for a repo-relative forward-slash path — no
+ * `node:path` import here (AC-PURE-1: this module must stay fs/path-free).
+ * `dirnameOf("packages/lore/src/adapters/cli/CLAUDE.md") ===
+ * "packages/lore/src/adapters/cli"`; `dirnameOf("CLAUDE.md") === ""` (a
+ * root-level file has no parent directory within the repo tree).
+ */
+function dirnameOf(path: string): string {
+  const lastSlash = path.lastIndexOf("/");
+  return lastSlash === -1 ? "" : path.slice(0, lastSlash);
+}
+
+/**
+ * POSIX-style `join` for two forward-slash path segments — no `node:path`
+ * import here (AC-PURE-1, same reason as {@link dirnameOf}).
+ */
+function joinPaths(dir: string, rel: string): string {
+  return dir === "" ? rel : `${dir}/${rel}`;
+}
+
+/**
+ * Module-relative resolution (N4, the fifth false-positive class): a module
+ * doc's own convention is to reference a sibling file relative to ITS OWN
+ * directory (`commands/set.ts` inside `adapters/cli/CLAUDE.md`, meaning
+ * `packages/lore/src/adapters/cli/commands/set.ts`) — the repo-root-relative
+ * check alone reports this as dangling. Resolves `filePart` against
+ * `dirnameOf(scannedFilePath)`, re-validates the JOINED candidate through
+ * the SAME `normalizeFileAnchors` gate the root-relative candidate already
+ * passed (so a `filePart` that escapes the repo root via `..` once joined to
+ * a deep module directory is rejected here too, not silently accepted), and
+ * probes it with the SAME injected `fileExists` — this function never
+ * touches `fs` itself.
+ *
+ * @returns `true` iff the module-relative candidate normalizes AND `fileExists` confirms it.
+ */
+function resolvesModuleRelative(
+  filePart: string,
+  scannedFilePath: string,
+  fileExists: (p: string) => boolean,
+): boolean {
+  const joined = joinPaths(dirnameOf(scannedFilePath), filePart);
+  const normalized = normalizeFileAnchors([joined]);
+  if (!normalized.ok) return false;
+  const normalizedJoined = normalized.value[0];
+  if (normalizedJoined === undefined) return false;
+  return fileExists(normalizedJoined);
+}
+
 /**
  * Extracts backtick-quoted, repo-relative-looking path candidates from
  * `content` and reports the ones `fileExists` says are absent (spec §D6
@@ -135,8 +263,15 @@ const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
  * off `MemoryFileFindingKind`; see this module's header).
  *
  * Candidate grammar: a backtick-quoted token that contains `/`, has no
- * whitespace, and does not start with a URL scheme. A `path#Symbol` suffix
- * is a fragment on top of a file path — only the file part (text before the
+ * whitespace, and does not start with a URL scheme. Four measured
+ * false-positive classes are excluded outright before any existence check
+ * runs (N4: npm scope names / retired path aliases, glob metacharacters,
+ * brace expansion, tilde home paths — {@link isExcludedReferenceCandidate}),
+ * and a further charset + shape gate ({@link looksLikePathCandidate})
+ * silently drops non-path noise (bare verb/enum lists, code fragments) that
+ * is not one of the five official classes but was independently measured as
+ * false-positive noise in real module docs. A `path#Symbol` suffix is a
+ * fragment on top of a file path — only the file part (text before the
  * first `#`) is existence-checked. Candidates are normalized through
  * `@lore/core`'s `normalizeFileAnchors` (the SAME normalizer
  * `task.extra.file_anchors` uses, SPEC-042) — a candidate that fails that
@@ -145,22 +280,42 @@ const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
  * not" risk posture. Duplicate missing references (same normalized path)
  * report once, first occurrence order preserved.
  *
+ * A candidate absent at its repo-root-relative location is given ONE more
+ * chance when `filePath` is supplied: resolved against `filePath`'s OWN
+ * directory (N4's fifth class, module-relative resolution —
+ * {@link resolvesModuleRelative}). Only a candidate absent at BOTH locations
+ * is reported — module-relative resolution is a second resolution strategy,
+ * never a blanket exclusion.
+ *
  * @param content - Raw file text to scan (e.g. a CLAUDE.md body).
  * @param fileExists - Caller-owned existence predicate — the SOLE source of
  *   truth for "does this path exist"; this module never touches `fs`.
+ * @param filePath - The scanned file's own repo-relative path (e.g.
+ *   `"packages/lore/src/adapters/cli/CLAUDE.md"`, the same value
+ *   `MemoryFileRecord.path` carries). OPTIONAL — omitting it disables
+ *   module-relative resolution (every candidate is then checked
+ *   repo-root-relative only, the pre-N4 behavior).
  * @returns One `reference_missing` {@link AdvisoryFinding} per distinct absent reference.
  *   Empty array on empty `content`, when no candidate matches the grammar,
- *   or when every candidate exists.
+ *   or when every candidate exists (root-relative or module-relative).
  * @example
  * checkReferenceExistence(
  *   "See `packages/lore/src/gone.ts` for details.",
  *   (p) => p !== "packages/lore/src/gone.ts",
  * );
  * // => [{ kind: "reference_missing", path: "packages/lore/src/gone.ts", ... }]
+ * @example
+ * checkReferenceExistence(
+ *   "Every subcommand lives in `commands/set.ts`.",
+ *   (p) => p === "packages/lore/src/adapters/cli/commands/set.ts",
+ *   "packages/lore/src/adapters/cli/CLAUDE.md",
+ * );
+ * // => [] — resolved against the scanned file's own directory
  */
 export function checkReferenceExistence(
   content: string,
   fileExists: (p: string) => boolean,
+  filePath?: string,
 ): AdvisoryFinding[] {
   if (content.length === 0) return [];
 
@@ -171,10 +326,12 @@ export function checkReferenceExistence(
     const token = match[1];
     if (token === undefined || !token.includes("/")) continue;
     if (URL_SCHEME_RE.test(token)) continue;
+    if (isExcludedReferenceCandidate(token)) continue;
 
     const hashIndex = token.indexOf("#");
     const filePart = hashIndex === -1 ? token : token.slice(0, hashIndex);
     if (filePart.length === 0) continue;
+    if (!looksLikePathCandidate(filePart)) continue;
 
     const normalized = normalizeFileAnchors([filePart]);
     if (!normalized.ok) continue; // not a valid repo-relative path (SPEC-042 grammar) — noise, not a finding
@@ -182,15 +339,16 @@ export function checkReferenceExistence(
     const normalizedPath = normalized.value[0];
     if (normalizedPath === undefined || alreadyReported.has(normalizedPath)) continue;
 
-    if (!fileExists(normalizedPath)) {
-      alreadyReported.add(normalizedPath);
-      findings.push({
-        kind: "reference_missing",
-        path: normalizedPath,
-        reference: token,
-        message: `\`${normalizedPath}\` is referenced but does not exist`,
-      });
-    }
+    if (fileExists(normalizedPath)) continue;
+    if (filePath !== undefined && resolvesModuleRelative(filePart, filePath, fileExists)) continue;
+
+    alreadyReported.add(normalizedPath);
+    findings.push({
+      kind: "reference_missing",
+      path: normalizedPath,
+      reference: token,
+      message: `\`${normalizedPath}\` is referenced but does not exist`,
+    });
   }
 
   return findings;
@@ -490,7 +648,7 @@ export function runMemoryFileChecks(
 
   const advisory: AdvisoryFinding[] = [];
   for (const file of files) {
-    advisory.push(...checkReferenceExistence(file.content, deps.fileExists));
+    advisory.push(...checkReferenceExistence(file.content, deps.fileExists, file.path));
     advisory.push(...detectNarrativeSmells(file.content));
 
     for (const finding of checkSlugPointers(file.content, deps.docExists)) {
