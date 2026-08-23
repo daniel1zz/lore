@@ -30,6 +30,7 @@ import {
   describePrecheckRoots,
   findMissingOracleFiles,
   findCaptureFlagConflict,
+  findCapturedFailDiscoveryRefusal,
 } from "../../../src/adapters/cli/evidence-precheck.js";
 
 // ─── extractTestFileTokens — HAPPY ──────────────────────────────────────────
@@ -658,5 +659,144 @@ describe("findCaptureFlagConflict — REGRESSION", () => {
     for (const oracle of ["tsc", "test", "lint", "build", "e2e", "other"]) {
       expect(findCaptureFlagConflict({ oracle, capture: true })).toBeNull();
     }
+  });
+});
+
+// ─── findCapturedFailDiscoveryRefusal (AC-OX-12, spec-oracle-executability- ─
+// ─── a-runner-s-discovery-refusal-is-not-a §M6.2's evidence-path sibling) ───
+//
+// AC-OX-2/AC-OX-3 (packages/lore/tests/unit/service/verify-completeness.test.ts)
+// already pin `VerifyRunnerService`'s OWN downgrade of a discovery-refusal exit
+// to "inconclusive" via an injected-executor tail, never a real spawn — the
+// live-runner phrase capture is AC-OX-5's own dedicated bun-test file. This
+// describe block follows that SAME precedent (hand-captured tail fixtures,
+// pure function under test) rather than re-spawning a runner here: the
+// property under test is the GUARD's decision given a captured tail, not
+// whether a runner's wording changed since AC-OX-5 last measured it.
+//
+// The `describe` title below carries the literal kebab token
+// "refusal-blocks-evidence-red" the AC-OX-12 oracle command filters on
+// (`-t refusal-blocks-evidence-red`) — do not rename it without updating that
+// spec's `verify.command`.
+describe("refusal-blocks-evidence-red", () => {
+  const DISCOVERY_COMMAND = "bunx vitest run packages/core/tests/does-not-exist.test.ts";
+  const GENUINE_COMMAND = "bunx vitest run packages/core/tests/a.test.ts";
+
+  // Same phrase attestation-completeness.test.ts's "findDiscoveryRefusal
+  // (discovery-refusal)" describe block uses — captured verbatim from a live
+  // vitest spawn against a nonexistent path on 2026-08-10, re-verified live by
+  // AC-OX-5's discovery-refusal-live-capture.bun.test.ts.
+  const VITEST_DISCOVERY_REFUSAL_TAIL =
+    "\n RUN  v3.2.6 /repo\n\nNo test files found, exiting with code 1\n\n" +
+    "filter: packages/core/tests/does-not-exist.test.ts\n";
+  // A GENUINE vitest failure tail — carries the "Test Files ... (N)" summary
+  // findDiscoveryRefusal's own mutual-exclusion invariant guarantees a real
+  // discovery-refusal phrase never also carries.
+  const GENUINE_VITEST_FAILURE_TAIL =
+    "\n Test Files  1 failed (1)\n      Tests  1 failed | 3 passed (4)\n";
+
+  it("(a) HAPPY/RED-fixed: a captured vitest discovery refusal under --result expected-fail is REFUSED, naming the runner — no fail-family row is produced", () => {
+    const refusal = findCapturedFailDiscoveryRefusal({
+      oracle: "test",
+      result: "expected-fail",
+      capture: true,
+      command: DISCOVERY_COMMAND,
+      outputTail: VITEST_DISCOVERY_REFUSAL_TAIL,
+    });
+    expect(refusal).not.toBeNull();
+    if (refusal?.code !== "VALIDATION_ERROR") throw new Error("expected VALIDATION_ERROR");
+    expect(refusal.message).toContain("vitest");
+    expect(refusal.message).toContain("No test files found, exiting with code 1");
+    // REGRESSION: the refusal echoes the EXACT command that was refused —
+    // an operator must see what was refused, not guess from context.
+    expect(refusal.value).toBe(DISCOVERY_COMMAND);
+  });
+
+  it("(a) HAPPY: the same captured discovery refusal is ALSO refused under --result fail (the other fail-family value)", () => {
+    const refusal = findCapturedFailDiscoveryRefusal({
+      oracle: "test",
+      result: "fail",
+      capture: true,
+      command: DISCOVERY_COMMAND,
+      outputTail: VITEST_DISCOVERY_REFUSAL_TAIL,
+    });
+    expect(refusal).not.toBeNull();
+  });
+
+  it("(b) CONTROL/REGRESSION: a GENUINE assertion-failure tail under --result expected-fail is NOT refused — expected-fail is still recorded", () => {
+    const refusal = findCapturedFailDiscoveryRefusal({
+      oracle: "test",
+      result: "expected-fail",
+      capture: true,
+      command: GENUINE_COMMAND,
+      outputTail: GENUINE_VITEST_FAILURE_TAIL,
+    });
+    expect(refusal).toBeNull();
+  });
+
+  it("NEGATIVE: a non-captured (self-reported) fail with a discovery-refusal-shaped tail is OUT OF SCOPE — this AC wires only the --capture path", () => {
+    expect(
+      findCapturedFailDiscoveryRefusal({
+        oracle: "test",
+        result: "expected-fail",
+        capture: false,
+        command: DISCOVERY_COMMAND,
+        outputTail: VITEST_DISCOVERY_REFUSAL_TAIL,
+      }),
+    ).toBeNull();
+  });
+
+  it("BOUNDARY: an oracle other than 'test' (e.g. 'e2e') is OUT OF SCOPE, mirroring VerifyRunnerService's M6.2 scoping exactly", () => {
+    expect(
+      findCapturedFailDiscoveryRefusal({
+        oracle: "e2e",
+        result: "expected-fail",
+        capture: true,
+        command: DISCOVERY_COMMAND,
+        outputTail: VITEST_DISCOVERY_REFUSAL_TAIL,
+      }),
+    ).toBeNull();
+  });
+
+  it("BOUNDARY: --result pass is OUT OF SCOPE (a captured pass can never carry a discovery-refusal tail — the exit-code cross-check in captureOracleCommand already refuses that mismatch upstream)", () => {
+    expect(
+      findCapturedFailDiscoveryRefusal({
+        oracle: "test",
+        result: "pass",
+        capture: true,
+        command: DISCOVERY_COMMAND,
+        outputTail: VITEST_DISCOVERY_REFUSAL_TAIL,
+      }),
+    ).toBeNull();
+  });
+
+  it("ERROR: an undefined outputTail never throws and returns null (fail-open — nothing captured, nothing to classify)", () => {
+    expect(() =>
+      findCapturedFailDiscoveryRefusal({
+        oracle: "test",
+        result: "fail",
+        capture: true,
+        command: DISCOVERY_COMMAND,
+      }),
+    ).not.toThrow();
+    expect(
+      findCapturedFailDiscoveryRefusal({
+        oracle: "test",
+        result: "fail",
+        capture: true,
+        command: DISCOVERY_COMMAND,
+      }),
+    ).toBeNull();
+  });
+
+  it("STATE: is referentially transparent — repeated calls on the same input agree", () => {
+    const input = {
+      oracle: "test",
+      result: "expected-fail",
+      capture: true,
+      command: DISCOVERY_COMMAND,
+      outputTail: VITEST_DISCOVERY_REFUSAL_TAIL,
+    };
+    expect(findCapturedFailDiscoveryRefusal(input)).toEqual(findCapturedFailDiscoveryRefusal(input));
   });
 });

@@ -129,12 +129,35 @@
  *   a self-reported `--result pass` with no `--capture` and no `--oracle manual`
  *   escape (D5's raised predicate — ANY tail, empty or hand-authored, no longer
  *   suffices for a capturable oracle), a `--capture` spawn whose observed exit code contradicts the declared
- *   `--result`, OR a missing oracle file / an unproven filtered pass / a
- *   mixed-runner command / a piped self-reported command per the prechecks
- *   below, OR a `--result pass` from a claim whose recorded worktree is
+ *   `--result`, a `--capture`d fail-family result whose OWN observed output is
+ *   a runner discovery refusal (AC-OX-12 — see below), OR a missing oracle
+ *   file / an unproven filtered pass / a mixed-runner command / a piped
+ *   self-reported command per the prechecks below, OR a `--result pass` from a
+ *   claim whose recorded worktree is
  *   uncommitted / from a no-worktree claim running inside a real git repo —
  *   TaskWorkflowService's own uncommitted-worktree guard, see module header),
  *   5 = STALE_VERSION.
+ *
+ * Discovery-refusal guard (task-wire-the-discovery-refusal-guard-into-the-
+ * evidence-capture, spec-oracle-executability-a-runner-s-discovery-refusal-
+ * is-not-a §M6.2's evidence-path sibling, AC-OX-12) — `--capture` measures a
+ * REAL exit code from a REAL spawn, but a nonzero exit is ambiguous: every
+ * runner this repo uses (vitest/bun test/playwright) returns the SAME exit
+ * code for "found no matching test file" as for "ran and something failed".
+ * Before this guard, a fail-family `--result` (`fail`/`expected-fail`) whose
+ * captured output was actually a discovery refusal — e.g. a poisoned cwd
+ * making `bunx vitest run <path>` print vitest's own "No test files found,
+ * exiting with code 1" — recorded cleanly as `capture_source: "runner"`, the
+ * corpus's strongest self-report label, for a run that measured NOTHING.
+ * `service/verify-runner-service.ts`'s §M6.2 call site already downgrades
+ * this exact shape to `"inconclusive"` for `lore verify`'s attested path; this
+ * is the SAME primitive (`@lore/core`'s `findDiscoveryRefusal`) wired into the
+ * SECOND write path that mints a red. Checked immediately after a successful
+ * `--capture` spawn, scoped to `capture === true` AND `oracle === "test"` AND
+ * a fail-family `result` (byte-identical scoping to §M6.2's own call site).
+ * The decision itself lives in
+ * `../evidence-precheck.js::findCapturedFailDiscoveryRefusal`, shared
+ * verbatim with the MCP `lore_evidence_add` handler.
  *
  * Pipe-refusal guard (SPEC oracle-tier-falsifiability-a-criterion-never-
  * observed-red M2; ADR falsifiability-moves-from-the-task-tier-to-the-oracle-
@@ -256,7 +279,10 @@
  *   the pre-existing `findPipeRefusal` guard into this call sequence);
  *   task-raise-the-evidence-tail-guard-s-predicate-to-its-own (spec-
  *   falsifiability-reachability-a-feedable-checkpoint-an §D5 — raises
- *   `rejectMissingPassOutputTail`'s predicate to match its own message)
+ *   `rejectMissingPassOutputTail`'s predicate to match its own message);
+ *   task-wire-the-discovery-refusal-guard-into-the-evidence-capture (AC-OX-12,
+ *   spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2's
+ *   evidence-path sibling — the discovery-refusal guard above)
  */
 
 import { existsSync, readFileSync } from "fs";
@@ -279,6 +305,7 @@ import {
   findMixedRunnerRefusal,
   findCaptureFlagConflict,
   findPipeRefusal,
+  findCapturedFailDiscoveryRefusal,
   describePrecheckRoots,
   describeDerivedCdTarget,
 } from "../evidence-precheck.js";
@@ -434,6 +461,35 @@ export default defineCommand({
       // warning would need a second threshold nobody has calibrated. Appended to
       // the human line only (never the --json payload, which is a consumed shape).
       captureMargin = ` [captured in ${captured.value.elapsedMs}ms of a ${captureTimeoutMs}ms window]`;
+
+      // reason: discovery-refusal guard (task-wire-the-discovery-refusal-guard-
+      // into-the-evidence-capture, spec-oracle-executability-a-runner-s-
+      // discovery-refusal-is-not-a §M6.2's evidence-path sibling, AC-OX-12) —
+      // this is the SECOND write path that mints a red (`lore verify`'s own
+      // §M6.2 call site, `service/verify-runner-service.ts`, is the first and
+      // already downgrades to "inconclusive"). A fail-family `--result` whose
+      // REAL captured output is a runner's own discovery-refusal phrase (found
+      // no matching test file — a ZERO-EXECUTION event, never distinguishable
+      // from a genuine assertion failure by exit code alone) is refused here,
+      // BEFORE the DB is even opened, rather than recorded as a permanent
+      // fail/expected-fail row that measured nothing. Checked immediately after
+      // the capture that produced `outputTail`, using the SAME `captureRequested`
+      // boolean already resolved — mirrors `findPipeRefusal`'s own `capture`
+      // param shape below. The decision itself lives in
+      // `../evidence-precheck.js::findCapturedFailDiscoveryRefusal`, shared
+      // verbatim with the MCP `lore_evidence_add` handler.
+      const capturedDiscoveryRefusal = findCapturedFailDiscoveryRefusal({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        capture: captureRequested,
+        command: args.command as string,
+        outputTail,
+      });
+      if (capturedDiscoveryRefusal !== null) {
+        process.stderr.write(formatError(capturedDiscoveryRefusal) + "\n");
+        process.exitCode = exitCode(capturedDiscoveryRefusal);
+        return;
+      }
     } else if (typeof args["output-tail"] === "string") {
       outputTail = tailChars(args["output-tail"], 4000);
     } else if (typeof args["output-tail-file"] === "string") {
