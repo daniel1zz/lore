@@ -134,8 +134,13 @@ import {
 import {
   createFalsifierScratchWorktree,
   removeFalsifierScratchWorktree,
+  VerifyRunnerService,
   type FalsifierScratchWorktree,
 } from "../../../src/service/verify-runner-service.js";
+import { ok } from "@lore/core";
+import type { AcceptanceCriterion, DocRecord, LoreError, PlanBundle, Result } from "@lore/core";
+import type { VerifiedEvidenceInput } from "../../../src/service/task-workflow-service.js";
+import type { VerifySpawnSpec, VerifyExecutionResult } from "../../../src/service/verify-spawn.js";
 
 // ─── Fixture repo builder (throwaway `mkdtemp` + `git init` — NEVER this
 //     repo's own working tree) ──────────────────────────────────────────────
@@ -996,4 +1001,338 @@ describe("cleanup cannot escape", () => {
     // in `createdScratches`.
     expect(existsSync(scratch.parentDir), "a no-op cleanup must fail this half").toBe(true);
   });
+});
+
+// ─── AC-SD-7 ────────────────────────────────────────────────────────────────
+//
+// Unlike every describe above (which calls `materializeFalsifierDependencies`
+// directly, bypassing the falsifier pipeline entirely), THIS describe drives
+// `VerifyRunnerService.verifyFalsifier` — the wired `_runFalsifier` this
+// task's own anchor (`verify-runner-service.ts`) now calls
+// `materializeFalsifierDependencies` from — the SAME shape
+// `attested-red.test.ts` already uses for its own "AC-FR-11 — green-control"
+// describe: a REAL `executor` (spawns `sh -c <command>` via
+// `node:child_process.spawnSync`, never a scripted double) and REAL git
+// worktree mechanics, with only `getPlanBundle`/`recordVerifiedEvidence`
+// staying hand-written test doubles.
+//
+// The fixture reuses `makeFixtureMainRepo()` verbatim (the SAME workspace +
+// node_modules shape already proven, by every describe above, to make
+// `materializeFalsifierDependencies` succeed) and adds ONE untracked-only
+// file — `only-in-worktree.txt`, mirroring `attested-red.test.ts`'s own
+// `makeThrowawayGitRepoWithDependency(false)` fixture exactly: present in
+// the WORKING TREE, never `git add`-ed, so the default
+// `git worktree add --detach <dir> HEAD` (no `captureUncommitted`) checks out
+// only committed content and structurally cannot carry it into the scratch
+// worktree either way.
+//
+// The AC's own command checks TWO things in order, each with its own
+// distinct marker, so a wrong-cause pass can never be mistaken for the
+// right-cause one: (1) that `node_modules/@fixture/core` resolves at all —
+// this is the discriminating check that materialization genuinely ran and
+// succeeded (a materializer regression would print `AC_SD_7_MODULE_MISSING`
+// and exit 9, a DIFFERENT code than the falsifier's own declared value,
+// making a materializer failure impossible to mistake for this AC's own
+// green-control failure); only once that passes does it (2) check for
+// `only-in-worktree.txt`, printing `AC_SD_7_UNTRACKED_MISSING` and exiting 5
+// when absent — the falsifier's OWN declared `expected_exit_code` is ALSO 5,
+// mirroring `attested-red.test.ts::makeGreenControlCriterion`'s own
+// deliberate numeric coincidence: an implementation that skipped the green
+// control, or compared its exit code against `expected_exit_code` instead of
+// strictly `=== 0`, would wrongly record "expected-fail" here.
+//
+// RED-FIRST verification note (recorded in this task's evidence log at the
+// moment each was red; NEVER permanently pinned in this describe — both
+// require a TEMPORARY, reverted edit to `_runFalsifier` itself, this task's
+// own anchor, so pinning either permanently would mean shipping the bug
+// alongside its own test):
+//   - RED (i) ("hardcode the green control to always pass") was produced by
+//     temporarily forcing `_runFalsifier`'s `greenUsable` computation to
+//     `true` unconditionally, re-running the HAPPY test below, and observing
+//     it record `result: "expected-fail"` (the mutation gets applied and
+//     compared even though `only-in-worktree.txt` is still missing) instead
+//     of `"inconclusive"` — failing this test's own assertion. Reverted
+//     immediately after. See this task's completion report for the exact
+//     command/output pair.
+//   - RED (ii) ("make materialization also stage untracked files") was
+//     produced by temporarily inserting one line right after this task's own
+//     `materializeFalsifierDependencies(...)` call in `_runFalsifier` —
+//     `cpSync(join(repoRoot, "only-in-worktree.txt"), join(scratch.worktreeDir, "only-in-worktree.txt"))`
+//     — simulating a materializer widened to ALSO copy untracked files into
+//     the scratch tree, re-running the HAPPY test below, and observing it
+//     record `result: "expected-fail"` (the file is now present, so the
+//     green control passes) instead of `"inconclusive"` — failing this
+//     test's own assertion, proving that widening would be a silent scope
+//     change AC-SD-7 exists to reject, never something this task's wiring
+//     may do on its own authority. Reverted immediately after. See this
+//     task's completion report for the exact command/output pair.
+
+function makeGreenControlStillFiresDoc(
+  overrides: Partial<DocRecord> & Pick<DocRecord, "id" | "type" | "title">,
+): DocRecord {
+  return {
+    slug: overrides.id,
+    role: "plan",
+    status: "approved",
+    priority: "medium",
+    content: "body",
+    parent_id: null,
+    created_at: "2026-08-23T00:00:00.000Z",
+    updated_at: "2026-08-23T00:00:00.000Z",
+    created_by: "ac-sd-7-tester",
+    version: 1,
+    deleted_at: null,
+    tags: [],
+    extra: {},
+    ...overrides,
+  } as DocRecord;
+}
+
+/** A REAL executor — spawns `sh -c <command>` synchronously via `node:child_process.spawnSync`, never a scripted double (same shape `attested-red.test.ts::realExecutor` uses). */
+async function greenControlStillFiresRealExecutor(
+  spec: VerifySpawnSpec,
+): Promise<Result<VerifyExecutionResult, LoreError>> {
+  const start = Date.now();
+  const result = spawnSync(spec.cmd[0]!, spec.cmd.slice(1), {
+    cwd: spec.cwd,
+    timeout: spec.timeoutMs,
+    encoding: "utf8",
+    env: spec.env,
+  });
+  const timedOut = result.error !== undefined && (result.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
+  const exitCode = result.status ?? (timedOut ? 124 : 1);
+  return ok({
+    exitCode,
+    outputTail: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+    durationMs: Date.now() - start,
+    timedOut,
+  });
+}
+
+function makeGreenControlStillFiresRecorder() {
+  const calls: Array<{ idOrSlug: string; entry: VerifiedEvidenceInput; nowIso: string }> = [];
+  const fn = async (
+    idOrSlug: string,
+    entry: VerifiedEvidenceInput,
+    nowIso: string,
+  ): Promise<Result<DocRecord, LoreError>> => {
+    calls.push({ idOrSlug, entry, nowIso });
+    return ok(makeGreenControlStillFiresDoc({ id: "task-1", type: "task", title: "Task" }));
+  };
+  return { fn, calls };
+}
+
+const GREEN_CONTROL_STILL_FIRES_BASE_CONFIG = {
+  repoRoot: "", // overridden per-test with the fixture repo's root
+  defaultTimeoutMs: 15000,
+  claimTtlMinutes: 120,
+  requireCommandApproval: false,
+  envAllowlist: [],
+  envPassthroughAll: true,
+  processEnv: process.env,
+};
+
+/**
+ * Checks (1) `node_modules/@fixture/core` resolves (proves materialization
+ * itself succeeded — a DIFFERENT exit code/marker than (2)/(3), so a
+ * materializer regression can never be mistaken for this AC's own
+ * untracked-file green-control failure or for a genuine falsifier red), THEN
+ * (2) `only-in-worktree.txt` exists — absent by fixture construction in the
+ * HAPPY test, exit 5, matching the falsifier's own declared
+ * `expected_exit_code` on purpose (see this describe's own header) — THEN,
+ * only once BOTH (1) and (2) pass (the reverse-control test, where the file
+ * IS tracked), (3) `grep`s `packages/core/index.js`'s own CONTENT for the
+ * falsifier's unmutated marker, so the falsifier's mutation (which changes
+ * that file's TEXT, never its existence) has an observable effect on this
+ * command's exit code — exit 5 again post-mutation, the SAME declared value,
+ * mirroring `attested-red.test.ts::makeGreenControlCriterion`'s own
+ * deliberate numeric coincidence.
+ */
+const GREEN_CONTROL_STILL_FIRES_COMMAND = [
+  "if [ ! -e node_modules/@fixture/core ]; then echo AC_SD_7_MODULE_MISSING; exit 9; fi",
+  "if [ ! -f only-in-worktree.txt ]; then echo AC_SD_7_UNTRACKED_MISSING; exit 5; fi",
+  "grep -q PROBE_OK packages/core/index.js && exit 0 || exit 5",
+].join("\n");
+
+describe("green control still fires", () => {
+  it(
+    "green control still fires: HAPPY (also the permanently-pinned RED case) — materialization succeeds (node_modules resolves) but an untracked-only dependency file still makes the green control fail, recording inconclusive, never expected-fail, even though the observed exit code coincides with the falsifier's declared value",
+    // reason: spawns ~7 real subprocesses (2 `git config`, `git init` inside
+    // `makeFixtureMainRepo`, `git add`/`git commit` seeding the fixture
+    // workspace, `git worktree add` + `git worktree remove` inside
+    // `verifyFalsifier`'s own `createFalsifierScratchWorktree`/
+    // `removeFalsifierScratchWorktree`, plus one real `sh -c` green-control
+    // spawn) — check-test-budgets D1 (spec-a-test-case-s-timeout-budget-must-be-declared-when-its).
+    { timeout: 20_000 },
+    async () => {
+      const { repoRoot } = makeFixtureMainRepo();
+      // reason: UNTRACKED (never `git add`-ed) — the measured defect vector
+      // this AC exists to keep closed even with materialization enabled; see
+      // this describe's own header for why the default (no
+      // `captureUncommitted`) `git worktree add --detach <dir> HEAD` cannot
+      // carry it into the scratch worktree either way.
+      writeFileSync(join(repoRoot, "only-in-worktree.txt"), "dependency present\n", "utf8");
+
+      const criterion: AcceptanceCriterion = {
+        id: "AC-SD-7-GREEN",
+        statement: "node_modules/@fixture/core resolves AND only-in-worktree.txt exists",
+        verify: {
+          mode: "script",
+          oracle: "test",
+          command: GREEN_CONTROL_STILL_FIRES_COMMAND,
+          falsifier: {
+            path: "packages/core/index.js",
+            find: "PROBE_OK",
+            replace: "PROBE_BROKEN",
+            expected_exit_code: 5,
+          },
+        },
+      };
+      const plan = makeGreenControlStillFiresDoc({ id: "plan-ac-sd-7", type: "plan", title: "AC-SD-7 Plan" });
+      const spec = makeGreenControlStillFiresDoc({
+        id: "spec-ac-sd-7",
+        type: "spec",
+        title: "AC-SD-7 Spec",
+        status: "approved",
+        extra: { acceptance_criteria: [criterion] },
+      });
+      const task = makeGreenControlStillFiresDoc({
+        id: "task-ac-sd-7",
+        type: "task",
+        title: "AC-SD-7 Task",
+        slug: "task-ac-sd-7",
+        parent_id: "plan-ac-sd-7",
+      });
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+
+      const recorder = makeGreenControlStillFiresRecorder();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(
+        getPlanBundle,
+        recorder.fn,
+        greenControlStillFiresRealExecutor,
+        { ...GREEN_CONTROL_STILL_FIRES_BASE_CONFIG, repoRoot },
+      );
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "ac-sd-7-tester",
+        nowIso: "2026-08-23T00:00:00.000Z",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // The green control's OWN exit code (the untracked-file fallback
+      // branch) — numerically equal to `falsifier.expected_exit_code` by
+      // deliberate fixture construction, yet the outcome below must still be
+      // "inconclusive", never "expected-fail".
+      expect(result.value.exit_code).toBe(5);
+      expect(result.value.result).toBe("inconclusive");
+      expect(result.value.ac_id).toBe("AC-SD-7-GREEN");
+
+      expect(recorder.calls).toHaveLength(1);
+      const entry = recorder.calls[0]!.entry;
+      expect(entry.result).toBe("inconclusive");
+      expect(entry.capture_source).toBe("runner");
+      expect(entry.ac_ref).toBe("AC-SD-7-GREEN");
+      // AC-FR-11 — NO attestation block on an inconclusive green-control row,
+      // materialization enabled or not.
+      expect(entry.attestation).toBeUndefined();
+      // Proves materialization itself SUCCEEDED — the "module missing"
+      // branch (and its own DISTINCT exit code, 9) was never hit. Without
+      // this assertion, a materializer regression for this exact fixture
+      // shape could make this test pass for the WRONG reason.
+      expect(entry.output_tail).not.toContain("AC_SD_7_MODULE_MISSING");
+      expect(entry.output_tail).toContain("AC_SD_7_UNTRACKED_MISSING");
+
+      // The mutation was never applied — packages/core/index.js (the
+      // falsifier's own target) is untouched.
+      expect(readFileSync(join(repoRoot, "packages", "core", "index.js"), "utf8")).toContain("PROBE_OK");
+    },
+  );
+
+  it(
+    "green control still fires: NEGATIVE (mandatory reverse control) — the SAME criterion with only-in-worktree.txt TRACKED instead of untracked passes the green control and reaches expected-fail, proving the HAPPY test's inconclusive above is really about the file being untracked",
+    // reason: same subprocess budget as the HAPPY test above, PLUS one extra
+    // `git add`/`git commit` pair to track `only-in-worktree.txt` and PLUS
+    // the mutated (second) spawn once the green control passes — check-test-budgets
+    // flagged this exact test with "3 spawn-helper call(s), no explicit
+    // timeout argument" (measured 2026-08-23).
+    { timeout: 20_000 },
+    async () => {
+      const { repoRoot } = makeFixtureMainRepo();
+      writeFileSync(join(repoRoot, "only-in-worktree.txt"), "dependency present\n", "utf8");
+      // reason: TRACKED this time — the mandatory reverse control (mirrors
+      // `attested-red.test.ts::makeThrowawayGitRepoWithDependency(true)`).
+      // Without this half, the HAPPY test's "inconclusive" cannot be
+      // distinguished from "happened to fail for some unrelated reason" —
+      // and it is ALSO the closest available proxy for AC-SD-7's own RED (ii)
+      // ("materialization also staging untracked files would be a scope
+      // change"): whatever mechanism makes this file available in the
+      // scratch tree (git tracking here; a widened materializer per RED (ii)'s
+      // own text) flips the SAME criterion's outcome from "inconclusive" to
+      // "expected-fail" — exactly the outcome AC-SD-7 forbids a widened
+      // materializer from producing silently.
+      execFileSync("git", ["add", "-A"], { cwd: repoRoot });
+      execFileSync("git", ["commit", "-q", "-m", "track only-in-worktree.txt too"], { cwd: repoRoot });
+
+      const criterion: AcceptanceCriterion = {
+        id: "AC-SD-7-GREEN",
+        statement: "node_modules/@fixture/core resolves AND only-in-worktree.txt exists",
+        verify: {
+          mode: "script",
+          oracle: "test",
+          command: GREEN_CONTROL_STILL_FIRES_COMMAND,
+          falsifier: {
+            path: "packages/core/index.js",
+            find: "PROBE_OK",
+            replace: "PROBE_BROKEN",
+            expected_exit_code: 5,
+          },
+        },
+      };
+      const plan = makeGreenControlStillFiresDoc({ id: "plan-ac-sd-7-neg", type: "plan", title: "AC-SD-7 Plan" });
+      const spec = makeGreenControlStillFiresDoc({
+        id: "spec-ac-sd-7-neg",
+        type: "spec",
+        title: "AC-SD-7 Spec",
+        status: "approved",
+        extra: { acceptance_criteria: [criterion] },
+      });
+      const task = makeGreenControlStillFiresDoc({
+        id: "task-ac-sd-7-neg",
+        type: "task",
+        title: "AC-SD-7 Task",
+        slug: "task-ac-sd-7-neg",
+        parent_id: "plan-ac-sd-7-neg",
+      });
+      const bundle: PlanBundle = { plan, spec, tasks: [task] };
+
+      const recorder = makeGreenControlStillFiresRecorder();
+      const getPlanBundle = async (): Promise<Result<PlanBundle, LoreError>> => ok(bundle);
+      const service = new VerifyRunnerService(
+        getPlanBundle,
+        recorder.fn,
+        greenControlStillFiresRealExecutor,
+        { ...GREEN_CONTROL_STILL_FIRES_BASE_CONFIG, repoRoot },
+      );
+
+      const result = await service.verifyFalsifier(plan.id, criterion.id, {
+        explicitTaskIdOrSlug: task.id,
+        by: "ac-sd-7-tester",
+        nowIso: "2026-08-23T00:00:00.000Z",
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.result).toBe("expected-fail");
+      expect(result.value.exit_code).toBe(5);
+
+      expect(recorder.calls).toHaveLength(1);
+      const entry = recorder.calls[0]!.entry;
+      expect(entry.result).toBe("expected-fail");
+      expect(entry.attestation?.exit_code).toBe(5);
+      expect(entry.attestation?.runner).toBe("lore-cli");
+    },
+  );
 });
