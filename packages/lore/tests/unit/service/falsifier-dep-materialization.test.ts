@@ -451,10 +451,15 @@ describe("hybrid layout", () => {
     const escaping = findEscapingScopeEntries(
       join(scratch.worktreeDir, "node_modules"),
       "@fixture",
-      scratch.worktreeDir,
+      // ⛔ realpathSync, NOT the raw handle: `/var` is a symlink to `/private/var`,
+      // so an un-resolved base makes `isInside` report EVERY entry as escaping —
+      // measured 2026-08-23, a CORRECT hybrid layout also returned all three, which
+      // made this control assert a result it would get either way (zero discriminating
+      // power). Same reason the HAPPY test above resolves its base.
+      realpathSync(scratch.worktreeDir),
     );
-    // this is exactly the trap: EVERY scope entry escapes, because the outer
-    // symlink is followed first and the inner @fixture/* links are relative.
+    // the trap itself: EVERY scope entry escapes, because the outer symlink is
+    // followed first and the inner @fixture/* links are relative.
     expect(escaping.sort()).toEqual(["consumer", "core", "extra"]);
   });
 
