@@ -12,7 +12,10 @@
  *     a-feedable-checkpoint-an §D2/D3/D4's ATTESTED-RED runner: runs ONE
  *     declared AC's own UNMUTATED command inside a SCRATCH git worktree
  *     (never the working tree — see the "Attested-Red Falsifier Runner"
- *     section below) as a GREEN CONTROL (AC-FR-11) BEFORE applying anything;
+ *     section below), first materializing that worktree's dependencies
+ *     (`materializeFalsifierDependencies`,
+ *     `spec-a-falsifier-s-scratch-worktree-must-be-runnable-and` AC-SD-6) so
+ *     `node_modules` is usable there, as a GREEN CONTROL (AC-FR-11) BEFORE applying anything;
  *     a nonzero/timed-out control records `result: "inconclusive"` with NO
  *     `attestation` and stops right there. Only once that control exits 0
  *     does it apply the AC's `verify.falsifier` mutation, run the AC's
@@ -218,6 +221,7 @@ import {
   type VerifyExecutionResult,
 } from "./verify-spawn.js";
 import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
+import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
 
 // ─── Pinned refusal literals (declared-scope contract) ─────────────────────
 
@@ -362,17 +366,27 @@ export interface VerifyPlanResult {
 // there would require the tree to be temporarily BROKEN, which no attested
 // evidence-recording path can ever do. `VerifyRunnerService.verifyFalsifier`
 // (below the class-opening comment) is the SEPARATE entry point that can: it
-// creates a SCRATCH git worktree (never the caller's working tree — D3), runs
-// a GREEN CONTROL — the AC's own command, UNMUTATED, in that SAME scratch
+// creates a SCRATCH git worktree (never the caller's working tree — D3),
+// materializes that worktree's dependencies (`materializeFalsifierDependencies`,
+// `spec-a-falsifier-s-scratch-worktree-must-be-runnable-and` AC-SD-6 — see
+// `_runFalsifier`'s own "Step 3.5" below), then runs a GREEN CONTROL — the
+// AC's own command, UNMUTATED, in that SAME (now-materialized) scratch
 // worktree — BEFORE applying anything (AC-FR-11, closing the false-match
 // vector measured 2026-08-21: a scratch worktree missing `node_modules`, an
 // untracked test file, or a gitignored `dist/lore` binary exits nonzero on
 // its OWN, with no mutation involved, and no exit code can tell that apart
 // from a genuine assertion failure — the distinguishing signal only exists in
-// whether the UNMUTATED command already fails). A nonzero/timed-out green
-// control — OR one that fails to LAUNCH at all (e.g. ENOENT on the scratch
-// worktree's own copy of the command) — records `result: "inconclusive"` with
-// NO `attestation` block and aborts before the mutation is even attempted —
+// whether the UNMUTATED command already fails). Materialization moves
+// "missing node_modules" from an ALWAYS cause of that failure to a cause the
+// green control can actually get past — it does NOT remove the other two
+// documented causes (an untracked dependency file, a gitignored `dist/lore`),
+// which stay exactly as able to fail the green control as before
+// (`spec-a-falsifier-s-scratch-worktree-must-be-runnable-and` AC-SD-7 —
+// "the green control is not disarmed", `falsifier-dep-materialization.test.ts`
+// describe "green control still fires"). A nonzero/timed-out green control —
+// OR one that fails to LAUNCH at all (e.g. ENOENT on the scratch worktree's
+// own copy of the command) — records `result: "inconclusive"` with NO
+// `attestation` block and aborts before the mutation is even attempted —
 // this path never mints a proven red out of an unrunnable environment, and
 // never lets that same "unrunnable" fact vanish into an unrecorded error
 // just because the failure happened one step earlier (at spawn, not exit).
@@ -1643,6 +1657,26 @@ export class VerifyRunnerService {
    *   3. {@link createFalsifierScratchWorktree} off the resolved execution root
    *      (AC-JV-3 — `opts.executionRoot?.root ?? config.repoRoot`, WITH
    *      `captureUncommitted: true` iff that resolution's `mode` is `"worktree"`).
+   *   3.5. `materializeFalsifierDependencies(scratch.worktreeDir, repoRoot)`
+   *      (spec-a-falsifier-s-scratch-worktree-must-be-runnable-and AC-SD-6) —
+   *      BEFORE step 4, so the green control measures the MATERIALIZED
+   *      environment rather than the bare `git worktree add` copy (`node_modules`
+   *      is gitignored, so no scratch worktree ever carries it otherwise). A
+   *      materialization FAILURE (e.g. `repoRoot` has no installed
+   *      `node_modules` of its own to source from at all — true of every
+   *      throwaway fixture repo with no package-manager install step, never
+   *      true of a real developer checkout) is NOT swallowed: it is captured
+   *      as `materializeNote` and APPENDED (never substituted) onto whichever
+   *      annotation step 4 or step 8 below ends up recording, then execution
+   *      falls through to step 4 exactly as if materialization had never run
+   *      — a bare scratch tree missing `node_modules` is ALREADY one of step
+   *      4's own documented "environment unusable" causes, so this invents no
+   *      new recorded outcome, only explains an existing one. AC-SD-7's own
+   *      regression guard is the mirror image: a materialization SUCCESS must
+   *      never widen what step 4 catches either (an untracked dependency file,
+   *      a gitignored `dist/lore` — both stay out of this call's scope; see
+   *      `falsifier-dep-materialization.test.ts`'s "green control still
+   *      fires" describe).
    *   4. GREEN CONTROL (AC-FR-11) — spawn the AC's `verify.command` UNMUTATED
    *      in that SAME scratch worktree, via the SAME injected `executor` port
    *      and `buildVerifySpawnSpec` shape step 6 below also uses. Exit 0 (not
@@ -1705,6 +1739,47 @@ export class VerifyRunnerService {
     const scratch = createResult.value;
 
     try {
+      // ─── Step 3.5 — MATERIALIZE DEPENDENCIES ────────────────────────────
+      // (spec-a-falsifier-s-scratch-worktree-must-be-runnable-and AC-SD-6) —
+      // BEFORE the green control (step 4), so that control measures the
+      // MATERIALIZED environment, not the bare `git worktree add` copy:
+      // `node_modules` is gitignored, so no scratch worktree ever carries it
+      // otherwise, and every `oracle: test` AC's green control would fail for
+      // that reason alone regardless of whether the AC itself is sound — the
+      // exact gap `adr-a-falsifier-s-scratch-worktree-gets-dependencies-by-hybrid`
+      // exists to close.
+      //
+      // A materialization FAILURE (e.g. `repoRoot` has no `node_modules` of
+      // its own to source from at all — true of every throwaway fixture repo
+      // with no package-manager install step, never true of a real developer
+      // checkout) is NOT a silent fallback: this is not a `catch {}` that
+      // swallows the error and pretends materialization ran. `materializeNote`
+      // carries the failure forward in plain text and is APPENDED — never
+      // substituted — onto whichever annotation this run ends up recording
+      // below (step 4's `inconclusive` branch or step 8's `expected-fail`
+      // one), so the failure is visible in the SAME evidence trail a reader
+      // already checks. Execution then falls through to the green control
+      // exactly as if materialization had never been attempted: a scratch
+      // tree missing `node_modules` is ALREADY one of the green control's own
+      // documented "environment unusable" causes (this class's own
+      // "Attested-Red Falsifier Runner" section above), so this never mints a
+      // NEW recorded outcome — it only explains an existing one.
+      //
+      // AC-SD-7's own regression guard is the mirror image: a materialization
+      // SUCCESS must never widen what the green control catches — an
+      // untracked dependency file (`git stash create` never carries one) and
+      // a gitignored `dist/lore` both stay OUT of this call's scope, exactly
+      // as able to fail the green control as before (see
+      // `falsifier-dep-materialization.test.ts`'s "green control still
+      // fires" describe).
+      const materializeResult = materializeFalsifierDependencies(scratch.worktreeDir, repoRoot);
+      const materializeNote = materializeResult.ok
+        ? undefined
+        : ` [attested-red] AC "${criterion.id}": dependency materialization was attempted and ` +
+          `failed (${materializeResult.error.code}: ` +
+          `${"message" in materializeResult.error ? materializeResult.error.message : materializeResult.error.code}) ` +
+          "— proceeding with the scratch worktree exactly as `git worktree add`/`git stash create` left it.";
+
       // SPEC-039 §M2 — env resolved the SAME way `_runVerification` resolves
       // it for the ordinary green-path run (allowlist filter still applies
       // to a falsifier run's spawned command). Resolved ONCE, before the
@@ -1749,22 +1824,29 @@ export class VerifyRunnerService {
         // proven red minted out of an environment failure) and return
         // WITHOUT ever calling `applyFalsifierMutation` or spawning the
         // command a second time.
-        const greenAnnotation = greenResult.ok
-          ? `[attested-red] AC "${criterion.id}": green control failed — the UNMUTATED ` +
-            `command exited ${greenResult.value.exitCode}` +
-            `${greenResult.value.timedOut ? " (timed out)" : ""} in the scratch worktree before ` +
-            "any falsifier mutation was applied. The scratch environment itself is unusable " +
-            "(e.g. missing node_modules, a command-referenced file that exists only untracked, " +
-            "or a gitignored dist/lore binary) — recording inconclusive rather than proceeding " +
-            "to mutate-and-compare, which could otherwise misattribute an environment failure " +
-            "as a machine-proven red."
-          : `[attested-red] AC "${criterion.id}": green control FAILED TO LAUNCH (` +
-            `${"message" in greenResult.error ? greenResult.error.message : greenResult.error.code}) ` +
-            "in the scratch worktree, before any falsifier mutation was applied. The scratch " +
-            "environment itself is unusable (e.g. a gitignored dist/lore binary or an untracked " +
-            "dependency missing from the scratch copy) — recording inconclusive rather than " +
-            "aborting with no corpus trace, which could otherwise leave an unrunnable " +
-            "environment indistinguishable from a run that was never attempted.";
+        const greenAnnotation =
+          (greenResult.ok
+            ? `[attested-red] AC "${criterion.id}": green control failed — the UNMUTATED ` +
+              `command exited ${greenResult.value.exitCode}` +
+              `${greenResult.value.timedOut ? " (timed out)" : ""} in the scratch worktree before ` +
+              "any falsifier mutation was applied. The scratch environment itself is unusable " +
+              "(e.g. missing node_modules, a command-referenced file that exists only untracked, " +
+              "or a gitignored dist/lore binary) — recording inconclusive rather than proceeding " +
+              "to mutate-and-compare, which could otherwise misattribute an environment failure " +
+              "as a machine-proven red."
+            : `[attested-red] AC "${criterion.id}": green control FAILED TO LAUNCH (` +
+              `${"message" in greenResult.error ? greenResult.error.message : greenResult.error.code}) ` +
+              "in the scratch worktree, before any falsifier mutation was applied. The scratch " +
+              "environment itself is unusable (e.g. a gitignored dist/lore binary or an untracked " +
+              "dependency missing from the scratch copy) — recording inconclusive rather than " +
+              "aborting with no corpus trace, which could otherwise leave an unrunnable " +
+              "environment indistinguishable from a run that was never attempted.") +
+          // reason: step 3.5's own materialization-failure note (undefined on
+          // success) — APPENDED, never substituted, so a materializer
+          // failure is surfaced in the SAME evidence trail this row already
+          // carries rather than vanishing silently (see step 3.5's own
+          // comment above for why falling through here mints no NEW outcome).
+          (materializeNote ?? "");
         // reason: `-1` — no process ever exited when the launch itself
         // failed, so there is no real exit code to report; mirrors this
         // codebase's existing `timed_out: true` / `exit_code: -1` convention
@@ -1842,7 +1924,15 @@ export class VerifyRunnerService {
       const annotation =
         `[attested-red] AC "${criterion.id}": falsifier mutated "${falsifier.path}" — ` +
         `declared exit ${falsifier.expected_exit_code}, observed exit ${exitCode}` +
-        `${timedOut ? " (timed out)" : ""}.`;
+        `${timedOut ? " (timed out)" : ""}.` +
+        // reason: step 3.5's own materialization-failure note (undefined on
+        // success) — surfaced here too: a run can reach a genuine
+        // "expected-fail" even when materialization itself failed, for a
+        // command whose green control does not happen to need node_modules
+        // (every pre-existing falsifier fixture in this repo). APPENDED,
+        // never substituted — see step 3.5's own comment for the full
+        // rationale.
+        (materializeNote ?? "");
       const combinedOutputTail = tailChars(
         outputTail.length > 0 ? `${outputTail}\n${annotation}` : annotation,
         FALSIFIER_OUTPUT_TAIL_MAX_CHARS,
