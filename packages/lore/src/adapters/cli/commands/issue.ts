@@ -269,7 +269,10 @@ function unresolvablePointerError(binding: PointerFlagBinding, value: string, ca
  * `superseded`/`duplicate` pointers accept any doc): an owner that is not
  * itself a `plan` or `task` cannot do the work the adoption claims will
  * happen, which is the "constrained party must not control the ceiling"
- * failure §M2/§M6 already record, applied to WHO may free quota by adopting.
+ * failure §M2/§M6 already record, applied to WHO may claim ownership by adopting.
+ * ⛔ The original wording tied this constraint to the retired open-report ceiling,
+ * which SPEC-145 deleted; the surviving reason is that a non-plan/task owner cannot
+ * do the work an adoption claims will happen.
  */
 function wrongPointerTypeError(
   binding: PointerFlagBinding,
@@ -282,7 +285,7 @@ function wrongPointerTypeError(
     message:
       `${binding.flag} '${pointerDoc.slug}' resolves to a doc of type '${pointerDoc.type}', but --state ` +
       `${binding.state} requires one of: ${allowedDocTypes.join(", ")} — naming ${binding.names}. Without a ` +
-      "live plan or task as owner, adoption would free quota with nobody accountable for the claim.",
+      "live plan or task as owner, adoption would name an owner that cannot do the work it claims.",
     value: pointerDoc.slug,
   };
 }
