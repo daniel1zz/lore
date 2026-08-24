@@ -6732,6 +6732,10 @@
     "01M0SNQDQVHRJJD9VD2JDRMGN2": {
       "human_id": "KN-537",
       "file_path": "docs/requirements/knowledge/KN-537-assessment-make-lore-issues-refuse-a-retired-shape.md"
+    },
+    "01M0SNYBAP7VTDJ6VNS3JKFYNB": {
+      "human_id": "KN-538",
+      "file_path": "docs/requirements/knowledge/KN-538-handoff-agent-main-orchestrator.md"
     }
   }
 }

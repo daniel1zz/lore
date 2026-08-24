@@ -3,7 +3,7 @@ id: KN-530
 type: knowledge
 role: knowledge
 title: "Handoff — agent:main-orchestrator"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
 updated: 2026-08-24
