@@ -6,7 +6,7 @@ title: "AC-as-code: structured acceptance criteria + oracle binding"
 status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-08-01
+updated: 2026-08-23
 tags: [acceptance, oracle, evidence, assess]
 parent: PRD-001
 links:
@@ -100,7 +100,7 @@ export function computeAcCoverage(
 - `lore ac add <spec> <id> --statement <s> --mode script --oracle test --command "bun test x"`(ai: `--rubric`;human: `--note`);`lore ac list <spec> [--json]`(附 coverage,当 spec 下有 plan);`lore ac rm <spec> <id>`(有 evidence 引用 → 拒绝,`--force` 覆盖;镜像 phase rm 语义)。经 NEW `AcService`(镜像 PhaseService,CLI 保持薄管道)。
 - `lore ac set <spec> <id>`(2026-08-01 补齐,SSOT: `spec-lore-ac-set-in-place-edit-of-a-declared-acceptance`)——**就地**改写既有 criterion 的 `--statement`/`--oracle`/`--command`/`--rubric`/`--note`/`--covers`;`id` 与 `mode` 不可改(改 mode 等于换了一个 criterion,历史 attested evidence 的语义会漂移,那条路仍走 `rm`+`add` 并显式承担 `ac_ref` 后果)。补齐的动机不是便利:在此之前 `statement` 是**每个 oracle 都读、却没有任何 verb 能修正**的字段,唯一修正路径 `rm --force`+`add` 会留下 dangling 窗口——本文 §测试矩阵 STATE 一行早已预见"ac rm 后 evidence ac_ref 悬挂",而 2026-08-01 的实测确认它已真实发生 3 次。退出码边界随既有约定(SPEC-003 §5):纯 argv 可判定 → 2(零字段、`--mode`),需读文档才可判定 → 4(未知 id、mode 不匹配的字段)。`approved` spec 被编辑后按与正文编辑相同的规则降级回 `draft`——验收标准即契约,改了契约就没被评审过。
 - **dangling `ac_ref` 检测器**(同批):`bun scripts/check-ac-ref-integrity.ts` 遍历每个 task 的 `verification_evidence[].ac_ref`,断言其指向的 id 仍声明在治理 spec 上。exit 0 干净;exit 2 逐条列出 `(task, ac_ref)` 新债;exit 5 报告 `scripts/ac-ref-exemption-ledger.json` 中已不再匹配真实悬挂的孤儿行(豁免不得比它描述的债活得更久)。豁免 ledger 沿用 `test-budget-ledger` 的形状与可审计性要求(`adr-a-newly-armed-structural-oracle-enforces-from-a-baseline`):criterion 确系被取代 → 记一条带诊断依据的豁免;确系遗失 → 用 `lore ac set`/`add` 以原 id 复declare。⛔ 永不为通过检测器而合成一条 criterion。
-- 文本投影(SPEC-032 seam):`lore get` 非 raw 与 `export-docs` 在 spec 正文后渲染 `## Acceptance Criteria (structured)` 清单;有 coverage 时以 `✔/✘/·` 前缀。
+- 文本投影(SPEC-032 seam):`lore get` 非 raw 与 `export-docs` 在 spec 正文后渲染 `## Acceptance Criteria (structured)` 清单;有 coverage 时前缀由 `packages/core/src/acceptance.ts::projectAcCoverageGlyph` 单点投影(SPEC-143 C4/D7,2026-08-23 换掉原三字形规则)。⛔ 字形表的唯一 SSOT 是该函数自身的 `switch`,此处与本文档任何位置都不得转写;`scripts/check-ac-state-renderers.ts --rule glyph-projection` 拒绝 `acceptance.ts` 之外的第二处投影。
 - MCP:仅扩展 `lore_evidence_add`(ac_ref)与既有 get 通道(extra 自然透传);不新增 MCP 工具(SPEC-024 面控)。
 
 ## 7. Design Decisions
@@ -160,27 +160,27 @@ export function computeAcCoverage(
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-ACODE-1: acceptanceCriterionSchema rejects duplicate ids, malformed id format, script without command, overlong rubric; legal script/ai/human inputs parse
+- [○] [script] AC-ACODE-1: acceptanceCriterionSchema rejects duplicate ids, malformed id format, script without command, overlong rubric; legal script/ai/human inputs parse
   script: test — bunx vitest run packages/core/src/acceptance.test.ts
-- [✔] [script] AC-ACODE-2: create and set paths both reject invalid acceptance_criteria with VALIDATION_ERROR; valid writes roundtrip
+- [○] [script] AC-ACODE-2: create and set paths both reject invalid acceptance_criteria with VALIDATION_ERROR; valid writes roundtrip
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-service.test.ts
-- [✔] [script] AC-ACODE-3: evidence --ac with undeclared id fails VALIDATION_ERROR (exit 4); declared id records ac_ref and bumps version
+- [○] [script] AC-ACODE-3: evidence --ac with undeclared id fails VALIDATION_ERROR (exit 4); declared id records ac_ref and bumps version
   script: test — bunx vitest run packages/lore/tests/integration/cli/task-workflow.test.ts
-- [✔] [script] AC-ACODE-4: spec with structured ACs: assess prompt contains AC table (full id set, coverage rows) at ASSESS_PROMPT_VERSION 4; undeclared spec keeps verbatim section byte-identical
+- [○] [script] AC-ACODE-4: spec with structured ACs: assess prompt contains AC table (full id set, coverage rows) at ASSESS_PROMPT_VERSION 4; undeclared spec keeps verbatim section byte-identical
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
-- [✔] [script] AC-ACODE-5: judge output containing undeclared ac_id errors without creating a knowledge doc and without consuming the corrective retry
+- [○] [script] AC-ACODE-5: judge output containing undeclared ac_id errors without creating a knowledge doc and without consuming the corrective retry
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
-- [✔] [script] AC-ACODE-6: computeAcCoverage aggregates pass/fail per ac_ref; evidence without ac_ref excluded; empty task set yields all-zero facts
+- [○] [script] AC-ACODE-6: computeAcCoverage aggregates pass/fail per ac_ref; evidence without ac_ref excluded; empty task set yields all-zero facts
   script: test — bunx vitest run packages/core/src/acceptance.test.ts
-- [✔] [script] AC-ACODE-7: lore ac add/list/rm roundtrip; rm refused while evidence references the id; --force overrides leaving dangling ref visible in list
+- [○] [script] AC-ACODE-7: lore ac add/list/rm roundtrip; rm refused while evidence references the id; --force overrides leaving dangling ref visible in list
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-service.test.ts
-- [✔] [script] AC-ACODE-8: oracle enum kinds defined exactly once (task-workflow.ts ORACLE_KINDS); both adapters reference the SSOT
+- [○] [script] AC-ACODE-8: oracle enum kinds defined exactly once (task-workflow.ts ORACLE_KINDS); both adapters reference the SSOT
   script: other — test $(grep -rln 'z.enum(\[.tsc.,' packages/lore/src/adapters/ | wc -l) -eq 0
-- [✔] [script] AC-ACODE-9: text projection renders structured AC checklist in get non-raw and export-docs body; raw output untouched
+- [○] [script] AC-ACODE-9: text projection renders structured AC checklist in get non-raw and export-docs body; raw output untouched. AMENDED 2026-08-23 BY SPEC-143 D7, IN THE SAME COMMIT AS THE RENDERER FIX: the coverage prefix is NO LONGER the three-glyph `✔/✘/·` rule this criterion used to imply. `outline-service.ts::acCoveragePrefix` now DELEGATES to `packages/core/src/acceptance.ts::projectAcCoverageGlyph` over `deriveAcCoverageState`, so all SEVEN coverage states render PAIRWISE-DISTINCT glyphs and the renderer holds no glyph and no precedence rule of its own. ⛔ The authoritative glyph list is that function’s own `switch`, never a transcription here or in the spec body — SPEC-143 AC-CT-1 measures its injectivity (seven states → set size 7, eighth state a compile error) and `scripts/check-ac-state-renderers.ts --rule glyph-projection` refuses any second projection outside `acceptance.ts`. Why amended rather than left alone: fixing the renderer alone would have turned this criterion into a corpus falsehood the mirror check then enshrines. BODY AMENDED IN THE SAME SESSION (v22, agent:main-orchestrator): the 文本投影 bullet now names `projectAcCoverageGlyph` as the single projection instead of transcribing glyphs, closing the residual the implementing agent could only report. ⛔ Mechanically checkable, not prose: `lore get SPEC-038 --json | jq -r .data.doc.content | grep -c '✔/✘/·'` MUST print 0.
   script: test — bunx vitest run packages/lore/tests/unit/service/outline-render.test.ts packages/lore/tests/unit/service/outline-service.test.ts
-- [✔] [script] AC-ACODE-10: full existing suites pass on both runners (enum extraction + evidenceEntrySchema blast radius)
+- [○] [script] AC-ACODE-10: full existing suites pass on both runners (enum extraction + evidenceEntrySchema blast radius)
   script: test — bun run test
-- [✔] [script] AC-ACODE-11: monorepo typecheck passes
+- [○] [script] AC-ACODE-11: monorepo typecheck passes
   script: tsc — bun run typecheck
 
 ## Code anchors

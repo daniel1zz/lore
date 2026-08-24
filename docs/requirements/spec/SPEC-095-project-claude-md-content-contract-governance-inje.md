@@ -6,7 +6,7 @@ title: "Project CLAUDE.md content contract — governance-injected prose target 
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-08-23
 tags: [claude-md, memory-files, distribution, governance]
 parent: PRD-001
 links:
@@ -64,23 +64,23 @@ Typed ACs authored via `lore ac add` (script-mode). Coverage contract: pure-lint
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-CMC-1: Pure lint boundary correctness: claude-md-check unit suite passes with fixtures at ceiling-1/ceiling+1 for BOTH max_lines and max_bytes per role, plus a UTF-8 multibyte fixture where byte count != string length
+- [⚑] [script] AC-CMC-1: Pure lint boundary correctness: claude-md-check unit suite passes with fixtures at ceiling-1/ceiling+1 for BOTH max_lines and max_bytes per role, plus a UTF-8 multibyte fixture where byte count != string length
   script: test — bunx vitest run packages/lore/tests/unit/service/claude-md-check.test.ts
-- [✔] [script] AC-CMC-2: Compiled binary serves the contract verbatim: dist/lore governance claude-md stdout is byte-identical to assets/governance/claude-md-contract.md, and multi-topic invocation exits 2
+- [⚑] [script] AC-CMC-2: Compiled binary serves the contract verbatim: dist/lore governance claude-md stdout is byte-identical to assets/governance/claude-md-contract.md, and multi-topic invocation exits 2
   script: e2e — cd packages/lore && bun test tests/e2e/governance-claude-md-compiled.bun.test.ts
-- [✔] [script] AC-CMC-3: Hook trips end-to-end: in a temp repo, assets/project/pre-push exits non-zero on an over-ceiling CLAUDE.md, exits 0 when context.memory_files.enabled is false, and exits 0 when .lore is absent (fail-open)
+- [⚑] [script] AC-CMC-3: Hook trips end-to-end: in a temp repo, assets/project/pre-push exits non-zero on an over-ceiling CLAUDE.md, exits 0 when context.memory_files.enabled is false, and exits 0 when .lore is absent (fail-open)
   script: e2e — cd packages/lore && bun test tests/integration/pre-push-claude-md-trip.bun.test.ts
-- [✔] [script] AC-CMC-4: Distribution parity holds: hooks/pre-push and assets/project/pre-push remain byte-identical and both contain the check-claude-md invocation; assets manifest is regenerated (embed-assets-manifest --check exits 0)
+- [⚑] [script] AC-CMC-4: Distribution parity holds: hooks/pre-push and assets/project/pre-push remain byte-identical and both contain the check-claude-md invocation; assets manifest is regenerated (embed-assets-manifest --check exits 0)
   script: test — bunx vitest run packages/lore/tests/unit/assets/pre-push-parity.test.ts && node scripts/embed-assets-manifest.mjs --check
-- [✔] [script] AC-CMC-5: Skill consumes the SSOT: lore-init-context SKILL.md contains both literal commands (lore governance claude-md; lore status --check-claude-md) and no longer contains its own What-Goes-In taxonomy section; template contains the pointer line
+- [⚑] [script] AC-CMC-5: Skill consumes the SSOT: lore-init-context SKILL.md contains both literal commands (lore governance claude-md; lore status --check-claude-md) and no longer contains its own What-Goes-In taxonomy section; template contains the pointer line
   script: test — bunx vitest run packages/lore/tests/unit/assets/init-context-contract.test.ts
 
 ## Code anchors
 
-- packages/lore/src/service/claude-md-check.ts#lintMemoryFiles
 - packages/lore/src/adapters/real-memory-file-probe.ts
 - packages/lore/src/adapters/cli/commands/status.ts
 - packages/lore/src/adapters/cli/commands/governance.ts
 - packages/core/src/config.ts#contextConfigSchema
 - assets/governance/claude-md-contract.md
 - hooks/pre-push
+- packages/lore/src/service/claude-md-budget.ts#lintMemoryFiles

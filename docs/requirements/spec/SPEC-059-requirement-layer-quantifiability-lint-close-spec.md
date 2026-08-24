@@ -126,17 +126,17 @@ still accept it (self-consistency check folded into AC-RQ-5's fixture set).
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-RQ-1: lintStatement is exported from @lore/core and returns >=1 AcQualityFinding for a statement with an abstract word and 0 measurable tokens, and returns exactly 0 findings for a quantified statement; test asserts both directions and exits 0
+- [⚑] [script] AC-RQ-1: lintStatement is exported from @lore/core and returns >=1 AcQualityFinding for a statement with an abstract word and 0 measurable tokens, and returns exactly 0 findings for a quantified statement; test asserts both directions and exits 0
   script: test — bunx vitest run packages/core/tests/unit/ac-quality.test.ts
-- [✔] [script] AC-RQ-2: lintAcQuantifiability is re-expressed as a per-criterion map over lintStatement and its output stays byte-identical to the pre-change implementation across all existing ac-quality fixtures; regression test exits 0
+- [⚑] [script] AC-RQ-2: lintAcQuantifiability is re-expressed as a per-criterion map over lintStatement and its output stays byte-identical to the pre-change implementation across all existing ac-quality fixtures; regression test exits 0
   script: test — bunx vitest run packages/core/tests/unit/ac-quality.test.ts
-- [✔] [script] AC-RQ-3: RequirementService.addRequirement returns a VALIDATION_ERROR result for a statement carrying an abstract word with 0 measurable tokens and returns an ok result for a quantified statement; test asserts >=1 reject and >=1 accept case and exits 0
+- [⚑] [script] AC-RQ-3: RequirementService.addRequirement returns a VALIDATION_ERROR result for a statement carrying an abstract word with 0 measurable tokens and returns an ok result for a quantified statement; test asserts >=1 reject and >=1 accept case and exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-RQ-5: with workflow.requirement_quantifiable.enabled set to false in config, addRequirement accepts a vague statement that would otherwise be rejected; test asserts the disabled-knob accept path and the default-true reject path and exits 0
+- [⚑] [script] AC-RQ-5: with workflow.requirement_quantifiable.enabled set to false in config, addRequirement accepts a vague statement that would otherwise be rejected; test asserts the disabled-knob accept path and the default-true reject path and exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-RQ-6: bun run typecheck exits 0 with 0 type errors after the change across all packages and scripts
+- [⚑] [script] AC-RQ-6: bun run typecheck exits 0 with 0 type errors after the change across all packages and scripts
   script: test — bun run typecheck
-- [✔] [script] AC-RQ-4: lore requirement add exits with code 4 (VALIDATION_ERROR, the codebase SSOT exit code per utils.ts::exitCode) for a vague statement and code 0 for a quantified statement, measured by spawning the CLI from source and reading its exit code directly; e2e test asserts both codes and exits 0
+- [⚑] [script] AC-RQ-4: lore requirement add exits with code 4 (VALIDATION_ERROR, the codebase SSOT exit code per utils.ts::exitCode) for a vague statement and code 0 for a quantified statement, measured by spawning the CLI from source and reading its exit code directly; e2e test asserts both codes and exits 0
   script: e2e — bunx vitest run packages/lore/tests/integration/requirement-quantifiable-cli.test.ts
 
 ## Code anchors

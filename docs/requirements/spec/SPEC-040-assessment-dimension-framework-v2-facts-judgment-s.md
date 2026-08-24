@@ -166,33 +166,33 @@ are vitest on InMemoryStore/InMemoryAIProvider — no bun:sqlite dependency; rev
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-ADF-7: Golden-set harness dry-run exits 0 and lists every fixture with its human-outcome label in deterministic order, zero provider calls
+- [⚑] [script] AC-ADF-7: Golden-set harness dry-run exits 0 and lists every fixture with its human-outcome label in deterministic order, zero provider calls
   script: other — bun scripts/assess-golden.ts --dry-run
-- [✔] [script] AC-ADF-8: Review prompt for an oversized doc body contains the truncation notice section and the judgment records truncated: true (regression fixture: 36k-char doc)
+- [⚑] [script] AC-ADF-8: Review prompt for an oversized doc body contains the truncation notice section and the judgment records truncated: true (regression fixture: 36k-char doc)
   script: test — bunx vitest run packages/lore/tests/unit/ai/review-template-truncation.test.ts
-- [✔] [script] AC-ADF-1: Facts are computation-persisted at creation time: extra.assessment.facts equals computeAssessmentFacts output for the seeded bundle even when the scripted judge response contradicts them (creation-time invariant only)
+- [⚑] [script] AC-ADF-1: Facts are computation-persisted at creation time: extra.assessment.facts equals computeAssessmentFacts output for the seeded bundle even when the scripted judge response contradicts them (creation-time invariant only)
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess-facts.test.ts
-- [✔] [script] AC-ADF-2: A v1-shaped stored assessment (gaps/recommendations as string arrays, no new fields) round-trips byte-unchanged through schema validation and rendering; a v6 output with typed_gaps/typed_recommendations persists derived legacy string arrays alongside the typed fields
+- [⚑] [script] AC-ADF-2: A v1-shaped stored assessment (gaps/recommendations as string arrays, no new fields) round-trips byte-unchanged through schema validation and rendering; a v6 output with typed_gaps/typed_recommendations persists derived legacy string arrays alongside the typed fields
   script: test — bunx vitest run packages/core/tests/assessment-schema-compat.test.ts
-- [✔] [script] AC-ADF-3: Malformed typed findings trigger the existing single corrective retry then AI_PROVIDER_ERROR with no doc created (sequence-mode InMemoryAIProvider oracle)
+- [⚑] [script] AC-ADF-3: Malformed typed findings trigger the existing single corrective retry then AI_PROVIDER_ERROR with no doc created (sequence-mode InMemoryAIProvider oracle)
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess-typed.test.ts
-- [✔] [script] AC-ADF-4: An ac_score or dimension entry with based_on=absence whose subject is in neither unverifiable[] nor truncated[] records a rubric_warning on the assessment doc; with a matching unverifiable entry no warning is recorded; warnings are never fatal
+- [⚑] [script] AC-ADF-4: An ac_score or dimension entry with based_on=absence whose subject is in neither unverifiable[] nor truncated[] records a rubric_warning on the assessment doc; with a matching unverifiable entry no warning is recorded; warnings are never fatal
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess-grounding.test.ts
-- [✔] [script] AC-ADF-5: plan extra.ac_scope validation fails loud with VALIDATION_ERROR for: an id not declared on the parent spec, an empty array, or a plan whose parent is not a spec; a valid subset marks out-of-scope AC rows in the prompt and restricts the output-instruction id list to the subset
+- [⚑] [script] AC-ADF-5: plan extra.ac_scope validation fails loud with VALIDATION_ERROR for: an id not declared on the parent spec, an empty array, or a plan whose parent is not a spec; a valid subset marks out-of-scope AC rows in the prompt and restricts the output-instruction id list to the subset
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-ac-scope.test.ts
-- [✔] [script] AC-ADF-6: ASSESS_TEMPLATES registry dispatches by version key with v5 retained as a provenance entry; requesting a version absent from the registry returns AI_PROVIDER_ERROR naming the version, never an uncaught throw
+- [⚑] [script] AC-ADF-6: ASSESS_TEMPLATES registry dispatches by version key with v5 retained as a provenance entry; requesting a version absent from the registry returns AI_PROVIDER_ERROR naming the version, never an uncaught throw
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-template-registry.test.ts
-- [✔] [human] AC-ADF-9: Owner spot-check on one real plan: every v6 typed_recommendation names a target and an action executable without re-reading the plan, and v6 surfaces at least one dimension-attributed gap the v5 assessment did not
+- [○] [human] AC-ADF-9: Owner spot-check on one real plan: every v6 typed_recommendation names a target and an action executable without re-reading the plan, and v6 surfaces at least one dimension-attributed gap the v5 assessment did not
   human: Owner runs v5 and v6 on the same real plan and compares side-by-side
-- [✔] [script] AC-ADF-10: computeAssessmentFacts handles a spec-less bundle (scope facts explicitly absent, no throw) and is computed from the full bundle before prompt truncation: coverage counts are identical whether or not prompt sections were truncated (E3 oracle)
+- [⚑] [script] AC-ADF-10: computeAssessmentFacts handles a spec-less bundle (scope facts explicitly absent, no throw) and is computed from the full bundle before prompt truncation: coverage counts are identical whether or not prompt sections were truncated (E3 oracle)
   script: test — bunx vitest run packages/core/tests/assessment-facts.test.ts
-- [✔] [script] AC-ADF-11: After the parent spec drops an AC id still named in a plan's ac_scope, assess marks the id in facts.dangling, annotates it in the prompt, and records a rubric_warning; an ac_scope equal to the full declared set produces no out-of-scope marks
+- [⚑] [script] AC-ADF-11: After the parent spec drops an AC id still named in a plan's ac_scope, assess marks the id in facts.dangling, annotates it in the prompt, and records a rubric_warning; an ac_scope equal to the full declared set produces no out-of-scope marks
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-ac-scope-staleness.test.ts
-- [✔] [script] AC-ADF-12: The golden-set aggregation pure fn computes per-fixture 3-run majority direction labels and the non-inferiority comparison deterministically under a scripted provider, including tie-passes and a regression case where the candidate loses
+- [⚑] [script] AC-ADF-12: The golden-set aggregation pure fn computes per-fixture 3-run majority direction labels and the non-inferiority comparison deterministically under a scripted provider, including tie-passes and a regression case where the candidate loses
   script: test — bunx vitest run packages/lore/tests/unit/ai/assess-golden-aggregation.test.ts
-- [✔] [script] AC-ADF-13: All three assess render sites (core renderAssessmentContent, CLI assess command output, MCP lore_assess tool output) render legacy string gaps/recommendations unchanged and render typed tables when typed arrays are present (snapshot oracle)
+- [⚑] [script] AC-ADF-13: All three assess render sites (core renderAssessmentContent, CLI assess command output, MCP lore_assess tool output) render legacy string gaps/recommendations unchanged and render typed tables when typed arrays are present (snapshot oracle)
   script: test — bunx vitest run packages/lore/tests/unit/assess-render-sites.test.ts
-- [✔] [script] AC-040-SCOPE-1: lore assess emits a non-blocking scope-mismatch warning (in --json under a stable key and in text output) when the provided --diff/--diff-file file set intersects the plan's task file_anchors in fewer than half the diff's files, naming the likely-too-wide range; when no plan task declares anchors the check is skipped (no warning, not an error); the assessment still runs and persists in both cases; at least 1 test file runs and exits 0
+- [⚑] [script] AC-040-SCOPE-1: lore assess emits a non-blocking scope-mismatch warning (in --json under a stable key and in text output) when the provided --diff/--diff-file file set intersects the plan's task file_anchors in fewer than half the diff's files, naming the likely-too-wide range; when no plan task declares anchors the check is skipped (no warning, not an error); the assessment still runs and persists in both cases; at least 1 test file runs and exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
 
 ## Code anchors

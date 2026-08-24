@@ -72,23 +72,23 @@ After truncating to 64 chars, cut back to the last complete hyphen-separated tok
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-068-1: All-CJK title transliterates to a tone-less pinyin slug: slugify('adr','产品定位：内部圈子使用，功能强大优先于合规保守',{transliterate}) starts with 'adr-chan-pin-ding-wei' and matches slugSchema
+- [⚑] [script] AC-068-1: All-CJK title transliterates to a tone-less pinyin slug: slugify('adr','产品定位：内部圈子使用，功能强大优先于合规保守',{transliterate}) starts with 'adr-chan-pin-ding-wei' and matches slugSchema
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-1'
-- [✔] [script] AC-068-2: Mixed CJK/ASCII title preserves ASCII tokens verbatim and transliterates CJK spans in original order
+- [⚑] [script] AC-068-2: Mixed CJK/ASCII title preserves ASCII tokens verbatim and transliterates CJK spans in original order
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-2'
-- [✔] [script] AC-068-3: Title beginning with the type word never duplicates the prefix: slugify('adr','ADR: internal-circle positioning') === 'adr-internal-circle-positioning'
+- [⚑] [script] AC-068-3: Title beginning with the type word never duplicates the prefix: slugify('adr','ADR: internal-circle positioning') === 'adr-internal-circle-positioning'
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-3'
-- [✔] [script] AC-068-4: Truncation at 64 chars ends on a complete hyphen-separated token (no mid-token cut) unless the first name token alone exceeds the limit
+- [⚑] [script] AC-068-4: Truncation at 64 chars ends on a complete hyphen-separated token (no mid-token cut) unless the first name token alone exceeds the limit
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-4'
-- [✔] [script] AC-068-5: Non-transliterable non-empty title (Korean/kana/emoji, or no transliterator injected) yields deterministic '{type}-{fnv8hex}' — slugify never returns the bare type name for a non-empty title
+- [⚑] [script] AC-068-5: Non-transliterable non-empty title (Korean/kana/emoji, or no transliterator injected) yields deterministic '{type}-{fnv8hex}' — slugify never returns the bare type name for a non-empty title
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-5'
-- [✔] [script] AC-068-6: pinyin-pro is unreachable from the @lore/core default barrel: static import-graph scan of packages/core/src/index.ts transitive closure finds 0 pinyin-pro imports
+- [⚑] [script] AC-068-6: pinyin-pro is unreachable from the @lore/core default barrel: static import-graph scan of packages/core/src/index.ts transitive closure finds 0 pinyin-pro imports
   script: test — bunx vitest run packages/lore/tests/unit/core/barrel-isolation.test.ts
-- [✔] [script] AC-068-7: lore set --slug renames: new slug resolves, old slug returns DOC_NOT_FOUND, version log gains an entry, links (ULID-keyed) survive, and an approved doc does NOT reset to draft
+- [⚑] [script] AC-068-7: lore set --slug renames: new slug resolves, old slug returns DOC_NOT_FOUND, version log gains an entry, links (ULID-keyed) survive, and an approved doc does NOT reset to draft
   script: test — bunx vitest run packages/lore/tests/unit/service/set-slug.test.ts -t 'AC-068-7'
-- [✔] [script] AC-068-8: set --slug rejects with VALIDATION_ERROR (CLI exit 4) when the slug is taken by another doc (message names the holder) or fails slugSchema; unchanged slug is a no-op
+- [⚑] [script] AC-068-8: set --slug rejects with VALIDATION_ERROR (CLI exit 4) when the slug is taken by another doc (message names the holder) or fails slugSchema; unchanged slug is a no-op
   script: test — bunx vitest run packages/lore/tests/unit/service/set-slug.test.ts -t 'AC-068-8'
-- [✔] [script] AC-068-9: Golden regression table: representative ASCII titles produce byte-identical slugs to the pre-change algorithm (except documented D3/D4 degenerate cases)
+- [⚑] [script] AC-068-9: Golden regression table: representative ASCII titles produce byte-identical slugs to the pre-change algorithm (except documented D3/D4 degenerate cases)
   script: test — bunx vitest run packages/lore/tests/unit/core/slugify-cjk.test.ts -t 'AC-068-9'
-- [✔] [script] AC-068-10: Compiled-binary e2e: freshly built dist/lore, run from a temp corpus OUTSIDE the repo (no node_modules), creates an all-CJK-title doc whose slug is pinyin (starts with the type prefix + first pinyin token), exit 0
+- [⚑] [script] AC-068-10: Compiled-binary e2e: freshly built dist/lore, run from a temp corpus OUTSIDE the repo (no node_modules), creates an all-CJK-title doc whose slug is pinyin (starts with the type prefix + first pinyin token), exit 0
   script: test — cd packages/lore && bun test tests/integration/cli/slugify-compiled.bun.test.ts

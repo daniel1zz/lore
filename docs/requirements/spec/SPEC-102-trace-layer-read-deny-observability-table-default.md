@@ -120,19 +120,19 @@ What its oracle actually proves, stated explicitly so no reader mistakes exit-0 
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-TRACE-1: Fresh lore init DB reaches user_version 11 with trace_events table and idx_trace_kind_ts/idx_trace_kind_actor/idx_trace_doc/idx_trace_ts present
+- [⚑] [script] AC-TRACE-1: Fresh lore init DB reaches user_version 11 with trace_events table and idx_trace_kind_ts/idx_trace_kind_actor/idx_trace_doc/idx_trace_ts present
   script: test — cd packages/lore && bun test tests/unit/store/trace-events.bun.test.ts -t AC-TRACE-1
-- [✔] [script] AC-TRACE-2: CorpusService.get/search with wired TraceRecorder insert rows with correct kind/actor/surface/doc_id/hit_count; bare construction inserts nothing
+- [⚑] [script] AC-TRACE-2: CorpusService.get/search with wired TraceRecorder insert rows with correct kind/actor/surface/doc_id/hit_count; bare construction inserts nothing
   script: test — bunx vitest run packages/lore/tests/unit/service/trace-recorder.test.ts -t AC-TRACE-2
-- [✔] [script] AC-TRACE-3: Service-layer gate deny inserts kind=gate_deny row with checkpoint+predicates_failed+layer; a throwing recorder does not alter the traced operation Result
+- [⚑] [script] AC-TRACE-3: Service-layer gate deny inserts kind=gate_deny row with checkpoint+predicates_failed+layer; a throwing recorder does not alter the traced operation Result
   script: test — bunx vitest run packages/lore/tests/unit/service/trace-recorder.test.ts -t AC-TRACE-3
-- [✔] [script] AC-TRACE-4: lore trace stats --json returns counts-by-kind, deny-by-checkpoint, zero-hit-search count and never-read-docs count over --since window
+- [⚑] [script] AC-TRACE-4: lore trace stats --json returns counts-by-kind, deny-by-checkpoint, zero-hit-search count and never-read-docs count over --since window
   script: test — cd packages/lore && bun test tests/integration/cli/trace-stats.bun.test.ts -t AC-TRACE-4
-- [✔] [script] AC-TRACE-5: Startup prune deletes only rows older than trace.retention_days in bounded batches; trace.enabled=false disables recording and pruning
+- [⚑] [script] AC-TRACE-5: Startup prune deletes only rows older than trace.retention_days in bounded batches; trace.enabled=false disables recording and pruning
   script: test — cd packages/lore && bun test tests/integration/cli/trace-stats.bun.test.ts -t AC-TRACE-5
-- [✔] [script] AC-TRACE-6: Running lore trace stats twice yields identical trace_events row counts (stats reads emit no trace rows)
+- [⚑] [script] AC-TRACE-6: Running lore trace stats twice yields identical trace_events row counts (stats reads emit no trace rows)
   script: test — cd packages/lore && bun test tests/integration/cli/trace-stats.bun.test.ts -t AC-TRACE-6
-- [✔] [script] AC-TRACE-7: In sync mode trace writes land via the separate local handle and trace_events is absent from the sync-push replicated table set
+- [⚑] [script] AC-TRACE-7: In sync mode trace writes land via the separate local handle and trace_events is absent from the sync-push replicated table set
   script: test — cd packages/lore && bun test tests/unit/store/trace-events.bun.test.ts -t AC-TRACE-7
 
 ## Code anchors

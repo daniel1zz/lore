@@ -137,29 +137,29 @@ HAPPY: VRF-3/4/8/10;NEGATIVE: VRF-2/6/7(歧义);BOUNDARY: timeout_ms 边界、�
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-VRF-1: attestation is optional on evidenceEntrySchema; a mixed evidence array (legacy entry without + new entry with attestation) parses as a whole via extractEvidence
+- [⚑] [script] AC-VRF-1: attestation is optional on evidenceEntrySchema; a mixed evidence array (legacy entry without + new entry with attestation) parses as a whole via extractEvidence
   script: test — bunx vitest run packages/core/src/task-workflow.test.ts
-- [✔] [script] AC-VRF-2: evidence write surfaces (CLI lore evidence / MCP lore_evidence_add) reject input carrying attestation with VALIDATION_ERROR exit 4
+- [⚑] [script] AC-VRF-2: evidence write surfaces (CLI lore evidence / MCP lore_evidence_add) reject input carrying attestation with VALIDATION_ERROR exit 4
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-service.test.ts
-- [✔] [script] AC-VRF-3: lore verify end-to-end: exit-0 command produces attested pass evidence with correct exit_code and duration_ms via recordVerifiedEvidence sole injection site
+- [⚑] [script] AC-VRF-3: lore verify end-to-end: exit-0 command produces attested pass evidence with correct exit_code and duration_ms via recordVerifiedEvidence sole injection site
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-runner-service.test.ts
-- [✔] [script] AC-VRF-4: deriveVerifyResult pure fn: exit 0 maps to pass, nonzero to fail, timeout flag preserved
+- [⚑] [script] AC-VRF-4: deriveVerifyResult pure fn: exit 0 maps to pass, nonzero to fail, timeout flag preserved
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-spawn.test.ts
-- [✔] [script] AC-VRF-5: timeout delivers SIGTERM to the process group; a TERM-trapping survivor is SIGKILLed after the grace period; evidence records fail with timed_out true
+- [⚑] [script] AC-VRF-5: timeout delivers SIGTERM to the process group; a TERM-trapping survivor is SIGKILLed after the grace period; evidence records fail with timed_out true
   script: test — cd packages/lore && bun test tests/integration/verify-executor.bun.test.ts
-- [✔] [script] AC-VRF-6: spawn launch failure (ENOENT) returns err and records no evidence
+- [⚑] [script] AC-VRF-6: spawn launch failure (ENOENT) returns err and records no evidence
   script: test — cd packages/lore && bun test tests/integration/verify-executor.bun.test.ts
-- [✔] [script] AC-VRF-7: resolveTargetTask matrix: zero/one/many fresh claims, stale claim excluded, explicit task override wins, ambiguity fails loud listing candidates
+- [⚑] [script] AC-VRF-7: resolveTargetTask matrix: zero/one/many fresh claims, stale claim excluded, explicit task override wins, ambiguity fails loud listing candidates
   script: test — bunx vitest run packages/core/src/task-workflow.test.ts
-- [✔] [script] AC-VRF-8: computeAcCoverage carries attested counts as the single derivation point; ac list renders attested-pass prefix
+- [⚑] [script] AC-VRF-8: computeAcCoverage carries attested counts as the single derivation point; ac list renders attested-pass prefix
   script: test — bunx vitest run packages/core/src/acceptance.test.ts packages/lore/tests/unit/service/ac-service.test.ts
-- [✔] [script] AC-VRF-9: assess prompt bumps to version 5 with attested annotation in the AC table; the three version-4 assertions migrate in the same change
+- [⚑] [script] AC-VRF-9: assess prompt bumps to version 5 with attested annotation in the AC table; the three version-4 assertions migrate in the same change
   script: test — bunx vitest run packages/lore/tests/unit/service/ai-provider-service-assess.test.ts
-- [✔] [script] AC-VRF-10: lore verify CLI and lore_verify MCP happy and negative paths (ambiguous task, no script ACs, draft-spec warning)
+- [⚑] [script] AC-VRF-10: lore verify CLI and lore_verify MCP happy and negative paths (ambiguous task, no script ACs, draft-spec warning)
   script: test — bunx vitest run packages/lore/tests/integration/cli/verify.test.ts
-- [✔] [script] AC-VRF-11: full suites pass on both runners with zero regressions
+- [⚑] [script] AC-VRF-11: full suites pass on both runners with zero regressions
   script: test — bun run test
-- [✔] [script] AC-VRF-12: monorepo typecheck passes
+- [⚑] [script] AC-VRF-12: monorepo typecheck passes
   script: tsc — bun run typecheck
 
 ## Code anchors

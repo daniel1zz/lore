@@ -42,11 +42,11 @@ Structured via `lore ac add`. Sketch: (1) compiled injection e2e — ordinary-se
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-096-1: Compiled injection e2e: ordinary-session lore bootstrap --injection output contains zero resume_hint keys; key-order regression updated; a seat-scoped run retains its seat-derived resume hint
+- [⚑] [script] AC-096-1: Compiled injection e2e: ordinary-session lore bootstrap --injection output contains zero resume_hint keys; key-order regression updated; a seat-scoped run retains its seat-derived resume hint
   script: e2e — cd packages/lore && bun test tests/e2e/bootstrap-injection-compiled.bun.test.ts
-- [✔] [script] AC-096-2: Unit: handoff docs with status archived or deprecated, and docs invalidated via extra.validity, appear in neither latest_handoffs nor the injection; draft and approved handoffs still appear
+- [⚑] [script] AC-096-2: Unit: handoff docs with status archived or deprecated, and docs invalidated via extra.validity, appear in neither latest_handoffs nor the injection; draft and approved handoffs still appear
   script: test — bunx vitest run packages/lore/tests/unit/service/session-service.test.ts
-- [✔] [script] AC-096-3: Prose pins: assets/governance/corpus-workflow.md contains the never-auto-resume prohibition and neutral open-thread directory wording, and zero occurrences of the stale resume-hint-as-fallback phrasing
+- [⚑] [script] AC-096-3: Prose pins: assets/governance/corpus-workflow.md contains the never-auto-resume prohibition and neutral open-thread directory wording, and zero occurrences of the stale resume-hint-as-fallback phrasing
   script: test — bunx vitest run packages/lore/tests/unit/setup-governance-retirement.test.ts
-- [✔] [script] AC-096-4: bun run typecheck exits 0 across all packages
+- [⚑] [script] AC-096-4: bun run typecheck exits 0 across all packages
   script: tsc — bun run typecheck

@@ -53,13 +53,13 @@ Structured ACs: typecheck; CLI unit suites green; full dual-runner suite green; 
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-051-1: Typecheck clean
+- [⚑] [script] AC-051-1: Typecheck clean
   script: tsc — bun run typecheck
-- [✔] [script] AC-051-2: CLI unit suites green incl. strict-flags helper + both incident regressions
+- [⚑] [script] AC-051-2: CLI unit suites green incl. strict-flags helper + both incident regressions
   script: test — bunx vitest run packages/lore/tests/unit/adapters
-- [✔] [script] AC-051-3: Full dual-runner suite green (valid invocations byte-identical)
+- [⚑] [script] AC-051-3: Full dual-runner suite green (valid invocations byte-identical)
   script: test — bun run test
-- [✔] [human] AC-051-4: Live repro: link with an unknown flag exits 2 naming it; approve --by attributes the given actor in lore log
+- [○] [human] AC-051-4: Live repro: link with an unknown flag exits 2 naming it; approve --by attributes the given actor in lore log
   human: Scratch corpus only
 
 ## Code anchors

@@ -84,15 +84,15 @@ matches a rule blocks exactly as today.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-066-1: A Bash command whose heredoc body contains git branch -D is ALLOWED for all four delimiter forms (unquoted, single-quoted, double-quoted, dash-trimmed)
+- [⚑] [script] AC-066-1: A Bash command whose heredoc body contains git branch -D is ALLOWED for all four delimiter forms (unquoted, single-quoted, double-quoted, dash-trimmed)
   script: test — bunx vitest run packages/lore/tests/unit/hooks/git-safety-gate.test.ts -t "AC-066-1"
-- [✔] [script] AC-066-2: A directly-executing git branch -D remains BLOCKED with exit 2, including as a chained later segment
+- [⚑] [script] AC-066-2: A directly-executing git branch -D remains BLOCKED with exit 2, including as a chained later segment
   script: test — bunx vitest run packages/lore/tests/unit/hooks/git-safety-gate.test.ts -t "AC-066-2"
-- [✔] [script] AC-066-3: A dangerous command outside a heredoc that also appears inside the heredoc body is still BLOCKED (stripping does not eat trailing segments)
+- [⚑] [script] AC-066-3: A dangerous command outside a heredoc that also appears inside the heredoc body is still BLOCKED (stripping does not eat trailing segments)
   script: test — bunx vitest run packages/lore/tests/unit/hooks/git-safety-gate.test.ts -t "AC-066-3"
-- [✔] [script] AC-066-4: A dangerous trigger token in non-command position (argument position) does not fire the rule
+- [⚑] [script] AC-066-4: A dangerous trigger token in non-command position (argument position) does not fire the rule
   script: test — bunx vitest run packages/lore/tests/unit/hooks/git-safety-gate.test.ts -t "AC-066-4"
-- [✔] [script] AC-066-5: An unterminated heredoc neither crashes the gate nor blocks on body content (strip-to-end)
+- [⚑] [script] AC-066-5: An unterminated heredoc neither crashes the gate nor blocks on body content (strip-to-end)
   script: test — bunx vitest run packages/lore/tests/unit/hooks/git-safety-gate.test.ts -t "AC-066-5"
-- [✔] [script] AC-066-6: SSOT assets hook and installed copy remain byte-identical after the change (parity suite green)
+- [⚑] [script] AC-066-6: SSOT assets hook and installed copy remain byte-identical after the change (parity suite green)
   script: test — bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts

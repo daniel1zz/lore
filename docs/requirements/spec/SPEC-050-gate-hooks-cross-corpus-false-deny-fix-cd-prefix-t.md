@@ -52,13 +52,13 @@ The trigger-phrase regex currently matches ANYWHERE in the raw command string �
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-050-1: Typecheck clean
+- [⚑] [script] AC-050-1: Typecheck clean
   script: tsc — bun run typecheck
-- [✔] [script] AC-050-2: Hook regression suite green incl. new cd-prefix + g1 anomaly cases
+- [⚑] [script] AC-050-2: Hook regression suite green incl. new cd-prefix + g1 anomaly cases
   script: test — bunx vitest run packages/lore/tests/unit/hooks
-- [✔] [script] AC-050-3: Full dual-runner suite green
+- [⚑] [script] AC-050-3: Full dual-runner suite green
   script: test — bun run test
-- [✔] [human] AC-050-4: Live repro: from repo-cwd session, spec creation against a scratch corpus with a valid in-scratch parent passes the hook; the no-parent variant is still denied; a quoted-text mention of the trigger phrase no longer trips the matcher
+- [○] [human] AC-050-4: Live repro: from repo-cwd session, spec creation against a scratch corpus with a valid in-scratch parent passes the hook; the no-parent variant is still denied; a quoted-text mention of the trigger phrase no longer trips the matcher
   human: Scratch corpus only, never the repo corpus
 
 ## Code anchors

@@ -242,31 +242,31 @@ All 13 ACs are script-mode (external oracles; added via `lore ac add`, covering 
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-072-1: Round-trip: a report filed from a consumer temp corpus lands in the twin upstream temp corpus as a draft ad-hoc task with all 7 extra.issue_report fields populated, appears in the upstream pending queue, and is absent from lore ready --adhoc output until approved (test exit 0 with 1 matched file).
+- [⚑] [script] AC-072-1: Round-trip: a report filed from a consumer temp corpus lands in the twin upstream temp corpus as a draft ad-hoc task with all 7 extra.issue_report fields populated, appears in the upstream pending queue, and is absent from lore ready --adhoc output until approved (test exit 0 with 1 matched file).
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-1'
-- [✔] [script] AC-072-2: Unconfigured feedback.upstream: lore report-issue exits 4 and the error message names both feedback.upstream.corpus_path and feedback.upstream.root_prd with a literal YAML example; zero local and zero remote writes.
+- [⚑] [script] AC-072-2: Unconfigured feedback.upstream: lore report-issue exits 4 and the error message names both feedback.upstream.corpus_path and feedback.upstream.root_prd with a literal YAML example; zero local and zero remote writes.
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-2'
-- [✔] [script] AC-072-3: Root-PRD identity mismatch: configured root_prd differing from the upstream corpus root exits 4 naming expected vs found values; upstream doc count unchanged.
+- [⚑] [script] AC-072-3: Root-PRD identity mismatch: configured root_prd differing from the upstream corpus root exits 4 naming expected vs found values; upstream doc count unchanged.
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-3'
-- [✔] [script] AC-072-5: Sync-enabled upstream: upstream config with sync.enabled true exits 4 naming the v1 SQLite-only constraint; no store construction attempted (no migration side effect observable).
+- [⚑] [script] AC-072-5: Sync-enabled upstream: upstream config with sync.enabled true exits 4 naming the v1 SQLite-only constraint; no store construction attempted (no migration side effect observable).
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-5'
-- [✔] [script] AC-072-6: Rate cap: the 11th open report from the same reporter_project exits 4 and the message lists the 10 existing open report ids; upstream task count stays 10.
+- [⚑] [script] AC-072-6: Rate cap: the 11th open report from the same reporter_project exits 4 and the message lists the 10 existing open report ids; upstream task count stays 10.
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-6'
-- [✔] [script] AC-072-7: Failure transparency: an upstream createDraft failure of any kind is propagated verbatim (same code and message) and the receipt file line count is unchanged (0 lines appended).
+- [⚑] [script] AC-072-7: Failure transparency: an upstream createDraft failure of any kind is propagated verbatim (same code and message) and the receipt file line count is unchanged (0 lines appended).
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-report-service.test.ts -t 'AC-072-7'
-- [✔] [script] AC-072-8: Dedup boundary: against a zero-doc upstream corpus (root PRD only), possible_duplicates is an empty array and the report write still succeeds with exit 0.
+- [⚑] [script] AC-072-8: Dedup boundary: against a zero-doc upstream corpus (root PRD only), possible_duplicates is an empty array and the report write still succeeds with exit 0.
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-8'
-- [✔] [script] AC-072-9: Concurrency: 2 concurrent in-process report() invocations yield exactly 2 distinct upstream draft tasks and exactly 2 well-formed JSONL receipt lines (JSON.parse succeeds per line).
+- [⚑] [script] AC-072-9: Concurrency: 2 concurrent in-process report() invocations yield exactly 2 distinct upstream draft tasks and exactly 2 well-formed JSONL receipt lines (JSON.parse succeeds per line).
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-9'
-- [✔] [script] AC-072-10: Closure list: report-issue --list joins each receipt with live upstream status; a rejected report row carries the recorded rejection reason; with the upstream path removed, rows render status unreachable and the command exits 0 (history stays visible, no crash).
+- [⚑] [script] AC-072-10: Closure list: report-issue --list joins each receipt with live upstream status; a rejected report row carries the recorded rejection reason; with the upstream path removed, rows render status unreachable and the command exits 0 (history stays visible, no crash).
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-10'
-- [✔] [script] AC-072-11: MCP surface: lore_report_issue without by returns a validation error; with by it produces the same upstream draft ad-hoc task shape as the CLI path (all 7 issue_report fields present).
+- [⚑] [script] AC-072-11: MCP surface: lore_report_issue without by returns a validation error; with by it produces the same upstream draft ad-hoc task shape as the CLI path (all 7 issue_report fields present).
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-11'
-- [✔] [script] AC-072-13: Import-graph pin: a static scan asserts issue-report-service.ts contains no value import of flows/* modules or bun:sqlite (type-only imports allowed), keeping the service vitest-reachable.
+- [⚑] [script] AC-072-13: Import-graph pin: a static scan asserts issue-report-service.ts contains no value import of flows/* modules or bun:sqlite (type-only imports allowed), keeping the service vitest-reachable.
   script: test — bunx vitest run packages/lore/tests/unit/service/issue-report-service.test.ts -t 'AC-072-13'
-- [✔] [script] AC-072-4: Version skew: against a PRAGMA-user_version-downgraded upstream fixture copy, report-issue exits 4 naming both versions; the upstream db and -wal files are sha256-byte-identical before/after and the -shm file size is unchanged (WAL reader bookkeeping mutates -shm bytes on ANY connection incl. readonly — empirically verified 2026-07-24, T4).
+- [⚑] [script] AC-072-4: Version skew: against a PRAGMA-user_version-downgraded upstream fixture copy, report-issue exits 4 naming both versions; the upstream db and -wal files are sha256-byte-identical before/after and the -shm file size is unchanged (WAL reader bookkeeping mutates -shm bytes on ANY connection incl. readonly — empirically verified 2026-07-24, T4).
   script: test — cd packages/lore && bun test tests/unit/service/issue-report-cross-corpus.bun.test.ts -t 'AC-072-4'
-- [✔] [script] AC-072-12: Probe purity: probeUpstreamDb on a WAL-mode database returns user_version and leaves the db and -wal files sha256-byte-identical with -shm size invariant (readonly open, structurally no migration; -shm byte churn is inherent SQLite WAL reader bookkeeping, not a write).
+- [⚑] [script] AC-072-12: Probe purity: probeUpstreamDb on a WAL-mode database returns user_version and leaves the db and -wal files sha256-byte-identical with -shm size invariant (readonly open, structurally no migration; -shm byte churn is inherent SQLite WAL reader bookkeeping, not a write).
   script: test — cd packages/lore && bun test tests/unit/store/schema-probe.bun.test.ts -t 'AC-072-12'
 
 ## Code anchors

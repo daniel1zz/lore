@@ -6,7 +6,7 @@ title: "Lore — Internal-First AI Team Knowledge Platform"
 status: approved
 priority: critical
 created: 2026-06-07
-updated: 2026-07-28
+updated: 2026-08-23
 tags: [product-overview, L0, lore, mvp, internal-first, ai-native, protocol-aware]
 links:
   - {id: SPEC-102, type: relates-to}
@@ -63,7 +63,7 @@ Lore is an AI-native shared knowledge / memory platform for AI-first founding te
 | G11 | Memory hygiene live (§16): bi-temporal invalidation + staleness probes + `lore status --check-drift` with 0 false-negatives on a seeded drift fixture | P2+, committed v0.8 |
 | G12 | Phase execution model live (§18): plans created after the landing spec ships execute via phases; phase completion 100% computed (oracle: P3 unit suite + seeded-corpus fixture); task→phase migration zero data loss (oracle: P7 pre/post reconciliation, idempotent re-run); phases-per-plan distribution tracked at each `lore assess` with the §18 re-open trigger | P2+, landing specs before the v0.11 PRD review |
 | G13 | Two-tier seat model live (§15 S4): `lore seat` covers seat entry / list / resume; seat-aware resume verified over the S4 equivalence-class table (main checkout / seat worktree / task-worktree-under-seat / detached HEAD), 0 counterexamples across all enumerated classes | P2+, landing specs before the v0.11 PRD review |
-| G14 | Upstream issue feedback loop live (§20): a consuming project's agent files a structured defect report via `lore report-issue` into this corpus as a draft ad-hoc task, with all four R-5 safety rails oracle-tested (identity pin, version-skew reject, sync-upstream reject, rate cap); all four trigger surfaces committed (hints + vendored stanza owner-promoted 2026-07-24) and dashboard Issues triage surface live (F5); ≥1 true defect fixed end-to-end through the loop | P2+ |
+| G14 | Upstream issue feedback loop live (§20): a consuming project's agent on ANY machine files a structured defect report via `lore report-issue` into the configured GitHub tracker, while this corpus retains authority over resolution (`adr-a-tracker-is-replaceable-a-corpus-is-not-github-is-the`). The four original R-5 rails are dispositioned rather than carried forward: identity pin → superseded by an authenticated target check (`gh api user` + an explicitly-passed repo, never a git-remote inference); version-skew reject and sync-upstream reject → NOT APPLICABLE on a hosted tracker, which exposes no upstream schema version and no replica state; rate cap → DELETED, because abuse control belongs to the tracker and a cap only refuses honest reporters (measured 2026-08-23: 10 open reports against a ceiling of 10 refused every new report while 6 criticals sat untriaged). The local-SQLite intake this goal originally described was measured structurally unreachable from any other machine, so it never satisfied "a consuming project's agent" at all. Trigger surfaces committed (hints + vendored stanza owner-promoted 2026-07-24) and dashboard Issues triage surface live (F5); ≥1 true defect fixed end-to-end through the loop | P2+ |
 | G15 | Dashboard console first batch live (§21 F1+F2): evidence/AC adjudication context + keyboard triage + judgment drill-down, with route-level usage telemetry recording to the SPEC-012 sink; oracle: keyboard-only component-test loop (incl. editor-focus suppression) + boundary-state component tests + Playwright adjudicate-with-evidence-visible e2e + telemetry enabled/disabled two-branch assert | P2+, committed v0.13 |
 | G16 | Multi-project dashboard live (§22): one instance mounts ≥3 registered projects with one login; switcher performs full context switch with per-project pending badges; two-corpus write-isolation + If-Match-replay e2e (R-12), gate-equivalence e2e (R-13), stale-bleed e2e (R-16), and runtime-degradation test (R-17) pass; registry-less regression incl. the new route-shape pin passes | P2+, committed v0.14 |
 
@@ -108,6 +108,21 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] CLAUDE.md governance — content-dimension checks: wire the dead admission half, split capacity from content, and measure what the contract asks for (approved)
+- [knowledge] The orphan-branch sweep asks a content question with a SHA predicate, and a red-first test task has no legal terminal state (approved)
+- [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (approved)
+- [spec] Context verb family — two-zone CLAUDE.md anatomy, lore context init refresh, admission checks, init-context skill retirement (approved)
+- [spec] The defect channel reaches no machine but its own: GitHub becomes intake while the corpus keeps resolution authority (approved)
+- [knowledge] A worktree without its own bun install silently tests against the main checkout's @lore/core — a false-oracle in both directions (approved)
+- [knowledge] Three mechanism gaps measured while dispatching the GitHub-intake plan: red-first tasks are un-archivable, falsifier declaration demotes a spec, and --merged is unsafe for worktree cleanup (approved)
+- [adr] A tracker is replaceable, a corpus is not — GitHub is the defect channel's intake, never its resolution SSOT (approved)
+- [knowledge] lore evidence --capture now clears the attested floor, and AC-CT-2 asserts a corpus-wide property that is false by 440 rows (approved)
+- [knowledge] A gate at the end of a && chain is never invoked while main is red, and the blast radius my dispatch bundle carried was wrong by 10 sites (approved)
+- [spec] Corpus truthfulness: a verdict must carry the state it describes, and a post-arming stamp-less record is never green (approved)
+- [spec] AC-as-code: structured acceptance criteria + oracle binding (approved)
+- [knowledge] Five gaps from landing plan A's type foundation — two same-batch worktrees on a stale base, a compile oracle green under its own falsifier, and a shipped arming constant that never arms downstream (approved)
+- [knowledge] lore feed's readiness line counts retracted tasks while lore ready excludes them — two unfiltered call sites in session-service (draft)
+- [knowledge] Ten measured gaps from landing plan A wave 1 — and the one that deadlocked the whole plan shape (approved)
 - [knowledge] A symlinked node_modules makes the green control pass while every cross-package mutation goes invisible: runnability and observability are two properties (approved)
 - [adr] A falsifier's scratch worktree gets dependencies by hybrid symlink, with the workspace scope redirected inward — runnability and mutation observability are separate assertions (approved)
 - [spec] A falsifier's scratch worktree must be runnable AND observable: hybrid dependency materialization with the workspace scope redirected inward (approved)
@@ -116,7 +131,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] lore verify --falsify compares only the exit code, so an unrunnable scratch worktree mints a proven red from a module-not-found error (draft)
 - [knowledge] Redeeming three advisories produced two more rounds of the same defect, and the judge's escalation caught a real design break no self-check did (approved)
 - [spec] Oracle executability: a runner's discovery refusal is not a measurement, and must never mint a red (approved)
-- [spec] Corpus truthfulness: a verdict must carry the state it describes, and a post-arming stamp-less record is never green (approved)
 - [task] lore done's test-anchor refusal demands an ATTESTED unfiltered pass, but its predicate never checks attestation — an unattested --capture row satisfies it (draft)
 - [knowledge] The green-control pattern, and its cost: a falsifier that can never go red replaces one that always could (approved)
 - [spec] Falsifiability reachability: a feedable checkpoint, an attestable red, a guard that means what it says, and a mirror whose drift trips (approved)
@@ -370,7 +384,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] Mechanized-eviction sweep of the CLAUDE.md standing-lessons layer: 4 evicted with demonstrated mechanisms, 15 kept as measured-unmechanized, 967 bytes freed (draft)
 - [knowledge] Three of four remaining assess gaps were bundle-visibility artifacts, not defects: the diff was never passed, the ledger was never shown, the counter was monotonic by construction (approved)
 - [spec] Execution-time attestation floor + ad-hoc task channel (approved)
-- [spec] AC-as-code: structured acceptance criteria + oracle binding (approved)
 - [knowledge] Handoff — agent:main-orchestrator (approved)
 - [spec] A test case's timeout budget must be declared when its spawn count makes the default unsafe: a structural oracle instead of a bigger number (approved)
 - [task] An ad-hoc task's attested evidence cannot carry ac_ref: appendEvidenceEntry resolves declared AC ids through parent_id, which is structurally a PRD for --adhoc tasks (archived)
@@ -488,7 +501,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [spec] Workflow hardening — evidence red vocabulary, claim worktree validation, task done verb, worktree corpus resolution (approved)
 - [spec] Claim-time actor-identity guard + zero-evidence release advisory (approved)
 - [knowledge] Session process review — 2026-07-27 context-refresh incident → CTX Phase 4 hardening (draft)
-- [spec] Context verb family — two-zone CLAUDE.md anatomy, lore context init refresh, admission checks, init-context skill retirement (approved)
 - [knowledge] Stale in-context snapshot replayed as current state in a cross-plan report — timeless-context bias, mechanized at reporter layer (draft)
 - [adr] Distribution-first: every improvement names its consumer-delivery surface before it counts as landed (draft)
 - [task] CLI gap: no safe update path for adr extra.decision_status — add lore set --decision-status (draft)
@@ -496,7 +508,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [adr] CLAUDE.md Specs section is pointer-only — per-spec index lines retired to the corpus (approved)
 - [adr] Context capability is a first-class lore verb family — init-context skill retired, CLAUDE.md becomes two-zone (approved)
 - [spec] Distribution & Adoption (phased, spike-gated one-step install) (domain overview) (approved)
-- [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (approved)
 - [task] Dogfood pin: root CLAUDE.md must carry the claude-md-contract pointer line (draft)
 - [knowledge] Handoff — agent:main-orchestrator (archived)
 - [knowledge] Handoff — agent:main-orchestrator (archived)

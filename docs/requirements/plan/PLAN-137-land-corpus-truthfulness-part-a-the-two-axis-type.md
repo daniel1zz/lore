@@ -52,36 +52,38 @@ Builds SPEC-143 Migration **Phase 1 (honest labels)** in full, and the **mechani
 | Risk | Impact | Trigger (observable) | Mitigation (in the task tree) | Contingency |
 |---|---|---|---|---|
 | The type foundation is a single point of failure — six consumers depend on it, so a wrong shape means full-line rework | **H** | Any P1/P2 task reports the declared types cannot express its case | T0's AC requires a compile-only consumer fixture exercising all five `StampVerdict` readings and both `RadiusMeasurement` arms BEFORE T0 archives | Halt the wave, revise types in a follow-up task, re-dispatch consumers from the corrected base |
-| AC-CT-5's injection seam is timing-sensitive — a REAL commit must land between the runner's pre-read and post-read, and the spec explicitly refuses a fake `GitPort` | **H** | The test passes with the commit landing outside the window, or flakes across runs | T5 is estimated L and paired with its own RED task whose scenarios pin the ordering; the falsifier (record only the post-run stamp) must be observed red | If the seam cannot be hit deterministically, escalate to the user — ⛔ do NOT weaken to a fake port, which the spec rejects by name |
-| D7 forces AC-ACODE-9 and two JSDoc sites into the SAME commit as the renderer fix, and the `ac set` demotes SPEC-038 to `draft` | **M** | SPEC-038 reads `draft` after T2 merges | T2's bundle states the same-commit requirement explicitly; the main agent runs `lore review` + `lore approve` on SPEC-038 immediately after merging T2 | If a descendant claim is blocked meanwhile, re-approve first and re-dispatch |
-| Anchor overlap between sibling tasks — measured: exactly ONE pair | **M** | `lore ready --json` reports `anchor_conflicts[]` non-empty | Enumerated over all 15 tasks' declared `file_anchors` 2026-08-23: the only file appearing twice is `packages/lore/src/service/gate-predicates.ts` (T0 and the AC-CT-3 task), already serialized by a `blocks` link. A second potential collision was removed by construction — AC-CT-1 and AC-CT-7 are ONE task because both write `check-ac-state-renderers.ts`. ⛔ An earlier version of this row said "three pairs"; that count was never verifiable against the anchors it claimed to summarise | Never leave a conflict to dispatch time — the gate would stall the second agent |
+| AC-CT-5's injection seam is timing-sensitive — a REAL commit must land between the runner's pre-read and post-read, and the spec explicitly refuses a fake `GitPort` | **H** | The test passes with the commit landing outside the window, or flakes across runs | T5 is one collapsed task of 5 units (red M + green L) whose RED-stage scenarios pin the ordering (post-D-A8; it was a RED/impl PAIR before); the falsifier (record only the post-run stamp) must be observed red | If the seam cannot be hit deterministically, escalate to the user — ⛔ do NOT weaken to a fake port, which the spec rejects by name |
+| D7 forces AC-ACODE-9 and two JSDoc sites into the SAME commit as the renderer fix, and the `ac set` demotes SPEC-038 to `draft` | **M** | SPEC-038 reads `draft` after T2 merges | T2's green-stage bundle states the same-commit requirement explicitly; the main agent runs `lore review` + `lore approve` on SPEC-038 immediately after merging T2 | If a descendant claim is blocked meanwhile, re-approve first and re-dispatch |
+| Anchor overlap between sibling tasks — measured: exactly ONE pair | **M** | `lore ready --json` reports `anchor_conflicts[]` non-empty | RE-MEASURED AFTER D-A8 over the surviving 8 tasks (`lore ready --json` reports `anchor_conflicts: []`, 2026-08-23): the only file appearing twice is still `packages/lore/src/service/gate-predicates.ts` (T0 and T3), and the collapse made its serialization DIRECT rather than transitive — pre-collapse it ran T0-impl → T3-test → T3-impl; now T0 `blocks` T3 in one edge. A second potential collision was removed by construction — AC-CT-1 and AC-CT-7 are ONE task because both write `check-ac-state-renderers.ts`. ⛔ An earlier version of this row said "three pairs"; that count was never verifiable against the anchors it claimed to summarise | Never leave a conflict to dispatch time — the gate would stall the second agent |
 | All 10 ACs carry PROSE falsifiers, not structured fields; nothing forces redemption | **M** | A task reports pass without ever having observed its falsifier red | Each implement task's AC requires running the declared mutation once and recording the red | Accepted residual — the mechanism needs its own spec (`knowledge-a-declared-property-with-no-measuring-oracle-and-the`) |
 | A peer session lands commits mid-wave, reddening a worktree for reasons unrelated to the diff | **M** | A worktree suite reddens on files the task never touched | Scoped runs via `bun run test:changed <base>`; full suite only on `main` | Re-verify at the merged tree before attributing failure to the task |
 
 ## Estimation
 
-Measured from the created tasks (S=1, M=2, L=3), not from the pre-decomposition estimate:
+Measured from the created tasks (S=1, M=2, L=3), not from the pre-decomposition estimate. ⛔ After D-A8's collapse, a collapsed task's figure is the SUM of its two stages, so T2 and T5 read 5 — a value no single S/M/L size can express. The sizes still describe stages; only the per-task totals are sums:
 
 | Phase | Tasks | Session-units |
 |---|---|---|
-| P0 Type foundation | 2 | 3 |
-| P1 Independent labels | 4 | 7 |
-| P2 Stamp mechanisms | 8 | 14 |
+| P0 Type foundation | 1 | 3 |
+| P1 Independent labels | 2 | 7 |
+| P2 Stamp mechanisms | 4 | 14 |
 | P3 Phase-gate verification | 1 | 1 |
-| **Total** | **15** | **25** |
+| **Total** | **8** | **25** |
 
-**Critical path**: `T0-test(1) → T0(2) → T5-test(2) → T5(3) → T9(1)` = **9 session-units** — the AC-CT-5 chain, whose RED task is M rather than S because the real-commit injection window has to be constructed, and whose implementation is the plan's only other L.
+⛔ The task count fell 15 → 8 on 2026-08-23 (D-A8) while the session-unit total stayed **25**. Collapsing a RED/impl pair removes an ARCHIVAL BOUNDARY, not work — anyone reading the smaller count as a descope is reading it wrong.
+
+**Critical path**: `T0(3) → T5(5) → T9(1)` = **9 session-units** — the AC-CT-5 chain, whose red stage is M rather than S because the real-commit injection window has to be constructed, and whose green stage is the plan's only other L. Three tasks now rather than five, but the SAME 9 units (D-A8).
 
 All six chains, for comparison:
 
 | Chain | Path | Units |
 |---|---|---|
-| AC-CT-5 | T0-test → T0 → T5-test → T5 → T9 | **9** ← critical |
-| AC-CT-3 | T0-test → T0 → T3-test → T3 → T9 | 7 |
-| AC-CT-4 | T0-test → T0 → T4-test → T4 → T9 | 7 |
-| AC-CT-8 | T0-test → T0 → T6-test → T6 → T9 | 7 |
-| AC-CT-1+7 | T2-test → T2 → T9 | 6 |
-| AC-CT-2 | T1-test → T1 → T9 | 3 |
+| AC-CT-5 | T0 → T5 → T9 | **9** ← critical |
+| AC-CT-3 | T0 → T3 → T9 | 7 |
+| AC-CT-4 | T0 → T4 → T9 | 7 |
+| AC-CT-8 | T0 → T6 → T9 | 7 |
+| AC-CT-1+7 | T2 → T9 | 6 |
+| AC-CT-2 | T1 → T9 | 3 |
 
 ⛔ **9 still exceeds the plan skill's 6-unit critical-path threshold, and an earlier version of this section claimed 6.** That figure was wrong: it estimated T5-test at S and omitted the gate task. Recorded rather than quietly corrected, because the split into parts A and B was justified partly on the claim that A's critical path fell to 6. The split remains right on other grounds — part B's tasks can be written against types that exist rather than against declarations — but it did NOT bring the critical path under the threshold. The residual is structural: the type foundation must precede the AC-CT-5 seam, which must precede the gate, and no reordering removes that.
 
@@ -89,7 +91,7 @@ P1 runs fully parallel to P0 (neither of its chains consumes the new types), and
 
 ## Exit Criteria
 
-- All 15 tasks archived (or deprecated with rationale in the Decisions Log).
+- All **8** tasks archived. The 7 absorbed `[Skill:implement]` tasks are NOT counted here: they were retracted via `lore invalidate --superseded-by` (D-A8), which is orthogonal to `status` — `draft → deprecated` is not a legal transition (`packages/core/src/schemas.ts:798-803`), so "deprecated with rationale" was unavailable for them.
 - Every one of the 7 ACs in scope carries attested pass evidence via `lore verify`, and every one carries a recorded `expected-fail` from its red phase.
 - `lore assess` run and findings triaged.
 - All H-impact risks either did not trigger, or triggered and were mitigated with the outcome recorded here.
@@ -102,9 +104,12 @@ P1 runs fully parallel to P0 (neither of its chains consumes the new types), and
 | ID | Decision | Rationale |
 |---|---|---|
 | D-A1 | Decomposition strategy: **Interface-First** | Six consumers depend on one type cluster; defining it first collapses O(N) sequential depth to O(1). Alternatives considered: spec's own Migration ordering (rejected — forces C5 to wait a phase it has no dependency on) and Risk-First (rejected — the two riskiest ACs both depend on the type foundation, so they cannot go first) |
-| D-A2 | Scope split into part A and part B | 19 tasks / critical path 15 breached both plan-skill thresholds. Splitting at the wiring boundary drops A's critical path to 6, and part B's tasks can then be written against types that EXIST rather than against declarations |
-| D-A3 | Red-first via paired `[Skill:test]` RED tasks, test blocks impl | Separates the agent that writes the failing test from the agent that makes it pass; INV-4's evidence is then produced by a party with no stake in it passing |
+| D-A2 | Scope split into part A and part B — **the "critical path to 6" clause below is SUPERSEDED by the Estimation section's measured 9** | 19 tasks / critical path 15 breached both plan-skill thresholds. Splitting at the wiring boundary was believed to drop A's critical path to 6 (WRONG — it omitted the gate task and under-sized T5's red stage; the measured figure is 9, see Estimation), and part B's tasks can then be written against types that EXIST rather than against declarations |
+| D-A3 | Red-first, two agents — **AMENDED by D-A8**: one task, two sequential claims, no longer two tasks joined by `blocks` | The property being bought is unchanged: the agent that writes the failing test is not the agent that makes it pass, so INV-4's evidence comes from a party with no stake in it passing. Only the archival boundary moved |
 | D-A4 | Concurrency: multi-worktree, `attended` phase gates | Each implementer gets its own worktree and a distinct `LORE_ACTOR`; claims are raised by the implementer inside its own worktree, never pre-claimed here |
 | D-A5 | D7 handled inside T2, re-approval by the main agent | The spec makes the same-commit requirement mechanical; the re-approval cannot be done by the implementer, which cannot assert the merge landed |
 | D-A6 | Failure loop: retry ≤2 with the failure text, then a fresh agent with the failure summary as an anti-pattern | Project standing protocol |
 | D-A7 | `capture_source` and stamp-verdict are TWO PARALLEL distributions (decided this session, R12) | Recorded here because part B implements it; folding them yields non-exclusive buckets summing to twice the row count |
+| D-A8 | Each RED/impl pair COLLAPSED into one task, 15 → 8, on 2026-08-23 mid-wave | Measured, not preference: `lore done` carries THREE independent conjunctive floors and the third — `findMissingUnfilteredTestFileRuns`, `packages/lore/src/service/task-workflow-service.ts:2934` — demands, per declared `.test.ts` anchor, an `oracle:test result:pass` row running that file UNFILTERED, and offers NO escape hatch (the other two do: `--override-attestation`, `--declare-no-new-tests`). A RED-only task whose declared anchor IS the failing test file therefore can NEVER archive, and its paired impl task `blocks` on that archival, so the original shape was a deadlock for all **7** pairs — discovered only when the first RED task returned and `lore done` refused it twice. ⛔ 7, not 8: the plan holds 8 `[Skill:test]` tasks but the P3 gate task has no paired impl and anchors `package.json`, not a `.test.ts`, so floor 3 never fires for it. 7 pairs = 14 tasks + 1 gate = 15. The collapse satisfies all three floors truthfully with ZERO overrides on 6 of 7 pairs; T0 is the exception (see D-A9). ⛔ The floor is not the defect — it exists to stop a `-t`-filtered pass certifying a whole file. The defect was pairing an archival unit with an anchor it could not turn green |
+| D-A9 | T0 (the type foundation) will still need ONE `--override-attestation` at archive | SPEC-143's C1/C2 declare the two-axis type cluster but carry **no acceptance criterion at all**, so T0's `ac_scope` is legitimately empty and `lore verify` has nothing to bind to — no attested pass is reachable. This is a SPEC-level gap, not an execution shortcut: the plan's own Risk Register calls the type foundation "a single point of failure — six consumers depend on it", and it is the one item in the plan with no AC. Floor 3 is still satisfiable truthfully (an unfiltered `result:pass` row on `stamp-types.test.ts` once the green stage lands); only floor 1 needs the audited escape |
+| D-A10 | ⛔ D-A3's two-agent separation is now CONVENTION, NOT CONSTRUCTION — recorded as a named loss, not claimed as preserved | Raised by this plan's own review after D-A8 and CORRECT. Before the collapse the separation was structural: two task docs, two claim leases, a `blocks` edge. After it, ONE task takes two sequential claims and NOTHING refuses the case where the same `LORE_ACTOR` raises both — no gate compares the actor on the `expected-fail` row against the actor on the attested pass. So INV-4's independence guarantee is, for this plan, enforced by the orchestrator's dispatch discipline alone, which this project counts as NOT ENFORCED. The mechanism it would need: a `lore done` floor asserting that the actor of at least one red row differs from the actor of every attesting pass row on the same task — a comparison the evidence rows already carry the data for (`recorded_by` is on every row), so this is a missing predicate rather than missing measurement. Deliberately NOT closed in this plan: the deadlock had to clear to unblock the wave, and inventing a floor mid-wave would be a spec change with no criterion. It is the honest cost of D-A8 and belongs in part B's scope or its own spec |

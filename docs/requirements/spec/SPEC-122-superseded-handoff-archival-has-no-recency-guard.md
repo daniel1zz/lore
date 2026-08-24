@@ -96,13 +96,13 @@ against today's defective behaviour, which flags regardless of age.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-R2-1: NEGATIVE, load-bearing: two handoffs sharing the same parent_id and by, with the OLDER one younger than handoffTtlMinutes, yield ZERO superseded_handoff candidates. A test asserting only the old-enough case passes against today's behaviour, which flags regardless of age — so this negative half is the whole measurement.
+- [⚑] [script] AC-R2-1: NEGATIVE, load-bearing: two handoffs sharing the same parent_id and by, with the OLDER one younger than handoffTtlMinutes, yield ZERO superseded_handoff candidates. A test asserting only the old-enough case passes against today's behaviour, which flags regardless of age — so this negative half is the whole measurement.
   script: test — bunx vitest run packages/core/tests/unit/archive-candidates-recency.test.ts -t 'a young superseded handoff is not a candidate'
-- [✔] [script] AC-R2-2: The guard reads the SUPERSEDED doc's age, not the superseding doc's (D2): an OLD superseded handoff paired with a freshly written newer one is still a candidate. Inverting the comparison would silently invert the protection, and no assertion on the young case alone can detect that.
+- [⚑] [script] AC-R2-2: The guard reads the SUPERSEDED doc's age, not the superseding doc's (D2): an OLD superseded handoff paired with a freshly written newer one is still a candidate. Inverting the comparison would silently invert the protection, and no assertion on the young case alone can detect that.
   script: test — bunx vitest run packages/core/tests/unit/archive-candidates-recency.test.ts -t 'the guard reads the superseded docs age'
-- [✔] [script] AC-R2-3: R2 stays distinct from R3 rather than collapsing into it: an old superseded handoff under an ACTIVE parent plan is still reported, with rule superseded_handoff and a reason naming supersession — R3 never touches an active plan, and R2 must keep precedence for attribution so the more specific reason is the one surfaced.
+- [⚑] [script] AC-R2-3: R2 stays distinct from R3 rather than collapsing into it: an old superseded handoff under an ACTIVE parent plan is still reported, with rule superseded_handoff and a reason naming supersession — R3 never touches an active plan, and R2 must keep precedence for attribution so the more specific reason is the one surfaced.
   script: test — bunx vitest run packages/core/tests/unit/archive-candidates-recency.test.ts -t 'R2 stays distinct from R3'
-- [✔] [script] AC-R2-4: The pre-existing rules are unchanged: the whole archive-candidates suite passes, covering expired_handoff's own TTL-and-plan-terminal conditions and done_plan_straggler, plus the one-candidate-per-doc invariant. No test total is hardcoded.
+- [⚑] [script] AC-R2-4: The pre-existing rules are unchanged: the whole archive-candidates suite passes, covering expired_handoff's own TTL-and-plan-terminal conditions and done_plan_straggler, plus the one-candidate-per-doc invariant. No test total is hardcoded.
   script: test — bunx vitest run packages/core/tests/unit/archive-candidates.test.ts
 
 ## Code anchors

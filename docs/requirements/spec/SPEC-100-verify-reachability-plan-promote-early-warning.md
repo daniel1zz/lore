@@ -49,15 +49,15 @@ Structured via `lore ac add` (script-mode, oracle-bound). Sketch: (1) `verifyRea
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-VRW-1: verifyReachability truth table (>=4 cases: parent-not-spec / no-script-acs / reachable / boundary zero-AC) plus plan-promote advisory presence when unreachable and absence when reachable, with gate verdict asserted unchanged in both branches; suite exits 0
+- [⚑] [script] AC-VRW-1: verifyReachability truth table (>=4 cases: parent-not-spec / no-script-acs / reachable / boundary zero-AC) plus plan-promote advisory presence when unreachable and absence when reachable, with gate verdict asserted unchanged in both branches; suite exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-reachability.test.ts
-- [✔] [script] AC-VRW-2: feedAttestationFloor reachable branch byte-identical to pre-change text (regression pin) and unreachable branch contains zero occurrences of the string 'Recovery: run' + names both real options (parent-spec script ACs, typed exemption); suite exits 0
+- [⚑] [script] AC-VRW-2: feedAttestationFloor reachable branch byte-identical to pre-change text (regression pin) and unreachable branch contains zero occurrences of the string 'Recovery: run' + names both real options (parent-spec script ACs, typed exemption); suite exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/feed-attestation-reachability.test.ts
-- [✔] [script] AC-VRW-3: attestationExemptKindSchema accepts all 4 enum members and rejects >=2 invalid values; checkPlanClose denies exemption missing kind and passes exemption with valid kind (4-row outcome table); suite exits 0
+- [⚑] [script] AC-VRW-3: attestationExemptKindSchema accepts all 4 enum members and rejects >=2 invalid values; checkPlanClose denies exemption missing kind and passes exemption with valid kind (4-row outcome table); suite exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-exempt-kind.test.ts
-- [✔] [script] AC-VRW-4: bun run typecheck exits 0 across all packages
+- [⚑] [script] AC-VRW-4: bun run typecheck exits 0 across all packages
   script: tsc — bun run typecheck
-- [✘] [script] AC-VRW-5: End-to-end on built dist/lore in a throwaway corpus: approving a plan parented to a PRD prints >=1 reachability advisory line to stderr with exit 0, and approving a plan parented to a spec with >=1 script-mode AC prints zero advisory lines; suite exits 0
+- [⊘] [script] AC-VRW-5: End-to-end on built dist/lore in a throwaway corpus: approving a plan parented to a PRD prints >=1 reachability advisory line to stderr with exit 0, and approving a plan parented to a spec with >=1 script-mode AC prints zero advisory lines; suite exits 0
   script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-plan-promote-advisory.bun.test.ts
 
 ## Code anchors

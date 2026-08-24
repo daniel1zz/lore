@@ -132,21 +132,21 @@ mirroring `SetupFsWriter`'s surface.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-060-1: After lore setup --project in a throwaway git repo, .lore/.lore-project-manifest.json parses against setupManifestSchema and its entries[].path set equals exactly the set of files the run wrote (0 extra, 0 missing)
+- [⚑] [script] AC-060-1: After lore setup --project in a throwaway git repo, .lore/.lore-project-manifest.json parses against setupManifestSchema and its entries[].path set equals exactly the set of files the run wrote (0 extra, 0 missing)
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-project-manifest.test.ts -t 'manifest entries equal written file set'
-- [✔] [script] AC-060-2: A second identical lore setup --project run issues exactly 0 writer calls and leaves every tracked file byte-identical
+- [⚑] [script] AC-060-2: A second identical lore setup --project run issues exactly 0 writer calls and leaves every tracked file byte-identical
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-project-manifest.test.ts -t 'second run issues 0 writer calls'
-- [✔] [script] AC-060-3: lore setup --project --uninstall restores 100% of backed-up files byte-identically, removes every file that had no backup, and leaves 0 manifest files on disk
+- [⚑] [script] AC-060-3: lore setup --project --uninstall restores 100% of backed-up files byte-identically, removes every file that had no backup, and leaves 0 manifest files on disk
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-project-uninstall.test.ts
-- [✔] [script] AC-060-4: In a repo with no .gitignore the run creates one containing all 6 declared entries; with an existing .gitignore the original bytes remain a byte-exact prefix and exactly 1 '# --- lore ---' block is appended; a third run appends 0 additional blocks
+- [⚑] [script] AC-060-4: In a repo with no .gitignore the run creates one containing all 6 declared entries; with an existing .gitignore the original bytes remain a byte-exact prefix and exactly 1 '# --- lore ---' block is appended; a third run appends 0 additional blocks
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-project-gitignore.test.ts
-- [✔] [script] AC-060-5: In a repo whose CLAUDE.md differs from the template, the run writes .lore/.lore-backups/<iso>/CLAUDE.md byte-identical to the pre-run file and stdout contains that exact backup path
+- [⚑] [script] AC-060-5: In a repo whose CLAUDE.md differs from the template, the run writes .lore/.lore-backups/<iso>/CLAUDE.md byte-identical to the pre-run file and stdout contains that exact backup path
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-project-claudemd.test.ts
-- [✔] [script] AC-060-6: lore setup --project --json emits next_steps with >=3 entries and backups as an array; text mode prints the same next-steps in the same order
+- [⚑] [script] AC-060-6: lore setup --project --json emits next_steps with >=3 entries and backups as an array; text mode prints the same next-steps in the same order
   script: test — bunx vitest run packages/lore/tests/unit/adapters/setup-render-next-steps.test.ts
-- [✔] [script] AC-060-7: REGRESSION: the machine-target SetupService install/uninstall path produces a byte-identical <claude-dir> tree and manifest before and after this change, with 0 failing tests in the 3 existing setup suites
+- [⚑] [script] AC-060-7: REGRESSION: the machine-target SetupService install/uninstall path produces a byte-identical <claude-dir> tree and manifest before and after this change, with 0 failing tests in the 3 existing setup suites
   script: test — bun run test:vitest packages/lore/tests/unit/setup-service.test.ts packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/real-setup-ports.test.ts
-- [✔] [script] AC-060-8: REGRESSION (corrects AC-060-7 whose paths were wrong and silently matched only 1 of 3 suites): the 3 machine-target setup suites at their real paths (service/setup-service, assets-ssot, adapters/real-setup-ports) execute and report 0 failures across exactly 3 test files
+- [⚑] [script] AC-060-8: REGRESSION (corrects AC-060-7 whose paths were wrong and silently matched only 1 of 3 suites): the 3 machine-target setup suites at their real paths (service/setup-service, assets-ssot, adapters/real-setup-ports) execute and report 0 failures across exactly 3 test files
   script: test — bunx vitest run packages/lore/tests/unit/service/setup-service.test.ts packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts
 
 ## Code anchors

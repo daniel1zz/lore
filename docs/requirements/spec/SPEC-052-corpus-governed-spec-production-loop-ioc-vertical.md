@@ -144,9 +144,9 @@ One `knowledge` doc, `sub_type=reference`, status `approved`, holding the write-
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-IOC-1: gate-predicates pure functions pass
+- [⚑] [script] AC-IOC-1: gate-predicates pure functions pass
   script: test — bunx vitest run packages/lore/tests/unit/service/gate-predicates.test.ts
-- [✔] [script] AC-IOC-2: gate-feeding minimal-slice pack passes
+- [⚑] [script] AC-IOC-2: gate-feeding minimal-slice pack passes
   script: test — bunx vitest run packages/lore/tests/unit/service/gate-feeding.test.ts
 
 ## Code anchors

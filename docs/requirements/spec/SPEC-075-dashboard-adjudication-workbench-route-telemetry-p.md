@@ -178,27 +178,27 @@ Structured ACs via `lore ac add` (script-mode, commands pinned there). Prose sum
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-075-1: TaskEvidencePanel renders a task's verification-evidence timeline with attested/self-reported trust labels and monospace output_tail
+- [⚑] [script] AC-075-1: TaskEvidencePanel renders a task's verification-evidence timeline with attested/self-reported trust labels and monospace output_tail
   script: test — cd packages/dashboard && bunx vitest run -t "AC-075-1"
-- [✘] [script] AC-075-2: SpecAcCoveragePanel renders the AC coverage matrix derived from computeAcCoverage; PlanAttestationPanel renders the attestation summary including zero_attested_tasks; VerificationProjectionService assembles all three unions via core SSOT fns
+- [⊘] [script] AC-075-2: SpecAcCoveragePanel renders the AC coverage matrix derived from computeAcCoverage; PlanAttestationPanel renders the attestation summary including zero_attested_tasks; VerificationProjectionService assembles all three unions via core SSOT fns
   script: test — bunx vitest run packages/lore/tests/unit/service/verification-projection-service.test.ts -t "AC-075-2" && cd packages/dashboard && bunx vitest run -t "AC-075-2"
-- [✘] [script] AC-075-3: Boundary states: zero evidence, spec-without-ACs, plan-with-zero-tasks render explicit empty states; a plan with phase children and zero task children returns fail-loud VALIDATION_ERROR (D9)
+- [⊘] [script] AC-075-3: Boundary states: zero evidence, spec-without-ACs, plan-with-zero-tasks render explicit empty states; a plan with phase children and zero task children returns fail-loud VALIDATION_ERROR (D9)
   script: test — bunx vitest run packages/lore/tests/unit/service/verification-projection-service.test.ts -t "AC-075-3" && cd packages/dashboard && bunx vitest run -t "AC-075-3"
-- [✘] [script] AC-075-4: Playwright e2e: DocDetail of an in-review doc shows AdjudicationBar on the same screen as approve/reject; adjudicating with the evidence panel visible produces a calibration record equal field-by-field (doc_id, doc_version, judgment pairing, decision, actor, note-to-delta_reasons) to CLI-path semantics, asserted via API read-back
+- [⊘] [script] AC-075-4: Playwright e2e: DocDetail of an in-review doc shows AdjudicationBar on the same screen as approve/reject; adjudicating with the evidence panel visible produces a calibration record equal field-by-field (doc_id, doc_version, judgment pairing, decision, actor, note-to-delta_reasons) to CLI-path semantics, asserted via API read-back
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/adjudication.pw.ts
-- [✔] [script] AC-075-5: Full keyboard triage loop j/k/a/x/e/o proven by a component test dispatching ONLY keyboard events and asserting each state transition
+- [⚑] [script] AC-075-5: Full keyboard triage loop j/k/a/x/e/o proven by a component test dispatching ONLY keyboard events and asserting each state transition
   script: test — cd packages/dashboard && bunx vitest run -t "AC-075-5"
-- [✔] [script] AC-075-6: All five triage shortcuts are suppressed while an editable element (input, textarea, contenteditable, .cm-editor) holds focus — keystrokes pass through, no adjudication fires
+- [⚑] [script] AC-075-6: All five triage shortcuts are suppressed while an editable element (input, textarea, contenteditable, .cm-editor) holds focus — keystrokes pass through, no adjudication fires
   script: test — cd packages/dashboard && bunx vitest run -t "AC-075-6"
-- [✔] [script] AC-075-7: JudgmentDrilldown renders decision, confidence, qualitative reasons[] (dimension+finding), blocking_questions, prompt_version; a doc with no judgment record shows no drill-down affordance and no error; a stale judgment renders with the existing stale badge
+- [⚑] [script] AC-075-7: JudgmentDrilldown renders decision, confidence, qualitative reasons[] (dimension+finding), blocking_questions, prompt_version; a doc with no judgment record shows no drill-down affordance and no error; a stale judgment renders with the existing stale badge
   script: test — cd packages/dashboard && bunx vitest run -t "AC-075-7"
-- [✘] [script] AC-075-8: Telemetry enabled: exactly one JSONL event per dashboard route navigation carrying route_id (+doc_type when applicable); disabled: zero sink writes; sink write failure via injected throwing writer: HTTP 204, zero user-visible errors, one server-side log line
+- [⊘] [script] AC-075-8: Telemetry enabled: exactly one JSONL event per dashboard route navigation carrying route_id (+doc_type when applicable); disabled: zero sink writes; sink write failure via injected throwing writer: HTTP 204, zero user-visible errors, one server-side log line
   script: test — cd packages/lore && bun test tests/http/telemetry-route.bun.test.ts && cd ../dashboard && bunx vitest run -t "AC-075-8"
-- [✘] [script] AC-075-9: Auth matrix: GET /api/evidence-panel returns 401 unauthenticated and 200 for both cookie and bearer; POST /api/dashboard/telemetry/route-view returns 403 for bearer auth and for a disallowed Origin
+- [⊘] [script] AC-075-9: Auth matrix: GET /api/evidence-panel returns 401 unauthenticated and 200 for both cookie and bearer; POST /api/dashboard/telemetry/route-view returns 403 for bearer auth and for a disallowed Origin
   script: test — cd packages/lore && bun test tests/http -t "AC-075-9"
-- [✔] [script] AC-075-10: Import-graph pins hold: verification-projection-service defines no local derive/compute functions (derivations imported from @lore/core only) and packages/dashboard/src contains zero @lore/lore imports
+- [⚑] [script] AC-075-10: Import-graph pins hold: verification-projection-service defines no local derive/compute functions (derivations imported from @lore/core only) and packages/dashboard/src contains zero @lore/lore imports
   script: other — bash -c '! grep -nE "function (derive|compute)" packages/lore/src/service/verification-projection-service.ts && ! grep -rn "from \"@lore/lore\"" packages/dashboard/src/'
-- [✔] [script] AC-075-11: attestationFloor delegates to core deriveAttestationSummary reproducing BOTH conditions (per-task zero-attested AND plan-wide ratio >= min_ratio) with byte-identical gate behavior: existing gate tests green plus a dedicated parity unit test over both condition classes
+- [⚑] [script] AC-075-11: attestationFloor delegates to core deriveAttestationSummary reproducing BOTH conditions (per-task zero-attested AND plan-wide ratio >= min_ratio) with byte-identical gate behavior: existing gate tests green plus a dedicated parity unit test over both condition classes
   script: test — bunx vitest run packages/lore/tests -t "AC-075-11" && bunx vitest run packages/lore/tests/unit/service/gate-predicates.test.ts
-- [✘] [script] AC-075-12: Full oracle suite green: typecheck, vitest, bun test, dashboard vitest, Playwright e2e
+- [⊘] [script] AC-075-12: Full oracle suite green: typecheck, vitest, bun test, dashboard vitest, Playwright e2e
   script: test — bun run typecheck && bun run test && cd packages/dashboard && bunx vitest run && bunx playwright test

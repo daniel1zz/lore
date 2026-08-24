@@ -124,19 +124,19 @@ acceptance. Opt-out plans (no `requires_uat`) archive exactly as today — non-b
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-054-1: isP0Accepted returns true for a clean accept and false for each of verdict reject, a P0 tier row with rejected>0, non-empty uncovered_p0, uiux blocker_count>0; truth-table test >=5 cases exit 0
+- [⚑] [script] AC-054-1: isP0Accepted returns true for a clean accept and false for each of verdict reject, a P0 tier row with rejected>0, non-empty uncovered_p0, uiux blocker_count>0; truth-table test >=5 cases exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts
-- [✔] [script] AC-054-2: uatVerdictSchema parses a well-formed payload and rejects one with out-of-enum verdict and one missing tier_results; test >=1 accept and >=2 reject cases exit 0
+- [⚑] [script] AC-054-2: uatVerdictSchema parses a well-formed payload and rejects one with out-of-enum verdict and one missing tier_results; test >=1 accept and >=2 reject cases exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts
-- [✔] [script] AC-054-3: knowledgeExtraSchema fails to parse sub_type uat with no extra.uat and still parses a non-uat sub_type with no uat field REGRESSION; test both branches exit 0
+- [⚑] [script] AC-054-3: knowledgeExtraSchema fails to parse sub_type uat with no extra.uat and still parses a non-uat sub_type with no uat field REGRESSION; test both branches exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts
-- [✔] [script] AC-054-4: UatService.record creates exactly one knowledge doc with extra.sub_type uat carrying the payload AND an informs link from that doc to the plan; store round-trip test exit 0
+- [⚑] [script] AC-054-4: UatService.record creates exactly one knowledge doc with extra.sub_type uat carrying the payload AND an informs link from that doc to the plan; store round-trip test exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts
-- [✔] [script] AC-054-5: a direct CorpusService.create with type knowledge sub_type uat returns VALIDATION_ERROR whose message names lore uat record; test exit 0
+- [⚑] [script] AC-054-5: a direct CorpusService.create with type knowledge sub_type uat returns VALIDATION_ERROR whose message names lore uat record; test exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts
-- [✔] [script] AC-054-6: the plan-close gate via GateEnforcer blocks a plan with requires_uat true and no P0-accepting linked UAT verdict on set to archived (field gate plan-close), allows it with a P0-accepting verdict, and vacuous-passes a plan without requires_uat; 3-branch test exit 0
+- [⚑] [script] AC-054-6: the plan-close gate via GateEnforcer blocks a plan with requires_uat true and no P0-accepting linked UAT verdict on set to archived (field gate plan-close), allows it with a P0-accepting verdict, and vacuous-passes a plan without requires_uat; 3-branch test exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts
-- [✔] [script] AC-054-7: the blocked plan-close feeding pack text names the literal lore uat record recovery command; substring test on the error message exit 0
+- [⚑] [script] AC-054-7: the blocked plan-close feeding pack text names the literal lore uat record recovery command; substring test on the error message exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts
-- [✔] [script] AC-054-8: UatService.record then reading the plan linked UAT verdicts back returns the persisted payload equal to what was written round-trip fidelity; test exit 0
+- [⚑] [script] AC-054-8: UatService.record then reading the plan linked UAT verdicts back returns the persisted payload equal to what was written round-trip fidelity; test exit 0
   script: test — bunx vitest run packages/core/tests/unit/uat.test.ts packages/lore/tests/unit/service/uat-service.test.ts

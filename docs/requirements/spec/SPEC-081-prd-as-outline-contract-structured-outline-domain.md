@@ -194,25 +194,25 @@ Structured ACs are declared via `lore ac add` (SSOT); prose mirror:
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-080-2: lore outline set patches exactly 1 outline entry (all sibling entries byte-identical before/after); direct lore set patching extra.outline returns VALIDATION_ERROR (exit 4) naming lore outline
+- [⚑] [script] AC-080-2: lore outline set patches exactly 1 outline entry (all sibling entries byte-identical before/after); direct lore set patching extra.outline returns VALIDATION_ERROR (exit 4) naming lore outline
   script: test — bunx vitest run packages/lore/tests/unit/service/outline-writer-guard.test.ts
-- [✘] [script] AC-080-3: lore create spec --kind domain-overview --parent <prd> passes the spec-create gate (exit 0); an unrecognized kind value exits 4
+- [⊘] [script] AC-080-3: lore create spec --kind domain-overview --parent <prd> passes the spec-create gate (exit 0); an unrecognized kind value exits 4
   script: test — cd packages/lore && bun test tests/integration/cli-domain-overview-kind.bun.test.ts
-- [✔] [script] AC-080-5: lore status lists exempt plans (count + slugs) when >= 1 prd_sync_exempt exists; zero-exemption text output is byte-stable vs pre-change baseline
+- [⚑] [script] AC-080-5: lore status lists exempt plans (count + slugs) when >= 1 prd_sync_exempt exists; zero-exemption text output is byte-stable vs pre-change baseline
   script: test — bunx vitest run packages/lore/tests/unit/cli/status-exempt-surfacing.test.ts
-- [✔] [script] AC-080-7: migration dry-run on a violation fixture reports the failed set-equality invariant and performs 0 writes (doc version count unchanged before/after)
+- [⚑] [script] AC-080-7: migration dry-run on a violation fixture reports the failed set-equality invariant and performs 0 writes (doc version count unchanged before/after)
   script: test — cd packages/lore && bun test tests/unit/service/outline-migration-dryrun.bun.test.ts
-- [✔] [script] AC-080-8: bootstrap/feed inject link-only outline: injected PRD-derived content < 32000 chars on the migrated corpus (payload-size regression pin, no resolved MDX)
+- [⚑] [script] AC-080-8: bootstrap/feed inject link-only outline: injected PRD-derived content < 32000 chars on the migrated corpus (payload-size regression pin, no resolved MDX)
   script: test — cd packages/lore && bun test tests/integration/bootstrap-outline-payload.bun.test.ts
-- [✔] [script] AC-080-1: Post-migration root PRD raw body <= 24000 chars; --check-prd-budget exits 3 on a seeded over-budget fixture, 0 on a compliant fixture, and completes in < 1000 ms on the compliant fixture
+- [⚑] [script] AC-080-1: Post-migration root PRD raw body <= 24000 chars; --check-prd-budget exits 3 on a seeded over-budget fixture, 0 on a compliant fixture, and completes in < 1000 ms on the compliant fixture
   script: test — cd packages/lore && bun test tests/integration/prd-budget-check.bun.test.ts
-- [✔] [script] AC-080-4: plan-close denies with exit 4 and a feeding pack naming repair commands when the linked domain doc has 0 versions whose content differs from its predecessor inside the [earliest-claim-at (fallback plan created_at), close-write) window; passes when >= 1 such version exists; passes with a dedicated-verb exemption; direct extra.prd_sync_exempt patch returns VALIDATION_ERROR
+- [⚑] [script] AC-080-4: plan-close denies with exit 4 and a feeding pack naming repair commands when the linked domain doc has 0 versions whose content differs from its predecessor inside the [earliest-claim-at (fallback plan created_at), close-write) window; passes when >= 1 such version exists; passes with a dedicated-verb exemption; direct extra.prd_sync_exempt patch returns VALIDATION_ERROR
   script: test — bunx vitest run packages/lore/tests/unit/service/plan-close-prd-sync.test.ts
-- [✔] [script] AC-080-6: content-flight scan flags a seeded free-text extra string exceeding outline_budget.extra_prose_chars (default 1000); a payload at exactly the threshold and all typed schemas (requirements/acceptance_criteria/phases/outline) produce 0 flags
+- [⚑] [script] AC-080-6: content-flight scan flags a seeded free-text extra string exceeding outline_budget.extra_prose_chars (default 1000); a payload at exactly the threshold and all typed schemas (requirements/acceptance_criteria/phases/outline) produce 0 flags
   script: test — bunx vitest run packages/lore/tests/unit/service/prd-budget-content-flight.test.ts
-- [✔] [script] AC-080-9: Post-migration the pre-existing consumer regression suites pass unchanged: dashboard Playwright e2e exits 0, lore bootstrap --json schema self-check exits 0, lore status --check-requirements exits 0
+- [⚑] [script] AC-080-9: Post-migration the pre-existing consumer regression suites pass unchanged: dashboard Playwright e2e exits 0, lore bootstrap --json schema self-check exits 0, lore status --check-requirements exits 0
   script: e2e — cd packages/dashboard && bunx playwright test && cd ../.. && lore bootstrap --json >/dev/null && lore status --check-requirements
-- [✔] [script] AC-080-10: Every outline entry declares >= 1 rel=detail link, every such link resolves to an existing non-deleted doc, and the target sits exactly 1 hop from the outline (verified inside --check-prd-budget)
+- [⚑] [script] AC-080-10: Every outline entry declares >= 1 rel=detail link, every such link resolves to an existing non-deleted doc, and the target sits exactly 1 hop from the outline (verified inside --check-prd-budget)
   script: test — cd packages/lore && bun test tests/integration/prd-budget-check.bun.test.ts -t detail-link
 
 ## Code anchors

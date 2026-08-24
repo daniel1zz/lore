@@ -57,9 +57,9 @@ Thin glue: reuse knowledge's review/version/link/calibration wholesale. Only new
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-P1-A: findFeedingSkill discovery by applies_to passes
+- [⚑] [script] AC-P1-A: findFeedingSkill discovery by applies_to passes
   script: test — bunx vitest run packages/lore/tests/unit/service/corpus-service-find-feeding-skill.test.ts
-- [✔] [script] AC-P1-B: knowledge prompt/skill sub_type schema passes
+- [⚑] [script] AC-P1-B: knowledge prompt/skill sub_type schema passes
   script: test — bunx vitest run packages/lore/tests/unit/core/schemas.test.ts
 
 ## Code anchors

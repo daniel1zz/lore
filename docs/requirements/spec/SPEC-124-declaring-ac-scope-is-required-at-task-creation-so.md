@@ -121,19 +121,19 @@ reviewer's reading.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-ACS-1: Creating a task under a plan whose spec declares at least one script-mode AC, with no --ac-scope, is refused and the message contains the literal --ac-scope.
+- [⚑] [script] AC-ACS-1: Creating a task under a plan whose spec declares at least one script-mode AC, with no --ac-scope, is refused and the message contains the literal --ac-scope.
   script: test — bunx vitest run packages/lore/tests/integration/cli/create-task-ac-scope.test.ts
-- [✔] [script] AC-ACS-2: The same creation with --ac-scope succeeds and the stored extra.ac_scope equals exactly the ids passed.
+- [⚑] [script] AC-ACS-2: The same creation with --ac-scope succeeds and the stored extra.ac_scope equals exactly the ids passed.
   script: test — bunx vitest run packages/lore/tests/integration/cli/create-task-ac-scope.test.ts
-- [✔] [script] AC-ACS-3: An explicitly empty --ac-scope succeeds and stores an EMPTY array, a state distinct from absent.
+- [⚑] [script] AC-ACS-3: An explicitly empty --ac-scope succeeds and stores an EMPTY array, a state distinct from absent.
   script: test — bunx vitest run packages/lore/tests/integration/cli/create-task-ac-scope.test.ts
-- [✔] [script] AC-ACS-4: A plan whose spec declares only ai/human-mode criteria, or none, accepts a task with no --ac-scope: the predicate passes vacuously and adds no friction.
+- [⚑] [script] AC-ACS-4: A plan whose spec declares only ai/human-mode criteria, or none, accepts a task with no --ac-scope: the predicate passes vacuously and adds no friction.
   script: test — bunx vitest run packages/lore/tests/integration/cli/create-task-ac-scope.test.ts
-- [✔] [script] AC-ACS-5: An --adhoc task with NO --ac-scope is REFUSED at exit 4, and the same call with --ac-scope "" exits 0 storing an EMPTY array: the ad-hoc branch is BOUND by the requiredness rule, keyed on the author's flag at the CLI layer rather than on a parent plan's spec. Reverses this criterion's original not-applicable-never-exempt reading, superseded 2026-08-03 by task-an-ad-hoc-task-can-never-reach-the-attestation-path-that — the old reading described a trigger that could never fire, which is what made --override-attestation routine for the dominant task shape.
+- [⚑] [script] AC-ACS-5: An --adhoc task with NO --ac-scope is REFUSED at exit 4, and the same call with --ac-scope "" exits 0 storing an EMPTY array: the ad-hoc branch is BOUND by the requiredness rule, keyed on the author's flag at the CLI layer rather than on a parent plan's spec. Reverses this criterion's original not-applicable-never-exempt reading, superseded 2026-08-03 by task-an-ad-hoc-task-can-never-reach-the-attestation-path-that — the old reading described a trigger that could never fire, which is what made --override-attestation routine for the dominant task shape.
   script: test — bunx vitest run packages/lore/tests/integration/cli/create-task-ac-scope.test.ts
-- [✔] [script] AC-ACS-7: The refusal enumerates the governing spec's script-mode criterion ids so the author can copy one rather than query for legal values.
+- [⚑] [script] AC-ACS-7: The refusal enumerates the governing spec's script-mode criterion ids so the author can copy one rather than query for legal values.
   script: test — bunx vitest run packages/lore/tests/integration/cli/create-task-ac-scope.test.ts
-- [✔] [script] AC-ACS-6: REGRESSION: lore verify with an ABSENT ac_scope plus an explicit --ac still runs the named ids and still writes runner-attested evidence, keeping the back-catalogue recovery path open.
+- [⚑] [script] AC-ACS-6: REGRESSION: lore verify with an ABSENT ac_scope plus an explicit --ac still runs the named ids and still writes runner-attested evidence, keeping the back-catalogue recovery path open.
   script: e2e — cd packages/lore && bun test tests/integration/cli/create-task-ac-scope-e2e.bun.test.ts
-- [✔] [script] AC-ACS-8: End-to-end: a task created under this rule is verified by lore verify and the resulting STORED evidence entry carries an attestation block, asserted on the entry itself rather than on a zero exit code.
+- [⚑] [script] AC-ACS-8: End-to-end: a task created under this rule is verified by lore verify and the resulting STORED evidence entry carries an attestation block, asserted on the entry itself rather than on a zero exit code.
   script: e2e — cd packages/lore && bun test tests/integration/cli/create-task-ac-scope-e2e.bun.test.ts

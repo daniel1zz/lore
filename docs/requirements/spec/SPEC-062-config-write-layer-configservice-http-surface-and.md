@@ -134,31 +134,31 @@ receives the corpus directory, not a store — config is file state, not
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-062-1: PATCH /api/dashboard/config with a patch touching any of the 4 CONFIG_DENY_KEYS returns VALIDATION_ERROR naming that key, and config.yaml sha256 is identical before and after
+- [⚑] [script] AC-062-1: PATCH /api/dashboard/config with a patch touching any of the 4 CONFIG_DENY_KEYS returns VALIDATION_ERROR naming that key, and config.yaml sha256 is identical before and after
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'deny keys'
-- [✔] [script] AC-062-2: GET /api/config emits 0 occurrences of a literal ai.http.headers.x-api-key value present in the on-disk config: the serialized response body does not contain that string
+- [⚑] [script] AC-062-2: GET /api/config emits 0 occurrences of a literal ai.http.headers.x-api-key value present in the on-disk config: the serialized response body does not contain that string
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'redaction'
 - [✘] [script] AC-062-3: PATCH with a stale If-Match hash returns HTTP status exactly 409 carrying the current hash, and leaves config.yaml byte-identical
   script: test — bunx vitest run packages/lore/tests/unit/http/config-routes.test.ts -t 'stale If-Match'
-- [✔] [script] AC-062-4: A successful PATCH changing sync.enabled returns restart_required containing exactly 1 entry equal to sync.enabled; a PATCH changing workflow.claim_ttl_minutes returns restart_required with exactly 0 entries
+- [⚑] [script] AC-062-4: A successful PATCH changing sync.enabled returns restart_required containing exactly 1 entry equal to sync.enabled; a PATCH changing workflow.claim_ttl_minutes returns restart_required with exactly 0 entries
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'restart_required'
 - [✘] [script] AC-062-5: PATCH /api/dashboard/config with a bearer token and no cookie returns HTTP status exactly 403 and writes 0 bytes to config.yaml
   script: test — bunx vitest run packages/lore/tests/unit/http/config-routes.test.ts -t 'bearer rejected'
-- [✔] [script] AC-062-6: A PATCH whose merged result fails the LoreConfig Zod schema is rejected with VALIDATION_ERROR and leaves config.yaml byte-identical, proving validate-then-write with 0 partial application
+- [⚑] [script] AC-062-6: A PATCH whose merged result fails the LoreConfig Zod schema is rejected with VALIDATION_ERROR and leaves config.yaml byte-identical, proving validate-then-write with 0 partial application
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'schema rejection'
-- [✔] [script] AC-062-7: Every accepted PATCH produces exactly 1 audit row naming the changed key set; a rejected PATCH produces exactly 0 audit rows
+- [⚑] [script] AC-062-7: Every accepted PATCH produces exactly 1 audit row naming the changed key set; a rejected PATCH produces exactly 0 audit rows
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'audit'
-- [✔] [script] AC-062-8: REGRESSION: the @lore/core default barrel imports exactly 0 Node builtins after adding config-editability.ts, asserted by the existing browser-safety source scan
+- [⚑] [script] AC-062-8: REGRESSION: the @lore/core default barrel imports exactly 0 Node builtins after adding config-editability.ts, asserted by the existing browser-safety source scan
   script: test — bunx vitest run packages/core/tests/browser-safety.test.ts
-- [✔] [script] AC-062-9: REPLACES AC-062-3 whose declared path packages/lore/tests/unit/http/ does not exist: a stale If-Match hash returns HTTP status exactly 409 with the current hash and leaves config.yaml byte-identical, with at least 1 matched test case
+- [⚑] [script] AC-062-9: REPLACES AC-062-3 whose declared path packages/lore/tests/unit/http/ does not exist: a stale If-Match hash returns HTTP status exactly 409 with the current hash and leaves config.yaml byte-identical, with at least 1 matched test case
   script: test — bunx vitest run packages/lore/tests/unit/adapters/http/config-routes.test.ts -t 'stale If-Match'
-- [✔] [script] AC-062-10: REPLACES AC-062-5 whose declared path does not exist: a bearer-token PATCH with no cookie returns HTTP status exactly 403 and writes exactly 0 bytes to config.yaml, with at least 1 matched test case
+- [⚑] [script] AC-062-10: REPLACES AC-062-5 whose declared path does not exist: a bearer-token PATCH with no cookie returns HTTP status exactly 403 and writes exactly 0 bytes to config.yaml, with at least 1 matched test case
   script: test — bunx vitest run packages/lore/tests/unit/adapters/http/config-routes.test.ts -t 'bearer rejected'
-- [✔] [script] AC-062-11: ConfigService.update accepts an expectedHash option and performs the staleness comparison itself: a concurrent writer changing config.yaml between the route precheck and the service write causes the second update to be rejected with 0 bytes written, proven by at least 2 test cases (matching hash accepted, mismatched hash rejected)
+- [⚑] [script] AC-062-11: ConfigService.update accepts an expectedHash option and performs the staleness comparison itself: a concurrent writer changing config.yaml between the route precheck and the service write causes the second update to be rejected with 0 bytes written, proven by at least 2 test cases (matching hash accepted, mismatched hash rejected)
   script: test — bunx vitest run packages/lore/tests/unit/service/config-service.test.ts -t 'expectedHash'
-- [✔] [script] AC-062-12: findDeniedConfigKeys denies a patch whose leaf path is a proper ancestor of any CONFIG_DENY_KEYS pattern — {ai:{providers:null}}, {ai:{providers:{}}}, {ai:{providers:[]}}, {verify:{env:null}} and {ai:null} each yield at least 1 denied key — while benign sibling patches such as {ai:{provider:'cli'}} and {workflow:{claim_ttl_minutes:30}} yield exactly 0; exactly 1 test file runs and exits 0
+- [⚑] [script] AC-062-12: findDeniedConfigKeys denies a patch whose leaf path is a proper ancestor of any CONFIG_DENY_KEYS pattern — {ai:{providers:null}}, {ai:{providers:{}}}, {ai:{providers:[]}}, {verify:{env:null}} and {ai:null} each yield at least 1 denied key — while benign sibling patches such as {ai:{provider:'cli'}} and {workflow:{claim_ttl_minutes:30}} yield exactly 0; exactly 1 test file runs and exits 0
   script: test — bunx vitest run packages/core/src/config-editability.test.ts
-- [✔] [script] AC-062-13: defaults.editor is a CONFIG_DENY_KEYS entry: findDeniedConfigKeys({defaults:{editor:'/tmp/evil.sh'}}) returns exactly 1 denied key and ConfigService.update rejects that patch writing exactly 0 bytes, closing the deferred-execution RCE where a cookie-authenticated PATCH sets the binary openEditor spawns on the next interactive lore create/set; exactly 2 test files run and exit 0
+- [⚑] [script] AC-062-13: defaults.editor is a CONFIG_DENY_KEYS entry: findDeniedConfigKeys({defaults:{editor:'/tmp/evil.sh'}}) returns exactly 1 denied key and ConfigService.update rejects that patch writing exactly 0 bytes, closing the deferred-execution RCE where a cookie-authenticated PATCH sets the binary openEditor spawns on the next interactive lore create/set; exactly 2 test files run and exit 0
   script: test — bunx vitest run packages/core/src/config-editability.test.ts packages/lore/tests/unit/service/config-service.test.ts
 
 ## Code anchors

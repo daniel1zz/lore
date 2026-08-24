@@ -125,17 +125,17 @@ of git/process probing (mirrors how `repoRoot` is injected today).
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-063-1: resolveVerifyExecutionRoot returns mode=worktree with the worktree root for git facts describing a linked worktree whose root differs from corpusRoot, and mode=corpus_root with corpusRoot for main-checkout facts, across at least 6 table-driven cases
+- [⚑] [script] AC-063-1: resolveVerifyExecutionRoot returns mode=worktree with the worktree root for git facts describing a linked worktree whose root differs from corpusRoot, and mode=corpus_root with corpusRoot for main-checkout facts, across at least 6 table-driven cases
   script: test — bunx vitest run packages/core/src/verify-execution-root.test.ts
-- [✔] [script] AC-063-2: REPRO: a verify run whose caller cwd is a linked worktree spawns its AC command with cwd exactly equal to that worktree root, proven by capturing the command's own pwd output and asserting string equality with the worktree root and inequality with the corpus root
+- [⚑] [script] AC-063-2: REPRO: a verify run whose caller cwd is a linked worktree spawns its AC command with cwd exactly equal to that worktree root, proven by capturing the command's own pwd output and asserting string equality with the worktree root and inequality with the corpus root
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-execution-root.test.ts -t 'REPRO'
-- [✔] [script] AC-063-3: REGRESSION: a verify run invoked from the main checkout spawns with cwd exactly equal to corpusRoot and its evidence record is byte-identical in all pre-existing fields to a pre-change run
+- [⚑] [script] AC-063-3: REGRESSION: a verify run invoked from the main checkout spawns with cwd exactly equal to corpusRoot and its evidence record is byte-identical in all pre-existing fields to a pre-change run
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-execution-root.test.ts -t 'REGRESSION'
-- [✔] [script] AC-063-4: When mode=worktree the verify stdout contains the resolved execution root on a line preceding the first AC result line; when mode=corpus_root the stdout contains exactly 0 execution-root lines
+- [⚑] [script] AC-063-4: When mode=worktree the verify stdout contains the resolved execution root on a line preceding the first AC result line; when mode=corpus_root the stdout contains exactly 0 execution-root lines
   script: test — bunx vitest run packages/lore/tests/unit/adapters/verify-render-execution-root.test.ts
-- [✔] [script] AC-063-5: attestation.execution_root and execution_mode are present on evidence written under this change, and an evidence record lacking both fields still parses against evidenceEntrySchema with 0 validation errors
+- [⚑] [script] AC-063-5: attestation.execution_root and execution_mode are present on evidence written under this change, and an evidence record lacking both fields still parses against evidenceEntrySchema with 0 validation errors
   script: test — bunx vitest run packages/core/src/task-workflow.test.ts -t 'execution_root'
-- [✔] [script] AC-063-6: lore verify --execution-root path spawns from exactly that path and reports it, overriding the inferred value in at least 2 cases covering main checkout and worktree
+- [⚑] [script] AC-063-6: lore verify --execution-root path spawns from exactly that path and reports it, overriding the inferred value in at least 2 cases covering main checkout and worktree
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-execution-root.test.ts -t 'explicit override'
 
 ## Code anchors

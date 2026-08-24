@@ -3,7 +3,7 @@ id: TASK-797
 type: task
 role: plan
 title: "skill-test: RED oracle for the two always-on advisories (line_length, target_distance)"
-status: draft
+status: archived
 priority: medium
 phase: "P4-always-on-advisories"
 created: 2026-08-23

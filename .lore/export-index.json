@@ -6620,6 +6620,18 @@
     "01M0QH6JJR3TE5YAA1HA1CF974": {
       "human_id": "KN-516",
       "file_path": "docs/requirements/knowledge/KN-516-handoff-agent-main-orchestrator.md"
+    },
+    "01M0RS83J85HWGRJRXM4FWAYJB": {
+      "human_id": "KN-517",
+      "file_path": "docs/requirements/knowledge/KN-517-handoff-agent-main-orchestrator.md"
+    },
+    "01M0QJJ8A97G1T2PAYJD5DXVRN": {
+      "human_id": "KN-518",
+      "file_path": "docs/requirements/knowledge/KN-518-a-declared-sole-entry-enforced-by-a-hand-written.md"
+    },
+    "01M0QHFTF89X2JJ3A1603TED1N": {
+      "human_id": "KN-519",
+      "file_path": "docs/requirements/knowledge/KN-519-assessment-implementation-claude-md-content-dimens.md"
     }
   }
 }

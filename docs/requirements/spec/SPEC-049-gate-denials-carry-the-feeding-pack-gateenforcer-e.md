@@ -64,13 +64,13 @@ Declared as structured ACs (`lore ac add`): typecheck clean; gate-related vitest
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-049-1: TypeScript strict typecheck passes across all packages
+- [⚑] [script] AC-049-1: TypeScript strict typecheck passes across all packages
   script: tsc — bun run typecheck
-- [✔] [script] AC-049-2: Gate-related unit suites pass (enforcer feed embedding, corpus-service spec-create enrichment, checkpoint registry regression)
+- [⚑] [script] AC-049-2: Gate-related unit suites pass (enforcer feed embedding, corpus-service spec-create enrichment, checkpoint registry regression)
   script: test — bunx vitest run packages/lore/tests/unit/service/gate-enforcer.test.ts packages/lore/tests/unit/service/checkpoint-registry.test.ts packages/lore/tests/unit/service/gate-feeding.test.ts
-- [✔] [script] AC-049-3: Full dual-runner suite green (vitest + bun test)
+- [⚑] [script] AC-049-3: Full dual-runner suite green (vitest + bun test)
   script: test — bun run test
-- [✔] [human] AC-049-4: Live repro: anchor-overlap lore claim denial on a scratch corpus prints conflicting holder + literal 'lore release <slug> --by <holder> --force' recovery command
+- [○] [human] AC-049-4: Live repro: anchor-overlap lore claim denial on a scratch corpus prints conflicting holder + literal 'lore release <slug> --by <holder> --force' recovery command
   human: Reproduce on a throwaway corpus (mkdtemp + lore init), never the repo corpus
 
 ## Code anchors

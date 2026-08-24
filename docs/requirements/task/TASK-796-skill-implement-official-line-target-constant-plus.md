@@ -3,7 +3,7 @@ id: TASK-796
 type: task
 role: plan
 title: "skill-implement: OFFICIAL_LINE_TARGET constant plus the line_length and target_distance always-on advisories"
-status: draft
+status: archived
 priority: medium
 phase: "P4-always-on-advisories"
 created: 2026-08-23

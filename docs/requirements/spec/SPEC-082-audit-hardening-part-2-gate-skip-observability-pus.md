@@ -110,15 +110,15 @@ Structured ACs via `lore ac add` (all script-mode); canonical test paths are con
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-080-1: GateEnforcer config-disabled skip writes a gate_skipped audit entry with mechanism config_disabled and correct checkpoint/actor/target; unwired port writes nothing; failing port never blocks the skip
+- [⚑] [script] AC-080-1: GateEnforcer config-disabled skip writes a gate_skipped audit entry with mechanism config_disabled and correct checkpoint/actor/target; unwired port writes nothing; failing port never blocks the skip
   script: test — bunx vitest run packages/lore/tests/unit/service/gate-skip-audit.test.ts
-- [✔] [script] AC-080-2: lore gate LORE_GATE_BYPASS=1 writes a gate_skipped entry with mechanism env_bypass when the corpus is reachable, prints the not-audited stderr line and still exits 0 when unreachable
+- [⚑] [script] AC-080-2: lore gate LORE_GATE_BYPASS=1 writes a gate_skipped entry with mechanism env_bypass when the corpus is reachable, prints the not-audited stderr line and still exits 0 when unreachable
   script: test — bunx vitest run packages/lore/tests/integration/cli/gate-bypass-audit.test.ts
-- [✔] [script] AC-080-3: hooks/pre-push and assets/project/pre-push are byte-identical and both invoke lore audit --verify
+- [⚑] [script] AC-080-3: hooks/pre-push and assets/project/pre-push are byte-identical and both invoke lore audit --verify
   script: test — bunx vitest run packages/lore/tests/unit/assets/pre-push-parity.test.ts
-- [✔] [script] AC-080-4: tamper suite gains the genesis-row deletion pin (new first row reports prev_link_mismatch) and the whole suite passes
+- [⚑] [script] AC-080-4: tamper suite gains the genesis-row deletion pin (new first row reports prev_link_mismatch) and the whole suite passes
   script: test — cd packages/lore && bun test tests/unit/store/audit-tamper.bun.test.ts
-- [✔] [script] AC-080-5: full regression passes: typecheck and both test runners exit 0
+- [⚑] [script] AC-080-5: full regression passes: typecheck and both test runners exit 0
   script: build — bun run typecheck && bun run test
 
 ## Code anchors

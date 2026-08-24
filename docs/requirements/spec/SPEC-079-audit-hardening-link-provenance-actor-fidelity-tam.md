@@ -128,19 +128,19 @@ are part of the contract — implementers create exactly these paths:
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-079-1: link/unlink/tree-fix provenance suite passes: every CorpusService.link and unlink call and every TreeCheckService applied repair writes exactly one audit entry with the documented action and details shape
+- [⚑] [script] AC-079-1: link/unlink/tree-fix provenance suite passes: every CorpusService.link and unlink call and every TreeCheckService applied repair writes exactly one audit entry with the documented action and details shape
   script: test — bunx vitest run packages/lore/tests/unit/service/link-provenance.test.ts
-- [✔] [script] AC-079-2: actor fidelity suite passes: create/set/delete audit entries and links.created_by carry the resolved actor; omitted by falls back to the resolveActorWithSource env chain
+- [⚑] [script] AC-079-2: actor fidelity suite passes: create/set/delete audit entries and links.created_by carry the resolved actor; omitted by falls back to the resolveActorWithSource env chain
   script: test — bunx vitest run packages/lore/tests/unit/service/audit-actor-fidelity.test.ts
-- [✔] [script] AC-079-3: chain construction suite passes: every audit insert path extends the hash chain; migration-009 backfills a legacy fixture DB into a verifiable chain; a fresh corpus verifies clean
+- [⚑] [script] AC-079-3: chain construction suite passes: every audit insert path extends the hash chain; migration-009 backfills a legacy fixture DB into a verifiable chain; a fresh corpus verifies clean
   script: test — cd packages/lore && bun test tests/unit/store/audit-chain.bun.test.ts
-- [✔] [script] AC-079-4: tamper detection suite passes: in-place UPDATE of one audit row yields hash_mismatch at that id; paired DELETE of versions+audit rows yields a chain break; a forged appended row yields prev_link_mismatch
+- [⚑] [script] AC-079-4: tamper detection suite passes: in-place UPDATE of one audit row yields hash_mismatch at that id; paired DELETE of versions+audit rows yields a chain break; a forged appended row yields prev_link_mismatch
   script: test — cd packages/lore && bun test tests/unit/store/audit-tamper.bun.test.ts
-- [✔] [script] AC-079-5: anchor roundtrip suite passes: lore audit anchor writes .lore/audit-anchor.json; verify consumes it; a rewritten chain is reported as anchor_mismatch
+- [⚑] [script] AC-079-5: anchor roundtrip suite passes: lore audit anchor writes .lore/audit-anchor.json; verify consumes it; a rewritten chain is reported as anchor_mismatch
   script: test — cd packages/lore && bun test tests/integration/audit-anchor.bun.test.ts
-- [✔] [script] AC-079-6: InMemoryStore chain parity suite passes: the in-memory store produces the identical chain semantics for all audit write paths
+- [⚑] [script] AC-079-6: InMemoryStore chain parity suite passes: the in-memory store produces the identical chain semantics for all audit write paths
   script: test — bunx vitest run packages/lore/tests/unit/store/in-memory-audit-chain.test.ts
-- [✔] [script] AC-079-7: full regression passes: typecheck and both test runners exit 0
+- [⚑] [script] AC-079-7: full regression passes: typecheck and both test runners exit 0
   script: build — bun run typecheck && bun run test
 
 ## Code anchors

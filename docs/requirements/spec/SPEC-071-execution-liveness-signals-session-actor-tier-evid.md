@@ -105,21 +105,21 @@ Structured ACs are authored via `lore ac add` (script-mode, exit-code oracles). 
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-069-1: Actor precedence chain resolves --by > LORE_ACTOR > session tier (agent:session-<id8> from CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID) > OS username, verified with literal env objects (no process.env mutation); ActorSource gains 'session'
+- [⚑] [script] AC-069-1: Actor precedence chain resolves --by > LORE_ACTOR > session tier (agent:session-<id8> from CLAUDE_CODE_SESSION_ID/CLAUDE_SESSION_ID) > OS username, verified with literal env objects (no process.env mutation); ActorSource gains 'session'
   script: test — bunx vitest run packages/lore/tests/unit/cli/actor-session-tier.test.ts
-- [✔] [script] AC-069-3: renewClaimForEvidence truth table: same-holder fresh -> renewed at=nowIso with branch/machine/worktree preserved; same-holder stale -> renewed; foreign holder -> null; absent claim -> null; input never mutated
+- [⚑] [script] AC-069-3: renewClaimForEvidence truth table: same-holder fresh -> renewed at=nowIso with branch/machine/worktree preserved; same-holder stale -> renewed; foreign holder -> null; absent claim -> null; input never mutated
   script: test — bunx vitest run packages/lore/tests/unit/core/renew-claim-for-evidence.test.ts
-- [✔] [script] AC-069-4: TaskWorkflowService.addEvidence renewal: same-holder evidence refreshes claim.at in ONE CAS write (doc version delta === 1), audit details carries claim_renewed=true, evidence recorded_at === renewed claim.at; foreign-holder evidence leaves extra.claim byte-identical; STALE_VERSION now()-seam recipe still passes (REGRESSION)
+- [⚑] [script] AC-069-4: TaskWorkflowService.addEvidence renewal: same-holder evidence refreshes claim.at in ONE CAS write (doc version delta === 1), audit details carries claim_renewed=true, evidence recorded_at === renewed claim.at; foreign-holder evidence leaves extra.claim byte-identical; STALE_VERSION now()-seam recipe still passes (REGRESSION)
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-evidence-renewal.test.ts
-- [✔] [script] AC-069-5: PhaseWorkflowService parity: identical renewal assertions (single version bump, claim_renewed audit detail, foreign-holder untouched) on the phase appendEvidenceEntry path
+- [⚑] [script] AC-069-5: PhaseWorkflowService parity: identical renewal assertions (single version bump, claim_renewed audit detail, foreign-holder untouched) on the phase appendEvidenceEntry path
   script: test — bunx vitest run packages/lore/tests/unit/service/phase-workflow-evidence-renewal.test.ts
-- [✔] [script] AC-069-6: deriveLastActivityAt is total (zero-task plan -> plan.updated_at; else max across plan+tasks); SessionService.bootstrap populates required last_activity_at on every active_plans entry; bootstrapReportSchema.parse throws when the field is absent (fail-loud)
+- [⚑] [script] AC-069-6: deriveLastActivityAt is total (zero-task plan -> plan.updated_at; else max across plan+tasks); SessionService.bootstrap populates required last_activity_at on every active_plans entry; bootstrapReportSchema.parse throws when the field is absent (fail-loud)
   script: test — bunx vitest run packages/lore/tests/unit/service/session-bootstrap-last-activity.test.ts
-- [✔] [script] AC-069-7: Whole-repo typecheck exits 0
+- [⚑] [script] AC-069-7: Whole-repo typecheck exits 0
   script: tsc — bun run typecheck
-- [✘] [script] AC-069-8: Both test runners exit 0 (vitest + bun test) — regression floor incl. ~33 bootstrap fixture migrations for the required F3 field
+- [⊘] [script] AC-069-8: Both test runners exit 0 (vitest + bun test) — regression floor incl. ~33 bootstrap fixture migrations for the required F3 field
   script: test — bun run test
-- [✔] [script] AC-069-2: sessionActorFromId produces agent:session-<8-char sanitized prefix>; sanitization collapses non-[a-z0-9-] runs to a single hyphen (sanitizeBranchSegment semantics) with leading/trailing hyphens trimmed; sanitize-to-empty input throws in core (fail-loud, never a bare prefix) and the CLI session tier catches it, degrading to os-fallback
+- [⚑] [script] AC-069-2: sessionActorFromId produces agent:session-<8-char sanitized prefix>; sanitization collapses non-[a-z0-9-] runs to a single hyphen (sanitizeBranchSegment semantics) with leading/trailing hyphens trimmed; sanitize-to-empty input throws in core (fail-loud, never a bare prefix) and the CLI session tier catches it, degrading to os-fallback
   script: test — bunx vitest run packages/lore/tests/unit/core/session-actor.test.ts
 
 ## Code anchors

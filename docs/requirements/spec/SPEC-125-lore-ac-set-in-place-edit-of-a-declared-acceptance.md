@@ -276,19 +276,19 @@ Declared after landing, per CLOSE-phase discipline — not here.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-ACS-1: lore ac set <spec> <id> --statement <new> exits 0
+- [⚑] [script] AC-ACS-1: lore ac set <spec> <id> --statement <new> exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-set.test.ts -t 'setCriterion returns ok on a valid edit'
-- [✔] [script] AC-ACS-2: lore ac set against an id absent from extra.acceptance_criteria exits 4 and stderr enumerates the ids that are declared on that spec
+- [⚑] [script] AC-ACS-2: lore ac set against an id absent from extra.acceptance_criteria exits 4 and stderr enumerates the ids that are declared on that spec
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-set.test.ts -t 'unknown id exits 4 naming declared ids'
-- [✔] [script] AC-ACS-6: after lore ac set on one criterion every other criterion on that spec is byte-identical and every other key of extra is unchanged
+- [⚑] [script] AC-ACS-6: after lore ac set on one criterion every other criterion on that spec is byte-identical and every other key of extra is unchanged
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-set.test.ts -t 'leaves sibling criteria and other extra keys untouched'
-- [✘] [script] AC-ACS-7: a corpus-wide integrity oracle reports zero dangling ac_ref, so every evidence row's ac_ref resolves to a criterion still declared on its spec, and it exits non-zero on a fixture corpus carrying one dangling reference
+- [⊘] [script] AC-ACS-7: a corpus-wide integrity oracle reports zero dangling ac_ref, so every evidence row's ac_ref resolves to a criterion still declared on its spec, and it exits non-zero on a fixture corpus carrying one dangling reference
   script: lint — bun scripts/check-ac-ref-integrity.ts
-- [✔] [script] AC-ACS-3: lore ac set with no field flag exits 2, stderr names at least --statement, and the document version is unchanged so no empty write occurred
+- [⚑] [script] AC-ACS-3: lore ac set with no field flag exits 2, stderr names at least --statement, and the document version is unchanged so no empty write occurred
   script: test — bunx vitest run packages/lore/tests/unit/adapters/cli-ac-set.test.ts -t 'no field flag exits 2'
-- [✔] [script] AC-ACS-4: lore ac set on an approved spec leaves it at status draft
+- [⚑] [script] AC-ACS-4: lore ac set on an approved spec leaves it at status draft
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-set.test.ts -t 'demotes an approved spec to draft'
-- [✔] [script] AC-ACS-5: a field flag the target criterion's mode does not define, such as --rubric against a script criterion, exits 4 with stderr naming both the flag and the criterion's actual mode
+- [⚑] [script] AC-ACS-5: a field flag the target criterion's mode does not define, such as --rubric against a script criterion, exits 4 with stderr naming both the flag and the criterion's actual mode
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-set.test.ts -t 'mode-inconsistent flag exits 4'
 - [·] [script] AC-ACS-8: after lore ac set <spec> <id> --statement <new>, a following lore ac list prints the new text for that id
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-set.test.ts -t 'lore ac list reflects the new statement after set'

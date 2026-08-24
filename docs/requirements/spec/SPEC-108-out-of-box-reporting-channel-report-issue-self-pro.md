@@ -98,21 +98,21 @@ Declared after landing (an undeclared path reads as an instant false `file_missi
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-OOB-1: Unconfigured consumer, non-TTY, no --auto-config: lore report-issue exits 4 and its stderr contains the literal --auto-config provision command; it contains ZERO occurrences of hand-edit YAML guidance (no 'corpus_path: /path/to' template line)
+- [⚑] [script] AC-OOB-1: Unconfigured consumer, non-TTY, no --auto-config: lore report-issue exits 4 and its stderr contains the literal --auto-config provision command; it contains ZERO occurrences of hand-edit YAML guidance (no 'corpus_path: /path/to' template line)
   script: test — cd packages/lore && bun test tests/integration/report-issue-provision.bun.test.ts -t 'AC-OOB-1'
-- [✔] [script] AC-OOB-2: Unconfigured consumer with --auto-config and a resolvable upstream: the command writes feedback.upstream into .lore/config.yaml, the written value parses clean under FeedbackConfigSchema, and the report lands as a draft task in the upstream corpus (exit 0)
+- [⚑] [script] AC-OOB-2: Unconfigured consumer with --auto-config and a resolvable upstream: the command writes feedback.upstream into .lore/config.yaml, the written value parses clean under FeedbackConfigSchema, and the report lands as a draft task in the upstream corpus (exit 0)
   script: test — cd packages/lore && bun test tests/integration/report-issue-provision.bun.test.ts -t 'AC-OOB-2'
-- [✔] [script] AC-OOB-3: --auto-config with an UNRESOLVABLE upstream exits 4 naming what could not be resolved, and the consumer .lore/config.yaml is byte-identical to its pre-invocation content (no silently written wrong path)
+- [⚑] [script] AC-OOB-3: --auto-config with an UNRESOLVABLE upstream exits 4 naming what could not be resolved, and the consumer .lore/config.yaml is byte-identical to its pre-invocation content (no silently written wrong path)
   script: test — cd packages/lore && bun test tests/integration/report-issue-provision.bun.test.ts -t 'AC-OOB-3'
-- [✔] [script] AC-OOB-4: Idempotent and non-destructive: on an ALREADY-configured corpus --auto-config leaves feedback.upstream byte-identical, and on an unconfigured corpus the provisioning write preserves every pre-existing top-level key in .lore/config.yaml
+- [⚑] [script] AC-OOB-4: Idempotent and non-destructive: on an ALREADY-configured corpus --auto-config leaves feedback.upstream byte-identical, and on an unconfigured corpus the provisioning write preserves every pre-existing top-level key in .lore/config.yaml
   script: test — cd packages/lore && bun test tests/integration/report-issue-provision.bun.test.ts -t 'AC-OOB-4'
-- [✔] [script] AC-OOB-5: Identity pin over path trust: a candidate repo that has a readable .lore/lore.db but whose root PRD does NOT match the expected lore root-PRD identity is REJECTED (exit 4) and no config is written
+- [⚑] [script] AC-OOB-5: Identity pin over path trust: a candidate repo that has a readable .lore/lore.db but whose root PRD does NOT match the expected lore root-PRD identity is REJECTED (exit 4) and no config is written
   script: test — cd packages/lore && bun test tests/integration/report-issue-provision.bun.test.ts -t 'AC-OOB-5'
-- [✘] [script] AC-OOB-6: Self-lock broken, both directions: an UNCONFIGURED consumer's gate-denial stderr carries exactly 1 provision-guidance line (pre-change baseline is 0), AND a CONFIGURED consumer's gate-denial stderr stays byte-identical to the SPEC-073 AC-073-1 baseline wording
+- [⊘] [script] AC-OOB-6: Self-lock broken, both directions: an UNCONFIGURED consumer's gate-denial stderr carries exactly 1 provision-guidance line (pre-change baseline is 0), AND a CONFIGURED consumer's gate-denial stderr stays byte-identical to the SPEC-073 AC-073-1 baseline wording
   script: test — cd packages/lore && bun test tests/unit/adapters/report-issue-hint.bun.test.ts -t 'AC-OOB-6'
-- [✔] [script] AC-OOB-7: bun run typecheck exits 0 across all packages
+- [⚑] [script] AC-OOB-7: bun run typecheck exits 0 across all packages
   script: tsc — bun run typecheck
-- [✔] [script] AC-OOB-8: Full two-runner suite exits 0: vitest (all test files) and bun test both green, no skipped-as-failure. This is the plan's Exit Criterion promoted to a declared AC so it is attested by the runner rather than self-reported by the closer
+- [⚑] [script] AC-OOB-8: Full two-runner suite exits 0: vitest (all test files) and bun test both green, no skipped-as-failure. This is the plan's Exit Criterion promoted to a declared AC so it is attested by the runner rather than self-reported by the closer
   script: test — bun run test
 
 ## Code anchors

@@ -53,13 +53,13 @@ Structured ACs via `lore ac add` (script:test):
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-FRESH-1: Closing a plan whose newest evidence/done audit timestamp is newer than its newest linked assessment is denied at plan-close, and the feeding pack names the exact lore assess re-run command
+- [⚑] [script] AC-FRESH-1: Closing a plan whose newest evidence/done audit timestamp is newer than its newest linked assessment is denied at plan-close, and the feeding pack names the exact lore assess re-run command
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-freshness.test.ts -t AC-FRESH-1
-- [✔] [script] AC-FRESH-2: The same plan closes cleanly once a newer assessment exists; a plan with no assessment at all is unaffected by this predicate
+- [⚑] [script] AC-FRESH-2: The same plan closes cleanly once a newer assessment exists; a plan with no assessment at all is unaffected by this predicate
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-freshness.test.ts -t AC-FRESH-2
-- [✔] [script] AC-FRESH-3: Cosmetic doc edits after an assessment (anchor add, link write, status change) do not trip the predicate; only evidence/done audit activity does
+- [⚑] [script] AC-FRESH-3: Cosmetic doc edits after an assessment (anchor add, link write, status change) do not trip the predicate; only evidence/done audit activity does
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-freshness.test.ts -t AC-FRESH-3
-- [✔] [script] AC-FRESH-4: lore assess on a plan whose stored assessment is already stale prints a loud advisory naming the newer activity and still writes the assessment, never refusing
+- [⚑] [script] AC-FRESH-4: lore assess on a plan whose stored assessment is already stale prints a loud advisory naming the newer activity and still writes the assessment, never refusing
   script: test — cd packages/lore && bun test tests/integration/cli/assessment-freshness.bun.test.ts -t AC-FRESH-4
-- [✔] [script] AC-FRESH-5: extra.assessment_freshness_exempt true WITH a non-empty reason short-circuits the predicate; the flag without a reason does not
+- [⚑] [script] AC-FRESH-5: extra.assessment_freshness_exempt true WITH a non-empty reason short-circuits the predicate; the flag without a reason does not
   script: test — bunx vitest run packages/lore/tests/unit/service/assessment-freshness.test.ts -t AC-FRESH-5

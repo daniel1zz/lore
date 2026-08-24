@@ -113,21 +113,21 @@ graph LR
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-S-1: core/seat.ts suite passes 0 failures across >=16 cases: naming/parsing round-trip, 4-class location table, assertSeatEntryReady matched pair (ready ok / blocked err), deriveResumeHint seat-scoped + corpus-global + null-when-none
+- [⚑] [script] AC-S-1: core/seat.ts suite passes 0 failures across >=16 cases: naming/parsing round-trip, 4-class location table, assertSeatEntryReady matched pair (ready ok / blocked err), deriveResumeHint seat-scoped + corpus-global + null-when-none
   script: test — bunx vitest run packages/lore/tests/unit/core/seat.test.ts
-- [✔] [script] AC-S-2: SeatService fake-GitPort suite: entry sequence order asserted, dirty main typed err, mid-sequence failure (rebase ok then worktreeAdd throws) errs naming the step AND second enter retry succeeds, unmerged remove err / merged remove ok matched pair, 0 failures
+- [⚑] [script] AC-S-2: SeatService fake-GitPort suite: entry sequence order asserted, dirty main typed err, mid-sequence failure (rebase ok then worktreeAdd throws) errs naming the step AND second enter retry succeeds, unmerged remove err / merged remove ok matched pair, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/service/seat-service.test.ts
-- [✔] [script] AC-S-3: resume equivalence classes pass: existing session-service.test.ts resume_hint assertions byte-unchanged (frozen baseline), seat -> plan-scoped hint, task-worktree-under-seat -> parent seat plan, detached -> corpus-global plus seat_unresolved warning, 0 failures
+- [⚑] [script] AC-S-3: resume equivalence classes pass: existing session-service.test.ts resume_hint assertions byte-unchanged (frozen baseline), seat -> plan-scoped hint, task-worktree-under-seat -> parent seat plan, detached -> corpus-global plus seat_unresolved warning, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/service/session-service.test.ts
-- [✔] [script] AC-S-4: hook spawned-subprocess suite: seat-worktree session invocation log contains --seat-branch with the branch value, main-checkout invocation log byte-unchanged, 0 failures
+- [⚑] [script] AC-S-4: hook spawned-subprocess suite: seat-worktree session invocation log contains --seat-branch with the branch value, main-checkout invocation log byte-unchanged, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/hooks/session-seat-injection.test.ts
-- [✔] [script] AC-S-5: sanitizer parity: seat-branch-sanitize.golden.json fixture consumed by BOTH hook suite and core suite with all pairs passing in both runners, 0 failures
+- [⚑] [script] AC-S-5: sanitizer parity: seat-branch-sanitize.golden.json fixture consumed by BOTH hook suite and core suite with all pairs passing in both runners, 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/core/seat.test.ts packages/lore/tests/unit/hooks/session-seat-injection.test.ts
-- [✔] [script] AC-S-6: RealGitPort integration against a real mkdtemp git repo: worktreeAdd -> isDirty -> isMerged -> worktreeRemove round-trip plus squash-merge and detached-entry porcelain parsing cases, 0 failures
+- [⚑] [script] AC-S-6: RealGitPort integration against a real mkdtemp git repo: worktreeAdd -> isDirty -> isMerged -> worktreeRemove round-trip plus squash-merge and detached-entry porcelain parsing cases, 0 failures
   script: test — bunx vitest run packages/lore/tests/integration/real-git-port.test.ts
-- [✔] [script] AC-S-7: seat list --json emits branch, created_at and merged fields per seat on a fake-GitPort fixture (G13 cost counter-metric data surface), 0 failures
+- [⚑] [script] AC-S-7: seat list --json emits branch, created_at and merged fields per seat on a fake-GitPort fixture (G13 cost counter-metric data surface), 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/cli/seat-list.test.ts
-- [✔] [script] AC-S-8: bun run typecheck exits 0 across all packages
+- [⚑] [script] AC-S-8: bun run typecheck exits 0 across all packages
   script: build — bun run typecheck
 
 ## Code anchors

@@ -71,23 +71,23 @@ Thin glue over existing conventions: services return `Result`, ports injected (F
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-046-A: Pure-fn suite green: setup-manifest schema, planInstall, mergeSettings (malformed existing JSON returns err), register-mcp args builder — six-dimension coverage
+- [⚑] [script] AC-046-A: Pure-fn suite green: setup-manifest schema, planInstall, mergeSettings (malformed existing JSON returns err), register-mcp args builder — six-dimension coverage
   script: test — bunx vitest run packages/lore/tests/unit/core/setup-pure.test.ts
-- [✔] [script] AC-046-B: SetupService lifecycle green: fake-fs fault injection (partial-write honesty, re-run convergence) + mkdtemp roundtrip; invariants I1-I5 each have a dedicated test
+- [⚑] [script] AC-046-B: SetupService lifecycle green: fake-fs fault injection (partial-write honesty, re-run convergence) + mkdtemp roundtrip; invariants I1-I5 each have a dedicated test
   script: test — bunx vitest run packages/lore/tests/unit/service/setup-service.test.ts
-- [✔] [script] AC-046-C: ProjectSetupService scaffold green: init + g1-g4 hooks + pre-push + lore.tree.yaml + core.hooksPath in a throwaway git repo
+- [⚑] [script] AC-046-C: ProjectSetupService scaffold green: init + g1-g4 hooks + pre-push + lore.tree.yaml + core.hooksPath in a throwaway git repo
   script: test — bunx vitest run packages/lore/tests/unit/service/project-setup-service.test.ts
-- [✔] [script] AC-046-D: Asset SSOT conformance: assets/ tree contains every declared skill/agent/hook/governance/project file; governance snippet parses standalone
+- [⚑] [script] AC-046-D: Asset SSOT conformance: assets/ tree contains every declared skill/agent/hook/governance/project file; governance snippet parses standalone
   script: test — bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts
-- [✘] [script] AC-046-E: Full regression stays green (typecheck + both test runners)
+- [⊘] [script] AC-046-E: Full regression stays green (typecheck + both test runners)
   script: build — bun run typecheck && bun run test
 - [·] [human] AC-046-F: Sandbox smoke on owner machine: lore setup --claude-dir $(mktemp -d) → receipt correct → re-run all-skipped → --uninstall returns dir to pre-install state
   human: Never run against the real ~/.claude; mktemp sandbox only
-- [✔] [script] AC-046-SG1: lore setup --dry-run --json output contains exactly 1 hook-file write entry with path ending 'subagent-stop-commit-guard.mjs' AND exactly 1 SubagentStop settings.json hook-command entry containing 'subagent-stop-commit-guard.mjs'
+- [○] [script] AC-046-SG1: lore setup --dry-run --json output contains exactly 1 hook-file write entry with path ending 'subagent-stop-commit-guard.mjs' AND exactly 1 SubagentStop settings.json hook-command entry containing 'subagent-stop-commit-guard.mjs'
   script: other — bun run dev -- setup --dry-run --json --claude-dir /tmp/fake-claude-dir-sg
-- [✔] [script] AC-046-SG2: bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts reports 'Test Files 2 passed (2)' with 0 failures after subagent-stop-commit-guard.mjs is added to both manifests
+- [○] [script] AC-046-SG2: bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts reports 'Test Files 2 passed (2)' with 0 failures after subagent-stop-commit-guard.mjs is added to both manifests
   script: test — bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts packages/lore/tests/unit/adapters/real-setup-ports.test.ts
-- [✔] [script] AC-046-SG3: sha256 of assets/hooks/subagent-stop-commit-guard.mjs equals sha256 of ~/.claude/hooks/subagent-stop-commit-guard.mjs, 0 byte diff
+- [○] [script] AC-046-SG3: sha256 of assets/hooks/subagent-stop-commit-guard.mjs equals sha256 of ~/.claude/hooks/subagent-stop-commit-guard.mjs, 0 byte diff
   script: other — diff <(shasum -a 256 assets/hooks/subagent-stop-commit-guard.mjs | cut -d' ' -f1) <(shasum -a 256 ~/.claude/hooks/subagent-stop-commit-guard.mjs | cut -d' ' -f1)
 
 ## Code anchors

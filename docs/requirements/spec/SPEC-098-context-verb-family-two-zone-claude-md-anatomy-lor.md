@@ -6,7 +6,7 @@ title: "Context verb family — two-zone CLAUDE.md anatomy, lore context init re
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-08-23
 tags: [claude-md, context, distribution, governance]
 parent: PRD-001
 links:
@@ -169,23 +169,23 @@ One direction only: core ← service ← flows ← adapters. No cycles.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-CTX-1: Projection/splice unit suite passes: five-state transitions including diverged_skip on fingerprint hash mismatch, splice idempotency (second apply of identical sections is byte-identical), and Z2 byte-preservation on every code path
+- [⚑] [script] AC-CTX-1: Projection/splice unit suite passes: five-state transitions including diverged_skip on fingerprint hash mismatch, splice idempotency (second apply of identical sections is byte-identical), and Z2 byte-preservation on every code path
   script: test — bunx vitest run packages/lore/tests/unit/service/context-projection.test.ts
-- [✔] [script] AC-CTX-2: Admission-check unit suite passes: reference_missing findings fire for backtick-quoted repo-relative paths that do not exist and stay silent for existing paths and URL-scheme tokens; detectNarrativeSmells findings are emitted as advisory and never alter the deterministic finding set or exit-relevant output
+- [⚑] [script] AC-CTX-2: Admission-check unit suite passes: reference_missing findings fire for backtick-quoted repo-relative paths that do not exist and stay silent for existing paths and URL-scheme tokens; detectNarrativeSmells findings are emitted as advisory and never alter the deterministic finding set or exit-relevant output
   script: test — bunx vitest run packages/lore/tests/unit/service/claude-md-admission.test.ts
-- [✘] [script] AC-CTX-3: Compiled-binary e2e passes in a temp repo: lore context init without a usable AI provider exits 0, writes a skeleton, and prints a warning on stderr; an immediately following lore context refresh is byte-identical (idempotent); a hand-edit inside a managed section makes the next refresh report diverged_skip and leave the file bytes untouched
+- [⊘] [script] AC-CTX-3: Compiled-binary e2e passes in a temp repo: lore context init without a usable AI provider exits 0, writes a skeleton, and prints a warning on stderr; an immediately following lore context refresh is byte-identical (idempotent); a hand-edit inside a managed section makes the next refresh report diverged_skip and leave the file bytes untouched
   script: e2e — cd packages/lore && bun test tests/e2e/context-verbs-compiled.bun.test.ts
-- [✘] [script] AC-CTX-4: Splice SSOT holds: setup-project-flow imports spliceManagedSections from context-projection (grep-pin asserts no second marker-splice implementation remains) and the existing setup e2e suite stays green
+- [⊘] [script] AC-CTX-4: Splice SSOT holds: setup-project-flow imports spliceManagedSections from context-projection (grep-pin asserts no second marker-splice implementation remains) and the existing setup e2e suite stays green
   script: test — bunx vitest run packages/lore/tests/unit/flows/setup-splice-ssot.test.ts
-- [✘] [script] AC-CTX-5: Guard hook trips end-to-end in a temp repo: the PostToolUse hook script emits blocking feedback (non-zero) for an over-ceiling memory file, exits 0 when lore or .lore is absent (fail-open), and contains zero numeric budget literals (grep-pin)
+- [⊘] [script] AC-CTX-5: Guard hook trips end-to-end in a temp repo: the PostToolUse hook script emits blocking feedback (non-zero) for an over-ceiling memory file, exits 0 when lore or .lore is absent (fail-open), and contains zero numeric budget literals (grep-pin)
   script: e2e — cd packages/lore && bun test tests/integration/claude-md-guard-hook-trip.bun.test.ts
-- [✘] [script] AC-CTX-6: Skill retirement completes end-to-end: on a fixture with a previously-installed lore-init-context skill, lore setup removes the installed copy, and the embedded assets manifest check exits 0
+- [⊘] [script] AC-CTX-6: Skill retirement completes end-to-end: on a fixture with a previously-installed lore-init-context skill, lore setup removes the installed copy, and the embedded assets manifest check exits 0
   script: e2e — cd packages/lore && bun test tests/integration/init-context-skill-retirement.bun.test.ts && node ../../scripts/embed-assets-manifest.mjs --check
-- [✔] [script] AC-CTX-7: Full gates pass: bun run typecheck exits 0 and both test runners (vitest suite and bun test suite) exit 0
+- [⚑] [script] AC-CTX-7: Full gates pass: bun run typecheck exits 0 and both test runners (vitest suite and bun test suite) exit 0
   script: test — bun run typecheck && bun run test
-- [✔] [script] AC-CTX-8: Refresh pre-write admission: contextRefresh runs the claude-md ceiling admission check (same max_lines/max_bytes source as lore status --check-claude-md) on the SPLICED candidate BEFORE writing; a would-be breach performs NO write and returns a loud non-ok Result naming the findings; a within-budget splice writes as before (byte-identical to pre-change behavior)
+- [⚑] [script] AC-CTX-8: Refresh pre-write admission: contextRefresh runs the claude-md ceiling admission check (same max_lines/max_bytes source as lore status --check-claude-md) on the SPLICED candidate BEFORE writing; a would-be breach performs NO write and returns a loud non-ok Result naming the findings; a within-budget splice writes as before (byte-identical to pre-change behavior)
   script: test — bunx vitest run packages/lore/tests/unit/flows/context-flow.test.ts
-- [✔] [script] AC-CTX-9: Module-index walk hygiene: collectContextFacts skips (a) every dot-directory by default and (b) every directory matched by .gitignore semantics (root and nested .gitignore files, including negation patterns), sourced via FsReadPort reads only — no child_process; the static EXCLUDED_DIR_BASENAMES denylist is retained as fallback for repos without .gitignore. Regression pins the incident: a tree containing gitignored dist-npm/ and dot-dir .serena/cache never yields those paths in moduleIndex
+- [⚑] [script] AC-CTX-9: Module-index walk hygiene: collectContextFacts skips (a) every dot-directory by default and (b) every directory matched by .gitignore semantics (root and nested .gitignore files, including negation patterns), sourced via FsReadPort reads only — no child_process; the static EXCLUDED_DIR_BASENAMES denylist is retained as fallback for repos without .gitignore. Regression pins the incident: a tree containing gitignored dist-npm/ and dot-dir .serena/cache never yields those paths in moduleIndex
   script: test — bunx vitest run packages/lore/tests/unit/service/context-facts.test.ts
 
 ## Code anchors
@@ -194,8 +194,8 @@ One direction only: core ← service ← flows ← adapters. No cycles.
 - packages/core/src/fs-ports.ts
 - packages/lore/src/service/context-projection.ts#spliceManagedSections
 - packages/lore/src/service/context-facts.ts#collectContextFacts
-- packages/lore/src/service/claude-md-check.ts#checkReferenceExistence
 - packages/lore/src/flows/context-flow.ts
 - packages/lore/src/adapters/cli/commands/context.ts
 - packages/lore/src/ai/context-narrative-template.ts
 - assets/hooks/claude-md-guard.sh
+- packages/lore/src/service/claude-md-admission.ts#checkReferenceExistence

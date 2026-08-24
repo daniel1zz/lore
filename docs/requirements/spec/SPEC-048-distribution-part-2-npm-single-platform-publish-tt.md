@@ -107,13 +107,13 @@ Structured ACs (AC-as-code) attached via `lore ac add`; summary:
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-048-A: Unit oracles green: platform-map structured output (+build.ts REGRESSION parity), buildPublishPlan staging map + generated manifest (bin/os/cpu/files), postinstall decide() TTY×CI matrix, publish-pipeline orchestration with fake Publisher (npmPublish NEVER called without --publish), zero-dep postinstall conformance
+- [⚑] [script] AC-048-A: Unit oracles green: platform-map structured output (+build.ts REGRESSION parity), buildPublishPlan staging map + generated manifest (bin/os/cpu/files), postinstall decide() TTY×CI matrix, publish-pipeline orchestration with fake Publisher (npmPublish NEVER called without --publish), zero-dep postinstall conformance
   script: test — bunx vitest run packages/lore/tests/unit/distribution
-- [✔] [script] AC-048-B: Bare (dry-run) publish pipeline stages a-c pass on this machine: staged binary --version OK, lore setup --dry-run resolves STAGED assets, npm pack --dry-run file list exact, tar -tvf shows dist/lore executable, size <150MB
+- [⚑] [script] AC-048-B: Bare (dry-run) publish pipeline stages a-c pass on this machine: staged binary --version OK, lore setup --dry-run resolves STAGED assets, npm pack --dry-run file list exact, tar -tvf shows dist/lore executable, size <150MB
   script: e2e — bun run scripts/publish-npm.ts
-- [✔] [script] AC-048-C: npm-layout install simulation without registry: npm i <packed .tgz> into throwaway prefix; node_modules/.bin/lore --version works THROUGH the symlink (realpath fix proven); lore setup --dry-run finds assets from installed location; postinstall emitted one-line nudge (non-TTY), install exit 0
+- [⚑] [script] AC-048-C: npm-layout install simulation without registry: npm i <packed .tgz> into throwaway prefix; node_modules/.bin/lore --version works THROUGH the symlink (realpath fix proven); lore setup --dry-run finds assets from installed location; postinstall emitted one-line nudge (non-TTY), install exit 0
   script: e2e — bunx vitest run packages/lore/tests/integration/npm-install-simulation.test.ts
-- [✘] [script] AC-048-D: Repo-wide regression green (typecheck + both test runners)
+- [⊘] [script] AC-048-D: Repo-wide regression green (typecheck + both test runners)
   script: build — bun run typecheck && bun run test
 - [·] [human] AC-048-E: Owner performs one real beta install from the packed tarball on a teammate-equivalent machine and records the receipt
   human: supervised posture, same as SPEC-046 real-machine install; deferred to owner acceptance

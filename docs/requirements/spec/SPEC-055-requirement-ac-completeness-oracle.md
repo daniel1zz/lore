@@ -119,17 +119,17 @@ during development.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-055-1: requirementSchema parses a well-formed R-1 P0 requirement and rejects one with out-of-enum priority and one with a malformed id (no R- prefix); test >=1 accept and >=2 reject cases exit 0
+- [⚑] [script] AC-055-1: requirementSchema parses a well-formed R-1 P0 requirement and rejects one with out-of-enum priority and one with a malformed id (no R- prefix); test >=1 accept and >=2 reject cases exit 0
   script: test — bunx vitest run packages/core/tests/unit/requirement.test.ts packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-055-2: prdRequirementsSchema rejects an array with two entries sharing an id and acceptanceCriterionSchema accepts an optional requirement_refs (absent still parses REGRESSION); test exit 0
+- [⚑] [script] AC-055-2: prdRequirementsSchema rejects an array with two entries sharing an id and acceptanceCriterionSchema accepts an optional requirement_refs (absent still parses REGRESSION); test exit 0
   script: test — bunx vitest run packages/core/tests/unit/requirement.test.ts packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-055-3: computeRequirementCoverage returns empty uncovered when every requirement id appears in refs, non-empty uncovered_p0 when a P0 id appears in no ref, and all-empty for an empty requirements array; truth-table test >=3 cases exit 0
+- [⚑] [script] AC-055-3: computeRequirementCoverage returns empty uncovered when every requirement id appears in refs, non-empty uncovered_p0 when a P0 id appears in no ref, and all-empty for an empty requirements array; truth-table test >=3 cases exit 0
   script: test — bunx vitest run packages/core/tests/unit/requirement.test.ts packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-055-4: requirementCoverageExitCode returns 3 iff uncovered_p0 is non-empty else 0; both-branch test exit 0
+- [⚑] [script] AC-055-4: requirementCoverageExitCode returns 3 iff uncovered_p0 is non-empty else 0; both-branch test exit 0
   script: test — bunx vitest run packages/core/tests/unit/requirement.test.ts packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-055-5: RequirementService.addRequirement then listRequirements round-trips the requirement on prd.extra.requirements preserving other extra keys and removeRequirement drops it; store round-trip test exit 0
+- [⚑] [script] AC-055-5: RequirementService.addRequirement then listRequirements round-trips the requirement on prd.extra.requirements preserving other extra keys and removeRequirement drops it; store round-trip test exit 0
   script: test — bunx vitest run packages/core/tests/unit/requirement.test.ts packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-055-6: CorpusService.computeRequirementCoverageForPrd gathers a descendant spec AC requirement_refs and reports a PRD requirement covered iff some descendant AC references it, uncovered otherwise; multi-doc store test exit 0
+- [⚑] [script] AC-055-6: CorpusService.computeRequirementCoverageForPrd gathers a descendant spec AC requirement_refs and reports a PRD requirement covered iff some descendant AC references it, uncovered otherwise; multi-doc store test exit 0
   script: test — bunx vitest run packages/core/tests/unit/requirement.test.ts packages/lore/tests/unit/service/requirement-service.test.ts
-- [✔] [script] AC-055-7: AcService.addCriterion accepts and persists a requirement_refs value round-tripped via listCriteria and a criterion with no requirement_refs still validates REGRESSION; test exit 0
+- [⚑] [script] AC-055-7: AcService.addCriterion accepts and persists a requirement_refs value round-tripped via listCriteria and a criterion with no requirement_refs still validates REGRESSION; test exit 0
   script: test — bunx vitest run packages/core/tests/unit/requirement.test.ts packages/lore/tests/unit/service/requirement-service.test.ts

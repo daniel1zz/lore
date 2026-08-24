@@ -51,17 +51,17 @@ The lint is the hard gate; the AI judge is advisory. `lintAcQuantifiability` mir
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-ACQ-1: lintAcQuantifiability returns >=1 block finding for an AC statement with an abstract word and 0 measurable token, and exactly 0 findings when rewritten with a numeric threshold
+- [⚑] [script] AC-ACQ-1: lintAcQuantifiability returns >=1 block finding for an AC statement with an abstract word and 0 measurable token, and exactly 0 findings when rewritten with a numeric threshold
   script: test — bunx vitest run packages/core/tests/unit/ac-quality.test.ts
-- [✔] [script] AC-ACQ-2: ac-quality.ts imports no AIProvider/generate symbol and issues 0 provider calls; source-scan test asserts grep finds no AIProvider in the module
+- [⚑] [script] AC-ACQ-2: ac-quality.ts imports no AIProvider/generate symbol and issues 0 provider calls; source-scan test asserts grep finds no AIProvider in the module
   script: test — bun test packages/core/tests/unit/ac-quality-no-llm.bun.test.ts
-- [✔] [script] AC-ACQ-3: spec-create with an AC carrying an unquantified abstract word exits 4 with a feeding pack naming the offending AC id; same spec with all ACs quantified exits 0
+- [⚑] [script] AC-ACQ-3: spec-create with an AC carrying an unquantified abstract word exits 4 with a feeding pack naming the offending AC id; same spec with all ACs quantified exits 0
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-quantifiable-gate.test.ts
-- [✔] [script] AC-ACQ-4: with workflow.gates.spec-create.ac_quantifiable.enabled false, a spec that AC-ACQ-3 would block passes with exit 0
+- [⚑] [script] AC-ACQ-4: with workflow.gates.spec-create.ac_quantifiable.enabled false, a spec that AC-ACQ-3 would block passes with exit 0
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-quantifiable-gate.test.ts -t config-escape
-- [✔] [script] AC-ACQ-5: a spec-create with provider absent still passes the deterministic gate for a quantified spec; the gate path issues 0 provider calls; AI vagueness check runs only under lore review
+- [⚑] [script] AC-ACQ-5: a spec-create with provider absent still passes the deterministic gate for a quantified spec; the gate path issues 0 provider calls; AI vagueness check runs only under lore review
   script: test — bunx vitest run packages/lore/tests/unit/service/ac-quantifiable-gate.test.ts -t advisory-only
-- [✔] [script] AC-ACQ-6: this spec's own declared acceptance_criteria produce 0 block findings from lintAcQuantifiability
+- [⚑] [script] AC-ACQ-6: this spec's own declared acceptance_criteria produce 0 block findings from lintAcQuantifiability
   script: test — bunx vitest run packages/core/tests/unit/ac-quality.test.ts -t dogfood-self-application
-- [✔] [script] AC-ACQ-7: lintStatement rejects a match hyphen-adjacent to a bare AC_ABSTRACT_WORDS entry (e.g. "fast-track", "best-effort") while still blocking that same word standalone (e.g. "the dashboard loads fast") and continuing to clear suffix collisions ("breakfast", "faster")
+- [⚑] [script] AC-ACQ-7: lintStatement rejects a match hyphen-adjacent to a bare AC_ABSTRACT_WORDS entry (e.g. "fast-track", "best-effort") while still blocking that same word standalone (e.g. "the dashboard loads fast") and continuing to clear suffix collisions ("breakfast", "faster")
   script: test — bunx vitest run packages/core/tests/unit/ac-quality.test.ts -t hyphen-adjacency-bound

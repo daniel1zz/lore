@@ -82,19 +82,19 @@ Coverage rule: an oracle kind is covered IFF ≥1 declared AC has `verify.mode =
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-V-1: checkOracleCoverage suite passes 0 failures across >=12 cases: floor met (HAPPY), ai-mode AC does NOT satisfy a floor (NEGATIVE), empty criteria vs unconfigured profile distinct outcomes (BOUNDARY), unknown oracle kind in config yields typed schema err (ERROR)
+- [⚑] [script] AC-V-1: checkOracleCoverage suite passes 0 failures across >=12 cases: floor met (HAPPY), ai-mode AC does NOT satisfy a floor (NEGATIVE), empty criteria vs unconfigured profile distinct outcomes (BOUNDARY), unknown oracle kind in config yields typed schema err (ERROR)
   script: test — bunx vitest run packages/lore/tests/unit/core/verification-profile.test.ts
-- [✔] [script] AC-V-2: spec-promote gate matched pair: design spec with 0 e2e-bound ACs blocked with pack naming e2e AND same spec plus one e2e script AC promotes ok; unconfigured corpus byte-identical to frozen fixture spec-promote-unconfigured-baseline.json; oracle_coverage.enabled false disables with profile configured; 0 failures
+- [⚑] [script] AC-V-2: spec-promote gate matched pair: design spec with 0 e2e-bound ACs blocked with pack naming e2e AND same spec plus one e2e script AC promotes ok; unconfigured corpus byte-identical to frozen fixture spec-promote-unconfigured-baseline.json; oracle_coverage.enabled false disables with profile configured; 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/service/oracle-coverage-gate.test.ts
-- [✔] [script] AC-V-3: plan-promote requires_uat: design-spec plan without requires_uat blocked with repair command, with requires_uat true promotes ok, feature-spec plan unaffected, and promoted plan archives end-to-end through the SPEC-054 plan-close uatP0Accepted gate; 0 failures
+- [⚑] [script] AC-V-3: plan-promote requires_uat: design-spec plan without requires_uat blocked with repair command, with requires_uat true promotes ok, feature-spec plan unaffected, and promoted plan archives end-to-end through the SPEC-054 plan-close uatP0Accepted gate; 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/service/requires-uat-gate.test.ts
-- [✔] [script] AC-V-4: NEW assets/project/lore-config-template.yaml exists, parses with verificationProfileSchema, contains design->e2e feature->test tech->test blocks, and a scaffolded corpus config contains the block (dedicated verification-profile-template.test.ts); 0 failures
+- [⚑] [script] AC-V-4: NEW assets/project/lore-config-template.yaml exists, parses with verificationProfileSchema, contains design->e2e feature->test tech->test blocks, and a scaffolded corpus config contains the block (dedicated verification-profile-template.test.ts); 0 failures
   script: test — bunx vitest run packages/lore/tests/unit/setup/verification-profile-template.test.ts
-- [✔] [script] AC-V-5: bun run typecheck exits 0 across all packages
+- [⚑] [script] AC-V-5: bun run typecheck exits 0 across all packages
   script: build — bun run typecheck
-- [✘] [script] AC-V-6: lore create plan --requires-uat sets extra.requires_uat===true; the flag is plan-type-only and passing it on any non-plan type exits 4 naming the mismatch; a plan created without it has no requires_uat key. At least 1 CLI test case runs and exits 0
+- [⊘] [script] AC-V-6: lore create plan --requires-uat sets extra.requires_uat===true; the flag is plan-type-only and passing it on any non-plan type exits 4 naming the mismatch; a plan created without it has no requires_uat key. At least 1 CLI test case runs and exits 0
   script: test — cd packages/lore && bun test tests/unit/adapters/cli-create.bun.test.ts
-- [✔] [script] AC-V-7: MCP lore_create accepts a requires_uat boolean with plan-only semantics identical to the CLI flag (sets extra.requires_uat===true on a plan; ignored-or-rejected consistently on non-plan types), so an agent creating a design-parented plan over MCP can satisfy the plan-promote requiresUat gate. At least 1 MCP test case runs and exits 0
+- [⚑] [script] AC-V-7: MCP lore_create accepts a requires_uat boolean with plan-only semantics identical to the CLI flag (sets extra.requires_uat===true on a plan; ignored-or-rejected consistently on non-plan types), so an agent creating a design-parented plan over MCP can satisfy the plan-promote requiresUat gate. At least 1 MCP test case runs and exits 0
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-tools.test.ts
 
 ## Code anchors

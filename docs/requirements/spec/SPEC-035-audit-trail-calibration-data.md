@@ -170,7 +170,7 @@ HAPPY (judge → judgment persisted → pending badge; approve on judged doc →
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-AUDIT-ACTOR-1: resolveActor emits exactly 1 non-blocking stderr advisory (naming --by / LORE_ACTOR as the fix) at most once per process ONLY when the actor falls to the OS-username default (no --by, no $LORE_ACTOR); an explicit --by value OR a set $LORE_ACTOR yields exactly 0 advisory lines; the resolved actor string and the caller's exit code are byte-identical to before in all three cases; at least 1 test file runs and exits 0
+- [⚑] [script] AC-AUDIT-ACTOR-1: resolveActor emits exactly 1 non-blocking stderr advisory (naming --by / LORE_ACTOR as the fix) at most once per process ONLY when the actor falls to the OS-username default (no --by, no $LORE_ACTOR); an explicit --by value OR a set $LORE_ACTOR yields exactly 0 advisory lines; the resolved actor string and the caller's exit code are byte-identical to before in all three cases; at least 1 test file runs and exits 0
   script: test — bunx vitest run packages/lore/tests/unit/adapters/cli-utils.test.ts
 
 ## Code anchors

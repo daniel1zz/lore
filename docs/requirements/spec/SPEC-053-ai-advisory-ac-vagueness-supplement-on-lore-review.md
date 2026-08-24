@@ -116,17 +116,17 @@ a stringly-typed convention with a Zod-enforced enum.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-053-1: REVIEW_PROMPT_VERSION === 'v2' and Object.keys(REVIEW_TEMPLATES).length === 2 (keys exactly v1,v2), asserted by a passing unit test exit 0
+- [⚑] [script] AC-053-1: REVIEW_PROMPT_VERSION === 'v2' and Object.keys(REVIEW_TEMPLATES).length === 2 (keys exactly v1,v2), asserted by a passing unit test exit 0
   script: test — bunx vitest run packages/core/tests/unit/review-advisory.test.ts packages/lore/tests/unit/ai/review-template-v2.test.ts packages/lore/tests/unit/adapters/cli/review-render-advisory.test.ts
-- [✔] [script] AC-053-2: The advisory kind enum accepts 'ac_quantifiability' and a Zod parse of an advisory entry with an out-of-enum kind fails; test has >=1 accept and >=1 reject case, exit 0
+- [⚑] [script] AC-053-2: The advisory kind enum accepts 'ac_quantifiability' and a Zod parse of an advisory entry with an out-of-enum kind fails; test has >=1 accept and >=1 reject case, exit 0
   script: test — bunx vitest run packages/core/tests/unit/review-advisory.test.ts packages/lore/tests/unit/ai/review-template-v2.test.ts packages/lore/tests/unit/adapters/cli/review-render-advisory.test.ts
-- [✔] [script] AC-053-3: buildReviewPromptV2 output contains literal heading AC Quantifiability advisory and every declared AC id for a spec with >=1 AC, and NO such heading for a non-spec or spec with 0 ACs; test covers all 3 branches, exit 0
+- [⚑] [script] AC-053-3: buildReviewPromptV2 output contains literal heading AC Quantifiability advisory and every declared AC id for a spec with >=1 AC, and NO such heading for a non-spec or spec with 0 ACs; test covers all 3 branches, exit 0
   script: test — bunx vitest run packages/core/tests/unit/review-advisory.test.ts packages/lore/tests/unit/ai/review-template-v2.test.ts packages/lore/tests/unit/adapters/cli/review-render-advisory.test.ts
-- [✔] [script] AC-053-4: buildReviewPromptV2 output contains the exact advisory-only clause that advisory findings MUST NOT force decision=reject; substring test exit 0
+- [⚑] [script] AC-053-4: buildReviewPromptV2 output contains the exact advisory-only clause that advisory findings MUST NOT force decision=reject; substring test exit 0
   script: test — bunx vitest run packages/core/tests/unit/review-advisory.test.ts packages/lore/tests/unit/ai/review-template-v2.test.ts packages/lore/tests/unit/adapters/cli/review-render-advisory.test.ts
-- [✔] [script] AC-053-5: buildReviewPromptV2 advisory section embeds the lintAcQuantifiability verdict pass and finding count for the spec ACs so the judge does not re-derive lexical result; test checks rendered count exit 0
+- [⚑] [script] AC-053-5: buildReviewPromptV2 advisory section embeds the lintAcQuantifiability verdict pass and finding count for the spec ACs so the judge does not re-derive lexical result; test checks rendered count exit 0
   script: test — bunx vitest run packages/core/tests/unit/review-advisory.test.ts packages/lore/tests/unit/ai/review-template-v2.test.ts packages/lore/tests/unit/adapters/cli/review-render-advisory.test.ts
-- [✔] [script] AC-053-6: buildReviewPromptV1 output is byte-identical to a frozen fixture captured before this change REGRESSION; string-equality test exit 0
+- [⚑] [script] AC-053-6: buildReviewPromptV1 output is byte-identical to a frozen fixture captured before this change REGRESSION; string-equality test exit 0
   script: test — bunx vitest run packages/core/tests/unit/review-advisory.test.ts packages/lore/tests/unit/ai/review-template-v2.test.ts packages/lore/tests/unit/adapters/cli/review-render-advisory.test.ts
-- [✔] [script] AC-053-7: review-render advisory renderer returns a non-empty block containing each advisory finding when advisory has >=1 entry, and returns empty string when advisory absent or empty REGRESSION no-op; test with both branches exit 0
+- [⚑] [script] AC-053-7: review-render advisory renderer returns a non-empty block containing each advisory finding when advisory has >=1 entry, and returns empty string when advisory absent or empty REGRESSION no-op; test with both branches exit 0
   script: test — bunx vitest run packages/core/tests/unit/review-advisory.test.ts packages/lore/tests/unit/ai/review-template-v2.test.ts packages/lore/tests/unit/adapters/cli/review-render-advisory.test.ts

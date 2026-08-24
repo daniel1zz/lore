@@ -33,15 +33,15 @@ Structured via `lore ac add` (AC-074-1..5): 4 Playwright e2e + 1 route-auth test
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-074-1: Seeded 2 incoming reports (filed via the real report-issue CLI from a twin consumer fixture): dashboard nav badge shows 2 and the Issues page lists 2 rows each showing title, reporter_project and reported_at, sorted newest first.
+- [⚑] [script] AC-074-1: Seeded 2 incoming reports (filed via the real report-issue CLI from a twin consumer fixture): dashboard nav badge shows 2 and the Issues page lists 2 rows each showing title, reporter_project and reported_at, sorted newest first.
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-1'
-- [✔] [script] AC-074-2: In-place approve: approving a report from its detail view drops the badge to 1, and the approved report appears in lore ready --adhoc output (CLI assertion inside the test) while leaving the other report untouched.
+- [⚑] [script] AC-074-2: In-place approve: approving a report from its detail view drops the badge to 1, and the approved report appears in lore ready --adhoc output (CLI assertion inside the test) while leaving the other report untouched.
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-2'
-- [✘] [script] AC-074-3: In-place reject: rejecting a report requires a non-empty reason (submit disabled or error when empty), drops the badge to 0, and the recorded reason is echoed by the consumer-side report-issue --list row for that report.
+- [⊘] [script] AC-074-3: In-place reject: rejecting a report requires a non-empty reason (submit disabled or error when empty), drops the badge to 0, and the recorded reason is echoed by the consumer-side report-issue --list row for that report.
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-3'
-- [✔] [script] AC-074-4: Home card: with open reports present the dashboard home shows an incoming-reports card with the open count and at most 3 most-recent titles linking to the Issues page; with 0 open reports the badge is hidden and the card shows an explicit empty state (not a blank region).
+- [⚑] [script] AC-074-4: Home card: with open reports present the dashboard home shows an incoming-reports card with the open count and at most 3 most-recent titles linking to the Issues page; with 0 open reports the badge is hidden and the card shows an explicit empty state (not a blank region).
   script: e2e — cd packages/dashboard && bunx playwright test tests/e2e/issues.spec.ts -g 'AC-074-4'
-- [✔] [script] AC-074-5: GET /api/issue-reports auth matrix: cookie session 200, bearer token 200 (read-only), no auth 401; response rows carry the 8 declared fields plus open_count, and a corpus with 0 reports returns open_count 0 with an empty rows array (not an error).
+- [⚑] [script] AC-074-5: GET /api/issue-reports auth matrix: cookie session 200, bearer token 200 (read-only), no auth 401; response rows carry the 8 declared fields plus open_count, and a corpus with 0 reports returns open_count 0 with an empty rows array (not an error).
   script: test — bunx vitest run packages/lore/tests/unit/adapters/http-issue-reports.test.ts -t 'AC-074-5'
 
 ## Code anchors

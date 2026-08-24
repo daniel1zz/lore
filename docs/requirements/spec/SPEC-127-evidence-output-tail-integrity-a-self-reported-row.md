@@ -106,19 +106,19 @@ authority. Prose restatement here is a reader's summary only.
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-ETI-1: A self-reported evidence write with result=fail and no output_tail is rejected with a VALIDATION_ERROR whose field is output_tail; the row is not appended.
+- [⚑] [script] AC-ETI-1: A self-reported evidence write with result=fail and no output_tail is rejected with a VALIDATION_ERROR whose field is output_tail; the row is not appended.
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-nonpass-tail.test.ts -t 'AC-ETI-1'
-- [✔] [script] AC-ETI-2: A self-reported result=fail whose output_tail is whitespace-only is rejected identically to an absent one (emptiness is tested after trimming, per D3).
+- [⚑] [script] AC-ETI-2: A self-reported result=fail whose output_tail is whitespace-only is rejected identically to an absent one (emptiness is tested after trimming, per D3).
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-nonpass-tail.test.ts -t 'AC-ETI-2'
-- [✔] [script] AC-ETI-3: A self-reported result=expected-fail with no output_tail is rejected on the same predicate as fail (D1).
+- [⚑] [script] AC-ETI-3: A self-reported result=expected-fail with no output_tail is rejected on the same predicate as fail (D1).
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-nonpass-tail.test.ts -t 'AC-ETI-3'
-- [✔] [script] AC-ETI-4: A self-reported result=pass whose output_tail is absent or whitespace-only is REFUSED with a VALIDATION_ERROR naming output_tail, and no row is appended. WIDENED 2026-08-03 (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the, merge 82157f3) from this criterion's original form, which was the opposite CONTROL asserting the pass path stays exempt — that exemption was deliberately reversed, because the pass row is the one that unlocks archival and two implementers were measured recording 8 zero-tail pass rows each. Reversal recorded in place rather than by deletion so it stays auditable.
+- [⚑] [script] AC-ETI-4: A self-reported result=pass whose output_tail is absent or whitespace-only is REFUSED with a VALIDATION_ERROR naming output_tail, and no row is appended. WIDENED 2026-08-03 (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the, merge 82157f3) from this criterion's original form, which was the opposite CONTROL asserting the pass path stays exempt — that exemption was deliberately reversed, because the pass row is the one that unlocks archival and two implementers were measured recording 8 zero-tail pass rows each. Reversal recorded in place rather than by deletion so it stays auditable.
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-nonpass-tail.test.ts -t 'AC-ETI-4'
-- [✔] [script] AC-ETI-5: CONTROL: a runner-attested result=fail carrying an empty output_tail is still appended successfully via recordVerifiedEvidence — proving the predicate binds the self-report path only and cannot abort lore verify on a silent or timed-out command.
+- [⚑] [script] AC-ETI-5: CONTROL: a runner-attested result=fail carrying an empty output_tail is still appended successfully via recordVerifiedEvidence — proving the predicate binds the self-report path only and cannot abort lore verify on a silent or timed-out command.
   script: test — bunx vitest run packages/lore/tests/unit/service/task-workflow-nonpass-tail.test.ts -t 'AC-ETI-5'
-- [✔] [script] AC-ETI-6: The phase-tier self-report path (PhaseWorkflowService._addEvidenceImpl) rejects a tail-less non-pass row identically to the task tier, so the phase fallback in commands/evidence.ts does not bypass the rule.
+- [⚑] [script] AC-ETI-6: The phase-tier self-report path (PhaseWorkflowService._addEvidenceImpl) rejects a tail-less non-pass row identically to the task tier, so the phase fallback in commands/evidence.ts does not bypass the rule.
   script: test — bunx vitest run packages/lore/tests/unit/service/phase-workflow-nonpass-tail.test.ts -t 'AC-ETI-6'
-- [✔] [script] AC-ETI-7: When an evidence row carries an ac_ref and that AC id occurs in the captured stream earlier than the final OUTPUT_TAIL_MAX_CHARS window, the stored output_tail contains that AC id (the window is taken around the id's last occurrence, not the stream end).
+- [⚑] [script] AC-ETI-7: When an evidence row carries an ac_ref and that AC id occurs in the captured stream earlier than the final OUTPUT_TAIL_MAX_CHARS window, the stored output_tail contains that AC id (the window is taken around the id's last occurrence, not the stream end).
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-tail-witness.test.ts -t 'AC-ETI-7'
-- [✔] [script] AC-ETI-8: CONTROL: when the ac_ref id does not occur anywhere in the captured stream, the stored output_tail is byte-identical to the pre-change stream-tail result.
+- [⚑] [script] AC-ETI-8: CONTROL: when the ac_ref id does not occur anywhere in the captured stream, the stored output_tail is byte-identical to the pre-change stream-tail result.
   script: test — bunx vitest run packages/lore/tests/unit/service/verify-tail-witness.test.ts -t 'AC-ETI-8'

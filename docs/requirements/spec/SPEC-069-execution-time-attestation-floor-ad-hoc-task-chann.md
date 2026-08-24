@@ -96,19 +96,19 @@ single-pass create-task validation (missing/conflicting flags reported together)
 
 ## Acceptance Criteria (structured)
 
-- [✔] [script] AC-069-1: Closing a plan whose tasks carry evidence but zero attested entries is DENIED at plan-close; the denial names an offending task and contains the string lore verify
+- [⚑] [script] AC-069-1: Closing a plan whose tasks carry evidence but zero attested entries is DENIED at plan-close; the denial names an offending task and contains the string lore verify
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-1"
-- [✔] [script] AC-069-2: After attested evidence meets the floor the same plan-close transition succeeds
+- [⚑] [script] AC-069-2: After attested evidence meets the floor the same plan-close transition succeeds
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-2"
-- [✔] [script] AC-069-3: workflow.attestation.min_ratio is honored: ratio 0.4 fails the default 0.5 floor and passes when the knob is set to 0.3
+- [⚑] [script] AC-069-3: workflow.attestation.min_ratio is honored: ratio 0.4 fails the default 0.5 floor and passes when the knob is set to 0.3
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-3"
-- [✔] [script] AC-069-4: A plan with extra.attestation_exempt true plus reason closes without attested evidence and assess facts surface the exemption
+- [⚑] [script] AC-069-4: A plan with extra.attestation_exempt true plus reason closes without attested evidence and assess facts surface the exemption
   script: test — bunx vitest run packages/lore/tests/unit/service/attestation-floor.test.ts -t "AC-069-4"
-- [✔] [script] AC-069-5: create task --adhoc succeeds with no plan-id or parent, sets extra.adhoc true, parents to the root PRD; combining --adhoc with --plan-id exits 2
+- [⚑] [script] AC-069-5: create task --adhoc succeeds with no plan-id or parent, sets extra.adhoc true, parents to the root PRD; combining --adhoc with --plan-id exits 2
   script: test — bunx vitest run packages/lore/tests/unit/service/adhoc-task.test.ts -t "AC-069-5"
-- [✔] [script] AC-069-6: create task --linkage stores extra.linkage verbatim and assess facts for the plan include it
+- [⚑] [script] AC-069-6: create task --linkage stores extra.linkage verbatim and assess facts for the plan include it
   script: test — bunx vitest run packages/lore/tests/unit/service/adhoc-task.test.ts -t "AC-069-6"
-- [✔] [script] AC-069-7: lore ready plan output is regression-unchanged for plan tasks and lore ready --adhoc --json lists open ad-hoc tasks
+- [⚑] [script] AC-069-7: lore ready plan output is regression-unchanged for plan tasks and lore ready --adhoc --json lists open ad-hoc tasks
   script: test — bunx vitest run packages/lore/tests/unit/service/adhoc-task.test.ts -t "AC-069-7"
 - [·] [script] AC-069-8: lore plan exempt-attestation <plan> --reason <text> --kind <k> authors all three fields by READ-MERGE-WRITE onto extra (attestation_exempt true, attestation_exempt_reason, attestation_exempt_kind), leaving every unrelated extra key byte-identical — never the wholesale extra replacement lore set performs
   script: test — bunx vitest run packages/lore/tests/unit/cli/plan-exempt-attestation.test.ts -t 'AC-069-8'

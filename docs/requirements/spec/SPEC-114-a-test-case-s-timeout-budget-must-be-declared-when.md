@@ -80,15 +80,15 @@ Out of scope, each deliberately:
 
 ## Acceptance Criteria (structured)
 
-- [✘] [script] AC-TB-1: the test-budget oracle exits 0 on the repo tree, meaning every measured violation is matched by an auditable ledger row and zero unledgered violations remain (D6); the scanned/exempted/new counts are an observation that drifts with the tree, never part of the threshold
+- [⊘] [script] AC-TB-1: the test-budget oracle exits 0 on the repo tree, meaning every measured violation is matched by an auditable ledger row and zero unledgered violations remain (D6); the scanned/exempted/new counts are an observation that drifts with the tree, never part of the threshold
   script: lint — bun run check:test-budgets
-- [✔] [script] AC-TB-2: pointed at a fixture with 3 spawn calls and no explicit timeout the oracle exits non-zero and names that fixture's test title
+- [⚑] [script] AC-TB-2: pointed at a fixture with 3 spawn calls and no explicit timeout the oracle exits non-zero and names that fixture's test title
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts -t 'control fixture is reported'
-- [✔] [script] AC-TB-3: a fixture with exactly 2 spawns and no explicit timeout exits 0 while the same fixture with a 3rd spawn exits non-zero
+- [⚑] [script] AC-TB-3: a fixture with exactly 2 spawns and no explicit timeout exits 0 while the same fixture with a 3rd spawn exits non-zero
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts -t 'threshold boundary two versus three'
-- [✔] [script] AC-TB-4: the AC-VRW-5b case in cli-plan-promote-advisory.bun.test.ts declares an explicit timeout and passes in isolation
+- [⚑] [script] AC-TB-4: the AC-VRW-5b case in cli-plan-promote-advisory.bun.test.ts declares an explicit timeout and passes in isolation
   script: e2e — cd packages/lore && bun test tests/unit/adapters/cli-plan-promote-advisory.bun.test.ts
-- [✔] [script] AC-TB-5: an unparseable test file makes the oracle exit non-zero with the path in its output and never exit 0
+- [⚑] [script] AC-TB-5: an unparseable test file makes the oracle exit non-zero with the path in its output and never exit 0
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts -t 'unparseable file is loud'
 - [·] [script] AC-TB-6: The baseline ledger fails loud in every direction, never silently re-exempting: a violation with no matching ledger row is reported as NEW debt (exit 2); a ledger row whose violation was fixed, or whose (path,line) matches but spawnCount drifted, is ORPHANED rather than re-exempted (exit 5); a ledger row naming a nonexistent path is reported by name (exit 5); and every row carries path/line/spawnCount/reason. Deliberately run as the WHOLE file with no -t filter: a -t name filter that matches nothing exits 0 with zero tests executed (measured 2026-08-01), which is indistinguishable from passing, so name-filtered ACs silently rot the moment a test is renamed.
   script: test — bunx vitest run scripts/tests/check-test-budgets.test.ts

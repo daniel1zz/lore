@@ -6,7 +6,7 @@ title: "CLAUDE.md governance — content-dimension checks: wire the dead admissi
 status: approved
 priority: medium
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-08-24
 tags: [claude-md, memory-files, governance, admission, distribution]
 parent: PRD-001
 links:
@@ -122,7 +122,27 @@ Typed ACs authored via `lore ac add` (script mode). Coverage contract:
   script: test — bunx vitest run packages/lore/tests/integration/claude-md-rules-discovery.test.ts 2>&1 && echo 'AC-RULES-1 PASS: CLI JSON reports exactly two role=rules files and zero worktree copies'
 - [⚑] [script] AC-CONTRACT-1: The distributed contract carries all three prose changes and ships byte-identically: assets/governance/claude-md-contract.md contains a .claude/rules/ section, the reworded reflow clause separating ceiling-gaming from readability, and the rule binding eviction stubs to the Index-Entry Contract; and 'lore governance claude-md' stdout is byte-identical to that asset. Prose-only delivery does not reach consumers unless the asset ships. Covered by describe 'contract asset — three additions and governance-verb byte parity'.
   script: test — bunx vitest run packages/lore/tests/unit/assets/claude-md-contract-content.test.ts 2>&1 && (cd packages/lore && bun test tests/e2e/governance-claude-md-compiled.bun.test.ts) 2>&1 && bunx vitest run packages/lore/tests/unit/assets-ssot.test.ts 2>&1 && echo 'AC-CONTRACT-1 PASS: contract asset carries the rules section + reworded reflow clause + eviction-stub rule, governance stdout is byte-identical, and the assets manifest is in sync'
-- [·] [script] AC-ADV-1: The two always-on advisory metrics appear in machine-readable output on every run and never change the exit code: 'lore status --check-claude-md --json' yields, for EVERY discovered memory file, one advisory entry of kind exactly 'line_length' and one of kind exactly 'target_distance' whose measured field equals that file's line count minus OFFICIAL_LINE_TARGET, on a run whose exit code is exactly 0. Asserted on JSON kinds and fields, never on rendered prose. Anthropic defines 200 lines as a target, not a limit; rendering it as a breach would overwrite that definition. Covered by describe 'always-on advisories — printed every run, exit code untouched'.
+- [⚑] [script] AC-ADV-1: The two always-on advisory metrics appear in machine-readable output on every run and never change the exit code: 'lore status --check-claude-md --json' yields, for EVERY discovered memory file, one advisory entry of kind exactly 'line_length' and one of kind exactly 'target_distance' whose measured field equals that file's line count minus OFFICIAL_LINE_TARGET, on a run whose exit code is exactly 0. Asserted on JSON kinds and fields, never on rendered prose. Anthropic defines 200 lines as a target, not a limit; rendering it as a breach would overwrite that definition. Covered by describe 'always-on advisories — printed every run, exit code untouched'.
   script: test — bunx vitest run packages/lore/tests/integration/claude-md-advisories.test.ts 2>&1 && echo 'AC-ADV-1 PASS: line_length + target_distance present per memory file with measured deltas, exit code exactly 0'
 - [⚑] [script] AC-TEMPLATE-1: The rules pointer actually ships to consumers: assets/project/CLAUDE.md.template contains a line pointing at .claude/rules/ as the path-scoped mechanism for instructions that should not load every session, AND a 'lore setup --project' run into a fresh mkdtemp installs a CLAUDE.md containing that same line. An asset edit with no installed-output assertion is the same capability-without-wiring failure this spec exists to close — in miniature. Covered by describe 'template pointer — present in the asset and in the installed output'.
   script: test — bunx vitest run packages/lore/tests/integration/claude-md-template-pointer.test.ts 2>&1 && echo 'AC-TEMPLATE-1 PASS: rules pointer present in the template asset and in the setup --project installed CLAUDE.md'
+
+## Code anchors
+
+- packages/lore/src/service/claude-md-admission.ts#runMemoryFileChecks
+- packages/lore/src/service/claude-md-admission.ts#OFFICIAL_LINE_TARGET
+- packages/lore/src/service/claude-md-budget.ts
+- packages/lore/src/service/claude-md-findings.ts
+- packages/lore/src/adapters/cli/claude-md-render.ts
+- packages/lore/src/adapters/cli/commands/status.ts
+- packages/lore/src/flows/context-flow.ts
+- packages/lore/src/adapters/real-memory-file-probe.ts
+- packages/lore/tests/integration/claude-md-wiring.test.ts
+- packages/lore/tests/integration/claude-md-advisories.test.ts
+- packages/lore/tests/integration/claude-md-slug-pointers.test.ts
+- packages/lore/tests/integration/claude-md-emphasis.test.ts
+- packages/lore/tests/integration/claude-md-rules-discovery.test.ts
+- packages/lore/tests/integration/claude-md-template-pointer.test.ts
+- packages/lore/tests/unit/service/claude-md-reference-grammar.test.ts
+- packages/lore/tests/unit/service/claude-md-admission.test.ts
+- packages/lore/tests/unit/assets/claude-md-contract-content.test.ts
