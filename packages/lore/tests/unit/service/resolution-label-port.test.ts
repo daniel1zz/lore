@@ -106,8 +106,11 @@ describe("GhResolutionLabelPort (AC-GI-4, spec-the-defect-channel-reaches-no-mac
 
     expect(result.ok).toBe(true);
     expect(calls).toHaveLength(2);
-    expect(calls[0].args).toEqual(["api", LABELS_PATH]);
-    expect(calls[1].args).toEqual(["api", LABELS_PATH, "-X", "POST", "-f", "labels[]=resolution:fixed"]);
+    // Non-null: the toHaveLength(2) assertion just above proves indices 0
+    // and 1 are populated at runtime; noUncheckedIndexedAccess can't see
+    // that cross-statement guarantee.
+    expect(calls[0]!.args).toEqual(["api", LABELS_PATH]);
+    expect(calls[1]!.args).toEqual(["api", LABELS_PATH, "-X", "POST", "-f", "labels[]=resolution:fixed"]);
   });
 
   it("STATE: a stale resolution:* sibling is deleted and the target added", async () => {
@@ -123,8 +126,11 @@ describe("GhResolutionLabelPort (AC-GI-4, spec-the-defect-channel-reaches-no-mac
 
     expect(result.ok).toBe(true);
     expect(calls).toHaveLength(3);
-    expect(calls[1].args).toEqual(["api", `${LABELS_PATH}/resolution%3Aopen`, "-X", "DELETE"]);
-    expect(calls[2].args).toEqual(["api", LABELS_PATH, "-X", "POST", "-f", "labels[]=resolution:fixed"]);
+    // Non-null: the toHaveLength(3) assertion just above proves indices 1
+    // and 2 are populated at runtime; noUncheckedIndexedAccess can't see
+    // that cross-statement guarantee.
+    expect(calls[1]!.args).toEqual(["api", `${LABELS_PATH}/resolution%3Aopen`, "-X", "DELETE"]);
+    expect(calls[2]!.args).toEqual(["api", LABELS_PATH, "-X", "POST", "-f", "labels[]=resolution:fixed"]);
   });
 
   it("STATE: the target label already present and no stale sibling — zero mutating calls beyond the GET", async () => {

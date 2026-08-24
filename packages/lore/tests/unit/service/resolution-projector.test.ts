@@ -63,7 +63,7 @@
  * @spec_ref AC-GI-4 — spec-the-defect-channel-reaches-no-machine-but-its-own-github
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { ok, err, ISSUE_RESOLUTION_MEMBERS, type DocRecord, type IssueResolution, type LoreError } from "@lore/core";
 
 // ─── The module under test — DOES NOT EXIST; this import is the RED signal ──
@@ -226,7 +226,12 @@ const BASE_RESOLVE_ARGS = {
 
 describe("AC-GI-4 scenario 3 — lore issue resolve calls the injected ResolutionProjector (REGRESSION: zero-caller)", () => {
   const originalExitCode = process.exitCode;
-  let stderrSpy: ReturnType<typeof vi.spyOn>;
+  // Typed to the REAL overloaded signature of `process.stderr.write` (what
+  // `vi.spyOn(process.stderr, "write")` actually returns) rather than the
+  // generic `ReturnType<typeof vi.spyOn>` fallback — the fallback collapses
+  // to `MockInstance<(this: unknown, ...args: unknown[]) => unknown>`, which
+  // the overloaded `write` signature isn't assignable to.
+  let stderrSpy: MockInstance<typeof process.stderr.write>;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let issueDoc: DocRecord;
 
@@ -366,7 +371,12 @@ describe("AC-GI-4 scenario 4 — a hand-edited label never overrides the corpus-
 
 describe("AC-GI-4 scenario 5 — a projection (network) failure never swallows the corpus verdict", () => {
   const originalExitCode = process.exitCode;
-  let stderrSpy: ReturnType<typeof vi.spyOn>;
+  // Typed to the REAL overloaded signature of `process.stderr.write` (what
+  // `vi.spyOn(process.stderr, "write")` actually returns) rather than the
+  // generic `ReturnType<typeof vi.spyOn>` fallback — the fallback collapses
+  // to `MockInstance<(this: unknown, ...args: unknown[]) => unknown>`, which
+  // the overloaded `write` signature isn't assignable to.
+  let stderrSpy: MockInstance<typeof process.stderr.write>;
   let logSpy: ReturnType<typeof vi.spyOn>;
   let issueDoc: DocRecord;
 
