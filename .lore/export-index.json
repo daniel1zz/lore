@@ -6788,6 +6788,14 @@
     "01M0SSE3N65EDES68GXRHJAPV7": {
       "human_id": "KN-543",
       "file_path": "docs/requirements/knowledge/KN-543-an-equality-oracle-over-two-copies-goes-vacuous-th.md"
+    },
+    "01M0STFB77NADDTWGH88HK637Z": {
+      "human_id": "KN-544",
+      "file_path": "docs/requirements/knowledge/KN-544-handoff-agent-main-orchestrator.md"
+    },
+    "01M0ST7PA2776TA0M0KS72J68E": {
+      "human_id": "KN-545",
+      "file_path": "docs/requirements/knowledge/KN-545-handoff-agent-main-orchestrator.md"
     }
   }
 }
