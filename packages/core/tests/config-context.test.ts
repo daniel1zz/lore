@@ -50,10 +50,18 @@ const DEFAULT_BUDGETS = {
   filenames: ["CLAUDE.md"],
   root: { max_lines: 300, max_bytes: 30720 },
   module: { max_lines: 200, max_bytes: 16384 },
+  // SPEC-146 N7: a third, separate ceiling pair for `.claude/rules/**/*.md`
+  // path-scoped rule files — never a reuse of `module`'s (packages/core/src/
+  // config.ts, contextConfigSchema.memory_files.rules doc comment).
+  rules: { max_lines: 100, max_bytes: 8192 },
   warn_threshold_fraction: 0.9,
   // task-a-module-claude-md-at-its-byte-ceiling-silently-relocates: the third
   // band. Advisory (0.9) < deterministic eviction floor (0.97) <= ceiling.
   evict_threshold_fraction: 0.97,
+  // SPEC-146 Phase 2 N5/N6: a separate, single-threshold block for marker
+  // density (⛔/IMPORTANT/MUST/NEVER per KB) — deliberately NOT part of the
+  // warn/evict band machinery above (config.ts, `emphasis` doc comment).
+  emphasis: { max_per_kb: 3 },
 };
 
 // ─── HAPPY ──────────────────────────────────────────────────────────────────
@@ -77,8 +85,10 @@ describe("resolveMemoryFileBudgets — HAPPY", () => {
           filenames: ["CLAUDE.md", "AGENTS.md"],
           root: { max_lines: 500, max_bytes: 51200 },
           module: { max_lines: 250, max_bytes: 20480 },
+          rules: { max_lines: 150, max_bytes: 12288 },
           warn_threshold_fraction: 0.75,
           evict_threshold_fraction: 0.88,
+          emphasis: { max_per_kb: 5 },
         },
       },
     });
@@ -87,8 +97,10 @@ describe("resolveMemoryFileBudgets — HAPPY", () => {
       filenames: ["CLAUDE.md", "AGENTS.md"],
       root: { max_lines: 500, max_bytes: 51200 },
       module: { max_lines: 250, max_bytes: 20480 },
+      rules: { max_lines: 150, max_bytes: 12288 },
       warn_threshold_fraction: 0.75,
       evict_threshold_fraction: 0.88,
+      emphasis: { max_per_kb: 5 },
     });
   });
 });
