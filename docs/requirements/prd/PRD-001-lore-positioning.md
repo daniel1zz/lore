@@ -108,12 +108,12 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (draft)
 - [spec] Out-of-box reporting channel — report-issue self-provisions its upstream config (deprecated)
 - [spec] Upstream issue reporting: lore report-issue (consumer defect feedback loop) (deprecated)
 - [spec] report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree (approved)
 - [spec] CLAUDE.md governance — content-dimension checks: wire the dead admission half, split capacity from content, and measure what the contract asks for (approved)
 - [knowledge] The orphan-branch sweep asks a content question with a SHA predicate, and a red-first test task has no legal terminal state (approved)
-- [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (approved)
 - [spec] Context verb family — two-zone CLAUDE.md anatomy, lore context init refresh, admission checks, init-context skill retirement (approved)
 - [spec] The defect channel reaches no machine but its own: GitHub becomes intake while the corpus keeps resolution authority (approved)
 - [knowledge] A worktree without its own bun install silently tests against the main checkout's @lore/core — a false-oracle in both directions (approved)

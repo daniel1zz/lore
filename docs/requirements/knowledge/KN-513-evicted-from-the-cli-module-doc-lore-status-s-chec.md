@@ -6,8 +6,9 @@ title: "Evicted from the CLI module doc: lore status's check-family behaviour, m
 status: draft
 priority: medium
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-08-24
 tags: [claude-md, eviction, status, exit-codes]
+parent: SPEC-145
 ---
 # Evicted from the CLI module doc: `lore status`'s check-family behaviour, measured
 
