@@ -55,15 +55,16 @@
  * then session tier, then OS username — no `--by` flag on this command, since
  * SPEC-072's task packet declares only the flags in this header).
  *
- * When `feedback.upstream` is unconfigured at all, `resolveEffectiveUpstreamCfg`
- * below returns `@lore/core`'s exported `buildUnconfiguredUpstreamRemedy()` —
- * the SAME actionable error for BOTH the filing path and `--list` (single
- * wording SSOT, AC-OOB-1), and now ALSO the identical error the MCP
- * `lore_report_issue` tool returns on the same condition
- * (spec-governance-defaults-must-ship-and-every-recorded-gap-must D3,
- * AC-GD-2). Collapsing onto that ONE shared, imported builder is what makes
- * "the CLI's remedy" and every other surface's remedy the same remedy BY
- * CONSTRUCTION, not by two literals that happen to read alike today.
+ * When `feedback.upstream` is unconfigured at all
+ * (`classifyFeedbackUpstream(config).kind === "unconfigured"`, see below),
+ * this command returns `@lore/core`'s exported
+ * `buildUnconfiguredUpstreamRemedy()` — the SAME actionable error for BOTH
+ * the filing path and `--list` (single wording SSOT, AC-OOB-1), and now ALSO
+ * the identical error the MCP `lore_report_issue` tool returns on the same
+ * condition (spec-governance-defaults-must-ship-and-every-recorded-gap-must
+ * D3, AC-GD-2). Collapsing onto that ONE shared, imported builder is what
+ * makes "the CLI's remedy" and every other surface's remedy the same remedy
+ * BY CONSTRUCTION, not by two literals that happen to read alike today.
  *
  * Every failure is a `LoreError`, mapped through the normal
  * `exitCode()`/`formatError()` pipeline — most report-filing failures are
@@ -91,13 +92,7 @@ import {
 import { resolveActorWithSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
-import {
-  fileGithubIssue,
-  isGithubUpstreamCfg,
-  resolveConsumerCorpusRoot,
-  resolveFeedbackUpstreamCfg,
-  type UpstreamCfg,
-} from "../report-issue-wiring.js";
+import { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } from "../report-issue-wiring.js";
 
 /**
  * The report-filing flags — mutually exclusive with `--list` (checked as a group).
@@ -119,44 +114,6 @@ const REPORT_FLAGS = [
 
 /** The report-filing flags that are REQUIRED when NOT using `--list`. */
 const REQUIRED_REPORT_FLAGS = ["title", "description", "expected", "actual"] as const;
-
-/**
- * Resolves the `UpstreamCfg` this invocation should act against.
- *
- * ⛔ RETIRED (P4): this used to ALSO self-provision an unconfigured
- * `feedback.upstream` from the running binary's own installed corpus
- * location when `--auto-config` was passed — deleted along with the
- * SQLite-shaped output it produced (see this file's own header).
- *
- * @param cfg - this consumer's current `feedback.upstream` config, or
- *   `undefined` when unconfigured (`resolveFeedbackUpstreamCfg`'s result)
- * @returns `cfg` unchanged when configured;
- *   `err({@link buildUnconfiguredUpstreamRemedy})` otherwise (AC-OOB-1 /
- *   AC-GD-2 — the SAME shared builder every other surface returns on the
- *   identical condition)
- */
-function resolveEffectiveUpstreamCfg(cfg: UpstreamCfg | undefined): Result<UpstreamCfg, LoreError> {
-  if (cfg !== undefined) return ok(cfg);
-  return err(buildUnconfiguredUpstreamRemedy());
-}
-
-/**
- * The refusal for a `feedback.upstream` configured with the retired legacy
- * SQLite shape (P4, spec-the-defect-channel-reaches-no-machine-but-its-own-
- * github) — fires on BOTH `--list` and filing mode, before any further
- * dispatch, since neither has a transport left to run against that shape.
- */
-function buildLegacyUpstreamRetiredError(): LoreError {
-  return {
-    code: "VALIDATION_ERROR",
-    field: "feedback.upstream",
-    message:
-      "this corpus's feedback.upstream is configured with the retired SQLite shape " +
-      "({root_prd, ...}) — SQLite-based issue reporting was removed " +
-      "(spec-the-defect-channel-reaches-no-machine-but-its-own-github P4). Reconfigure " +
-      'feedback.upstream.repo (e.g. "owner/repo") to file/list issue reports via GitHub.',
-  };
-}
 
 /**
  * §M6 — validates the two ORDERING-ONLY triage labels BEFORE any IO, returning the
@@ -328,25 +285,33 @@ export default defineCommand({
     const { app, config } = loadLoreApp();
     try {
       const corpusRoot = resolveConsumerCorpusRoot();
-      const cfg = resolveFeedbackUpstreamCfg(config);
 
-      const effectiveCfgResult = resolveEffectiveUpstreamCfg(cfg);
-      if (!effectiveCfgResult.ok) {
-        process.stderr.write(formatError(effectiveCfgResult.error) + "\n");
-        process.exitCode = exitCode(effectiveCfgResult.error);
+      // reason: ONE shared classifier (spec-lore-issues-falls-through-to-the-
+      // local-corpus-on-a-retired D1) — `commands/issues.ts` consumes the
+      // SAME function, so a retired-shape upstream cannot drift back into
+      // two independently-derived verdicts.
+      const classification = classifyFeedbackUpstream(config);
+
+      if (classification.kind === "unconfigured") {
+        const unconfiguredError = buildUnconfiguredUpstreamRemedy();
+        process.stderr.write(formatError(unconfiguredError) + "\n");
+        process.exitCode = exitCode(unconfiguredError);
         return;
       }
-      const effectiveCfg = effectiveCfgResult.value;
 
       // ─── Legacy SQLite-shaped upstream: retired, refused loudly (P4) — see
       // this file's own header. Checked BEFORE any list/filing dispatch since
-      // neither has a transport left to run against this shape.
-      if (!isGithubUpstreamCfg(effectiveCfg)) {
-        const retiredError = buildLegacyUpstreamRetiredError();
-        process.stderr.write(formatError(retiredError) + "\n");
-        process.exitCode = exitCode(retiredError);
+      // neither has a transport left to run against this shape. The refusal
+      // literal lives ONLY inside `classifyFeedbackUpstream` (spec D1) — this
+      // command never holds its own copy.
+      if (classification.kind === "retired") {
+        process.stderr.write(formatError(classification.error) + "\n");
+        process.exitCode = exitCode(classification.error);
         return;
       }
+
+      // `classification.kind === "github"` from here on.
+      const effectiveCfg = classification.cfg;
 
       // ─── GitHub-configured upstream: the LIVE path (GitHubIntakePort +
       // frontMatterCodec + ReceiptLogV2) — see report-issue-wiring.ts::

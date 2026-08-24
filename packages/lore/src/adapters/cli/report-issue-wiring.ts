@@ -30,12 +30,26 @@
  *     channel-reaches-no-machine-but-its-own-github P2). STAYS the ONLY
  *     `feedback.upstream` READ site (plan invariant).
  *   - `isGithubUpstreamCfg(cfg)` — type guard distinguishing the two
- *     `UpstreamCfg` branches.
+ *     `UpstreamCfg` branches. Retained for the MCP `lore_report_issue` tool
+ *     (`adapters/mcp/tools.ts`, dynamic-imports this module), which is
+ *     outside this module's own command-file anchors; `commands/issues.ts`
+ *     and `commands/report-issue.ts` MUST NOT call it directly any more —
+ *     see `classifyFeedbackUpstream` below.
+ *   - `classifyFeedbackUpstream(config)` — the ONE shape-policy source both
+ *     `commands/issues.ts` and `commands/report-issue.ts` consume
+ *     (spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired D1):
+ *     classifies a parsed `LoreConfig`'s `feedback.upstream` into exactly one
+ *     of `"unconfigured"` / `"retired"` / `"github"`, carrying the shared
+ *     retired-shape `LoreError` and the narrowed `GithubUpstreamCfg`
+ *     respectively so neither caller re-derives shape policy in its own
+ *     `if` chain (the drift that let `lore issues` silently fall through to
+ *     the local corpus on a retired-shape upstream while `lore report-issue`
+ *     already refused it).
  *   - `fileGithubIssue(input, cfg, ctx)` — the LIVE GitHub filing path's
  *     orchestration (AC-GI-1): retry recognition over the local v2 receipt
  *     log, then `GitHubIntakePort.verifyTarget`/`.searchDuplicates`/
  *     `.fileIssue`. The LIVE path `commands/report-issue.ts` calls whenever
- *     `resolveFeedbackUpstreamCfg` resolves the GITHUB shape.
+ *     `classifyFeedbackUpstream` resolves the GITHUB shape.
  *
  * Invariants:
  *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
@@ -142,6 +156,70 @@ export function resolveFeedbackUpstreamCfg(config: LoreConfig | undefined): Upst
  */
 export function isGithubUpstreamCfg(cfg: UpstreamCfg): cfg is GithubUpstreamCfg {
   return "repo" in cfg;
+}
+
+/**
+ * The retired legacy-SQLite-shape refusal — the ONE place this string
+ * literal lives (spec-lore-issues-falls-through-to-the-local-corpus-on-a-
+ * retired D1). Both `commands/report-issue.ts` and `commands/issues.ts`
+ * consume it via {@link classifyFeedbackUpstream}'s `"retired"` branch;
+ * neither holds its own copy. Moved here verbatim from
+ * `commands/report-issue.ts`'s former `buildLegacyUpstreamRetiredError` —
+ * `report-issue.ts` was the only verb that refused this shape before this
+ * spec; `issues.ts` fell through to reading the local corpus instead, which
+ * is the defect this classifier closes.
+ */
+function buildRetiredFeedbackUpstreamError(): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "feedback.upstream",
+    message:
+      "this corpus's feedback.upstream is configured with the retired SQLite shape " +
+      "({root_prd, ...}) — SQLite-based issue reporting was removed " +
+      "(spec-the-defect-channel-reaches-no-machine-but-its-own-github P4). Reconfigure " +
+      'feedback.upstream.repo (e.g. "owner/repo") to file/list issue reports via GitHub.',
+  };
+}
+
+/**
+ * {@link classifyFeedbackUpstream}'s three possible verdicts — a
+ * discriminated union so a `"github"` caller reaches `.cfg.repo` with no
+ * separate `isGithubUpstreamCfg` call, and a `"retired"` caller gets the
+ * SHARED refusal `LoreError` (never a second, independently-worded copy).
+ */
+export type FeedbackUpstreamClassification =
+  | { readonly kind: "unconfigured" }
+  | { readonly kind: "retired"; readonly error: LoreError }
+  | { readonly kind: "github"; readonly cfg: GithubUpstreamCfg };
+
+/**
+ * ONE shape-policy source for a consumer's `feedback.upstream`, consumed by
+ * BOTH `commands/issues.ts` (READ) and `commands/report-issue.ts` (WRITE) —
+ * spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired D1. Before
+ * this function existed, each verb re-derived the same three-way shape
+ * policy in its own `if` chain via `isGithubUpstreamCfg` alone, and they
+ * drifted: `report-issue` refused a retired-shape upstream loudly,
+ * `issues` silently fell through to reading the local corpus, indistinguishable
+ * from "nothing configured". Routing both verbs through this ONE function
+ * makes that drift structurally impossible — there is nowhere left for a
+ * second, independently-derived verdict to live.
+ *
+ * @param config - the consumer's own parsed `.lore/config.yaml` (`undefined`
+ *   when none was found/parsed) — routed through
+ *   {@link resolveFeedbackUpstreamCfg}, which STAYS the only
+ *   `feedback.upstream` READ site (this module's own header)
+ * @returns `{kind: "unconfigured"}` when `feedback.upstream` is absent;
+ *   `{kind: "retired", error}` when configured with the legacy
+ *   `{corpus_path, root_prd}` shape, `error` carrying the SAME
+ *   `VALIDATION_ERROR` literal both verbs must emit verbatim
+ *   ({@link buildRetiredFeedbackUpstreamError}); `{kind: "github", cfg}` when
+ *   configured with the GitHub `{repo}` shape
+ */
+export function classifyFeedbackUpstream(config: LoreConfig | undefined): FeedbackUpstreamClassification {
+  const cfg = resolveFeedbackUpstreamCfg(config);
+  if (cfg === undefined) return { kind: "unconfigured" };
+  if (isGithubUpstreamCfg(cfg)) return { kind: "github", cfg };
+  return { kind: "retired", error: buildRetiredFeedbackUpstreamError() };
 }
 
 // ─── GitHub filing path (spec-the-defect-channel-reaches-no-machine-but-its-own-github P2, AC-GI-1) ───
