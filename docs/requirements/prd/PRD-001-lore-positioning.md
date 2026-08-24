@@ -109,9 +109,9 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
 - [spec] A GitHub-filed defect must be claimable: one ingest seam turns a listed issue into a corpus task (approved)
-- [spec] Governance weight must scale with measured blast radius: a gate with no risk input can only be all-on or all-off (draft)
-- [spec] A conclusion with no currency signal and no falsifier: retrieval ranks a superseded claim above the one that replaced it (draft)
 - [knowledge] A deterministic gate:pass is not design completeness, raw fan-in inverts blast radius, and an absent JSON key is not an absent field (approved)
+- [spec] A conclusion with no currency signal and no falsifier: retrieval ranks a superseded claim above the one that replaced it (approved)
+- [spec] Governance weight must scale with measured blast radius: a gate with no risk input can only be all-on or all-off (approved)
 - [knowledge] Five findings from planning the GitHub read side: a refusal can promise a phase no spec declares (approved)
 - [knowledge] A worktree with no node_modules resolves workspace imports to the MAIN checkout, silently (approved)
 - [spec] Phase writes are version-less BY DESIGN (SPEC-023) — the root CLAUDE.md lifecycle paragraph contradicts it, and the premise that phase history is dispensable has moved (approved)

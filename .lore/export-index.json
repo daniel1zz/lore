@@ -6868,6 +6868,58 @@
     "01M0SWSZG5Z51J2T95T51823TC": {
       "human_id": "KN-550",
       "file_path": "docs/requirements/knowledge/KN-550-handoff-agent-main-orchestrator.md"
+    },
+    "01M0T2PB2K5YPN0QW3DPX1CPBW": {
+      "human_id": "KN-551",
+      "file_path": "docs/requirements/knowledge/KN-551-handoff-agent-main-orchestrator.md"
+    },
+    "01M0T2C1S0F241RNM2BP0P229A": {
+      "human_id": "PLAN-146",
+      "file_path": "docs/requirements/plan/PLAN-146-land-conclusion-currency-a-dated-retrieval-project.md"
+    },
+    "01M0T10BD1KM3053PKDPWVT9CB": {
+      "human_id": "PLAN-147",
+      "file_path": "docs/requirements/plan/PLAN-147-land-measured-blast-radius-grading-one-fan-in-defi.md"
+    },
+    "01M0T2MA2KDWF6ZZPMWF725EQ0": {
+      "human_id": "TASK-824",
+      "file_path": "docs/requirements/task/TASK-824-regression-lock-the-measured-m2-labelling-failure.md"
+    },
+    "01M0T2M9DEN5G6PHHJBQ7RZQC0": {
+      "human_id": "TASK-825",
+      "file_path": "docs/requirements/task/TASK-825-refuse-an-undeclared-anchor-intersection-and-consu.md"
+    },
+    "01M0T2KEA7N69XP4PF4DS5ZBV9": {
+      "human_id": "TASK-826",
+      "file_path": "docs/requirements/task/TASK-826-extend-the-anchor-ratchet-to-conclusion-bearing-kn.md"
+    },
+    "01M0T2KDM2JGH05ZV5W1FPKC85": {
+      "human_id": "TASK-827",
+      "file_path": "docs/requirements/task/TASK-827-add-updated-at-and-a-supersedes-projection-to-the.md"
+    },
+    "01M0T2H7EYFD6GDTXXTSZDX7BK": {
+      "human_id": "TASK-828",
+      "file_path": "docs/requirements/task/TASK-828-emit-the-three-tables-from-gate-explain-and-close.md"
+    },
+    "01M0T2GKEDNQ23FC05BQHHV74D": {
+      "human_id": "TASK-829",
+      "file_path": "docs/requirements/task/TASK-829-re-check-declared-anchors-against-measured-blast-r.md"
+    },
+    "01M0T2GJRPAFN64H0JAN9ZNG9Y": {
+      "human_id": "TASK-830",
+      "file_path": "docs/requirements/task/TASK-830-wire-the-waiver-table-cell-by-cell-and-open-the-sp.md"
+    },
+    "01M0T2FRGGFER75CZPNTTEF553": {
+      "human_id": "TASK-831",
+      "file_path": "docs/requirements/task/TASK-831-make-the-predicate-class-map-total-and-prove-class.md"
+    },
+    "01M0T2FQWE70D36785787RZAWD": {
+      "human_id": "TASK-832",
+      "file_path": "docs/requirements/task/TASK-832-build-gradeof-as-a-total-layer-dominant-function-a.md"
+    },
+    "01M0T2E3S1SYVNK88P56C1M84A": {
+      "human_id": "TASK-833",
+      "file_path": "docs/requirements/task/TASK-833-move-the-pure-import-graph-core-to-lore-core-and-p.md"
     }
   }
 }

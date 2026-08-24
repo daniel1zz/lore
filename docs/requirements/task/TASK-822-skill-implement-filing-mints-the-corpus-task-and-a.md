@@ -3,7 +3,7 @@ id: TASK-822
 type: task
 role: plan
 title: "[Skill:implement] filing mints the corpus task, and a landed-then-failed write names the issue"
-status: draft
+status: archived
 priority: critical
 phase: "P2: Filing-time wiring"
 created: 2026-08-24

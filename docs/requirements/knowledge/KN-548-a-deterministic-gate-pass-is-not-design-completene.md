@@ -88,3 +88,56 @@ The same turn produced the mirror-image error: I reported `knowledge` cannot dec
 `code_anchors` from a stale reading, when the capability had shipped 12 days earlier
 (F3). Both errors shared one shape — inferring a CAPABILITY's absence from an
 OBSERVATION's absence.
+
+
+## F5 — the review loop converges by DEFECT TYPE, not by the judge falling silent
+
+F1 recorded one advisory round. The same two specs then took **12** rounds, and the judge
+found something real in every single one while the deterministic gate said `pass` from
+round 1. The useful finding is not "run more rounds" — it is that the findings arrive in a
+fixed order, and the order tells you when to stop:
+
+1. **Design holes** — a table promised in prose and never written; an enumeration whose
+   members are unnamed; a capability with no AC asserting it is WIRED.
+2. **Unquantifiable oracles** — a recognizer left to prose ("a live read", "a code symbol",
+   "a violating fixture"), a threshold with no literal, a baseline artifact with no path.
+3. **Observation-granularity false greens** — the sharpest class. One aggregate observation
+   over a conjunction of two claims: mutate one shared definition, observe one exit code,
+   and the AC goes green when only ONE of two consumers actually calls it. Mutation strength
+   was already pinned; the hole was the OBSERVATION being scalar. Fix: one named suite per
+   conjunct.
+4. **Unnamed referents** — every remaining finding is "this AC cites a symbol/path/slug it
+   never names". Cheap, mechanical, and once you are only getting these, the loop is done.
+
+⛔ Stop when the TYPE stops changing, not when the judge stops talking — it never stops
+talking, and rounds 11-12 were still producing type-4 findings after every type-3 hole was
+closed. Two rounds of type-4-only is convergence.
+
+⛔ Corollary measured twice this session: a fix can INTRODUCE a higher-class defect. Pinning
+the behavioural half to a declared falsifier (a type-2 fix) created the type-3 scalar-
+observation hole; constraining the falsifier's exit code (another type-2 fix) created a
+state where nothing constrained WHAT the code should be. Re-read the amended AC as an
+adversary, not as its author.
+
+## F6 — sweep the pattern yourself; the judge samples
+
+Rounds 9-11 were spent answering findings of the same two shapes one at a time. Grepping
+all 20 ACs for those two shapes at once — negative assertions with no recognizer, and set
+claims bounded only from below — found 8 candidates in one pass, of which 6 were real and
+were fixed together. ⛔ An LLM judge samples; it does not enumerate. Once it names a SHAPE
+twice, stop answering instances and go scan for that shape across every criterion.
+
+## F7 — three more measurements that changed a decision
+
+- **Anchor counts** over 822 live tasks: p50=2, p75=3, p90=5, p95=7, p99=12, max=21 — and
+  **193 (24%) declare ZERO anchors**. The zero bucket is not a rounding error, it is a
+  quarter of the corpus, and `noAnchorOverlap` is **vacuously satisfied** for every one of
+  them: today those tasks are invisible to the file mutex they are supposed to be governed
+  by. Unowned; named here so the next session does not rediscover it.
+- **Barrels are rare**: exactly 4 tree-wide (`packages/core/src/index.ts` 670,
+  `packages/core/src/node.ts` 54, `packages/dashboard/src/types.ts` 0,
+  `packages/lore/src/eval/index.ts` 1). Excluding them moves adjusted fan-in p75 from 4 to 3
+  and the max from 670 to 200, leaving p90/p99 unchanged.
+- **`packages/core/src/schemas.ts:701`** lists 8 knowledge sub_types and omits `uat`, which
+  is legal — `KNOWLEDGE_SUB_TYPES` (`packages/core/src/types.ts:222`) holds 9 and 7 `uat`
+  docs exist. A user hitting that refusal is shown an incomplete set of legal values.
