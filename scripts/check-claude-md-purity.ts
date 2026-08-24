@@ -116,9 +116,10 @@ export function main(): number {
   const missing = TARGET_FILES.filter((path) => !existsSync(join(REPO_ROOT, path)));
   if (missing.length > 0) {
     throw new PurityCheckError(
-      `declared purity target(s) do not exist: ${missing.join(", ")} — the three-way split of ` +
-        "claude-md-check.ts has not landed yet, so purity cannot be measured (a missing file is NOT " +
-        "the same as a file that was checked and found clean)",
+      `declared purity target(s) do not exist: ${missing.join(", ")} — one of the three split ` +
+        "modules (claude-md-budget.ts / claude-md-admission.ts / claude-md-findings.ts) was deleted " +
+        "or renamed, so purity cannot be measured (a missing file is NOT the same as a file that " +
+        "was checked and found clean)",
     );
   }
 

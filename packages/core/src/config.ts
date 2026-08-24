@@ -939,8 +939,8 @@ export type SetupConfig = z.infer<typeof SetupConfigSchema>;
  * `context.memory_files.*` — the ONLY home of the project-CLAUDE.md line/byte
  * ceiling numbers (spec-project-claude-md-content-contract-governance-injected
  * §D1/D8: "zod defaults ONLY; config.yaml overrides; prose cites the command" —
- * deliberately anti-dual-write. `packages/lore/src/service/claude-md-check.ts`'s
- * `lintMemoryFiles` (downstream task) consumes {@link resolveMemoryFileBudgets}'s
+ * deliberately anti-dual-write. `packages/lore/src/service/claude-md-budget.ts`'s
+ * `lintMemoryFiles` consumes {@link resolveMemoryFileBudgets}'s
  * return value; it MUST NOT hardcode these numbers itself.
  *
  * Field-level `.default(...)` on every leaf (the `bootstrap_injection`
@@ -988,7 +988,7 @@ export const contextConfigSchema = z
           .default({}),
         /**
          * Fraction (0–1) of a ceiling at which `computeHeadroom`
-         * (`packages/lore/src/service/claude-md-check.ts`) marks a metric as
+         * (`packages/lore/src/service/claude-md-budget.ts`) marks a metric as
          * "approaching" — an ADVISORY-only warning surfaced by `lore status
          * --check-claude-md`, never a breach and never exit-affecting
          * (task-lore-status-check-claude-md-reports-a-saturated-file-as: a
@@ -1005,7 +1005,7 @@ export const contextConfigSchema = z
          * Fraction (0–1) of a ceiling at which a memory file stops being
          * merely "approaching" and becomes a DETERMINISTIC, exit-relevant
          * `eviction_required` finding from `lintMemoryFiles`
-         * (`packages/lore/src/service/claude-md-check.ts`) — the recurrence
+         * (`packages/lore/src/service/claude-md-budget.ts`) — the recurrence
          * rule for
          * task-a-module-claude-md-at-its-byte-ceiling-silently-relocates.
          *
@@ -1877,7 +1877,7 @@ export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined)
  * filenames: ["CLAUDE.md"], warn_threshold_fraction: 0.9). Unlike
  * {@link resolveBootstrapInjectionBudgets}, this returns the section's own
  * snake_case shape verbatim — no camelCase projection — since
- * `packages/lore/src/service/claude-md-check.ts`'s `lintMemoryFiles`/
+ * `packages/lore/src/service/claude-md-budget.ts`'s `lintMemoryFiles`/
  * `computeHeadroom` are the sole consumers and the spec's
  * `MemoryFileFinding` shape is itself snake_case-free-form.
  *

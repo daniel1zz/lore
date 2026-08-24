@@ -404,7 +404,7 @@ function computeAcIdsUnderJudgment(criteria: AcceptanceCriterion[]): Set<string>
  * with an empty tail went unnoticed inside a whole-body embedding — see
  * `knowledge-a-task-doc-that-accumulated-10-evidence-rows`). Byte count (not char count)
  * because `output_tail` can carry multi-byte UTF-8 content — matches this codebase's
- * existing `Buffer.byteLength(text, "utf8")` convention (`claude-md-check.ts`).
+ * existing `Buffer.byteLength(text, "utf8")` convention (`claude-md-budget.ts`).
  *
  * Malformed/absent evidence renders as "(no evidence recorded)" rather than throwing —
  * `extra` is untyped storage, and a judge prompt should degrade gracefully, not crash.
