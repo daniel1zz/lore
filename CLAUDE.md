@@ -84,7 +84,7 @@ packages/lore/src/eval/           ← read-only evaluation scenarios (lore eval)
 
 **Import style (monorepo)** — path aliases `@core/*`, `@store/*`, `@service/*`, `@adapters/*` are retired. Cross-package imports use `@lore/core` (resolved via Bun workspaces). Intra-package imports within `packages/lore/` use relative `.js` paths. No `resolve.alias` in vitest.
 
-**`@lore/core` is browser-safe; Node-only IO lives in `@lore/core/node`** — the default barrel must never top-level-import Node builtins (`fs`/`path`/`os`): the dashboard imports it and Vite's dev-mode stub throws at module-load time (blank SPA). File-IO implementations (`loadConfig`/`saveConfig`, `JsonlTelemetry`/`createTelemetry`) are exported only from the `@lore/core/node` subpath, imported by server code (`packages/lore/**`, `scripts/**`) — never by `packages/dashboard/src/**`. Regression oracle: the Playwright e2e suite (`cd packages/dashboard && bunx playwright test`).
+**`@lore/core` is browser-safe; Node-only IO lives in `@lore/core/node`** — ⛔ the default barrel must never top-level-import a Node builtin, or the SPA blanks before React mounts. The `@lore/core/node` subpath is for server code (`packages/lore/**`, `scripts/**`) and ⛔ never for `packages/dashboard/src/**`. Mechanism, split-file list, and both oracles: `packages/core/src/CLAUDE.md` (do not restate them here — that file owns them).
 
 **DocRecord has two identifier fields**: `id` (ULID, immutable PK) and `slug` (human-readable, editable, format `{type}-{kebab-title}`). Service methods accept either via `corpusService.resolve(idOrSlug)` (`packages/lore/src/service/resolve.ts`).
 
@@ -117,7 +117,7 @@ active → archived | deprecated
 archived, deprecated → terminal (no outbound edge)
 ```
 
-Editing an `approved` doc resets it to `draft` automatically — content/title AND `extra` — except the ledger knowledge sub-types (`assessment | retro | handoff | uat`), which are re-fast-tracked to `approved` in the SAME write, so an edit logs two versions at one timestamp and never enters the review queue. ⛔ The two AC writers are ASYMMETRIC: `lore ac set` demotes an approved spec to `draft`; **`lore ac add` does NOT** — so an approval certifies the AC set as of approval time, not the set a reader sees. `knowledge-five-findings-from-planning-the-bootstrap-fixpoint` §3.
+Editing an `approved` doc resets it to `draft` automatically — content/title AND `extra` — except the ledger knowledge sub-types (`assessment | retro | handoff | uat`), which are re-fast-tracked to `approved` in the SAME write, so an edit logs two versions at one timestamp and never enters the review queue. ⛔ Three `extra` writers break that rule, in increasing invisibility: `lore ac set` demotes AND logs a version; **`lore ac add` does NOT demote** but logs one — so an approval certifies the AC set as of approval time, not the set a reader sees; **`lore phase add|rm` neither demotes NOR logs a version**, measured on an approved plan, so a declared phase set can change after review with nothing in `lore log`/`lore diff` to show it. `knowledge-five-findings-from-planning-the-bootstrap-fixpoint` §3; `knowledge-five-governance-findings-measured-while-closing-the` F6.
 
 ### MDX Placeholder Components (OutlineService)
 

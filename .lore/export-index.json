@@ -6668,6 +6668,26 @@
     "01M0S7ECRD870NHDG32P76RNG3": {
       "human_id": "KN-528",
       "file_path": "docs/requirements/knowledge/KN-528-corpus-growth-crossed-three-hard-coded-thresholds.md"
+    },
+    "01M0SHW9E9K8KBH12140VJWC91": {
+      "human_id": "SPEC-147",
+      "file_path": "docs/requirements/spec/SPEC-147-lore-issues-falls-through-to-the-local-corpus-on-a.md"
+    },
+    "01M0SHSYGWDXHZF0F36CH5RZTR": {
+      "human_id": "KN-529",
+      "file_path": "docs/requirements/knowledge/KN-529-evicted-from-packages-core-src-claude-md-2026-08-2.md"
+    },
+    "01M0SJ5RZMHX7QF9VESK9PPNH2": {
+      "human_id": "PLAN-140",
+      "file_path": "docs/requirements/plan/PLAN-140-make-lore-issues-refuse-a-retired-shape-upstream-a.md"
+    },
+    "01M0SJ54XVV9SFNNJZZ8NMCMP0": {
+      "human_id": "PLAN-141",
+      "file_path": "docs/requirements/plan/PLAN-141-retire-spec-146-s-split-debt-repoint-the-eight-sta.md"
+    },
+    "01M0SJCHR5EQK4NHA90S3YE14T": {
+      "human_id": "TASK-809",
+      "file_path": "docs/requirements/task/TASK-809-skill-implement-repoint-the-8-stale-claude-md-chec.md"
     }
   }
 }

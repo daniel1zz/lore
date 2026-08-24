@@ -162,3 +162,46 @@ eviction floor). The remaining advisory belongs to `packages/core/src/CLAUDE.md`
 15704/16384 — its own eviction floor is 16384 x 0.97 = 15892, i.e. **188 bytes away**.
 Read the live numbers from `lore status --check-claude-md`; do not trust these once the
 file is touched.
+
+## F6 — `lore phase add` mutates an APPROVED plan with no demotion AND no version row
+
+Measured 2026-08-24 by a reversible probe on `plan-retire-spec-146-s-split-debt-repoint-the-eight-stale`,
+a plan this session had just created and approved (never someone else's object):
+
+| Step | Observed |
+|---|---|
+| plan status before | `approved` |
+| `lore phase add <plan> ZZ-probe-delete-me` | exit 0 |
+| plan status after | `approved` — **no demotion** |
+| `extra.phases` after | `['P1-repoint', 'ZZ-probe-delete-me']` — the set changed |
+| `lore log <plan>` after | still exactly `v1 create` / `v2 approve` — **no version row for the write** |
+| `lore phase rm` | exit 0, set restored, still no version row |
+
+The root `CLAUDE.md` Document Lifecycle paragraph states: "Editing an `approved` doc resets
+it to `draft` automatically — content/title AND `extra`". That sentence is FALSE for this
+writer. It already carried one documented exception (`lore ac add` does not demote, while
+`lore ac set` does); `phase add`/`phase rm` is a THIRD writer, and the most invisible of
+the three:
+
+- `ac set` — demotes, logs a version. Visible twice.
+- `ac add` — does not demote, but logs a version. Visible once, in `lore log`/`lore diff`.
+- `phase add`/`rm` — does not demote AND logs nothing. Visible nowhere after the fact.
+
+⛔ Why it is load-bearing rather than cosmetic: declared phases are consumed by
+`taskExtraSchema.phase` cross-entity validation (a task's phase is checked against the
+MEMBER plan's `phases[].name`), by `lore ready`'s phase grouping, and by the plan-close
+family's "every child task archived" reasoning, where an EMPTY phase is exactly the
+vacuous-truth case the North Star names. A phase set that can change after approval, with
+nothing in the version log, means an approval certifies a phase set no reader can
+reconstruct — and `lore diff` cannot show the change even if someone suspects it.
+
+**Mechanism needed.** Route `phase add`/`phase rm` through the same write path as every
+other `extra` mutation so it logs a version, and decide the demotion question EXPLICITLY
+rather than by omission: either it demotes (like `ac set`) or the lifecycle paragraph must
+name it as a third documented exception. ⛔ Whichever is chosen, the oracle is a version-row
+assertion, not prose: `lore log` must gain a row for a `phase add` against an approved plan.
+
+**Also true of this session's own work**: the plan above was reviewed at v1, then had its
+only phase added, then was approved at v2 — and `lore approve` accepted it. That sequence
+is legal precisely because the phase write left no version behind for the freshness check
+to notice.
