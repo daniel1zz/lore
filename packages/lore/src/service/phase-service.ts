@@ -2,8 +2,30 @@
  * PhaseService — manages declared phases on plan documents.
  *
  * Phases are soft groupings stored in plan.extra.phases (array of {name, description?}).
- * They are NOT a doc type — no ID, no lifecycle, no version history.
- * Tasks reference phases by name via task.extra.phase.
+ * They are NOT a doc type — no id, no lifecycle, no status of their own. Tasks
+ * reference phases by name via task.extra.phase.
+ *
+ * ⛔ WRITE CONTRACT, decided by
+ * `adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan` — which overturns
+ * ONLY SPEC-023's "phase history is dispensable" clause and keeps its soft-grouping
+ * model intact. The three phase-set writers below (`addPhase`, `removePhase`,
+ * `renamePhase`) each LOG exactly one version row, so a phase-set mutation is visible
+ * in `lore log`/`lore diff`; and each leaves the plan's `status` UNTOUCHED — adding a
+ * phase to an `approved` plan keeps it `approved`. This is the shape `lore ac add`
+ * already has (see `ac-service.ts`'s own header for the sibling contract).
+ *
+ * ⛔ The demotion half is explicitly OUT. The status-after-contract-edit helper that
+ * `lore ac set` calls — exported from `@lore/core`'s schemas.ts, consumed by
+ * `ac-service.ts`, which is this file's green control for it — has NO caller here by
+ * decision, and its identifier is deliberately absent from this file so that the
+ * decision is greppable as an absence (the ADR above names it in full). A future reader
+ * who notices that phase writes now log a version but do not demote is looking at the
+ * DECIDED behaviour, not an unfinished migration — ⛔ do not "complete" it by adding a
+ * demotion.
+ *
+ * ⛔ The back-catalogue is unrecoverable: every phase mutation applied before that
+ * decision landed left no version row, and no migration can reconstruct them. Anywhere
+ * a plan's version history is presented as complete, that limit MUST be stated.
  *
  * Public surface:
  *   listPhases(planIdOrSlug)                       → PlanPhase[]
@@ -16,9 +38,14 @@
  * @invariant Names are trimmed at write time and matched case-sensitively (SPEC-023 §8 Q-extra).
  * @invariant removePhase fails if any child task still references the phase (AC-PHASE-9).
  * @invariant migratePhases is idempotent — rerunning is a no-op (AC-PHASE-10).
+ * @invariant {@link PhaseService.writePhases} is the ONLY writer of `plan.extra.phases`
+ *   in this file — one CAS-guarded composite write (doc patch + version row + audit
+ *   entry) per mutation, never a bare `store.update`. `migratePhases` is deliberately
+ *   NOT routed through it: it rewrites the LEGACY singular `extra.phase` key, not the
+ *   declared `phases[]` array, and is outside the ADR's scope.
  *
  * Side-effect class: IO (reads and writes via StoreInterface).
- * Source: SPEC-023 §4, §9.1
+ * Source: SPEC-023 §4, §9.1, as amended by the ADR cited above.
  */
 
 import { err, ok, type Result } from "@lore/core";
@@ -138,11 +165,12 @@ export class PhaseService {
     }
 
     const updatedPhases: PlanPhase[] = [...existing, newPhase];
-    const updateResult = await this.store.update(plan.id, {
-      extra: { ...plan.extra, phases: updatedPhases },
-      updated_at: new Date().toISOString(),
+    const writeResult = await this.writePhases(plan, updatedPhases, {
+      operation: "add",
+      change_summary: `Phase added — "${trimmedName}" (${updatedPhases.length} declared)`,
+      details: { phase: trimmedName },
     });
-    if (!updateResult.ok) return updateResult;
+    if (!writeResult.ok) return writeResult;
 
     return ok(updatedPhases);
   }
@@ -200,11 +228,12 @@ export class PhaseService {
     }
 
     const updatedPhases = existing.filter((p) => p.name !== name);
-    const updateResult = await this.store.update(plan.id, {
-      extra: { ...plan.extra, phases: updatedPhases },
-      updated_at: new Date().toISOString(),
+    const writeResult = await this.writePhases(plan, updatedPhases, {
+      operation: "remove",
+      change_summary: `Phase removed — "${name}" (${updatedPhases.length} declared)`,
+      details: { phase: name },
     });
-    if (!updateResult.ok) return updateResult;
+    if (!writeResult.ok) return writeResult;
 
     return ok(updatedPhases);
   }
@@ -280,11 +309,12 @@ export class PhaseService {
       p.name === oldName ? { ...p, name: trimmedNew } : p,
     );
 
-    const planUpdateResult = await this.store.update(plan.id, {
-      extra: { ...plan.extra, phases: updatedPhases },
-      updated_at: new Date().toISOString(),
+    const planWriteResult = await this.writePhases(plan, updatedPhases, {
+      operation: "rename",
+      change_summary: `Phase renamed — "${oldName}" → "${trimmedNew}" (${updatedPhases.length} declared)`,
+      details: { phase: trimmedNew, previous_phase: oldName },
     });
-    if (!planUpdateResult.ok) return planUpdateResult;
+    if (!planWriteResult.ok) return planWriteResult;
 
     // Update all child tasks that reference the old phase name.
     // reason: best-effort sequential updates — StoreInterface has no transaction primitive.
@@ -378,6 +408,108 @@ export class PhaseService {
       (doc) => isPlanMember(doc, planId) && doc.extra["phase"] === phaseName,
     );
     return ok(matched);
+  }
+
+  // ── writePhases ────────────────────────────────────────────────────
+
+  /**
+   * The single write path for `plan.extra.phases` — shared by `addPhase`,
+   * `removePhase` and `renamePhase`. Bumps the plan's `version`, snapshots that
+   * version, and audits it, per
+   * `adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan`.
+   *
+   * ⛔ `status` is passed through UNCHANGED and is never computed here. reason: the
+   * ADR decided the `lore ac add` shape — log, do NOT demote — and explicitly ruled the
+   * demotion half out (this file's header explains why the helper's identifier is absent
+   * here rather than merely uncalled). An `approved` plan is still `approved` after a
+   * phase write. Reintroducing a demotion would force re-approval on every phase edit,
+   * which the ADR rejected by name as a coordination cost under many-concurrent-sessions.
+   *
+   * reason: ONE composite `updateWithProvenance` rather than
+   * `update` + `insertVersion` + `appendAuditEntry` as three independent awaits, on two
+   * grounds neither of which is optional here:
+   *   1. BUG-002 — three separate awaits leave the doc PERSISTED with a missing
+   *      version/audit row when step 2 or 3 fails, with no signal to the caller.
+   *      `updateWithProvenance` commits or rolls back all three together.
+   *   2. The `versions` table's real PK is `(doc_id, version)`, so two concurrent phase
+   *      writes that both computed `plan.version + 1` would collide on the version
+   *      insert AFTER one of them had already mutated the doc. The
+   *      `expected_version` CAS below turns that race into a clean `STALE_VERSION` for
+   *      the loser, before any row is written.
+   *
+   * The audit entry's `details.version` is load-bearing, not decoration: it is the join
+   * key `AuditService.verify` reconciles versions rows against (SPEC-035 §2,
+   * `VERSION_ACTION_AUDIT_FAMILY`). A version row with `action: "update"` and no audit
+   * entry carrying the same `(doc_id, version)` is reported as an unexplained row and
+   * makes `lore audit --verify` return `clean: false` (MEASURED: dropping the audit
+   * entry and keeping only the version row puts one miss per phase write in that
+   * command's `misses[]` and exits 4, while the whole SPEC-148 parity suite stays
+   * green — the suite does not read the audit trail). That is why the audit half is
+   * written here and not left to callers.
+   *
+   * `actor`/`created_by` are the literal `"system"`, matching `AcService`'s sibling
+   * `extra` write path: `PhaseService` is constructed with a store and nothing else, so
+   * there is no invoking actor to resolve. Attribution of phase writes to a real actor
+   * needs `by`-plumbing through `phase-wiring.ts`, which no decision has asked for yet.
+   *
+   * @param plan - The resolved plan doc, read BEFORE the mutation; its `version` is
+   *   both the CAS expectation and the base for the new version number.
+   * @param phases - The complete post-mutation phases array (this method never merges).
+   * @param opts.operation - Which writer called, for `change_summary`/audit `details`.
+   * @param opts.change_summary - Human-readable one-liner stored on the version row.
+   * @param opts.details - Operation-specific audit `details` keys merged in alongside
+   *   the mandatory `operation`/`phase_count`/`version`.
+   * @returns The updated plan record, or the store's own error — `STALE_VERSION` when a
+   *   concurrent writer moved the plan's version, never a silently-lost write.
+   */
+  private async writePhases(
+    plan: DocRecord,
+    phases: PlanPhase[],
+    opts: {
+      operation: "add" | "remove" | "rename";
+      change_summary: string;
+      details: Record<string, unknown>;
+    },
+  ): Promise<Result<DocRecord, LoreError>> {
+    const now = new Date().toISOString();
+    const newVersion = plan.version + 1;
+    const newExtra: Record<string, unknown> = { ...plan.extra, phases };
+
+    return this.store.updateWithProvenance(
+      plan.id,
+      { extra: newExtra, updated_at: now, version: newVersion },
+      { expected_version: plan.version },
+      {
+        doc_id: plan.id,
+        version: newVersion,
+        content: plan.content,
+        extra: newExtra,
+        // ⛔ The ADR's non-demotion half, expressed as data: the snapshot carries the
+        // plan's CURRENT status, never a recomputed one.
+        status: plan.status,
+        title: plan.title,
+        action: "update",
+        created_at: now,
+        created_by: "system",
+        change_summary: opts.change_summary,
+        // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
+        // current (unchanged) slug.
+        slug: plan.slug,
+      },
+      {
+        timestamp: now,
+        actor: "system",
+        session_id: plan.id,
+        action: "update",
+        doc_id: plan.id,
+        details: {
+          ...opts.details,
+          operation: opts.operation,
+          phase_count: phases.length,
+          version: newVersion,
+        },
+      },
+    );
   }
 }
 
