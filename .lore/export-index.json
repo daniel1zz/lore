@@ -6724,6 +6724,14 @@
     "01M0SMJJ9X6YBACXPN2RYB77MV": {
       "human_id": "KN-535",
       "file_path": "docs/requirements/knowledge/KN-535-handoff-agent-main-orchestrator.md"
+    },
+    "01M0SN2HS46J8HX7X0AKEBM7GX": {
+      "human_id": "KN-536",
+      "file_path": "docs/requirements/knowledge/KN-536-lore-release-erases-all-three-ownership-signals-at.md"
+    },
+    "01M0SNQDQVHRJJD9VD2JDRMGN2": {
+      "human_id": "KN-537",
+      "file_path": "docs/requirements/knowledge/KN-537-assessment-make-lore-issues-refuse-a-retired-shape.md"
     }
   }
 }

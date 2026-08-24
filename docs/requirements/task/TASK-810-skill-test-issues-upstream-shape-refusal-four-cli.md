@@ -3,7 +3,7 @@ id: TASK-810
 type: task
 role: plan
 title: "[Skill:test] issues-upstream-shape-refusal — four CLI-surface describes against a throwaway corpus, RED first"
-status: draft
+status: archived
 priority: high
 phase: "P1: Red"
 created: 2026-08-24

@@ -3,7 +3,7 @@ id: TASK-811
 type: task
 role: plan
 title: "[Skill:implement] classifyFeedbackUpstream as the single shape-policy source for both issue verbs, plus the two stale issues.ts comments"
-status: draft
+status: archived
 priority: high
 phase: "P2: Fix"
 created: 2026-08-24
