@@ -108,6 +108,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [knowledge] An equality oracle over two copies goes vacuous the moment the copies are collapsed, plus three findings from closing the defect channel's SSOT (approved)
 - [knowledge] A --dry-run flag that does not exist writes the files anyway, a mirror CLI with no per-doc --force, and the five-pass gradient from a green-on-arrival oracle to a positive one (approved)
 - [spec] The retired-shape refusal message has two independent definitions and no oracle fails when they diverge — measured: they already had (approved)
 - [spec] Phase writes are version-less BY DESIGN (SPEC-023) — the root CLAUDE.md lifecycle paragraph contradicts it, and the premise that phase history is dispensable has moved (approved)

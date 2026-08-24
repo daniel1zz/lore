@@ -6784,6 +6784,10 @@
     "01M0SQX9JNWSEYFYTEXVRNP91Q": {
       "human_id": "KN-542",
       "file_path": "docs/requirements/knowledge/KN-542-a-dry-run-flag-that-does-not-exist-writes-the-file.md"
+    },
+    "01M0SSE3N65EDES68GXRHJAPV7": {
+      "human_id": "KN-543",
+      "file_path": "docs/requirements/knowledge/KN-543-an-equality-oracle-over-two-copies-goes-vacuous-th.md"
     }
   }
 }

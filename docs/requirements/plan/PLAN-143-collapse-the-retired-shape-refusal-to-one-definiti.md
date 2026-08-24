@@ -48,10 +48,22 @@ Every AC's oracle was executed against HEAD before this plan was written.
 quotes the exact stderr). This plan changes no behaviour, so a probe may only assert what the
 message ALREADY says — an absent substring could not be made to appear here.
 
-⛔ Behaviour is ALREADY CORRECT on all three surfaces — MCP refuses all three shapes today,
-and its retired message is byte-identical to the classifier's. This plan removes a duplication
-that no oracle would have caught diverging; it is not a defect fix. Do not let a report frame
-it as one.
+⛔ Behaviour is ALREADY CORRECT on all three surfaces — MCP refuses all three shapes today.
+This plan removes a duplication that no oracle would have caught diverging.
+
+⛔ CORRECTION (measured after this baseline was written, and after `lore assess` flagged the
+contradiction): the clause originally read "and its retired message is byte-identical to the
+classifier's". That was FALSE. `git show <pre-fix>:...` on both files:
+
+- `report-issue-wiring.ts` -> `... to file/list issue reports via GitHub.`
+- `adapters/mcp/tools.ts`  -> `... to file issue reports via GitHub.`  (no `/list`)
+
+The copies had ALREADY DRIFTED and nothing noticed, for exactly as long as the copy existed.
+The false claim came from grepping only the SHARED substring, finding it in both, and reading
+that as equality — a partial comparison is not an equality check. This makes the plan's purpose
+stronger, not weaker: it was not preventing a hypothetical future drift, it was closing a live
+one. ⛔ assess was right to flag that the shipped docstring contradicted this table; the
+docstring was correct and the table was wrong.
 
 ## Sequencing
 
