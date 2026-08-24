@@ -6688,6 +6688,26 @@
     "01M0SJCHR5EQK4NHA90S3YE14T": {
       "human_id": "TASK-809",
       "file_path": "docs/requirements/task/TASK-809-skill-implement-repoint-the-8-stale-claude-md-chec.md"
+    },
+    "01M0SJW76QSCX0J2MDVJVF6F19": {
+      "human_id": "SPEC-148",
+      "file_path": "docs/requirements/spec/SPEC-148-lore-phase-add-and-phase-rm-mutate-a-plan-s-declar.md"
+    },
+    "01M0SJZMD3HVGMAA2TY23AV3Q5": {
+      "human_id": "KN-530",
+      "file_path": "docs/requirements/knowledge/KN-530-handoff-agent-main-orchestrator.md"
+    },
+    "01M0SJWWFA44JEBZWXPZ75FMAA": {
+      "human_id": "KN-531",
+      "file_path": "docs/requirements/knowledge/KN-531-two-attributions-in-the-corpus-growth-threshold.md"
+    },
+    "01M0SJJ174MZT2X1V7NZYFAJVE": {
+      "human_id": "TASK-810",
+      "file_path": "docs/requirements/task/TASK-810-skill-test-issues-upstream-shape-refusal-four-cli.md"
+    },
+    "01M0SJJ1VBA1FTDCVT9CWKAD8F": {
+      "human_id": "TASK-811",
+      "file_path": "docs/requirements/task/TASK-811-skill-implement-classifyfeedbackupstream-as-the-si.md"
     }
   }
 }

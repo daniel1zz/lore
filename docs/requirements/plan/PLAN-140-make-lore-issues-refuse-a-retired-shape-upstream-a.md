@@ -3,7 +3,7 @@ id: PLAN-140
 type: plan
 role: plan
 title: "Make lore issues refuse a retired-shape upstream as loudly as report-issue already does"
-status: draft
+status: approved
 priority: high
 created: 2026-08-24
 updated: 2026-08-24

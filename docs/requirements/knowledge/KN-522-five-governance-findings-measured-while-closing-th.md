@@ -205,3 +205,38 @@ assertion, not prose: `lore log` must gain a row for a `phase add` against an ap
 only phase added, then was approved at v2 — and `lore approve` accepted it. That sequence
 is legal precisely because the phase write left no version behind for the freshness check
 to notice.
+
+### F6 NARROWED — the neighbours were measured, and they all log
+
+Following F1's own lesson (test the neighbouring cells before buying a class-wide fix),
+every sibling `extra` writer was measured in a THROWAWAY corpus (`mktemp -d` + `lore init`,
+cwd inside it, deleted afterwards — ⛔ never this repo's live `.lore/`):
+
+| Writer | Field it mutates | Version row? |
+|---|---|---|
+| `lore anchor add` | `extra.file_anchors` | YES — v1 → v2 |
+| `lore scope add` | `extra.ac_scope` | YES — v2 → v3 |
+| `lore red-first` | `extra.red_first` | YES — v3 → v4 |
+| `lore ac set` | spec criteria | YES, and demotes |
+| `lore ac add` | spec criteria | YES, no demotion |
+| **`lore phase add`** | `extra.phases` | **NO — stayed v1** |
+| **`lore phase rm`** | `extra.phases` | **NO — stayed v1** |
+
+Reproduced on a fresh plan in a corpus that had never seen this repo, so it is a
+consumer-visible defect, not an artifact of our own corpus. ⛔ Scope is therefore ONE
+command family, not the `extra`-writer class: five siblings already route through a
+version-logging write path, which is the green control proving that path works and that
+`phase add`/`rm` simply does not use it.
+
+### Why the harm is precise
+
+`lore approve` DOES enforce a review judgment for the CURRENT version — measured: approving
+a spec with no review exits 4 and names the recovery. The defect is not that the check is
+missing; it is that `phase add` mutates content WITHOUT advancing version identity, so the
+check compares the right thing and still says "current" about a document that changed. A
+review therefore survives a phase-set change it never saw, and `lore diff` has no rows to
+show it with.
+
+⛔ This is North Star property 1 (it must not lie) at the version-log layer: the log is not
+merely incomplete, it is self-consistent and wrong — `v1 create / v2 approve` reads as a
+complete history of a document that was edited between those two rows.
