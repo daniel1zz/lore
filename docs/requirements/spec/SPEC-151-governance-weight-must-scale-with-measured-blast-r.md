@@ -63,6 +63,23 @@ the Zod boundary every write crosses — scores 8. Layer must dominate; fan-in m
 subdivide within a layer. This measurement was taken BEFORE the thresholds were
 written, and it changed them.
 
+**M6 — anchor counts and barrel-adjusted fan-in, measured because the first draft's
+thresholds were invented.** Over 822 live tasks, `file_anchors` length: p50=2, p75=3,
+p90=5, p95=7, **p99=12**, max=21 — and **193 tasks (24%) declare ZERO anchors**. Over
+the 498 non-test non-barrel source files, `adjustedFanIn`: p50=1, **p75=3**, p90=10,
+p95=23, p99=85, **max=200**. Barrels are rare — exactly 4 tree-wide
+(`packages/core/src/index.ts` 670, `packages/core/src/node.ts` 54,
+`packages/dashboard/src/types.ts` 0, `packages/lore/src/eval/index.ts` 1) — so excluding
+them moves p75 from 4 to 3 and the max from 670 to 200, leaving p90/p99 unchanged.
+
+⛔ Two consequences. First, the first draft's anchor cutoffs (>8, >3, <=2) carried NO
+measurement — only the fan-in row did — so D8's provenance sentence was broader than its
+evidence; `>8` is near p97, a number with no meaning, and is corrected to p99=12 below.
+Second, a zero-anchor task makes `layer(anchors)` UNDEFINED over an empty set, which is
+distinct from "matches no layer" — and 24% of live tasks are in that state, where
+`noAnchorOverlap` also passes vacuously. D8 resolves the empty set to the MOST severe
+grade (D9), because no-information must not buy a lighter process.
+
 ## Goals / Non-Goals
 
 **Goals**
@@ -126,11 +143,16 @@ assigned to exactly one class:
 
 | Class | Predicates | Grade interaction |
 |---|---|---|
-| **I — concurrency + attributability** | `noAnchorOverlap`, `actorIdentityGuard`, `stampCurrency`, `parentLegal`, `specKindValid`, `upstreamApproved` | NONE. No grade waives these. |
+| **I — size-invariant** | `noAnchorOverlap`, `actorIdentityGuard`, `stampCurrency`, `parentLegal`, `specKindValid`, `upstreamApproved` | NONE. No grade waives these. |
 | **II — per-requirement verification quality** | `hasSkeleton`, `upstreamHasAcceptanceCriteria`, `acQuantifiable`, `oracleCoverage`, `requiresUat`, `attestationFloor` | Scaled by grade (`attestationFloor` by ratio, the rest by applicability) |
 
-The boundary rests on one property: **a class-I failure's cost does not scale with
-requirement size.** Two sessions colliding on one file costs the same whether the
+The class is named for the property that DEFINES it, not for a subset of its members:
+**a class-I failure's cost does not scale with requirement size.** That is why
+`parentLegal` and `specKindValid` belong here despite being structural-legality rather
+than concurrency predicates — a malformed parent link costs the same at any size. ⛔ An
+earlier draft named this class "concurrency + attributability", which was narrower than
+its own membership and would have made the next session reclassify by the label instead
+of by the property. Two sessions colliding on one file costs the same whether the
 change was a typo fix or an architecture rewrite. A class-II failure's cost is
 proportional to the requirement — a doc tweak with no AC loses that doc tweak; a gate
 semantics change with no AC loses the governance layer.
@@ -181,8 +203,11 @@ bind. The grade function, the class map, and the tier table are each printable
 (`lore gate --explain` extended), and `CLAUDE.md` gains pointers only. The oracle for
 this is `lore status --check-claude-md`: net growth must stay within budget.
 
-**D8 — the level set, the thresholds, and the waiver table.** Every threshold below is
-a measured percentile from M5, not a chosen round number.
+**D8 — the level set, the thresholds, and the waiver table.** Every fan-in cutoff is a
+measured percentile from M5/M6 and every anchor-count cutoff from M6; each table cell
+names its source inline. ⛔ The waiver table's ratios are NOT measured percentiles — they
+are a policy choice, and are labelled as such, because an unearned provenance claim is
+what an earlier draft of this sentence made.
 
 *Layers, risk-descending:*
 
@@ -198,21 +223,24 @@ a measured percentile from M5, not a chosen round number.
 never an average and never the first anchor's. An anchor matching NO layer is an error
 (T3), not a `PERIPHERAL` default.
 
-*Grades, evaluated in this order, first match wins. `G1` is the unconditional tail, so
-the function is TOTAL over every (layer, count, fan-in) triple:*
+*Grades, evaluated in this order, first match wins. `R1` is the unconditional tail, so
+the function is TOTAL over every (layer, count, fan-in) triple. Every cutoff cites the
+M5/M6 percentile it comes from:*
 
 | Order | Grade | Condition |
 |---|---|---|
-| 1 | `G3 structural` | layer is `STRUCT`, OR `adjustedFanIn` > 85 (p99), OR `count(anchors)` > 8 |
-| 2 | `G2 broad` | `adjustedFanIn` > 10 (p90), OR `count(anchors)` > 3 |
-| 3 | `G0 mechanical` | layer is `PERIPHERAL` AND `count(anchors)` <= 2 AND `adjustedFanIn` <= 4 (p75) |
-| 4 | `G1 local` | **tail — everything else** |
+| 0 | `R3 structural` | `count(anchors)` == 0 — see D9 |
+| 1 | `R3 structural` | layer is `STRUCT`, OR `adjustedFanIn` > 85 (M5 p99), OR `count(anchors)` > 12 (M6 p99) |
+| 2 | `R2 broad` | `adjustedFanIn` > 10 (M5 p90), OR `count(anchors)` > 3 (M6 p75) |
+| 3 | `R0 mechanical` | layer is `PERIPHERAL` AND `count(anchors)` <= 2 (M6 p50) AND `adjustedFanIn` <= 3 (M6 adjusted p75) |
+| 4 | `R1 local` | **tail — everything else** |
 
-⛔ `G0` is tested BEFORE `G1` because it is the narrower predicate; `G1` carries no
-layer restriction precisely so that no input can fall through. A `PERIPHERAL` task with
-3 anchors, or one with `adjustedFanIn` of 7, lands `G1` — an earlier draft of this table
-left both unmatched, and the totality assertion in AC-GRADE-1 exists to keep that
-regression out.
+⛔ `R0` is tested BEFORE `R1` because it is the narrower predicate; `R1` carries no layer
+restriction precisely so that no input can fall through. A `PERIPHERAL` task with 3
+anchors, or one with `adjustedFanIn` of 7, lands `R1` — an earlier draft of this table
+left both unmatched, and AC-GRADE-1's totality sweep exists to keep that regression out.
+⛔ The `<= 3` fan-in cutoff is the BARREL-ADJUSTED p75 (M6), not the raw p75 of 4 (M5):
+the percentile must be computed on the same distribution the function reads.
 
 *Class-II waivers by grade — the table D3 promised:*
 
@@ -231,12 +259,23 @@ regression out.
 
 | Grade | Permitted shapes |
 |---|---|
-| `G0` | `--adhoc`, or spec + task, or full chain |
-| `G1` | spec + task (D4), or full chain |
-| `G2`, `G3` | full chain only — plan and phase required |
+| `R0` | `--adhoc`, or spec + task, or full chain |
+| `R1` | spec + task (D4), or full chain |
+| `R2`, `R3` | full chain only — plan and phase required |
 
-G1 is the middle tier's home: it is the grade at which ACs are still worth declaring
+R1 is the middle tier's home: it is the grade at which ACs are still worth declaring
 (so a spec must exist) but no cross-task coordination is in play (so no plan).
+
+**D9 — an empty anchor set grades `R3`, not `R1`.** M6 measured 24% of live tasks
+declaring zero anchors. Over an empty set `layer()` has no value at all, which is a
+different condition from "an anchor matching no layer" (the T3 error) and must not be
+folded into it. Resolving the empty set to the HEAVIEST grade is the only fail-safe
+direction, and it aligns the incentive with D1: declaring nothing cannot buy a lighter
+process, so the only way to reach `R0`/`R1` is to declare a genuinely narrow anchor set.
+⛔ It also removes a vacuous pass that already exists — `noAnchorOverlap` is trivially
+satisfied by an empty anchor set, so today a zero-anchor task is invisible to the file
+mutex as well. This spec does not fix that mutex hole, but it stops the grade layer from
+inheriting it.
 
 ## Trade-offs
 
@@ -261,8 +300,8 @@ G1 is the middle tier's home: it is the grade at which ACs are still worth decla
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-GRADE-1: gradeOf is pure and TOTAL, asserted on four fronts: (a) two calls with identical input return deep-equal grades; (b) the grade table is a total function — a bounded exhaustive sweep over layer x anchor-count x fan-in including every threshold boundary value (2,3,4,5,8,9,10,11,85,86) yields a grade for EVERY triple, never undefined, which is the regression guard for the unmatched-row hole an earlier draft of D8 had; (c) an anchor matching no declared layer is refused with an error, never defaulted to PERIPHERAL; (d) a task whose anchors span layers resolves to the most risk-dominant layer present, and a pure re-export barrel is EXCLUDED from adjustedFanIn — both asserted, since D1 promises them and no other AC covers them. Covered by describe "gradeOf — purity, totality, layer resolution, barrel exclusion" in packages/lore/tests/unit/service/requirement-grade.test.ts
-  script: test — bunx vitest run packages/lore/tests/unit/service/requirement-grade.test.ts 2>&1 && echo 'AC-GRADE-1 PASS: repeated identical input gave deep-equal grades, the bounded exhaustive triple sweep including every threshold boundary returned a grade for every input with none undefined, an unknown anchor layer was refused with an error rather than defaulted, a multi-layer task resolved to its most risk-dominant layer, and a pure re-export barrel was excluded from adjustedFanIn'
+- [·] [script] AC-GRADE-1: gradeOf is pure and TOTAL, asserted on five fronts: (a) two calls with identical input return deep-equal grades; (b) the grade table is a total function — a bounded exhaustive sweep over layer x anchor-count x fan-in covering every value the D8 table actually branches on, plus one either side of each: 0,1,2,3,4 and 10,11,12,13 and 85,86. D8 branches on M6 p50=2, M6 p75=3, M6 adjusted p75=3, M5 p90=10 and M5/M6 p99 (85 fan-in, 12 anchors) ONLY — p95 and max are measured in M5/M6 but are deliberately NOT cutoffs, so they are absent from this list by design, not by oversight; (c) an anchor matching no declared layer is refused with an error, never defaulted to PERIPHERAL; (d) a task whose anchors span layers resolves to the most risk-dominant layer present, and a pure re-export barrel is EXCLUDED from adjustedFanIn, with the barrel set asserted to be exactly the 4 files M6 measured; (e) an EMPTY anchor set grades R3 per D9 — distinct from case (c), and the state 24% of live tasks are in. Covered by describe "gradeOf — purity, totality, layer resolution, barrel exclusion, empty set" in packages/lore/tests/unit/service/requirement-grade.test.ts
+  script: test — bunx vitest run packages/lore/tests/unit/service/requirement-grade.test.ts 2>&1 && echo 'AC-GRADE-1 PASS: repeated identical input gave deep-equal grades, the exhaustive sweep over every value D8 branches on returned a defined grade for each, an unknown layer was refused, a multi-layer task took its most risk-dominant layer, the barrel set matched M6 exactly 4 files, and an empty anchor set graded R3'
 - [·] [script] AC-GRADE-2: buildImportGraph has EXACTLY ONE definition tree-wide (in @lore/core), and BOTH scripts/changed-tests.ts and the grade-derivation module carry a live CALL to it, not merely an import. Asserts exactly 1, never >= 1: two copies of one rule is the shape this repo has already measured drifting undetected, because nothing compared them.
   script: test — bun scripts/check-fanin-ssot.ts 2>&1 && echo 'AC-GRADE-2 PASS: buildImportGraph resolved to exactly 1 tree-wide definition in @lore/core and both changed-tests.ts and the grade module were measured to CALL it, not merely import it'
 - [·] [script] AC-GRADE-3: For EVERY predicate in the class-I set, a lowest-grade task input still has that predicate evaluated and still able to refuse — at least one refusing case per predicate. The test iterates the class map itself as its source, so a newly added class-I predicate enters the sweep automatically. Not a sample. Covered by describe "class-I predicates are grade-invariant" in packages/lore/tests/unit/service/gate-class-boundary.test.ts
@@ -275,9 +314,11 @@ G1 is the middle tier's home: it is the grade at which ACs are still worth decla
   script: test — bunx vitest run packages/lore/tests/unit/service/requirement-grade.test.ts -t 'declared anchors vs measured blast radius' 2>&1 && echo 'AC-GRADE-6 PASS: an under-declared task was refused with the undeclared paths named, and the same task with complete anchors passed in the same run as the green control'
 - [·] [script] AC-GRADE-7: Arming invalidates nothing: the gate verdict for EVERY pre-arming task is identical before and after the arming commit, compared as whole result sets, not sampled. Pre-arming tasks classify legacy_ungraded and are accepted. The comparison enumerates every live task, so a task added to the corpus mid-run cannot hide in an unsampled remainder. Covered by describe "arming changes no pre-arming verdict" in packages/lore/tests/integration/grade-arming-parity.test.ts
   script: test — bunx vitest run packages/lore/tests/integration/grade-arming-parity.test.ts 2>&1 && echo 'AC-GRADE-7 PASS: the gate verdict set over every pre-arming task compared equal before and after arming, with pre-arming tasks classified legacy_ungraded and accepted'
-- [·] [script] AC-GRADE-8: The rules ship as executables, not prose: lore status --check-claude-md exits 0 with root CLAUDE.md inside both its line and byte ceilings, this spec adds at most 3 lines to it, and the grade function, the class map, and the tier table are each printable from lore gate --explain. Asserts the printed output is non-empty and names all three, so a pointer with nothing behind it fails.
-  script: other — lore status --check-claude-md 2>&1 && lore gate --explain 2>&1 | grep -q 'class' && echo 'AC-GRADE-8 PASS: check-claude-md exit 0 within both ceilings and lore gate --explain printed the grade function, class map and tier table'
-- [·] [script] AC-GRADE-9: Every script-mode AC on this spec EXCEPT this one carries all four --falsifier-* fields, and lore verify --falsify drives each to the EXACT declared exit code. This AC itself carries no falsifier by construction, not by omission: its red state is a corpus condition (some AC lacks a falsifier), and the falsifier mechanism mutates FILES only, so it cannot express a corpus-state mutation.
-  script: other — lore ac list spec-governance-weight-must-scale-with-measured-blast-radius-a --json 2>&1 | bun scripts/check-falsifier-coverage.ts 2>&1 && echo 'AC-GRADE-9 PASS: every script-mode AC on this spec except AC-GRADE-9 carries all four falsifier fields and verify --falsify reached each declared exit code exactly'
+- [·] [script] AC-GRADE-8: The rules ship as executables, not prose: lore status --check-claude-md exits 0 with root CLAUDE.md inside both its line and byte ceilings, this spec adds at most 3 lines to it, and lore gate --explain emits all three of the EXACT literal tokens "LAYER TABLE", "GRADE TABLE" and "CLASS-II WAIVERS" — named literals, not a loose reading of "names all three", so two sessions cannot both claim green on different assertions. Each token must be followed by at least one data row, so a printed header with an empty table fails.
+  script: other — lore status --check-claude-md 2>&1 && lore gate --explain 2>&1 | grep -c -E 'LAYER TABLE|GRADE TABLE|CLASS-II WAIVERS' | grep -qx 3 && echo 'AC-GRADE-8 PASS: check-claude-md exit 0 within both ceilings and gate --explain emitted exactly the three literal tokens LAYER TABLE, GRADE TABLE and CLASS-II WAIVERS each followed by data rows'
+- [·] [script] AC-GRADE-9: Every script-mode AC on this spec EXCEPT this one carries all FOUR named falsifier fields — falsifier_path, falsifier_find, falsifier_replace, falsifier_exit_code — and lore verify --falsify drives each mutation to the exit code recorded in THAT AC own falsifier_exit_code field, compared for exact equality. This AC carries no falsifier by construction, not omission: its red state is a corpus condition and the mechanism mutates FILES only. Covered by describe "every script-mode AC declares a reachable falsifier" in packages/lore/tests/integration/falsifier-coverage.test.ts
+  script: other — bunx vitest run packages/lore/tests/integration/falsifier-coverage.test.ts 2>&1 && echo 'AC-GRADE-9 PASS: every script-mode AC on this spec except AC-GRADE-9 carried all four named falsifier fields and verify --falsify reached each AC own declared falsifier_exit_code exactly'
 - [·] [script] AC-GRADE-10: Grading is WIRED, not merely computed: the D8 waiver table is the iteration source, and for EVERY (predicate, grade) cell the suite asserts the actual gate behaviour matches the cell — a waived cell means the predicate was NOT evaluated, a required cell means it WAS evaluated and can still refuse. Two-sided in the same run. Adding a row or column to the table therefore enters the sweep automatically. Asserting only that gradeOf returns the right grade would be the capability-implemented-wiring-absent false green this repo has already measured four times. Covered by describe "the D8 waiver table is enforced cell by cell" in packages/lore/tests/integration/grade-waiver-wiring.test.ts
   script: test — bunx vitest run packages/lore/tests/integration/grade-waiver-wiring.test.ts 2>&1 && echo 'AC-GRADE-10 PASS: every cell of the D8 waiver table was driven end to end — waived cells measured the predicate as not evaluated, required cells measured it evaluated and still able to refuse'
+- [·] [script] AC-GRADE-11: There is NO declared-override path, asserted positively rather than left to "by construction" (N2/D1): (a) a task-create input carrying a grade or risk_class field is REJECTED by the Zod schema, with the rejection naming the offending key — a negative assertion, so introducing an override field later turns this red; (b) priority is read by no gate — a tree-wide scan asserts zero reads of the priority field inside the gate predicate and checkpoint-registry modules, against a green control of at least one read elsewhere in the tree, so the scan is proven able to find a read at all (N1). Covered by describe "no declared-override path exists" in packages/lore/tests/unit/service/requirement-grade.test.ts
+  script: test — bunx vitest run packages/lore/tests/unit/service/requirement-grade.test.ts -t 'no declared-override path' 2>&1 && echo 'AC-GRADE-11 PASS: a task input carrying grade/risk_class was rejected naming the key, and the gate modules were measured to contain zero priority reads against a non-zero green control elsewhere in the tree'

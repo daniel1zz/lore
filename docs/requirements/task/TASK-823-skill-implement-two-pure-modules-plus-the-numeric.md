@@ -3,7 +3,7 @@ id: TASK-823
 type: task
 role: plan
 title: "[Skill:implement] two pure modules plus the numeric repo id that survives a rename"
-status: draft
+status: archived
 priority: critical
 phase: "P1: Pure modules"
 created: 2026-08-24
