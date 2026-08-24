@@ -48,8 +48,12 @@
  *   - `fileGithubIssue(input, cfg, ctx)` — the LIVE GitHub filing path's
  *     orchestration (AC-GI-1): retry recognition over the local v2 receipt
  *     log, then `GitHubIntakePort.verifyTarget`/`.searchDuplicates`/
- *     `.fileIssue`. The LIVE path `commands/report-issue.ts` calls whenever
- *     `classifyFeedbackUpstream` resolves the GITHUB shape.
+ *     `.fileIssue`, then — spec-a-github-filed-defect-must-be-claimable-one-
+ *     ingest-seam D8 — mints the corpus task via `issue-task-shaping.ts`'s
+ *     `toIssueTaskInput` + `ctx.corpusService.create` so the filed defect is
+ *     claimable with NO further command (AC-GR-9). The LIVE path
+ *     `commands/report-issue.ts` calls whenever `classifyFeedbackUpstream`
+ *     resolves the GITHUB shape.
  *
  * Invariants:
  *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
@@ -65,20 +69,50 @@
  *     `resolveActor` (fallback chain), MCP requires `by` explicitly
  *     (SPEC-025 precedent); both thread the resolved actor through
  *     `GithubFilingContext.actor`, never through anything built here.
+ *   - D8/AC-GR-7: a corpus-write failure AFTER the GitHub filing already
+ *     landed is reported as a `STORE_ERROR` naming BOTH the filed issue
+ *     number and its URL — mirrors `github-intake-port.ts`'s own
+ *     `fileIssue`'s outcome-receipt-write failure message verbatim ("the
+ *     upstream issue itself was NOT lost"), the same split, so the same
+ *     honesty.
+ *   - **Retry-path decision (documented per the spec's ask, covered by a
+ *     test)**: on the RETRY branch (a prior successful filing for this
+ *     exact title is already recorded in the local receipt log),
+ *     `fileGithubIssue` returns the prior outcome immediately and does
+ *     **NOT** re-attempt the corpus-task mint. Two reasons: (1) the retry
+ *     branch's entire purpose is "no network call at all" for an
+ *     already-completed filing — minting the task on this branch would
+ *     require an extra `verifyTarget()` call purely to recover `repo_id`,
+ *     breaking that documented zero-call guarantee; (2) if the ORIGINAL
+ *     call's corpus write is the thing that failed (the D8/AC-GR-7
+ *     scenario), the caller already saw that exact failure, synchronously,
+ *     naming the issue number/URL — recovering from it is the job of a
+ *     dedicated re-mint path (`lore issue adopt <number>`, an explicitly
+ *     later phase, `commands/issue.ts`), not a second, silently-diverging
+ *     mint attempt bolted onto the retry branch here. A naive
+ *     implementation that DID call `ctx.corpusService.create` again on this
+ *     branch would hit the store's typed `DUPLICATE_SLUG` (the task already
+ *     exists, minted by the original call) — since this branch calls
+ *     `create` zero times, that error can never surface from here.
  *
  * Side-effect class: IO indirectly — `fileGithubIssue` reads/writes the local
- * v2 receipt log and calls `gh` via `GitHubIntakePort`.
+ * v2 receipt log, calls `gh` via `GitHubIntakePort`, and (D8, non-retry path
+ * only) writes ONE corpus task via `ctx.corpusService.create`.
  *
  * Source: SPEC-072 §3 Structure, §4 Public Interface, §11 Downstream Handoff;
- * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4.
+ * spec-the-defect-channel-reaches-no-machine-but-its-own-github P2/P4;
+ * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D8, D13.
  */
 
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
+  assembleIssueBody,
   err,
   ok,
+  redactReporterIdentity,
   type FeedbackConfig,
+  type IssueFrontMatterFields,
   type IssueSeverity,
   type LoreConfig,
   type LoreError,
@@ -88,8 +122,10 @@ import {
 } from "@lore/core";
 import type { CorpusService } from "../../service/corpus-service.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
-import { GitHubIntakePort } from "../../service/github-intake-port.js";
+import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
 import { ReceiptLogV2, type ReceiptV2Entry } from "../../service/receipt-log-v2.js";
+import type { GithubIssueRef } from "../../service/resolution-projector.js";
+import { toIssueTaskInput } from "../../service/issue-task-shaping.js";
 import { findLoreDbPath } from "./utils.js";
 
 /**
@@ -364,19 +400,131 @@ function buildIssueDescriptionBlock(input: GithubReportInput): string {
 }
 
 /**
+ * Builds the AC-GR-7-shaped `STORE_ERROR` for a corpus-write failure that
+ * happens AFTER the GitHub issue already landed — the split-write honesty
+ * mirror of `github-intake-port.ts::fileIssue`'s own outcome-receipt-write
+ * failure message ("the upstream issue itself was NOT lost"). The message
+ * MUST contain both `issueNumber` and `issueUrl` (AC-GR-7's oracle greps
+ * both substrings) so an operator who only sees this error can still find
+ * the public issue and, later, `lore issue adopt` it.
+ *
+ * @param issueNumber - the number GitHub assigned the already-filed issue.
+ * @param issueUrl - that issue's `html_url`.
+ * @param reason - why the corpus write failed (a shaping refusal's message,
+ *   or the store error's `message`/`code`).
+ */
+function buildPartialSuccessStoreError(issueNumber: number, issueUrl: string, reason: string): LoreError {
+  return {
+    code: "STORE_ERROR",
+    message:
+      `issue filed upstream as #${issueNumber} (${issueUrl}) but the corpus task could not be created ` +
+      `(${reason}) — the upstream issue itself was NOT lost.`,
+  };
+}
+
+/**
+ * Renders a `LoreError` as one human-readable line — several `LoreError`
+ * members (e.g. `DOC_NOT_FOUND`, `DUPLICATE_SLUG`) carry no `message` field
+ * at all, so a bare `.message` access does not compile against the full
+ * union; this falls back to `.code` for those.
+ */
+function describeLoreError(error: LoreError): string {
+  return "message" in error ? error.message : error.code;
+}
+
+/**
+ * Mints the corpus task for one freshly-filed (or freshly-verified) GitHub
+ * issue (D8) — reconstructs the EXACT front-matter fields and body
+ * `GitHubIntakePort.fileIssue` posted (both are PURE functions of the same
+ * inputs: `input`'s triage labels + the caller's own resolved identity +
+ * the port's returned `idempotencyKey`), so `toIssueTaskInput`'s
+ * `parseIssueBody(issue.body)` round-trips back to a byte-identical
+ * `IssueFrontMatterFields` — this function never invents a value
+ * `fileIssue` did not already determine.
+ *
+ * @param input - the report's triage labels + free-form content
+ * @param identity - the RAW identity `fileIssue` was called with
+ * @param issueNumber - GitHub's assigned issue number
+ * @param issueUrl - that issue's `html_url`
+ * @param idempotencyKey - `FileIssuePortResult.idempotencyKey` from the SAME
+ *   `fileIssue()` call (never freshly generated here — it must match what
+ *   was actually posted, so a `lore issue adopt` reading this task back
+ *   later sees the same key GitHub's copy carries)
+ * @param repoId - the target repo's numeric id (`verifyTarget()`'s `id`, D1)
+ * @param cfg - the GitHub-shaped `feedback.upstream` config (`cfg.repo`)
+ * @param rootPrdId - the reporter's own root PRD id — threaded through to
+ *   `toIssueTaskInput` as a precondition proof only; see that function's own
+ *   `rootPrdId` doc for why it is NOT written into `parent_id` directly
+ *   (D13's actual parenting happens via `CorpusService._createImpl`'s adhoc
+ *   auto-parenting instead)
+ * @param corpusService - the reporter's OWN `CorpusService`
+ * @param actor - the resolved filing actor, attributed as the task's creator
+ * @returns `ok(void)` once the task is created; `err(...)` shaped by
+ *   {@link buildPartialSuccessStoreError} on a shaping OR store failure
+ */
+async function mintIssueTask(
+  input: GithubReportInput,
+  identity: RawReporterIdentity,
+  issueNumber: number,
+  issueUrl: string,
+  idempotencyKey: string,
+  repoId: number,
+  cfg: GithubUpstreamCfg,
+  rootPrdId: string,
+  corpusService: CorpusService,
+  actor: string,
+): Promise<Result<void, LoreError>> {
+  const redacted = redactReporterIdentity(identity);
+  const fields: IssueFrontMatterFields = {
+    severity: input.severity,
+    category: input.category,
+    tags: [...input.tags],
+    reporter_corpus: redacted.reporter_corpus,
+    reporter_root_prd: redacted.reporter_root_prd,
+    idempotency_key: idempotencyKey,
+  };
+  const listedIssue: GithubListedIssue = {
+    number: issueNumber,
+    title: input.title,
+    state: "open",
+    body: assembleIssueBody(fields, buildIssueDescriptionBlock(input), redacted.actor),
+  };
+  const ref: GithubIssueRef = { repo: cfg.repo, issueNumber, repo_id: repoId };
+
+  const taskInputResult = toIssueTaskInput(listedIssue, ref, rootPrdId);
+  if (!taskInputResult.ok) {
+    return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(taskInputResult.error)));
+  }
+
+  const createResult = await corpusService.create(taskInputResult.value, { by: actor });
+  if (!createResult.ok) {
+    return err(buildPartialSuccessStoreError(issueNumber, issueUrl, describeLoreError(createResult.error)));
+  }
+
+  return ok(undefined);
+}
+
+/**
  * Orchestrates the LIVE GitHub filing path — the caller-side glue around
  * `GitHubIntakePort`'s four ops (`report-issue.ts` calls this instead of
  * `IssueReportService.report()` whenever `resolveFeedbackUpstreamCfg`
  * resolved the GITHUB shape, see {@link isGithubUpstreamCfg}). Runs, in
  * order:
  *   1. Retry recognition — reads the LOCAL v2 receipt log and returns a
- *      PRIOR filing's outcome verbatim (no network call at all) when one
- *      exists for the exact same title ({@link findPriorGithubFiling}).
+ *      PRIOR filing's outcome verbatim (no network call at all, and no
+ *      corpus write — see this module's header for why the retry branch
+ *      deliberately does not re-attempt the mint) when one exists for the
+ *      exact same title ({@link findPriorGithubFiling}).
  *   2. `verifyTarget()` — fail loud before any write-shaped call.
  *   3. `searchDuplicates()` — advisory; a failure degrades, never blocks.
  *   4. Resolves the reporter's own identity (`resolveLocalRootPrd`,
  *      `os.homedir()`) and calls `fileIssue()`, which itself performs the
  *      redaction + front-matter assembly + two-phase receipt writes.
+ *   5. D8/AC-GR-9 — mints the corpus task ({@link mintIssueTask}) so the
+ *      filed defect is claimable with no further command. A failure here
+ *      is reported via {@link buildPartialSuccessStoreError} (AC-GR-7):
+ *      the GitHub issue is NOT rolled back — it already exists publicly —
+ *      so the error names it instead of hiding behind a generic message.
  *
  * @param input - the report's content + already-validated triage labels
  * @param cfg - the GitHub-shaped `feedback.upstream` config
@@ -398,6 +546,10 @@ export async function fileGithubIssue(
   if (priorReadResult.ok) {
     const prior = findPriorGithubFiling(priorReadResult.value.entries, input.title);
     if (prior !== undefined) {
+      // Retry-path decision (see this module's header): the corpus mint is
+      // NOT re-attempted here. `ctx.corpusService.create` is never called on
+      // this branch, so the store's DUPLICATE_SLUG can never surface from
+      // it — pinned by a test in github-filing-split-write.test.ts.
       return ok({
         number: prior.number,
         url: prior.url,
@@ -454,6 +606,20 @@ export async function fileGithubIssue(
     identity,
   });
   if (!fileResult.ok) return fileResult;
+
+  const mintResult = await mintIssueTask(
+    input,
+    identity,
+    fileResult.value.number,
+    fileResult.value.url,
+    fileResult.value.idempotencyKey,
+    verifyResult.value.id,
+    cfg,
+    rootPrd.id,
+    ctx.corpusService,
+    ctx.actor,
+  );
+  if (!mintResult.ok) return mintResult;
 
   return ok({
     number: fileResult.value.number,

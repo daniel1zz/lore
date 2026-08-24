@@ -176,17 +176,33 @@ describe("AC-GR-6: githubIssueTaskSlug is total and injective over GitHub's name
 
 describe("toIssueTaskInput: builds the CreateDocInput for one listed GitHub issue", () => {
   it("HAPPY: a well-formed listed issue becomes a claimable CreateDocInput carrying the six decoded fields plus the GitHub pointer", () => {
-    const result = toIssueTaskInput(listedIssue(), githubRef(), "plan-x", "plan-x");
+    const result = toIssueTaskInput(listedIssue(), githubRef(), "prd-lore");
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
 
     expect(result.value.type).toBe("task");
     expect(result.value.slug).toBe("task-gh-555-7");
-    expect(result.value.parent_id).toBe("plan-x");
+    // parent_id is deliberately ABSENT — measured 2026-08-24: an explicit
+    // parent_id naming the root PRD hits PARENT_TYPE_CONTRACT.task's
+    // plan-only contract (INVALID_PARENT_TYPE); CorpusService._createImpl's
+    // SPEC-069 adhoc auto-parenting is the only legal path to a task→prd
+    // parent, and it fires only when parent_id is absent. Falsifier: set
+    // parent_id: rootPrdId in the implementation and this line reddens.
+    expect("parent_id" in result.value).toBe(false);
 
     const extra = result.value.extra as Record<string, unknown>;
-    expect(extra["plan_id"]).toBe("plan-x");
+    // D13 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam):
+    // the minted task is adhoc, never plan-parented — no plan_id key at
+    // all. Falsifier: set extra.plan_id anywhere in the implementation and
+    // this `"plan_id" in extra` check reddens.
+    expect(extra["adhoc"]).toBe(true);
+    expect("plan_id" in extra).toBe(false);
+    // An adhoc task always requires an explicit ac_scope — a filed defect
+    // claims no AC, so an explicit empty array (never an omitted key).
+    // Falsifier: omit ac_scope from the built extra and toEqual([]) reddens
+    // (undefined !== []).
+    expect(extra["ac_scope"]).toEqual([]);
 
     const issueReport = extra["issue_report"] as Record<string, unknown>;
     expect(issueReport["severity"]).toBe("high");
@@ -204,8 +220,7 @@ describe("toIssueTaskInput: builds the CreateDocInput for one listed GitHub issu
     const result = toIssueTaskInput(
       listedIssue({ body: "Just a plain GitHub issue, no front matter." }),
       githubRef(),
-      "plan-x",
-      "plan-x",
+      "prd-lore",
     );
 
     expect(result.ok).toBe(false);
@@ -216,9 +231,9 @@ describe("toIssueTaskInput: builds the CreateDocInput for one listed GitHub issu
   it("ERROR: a corrupted front-matter block (delimiters present, invalid JSON) is reported, never thrown", () => {
     const corruptBody = "---\n{not valid json\n---\n\nSteps to reproduce.";
 
-    expect(() => toIssueTaskInput(listedIssue({ body: corruptBody }), githubRef(), "plan-x", "plan-x")).not.toThrow();
+    expect(() => toIssueTaskInput(listedIssue({ body: corruptBody }), githubRef(), "prd-lore")).not.toThrow();
 
-    const result = toIssueTaskInput(listedIssue({ body: corruptBody }), githubRef(), "plan-x", "plan-x");
+    const result = toIssueTaskInput(listedIssue({ body: corruptBody }), githubRef(), "prd-lore");
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected err");
     expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -226,7 +241,7 @@ describe("toIssueTaskInput: builds the CreateDocInput for one listed GitHub issu
 
   it("BOUNDARY/STATE: a ref with no repo_id yet is refused rather than falling back to a rename-unsafe key (D1)", () => {
     const refWithNoRepoId: GithubIssueRef = { repo: "acme/widget", issueNumber: 7 };
-    const result = toIssueTaskInput(listedIssue(), refWithNoRepoId, "plan-x", "plan-x");
+    const result = toIssueTaskInput(listedIssue(), refWithNoRepoId, "prd-lore");
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected err");
@@ -235,9 +250,19 @@ describe("toIssueTaskInput: builds the CreateDocInput for one listed GitHub issu
     expect(result.error.field).toBe("ref.repo_id");
   });
 
+  it("NEGATIVE: an empty rootPrdId is refused rather than minting a parentless task", () => {
+    const result = toIssueTaskInput(listedIssue(), githubRef(), "");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected err");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code !== "VALIDATION_ERROR") throw new Error("expected VALIDATION_ERROR");
+    expect(result.error.field).toBe("rootPrdId");
+  });
+
   it("REGRESSION: toIssueTaskInput is deterministic — identical inputs yield an identical CreateDocInput", () => {
-    const first = toIssueTaskInput(listedIssue(), githubRef(), "plan-x", "plan-x");
-    const second = toIssueTaskInput(listedIssue(), githubRef(), "plan-x", "plan-x");
+    const first = toIssueTaskInput(listedIssue(), githubRef(), "prd-lore");
+    const second = toIssueTaskInput(listedIssue(), githubRef(), "prd-lore");
     expect(first).toEqual(second);
   });
 });
