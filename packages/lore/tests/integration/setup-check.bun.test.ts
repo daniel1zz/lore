@@ -19,6 +19,20 @@
  * targets a fresh `mkdtemp` `--claude-dir` — never the real `~/.claude`
  * (project CLAUDE.md's 2026-07-07 pollution-incident hard rule).
  *
+ * GH STUB — `--check` ALSO runs a read-only GitHub-channel health probe
+ * (`setup-github-health.ts`) that can override a clean exit `0` to `8` when
+ * it can't resolve `gh` on PATH. `--check` never touches `claude`/MCP, so
+ * the `PATH: ""` convention above buys it nothing, but the empty PATH
+ * collaterally starves that probe too. Every `--check` call in a scenario
+ * that asserts a clean exit `0` therefore passes `healthy-gh-stub.ts`'s
+ * stub directory as its own `PATH` instead — deterministic regardless of
+ * the HOST machine's real `gh` install/auth state (see that helper's own
+ * module doc for the full derivation). A scenario whose expected exit code
+ * is already nonzero for an unrelated reason (freshness stale/missing/
+ * corrupted-manifest) is UNAFFECTED either way — the channel probe never
+ * downgrades an already-nonzero exit — and is left on the plain `PATH: ""`
+ * default.
+ *
  * Coverage:
  *   HAPPY:      a fresh `--yes` converge followed by `--check` exits 0,
  *               `--json`'s `files` buckets are all empty, and the check
@@ -44,10 +58,11 @@
  *               `orphaned` — no `sync` list leaking into the wire shape).
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupHealthyGhStubDir, healthyGhStubDir } from "./helpers/healthy-gh-stub";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -109,6 +124,10 @@ afterEach(() => {
   }
 });
 
+afterAll(() => {
+  cleanupHealthyGhStubDir();
+});
+
 /** Converges a fresh `--claude-dir` via a real `--yes` install. `PATH=""` makes MCP registration fail (exit 1) — file writes still land. */
 function seedConvergedTarget(scratch: string, targetDir: string): void {
   const install = runSetup(["--claude-dir", targetDir, "--yes"], scratch);
@@ -136,7 +155,9 @@ describe("lore setup --check — HAPPY", () => {
     const targetDir = join(scratch, ".claude");
     seedConvergedTarget(scratch, targetDir);
 
-    const check = runSetup(["--check", "--claude-dir", targetDir, "--json"], scratch);
+    // See file header's "GH STUB" note — this scenario asserts a clean exit 0, so it needs the
+    // GitHub-channel health probe to resolve `gh` as healthy rather than being starved by PATH="".
+    const check = runSetup(["--check", "--claude-dir", targetDir, "--json"], scratch, { PATH: healthyGhStubDir() });
     expect(check.exitCode).toBe(0);
 
     const payload = JSON.parse(check.stdout);
@@ -277,9 +298,11 @@ describe("lore setup --check — STATE (zero-write invariant)", () => {
     const manifestMtimeBefore = statSync(manifestPath).mtimeMs;
     const fileMtimeBefore = statSync(watchedFile).mtimeMs;
 
-    const first = runSetup(["--check", "--claude-dir", targetDir], scratch);
+    // See file header's "GH STUB" note — both calls assert a clean exit 0.
+    const ghStubPath = { PATH: healthyGhStubDir() };
+    const first = runSetup(["--check", "--claude-dir", targetDir], scratch, ghStubPath);
     expect(first.exitCode).toBe(0);
-    const second = runSetup(["--check", "--claude-dir", targetDir], scratch);
+    const second = runSetup(["--check", "--claude-dir", targetDir], scratch, ghStubPath);
     expect(second.exitCode).toBe(0);
 
     expect(statSync(manifestPath).mtimeMs).toBe(manifestMtimeBefore);
@@ -307,9 +330,23 @@ describe("lore setup --check — REGRESSION", () => {
     // now populated (SPEC-076 T5, task-skill-implement-t5-converge-hardening-diverged-skip-force)
     // — `seedConvergedTarget`'s install stamps both on every successful converge (§C4), so
     // this run's manifest carries both and both surface here.
+    //
+    // RE-BASELINE (2026-08-24, `--check --json` single-document fix): this closed set used to
+    // list exactly the five `SetupCheckReport` fields. Original command: the same `runSetup` call
+    // above; original (pre-fix) failure at this exact assertion was `JSON.parse` throwing
+    // "Unable to parse JSON string", because `--check --json` printed the GitHub-channel health
+    // probe's report as a SECOND, independent top-level JSON value on the same stdout stream —
+    // invalid JSON to any parser. The fix (commands/setup.ts::runCheckDispatch) composes both
+    // reports into ONE document, adding `github_channel` as a NEW, INTENDED sibling key inside
+    // `data` (AC1 of that fix: "the github-channel report is reachable inside it ... under
+    // `data.github_channel`"). Adding it here is a correction, not a weakening: the assertion's
+    // original purpose — catching an UNINTENDED leaked key (e.g. a stray `sync` bucket) — is
+    // fully preserved, since the set below is still closed and still rejects any OTHER surprise
+    // key; only the one key this fix deliberately adds is now expected.
     expect(Object.keys(payload.data).sort()).toEqual([
       "binary_version",
       "files",
+      "github_channel",
       "installed_at",
       "installed_binary_version",
       "summary",
