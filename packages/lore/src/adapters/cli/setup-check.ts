@@ -9,6 +9,19 @@
  * shape) — never a target asset file, never the setup manifest itself.
  *
  * Public surface:
+ *   - computeSetupCheckReport(opts) — the PURE "do the check" half: reads
+ *     the manifest, classifies every managed entry, writes the check cache
+ *     (module doc's one write exception), and returns
+ *     `Result<SetupCheckReport, LoreError>` — never prints anything, never
+ *     touches `process.exitCode`. Extracted (2026-08-24, the `--check
+ *     --json` double-document fix — `commands/setup.ts`'s `--check`
+ *     dispatch previously `console.log`'d this module's own report AND the
+ *     GitHub-channel health probe's report as two SEPARATE top-level JSON
+ *     values, which is not valid JSON to any `JSON.parse(stdout)` consumer)
+ *     so that dispatch can compose ONE document (`data.github_channel`
+ *     alongside this report's own fields) instead of two. `runSetupCheck`
+ *     below is a thin wrapper over this function and keeps its own
+ *     standalone behavior byte-identical.
  *   - runSetupCheck(opts) — orchestrates the whole `--check` run, sets
  *     `process.exitCode` (0 sync / 3 stale / mapped `LoreError` code on a
  *     read/parse failure), prints text or `--json` output.
@@ -415,13 +428,74 @@ function renderSetupCheckReport(report: SetupCheckReport, targetDir: string): st
 // ─── Orchestration ──────────────────────────────────────────────────────────
 
 /**
- * Runs the full `lore setup --check` flow: reads the installed manifest,
- * classifies every managed entry via `planUpdate`, resolves the team's
- * `setup.check_reminder` config (`resolveCheckReminderEnabled`), writes the
- * check cache (the run's ONLY write — see module doc), prints text or
- * `--json` output, and sets `process.exitCode` (0 sync / 3 stale / a mapped
- * `LoreError` code on a read/parse failure — never a JS exception escaping
- * this function).
+ * The pure "do the check" half of `runSetupCheck` — see this module's
+ * "Public surface" doc above. Reads the installed manifest, classifies
+ * every managed entry via `planUpdate`, resolves the team's
+ * `setup.check_reminder` config (`resolveCheckReminderEnabled`), and writes
+ * the check cache (the run's ONLY write — see module doc). Never prints
+ * anything, never touches `process.exitCode`; a caller composing this
+ * report with something else (`commands/setup.ts`'s `--check` dispatch, for
+ * the GitHub-channel health probe) reads `Result.ok` itself and decides
+ * what to print/exit with.
+ *
+ * @param opts.targetDir - The resolved install target (`--claude-dir` >
+ *   `$CLAUDE_CONFIG_DIR` > `~/.claude`, resolved by the caller — mirrors
+ *   every other mode's `resolveTargetDir` discipline).
+ * @param opts.now - Time seam for the cache's `checked_at` (mirrors the
+ *   codebase-wide `now: () => string` convention, e.g. `SetupService.install`)
+ *   — defaults to `() => new Date().toISOString()`.
+ * @param opts.cwd - Directory to start the `setup.check_reminder` team-config
+ *   lookup from (walked upward — see `resolveCheckReminderEnabled`). Defaults
+ *   to `process.cwd()`. Test seam, mirrors `opts.now`.
+ * @throws Never.
+ */
+export async function computeSetupCheckReport(opts: {
+  targetDir: string;
+  now?: () => string;
+  cwd?: string;
+}): Promise<Result<SetupCheckReport, LoreError>> {
+  const now = opts.now ?? (() => new Date().toISOString());
+  const cwd = opts.cwd ?? process.cwd();
+
+  const manifestResult = readInstalledManifest(opts.targetDir);
+  if (!manifestResult.ok) return manifestResult;
+  const installed = manifestResult.value;
+
+  const embedded = buildCheckEmbeddedManifest();
+  const probe = new RealSetupCheckProbe(opts.targetDir);
+  const planResult = planUpdate(embedded, installed, probe);
+  if (!planResult.ok) return planResult;
+  const plan = planResult.value;
+
+  const report: SetupCheckReport = {
+    summary: plan.summary,
+    binary_version: LORE_BINARY_VERSION,
+    ...(installed?.binary_version !== undefined ? { installed_binary_version: installed.binary_version } : {}),
+    ...(installed?.installed_at !== undefined ? { installed_at: installed.installed_at } : {}),
+    files: {
+      outdated: plan.files.outdated,
+      diverged: plan.files.diverged,
+      missing: plan.files.missing,
+      orphaned: plan.files.orphaned,
+    },
+  };
+
+  await writeCheckCache(opts.targetDir, report, now(), resolveCheckReminderEnabled(cwd));
+
+  return ok(report);
+}
+
+/**
+ * Thin printing/exit-code wrapper over {@link computeSetupCheckReport} —
+ * runs the full `lore setup --check` flow: computes the report (which does
+ * the one permitted write, the check cache — see module doc), then prints
+ * text or `--json` output and sets `process.exitCode` (0 sync / 3 stale / a
+ * mapped `LoreError` code on a read/parse failure — never a JS exception
+ * escaping this function). `commands/setup.ts`'s `--check` dispatch calls
+ * this directly for the non-`--json` (human) path only; the `--json` path
+ * calls {@link computeSetupCheckReport} directly instead so it can compose
+ * this report with the GitHub-channel health probe's report into ONE
+ * document (see that file's module doc, "`--check --json` composition").
  *
  * @param opts.targetDir - The resolved install target (`--claude-dir` >
  *   `$CLAUDE_CONFIG_DIR` > `~/.claude`, resolved by the caller — mirrors
@@ -441,41 +515,13 @@ export async function runSetupCheck(opts: {
   now?: () => string;
   cwd?: string;
 }): Promise<void> {
-  const now = opts.now ?? (() => new Date().toISOString());
-  const cwd = opts.cwd ?? process.cwd();
-
-  const manifestResult = readInstalledManifest(opts.targetDir);
-  if (!manifestResult.ok) {
-    process.stderr.write(formatError(manifestResult.error) + "\n");
-    process.exitCode = exitCode(manifestResult.error);
+  const result = await computeSetupCheckReport(opts);
+  if (!result.ok) {
+    process.stderr.write(formatError(result.error) + "\n");
+    process.exitCode = exitCode(result.error);
     return;
   }
-  const installed = manifestResult.value;
-
-  const embedded = buildCheckEmbeddedManifest();
-  const probe = new RealSetupCheckProbe(opts.targetDir);
-  const planResult = planUpdate(embedded, installed, probe);
-  if (!planResult.ok) {
-    process.stderr.write(formatError(planResult.error) + "\n");
-    process.exitCode = exitCode(planResult.error);
-    return;
-  }
-  const plan = planResult.value;
-
-  const report: SetupCheckReport = {
-    summary: plan.summary,
-    binary_version: LORE_BINARY_VERSION,
-    ...(installed?.binary_version !== undefined ? { installed_binary_version: installed.binary_version } : {}),
-    ...(installed?.installed_at !== undefined ? { installed_at: installed.installed_at } : {}),
-    files: {
-      outdated: plan.files.outdated,
-      diverged: plan.files.diverged,
-      missing: plan.files.missing,
-      orphaned: plan.files.orphaned,
-    },
-  };
-
-  await writeCheckCache(opts.targetDir, report, now(), resolveCheckReminderEnabled(cwd));
+  const report = result.value;
 
   if (opts.json) {
     console.log(JSON.stringify({ ok: true, data: report }, null, 2));

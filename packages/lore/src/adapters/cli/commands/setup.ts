@@ -28,10 +28,10 @@
  * since it composes with NONE of install/dry-run/uninstall/project's modes
  * (mutually exclusive with `--uninstall`/`--dry-run`; `--check --project` is
  * an explicit, named-exit-2 Scope-Alt — never a silent global-only check).
- * Thin pipe over `../setup-check.js::runSetupCheck` — see that module's own
- * doc for the zero-mutation-beyond-the-check-cache invariant. Immediately
- * after that asset-freshness section, `--check` ALSO runs a second,
- * independent read-only section (task
+ * Thin pipe over `../setup-check.js::runSetupCheck`/`computeSetupCheckReport`
+ * — see that module's own doc for the zero-mutation-beyond-the-check-cache
+ * invariant. Immediately after that asset-freshness section, `--check` ALSO
+ * runs a second, independent read-only section (task
  * task-skill-implement-lore-setup-check-read-only-health-probe, AC-GI-2's
  * pre-flight discoverability half, Migration Plan P0) — a GitHub-channel
  * health probe over `../setup-github-health.js::runGitHubHealthCheck`,
@@ -39,6 +39,23 @@
  * file the asset-freshness section reads or writes, and never downgrades
  * an already-nonzero exit code from that section — see
  * `runGitHubChannelHealthCheck`'s own doc.
+ *
+ * `--check --json` composition (2026-08-24 fix): the two sections above are
+ * two SEPARATE reports, but `--json` MUST print exactly ONE top-level JSON
+ * document — printing each report via its own `console.log` (the pre-fix
+ * behavior) emits two, which is not valid JSON to any `JSON.parse(stdout)`
+ * consumer (measured: 9 bun tests red). `runCheckDispatch` below is the
+ * ONLY caller of both sections now: in `--json` mode it computes the
+ * freshness report via `computeSetupCheckReport` (which never prints) and
+ * the channel report via `runGitHubHealthCheck` (never printed anything
+ * itself), then prints ONE `console.log(JSON.stringify({ ok, data: {
+ * ...report, github_channel: channelReport } }))` — the channel report is
+ * reachable at `data.github_channel`, never a second document. The HUMAN
+ * (non-`--json`) path is untouched: it still calls `runSetupCheck`
+ * (prints its own rendered section) followed by `runGitHubChannelHealthCheck`
+ * (prints its own `✓`/`✗` line) exactly as before this fix — two sections on
+ * a human terminal were always fine; two JSON values on one stdout stream
+ * never were.
  *
  * `--project --uninstall` (SPEC-060 §Design D2) is a FIFTH mode
  * (`"project-uninstall"`, `../setup-args.js::SetupMode`) reversing a prior
@@ -154,7 +171,7 @@ import {
   type SetupPathContext,
 } from "../setup-args.js";
 import { exitCode, formatError } from "../utils.js";
-import { runSetupCheck } from "../setup-check.js";
+import { computeSetupCheckReport, runSetupCheck } from "../setup-check.js";
 import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
 import { createGhRunnerHealthProbe, ghHealthExitCode, runGitHubHealthCheck } from "../setup-github-health.js";
 
@@ -651,6 +668,56 @@ async function runGitHubChannelHealthCheck(opts: { json: boolean }): Promise<voi
   }
 }
 
+/**
+ * `--check`'s full dispatch — composes the asset-freshness check
+ * (`computeSetupCheckReport`/`runSetupCheck`) with the GitHub-channel
+ * health probe (`runGitHubHealthCheck`/`runGitHubChannelHealthCheck`). See
+ * this file's module doc, "`--check --json` composition", for why the two
+ * sections must NOT each print their own top-level JSON value.
+ *
+ * Non-`--json`: unchanged from before this fix — two independently
+ * rendered human sections, in the same order, same exit-code precedence.
+ *
+ * `--json`: computes both reports WITHOUT letting either print, then emits
+ * exactly one `console.log(JSON.stringify(...))` with the channel report
+ * nested at `data.github_channel`. If the freshness computation itself
+ * fails (`computeSetupCheckReport` returns `err`), it — like before this
+ * fix — never wrote anything to stdout (only `formatError` to stderr), so
+ * there is nothing to compose: the channel probe's own single document
+ * (via `runGitHubChannelHealthCheck`) is already the whole of stdout, byte-
+ * identical to pre-fix behavior for that path.
+ *
+ * Exit-code precedence is preserved exactly (this file's module doc, "Exit
+ * codes"): the channel probe never downgrades an already-nonzero freshness
+ * exit, and may only override a clean `0`.
+ */
+async function runCheckDispatch(opts: { targetDir: string; json: boolean }): Promise<void> {
+  if (!opts.json) {
+    await runSetupCheck({ targetDir: opts.targetDir, json: false });
+    await runGitHubChannelHealthCheck({ json: false });
+    return;
+  }
+
+  const freshnessResult = await computeSetupCheckReport({ targetDir: opts.targetDir });
+  if (!freshnessResult.ok) {
+    process.stderr.write(formatError(freshnessResult.error) + "\n");
+    process.exitCode = exitCode(freshnessResult.error);
+    await runGitHubChannelHealthCheck({ json: true });
+    return;
+  }
+  const report = freshnessResult.value;
+
+  const runner = createGhRunnerHealthProbe(new GhRunner({ execFile: createNodeGhExecFile() }));
+  const channelReport = await runGitHubHealthCheck({ runner });
+
+  console.log(JSON.stringify({ ok: true, data: { ...report, github_channel: channelReport } }, null, 2));
+
+  process.exitCode = report.summary === "sync" ? 0 : 3;
+  if (!channelReport.ok && process.exitCode === 0) {
+    process.exitCode = ghHealthExitCode(channelReport.condition);
+  }
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export default defineCommand({
@@ -729,8 +796,7 @@ export default defineCommand({
         env: process.env,
         homeDir: homedir(),
       });
-      await runSetupCheck({ targetDir: checkTargetDir, json });
-      await runGitHubChannelHealthCheck({ json });
+      await runCheckDispatch({ targetDir: checkTargetDir, json });
       return;
     }
 

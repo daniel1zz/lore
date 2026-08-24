@@ -53,6 +53,14 @@
  * is never touched at all (`setup` targets a Claude Code config directory,
  * unrelated to any corpus).
  *
+ * GH STUB — same rationale as `setup-check.bun.test.ts`'s own "GH STUB" file
+ * header note: `--check` ALSO runs a read-only GitHub-channel health probe
+ * that resolves `gh` via the SAME (here, empty) `PATH`, so a scenario
+ * asserting a clean exit `0` needs `../integration/helpers/healthy-gh-stub`'s
+ * deterministic stub instead of the plain `PATH: ""` default, or the probe's
+ * "gh-missing" finding overrides that clean 0 to 8 (a real, by-design
+ * override this suite must not defeat — only make deterministic).
+ *
  * Coverage:
  *   HAPPY:      a fresh `--yes` converge against a throwaway `--claude-dir`
  *               followed by `--check` exits 0, `--json`'s `files` buckets
@@ -76,12 +84,13 @@
  *               assertion end-to-end against the real artifact.
  */
 
-import { afterEach, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { cleanupHealthyGhStubDir, healthyGhStubDir } from "../integration/helpers/healthy-gh-stub";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -137,6 +146,10 @@ afterEach(() => {
   }
 });
 
+afterAll(() => {
+  cleanupHealthyGhStubDir();
+});
+
 const MANIFEST_FILENAME = ".lore-setup-manifest.json";
 const WATCHED_MANAGED_FILE = "agents/lore-implementer.md";
 const MUTATED_BYTES = "MUTATED BYTES — not the embedded content, this is a user-made edit (T9 e2e)\n";
@@ -188,7 +201,8 @@ describe("AC-076-10: compiled dist/lore setup-freshness cycle — HAPPY", () => 
     const targetDir = join(scratch, ".claude");
     freshInstall(scratch, targetDir);
 
-    const check = runSetup(["--check", "--claude-dir", targetDir, "--json"], scratch);
+    // See file header's "GH STUB" note — this scenario asserts a clean exit 0.
+    const check = runSetup(["--check", "--claude-dir", targetDir, "--json"], scratch, { PATH: healthyGhStubDir() });
     expect(check.exitCode).toBe(0);
 
     const payload = JSON.parse(check.stdout) as SetupCheckPayload;
@@ -254,8 +268,11 @@ describe("AC-076-10: compiled dist/lore setup-freshness cycle — STATE", () => 
     expect(forcePayload.data.backups).toContain(WATCHED_MANAGED_FILE);
     expect(existsSync(join(targetDir, ".lore-backups"))).toBe(true);
 
-    // Full cycle closure — --check reports sync again, all buckets empty.
-    const postForceCheck = runSetup(["--check", "--claude-dir", targetDir, "--json"], scratch);
+    // Full cycle closure — --check reports sync again, all buckets empty. See file header's
+    // "GH STUB" note — this call asserts a clean exit 0.
+    const postForceCheck = runSetup(["--check", "--claude-dir", targetDir, "--json"], scratch, {
+      PATH: healthyGhStubDir(),
+    });
     expect(postForceCheck.exitCode).toBe(0);
     const postForcePayload = JSON.parse(postForceCheck.stdout) as SetupCheckPayload;
     expect(postForcePayload.data.summary).toBe("sync");
