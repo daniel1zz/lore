@@ -49,12 +49,39 @@ reports while they believe they are reading upstream.
 explicitly refuses (root `CLAUDE.md` -> Store selection D-007: missing credentials must
 `err(VALIDATION_ERROR)`, never fall back). Same class, opposite handling, one binary.
 
-**Mechanism needed.** The read path must share the write path's config-shape validation:
-one `resolveFeedbackUpstream` that returns `Result`, consumed by BOTH verbs, so a
-retired-only config produces the same exit-4 refusal on read as on write. A `--local`
-flag whose presence changes nothing is the machine-checkable red flag — an oracle that
-asserts `lore issues` and `lore issues --local` DIFFER under a valid non-local upstream,
-and that both REFUSE under a retired-only one.
+### DIAGNOSIS NARROWED the same day — measured after migrating this repo's config
+
+The paragraphs above were written from the retired-shape measurement alone. Migrating
+`.lore/config.yaml` to the GitHub shape (`feedback.upstream.repo: daniel1zz/lore`,
+2026-08-24) produced evidence that CHANGES the diagnosis, so it is recorded here rather
+than left standing:
+
+| Config shape | `lore issues` | `lore issues --local` | Differ? |
+|---|---|---|---|
+| retired `{corpus_path, root_prd}` | exit **0**, local corpus | exit 0, local corpus | NO (`diff` exit 0) |
+| GitHub `{repo}` | exit **4** — "GitHub-configured (repo: daniel1zz/lore) — reading it via 'lore issues' is not yet supported ... Pass --local" | exit 0, local corpus | YES (`diff` exit 1) |
+
+So the read path is NOT missing config-shape validation wholesale — it already carries a
+correct, loud, remedy-naming refusal branch for the GitHub shape. What it lacks is that
+branch for the RETIRED shape specifically, where control falls through to the local
+reader. The write path (`report-issue`) refuses on BOTH.
+
+⛔ The original "the read path silently falls back" framing was too broad and would have
+bought a larger fix than the defect needs. The real shape is a **single missing branch
+between two neighbours that both handle it correctly** — which is also why it survived:
+nothing about the read path looks unguarded.
+
+**Mechanism needed (narrowed).** Give the retired-shape case in the `lore issues` reader
+the same refusal the GitHub-shape case already has, sourced from one shared
+`resolveFeedbackUpstream` returning `Result` so the two verbs cannot drift again. Oracle:
+assert `lore issues` exits non-zero under a retired-only upstream (it currently exits 0),
+and keep the existing GitHub-shape refusal as the green control that proves the assertion
+is reachable.
+
+**Consequence of the migration, stated plainly.** `lore report-issue` now files to GitHub,
+and `lore issues` cannot read GitHub yet (a later phase of
+spec-the-defect-channel-reaches-no-machine-but-its-own-github). This corpus's 27 legacy
+local reports are therefore reachable ONLY via `lore issues --local` from now on.
 
 ⛔ Consequence for this doc's own filing: F1 could not be filed through
 `lore report-issue`, because the channel is correctly refusing. A finding about a broken

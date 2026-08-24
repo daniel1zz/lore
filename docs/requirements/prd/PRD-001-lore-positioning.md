@@ -108,7 +108,8 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (draft)
+- [knowledge] lore evidence --capture now clears the attested floor, and AC-CT-2 asserts a corpus-wide property that is false by 440 rows (approved)
+- [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (approved)
 - [spec] Out-of-box reporting channel — report-issue self-provisions its upstream config (deprecated)
 - [spec] Upstream issue reporting: lore report-issue (consumer defect feedback loop) (deprecated)
 - [spec] report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree (approved)
@@ -119,7 +120,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [knowledge] A worktree without its own bun install silently tests against the main checkout's @lore/core — a false-oracle in both directions (approved)
 - [knowledge] Three mechanism gaps measured while dispatching the GitHub-intake plan: red-first tasks are un-archivable, falsifier declaration demotes a spec, and --merged is unsafe for worktree cleanup (approved)
 - [adr] A tracker is replaceable, a corpus is not — GitHub is the defect channel's intake, never its resolution SSOT (approved)
-- [knowledge] lore evidence --capture now clears the attested floor, and AC-CT-2 asserts a corpus-wide property that is false by 440 rows (approved)
 - [knowledge] A gate at the end of a && chain is never invoked while main is red, and the blast radius my dispatch bundle carried was wrong by 10 sites (approved)
 - [spec] Corpus truthfulness: a verdict must carry the state it describes, and a post-arming stamp-less record is never green (approved)
 - [spec] AC-as-code: structured acceptance criteria + oracle binding (approved)

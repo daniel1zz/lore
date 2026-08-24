@@ -6,7 +6,7 @@ title: "lore evidence --capture now clears the attested floor, and AC-CT-2 asser
 status: approved
 priority: critical
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-08-24
 tags: [attestation, capture-source, lore-done-floor, ac-ct-2, anchor-gap, spec-143]
 parent: PRD-001
 links:
@@ -92,3 +92,38 @@ So after this wave, a caller who supplies a necessarily-succeeding command gets 
 ⛔ This is NOT an argument that the C5 change should be reverted: C5's stated purpose was to stop the false `runner`-without-attestation label, and it does that. It is an argument that `hasAttestedPass` is now the wrong predicate — it should require provenance, not merely presence. The mechanism that would close it: have the floor demand the verify-only fields (or an explicit provenance discriminator on the attestation), so a caller-supplied command cannot satisfy an archival gate no matter how honestly its exit code was measured.
 
 Recorded as the wave's most consequential open item. It was found by READING A GATE'S REFUSAL TEXT rather than by review — the refusal explained its own field better than either the spec or this doc's first draft did.
+
+
+## SECOND ADDENDUM — the C5 write-through did NOT stop new false-label rows. Re-measured 2026-08-24.
+
+Re-ran the same read-only census 21 hours after the merge (`file:.lore/lore.db?mode=ro`, same predicate: `capture_source == "runner"` and `attestation` absent):
+
+| | rows |
+|---|---|
+| total evidence rows | 4675 (was 4570) |
+| `runner` WITHOUT attestation | **442** (was 440) |
+
+The count GREW. Sorting those 442 by `recorded_at` decides whether that matters, and it does — the newest is:
+
+    2026-08-23T12:46:21.832Z  by agent:impl-p3a-contract
+      task-skill-implement-contract-prose-rules-section-reworded
+      bunx vitest run packages/lore/tests/unit/assets/claude-md-contract-con…
+
+That row was written roughly SIX HOURS AFTER the C5 write-through landed on main, by a different session's agent. The next five newest all belong to this wave's own agents (06:32–06:52) and are expected: their worktrees predated the fix.
+
+⛔ So the first addendum's framing was too generous. It treated the 440 as a closed historical cohort and the floor's presence-vs-provenance gap as the only live problem. Both addenda were wrong about the cohort being closed: **a production path still mints the false label after the fix**.
+
+Two candidate causes, NOT yet distinguished — whoever picks this up must decide which before proposing a repair:
+
+1. **Stale binary.** The writing agent invoked a `lore` built before the C5 merge (its own worktree's `dist/lore`, or a `PATH` entry pointing at an unrebuilt main). Then the code fix is correct and the defect is one of DISTRIBUTION — a write-through fix does not take effect until every writer's binary is rebuilt, and nothing tells a writer its binary predates the fix it depends on. Note the provenance check exists precisely to catch a stale binary, but it gates PUSH, not the `lore evidence` write path.
+2. **An unfixed write path.** Some caller reaches `appendEvidenceEntry` with a `"runner"` label without going through `captureOracleCommand`'s `CapturedProvenance` pair. Then C5's guarantee ("no PRODUCTION CAPTURE PATH can mint one") is literally true and still insufficient, because that path is not the capture path.
+
+Cause 1 is the more likely and the more interesting: it means the honest statement of C5's effect is not "new rows now attest" but "new rows attest ONCE THE WRITER'S BINARY IS REBUILT", and the corpus has no way to tell a reader which rows were written by which binary generation. That is the same class as this doc's §1 — a label whose meaning silently depends on state the label does not carry.
+
+Mechanically checkable reproduction, no fixture needed:
+
+    sqlite3 "file:.lore/lore.db?mode=ro" -- and select, per task, the evidence
+    rows where capture_source='runner' and attestation is null, sorted by
+    recorded_at desc. Any row dated after the C5 merge commit is an instance.
+
+⛔ AC-CT-2's prose ("Zero evidence rows may carry capture_source runner without an attestation block") is therefore false in BOTH directions now: false for the historical cohort, which cannot be repaired, AND false going forward, which can. Its oracle detects neither, because it runs against a throwaway corpus.
