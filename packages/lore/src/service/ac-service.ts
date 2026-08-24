@@ -4,9 +4,17 @@
  * Acceptance criteria live in `spec.extra.acceptance_criteria` (array of
  * `AcceptanceCriterion`, schema-validated by `specAcceptanceCriteriaSchema` —
  * `@lore/core` acceptance.ts). They are NOT a doc type — no id of their own beyond
- * the `AC-*` string `id` field, no lifecycle, no independent version history; changes
- * ride the parent spec's own version log (unlike PhaseService's version-less writes —
- * AC declarations are judge-consumed data (SPEC-026/038), so history matters more here).
+ * the `AC-*` string `id` field and no lifecycle of their own; changes ride the parent
+ * spec's own version log, because AC declarations are judge-consumed data
+ * (SPEC-026/038) and history is what makes a retired oracle auditable.
+ *
+ * `PhaseService` is NO LONGER the contrast this header used to draw against it. Its
+ * three phase-set writers now log a version row too, and do not demote — see
+ * `adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan`, which adopted
+ * `lore ac add`'s shape by name. ⛔ The remaining asymmetry is INSIDE this file and is
+ * the one to keep straight: `addCriterion`/`removeCriterion` log WITHOUT demoting,
+ * while `setCriterion` logs AND demotes an `approved` spec to `draft` (D2 below). Do
+ * not generalise either half into "how `extra` writers behave".
  *
  * Public surface:
  *   addCriterion(specIdOrSlug, criterion)          → AcceptanceCriterion[] (updated list)
