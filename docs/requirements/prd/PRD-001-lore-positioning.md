@@ -108,12 +108,20 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [knowledge] A --dry-run flag that does not exist writes the files anyway, a mirror CLI with no per-doc --force, and the five-pass gradient from a green-on-arrival oracle to a positive one (approved)
+- [spec] The retired-shape refusal message has two independent definitions and no oracle fails when they diverge — measured: they already had (approved)
+- [spec] Phase writes are version-less BY DESIGN (SPEC-023) — the root CLAUDE.md lifecycle paragraph contradicts it, and the premise that phase history is dispensable has moved (approved)
+- [knowledge] Under vitest, importing a name a module does not export is green unless you call it, so a vitest oracle never proves an export exists (approved)
+- [adr] Phase writes log a version row and do NOT demote the plan — SPEC-023's 'history is dispensable' clause is overturned, its soft-grouping model is not (approved)
+- [spec] lore issues falls through to the LOCAL corpus on a retired-shape upstream while report-issue refuses it (approved)
+- [knowledge] lore release erases all three ownership signals at once, so a live peer's unmerged work renders as unowned — the bucket the merge protocol authorises acting on (approved)
+- [knowledge] Worktree agents are built from origin/main, not local HEAD, so the standing pull-before-dispatch rule is a no-op exactly when it matters (approved)
+- [spec] CLAUDE.md governance — content-dimension checks: wire the dead admission half, split capacity from content, and measure what the contract asks for (approved)
 - [knowledge] lore evidence --capture now clears the attested floor, and AC-CT-2 asserts a corpus-wide property that is false by 440 rows (approved)
 - [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (approved)
 - [spec] Out-of-box reporting channel — report-issue self-provisions its upstream config (deprecated)
 - [spec] Upstream issue reporting: lore report-issue (consumer defect feedback loop) (deprecated)
 - [spec] report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree (approved)
-- [spec] CLAUDE.md governance — content-dimension checks: wire the dead admission half, split capacity from content, and measure what the contract asks for (approved)
 - [knowledge] The orphan-branch sweep asks a content question with a SHA predicate, and a red-first test task has no legal terminal state (approved)
 - [spec] Context verb family — two-zone CLAUDE.md anatomy, lore context init refresh, admission checks, init-context skill retirement (approved)
 - [spec] The defect channel reaches no machine but its own: GitHub becomes intake while the corpus keeps resolution authority (approved)

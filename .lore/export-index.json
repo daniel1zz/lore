@@ -6736,6 +6736,54 @@
     "01M0SNYBAP7VTDJ6VNS3JKFYNB": {
       "human_id": "KN-538",
       "file_path": "docs/requirements/knowledge/KN-538-handoff-agent-main-orchestrator.md"
+    },
+    "01M0SPBEKBGS8MD812DJQGDFHH": {
+      "human_id": "SPEC-149",
+      "file_path": "docs/requirements/spec/SPEC-149-the-retired-shape-refusal-message-has-two-byte-ide.md"
+    },
+    "01M0SP8149BTJ7YJ9461Q2MD34": {
+      "human_id": "ADR-038",
+      "file_path": "docs/requirements/adr/ADR-038-phase-writes-log-a-version-row-and-do-not-demote-t.md"
+    },
+    "01M0SQE1NM9Y5P5GKE5BPBGWPP": {
+      "human_id": "KN-539",
+      "file_path": "docs/requirements/knowledge/KN-539-under-vitest-importing-a-name-a-module-does-not.md"
+    },
+    "01M0SQM65Z6VKM385V1JFR2EEA": {
+      "human_id": "PLAN-142",
+      "file_path": "docs/requirements/plan/PLAN-142-land-the-adr-s-phase-write-decision-a-red-first-pa.md"
+    },
+    "01M0SPK92JNJGPE9RB9TJTSCDE": {
+      "human_id": "PLAN-143",
+      "file_path": "docs/requirements/plan/PLAN-143-collapse-the-retired-shape-refusal-to-one-definiti.md"
+    },
+    "01M0SPT65955D45F1KE85T3DR5": {
+      "human_id": "TASK-812",
+      "file_path": "docs/requirements/task/TASK-812-skill-implement-export-buildretiredfeedbackupstrea.md"
+    },
+    "01M0SQNSDG03DHD5GHHY6JVYH7": {
+      "human_id": "TASK-813",
+      "file_path": "docs/requirements/task/TASK-813-route-all-three-phaseservice-writers-through-inser.md"
+    },
+    "01M0SQN6WHZH6VEGSV1M4P8AM9": {
+      "human_id": "TASK-814",
+      "file_path": "docs/requirements/task/TASK-814-author-the-red-first-phase-write-lifecycle-doc-par.md"
+    },
+    "01M0SPT5JY44C6THKE60W25ZYE": {
+      "human_id": "TASK-815",
+      "file_path": "docs/requirements/task/TASK-815-skill-test-mcp-retired-shape-ssot-probes-plus-the.md"
+    },
+    "01M0SR4X23WBGP4PCD33XM3CDC": {
+      "human_id": "KN-540",
+      "file_path": "docs/requirements/knowledge/KN-540-assessment-collapse-the-retired-shape-refusal-to-o.md"
+    },
+    "01M0SQZ8QBT6PXK2Q4E6ZPYMH8": {
+      "human_id": "KN-541",
+      "file_path": "docs/requirements/knowledge/KN-541-handoff-agent-main-orchestrator.md"
+    },
+    "01M0SQX9JNWSEYFYTEXVRNP91Q": {
+      "human_id": "KN-542",
+      "file_path": "docs/requirements/knowledge/KN-542-a-dry-run-flag-that-does-not-exist-writes-the-file.md"
     }
   }
 }

@@ -9,6 +9,8 @@ created: 2026-08-24
 updated: 2026-08-24
 tags: []
 parent: PRD-001
+links:
+  - {id: ADR-038, type: relates-to}
 ---
 ## Overview/Goal
 
@@ -57,73 +59,174 @@ names TWO things — `plan.extra.phases[]` soft groupings and a `phase` DOC TYPE
 corpus currently holds zero). `phase-service.ts:5` is about the former and remains true of it.
 An earlier reading of this spec's own draft treated that comment as stale; it is not.
 
+### S2 is now RESOLVED — decided 2026-08-24 by the project owner
+
+`adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan` (`decision_status:
+accepted`, linked from this spec) answers S2: **phase writes SHALL log a version row, and
+SHALL NOT demote the plan.** `addPhase`/`removePhase`/`renamePhase` gain `insertVersion`;
+plan status is left untouched, so adding a phase to an `approved` plan keeps it `approved`.
+
+⛔ D2 required that the answer come from SPEC-023's authors rather than from an agent
+reasoning inside a defect spec. It did: the owner chose from four costed options. That is
+what discharges D2 — not an agent arguing the point more carefully.
+
+⛔ What is overturned is narrow: SPEC-023's "history is dispensable" clause only. Its
+soft-grouping model stands — phases stay id-less, lifecycle-less, and NOT a doc type. The
+separate `"phase"` entry in `DocType` is a different thing, and conflating the two is a
+misreading this spec's own history already records.
+
 ## Scope
 
 In: reconciling S1 — the lifecycle paragraph must stop asserting a universal that three
 writers already break (`ac add`, `phase add`, `phase rm`). Either it enumerates the
 exceptions or it states the rule narrowly.
 
-In: forcing S2 to be DECIDED AND RECORDED rather than left implicit — whether phase-set
-history is still dispensable now that phase names gate task validation and plan-close
-reasoning. ⛔ This spec deliberately does not pick the answer; picking it here would
-re-litigate SPEC-023 without its authors' inputs. What it refuses is leaving the question
-unasked while the premise has visibly moved.
+In: S2 is DECIDED AND RECORDED — the ADR exists and is `accepted`, so the condition the
+previous revision imposed ("any such change must first record why SPEC-023's rationale no
+longer holds") is MET. What is in scope now is consuming that decision: routing all three
+`PhaseService` writers through `insertVersion`.
 
-Out: ⛔ changing `PhaseService`'s write path as a foregone conclusion. That is what the
-corrected version of this spec exists to prevent. Any such change must first record why
-SPEC-023's rationale no longer holds.
+In: `renamePhase` — MEASURED 2026-08-24, no longer presumed. Version-less and non-demoting,
+identical to add/rm, established against a green control (`lore set --content`) that DID
+demote and DID log a row in the same apparatus, so the instrument was shown to discriminate
+before the negative result was believed. It moved Out → In because the presumption was
+replaced by a measurement, not because the presumption was accepted.
 
-Out: `renamePhase` — UNMEASURED. It shares the family and is presumed version-less, but
-presuming a neighbour's behaviour is the exact error this spec already made once.
+Out: ⛔ demoting the plan on a phase write. The ADR rejects that alternative by name — it
+would force re-approval on every phase edit of an `approved` plan, which is a coordination
+cost paid on each edit under many-concurrent-sessions. A future reader who finds phase
+writes logging a version but not demoting is looking at the DECIDED behaviour, not an
+unfinished migration.
+
+Out: ⛔ promoting phases to a doc type, and ⛔ any migration that reconstructs the
+back-catalogue. Pre-existing phase mutations left no rows and cannot be recovered.
 
 Out: F1–F5 of `knowledge-five-governance-findings-measured-while-closing-the`. F1 is owned by
 `spec-lore-issues-falls-through-to-the-local-corpus-on-a`.
 
 ## Module Boundary
 
-- Read-only for this spec: `packages/lore/src/service/phase-service.ts` (`addPhase`,
-  `removePhase`, `renamePhase` — all write via `this.store.update` with no `insertVersion`,
-  ⛔ by design, contrast `ac-service.ts`'s `insertVersion` at its own documented rationale).
-- The artifact this spec DOES change is the root `CLAUDE.md` Document Lifecycle paragraph,
-  plus whatever record S2's decision lands in (an ADR is the natural home if the answer is
-  "revisit"; `lore create adr`).
-- ⛔ If S2 ever resolves toward versioning phase writes, the demotion half MUST call
-  `resolveStatusAfterContractEdit` (`packages/core/src/schemas.ts`) rather than writing a
-  `"draft"` literal — the demotion-rule SSOT test already pins that contract for its two
-  existing callers.
+- WRITE target: `packages/lore/src/service/phase-service.ts` — `addPhase`, `removePhase`,
+  `renamePhase`. Each currently writes via `this.store.update` with no `insertVersion`; each
+  gains one. The `ac-service.ts` writer is the shape to copy, and its header comment at
+  `ac-service.ts:8` — which today names PhaseService as the version-less contrast — becomes
+  a STALE ASSERTION the moment this lands, so it is in scope for the same task. ⛔ Fixing a
+  gap and updating the comment that documented the gap are one acceptance unit.
+- WRITE target: `packages/lore/src/service/phase-service.ts:5`'s own header, for the same
+  reason — it states "no version history" as a property of the phase family.
+- Already landed, do not redo: the root `CLAUDE.md` Document Lifecycle paragraph
+  (`CLAUDE.md:120`, commit `063f113f`) now enumerates the three exceptions instead of
+  asserting the false universal. ⛔ But that paragraph currently describes `phase add|rm` as
+  "neither demotes NOR logs a version — BY DESIGN"; the second half of that clause becomes
+  false when this spec lands, so the paragraph is a WRITE target again, for the logging half
+  only.
+- ⛔ `resolveStatusAfterContractEdit` (`packages/core/src/schemas.ts`) MUST NOT be called
+  from `PhaseService`. The previous revision required it conditionally, on a demotion that
+  the ADR has now rejected. Calling it would implement the alternative that was declined.
 
 ## Design Decisions
 
 | # | Decision | Choice | Rejected | Rationale |
 |---|---|---|---|---|
 | D1 | What is wrong here | the DOCUMENTATION (S1); the code follows SPEC-023 | "the writer forgot to log" | measured: both sites document the asymmetry and give its reason |
-| D2 | The premise question | ask it explicitly, record the answer, do not answer it here | silently re-implement, or silently drop it | re-litigating SPEC-023 inside a defect spec would decide a trade-off without engaging its authors |
-| D3 | Oracle shape | assert the DOC now matches measured behaviour, not that behaviour changed | assert a version row appears | asserting a row would hard-code the outcome D2 refuses to pick |
-| D4 | `renamePhase` | MEASURE before any claim | assume it matches add/rm | this spec already made that error once, in its own first version |
+| D2 | The premise question | ANSWERED 2026-08-24 by the owner, recorded in an accepted ADR: log a version, do not demote | leave it open; or let an agent pick it | D2's requirement was authorship, not caution — the owner chose from four costed options, which is the input D2 was holding out for |
+| D3 | Oracle shape | ⛔ RE-BASELINED with D2: assert a version row DOES appear and status does NOT change | the previous "assert current behaviour, never presuppose logging" | the old wording existed only because D2 was undecided; keeping it after the ADR would make the oracle certify the rejected alternative |
+| D4 | `renamePhase` | MEASURED, not assumed — version-less and non-demoting, same as add/rm | assume it matches add/rm | it does match, but the point stands: the match is now a measurement with a green control behind it, not an inference from a neighbour |
+| D5 | Why not the fingerprint alternative | rejected in the ADR | record a `phases_fingerprint` at approval and compare it at the gates | strictly more new surface (a field plus two consumer sites) than three `insertVersion` calls, and it leaves the history half silent |
 
 ## Risks
 
-- ⛔ The strongest risk is this spec's own first version: a defect spec that reads plausibly
-  while indicting a deliberate design. Anything that reintroduces "route it through the
-  versioning path" as settled must be refused until D2 is recorded.
-- If S2 resolves toward versioning, every existing workflow that adds a phase to an approved
-  plan may start requiring re-approval — a real behaviour change, and the reason D2 exists.
+- ⛔ This spec has now been wrong in BOTH directions, and that is the risk to carry forward.
+  v1 indicted a deliberate design as a defect. The corrected version then hardened "do not
+  touch the write path" into an oracle. Neither error was caught by reading; both were caught
+  by measuring, and the second only because a decision was escalated instead of assumed. ⛔ Do
+  not read the ADR as retroactive proof that v1 was right — v1's REASONING ("five siblings
+  log, so this one forgot") is still false, and the ADR reaches the same write path from an
+  entirely different premise.
+- ⛔ The demotion half is the live trap. Three of the four options put before the owner
+  touched status; the chosen one does not. An implementer who pattern-matches "version-logging
+  writer" to `ac set` rather than `ac add` will add a demotion nobody asked for, and every
+  workflow that adds a phase to an approved plan starts requiring re-approval.
 - The back-catalogue is unrecoverable either way: phase mutations already applied left no
   rows. Anywhere plan version history is presented as complete, that limit MUST be stated.
 
 ## Acceptance Criteria
 
-Typed ACs authored via `lore ac add` (script mode). Coverage contract: the lifecycle
-paragraph in the root `CLAUDE.md` must be assertable against measured behaviour — a check
-that the paragraph does NOT claim `extra` edits universally demote, paired with a live
-measurement that `phase add` against an approved plan leaves status and version log
-untouched, so the doc and the code are pinned to agree. Plus a MEASURED verdict for
-`renamePhase`, and a recorded decision artifact for S2.
+Typed ACs authored via `lore ac add` (script mode). Coverage contract, RE-BASELINED against
+the ADR: the root `CLAUDE.md` lifecycle paragraph and the measured behaviour must be pinned
+to agree, where the agreed behaviour is now "a version row appears AND status does not
+change" for all three writers. The doc-side half must catch the paragraph still calling
+phase writes version-less. The code-side half must assert BOTH conjuncts per writer — a
+present version row is not evidence that status was left alone, and an unchanged status is
+not evidence that a row was written; an oracle checking only one certifies half the
+decision. Plus an `accepted` ADR reachable from this spec, and the stale header comments at
+`phase-service.ts:5` and `ac-service.ts:8` updated in the same unit as the code.
+
+⛔ Every negative assertion here needs a green control in the same run. "No demotion
+happened" is indistinguishable from "the status reader is broken" without a writer that DOES
+demote in the same apparatus — `lore set --content` is the one used to establish the
+baseline, and the suite should keep using it.
+
+### How the suite must invoke lore — pinned, because the alternative is a false oracle
+
+The three ACs all run one vitest file, and all three depend on "live" behaviour. ⛔ The suite
+MUST reach the CLI through the WORKTREE'S OWN SOURCE (`packages/lore/src/index.ts`, e.g. via
+`bun run dev` or `bun <repo>/packages/lore/src/index.ts`) and MUST NOT invoke a prebuilt
+`dist/lore`. A `dist/lore` binary is built from whatever commit last ran `bun run build`; a
+suite that spawns it measures that commit and reports the verdict as if it measured the
+change under test. This repo has already been burned by the harness-sees-its-own-copy shape.
+⛔ The suite must also ASSERT the resolved entry path lies inside the repo under test, so the
+mistake is refused rather than merely discouraged.
+
+⛔ vitest is the pinned runner, so the suite may NOT top-level-import `bun:sqlite` (or
+anything that transitively does) — that is what forces the subprocess shape above rather
+than an in-process `createApp`. Naming this here because the obvious in-process
+implementation is the one that will be reached for first, and it fails under vitest for a
+reason unrelated to anything this spec is about.
+
+### How the paraphrase hole was closed, and what the four review passes cost
+
+⛔ This section previously disclosed an UNCLOSED gap: AC-PHASEVER-3(a)/(b) name an intended
+meaning, and (d)'s two banned phrases could be paraphrased around — a header saying
+"PhaseService does not record history" would have passed every conjunct while keeping the
+stale claim. The disclosure was honest and it was also the wrong answer. AC-PHASEVER-3(e)
+closes it POSITIVELY: each header must contain the ADR slug exactly once. A header compelled
+to cite the ADR cannot quietly keep asserting what the ADR overturned, and a positive
+fixed-string requirement has no paraphrase surface at all.
+
+⛔ Recorded because the process is the finding: this spec took FOUR `lore review` passes to
+reach that, and every pass found something real — a negative with no green control, a
+semantic predicate dressed as a pinned one, an oracle that MATCHED THE FALSE TEXT it existed
+to delete, and finally the choice between disclosing a hole and closing it. ⛔ The lesson is
+not "review more"; it is that a negative-only oracle over prose tends toward
+paraphrase-whack-a-mole, and the exit is a POSITIVE requirement pointing at the new SSOT.
+An earlier revision of this very section asserted the gap was uncloseable; that assertion is
+retracted here rather than left standing.
+
+⛔ **The version-row count is read via `lore log <plan> --json`'s `data.total`** — measured
+2026-08-24 to exist and to equal the entries length. Printed line counts are refused:
+`--limit` defaults to 20 and any format change moves them.
+
+⛔ **AC-PHASEVER-1(a)'s required literal is NORMATIVE**, copied character-for-character
+including backticks and capitalization. A semantically correct paragraph worded differently
+FAILS that oracle on purpose — every looser form measured so far also matched the false text
+it was meant to delete.
+
+### One conjunct is VACUOUSLY GREEN today — say so, do not silently bank it
+
+Measured 2026-08-24: `grep -n 'resolveStatusAfterContractEdit\|"draft"'
+packages/lore/src/service/phase-service.ts` returns ZERO matches. So AC-PHASEVER-3(c) passes
+BEFORE any work is done. It is retained deliberately as a REGRESSION GUARD against the
+implementation trap named in Risks — not as evidence of anything achieved. ⛔ Its pass MUST
+NOT be counted as coverage of this spec's change; "vacuously true" and "true" are different
+verdicts and this one is the former until an implementation exists for it to constrain.
 
 
 ## Acceptance Criteria (structured)
 
-- [·] [script] AC-PHASEVER-1: The lifecycle paragraph and the measured behaviour are pinned to AGREE, in either direction. The suite asserts BOTH halves in one run: (a) the root CLAUDE.md Document Lifecycle paragraph does NOT assert that editing an approved doc's extra universally resets it to draft — three writers already break that universal (lore ac add, phase add, phase rm); and (b) a LIVE measurement in a throwaway corpus (mkdtemp + lore init, never this repo's .lore/) that 'lore phase add' against an APPROVED plan leaves both its status and its version-row count unchanged. ⛔ Half (b) asserts CURRENT behaviour on purpose: this criterion must NOT presuppose that phase writes start logging, because D2 explicitly declines to decide that. If S2 later resolves toward versioning, this AC is re-baselined then, with the reason recorded. Baseline measured 2026-08-24: status stayed approved, log stayed at v1, and the paragraph did assert the false universal — so half (a) is red today and half (b) green.
-  script: test — bunx vitest run packages/lore/tests/integration/phase-write-lifecycle-doc-parity.test.ts 2>&1 && echo 'AC-PHASEVER-1 PASS: the lifecycle paragraph claims no universal extra-demotion AND phase add against an approved plan was measured to leave status and version count untouched'
-- [·] [script] AC-PHASEVER-2: renamePhase is MEASURED, and S2's premise question has a recorded answer. Two conjuncts: (a) a live throwaway-corpus measurement of 'lore phase rename' against an approved plan, asserting its status and version-row behaviour explicitly — ⛔ D4 forbids assuming it matches add/rm, and this spec's own first version is the cautionary case for assuming a neighbour's behaviour; and (b) an ADR exists, linked to this spec, recording whether SPEC-023's 'phases are soft groupings, history is dispensable' rationale still holds now that extra.phases[] gates taskExtraSchema.phase cross-entity validation, lore ready's grouping, and plan-close's every-child-archived reasoning. ⛔ Either answer satisfies (b); an ABSENT answer does not. The oracle asserts the ADR is reachable from this spec and that its decision_status is 'accepted', never that it reached a particular conclusion — this spec declines to pick, and an oracle that demanded one outcome would decide by the back door.
-  script: test — bunx vitest run packages/lore/tests/integration/phase-write-lifecycle-doc-parity.test.ts -t 'rename measured and premise recorded' 2>&1 && echo 'AC-PHASEVER-2 PASS: phase rename status/version behaviour measured explicitly, and an accepted ADR linked to this spec records the SPEC-023 premise verdict either way'
+- [·] [script] AC-PHASEVER-1: CLAUDE.md's lifecycle paragraph and the measured behaviour of `lore phase add` are pinned to AGREE on the ADR's decision: a version row appears AND status is unchanged. Three conjuncts, ONE run. (a) DOC PARITY as two fixed-string counts in the root CLAUDE.md. FORBIDDEN: "neither demotes NOR logs a version" == 0. REQUIRED: "`lore phase add|rm` does NOT demote but LOGS a version" == 1 -- NORMATIVE, copied verbatim including backticks and case; a differently-worded but correct paragraph FAILS on purpose. Attribution sits inside the literal, so no separate attribution predicate. Measured 2026-08-24: forbidden=1, required=0 -- both RED. ⛔ REFUSED as oracle, on measurement: a bare grep for "logs a version", or a regex binding the writer names to it. Both MATCH THE CURRENT FALSE TEXT (measured 1 against the false line), so both report coverage while having zero discriminating power. (b) LIVE measurement in a throwaway corpus (mkdtemp + lore init, cwd inside it, NEVER this repo's .lore/): `lore phase add` on an APPROVED plan raises `lore log <plan> --json`'s `data.total` by EXACTLY 1 AND leaves status `approved`. Two separate halves -- a new row is not evidence status was untouched, nor the reverse. `data.total` is the pinned reader (measured 2026-08-24 to exist and equal the entries length); printed lines are refused because `--limit` and format changes move them. (c) GREEN CONTROL, SAME run: `lore set --content` on that plan observed to demote to `draft` AND raise `data.total` by 1. Without it, (b)'s negative half is indistinguishable from a broken status reader. RE-BASELINED 2026-08-24; why this is a correction and not a weakening is in D3 and the ADR's Consequences. Runner and invocation shape are pinned in the spec body.
+  script: test — bunx vitest run packages/lore/tests/integration/phase-write-lifecycle-doc-parity.test.ts 2>&1 && echo 'AC-PHASEVER-1 PASS: CLAUDE.md has 0 of the forbidden clause and exactly 1 of the required literal, phase add on an approved plan raised lore log --json data.total by exactly 1 and left status approved, and a same-run set --content control was observed to demote and log'
+- [·] [script] AC-PHASEVER-2: renamePhase and removePhase are MEASURED with the same two conjuncts AND the same green control as add, and S2's premise question has a recorded answer. (a) A live throwaway-corpus measurement of `lore phase rename` AND `lore phase rm` against an APPROVED plan, each asserting BOTH conjuncts explicitly: version-row count +1, and status still `approved`. D4 forbids assuming these match add -- and note they DID match add under the old behaviour (measured 2026-08-24: version-less and non-demoting, against a green control), which is exactly why re-measuring after the change is required rather than inferred. (a2) GREEN CONTROL, required in the SAME run as (a) and not inherited from AC-PHASEVER-1: a `lore set --content` write on the same plan observed to demote to `draft` and log a row. AC-1(c) only covers AC-1's own run; if rename/rm are measured in a separate vitest invocation their 'status still approved' half is exposed to the identical broken-status-reader failure mode. A control that does not run in the same process as the negative it guards is not a control. (b) An ADR exists at DEPTH 1 from this spec -- a direct `relates-to` link edge outbound from this spec, as created 2026-08-24, not transitive tree reachability -- and has decision_status `accepted`, recording whether SPEC-023's 'phases are soft groupings, history is dispensable' rationale still holds now that extra.phases[] gates taskExtraSchema.phase cross-entity validation, lore ready's grouping, and plan-close's every-child-archived reasoning. The oracle asserts reachability and `accepted`, NEVER a particular conclusion. Satisfied as of 2026-08-24 by adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan, which answers: overturn the history clause, keep the soft-grouping model, do not demote.
+  script: test — bunx vitest run packages/lore/tests/integration/phase-write-lifecycle-doc-parity.test.ts -t 'rename and rm measured and premise recorded' 2>&1 && echo 'AC-PHASEVER-2 PASS: phase rename and phase rm each measured to add exactly 1 version row and leave status approved against a same-run set --content control, and an accepted ADR reachable from this spec records the SPEC-023 premise verdict'
+- [·] [script] AC-PHASEVER-3: Every prose assertion that phase writes are version-less is swept in the SAME unit as the code change, and the ADR-rejected demotion is guarded. THREE conjuncts -- (c), (d), (e) -- and they are the WHOLE oracle. INTENT, NOT conjuncts, because neither is checkable without judgement: phase-service.ts's header should stop stating 'no version history' as a property of the phase family, and ac-service.ts's header should stop naming PhaseService as the version-less contrast (TRUE today, STALE the moment this lands; fixing a gap and updating the comment that recorded it are ONE unit). ⛔ (d)+(e) are NOT equivalent to that intent -- a header with zero banned phrases and one ADR citation could still assert the overturned claim in fresh wording. Residual: an implementation reviewer MUST read both headers. (c) NEGATIVE GUARD, pinned; the earlier open predicate 'a literal draft status write' is WITHDRAWN as unmeasurable. In phase-service.ts: `resolveStatusAfterContractEdit` == 0, 'draft' (single-quoted) == 0, "draft" (double-quoted) == 0. CONTROL, same run: `resolveStatusAfterContractEdit` in ac-service.ts >= 1 -- measured 2026-08-24 it is 2 (import :99, call :615), so the zeros are not a mis-aimed grep. ⛔ (c) is VACUOUSLY GREEN today; it is a regression guard over the Risks trap; its pass MUST NOT count as coverage. (d) NEGATIVE closed set, match rule pinned: `grep -rIl -e 'no version history' -e 'version-less' packages/` == 0 files. Measured 2026-08-24: 2 files -- RED. The rewritten headers may not use either phrase even to describe the OLD behaviour. (e) POSITIVE requirement, which is what CLOSES (a)/(b) instead of merely disclosing them: each of the two headers contains the literal "adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan" EXACTLY 1 time. Fixed-string, no paraphrase surface: a header forced to cite the ADR cannot quietly keep asserting what it overturned. Measured 2026-08-24: 0 in both -- RED.
+  script: test — bunx vitest run packages/lore/tests/integration/phase-write-lifecycle-doc-parity.test.ts -t 'stale version-less assertions swept and demotion guarded' 2>&1 && echo 'AC-PHASEVER-3 PASS: both service headers dropped the version-less phrases and each cites the ADR slug once, phase-service.ts has 0 hits for resolveStatusAfterContractEdit and 0 draft literals against an ac-service.ts control of at least 1, and grep -rIl for the two pinned phrases under packages/ returns exactly 0 files'

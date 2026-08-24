@@ -89,6 +89,55 @@ local reports are therefore reachable ONLY via `lore issues --local` from now on
 `lore report-issue`, because the channel is correctly refusing. A finding about a broken
 reporting channel cannot use that channel — so it lands here.
 
+### CLOSED (behaviour) / OPEN (SSOT) 2026-08-24 — and my first two write-ups of this were both wrong
+
+⛔ F1's BEHAVIOURAL defect is closed. A residual SSOT duplication is open. This section is retained as the MEASUREMENT.
+`spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired` added one shared
+`classifyFeedbackUpstream` to `report-issue-wiring.ts` that BOTH verbs consume; the retired
+shape now exits 4 from `lore issues` carrying the same canonical message `report-issue`
+emits. Verified end-to-end against the rebuilt binary, throwaway corpora, upstream pointed at
+a DIFFERENT corpus: retired+`issues` exit **4** (was 0), retired+`--local` exit 0,
+GitHub+`issues` exit 4 (green control unchanged), GitHub+`--local` exit 0. And the original
+defect signature is gone: `--local` vs no-`--local` stdout are no longer byte-identical, so
+the flag recovered the discriminating power F1 measured it as having lost.
+
+⛔ What the fix had to be, and why the obvious AC was not enough: the mechanism was never
+missing validation — it was two verbs each re-deriving policy from the `isGithubUpstreamCfg`
+type guard. So the guarding AC is STRUCTURAL (zero `isGithubUpstreamCfg` call sites left in
+either command file, AND `classifyFeedbackUpstream` referenced in both), because a purely
+behavioural AC is satisfied by an inlined ad-hoc re-derivation — the same drift in different
+code. The AI judge caught that hole in the first AC draft; no deterministic gate did.
+
+⛔ **What is still open — and the two wrong write-ups that preceded this one.** `lore assess`
+flagged two files as still deriving shape policy outside the classifier. I wrote that up as
+"the defect is NOT closed, only narrowed" in root CLAUDE.md, then machine-checked both files
+and found that framing too strong. Corrected measurement:
+
+| consumer | what it actually does | verdict |
+|---|---|---|
+| `adapters/mcp/tools.ts` (2908, 2919) | judged shape itself, with a CORRECT refusal branch for all three states. ⛔ I recorded its retired message as "byte-identical to the classifier's" — FALSE, measured later: it read `to file issue reports` against the classifier's `to file/list issue reports`. I had grepped only the shared substring and read that as equality | behaviour was CORRECT; the copies had ALREADY DRIFTED unnoticed. CLOSED 2026-08-24 by `spec-the-retired-shape-refusal-message-has-two-byte-identical` |
+| `scripts/migrate-issue-reports.ts` (100, 537) | `!isGithubUpstreamCfg(cfg)` -> refuses and returns 1 ("refusing to guess a migration target") | LEGITIMATE — a one-shot migration tool that only accepts the GitHub shape is not a second arbiter of shape policy. Listing it as residual drift was my error |
+
+So the surviving risk is narrow and real: two byte-identical copies of one refusal message,
+with no oracle that fails when they diverge. It is NOT the silent-fallback class F1 measured.
+
+⛔ Three write-ups of the same fact in one session, each corrected by the next: "CLOSED"
+(before assess ran) -> "NOT closed, only narrowed" (from assess's wording, un-checked) ->
+this one (after grepping both files). The middle one is the instructive failure: assess's
+finding was accurately worded, and I still over-read it, because a finding that names a path
+invites inference about severity that the finding itself does not make. ⛔ The standing rule
+already says to machine-check every assess finding that names a path — the unstated half is
+that machine-checking must also be allowed to make the finding LESS severe, not only to
+confirm it. A correction that reduces alarm is as mandatory as one that raises it.
+
+⛔ The generalisable failure: **a structural AC is only as wide as the file list it greps.**
+AC-IS-4 asserted zero `isGithubUpstreamCfg` occurrences in the two CLI command files and
+passed honestly, while two other consumers kept theirs. The spec's anchors and the AC's grep
+target were the SAME narrow set, so nothing in the loop could notice the omission — the
+oracle and the scope were derived from one another. Widening one without the other would not
+have helped either. `lore assess`'s diff-aware review is what caught it, one layer above every
+AC.
+
 ## F2 — A deleted module's name survives in source comments, structurally invisible to the new reference check
 
 SPEC-146's three-way split deleted `packages/lore/src/service/claude-md-check.ts`

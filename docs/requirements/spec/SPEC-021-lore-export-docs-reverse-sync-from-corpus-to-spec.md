@@ -9,6 +9,8 @@ created: 2026-06-30
 updated: 2026-07-14
 tags: [cli, corpus, sync, export, drift, phase-10, stub]
 parent: PRD-001
+links:
+  - {id: KN-542, type: relates-to}
 ---
 # SPEC-021: `lore export-docs` — reverse sync (corpus → file)
 
