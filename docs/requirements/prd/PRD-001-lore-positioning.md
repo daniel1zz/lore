@@ -108,6 +108,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree (approved)
 - [spec] CLAUDE.md governance — content-dimension checks: wire the dead admission half, split capacity from content, and measure what the contract asks for (approved)
 - [knowledge] The orphan-branch sweep asks a content question with a SHA predicate, and a red-first test task has no legal terminal state (approved)
 - [spec] Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push (approved)
@@ -375,7 +376,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [spec] Resume-coverage floor — the satisfaction boundaries: a deferral must carry its reason, and a sidechain chain cannot discharge (approved)
 - [knowledge] An LLM judge returned escalate and approve on the identical document version, and D5 turns either outcome into a hard approval block (approved)
 - [task] The approved-to-draft demotion rule is mirrored in ac-service.ts instead of shared — extract it to @lore/core beside VALID_TRANSITIONS (archived)
-- [spec] report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree (approved)
 - [knowledge] Handoff — agent:main-orchestrator (approved)
 - [adr] The coverage floor's MCP arming compares the tool name's LAST segment deliberately — a full-name match would silently disarm alias-registered consumers (approved)
 - [task] g1 spec-create gate denies 'lore create spec --help' with PARENT_REQUIRED — a read-only introspection command cannot violate a create predicate (archived)
