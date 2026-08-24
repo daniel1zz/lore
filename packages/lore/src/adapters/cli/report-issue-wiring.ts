@@ -168,8 +168,27 @@ export function isGithubUpstreamCfg(cfg: UpstreamCfg): cfg is GithubUpstreamCfg 
  * `report-issue.ts` was the only verb that refused this shape before this
  * spec; `issues.ts` fell through to reading the local corpus instead, which
  * is the defect this classifier closes.
+ *
+ * Exported (spec-the-retired-shape-refusal-message-has-two-byte-identical
+ * D1) so `adapters/mcp/tools.ts`'s `lore_report_issue` handler — reached only
+ * via that file's own lazy `await import()`, not through
+ * {@link classifyFeedbackUpstream} — calls this instead of holding its own
+ * copy of the message. Before D1, the MCP copy had already drifted ("file
+ * issue reports" vs. this function's "file/list issue reports") with no
+ * oracle to catch it.
+ *
+ * Return type is narrowed to the `VALIDATION_ERROR` member (the
+ * `Extract<LoreError, {code: "..."}>` pattern already used by
+ * `config.ts::isValidationError`'s narrowing and `in-memory-provider.ts`'s
+ * `AI_PROVIDER_ERROR` results) rather than the full `LoreError` union — a
+ * caller reading `.message`/`.field` off this specific builder's result
+ * (e.g. an equality probe comparing it against another VALIDATION_ERROR)
+ * needs that without re-narrowing by `code` first; widening back to
+ * `LoreError` at each call site (`classifyFeedbackUpstream`'s `"retired"`
+ * branch, the MCP handler's `errorContent`) is a normal subtype-to-supertype
+ * assignment.
  */
-function buildRetiredFeedbackUpstreamError(): LoreError {
+export function buildRetiredFeedbackUpstreamError(): Extract<LoreError, { code: "VALIDATION_ERROR" }> {
   return {
     code: "VALIDATION_ERROR",
     field: "feedback.upstream",
