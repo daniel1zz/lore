@@ -6660,6 +6660,14 @@
     "01M0S6HNWPSP4654NW11W3YWJR": {
       "human_id": "KN-526",
       "file_path": "docs/requirements/knowledge/KN-526-handoff-agent-main-orchestrator.md"
+    },
+    "01M0S7GACJKMB806VRSD1ZY85J": {
+      "human_id": "KN-527",
+      "file_path": "docs/requirements/knowledge/KN-527-handoff-agent-main-orchestrator.md"
+    },
+    "01M0S7ECRD870NHDG32P76RNG3": {
+      "human_id": "KN-528",
+      "file_path": "docs/requirements/knowledge/KN-528-corpus-growth-crossed-three-hard-coded-thresholds.md"
     }
   }
 }
