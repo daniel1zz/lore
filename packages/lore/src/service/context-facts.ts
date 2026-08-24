@@ -62,7 +62,7 @@
  *     simulated) is indistinguishable from a plain file and is simply never
  *     recorded as a module — undercounting an edge case is the accepted,
  *     documented direction (spec's own "misses acceptable, false alarms are
- *     not" risk posture, `claude-md-check.ts`'s identical stance).
+ *     not" risk posture, `claude-md-admission.ts`'s identical stance).
  *   - Walk is capped at `MAX_MODULE_INDEX_ENTRIES` recorded entries — a
  *     defensive ceiling against a pathological (or adversarially deep)
  *     tree; hitting it silently stops recording further entries rather than
@@ -73,7 +73,7 @@
  *     producing at least the module-index/pointer sections.
  *   - `budgetsCfg.filenames` (e.g. `["CLAUDE.md"]`, `resolveMemoryFileBudgets`
  *     defaults) is the ONLY input this module reads off `budgetsCfg` — the
- *     line/byte ceilings themselves are a `claude-md-check.ts` lint concern,
+ *     line/byte ceilings themselves are a `claude-md-budget.ts` lint concern,
  *     unrelated to fact collection.
  *
  * Side-effect class: IO (exclusively via the injected `FsReadPort`)
