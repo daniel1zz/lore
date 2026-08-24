@@ -3,10 +3,10 @@ id: SPEC-108
 type: spec
 role: spec
 title: "Out-of-box reporting channel — report-issue self-provisions its upstream config"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-08-24
 tags: [feedback-loop, distribution-first, dogfood]
 parent: PRD-001
 links:
@@ -117,7 +117,5 @@ Declared after landing (an undeclared path reads as an instant false `file_missi
 
 ## Code anchors
 
-- packages/lore/src/adapters/cli/report-issue-wiring.ts#resolveUpstreamFromInstalledBinary
-- packages/lore/src/adapters/cli/report-issue-wiring.ts#provisionFeedbackUpstream
 - packages/lore/src/adapters/cli/report-issue-hint.ts#buildReportIssueHint
 - packages/lore/src/adapters/cli/commands/report-issue.ts

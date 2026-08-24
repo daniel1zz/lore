@@ -3,10 +3,10 @@ id: SPEC-072
 type: spec
 role: spec
 title: "Upstream issue reporting: lore report-issue (consumer defect feedback loop)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-24
-updated: 2026-07-27
+updated: 2026-08-24
 tags: [spec-072, feedback-loop, report-issue, cross-corpus]
 parent: PRD-001
 ---
@@ -273,9 +273,6 @@ All 13 ACs are script-mode (external oracles; added via `lore ac add`, covering 
 
 - packages/core/src/issue-report.ts#matchRootPrd
 - packages/core/src/config.ts#FeedbackConfigSchema
-- packages/lore/src/flows/upstream-probe.ts#probeUpstreamDb
-- packages/lore/src/flows/upstream-context-flow.ts#buildUpstreamContext
-- packages/lore/src/service/issue-report-service.ts#IssueReportService
 - packages/lore/src/service/receipt-log.ts#ReceiptLog
 - packages/lore/src/adapters/cli/commands/report-issue.ts
 - packages/lore/src/adapters/cli/report-issue-wiring.ts

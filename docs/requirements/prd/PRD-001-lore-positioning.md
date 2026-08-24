@@ -108,6 +108,8 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] Out-of-box reporting channel — report-issue self-provisions its upstream config (deprecated)
+- [spec] Upstream issue reporting: lore report-issue (consumer defect feedback loop) (deprecated)
 - [spec] report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree (approved)
 - [spec] CLAUDE.md governance — content-dimension checks: wire the dead admission half, split capacity from content, and measure what the contract asks for (approved)
 - [knowledge] The orphan-branch sweep asks a content question with a SHA predicate, and a red-first test task has no legal terminal state (approved)
@@ -477,7 +479,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] lore 全局纪律缺一条：「绝不屏蔽 lore 自身输出」应进 governance corpus-workflow 资产（原建议的 hook 方案已作废） (draft)
 - [knowledge] Retro — plan-close's recovery text is not executable: omitted exempt_kind, and a merge instruction that collides with dedicated writers (approved)
 - [spec] Dashboard production packaging — one-command lore dashboard (F5a) (approved)
-- [spec] Out-of-box reporting channel — report-issue self-provisions its upstream config (approved)
 - [task] Task-scoped oracles cannot verify integration reachability: an AC passes green while its deliverable is dead code (draft)
 - [task] No gate arms the doc-code drift oracle: a spec whose implementation merged with zero code_anchors passes every existing gate (draft)
 - [task] evidence --ac gate only validates against the plan's direct governing spec, breaking AC traceability across an implements chain (draft)
@@ -568,7 +569,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [spec] git-safety-gate heredoc/string-literal awareness (command-position discipline) (approved)
 - [spec] Execution liveness signals: session actor tier, evidence claim renewal, plan last-activity (approved)
 - [spec] Deterministic task dispatch bundle: lore feed task-start (approved)
-- [spec] Upstream issue reporting: lore report-issue (consumer defect feedback loop) (approved)
 - [spec] report-issue trigger surfaces: error-path hints + vendored discipline stanza (approved)
 - [spec] dashboard Issues triage surface: badge, list, in-place adjudication (approved)
 - [spec] Dashboard adjudication workbench + route telemetry (PRD §21 F1+F2) (approved)

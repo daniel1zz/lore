@@ -196,5 +196,9 @@ Row 4 is the one the original wording got wrong. The external transaction blocks
 ## Code anchors
 
 - packages/core/src/issue-report.ts
-- packages/lore/src/service/issue-report-service.ts
 - scripts/check-no-timer-retry.ts
+- packages/lore/src/adapters/cli/commands/report-issue.ts
+- packages/lore/src/service/gh-runner.ts
+- packages/lore/src/service/github-intake-port.ts
+- packages/lore/src/service/issue-resolution.ts
+- scripts/tests/check-no-timer-retry.test.ts
