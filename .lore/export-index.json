@@ -6796,6 +6796,58 @@
     "01M0ST7PA2776TA0M0KS72J68E": {
       "human_id": "KN-545",
       "file_path": "docs/requirements/knowledge/KN-545-handoff-agent-main-orchestrator.md"
+    },
+    "01M0SVMCPHCNJ2TA941P3DAZKS": {
+      "human_id": "SPEC-150",
+      "file_path": "docs/requirements/spec/SPEC-150-a-github-filed-defect-must-be-claimable-one-ingest.md"
+    },
+    "01M0SWJECFFT7AWA7ZP37G1HW2": {
+      "human_id": "PLAN-144",
+      "file_path": "docs/requirements/plan/PLAN-144-make-the-phase-write-version-row-audit-entry-pairi.md"
+    },
+    "01M0SW7T0EYWM18W7GWHJG0K8W": {
+      "human_id": "PLAN-145",
+      "file_path": "docs/requirements/plan/PLAN-145-close-the-read-side-a-github-filed-defect-becomes.md"
+    },
+    "01M0SWK6BP682JPNTYBSN6YPXP": {
+      "human_id": "TASK-816",
+      "file_path": "docs/requirements/task/TASK-816-author-the-phase-write-audit-pairing-oracle-and-pr.md"
+    },
+    "01M0SW90NPZ4EKQSBYVS9Y6Z21": {
+      "human_id": "TASK-817",
+      "file_path": "docs/requirements/task/TASK-817-skill-implement-a-verbatim-slug-on-create-makes-th.md"
+    },
+    "01M0SW93KFXF2QTXS5E6NBY3VA": {
+      "human_id": "TASK-818",
+      "file_path": "docs/requirements/task/TASK-818-skill-test-final-verification-attested-12-of-12-de.md"
+    },
+    "01M0SW934QYERAVGMYW3MGM53X": {
+      "human_id": "TASK-819",
+      "file_path": "docs/requirements/task/TASK-819-skill-implement-mcp-lore-report-issue-files-throug.md"
+    },
+    "01M0SW92ND5NQ2M3CG5PFCDD8Z": {
+      "human_id": "TASK-820",
+      "file_path": "docs/requirements/task/TASK-820-skill-implement-lore-issue-adopt-and-the-label-rou.md"
+    },
+    "01M0SW92237ZABBVDDGKMKQDBZ": {
+      "human_id": "TASK-821",
+      "file_path": "docs/requirements/task/TASK-821-skill-implement-the-read-surface-reaches-github-an.md"
+    },
+    "01M0SW91MXYE7P45PHYZ9WEF3Y": {
+      "human_id": "TASK-822",
+      "file_path": "docs/requirements/task/TASK-822-skill-implement-filing-mints-the-corpus-task-and-a.md"
+    },
+    "01M0SW917V4MK1TST3DQJG5Z1S": {
+      "human_id": "TASK-823",
+      "file_path": "docs/requirements/task/TASK-823-skill-implement-two-pure-modules-plus-the-numeric.md"
+    },
+    "01M0SWNCSQ35R95S1G6G2EYFF9": {
+      "human_id": "KN-546",
+      "file_path": "docs/requirements/knowledge/KN-546-five-findings-from-planning-the-github-read-side-a.md"
+    },
+    "01M0SW0RH2SSVNZD0ZCMPC4PVK": {
+      "human_id": "KN-547",
+      "file_path": "docs/requirements/knowledge/KN-547-assessment-land-the-adr-s-phase-write-decision-a-r.md"
     }
   }
 }

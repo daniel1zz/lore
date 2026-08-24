@@ -3,7 +3,7 @@ id: TASK-813
 type: task
 role: plan
 title: "Route all three PhaseService writers through insertVersion and sweep the version-less assertions"
-status: approved
+status: archived
 priority: medium
 phase: "consume the decision"
 created: 2026-08-24

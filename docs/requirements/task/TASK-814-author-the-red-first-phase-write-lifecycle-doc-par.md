@@ -3,7 +3,7 @@ id: TASK-814
 type: task
 role: plan
 title: "Author the red-first phase-write lifecycle doc-parity suite"
-status: approved
+status: archived
 priority: medium
 phase: "red-first parity suite"
 created: 2026-08-24

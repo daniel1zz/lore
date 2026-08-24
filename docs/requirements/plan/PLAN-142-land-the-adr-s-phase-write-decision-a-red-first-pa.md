@@ -3,7 +3,7 @@ id: PLAN-142
 type: plan
 role: plan
 title: "Land the ADR's phase-write decision: a red-first parity suite, then version-logging in all three PhaseService writers"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
 updated: 2026-08-24
@@ -12,6 +12,8 @@ parent: SPEC-148
 phases:
   - {name: "red-first parity suite", description: "Author the vitest parity suite. Claims no AC; deliverable is a RED oracle plus expected-fail evidence recorded at the moment of red."}
   - {name: "consume the decision", description: "Add insertVersion to all three PhaseService writers, sweep both service headers and the root CLAUDE.md clause, turn the suite green without editing it."}
+links:
+  - {id: KN-542, type: relates-to}
 ---
 ## Goal
 

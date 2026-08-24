@@ -180,3 +180,87 @@ someone reads `mirror-roundtrip-idempotency.bun.test.ts` and `spec-mirror-conten
 ⛔ Both errors share one shape: a correct local observation promoted to a general claim without
 checking what governs it. Neither was caught by re-reading; both were caught by taking one more
 measurement.
+
+## F6 — `lore get` is NOT write-free, and `lore list` is
+
+Measured by bracketing, with a negative control: `lore trace stats`' `get` counter read
+10856, one `lore get <slug>` took it to 10857, and a following `lore list --type adr` left it
+at 10857. So the read verb writes a trace row and the list verb does not.
+
+⛔ Consequence for any test that reads the LIVE corpus: every full-suite run inflates
+`trace_events` and launders the docs it touched out of any "never-read" or "cold doc" signal
+derived from those counters. The phase-1 agent hit this and restricted its live reads to an
+`audit` + `list` allowlist enforced in code, with a test asserting the refusal. That is the
+right shape, but it is a workaround for a verb whose name promises a read.
+
+## F7 — `lore done` has TWO floors, and together they make a red-first task UN-ARCHIVABLE
+
+Measured on `task-author-the-red-first-phase-write-lifecycle-doc-parity-suite`, whose
+deliberate deliverable is a FAILING oracle:
+
+1. First refusal: no `result:"pass"` row carrying `attestation`. The message is precise and
+   even diagnoses the design — a task with EMPTY `ac_scope` can reach neither `lore verify`
+   (which needs a non-empty scope to resolve a governing spec) nor a plan-level verify, so
+   `--override-attestation` is "the only available route".
+2. Second refusal, AFTER supplying `--override-attestation` with a full reason: the task
+   declares a test-file anchor, so `lore done` additionally requires an **unfiltered**
+   `oracle:test result:pass` run of that file. ⛔ `--override-attestation` does NOT cover this
+   floor, and no override is offered for it.
+
+⛔ So "red-first as its own task, with the suite as its anchor" implies a **deferred archive**:
+the task cannot be closed until a LATER task turns its oracle green. That is not a defect —
+archiving a task whose own anchored suite is red would make the corpus claim completion over a
+failing oracle — but it is an unadvertised consequence of the pattern, and the first refusal's
+message actively points at an escape that the second refusal then rejects. A caller who stops
+reading after refusal 1 will believe the override is sufficient.
+
+⛔ Recorded per the standing rule that reaching for an escape hatch is itself the signal: I
+did reach for `--override-attestation`, and the correct answer turned out to be to reach for
+nothing and archive later.
+
+## F8 — AC-PHASEVER-3(d) as I wrote it is SELF-COLLIDING. My AC bug, found by the implementer.
+
+The criterion pins `grep -rIl -e 'no version history' -e 'version-less' packages/` == 0 files,
+with no exclusion. The suite that IMPLEMENTS the criterion lives under `packages/` and must
+reference both phrases to test for them. Spelled out: the criterion can never reach 0 whatever
+the implementation does.
+
+The phase-1 agent resolved it at source level — both phrases assembled by concatenation so
+they never appear contiguously, plus a self-guard test that fails loud if anyone rejoins the
+literals. Verified: the suite file greps to 0 and the tree-wide grep still returns exactly the
+two service files.
+
+⛔ That workaround is correct and it is also fragile in a way the AC does not admit: the
+criterion's reachability now depends on a test file avoiding contiguous string literals. The
+honest fix is an explicit exclusion in the criterion itself, so the intent is legible instead
+of encoded in someone's cleverness. ⛔ NOT applied yet, and the reason is itself a finding:
+`lore ac set` demotes the spec to draft and hard-blocks EVERY descendant claim, and the phase-2
+implementer is working under that spec right now. A governance tool whose smallest edit has
+repo-wide claim blast radius cannot be used for in-flight corrections.
+
+## F9 — my own AC states a measured count that is an UNDERCOUNT
+
+AC-PHASEVER-3(c) says the `resolveStatusAfterContractEdit` control in `ac-service.ts` is
+"2 (import :99, call :615)". Re-measured: it is **4** — `:73` and `:1132` are prose mentions in
+comments that I never counted because I looked only for code sites. The assertion is `>= 1`, so
+no oracle is affected and nothing is falsified operationally.
+
+⛔ It is still a false number inside an approved acceptance criterion, which is the category
+this project ranks above code correctness. Pending correction, deferred for the same
+claim-blast-radius reason as F8. ⛔ The generalisable error: I reported a grep count after
+mentally filtering it to the hits I considered relevant, then wrote the filtered number as the
+measurement. A count is only reproducible if the command that produced it is the whole rule.
+
+## F10 — no CLI surface exposes link DIRECTION, and the comment that says otherwise is a false label
+
+`corpus-service.ts` builds `navigation.related` from `this.store.findLinks(doc.id, "both")`,
+directly under a comment reading "Related — non-parent **outbound** links". Read in source:
+the comment says outbound, the call says both. So `lore get`'s Related block lists inbound
+edges indistinguishably from outbound ones.
+
+⛔ This bit my own AC-PHASEVER-2(b), which asserts "a direct `relates-to` edge **outbound**
+from this spec". No CLI surface can confirm that. The only decidable source is the audit trail:
+`action: "link"` rows are written on the FROM doc with `details.to_id`. The phase-1 agent used
+it, and additionally asserted no later `unlink` row, no `parent`-typed row, and
+`entries.length === total` so a truncated scan cannot read as "absent" — that last guard is the
+one worth copying.
