@@ -3,7 +3,7 @@ id: PLAN-141
 type: plan
 role: plan
 title: "Retire SPEC-146's split debt — repoint the eight stale claude-md-check references, one of them a live error message"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
 updated: 2026-08-24

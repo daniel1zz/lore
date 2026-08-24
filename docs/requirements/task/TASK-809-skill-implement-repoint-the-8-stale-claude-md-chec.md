@@ -3,7 +3,7 @@ id: TASK-809
 type: task
 role: plan
 title: "skill-implement: repoint the 8 stale claude-md-check references, including the PurityCheckError message on a live failure path"
-status: draft
+status: archived
 priority: medium
 phase: "P1-repoint"
 created: 2026-08-24

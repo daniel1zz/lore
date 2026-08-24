@@ -6708,6 +6708,18 @@
     "01M0SJJ1VBA1FTDCVT9CWKAD8F": {
       "human_id": "TASK-811",
       "file_path": "docs/requirements/task/TASK-811-skill-implement-classifyfeedbackupstream-as-the-si.md"
+    },
+    "01M0SKNZX7NAVJ8NBQ5P7DBY42": {
+      "human_id": "KN-532",
+      "file_path": "docs/requirements/knowledge/KN-532-assessment-retire-spec-146-s-split-debt-repoint-th.md"
+    },
+    "01M0SKSZXRAK8X40JE61C6W43A": {
+      "human_id": "KN-533",
+      "file_path": "docs/requirements/knowledge/KN-533-assessment-retire-spec-146-s-split-debt-repoint-th.md"
+    },
+    "01M0SKQG7M1CAF69GRG05DM002": {
+      "human_id": "KN-534",
+      "file_path": "docs/requirements/knowledge/KN-534-worktree-agents-are-built-from-origin-main-not-loc.md"
     }
   }
 }

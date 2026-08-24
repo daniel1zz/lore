@@ -9,6 +9,8 @@ created: 2026-08-24
 updated: 2026-08-24
 tags: []
 parent: SPEC-095
+links:
+  - {id: KN-534, type: relates-to}
 ---
 ## What this session did
 
@@ -240,3 +242,97 @@ show it with.
 ⛔ This is North Star property 1 (it must not lie) at the version-log layer: the log is not
 merely incomplete, it is self-consistent and wrong — `v1 create / v2 approve` reads as a
 complete history of a document that was edited between those two rows.
+
+### ⛔ F6 RETRACTED AS A DEFECT — the behaviour is deliberate and documented
+
+Measured hours after F6 was written, by reading the code instead of only its behaviour.
+The version-less phase write is a DESIGN DECISION with its rationale written at two sites:
+
+- `packages/lore/src/service/phase-service.ts:5` — "Phases are soft groupings stored in
+  `plan.extra.phases` … They are NOT a doc type — no ID, no lifecycle, **no version
+  history**." Source: SPEC-023 §4, §9.1.
+- `packages/lore/src/service/ac-service.ts:8` — AC changes "ride the parent spec's own
+  version log (**unlike PhaseService's version-less writes** — AC declarations are
+  judge-consumed data (SPEC-026/038), so history matters more here)."
+
+⛔ So F6's central inference was WRONG. "Five sibling `extra` writers log, therefore this one
+forgot" read as a clean one-cell diagnosis and was still an indictment of a fence whose
+reason was written down beside it. The neighbour measurements themselves stand
+(anchor add v1→v2, scope add v2→v3, red-first v3→v4, phase add/rm stay v1); the CONCLUSION
+drawn from them does not.
+
+The bitter part: F6 was written immediately after F1 taught the lesson "test the neighbours
+before buying a class-wide fix". Testing the neighbours' BEHAVIOUR is not the same as reading
+their stated REASONS, and only the second one finds a Chesterton's fence. A measurement can
+be flawless and the inference from it still wrong.
+
+**What survives, restated honestly:**
+
+- **S1 (a documentation falsehood, not a code defect).** The root `CLAUDE.md` Document
+  Lifecycle paragraph asserts "Editing an `approved` doc resets it to `draft` automatically —
+  content/title AND `extra`". Three writers break that universal: `lore ac add` (documented),
+  `phase add` and `phase rm` (measured here). The code follows SPEC-023; the memory file
+  states a universal that never was one.
+- **S2 (a premise that moved, which is a question, not a bug).** SPEC-023 justified
+  version-less writes by calling phases "soft groupings". `extra.phases[]` has since become
+  governance-load-bearing: `taskExtraSchema.phase` is validated cross-entity against the
+  MEMBER plan's `phases[].name`, `lore ready` groups by it, and plan-close reasons over
+  "every child task archived" where an EMPTY phase is the vacuous case. Whether "history is
+  dispensable" still holds deserves a recorded answer. ⛔ Either answer is legitimate.
+
+**Also checked before asserting, and NOT a defect:** `DocType` does include `"phase"`
+(`packages/core/src/types.ts:19`) and `lore gate phase-claim` exists (SPEC-056), so the word
+names TWO things — `plan.extra.phases[]` soft groupings and a `phase` DOC TYPE, of which this
+corpus currently holds ZERO instances (`lore list --type phase`). A draft of this correction
+was about to call `phase-service.ts:5`'s "NOT a doc type" stale; it is not — it describes the
+groupings, and of those it remains true.
+
+`spec-lore-phase-add-and-phase-rm-mutate-a-plan-s-declared` was rewritten in place to carry
+S1/S2 instead of the defect framing, its two ACs re-baselined so neither presupposes that
+phase writes start logging, and it was re-reviewed and re-approved. ⛔ Anything that
+reintroduces "route phase writes through the versioning path" as settled must be refused
+until the S2 decision is on record.
+
+### The generalizable lesson
+
+⛔ Before filing a governance finding, grep the implicated symbol's OWN module header and its
+nearest sibling's for a stated rationale. Behaviour tells you what happens; only the prose at
+the site tells you whether someone chose it. Two of this session's six findings (F1, F6) were
+over-framed on first writing, and both were narrowed only by evidence gathered AFTER the
+finding was already recorded — which is an argument for recording findings as provisional
+until the fence check is done, not for recording them later.
+
+### Corroboration for `knowledge-worktree-agents-are-built-from-origin-main-not-local`
+
+That doc (a concurrent session's, 2026-08-24) measured that the harness builds an agent
+worktree from `origin/main`, not local HEAD — so CLAUDE.md's "pull before dispatch" rule
+rests on a false parenthetical. This session hit the same thing from the other end, with a
+different consequence, so it is recorded here as an independent sample rather than a
+restatement:
+
+- Dispatched the F2 implementer when local `main` was at `2471156f`. `git rev-list --count
+  origin/main..main` = **56**, `main..origin/main` = 0, from which this session concluded
+  "nothing to pull" and dispatched.
+- The resulting worktree's merge-base with local main was `15f376a4` — i.e. the agent got a
+  tree ~56 commits behind what the orchestrator was looking at.
+- Consequence: the implementer honestly reported a pre-existing `TS2322` in
+  `packages/lore/src/adapters/cli/report-issue-wiring.ts:145`, verified it on its own base,
+  and flagged it as not-its-fault. Re-run on local main: `bun run typecheck` exit 0, zero
+  errors — a concurrent session had already rewritten that file. ⛔ Neither report was wrong;
+  they described different trees.
+
+⛔ The reasoning error was the orchestrator's, not the agent's: "origin/main is BEHIND local,
+so there is nothing to pull" is the correct answer to the wrong question. When the worktree
+is cut from `origin/main`, local being ahead is exactly the harmful case — the agent gets the
+stale side. The dispatch precondition to check is `git rev-list --count origin/main..main`
+== 0, and a non-zero count means PUSH (or accept a measured-stale baseline and say so in the
+bundle), not "nothing to do".
+
+
+⛔ Footnote on this doc's own integrity: the corroboration above first cited the slug as
+`knowledge-worktree-agents-are-built-from-origin-main-not-loc` — the MIRROR FILENAME's
+truncated form, not the slug. `lore link` refused it and named the real one
+(`...-not-local`). That is F3's blind spot landing inside F3's own retro: a dangling
+pointer in a CORPUS doc, where `lore status --check-memory-pointers` cannot see it because
+it walks memory files only. Reading a slug off `docs/requirements/**` filenames is a
+reliable way to manufacture this class — the filenames are truncated to fit, the slugs are not.

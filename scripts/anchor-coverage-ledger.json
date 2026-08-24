@@ -302,6 +302,11 @@
       "slug": "spec-version-snapshots-capture-slug-values-spec-068-d5-follow-up",
       "cohort": "debt",
       "reason": "Anchor debt: created 2026-07-24, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-lore-phase-add-and-phase-rm-mutate-a-plan-s-declared",
+      "cohort": "debt",
+      "reason": "Anchor debt by the mechanical date split (created 2026-08-24, after the 2026-07-14 backfill cutoff — the cohort field is decided by created_at, not by the author's judgment; a first attempt filed this as 'deliberate' and the gate refused it). No code anchor is declarable yet regardless: this spec's Module Boundary marks packages/lore/src/service/phase-service.ts explicitly READ-ONLY, and the artifacts it changes are the root CLAUDE.md Document Lifecycle paragraph plus an ADR recording whether SPEC-023's 'phase history is dispensable' premise still holds. Anchoring at phase-service.ts would assert an implementation site this spec forbids touching. Retire this row in the same commit that declares real anchors, which becomes possible only if the ADR resolves toward changing the write path."
     }
   ]
 }
