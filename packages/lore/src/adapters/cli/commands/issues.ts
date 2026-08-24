@@ -24,16 +24,23 @@
  * `resolveIssueReadSource` — but as of P4 (spec-the-defect-channel-reaches-
  * no-machine-but-its-own-github) this command NEVER feeds it a legacy
  * `corpus_path`: that field is retired (parses-but-ignored) since the SQLite
- * `UpstreamPort` it named is deleted outright, so a legacy-shaped
- * `feedback.upstream` is now indistinguishable, HERE, from "unconfigured" —
- * `resolveIssueReadSource` therefore resolves to the LOCAL (cwd) corpus for
- * both. A GITHUB-shaped `feedback.upstream` is a SEPARATE, still-loud
- * refusal (see below): its read surface (`GitHubIntakePort.listIssues`) is a
- * later phase's own task, not yet wired here.
+ * `UpstreamPort` it named is deleted outright. A legacy (RETIRED) -shaped
+ * `feedback.upstream` is NOT treated as "unconfigured" — `../report-issue-
+ * wiring.js`'s `classifyFeedbackUpstream` (spec-lore-issues-falls-through-to-
+ * the-local-corpus-on-a-retired D1, the SAME classifier
+ * `commands/report-issue.ts` consumes) classifies it `"retired"` and this
+ * command refuses loudly, exactly like a GITHUB-shaped upstream, unless
+ * `--local` bypasses upstream reading entirely (spec D2).
  *   - `feedback.upstream` GITHUB-shaped → refused loudly (exit 4) unless
- *     `--local`, naming the later-phase gap.
- *   - `feedback.upstream` legacy-shaped, or unconfigured, or `--local` passed
- *     → the cwd corpus.
+ *     `--local`, naming the later-phase gap. Its read surface
+ *     (`GitHubIntakePort.listIssues`) is a later phase's own task, not yet
+ *     wired here.
+ *   - `feedback.upstream` RETIRED-shaped (legacy `{corpus_path, root_prd}`)
+ *     → refused loudly (exit 4) unless `--local`, naming the retired shape
+ *     and the `feedback.upstream.repo` remedy — the SAME `LoreError`
+ *     `lore report-issue` emits for the identical shape (AC-IS-4).
+ *   - `feedback.upstream` unconfigured, or `--local` passed → the cwd
+ *     corpus.
  *
  * Every run NAMES the corpus it read (§M4's declared render contract): the human
  * output's FIRST line is `formatIssueCorpusLine(...)`'s fixed `Corpus: ` prefix
@@ -144,7 +151,7 @@ import {
 } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { relativeTime, formatTable, exitCode, formatError } from "../utils.js";
-import { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "../report-issue-wiring.js";
+import { classifyFeedbackUpstream } from "../report-issue-wiring.js";
 import {
   hasIssueReport,
   computeIssueResolution,
@@ -308,38 +315,58 @@ export default defineCommand({
     // command shares.
     const { app, dbPath, config } = loadLoreApp();
     try {
-      const upstreamCfg = resolveFeedbackUpstreamCfg(config);
-      // reason: a GitHub-shaped upstream (spec-the-defect-channel-reaches-no-
-      // machine-but-its-own-github P2) is refused loudly (never silently
-      // treated as "no upstream configured", which would misreport a REAL
-      // configuration as absent) unless `--local` bypasses upstream reading
-      // entirely. The GitHub-backed read surface (`GitHubIntakePort.listIssues`)
-      // is a later phase's own task, out of this task's scope.
-      if (upstreamCfg !== undefined && isGithubUpstreamCfg(upstreamCfg) && args.local !== true) {
-        process.stderr.write(
-          formatError({
-            code: "VALIDATION_ERROR",
-            field: "feedback.upstream",
-            message:
-              "this corpus's feedback.upstream is GitHub-configured (repo: " +
-              `${upstreamCfg.repo}) — reading it via 'lore issues' is not yet supported ` +
-              "(a later phase of spec-the-defect-channel-reaches-no-machine-but-its-own-github). " +
-              "Pass --local to read this corpus's own issue reports instead.",
-          }) + "\n",
-        );
-        process.exitCode = 4;
-        return;
+      // reason: ONE shared classifier (spec-lore-issues-falls-through-to-the-
+      // local-corpus-on-a-retired D1) — `commands/report-issue.ts` consumes
+      // the SAME function, so a retired-shape upstream cannot drift back
+      // into two independently-derived verdicts.
+      const classification = classifyFeedbackUpstream(config);
+      // reason: BOTH a GitHub-shaped upstream (spec-the-defect-channel-
+      // reaches-no-machine-but-its-own-github P2) and a RETIRED-shaped
+      // upstream (spec-lore-issues-falls-through-to-the-local-corpus-on-a-
+      // retired D1) are refused loudly — never silently treated as "no
+      // upstream configured", which would misreport a REAL configuration as
+      // absent — unless `--local` bypasses upstream reading entirely. The
+      // GitHub-backed read surface (`GitHubIntakePort.listIssues`) is a
+      // later phase's own task, out of this task's scope; the retired shape
+      // has no transport left at all (`classification.error`, the SAME
+      // `LoreError` `lore report-issue` emits for the identical shape).
+      if (args.local !== true) {
+        if (classification.kind === "retired") {
+          process.stderr.write(formatError(classification.error) + "\n");
+          process.exitCode = exitCode(classification.error);
+          return;
+        }
+        if (classification.kind === "github") {
+          process.stderr.write(
+            formatError({
+              code: "VALIDATION_ERROR",
+              field: "feedback.upstream",
+              message:
+                "this corpus's feedback.upstream is GitHub-configured (repo: " +
+                `${classification.cfg.repo}) — reading it via 'lore issues' is not yet supported ` +
+                "(a later phase of spec-the-defect-channel-reaches-no-machine-but-its-own-github). " +
+                "Pass --local to read this corpus's own issue reports instead.",
+            }) + "\n",
+          );
+          process.exitCode = 4;
+          return;
+        }
       }
       // reason: `upstreamCorpusPath` is ALWAYS undefined here (P4,
       // spec-the-defect-channel-reaches-no-machine-but-its-own-github) — the
       // legacy `feedback.upstream.corpus_path` field is retired
       // (parses-but-ignored: no `UpstreamPort` implementation exists anymore
-      // to open it against), and the GitHub-shaped case is already refused
-      // above. `resolveIssueReadSource`'s `"upstream"` variant is therefore
-      // structurally unreachable from THIS call site until a future task
-      // wires a GitHub-backed read source — kept as a real (never
-      // constructed) branch below rather than deleted from the shared
-      // decision function, which other future callers may still need.
+      // to open it against). Both non-local upstream shapes are refused
+      // ABOVE, before this call — the retired shape via
+      // `classification.kind === "retired"` (spec-lore-issues-falls-through-
+      // to-the-local-corpus-on-a-retired D1, no longer silently absorbed
+      // into "unconfigured"), the GitHub shape via `classification.kind ===
+      // "github"`. `resolveIssueReadSource`'s `"upstream"` variant is
+      // therefore structurally unreachable from THIS call site until a
+      // future task wires a GitHub-backed read source — kept as a real
+      // (never constructed) branch below rather than deleted from the
+      // shared decision function, which other future callers may still
+      // need.
       const source = resolveIssueReadSource({
         localCorpusRoot: dirname(dirname(dbPath)),
         upstreamCorpusPath: undefined,
