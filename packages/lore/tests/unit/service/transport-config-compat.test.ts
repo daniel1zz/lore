@@ -151,7 +151,18 @@ describe("retired transport keys parse with warnings while strict mode holds (AC
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe("VALIDATION_ERROR");
-      expect(result.error.field).toBe("feedback.upstream.totally_unrelated_typo");
+      // Narrowing guard (not a weakened assertion): `expect(...).toBe(...)`
+      // above is a runtime check only — it does not narrow the `LoreError`
+      // union for TypeScript, so `.field` (declared only on the
+      // VALIDATION_ERROR member) is unreachable without this `if`. The
+      // preceding expect already fails the test if code is anything else,
+      // so this guard is always entered on a passing run — it doesn't skip
+      // or loosen the field assertion, only makes it type-check.
+      if (result.error.code === "VALIDATION_ERROR") {
+        expect(result.error.field).toBe("feedback.upstream.totally_unrelated_typo");
+      } else {
+        throw new Error(`expected VALIDATION_ERROR, got ${result.error.code}`);
+      }
     }
   });
 });
