@@ -14,9 +14,13 @@
  *     instead of correctly reporting "not one of ours".
  *   - `readGithubIssueRef(extra)` — defensive reader for the GitHub
  *     pointer an issue task's `extra.issue_report.github` carries
- *     (`{repo, number}`), returning `undefined` when the task was never
- *     filed through the GitHub intake path (a legacy/adhoc issue report
- *     has no counterpart to project onto — this is normal, not an error).
+ *     (`{repo, number, repo_id?}`), returning `undefined` when the task was
+ *     never filed through the GitHub intake path (a legacy/adhoc issue
+ *     report has no counterpart to project onto — this is normal, not an
+ *     error). `repo_id` (spec-a-github-filed-defect-must-be-claimable-one-
+ *     ingest-seam D1/D9) is read when present and OMITTED (never `undefined`)
+ *     when the stored bag predates that field — see {@link GithubIssueRef}'s
+ *     own doc.
  *   - `ResolutionLabelPort` — the ONE injected write capability
  *     (`setLabel(ref, label): Promise<Result<void, LoreError>>`). This
  *     module never imports a concrete GitHub client (no `GhRunner`, no
@@ -106,10 +110,24 @@ export function labelToResolution(label: string): IssueResolution | undefined {
   return ISSUE_RESOLUTION_MEMBER_SET.has(candidate) ? (candidate as IssueResolution) : undefined;
 }
 
-/** An issue task's GitHub counterpart — the target `project()` writes the label onto. */
+/**
+ * An issue task's GitHub counterpart — the target `project()` writes the
+ * label onto, and (D4) the type `issue-task-shaping.ts::toIssueTaskInput`
+ * imports rather than re-declaring its own `{repo, number}` shape.
+ */
 export interface GithubIssueRef {
   readonly repo: string;
   readonly issueNumber: number;
+  /**
+   * D1's rename-proof identity fact — GitHub's own numeric repository id
+   * (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D1/D9).
+   * OPTIONAL: a ref read off a task written BEFORE this field existed
+   * carries none, and {@link readGithubIssueRef} degrades that case to an
+   * omitted key (never `repo_id: undefined`) rather than fabricating one.
+   * A freshly-minted ref (`issue-task-shaping.ts::toIssueTaskInput`, going
+   * forward) always carries it — that module refuses to proceed without it.
+   */
+  readonly repo_id?: number;
 }
 
 /**
@@ -125,10 +143,15 @@ export interface GithubIssueRef {
  * error.
  *
  * @param extra - a doc's raw `extra` field (untyped storage)
- * @returns the `{repo, issueNumber}` pointer, or `undefined` when absent or malformed
+ * @returns the `{repo, issueNumber, repo_id?}` pointer, or `undefined` when
+ *   absent or malformed. `repo_id` is present iff the stored bag carries a
+ *   numeric `repo_id` (D1) — otherwise the key is OMITTED, never set to
+ *   `undefined` (`exactOptionalPropertyTypes`).
  * @example
+ *   readGithubIssueRef({issue_report: {github: {repo: "acme/widget", number: 42, repo_id: 12345}}})
+ *     // => {repo: "acme/widget", issueNumber: 42, repo_id: 12345}
  *   readGithubIssueRef({issue_report: {github: {repo: "acme/widget", number: 42}}})
- *     // => {repo: "acme/widget", issueNumber: 42}
+ *     // => {repo: "acme/widget", issueNumber: 42} (pre-D1 shape — no repo_id key at all)
  *   readGithubIssueRef({issue_report: {}}) // => undefined (never filed via GitHub)
  *   readGithubIssueRef({})                 // => undefined
  *   readGithubIssueRef(null)               // => undefined
@@ -142,6 +165,10 @@ export function readGithubIssueRef(extra: unknown): GithubIssueRef | undefined {
   const repo = (github as Record<string, unknown>)["repo"];
   const issueNumber = (github as Record<string, unknown>)["number"];
   if (typeof repo !== "string" || repo.length === 0 || typeof issueNumber !== "number") return undefined;
+  const repoId = (github as Record<string, unknown>)["repo_id"];
+  if (typeof repoId === "number") {
+    return { repo, issueNumber, repo_id: repoId };
+  }
   return { repo, issueNumber };
 }
 

@@ -137,6 +137,16 @@ export interface FileIssuePortResult {
 /** `gh api user`'s response shape — only `login` is read. `.passthrough()`: the real payload carries many more fields this module has no use for. */
 const GithubUserSchema = z.object({ login: z.string() }).passthrough();
 
+/**
+ * `gh api repos/<repo>`'s response shape — only the numeric `id` is read
+ * (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D1: the
+ * rename-proof identity key `githubIssueTaskSlug`/`joinListing` join on,
+ * fetched here at ZERO extra network cost since `verifyTarget` already
+ * makes this exact call). `.passthrough()`: the real payload carries dozens
+ * more fields this module has no use for.
+ */
+const GithubRepoSchema = z.object({ id: z.number() }).passthrough();
+
 /** `gh api repos/<repo>/issues -X POST`'s response shape — only the two fields this module persists. */
 const GithubCreatedIssueSchema = z.object({ number: z.number(), html_url: z.string() }).passthrough();
 
@@ -190,16 +200,20 @@ export class GitHubIntakePort {
    * Asserts `gh` is authenticated (`gh api user`) AND that the configured
    * target repo is reachable (`gh api repos/<repo>`) — both against the
    * repo resolved ONCE at construction, never a git-remote-inferred one
-   * (risk R2).
+   * (risk R2). The repo call's response ALSO carries the numeric repo `id`
+   * (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D1) —
+   * returned here at zero extra network cost, since this call was already
+   * being made for reachability alone before D1 existed.
    *
-   * @returns `ok({login})` — the authenticated account's GitHub login —
+   * @returns `ok({login, id})` — the authenticated account's GitHub login,
+   *   plus the target repo's numeric id (D1's rename-proof identity key) —
    *   when both calls succeed; `err(...)` on the FIRST failing call
    *   (`GhRunner.run`'s own `AUTH_REQUIRED`/`TRANSPORT_UNAVAILABLE`/
    *   `RATE_LIMITED`/generic taxonomy, propagated verbatim; a malformed
-   *   `gh api user` JSON body is a `VALIDATION_ERROR` this method raises
-   *   itself)
+   *   `gh api user`/`gh api repos/<repo>` JSON body is a `VALIDATION_ERROR`
+   *   this method raises itself)
    */
-  async verifyTarget(): Promise<Result<{ login: string }, LoreError>> {
+  async verifyTarget(): Promise<Result<{ login: string; id: number }, LoreError>> {
     const userResult = await this.runner.run(["api", "user"]);
     if (!userResult.ok) return userResult;
 
@@ -216,7 +230,17 @@ export class GitHubIntakePort {
     const repoResult = await this.runner.run(["api", `repos/${this.repo}`]);
     if (!repoResult.ok) return repoResult;
 
-    return ok({ login: userParsed.data.login });
+    const repoParsed = GithubRepoSchema.safeParse(parseJsonSafely(repoResult.value.stdout));
+    if (!repoParsed.success) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "gh_repo_response",
+        message: `gh returned a repo payload this module could not parse: ${repoParsed.error.message}`,
+        value: repoResult.value.stdout,
+      });
+    }
+
+    return ok({ login: userParsed.data.login, id: repoParsed.data.id });
   }
 
   /**
