@@ -6720,6 +6720,10 @@
     "01M0SKQG7M1CAF69GRG05DM002": {
       "human_id": "KN-534",
       "file_path": "docs/requirements/knowledge/KN-534-worktree-agents-are-built-from-origin-main-not-loc.md"
+    },
+    "01M0SMJJ9X6YBACXPN2RYB77MV": {
+      "human_id": "KN-535",
+      "file_path": "docs/requirements/knowledge/KN-535-handoff-agent-main-orchestrator.md"
     }
   }
 }
