@@ -57,7 +57,7 @@ import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, saveConfig } from "@lore/core/node";
-import type { LoreConfig } from "@lore/core";
+import { FeedbackConfigSchema, type FeedbackConfig, type LoreConfig } from "@lore/core";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ (3 levels up).
 const PROJECT_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -74,31 +74,57 @@ interface RunResult {
  * Spawns `bun run src/index.ts ...args` — a REAL, separate OS process, source
  * (not compiled-binary) so this file needs no `bun run build` first. Exit
  * code read directly from `Bun.spawnSync`'s own `exitCode` field, never
- * measured through a pipe. `maxBuffer` is set explicitly and `result.error`
- * is checked before trusting `exitCode` — an unset `error` combined with a
- * swallowed non-zero-from-signal exit has previously hidden a real ENOBUFS
- * diagnosis in this repo.
+ * measured through a pipe.
+ *
+ * `maxBuffer` is set explicitly so a chatty command cannot silently truncate
+ * (`exitedDueToMaxBuffer` is checked below instead of being swallowed).
+ *
+ * ⛔ `Bun.spawnSync`'s `SyncSubprocess` has NO `.error` field — unlike Node's
+ * `child_process.spawnSync`, a spawn failure (missing binary, permission
+ * denied, etc.) THROWS synchronously instead of returning one. The
+ * type-sound equivalent of "never let an infrastructure failure read as a
+ * normal command exit" (the ENOBUFS-swallowed-as-exit-1 incident this repo
+ * already paid for once) is therefore two checks, not a `.error` probe:
+ *   1. catch the throw from the spawn call itself and re-raise it naming the
+ *      command, so it is never silently swallowed by a caller only checking
+ *      `exitCode`;
+ *   2. after a successful spawn, reject a non-normal exit — `signalCode` set
+ *      (killed/crashed/OOM, `exitedDueToMaxBuffer`/`exitedDueToTimeout` name
+ *      two specific causes) — before trusting `exitCode` as the command's
+ *      own verdict. Bun's declared type for `exitCode` is `number` even in
+ *      this case, but a signal-terminated process's `exitCode` is not a real
+ *      command exit code and must not be reported as one; the `typeof`
+ *      check below is the defensive half of that same guard.
  */
 function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
-    cwd,
-    env: {
-      ...process.env,
-      HOME: cwd,
-      CLAUDECODE: "1",
-      LORE_ACTOR: "agent:issues-upstream-shape-refusal-probe",
-    },
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  if (proc.error) {
+  const commandLabel = `'bun run src/index.ts ${args.join(" ")}' in ${cwd}`;
+  let proc: Bun.SyncSubprocess<"pipe", "pipe">;
+  try {
+    proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
+      cwd,
+      env: {
+        ...process.env,
+        HOME: cwd,
+        CLAUDECODE: "1",
+        LORE_ACTOR: "agent:issues-upstream-shape-refusal-probe",
+      },
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (spawnError) {
+    throw new Error(`Bun.spawnSync threw for ${commandLabel}: ${String(spawnError)}`);
+  }
+  if (typeof proc.exitCode !== "number" || proc.signalCode !== undefined) {
     throw new Error(
-      `Bun.spawnSync failed for 'bun run src/index.ts ${args.join(" ")}' in ${cwd}: ${String(proc.error)}`,
+      `${commandLabel} did not exit normally (signalCode=${String(proc.signalCode)}, ` +
+        `exitedDueToMaxBuffer=${String(proc.exitedDueToMaxBuffer)}, ` +
+        `exitedDueToTimeout=${String(proc.exitedDueToTimeout)}) — refusing to report ` +
+        `exitCode=${String(proc.exitCode)} as a real command result.`,
     );
   }
   return {
     stdout: proc.stdout.toString(),
     stderr: proc.stderr.toString(),
-    exitCode: proc.exitCode ?? 1,
+    exitCode: proc.exitCode,
   };
 }
 
@@ -111,16 +137,32 @@ function initCorpus(dir: string): void {
 
 type UpstreamCfgInput = NonNullable<NonNullable<LoreConfig["feedback"]>["upstream"]>;
 
+/**
+ * `FeedbackConfigSchema`'s own defaults (`stale_after_days`/`inbound`), parsed
+ * from `{}` — the SSOT for "no `feedback` section at all" rather than a
+ * hand-typed literal duplicating the schema's `.default(...)` values. Used to
+ * widen `loaded.value.feedback` (`FeedbackConfig | undefined`, since a fresh
+ * `lore init` corpus has no `feedback` key yet) to a definite `FeedbackConfig`
+ * BEFORE spreading it — spreading a possibly-`undefined` value directly makes
+ * every property of the result optional in TypeScript's eyes, which is
+ * exactly the shape mismatch (`stale_after_days`/`inbound` required on
+ * `LoreConfig["feedback"]`, optional on the spread) `bun run typecheck`
+ * caught. Fixing it this way needs no `as`/`!` — the object handed to
+ * `saveConfig` genuinely satisfies `LoreConfig`.
+ */
+const DEFAULT_FEEDBACK: FeedbackConfig = FeedbackConfigSchema.parse({});
+
 /** Read-then-full-replace write of `feedback.upstream` — `saveConfig` has no partial-merge form. */
 function configureUpstream(dir: string, upstream: UpstreamCfgInput): void {
   const loaded = loadConfig(dir);
   if (!loaded.ok) {
     throw new Error(`loadConfig failed for ${dir}: ${loaded.error.code}`);
   }
+  const feedback: FeedbackConfig = loaded.value.feedback ?? DEFAULT_FEEDBACK;
   const next: LoreConfig = {
     ...loaded.value,
     feedback: {
-      ...loaded.value.feedback,
+      ...feedback,
       upstream,
     },
   };
