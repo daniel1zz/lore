@@ -115,6 +115,8 @@ links:
   - {id: SPEC-148, type: governs}
   - {id: SPEC-149, type: governs}
   - {id: SPEC-150, type: governs}
+  - {id: SPEC-151, type: governs}
+  - {id: SPEC-152, type: governs}
 ---
 ## Overview
 

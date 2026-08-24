@@ -3,7 +3,7 @@ id: TASK-817
 type: task
 role: plan
 title: "[Skill:implement] a verbatim slug on create makes the store's UNIQUE index the sole identity arbiter"
-status: draft
+status: archived
 priority: critical
 phase: "P0: Convergence primitive"
 created: 2026-08-24

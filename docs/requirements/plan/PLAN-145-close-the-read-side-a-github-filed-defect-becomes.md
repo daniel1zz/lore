@@ -55,7 +55,8 @@ Declared mechanically as each task's `extra.ac_scope`, and restated here so the 
 4. ⛔ `assertFreshBinary` runs before any `dist/lore` spawn — a stale binary yields a verdict about code not under test.
 5. ⛔ Red-first evidence is recorded by the agent that produced the red, at the moment it was red (`lore evidence --result expected-fail`), never transcribed afterwards.
 6. ⛔ The read path never writes (AC-GR-12). Ingest happens only inside `fileGithubIssue` and the `adopt` verb.
-7. ⛔ Worktree oracles are scoped (`bun run test:changed <base>`); the full suite runs once on main after the last merge.
+7. ⛔ **Every worktree bundle runs `bun install` FIRST and PRINTS the resolved `@lore/core` path.** Measured 2026-08-24 with a two-sided probe: a worktree with no `node_modules` resolves `@lore/core` to the MAIN CHECKOUT's `packages/core/src/index.ts`, because worktrees are nested inside the main checkout and the upward `node_modules` walk escapes the worktree boundary. Every typecheck and test verdict is then about code the agent did not write — and P1 edits `packages/core`-adjacent modules, so this is live for this plan. Printing the path is what makes it auditable instead of a claim. ⛔ This invariant is PROSE and therefore NOT ENFORCED; the mechanism it needs (a resolve-guard sibling to `assert-fresh-binary.ts`) does not exist. `knowledge-a-worktree-with-no-node-modules-resolves-workspace`
+8. ⛔ Worktree oracles are scoped (`bun run test:changed <base>`); the full suite runs once on main after the last merge.
 
 ## Exit Criteria
 

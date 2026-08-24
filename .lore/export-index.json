@@ -6848,6 +6848,26 @@
     "01M0SW0RH2SSVNZD0ZCMPC4PVK": {
       "human_id": "KN-547",
       "file_path": "docs/requirements/knowledge/KN-547-assessment-land-the-adr-s-phase-write-decision-a-r.md"
+    },
+    "01M0SXZRA5Z4SARNXP38A56BK6": {
+      "human_id": "SPEC-151",
+      "file_path": "docs/requirements/spec/SPEC-151-governance-weight-must-scale-with-measured-blast-r.md"
+    },
+    "01M0SXZXHPFPTE5CM3G5GMXX0Q": {
+      "human_id": "SPEC-152",
+      "file_path": "docs/requirements/spec/SPEC-152-a-conclusion-with-no-currency-signal-and-no-falsif.md"
+    },
+    "01M0SYZWNGJ4NAVCP0C90CN3KK": {
+      "human_id": "KN-548",
+      "file_path": "docs/requirements/knowledge/KN-548-a-deterministic-gate-pass-is-not-design-completene.md"
+    },
+    "01M0SYJGC0YYR52QYR3Y9192XE": {
+      "human_id": "KN-549",
+      "file_path": "docs/requirements/knowledge/KN-549-a-worktree-with-no-node-modules-resolves-workspace.md"
+    },
+    "01M0SWSZG5Z51J2T95T51823TC": {
+      "human_id": "KN-550",
+      "file_path": "docs/requirements/knowledge/KN-550-handoff-agent-main-orchestrator.md"
     }
   }
 }

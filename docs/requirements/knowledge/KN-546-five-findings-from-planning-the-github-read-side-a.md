@@ -62,3 +62,19 @@ The trap is for the NEXT consumer: any path that PARSES stdout (`GitHubIntakePor
 Neither error was subtle and both cost one `grep` / one `git rev-list` to disprove. The load-bearing point is not that a handoff was wrong — it is that **a handoff's confidence figure is an assertion about the past, and the reader's job is to re-measure, not to weigh the number.** A 96 next to a claim that a symbol is absent is worth exactly one grep.
 
 The same session's real gap was one the handoff never named: `fileGithubIssue` makes NO corpus write at all, so the missing piece was never "wire `listIssues` into the CLI" — it was that a GitHub-filed defect has no claimable corpus object in the first place.
+
+
+## F6 — The two runners disagree on a zero-match `-t`, in OPPOSITE directions
+
+Measured 2026-08-24, both ends, because a concurrent session's handoff (`knowledge-handoff-agent-main-orchestrator-128` KD3) reported the vitest half and six ACs written in this slice used `-t` filters.
+
+| runner | `-t` matching nothing | consequence for `<cmd> && echo "AC-X PASS"` |
+|---|---|---|
+| `bunx vitest run <file> -t <missing>` | **exit 0**, `77 skipped` | the trailing echo FIRES over zero assertions — a false green |
+| `bun test <file> -t <missing>` | **exit 1**, `regex "…" matched 0 tests` | refused |
+
+The root CLAUDE.md standing lesson states only the vitest half. Stating one half invites two opposite errors: hardening a `bun test` oracle that never needed it, and — far worse — assuming the runners agree in the OTHER direction, i.e. that a bun-style loud refusal is what vitest also does.
+
+⛔ Practical rule, and note it is a property of the RUNNER, not of the oracle text: a `-t`-filtered oracle under **vitest** MUST additionally require a `Tests N passed` summary; under **bun test** the zero-match exit is already loud. The six ACs on `spec-a-github-filed-defect-must-be-claimable-one-ingest-seam` that use `-t` are all `bun test`, so they are safe — by accident of runner choice, not by design. Anyone moving one of those oracles to vitest must add the summary requirement in the same edit.
+
+⛔ Second-order, unmeasured and therefore stated as a hypothesis rather than a finding: `bun test -t` appears to match as a SUBSTRING, so `-t "AC-GR-1"` would also select a block named `AC-GR-10: …`. That direction is stricter (more tests must pass), so it cannot produce a false green — but it does mean one AC's oracle can fail on another AC's test, and a reader debugging that failure will look in the wrong place.
