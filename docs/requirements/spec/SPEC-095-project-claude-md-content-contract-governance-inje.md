@@ -3,7 +3,7 @@ id: SPEC-095
 type: spec
 role: spec
 title: "Project CLAUDE.md content contract — governance-injected prose target + deterministic line/byte ceiling lint across template, init-context, and pre-push"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-27
 updated: 2026-08-24

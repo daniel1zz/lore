@@ -3,10 +3,10 @@ id: PLAN-139
 type: plan
 role: plan
 title: "Implementation — CLAUDE.md content-dimension checks (split first, then metrics)"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-08-24
 tags: [claude-md, governance, admission]
 parent: SPEC-146
 phases:

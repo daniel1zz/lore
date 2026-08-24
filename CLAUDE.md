@@ -10,17 +10,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## North Star — the standing design brief
 
-⛔ Not a rule list. A rule that exists only as prose does not bind — measured 2026-08-17: an agent violated a bold prohibition in its own dispatch bundle the same turn it wrote it, while the agent it had just instructed was still running. This section is the set of questions every change is judged by.
+⛔ Not a rule list. A rule that exists only as prose does not bind — an agent has violated a bold prohibition in its own dispatch bundle the same turn it wrote it. This section is the set of questions every change is judged by.
 
 **Target state**: development executed ~100% by AI, ~90% of decisions made by AI, work advancing unattended after the opening phase, and one project developed by MANY CONCURRENT SESSIONS.
 
-**Why the corpus is the load-bearing thing**: as AI output outpaces human review, sampling stops scaling — 1% of ten times the output is still unreadable. The only check that scales is the corpus checking itself. So the corpus is not a record of what happened; it is the single source of truth AND the coordination mechanism. The ranking follows directly: **code wrong + corpus right → the next session repairs it; corpus wrong → correct code gets edited into broken code.** Corpus integrity outranks code correctness.
+**Why the corpus is load-bearing**: as AI output outpaces human review, sampling stops scaling — 1% of ten times the output is still unreadable, so the only check that scales is the corpus checking itself. The corpus is therefore not a record of what happened; it is the SSOT AND the coordination mechanism. Hence the ranking: **code wrong + corpus right → the next session repairs it; corpus wrong → correct code gets edited into broken code.** Corpus integrity outranks code correctness.
 
 **Three properties the corpus must hold** — each mechanically checkable, none of them by agent diligence:
 
 1. **It must not lie.** A verdict carries the state it describes (`ASSESSMENT_STALE` is the working prior art — generalize it, do not reinvent it). Rendering is injective: `fail` and `fail_superseded` must not both print `✘`. Labels are honest: `capture_source: runner` with no attestation block is a false label, and an agent has no second source to catch it with.
-2. **It must not go silent.** Filtering leaves a trace in the count — `lore list` hiding invalidated docs behind a self-consistent total made a census wrong by 21×. "Vacuously true" must be distinguishable from "true" — an empty phase satisfies "every child task archived".
-3. **It must be addressable.** Every assertion locatable and re-verifiable. 51 AC ids are currently claimed by more than one live spec, so a bare `AC-OX-6` in a handoff resolves to nothing.
+2. **It must not go silent.** Filtering leaves a trace in the count — a self-consistent total that hides invalidated docs makes every census over it wrong. "Vacuously true" must be distinguishable from "true" — an empty phase satisfies "every child task archived".
+3. **It must be addressable.** Every assertion locatable and re-verifiable. While one AC id is claimed by more than one live spec, a bare `AC-OX-6` in a handoff resolves to nothing.
 
 **Four questions for every change**:
 
@@ -29,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - What refuses this when it is violated? "An agent should remember" means NOT ENFORCED — say so, and count it.
 - What is the smallest mutation that turns this oracle red? Cannot name one → it has no discriminating power. `lore ac add --falsifier-*` makes that machine-checkable.
 
-⛔ Self-checking must stay cheaper than corpus growth. A full-suite verdict costs 869s AND a clean tree; under real concurrency the tree is never clean, so that verdict form is already unobtainable rather than merely slow. Prefer incremental, local, concurrency-safe checks.
+⛔ Self-checking must stay cheaper than corpus growth. A full-suite verdict costs both a long run AND a clean tree; under real concurrency the tree is never clean, so that verdict form is unobtainable, not merely slow. Prefer incremental, local, concurrency-safe checks.
 
 ## Commands
 
@@ -43,7 +43,7 @@ bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
 bun run test:bun          # cd packages/lore && bun test .bun.test
 bun run test              # both runners in sequence
 bun run test:changed [<base>]  # deterministic worktree oracle (default base: merge-base main HEAD); --list previews
-                               # ⛔ STILL UNDER-SELECTS: a tree-scanning test naming no literal path, and any consumer reaching its target through a dynamic `await import()` — run those BY HAND. Also structurally blind to `.bun.test.ts` via `vitest --changed`. ⛔ It also OVER-selects: a high-fan-in edit selected 623 files = the full suite a worktree forbids, so it is UNUSABLE there — hand-pick direct consumers, re-verify on main. `hooks/**`+`assets/**` is CLOSED (`16a24f00`, AC-TC-4). ⛔ The marker-ONLY fix was measured INERT — membership and scope are two conjunctive gates and both must change. `knowledge-bun-run-test-changed-full-selection-contract-and-its`
+                               # ⛔ UNDER-selects (tree-scanning tests naming no literal path; consumers reached via dynamic `await import()`; `.bun.test.ts` via `vitest --changed`) AND OVER-selects (a high-fan-in edit can select the whole suite a worktree forbids). ⇒ hand-pick direct consumers, run the blind ones BY HAND, re-verify on main. Selection contract, closed sets, and why a marker-only fix is INERT: `knowledge-bun-run-test-changed-full-selection-contract-and-its`
 
 # Run a single vitest test file
 bunx vitest run packages/lore/tests/unit/service/corpus-service.test.ts
@@ -54,9 +54,9 @@ cd packages/lore && bun test tests/unit/store/sqlite-store.bun.test.ts
 
 **Test file convention**: Files ending in `.bun.test.ts` run under `bun test` only (they use `bun:sqlite`). All other `.test.ts` files run under vitest. Do not mix runners.
 
-**Pre-push corpus gate**: `hooks/pre-push` runs, in this order — `lore status --check-binary-provenance` (SPEC-134, armed 2026-08-17; FIRST on purpose, since every check after it is issued by that binary), `--check-tree --check-drift`, `lore audit --verify` (SPEC-081 G5), `--check-prd-budget` (SPEC-080 Phase 3, armed 2026-07-26), `--check-claude-md`, and finally `bun scripts/check-anchor-coverage.ts` (SPEC-134 AC-BFI-9, armed 2026-08-17 — a REPO SCRIPT, not a `lore` subcommand, so it is skipped rather than fatal when absent). Fail-open when `lore`/`.lore/` absent; bypass with `--no-verify`. ⛔ Do not pin the COUNT here — read the hook (a pinned "FOUR" went false the same day a fifth and sixth landed). ⛔ Provenance blocks on a `dist/lore` older than HEAD (exit 3), which is EVERY merge not followed by `bun run build`, so the rebuild is now part of landing a merge — after the last agent of a batch returns, never mid-wave. ⛔ It runs NO tests, so every test-shaped oracle is push-invisible — an existing sound oracle is not a gate until something INVOKES it (measured: a stale assets manifest reached main at `c3803eb2` though `embed-assets-manifest.test.ts` pins it), and POSITION decides invocation too: a `&&`-terminal check never runs while main is red, which it currently is. `knowledge-a-gate-at-the-end-of-a-chain-is-never-invoked-while` Byte-identical pair with `assets/project/pre-push` (parity-pinned; regen assets manifest on edit). After clone, activate with `git config core.hooksPath hooks`.
+**Pre-push corpus gate**: ⛔ Read `hooks/pre-push` for the checks and their ORDER — never pin either here (a pinned count went false the day two more landed). Standing invariants: `--check-binary-provenance` runs FIRST on purpose, since every later check is issued by that binary; `check-anchor-coverage.ts` is a REPO SCRIPT, so absent = skipped, not fatal; fail-open when `lore`/`.lore/` absent; bypass with `--no-verify`. ⛔ Provenance blocks on a `dist/lore` older than HEAD (exit 3) = EVERY merge not followed by `bun run build`, so the rebuild is part of landing a merge — after the last agent of a batch returns, never mid-wave. ⛔ It runs NO tests: a test-shaped oracle is push-invisible until something INVOKES it, and POSITION decides invocation — a `&&`-terminal check never runs while main is red. `knowledge-a-gate-at-the-end-of-a-chain-is-never-invoked-while` Byte-identical pair with `assets/project/pre-push` (parity-pinned; regen assets manifest on edit). After clone: `git config core.hooksPath hooks`.
 
-**⛔ Never write to the repo's own `.lore/` corpus from tests or smoke checks.** The repo corpus is the team's live knowledge base. Any manual smoke test or e2e run that creates/edits docs MUST use a throwaway corpus (`mkdtemp` + `lore init`, cwd inside it) — see `packages/dashboard/tests/e2e/global-setup.ts` for the canonical pattern. Also never assume a server on port 8787 is yours — a stale `lore dashboard` on the real corpus once absorbed an e2e write suite (2026-07-07: 6 foreign docs, corrupted export numbering).
+**⛔ Never write to the repo's own `.lore/` corpus from tests or smoke checks** — it is the team's live knowledge base. Any smoke/e2e run that creates or edits docs MUST use a throwaway corpus (`mkdtemp` + `lore init`, cwd inside it); canonical pattern: `packages/dashboard/tests/e2e/global-setup.ts`. ⛔ Never assume a server on port 8787 is yours — a stale `lore dashboard` on the real corpus once absorbed an entire e2e write suite.
 
 ## Architecture
 
@@ -110,13 +110,14 @@ All services are stateless — state lives entirely in `StoreInterface`. Telemet
 Status transitions (`packages/core/src/schemas.ts → VALID_TRANSITIONS`):
 
 ```
-draft → in-review → approved → active → archived
-draft → approved (fast-track)
-approved → deprecated
+draft → in-review | approved (fast-track)
+in-review → approved | draft
+approved → active | archived | deprecated   # ⛔ approved → archived is LEGAL, direct
 active → archived | deprecated
+archived, deprecated → terminal (no outbound edge)
 ```
 
-Editing an `approved` doc resets it to `draft` automatically — content/title AND `extra` — except the ledger knowledge sub-types (`assessment | retro | handoff | uat`), which are re-fast-tracked to `approved` in the SAME write, so an edit logs two versions at one timestamp and never enters the review queue. ⛔ The two AC writers are ASYMMETRIC, and a prior version of this line asserted they were not: `lore ac set` demotes an approved spec to `draft`; **`lore ac add` does NOT** — criteria can be appended to an approved spec indefinitely without re-entering review, so an approval certifies the AC set as of approval time, not the set a reader sees. Measured 2026-08-11: `knowledge-five-findings-from-planning-the-bootstrap-fixpoint` §3.
+Editing an `approved` doc resets it to `draft` automatically — content/title AND `extra` — except the ledger knowledge sub-types (`assessment | retro | handoff | uat`), which are re-fast-tracked to `approved` in the SAME write, so an edit logs two versions at one timestamp and never enters the review queue. ⛔ The two AC writers are ASYMMETRIC: `lore ac set` demotes an approved spec to `draft`; **`lore ac add` does NOT** — so an approval certifies the AC set as of approval time, not the set a reader sees. `knowledge-five-findings-from-planning-the-bootstrap-fixpoint` §3.
 
 ### MDX Placeholder Components (OutlineService)
 
@@ -133,32 +134,33 @@ Enforced via Zod `superRefine` in `packages/core/src/schemas.ts`.
 
 ### Dogfooding: Skill/Tool Eval Log
 
-Building Lore is itself run **through** the Lore-governed workflow (corpus chain + skills + gates). Dogfooding is our credibility source: if we don't follow best practice while building the tool that enforces best practice, we can't claim other teams should trust it.
+Lore is built **through** the Lore-governed workflow (corpus chain + skills + gates): a discipline we skip here is one we cannot ask other teams to keep.
 
-**⛔ Consciously eval every skill/tool we depend on — never assume it is already optimal.** A broken, misleading, or sub-optimal skill/hook/agent/gate is a defect: fix it immediately (or course-correct + record the correct path).
+**⛔ Eval every skill/tool we depend on — never assume it is already optimal.** A broken, misleading, or sub-optimal skill/hook/agent/gate is a defect: fix it now, or course-correct and record the correct path.
 
-**⛔ Boundary rule (2026-07-22)**: new findings are recorded ONLY in the lore corpus (`lore create knowledge --sub-type retro`), plus at most a one-line standing lesson below. CLAUDE.md never carries full incident narratives — they go stale (proven: a "not yet built" status here outlived the mechanism being built). `docs/claude-md-archive/` is a FROZEN pre-2026-07-22 snapshot — never append to it.
+**⛔ Boundary rule**: new findings go ONLY to the corpus (`lore create knowledge --sub-type retro`), plus at most a one-line standing lesson below. CLAUDE.md never carries incident narratives — they go stale. `docs/claude-md-archive/` is a FROZEN pre-2026-07-22 snapshot — never append.
 
-**⛔ A lore defect is fixed at its MECHANISM ROOT and verified from a FRESH consumer install — never patched on whichever surface happened to expose it.** Two questions gate every lore fix: (1) *what mechanism made this possible?* — prose that "should have been followed" is not a mechanism, and a defect already covered by existing prose is proof that the prose layer is the wrong layer; (2) *would a project that just ran `lore init` + `lore setup` still hit this?* — if yes, it is not fixed (BUT a fresh install cannot REACH convergence/diff-shaped defects — removal, retirement, pruning: the probe must construct BOTH ends of the diff plus a live control, else it vacuously passes; `knowledge-retro-a-fresh-install-probe-vacuously-passes`). The fix MUST land on a surface that SHIPS (binary-side output/payload, or `assets/` SSOT + manifest), never only in this repo's own files, this machine's `~/.claude/` copy, or a hand-edited consumer config (see the distribution-first lesson below).
+**⛔ A lore defect is fixed at its MECHANISM ROOT and verified from a FRESH consumer install — never patched on whichever surface happened to expose it.** Two questions gate every fix: (1) *what mechanism made this possible?* — prose that "should have been followed" is not a mechanism, and a defect already covered by prose proves the prose layer is the wrong layer; (2) *would a project that just ran `lore init` + `lore setup` still hit this?* — if yes, it is not fixed. ⛔ A fresh install cannot REACH convergence/diff-shaped defects (removal, retirement, pruning): construct BOTH ends of the diff plus a live control, else the probe vacuously passes — `knowledge-retro-a-fresh-install-probe-vacuously-passes`. The fix MUST land on a surface that SHIPS (binary-side output/payload, or `assets/` SSOT + manifest), never only this repo's files, this machine's `~/.claude/`, or a hand-edited consumer config.
 
-**Standing lessons** — one line each, scope only. Full text: `knowledge-retired-from-root-claude-md-the-19-dogfooding`, `knowledge-retired-from-root-claude-md-2026-08-13-three-standing`; pre-2026-07-22 history: `docs/claude-md-archive/dogfood-eval-log.md` (FROZEN).
+**Standing lessons** — one line each, scope keywords + a resolving slug; nothing restated. Full text of the 16 below, verbatim, incl. the three ex-"Same doc." pointers resolved: `knowledge-evicted-from-root-claude-md-2026-08-24-the-16`. Earlier evictions: `knowledge-retired-from-root-claude-md-the-19-dogfooding`, `knowledge-retired-from-root-claude-md-2026-08-13-three-standing`; pre-2026-07-22 history: `docs/claude-md-archive/dogfood-eval-log.md` (FROZEN).
 
-- False oracles — exit-code-true ≠ measured-the-right-thing; V7 pair a GREEN control; V8 it proves the harness STARTED, never that it SEES the copy it runs. `knowledge-a-symlinked-node-modules-makes-the-green-control-pass`
-- Eight pointer-less lessons were evicted VERBATIM and remain normative — substring matchers, SSOT↔asset parity, distribution oracles, worktree dispatch order, `spawnSync`/`set -e`, main-checkout actor, path-scoped commits, clean-tree verdicts: `knowledge-retired-from-root-claude-md-eight-pointer-less`
-- ⛔ NINE lessons were evicted as UNENFORCED — nothing refuses them if violated. They stay NORMATIVE, and each names the mechanism it still needs: `knowledge-the-nine-unenforced-standing-lessons-evicted-from`. That count is the honest distance to unattended operation. A `plan-close` prose copy was also dropped: the gate enforces it (`lore gate plan-close --explain` is the SSOT).
+- False oracles — exit-code-true vs. measured-the-right-thing; green control; harness-sees-its-own-copy. `knowledge-a-symlinked-node-modules-makes-the-green-control-pass`
+- Eight pointer-less lessons, evicted verbatim, still normative — substring matchers, SSOT/asset parity, distribution oracles, worktree dispatch order, `spawnSync`/`set -e`, main-checkout actor, path-scoped commits, clean-tree verdicts. `knowledge-retired-from-root-claude-md-eight-pointer-less`
+- ⛔ Nine standing lessons are UNENFORCED — each names the mechanism it still needs; `lore gate plan-close --explain` is the SSOT for the dropped plan-close copy. `knowledge-the-nine-unenforced-standing-lessons-evicted-from`
 - Distribution-first: name the delivery surface or it does not exist for consumers. `adr-distribution-first-every-improvement-names-its-consumer`
 - Spec close-outs write NOTHING to this file. `adr-claude-md-specs-section-is-pointer-only-per-spec-index`
 - A new deterministic gate retroactively invalidates the back-catalog — budget the sweep + a written exemption in the SAME slice. `knowledge-retro-a-newly-built-gate-leaves-every-pre-existing`
-- Marker censuses over a self-documenting corpus over-match: anchor structurally + require a second independent condition. `knowledge-the-substring-matcher-lesson-has-a-mirror-face-over`
-- Before blaming a red suite on the diff: timeouts ≠ assertion mismatches, check isolation, read MEMORY not load average. `knowledge-load-average-is-the-wrong-instrument-for-is-this-red`
-- ⛔ Tightening an AC via `lore ac set` drops the spec to `draft` and hard-blocks EVERY descendant claim (`ac add` does not demote — see the asymmetry above) — re-read the spec's status immediately before each dispatch, never from a batch-start snapshot. Same doc.
-- ⛔ A literal corpus count inside a governance doc is a claim with no oracle — cite the `lore status --json` field instead. A `pass_unfalsified` figure justifying a decision was off 20x. Same doc.
-- ⛔ The tool FIELD lies too: `lore feed`/`bootstrap` count RETRACTED tasks as ready (two sites skip `isInvalidated`), `lore ready` excludes them — quoting the raw count can quote a wrong one. `knowledge-lore-feed-s-readiness-line-counts-retracted-tasks`
-- ⛔ An ATTESTED pass is not evidence of production wiring: if the AC's command exercises the implementation layer while its prose promises a user-facing surface, attestation certifies an unreachable capability with the corpus's strongest evidence tier. Split any AC whose prose names two layers; a surface AC's oracle MUST drive the surface. Measured: 2 of 3 found by `lore assess`, all AFTER attestation — assess is load-bearing, not advisory-in-practice. `knowledge-an-attested-pass-is-not-evidence-of-production-wiring`
-- ⛔ An `assess` MAJOR can be exactly BACKWARDS — one read a rename's SOURCE side as the result and indicted a filename that same commit FIXED. Machine-check every finding that names a path before scoring it; path existence is decidable, never a judgment. Same doc.
-- ⛔ MEASURE a field/command before pinning an AC's oracle to it, and never pair that pin with a clause REFUSING the alternative in the same round: pinning `lore status --json` (which surfaces `ai_defaults` but NOT arbitrary resolved config) while forbidding a hand-rebuilt merge left an AC with no runnable oracle at all. Tightening an oracle can DESTROY it. `knowledge-five-governance-tooling-gaps-measured-while-resuming`
-- ⛔ `lore ac list`'s count is scoped by the recording task's PLAN LINEAGE and IGNORES `ac_scope` — polarity inverted from the flag's own help. Attested rows from a task that declared the AC go uncounted; a task declaring none is counted. And `oracle_generation` bumps only when `verify.command` changes, so a stable command over a rewritten test file reads green forever. `knowledge-ac-coverage-counts-evidence-by-plan-lineage-and`
-- ⛔ `--capture` NOW ATTESTS (SPEC-143 C5) and clears `lore done`'s attested floor, so the old "≠ attested" rule is FALSE for new rows — but it proves only that a CALLER-SUPPLIED command exited 0, where `verify` proves the command came from declared scope. The floor asks presence, not provenance. `knowledge-lore-evidence-capture-now-clears-the-attested-floor`
+- Marker censuses over a self-documenting corpus over-match: anchor structurally + a second independent condition. `knowledge-the-substring-matcher-lesson-has-a-mirror-face-over`
+- Red-suite triage: timeouts vs. assertion mismatches, isolation, read MEMORY not load average. `knowledge-load-average-is-the-wrong-instrument-for-is-this-red`
+- ⛔ `lore ac set` demotes an approved spec to draft and hard-blocks EVERY descendant claim (`ac add` does not — see the asymmetry above); re-read spec status per dispatch, never from a batch-start snapshot. `knowledge-three-of-lore-s-own-outputs-misled-this-session-a`
+- ⛔ A literal corpus count inside a governance doc is a claim with no oracle — cite the `lore status --json` field instead. `knowledge-three-of-lore-s-own-outputs-misled-this-session-a`
+- ⛔ Readiness fields disagree: `lore feed`/`bootstrap` count RETRACTED tasks as ready, `lore ready` excludes them. `knowledge-lore-feed-s-readiness-line-counts-retracted-tasks`
+- ⛔ An ATTESTED pass is not evidence of production wiring — split any AC whose prose names two layers; a surface AC's oracle MUST drive the surface. `knowledge-an-attested-pass-is-not-evidence-of-production-wiring`
+- ⛔ An `assess` MAJOR can be exactly BACKWARDS — machine-check every finding that names a path; path existence is decidable, never a judgment. `knowledge-nine-findings-from-landing-the-mirror-id-unify-merge`
+- ⛔ MEASURE a field/command before pinning an AC's oracle to it, and never pair that pin with a clause refusing the alternative — tightening an oracle can DESTROY it. `knowledge-five-governance-tooling-gaps-measured-while-resuming`
+- ⛔ `lore ac list` counts by recording-task PLAN LINEAGE and IGNORES `ac_scope`; `oracle_generation` bumps only when `verify.command` changes. `knowledge-ac-coverage-counts-evidence-by-plan-lineage-and`
+- ⛔ `--capture` NOW ATTESTS (SPEC-143 C5) and clears `lore done`'s floor, so the old "not attested" rule is FALSE for new rows — the floor asks presence, not provenance; only `verify` proves declared scope. `knowledge-lore-evidence-capture-now-clears-the-attested-floor`
+- ⛔ A refusal branch present for one config shape and absent for its neighbour reads as "guarded" everywhere — `lore issues` refuses a GitHub upstream loudly but falls through to LOCAL on the retired shape, where `report-issue` refuses both. Validate shape once, consume from both verbs. `knowledge-five-governance-findings-measured-while-closing-the`
 
 ### AI Default Behavior by Caller Surface (SPEC-024)
 
@@ -166,7 +168,7 @@ AI is ON for human surfaces (`cli`, `http_cookie`) and OFF for agent surfaces (`
 
 ### Implementation Status
 
-Phase 1 + Phase 2 landed; active work is incremental hardening. Per-spec SSOT: `lore get SPEC-0NN`. Evicted verbatim narrative: `knowledge-retired-from-root-claude-md-the-implementation-status`; FROZEN pre-2026-07-22: `docs/claude-md-archive/spec-implementation-notes.md`.
+⛔ Per-spec SSOT is the corpus, never a snapshot here: `lore get SPEC-0NN`, `lore list --type plan`. Evicted narrative: `knowledge-retired-from-root-claude-md-the-implementation-status`; FROZEN pre-2026-07-22: `docs/claude-md-archive/spec-implementation-notes.md`.
 
 Cross-cutting rules extracted from it: gates run in the SERVICE layer so CLI/MCP/HTTP writes are gated identically (per-checkpoint knob `workflow.gates.<checkpoint>.enabled`); `extra.phase` validates against the MEMBER plan via `extra.plan_id`, ⛔ never the `parent_id` proxy; `--worktree` is ALWAYS explicit on `lore claim`; `lore done` needs a RUNNER-ATTESTED pass (audited `--override-attestation` escape); `lore ready`'s `sessions[]` is plan-scoped/fresh-only while `lore bootstrap`'s `active_sessions` is corpus-wide and FLAGS `stale` (⛔ ≠ death); ⛔ a session-collapse report is NEVER fixed by prescribing a more unique `LORE_ACTOR`; ⛔ a listed doc is NOT proven live — validity is authoritative only by direct address. The v1 predecessor at `~/.claude/docman-mcp` is frozen — do not carry over its schema or API shape.
 
