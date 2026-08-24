@@ -357,5 +357,18 @@ describe("AC-DC-17 rewritten: production wiring, compiled binary — adopted is 
     const adoptedRow = issuesListing.data.data.reports.find((r) => r.id === reportId);
     expect(adoptedRow, `adopted report ${reportId} must still appear in the default (unresolved-only) listing`).toBeDefined();
     expect(adoptedRow?.resolution).toBe("adopted");
-  });
+  }, 15000);
+  // ^ explicit timeout (spec-a-test-case-s-timeout-budget-must-be-declared-when-its
+  // D1/D2, check-test-budgets.ts): this body calls the `run`/`runJson` spawn
+  // helper 3 DIRECT times (missingPointer, unresolvablePointer, adoptResult)
+  // — the structural oracle's own counted shape — plus 2 more via `runJson`
+  // (ownerPlan create, issuesListing) and 2 more inside `makeUpstream` (init,
+  // create prd): 7 real `dist/lore` spawns total per run. Measured (junit
+  // reporter, 3 consecutive runs on this machine, no induced load): 1264ms /
+  // 1218ms / 1218ms. 15000ms gives ~12x headroom over the worst observed
+  // figure against bun:test's DEFAULT 5000ms budget, without policing the
+  // number (the oracle only requires the argument be present) — the same
+  // spawn-count-driven phantom-timeout risk `cli-plan-promote-advisory.bun.
+  // test.ts`'s AC-VRW-5b case measured (6222ms/6981ms against the 5000ms
+  // default under load).
 });
