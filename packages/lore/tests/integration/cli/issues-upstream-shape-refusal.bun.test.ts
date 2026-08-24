@@ -247,6 +247,13 @@ describe("AC-IS-2 green control: GitHub-shape upstream still refuses", () => {
   it("AC-IS-2 green control: GitHub-shape upstream still refuses", () => {
     const result = runLore(["issues"], githubDir);
     expect(result.exitCode).toBe(4);
+    // spec-the-retired-shape-refusal-message-has-two-byte-identical D4: a
+    // bare exitCode-4 assertion is satisfiable by ANY unrelated exit-4, so it
+    // carries no proof that this specific refusal names the later-phase gap
+    // (the AC-IS-2 statement's own promise). Chosen over the equally-present
+    // "reading it via 'lore issues' is not yet supported" because this
+    // literal has no single quotes and needs no escaping.
+    expect(result.stderr).toContain("a later phase of spec-the-defect-channel-reaches-no-machine");
   });
 });
 
