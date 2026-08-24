@@ -610,6 +610,15 @@ const baseCreateDocInputSchema = z.object({
   tags: z.array(z.string()).optional(),
   extra: z.record(z.unknown()).optional(),
   priority: prioritySchema.optional(),
+  // D2 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam): an
+  // OPTIONAL verbatim slug. When present, `CorpusService.create` uses it
+  // AS-IS — no `slugifyWithCollision` suffixing — and the store's UNIQUE
+  // index on `docs.slug` becomes the sole arbiter of identity, surfacing a
+  // collision as a typed `DUPLICATE_SLUG` error (never a silently aliased
+  // "-2" suffix). Mirrors `docPatchSchema.slug` (below, the *update* path's
+  // equivalent field). Absent (every pre-existing caller) preserves today's
+  // generated-slug behavior exactly.
+  slug: slugSchema.optional(),
 });
 
 /**

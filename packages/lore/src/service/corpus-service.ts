@@ -918,8 +918,16 @@ export class CorpusService {
 
   /**
    * Create a new document.
-   * Validates via createDocInputSchema, generates ULID + slug, resolves parent,
+   * Validates via createDocInputSchema, generates a ULID id, resolves parent,
    * inserts doc + version record + audit entry.
+   *
+   * Slug: `input.slug` when supplied is used VERBATIM (D2,
+   * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam) — the
+   * store's UNIQUE index on `docs.slug` is then the sole arbiter of identity,
+   * and a collision returns a typed `DUPLICATE_SLUG` error (never a silently
+   * aliased "-2" suffix). Absent `input.slug` (every pre-existing caller)
+   * generates a collision-free slug via `slugifyWithCollision`, byte-identical
+   * to pre-D2 behavior.
    * Telemetry: records one event with doc type and resulting id/slug on success.
    *
    * @invariant Rejects `type: "knowledge"` + `extra.sub_type: "handoff"` with
@@ -1298,24 +1306,40 @@ export class CorpusService {
     const now = new Date().toISOString();
     const role = DOC_TYPE_ROLE_MAP[data.type];
 
-    // Generate collision-free slug. transliterate: getTransliterateCjk (SPEC-068
-    // D1) — CJK titles get a pinyin-derived slug instead of collapsing to the
-    // bare type name (kebab's [^a-z0-9]+ strips every non-ASCII character
-    // otherwise). Only awaited when the title actually contains CJK — an
-    // ASCII-only title never pays the pinyin-pro load cost.
-    // reason: exactOptionalPropertyTypes forbids `{ transliterate: undefined }`
-    // — omit the key entirely (not just set it undefined) when the title has
-    // no CJK, rather than always spreading an `undefined`-valued property.
-    const slugOpts = containsCjk(data.title) ? { transliterate: await getTransliterateCjk() } : undefined;
-    const slug = await slugifyWithCollision(
-      data.type,
-      data.title,
-      async (candidate) => {
-        const r = await this.store.findBySlug(candidate);
-        return r.ok && r.value !== null;
-      },
-      slugOpts,
-    );
+    // D2 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam): a
+    // caller-supplied `data.slug` is used VERBATIM — the store's UNIQUE index
+    // on `docs.slug` becomes the SOLE arbiter of identity. No collision
+    // suffixing, no CJK-transliteration lookup: a colliding verbatim slug
+    // surfaces as the store's typed `DUPLICATE_SLUG` on the insert below
+    // (AC-GR-4), never a silently aliased "-2" suffix. Deliberately no
+    // `findBySlug` pre-check here — a check-then-insert would reopen the exact
+    // TOCTOU race this path exists to close; the store's UNIQUE constraint is
+    // the only correct arbiter under concurrent writers. Absent `data.slug`
+    // (every pre-existing caller) falls through to the original
+    // collision-avoiding generator below, byte-identical to pre-D2 behavior.
+    let slug: string;
+    if (data.slug !== undefined) {
+      slug = data.slug;
+    } else {
+      // Generate collision-free slug. transliterate: getTransliterateCjk (SPEC-068
+      // D1) — CJK titles get a pinyin-derived slug instead of collapsing to the
+      // bare type name (kebab's [^a-z0-9]+ strips every non-ASCII character
+      // otherwise). Only awaited when the title actually contains CJK — an
+      // ASCII-only title never pays the pinyin-pro load cost.
+      // reason: exactOptionalPropertyTypes forbids `{ transliterate: undefined }`
+      // — omit the key entirely (not just set it undefined) when the title has
+      // no CJK, rather than always spreading an `undefined`-valued property.
+      const slugOpts = containsCjk(data.title) ? { transliterate: await getTransliterateCjk() } : undefined;
+      slug = await slugifyWithCollision(
+        data.type,
+        data.title,
+        async (candidate) => {
+          const r = await this.store.findBySlug(candidate);
+          return r.ok && r.value !== null;
+        },
+        slugOpts,
+      );
+    }
 
     // Default extra.spec_kind = "feature" for spec docs when absent (SPEC-032 §3.1).
     // reason: Zod superRefine can only addIssue, never inject a default — the schema
