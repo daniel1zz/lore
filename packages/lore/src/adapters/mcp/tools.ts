@@ -2905,7 +2905,9 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       // `github-intake-port.js`, whose transitive deps a static import here
       // would drag into the vitest graph of every tools.ts consumer
       // (mcp-tools.test.ts).
-      const { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } = await import("../cli/report-issue-wiring.js");
+      const { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg, buildRetiredFeedbackUpstreamError } = await import(
+        "../cli/report-issue-wiring.js"
+      );
       const cfg = resolveFeedbackUpstreamCfg(getConfig?.());
 
       if (cfg === undefined) {
@@ -2929,15 +2931,12 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
       // legacy-shaped `feedback.upstream` — retired (P4): `IssueReportService`
       // and the SQLite `UpstreamPort` it drove no longer exist to file through.
-      return errorContent({
-        code: "VALIDATION_ERROR",
-        field: "feedback.upstream",
-        message:
-          "this corpus's feedback.upstream is configured with the retired SQLite shape " +
-          "({root_prd, ...}) — SQLite-based issue reporting was removed " +
-          "(spec-the-defect-channel-reaches-no-machine-but-its-own-github P4). Reconfigure " +
-          'feedback.upstream.repo (e.g. "owner/repo") to file issue reports via GitHub.',
-      });
+      //
+      // Message is the SHARED definition (spec-the-retired-shape-refusal-
+      // message-has-two-byte-identical D1) — this handler must NOT hold its
+      // own copy, or it silently drifts from `report-issue-wiring.ts`'s
+      // canonical wording again with no oracle to notice.
+      return errorContent(buildRetiredFeedbackUpstreamError());
     },
   );
 }
