@@ -92,6 +92,7 @@ import {
   RESUME_DISPOSITION_MARKER,
   RESUME_DISPOSITION_DONE,
   RESUME_DISPOSITION_DEFERRED_PREFIX,
+  RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX,
   RESUME_ITEM_ID_PREFIX_KEY_DECISION,
   RESUME_ITEM_ID_PREFIX_NEXT_STEP,
   formatResumeItemId,
@@ -352,11 +353,21 @@ function dispositionLine(id: string, disposition: string): string {
   return `${RESUME_DISPOSITION_MARKER} ${id}: ${disposition}`;
 }
 
-/** A full accounting of `ids`, alternating the two accepted dispositions so both are exercised (D5). */
+/**
+ * A full accounting of `ids`, alternating the two accepted dispositions so
+ * both are exercised (D5). The deferred half's reason carries an S4
+ * destination token (`see issue #5`) — spec-resume-coverage-floor-the-satisfaction-boundaries-a
+ * S4 makes a reason ALONE insufficient to close a deferred item, so every
+ * pre-existing caller of this helper that expects full closure needs this
+ * fixture to satisfy S4 too, not just S1.
+ */
 function fullAccounting(ids: readonly string[]): string {
   return ids
     .map((id, i) =>
-      dispositionLine(id, i % 2 === 0 ? RESUME_DISPOSITION_DONE : `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope`),
+      dispositionLine(
+        id,
+        i % 2 === 0 ? RESUME_DISPOSITION_DONE : `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope, see issue #5`,
+      ),
     )
     .join("\n");
 }
@@ -907,7 +918,7 @@ describe("AC-RCH-6 — cross-turn accumulation: one accounting closes the item f
       assistantTextEntry("an unrelated turn in between"),
       assistantTextEntry(
         [
-          dispositionLine(TWO_AND_TWO_IDS[1] as string, `${RESUME_DISPOSITION_DEFERRED_PREFIX}next session`),
+          dispositionLine(TWO_AND_TWO_IDS[1] as string, `${RESUME_DISPOSITION_DEFERRED_PREFIX}next session, see issue #5`),
           dispositionLine(TWO_AND_TWO_IDS[2] as string, RESUME_DISPOSITION_DONE),
         ].join("\n"),
       ),
@@ -1035,9 +1046,17 @@ describe("AC-RCS-1 — an accepted deferral requires a non-empty reason (S1: def
       expectBlock: true,
     },
     {
-      label: "control: every item deferred with a NON-EMPTY reason closes cleanly",
+      // ⚠️ RE-BASELINED 2026-08-25 (spec-resume-coverage-floor-the-satisfaction-boundaries-a
+      // S4): this payload formerly carried a reason with NO destination
+      // token, which S4 now blocks — the old payload and S4's negative arm
+      // (below, "deferral destination" describe block) were mutually
+      // unsatisfiable. The control payload is now STRICTER (it must satisfy
+      // S1 AND S4), not weaker: no assertion here is dropped.
+      label: "control: every item deferred with a NON-EMPTY reason AND an S4 destination token closes cleanly",
       message: (ids) =>
-        ids.map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope`)).join("\n"),
+        ids
+          .map((id) => dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope, see issue #5`))
+          .join("\n"),
       expectBlock: false,
     },
     {
@@ -1149,6 +1168,102 @@ describe("AC-RCS-2 — a sidechain disposition does not satisfy, but a sidechain
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
+  });
+});
+
+// ─── AC-RCS-4 ───────────────────────────────────────────────────────────────
+//
+// spec-resume-coverage-floor-the-satisfaction-boundaries-a S4 (Hole 3): a
+// deferral reason alone is not a destination. `deferred:out of scope for
+// this session` satisfies S1 (non-empty reason) and still fails S4 (no
+// destination token) — measured over this corpus's own 139 handoff docs:
+// 458 of 696 next-step items (65.8%) were bare prose parking nothing
+// anywhere. S4's refusal must be distinguishable from S1's bare-deferral
+// refusal — "no reason given" and "a reason that parks the work nowhere" are
+// different operator mistakes with different fixes.
+
+describe("deferral destination", () => {
+  /** S1-satisfying reason (non-empty) that names NO destination — Hole 3's measured propagation vector. */
+  const REASON_NO_DESTINATION = "out of scope for this session";
+
+  it("(a) NEGATIVE: a reason with no destination token leaves its item unaccounted and blocks", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, ZERO_DECISIONS_TICKET_TEXT);
+    const id = expectedIdsFor(ZERO_DECISIONS_EXTRA)[0] as string;
+    const message = dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}${REASON_NO_DESTINATION}`);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    const payload = parseDecisionPayload(result.stdout);
+    expect(payload.decision).toBe(BLOCK_DECISION);
+  });
+
+  it("(b) INJECTIVITY: the stderr the verb ACTUALLY EMITS startsWith the destination-refusal prefix exported from @lore/core, AND that constant is not byte-equal to the bare-deferral prefix", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, ZERO_DECISIONS_TICKET_TEXT);
+    const id = expectedIdsFor(ZERO_DECISIONS_EXTRA)[0] as string;
+    const message = dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}${REASON_NO_DESTINATION}`);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    // Conjunct 1: asserted on the EMITTED BYTES, not merely on the constants
+    // — a verb that mis-routes this failure through UNDISPOSITIONED_PREFIX
+    // would still pass a constants-only distinctness check but fail this.
+    const stderrLines = result.stderr.split("\n").filter((line) => line.length > 0);
+    expect(stderrLines).toHaveLength(1);
+    expect((stderrLines[0] as string).startsWith(RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX)).toBe(true);
+    expect(stderrLines[0]).toContain(id);
+    // Never through the bare-deferral (S1) generic prefix — that would be
+    // exactly the mis-routing this front exists to catch.
+    expect(parseUndispositionedIds(result.stderr)).toEqual([]);
+    // Conjunct 2: the constants themselves are byte-distinct, never merely
+    // their emitted uses — containment is explicitly forbidden by the
+    // criterion, so this is `!==` identity, not `toContain`.
+    expect(RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX).not.toBe(UNDISPOSITIONED_PREFIX);
+    expect(RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX.length).toBeGreaterThan(0);
+  });
+
+  it("(c) CONTROL 1: the same reason plus an issue reference closes and does not block", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, ZERO_DECISIONS_TICKET_TEXT);
+    const id = expectedIdsFor(ZERO_DECISIONS_EXTRA)[0] as string;
+    const message = dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}${REASON_NO_DESTINATION}, see issue #5`);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("(d) CONTROL 2: the same reason plus a corpus slug closes and does not block", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, ZERO_DECISIONS_TICKET_TEXT);
+    const id = expectedIdsFor(ZERO_DECISIONS_EXTRA)[0] as string;
+    const message = dispositionLine(
+      id,
+      `${RESUME_DISPOSITION_DEFERRED_PREFIX}${REASON_NO_DESTINATION}, tracked in task-some-filed-thing`,
+    );
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("(e) CONTROL 3: `done` on the same fixture closes and does not block", () => {
+    const transcriptPath = writeArmedTicketTranscript(tmpDir, ZERO_DECISIONS_TICKET_TEXT);
+    const id = expectedIdsFor(ZERO_DECISIONS_EXTRA)[0] as string;
+    const message = dispositionLine(id, RESUME_DISPOSITION_DONE);
+
+    const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("IMPLEMENTATION CONTRACT: the predicate is reached through exactly one call site written literally as `!hasDeferralDestination(` in the verb's own source", () => {
+    const source = readFileSync(VERB_SOURCE_PATH, "utf8");
+    expect(countOccurrences(source, "!hasDeferralDestination(")).toBe(1);
   });
 });
 
@@ -1432,7 +1547,10 @@ describe("task-the-resume-coverage-verb-accepts-a-reason-after-deferred — a re
       RESUME_DISPOSITION_DONE,
       `${RESUME_DISPOSITION_DONE}:shipped in commit abc123`,
       `${RESUME_DISPOSITION_DONE} — verified via bun test, all green`,
-      `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope for this session`,
+      // S4 destination token added — a bare "out of scope for this session"
+      // (no destination) would now BLOCK, and this test's own point is that
+      // all four forms close cleanly TOGETHER.
+      `${RESUME_DISPOSITION_DEFERRED_PREFIX}out of scope for this session, see issue #5`,
     ];
     expect(dispositions).toHaveLength(TWO_AND_TWO_IDS.length);
     const message = TWO_AND_TWO_IDS.map((id, i) => dispositionLine(id, dispositions[i] as string)).join("\n");
@@ -1461,8 +1579,12 @@ describe("task-the-resume-coverage-verb-accepts-a-reason-after-deferred — a re
 
   it("REGRESSION: `deferred:<reason>` with a genuine non-empty reason is STILL accepted, unaffected by this fix — only the `done` side of the grammar changed", () => {
     const transcriptPath = writeArmedTicketTranscript(tmpDir, TWO_AND_TWO_TICKET_TEXT);
+    // S4 destination token added — this test's point is the `done`-widening
+    // fix left `deferred:<reason>` alone; it is not exercising S4 (covered by
+    // the "deferral destination" describe block below), so the reason must
+    // satisfy S4 too or this test would block for an unrelated cause.
     const message = TWO_AND_TWO_IDS.map((id) =>
-      dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}next session`),
+      dispositionLine(id, `${RESUME_DISPOSITION_DEFERRED_PREFIX}next session, see issue #5`),
     ).join("\n");
 
     const result = runCoverageCheck({ transcript_path: transcriptPath, last_assistant_message: message });

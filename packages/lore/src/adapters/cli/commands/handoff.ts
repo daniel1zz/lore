@@ -75,7 +75,8 @@
  *
  * Source: SPEC-041 §3 D6; spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
  * (D5, D6 arming predicate SUPERSEDED, D7, D8, D9, D10);
- * spec-resume-ticket-coverage-floor-blocking-channel-arming H1–H6.
+ * spec-resume-ticket-coverage-floor-blocking-channel-arming H1–H6;
+ * spec-resume-coverage-floor-the-satisfaction-boundaries-a S1, S2, S4.
  */
 
 import { readFileSync } from "fs";
@@ -83,10 +84,12 @@ import { defineCommand } from "citty";
 import {
   handoffExtraSchema,
   tailChars,
+  hasDeferralDestination,
   RESUME_COVERAGE_FLOOR,
   RESUME_DISPOSITION_DEFERRED_PREFIX,
   RESUME_DISPOSITION_DONE,
   RESUME_DISPOSITION_MARKER,
+  RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX,
   RESUME_ITEM_ID_PREFIX_KEY_DECISION,
   RESUME_ITEM_ID_PREFIX_NEXT_STEP,
   formatResumeItemId,
@@ -118,7 +121,14 @@ const COVERAGE_CHECK_SUBCOMMAND = "coverage-check";
  *   prefix for that case is exactly the defect
  *   task-resume-coverage-disposition-parser-an-unrecognised-token closed: a
  *   parser that has already recovered the item id and reports "never
- *   mentioned" anyway is asserting something it knows to be false.
+ *   mentioned" anyway is asserting something it knows to be false. A THIRD
+ *   case — a deferral reason present but naming no destination — is also
+ *   reserved OUT of this prefix, via
+ *   `RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX` (`@lore/core`,
+ *   spec-resume-coverage-floor-the-satisfaction-boundaries-a S4): that reason
+ *   satisfies THIS prefix's own sibling non-empty check (S1), so routing it
+ *   here would be the identical "asserting something known false" defect,
+ *   one hole over.
  */
 const UNDISPOSITIONED_ITEM_STDERR_PREFIX = "Undispositioned resume ticket item: ";
 
@@ -490,19 +500,25 @@ function scanTranscript(transcriptText: string): TranscriptScan {
  * What one call to {@link parseDispositionLines} recovers from a single
  * assistant text: the item ids it ACCOUNTS for, and — separately — the item
  * ids it merely NAMES with a disposition token this parser does not
- * recognize (task-resume-coverage-disposition-parser-an-unrecognised-token).
+ * recognize (task-resume-coverage-disposition-parser-an-unrecognised-token),
+ * and — separately again — the item ids it names with an otherwise-valid
+ * deferral reason that carries no DESTINATION token
+ * (spec-resume-coverage-floor-the-satisfaction-boundaries-a S4).
  *
- * The two sets are disjoint by construction (an id lands in exactly one, or
- * neither if the text never names it at all) and BOTH matter to the caller:
- * before this type existed, `runCoverageCheck` could only see `accepted`, so
- * an id it had already recovered from a marker line — just with a token it
- * didn't recognize — was indistinguishable from an id the text never
- * mentioned. Both ended up "missing" and both were reported identically as
- * "Undispositioned … never mentioned", which is false for the second case:
- * the parser HAD the item id and threw that fact away.
+ * The three sets are disjoint by construction (an id lands in exactly one,
+ * or none if the text never names it at all) and ALL THREE matter to the
+ * caller: before `unrecognized` existed, `runCoverageCheck` could only see
+ * `accepted`, so an id it had already recovered from a marker line — just
+ * with a token it didn't recognize — was indistinguishable from an id the
+ * text never mentioned; before `missingDestination` existed, the same
+ * collapse happened one hole over — a deferral reason present but parking
+ * the work nowhere was indistinguishable from a bare/whitespace-only
+ * deferral (S1's own hole). Each of these is false for the id it happens to:
+ * the parser HAD the item id and, for `missingDestination`, HAD a non-empty
+ * reason too, and threw both facts away.
  */
 interface DispositionParseResult {
-  /** Item ids this text accounts for (an accepted completion form, `isAcceptedDoneDisposition` — task-the-resume-coverage-verb-accepts-a-reason-after-deferred — or a non-empty `RESUME_DISPOSITION_DEFERRED_PREFIX<reason>` — SPEC-112 D5: account, not complete). */
+  /** Item ids this text accounts for (an accepted completion form, `isAcceptedDoneDisposition` — task-the-resume-coverage-verb-accepts-a-reason-after-deferred — or a non-empty `RESUME_DISPOSITION_DEFERRED_PREFIX<reason>` carrying an S4 destination token, `hasDeferralDestination` — SPEC-112 D5: account, not complete). */
   readonly accepted: ReadonlySet<string>;
   /**
    * Item id → the VERBATIM (trimmed) disposition text a marker line carried,
@@ -516,9 +532,26 @@ interface DispositionParseResult {
    * S1 already classifies that case as "not an accounting" via the plain
    * `accepted`-miss path, and this task's own requirement pins that
    * classification UNCHANGED — it must keep surfacing through
-   * {@link UNDISPOSITIONED_ITEM_STDERR_PREFIX}, not this map.
+   * {@link UNDISPOSITIONED_ITEM_STDERR_PREFIX}, not this map. Also EXCLUDES a
+   * non-empty reason with no destination token — that is
+   * {@link missingDestination}'s contract, not this one, for the identical
+   * reason (it DOES start with the accepted prefix and DOES carry a non-empty
+   * reason; it fails only S4's destination check).
    */
   readonly unrecognized: ReadonlyMap<string, string>;
+  /**
+   * Item id → the VERBATIM (trimmed) deferral reason, for every line whose
+   * token satisfied S1 (starts with `RESUME_DISPOSITION_DEFERRED_PREFIX`,
+   * non-empty reason after it) but failed S4's `hasDeferralDestination`
+   * check (no issue reference or corpus slug anywhere in the reason).
+   * `spec-resume-coverage-floor-the-satisfaction-boundaries-a`
+   * S4 — a reason alone is not a destination; this bucket is what routes
+   * that case to `RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX`
+   * instead of {@link UNDISPOSITIONED_ITEM_STDERR_PREFIX} (S1's bare-deferral
+   * prefix) or {@link unrecognized} (neither accepted form's shape at all —
+   * this bucket's ids DO match the deferred-prefix shape).
+   */
+  readonly missingDestination: ReadonlyMap<string, string>;
 }
 
 /**
@@ -633,6 +666,15 @@ function isAcceptedDoneDisposition(disposition: string): boolean {
  * `.trim()` below is kept anyway so this function's own contract does not
  * silently depend on that upstream trim.
  *
+ * `spec-resume-coverage-floor-the-satisfaction-boundaries-a` S4: an
+ * S1-satisfying (non-empty) deferral reason is accepted only when it ALSO
+ * carries a destination token (`hasDeferralDestination`, `@lore/core`) — an
+ * issue reference or a corpus slug. A reason with no destination is NOT
+ * added to `accepted`, and NOT added to `unrecognized` either (it DOES match
+ * the deferred-prefix shape and DOES carry a non-empty reason — neither of
+ * `unrecognized`'s exclusion conditions apply); it lands in
+ * `missingDestination` instead, that bucket's OWN contract.
+ *
  * task-the-resume-coverage-verb-accepts-a-reason-after-deferred Required #1:
  * `RESUME_DISPOSITION_DONE` optionally followed by a reason is ALSO an
  * accepted completion (see {@link isAcceptedDoneDisposition}) — a completion
@@ -648,12 +690,14 @@ function isAcceptedDoneDisposition(disposition: string): boolean {
  * round-trip property, not a claim about wording.
  *
  * @param assistantText - One assistant message's plain text.
- * @returns The item ids that text accounts for, and those it names with an
- *   unrecognized token.
+ * @returns The item ids that text accounts for, those it names with an
+ *   unrecognized token, and those it names with a deferral reason carrying
+ *   no destination token.
  */
 function parseDispositionLines(assistantText: string): DispositionParseResult {
   const accepted = new Set<string>();
   const unrecognized = new Map<string, string>();
+  const missingDestination = new Map<string, string>();
   for (const rawLine of assistantText.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line.startsWith(RESUME_DISPOSITION_MARKER)) continue;
@@ -663,6 +707,10 @@ function parseDispositionLines(assistantText: string): DispositionParseResult {
     const itemId = rest.slice(0, colonIndex).trim();
     if (itemId.length === 0) continue;
     const disposition = rest.slice(colonIndex + 1).trim();
+    if (isAcceptedDoneDisposition(disposition)) {
+      accepted.add(itemId);
+      continue;
+    }
     // S1: a deferral is accepted only with a non-empty reason after the
     // prefix — a bare `deferred:` (or one reducing to it after trimming
     // whitespace) leaves `deferralReason` empty and is therefore rejected,
@@ -670,7 +718,16 @@ function parseDispositionLines(assistantText: string): DispositionParseResult {
     const deferralReason = disposition.startsWith(RESUME_DISPOSITION_DEFERRED_PREFIX)
       ? disposition.slice(RESUME_DISPOSITION_DEFERRED_PREFIX.length).trim()
       : undefined;
-    if (isAcceptedDoneDisposition(disposition) || (deferralReason !== undefined && deferralReason.length > 0)) {
+    if (deferralReason !== undefined && deferralReason.length > 0) {
+      // S1 satisfied. S4: the reason must ALSO carry a destination token
+      // (spec-resume-coverage-floor-the-satisfaction-boundaries-a S4) — a
+      // reason alone parks the deferred work nowhere. This is the ONE call
+      // site AC-RCS-4's falsifier pins: mutating this literal must turn the
+      // negative front of that AC red.
+      if (!hasDeferralDestination(deferralReason)) {
+        missingDestination.set(itemId, deferralReason);
+        continue;
+      }
       accepted.add(itemId);
       continue;
     }
@@ -682,14 +739,24 @@ function parseDispositionLines(assistantText: string): DispositionParseResult {
     // requirement that S1's classification stays as-is.
     if (deferralReason === undefined) unrecognized.set(itemId, disposition);
   }
-  return { accepted, unrecognized };
+  return { accepted, unrecognized, missingDestination };
 }
 
-/** One item still unaccounted for after unioning every disposition source — either never named at all, or named with a token {@link parseDispositionLines} did not recognize. */
+/** One item still unaccounted for after unioning every disposition source — never named at all, named with a token {@link parseDispositionLines} did not recognize, or named with a deferral reason carrying no S4 destination token. */
 interface MissingItem {
   readonly id: string;
   /** Present only when some message named this id with an unrecognized token — the verbatim (trimmed) text it carried. */
   readonly unrecognizedToken?: string;
+  /**
+   * Present only when some message named this id with an otherwise-valid
+   * (S1-satisfying) deferral reason that carried no destination token
+   * (spec-resume-coverage-floor-the-satisfaction-boundaries-a S4) — the
+   * verbatim (trimmed) reason text. Mutually exclusive with
+   * `unrecognizedToken` by construction: {@link parseDispositionLines}
+   * classifies each line into exactly one of `accepted` / `unrecognized` /
+   * `missingDestination`.
+   */
+  readonly missingDestinationReason?: string;
 }
 
 /**
@@ -785,12 +852,17 @@ function buildBlockReason(missing: readonly MissingItem[]): string {
  *   - ≥1 recovered item id undispositioned → one `{"decision":"block"}` JSON
  *     object on stdout, plus each missing id on its own stderr line for the
  *     operator watching a terminal (H2) — `UNDISPOSITIONED_ITEM_STDERR_PREFIX`
- *     when the id was never named at all, or
+ *     when the id was never named at all,
  *     `UNRECOGNIZED_DISPOSITION_STDERR_PREFIX` (naming the verbatim token
  *     received) when a marker line DID name it but with a token neither
  *     accepted form matches
- *     (task-resume-coverage-disposition-parser-an-unrecognised-token) — never
- *     the former for the latter case, which is the defect that task closed.
+ *     (task-resume-coverage-disposition-parser-an-unrecognised-token), or
+ *     `RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX` (`@lore/core`,
+ *     naming the verbatim reason received) when a marker line named it with
+ *     an S1-satisfying deferral reason that carried no destination token
+ *     (spec-resume-coverage-floor-the-satisfaction-boundaries-a S4) — never
+ *     one of these three prefixes for another case, which is exactly the
+ *     defect each of them was added to close.
  *
  * `process.exitCode` is deliberately left untouched on every path; the only
  * non-zero exits reachable through this verb are the cardinality-template
@@ -845,25 +917,39 @@ function runCoverageCheck(): void {
   // turns, then the current turn), so the token shown is the most recent
   // attempt — moot for an id that ends up `dispositioned` anyway, since only
   // ids that are still `missing` below ever consult this map.
+  //
+  // spec-resume-coverage-floor-the-satisfaction-boundaries-a S4:
+  // `missingDestinationReasonByItemId` accumulates the SAME way, for every id
+  // a message named with an S1-satisfying deferral reason that carried no
+  // destination token.
   const dispositioned = new Set<string>();
   const unrecognizedTokenByItemId = new Map<string, string>();
+  const missingDestinationReasonByItemId = new Map<string, string>();
   for (const message of scan.dispositionBearingMessages) {
     if (message.entryIndex <= ticket.entryIndex) continue;
     const parsed = parseDispositionLines(message.text);
     for (const id of parsed.accepted) dispositioned.add(id);
     for (const [id, token] of parsed.unrecognized) unrecognizedTokenByItemId.set(id, token);
+    for (const [id, reason] of parsed.missingDestination) missingDestinationReasonByItemId.set(id, reason);
   }
   const currentTurn = parseDispositionLines(lastAssistantMessage);
   for (const id of currentTurn.accepted) dispositioned.add(id);
   for (const [id, token] of currentTurn.unrecognized) unrecognizedTokenByItemId.set(id, token);
+  for (const [id, reason] of currentTurn.missingDestination) missingDestinationReasonByItemId.set(id, reason);
 
   const missing: MissingItem[] = expectedIds
     .filter((id) => !dispositioned.has(id))
     .map((id) => {
-      // `exactOptionalPropertyTypes`: omit the property entirely rather than
-      // set it to `undefined` when this id was never named with a bad token.
+      // `exactOptionalPropertyTypes`: omit each property entirely rather
+      // than set it to `undefined` when this id was never named with that
+      // outcome.
       const unrecognizedToken = unrecognizedTokenByItemId.get(id);
-      return unrecognizedToken === undefined ? { id } : { id, unrecognizedToken };
+      const missingDestinationReason = missingDestinationReasonByItemId.get(id);
+      return {
+        id,
+        ...(unrecognizedToken === undefined ? {} : { unrecognizedToken }),
+        ...(missingDestinationReason === undefined ? {} : { missingDestinationReason }),
+      };
     });
 
   if (missing.length === 0) return; // every item accounted for — nothing on stdout
@@ -872,10 +958,16 @@ function runCoverageCheck(): void {
     // The defect this task closed: an id already recovered from a marker line
     // must never be reported through the "never mentioned" prefix — that is
     // a claim the parser knows to be false the moment `unrecognizedToken` is
-    // defined.
+    // defined. S4 extends the same discipline: a deferral reason present but
+    // parking the work nowhere is reported through its OWN prefix, never
+    // either of the other two.
     if (item.unrecognizedToken !== undefined) {
       process.stderr.write(
         `${UNRECOGNIZED_DISPOSITION_STDERR_PREFIX}${item.id}: received "${item.unrecognizedToken}" (accepted: "${RESUME_DISPOSITION_DONE}" or "${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>")\n`,
+      );
+    } else if (item.missingDestinationReason !== undefined) {
+      process.stderr.write(
+        `${RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX}${item.id}: received reason "${item.missingDestinationReason}" — add an issue reference (e.g. "#123") or a corpus slug (e.g. "task-…")\n`,
       );
     } else {
       process.stderr.write(`${UNDISPOSITIONED_ITEM_STDERR_PREFIX}${item.id}\n`);
