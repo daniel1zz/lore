@@ -7068,6 +7068,30 @@
     "01M0WJ84GZHJ07WD84YQGX36XS": {
       "human_id": "TASK-858",
       "file_path": "docs/requirements/task/TASK-858-nothing-stops-one-session-overwriting-another-s-in.md"
+    },
+    "01M0WRXHVAR8B5DHMAW2FZ7GPY": {
+      "human_id": "KN-561",
+      "file_path": "docs/requirements/knowledge/KN-561-handoff-agent-main-orchestrator.md"
+    },
+    "01M0WR12G2F24SFGWGRPCMQT0F": {
+      "human_id": "TASK-859",
+      "file_path": "docs/requirements/task/TASK-859-the-mirror-exit-code-ssot-is-split-across-two-modu.md"
+    },
+    "01M0WR0YS5SMZ3DRP7CBZ998ZN": {
+      "human_id": "TASK-860",
+      "file_path": "docs/requirements/task/TASK-860-lore-evidence-output-tail-keeps-the-last-4000-char.md"
+    },
+    "01M0WR0TXZKV7R7RASYG19YPPA": {
+      "human_id": "TASK-861",
+      "file_path": "docs/requirements/task/TASK-861-check-no-nul-bytes-is-blind-to-untracked-files-so.md"
+    },
+    "01M0WR0Q54ECGK5FR229B0EPMR": {
+      "human_id": "TASK-862",
+      "file_path": "docs/requirements/task/TASK-862-eight-of-nine-red-first-rows-on-an-archived-plan-a.md"
+    },
+    "01M0WQAXS3KS70QA46QF03Y0A3": {
+      "human_id": "TASK-863",
+      "file_path": "docs/requirements/task/TASK-863-one-documentation-edit-put-main-s-claude-md-evicti.md"
     }
   }
 }

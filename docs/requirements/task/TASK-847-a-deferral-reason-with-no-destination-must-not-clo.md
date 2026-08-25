@@ -3,7 +3,7 @@ id: TASK-847
 type: task
 role: plan
 title: "A deferral reason with no destination must not close its resume-ticket item (S4)"
-status: draft
+status: archived
 priority: high
 created: 2026-08-25
 updated: 2026-08-25
