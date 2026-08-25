@@ -6960,6 +6960,10 @@
     "01M0VPVGXA0MTSYHS4WBE6H4F4": {
       "human_id": "KN-556",
       "file_path": "docs/requirements/knowledge/KN-556-handoff-agent-main-orchestrator.md"
+    },
+    "01M0VXCG4TNBE33GB5H9HQPF18": {
+      "human_id": "TASK-839",
+      "file_path": "docs/requirements/task/TASK-839-the-mirror-check-absorbed-the-content-probe-in-909.md"
     }
   }
 }
