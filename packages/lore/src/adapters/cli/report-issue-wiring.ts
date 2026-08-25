@@ -54,6 +54,15 @@
  *     claimable with NO further command (AC-GR-9). The LIVE path
  *     `commands/report-issue.ts` calls whenever `classifyFeedbackUpstream`
  *     resolves the GITHUB shape.
+ *   - `resolveGithubIssueListing(cfg)` — the ONE place that constructs
+ *     `GhRunner` + `GitHubIntakePort` for READS (AC-GR-1): `verifyTarget()`
+ *     for the numeric repo id, then `listIssues()` for the batched listing.
+ *   - `resolveGithubJoinedRows(corpusService, cfg)` — the read surface's
+ *     shared read+join (AC-GR-1/2/10/12): calls `resolveGithubIssueListing`
+ *     then joins against the corpus's already-ingested tasks via
+ *     `github-issue-listing.ts::joinListing`, so `commands/issues.ts` and
+ *     `commands/report-issue.ts --list` render off ONE join, never two.
+ *     Read-only by construction — see that function's own header.
  *
  * Invariants:
  *   - `resolveConsumerCorpusRoot` is safe to call from a long-lived MCP
@@ -111,6 +120,7 @@ import {
   err,
   ok,
   redactReporterIdentity,
+  type DocRecord,
   type FeedbackConfig,
   type IssueFrontMatterFields,
   type IssueSeverity,
@@ -123,8 +133,10 @@ import {
 import type { CorpusService } from "../../service/corpus-service.js";
 import { GhRunner, createNodeGhExecFile } from "../../service/gh-runner.js";
 import { GitHubIntakePort, type GithubListedIssue } from "../../service/github-intake-port.js";
+import { joinListing, type GithubIssueRow } from "../../service/github-issue-listing.js";
+import { computeIssueResolution, hasIssueReport, type IssueResolution } from "../../service/issue-resolution.js";
 import { ReceiptLogV2, type ReceiptV2Entry } from "../../service/receipt-log-v2.js";
-import type { GithubIssueRef } from "../../service/resolution-projector.js";
+import { readGithubIssueRef, type GithubIssueRef } from "../../service/resolution-projector.js";
 import { toIssueTaskInput } from "../../service/issue-task-shaping.js";
 import { findLoreDbPath } from "./utils.js";
 
@@ -275,6 +287,123 @@ export function classifyFeedbackUpstream(config: LoreConfig | undefined): Feedba
   if (cfg === undefined) return { kind: "unconfigured" };
   if (isGithubUpstreamCfg(cfg)) return { kind: "github", cfg };
   return { kind: "retired", error: buildRetiredFeedbackUpstreamError() };
+}
+
+// ─── GitHub read path (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam, AC-GR-1/2/10/12) ───
+
+/**
+ * One live GitHub issue listing (D3's read half): the numeric repo id
+ * `joinListing` keys on (`repo_id`, D5's rename-proof identity) plus the
+ * batched issue list, both fetched by {@link resolveGithubIssueListing}.
+ */
+export interface GithubIssueListing {
+  readonly issues: readonly GithubListedIssue[];
+  readonly repoId: number;
+}
+
+/**
+ * The ONE place that constructs `GhRunner` + `GitHubIntakePort` for READS
+ * (`lore issues`, `lore report-issue --list`) — mirrors {@link fileGithubIssue}'s
+ * own construction for WRITES. Without this, each read site would
+ * independently build its own runner + port, exactly the duplication
+ * {@link classifyFeedbackUpstream} exists to prevent for shape policy.
+ *
+ * @param cfg - the GitHub-shaped `feedback.upstream` config
+ * @returns `ok({issues, repoId})` — `repoId` is `verifyTarget()`'s numeric
+ *   `id` (the join key `joinListing`/`readGithubIssueRef` both key on, never
+ *   the stored `owner/repo` string, D5); `issues` is `listIssues()`'s
+ *   batched result — ONE `gh api` call regardless of listing size.
+ *   `err(...)` on the first failing call: `verifyTarget()`'s auth/target
+ *   failure surfaces BEFORE `listIssues()` is ever attempted.
+ */
+export async function resolveGithubIssueListing(
+  cfg: GithubUpstreamCfg,
+): Promise<Result<GithubIssueListing, LoreError>> {
+  const receiptsPath = join(resolveConsumerCorpusRoot(), ".lore", RECEIPT_LOG_V2_FILENAME);
+  const runner = new GhRunner({ execFile: createNodeGhExecFile() });
+  const port = new GitHubIntakePort({ runner, repo: cfg.repo, receiptsPath });
+
+  const verifyResult = await port.verifyTarget();
+  if (!verifyResult.ok) return verifyResult;
+
+  const listResult = await port.listIssues();
+  if (!listResult.ok) return listResult;
+
+  return ok({ issues: listResult.value, repoId: verifyResult.value.id });
+}
+
+/**
+ * Reads + joins a live GitHub listing against the corpus's already-ingested
+ * issue tasks — the SAME read path `commands/issues.ts` and
+ * `commands/report-issue.ts --list` both call, so neither builds its own
+ * port or its own join (AC-GR-1/2/10/12; the duplication a review caught
+ * before this function existed: `lore issues` silently fell through to the
+ * local corpus while `lore report-issue --list` refused loudly for the
+ * IDENTICAL retired-shape config — see {@link classifyFeedbackUpstream}'s
+ * own header for that precedent, and D1's fix for the shape-policy half of
+ * it).
+ *
+ * `resolveOne` ({@link ResolveIssueResolution} in `github-issue-listing.ts`)
+ * must stay a SYNCHRONOUS closure — this function therefore gathers every
+ * candidate task's store-fetched facts (`resolvesInEdges`) with an async
+ * per-task `corpusService.get()` call BEFORE calling `joinListing`, mirrors
+ * `commands/issues.ts::readLocalRows`'s identical per-task read shape.
+ *
+ * ⛔ READ-ONLY (AC-GR-12): this function calls `corpusService.list`,
+ * `.listFull`, and `.get` only — never `.create`/`.update`/`.set`. A task
+ * whose per-doc `get()` fails (deleted between the two calls) degrades to
+ * "excluded from the join" rather than aborting the whole read — the same
+ * graceful-partial-result precedent `readLocalRows` documents.
+ *
+ * @param corpusService - the caller's own `CorpusService` — the SAME corpus
+ *   `fileGithubIssue`'s `ctx.corpusService` mints ingested tasks into, never
+ *   a second one
+ * @param cfg - the GitHub-shaped `feedback.upstream` config
+ * @returns `ok({repoId, rows})` — `rows` has exactly one entry per listed
+ *   issue, in listing order ({@link joinListing}'s own contract); `err(...)`
+ *   on the first failing `gh`/store call
+ */
+export async function resolveGithubJoinedRows(
+  corpusService: CorpusService,
+  cfg: GithubUpstreamCfg,
+): Promise<Result<{ repoId: number; rows: readonly GithubIssueRow[] }, LoreError>> {
+  const listingResult = await resolveGithubIssueListing(cfg);
+  if (!listingResult.ok) return listingResult;
+  const { issues, repoId } = listingResult.value;
+
+  const listResult = await corpusService.listFull({ type: "task" });
+  if (!listResult.ok) return listResult;
+
+  const resolutionByTaskId = new Map<string, IssueResolution>();
+  const joinableTasks: DocRecord[] = [];
+  for (const task of listResult.value.docs.filter((d) => hasIssueReport(d.extra))) {
+    const getResult = await corpusService.get(task.id);
+    if (!getResult.ok) continue; // reason: same graceful degrade `readLocalRows` documents for its own per-task get().
+
+    const resolvesInEdges = getResult.value.navigation.related.filter((r) => r.link_type === "resolves");
+    resolutionByTaskId.set(
+      task.id,
+      computeIssueResolution(
+        task,
+        resolvesInEdges.map((r) => ({ from_id: r.id })),
+        resolvesInEdges.map((r) => ({ id: r.id, status: r.status })),
+      ),
+    );
+    joinableTasks.push(task);
+  }
+
+  const rows = joinListing(issues, joinableTasks, repoId, (task) => {
+    const resolution = resolutionByTaskId.get(task.id);
+    // reason: `task` is always drawn from `joinableTasks` above — the exact
+    // set this loop just computed a resolution for, one entry each — so
+    // `resolutionByTaskId` can never miss it. `joinListing` calls this
+    // closure synchronously per its own contract (github-issue-listing.ts's
+    // header), which is why the fetch above must happen BEFORE this call,
+    // not inside it.
+    return resolution as IssueResolution;
+  });
+
+  return ok({ repoId, rows });
 }
 
 // ─── GitHub filing path (spec-the-defect-channel-reaches-no-machine-but-its-own-github P2, AC-GI-1) ───

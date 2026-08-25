@@ -29,12 +29,18 @@
  * wiring.js`'s `classifyFeedbackUpstream` (spec-lore-issues-falls-through-to-
  * the-local-corpus-on-a-retired D1, the SAME classifier
  * `commands/report-issue.ts` consumes) classifies it `"retired"` and this
- * command refuses loudly, exactly like a GITHUB-shaped upstream, unless
- * `--local` bypasses upstream reading entirely (spec D2).
- *   - `feedback.upstream` GITHUB-shaped → refused loudly (exit 4) unless
- *     `--local`, naming the later-phase gap. Its read surface
- *     (`GitHubIntakePort.listIssues`) is a later phase's own task, not yet
- *     wired here.
+ * command refuses loudly unless `--local` bypasses upstream reading
+ * entirely (spec D2).
+ *   - `feedback.upstream` GITHUB-shaped → reads LIVE (spec-a-github-filed-
+ *     defect-must-be-claimable-one-ingest-seam, AC-GR-1/2/10/12) via
+ *     `runGithubIssuesListing` (this file, below): `../report-issue-
+ *     wiring.js`'s `resolveGithubJoinedRows` fetches the listing +
+ *     already-ingested tasks and joins them, this file renders. `--local`
+ *     bypasses this entirely and reads the cwd corpus instead.
+ *     `--open`/`--resolved`/`--all`/`--severity`/`--category`/`--verify`
+ *     against this shape are refused loudly (exit 4, `run()`'s own
+ *     `explicitModeFlag` check) rather than silently ignored — none is
+ *     implemented against this branch yet.
  *   - `feedback.upstream` RETIRED-shaped (legacy `{corpus_path, root_prd}`)
  *     → refused loudly (exit 4) unless `--local`, naming the retired shape
  *     and the `feedback.upstream.repo` remedy — the SAME `LoreError`
@@ -48,13 +54,19 @@
  * `data.corpus_path` (plus `data.source`, which distinguishes "read cwd because
  * you asked" from "read cwd because nothing is configured" — a bare path renders
  * those identically and the second one is the state that caused the defect).
+ * The GitHub branch's `data.source` is the literal `"github"` and prints the
+ * SAME `Corpus: ` line for the LOCAL corpus its already-ingested tasks live
+ * in (never a second, upstream corpus — GitHub has no corpus of its own).
  *
  * ── HOW each corpus is read ──
  * `readLocalRows`/`collectLocalVerifyTargets` read via `loadLoreApp()` +
- * `CorpusService` — the ONLY read path this file has left as of P4 (the
+ * `CorpusService` — the read path for `--local`/unconfigured (the
  * SQLite-shaped `UpstreamPort` read path, `readUpstreamRows`/
  * `collectUpstreamVerifyTargets`, is deleted outright along with the
- * bun:sqlite-backed module it opened).
+ * bun:sqlite-backed module it opened). `runGithubIssuesListing` is the
+ * GITHUB-shaped read path (see above) — it never calls `readLocalRows`,
+ * though it DOES read the same local `CorpusService` for already-ingested
+ * tasks to join against the live GitHub listing.
  * ⛔ RESIDUAL, named rather than silently inherited: this branch computes
  * resolution WITHOUT the audit-trail review-rejection lookback the deleted
  * upstream branch used to perform (`hasRecordedReviewRejection`), because
@@ -151,7 +163,7 @@ import {
 } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { relativeTime, formatTable, exitCode, formatError } from "../utils.js";
-import { classifyFeedbackUpstream } from "../report-issue-wiring.js";
+import { classifyFeedbackUpstream, resolveGithubJoinedRows, type GithubUpstreamCfg } from "../report-issue-wiring.js";
 import {
   hasIssueReport,
   computeIssueResolution,
@@ -160,6 +172,7 @@ import {
 } from "../../../service/issue-resolution.js";
 import { GhRunner, createNodeGhExecFile } from "../../../service/gh-runner.js";
 import { readGithubIssueRef, labelToResolution, type GithubIssueRef } from "../../../service/resolution-projector.js";
+import type { GithubIssueRow } from "../../../service/github-issue-listing.js";
 
 /**
  * One rendered row — the fields D4 names (title, slug, reporter_project,
@@ -237,6 +250,122 @@ function projectIssueRow(
     ...(triage.severity !== undefined ? { severity: triage.severity } : {}),
     ...(triage.category !== undefined ? { category: triage.category } : {}),
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GitHub-configured `feedback.upstream` read surface (spec-a-github-filed-
+// defect-must-be-claimable-one-ingest-seam, AC-GR-1/2/10/12). Read live via
+// `report-issue-wiring.ts::resolveGithubJoinedRows` — never a second
+// `GhRunner`/`GitHubIntakePort` construction, never a corpus write.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * §M4's declared header contract's boundary line, PINNED verbatim
+ * (AC-GR-10's oracle greps this exact literal): this listing is the live
+ * GitHub state, never a union with the local-only pre-GitHub reports
+ * `hasIssueReport` also matches — those stay behind `lore issues --local`.
+ */
+const GITHUB_LISTING_LOCAL_BOUNDARY_NOTE =
+  "pre-GitHub local-only reports are not listed here (see 'lore issues --local')";
+
+/**
+ * One rendered GitHub-listing row. `resolution` is EITHER a real 9-state
+ * `IssueResolution` member (already ingested — D6's computed resolution,
+ * never re-derived here) OR the literal `"not_ingested"` — deliberately
+ * OUTSIDE that vocabulary (`github-issue-listing.ts`'s own header), so
+ * AC-GR-2's two tokens can never collide by construction, not by
+ * convention.
+ */
+interface GithubProjectedRow {
+  readonly number: number;
+  readonly title: string;
+  readonly state: string;
+  readonly resolution: IssueResolution | "not_ingested";
+  readonly slug?: string;
+}
+
+/** The ONE place a {@link GithubIssueRow} becomes a {@link GithubProjectedRow} — so the human table and `--json` render off the same projection. */
+function projectGithubRow(row: GithubIssueRow): GithubProjectedRow {
+  if (row.kind === "ingested") {
+    return {
+      number: row.issue.number,
+      title: row.issue.title,
+      state: row.issue.state,
+      resolution: row.resolution,
+      slug: row.task.slug,
+    };
+  }
+  return { number: row.issue.number, title: row.issue.title, state: row.issue.state, resolution: "not_ingested" };
+}
+
+/**
+ * Reads + joins + renders a GitHub-configured `feedback.upstream`'s live
+ * issue listing (AC-GR-1/2/10/12) — the ONE listing implementation
+ * `commands/report-issue.ts --list` also calls (via a lazy `import("./
+ * issues.js")`, mirroring the MCP tool's lazy import of `report-issue-
+ * wiring.ts`), so neither command re-derives its own read/render.
+ *
+ * ⛔ RESIDUAL, named rather than silently inherited (mirrors this file's own
+ * local-branch residual above): `--open`/`--resolved`/`--all`/`--severity`/
+ * `--category`/`--verify` are NOT implemented against this branch — the
+ * caller (`run()` below) refuses loudly rather than silently ignoring them
+ * when any is passed explicitly. This listing always shows every
+ * currently-listed GitHub issue (G3's "never drops a row" invariant), the
+ * shape all four of this task's ACs exercise.
+ *
+ * @param app - the loaded local App — `app.corpusService` is the ONLY
+ *   corpus consulted for already-ingested tasks (never a second corpus)
+ * @param cfg - the GitHub-shaped `feedback.upstream` config
+ * @param corpusPath - the local corpus root, printed/reported exactly like
+ *   the local branch's `Corpus: ` line (§M4's declared render contract)
+ * @param json - whether `--json` was passed
+ */
+export async function runGithubIssuesListing(
+  app: ReturnType<typeof loadLoreApp>["app"],
+  cfg: GithubUpstreamCfg,
+  corpusPath: string,
+  json: boolean,
+): Promise<void> {
+  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg);
+  if (!joinedResult.ok) {
+    process.stderr.write(formatError(joinedResult.error) + "\n");
+    process.exitCode = exitCode(joinedResult.error);
+    return;
+  }
+
+  const projected = joinedResult.value.rows.map(projectGithubRow);
+
+  if (json) {
+    console.log( // CLI surface
+      JSON.stringify(
+        {
+          ok: true,
+          data: {
+            corpus_path: corpusPath,
+            source: "github",
+            repo: cfg.repo,
+            total: projected.length,
+            reports: projected,
+            local_note: GITHUB_LISTING_LOCAL_BOUNDARY_NOTE,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
+  if (projected.length === 0) {
+    console.log("(no GitHub issue reports)"); // CLI surface
+  } else {
+    console.log(`GitHub issue reports (${cfg.repo}) (${projected.length}):`); // CLI surface
+    const headers = ["Number", "Title", "State", "Resolution", "Slug"];
+    const tableRows = projected.map((r) => [String(r.number), r.title, r.state, r.resolution, r.slug ?? ""]);
+    console.log(formatTable(headers, tableRows)); // CLI surface
+  }
+  console.log(GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
 }
 
 export default defineCommand({
@@ -320,53 +449,61 @@ export default defineCommand({
       // the SAME function, so a retired-shape upstream cannot drift back
       // into two independently-derived verdicts.
       const classification = classifyFeedbackUpstream(config);
-      // reason: BOTH a GitHub-shaped upstream (spec-the-defect-channel-
-      // reaches-no-machine-but-its-own-github P2) and a RETIRED-shaped
-      // upstream (spec-lore-issues-falls-through-to-the-local-corpus-on-a-
-      // retired D1) are refused loudly — never silently treated as "no
-      // upstream configured", which would misreport a REAL configuration as
-      // absent — unless `--local` bypasses upstream reading entirely. The
-      // GitHub-backed read surface (`GitHubIntakePort.listIssues`) is a
-      // later phase's own task, out of this task's scope; the retired shape
-      // has no transport left at all (`classification.error`, the SAME
-      // `LoreError` `lore report-issue` emits for the identical shape).
-      if (args.local !== true) {
-        if (classification.kind === "retired") {
-          process.stderr.write(formatError(classification.error) + "\n");
-          process.exitCode = exitCode(classification.error);
-          return;
-        }
-        if (classification.kind === "github") {
+      // reason: a RETIRED-shaped upstream (spec-lore-issues-falls-through-to-
+      // the-local-corpus-on-a-retired D1) is refused loudly — never silently
+      // treated as "no upstream configured", which would misreport a REAL
+      // configuration as absent — unless `--local` bypasses upstream reading
+      // entirely. A GitHub-shaped upstream is handled by the dedicated
+      // branch below (spec-a-github-filed-defect-must-be-claimable-one-
+      // ingest-seam, AC-GR-1/2/10/12: `runGithubIssuesListing` reads live via
+      // `report-issue-wiring.ts::resolveGithubJoinedRows`).
+      if (args.local !== true && classification.kind === "retired") {
+        process.stderr.write(formatError(classification.error) + "\n");
+        process.exitCode = exitCode(classification.error);
+        return;
+      }
+      // reason: the GitHub read surface (AC-GR-1/2/10/12) always shows every
+      // currently-listed GitHub issue (G3's "never drops a row" invariant) —
+      // `--open`/`--resolved`/`--all`/`--severity`/`--category`/`--verify`
+      // have no implementation against it (RESIDUAL, named rather than
+      // silently inherited: see `runGithubIssuesListing`'s own header).
+      // Refusing loudly when any is passed EXPLICITLY (never on the derived
+      // `mode` default, which is always "open" even with zero flags) keeps
+      // "the flag had no effect" from happening silently.
+      if (args.local !== true && classification.kind === "github") {
+        const explicitModeFlag = args.open === true || args.resolved === true || args.all === true;
+        if (args.verify === true || explicitModeFlag || severityFilter !== undefined || categoryFilter !== undefined) {
           process.stderr.write(
             formatError({
               code: "VALIDATION_ERROR",
               field: "feedback.upstream",
               message:
-                "this corpus's feedback.upstream is GitHub-configured (repo: " +
-                `${classification.cfg.repo}) — reading it via 'lore issues' is not yet supported ` +
-                "(a later phase of spec-the-defect-channel-reaches-no-machine-but-its-own-github). " +
-                "Pass --local to read this corpus's own issue reports instead.",
+                "--verify/--open/--resolved/--all/--severity/--category against a GitHub-configured " +
+                "feedback.upstream are not yet supported by 'lore issues' (a later phase of spec-a-github-filed-" +
+                "defect-must-be-claimable-one-ingest-seam) — the plain listing always shows every currently-open " +
+                "GitHub issue. Pass --local to use those filters against this corpus's own issue reports instead.",
             }) + "\n",
           );
           process.exitCode = 4;
           return;
         }
+        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true);
+        return;
       }
       // reason: `upstreamCorpusPath` is ALWAYS undefined here (P4,
       // spec-the-defect-channel-reaches-no-machine-but-its-own-github) — the
       // legacy `feedback.upstream.corpus_path` field is retired
       // (parses-but-ignored: no `UpstreamPort` implementation exists anymore
-      // to open it against). Both non-local upstream shapes are refused
-      // ABOVE, before this call — the retired shape via
-      // `classification.kind === "retired"` (spec-lore-issues-falls-through-
-      // to-the-local-corpus-on-a-retired D1, no longer silently absorbed
-      // into "unconfigured"), the GitHub shape via `classification.kind ===
-      // "github"`. `resolveIssueReadSource`'s `"upstream"` variant is
-      // therefore structurally unreachable from THIS call site until a
-      // future task wires a GitHub-backed read source — kept as a real
-      // (never constructed) branch below rather than deleted from the
-      // shared decision function, which other future callers may still
-      // need.
+      // to open it against). Every non-local upstream shape is disposed of
+      // ABOVE, before this call — the retired shape returns (exit
+      // `exitCode(classification.error)`) via `classification.kind ===
+      // "retired"`, the GitHub shape either returns (exit 4, an explicit
+      // filter flag) or renders via `runGithubIssuesListing` and returns via
+      // `classification.kind === "github"`. `resolveIssueReadSource`'s
+      // `"upstream"` variant is therefore structurally unreachable from THIS
+      // call site — kept as a real (never constructed) branch below rather
+      // than deleted from the shared decision function, which other future
+      // callers may still need.
       const source = resolveIssueReadSource({
         localCorpusRoot: dirname(dirname(dbPath)),
         upstreamCorpusPath: undefined,
