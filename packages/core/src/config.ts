@@ -737,9 +737,10 @@ function warnRetiredUpstreamTransportKey(key: "corpus_path" | "transport"): void
  *   which every caller treats as a fail-loud `VALIDATION_ERROR` (configuring
  *   this section IS the consent act, SPEC-072 Overview) — there is no
  *   partial/silent-degrade state.
- * @invariant `upstream`, once present, is one of TWO mutually-exclusive
+ * @invariant `upstream`, once present, is one of THREE mutually-exclusive
  *   shapes (spec-the-defect-channel-reaches-no-machine-but-its-own-github
- *   P2, AC-GI-1 scenario 5) — a plain `z.union`, not a discriminated union,
+ *   P2, AC-GI-1 scenario 5; the third added by the vendor-intake split,
+ *   2026-08-25) — a plain `z.union`, not a discriminated union,
  *   because neither shape carries a literal tag field of its own (adding one
  *   would be a THIRD breaking change on top of the transport switch itself):
  *     1. the LEGACY SQLite shape — `root_prd` REQUIRED (disabling the R-5a
@@ -751,15 +752,47 @@ function warnRetiredUpstreamTransportKey(key: "corpus_path" | "transport"): void
  *     2. the GITHUB shape — `repo` alone (`"owner/repo"`), the target
  *        `GitHubIntakePort`'s `verifyTarget`/`fileIssue`/`listIssues` resolve
  *        ONCE from config and pass explicitly (risk R2 — never `-R` inferred
- *        from a git remote). `.strict()` on EACH branch is what makes the two
+ *        from a git remote). `.strict()` on EACH branch is what makes the
  *        shapes mutually exclusive: a config carrying both `repo` and
- *        `root_prd` matches neither branch and fails loud, rather than
+ *        `root_prd` matches no branch and fails loud, rather than
  *        silently picking one.
- *   `z.union` tries each branch in declaration order and reports the first
- *   branch's issues verbatim when a value matches neither — acceptable here
- *   because the two shapes' required-key sets do not overlap, so a
- *   malformed config almost always reads as "missing X" for whichever
+ *     3. the VENDOR-CONSENT shape — `vendor: true` alone. Carries CONSENT
+ *        only, never an address: the address is `@lore/core`'s
+ *        `VENDOR_INTAKE_REPO` constant (`issue-report.ts`), shipped in the
+ *        binary because it is the same value for every consumer and a
+ *        hand-copied copy of it can only be right-by-luck or silently
+ *        pointed at a stranger's repository. `report-issue-wiring.ts`'s
+ *        `classifyFeedbackUpstream` NORMALIZES this branch into shape 2's
+ *        `{repo}` before any consumer sees it, so nothing downstream of the
+ *        classifier gains a second addressing path.
+ *   `z.union` tries each branch in declaration order; when a value matches
+ *   none, `describeConfigIssue` (below) recurses into the branch with the
+ *   FEWEST issues, ties keeping the first-declared — acceptable here because
+ *   the three shapes' required-key sets are disjoint, so a malformed config
+ *   almost always reads as "missing X"/"unrecognized key X" for whichever
  *   branch it came closer to, not a generic union failure.
+ * @invariant `vendor` is `z.literal(true)`, so `vendor: false` FAILS to parse
+ *   — see that field's own JSDoc for why a parsing `false` would be a silent
+ *   no-op rather than an expression of refusal. Declaration order puts this
+ *   branch LAST, keeping the legacy branch first, so the fewest-issues
+ *   selection above reports the SAME field it reported before this branch
+ *   existed for every pre-existing malformed-config shape (measured against
+ *   the `{corpus_path, root_prd, <typo>}` fixture in
+ *   `tests/unit/service/transport-config-compat.test.ts`, which still pins
+ *   `feedback.upstream.<typo>`).
+ *   ⛔ Accepted consequence, measured rather than assumed: a config mixing
+ *   intents (`{vendor: true, repo: "o/r"}`) matches no branch and fails loud,
+ *   but the reported field names only ONE of the two keys as an unrecognized
+ *   key — the same one-sidedness the pre-existing `repo`+`root_prd` mix
+ *   already had, not a new defect class.
+ *   ⛔ ALSO measured, and NOT closed by this section: `parseConfig`'s honest
+ *   per-key refusal is DISCARDED by the CLI. Non-`ai` config parse failures
+ *   keep the historical silent fallback-to-defaults (see
+ *   `isAiConfigValidationError`), so at a real `lore report-issue` a
+ *   `vendor: false` or mixed-intent config surfaces as
+ *   `buildUnconfiguredUpstreamRemedy`'s "is not configured" — loud in exit
+ *   code (4), wrong in REASON. The precise error exists at this boundary and
+ *   is only visible to a direct `parseConfig` caller.
  * @invariant `corpus_path` and `transport` (legacy shape only) are RETIRED
  *   (spec-the-defect-channel-reaches-no-machine-but-its-own-github P4,
  *   AC-GI-14) — `corpus_path` named the upstream repo root a live SQLite
@@ -872,6 +905,29 @@ export const FeedbackConfigSchema = z
              * inferred from a git remote via `-R`.
              */
             repo: z.string().min(1).regex(/^[^/\s]+\/[^/\s]+$/, "must be 'owner/repo'"),
+          })
+          .strict(),
+        z
+          .object({
+            /**
+             * CONSENT to report this corpus's defects into the vendor's own
+             * GitHub intake — `@lore/core`'s `VENDOR_INTAKE_REPO`
+             * (`issue-report.ts`), which ships INSIDE the binary and is
+             * therefore never written here. See this schema's own `vendor`
+             * invariant above for why addressing left config while consent
+             * stayed.
+             *
+             * ⛔ `z.literal(true)`, deliberately NOT `z.boolean()`: `vendor:
+             * false` MUST fail to parse rather than read as "configured, and
+             * the answer is no". There is no third state to express — a
+             * corpus that does not consent simply omits `upstream` (which
+             * `classifyFeedbackUpstream` reports as `unconfigured`, refusing
+             * loudly) or names its own `repo`. A parsing `false` would be a
+             * silent no-op: the writer believes something is configured, and
+             * `lore report-issue` refuses anyway with an "unconfigured"
+             * message that contradicts the file in front of them.
+             */
+            vendor: z.literal(true),
           })
           .strict(),
       ])

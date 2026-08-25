@@ -62,7 +62,7 @@ import { OutlineService } from "../../../src/service/outline-service.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { JudgmentService } from "../../../src/service/judgment-service.js";
-import { NoOpTelemetry, LoreConfigSchema, buildUnconfiguredUpstreamRemedy } from "@lore/core";
+import { NoOpTelemetry, LoreConfigSchema, VENDOR_INTAKE_REPO, buildUnconfiguredUpstreamRemedy } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
@@ -166,6 +166,8 @@ const REPORT_ISSUE_ARGS = {
 
 const RETIRED_UPSTREAM = { root_prd: "prd-legacy-target" };
 const GITHUB_UPSTREAM = { repo: "acme/widget" };
+/** The vendor-consent shape (2026-08-25) — CONSENT only; the address is not written here. */
+const VENDOR_UPSTREAM = { vendor: true };
 
 // ─── AC-MS-2 ───────────────────────────────────────────────────────────────
 
@@ -182,6 +184,41 @@ describe("AC-MS-2 MCP retired-shape refusal comes from the shared definition", (
     // ⛔ Equality, not containment — a drifted copy that still contains the
     // canonical fragment must FAIL this. That is the entire point of AC-MS-2.
     expect(error.message).toBe(canonical.message);
+  });
+});
+
+// ─── Vendor-consent branch (2026-08-25) — PRODUCTION WIRING, not capability ─
+
+describe("the MCP handler routes vendor-consent configs through the shared classifier", () => {
+  it("a {vendor: true} feedback.upstream reaches the GitHub filing path addressed at VENDOR_INTAKE_REPO — never the retired-shape refusal", async () => {
+    // ⛔ This is a WIRING assertion, and it drives the real surface: the MCP
+    // `lore_report_issue` handler used to re-derive shape policy itself with
+    // `resolveFeedbackUpstreamCfg` + `isGithubUpstreamCfg`. That chain tests
+    // `"repo" in cfg`; a vendor config carries no `repo`, so it fell through to
+    // the LEGACY branch and refused a valid config with the retired-SQLite
+    // message. Normalizing inside `classifyFeedbackUpstream` is only half the
+    // fix — this test proves the MCP surface actually consumes it.
+    //
+    // MEASURED, not guessed: `REPORT_ISSUE_ARGS` carries no `severity`/
+    // `category`, so the handler's own missing-required-triage-field pre-check
+    // refuses BEFORE any `gh` call. That refusal is what makes this a safe,
+    // network-free probe AND what gives it discriminating power — the pre-check
+    // ECHOES the resolved `cfg.repo`, so the message text proves which address
+    // the classifier handed over.
+    const server = makeServerWithConfig(makeConfig(VENDOR_UPSTREAM));
+    const call = getToolHandler(server, "lore_report_issue");
+
+    const result = await call(REPORT_ISSUE_ARGS);
+
+    expect(result.isError).toBe(true);
+    const error = parseError(result);
+    expect(error.code).toBe("VALIDATION_ERROR");
+    expect(error.field).toBe("severity,category");
+    // Reached the GitHub filing path, addressed at the vendor intake.
+    expect(error.message).toContain(VENDOR_INTAKE_REPO);
+    // ⛔ The load-bearing negative: the pre-vendor handler produced THIS text
+    // for exactly this input.
+    expect(error.message).not.toContain("configured with the retired SQLite shape");
   });
 });
 

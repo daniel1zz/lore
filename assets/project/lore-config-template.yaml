@@ -65,3 +65,35 @@ ai:
       command: claude
       args: ["-p"]
       timeout_ms: 180000
+
+# ── Defect reporting: `lore report-issue` / `lore issues` ─────────────────────
+# COMMENTED OUT ON PURPOSE — see below. Uncomment ONE of the two shapes to turn
+# `lore report-issue` on for this corpus; leaving both commented keeps it
+# refusing with an actionable message naming both paths.
+#
+# `feedback.upstream` carries CONSENT, not an address. Filing a report sends
+# this project's issue title, description, repro command and resolved actor
+# identity to a GitHub repository outside this project, so it MUST NOT be
+# seeded live: a shipped default here would agree, on your behalf, to publish
+# your defect reports somewhere. That is why the block below is commented and
+# why the key has no default anywhere in the binary.
+#
+#   1. Report into the lore project's own GitHub intake. The address is NOT
+#      written here — it ships inside the `lore` binary (`@lore/core`'s
+#      VENDOR_INTAKE_REPO), because it is the same value for every consumer and
+#      a hand-copied one can only be right-by-luck or silently pointed at a
+#      stranger's repository. `vendor` accepts `true` only: `vendor: false`
+#      fails to parse rather than reading as a configured "no" (omit the whole
+#      `upstream` key to decline).
+#
+# feedback:
+#   upstream:
+#     vendor: true
+#
+#   2. Or file into a GitHub intake you host yourself, giving its "owner/repo".
+#      Mutually exclusive with `vendor` — a config carrying both matches
+#      neither shape and fails loud.
+#
+# feedback:
+#   upstream:
+#     repo: "your-org/your-intake-repo"

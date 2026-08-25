@@ -100,6 +100,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { basename, join, resolve } from "node:path";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { VENDOR_INTAKE_REPO } from "@lore/core";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
@@ -110,7 +111,16 @@ const TMP_ROOT = tmpdir();
 /** Plan Decisions Log D-3: the one permanent, dedicated e2e target repo. */
 const TARGET_REPO: string = "daniel1zz/lore-e2e-target";
 /** Plan Invariant 5: the product's own tracker. NEVER file into this. */
-const FORBIDDEN_REPO: string = "daniel1zz/lore";
+/**
+ * `@lore/core`'s `VENDOR_INTAKE_REPO` — the product's own tracker. ⛔ DERIVED,
+ * never a second copy of the literal: the thing this suite must never touch is
+ * *by definition* the address `feedback.upstream.vendor: true` resolves to, so
+ * a hand-copied duplicate here could go stale against the real intake and
+ * leave this guard watching an address nothing files to. The static
+ * `TARGET_REPO === FORBIDDEN_REPO` self-check below now also fails loud if the
+ * constant were ever pointed at this suite's dedicated e2e target.
+ */
+const FORBIDDEN_REPO: string = VENDOR_INTAKE_REPO;
 
 if (TARGET_REPO === FORBIDDEN_REPO) {
   // Static self-check — cannot happen given the literals above, but a future

@@ -200,7 +200,7 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
   {
     key: "feedback.upstream",
     rationale:
-      "Names WHERE this corpus's lore report-issue reports go — configuring it is the per-project consent act (SPEC-072); a shipped default would be meaningless or actively wrong.",
+      "Carries CONSENT to send this corpus's own defect reports (title, description, repro command, actor) to a third-party GitHub intake — inherently per-project, and no default can honestly stand in for an agreement nobody made. ADDRESSING is no longer part of this key's job: the vendor intake's address ships inside the binary as @lore/core's VENDOR_INTAKE_REPO, spent by feedback.upstream.vendor: true, so the half that WAS a constant left config entirely (2026-08-25) and only the half that genuinely needs a per-project decision remains.",
   },
   {
     key: "context.memory_files.root.max_lines",
