@@ -41,7 +41,8 @@ bun run typecheck         # tsc --noEmit for all packages + scripts
 # Tests — two runners, both must pass
 bun run test:vitest       # bunx vitest run — covers non-bun:sqlite files
 bun run test:bun          # cd packages/lore && bun test .bun.test
-bun run test              # both runners in sequence
+bun run test              # ⛔ NOT "both runners" — a 4-link && chain ending in check:spec-mirror; a red vitest
+                          # short-circuits the rest. `knowledge-prd-001-s-prose-contradicts-the-exporter-it-describes`
 bun run test:changed [<base>]  # deterministic worktree oracle (default base: merge-base main HEAD); --list previews
                                # ⛔ UNDER-selects (tree-scanning tests naming no literal path; consumers reached via dynamic `await import()`; `.bun.test.ts` via `vitest --changed`) AND OVER-selects (a high-fan-in edit can select the whole suite a worktree forbids). ⇒ hand-pick direct consumers, run the blind ones BY HAND, re-verify on main. Selection contract, closed sets, and why a marker-only fix is INERT: `knowledge-bun-run-test-changed-full-selection-contract-and-its`
 
@@ -146,8 +147,8 @@ Lore is built **through** the Lore-governed workflow (corpus chain + skills + ga
 
 - False oracles — exit-code-true vs. measured-the-right-thing; green control; harness-sees-its-own-copy. `knowledge-a-symlinked-node-modules-makes-the-green-control-pass`
 - ⛔ Oracle design: a vitest `-t` naming a missing block exits 0 all-SKIPPED, so filtered oracles MUST also require `Tests N passed`; a negative-only prose oracle needs a POSITIVE counterpart citing the new SSOT. `knowledge-a-dry-run-flag-that-does-not-exist-writes-the-files`
-- ⛔ `export-spec-mirror.ts` parses ONLY `--check` — `--dry-run` is ignored and it WRITES; an MDX placeholder in a corpus body is mirrored EXPANDED (PRD-001's `<ChildrenOf />` → 594 lines), so `check:spec-mirror` re-drifts on every new doc and its exit carries no signal. `knowledge-a-dry-run-flag-that-does-not-exist-writes-the-files`
-- ⛔ A vitest run NEVER proves a symbol is exported — esbuild does not check named exports across modules, so importing a non-exported name is GREEN unless the test CALLS it (two-sided probe measured). Only `tsc` (TS2459) or a call catches it; "both runners green" carries no export guarantee. `knowledge-under-vitest-importing-a-name-a-module-does-not`
+- ⛔ `export-spec-mirror.ts` parses ONLY `--check` (`--dry-run` is ignored, it WRITES) and write-mode does NOT reconcile bodies — only `lore export-docs --force` does; an MDX placeholder is mirrored EXPANDED, so drift returns on the next new doc. `knowledge-a-dry-run-flag-that-does-not-exist-writes-the-files`
+- ⛔ A vitest run NEVER proves a symbol is exported — esbuild does not check named exports across modules, so importing a non-exported name is GREEN unless the test CALLS it. Only `tsc` (TS2459) or a call catches it; "both runners green" carries no export guarantee. `knowledge-under-vitest-importing-a-name-a-module-does-not`
 - Eight pointer-less lessons, evicted verbatim, still normative — substring matchers, SSOT/asset parity, distribution oracles, worktree dispatch order, `spawnSync`/`set -e`, main-checkout actor, path-scoped commits, clean-tree verdicts. `knowledge-retired-from-root-claude-md-eight-pointer-less`
 - ⛔ Nine standing lessons are UNENFORCED — each names the mechanism it still needs; `lore gate plan-close --explain` is the SSOT for the dropped plan-close copy. `knowledge-the-nine-unenforced-standing-lessons-evicted-from`
 - Distribution-first: name the delivery surface or it does not exist for consumers. `adr-distribution-first-every-improvement-names-its-consumer`

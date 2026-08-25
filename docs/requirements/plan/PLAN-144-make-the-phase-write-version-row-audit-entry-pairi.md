@@ -3,10 +3,10 @@ id: PLAN-144
 type: plan
 role: plan
 title: "Make the phase-write version-row / audit-entry pairing oracle-enforced"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-25
 tags: []
 parent: SPEC-148
 phases:

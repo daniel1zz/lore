@@ -6924,6 +6924,10 @@
     "01M0VD5BK21XAW9ETEYN7F52BY": {
       "human_id": "KN-552",
       "file_path": "docs/requirements/knowledge/KN-552-prd-001-s-prose-contradicts-the-exporter-it-descri.md"
+    },
+    "01M0VETYJV6A4GP6JB33DRBWJV": {
+      "human_id": "KN-553",
+      "file_path": "docs/requirements/knowledge/KN-553-assessment-make-the-phase-write-version-row-audit.md"
     }
   }
 }
