@@ -106,7 +106,22 @@
  *   - `runContentCheck` — IO, READ-ONLY. BODY comparison (AC-BFI-8) via a `dryRun: true`
  *     `exportDocs` probe; writes nothing. Called from `main`'s check mode only, never from
  *     `runExport` — so `bun run mirror:export`'s behaviour and exit codes are unchanged by it.
- *   - `main` — IO. CLI dispatch (`--check` selects check mode); never calls `process.exit` itself.
+ *   - `parseMirrorArgv` — PURE. The WHOLE argv contract in one function: `--check` and
+ *     `--type <t>` are recognised, every other token is REFUSED. ⛔ It replaces an
+ *     `argv.includes("--check")` that read nothing else, under which
+ *     `--check --type prd --definitely-not-a-flag` scanned all six types and printed no refusal at
+ *     all (measured 2026-08-25) — the defect class of
+ *     `knowledge-a-dry-run-flag-that-does-not-exist-writes-the-files`, where a flag that does not
+ *     exist is accepted and the command proceeds to do the opposite of what the caller asked.
+ *   - `main` — IO. Parses argv FIRST — a usage error returns {@link MIRROR_USAGE_EXIT_CODE} before
+ *     the corpus is even opened — then dispatches export vs. check over the SELECTED types; never
+ *     calls `process.exit` itself.
+ *   - ⛔ `runCheck` / `runContentCheck` / `runExport` each take the type selection as an EXPLICIT
+ *     third parameter defaulting to every {@link MIRROR_TYPES} entry. A narrowed selection changes
+ *     WHICH types are scanned and nothing else: within a scanned type the verdict is bit-for-bit
+ *     the one a full run reports, which is what
+ *     `scripts/tests/export-spec-mirror-type-scope.test.ts` asserts by comparing the narrow and
+ *     full runs on the SAME seeded drift.
  *   - Everything under "Pure/fs-only surface" below is re-exported from `export-spec-mirror-core.js`
  *     for callers that only need one import site.
  *
@@ -127,15 +142,34 @@
  *       completed with 0 per-doc errors but still failed to reach parity for some type
  *       (defensive — should not occur, since `exportDocs` either creates or reports an error for
  *       every doc it processes).
+ *   {@link MIRROR_USAGE_EXIT_CODE} (3) — the ARGUMENTS were wrong, so NOTHING was measured: an
+ *       unrecognised token, a `--type` with no value, an unknown type name, or a repeated `--type`.
+ *       The offending token is echoed to stderr verbatim. ⛔ Returned BEFORE the corpus is opened,
+ *       so this code can never be read as "the mirror is stale" (2) nor as "the tool tried and
+ *       could not decide" (4). ⛔ It is declared in THIS file rather than beside 2 and 4 in
+ *       `export-spec-mirror-core.ts` because it is a property of this file's CLI surface, which
+ *       core — pure/fs-only, never argv-aware — has no part in. That split is not left to
+ *       diligence: `scripts/tests/export-spec-mirror-argv.test.ts` asserts 3 differs from BOTH
+ *       imported core codes, so a future core code that took 3 turns that suite red instead of
+ *       silently aliasing a usage error onto a corpus verdict.
  *   {@link MIRROR_HARD_FAILURE_EXIT_CODE} (4) — a per-doc export error, an unreadable or
  *       schema-invalid `.lore/export-index.json`, a corpus read failure, or a drifted mirror file
  *       attributable to no corpus doc, for ANY type. ⛔ 2 and 4 must stay distinguishable: 4 means
  *       the tool could not decide, 2 means it decided the mirror is stale. A test asserting merely
  *       "non-zero" cannot tell a detection from a crash.
  *
- * Usage:
- *   bun scripts/export-spec-mirror.ts            # export ALL SIX types (writes)
- *   bun scripts/export-spec-mirror.ts --check    # drift check, ALL SIX types (read-only, never regenerates)
+ * Usage (⛔ every token is PARSED, never scanned for — an unrecognised one is REFUSED, see
+ * {@link parseMirrorArgv}):
+ *   bun scripts/export-spec-mirror.ts                     # export ALL SIX types (writes)
+ *   bun scripts/export-spec-mirror.ts --check             # drift check, ALL SIX types (read-only)
+ *   bun scripts/export-spec-mirror.ts --check --type spec # the SAME check over ONE type
+ *   bun scripts/export-spec-mirror.ts --type spec         # export ONE type (writes; prunes only that type's directory)
+ *
+ * ⛔ `package.json`'s `check:spec-mirror` — the link `bun run test` invokes — MUST stay the
+ * UNNARROWED `bun scripts/export-spec-mirror.ts --check`. A narrowed variant wired into that chain
+ * would leave every other type's drift behaviour exercised by nothing;
+ * `scripts/tests/mirror-production-command-unnarrowed.test.ts` asserts that script string by
+ * fixed-string EQUALITY (⛔ not containment, which stays true if someone appends `--type spec`).
  */
 
 import { existsSync } from "node:fs";
@@ -195,16 +229,158 @@ const __filename = fileURLToPath(import.meta.url);
 /** This file's own repo root — see module header "Why `projectDir` is derived from THIS FILE's own path". */
 const REPO_ROOT = join(__filename, "..", "..");
 
+// ─── argv contract (⛔ the ONLY place this script decides what an argument means) ──────────────
+
+/**
+ * Exit code for a USAGE error — the arguments were wrong, so NOTHING about the mirror was
+ * measured. ⛔ Distinct from `0` (clean), from {@link MIRROR_DRIFT_EXIT_CODE} (2, "the mirror is
+ * stale") and from {@link MIRROR_HARD_FAILURE_EXIT_CODE} (4, "the tool could not decide"): a
+ * caller who typo'd a flag and a caller whose corpus drifted must never receive the same number.
+ *
+ * ⛔ Declared HERE and not beside 2 and 4 in `export-spec-mirror-core.ts` because it describes
+ * THIS file's CLI surface, and core is the pure/fs-only half that never sees argv. The
+ * non-collision is mechanized rather than trusted: `scripts/tests/export-spec-mirror-argv.test.ts`
+ * asserts this value differs from BOTH core codes, so a future core code that took `3` turns that
+ * suite red instead of silently aliasing a usage error onto a corpus verdict.
+ */
+export const MIRROR_USAGE_EXIT_CODE = 3;
+
+/** The fully resolved argv of one run — what {@link main} dispatches on, with nothing left implicit. */
+export interface MirrorArgv {
+  /** `true` iff `--check` was given: the read-only drift check. `false` selects the WRITING export. */
+  readonly checkMode: boolean;
+  /**
+   * The mirrored types this run scans, in {@link MIRROR_TYPES} order — every type unless `--type`
+   * narrowed it. ⛔ Narrowing selects WHICH types are visited and nothing else: the verdict for a
+   * visited type is the one a full run would report for that same type.
+   */
+  readonly types: readonly MirrorDocType[];
+}
+
+/** {@link parseMirrorArgv}'s verdict — a resolved {@link MirrorArgv}, or the human-readable reason the arguments were refused. ⛔ Never both, and never a partially-applied argv. */
+export type MirrorArgvParse =
+  | { readonly ok: true; readonly value: MirrorArgv }
+  | { readonly ok: false; readonly message: string };
+
+/** The `--type=` inline form's prefix, named once so the parser's two reads of it cannot drift apart. */
+const TYPE_FLAG_PREFIX = "--type=";
+
+/** Printed to stderr under every refusal, so a caller sees the whole accepted surface rather than only the token they got wrong. */
+export const MIRROR_USAGE_TEXT = [
+  `usage: bun scripts/export-spec-mirror.ts [--check] [--type <${MIRROR_TYPES.join("|")}>]`,
+  "  --check          read-only drift check; omit it to run the WRITING export",
+  `  --type <type>    scan ONE mirrored type instead of all ${MIRROR_TYPES.length} (the inline form --type=<type> is accepted too)`,
+].join("\n");
+
+/** Narrowing type guard over the {@link MIRROR_TYPES} tuple — the single place a raw `--type` value becomes a {@link MirrorDocType}. */
+function isMirrorDocType(value: string): value is MirrorDocType {
+  return (MIRROR_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * PURE argv parser — the whole command-line contract of this script, and the reason an
+ * unrecognised argument can no longer be silently ignored.
+ *
+ * ## What this replaces, measured
+ *
+ * `main` previously read `argv.includes("--check")` and NOTHING else, then looped
+ * {@link MIRROR_TYPES} unconditionally. Measured 2026-08-25 on main @ `3331a98e`:
+ * `bun scripts/export-spec-mirror.ts --check --type prd --definitely-not-a-flag` exited 2 having
+ * scanned all six types, printing no refusal line at all — BOTH the bogus flag and the
+ * not-yet-existing `--type` were inert in that single run. That is the defect class of
+ * `knowledge-a-dry-run-flag-that-does-not-exist-writes-the-files`: an argument that does not exist
+ * is accepted, and the command proceeds to do something other than what the caller asked for.
+ *
+ * ## Every refusal, and why each one is a refusal rather than a default
+ *
+ *   - an unrecognised token — the caller asked for something this script does not do, and guessing
+ *     which part of their intent to drop is precisely the defect above. Echoed verbatim.
+ *   - `--type` with no value (last argument, or an empty `--type=`) — there is no "default type"
+ *     to fall back to that would not also be a silent reinterpretation of the request.
+ *   - an unknown type name — the valid set is finite and is named in the message.
+ *   - `--type` given more than once — two narrowings cannot both be honoured, and last-wins would
+ *     silently discard one of them. ⛔ Refused even when the two values are equal: "you typed it
+ *     twice" is decidable, whereas "you meant it twice" is not.
+ *
+ * ⛔ A repeated `--check` is NOT refused: unlike `--type` it carries no value, so a second one
+ * cannot express a different intent from the first and there is nothing to discard.
+ *
+ * @param argv the arguments AFTER the script path (i.e. `process.argv.slice(2)`).
+ * @returns `{ ok: true, value }` with the resolved mode + type selection, or `{ ok: false, message }`
+ *   naming the offending token verbatim. ⛔ Never throws, never partially applies an argv.
+ */
+export function parseMirrorArgv(argv: readonly string[]): MirrorArgvParse {
+  let checkMode = false;
+  let selectedType: MirrorDocType | undefined;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] as string;
+
+    if (arg === "--check") {
+      checkMode = true;
+      continue;
+    }
+
+    if (arg === "--type" || arg.startsWith(TYPE_FLAG_PREFIX)) {
+      const inlineValue = arg.startsWith(TYPE_FLAG_PREFIX) ? arg.slice(TYPE_FLAG_PREFIX.length) : undefined;
+      // reason: the separated form consumes the NEXT token, so the loop must skip it; the inline
+      // form consumes nothing beyond itself. Advancing `index` from WHICH FORM was used (rather
+      // than from whether a value was found) is what keeps a trailing bare `--type` a REFUSAL
+      // below instead of an accidental re-read of whatever followed it.
+      const rawValue = inlineValue ?? argv[index + 1];
+      if (inlineValue === undefined) index += 1;
+
+      if (rawValue === undefined || rawValue === "") {
+        return { ok: false, message: `'${arg}' requires a mirrored type name` };
+      }
+      if (!isMirrorDocType(rawValue)) {
+        return {
+          ok: false,
+          message: `unknown mirrored type '${rawValue}' in '${arg}' (expected one of: ${MIRROR_TYPES.join(", ")})`,
+        };
+      }
+      if (selectedType !== undefined) {
+        return {
+          ok: false,
+          message: `--type given more than once ('${selectedType}' then '${rawValue}') — one run scans one selection`,
+        };
+      }
+      selectedType = rawValue;
+      continue;
+    }
+
+    return { ok: false, message: `unrecognised argument '${arg}'` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      checkMode,
+      types: selectedType === undefined ? MIRROR_TYPES : [selectedType],
+    },
+  };
+}
+
 /** Parity verdict across every {@link MirrorDocType} — the aggregate `runCheck`/`runExport` return, one `MirrorParityResult` per type plus a corpus-wide `ok` (AND across all six). */
 export interface MirrorParityAllTypesResult {
-  readonly perType: Readonly<Record<MirrorDocType, MirrorParityResult>>;
-  /** `true` iff every type's own `perType[type].ok` is `true`. */
+  /**
+   * One verdict per SCANNED type. ⛔ `Partial`, not a full record: a `--type`-narrowed run visits
+   * a subset, and a reader must be able to tell "this type was not scanned" from "this type was
+   * scanned and was clean". The key set IS the scanned set.
+   */
+  readonly perType: Readonly<Partial<Record<MirrorDocType, MirrorParityResult>>>;
+  /** `true` iff every SCANNED type recorded a verdict AND every one of those verdicts is `ok`. ⛔ A type that was selected but produced no verdict makes this `false`, never vacuously `true`. */
   readonly ok: boolean;
 }
 
 /** Full result of one `runExport` run — the underlying service's own report PER TYPE, the corpus-wide orphan-pruning log (empty when nothing was orphaned), and the measured post-write parity verdict across all six types. */
 export interface MirrorExportResult {
-  readonly perType: Readonly<Record<MirrorDocType, MirrorExportReportLike>>;
+  /**
+   * One verdict per SCANNED type. ⛔ `Partial`, not a full record: a `--type`-narrowed run visits
+   * a subset, and a reader must be able to tell "this type was not scanned" from "this type was
+   * scanned and was clean". The key set IS the scanned set.
+   */
+  readonly perType: Readonly<Partial<Record<MirrorDocType, MirrorExportReportLike>>>;
   /** Repo-relative paths of `.md` files removed this run (any mirrored type) because no CURRENT export-index mapping pointed to them — see `export-spec-mirror-core.ts`'s "Orphan pruning". Never silent: always populated, even when empty. */
   readonly pruned: readonly string[];
   readonly parity: MirrorParityAllTypesResult;
@@ -224,12 +400,16 @@ export interface MirrorExportResult {
  * @throws {SpecMirrorError} `corpus_unreadable` (store read failure, names the failing type) or
  *   any `loadMirrorMappings` error.
  */
-export async function runCheck(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorParityAllTypesResult> {
+export async function runCheck(
+  app: App,
+  repoRoot: string = REPO_ROOT,
+  types: readonly MirrorDocType[] = MIRROR_TYPES,
+): Promise<MirrorParityAllTypesResult> {
   const mappings = loadMirrorMappings(repoRoot);
   const fileExists = (relFilePath: string): boolean => existsSync(join(repoRoot, relFilePath));
 
-  const perType = {} as Record<MirrorDocType, MirrorParityResult>;
-  for (const type of MIRROR_TYPES) {
+  const perType: Partial<Record<MirrorDocType, MirrorParityResult>> = {};
+  for (const type of types) {
     const docsResult = await app.corpusService.listFull({ type });
     if (!docsResult.ok) {
       throw new SpecMirrorError("corpus_unreadable", `failed to list corpus ${type} docs: ${JSON.stringify(docsResult.error)}`, {
@@ -242,7 +422,7 @@ export async function runCheck(app: App, repoRoot: string = REPO_ROOT): Promise<
     perType[type] = computeMirrorParity(docs, mappings, fileExists, fileCountOnDisk);
   }
 
-  const ok = MIRROR_TYPES.every((type) => perType[type].ok);
+  const ok = types.every((type) => perType[type]?.ok === true);
   return { perType, ok };
 }
 
@@ -284,8 +464,13 @@ export async function runCheck(app: App, repoRoot: string = REPO_ROOT): Promise<
  */
 /** Body-comparison verdict across every {@link MirrorDocType} — one `MirrorContentDriftResult` per type plus an AND across all six. */
 export interface MirrorContentAllTypesResult {
-  readonly perType: Readonly<Record<MirrorDocType, MirrorContentDriftResult>>;
-  /** `true` iff every type's own `perType[type].ok` is `true`. */
+  /**
+   * One verdict per SCANNED type. ⛔ `Partial`, not a full record: a `--type`-narrowed run visits
+   * a subset, and a reader must be able to tell "this type was not scanned" from "this type was
+   * scanned and was clean". The key set IS the scanned set.
+   */
+  readonly perType: Readonly<Partial<Record<MirrorDocType, MirrorContentDriftResult>>>;
+  /** `true` iff every SCANNED type recorded a verdict AND every one of those verdicts is `ok`. ⛔ A type that was selected but produced no verdict makes this `false`, never vacuously `true`. */
   readonly ok: boolean;
 }
 
@@ -316,11 +501,15 @@ export interface MirrorContentAllTypesResult {
  *   the probe reported per-doc errors) / `content_unattributable` (a drifted file no corpus doc of
  *   its type owns) — both map to {@link MIRROR_HARD_FAILURE_EXIT_CODE}, never the drift code.
  */
-export async function runContentCheck(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorContentAllTypesResult> {
+export async function runContentCheck(
+  app: App,
+  repoRoot: string = REPO_ROOT,
+  types: readonly MirrorDocType[] = MIRROR_TYPES,
+): Promise<MirrorContentAllTypesResult> {
   const mappings = loadMirrorMappings(repoRoot);
 
-  const perType = {} as Record<MirrorDocType, MirrorContentDriftResult>;
-  for (const type of MIRROR_TYPES) {
+  const perType: Partial<Record<MirrorDocType, MirrorContentDriftResult>> = {};
+  for (const type of types) {
     const probeResult = await app.exportDocsService.exportDocs({ projectDir: repoRoot, dryRun: true, type });
     if (!probeResult.ok) {
       throw new SpecMirrorError("corpus_unreadable", `content probe failed for type ${type}: ${JSON.stringify(probeResult.error)}`, {
@@ -359,13 +548,17 @@ export async function runContentCheck(app: App, repoRoot: string = REPO_ROOT): P
     perType[type] = contentResult;
   }
 
-  const ok = MIRROR_TYPES.every((type) => perType[type].ok);
+  const ok = types.every((type) => perType[type]?.ok === true);
   return { perType, ok };
 }
 
-export async function runExport(app: App, repoRoot: string = REPO_ROOT): Promise<MirrorExportResult> {
-  const perType = {} as Record<MirrorDocType, MirrorExportReportLike>;
-  for (const type of MIRROR_TYPES) {
+export async function runExport(
+  app: App,
+  repoRoot: string = REPO_ROOT,
+  types: readonly MirrorDocType[] = MIRROR_TYPES,
+): Promise<MirrorExportResult> {
+  const perType: Partial<Record<MirrorDocType, MirrorExportReportLike>> = {};
+  for (const type of types) {
     const exportResult = await app.exportDocsService.exportDocs({ projectDir: repoRoot, dryRun: false, type });
     if (!exportResult.ok) {
       throw new SpecMirrorError("corpus_unreadable", `export failed for type ${type}: ${JSON.stringify(exportResult.error)}`, {
@@ -383,7 +576,7 @@ export async function runExport(app: App, repoRoot: string = REPO_ROOT): Promise
   // true` ExportDocsService itself uses, so this set is exactly "what SHOULD still be
   // mirrored", never a broader or narrower one.
   const liveDocIds = new Set<string>();
-  for (const type of MIRROR_TYPES) {
+  for (const type of types) {
     const docsResult = await app.corpusService.listFull({ type });
     if (!docsResult.ok) {
       throw new SpecMirrorError("corpus_unreadable", `failed to list corpus ${type} docs for orphan pruning: ${JSON.stringify(docsResult.error)}`, {
@@ -403,19 +596,57 @@ export async function runExport(app: App, repoRoot: string = REPO_ROOT): Promise
   const liveMappings = Object.fromEntries(
     Object.entries(freshMappings).filter(([docId]) => liveDocIds.has(docId)),
   );
-  const pruned = pruneOrphanMirrorFiles(repoRoot, liveMappings, MIRROR_TYPES.map(mirrorDirRelative));
+  // reason: BOTH arguments are narrowed by the SAME `types` list, and that pairing is what makes
+  // a narrowed export safe. `liveMappings` holds only the scanned types' live docs, so sweeping any
+  // OTHER type's directory with it would delete every file in that directory as an "orphan". Since
+  // each mirror directory holds exactly one type, restricting the sweep to the scanned types'
+  // directories keeps every deletion attributable to a doc list that was actually read this run.
+  const pruned = pruneOrphanMirrorFiles(repoRoot, liveMappings, types.map(mirrorDirRelative));
 
-  const parity = await runCheck(app, repoRoot);
+  const parity = await runCheck(app, repoRoot, types);
   return { perType, pruned, parity };
 }
 
 /**
- * CLI entrypoint: dispatches export vs. check mode from `argv`, runs it against a real `App`,
- * prints a report per type, and returns the process exit code. Never calls `process.exit` itself
- * (the `import.meta.main` block below is the only place that does), so this stays directly
- * callable from tests.
+ * Reads back the verdict recorded for a type that was SELECTED for scanning, failing loudly when
+ * there is none.
  *
- * @param argv defaults to `process.argv.slice(2)`; `--check` selects the read-only drift check.
+ * ⛔ Not defensive noise and ⛔ not a place for a fallback: the aggregate results are `Partial`
+ * records precisely so a `--type`-narrowed run cannot pretend to hold a verdict it never computed,
+ * and this is the one function that turns that possibility into a crash (mapped to
+ * {@link MIRROR_HARD_FAILURE_EXIT_CODE} by the `import.meta.main` block) rather than into a
+ * silently skipped type — which would print a clean report over a question nobody answered.
+ *
+ * @throws {Error} when `perType` holds no verdict for `type`; unreachable while the same `types`
+ *   list drives both the scan and the report, which is exactly the invariant it pins.
+ */
+function requireVerdict<T>(
+  perType: Readonly<Partial<Record<MirrorDocType, T>>>,
+  type: MirrorDocType,
+  what: string,
+): T {
+  const verdict = perType[type];
+  if (verdict === undefined) {
+    throw new Error(`internal invariant: '${type}' was selected for scanning but no ${what} verdict was recorded for it`);
+  }
+  return verdict;
+}
+
+/**
+ * CLI entrypoint: PARSES `argv` (⛔ never scans it — see {@link parseMirrorArgv}), dispatches
+ * export vs. check mode over the selected types, runs it against a real `App`, prints a report per
+ * scanned type, and returns the process exit code. Never calls `process.exit` itself (the
+ * `import.meta.main` block below is the only place that does), so this stays directly callable
+ * from tests.
+ *
+ * ⛔ Argument parsing happens BEFORE the corpus is opened, so a usage error costs no corpus read
+ * and can never be confused with a verdict about the mirror. It also happens before
+ * `findLoreDbPath()`, whose own miss path calls `process.exit(1)` — a typo'd flag must not be
+ * reported as "no corpus found".
+ *
+ * @param argv defaults to `process.argv.slice(2)`; `--check` selects the read-only drift check and
+ *   `--type <t>` narrows the scan to one mirrored type. Anything else is REFUSED with
+ *   {@link MIRROR_USAGE_EXIT_CODE}.
  * @param repoRootOverride defaults to {@link REPO_ROOT} (this file's own location) — tests pass a
  *   throwaway fixture root here.
  * @param dbPathOverride defaults to `findLoreDbPath()` — tests pass a throwaway `mkdtemp` +
@@ -426,36 +657,43 @@ export async function main(
   repoRootOverride?: string,
   dbPathOverride?: string,
 ): Promise<number> {
+  const parsed = parseMirrorArgv(argv);
+  if (!parsed.ok) {
+    console.error(`export-spec-mirror: ${parsed.message}`);
+    console.error(MIRROR_USAGE_TEXT);
+    return MIRROR_USAGE_EXIT_CODE;
+  }
+  const { checkMode, types } = parsed.value;
+
   const repoRoot = repoRootOverride ?? REPO_ROOT;
-  const checkMode = argv.includes("--check");
   const dbPath = dbPathOverride ?? findLoreDbPath();
   const app = createApp(dbPath);
   try {
     if (checkMode) {
-      const parity = await runCheck(app, repoRoot);
-      const content = await runContentCheck(app, repoRoot);
+      const parity = await runCheck(app, repoRoot, types);
+      const content = await runContentCheck(app, repoRoot, types);
       let allOk = true;
-      for (const type of MIRROR_TYPES) {
-        if (!printParity("check", type, parity.perType[type])) allOk = false;
+      for (const type of types) {
+        if (!printParity("check", type, requireVerdict(parity.perType, type, "parity"))) allOk = false;
         // reason: printed unconditionally, immediately after the parity line whose parenthetical
         // says "file CONTENT is not compared" — that parenthetical is scoped to `computeMirrorParity`
         // and would read as a command-level claim without this line answering content right there.
-        if (!printContentDrift(type, content.perType[type])) allOk = false;
+        if (!printContentDrift(type, requireVerdict(content.perType, type, "content"))) allOk = false;
       }
       return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
     }
 
-    const { perType, pruned, parity } = await runExport(app, repoRoot);
-    for (const type of MIRROR_TYPES) printExportReport(type, perType[type]);
+    const { perType, pruned, parity } = await runExport(app, repoRoot, types);
+    for (const type of types) printExportReport(type, requireVerdict(perType, type, "export"));
     if (pruned.length > 0) {
-      console.log(`export-spec-mirror: pruned ${pruned.length} orphaned file(s) (no longer mapped to any corpus doc, any mirrored type):`);
+      console.log(`export-spec-mirror: pruned ${pruned.length} orphaned file(s) (no longer mapped to any corpus doc, any scanned type):`);
       for (const relPath of pruned) console.log(`  ${relPath}`);
     }
     let anyErrors = false;
     let allOk = true;
-    for (const type of MIRROR_TYPES) {
-      if (perType[type].errors.length > 0) anyErrors = true;
-      if (!printParity("export", type, parity.perType[type])) allOk = false;
+    for (const type of types) {
+      if (requireVerdict(perType, type, "export").errors.length > 0) anyErrors = true;
+      if (!printParity("export", type, requireVerdict(parity.perType, type, "parity"))) allOk = false;
     }
     if (anyErrors) return MIRROR_HARD_FAILURE_EXIT_CODE;
     return allOk ? 0 : MIRROR_DRIFT_EXIT_CODE;
