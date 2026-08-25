@@ -38,9 +38,21 @@
  *     already-ingested tasks and joins them, this file renders. `--local`
  *     bypasses this entirely and reads the cwd corpus instead.
  *     `--open`/`--resolved`/`--all`/`--severity`/`--category`/`--verify`
- *     against this shape are refused loudly (exit 4, `run()`'s own
- *     `explicitModeFlag` check) rather than silently ignored — none is
- *     implemented against this branch yet.
+ *     ALL WORK against this shape (AC-GR-8, this task's own AC) with the
+ *     SAME semantics `run()` already applies to the local branch: mode
+ *     filters on the COMPUTED resolution (`includedByGithubMode`, this
+ *     file, below — a `not_ingested` row, no corpus task at all, is
+ *     bucketed as OPEN, never RESOLVED, keeping the two mutually
+ *     exclusive), `--severity`/`--category` narrow on
+ *     `readGithubRowTriageLabels`'s reader (corpus `extra` for an
+ *     "ingested" row, the GitHub body's own front matter — `parseIssueBody`
+ *     — for a "not_ingested" one, since it has no corpus `extra` to read),
+ *     and `--verify` (`runGithubVerify`, this file, below) reads each
+ *     issue's CURRENT `resolution:*` label straight off
+ *     `GitHubIntakePort.listIssues()`'s already-batched result (its
+ *     `labels` field, ZERO extra `gh` call — AC-GI-12's invariant
+ *     preserved) rather than the local branch's separate
+ *     `fetchGithubLabelResolutions` call.
  *   - `feedback.upstream` RETIRED-shaped (legacy `{corpus_path, root_prd}`)
  *     → refused loudly (exit 4) unless `--local`, naming the retired shape
  *     and the `feedback.upstream.repo` remedy — the SAME `LoreError`
@@ -98,32 +110,46 @@
  * --category filters on lore issues"; AC-GI-12) narrow the ALREADY-PROJECTED
  * rows to an exact match on that label — no additional `gh` call, since the
  * corpus-side `extra.issue_report.severity`/`category` copy
- * `readIssueTriageLabels` already reads is authoritative for BOTH read
- * branches (an issue's GitHub-body front-matter copy is a second, later
- * write of the SAME declared value, never a second source of truth).
- * Filtering happens BEFORE `renderRows` computes `total`, so a filtered
- * run's `--json` `data.total` is the FILTERED count, never the unfiltered
- * one — the exact census defect this project's own North Star names
- * ("filtering leaves a trace in the count... made a census wrong by 21x").
+ * `readIssueTriageLabels` already reads is authoritative for an "ingested"
+ * row on EITHER branch (an issue's GitHub-body front-matter copy is a
+ * second, later write of the SAME declared value, never a second source of
+ * truth). The GitHub branch's "not_ingested" rows have no corpus `extra` at
+ * all — for THOSE, `readGithubRowTriageLabels` (this file, below) falls
+ * back to decoding the same front matter straight off the issue's own body
+ * (`@lore/core`'s `parseIssueBody`), since a not-yet-ingested issue's ONLY
+ * copy of its declared severity/category lives there. Filtering happens
+ * BEFORE `renderRows`/`runGithubIssuesListing` compute `total`, so a
+ * filtered run's `--json` `data.total` is the FILTERED count, never the
+ * unfiltered one — the exact census defect this project's own North Star
+ * names ("filtering leaves a trace in the count... made a census wrong by
+ * 21x").
  *
  * `--verify` (AC-GI-5) is a DIFFERENT operation from the listing above, not
- * a flag that narrows it: it scans EVERY issue-report task carrying a
- * GitHub ref (`readGithubIssueRef`, `service/resolution-projector.js`)
- * regardless of `--open`/`--resolved`/`--all`/`--severity`/`--category`,
- * groups them by repo, and reads back each repo's CURRENT issue labels in
- * exactly ONE batched `GhRunner.run(...)` call per distinct repo — never
- * one call per issue (AC-GI-12: the call count for N=1 equals N=50). A
- * target's corpus-computed resolution (`computeIssueResolution`, consumed
- * verbatim, NEVER re-derived from the label — Per-Field Authority table,
- * "resolution (9 states) | corpus | resolution:* label | NEVER: drift check
- * only") is compared against the label's decoded resolution
- * (`labelToResolution`, same module). `--verify` performs ZERO writes — no
- * `corpusService.set`, no `gh api ... -X ...` mutation — and renders a
- * DELIBERATELY SEPARATE `--json` shape (`data.clean`/`data.divergences`),
- * never `data.reports`: a verify run is a diagnostic report, not a row
- * listing, and folding the two shapes together would let a caller mistake
- * "what GitHub currently shows" for "what the corpus says" — precisely the
- * authority inversion this spec exists to prevent.
+ * a flag that narrows it, on EITHER branch: it scans EVERY issue-report
+ * task carrying a GitHub ref (`readGithubIssueRef`,
+ * `service/resolution-projector.js`) regardless of
+ * `--open`/`--resolved`/`--all`/`--severity`/`--category`. The LOCAL
+ * branch (`runVerify`/`collectLocalVerifyTargets`, unconfigured or
+ * `--local`) groups them by repo and reads back each repo's CURRENT issue
+ * labels in exactly ONE batched `GhRunner.run(...)` call per distinct repo
+ * — never one call per issue (AC-GI-12: the call count for N=1 equals
+ * N=50). The GITHUB-configured-upstream branch (`runGithubVerify`, this
+ * file, below) makes NO SEPARATE label call at all: `resolveGithubJoinedRows`
+ * already fetched the listing (ONE `gh api` call regardless of N,
+ * AC-GI-12) with each issue's current `labels` attached
+ * (`GitHubIntakePort.listIssues`), so `--verify` here reads them straight
+ * off that same in-memory result. On both branches, a target's
+ * corpus-computed resolution (`computeIssueResolution`, consumed verbatim,
+ * NEVER re-derived from the label — Per-Field Authority table, "resolution
+ * (9 states) | corpus | resolution:* label | NEVER: drift check only") is
+ * compared against the label's decoded resolution (`labelToResolution`,
+ * same module). `--verify` performs ZERO writes — no `corpusService.set`,
+ * no `gh api ... -X ...` mutation — and renders a DELIBERATELY SEPARATE
+ * `--json` shape (`data.clean`/`data.divergences`), never `data.reports`: a
+ * verify run is a diagnostic report, not a row listing, and folding the
+ * two shapes together would let a caller mistake "what GitHub currently
+ * shows" for "what the corpus says" — precisely the authority inversion
+ * this spec exists to prevent.
  *
  * Exit codes: 0 success (including the zero-report empty-list case, per
  *   AC-ICL-5's explicit "empty list and exit 0" clause, and a clean --verify
@@ -152,12 +178,15 @@ import {
   err,
   formatIssueCorpusLine,
   isIssueSeverity,
+  MalformedIssueFrontMatterError,
   ok,
+  parseIssueBody,
   readIssueTriageLabels,
   resolveIssueReadSource,
   ISSUE_SEVERITIES,
   type IssueReadSource,
   type IssueSeverity,
+  type IssueTriageLabels,
   type LoreError,
   type Result,
 } from "@lore/core";
@@ -274,7 +303,10 @@ const GITHUB_LISTING_LOCAL_BOUNDARY_NOTE =
  * never re-derived here) OR the literal `"not_ingested"` — deliberately
  * OUTSIDE that vocabulary (`github-issue-listing.ts`'s own header), so
  * AC-GR-2's two tokens can never collide by construction, not by
- * convention.
+ * convention. `severity`/`category` mirror {@link IssueRow}'s identical
+ * optional pair (see `readGithubRowTriageLabels`'s own header for where
+ * each comes from) and are the two fields `--severity`/`--category`
+ * filter on — `filterIssueRows` (below) is generic over both row shapes.
  */
 interface GithubProjectedRow {
   readonly number: number;
@@ -282,10 +314,47 @@ interface GithubProjectedRow {
   readonly state: string;
   readonly resolution: IssueResolution | "not_ingested";
   readonly slug?: string;
+  readonly severity?: IssueSeverity;
+  readonly category?: string;
+}
+
+/**
+ * Severity/category for one GitHub-listing row (this task's twin of
+ * {@link projectIssueRow}'s `readIssueTriageLabels` call for the local
+ * branch). An "ingested" row already has a corpus task, whose
+ * `extra.issue_report.{severity,category}` copy `readIssueTriageLabels`
+ * reads is authoritative (this file's own header). A "not_ingested" row
+ * has NO corpus task and therefore no `extra` to read at all — the only
+ * remaining copy of its declared severity/category is the front matter
+ * embedded in the GitHub issue body itself, decoded via `@lore/core`'s
+ * `parseIssueBody`.
+ *
+ * @param row - one joined row from `resolveGithubJoinedRows`
+ * @returns `{}` when the applicable source declares neither field — a
+ *   "not_ingested" row whose body carries no parsable front matter (never
+ *   filed through this spec's own filing path, or hand-edited on GitHub)
+ *   degrades to "neither field", mirroring every other defensive
+ *   `extra`/body reader in this file (`readIssueReportString`) rather than
+ *   crashing this read surface over one malformed row.
+ */
+function readGithubRowTriageLabels(row: GithubIssueRow): IssueTriageLabels {
+  if (row.kind === "ingested") return readIssueTriageLabels(row.task.extra);
+  try {
+    const parsed = parseIssueBody(row.issue.body);
+    return parsed.present ? { severity: parsed.fields.severity, category: parsed.fields.category } : {};
+  } catch (error) {
+    if (error instanceof MalformedIssueFrontMatterError) return {};
+    throw error;
+  }
 }
 
 /** The ONE place a {@link GithubIssueRow} becomes a {@link GithubProjectedRow} — so the human table and `--json` render off the same projection. */
 function projectGithubRow(row: GithubIssueRow): GithubProjectedRow {
+  const triage = readGithubRowTriageLabels(row);
+  const triageFields = {
+    ...(triage.severity !== undefined ? { severity: triage.severity } : {}),
+    ...(triage.category !== undefined ? { category: triage.category } : {}),
+  };
   if (row.kind === "ingested") {
     return {
       number: row.issue.number,
@@ -293,9 +362,32 @@ function projectGithubRow(row: GithubIssueRow): GithubProjectedRow {
       state: row.issue.state,
       resolution: row.resolution,
       slug: row.task.slug,
+      ...triageFields,
     };
   }
-  return { number: row.issue.number, title: row.issue.title, state: row.issue.state, resolution: "not_ingested" };
+  return {
+    number: row.issue.number,
+    title: row.issue.title,
+    state: row.issue.state,
+    resolution: "not_ingested",
+    ...triageFields,
+  };
+}
+
+/**
+ * The GitHub branch's three mode flags' resolution filter — the twin of
+ * {@link includedByMode} for the local branch. A `"not_ingested"` row (no
+ * corpus task exists yet, G3's "never drops a row" invariant) is bucketed
+ * as OPEN, never RESOLVED: an issue nobody has ingested a corpus task for
+ * cannot possibly be in a terminal state, and this choice keeps
+ * `--open`/`--resolved` mutually exclusive (every row lands in exactly
+ * one) while `--all` still shows both — the same completeness
+ * {@link includedByMode} guarantees for the local branch.
+ */
+function includedByGithubMode(mode: "open" | "resolved" | "all", resolution: IssueResolution | "not_ingested"): boolean {
+  if (mode === "all") return true;
+  const isResolved = resolution !== "not_ingested" && TERMINAL_ISSUE_RESOLUTIONS.has(resolution);
+  return mode === "resolved" ? isResolved : !isResolved;
 }
 
 /**
@@ -305,13 +397,17 @@ function projectGithubRow(row: GithubIssueRow): GithubProjectedRow {
  * issues.js")`, mirroring the MCP tool's lazy import of `report-issue-
  * wiring.ts`), so neither command re-derives its own read/render.
  *
- * ⛔ RESIDUAL, named rather than silently inherited (mirrors this file's own
- * local-branch residual above): `--open`/`--resolved`/`--all`/`--severity`/
- * `--category`/`--verify` are NOT implemented against this branch — the
- * caller (`run()` below) refuses loudly rather than silently ignoring them
- * when any is passed explicitly. This listing always shows every
- * currently-listed GitHub issue (G3's "never drops a row" invariant), the
- * shape all four of this task's ACs exercise.
+ * `filters.mode`/`.severity`/`.category` (AC-GR-8) apply the SAME semantics
+ * `run()` already applies to the local branch: `includedByGithubMode` for
+ * the mode filter, `filterIssueRows` (generic, shared with the local
+ * branch) for severity/category — both computed BEFORE `data.total`, so a
+ * filtered run's total is the FILTERED count (this file's own header names
+ * the census defect an unfiltered total would reproduce). `filters`
+ * DEFAULTS to `{mode: "all"}` (never filtered) ONLY for a caller that omits
+ * it entirely — `commands/report-issue.ts --list`'s existing call, which
+ * has no filter flags of its own and has always shown every listed issue;
+ * `run()` below NEVER omits it, always passing its own explicitly-derived
+ * `mode`.
  *
  * @param app - the loaded local App — `app.corpusService` is the ONLY
  *   corpus consulted for already-ingested tasks (never a second corpus)
@@ -319,8 +415,96 @@ function projectGithubRow(row: GithubIssueRow): GithubProjectedRow {
  * @param corpusPath - the local corpus root, printed/reported exactly like
  *   the local branch's `Corpus: ` line (§M4's declared render contract)
  * @param json - whether `--json` was passed
+ * @param filters - the mode/severity/category filter to apply; omitted by
+ *   a caller that wants the unfiltered listing (see above)
  */
 export async function runGithubIssuesListing(
+  app: ReturnType<typeof loadLoreApp>["app"],
+  cfg: GithubUpstreamCfg,
+  corpusPath: string,
+  json: boolean,
+  filters: {
+    readonly mode: "open" | "resolved" | "all";
+    readonly severity?: IssueSeverity;
+    readonly category?: string;
+  } = { mode: "all" },
+): Promise<void> {
+  const joinedResult = await resolveGithubJoinedRows(app.corpusService, cfg);
+  if (!joinedResult.ok) {
+    process.stderr.write(formatError(joinedResult.error) + "\n");
+    process.exitCode = exitCode(joinedResult.error);
+    return;
+  }
+
+  const projected = joinedResult.value.rows.map(projectGithubRow);
+  const modeFiltered = projected.filter((row) => includedByGithubMode(filters.mode, row.resolution));
+  const filtered = filterIssueRows(modeFiltered, filters.severity, filters.category);
+
+  if (json) {
+    console.log( // CLI surface
+      JSON.stringify(
+        {
+          ok: true,
+          data: {
+            corpus_path: corpusPath,
+            source: "github",
+            repo: cfg.repo,
+            mode: filters.mode,
+            total: filtered.length,
+            reports: filtered,
+            local_note: GITHUB_LISTING_LOCAL_BOUNDARY_NOTE,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
+  if (filtered.length === 0) {
+    console.log(`(no ${filters.mode} GitHub issue reports)`); // CLI surface
+  } else {
+    console.log(`GitHub issue reports (${cfg.repo}) (${filtered.length}):`); // CLI surface
+    const headers = ["Number", "Title", "State", "Resolution", "Slug", "Severity", "Category"];
+    const tableRows = filtered.map((r) => [
+      String(r.number),
+      r.title,
+      r.state,
+      r.resolution,
+      r.slug ?? "",
+      r.severity ?? "",
+      r.category ?? "",
+    ]);
+    console.log(formatTable(headers, tableRows)); // CLI surface
+  }
+  console.log(GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
+}
+
+/**
+ * `--verify` against a GitHub-configured `feedback.upstream` — the GitHub
+ * branch's twin of {@link runVerify}. Only "ingested" rows have a
+ * corpus-computed resolution to compare against — a "not_ingested" row has
+ * no corpus task at all, so there is nothing to verify (mirrors the local
+ * branch's own `collectLocalVerifyTargets`, which likewise only ever
+ * collects tasks carrying a GitHub ref).
+ *
+ * ⛔ Makes NO SEPARATE `gh api` call for labels (AC-GI-12 preserved):
+ * `resolveGithubJoinedRows` already fetched the listing (ONE call
+ * regardless of N) with each issue's current `labels` attached
+ * (`GitHubIntakePort.listIssues`, this task's other anchor) — this function
+ * reads them straight off that already-in-memory result.
+ *
+ * ⛔ READ-ONLY (AC-GR-12/AC-GI-12's shared invariant): calls
+ * `resolveGithubJoinedRows` only — no write, ever.
+ *
+ * @param app - the loaded local App
+ * @param cfg - the GitHub-shaped `feedback.upstream` config
+ * @param corpusPath - the local corpus root (§M4's declared render contract)
+ * @param json - whether `--json` was passed
+ */
+async function runGithubVerify(
   app: ReturnType<typeof loadLoreApp>["app"],
   cfg: GithubUpstreamCfg,
   corpusPath: string,
@@ -333,39 +517,22 @@ export async function runGithubIssuesListing(
     return;
   }
 
-  const projected = joinedResult.value.rows.map(projectGithubRow);
-
-  if (json) {
-    console.log( // CLI surface
-      JSON.stringify(
-        {
-          ok: true,
-          data: {
-            corpus_path: corpusPath,
-            source: "github",
-            repo: cfg.repo,
-            total: projected.length,
-            reports: projected,
-            local_note: GITHUB_LISTING_LOCAL_BOUNDARY_NOTE,
-          },
-        },
-        null,
-        2,
-      ),
-    );
-    return;
+  const divergences: ResolutionDivergence[] = [];
+  for (const row of joinedResult.value.rows) {
+    if (row.kind !== "ingested") continue; // reason: no corpus task, no corpus-computed resolution to compare.
+    const labels = row.issue.labels ?? [];
+    const matchingLabel = labels.find((label) => labelToResolution(label) !== undefined);
+    const githubResolution = matchingLabel === undefined ? undefined : labelToResolution(matchingLabel);
+    if (githubResolution === row.resolution) continue;
+    divergences.push({
+      id: row.task.id,
+      slug: row.task.slug,
+      corpus_resolution: row.resolution,
+      github_label_resolution: githubResolution ?? NO_RESOLUTION_LABEL,
+    });
   }
 
-  console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
-  if (projected.length === 0) {
-    console.log("(no GitHub issue reports)"); // CLI surface
-  } else {
-    console.log(`GitHub issue reports (${cfg.repo}) (${projected.length}):`); // CLI surface
-    const headers = ["Number", "Title", "State", "Resolution", "Slug"];
-    const tableRows = projected.map((r) => [String(r.number), r.title, r.state, r.resolution, r.slug ?? ""]);
-    console.log(formatTable(headers, tableRows)); // CLI surface
-  }
-  console.log(GITHUB_LISTING_LOCAL_BOUNDARY_NOTE); // CLI surface
+  renderVerifyResult(corpusPath, divergences, json);
 }
 
 export default defineCommand({
@@ -462,32 +629,23 @@ export default defineCommand({
         process.exitCode = exitCode(classification.error);
         return;
       }
-      // reason: the GitHub read surface (AC-GR-1/2/10/12) always shows every
-      // currently-listed GitHub issue (G3's "never drops a row" invariant) —
-      // `--open`/`--resolved`/`--all`/`--severity`/`--category`/`--verify`
-      // have no implementation against it (RESIDUAL, named rather than
-      // silently inherited: see `runGithubIssuesListing`'s own header).
-      // Refusing loudly when any is passed EXPLICITLY (never on the derived
-      // `mode` default, which is always "open" even with zero flags) keeps
-      // "the flag had no effect" from happening silently.
+      // reason: the GitHub read surface (AC-GR-1/2/10/12, AC-GR-8) applies
+      // ALL SIX flags — `--verify` is a different operation dispatched
+      // first (`runGithubVerify`, mirrors the local branch's own ordering
+      // just above `readLocalRows`), then `--open`/`--resolved`/`--all`/
+      // `--severity`/`--category` all narrow `runGithubIssuesListing`'s
+      // listing via the SAME `mode`/`severityFilter`/`categoryFilter` this
+      // function already derived for the local branch above.
       if (args.local !== true && classification.kind === "github") {
-        const explicitModeFlag = args.open === true || args.resolved === true || args.all === true;
-        if (args.verify === true || explicitModeFlag || severityFilter !== undefined || categoryFilter !== undefined) {
-          process.stderr.write(
-            formatError({
-              code: "VALIDATION_ERROR",
-              field: "feedback.upstream",
-              message:
-                "--verify/--open/--resolved/--all/--severity/--category against a GitHub-configured " +
-                "feedback.upstream are not yet supported by 'lore issues' (a later phase of spec-a-github-filed-" +
-                "defect-must-be-claimable-one-ingest-seam) — the plain listing always shows every currently-open " +
-                "GitHub issue. Pass --local to use those filters against this corpus's own issue reports instead.",
-            }) + "\n",
-          );
-          process.exitCode = 4;
+        if (args.verify === true) {
+          await runGithubVerify(app, classification.cfg, dirname(dirname(dbPath)), args.json === true);
           return;
         }
-        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true);
+        await runGithubIssuesListing(app, classification.cfg, dirname(dirname(dbPath)), args.json === true, {
+          mode,
+          ...(severityFilter !== undefined ? { severity: severityFilter } : {}),
+          ...(categoryFilter !== undefined ? { category: categoryFilter } : {}),
+        });
         return;
       }
       // reason: `upstreamCorpusPath` is ALWAYS undefined here (P4,
@@ -497,8 +655,8 @@ export default defineCommand({
       // to open it against). Every non-local upstream shape is disposed of
       // ABOVE, before this call — the retired shape returns (exit
       // `exitCode(classification.error)`) via `classification.kind ===
-      // "retired"`, the GitHub shape either returns (exit 4, an explicit
-      // filter flag) or renders via `runGithubIssuesListing` and returns via
+      // "retired"`, the GitHub shape always returns via
+      // `runGithubVerify`/`runGithubIssuesListing` under
       // `classification.kind === "github"`. `resolveIssueReadSource`'s
       // `"upstream"` variant is therefore structurally unreachable from THIS
       // call site — kept as a real (never constructed) branch below rather
@@ -683,9 +841,14 @@ function renderRows(
 /**
  * `--severity`/`--category`'s exact-match narrowing over the ALREADY-
  * PROJECTED rows — see this file's own header for why this reads
- * `readIssueTriageLabels`'s existing corpus-side copy rather than issuing a
- * `gh` call: an absent filter value is a no-op (`undefined` skips its own
- * comparison), so passing neither leaves `rows` untouched.
+ * `readIssueTriageLabels`'s existing corpus-side copy (or, for a GitHub
+ * "not_ingested" row, `parseIssueBody`) rather than issuing a `gh` call: an
+ * absent filter value is a no-op (`undefined` skips its own comparison), so
+ * passing neither leaves `rows` untouched. Generic over `T` so ONE
+ * implementation serves both {@link IssueRow} (local branch) and
+ * {@link GithubProjectedRow} (GitHub branch) — both carry the identical
+ * optional `severity`/`category` pair — rather than two independently
+ * maintained copies of the same two-line filter.
  *
  * @param rows - the mode-filtered, already-projected rows
  * @param severity - `undefined` when `--severity` was not passed
@@ -693,7 +856,11 @@ function renderRows(
  * @returns the subset of `rows` matching every passed filter — the caller
  *   MUST compute `total` off THIS return value, never off `rows`
  */
-function filterIssueRows(rows: IssueRow[], severity: IssueSeverity | undefined, category: string | undefined): IssueRow[] {
+function filterIssueRows<T extends { readonly severity?: IssueSeverity; readonly category?: string }>(
+  rows: readonly T[],
+  severity: IssueSeverity | undefined,
+  category: string | undefined,
+): T[] {
   return rows.filter((row) => {
     if (severity !== undefined && row.severity !== severity) return false;
     if (category !== undefined && row.category !== category) return false;
@@ -881,14 +1048,22 @@ function computeDivergences(
 }
 
 /**
- * `--verify`'s ONE render — a DELIBERATELY separate shape from
- * {@link renderRows} (`data.clean`/`data.divergences`, never `data.reports`;
- * see this file's own header for why). Sets {@link VERIFY_DIVERGENCE_EXIT_CODE}
- * on any divergence; leaves `process.exitCode` untouched (this repo's own
- * clean-exit convention, mirrored from every other clean path in this file)
- * when clean.
+ * `--verify`'s ONE render — shared by BOTH the local branch (`runVerify`)
+ * and the GitHub-configured-upstream branch (`runGithubVerify`) — a
+ * DELIBERATELY separate shape from {@link renderRows} (`data.clean`/
+ * `data.divergences`, never `data.reports`; see this file's own header for
+ * why). Sets {@link VERIFY_DIVERGENCE_EXIT_CODE} on any divergence; leaves
+ * `process.exitCode` untouched (this repo's own clean-exit convention,
+ * mirrored from every other clean path in this file) when clean.
+ *
+ * @param corpusPath - the corpus root to print on the `Corpus: ` line
+ *   (§M4's declared render contract) — a plain string rather than an
+ *   `IssueReadSource` so the GitHub branch (which has no `IssueReadSource`
+ *   variant of its own, see `run()`'s own comment on why "upstream" is
+ *   structurally unreachable) does not have to construct a fake one just
+ *   to satisfy this function's signature.
  */
-function renderVerifyResult(source: IssueReadSource, divergences: readonly ResolutionDivergence[], json: boolean): void {
+function renderVerifyResult(corpusPath: string, divergences: readonly ResolutionDivergence[], json: boolean): void {
   const clean = divergences.length === 0;
 
   if (json) {
@@ -897,7 +1072,7 @@ function renderVerifyResult(source: IssueReadSource, divergences: readonly Resol
         {
           ok: true,
           data: {
-            corpus_path: source.corpus_path,
+            corpus_path: corpusPath,
             mode: "verify",
             clean,
             divergences,
@@ -908,7 +1083,7 @@ function renderVerifyResult(source: IssueReadSource, divergences: readonly Resol
       ),
     );
   } else {
-    console.log(formatIssueCorpusLine(source.corpus_path)); // CLI surface
+    console.log(formatIssueCorpusLine(corpusPath)); // CLI surface
     if (clean) {
       console.log("verify: clean — no resolution-label divergences found."); // CLI surface
     } else {
@@ -948,7 +1123,7 @@ async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: Iss
 
   const targets = targetsResult.value;
   if (targets.length === 0) {
-    renderVerifyResult(source, [], json);
+    renderVerifyResult(source.corpus_path, [], json);
     return;
   }
 
@@ -959,5 +1134,5 @@ async function runVerify(app: ReturnType<typeof loadLoreApp>["app"], source: Iss
     return;
   }
 
-  renderVerifyResult(source, computeDivergences(targets, labelsResult.value), json);
+  renderVerifyResult(source.corpus_path, computeDivergences(targets, labelsResult.value), json);
 }
