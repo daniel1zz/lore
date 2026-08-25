@@ -103,12 +103,26 @@ export interface GitHubIntakePortOptions {
   idGenerator?: () => string;
 }
 
-/** One issue as `listIssues`/`searchDuplicates` observe it. */
+/**
+ * One issue as `listIssues`/`searchDuplicates` observe it.
+ *
+ * `labels` is the issue's current `resolution:*`/other label NAMES (`gh`'s
+ * own `{name, color, ...}` objects, already decoded down to just `.name` —
+ * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam: GitHub's
+ * issues REST payload already carries a `labels` array on every entry, so
+ * `listIssues` surfaces it at ZERO extra network cost, never a second `gh`
+ * call). `undefined` ONLY for a record `listIssues` never produced — i.e. a
+ * SYNTHETICALLY reconstructed one (`report-issue-wiring.ts::mintIssueTask`
+ * builds one locally right after `fileIssue()` returns, rather than
+ * re-fetching from GitHub); a freshly-filed issue carries no labels yet
+ * regardless, so that omission is never lossy.
+ */
 export interface GithubListedIssue {
   readonly number: number;
   readonly title: string;
   readonly state: string;
   readonly body: string;
+  readonly labels?: readonly string[];
 }
 
 /**
@@ -150,13 +164,24 @@ const GithubRepoSchema = z.object({ id: z.number() }).passthrough();
 /** `gh api repos/<repo>/issues -X POST`'s response shape — only the two fields this module persists. */
 const GithubCreatedIssueSchema = z.object({ number: z.number(), html_url: z.string() }).passthrough();
 
-/** One entry of `gh api repos/<repo>/issues`'s array response. `body` is nullable on GitHub's own API when an issue has no body at all. */
+/** One label entry inside `gh api repos/<repo>/issues`'s per-issue `labels` array — only `.name` is read (`resolution:*` decoding, `resolution-projector.ts::labelToResolution`). `.passthrough()`: GitHub's real label object also carries `id`/`color`/`description`, unused here. */
+const GithubIssueListLabelSchema = z.object({ name: z.string() }).passthrough();
+
+/**
+ * One entry of `gh api repos/<repo>/issues`'s array response. `body` is
+ * nullable on GitHub's own API when an issue has no body at all. `labels`
+ * is REQUIRED here (never `.optional()`) because GitHub's real payload
+ * always includes it (possibly `[]`) — {@link GithubListedIssue.labels}'s
+ * own optionality is for a SYNTHETICALLY reconstructed record that never
+ * passes through this parse at all, not for a gap in the wire schema.
+ */
 const GithubIssueListEntrySchema = z
   .object({
     number: z.number(),
     title: z.string(),
     state: z.string(),
     body: z.string().nullable().optional(),
+    labels: z.array(GithubIssueListLabelSchema),
   })
   .passthrough();
 
@@ -360,7 +385,13 @@ export class GitHubIntakePort {
   /**
    * Lists every issue in the target repo (open and closed) in ONE batched
    * `gh api` call — AC-GI-12: the call count for N=1 equals the call count
-   * for N=50, never one call per issue.
+   * for N=50, never one call per issue. Each returned
+   * {@link GithubListedIssue}'s `labels` is populated from the SAME response
+   * (`entry.labels.map((l) => l.name)`) — GitHub's issues REST payload
+   * already carries a `labels` array per entry, so `commands/issues.ts`'s
+   * `--verify` (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam)
+   * reads the current `resolution:*` label off THIS call's result rather
+   * than issuing a second `gh api` call per repo.
    *
    * @returns `ok(issues[])`, or `err(...)` on the first failing `gh` call
    *   or a malformed response body
@@ -385,6 +416,7 @@ export class GitHubIntakePort {
         title: entry.title,
         state: entry.state,
         body: entry.body ?? "",
+        labels: entry.labels.map((label) => label.name),
       })),
     );
   }

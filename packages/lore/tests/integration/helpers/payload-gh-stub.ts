@@ -91,12 +91,23 @@ export interface RecordedLabelWrite {
   readonly label: string;
 }
 
-/** One duplicate-search hit `searchDuplicates` can be made to see, shaped exactly as `gh api repos/<repo>/issues?...` returns it (only `number`/`title`/`state`/`body` are read). */
+/**
+ * One duplicate-search / listing hit `searchDuplicates`/`listIssues` can be
+ * made to see, shaped exactly as `gh api repos/<repo>/issues?...` returns
+ * it (`number`/`title`/`state`/`body`/`labels` are read — `labels` by
+ * `commands/issues.ts`'s `--verify` against a GitHub-configured
+ * `feedback.upstream`, spec-a-github-filed-defect-must-be-claimable-one-
+ * ingest-seam). `labels` is plain label NAME strings here for ergonomics —
+ * {@link payloadGhStubDir} objectifies each into `gh`'s real `{name: ...}`
+ * shape when serialising, and defaults to `[]` when omitted (GitHub's real
+ * payload always carries the key, never omits it, even with zero labels).
+ */
 export interface PayloadGhStubIssue {
   readonly number: number;
   readonly title: string;
   readonly state: "open" | "closed";
   readonly body?: string;
+  readonly labels?: readonly string[];
 }
 
 /**
@@ -158,7 +169,15 @@ export function payloadGhStubDir(fixture: PayloadGhStubFixture): string {
 
   const loginJson = JSON.stringify({ login });
   const createdJson = JSON.stringify({ number: fixture.createdNumber, html_url: fixture.createdUrl });
-  const issuesJson = JSON.stringify(existingIssues);
+  // reason: `labels` is objectified from plain name strings into `gh`'s real
+  // `{name: ...}` shape here, and DEFAULTED to `[]` when the fixture omits
+  // it — `GithubIssueListEntrySchema` (github-intake-port.ts) requires the
+  // key on every entry (GitHub's real payload always carries it), so every
+  // fixture using this stub must serve it regardless of whether the CALLER
+  // supplied one.
+  const issuesJson = JSON.stringify(
+    existingIssues.map((issue) => ({ ...issue, labels: (issue.labels ?? []).map((name) => ({ name })) })),
+  );
   const repoJson = JSON.stringify({ id: fixture.repoId, name: "stub-repo" });
   // reason: `GhResolutionLabelPort.setLabel`'s GET step needs SOME array —
   // an empty one means every fixture using this stub converges with zero
