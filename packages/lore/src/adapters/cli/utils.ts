@@ -198,6 +198,17 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
     case "LINK_CYCLE":
       return `Error: Link would create a cycle: ${error.path.join(" → ")}`;
     case "DUPLICATE_SLUG":
+      // "used by <id>" is a claim about a doc the reader can look up, and it
+      // is only true because every store resolves the WINNER's id into
+      // `existing_id` (`store/sqlite-store.ts::findSlugConflictIdSync`,
+      // `store/turso-store.ts::findSlugConflictId`,
+      // `store/in-memory-store.ts::findSlugConflict`). It was FALSE for both
+      // SQL-backed stores until
+      // task-skill-implement-duplicate-slug-existing-id-names-the: they
+      // reported the rejected doc's own never-persisted id, so this line named
+      // a doc that did not exist. Pinned from this render surface by the
+      // `AC-4 SURFACE` case in `tests/unit/store/sqlite-store.bun.test.ts`,
+      // which drives a real SQLiteStore conflict through THIS function.
       return (
         `Error: Slug '${error.slug}' already exists (used by ${error.existing_id}).\n` +
         "  Use a different title or pass a unique slug."

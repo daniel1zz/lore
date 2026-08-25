@@ -554,14 +554,70 @@ export class SQLiteStore implements StoreInterface {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       if (msg.includes("UNIQUE constraint failed: docs.slug")) {
+        // The ONLY DUPLICATE_SLUG construction site in this file — every
+        // public insert entry point (`insert`, `insertWithAllocatedOrdinal`,
+        // `insertWithProvenance`, `insertWithAllocatedOrdinalAndProvenance`)
+        // reaches the UNIQUE violation through this one helper, so the
+        // conflict lookup below serves all four.
+        const winnerId = this.findSlugConflictIdSync(doc.slug);
+        if (winnerId === null) {
+          // reason: the UNIQUE index just refused this INSERT, so at that
+          // instant a row held `doc.slug`; finding none now means a
+          // concurrent writer removed or renamed it between the refusal and
+          // this lookup. ⛔ Never fall back to `doc.id` here — that WAS the
+          // defect (`existing_id` named the rejected, never-persisted doc, so
+          // every `get(existing_id)` answered DOC_NOT_FOUND). `existing_id`
+          // is typed non-optional (`packages/core/src/errors.ts:15`), so a
+          // conflict whose holder has vanished cannot be reported honestly
+          // under DUPLICATE_SLUG at all; it is reported loudly as a
+          // STORE_ERROR naming the race instead.
+          return err({
+            code: "STORE_ERROR",
+            message:
+              `slug '${doc.slug}' was refused by the docs.slug UNIQUE constraint, but no row holds ` +
+              `it now — its holder was removed or renamed concurrently between the refusal and ` +
+              `SQLiteStore.findSlugConflictIdSync's lookup. Retry the insert.`,
+            // `exactOptionalPropertyTypes` — `cause` is `cause?: Error`, so a
+            // non-Error throw must OMIT the key rather than set it undefined.
+            ...(e instanceof Error ? { cause: e } : {}),
+          });
+        }
         return err({
           code: "DUPLICATE_SLUG",
           slug: doc.slug,
-          existing_id: doc.id,
+          existing_id: winnerId,
         });
       }
       return wrapStoreError(e);
     }
+  }
+
+  /**
+   * Id of the doc that ALREADY holds `slug`, or `null` when no row does.
+   *
+   * Sole caller: {@link insertDocSync}'s `DUPLICATE_SLUG` branch, which needs
+   * the WINNER's id — the field `existing_id` has always promised and, before
+   * task-skill-implement-duplicate-slug-existing-id-names-the, never carried.
+   * Sync (like every other query in this class) so `insertDocSync` can stay
+   * sync and keep composing inside its callers' `BEGIN IMMEDIATE` blocks.
+   *
+   * ⛔ Deliberately does NOT filter `deleted_at`: `docs.slug` is UNIQUE at the
+   * COLUMN level (`migrations/migration-006.ts:103`), not a partial index over
+   * live rows, so a soft-deleted row still holds its slug and still raises the
+   * violation. Adding `WHERE deleted_at IS NULL` would make this return `null`
+   * while the INSERT is still refused, turning an honest DUPLICATE_SLUG into
+   * the STORE_ERROR race branch. Locked by `AC-1.05 BOUNDARY` in
+   * `tests/unit/store/sqlite-store.bun.test.ts`.
+   *
+   * Cross-store parity: {@link InMemoryStore.findSlugConflict} (`store/
+   * in-memory-store.ts`) scans every doc including soft-deleted ones, and
+   * `TursoStore.findSlugConflictId` issues this same unfiltered SELECT.
+   */
+  private findSlugConflictIdSync(slug: Slug): DocId | null {
+    const row = this.db
+      .prepare("SELECT id FROM docs WHERE slug = ?")
+      .get(slug) as { id: string } | null;
+    return row === null ? null : (row.id as DocId);
   }
 
   async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
