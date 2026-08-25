@@ -3,7 +3,7 @@ id: SPEC-153
 type: spec
 role: spec
 title: "The mirror oracles' two command surfaces are O(corpus) by accident: one row contract for list --json, a real argv parser for export-spec-mirror"
-status: approved
+status: draft
 priority: medium
 created: 2026-08-25
 updated: 2026-08-25
@@ -52,8 +52,18 @@ MAGNITUDE and the 74x ratio, never as a value any oracle compares against.
 ⛔ The cause is NOT that the filter branches fetch full records — they must. `DocSummary` carries
 no `extra`, and the validity gate plus `--plan-id` / `--phase` narrowing all read `extra`. The
 defect is that `adapters/cli/commands/list.ts` then prints those full records verbatim at three of
-its five `--json` emit sites, instead of projecting back down to the row shape the default branch
+its SIX `--json` emit sites, instead of projecting back down to the row shape the default branch
 emits. Fetching wide to filter is correct; emitting wide is the accident.
+
+⛔ CORRECTION, 2026-08-25, made by the implementing agent and verified before this edit: this
+section originally said FIVE emit sites and three wide ones. There are **SIX** — `grep -c
+'args.json'` and `grep -c 'console.log(JSON.stringify'` both return 6 on `list.ts`. The
+uncounted one is the `--governed-by` branch, which was equally wide (18 keys, `content`/`extra`,
+no `meta`). ⛔ The count came from ME reading the file, and an author's hand-enumeration silently
+became the criterion's blind spot — the exact failure `knowledge-five-findings-from-planning-the-github-read-side-a`
+records. AC-MOS-1 survived it only because it asserts a property of EVERY branch rather than a
+list of branches; had it enumerated the five, the sixth would have shipped wide and the AC would
+have certified it.
 
 Blast radius, measured across the repo — NO in-repo consumer reads a full-record field off
 `lore list --json`:

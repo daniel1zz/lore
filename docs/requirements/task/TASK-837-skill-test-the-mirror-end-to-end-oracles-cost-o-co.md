@@ -3,7 +3,7 @@ id: TASK-837
 type: task
 role: plan
 title: "[Skill:test] the mirror end-to-end oracles cost O(corpus) against a fixed 30s timeout and now exceed it"
-status: draft
+status: archived
 priority: high
 created: 2026-08-25
 updated: 2026-08-25

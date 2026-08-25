@@ -3,7 +3,7 @@ id: TASK-840
 type: task
 role: plan
 title: "One row contract for every lore list --json emit branch, proven against the live consumer"
-status: approved
+status: archived
 priority: medium
 phase: "command surfaces"
 created: 2026-08-25

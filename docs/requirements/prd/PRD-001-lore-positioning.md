@@ -108,12 +108,12 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
-- [task] [Skill:test] the mirror end-to-end oracles cost O(corpus) against a fixed 30s timeout and now exceed it (draft)
+- [spec] The mirror oracles' two command surfaces are O(corpus) by accident: one row contract for list --json, a real argv parser for export-spec-mirror (draft)
+- [task] lore log and created_by print the literal system while the audit trail holds the real actor: a false label that made me accuse the wrong agent (draft)
+- [task] [Skill:test] the mirror end-to-end oracles cost O(corpus) against a fixed 30s timeout and now exceed it (archived)
 - [task] [Skill:implement] DUPLICATE_SLUG.existing_id names the rejected doc, not the existing one (archived)
-- [task] lore create --by is accepted and ignored: CLI content writes hard-code created_by to the historical literal system while MCP resolves a real actor (draft)
 - [task] 48 files fabricate an exit code from spawnSync so every ENOBUFS reads as exit 1: the spawnSync audit needs a ratcheted check script (draft)
 - [task] The mirror --check absorbed the content probe in 90951390 without re-measuring its 13 callers: re-separate the halves or make it incremental (draft)
-- [spec] The mirror oracles' two command surfaces are O(corpus) by accident: one row contract for list --json, a real argv parser for export-spec-mirror (approved)
 - [task] One unknown key discards the whole .lore/config.yaml and the error then claims nothing was configured: silence, not the non-abort, is the defect (draft)
 - [spec] A GitHub-filed defect must be claimable: one ingest seam turns a listed issue into a corpus task (approved)
 - [task] [Skill:implement] D9's configured-repo substitution silently skips projection when the config is not GitHub-shaped (draft)
