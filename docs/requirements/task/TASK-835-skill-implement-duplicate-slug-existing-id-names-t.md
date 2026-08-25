@@ -3,7 +3,7 @@ id: TASK-835
 type: task
 role: plan
 title: "[Skill:implement] DUPLICATE_SLUG.existing_id names the rejected doc, not the existing one"
-status: draft
+status: archived
 priority: high
 created: 2026-08-25
 updated: 2026-08-25

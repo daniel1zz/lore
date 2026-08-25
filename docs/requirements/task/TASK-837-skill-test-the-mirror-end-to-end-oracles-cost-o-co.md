@@ -9,6 +9,8 @@ created: 2026-08-25
 updated: 2026-08-25
 tags: [oracle-design, scale, north-star]
 parent: PRD-001
+links:
+  - {id: KN-528, type: relates-to}
 ---
 MEASURED 2026-08-25 on main, during the full-suite gate of the read-side slice.
 
@@ -69,7 +71,11 @@ The step change was `90951390` itself (2026-08-17, "compare mirror bodies agains
 That residual — a command that absorbed a second, far more expensive check — is filed separately as `task-the-mirror-check-absorbed-the-content-probe-in-90951390`, because fixing it changes a command surface and therefore what an approved spec's oracle drives.
 
 
-## DEFECT 3, not previously recorded — `maxBuffer: 20MB` is already exceeded, and it fails as a LIE
+## DEFECT 3 — `maxBuffer: 20MB` is already exceeded, and it fails as a LIE
+
+⛔ **RETRACTION of this section's original heading, which read "not previously recorded". That was FALSE and it was my own retrieval failure**, recorded here rather than quietly edited. All three defects in this task were ALREADY diagnosed on 2026-08-24, one day earlier, in `knowledge-corpus-growth-crossed-three-hard-coded-thresholds-in` (approved) — its "Failure 1" is this ENOBUFS defect, verbatim, including the same A/B probe and the same `result.status ?? 1` diagnosis; its "Failures 2 and 3" are the timeout half; and its sibling `knowledge-the-mirror-content-parity-oracle-is-structurally` is the exclusive-corpus/concurrency half. ⛔ Read its CHILD before citing it: `knowledge-two-attributions-in-the-corpus-growth-threshold` (approved) corrects two of the parent's attributions, one of which would have bought the wrong fix. I searched for "incremental mirror check" and "parity content separation" and never for ENOBUFS or maxBuffer, which is how a day-old approved finding got re-discovered from scratch.
+
+What survives as NEW below is only the re-measurement (the corpus has grown since) and the per-type table.
 
 Measured 2026-08-25 by running this file alone (`bunx vitest run scripts/tests/spec-mirror-export.test.ts`): **4 cases red, and NOT ONE of them a timeout.** The AC-FR-10 HAPPY (a+b) case fails in 17.7s against its 60_000 budget with:
 

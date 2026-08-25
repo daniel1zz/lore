@@ -6964,6 +6964,38 @@
     "01M0VXCG4TNBE33GB5H9HQPF18": {
       "human_id": "TASK-839",
       "file_path": "docs/requirements/task/TASK-839-the-mirror-check-absorbed-the-content-probe-in-909.md"
+    },
+    "01M0VXQZ0ED2RZNAD3AQFX7BJV": {
+      "human_id": "SPEC-153",
+      "file_path": "docs/requirements/spec/SPEC-153-the-mirror-oracles-two-command-surfaces-are-o-corp.md"
+    },
+    "01M0VYSQ2QNADXK69VKKMFNNG4": {
+      "human_id": "KN-557",
+      "file_path": "docs/requirements/knowledge/KN-557-handoff-agent-main-orchestrator.md"
+    },
+    "01M0VYB79DQ7K7HXKPPYPV8XYS": {
+      "human_id": "PLAN-148",
+      "file_path": "docs/requirements/plan/PLAN-148-land-the-two-mirror-command-surfaces-one-row-contr.md"
+    },
+    "01M0VYH7FX5RDF2TNQGCBKB3H8": {
+      "human_id": "TASK-840",
+      "file_path": "docs/requirements/task/TASK-840-one-row-contract-for-every-lore-list-json-emit-bra.md"
+    },
+    "01M0VYFKH8WVEDSMBXRJ4ZKBRB": {
+      "human_id": "TASK-841",
+      "file_path": "docs/requirements/task/TASK-841-lore-create-by-is-accepted-and-ignored-cli-content.md"
+    },
+    "01M0VYKG8H1VE0PP03Z96PT8VV": {
+      "human_id": "TASK-842",
+      "file_path": "docs/requirements/task/TASK-842-48-files-fabricate-an-exit-code-from-spawnsync-so.md"
+    },
+    "01M0VYJC8DDCET65MAAKZNE9MF": {
+      "human_id": "TASK-843",
+      "file_path": "docs/requirements/task/TASK-843-a-real-argv-parser-for-export-spec-mirror-unknown.md"
+    },
+    "01M0VY0FBKSF7RRT681YGN6EDK": {
+      "human_id": "TASK-844",
+      "file_path": "docs/requirements/task/TASK-844-one-unknown-key-discards-the-whole-lore-config-yam.md"
     }
   }
 }

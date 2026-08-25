@@ -11,12 +11,22 @@ tags: [oracle-design, scale, north-star]
 parent: PRD-001
 links:
   - {id: TASK-837, type: relates-to}
+  - {id: KN-531, type: relates-to}
 ---
 MEASURED 2026-08-25 on main @ 3331a98e, while fixing `task-skill-test-the-mirror-end-to-end-oracles-cost-o-corpus`. That task removes the redundancy (13 full-corpus `--check` passes down to 5) and the shared-mutable-fixture race. It does NOT remove the O(corpus) property. This task is that residual, filed deliberately rather than folded in, because the fix changes a COMMAND's surface and therefore what an approved spec's oracle drives — a spec-level decision, not a test repair.
 
 ## The root cause, established by measurement (not inference)
 
-`bun scripts/export-spec-mirror.ts --check` takes **27.9s** on this corpus (838 task mirrors + five other types). Of that, the corpus read itself is **0.41s** (measured: `lore list --type task --json --include-invalid`). Essentially the whole cost is `runContentCheck` → one `exportDocsService.exportDocs({ dryRun: true })` probe PER TYPE: MDX placeholder resolution, body canonicalisation, and a read of every mirror file on disk.
+`bun scripts/export-spec-mirror.ts --check` takes **27.9s cold / 13.8s warm** on this corpus (839 task mirrors + five other types).
+
+The split, MEASURED DIRECTLY by importing the two halves and timing them against a warmed real `App` — not inferred:
+
+| half | ms | share |
+|---|---|---|
+| `runCheck` (parity: count + slug + `existsSync`) | **302** | 3% |
+| `runContentCheck` (`exportDocs({dryRun:true})` per type) | **11,457** | **97%** |
+
+⛔ An earlier revision of this task cited "the corpus read is 0.41s, measured via `lore list --type task --json --include-invalid`" as the evidence for that conclusion. **That citation was OFF-PATH and is retracted**, even though the conclusion it supported is the correct one. `--check` never spawns `lore list`: `main` runs in-process against a real `App`. This is the exact misattribution `knowledge-two-attributions-in-the-corpus-growth-threshold` (approved 2026-08-24) was written to correct — it records that a prior handoff proposed `lore list` field projection to shrink these very runs and that the fix "cannot shrink those runs by one millisecond". Citing a subprocess timing for an in-process path reproduces that error one step removed, which is why the direct split above replaces it.
 
 That cost was not always in `--check`. Commit `90951390` (2026-08-17, "feat(mirror): compare mirror bodies against corpus content in the spec-mirror check") ADDED `runContentCheck` to the SAME `--check` invocation that previously ran `runCheck` (parity only — six corpus lists plus an `existsSync` per file). Verified two ways:
 
