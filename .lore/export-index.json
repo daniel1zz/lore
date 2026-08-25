@@ -6940,6 +6940,10 @@
     "01M0VGT6EP0SPQY6BPRQWN7DVJ": {
       "human_id": "TASK-835",
       "file_path": "docs/requirements/task/TASK-835-skill-implement-duplicate-slug-existing-id-names-t.md"
+    },
+    "01M0VHKGQZM7N82XD93QTSX9PK": {
+      "human_id": "TASK-836",
+      "file_path": "docs/requirements/task/TASK-836-skill-implement-d9-s-configured-repo-substitution.md"
     }
   }
 }

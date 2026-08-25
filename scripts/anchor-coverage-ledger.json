@@ -302,6 +302,16 @@
       "slug": "spec-version-snapshots-capture-slug-values-spec-068-d5-follow-up",
       "cohort": "debt",
       "reason": "Anchor debt: created 2026-07-24, after the 2026-07-14 code-anchor backfill armed the drift oracle, and no code_anchors entry was ever declared. Not a design decision — simply never done. Retire this row in the same commit that declares real, measured anchors for this spec (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3: paying down debt carries a mandatory ledger edit)."
+    },
+    {
+      "slug": "spec-a-conclusion-with-no-currency-signal-and-no-falsifier",
+      "cohort": "debt",
+      "reason": "Anchor debt by the mechanical date split (created 2026-08-24, after the 2026-07-14 backfill cutoff; the cohort field is decided by created_at, not by judgment). MEASURED 2026-08-25 from a different session than the one that authored this spec: it declares no code_anchors, and a git log --all over every branch finds ZERO commits referencing it, so its child plan plan-land-conclusion-currency-a-dated-retrieval-pr has landed no implementation and no measured anchor is declarable yet. This row was filed to unblock the ratchet, NOT as a judgement that anchoring is unwarranted — retire it in the same commit that declares real anchors, which the authoring session should do as soon as its implementation lands."
+    },
+    {
+      "slug": "spec-governance-weight-must-scale-with-measured-blast-radius-a",
+      "cohort": "debt",
+      "reason": "Anchor debt by the mechanical date split (created 2026-08-24, after the 2026-07-14 backfill cutoff; the cohort field is decided by created_at, not by judgment). MEASURED 2026-08-25 from a different session than the one that authored this spec: it declares no code_anchors, and a git log --all over every branch finds ZERO commits referencing it, so its child plan plan-land-measured-blast-radius-grading-one-fan-in has landed no implementation and no measured anchor is declarable yet. This row was filed to unblock the ratchet, NOT as a judgement that anchoring is unwarranted — retire it in the same commit that declares real anchors, which the authoring session should do as soon as its implementation lands."
     }
   ]
 }

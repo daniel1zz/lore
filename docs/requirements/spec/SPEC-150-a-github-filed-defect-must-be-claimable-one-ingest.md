@@ -221,3 +221,13 @@ Recorded per the discipline that a criterion changed after it was written must c
   script: test — bunx vitest run packages/lore/tests/unit/adapters/mcp-github-filing.test.ts 2>&1 && echo 'AC-GR-11 PASS: the registered lore_report_issue handler files under the GitHub shape and names the created task slug'
 - [⚑] [script] AC-GR-12: The read path never writes (G4's oracle, absent until the review named the gap): against a corpus holding 3 un-ingested GitHub issues, the count of corpus tasks carrying extra.issue_report and the target docs' version-log row counts are BYTE-EQUAL before and after a real dist/lore 'issues' run. Covered by describe 'AC-GR-12: lore issues mutates nothing'. Falsifier: have the read path call CorpusService.create for an un-ingested row and the task count rises from 0 to 3.
   script: e2e — bun test packages/lore/tests/integration/cli/github-issue-read-surface.bun.test.ts -t 'AC-GR-12' 2>&1 && echo 'AC-GR-12 PASS: a real lore issues run left the task count and every version log unchanged'
+
+## Code anchors
+
+- packages/lore/src/service/issue-task-shaping.ts#toIssueTaskInput
+- packages/lore/src/service/github-issue-listing.ts#joinListing
+- packages/lore/src/adapters/cli/report-issue-wiring.ts#resolveGithubIssueListing
+- packages/lore/src/adapters/cli/commands/issues.ts
+- packages/lore/src/adapters/cli/commands/issue.ts
+- packages/lore/src/adapters/mcp/tools.ts
+- packages/core/src/schemas.ts

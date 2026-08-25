@@ -108,9 +108,10 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [task] [Skill:implement] D9's configured-repo substitution silently skips projection when the config is not GitHub-shaped (draft)
+- [spec] A GitHub-filed defect must be claimable: one ingest seam turns a listed issue into a corpus task (approved)
 - [task] [Skill:test] repair the two assertions my read-side slice superseded (archived)
 - [task] [Skill:implement] DUPLICATE_SLUG.existing_id names the rejected doc, not the existing one (draft)
-- [spec] A GitHub-filed defect must be claimable: one ingest seam turns a listed issue into a corpus task (approved)
 - [spec] lore issues falls through to the LOCAL corpus on a retired-shape upstream while report-issue refuses it (approved)
 - [spec] The retired-shape refusal message has two independent definitions and no oracle fails when they diverge — measured: they already had (approved)
 - [knowledge] PRD-001's prose contradicts the exporter it describes, check:spec-mirror's exit code carries no signal, and the CLAUDE.md floor displaces its cost onto the next writer (draft)
