@@ -116,6 +116,19 @@
  * leave the shared seam carrying the old behaviour. Do NOT "simplify" it back by applying
  * `selectLiveDocs` in this branch — that would make the exclusion run twice on the CLI
  * path and zero times on the MCP path if the service call were ever reverted.
+ *
+ * ## ⛔ ONE `--json` row contract across all SIX emit branches
+ * (spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by, AC-MOS-1/AC-MOS-2)
+ *
+ * This command has SIX `--json` emit sites — `--governed-by`, `--phase`, `--type task`,
+ * `--include-invalid`, `--plan-id`, and the default fall-through. FIVE of them print
+ * gated FULL records; only the default prints the store's summary. Until 2026-08-25 the
+ * five printed those records VERBATIM, so one command answered `--json` with two row
+ * contracts (18 keys with `content`/`extra` and no `meta`, vs. the default's ten).
+ * Every one of them now emits `ListJsonRow` via `toListJsonRows` — see that function's
+ * header for the measurement, the live consumer it broke, and what must not be
+ * "optimised" in response. ⛔ A NEW `--json` branch that prints its fetched rows
+ * directly re-splits the contract; route it through `toListJsonRows` like the rest.
  */
 
 import { defineCommand } from "citty";
@@ -137,12 +150,107 @@ import {
   withValidityStatus,
   type WithValidityStatus,
 } from "../../../service/validity-service.js";
-import { KNOWLEDGE_SUB_TYPES, ok } from "@lore/core";
-import type { DocRecord, DocType, DocStatus, LoreError, Result } from "@lore/core";
+import { deriveTypeMeta, KNOWLEDGE_SUB_TYPES, ok } from "@lore/core";
+import type { DocRecord, DocSummary, DocType, DocStatus, LoreError, Result } from "@lore/core";
 
-/** A full corpus row as this command emits it — every `--json` record carries its
- *  evaluated validity verdict (SPEC-043 D3's data half; see this file's header). */
+/** A full corpus row as this command FETCHES it — every full record carries its
+ *  evaluated validity verdict (SPEC-043 D3's data half; see this file's header).
+ *  ⛔ NOT the `--json` emit shape: that is {@link ListJsonRow}, which this projects
+ *  down to at the emit site (see {@link toListJsonRows}). */
 type ListedDoc = WithValidityStatus<DocRecord>;
+
+/**
+ * THE `lore list --json` ROW CONTRACT — the ONE shape every `--json` emit branch of
+ * this command prints, whatever fetch shape produced it.
+ *
+ * A CLOSED set of ten keys: `id slug type title status priority tags updated_at
+ * validity_status meta` — `DocSummary`'s nine plus the `validity_status` stamp this
+ * command adds. Typed as `WithValidityStatus<DocSummary>` rather than spelled out so
+ * a NEW REQUIRED field on `DocSummary` breaks {@link toListJsonRows} at `tsc` instead
+ * of silently splitting the contract again.
+ *
+ * ⛔ `meta` is OPTIONAL and is absent exactly when `deriveTypeMeta` cannot derive one
+ * (`prd`, whose type has no variant; or a legacy/corrupt `extra`). That absence is the
+ * documented degrade-by-omission invariant of `doc-type-meta.ts`, and it holds on EVERY
+ * branch identically — a `prd` row is a nine-key row here and a nine-key row on the
+ * default branch. ⛔ Do NOT "fix" it to `meta: null` to force ten keys: that fabricates
+ * a value the derivation deliberately refused.
+ */
+type ListJsonRow = WithValidityStatus<DocSummary>;
+
+/**
+ * Projects the FULL records the wide branches fetch down to {@link ListJsonRow}.
+ *
+ * ## Why this exists (spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by,
+ * AC-MOS-1 / AC-MOS-2)
+ *
+ * Five of this command's six `--json` emit branches used to print their fetched rows
+ * VERBATIM. Three fetch shapes met three emit sites, so one command answered `--json`
+ * with two different row contracts: the default branch's ten-key summary, and an
+ * 18-key full `DocRecord` carrying `content` and `extra`. MEASURED 2026-08-25 @
+ * 3331a98e: `lore list --type knowledge --json` = 313,281 bytes / 10 keys, while
+ * `--include-invalid` on the same corpus = 23,180,068 bytes / 18 keys and NO `meta`.
+ * The live consumer `scripts/tests/spec-mirror-export.test.ts` reads `{id, slug}` and
+ * declares `maxBuffer: 20 * 1024 * 1024`; the wide payload crossed it, and `spawnSync`
+ * reports that as `status: null` + `error.code: "ENOBUFS"` — never a nonzero exit —
+ * so the consumer read it as "the command exited 1" with empty stderr.
+ * Full diagnosis: `knowledge-corpus-growth-crossed-three-hard-coded-thresholds-in`
+ * (its ENOBUFS half; its timeout half is superseded by that doc's own child).
+ *
+ * ⛔ The FETCH is NOT the defect and must not be "optimised" into a `list()` summary
+ * call. Those branches need full records because the validity gate and the
+ * `--plan-id` / `--phase` narrowing all read `extra`, which `DocSummary` does not
+ * carry — see `fetchGatedFullDocs`'s own header for why one fetch shape across all
+ * branches is what keeps the exclusion from being skipped on one of them again.
+ * The projection belongs HERE, at the emit site, and nowhere earlier.
+ *
+ * ⛔ `meta` comes from `deriveTypeMeta` (`@lore/core`, SPEC-036 §2 D3's single
+ * derivation point) — never hand-rolled here. Dropping `meta` instead would also make
+ * the key sets match and is the cheap wrong answer AC-MOS-1(b) exists to refuse.
+ *
+ * ## Known duplication, deliberately not collapsed
+ * `CorpusService.toSummary` (`service/corpus-service.ts`) builds the same eight scalar
+ * fields and is documented there as this repo's sole `DocSummary` projection site. It
+ * is `private`, and `corpus-service.ts` is outside this change's declared file anchors,
+ * so it cannot be reused from here today. The `WithValidityStatus<DocSummary>` return
+ * type is the mechanism standing in for that reuse: it makes `tsc` — not a reader —
+ * responsible for catching a required-field divergence. ⛔ An OPTIONAL new field on
+ * `DocSummary` still slips past it; collapsing both sites onto one exported projector
+ * is the standing fix.
+ *
+ * Side-effect class: pure, EXCEPT the `Date.now()` read `deriveTypeMeta` performs to
+ * compute `task.claim_stale` when `claimTtlMinutes` is supplied (its own documented,
+ * narrow deviation).
+ *
+ * @param docs - Gated full records, already validity-stamped by `fetchGatedFullDocs`
+ *   (or by `CorpusService.listGovernedBy`, which applies its own gate)
+ * @param claimTtlMinutes - Task claim lease TTL forwarded verbatim to `deriveTypeMeta`
+ *   so `task.claim_stale` is computed against the SAME resolved config value
+ *   `CorpusService` uses for the default branch's `meta`. Both come from `app.ts`'s
+ *   single `resolveClaimTtlMinutes(config)` — passing a different one here would make
+ *   two branches disagree about staleness on the same doc.
+ * @returns One {@link ListJsonRow} per input, in input order
+ */
+function toListJsonRows(docs: readonly ListedDoc[], claimTtlMinutes: number): ListJsonRow[] {
+  return docs.map((doc) => {
+    const meta = deriveTypeMeta(doc, { claimTtlMinutes });
+    return {
+      id: doc.id,
+      slug: doc.slug,
+      type: doc.type,
+      title: doc.title,
+      status: doc.status,
+      updated_at: doc.updated_at,
+      tags: doc.tags,
+      priority: doc.priority,
+      // reason: present-iff-derivable, mirroring `CorpusService.toSummary` exactly —
+      // `...(meta !== undefined ? { meta } : {})`, never `meta: meta ?? null`. See
+      // ListJsonRow's own note on why a fabricated null is the wrong repair.
+      ...(meta !== undefined ? { meta } : {}),
+      validity_status: doc.validity_status,
+    };
+  });
+}
 
 export default defineCommand({
   meta: {
@@ -221,6 +329,11 @@ export default defineCommand({
       // bi-temporal verdict evaluated at two different "now"s inside one listing is
       // not reproducible from its own output.
       const nowIso = new Date().toISOString();
+      // reason: ONE read of the resolved claim TTL for the whole command, for the same
+      // reason `nowIso` is read once — it feeds BOTH the human workflow badge and the
+      // `--json` row's `meta.claim_stale` (via `toListJsonRows`), and those two must
+      // not be able to disagree about the same doc within one listing.
+      const claimTtlMinutes = app.taskWorkflowService.claimTtlMinutes;
       // BUG-006/007 audit: a NaN --limit/--offset used to reach `.slice(0, NaN)`
       // (silently empty results) or a store-level `LIMIT ?`/`OFFSET ?` bind (a
       // bare bun:sqlite "datatype mismatch" throw) — validate both up front.
@@ -322,7 +435,9 @@ export default defineCommand({
         const total = docs.length;
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs, total } }, null, 2));
+          console.log(
+            JSON.stringify({ ok: true, data: { docs: toListJsonRows(docs, claimTtlMinutes), total } }, null, 2),
+          );
           return;
         }
         if (total === 0) {
@@ -446,7 +561,9 @@ export default defineCommand({
         const total = filtered.length;
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs: filtered, total } }, null, 2));
+          console.log(
+            JSON.stringify({ ok: true, data: { docs: toListJsonRows(filtered, claimTtlMinutes), total } }, null, 2),
+          );
           return;
         }
         if (total === 0) {
@@ -456,7 +573,7 @@ export default defineCommand({
         // reason: workflow badge (claim/evidence, AC-WF-9) is only meaningful for task
         // rows; --phase filtering only applies to tasks in practice (SPEC-023), so we
         // always compute it here rather than branching on d.type.
-        const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
+        const ttlMinutes = claimTtlMinutes;
         const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Phase", "Updated"];
         const rows = filtered.map((d) => [
           d.id.slice(0, 10),
@@ -485,7 +602,13 @@ export default defineCommand({
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs: fullDocs, total: fullTotal } }, null, 2));
+          console.log(
+            JSON.stringify(
+              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal } },
+              null,
+              2,
+            ),
+          );
           return;
         }
         if (fullTotal === 0) {
@@ -493,7 +616,7 @@ export default defineCommand({
           return;
         }
 
-        const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
+        const ttlMinutes = claimTtlMinutes;
         const headers = ["ID", "Type", "Title", "Status", ...validityHeaders(), "Updated"];
         // reason: the validity badge is rendered UNCONDITIONALLY, not only under
         // --include-invalid. Pre-fix, this branch rendered the workflow badge alone,
@@ -531,7 +654,13 @@ export default defineCommand({
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs: fullDocs, total: fullTotal } }, null, 2));
+          console.log(
+            JSON.stringify(
+              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal } },
+              null,
+              2,
+            ),
+          );
           return;
         }
         if (fullTotal === 0) {
@@ -571,7 +700,13 @@ export default defineCommand({
         const { docs: fullDocs, total: fullTotal } = fullResult.value;
 
         if (args.json) {
-          console.log(JSON.stringify({ ok: true, data: { docs: fullDocs, total: fullTotal } }, null, 2));
+          console.log(
+            JSON.stringify(
+              { ok: true, data: { docs: toListJsonRows(fullDocs, claimTtlMinutes), total: fullTotal } },
+              null,
+              2,
+            ),
+          );
           return;
         }
         if (fullTotal === 0) {
