@@ -10,9 +10,14 @@
  * REQUIRED (not optional) on this path: `frontMatterCodec`'s closed
  * six-field set has no undeclared-label representation. `--tags`
  * (comma-separated) is likewise GitHub-path-only. `--list` against this
- * shape is refused loudly (a later phase's own read surface,
- * `GitHubIntakePort.listIssues`) rather than silently falling back to
- * anything.
+ * shape DELEGATES (spec-a-github-filed-defect-must-be-claimable-one-ingest-
+ * seam, AC-GR-1/2/10/12) to `commands/issues.ts::runGithubIssuesListing` —
+ * reached via a lazy `await import("./issues.js")` (mirrors `adapters/mcp/
+ * tools.ts`'s own lazy import of this file) so `lore report-issue`'s cold
+ * start does not also pull in `lore issues`'s module. `lore issues` is the
+ * canonical read verb this command's `--list` flag now points to (both its
+ * own help text and `meta.description` below name it); this command holds
+ * NO second listing implementation of its own.
  *
  * ── The legacy SQLite shape is RETIRED (P4, spec-the-defect-channel-reaches-
  * no-machine-but-its-own-github) ──
@@ -187,7 +192,8 @@ export default defineCommand({
   meta: {
     name: "report-issue",
     description:
-      "File a structured lore-defect report into a configured upstream corpus, or list previously filed reports (--list)",
+      "File a structured lore-defect report into a configured upstream corpus. --list delegates to 'lore issues', " +
+      "the canonical read verb — use that directly for the full flag set (--open/--resolved/--all/--local/--severity/--category)",
   },
   args: {
     title: {
@@ -230,7 +236,9 @@ export default defineCommand({
     },
     list: {
       type: "boolean",
-      description: "List previously filed reports with live upstream status, instead of filing a new one",
+      description:
+        "List previously filed reports with live upstream status, instead of filing a new one — delegates to " +
+        "'lore issues' (the canonical read verb; use it directly for --open/--resolved/--all/--local/--severity/--category)",
     },
     json: {
       type: "boolean",
@@ -315,20 +323,20 @@ export default defineCommand({
 
       // ─── GitHub-configured upstream: the LIVE path (GitHubIntakePort +
       // frontMatterCodec + ReceiptLogV2) — see report-issue-wiring.ts::
-      // fileGithubIssue's own header. `--list` against this shape is not yet
-      // wired (a later phase's read surface) — refused loudly.
+      // fileGithubIssue's own header. `--list` against this shape DELEGATES
+      // to `commands/issues.ts::runGithubIssuesListing` (spec-a-github-
+      // filed-defect-must-be-claimable-one-ingest-seam, AC-GR-1/2/10/12) —
+      // this file holds NO second listing implementation. A LAZY
+      // `import("./issues.js")` keeps this command's own cold start from
+      // also pulling in `lore issues`'s module (mirrors `adapters/mcp/
+      // tools.ts`'s existing lazy import of THIS file). `--open`/
+      // `--resolved`/`--all`/`--severity`/`--category`/`--verify` are not
+      // flags on this command at all, so this branch always runs the plain,
+      // unfiltered GitHub listing — the same one `lore issues` (no flags)
+      // renders.
       if (isList) {
-        process.stderr.write(
-          formatError({
-            code: "VALIDATION_ERROR",
-            field: "feedback.upstream",
-            message:
-              "--list against a GitHub-configured feedback.upstream is not yet supported by this command " +
-              "(the GitHub-backed read surface is a later phase of spec-the-defect-channel-reaches-no-machine-" +
-              "but-its-own-github).",
-          }) + "\n",
-        );
-        process.exitCode = 4;
+        const { runGithubIssuesListing } = await import("./issues.js");
+        await runGithubIssuesListing(app, effectiveCfg, corpusRoot, args.json === true);
         return;
       }
 
