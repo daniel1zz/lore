@@ -108,9 +108,9 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [spec] The mirror oracles' two command surfaces are O(corpus) by accident: one row contract for list --json, a real argv parser for export-spec-mirror (approved)
 - [knowledge] A correction asserting an oracle's strength is itself an unverified claim, and test:changed can demand a build a worktree agent must refuse (approved)
 - [task] [Skill:test] the mirror end-to-end oracles cost O(corpus) against a fixed 30s timeout and now exceed it (archived)
-- [spec] The mirror oracles' two command surfaces are O(corpus) by accident: one row contract for list --json, a real argv parser for export-spec-mirror (approved)
 - [task] lore log and created_by print the literal system while the audit trail holds the real actor: a false label that made me accuse the wrong agent (draft)
 - [task] [Skill:implement] DUPLICATE_SLUG.existing_id names the rejected doc, not the existing one (archived)
 - [task] 48 files fabricate an exit code from spawnSync so every ENOBUFS reads as exit 1: the spawnSync audit needs a ratcheted check script (draft)

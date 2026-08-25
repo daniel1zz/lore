@@ -3,7 +3,7 @@ id: TASK-845
 type: task
 role: plan
 title: "AC-MOS-1's oracle cannot see the sixth emit branch: cover --governed-by and seed the discriminant types it only conditionally asserts"
-status: approved
+status: archived
 priority: medium
 phase: "command surfaces"
 created: 2026-08-25
