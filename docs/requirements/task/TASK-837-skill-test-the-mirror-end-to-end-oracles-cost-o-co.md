@@ -113,3 +113,35 @@ That reconciles the timeout report with today's observation: a case invoking thr
 The other three red cases today failed at `expect(baseline.exitCode).toBe(0)` with exit **2** (drift), NOT on time. Cause: the orchestrator created one adhoc task and edited another WHILE the run was in flight, which drifted `docs/requirements/prd/PRD-001-lore-positioning.md` (its child list is an MDX placeholder) and `docs/requirements/task/TASK-837-*.md`. Self-inflicted; recorded so it is never mistaken for a defect of this file.
 
 This is `plan-close-the-read-side-a-github-filed-defect-becomes`'s KD3 measured a second time: **any corpus write during the run invalidates every `--check` baseline in it.** So the verification protocol for this task is: sync the mirror, commit, then run BOTH halves with ZERO `lore` writes in between. A green verdict obtained any other way is not a verdict.
+
+
+## POST-MERGE VERIFICATION on main, and the finding it produced
+
+Landed: `81d239d0` (the fix, +880/−192 in `scripts/tests/spec-mirror-export.test.ts` only — no source change was needed), merged to main as `7051f7e4`. Pass count 13 → 5, arithmetic in the implementer's report; the AC-FR-10 block went 65.6s → 10.3s and its RED(b) case 14381ms → 1ms.
+
+Measured on main by the orchestrator, mirror converged and committed, tree clean, one AC at a time:
+
+| oracle | result |
+|---|---|
+| `-t export-covers-corpus` (AC-FR-6) | **4 passed, exit 0** |
+| `-t all-types-parity-and-id-format` (AC-FR-10) | **5 passed, exit 0** |
+| `-t drift-check-is-separate` (AC-FR-7) | first run 1 failed / 1 passed; **2 passed, exit 0** after reconverging ONE file |
+
+Then `lore verify --task ... --yes` (attested, declared scope): AC-FR-6 pass (exit 0), AC-FR-7 pass (exit 0), **AC-FR-10 fail (exit 1)**.
+
+## ⛔ The finding: two of these three ACs demand an exclusive corpus, which this project declares unobtainable
+
+Both reds above were caused by a PEER SESSION writing to the corpus mid-run, and each was attributed by measurement, not guessed:
+
+- The AC-FR-7 red: `expect(baseline.output).not.toContain(target.slug)` failed because the chosen target's mirror BODY had drifted again — the peer session was still editing `spec-the-mirror-oracles-two-command-surfaces-are-o-corpus-by` after I converged it. Re-running `lore export-docs --force` on that one file turned it green, which is the attribution.
+- The AC-FR-10 red under verify: `"task: 844 mirror file(s) on disk vs 845 live corpus doc(s)"` — exactly one doc of difference. ⛔ My first hypothesis was that `lore verify`'s own evidence writes invalidated it; **that hypothesis is WRONG and is recorded as wrong.** Evidence writes bump a doc's version and drift its BODY; they do not change the COUNT. A count delta means a NEW doc, and the peer session had created `task-a-real-argv-parser-for-export-spec-mirror-unknown-flags` and `task-ac-mos-1-s-oracle-cannot-see-the-sixth-emit-branch-cover` while verify was running. Measured after the fact: 845 live vs 844 mirrored.
+
+⛔ So the residual is NOT in this fix. It is in the criteria: **AC-FR-6's "the count of files EQUALS the corpus spec count" and AC-FR-10's per-type count parity are exclusive-corpus verdicts.** Root CLAUDE.md's North Star names this exact form as unobtainable — *"A full-suite verdict costs both a long run AND a clean tree; under real concurrency the tree is never clean, so that verdict form is unobtainable, not merely slow"* — and *"An answer that relies on exclusivity — clean tree, exclusive corpus, single-writer file — is a refusal of the target state, not a design."*
+
+This task removed the exclusivity dependence it COULD remove (seven of nine baselines became deltas; mutations moved into a sandbox). The remaining dependence is written into the AC statements themselves and cannot be fixed from the test file. ⛔ Whoever addresses it must change the CRITERIA, not the test: a count-parity assertion needs a snapshot both sides are read from, or it must be restated as a delta (no doc created before time T lacks a mirror file) so a doc created during the run cannot redden it. `knowledge-the-mirror-content-parity-oracle-is-structurally` (approved 2026-08-24) already recorded the content-parity half of exactly this; the COUNT half is now measured too.
+
+⛔ NOT archived. AC-FR-10 carries an attested `fail` row, and archiving a task whose declared AC is red would make `lore ready` and every census over it lie. The work is on main and verified; the criterion is unverifiable under concurrency. That distinction is the reason this stays open rather than being closed with a footnote.
+
+## Residual carried out of this task, stated so it is not discovered later
+
+AC-FR-7's NEGATIVE case still has one exclusivity-sensitive precondition — `expect(baseline.output).not.toContain(target.slug)` over a FULL `--check` output. Any peer writing to the doc the test happens to pick reddens it. The sandbox protects the MUTATION; it does not protect this precondition, because the baseline is deliberately read from the real tree. Narrowing that assertion to the sandbox projection (as the implementer already did for the identity assertion) is the obvious next step and was not done.

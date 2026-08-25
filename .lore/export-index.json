@@ -6996,6 +6996,14 @@
     "01M0VY0FBKSF7RRT681YGN6EDK": {
       "human_id": "TASK-844",
       "file_path": "docs/requirements/task/TASK-844-one-unknown-key-discards-the-whole-lore-config-yam.md"
+    },
+    "01M0W144PP467ZQQQSQ3GMKDXN": {
+      "human_id": "KN-558",
+      "file_path": "docs/requirements/knowledge/KN-558-a-correction-asserting-an-oracle-s-strength-is-its.md"
+    },
+    "01M0W0W6EREVNSTHPQ1ME5B9Y0": {
+      "human_id": "TASK-845",
+      "file_path": "docs/requirements/task/TASK-845-ac-mos-1-s-oracle-cannot-see-the-sixth-emit-branch.md"
     }
   }
 }

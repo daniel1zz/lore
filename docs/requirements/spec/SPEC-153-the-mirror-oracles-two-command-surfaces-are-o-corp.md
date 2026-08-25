@@ -3,7 +3,7 @@ id: SPEC-153
 type: spec
 role: spec
 title: "The mirror oracles' two command surfaces are O(corpus) by accident: one row contract for list --json, a real argv parser for export-spec-mirror"
-status: draft
+status: approved
 priority: medium
 created: 2026-08-25
 updated: 2026-08-25

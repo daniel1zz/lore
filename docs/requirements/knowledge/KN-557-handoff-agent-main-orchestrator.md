@@ -57,3 +57,29 @@ Two things in the version above were wrong, both mine, both from using `lore log
 2. **"Attribution is not recorded" is FALSE.** It is recorded, in the audit trail. The defect is that `lore log`'s Author column and `doc.created_by` print the literal `system` for the SAME write whose `lore audit` entry names the actor correctly — two surfaces, one fact, two answers, and the misleading one is the discoverable one.
 
 ⛔ Standing instruction for the next session, the only durable output of this mistake: **for "who wrote this", use `lore audit <slug> --json` and read `entries[].actor`. NEVER `lore log`'s Author column, and NEVER infer a writer from `bootstrap`'s `active_sessions` — that field is claim-keyed, so a session doing pure planning writes is invisible in it, and AN UNLISTED SESSION IS NOT PROVEN ABSENT.**
+
+## FINAL STATE at 16:37 — both dispatched tasks landed; main was advanced concurrently by a PEER SESSION
+
+Both agents returned and both fixes are on `main`. ⛔ Note who merged what, because it matters for anyone reasoning about this session's actions:
+
+- `eb59448f` — I merged `worktree-agent-a525bfda1b5b84b4c` (DUPLICATE_SLUG). Independently re-verified on main by me: 102 pass / 0 fail (sqlite bun suite), 126 passed (the three vitest DUPLICATE_SLUG constructors), `bun run typecheck` exit 0, and my own census confirming 1 construction site per store / 3 total / 0 residual literals (the single remaining `existing_id: doc.id` is inside a JSDoc describing the historical bug — legitimate). `lore done` run: archived.
+- `7051f7e4` — **a PEER SESSION merged my agent's mirror-oracle branch, not me.** My own `git merge` reported "Already up to date". The same peer had merged its own `worktree-agent-ab5158ece8d960bf0` at 16:21 (`7751b798`) and committed SPEC-153/PLAN-148 plus mirror convergence at 16:24 (`1de6e97b`).
+
+⇒ The quarantine decision taken earlier in this session is MOOT for the code: the `lore list --json` row-contract change was already on main before it could be applied, merged by the session that owns it. ⛔ Reverting a peer session's merge is not this session's call and was not done.
+
+### The deepest finding: two ACs demand an exclusive corpus
+
+Post-merge, mirror converged and committed, tree clean, run one AC at a time: AC-FR-6 4 passed exit 0; AC-FR-10 5 passed exit 0; AC-FR-7 green only after reconverging one file. Then `lore verify --task ... --yes` (attested): AC-FR-6 pass, AC-FR-7 pass, **AC-FR-10 fail**.
+
+Both reds were caused by the peer session writing mid-run, each attributed by measurement:
+- AC-FR-7: the chosen target's mirror BODY drifted again (peer still editing SPEC-153); reconverging that one file turned it green.
+- AC-FR-10: `"task: 844 mirror file(s) on disk vs 845 live corpus doc(s)"`. ⛔ My first hypothesis — that `lore verify`'s own evidence writes invalidated it — is WRONG and recorded as wrong: evidence writes drift a BODY, never the COUNT. The peer created two new tasks during the run.
+
+⇒ AC-FR-6's and AC-FR-10's count-parity clauses are exclusive-corpus verdicts, the exact form the North Star calls unobtainable. The fix removed the exclusivity it could (7 of 9 baselines → deltas, mutations sandboxed); the rest is written into the AC statements and cannot be fixed from the test file. Restating them as deltas ("no doc created before time T lacks a mirror file") is the direction.
+
+### Open, precisely
+
+- `task-skill-test-the-mirror-end-to-end-oracles-cost-o-corpus` is **NOT archived**, deliberately: AC-FR-10 carries an attested `fail`. Archiving it would make `lore ready` and every census over it lie. The work is landed and verified; the CRITERION is unverifiable under concurrency.
+- **Worktree cleanup pending the safety gate's 30-minute quiet window.** `worktree-agent-a525bfda1b5b84b4c` and `worktree-agent-a144d78ebad2afefe` are merged, 0 commits ahead, and clean, but their last reflog entries were 16:12 and 16:17 against a 16:37 check — under 30 minutes. ⛔ I did not use `--force`. Remove them WITHOUT `--force` once quiet. ⛔ `worktree-agent-ab5158ece8d960bf0` is the PEER'S — do not touch it.
+- `dist/lore` still stale; `bun run build` still required before any push.
+- Two things measured that change how evidence should be recorded: `lore evidence --capture` DOES accept `--result expected-fail` and produces `capture_source: runner` with a real attestation (so a red can be attested — my dispatch bundles were wrong to omit `--capture`), and `lore evidence --result pass --output-tail-file` is now REFUSED outright, demanding `--capture`. Both belong in the bundle template.
