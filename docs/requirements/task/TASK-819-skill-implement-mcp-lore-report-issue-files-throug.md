@@ -3,11 +3,11 @@ id: TASK-819
 type: task
 role: plan
 title: "[Skill:implement] MCP lore_report_issue files through the same seam the CLI uses"
-status: draft
+status: archived
 priority: critical
 phase: "P4: Adopt + MCP"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-25
 tags: []
 parent: PLAN-145
 plan: PLAN-145

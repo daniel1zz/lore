@@ -6,7 +6,7 @@ title: "lore issues falls through to the LOCAL corpus on a retired-shape upstrea
 status: approved
 priority: high
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-25
 tags: [defect-channel, silent-fallback, issues, report-issue, config-shape]
 parent: PRD-001
 ---
@@ -22,7 +22,7 @@ consumer-harm case is the one under test:
 | retired `{corpus_path, root_prd}` | `lore issues` | **0** | reads the LOCAL cwd corpus; stdout's `Corpus:` line names the local path, never the configured upstream |
 | retired | `lore issues --local` | 0 | stdout BYTE-IDENTICAL to the row above (`diff` exit 0) |
 | retired | `lore report-issue` | 4 | refuses, names the retired shape AND the remedy |
-| GitHub `{repo}` | `lore issues` | 4 | refuses, names the later-phase gap and `--local` |
+| GitHub `{repo}` | `lore issues` | **0** | reads GitHub and prints the listing — ⛔ was `4 / refuses` until spec-a-github-filed-defect-must-be-claimable-one-ingest-seam deleted that refusal (2026-08-25) |
 | GitHub | `lore issues --local` | 0 | reads local — the flag's legitimate use |
 
 The defect is exactly ONE cell: retired shape + `lore issues` + no `--local`. Both of its
@@ -77,7 +77,7 @@ deliberately"; it stays exit 0 on retired AND GitHub shapes. The refusal applies
 UPSTREAM-reading path the user did not opt out of.
 
 **D3 — The GitHub-shape refusal is unchanged and serves as the green control.** It already
-exits 4 with a remedy. An AC asserting only "retired now exits non-zero" could be satisfied
+exits 0 and prints the listing under a payload gh stub — ⛔ it exited 4 with a remedy when this was written, and that refusal has since been deleted by spec-a-github-filed-defect-must-be-claimable-one-ingest-seam; the control's discriminating role is unchanged and AC-IS-2 carries the new exact form. An AC asserting only "retired now exits non-zero" could be satisfied
 by breaking the whole command; pairing it with the still-green GitHub assertion is what gives
 the new assertion discriminating power.
 
@@ -106,7 +106,7 @@ spec). Every one is a CLI-surface probe against a throwaway corpus built by `lor
 never this repo's live `.lore/` — with the config shape as the only varied input.
 
 - AC-IS-1 asserts the defect cell refuses (retired shape, `lore issues`, no `--local`).
-- AC-IS-2 is its green control (GitHub shape still refuses) — without it AC-IS-1 is
+- AC-IS-2 is its green control (GitHub shape reaches the GitHub read path; ⛔ it *refused* when this line was written) — without it AC-IS-1 is
   satisfiable by breaking the command outright.
 - AC-IS-3 keeps `--local` exit 0 under both shapes.
 - AC-IS-4 asserts the shared classifier is LIVE-CALLED from both verbs, not merely present.
@@ -117,8 +117,8 @@ never this repo's live `.lore/` — with the config shape as the only varied inp
 
 - [⚑] [script] AC-IS-1: Under a throwaway corpus (lore init, never this repo's live .lore/) whose feedback.upstream carries ONLY the retired {corpus_path, root_prd} shape, 'lore issues' with NO --local exits EXACTLY 4, and its stderr contains BOTH verbatim substrings: 'retired SQLite shape' (names the shape) and 'feedback.upstream.repo' (names the remedy). Covered by describe 'AC-IS-1 retired-shape upstream refuses the upstream read'.
   script: test — cd packages/lore && bun test tests/integration/cli/issues-upstream-shape-refusal.bun.test.ts -t 'AC-IS-1' 2>&1 && echo 'AC-IS-1 PASS: lore issues exits exactly 4 with stderr containing both retired SQLite shape and feedback.upstream.repo'
-- [⚑] [script] AC-IS-2: GREEN CONTROL for AC-IS-1 (spec D3): under a GitHub-shape feedback.upstream, 'lore issues' with NO --local still exits EXACTLY 4 naming the later-phase gap. Without this, AC-IS-1 is satisfiable by breaking the command outright. Covered by describe 'AC-IS-2 green control: GitHub-shape upstream still refuses'.
-  script: test — cd packages/lore && bun test tests/integration/cli/issues-upstream-shape-refusal.bun.test.ts -t 'AC-IS-2' 2>&1 && echo 'AC-IS-2 PASS: GitHub-shape refusal still exits exactly 4, proving AC-IS-1 assertion is reachable and not satisfied by a broken command'
+- [⚑] [script] AC-IS-2: GREEN CONTROL for AC-IS-1 (spec D3). ⛔ AMENDED 2026-08-25: the original asserted 'exits EXACTLY 4 naming the later-phase gap', and spec-a-github-filed-defect-must-be-claimable-one-ingest-seam DELETED that refusal. Measured on main after it landed: Expected 4 / Received 8 — with no reachable gh the command exits the transport code. The PURPOSE is unchanged: AC-IS-1 must not be satisfiable by breaking the command outright. New form, with exact-value discriminating power on BOTH halves: with a payload gh stub on PATH serving ONE seeded issue, a GitHub-shape feedback.upstream and NO --local makes lore issues exit EXACTLY 0, and its stdout contains (i) the fixed 'Corpus: ' line prefix and (ii) the seeded issue's number, and does NOT contain the retired-shape refusal 'configured with the retired SQLite shape'. ⛔ Two forms were considered and REJECTED for the SAME reason — a negative-only clause, and a positive clause reading merely 'prints its listing': a command emitting nothing, a blank line, or a bare header would satisfy either. Naming the seeded number is what closes that hole on the positive side. Covered by describe 'AC-IS-2 green control: GitHub-shape upstream reaches the GitHub read path'.
+  script: test — cd packages/lore && bun test tests/integration/cli/issues-upstream-shape-refusal.bun.test.ts -t 'AC-IS-2' 2>&1 && echo 'AC-IS-2 PASS: a GitHub-shape upstream exits exactly 0 under a payload gh stub, prints the Corpus line and the seeded issue number, and never the retired refusal'
 - [⚑] [script] AC-IS-3: 'lore issues --local' exits EXACTLY 0 under BOTH the retired shape and the GitHub shape, and in both cases stdout's FIRST line starts with the literal prefix 'Corpus: ' followed by the throwaway corpus's own absolute path — the flag's legitimate opt-out is not collateral damage of AC-IS-1 (spec D2). Covered by describe 'AC-IS-3 --local stays exit 0 under both shapes'.
   script: test — cd packages/lore && bun test tests/integration/cli/issues-upstream-shape-refusal.bun.test.ts -t 'AC-IS-3' 2>&1 && echo 'AC-IS-3 PASS: --local exits exactly 0 on both shapes with stdout first line naming the local corpus path'
 - [⚑] [script] AC-IS-4: LIVE WIRING via ONE classifier — THREE independent conditions (spec D1), because each alone is satisfiable by the drift D1 closes. (a) CLI-SURFACE BEHAVIOUR: under a retired-shape upstream, BOTH 'lore issues' and 'lore report-issue' emit stderr containing the VERBATIM substring 'configured with the retired SQLite shape'. This is a probe of what the two verbs EMIT, never a source grep of the command files — a D1-conformant fix keeps that literal ONLY in the classifier, so its correct occurrence count inside commands/issues.ts is ZERO. (b) STRUCTURAL-NEGATIVE: identifier 'isGithubUpstreamCfg' has ZERO occurrences in BOTH commands/issues.ts and commands/report-issue.ts (today: 2 in each), so neither verb re-derives shape policy in its own if-chain. (c) STRUCTURAL-POSITIVE: identifier 'classifyFeedbackUpstream' occurs at least ONCE in BOTH command files (today: 0 in each), which (b) alone cannot enforce — an inlined ad-hoc shape check would pass (b) while leaving the classifier merely present and never called. Covered by describe 'AC-IS-4 both verbs source the retired refusal from one classifier'.

@@ -6932,6 +6932,14 @@
     "01M0VFMQ985HAMPGHCPGF8GXDW": {
       "human_id": "KN-554",
       "file_path": "docs/requirements/knowledge/KN-554-handoff-agent-main-orchestrator.md"
+    },
+    "01M0VGF8W84M3ZGVFX3TGDP32Q": {
+      "human_id": "TASK-834",
+      "file_path": "docs/requirements/task/TASK-834-skill-test-repair-the-two-assertions-my-read-side.md"
+    },
+    "01M0VGT6EP0SPQY6BPRQWN7DVJ": {
+      "human_id": "TASK-835",
+      "file_path": "docs/requirements/task/TASK-835-skill-implement-duplicate-slug-existing-id-names-t.md"
     }
   }
 }
