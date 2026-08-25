@@ -41,9 +41,13 @@
  * note.
  *   HAPPY:      AC-IS-3 — `--local` stays exit 0 under both shapes.
  *   NEGATIVE:   AC-IS-1 — the defect cell must refuse, not silently succeed.
- *   BOUNDARY:   AC-IS-2 — the neighbouring GitHub-shape cell, already
- *               correct, must stay exit 4 (proves AC-IS-1 has discriminating
- *               power rather than being satisfiable by a broken command).
+ *   BOUNDARY:   AC-IS-2 — the neighbouring GitHub-shape cell — ⛔ AMENDED
+ *               2026-08-25 (spec-a-github-filed-defect-must-be-claimable-
+ *               one-ingest-seam deleted the refusal this cell used to pin):
+ *               it now reaches the live GitHub read path under a payload
+ *               `gh` stub and exits EXACTLY 0, proving AC-IS-1 has
+ *               discriminating power rather than being satisfiable by a
+ *               command variant that also exits nonzero on this shape.
  *   ERROR:      AC-IS-1 / AC-IS-4(a) — exact stderr substrings on refusal.
  *   STATE:      AC-IS-4 — the SAME literal fires from both verbs, evidence
  *               that they consume one shared classifier rather than two
@@ -58,6 +62,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, saveConfig } from "@lore/core/node";
 import { FeedbackConfigSchema, type FeedbackConfig, type LoreConfig } from "@lore/core";
+import { cleanupPayloadGhStubDir, payloadGhStubDir } from "../helpers/payload-gh-stub";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ (3 levels up).
 const PROJECT_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -96,7 +101,7 @@ interface RunResult {
  *      command exit code and must not be reported as one; the `typeof`
  *      check below is the defensive half of that same guard.
  */
-function runLore(args: string[], cwd: string): RunResult {
+function runLore(args: string[], cwd: string, envOverrides: Record<string, string> = {}): RunResult {
   const commandLabel = `'bun run src/index.ts ${args.join(" ")}' in ${cwd}`;
   let proc: Bun.SyncSubprocess<"pipe", "pipe">;
   try {
@@ -107,6 +112,7 @@ function runLore(args: string[], cwd: string): RunResult {
         HOME: cwd,
         CLAUDECODE: "1",
         LORE_ACTOR: "agent:issues-upstream-shape-refusal-probe",
+        ...envOverrides,
       },
       maxBuffer: 16 * 1024 * 1024,
     });
@@ -190,9 +196,21 @@ const REPORT_ISSUE_FILING_FLAGS = [
 
 const TMP_PREFIX = "lore-issues-upstream-shape-refusal-";
 
+/**
+ * AC-IS-2's seeded GitHub issue number — asserted verbatim in the rendered
+ * table (spec's own rejected-forms note: a bare "prints something"
+ * assertion is satisfiable by an empty listing; naming this exact number is
+ * what closes that hole).
+ */
+const SEEDED_ISSUE_NUMBER = 84_217;
+/** `verifyTarget()`'s `gh api repos/<repo>` response id — unchecked by AC-IS-2 but required by the stub's fixture shape. */
+const SEEDED_REPO_ID = 555_000_111;
+
 let retiredDir: string;
 let upstreamTargetDir: string;
 let githubDir: string;
+/** payload gh stub directory for the GitHub-shape green control (AC-IS-2 / AC-MS-4) — serves ONE seeded issue on PATH so `lore issues` reaches a real, stubbed GitHub read path rather than the network. */
+let githubGhStubDir: string;
 
 beforeAll(() => {
   retiredDir = mkdtempSync(join(tmpdir(), TMP_PREFIX + "retired-"));
@@ -222,9 +240,22 @@ beforeAll(() => {
   configureUpstream(githubDir, {
     repo: "acme/widget",
   });
+
+  // payload gh stub: one seeded issue, so AC-IS-2's GitHub-shape green
+  // control actually reaches a stubbed GitHub read path (never the real
+  // network) and its output has exact-value discriminating power.
+  githubGhStubDir = payloadGhStubDir({
+    repoId: SEEDED_REPO_ID,
+    existingIssues: [
+      { number: SEEDED_ISSUE_NUMBER, title: "AC-IS-2 seeded fixture issue", state: "open", body: "" },
+    ],
+    createdNumber: 1,
+    createdUrl: "https://example.invalid/never-created",
+  });
 });
 
 afterAll(() => {
+  cleanupPayloadGhStubDir(githubGhStubDir);
   for (const dir of [retiredDir, upstreamTargetDir, githubDir]) {
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -243,17 +274,30 @@ describe("AC-IS-1 retired-shape upstream refuses the upstream read", () => {
   });
 });
 
-describe("AC-IS-2 green control: GitHub-shape upstream still refuses", () => {
-  it("AC-IS-2 green control: GitHub-shape upstream still refuses", () => {
-    const result = runLore(["issues"], githubDir);
-    expect(result.exitCode).toBe(4);
-    // spec-the-retired-shape-refusal-message-has-two-byte-identical D4: a
-    // bare exitCode-4 assertion is satisfiable by ANY unrelated exit-4, so it
-    // carries no proof that this specific refusal names the later-phase gap
-    // (the AC-IS-2 statement's own promise). Chosen over the equally-present
-    // "reading it via 'lore issues' is not yet supported" because this
-    // literal has no single quotes and needs no escaping.
-    expect(result.stderr).toContain("a later phase of spec-the-defect-channel-reaches-no-machine");
+describe("AC-IS-2 green control: GitHub-shape upstream reaches the GitHub read path", () => {
+  it("AC-IS-2 green control: GitHub-shape upstream reaches the GitHub read path", () => {
+    // ⛔ AMENDED 2026-08-25: the original asserted "exits EXACTLY 4 naming
+    // the later-phase gap" — spec-a-github-filed-defect-must-be-claimable-
+    // one-ingest-seam DELETED that refusal (measured on main: Expected 4 /
+    // Received 8, since with no reachable `gh` the command now exits the
+    // transport code instead). The PURPOSE is unchanged: this cell must not
+    // be satisfiable by breaking `lore issues` outright. New form, with
+    // exact-value discriminating power on BOTH halves — a command emitting
+    // nothing, a blank line, or a bare header would satisfy a weaker
+    // "prints its listing" assertion but not this one.
+    const result = runLore(["issues"], githubDir, {
+      PATH: `${githubGhStubDir}:${process.env.PATH ?? ""}`,
+    });
+    expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+
+    const firstLine = result.stdout.split("\n")[0] ?? "";
+    expect(firstLine.startsWith("Corpus: ")).toBe(true);
+    // The positive half's exact-value discriminator: the seeded issue's own
+    // number must appear in the rendered listing.
+    expect(result.stdout).toContain(String(SEEDED_ISSUE_NUMBER));
+    // The negative half: never the retired-shape refusal this cell used to pin.
+    expect(result.stdout).not.toContain("configured with the retired SQLite shape");
+    expect(result.stderr).not.toContain("configured with the retired SQLite shape");
   });
 });
 

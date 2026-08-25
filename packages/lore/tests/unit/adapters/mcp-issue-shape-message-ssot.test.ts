@@ -5,8 +5,15 @@
  *
  * spec-the-retired-shape-refusal-message-has-two-byte-identical D1/D2: the
  * MCP handler's behaviour on all three `feedback.upstream` shapes is
- * CORRECT today — it refuses unconfigured, GitHub, and retired shapes with
- * distinct, correct messages. What this file pins is NOT a behaviour bug:
+ * CORRECT today — it refuses unconfigured and retired shapes with distinct,
+ * correct messages. ⛔ AMENDED 2026-08-25 (AC-MS-3(b), superseded by
+ * spec-a-github-filed-defect-must-be-claimable-one-ingest-seam D12): the
+ * GitHub shape no longer refuses by design — it FILES through
+ * `fileGithubIssue`. This file's own GitHub-shape fixture (missing
+ * `severity`/`category`) still gets refused, but by the handler's
+ * missing-required-field PRE-CHECK, never the retired-shape upstream
+ * classification this file used to pin. What this file pins is NOT a
+ * behaviour bug on the two branches it still fully covers:
  * it is that the RETIRED-shape message has TWO byte-identical definitions
  * (report-issue-wiring.ts's private `buildRetiredFeedbackUpstreamError`, and
  * the MCP handler's own restatement in `adapters/mcp/tools.ts`), and no
@@ -195,7 +202,24 @@ describe("AC-MS-3 MCP unconfigured and GitHub refusals unchanged", () => {
     expect(error).toEqual(buildUnconfiguredUpstreamRemedy());
   });
 
-  it("a GitHub-shaped feedback.upstream refuses distinctly from the retired-shape message", async () => {
+  it("a GitHub-shaped feedback.upstream, missing severity/category, is refused by the pre-check before any filing attempt — never with the retired-shape message", async () => {
+    // ⛔ AMENDED 2026-08-25 (AC-MS-3(b)): the original positive half asserted
+    // "still refuses with a message containing 'filing via' and
+    // 'lore_report_issue'" — spec-a-github-filed-defect-must-be-claimable-
+    // one-ingest-seam D12 deliberately DELETED that refusal; the handler now
+    // FILES through `fileGithubIssue` for a well-formed GitHub-shaped
+    // request. That positive half is retired because it asserted behaviour
+    // that is now, by design, absent.
+    //
+    // MEASURED (not guessed) with THIS file's existing REPORT_ISSUE_ARGS
+    // fixture, which carries no `severity`/`category`: the handler's own
+    // missing-required-triage-field pre-check (`adapters/mcp/tools.ts`)
+    // refuses BEFORE `fileGithubIssue`/any `gh` call is ever attempted — this
+    // fixture never reaches a real filing attempt. New positive half, true
+    // of that measured behaviour, with real discriminating power (a
+    // collapsed-onto-the-retired-message handler would fail the `code`/
+    // `field` assertions below just as surely as the deleted literals would
+    // have caught it):
     const server = makeServerWithConfig(makeConfig(GITHUB_UPSTREAM));
     const call = getToolHandler(server, "lore_report_issue");
 
@@ -203,11 +227,13 @@ describe("AC-MS-3 MCP unconfigured and GitHub refusals unchanged", () => {
 
     expect(result.isError).toBe(true);
     const error = parseError(result);
-    expect(error.message).toContain("filing via");
-    expect(error.message).toContain("lore_report_issue");
-    // ⛔ Load-bearing negative clause (spec AC-MS-3(b)): what stops AC-MS-2
-    // from being satisfiable by collapsing all three branches onto the
-    // retired-shape message.
+    expect(error.code).toBe("VALIDATION_ERROR");
+    expect(error.field).toBe("severity,category");
+    expect(error.message).toContain("requires severity and category");
+    expect(error.message).toContain(GITHUB_UPSTREAM.repo);
+    // ⛔ Load-bearing negative clause (spec AC-MS-3(b), kept VERBATIM): what
+    // stops AC-MS-2 from being satisfiable by collapsing all three branches
+    // onto the retired-shape message.
     expect(error.message).not.toContain("configured with the retired SQLite shape");
   });
 });
