@@ -109,6 +109,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
 - [task] [Skill:test] the mirror end-to-end oracles cost O(corpus) against a fixed 30s timeout and now exceed it (draft)
+- [task] The mirror --check absorbed the content probe in 90951390 without re-measuring its 13 callers: re-separate the halves or make it incremental (draft)
 - [spec] A GitHub-filed defect must be claimable: one ingest seam turns a listed issue into a corpus task (approved)
 - [task] [Skill:implement] D9's configured-repo substitution silently skips projection when the config is not GitHub-shaped (draft)
 - [task] [Skill:test] repair the two assertions my read-side slice superseded (archived)
