@@ -144,7 +144,6 @@ See the structured criteria added via `lore ac add`.
 
 ## Code anchors
 
-- packages/lore/src/adapters/cli/commands/list.ts#toListJsonRows
 - scripts/export-spec-mirror.ts#parseMirrorArgv
 - packages/lore/tests/integration/list-json-row-contract.test.ts
 - packages/lore/tests/integration/list-json-real-corpus-buffer.test.ts
@@ -152,3 +151,4 @@ See the structured criteria added via `lore ac add`.
 - scripts/tests/export-spec-mirror-type-scope.test.ts
 - scripts/tests/mirror-production-command-unnarrowed.test.ts
 - scripts/tests/export-spec-mirror-narrowed-prune-scope.test.ts
+- packages/lore/src/adapters/cli/commands/list.ts

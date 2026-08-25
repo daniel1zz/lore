@@ -177,3 +177,58 @@ red. It does NOT prove which conjuncts. The agent recorded the unedited output r
 an excerpt — correct, because a curated tail is indistinguishable from a flattering one — and
 reported the attribution separately, where it is prose rather than evidence. ⛔ The mechanism this
 wants is a head+tail window, or a per-assertion structured result; neither exists. NOT BUILT.
+
+## F7 — I steered three agents into self-reported reds by prescribing the wrong flag
+
+Measured at this plan's `lore assess`, which raised it as a MAJOR and was right. Across the
+plan's four tasks:
+
+| task | expected-fail rows | attested |
+|---|---|---|
+| row contract | 2 | 0 |
+| argv parser | 5 | 0 |
+| narrowed prune scope | 1 | 0 |
+| `--governed-by` coverage | 1 | **1** |
+
+Eight of nine reds are `capture_source: self-report`. The plan's own text required an attested
+expected-fail per criterion; it got one.
+
+⛔ **The cause is a bundle-authoring error of mine, not agent laziness.** An early agent reported,
+correctly, that `lore evidence --result expected-fail` is REFUSED without a tail. I turned that
+into a bundle instruction:
+
+> `lore evidence … --result expected-fail --command "<cmd>" --output-tail-file <file>`
+
+and copied it into every later bundle. `--output-tail-file` satisfies the tail requirement and
+records `capture_source: self-report`. `--capture` ALSO satisfies it, spawns `--command` itself,
+and records `capture_source: runner` with a real `exit_code` — for ANY `--result`, red included.
+The one attested red in the table came from the agent that did not follow my template.
+
+⛔ The rule, stated so the next bundle carries it: **a red probe records with `--capture`, with the
+mutation IN PLACE while the command runs. ⛔ Never `--output-tail-file` for a red** — that is a
+self-report, and a self-reported red is precisely what the red-first discipline exists to replace.
+`--capture` and `--output-tail*` are mutually exclusive, so this is a choice, not an oversight one
+can make in both directions.
+
+⛔ Second-order, and the reason this is worth a whole finding: the incomplete report was TRUE.
+"expected-fail is refused without a tail" is a correct measurement. What made it harmful was
+promoting a true observation about ONE flag into a prescription, without checking whether a better
+flag satisfied the same constraint. A measurement answers the question it was asked; a
+prescription answers a question nobody measured.
+
+## F8 — two of this plan's four assess findings were backwards, and one was the most valuable output
+
+Machine-checked every finding that named a path, per the standing rule:
+
+- MAJOR "every attested row is a pass, all mutation reds self-reported" — **CORRECT**, and it is F7.
+- minor "AC-MOS-1's label set may be asserted by count rather than equality" — **BACKWARDS**.
+  `packages/lore/tests/integration/list-json-row-contract.test.ts:628` reads
+  `expect([...pinnedEmitSites.keys()].sort()).toEqual(PINNED_LABELS)` — equality, exactly as the
+  criterion demands.
+- minor on AC-MOS-6's tail attribution — correct; it is F6.
+- minor on `.lore/export-index.json` sitting outside both tasks' file anchors — correct and
+  expected; it is a generated corpus artifact the orchestrator commits, not task work.
+
+⛔ Two of four survive. That ratio is why the rule is "machine-check every finding that names a
+path" rather than "weigh the judge's confidence": path existence and a line's content are
+decidable, and deciding them costs one command each.

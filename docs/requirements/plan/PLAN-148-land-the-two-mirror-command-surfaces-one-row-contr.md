@@ -3,7 +3,7 @@ id: PLAN-148
 type: plan
 role: plan
 title: "Land the two mirror command surfaces: one row contract for list --json, a real argv parser for export-spec-mirror"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-25
 updated: 2026-08-25

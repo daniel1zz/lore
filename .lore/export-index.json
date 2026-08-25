@@ -7008,6 +7008,10 @@
     "01M0W30HDZKT2SZ7X04EJJH0X7": {
       "human_id": "TASK-846",
       "file_path": "docs/requirements/task/TASK-846-a-narrowed-export-must-never-delete-another-type-s.md"
+    },
+    "01M0W4QBZNB7NA7QR12BTNESBD": {
+      "human_id": "KN-559",
+      "file_path": "docs/requirements/knowledge/KN-559-assessment-land-the-two-mirror-command-surfaces-on.md"
     }
   }
 }
