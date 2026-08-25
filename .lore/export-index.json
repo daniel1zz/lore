@@ -7016,6 +7016,58 @@
     "01M0W5W001HHNN526RHGM90PKQ": {
       "human_id": "KN-560",
       "file_path": "docs/requirements/knowledge/KN-560-handoff-agent-main-orchestrator.md"
+    },
+    "01M0WPE20RPVE02C2NV36CXWTS": {
+      "human_id": "ADR-039",
+      "file_path": "docs/requirements/adr/ADR-039-the-vendor-intake-address-ships-in-the-binary-conf.md"
+    },
+    "01M0WMS2K0VPYGNND0623YS06Z": {
+      "human_id": "TASK-847",
+      "file_path": "docs/requirements/task/TASK-847-a-deferral-reason-with-no-destination-must-not-clo.md"
+    },
+    "01M0WNJZGSVXDRBX9VF9KBEHBV": {
+      "human_id": "TASK-848",
+      "file_path": "docs/requirements/task/TASK-848-the-judge-confidence-field-is-collapsed-85-percent.md"
+    },
+    "01M0WNJGZ53HZ6QMYE0QHPKGGV": {
+      "human_id": "TASK-849",
+      "file_path": "docs/requirements/task/TASK-849-lore-review-staleness-ships-a-complete-probe-that.md"
+    },
+    "01M0WNJA2R6YD9138NKSQJJ4QF": {
+      "human_id": "TASK-850",
+      "file_path": "docs/requirements/task/TASK-850-the-escalate-verdict-has-been-overturned-17-times.md"
+    },
+    "01M0WNHRNHCFDRF9EQT2D5WW18": {
+      "human_id": "TASK-851",
+      "file_path": "docs/requirements/task/TASK-851-review-judgments-pins-doc-version-but-nothing-re-j.md"
+    },
+    "01M0WKM4E511K1GR0HCF0G57Q4": {
+      "human_id": "TASK-852",
+      "file_path": "docs/requirements/task/TASK-852-a-resume-ticket-structurally-cannot-name-the-proje.md"
+    },
+    "01M0WKKFEPE12KHQSBGDRFGB5Y": {
+      "human_id": "TASK-853",
+      "file_path": "docs/requirements/task/TASK-853-check-test-budgets-scans-packages-only-so-scripts.md"
+    },
+    "01M0WKJQYBDBQ2X04Y49GPPR1Y": {
+      "human_id": "TASK-854",
+      "file_path": "docs/requirements/task/TASK-854-a-phase-carries-only-a-name-so-this-phase-s-criter.md"
+    },
+    "01M0WKH3EH3RF0WXY18N7FJG1Y": {
+      "human_id": "TASK-855",
+      "file_path": "docs/requirements/task/TASK-855-lore-log-and-created-by-print-the-literal-system-w.md"
+    },
+    "01M0WKG054Q6Y91A5C47AWD80S": {
+      "human_id": "TASK-856",
+      "file_path": "docs/requirements/task/TASK-856-one-unknown-key-discards-the-whole-lore-config-yam.md"
+    },
+    "01M0WJH15QF0PZJW1KE6Z04EQR": {
+      "human_id": "TASK-857",
+      "file_path": "docs/requirements/task/TASK-857-the-turso-half-of-the-duplicate-slug-fix-has-no-co.md"
+    },
+    "01M0WJ84GZHJ07WD84YQGX36XS": {
+      "human_id": "TASK-858",
+      "file_path": "docs/requirements/task/TASK-858-nothing-stops-one-session-overwriting-another-s-in.md"
     }
   }
 }
