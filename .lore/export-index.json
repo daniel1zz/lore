@@ -6944,6 +6944,18 @@
     "01M0VHKGQZM7N82XD93QTSX9PK": {
       "human_id": "TASK-836",
       "file_path": "docs/requirements/task/TASK-836-skill-implement-d9-s-configured-repo-substitution.md"
+    },
+    "01M0VJF82TXJJHW8RRGT4GH24P": {
+      "human_id": "TASK-837",
+      "file_path": "docs/requirements/task/TASK-837-skill-test-the-mirror-end-to-end-oracles-cost-o-co.md"
+    },
+    "01M0VKMSCCDXEPCM6ZPN96QQDZ": {
+      "human_id": "KN-555",
+      "file_path": "docs/requirements/knowledge/KN-555-assessment-close-the-read-side-a-github-filed-defe.md"
+    },
+    "01M0VKQMKA4ESJBH4FB971QHXE": {
+      "human_id": "TASK-838",
+      "file_path": "docs/requirements/task/TASK-838-skill-implement-the-six-read-flags-work-on-the-git.md"
     }
   }
 }
