@@ -17,7 +17,7 @@
 // `loadLibsqlClientModule` below). Only types are imported at the top level;
 // types are fully erased at compile time, so this import has NO runtime
 // effect and does not touch `@libsql/client`'s native binding.
-import type { Client, InValue, Row, Transaction } from "@libsql/client";
+import type { Client, InStatement, InValue, ResultSet, Row, Transaction } from "@libsql/client";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
 import { MIGRATION_001_SQL } from "./migrations/migration-001.js";
@@ -242,6 +242,19 @@ export function buildTursoClientConfig(
     readYourWrites: true,
   };
 }
+
+/**
+ * The one statement-running capability both `Client` and `Transaction` expose,
+ * so a helper can read through EITHER.
+ *
+ * ⛔ Structural on purpose, NOT `Pick<Client, "execute"> | Pick<Transaction,
+ * "execute">`: `Client.execute` is OVERLOADED (`(stmt)` and `(sql, args)`)
+ * while `Transaction.execute` has the single `(stmt: InStatement)` signature
+ * (`@libsql/core/lib-esm/api.d.ts:85-86` vs `:284`), so a `Transaction` does
+ * not satisfy `Pick<Client, "execute">` and a union of the two makes the call
+ * site ambiguous. Both DO satisfy this single-signature shape.
+ */
+type SqlExecutor = { execute(stmt: InStatement): Promise<ResultSet> };
 
 // ─── Row extraction helpers ────────────────────────────────────────────────
 // libsql Row fields are accessed as row["field"] returning Value.
@@ -645,6 +658,83 @@ export class TursoStore implements StoreInterface {
 
   // ── Document CRUD ─────────────────────────────────────────────────────
 
+  /**
+   * Id of the doc that ALREADY holds `slug`, or `null` when no row does.
+   *
+   * ⛔ Deliberately does NOT filter `deleted_at`: `docs.slug` is UNIQUE at the
+   * COLUMN level (`migrations/migration-006.ts:103`), not a partial index over
+   * live rows, so a soft-deleted row still holds its slug and still raises the
+   * violation. Adding `WHERE deleted_at IS NULL` would make this return `null`
+   * while the INSERT is still refused. Byte-for-byte the same SELECT
+   * `SQLiteStore.findSlugConflictIdSync` issues; `InMemoryStore.
+   * findSlugConflict` scans its Map with the same (unfiltered) semantics.
+   *
+   * @param executor - `this.client`, or the STILL-OPEN transaction whose
+   *   INSERT was just refused. It is the caller's job to pass a transaction
+   *   only while it is open: `insertWithProvenance` rolls back BEFORE it
+   *   inspects the error, so it passes `this.client` (the winning row is
+   *   committed data from another writer, so a fresh read sees it), whereas
+   *   `insertWithAllocatedOrdinal*`'s retry closure runs inside the live
+   *   transaction and passes that, which reads the exact snapshot the UNIQUE
+   *   index arbitrated against.
+   */
+  private async findSlugConflictId(
+    executor: SqlExecutor,
+    slug: Slug,
+  ): Promise<DocId | null> {
+    const rs = await executor.execute({
+      sql: "SELECT id FROM docs WHERE slug = ?",
+      args: [slug] as InValue[],
+    });
+    const row = rs.rows[0];
+    return row === undefined ? null : (rowStr(row, "id") as DocId);
+  }
+
+  /**
+   * The ONE DUPLICATE_SLUG construction site in this file — all four insert
+   * entry points (`insert`, `insertWithAllocatedOrdinal`,
+   * `insertWithProvenance`, `insertWithAllocatedOrdinalAndProvenance`) funnel
+   * their `UNIQUE constraint failed: docs.slug` branch through here.
+   *
+   * Before task-skill-implement-duplicate-slug-existing-id-names-the each of
+   * those four sites inlined `existing_id: doc.id` — the id of the doc the
+   * UNIQUE constraint had just REJECTED and which was therefore never
+   * persisted, so `corpusService.get(error.existing_id)` answered
+   * DOC_NOT_FOUND every time. `existing_id` now carries the id of the doc that
+   * actually holds the slug, resolved by {@link findSlugConflictId}.
+   *
+   * ⛔ Returns a STORE_ERROR, not a DUPLICATE_SLUG, when the lookup finds
+   * nothing: the UNIQUE index refused the INSERT, so a row held the slug at
+   * that instant, and finding none now means a concurrent writer removed or
+   * renamed it. `existing_id` is typed non-optional
+   * (`packages/core/src/errors.ts:15`), so that state cannot be reported
+   * honestly under DUPLICATE_SLUG — and falling back to `doc.id` is precisely
+   * the false label this helper exists to end.
+   *
+   * @param executor - see {@link findSlugConflictId}'s `executor` contract.
+   * @param cause - the driver error whose message identified the violation.
+   */
+  private async getDuplicateSlugErrorFor(
+    executor: SqlExecutor,
+    slug: Slug,
+    cause: unknown,
+  ): Promise<LoreError> {
+    const winnerId = await this.findSlugConflictId(executor, slug);
+    if (winnerId === null) {
+      return {
+        code: "STORE_ERROR",
+        message:
+          `slug '${slug}' was refused by the docs.slug UNIQUE constraint, but no row holds it ` +
+          `now — its holder was removed or renamed concurrently between the refusal and ` +
+          `TursoStore.findSlugConflictId's lookup. Retry the insert.`,
+        // `exactOptionalPropertyTypes` — `cause` is `cause?: Error`, so a
+        // non-Error throw must OMIT the key rather than set it undefined.
+        ...(cause instanceof Error ? { cause } : {}),
+      };
+    }
+    return { code: "DUPLICATE_SLUG", slug, existing_id: winnerId };
+  }
+
   async insert(doc: DocRecord): Promise<Result<DocRecord, LoreError>> {
     try {
       await this.ensureReady();
@@ -688,7 +778,9 @@ export class TursoStore implements StoreInterface {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "";
       if (msg.includes("UNIQUE constraint failed: docs.slug")) {
-        return err({ code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id });
+        // No transaction here — `insert` writes through `this.client` — so the
+        // conflict lookup reads through the same client.
+        return err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e));
       }
       // Duplicate PK also returns err (not throw)
       if (msg.includes("UNIQUE constraint failed: docs.id")) {
@@ -754,7 +846,14 @@ export class TursoStore implements StoreInterface {
         } catch (e) {
           const msg = e instanceof Error ? e.message : "";
           if (msg.includes("UNIQUE constraint failed: docs.slug")) {
-            return { kind: "error", error: { code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id } };
+            // `tx` is still OPEN here — the rollback below runs only after
+            // this closure returns — so the conflict lookup reads the exact
+            // snapshot the UNIQUE index arbitrated against. A failed
+            // statement does not roll back or close a libsql transaction —
+            // "the transaction is not rolled back" / "the transaction won't be
+            // rolled back", `@libsql/core/lib-esm/api.d.ts:288` and `:293-294`
+            // — so `tx` is still usable for this read.
+            return { kind: "error", error: await this.getDuplicateSlugErrorFor(tx, doc.slug, e) };
           }
           if (isOrdinalUniqueViolationMessage(msg)) {
             return { kind: "collision" };
@@ -1425,7 +1524,13 @@ export class TursoStore implements StoreInterface {
       }
       const msg = e instanceof Error ? e.message : "";
       if (msg.includes("UNIQUE constraint failed: docs.slug")) {
-        return err({ code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id });
+        // ⛔ `this.client`, NOT `tx`: the rollback above already ran and the
+        // `finally` below closes the transaction, so `tx` is unusable by the
+        // time the error is inspected. Reading through the client is correct
+        // regardless — the row holding the slug is committed data written by
+        // another writer (this transaction inserted `doc` exactly once, so it
+        // cannot be conflicting with itself).
+        return err(await this.getDuplicateSlugErrorFor(this.client, doc.slug, e));
       }
       return wrapStoreError(e);
     } finally {
@@ -1499,7 +1604,10 @@ export class TursoStore implements StoreInterface {
         } catch (e) {
           const msg = e instanceof Error ? e.message : "";
           if (msg.includes("UNIQUE constraint failed: docs.slug")) {
-            return { kind: "error", error: { code: "DUPLICATE_SLUG", slug: doc.slug, existing_id: doc.id } };
+            // `tx` is still open inside this retry closure — see
+            // `insertWithAllocatedOrdinal`'s identical branch for why a failed
+            // statement leaves a libsql transaction usable.
+            return { kind: "error", error: await this.getDuplicateSlugErrorFor(tx, doc.slug, e) };
           }
           if (isOrdinalUniqueViolationMessage(msg)) {
             return { kind: "collision" };

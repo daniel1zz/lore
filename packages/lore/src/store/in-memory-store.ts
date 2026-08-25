@@ -1109,6 +1109,25 @@ export class InMemoryStore implements StoreInterface {
 
   // ── Private Helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Id of the doc that ALREADY holds `slug`, or `null` when no doc does.
+   *
+   * Sole caller: {@link insert}'s `DUPLICATE_SLUG` branch. This store has
+   * always resolved the winner here; the two SQL-backed stores reported the
+   * REJECTED doc's own id until
+   * task-skill-implement-duplicate-slug-existing-id-names-the gave each of
+   * them the equivalent lookup (`SQLiteStore.findSlugConflictIdSync`,
+   * `TursoStore.findSlugConflictId`). ⛔ That asymmetry was invisible to every
+   * vitest unit test precisely BECAUSE this store — the test double — was the
+   * correct one; the oracle therefore lives in
+   * `tests/unit/store/sqlite-store.bun.test.ts` under `bun test`.
+   *
+   * ⛔ Scans soft-deleted docs too, deliberately: `docs.slug` is UNIQUE at the
+   * COLUMN level in both SQL stores (`migrations/migration-006.ts:103`), so a
+   * soft-deleted row still holds its slug and still refuses the insert.
+   * Skipping `deleted_at !== null` docs here would make this store ACCEPT an
+   * insert both SQL stores reject.
+   */
   private findSlugConflict(slug: Slug): DocId | null {
     for (const doc of this.docs.values()) {
       if (doc.slug === slug) {

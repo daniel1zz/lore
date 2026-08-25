@@ -21,15 +21,18 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { formatError } from "../../../src/adapters/cli/utils.js";
 import type {
   AuditEntry,
   CalibrationRecord,
   DocRecord,
   LinkRecord,
+  LoreError,
   ReviewJudgment,
   VersionRecord,
 } from "@lore/core";
@@ -1763,5 +1766,264 @@ describe("SQLiteStore — review judgments + calibration (SPEC-034)", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("STORE_ERROR");
+  });
+});
+
+// ─── DUPLICATE_SLUG.existing_id names the WINNER, never the rejected doc ─────
+// task-skill-implement-duplicate-slug-existing-id-names-the
+//
+// ⛔ These cases MUST run under `bun test` against the real SQLiteStore:
+//   cd packages/lore && bun test tests/unit/store/sqlite-store.bun.test.ts
+// A vitest run cannot judge this. The two stores that got the field wrong
+// (SQLiteStore, TursoStore) are the two that need a real database; the one that
+// got it right is InMemoryStore — the test double every vitest unit test uses,
+// so every vitest assertion about this field was green while both SQL-backed
+// stores were reporting an id that resolved to nothing.
+
+/** The DUPLICATE_SLUG member of the `LoreError` union (`packages/core/src/errors.ts:15`). */
+type DuplicateSlugError = Extract<LoreError, { code: "DUPLICATE_SLUG" }>;
+
+/**
+ * The AC-1 assertion, factored so every insert entry point asserts the SAME
+ * property: `existing_id` must RESOLVE to a persisted doc that holds the
+ * colliding slug.
+ *
+ * ⛔ An id-SHAPED string is not a passing condition — the pre-fix defect
+ * returned `doc.id` (the rejected doc's own freshly generated, never-persisted
+ * ULID), which is perfectly id-shaped and resolved to DOC_NOT_FOUND every
+ * single time. Hence the `store.find()` round trip plus the slug equality
+ * check, and the explicit `not.toBe(loser.id)` disqualifier.
+ */
+async function expectExistingIdNamesTheWinner(
+  store: SQLiteStore,
+  error: DuplicateSlugError,
+  winner: DocRecord,
+  loser: DocRecord,
+): Promise<void> {
+  expect(error.slug).toBe(winner.slug);
+
+  // Resolution is asserted BEFORE identity on purpose: it is the assertion
+  // with the discriminating power ("an id-shaped string is not a passing
+  // condition"), so it is the one a future red must quote.
+  const resolved = await store.find(error.existing_id);
+  expect(resolved.ok).toBe(true);
+  if (!resolved.ok) return;
+  expect(
+    resolved.value,
+    `existing_id ${error.existing_id} resolved to NO doc — the field promises the id of the doc ` +
+      `already holding '${error.slug}' (expected the winner ${winner.id}), so an unresolvable ` +
+      `value is the false label this fix closes`,
+  ).not.toBeNull();
+  expect(resolved.value?.slug).toBe(winner.slug);
+
+  expect(error.existing_id).toBe(winner.id);
+  expect(error.existing_id).not.toBe(loser.id);
+}
+
+describe("SQLiteStore — DUPLICATE_SLUG.existing_id names the winner (task-skill-implement-duplicate-slug-existing-id-names-the)", () => {
+  let store: SQLiteStore;
+
+  beforeEach(() => {
+    _counter = 0;
+    store = new SQLiteStore(":memory:");
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  const CONFLICT_SLUG = "prd-existing-id-conflict";
+
+  it("AC-1.01 (insert): existing_id resolves to the doc already holding the slug", async () => {
+    const winner = makeDoc({ slug: CONFLICT_SLUG });
+    const loser = makeDoc({ slug: CONFLICT_SLUG });
+    const seeded = await store.insert(winner);
+    expect(seeded.ok).toBe(true);
+
+    const result = await store.insert(loser);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DUPLICATE_SLUG");
+    if (result.error.code !== "DUPLICATE_SLUG") return;
+
+    await expectExistingIdNamesTheWinner(store, result.error, winner, loser);
+  });
+
+  it("AC-1.02 (insertWithAllocatedOrdinal): existing_id resolves to the doc already holding the slug", async () => {
+    const winner = makeDoc({ slug: CONFLICT_SLUG });
+    const loser = makeDoc({ slug: CONFLICT_SLUG });
+    expect((await store.insert(winner)).ok).toBe(true);
+
+    const result = await store.insertWithAllocatedOrdinal(loser);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DUPLICATE_SLUG");
+    if (result.error.code !== "DUPLICATE_SLUG") return;
+
+    await expectExistingIdNamesTheWinner(store, result.error, winner, loser);
+  });
+
+  it("AC-1.03 (insertWithProvenance): existing_id resolves to the doc already holding the slug", async () => {
+    const winner = makeDoc({ slug: CONFLICT_SLUG });
+    const loser = makeDoc({ slug: CONFLICT_SLUG });
+    expect((await store.insert(winner)).ok).toBe(true);
+
+    const result = await store.insertWithProvenance(
+      loser,
+      makeVersion(loser.id, 1),
+      makeAuditEntry(loser.id),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DUPLICATE_SLUG");
+    if (result.error.code !== "DUPLICATE_SLUG") return;
+
+    await expectExistingIdNamesTheWinner(store, result.error, winner, loser);
+  });
+
+  it("AC-1.04 (insertWithAllocatedOrdinalAndProvenance): existing_id resolves to the doc already holding the slug", async () => {
+    const winner = makeDoc({ slug: CONFLICT_SLUG });
+    const loser = makeDoc({ slug: CONFLICT_SLUG });
+    expect((await store.insert(winner)).ok).toBe(true);
+
+    const result = await store.insertWithAllocatedOrdinalAndProvenance(
+      loser,
+      makeVersion(loser.id, 1),
+      makeAuditEntry(loser.id),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DUPLICATE_SLUG");
+    if (result.error.code !== "DUPLICATE_SLUG") return;
+
+    await expectExistingIdNamesTheWinner(store, result.error, winner, loser);
+  });
+
+  it("AC-1.05 BOUNDARY: a SOFT-DELETED holder still owns the slug, so existing_id names it", async () => {
+    // reason: `docs.slug` is `TEXT NOT NULL UNIQUE` at the COLUMN level
+    // (`store/migrations/migration-006.ts:103`) — not a partial index over
+    // `deleted_at IS NULL`. A soft-deleted row therefore still holds its slug
+    // and still raises the UNIQUE violation, so the conflict lookup MUST NOT
+    // filter on `deleted_at` (this mirrors `InMemoryStore.findSlugConflict`,
+    // which scans every doc including soft-deleted ones). This case is the
+    // guard against a future session "tidying" a `WHERE deleted_at IS NULL`
+    // into that lookup: the lookup would then find nothing while the UNIQUE
+    // index still refuses the insert.
+    const winner = makeDoc({ slug: CONFLICT_SLUG });
+    const loser = makeDoc({ slug: CONFLICT_SLUG });
+    expect((await store.insert(winner)).ok).toBe(true);
+    expect((await store.softDelete(winner.id)).ok).toBe(true);
+
+    const result = await store.insert(loser);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("DUPLICATE_SLUG");
+    if (result.error.code !== "DUPLICATE_SLUG") return;
+
+    // `find` is a direct-address lookup and applies NO soft-delete filter
+    // (`store/store-interface.ts:414`), so the shared assertion holds unchanged.
+    await expectExistingIdNamesTheWinner(store, result.error, winner, loser);
+  });
+
+  it("AC-4 SURFACE: formatError's rendered message names the WINNER's id, not the rejected doc's", async () => {
+    // The user-visible half of the same false label:
+    // `adapters/cli/utils.ts`'s DUPLICATE_SLUG branch renders
+    // "already exists (used by <id>)" — a sentence that was false for every
+    // SQL-backed store until this fix. Asserting the store alone would leave
+    // the rendered surface uncovered.
+    const winner = makeDoc({ slug: CONFLICT_SLUG });
+    const loser = makeDoc({ slug: CONFLICT_SLUG });
+    expect((await store.insert(winner)).ok).toBe(true);
+
+    const result = await store.insert(loser);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    const rendered = formatError(result.error);
+    expect(rendered).toContain(`Slug '${CONFLICT_SLUG}' already exists`);
+    expect(rendered).toContain(winner.id);
+    expect(rendered).not.toContain(loser.id);
+  });
+});
+
+describe("AC-3 SSOT: no store constructs DUPLICATE_SLUG from the REJECTED doc's own id", () => {
+  const STORE_DIR = fileURLToPath(new URL("../../../src/store/", import.meta.url));
+  const STORE_FILES_THAT_MUST_CONSTRUCT_IT = [
+    "sqlite-store.ts",
+    "turso-store.ts",
+    "in-memory-store.ts",
+  ] as const;
+
+  /**
+   * One construction site per store implementation, each fed by a real
+   * conflict lookup. The count is asserted EXACTLY (not `<= 3`) so that a
+   * fourth store — or a fifth site smuggled back into an existing one — fails
+   * here and sends its author to this comment.
+   */
+  const EXPECTED_CONSTRUCTION_SITE_COUNT = 3;
+
+  function scanStoreSources(): {
+    scannedFiles: string[];
+    rejectedDocIdSites: string[];
+    constructionSites: string[];
+  } {
+    const scannedFiles = readdirSync(STORE_DIR).filter((name) => name.endsWith(".ts"));
+    const rejectedDocIdSites: string[] = [];
+    const constructionSites: string[] = [];
+
+    for (const file of scannedFiles) {
+      const lines = readFileSync(join(STORE_DIR, file), "utf8").split("\n");
+      lines.forEach((line, index) => {
+        // reason: comment lines are skipped so that PROSE about this invariant
+        // (including the why-comments this very fix added, which necessarily
+        // quote the field name) never counts as a construction site — the
+        // census must measure code, not documentation of code.
+        const trimmed = line.trim();
+        if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) return;
+        if (!/existing_id\s*:/.test(line)) return;
+        constructionSites.push(`${file}:${index + 1}`);
+        if (/existing_id\s*:\s*doc\.id\b/.test(line)) {
+          rejectedDocIdSites.push(`${file}:${index + 1}`);
+        }
+      });
+    }
+    return { scannedFiles, rejectedDocIdSites, constructionSites };
+  }
+
+  it("no store file assigns existing_id from the doc being inserted", () => {
+    const { scannedFiles, rejectedDocIdSites } = scanStoreSources();
+
+    // Positive control: without this, a renamed or empty directory would make
+    // the census below vacuously true.
+    for (const required of STORE_FILES_THAT_MUST_CONSTRUCT_IT) {
+      expect(scannedFiles).toContain(required);
+    }
+
+    expect(
+      rejectedDocIdSites,
+      `existing_id must name the doc ALREADY HOLDING the slug, resolved by a conflict lookup — ` +
+        `never \`doc.id\`, which is the id of the doc the UNIQUE constraint just rejected and which ` +
+        `was therefore never persisted. Offending sites: ${rejectedDocIdSites.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("exactly one construction site per store implementation, and every store still has one", () => {
+    const { constructionSites } = scanStoreSources();
+
+    for (const required of STORE_FILES_THAT_MUST_CONSTRUCT_IT) {
+      const sitesInFile = constructionSites.filter((site) => site.startsWith(`${required}:`));
+      expect(
+        sitesInFile.length,
+        `${required} must construct DUPLICATE_SLUG at exactly ONE site (found ${sitesInFile.length}: ${sitesInFile.join(", ")})`,
+      ).toBe(1);
+    }
+
+    expect(
+      constructionSites.length,
+      `Every DUPLICATE_SLUG construction site in src/store must resolve the WINNER's id through a ` +
+        `conflict lookup — see SQLiteStore.findSlugConflictIdSync, TursoStore.findSlugConflictId, ` +
+        `InMemoryStore.findSlugConflict. A new site here means a new store: give it a lookup and ` +
+        `bump this count. Sites: ${constructionSites.join(", ")}`,
+    ).toBe(EXPECTED_CONSTRUCTION_SITE_COUNT);
   });
 });

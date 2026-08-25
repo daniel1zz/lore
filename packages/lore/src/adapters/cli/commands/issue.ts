@@ -13,13 +13,20 @@
  * (`already_adopted: true` under `--json`) rather than creating a second
  * task or refusing — `CorpusService.create`'s typed `DUPLICATE_SLUG` on
  * that deterministic slug IS the "already adopted" signal, read back via
- * `corpusService.get(derivedSlug)` — the SAME D1 slug this call site
- * already computed before calling `create`, NEVER
- * `error.existing_id` (MEASURED 2026-08-25: `SqliteStore`/`TursoStore`'s
- * `DUPLICATE_SLUG` branch returns the NEW, never-persisted doc's own id
- * there, not the pre-existing doc's — see the `run()` body's own comment
- * at the `DUPLICATE_SLUG` check for the full finding), never papered over
- * with a silent catch. Refuses loudly (`VALIDATION_ERROR`, exit 4) when
+ * `corpusService.get(createResult.error.existing_id)`, the id of the task
+ * that ALREADY holds the slug, never papered over with a silent catch.
+ * ⛔ That re-fetch went through the locally re-derived D1 slug until
+ * task-skill-implement-duplicate-slug-existing-id-names-the, because both
+ * SQL-backed stores reported the REJECTED doc's own id in `existing_id`
+ * (measured 2026-08-25). Both now resolve the winner
+ * (`store/sqlite-store.ts::findSlugConflictIdSync`,
+ * `store/turso-store.ts::findSlugConflictId`), so the workaround is retired
+ * and the field is consumed as its name promises; the store-side guarantee
+ * is pinned by `AC-1.01`–`AC-1.05` in
+ * `tests/unit/store/sqlite-store.bun.test.ts` and this call site's own
+ * consumption by `AC-GR-3 STATE (idempotency)` in
+ * `tests/integration/cli/github-defect-claim-lifecycle.bun.test.ts`.
+ * Refuses loudly (`VALIDATION_ERROR`, exit 4) when
  * `<number>` is not a positive integer, when it names no issue in the live
  * listing, when `feedback.upstream` is unconfigured or retired-shape, or
  * when this corpus has no root PRD to adhoc-parent the new task to (D13,
@@ -157,7 +164,11 @@ import {
   type ExplicitResolution,
 } from "../../../service/issue-resolution.js";
 import { readGithubIssueRef, type GithubIssueRef } from "../../../service/resolution-projector.js";
-import { githubIssueTaskSlug, toIssueTaskInput } from "../../../service/issue-task-shaping.js";
+// `githubIssueTaskSlug` is deliberately NOT imported here: `toIssueTaskInput`
+// applies it internally (`service/issue-task-shaping.ts:231`), and the adopt
+// path no longer needs the slug locally now that `DUPLICATE_SLUG.existing_id`
+// names the winner (see the DUPLICATE_SLUG branch in `run()`).
+import { toIssueTaskInput } from "../../../service/issue-task-shaping.js";
 import { classifyFeedbackUpstream, resolveGithubIssueListing } from "../report-issue-wiring.js";
 import { buildUnconfiguredUpstreamRemedy, type LoreError } from "@lore/core";
 
@@ -529,14 +540,6 @@ export default defineCommand({
             return;
           }
 
-          // D1's deterministic slug, computed independently of
-          // `taskInputResult.value.slug` (which carries the SAME value, but
-          // typed `Slug | undefined` since `CreateDocInput.slug` is
-          // optional in general — this call site knows it is always
-          // present for an issue task and wants a non-optional `Slug` to
-          // key the idempotent re-fetch below on).
-          const derivedSlug = githubIssueTaskSlug(repoId, issueNumber);
-
           const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
           const createResult = await app.corpusService.create(taskInputResult.value, { by });
 
@@ -550,23 +553,25 @@ export default defineCommand({
             // `already_adopted` flag / "Already adopted" prefix, never by
             // exit code.
             //
-            // reason: re-fetch by `derivedSlug`, NEVER by
-            // `createResult.error.existing_id` — MEASURED 2026-08-25:
-            // `SqliteStore.insert`/`TursoStore.insert`'s `DUPLICATE_SLUG`
-            // branch (`store/sqlite-store.ts` ~L558, `store/turso-store.ts`
-            // several sites) returns `existing_id: doc.id`, i.e. the NEW
-            // (never-persisted, since the insert failed) doc's own freshly
-            // generated id — NOT the id of the doc actually holding the
-            // slug (`InMemoryStore.insert`'s `findSlugConflict`-derived
-            // `existing_id` gets this right; the two SQL-backed stores do
-            // not). A `corpusService.get(error.existing_id)` call here
-            // would DOC_NOT_FOUND every single time. This is a store-layer
-            // defect outside this task's file anchors — reported, not
-            // fixed here — but `derivedSlug` sidesteps it entirely: it is
-            // exactly the slug the collision just happened on, known to
-            // this call site independent of what the store reports.
+            // reason: re-fetch by `createResult.error.existing_id` — the id
+            // of the task that already holds the colliding slug, which is
+            // what that field names. ⛔ This call site used to re-derive the
+            // D1 slug instead, because both SQL-backed stores reported the
+            // REJECTED doc's own never-persisted id there and every
+            // `get(existing_id)` answered DOC_NOT_FOUND (measured
+            // 2026-08-25). That defect is FIXED, not sidestepped:
+            // `store/sqlite-store.ts::findSlugConflictIdSync` and
+            // `store/turso-store.ts::findSlugConflictId` now resolve the
+            // winner, and `AC-1.01`–`AC-1.05` in
+            // `tests/unit/store/sqlite-store.bun.test.ts` assert the id
+            // RESOLVES (not merely that it is id-shaped) for all four
+            // SQLite insert entry points. The workaround is therefore
+            // retired here rather than left standing as an expired
+            // assertion — `githubIssueTaskSlug` is still the slug `create`
+            // was called WITH (via `toIssueTaskInput`), it is just no longer
+            // needed to read the winner back.
             if (createResult.error.code === "DUPLICATE_SLUG") {
-              const existingResult = await app.corpusService.get(derivedSlug);
+              const existingResult = await app.corpusService.get(createResult.error.existing_id);
               if (!existingResult.ok) {
                 process.stderr.write(formatError(existingResult.error) + "\n");
                 process.exitCode = exitCode(existingResult.error);
