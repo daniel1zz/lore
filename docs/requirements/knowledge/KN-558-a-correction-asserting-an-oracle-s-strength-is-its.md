@@ -127,3 +127,53 @@ Measured by the implementing agent with a per-site mutation sweep — reverting 
 five distinct sites, and the sixth site is reached only by the BARE `--plan-id` invocation the AC
 does not name. The enumeration is still one short of the closed set it claims — the same defect
 as round 1, one layer down. Corrected in the AC after this measurement.
+
+## F5 — the NUL guard is blind at exactly the moment an agent consults it, which closes F2's loop
+
+Measured 2026-08-25 with a paired probe. A file containing one raw NUL, placed under
+`packages/lore/src/`:
+
+| state | `bun scripts/check-no-nul-bytes.ts` |
+|---|---|
+| UNTRACKED | **exit 0** — "3410 tracked file(s) considered, zero raw NUL bytes in any text-source file" |
+| the SAME file, staged | **exit 1** — names the file |
+
+The checker scans git-TRACKED files only. So an implementer who authors a NEW file and runs the
+guard before committing gets a green that says **nothing about the file they just wrote**, and the
+green's own wording ("3410 tracked file(s) considered") reads as thorough.
+
+⛔ This is how F2's NUL reached `main`. The sequence is not a lapse by any one actor:
+
+1. the implementing agent authored a new test file containing a raw NUL;
+2. any pre-commit run of the NUL guard was vacuous, because the file was untracked;
+3. the worktree protocol says agents run SCOPED oracles only, so nobody ran the suite that would
+   have caught it;
+4. the orchestrator merged on the strength of targeted per-file runs — and `hooks/pre-push` runs
+   six checks, none of which is a test.
+
+Every step followed the documented rule. The defect is that the guard's ONE reliable invoker (the
+vitest suite) is the one nobody is supposed to run until after the merge.
+
+⛔ Unenforced gap, NOT BUILT: the checker should consider untracked-but-would-be-tracked files, or
+say out loud how many candidate files it skipped for being untracked. A count of what was
+CONSIDERED, with no count of what was SKIPPED, is the same shape as F2's silent grep — an
+affirmative report over a question that was never asked.
+
+## F6 — `--output-tail`'s window structurally cannot carry a multi-conjunct attribution
+
+Measured by the implementing agent on AC-MOS-6's red probe. `lore evidence --output-tail-file`
+retains the LAST 4000 characters. vitest prints its compact per-assertion failure list FIRST and
+then expands each failure. For a soft-assertion oracle with 17 failures, the tail therefore holds
+the last three expansions plus the summary — and the verdict the criterion actually asked for
+("(a) and (b) red while (c) still green") falls outside the window BY CONSTRUCTION, not by
+truncation bad luck.
+
+Alternatives measured and rejected: `--reporter=dot` still emits full expansions (18.9 KB);
+`--reporter=github-actions` gives one line per failure (14.1 KB) but emits NO runner summary line,
+which violates the standing rule that an evidence tail must carry one.
+
+⛔ Consequence to state plainly rather than paper over: that evidence row proves the oracle went
+red. It does NOT prove which conjuncts. The agent recorded the unedited output rather than curate
+an excerpt — correct, because a curated tail is indistinguishable from a flattering one — and
+reported the attribution separately, where it is prose rather than evidence. ⛔ The mechanism this
+wants is a head+tail window, or a per-assertion structured result; neither exists. NOT BUILT.

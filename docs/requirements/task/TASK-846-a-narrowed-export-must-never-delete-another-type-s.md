@@ -3,7 +3,7 @@ id: TASK-846
 type: task
 role: plan
 title: "A narrowed export must never delete another type's mirror: put a refusal behind the prune-scoping pairing"
-status: approved
+status: archived
 priority: medium
 phase: "command surfaces"
 created: 2026-08-25
