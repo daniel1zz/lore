@@ -6,7 +6,7 @@ title: "Five findings from planning the GitHub read side: a refusal can promise 
 status: approved
 priority: high
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-25
 tags: [defect-channel, governance, oracle-design, handoff-hygiene]
 parent: PRD-001
 links:
@@ -78,3 +78,56 @@ The root CLAUDE.md standing lesson states only the vitest half. Stating one half
 ⛔ Practical rule, and note it is a property of the RUNNER, not of the oracle text: a `-t`-filtered oracle under **vitest** MUST additionally require a `Tests N passed` summary; under **bun test** the zero-match exit is already loud. The six ACs on `spec-a-github-filed-defect-must-be-claimable-one-ingest-seam` that use `-t` are all `bun test`, so they are safe — by accident of runner choice, not by design. Anyone moving one of those oracles to vitest must add the summary requirement in the same edit.
 
 ⛔ Second-order, unmeasured and therefore stated as a hypothesis rather than a finding: `bun test -t` appears to match as a SUBSTRING, so `-t "AC-GR-1"` would also select a block named `AC-GR-10: …`. That direction is stricter (more tests must pass), so it cannot produce a false green — but it does mean one AC's oracle can fail on another AC's test, and a reader debugging that failure will look in the wrong place.
+
+## F7 — A `-t`-filtered AC command and `lore done`'s unfiltered-run floor are structurally opposed
+
+Measured at P2's archival. `lore done` refused with:
+
+> Task … declares test-file anchor(s) with no attested UNFILTERED result:pass run … requires, for EACH declared test-file anchor, at least one `oracle:test result:pass` evidence row whose command runs that file with no `-t` / `--testNamePattern` / `--test-name-pattern` (or any of the three joined to a value with '=') case filter
+
+Both mechanisms are correct and they pull opposite ways:
+
+- The **AC** wants one criterion per assertion, so several ACs share one test file and each names its own `describe` with `-t`. That is what makes each AC independently attributable.
+- The **floor** wants the whole anchored file green, because a filtered run leaves the rest of the file unverified — a real hole, since an implementer can add a passing filtered case beside a failing unfiltered one.
+
+⛔ Neither is the bug. The consequence is a standing obligation: **every task whose test-file anchor is covered only by `-t`-filtered AC commands must ALSO record a companion unfiltered run** (`lore evidence … --result pass --capture`), or it cannot be archived. On the spec this was measured against, 6 of 12 ACs are `-t`-filtered and one phase has all four of its ACs filtering the same file.
+
+⛔ Recorded as an unenforced gap: nothing warns at `lore ac add` time that a filtered command will later need a companion row. The mechanism it wants is a check at AC-declaration time — the same class of "the tool knows at declaration time what it will refuse at archival, and says nothing until archival" gap. NOT BUILT.
+
+⛔ Second measured detail, easy to misread: on the run that first hit this, the unfiltered command's tail read `Ran 1 test across 1 file`. The file held exactly one test, so the filter was a no-op and the companion row was byte-equivalent to the filtered one. A reader could conclude the floor is pointless. It is not — the equivalence is a property of that file at that moment, and it disappears the instant a second phase adds its own case to the same file, which the plan schedules.
+
+## F8 — Four agent deaths were the machine sleeping, and I attributed the first three to prompt design
+
+Measured 2026-08-25. Four consecutive subagent runs on one task died. Three reported `Agent stalled: no progress for 600s (stream watchdog did not recover)`; the fourth reported `API Error: Your computer went to sleep mid-response`. Only the fourth named the cause. `pmset -g log` then showed the machine had entered Sleep three times in the preceding 45 minutes (994s, 974s, 536s), and `pmset -g` reports `sleep 1` — one minute of idle.
+
+⛔ **The 600s watchdog cannot distinguish "the agent is hung" from "the host stopped executing it."** Both present as a silent stream. The watchdog's message NAMES the first reading, and that name is what I believed.
+
+What I did with three data points and no measurement:
+
+1. After stall #1 I attributed it to context load and told the agent to read in slices.
+2. After stall #2 I attributed it to reading a 4500-line file, pre-digested every fact it needed, and injected a "never read a large file" anti-pattern.
+3. After stall #3 I attributed it to transcript replay compounding across resumes, declared retrying the same agent to be "letting the problem compound", abandoned the worktree, and dispatched a fresh agent.
+
+Each explanation was plausible, each was stated with more confidence than the evidence carried, and each was **wrong**. The cost: two wasted retries, one wasted fresh dispatch, one deleted worktree, and a bundle carrying an anti-pattern derived from a fault that never happened.
+
+⛔ The rule this violates is already in this project's standing discipline — *investigate before judging; a 5-second check beats a 5-minute wrong path* — and the trigger fired three times without being honoured. What makes this case worth recording is WHY it kept not firing: **each new failure looked like confirmation of the previous theory.** Stall #2 during a large read "confirmed" the reading hypothesis. Stall #3 arriving quickly after a resume "confirmed" the transcript hypothesis. A theory that predicts every observation is not being tested by them.
+
+**The cheap check that would have settled it at stall #1**: `pmset -g log | grep -iE "Sleep  |Wake "` on macOS. Roughly one second. ⛔ Before attributing ANY agent stall to prompt design, task scope, or context size, first establish that the host was actually running: check for host sleep, then for a stuck process holding a lock, then for load. Those are decidable; a prompt-design theory is not.
+
+⛔ Named as an unenforced gap: nothing in the dispatch path checks whether the host is likely to sleep before launching a long-running agent, and the stall notification carries no host-liveness signal that would let the orchestrator tell the two cases apart. Either would have prevented this. NOT BUILT.
+
+## F9 — A read-only agent keeps its worktree "unchanged", and an unchanged isolation worktree can be reclaimed under it
+
+Measured 2026-08-25, the fourth death on the same task. The agent reported that its working directory stopped existing between two tool calls, and refused to continue — correctly, since the only fallback offered was the parent session's shared checkout.
+
+Verified from the main checkout afterwards: `git worktree list` showed ONLY the main checkout, `.claude/worktrees/` had no subdirectories, `.git/worktrees/` metadata was empty, and every `worktree-agent-*` branch was gone — including a concurrent session's, which this session had explicitly decided not to touch.
+
+⛔ **No data was lost, and that was checked before anything else was done.** The concurrent session's commit `060189fa` was already in `main` via merge `d11be557`; the dead agent had zero commits. Every vanished branch was merged. The order matters: establish loss-or-no-loss FIRST, then diagnose.
+
+The explanation most consistent with the evidence: the harness auto-cleans an isolation worktree that is *unchanged*, and this agent had done nothing but `grep`/`sed`/`Read` — so its worktree never left the unchanged state, even while it was actively working. ⛔ Stated as the best-supported reading, NOT as established fact: branch deletion accompanied the removal, and it is not determined that the same mechanism does both.
+
+What IS determined, and is the operationally useful half: **an agent doing only reads is indistinguishable from an agent that has done nothing.** Time spent is not a signal any cleanup can see; a file on disk is.
+
+**Mitigation, now in the dispatch bundle**: the agent's first substantive action is to create its test file skeleton and commit it as a WIP commit, before any extended reading. Red-first already requires writing that file early, so this costs nothing and takes the worktree permanently out of the reclaimable state.
+
+⛔ Unenforced gap: nothing in the dispatch path guarantees a worktree becomes "changed" before the agent's first long read, and the agent gets no warning that its isolation root has been reclaimed until a tool call fails. NOT BUILT.

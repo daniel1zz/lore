@@ -3,11 +3,11 @@ id: TASK-821
 type: task
 role: plan
 title: "[Skill:implement] the read surface reaches GitHub and never writes"
-status: draft
+status: archived
 priority: critical
 phase: "P3: Read surface"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-25
 tags: []
 parent: PLAN-145
 plan: PLAN-145

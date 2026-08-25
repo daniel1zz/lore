@@ -3,11 +3,11 @@ id: TASK-816
 type: task
 role: plan
 title: "Author the phase-write audit-pairing oracle and prove it can fail"
-status: approved
+status: archived
 priority: medium
 phase: "audit pairing oracle"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-08-25
 tags: []
 parent: PLAN-144
 plan: PLAN-144
