@@ -6956,6 +6956,10 @@
     "01M0VKQMKA4ESJBH4FB971QHXE": {
       "human_id": "TASK-838",
       "file_path": "docs/requirements/task/TASK-838-skill-implement-the-six-read-flags-work-on-the-git.md"
+    },
+    "01M0VPVGXA0MTSYHS4WBE6H4F4": {
+      "human_id": "KN-556",
+      "file_path": "docs/requirements/knowledge/KN-556-handoff-agent-main-orchestrator.md"
     }
   }
 }
