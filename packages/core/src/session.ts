@@ -115,6 +115,15 @@
  *     disposition line back into a verdict is sibling T3's job (the
  *     `lore handoff` coverage-check verb, the SOLE parser of that grammar —
  *     D9).
+ *   - hasDeferralDestination(reason) / RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX
+ *     — spec-resume-coverage-floor-the-satisfaction-boundaries-a S4 (Overview
+ *     Hole 3): a deferral REASON (S1) is not itself a DESTINATION — the
+ *     predicate recognizes an issue reference or a corpus slug inside the
+ *     reason text, and the prefix is the coverage-check verb's distinct
+ *     stderr refusal for a reason that names neither. MANDATORY exports per
+ *     that spec's Scope section (SPEC-112 D7/D9: the verb composes from
+ *     exports, never inline literals) — see the constants' own doc comments,
+ *     just above `renderResumeCoverageCardinalityLine`, below.
  *   - sessionStartMarkerFilename(sessionId) / isSameSessionAuthorship(record,
  *     currentActor, sessionStartIso) — task-verifying-a-handoff-you-just-authored-arms-the-coverage
  *     D1/D2: narrows WHEN the resume-ticket coverage floor above arms.
@@ -1034,6 +1043,99 @@ export const RESUME_DISPOSITION_DONE = "done";
  * `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>`.
  */
 export const RESUME_DISPOSITION_DEFERRED_PREFIX = "deferred:";
+
+// ─── S4: Deferral Destination (spec-resume-coverage-floor-the-satisfaction-boundaries-a S4, Overview Hole 3) ───
+//
+// S1 (above) made a deferral carry a REASON. It did not make the reason
+// carry a DESTINATION, so `deferred:out of scope for this session` closes
+// an item and the deferred work enters no queue. Measured 2026-08-25 over
+// this corpus's own 139 handoff docs (`extra.handoff.next_steps`): 696
+// next-step items, 458 of them (65.8%) bare prose that parks nothing
+// anywhere. The two constants below close that hole.
+
+/**
+ * Recognizes an issue reference inside a deferral reason (S4) — either a
+ * bare `#<digits>` mention or a `/issues/<digits>` URL path segment (GitHub's
+ * and most trackers' issue-URL shape). Matched ANYWHERE in the reason text,
+ * not anchored, so `"...tracked, see issue #42"` still counts. Module-private
+ * — only {@link hasDeferralDestination}'s combined predicate is exported,
+ * since a caller composing the two patterns independently would be a second
+ * implementation of "what counts as a destination" (SPEC-112 D7/D9's own
+ * discipline: the grammar lives in exactly one place).
+ */
+const DEFERRAL_ISSUE_REFERENCE_PATTERN = /#\d+|\/issues\/\d+(?:[/?#]|$)/;
+
+/**
+ * Recognizes a corpus slug inside a deferral reason (S4) — one of the six
+ * `DocRecord` type prefixes (`prd|spec|adr|plan|task|knowledge`) followed by
+ * `-` and a lowercase kebab tail, the SAME `{type}-{kebab-title}` shape
+ * `DocRecord.slug` uses everywhere else in this codebase. Matched as a
+ * substring, not anchored, so `"...tracked in task-some-filed-thing"` still
+ * counts. Module-private for the same reason
+ * {@link DEFERRAL_ISSUE_REFERENCE_PATTERN} is.
+ *
+ * @invariant GRAMMAR ONLY (S4's recorded known false pass) — this pattern
+ *   matches the SHAPE of a slug, never resolves it against the corpus, so a
+ *   slug-shaped string naming no real document satisfies it. Resolution
+ *   would give this pure module store IO and a network dependency it must
+ *   not have (this module's own header: "no IO").
+ */
+const DEFERRAL_CORPUS_SLUG_PATTERN = /\b(?:prd|spec|adr|plan|task|knowledge)-[a-z0-9]+(?:-[a-z0-9]+)*/;
+
+/**
+ * S4's destination predicate — true iff `reason` (already S1-non-empty, per
+ * the caller's own check) names WHERE the deferred work went: an issue
+ * reference or a corpus slug. A reason alone is not a destination —
+ * `deferred:out of scope for this session` satisfies S1 and fails this
+ * predicate, which is exactly Hole 3's measured propagation vector (see this
+ * section's own header comment for the 458/696 measurement).
+ *
+ * Exported so `packages/lore/src/adapters/cli/commands/handoff.ts` — the
+ * SOLE parser of this grammar (D9) — composes from this export rather than
+ * typing the grammar a second time (SPEC-112 D7/D9); that verb's own call
+ * site is pinned to read literally `!hasDeferralDestination(`
+ * (task-a-deferral-reason-with-no-destination-must-not-close-its's own
+ * falsifier). Pure — no IO, no wall-clock reads, browser-safe (this module's
+ * own header: no Node builtin in the default barrel — pure string/regex work
+ * only here).
+ *
+ * @param reason - The trimmed text following `RESUME_DISPOSITION_DEFERRED_PREFIX`.
+ * @returns `true` iff `reason` carries a recognized destination token.
+ * @example
+ * hasDeferralDestination("out of scope for this session"); // => false — reason, no destination
+ * @example
+ * hasDeferralDestination("out of scope, see issue #5"); // => true — issue reference
+ * @example
+ * hasDeferralDestination("tracked in task-some-filed-thing"); // => true — corpus slug
+ */
+export function hasDeferralDestination(reason: string): boolean {
+  return DEFERRAL_ISSUE_REFERENCE_PATTERN.test(reason) || DEFERRAL_CORPUS_SLUG_PATTERN.test(reason);
+}
+
+/**
+ * The stderr presentation prefix for S4's own refusal — "a deferral reason
+ * naming no destination" — DISTINCT from S1's bare-deferral prefix
+ * (`UNDISPOSITIONED_ITEM_STDERR_PREFIX`, local to `handoff.ts`, see that
+ * constant's own doc) on purpose: "no reason given" (S1) and "a reason that
+ * parks the work nowhere" (S4) are different operator mistakes with
+ * different fixes, and this repo's own first corpus property forbids a
+ * verdict that is not injective — a shared prefix would make the two
+ * indistinguishable to a consumer parsing stderr.
+ *
+ * Exported (unlike the two prefixes it is distinct from, which stay local
+ * presentation literals in `handoff.ts`) because the Scope section of
+ * spec-resume-coverage-floor-the-satisfaction-boundaries-a S4 makes it
+ * MANDATORY — the verb must compose the destination grammar AND this prefix
+ * from `@lore/core` exports, never inline literals (SPEC-112 D7/D9).
+ *
+ * @invariant AC-RCS-4 front (b) asserts the stderr the verb ACTUALLY EMITS
+ *   `startsWith` this constant AND that this constant is not byte-equal to
+ *   the bare-deferral prefix — both conjuncts, since a constants-only
+ *   comparison cannot catch a verb that mis-routes a destination failure
+ *   through the OTHER prefix.
+ */
+export const RESUME_DISPOSITION_MISSING_DESTINATION_STDERR_PREFIX =
+  "Deferral reason names no destination for resume ticket item: ";
 
 /**
  * Pure cardinality-line renderer
