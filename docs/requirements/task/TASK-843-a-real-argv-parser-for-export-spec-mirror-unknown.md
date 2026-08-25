@@ -3,7 +3,7 @@ id: TASK-843
 type: task
 role: plan
 title: "A real argv parser for export-spec-mirror: unknown flags refused, --type narrows the scan but not the detection"
-status: approved
+status: archived
 priority: medium
 phase: "command surfaces"
 created: 2026-08-25
