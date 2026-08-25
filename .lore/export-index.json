@@ -6928,6 +6928,10 @@
     "01M0VETYJV6A4GP6JB33DRBWJV": {
       "human_id": "KN-553",
       "file_path": "docs/requirements/knowledge/KN-553-assessment-make-the-phase-write-version-row-audit.md"
+    },
+    "01M0VFMQ985HAMPGHCPGF8GXDW": {
+      "human_id": "KN-554",
+      "file_path": "docs/requirements/knowledge/KN-554-handoff-agent-main-orchestrator.md"
     }
   }
 }
