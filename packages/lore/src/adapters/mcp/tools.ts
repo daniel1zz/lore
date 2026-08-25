@@ -217,6 +217,13 @@ import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFi
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import { buildUnconfiguredUpstreamRemedy, ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
 import { resolveSubTypeFilter } from "../../service/corpus-service.js";
+// spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-11 —
+// `readGithubIssueRef` is pure/store-free (no `gh`/`bun:sqlite` deps, see
+// its own module header), so — unlike `report-issue-wiring.js` below —
+// this import stays static: it locates the task `fileGithubIssue` just
+// minted by its stored GitHub pointer, never by recomputing a slug this
+// handler has no `repo_id` to recompute it from.
+import { readGithubIssueRef } from "../../service/resolution-projector.js";
 import type { HandoffExtra } from "@lore/core";
 import { isAssessAiBraked } from "../../ai/resolve-ai.js";
 import { REVIEW_PROMPT_VERSION } from "../../ai/review-template.js";
@@ -2895,38 +2902,119 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       // github): this handler used to lazy-import `report-issue-wiring.js`'s
       // `buildIssueReportDeps` and pipe straight into `IssueReportService.report`
       // for a legacy-shaped `feedback.upstream`. `IssueReportService` and the
-      // SQLite `UpstreamPort` it drove are deleted outright — this tool now
-      // refuses EVERY configured shape (legacy SQLite is retired; GitHub is a
-      // later phase's own wiring task, unchanged from before) and only the
-      // "unconfigured" condition differs in wording from before.
+      // SQLite `UpstreamPort` it drove are deleted outright — legacy SQLite
+      // stays refused (below); GitHub now files for real (AC-GR-11,
+      // spec-a-github-filed-defect-must-be-claimable-one-ingest-seam), through
+      // the SAME `fileGithubIssue` `commands/report-issue.ts` calls — never a
+      // second filing implementation.
       //
       // Lazy import kept for the SAME isolation reason it existed before:
       // `report-issue-wiring.js` value-imports `gh-runner.js`/
       // `github-intake-port.js`, whose transitive deps a static import here
       // would drag into the vitest graph of every tools.ts consumer
       // (mcp-tools.test.ts).
-      const { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg, buildRetiredFeedbackUpstreamError } = await import(
-        "../cli/report-issue-wiring.js"
-      );
+      const {
+        isGithubUpstreamCfg,
+        resolveFeedbackUpstreamCfg,
+        buildRetiredFeedbackUpstreamError,
+        fileGithubIssue,
+        resolveConsumerCorpusRoot,
+      } = await import("../cli/report-issue-wiring.js");
       const cfg = resolveFeedbackUpstreamCfg(getConfig?.());
 
       if (cfg === undefined) {
         return errorContent(buildUnconfiguredUpstreamRemedy());
       }
 
-      // reason: the LIVE filing path is `GitHubIntakePort`, via
-      // `report-issue-wiring.ts::fileGithubIssue` — wiring THIS MCP tool onto
-      // it is a separate task's own scope; refuse loudly here rather than
-      // silently mis-typing the GitHub shape into a call with no implementation.
+      // AC-GR-11 — the LIVE filing path is `GitHubIntakePort`, via
+      // `report-issue-wiring.ts::fileGithubIssue`, the SAME function
+      // `commands/report-issue.ts` calls whenever `feedback.upstream`
+      // resolves to this shape.
       if (isGithubUpstreamCfg(cfg)) {
-        return errorContent({
-          code: "VALIDATION_ERROR",
-          field: "feedback.upstream",
-          message:
-            `this corpus's feedback.upstream is GitHub-configured (repo: ${cfg.repo}) — filing via ` +
-            "lore_report_issue (MCP) is not yet supported for that shape (a later phase of spec-the-" +
-            "defect-channel-reaches-no-machine-but-its-own-github). Use the CLI's `lore report-issue` instead.",
+        // `GithubReportInput.severity`/`.category` are REQUIRED (not
+        // optional) — mirrors `commands/report-issue.ts`'s own precondition
+        // check for the identical reason: the front-matter schema's closed
+        // six-field set has no undeclared-label representation. Checked
+        // here (not deferred to `fileGithubIssue`) so a caller missing
+        // either gets a `VALIDATION_ERROR` naming BOTH the offending
+        // field(s) and the accepted severity set, before any `gh` call.
+        if (args.severity === undefined || args.category === undefined) {
+          const missingTriageFields = [
+            args.severity === undefined ? "severity" : undefined,
+            args.category === undefined ? "category" : undefined,
+          ].filter((field): field is string => field !== undefined);
+          return errorContent({
+            code: "VALIDATION_ERROR",
+            field: missingTriageFields.join(","),
+            message:
+              `Filing into a GitHub-configured feedback.upstream (repo: ${cfg.repo}) requires ` +
+              `${missingTriageFields.join(" and ")} (the front-matter schema's severity/category fields ` +
+              `are not optional). Valid severities: ${ISSUE_SEVERITIES.join(", ")}.`,
+          });
+        }
+
+        // MCP requires `by` explicitly (SPEC-025 precedent; `LoreReportIssueSchema`
+        // rejects an empty one) — `resolveActorWithSource` always resolves this
+        // to the `"explicit"` tier, mirroring how the CLI resolves its own
+        // `actorSource` before threading it through `GithubFilingContext.actor`.
+        // This module does NO actor resolution of its own (report-issue-
+        // wiring.ts's own header) — never build the actor from anything else here.
+        const { actor, source: actorSource } = resolveActorWithSource(args.by);
+
+        const fileResult = await fileGithubIssue(
+          {
+            title: args.title,
+            description: args.description,
+            expected: args.expected,
+            actual: args.actual,
+            ...(args.repro_command !== undefined ? { repro_command: args.repro_command } : {}),
+            severity: args.severity,
+            category: args.category,
+            // No `tags` field on THIS surface (LoreReportIssueSchema's own
+            // header names this gap) — an MCP-filed report always carries
+            // an empty tag set.
+            tags: [],
+          },
+          cfg,
+          {
+            consumerCorpusRoot: resolveConsumerCorpusRoot(),
+            corpusService: app.corpusService,
+            actor,
+            actorSource,
+          },
+        );
+        if (!fileResult.ok) return errorContent(fileResult.error);
+
+        // D8/AC-GR-9's mint already landed inside `fileGithubIssue` — this
+        // read locates the SAME task by its stored GitHub pointer
+        // (`readGithubIssueRef`, pure/store-free) rather than recomputing
+        // `githubIssueTaskSlug` from a `repo_id` this handler was never
+        // given: `fileGithubIssue`'s return shape (`GithubReportResult`)
+        // carries `number`/`url`, never `repo_id`. AC-GR-11 requires the
+        // success payload to NAME the created task's slug.
+        const taskLookup = await app.corpusService.listFull({ type: "task" });
+        if (!taskLookup.ok) {
+          return errorContent({
+            code: "STORE_ERROR",
+            message:
+              `issue filed upstream as #${fileResult.value.number} (${fileResult.value.url}) but locating the ` +
+              `created corpus task failed (${taskLookup.error.code}) — the upstream issue itself was NOT lost.`,
+          });
+        }
+        const createdTask = taskLookup.value.docs.find((doc) => {
+          const ref = readGithubIssueRef(doc.extra);
+          return ref !== undefined && ref.repo === cfg.repo && ref.issueNumber === fileResult.value.number;
         });
+        if (createdTask === undefined) {
+          return errorContent({
+            code: "STORE_ERROR",
+            message:
+              `issue filed upstream as #${fileResult.value.number} (${fileResult.value.url}) but no corpus task ` +
+              `carrying that GitHub reference could be found — the upstream issue itself was NOT lost.`,
+          });
+        }
+
+        return textContent({ ...fileResult.value, task_slug: createdTask.slug });
       }
 
       // legacy-shaped `feedback.upstream` — retired (P4): `IssueReportService`
