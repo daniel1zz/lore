@@ -116,20 +116,27 @@
  * detector's job.
  *
  * D9 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam) — the
- * live `gh api` call `ResolutionProjector.project` triggers MUST target the
- * CONFIGURED repo (`classifyFeedbackUpstream(config)`'s `cfg.repo`), NEVER
- * the STORED `readGithubIssueRef(updated.extra).repo`: the stored string is
- * this task's PROVENANCE (which repo it was filed/adopted against at the
- * time), and a repository rename leaves it stale while `.lore/config.yaml`
- * is the operator's up-to-date pointer. The `run()` body below therefore
- * builds the live `GithubIssueRef` by substituting `repo` alone (never
- * `repo_id` — `GhResolutionLabelPort.setLabel`'s `issueLabelsPath` never
- * reads that field, only `.repo`/`.issueNumber`) onto the STORED ref, and
- * skips the `.project()` call entirely — never a refusal, the corpus
- * verdict already landed — when `feedback.upstream` no longer classifies as
- * GitHub-shaped at all (unconfigured or retired), the same "nothing to
- * project" degrade this file already applies when no projector is wired or
- * no GitHub pointer exists on the task.
+ * live `gh api` call `ResolutionProjector.project` triggers targets, in
+ * order of preference, the CONFIGURED repo
+ * (`classifyFeedbackUpstream(config)`'s `cfg.repo`, when `.kind ===
+ * "github"`), FALLING BACK to the STORED
+ * `readGithubIssueRef(updated.extra).repo` when the current config does
+ * not classify as GitHub-shaped (unconfigured, retired, or absent). The
+ * stored string is this task's PROVENANCE (which repo it was
+ * filed/adopted against at the time) and goes stale after a repository
+ * rename, which is why the configured repo wins WHEN AVAILABLE — but the
+ * config's shape today says nothing about whether THIS task should still
+ * project, so it is never treated as a joint requirement alongside
+ * `storedGithubRef`. The `run()` body below builds the live
+ * `GithubIssueRef` by substituting `repo` alone (never `repo_id` —
+ * `GhResolutionLabelPort.setLabel`'s `issueLabelsPath` never reads that
+ * field, only `.repo`/`.issueNumber`) onto the STORED ref. The
+ * `.project()` call is skipped ENTIRELY — never a refusal, the corpus
+ * verdict already landed — in exactly one case: `readGithubIssueRef`
+ * returns `undefined` (this task never carried a GitHub pointer), the same
+ * "nothing to project" degrade this file already applies when no
+ * projector is wired. A non-GitHub-shaped config alone never skips
+ * projection for a task that DOES carry a stored ref.
  *
  * Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D3,
  *   AC-ICL-3, AC-ICL-4;
@@ -849,14 +856,27 @@ export default defineCommand({
           // corpus verdict above already landed regardless.
           const storedGithubRef = readGithubIssueRef(updated.extra);
           // D9 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam)
-          // — the LIVE `gh api` target MUST be the CONFIGURED repo, never
-          // the STORED one: `storedGithubRef.repo` is this task's
-          // PROVENANCE (which repo it was filed/adopted against AT THE
-          // TIME), and a repository rename leaves that string stale while
+          // — the LIVE `gh api` target PREFERS the CONFIGURED repo over the
+          // STORED one: `storedGithubRef.repo` is this task's PROVENANCE
+          // (which repo it was filed/adopted against AT THE TIME), and a
+          // repository rename leaves that string stale while
           // `.lore/config.yaml`'s `feedback.upstream.repo` is the operator's
           // current pointer. `classifyFeedbackUpstream` is the SAME shared
           // classifier `adopt`/`report-issue`/`issues` use — no second,
           // independently-derived read of `feedback.upstream` here.
+          //
+          // "Prefer" is not "require": when the CURRENT config does not
+          // classify as GitHub-shaped (`kind !== "github"` — unconfigured,
+          // retired, or absent), that says nothing about whether THIS task
+          // was ever filed through GitHub; `storedGithubRef` is the
+          // independent, authoritative answer to that question. Falling
+          // through to `undefined` here — as a pre-D9 revert of this file
+          // would — is the exact silent-no-op this project bans: a task
+          // that legitimately carries a GitHub pointer would stop
+          // projecting for a reason (today's config shape) that has
+          // nothing to do with whether it should project. So `liveRepo`
+          // is a PREFERENCE, and `storedGithubRef.repo` is the fallback —
+          // never a joint requirement with `liveRepo`.
           const upstreamClassification = classifyFeedbackUpstream(config);
           const liveRepo =
             upstreamClassification.kind === "github" ? upstreamClassification.cfg.repo : undefined;
@@ -866,9 +886,15 @@ export default defineCommand({
           // `.issueNumber`, never `.repo_id`, so substituting just `repo`
           // is the entire fix; a stale `repo_id` in provenance is a
           // separate, D5-scoped concern this call site does not touch.
+          // `githubRef` is `undefined` in EXACTLY one case: no stored ref at
+          // all (this task never carried a GitHub pointer) — the
+          // legitimate "nothing to project" this file already documents for
+          // an absent projector. A stored ref ALWAYS yields a `githubRef`:
+          // `liveRepo` when the config is GitHub-shaped, `storedGithubRef.repo`
+          // (the fallback) otherwise.
           const githubRef: GithubIssueRef | undefined =
-            storedGithubRef !== undefined && liveRepo !== undefined
-              ? { ...storedGithubRef, repo: liveRepo }
+            storedGithubRef !== undefined
+              ? { ...storedGithubRef, repo: liveRepo ?? storedGithubRef.repo }
               : undefined;
           if (app.resolutionProjector !== undefined && githubRef !== undefined) {
             const projectResult = await app.resolutionProjector.project(computed, githubRef);
