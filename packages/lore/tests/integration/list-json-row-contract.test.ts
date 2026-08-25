@@ -31,19 +31,78 @@
  * ⛔ `meta` must come from `deriveTypeMeta` (`packages/core/src/doc-type-meta.ts`),
  * the SSOT. Dropping `meta` altogether would ALSO make the key sets match and is the
  * cheap wrong answer; that is why every type this file exercises has its discriminant
- * asserted by VALUE, not merely its presence counted.
+ * asserted by VALUE, not merely its presence counted. ⛔ "Every type it exercises" is
+ * itself enforced, not left to the author: {@link ASSERTED_DISCRIMINANT_TYPES} is
+ * compared against the types actually present across every capture, so seeding a
+ * seventh type reddens this suite until its discriminant is asserted too.
+ *
+ * ## MEASURED 2026-08-25 — the per-emit-site mutation sweep
+ *
+ * The AC claims one invocation per emit site. That claim was MEASURED rather than
+ * reasoned, by reverting each of `list.ts`'s five `toListJsonRows(...)` call sites to
+ * printing its full records, one at a time, and recording which assertions reddened:
+ *
+ *   | call site | branch              | suite | assertions reddened            |
+ *   |-----------|---------------------|-------|--------------------------------|
+ *   | line 439  | `--governed-by`     | 1/13  | the `--governed-by` case only  |
+ *   | line 565  | `--phase`           | 3/13  | pinned equality, leak, task meta |
+ *   | line 607  | `--type task`       | 4/13  | + STATE                        |
+ *   | line 659  | `--include-invalid` | 5/13  | + knowledge/adr/plan, prd      |
+ *   | line 705  | `--plan-id` alone   | 1/13  | the `--plan-id` case only      |
+ *
+ * Every site is discriminated — the suite has no blind emit branch. Two consequences
+ * are recorded here because neither is visible from the AC text:
+ *
+ * 1. ⛔ AC-MOS-1's enumeration of six invocations does NOT map one-per-emit-site.
+ *    `list.ts` tests `--governed-by`, then `--phase`, then `--type task`, then
+ *    `--include-invalid`, then `--plan-id`. So its `--type task --plan-id <p>` entry
+ *    is absorbed by the `--type task` branch at line 607 and NEVER reaches line 705 —
+ *    proved above, where mutating 607 reddens that capture and mutating 705 does not.
+ *    The AC's six therefore touch only FIVE distinct sites. This file covers the sixth
+ *    by pinning `--plan-id` WITHOUT `--type` as well ({@link PINNED_EMIT_SITES}), which
+ *    is a deliberate widening beyond the AC's letter, not a restatement of it.
+ * 2. The two fixture-B sites are each guarded by a single assertion, where the three
+ *    fixture-A sites are guarded by three to five. That asymmetry is why both are now
+ *    members of the pinned set rather than of a separate "branches never reached"
+ *    block: it brings them under the named-leak NEGATIVE check too.
+ *
+ * ⛔ This coverage was ALREADY complete before the task that produced this comment.
+ * That task was dispatched on the premise that `grep -c governed` over this file
+ * returned 0 and that reverting line 439 would therefore leave the suite GREEN. BOTH
+ * halves were false: the mutation reddened the `--governed-by` case on the unmodified
+ * file, and the grep returned nothing only because a raw NUL byte in this file's own
+ * source (see {@link distinctKeySets}) made `grep` treat it as binary and suppress
+ * every match. The grep was the false witness, not the suite.
+ *
+ * ## What that task therefore changed, and the red proving each part
+ *
+ * Since `list.ts` needed nothing, the work landed on the ORACLE's own failure modes.
+ * Each addition was falsified by a probe that must redden it and nothing unrelated:
+ *
+ *   | probe                                          | before | after                    |
+ *   |------------------------------------------------|--------|--------------------------|
+ *   | revert line 439 to `fullDocs`                   | 1 red  | 3 red (equality, leak, case) |
+ *   | drop `--governed-by` from the pinned set        | GREEN  | label-set equality red   |
+ *   | stop exercising the `spec` type                 | GREEN  | type-closure red         |
+ *
+ * The first row is the hardening: `--governed-by` was guarded by ONE assertion and is
+ * now guarded by three, because it moved from a side block into the pinned set and so
+ * came under the named-leak NEGATIVE check. Rows two and three are new discriminating
+ * power outright — both mutations were green before, and both are ORACLE-SHAPE
+ * regressions (an invocation quietly dropped, a run quietly narrowed) that no
+ * `list.ts` mutation can expose, which is exactly why the suite could not see them.
  *
  * ## Two fixtures, and the honest reason there are two
  *
  * `deriveTypeMeta` returns `undefined` for `prd` by documented design (that type has
  * no meta variant), so a `prd` row is a NINE-key row — on the default branch too.
- * AC-MOS-1's five pinned invocations therefore run against a corpus that deliberately
- * contains no `prd`, or its bare `--include-invalid` invocation could never satisfy a
- * ten-key EQUALITY. That exclusion is a real narrowing of the criterion, so it is
- * closed here rather than left implicit:
+ * The pinned invocations therefore run against corpora that deliberately return no `prd`
+ * row, or the bare `--include-invalid` invocation could never satisfy a ten-key EQUALITY.
+ * That exclusion is a real narrowing of the criterion, so it is closed here rather than
+ * left implicit:
  *
  *   - {@link FIXTURE_TEN_KEY} — plan / knowledge / adr / task, NO prd and NO spec.
- *     Runs AC-MOS-1's five pinned invocations. Every row: exactly ten keys.
+ *     Runs five of the seven pinned invocations. Every row: exactly ten keys.
  *   - {@link FIXTURE_FULL_TYPE} — prd / spec / plan / task / a `skill` knowledge doc.
  *     Covers the two types fixture A structurally cannot hold: `spec` (which the
  *     criterion names in its discriminant table, and which the corpus refuses to
@@ -52,9 +111,10 @@
  *     statement for that shape: it fails both if a wide branch re-widens AND if
  *     someone "repairs" the missing tenth key by fabricating `meta: null`.
  *
- * Fixture B also covers the two emit branches AC-MOS-1's five invocations never
- * reach: `--governed-by` (which the task text's own "FIVE emit sites" count omits —
- * it is the sixth) and the `--plan-id`-without-`--type` fall-through.
+ * Fixture B also supplies the other two pinned invocations — `--governed-by` and the
+ * `--plan-id`-without-`--type` fall-through — because neither can run against fixture A:
+ * the first needs a `skill` doc plus a `governs` link, and the second needs a plan whose
+ * members are reachable without a `--type task` narrowing that would re-route the branch.
  *
  * ## Invocation shape
  *
@@ -76,14 +136,18 @@
  *
  * ## Six-dimension coverage
  *
- *   HAPPY:      each of AC-MOS-1's five invocations returns rows whose sorted key set
- *               EQUALS the ten-key canonical set
- *   NEGATIVE:   no row carries `content` or `extra` — nor any of the other seven
- *               wide-only keys ({@link WIDE_ONLY_KEYS}), so a partial projection that
- *               dropped only the two big fields still fails
+ *   HAPPY:      each of the seven pinned invocations — AC-MOS-1's six plus the
+ *               `--plan-id`-alone site its enumeration misses — returns rows whose
+ *               sorted key set EQUALS the ten-key canonical set
+ *   NEGATIVE:   no row of any pinned invocation carries `content` or `extra` — nor any
+ *               of the other seven wide-only keys ({@link WIDE_ONLY_KEYS}), so a partial
+ *               projection that dropped only the two big fields still fails, and it
+ *               fails NAMING the keys that leaked
  *   BOUNDARY:   `prd`, the one type whose tenth key is legitimately absent, asserted
  *               as default-branch/wide-branch IDENTITY; an empty result set; a
- *               `--type` narrowing that returns zero rows
+ *               `--type` narrowing that returns zero rows; the pinned LABEL SET is
+ *               asserted by equality, so dropping an invocation reddens the suite
+ *               instead of silently shrinking what it covers
  *   ERROR:      exit codes asserted with `toBe(0)`, never "non-zero"; a `status: null`
  *               spawn (ENOBUFS/signal) throws NAMING the signal instead of being
  *               laundered into an exit code; every envelope read throws on a
@@ -159,6 +223,43 @@ const WIDE_ONLY_KEYS = [
 
 /** A `prd` row: the canonical set MINUS `meta`, which `deriveTypeMeta` refuses to derive for that type. */
 const PRD_ROW_KEYS = CANONICAL_ROW_KEYS.filter((k) => k !== "meta");
+
+/**
+ * AC-MOS-1's SIX enumerated invocations, verbatim and sorted. Pinned as a SET rather
+ * than counted: `size === 6` stays true if one invocation is swapped for a duplicate of
+ * another, which is exactly how the criterion's own enumeration came to touch only five
+ * distinct emit sites (see the header's mutation sweep).
+ */
+const AC_MOS_1_INVOCATIONS = [
+  "--governed-by",
+  "--include-invalid",
+  "--type knowledge",
+  "--type task",
+  "--type task --phase",
+  "--type task --plan-id",
+] as const;
+
+/**
+ * The emit site AC-MOS-1's enumeration MISSES. `--plan-id` reaches its own branch only
+ * when no `--type task` / `--phase` / `--include-invalid` claimed the request first, so
+ * the criterion's `--type task --plan-id` entry is absorbed by the `--type task` branch
+ * and this bare form is the only invocation that exercises line 705. MEASURED in the
+ * header's sweep: mutating 705 reddens this capture and nothing else.
+ */
+const UNENUMERATED_EMIT_SITES = ["--plan-id"] as const;
+
+/** Every invocation held to the canonical row contract: the criterion's six plus the site it misses. */
+const PINNED_LABELS = [...AC_MOS_1_INVOCATIONS, ...UNENUMERATED_EMIT_SITES].sort();
+
+/**
+ * The types whose `deriveTypeMeta` discriminant this file asserts BY VALUE. Compared
+ * against the types actually present across every capture ({@link PINNED_EMIT_SITES}
+ * and both fixtures' extra reads), so AC-MOS-1(b)'s "for EVERY type the run exercises"
+ * is enforced by the suite rather than by whoever last edited the fixtures. ⛔ Seeding a
+ * new type without asserting its discriminant reddens the closure test, which is the
+ * whole point: the clause is otherwise vacuously satisfiable by exercising fewer types.
+ */
+const ASSERTED_DISCRIMINANT_TYPES = ["adr", "knowledge", "plan", "prd", "spec", "task"];
 
 // ─── Primitives ─────────────────────────────────────────────────────────────
 
@@ -299,7 +400,15 @@ function distinctKeySets(rows: readonly EmittedRow[]): string[][] {
   const seen = new Map<string, string[]>();
   for (const row of rows) {
     const keys = sortedKeys(row);
-    seen.set(keys.join(" "), keys);
+    // reason: NUL is the separator because no corpus key name can contain one, so the
+    // join is unambiguous. ⛔ It MUST stay the ESCAPE `\u0000` and never a raw NUL byte
+    // typed into the source. A literal NUL made `file(1)` classify this file as `data`,
+    // and BSD `grep` then suppresses every match in it SILENTLY — no "binary file
+    // matches" line, exit 1, no output. Measured 2026-08-25: `grep -c governed` on this
+    // file printed nothing while the file held ten occurrences, which is what produced
+    // this task's false premise that `--governed-by` was uncovered. Any grep-shaped
+    // structural oracle over this file is blind while a raw NUL is present.
+    seen.set(keys.join("\u0000"), keys);
   }
   return [...seen.values()];
 }
@@ -327,7 +436,7 @@ const A_PHASE = "alpha";
 
 interface FixtureACaptures {
   readonly dir: string;
-  /** AC-MOS-1's five pinned invocations, keyed by a human label. */
+  /** The five pinned invocations this fixture can serve, keyed by a human label. */
   readonly pinned: ReadonlyMap<string, ListPayload>;
   /** The bare default listing — the control for the `--include-invalid` row-count comparison. */
   readonly bareDefault: ListPayload;
@@ -474,18 +583,56 @@ function buildFixtureB(): FixtureBCaptures {
 // hookTimeout in vitest.config.ts was sized for a single test CASE; declaring a budget
 // for a fixture builder whose cost is a known spawn count is the repo's documented
 // pattern, not a mask over a hang.
+/**
+ * EVERY invocation held to the canonical row contract, spanning both fixtures — the six
+ * AC-MOS-1 enumerates plus the `--plan-id`-alone site it misses. Assembled here rather
+ * than inside a fixture because two of the seven can only be produced by fixture B; the
+ * contract being asserted is a property of the COMMAND, not of either corpus.
+ */
+let pinnedEmitSites: ReadonlyMap<string, ListPayload>;
+
+/** Every capture this file takes, including the ones outside the pinned set — the input to the type-closure check. */
+let allCaptures: ReadonlyMap<string, ListPayload>;
+
 beforeAll(() => {
   fixtureA = buildFixtureA();
   fixtureB = buildFixtureB();
+
+  pinnedEmitSites = new Map<string, ListPayload>([
+    ...fixtureA.pinned,
+    ["--governed-by", fixtureB.governedBy],
+    ["--plan-id", fixtureB.planIdOnly],
+  ]);
+
+  allCaptures = new Map<string, ListPayload>([
+    ...pinnedEmitSites,
+    ["bare default", fixtureA.bareDefault],
+    ["--type task (pre-evidence)", fixtureA.taskBeforeEvidence],
+    ["--type spec", fixtureB.specDefault],
+    ["--type prd", fixtureB.prdDefault],
+    ["--type prd --include-invalid", fixtureB.prdWide],
+    ["--type adr (empty)", fixtureB.emptyNarrowing],
+  ]);
 }, 180000);
 
 // ─── The criterion ──────────────────────────────────────────────────────────
 
 describe("one row contract across every --json emit branch", () => {
-  describe("AC-MOS-1(a) — the five pinned invocations return the CLOSED ten-key row", () => {
+  describe("AC-MOS-1(a) — every pinned invocation returns the CLOSED ten-key row", () => {
+    it("BOUNDARY: the pinned LABEL SET equals AC-MOS-1's six plus the emit site its enumeration misses", () => {
+      // ⛔ Equality over the label SET, never `size`. A count stays green when one
+      // invocation is swapped for a duplicate of another — which is precisely the
+      // defect this assertion exists to name: AC-MOS-1's own six invocations touch
+      // only five distinct emit sites, because `--type task --plan-id` is absorbed
+      // by the `--type task` branch. See the header's mutation sweep for the proof.
+      expect([...pinnedEmitSites.keys()].sort()).toEqual(PINNED_LABELS);
+      for (const label of AC_MOS_1_INVOCATIONS) {
+        expect(pinnedEmitSites.has(label), `AC-MOS-1 names ${label} but it is not pinned`).toBe(true);
+      }
+    });
+
     it("HAPPY: every pinned invocation returns rows whose sorted key set EQUALS the canonical set", () => {
-      expect(fixtureA.pinned.size).toBe(5);
-      for (const [label, payload] of fixtureA.pinned) {
+      for (const [label, payload] of pinnedEmitSites) {
         // Non-vacuity: an invocation that returned nothing would satisfy a
         // per-row assertion trivially.
         expect(`${label}: ${payload.total} rows`).toBe(`${label}: ${payload.docs.length} rows`);
@@ -496,7 +643,7 @@ describe("one row contract across every --json emit branch", () => {
 
     it("NEGATIVE: no row carries content, extra, or any other wide-only DocRecord key", () => {
       const leaked = new Map<string, string[]>();
-      for (const [label, payload] of fixtureA.pinned) {
+      for (const [label, payload] of pinnedEmitSites) {
         const present = WIDE_ONLY_KEYS.filter((key) => payload.docs.some((row) => key in row));
         if (present.length > 0) leaked.set(label, [...present]);
       }
@@ -579,14 +726,18 @@ describe("one row contract across every --json emit branch", () => {
     });
   });
 
-  describe("the two emit branches AC-MOS-1's five invocations never reach", () => {
-    it("HAPPY: --governed-by — the SIXTH emit site, which the task text's 'five emit sites' count omits", () => {
+  describe("the two pinned emit sites only fixture B can reach", () => {
+    it("HAPPY: --governed-by — the SIXTH emit site (list.ts line 439), reached via a governs link", () => {
       expect(fixtureB.governedBy.total).toBe(1);
       expect(distinctKeySets(fixtureB.governedBy.docs)).toEqual([[...CANONICAL_ROW_KEYS]]);
       expect(soleMetaOfType(fixtureB.governedBy, "plan")).toEqual({ t: "plan", phase_count: 0 });
     });
 
-    it("HAPPY: --plan-id without --type — the fall-through full-record branch", () => {
+    it("HAPPY: --plan-id without --type — the site AC-MOS-1's `--type task --plan-id` never reaches", () => {
+      // ⛔ The bare form is load-bearing. Adding `--type task` re-routes the request
+      // into the `--type task` branch, so the criterion's own `--type task --plan-id`
+      // entry exercises line 607 twice over rather than line 705 once. Measured in the
+      // header's sweep: mutating 705 reddens THIS case and no other.
       expect(fixtureB.planIdOnly.total).toBe(1);
       expect(distinctKeySets(fixtureB.planIdOnly.docs)).toEqual([[...CANONICAL_ROW_KEYS]]);
       expect(soleMetaOfType(fixtureB.planIdOnly, "task")).toEqual({
@@ -594,6 +745,33 @@ describe("one row contract across every --json emit branch", () => {
         evidence_pass: 0,
         evidence_fail: 0,
       });
+    });
+  });
+
+  describe("AC-MOS-1(b) closure — 'every type the run exercises' is enforced, not trusted", () => {
+    it("BOUNDARY: the types present across every capture EQUAL the types whose discriminant is asserted", () => {
+      // ⛔ Without this, clause (b) is satisfiable by exercising FEWER types: a run that
+      // only ever returned `knowledge` and `task` rows would assert "the discriminant for
+      // every type the run exercises" truthfully and prove almost nothing. Equality in
+      // BOTH directions is the point — a newly seeded type reddens this until its
+      // discriminant is asserted, and deleting an assertion's type reddens it too.
+      const exercised = new Set<string>();
+      for (const payload of allCaptures.values()) {
+        for (const row of payload.docs) {
+          const type = row["type"];
+          if (typeof type !== "string") throw new Error(`a row carries a non-string type: ${JSON.stringify(row["type"])}`);
+          exercised.add(type);
+        }
+      }
+      expect([...exercised].sort()).toEqual(ASSERTED_DISCRIMINANT_TYPES);
+    });
+
+    it("BOUNDARY: every capture is non-empty except the one narrowing deliberately built to match nothing", () => {
+      // Non-vacuity for the closure above: it reads types out of rows, so a fixture that
+      // silently stopped returning rows would shrink `exercised` and the equality would
+      // report the wrong cause. Naming the single legal empty capture keeps that visible.
+      const empty = [...allCaptures].filter(([, payload]) => payload.docs.length === 0).map(([label]) => label);
+      expect(empty).toEqual(["--type adr (empty)"]);
     });
   });
 
