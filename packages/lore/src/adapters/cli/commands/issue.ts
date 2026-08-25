@@ -1,4 +1,31 @@
 /**
+ * `lore issue` subcommands: `adopt <number>` and `resolve <issue> --state ...`.
+ *
+ * `lore issue adopt <number> [--by <actor>] [--json]` —
+ * (task-skill-implement-lore-issue-adopt-and-the-label-round-trip, AC-GR-3)
+ * turns one LISTED GitHub issue into a claimable corpus task: resolves the
+ * consumer's configured `feedback.upstream` (must be GitHub-shaped —
+ * `classifyFeedbackUpstream`), reads the live listing
+ * (`report-issue-wiring.ts::resolveGithubIssueListing`), finds `<number>`
+ * in it, then mints the task via `issue-task-shaping.ts::toIssueTaskInput`
+ * (D1's deterministic `task-gh-<repo_id>-<number>` slug). IDEMPOTENT:
+ * adopting the SAME issue twice reports the EXISTING task at exit 0
+ * (`already_adopted: true` under `--json`) rather than creating a second
+ * task or refusing — `CorpusService.create`'s typed `DUPLICATE_SLUG` on
+ * that deterministic slug IS the "already adopted" signal, read back via
+ * `corpusService.get(derivedSlug)` — the SAME D1 slug this call site
+ * already computed before calling `create`, NEVER
+ * `error.existing_id` (MEASURED 2026-08-25: `SqliteStore`/`TursoStore`'s
+ * `DUPLICATE_SLUG` branch returns the NEW, never-persisted doc's own id
+ * there, not the pre-existing doc's — see the `run()` body's own comment
+ * at the `DUPLICATE_SLUG` check for the full finding), never papered over
+ * with a silent catch. Refuses loudly (`VALIDATION_ERROR`, exit 4) when
+ * `<number>` is not a positive integer, when it names no issue in the live
+ * listing, when `feedback.upstream` is unconfigured or retired-shape, or
+ * when this corpus has no root PRD to adhoc-parent the new task to (D13,
+ * `toIssueTaskInput`'s own precondition) — never a silent no-op and never
+ * a task minted anyway.
+ *
  * `lore issue resolve <issue> --state rejected|wontfix|superseded|duplicate|adopted
  *   --reason <r> [--superseded-by <doc> | --duplicate-of <doc> | --adopted-by <doc>]
  *   [--by <actor>] [--json]`
@@ -51,7 +78,7 @@
  * `findDroppedStructuredExtraField` guard documents the incident this
  * pattern avoids).
  *
- * Exit codes: 0 success; 3 DOC_NOT_FOUND (unknown --issue); 4
+ * `resolve`'s exit codes: 0 success; 3 DOC_NOT_FOUND (unknown --issue); 4
  * VALIDATION_ERROR (`--state fixed`, an unrecognized --state value, empty/
  * missing --reason, a target lacking `extra.issue_report`, a REQUIRED pointer
  * that is missing / unresolvable / self-referential / wrong-typed (`adopted`
@@ -66,6 +93,20 @@
  * `exitCode()` mapping is echoed unchanged (see the `resolutionProjector`
  * block at the end of `run()`).
  *
+ * `adopt`'s exit codes: 0 success, INCLUDING the idempotent "already
+ * adopted" case (never a distinct code — the caller must read
+ * `already_adopted` under `--json`, or the "Already adopted" vs "Adopted"
+ * prefix in the human render, to tell the two apart); 4 VALIDATION_ERROR
+ * for every refusal this command builds itself ({@link
+ * invalidIssueNumberError}, {@link issueNotListedError}, {@link
+ * noRootPrdError}) plus `buildUnconfiguredUpstreamRemedy()` (`@lore/core`)
+ * and `classifyFeedbackUpstream`'s retired-shape error (both shared with
+ * `report-issue.ts`/`issues.ts`, never re-worded here) and any
+ * `VALIDATION_ERROR` `toIssueTaskInput` itself returns; any OTHER code is
+ * whatever `resolveGithubIssueListing` or `corpusService.create` returned,
+ * echoed via `exitCode()` unchanged — this subcommand introduces no new
+ * `LoreError` variant.
+ *
  * spec-the-defect-channel-reaches-no-machine-but-its-own-github, Scope
  * "ResolutionProjector" — ratifying a verdict here is exactly when the
  * `resolution:<state>` label is re-projected, via `app.resolutionProjector`
@@ -73,6 +114,22 @@
  * inline in this file). Write-only: this command never reads a label back
  * as truth (Per-Field Authority table) — that is the separate AC-GI-5 drift
  * detector's job.
+ *
+ * D9 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam) — the
+ * live `gh api` call `ResolutionProjector.project` triggers MUST target the
+ * CONFIGURED repo (`classifyFeedbackUpstream(config)`'s `cfg.repo`), NEVER
+ * the STORED `readGithubIssueRef(updated.extra).repo`: the stored string is
+ * this task's PROVENANCE (which repo it was filed/adopted against at the
+ * time), and a repository rename leaves it stale while `.lore/config.yaml`
+ * is the operator's up-to-date pointer. The `run()` body below therefore
+ * builds the live `GithubIssueRef` by substituting `repo` alone (never
+ * `repo_id` — `GhResolutionLabelPort.setLabel`'s `issueLabelsPath` never
+ * reads that field, only `.repo`/`.issueNumber`) onto the STORED ref, and
+ * skips the `.project()` call entirely — never a refusal, the corpus
+ * verdict already landed — when `feedback.upstream` no longer classifies as
+ * GitHub-shaped at all (unconfigured or retired), the same "nothing to
+ * project" degrade this file already applies when no projector is wired or
+ * no GitHub pointer exists on the task.
  *
  * Source: spec-issue-closure-loop-computed-resolution-agent-reachable §D3,
  *   AC-ICL-3, AC-ICL-4;
@@ -92,8 +149,10 @@ import {
   reachOfExplicitResolution,
   type ExplicitResolution,
 } from "../../../service/issue-resolution.js";
-import { readGithubIssueRef } from "../../../service/resolution-projector.js";
-import type { LoreError } from "@lore/core";
+import { readGithubIssueRef, type GithubIssueRef } from "../../../service/resolution-projector.js";
+import { githubIssueTaskSlug, toIssueTaskInput } from "../../../service/issue-task-shaping.js";
+import { classifyFeedbackUpstream, resolveGithubIssueListing } from "../report-issue-wiring.js";
+import { buildUnconfiguredUpstreamRemedy, type LoreError } from "@lore/core";
 
 /**
  * The states this command may persist — CONSUMED from
@@ -314,12 +373,227 @@ function notAnIssueError(slug: string): LoreError {
   };
 }
 
+// ─── `adopt <number>` (task-skill-implement-lore-issue-adopt-and-the-label-round-trip, AC-GR-3) ───
+
+/** `<number>` did not parse as a positive integer — the ONLY shape a GitHub issue number can take. */
+function invalidIssueNumberError(raw: string): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "number",
+    message:
+      `'${raw}' is not a valid GitHub issue number (a positive integer) — pass the number ` +
+      "'lore issues' printed.",
+    value: raw,
+  };
+}
+
+/**
+ * `<number>` resolved to no entry in the live GitHub listing — refused
+ * loudly rather than silently ignored or adopted-anyway (this task's own
+ * "refuse loudly" requirement). Deliberately `VALIDATION_ERROR` (exit 4),
+ * not `DOC_NOT_FOUND` (exit 3): `DOC_NOT_FOUND`'s render
+ * (`formatError`, `utils.ts`) says "Run \`lore list\` to see available
+ * documents", which is actively misleading for a GitHub issue number — this
+ * command's own message points at 'lore issues' instead.
+ */
+function issueNotListedError(issueNumber: number, repo: string, listedCount: number): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "number",
+    message:
+      `GitHub issue #${issueNumber} was not found in ${repo}'s live listing (${listedCount} issue(s) ` +
+      "currently listed) — run 'lore issues' to see what is adoptable, or check the number.",
+    value: issueNumber,
+  };
+}
+
+/**
+ * This corpus has no root PRD — `toIssueTaskInput` (D13) requires one to
+ * adhoc-parent the adopted task to, and this module is store-free so it
+ * cannot discover one itself. Mirrors `report-issue-wiring.ts`'s own
+ * identically-worded `resolveLocalRootPrd` refusal for `fileGithubIssue`
+ * (that function is unexported — this is an independent, ADOPT-scoped
+ * copy of the same fact, not a shared import).
+ */
+function noRootPrdError(): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "rootPrdId",
+    message:
+      "this corpus has no root PRD at all — an adopted task (D13) has nothing to be adhoc-parented " +
+      "to. Create one (`lore create prd`) first.",
+  };
+}
+
 export default defineCommand({
   meta: {
     name: "issue",
-    description: "Manage filed issue reports (resolve)",
+    description: "Manage filed issue reports (adopt, resolve)",
   },
   subCommands: {
+    adopt: defineCommand({
+      meta: {
+        name: "adopt",
+        description:
+          "Mint a claimable corpus task for one listed GitHub issue (idempotent: re-adopting reports the existing task, exit 0)",
+      },
+      args: {
+        number: {
+          type: "positional",
+          description: "GitHub issue number to adopt, as printed by `lore issues`",
+          required: true,
+        },
+        by: {
+          type: "string",
+          description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
+        },
+        json: {
+          type: "boolean",
+          description: "Output result as JSON",
+        },
+      },
+      async run({ args }) {
+        const rawNumber = readStringArg(args as unknown as Record<string, unknown>, "number");
+        const issueNumber = Number(rawNumber);
+        if (rawNumber.length === 0 || !Number.isInteger(issueNumber) || issueNumber <= 0) {
+          const error = invalidIssueNumberError(rawNumber);
+          process.stderr.write(formatError(error) + "\n");
+          process.exitCode = exitCode(error);
+          return;
+        }
+
+        const { app, config } = loadLoreApp();
+        try {
+          // ONE shared shape-policy classifier (report-issue-wiring.ts's own
+          // header) — never a second, independently-derived verdict on
+          // whether `feedback.upstream` is adoptable from here.
+          const classification = classifyFeedbackUpstream(config);
+          if (classification.kind === "unconfigured") {
+            const error = buildUnconfiguredUpstreamRemedy();
+            process.stderr.write(formatError(error) + "\n");
+            process.exitCode = exitCode(error);
+            return;
+          }
+          if (classification.kind === "retired") {
+            process.stderr.write(formatError(classification.error) + "\n");
+            process.exitCode = exitCode(classification.error);
+            return;
+          }
+          const cfg = classification.cfg;
+
+          const listingResult = await resolveGithubIssueListing(cfg);
+          if (!listingResult.ok) {
+            process.stderr.write(formatError(listingResult.error) + "\n");
+            process.exitCode = exitCode(listingResult.error);
+            return;
+          }
+          const { issues, repoId } = listingResult.value;
+
+          const issue = issues.find((candidate) => candidate.number === issueNumber);
+          if (issue === undefined) {
+            const error = issueNotListedError(issueNumber, cfg.repo, issues.length);
+            process.stderr.write(formatError(error) + "\n");
+            process.exitCode = exitCode(error);
+            return;
+          }
+
+          // D13 precondition (toIssueTaskInput's own doc) — this module is
+          // store-free, so the "first PRD" lookup happens here, mirroring
+          // `report-issue-wiring.ts::resolveLocalRootPrd`'s identical shape.
+          const rootPrdListResult = await app.corpusService.list({ type: "prd" });
+          if (!rootPrdListResult.ok) {
+            process.stderr.write(formatError(rootPrdListResult.error) + "\n");
+            process.exitCode = exitCode(rootPrdListResult.error);
+            return;
+          }
+          const rootPrd = rootPrdListResult.value.docs[0];
+          if (rootPrd === undefined) {
+            const error = noRootPrdError();
+            process.stderr.write(formatError(error) + "\n");
+            process.exitCode = exitCode(error);
+            return;
+          }
+
+          const ref: GithubIssueRef = { repo: cfg.repo, issueNumber, repo_id: repoId };
+          const taskInputResult = toIssueTaskInput(issue, ref, rootPrd.id);
+          if (!taskInputResult.ok) {
+            process.stderr.write(formatError(taskInputResult.error) + "\n");
+            process.exitCode = exitCode(taskInputResult.error);
+            return;
+          }
+
+          // D1's deterministic slug, computed independently of
+          // `taskInputResult.value.slug` (which carries the SAME value, but
+          // typed `Slug | undefined` since `CreateDocInput.slug` is
+          // optional in general — this call site knows it is always
+          // present for an issue task and wants a non-optional `Slug` to
+          // key the idempotent re-fetch below on).
+          const derivedSlug = githubIssueTaskSlug(repoId, issueNumber);
+
+          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const createResult = await app.corpusService.create(taskInputResult.value, { by });
+
+          if (!createResult.ok) {
+            // Idempotency decision (this task's own header): adopting the
+            // SAME issue twice must be VISIBLY idempotent, never a second
+            // task and never a silently-swallowed error. D1's deterministic
+            // slug makes `DUPLICATE_SLUG` exactly the "already adopted"
+            // signal — read the existing task back and report it at exit
+            // 0, distinguished from a fresh adopt only by the
+            // `already_adopted` flag / "Already adopted" prefix, never by
+            // exit code.
+            //
+            // reason: re-fetch by `derivedSlug`, NEVER by
+            // `createResult.error.existing_id` — MEASURED 2026-08-25:
+            // `SqliteStore.insert`/`TursoStore.insert`'s `DUPLICATE_SLUG`
+            // branch (`store/sqlite-store.ts` ~L558, `store/turso-store.ts`
+            // several sites) returns `existing_id: doc.id`, i.e. the NEW
+            // (never-persisted, since the insert failed) doc's own freshly
+            // generated id — NOT the id of the doc actually holding the
+            // slug (`InMemoryStore.insert`'s `findSlugConflict`-derived
+            // `existing_id` gets this right; the two SQL-backed stores do
+            // not). A `corpusService.get(error.existing_id)` call here
+            // would DOC_NOT_FOUND every single time. This is a store-layer
+            // defect outside this task's file anchors — reported, not
+            // fixed here — but `derivedSlug` sidesteps it entirely: it is
+            // exactly the slug the collision just happened on, known to
+            // this call site independent of what the store reports.
+            if (createResult.error.code === "DUPLICATE_SLUG") {
+              const existingResult = await app.corpusService.get(derivedSlug);
+              if (!existingResult.ok) {
+                process.stderr.write(formatError(existingResult.error) + "\n");
+                process.exitCode = exitCode(existingResult.error);
+                return;
+              }
+              const existing = existingResult.value.doc;
+              if (args.json) {
+                console.log(
+                  JSON.stringify({ ok: true, data: { doc: existing, already_adopted: true } }, null, 2),
+                );
+              } else {
+                console.log(
+                  `Already adopted GitHub issue #${issueNumber} as ${existing.slug} (adopted previously).`,
+                );
+              }
+              return;
+            }
+
+            process.stderr.write(formatError(createResult.error) + "\n");
+            process.exitCode = exitCode(createResult.error);
+            return;
+          }
+
+          const created = createResult.value;
+          if (args.json) {
+            console.log(JSON.stringify({ ok: true, data: { doc: created, already_adopted: false } }, null, 2));
+          } else {
+            console.log(`Adopted GitHub issue #${issueNumber} as ${created.slug}.`);
+          }
+        } finally {
+          app.close();
+        }
+      },
+    }),
     resolve: defineCommand({
       meta: {
         name: "resolve",
@@ -415,7 +689,7 @@ export default defineCommand({
           return;
         }
 
-        const { app } = loadLoreApp();
+        const { app, config } = loadLoreApp();
         try {
           const issueId = args.issue as string;
           const getResult = await app.corpusService.get(issueId);
@@ -573,7 +847,29 @@ export default defineCommand({
           // this issue (never filed through the GitHub intake path) both
           // degrade to "nothing to project" — never a refusal, since the
           // corpus verdict above already landed regardless.
-          const githubRef = readGithubIssueRef(updated.extra);
+          const storedGithubRef = readGithubIssueRef(updated.extra);
+          // D9 (spec-a-github-filed-defect-must-be-claimable-one-ingest-seam)
+          // — the LIVE `gh api` target MUST be the CONFIGURED repo, never
+          // the STORED one: `storedGithubRef.repo` is this task's
+          // PROVENANCE (which repo it was filed/adopted against AT THE
+          // TIME), and a repository rename leaves that string stale while
+          // `.lore/config.yaml`'s `feedback.upstream.repo` is the operator's
+          // current pointer. `classifyFeedbackUpstream` is the SAME shared
+          // classifier `adopt`/`report-issue`/`issues` use — no second,
+          // independently-derived read of `feedback.upstream` here.
+          const upstreamClassification = classifyFeedbackUpstream(config);
+          const liveRepo =
+            upstreamClassification.kind === "github" ? upstreamClassification.cfg.repo : undefined;
+          // reason: `repo_id` is carried over UNCHANGED from the stored ref
+          // (never re-derived here) — `GhResolutionLabelPort.setLabel`'s
+          // `issueLabelsPath`/`issueLabelPath` read only `.repo`/
+          // `.issueNumber`, never `.repo_id`, so substituting just `repo`
+          // is the entire fix; a stale `repo_id` in provenance is a
+          // separate, D5-scoped concern this call site does not touch.
+          const githubRef: GithubIssueRef | undefined =
+            storedGithubRef !== undefined && liveRepo !== undefined
+              ? { ...storedGithubRef, repo: liveRepo }
+              : undefined;
           if (app.resolutionProjector !== undefined && githubRef !== undefined) {
             const projectResult = await app.resolutionProjector.project(computed, githubRef);
             if (!projectResult.ok) {
