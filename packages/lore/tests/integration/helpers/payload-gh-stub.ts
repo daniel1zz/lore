@@ -23,6 +23,17 @@
  *   - `PayloadGhStubFixture` — the four calls
  *     `GitHubIntakePort.verifyTarget`/`.searchDuplicates`/`.fileIssue`
  *     make, and what each caller-configurable field controls.
+ *   - `readRecordedLabelWrites(dir)` — AC-GR-3's label-round-trip oracle:
+ *     `GhResolutionLabelPort.setLabel` (`resolution-label-port.ts`) issues a
+ *     GET-then-POST/DELETE convergence sequence against
+ *     `repos/<repo>/issues/<n>/labels[...]`; this stub answers the GET with
+ *     an always-empty label list (no test using this fixture needs a
+ *     pre-existing `resolution:*` label to converge away) and, on the POST
+ *     add call, appends `<endpoint>\t<label>` to `dir`'s
+ *     `label-writes.log` instead of merely returning a 200 — a caller that
+ *     only asserted the CLI's own exit code would prove the corpus write
+ *     landed, never that the label call actually reached this stub with the
+ *     right issue number and label string.
  *
  * Dispatch mechanism: the written script is a POSIX `/bin/sh` script (never
  * `#!/usr/bin/env node` — measured: with the spawned child's `PATH` pinned
@@ -56,9 +67,29 @@
  *   Downstream Handoff ("A NEW payload-serving gh stub is required").
  */
 
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+/**
+ * Filename (inside the stub dir `payloadGhStubDir` returns) that
+ * `GhResolutionLabelPort.setLabel`'s POST-add call is recorded to — one
+ * tab-separated `<endpoint>\t<label>` line per add. AC-GR-3's load-bearing
+ * assertion (the label round-trip actually reached "GitHub") reads this
+ * file back via {@link readRecordedLabelWrites}; nothing else in this
+ * module consumes it.
+ */
+const LABEL_WRITES_FILENAME = "label-writes.log";
+
+/** One recorded `resolution:<state>` label POST, decoded from {@link LABEL_WRITES_FILENAME}. */
+export interface RecordedLabelWrite {
+  /** The `owner/repo` segment of the `gh api repos/<repo>/issues/<n>/labels` endpoint the stub matched. */
+  readonly repo: string;
+  /** The issue number segment of that same endpoint. */
+  readonly issueNumber: number;
+  /** The exact `labels[]=<value>` payload value the stub's POST call carried. */
+  readonly label: string;
+}
 
 /** One duplicate-search hit `searchDuplicates` can be made to see, shaped exactly as `gh api repos/<repo>/issues?...` returns it (only `number`/`title`/`state`/`body` are read). */
 export interface PayloadGhStubIssue {
@@ -120,6 +151,7 @@ function shellSingleQuote(value: string): string {
 export function payloadGhStubDir(fixture: PayloadGhStubFixture): string {
   const dir = mkdtempSync(join(tmpdir(), "lore-payload-gh-stub-"));
   const ghPath = join(dir, "gh");
+  const labelWritesLogPath = join(dir, LABEL_WRITES_FILENAME);
 
   const login = fixture.login ?? "payload-stub-user";
   const existingIssues = fixture.existingIssues ?? [];
@@ -128,6 +160,11 @@ export function payloadGhStubDir(fixture: PayloadGhStubFixture): string {
   const createdJson = JSON.stringify({ number: fixture.createdNumber, html_url: fixture.createdUrl });
   const issuesJson = JSON.stringify(existingIssues);
   const repoJson = JSON.stringify({ id: fixture.repoId, name: "stub-repo" });
+  // reason: `GhResolutionLabelPort.setLabel`'s GET step needs SOME array —
+  // an empty one means every fixture using this stub converges with zero
+  // stale `resolution:*` siblings to delete, which is the only scenario
+  // AC-GR-3 (a fresh issue's first resolve) needs.
+  const labelsJson = "[]";
 
   const script = `#!/bin/sh
 first="$1"
@@ -151,6 +188,40 @@ if [ "$second" = "user" ]; then
   printf '%s\n' ${shellSingleQuote(loginJson)}
   exit 0
 fi
+
+# reason: dispatched BEFORE the generic is_post fallback below — a bare
+# is_post check cannot distinguish this label-add POST from the plain
+# issue-create POST (\`repos/<repo>/issues\`, no trailing /labels), which is
+# exactly why this stub previously could not serve GhResolutionLabelPort at
+# all (a labels GET fell through to the repos/* object fallback, an array
+# schema mismatch).
+case "$second" in
+  *"/labels")
+    if [ "$is_post" = "1" ]; then
+      label_value=""
+      for arg in "$@"; do
+        case "$arg" in
+          labels\\[\\]=*)
+            label_value="\${arg#labels\\[\\]=}"
+            ;;
+        esac
+      done
+      printf '%s\t%s\n' "$second" "$label_value" >> ${shellSingleQuote(labelWritesLogPath)}
+      printf '%s\n' ${shellSingleQuote(createdJson)}
+      exit 0
+    fi
+    printf '%s\n' ${shellSingleQuote(labelsJson)}
+    exit 0
+    ;;
+  *"/labels/"*)
+    # reason: the stale-sibling DELETE call — this stub's labels GET always
+    # answers "[]" (no pre-existing resolution:* label), so no fixture using
+    # it ever reaches this branch today; handled anyway so a future fixture
+    # that seeds a stale label converges instead of hitting the
+    # "unrecognized endpoint" refusal below.
+    exit 0
+    ;;
+esac
 
 if [ "$is_post" = "1" ]; then
   printf '%s\n' ${shellSingleQuote(createdJson)}
@@ -184,4 +255,35 @@ export function cleanupPayloadGhStubDir(dir: string): void {
   } catch {
     /* best-effort cleanup — mirrors every other scratch-dir cleanup in this suite family */
   }
+}
+
+/**
+ * Reads back every label POST this stub recorded in `dir` (see
+ * {@link payloadGhStubDir}'s header) — AC-GR-3's load-bearing assertion
+ * that a `lore issue resolve` call reached "GitHub", not merely that the
+ * corpus write and the CLI's own exit code succeeded.
+ *
+ * @param dir - a directory previously returned by {@link payloadGhStubDir}
+ * @returns one entry per recorded POST, in call order; `[]` when the stub
+ *   was never called with a label-add POST (no `label-writes.log` file at
+ *   all) — never a thrown error, matching this module's other read paths.
+ *   A line whose endpoint does not match `repos/<owner>/<repo>/issues/<n>/labels`
+ *   is skipped rather than throwing — that shape is only ever written by
+ *   this same file's own script, so a mismatch here would mean the script
+ *   and this reader have drifted, not that the CALLER passed a bad `dir`.
+ */
+export function readRecordedLabelWrites(dir: string): RecordedLabelWrite[] {
+  const logPath = join(dir, LABEL_WRITES_FILENAME);
+  if (!existsSync(logPath)) return [];
+
+  const endpointPattern = /^repos\/(.+)\/issues\/(\d+)\/labels$/;
+  const writes: RecordedLabelWrite[] = [];
+  for (const line of readFileSync(logPath, "utf8").split("\n")) {
+    if (line.trim().length === 0) continue;
+    const [endpoint, label] = line.split("\t");
+    const match = endpoint === undefined ? null : endpointPattern.exec(endpoint);
+    if (match === null) continue;
+    writes.push({ repo: match[1] as string, issueNumber: Number(match[2]), label: label ?? "" });
+  }
+  return writes;
 }
