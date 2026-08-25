@@ -42,16 +42,24 @@
  *     blocking the plan; this implementation takes that option (three
  *     preconditions only: binary present, authenticated, target repository
  *     readable).
- *   - `LORE_UPSTREAM_REPO` below is a HARDCODED placeholder, not yet
- *     config-driven — Migration Plan P0 is GhRunner + the three new error
- *     codes + this probe ONLY ("pure addition — delete it" per that table).
- *     A later task (GitHubIntakePort, spec Scope entry, risk R2's
- *     mitigation "resolve the target repo once from config") introduces
- *     real config-driven target-repo resolution. Until then this probe
- *     checks the SAME repository this code shipped from (this project's own
- *     origin remote at authoring time) — correct for that one machine,
- *     a known, documented gap on every other target, never silently masked
- *     as something more general.
+ *   - The repository this probe reads is `@lore/core`'s `VENDOR_INTAKE_REPO`
+ *     (`issue-report.ts`) — the VENDOR intake, i.e. the address a consumer
+ *     opts into with `feedback.upstream.vendor: true`. ⛔ This line used to
+ *     say `LORE_UPSTREAM_REPO` was "a HARDCODED placeholder, not yet
+ *     config-driven", pending "real config-driven target-repo resolution".
+ *     That description is retired, not merely reworded: the vendor address is
+ *     a CONSTANT by design (it is the product's own tracker, the same value
+ *     for every consumer), so shipping it in the binary IS the resolution for
+ *     this half — see `VENDOR_INTAKE_REPO`'s own JSDoc for why config carries
+ *     only CONSENT. The local literal that used to live here is deleted; this
+ *     module now imports the one definition site.
+ *   - ⛔ STILL A GAP, stated so it is not read as closed by the paragraph
+ *     above: a corpus configured with a SELF-HOSTED
+ *     `feedback.upstream.repo: "owner/repo"` gets its reachability reported
+ *     against the VENDOR repo, not against its own intake — `lore setup
+ *     --check` does not read `feedback.upstream` at all. Nothing here refuses
+ *     that mismatch; the probe simply answers a narrower question than its
+ *     "the configured GitHub target" wording suggests.
  *   - AC-GI-7 scans every `.ts` source under `packages/lore/src` (this file
  *     included, it is not `gh-runner.ts`) for a CLOSED set of four two-word
  *     invocation tokens naming the binary plus a subcommand. This module
@@ -68,6 +76,7 @@
  *   Migration Plan P0, AC-GI-2.
  */
 
+import { VENDOR_INTAKE_REPO } from "@lore/core";
 import type { LoreError } from "@lore/core";
 
 import type { GhRunner } from "../../service/gh-runner.js";
@@ -129,13 +138,13 @@ const VERSION_PROBE_ARGS = ["--version"];
 const AUTH_STATUS_PROBE_ARGS = ["auth", "status"];
 
 /**
- * See module doc's `LORE_UPSTREAM_REPO` invariant — a hardcoded placeholder
- * target repository, pending config-driven resolution from a later task.
+ * The read-only probe's argv. Target is `@lore/core`'s `VENDOR_INTAKE_REPO`
+ * — imported, ⛔ never a second copy of the literal (this file held one of the
+ * three duplicates the constant replaced; see its JSDoc for the census). Still
+ * an explicit `repos/<repo>` path, never `-R`.
  */
-const LORE_UPSTREAM_REPO = "daniel1zz/lore";
-
 function repoReadProbeArgs(): string[] {
-  return ["api", `repos/${LORE_UPSTREAM_REPO}`];
+  return ["api", `repos/${VENDOR_INTAKE_REPO}`];
 }
 
 // ─── Report builders — one per GhHealthCondition ───────────────────────────
@@ -168,7 +177,7 @@ function buildRepoUnreadableReport(result: Extract<GhHealthRunResult, { ok: fals
   return {
     ok: false,
     condition: "repo-unreadable",
-    message: `the configured GitHub target (${LORE_UPSTREAM_REPO}) could not be read: ${describeRunFailure(result)}`,
+    message: `the configured GitHub target (${VENDOR_INTAKE_REPO}) could not be read: ${describeRunFailure(result)}`,
   };
 }
 
@@ -176,7 +185,7 @@ function buildHealthyReport(): GhHealthCheckReport {
   return {
     ok: true,
     condition: "healthy",
-    message: `the CLI binary is installed, authenticated, and the configured GitHub target (${LORE_UPSTREAM_REPO}) is reachable.`,
+    message: `the CLI binary is installed, authenticated, and the configured GitHub target (${VENDOR_INTAKE_REPO}) is reachable.`,
   };
 }
 

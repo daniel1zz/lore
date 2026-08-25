@@ -2913,24 +2913,34 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       // `github-intake-port.js`, whose transitive deps a static import here
       // would drag into the vitest graph of every tools.ts consumer
       // (mcp-tools.test.ts).
-      const {
-        isGithubUpstreamCfg,
-        resolveFeedbackUpstreamCfg,
-        buildRetiredFeedbackUpstreamError,
-        fileGithubIssue,
-        resolveConsumerCorpusRoot,
-      } = await import("../cli/report-issue-wiring.js");
-      const cfg = resolveFeedbackUpstreamCfg(getConfig?.());
+      //
+      // ⛔ Shape policy comes from `classifyFeedbackUpstream`, NOT from a local
+      // `resolveFeedbackUpstreamCfg` + `isGithubUpstreamCfg` chain. This handler
+      // was the LAST surface still re-deriving that chain itself, and the
+      // vendor-consent branch (`feedback.upstream.vendor: true`, 2026-08-25) is
+      // exactly the input a hand-rolled chain gets WRONG: `isGithubUpstreamCfg`
+      // tests `"repo" in cfg`, a vendor config carries no `repo`, so the old
+      // chain here would have fallen through and told the caller its valid
+      // config was "the retired SQLite shape". Routing through the classifier
+      // also normalizes vendor -> `{repo: VENDOR_INTAKE_REPO}`, so everything
+      // below this line is unchanged and cannot drift from the CLI's own
+      // policy (`commands/report-issue.ts` / `commands/issues.ts`).
+      const { classifyFeedbackUpstream, fileGithubIssue, resolveConsumerCorpusRoot } = await import(
+        "../cli/report-issue-wiring.js"
+      );
+      const classification = classifyFeedbackUpstream(getConfig?.());
 
-      if (cfg === undefined) {
+      if (classification.kind === "unconfigured") {
         return errorContent(buildUnconfiguredUpstreamRemedy());
       }
 
       // AC-GR-11 — the LIVE filing path is `GitHubIntakePort`, via
       // `report-issue-wiring.ts::fileGithubIssue`, the SAME function
       // `commands/report-issue.ts` calls whenever `feedback.upstream`
-      // resolves to this shape.
-      if (isGithubUpstreamCfg(cfg)) {
+      // resolves to this shape (self-hosted `{repo}`, or `{vendor: true}`
+      // already normalized onto it by the classifier).
+      if (classification.kind === "github") {
+        const cfg = classification.cfg;
         // `GithubReportInput.severity`/`.category` are REQUIRED (not
         // optional) — mirrors `commands/report-issue.ts`'s own precondition
         // check for the identical reason: the front-matter schema's closed
@@ -3021,10 +3031,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       // and the SQLite `UpstreamPort` it drove no longer exist to file through.
       //
       // Message is the SHARED definition (spec-the-retired-shape-refusal-
-      // message-has-two-byte-identical D1) — this handler must NOT hold its
-      // own copy, or it silently drifts from `report-issue-wiring.ts`'s
-      // canonical wording again with no oracle to notice.
-      return errorContent(buildRetiredFeedbackUpstreamError());
+      // message-has-two-byte-identical D1), now reached by carrying the
+      // classifier's OWN `error` rather than by calling the builder a second
+      // time here — the same wording, with one fewer place able to drift from
+      // it. `classification` is narrowed to the `retired` member at this point:
+      // `unconfigured` returned above and `github` returns on every path inside
+      // the block above.
+      return errorContent(classification.error);
     },
   );
 }

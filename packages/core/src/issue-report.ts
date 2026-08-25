@@ -23,6 +23,9 @@
  *     render contract's single composition site.
  *   - `IssueReadSource` / `resolveIssueReadSource` — the ONE decision function for
  *     WHICH corpus an issue read surface reads (§M4).
+ *   - `VENDOR_INTAKE_REPO` — the vendor's own GitHub intake address, the ONE
+ *     definition site repo-wide. Addressing ships in the binary; only CONSENT
+ *     (`feedback.upstream.vendor: true`) stays in a consumer's config.
  *
  * ⛔ RETIRED (spec-the-defect-channel-reaches-no-machine-but-its-own-github P1,
  *   AC-GI-9): the R-5d open-report rate cap this module used to help enforce is
@@ -293,6 +296,48 @@ export function matchRootPrd(
 }
 
 /**
+ * The vendor's own GitHub intake repository — WHERE a `lore report-issue`
+ * report goes when a consumer declares `feedback.upstream.vendor: true`.
+ *
+ * ⛔ ONE DEFINITION SITE, repo-wide (grep the quoted literal: it occurs here
+ * and nowhere else under `packages/`, `scripts/`, `assets/`). Before this
+ * constant existed the same `"owner/repo"` literal was authored in three
+ * independent places — `adapters/cli/setup-github-health.ts`'s
+ * `LORE_UPSTREAM_REPO`, and the `FORBIDDEN_REPO` target-discipline guard in
+ * each of `tests/integration/cli/github-intake-reach.bun.test.ts` and
+ * `tests/integration/cli/issue-migration.bun.test.ts` — and every consumer
+ * project additionally hand-copied it into its own `.lore/config.yaml`.
+ * All four now import THIS symbol.
+ *
+ * ⛔ WHY a constant rather than a config field: the address is not a
+ * per-project decision. It is the product's own tracker, identical for every
+ * consumer, so a hand-copied address can only ever be right-by-luck or
+ * silently wrong — and "silently wrong" here means filing this project's
+ * defect reports into a stranger's repository. Addressing therefore ships
+ * INSIDE the binary (`adr-distribution-first-every-improvement-names-its-
+ * consumer`); the only thing that genuinely needs a per-project decision —
+ * CONSENT to send this corpus's report bodies to a third-party GitHub —
+ * stays in config as `feedback.upstream.vendor`, with NO default.
+ *
+ * ⛔ NOT a fallback and NOT a default. Nothing resolves to this value unless
+ * a consumer's config says `vendor: true` in so many words: an absent
+ * `feedback.upstream` stays `unconfigured` and refuses loudly (see
+ * {@link buildUnconfiguredUpstreamRemedy}). Silently adopting the vendor
+ * intake would export this project's titles, descriptions, repro commands
+ * and actor identity to a third party with nobody having agreed to it.
+ *
+ * ⛔ Still threaded EXPLICITLY into every `gh api repos/<repo>/...` call,
+ * never inferred from a git remote via `-R`. This constant changes WHERE the
+ * address comes from (the binary, not the consumer's file), never the
+ * invariant that it is passed explicitly: `report-issue-wiring.ts`'s
+ * `classifyFeedbackUpstream` normalizes `{vendor: true}` into the SAME
+ * `{repo}` shape the self-hosted branch produces, so no downstream caller
+ * (`fileGithubIssue`, `runGithubIssuesListing`, `GitHubIntakePort`) learns a
+ * second way of being addressed.
+ */
+export const VENDOR_INTAKE_REPO = "daniel1zz/lore";
+
+/**
  * THE single shared "`feedback.upstream` is unconfigured" remedy —
  * spec-governance-defaults-must-ship-and-every-recorded-gap-must D3's
  * one-condition-one-remedy builder. Relocated here (P4,
@@ -338,13 +383,28 @@ export function matchRootPrd(
  * (deliberately not left to a reviewer's sense of whether the prose reads
  * clearly enough — this floor is UNCHANGED by the P4 rewrite):
  * `.lore/config.yaml`, `git-tracked`, `shared`.
+ *
+ * ⛔ MESSAGE CHANGED AGAIN (vendor-intake split, 2026-08-25) — recorded here
+ * per the same in-flight-oracle-edit discipline as the P4 note above, and a
+ * correction rather than a weakening for a reason that is checkable rather
+ * than rhetorical: the previous text named exactly ONE remedy,
+ * `feedback.upstream.repo`, which is the SELF-HOSTED intake. A caller who
+ * simply wants to report a defect to the lore project itself was told to
+ * type an address it cannot know, and every consumer that obeyed hand-copied
+ * {@link VENDOR_INTAKE_REPO}'s value into its own config — a typo there files
+ * defects into a stranger's repository. The message now names BOTH shapes and
+ * says which is which, so a reader can pick without guessing. Nothing is
+ * dropped: `feedback.upstream.repo` is still named verbatim (the REGRESSION
+ * clause that pins it stays green), and the three AC-GD-2(b) disclosure
+ * substrings are still present. The added substring an oracle pins is
+ * `feedback.upstream.vendor`.
  */
 export function buildUnconfiguredUpstreamRemedy(): LoreError {
   return {
     code: "VALIDATION_ERROR",
     field: "feedback.upstream",
     message:
-      '`feedback.upstream` is not configured — set feedback.upstream.repo (e.g. "owner/repo") in the git-tracked, team-shared .lore/config.yaml to file and read issue reports via GitHub.',
+      '`feedback.upstream` is not configured — declare one of its two consent-bearing shapes in the git-tracked, team-shared .lore/config.yaml. Set feedback.upstream.vendor: true to file and read issue reports through the lore project\'s own GitHub intake (its address ships inside this binary — you never type it), OR set feedback.upstream.repo (e.g. "owner/repo") to use a GitHub intake you host yourself. Neither is a default: filing sends this project\'s title, description, repro command and actor identity to whichever GitHub repository is named.',
   };
 }
 

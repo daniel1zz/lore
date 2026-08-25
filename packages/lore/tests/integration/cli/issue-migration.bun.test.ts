@@ -115,6 +115,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
+import { VENDOR_INTAKE_REPO } from "@lore/core";
 
 import { createApp, type App } from "../../../src/app.js";
 import { GhRunner, type GhExecFile } from "../../../src/service/gh-runner.js";
@@ -156,7 +157,16 @@ if (TMP_ROOT.startsWith(REPO_ROOT) || REPO_ROOT.startsWith(TMP_ROOT)) {
 // ─── Target discipline (plan Invariant 5 / Decisions Log D-3) ──────────────
 
 const TARGET_REPO: string = "daniel1zz/lore-e2e-target";
-const FORBIDDEN_REPO: string = "daniel1zz/lore";
+/**
+ * `@lore/core`'s `VENDOR_INTAKE_REPO` — the product's own tracker. ⛔ DERIVED,
+ * never a second copy of the literal: the thing this suite must never touch is
+ * *by definition* the address `feedback.upstream.vendor: true` resolves to, so
+ * a hand-copied duplicate here could go stale against the real intake and
+ * leave this guard watching an address nothing files to. The static
+ * `TARGET_REPO === FORBIDDEN_REPO` self-check below now also fails loud if the
+ * constant were ever pointed at this suite's dedicated e2e target.
+ */
+const FORBIDDEN_REPO: string = VENDOR_INTAKE_REPO;
 
 if (TARGET_REPO === FORBIDDEN_REPO) {
   throw new Error("TARGET_REPO must never equal FORBIDDEN_REPO (plan Invariant 5)");

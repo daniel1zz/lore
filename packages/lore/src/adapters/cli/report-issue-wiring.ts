@@ -26,25 +26,38 @@
  *     uses — NOT the upstream corpus this feature reports issues INTO.
  *   - `resolveFeedbackUpstreamCfg(config)` — narrows a parsed `LoreConfig`'s
  *     optional `feedback.upstream` section to its `UpstreamCfg` shape
- *     (LEGACY `{root_prd, ...}` OR GITHUB `{repo}`, spec-the-defect-
- *     channel-reaches-no-machine-but-its-own-github P2). STAYS the ONLY
+ *     (LEGACY `{root_prd, ...}`, GITHUB `{repo}`, or VENDOR-CONSENT
+ *     `{vendor: true}` — spec-the-defect-channel-reaches-no-machine-but-its-
+ *     own-github P2 plus the vendor-intake split, 2026-08-25). STAYS the ONLY
  *     `feedback.upstream` READ site (plan invariant).
- *   - `isGithubUpstreamCfg(cfg)` — type guard distinguishing the two
- *     `UpstreamCfg` branches. Retained for the MCP `lore_report_issue` tool
- *     (`adapters/mcp/tools.ts`, dynamic-imports this module), which is
- *     outside this module's own command-file anchors; `commands/issues.ts`
- *     and `commands/report-issue.ts` MUST NOT call it directly any more —
- *     see `classifyFeedbackUpstream` below.
+ *   - `isVendorUpstreamCfg(cfg)` — type guard for the VENDOR-CONSENT branch.
+ *     ⛔ `isGithubUpstreamCfg` answering `false` does NOT mean "legacy shape":
+ *     its discriminant is `"repo" in cfg` and a `{vendor: true}` config has NO
+ *     `repo` key, so a hand-rolled `if (github) ... else retired` chain
+ *     misclassifies vendor configs and refuses them with the retired-SQLite
+ *     message. ⇒ new callers MUST route through `classifyFeedbackUpstream`
+ *     rather than compose the guards themselves.
+ *   - `isGithubUpstreamCfg(cfg)` — type guard for the GITHUB branch. Kept
+ *     exported for `tests/` and for symmetry with the vendor guard; ⛔ NO
+ *     production caller may use it as a standalone shape policy any more —
+ *     `commands/issues.ts`, `commands/report-issue.ts` AND
+ *     `adapters/mcp/tools.ts`'s `lore_report_issue` all route through
+ *     `classifyFeedbackUpstream`. (The MCP handler was the last holdout: it
+ *     re-derived the chain with `isGithubUpstreamCfg` alone, which is exactly
+ *     the site the vendor branch would have silently broken.)
  *   - `classifyFeedbackUpstream(config)` — the ONE shape-policy source both
  *     `commands/issues.ts` and `commands/report-issue.ts` consume
  *     (spec-lore-issues-falls-through-to-the-local-corpus-on-a-retired D1):
  *     classifies a parsed `LoreConfig`'s `feedback.upstream` into exactly one
  *     of `"unconfigured"` / `"retired"` / `"github"`, carrying the shared
  *     retired-shape `LoreError` and the narrowed `GithubUpstreamCfg`
- *     respectively so neither caller re-derives shape policy in its own
+ *     respectively so no caller re-derives shape policy in its own
  *     `if` chain (the drift that let `lore issues` silently fall through to
  *     the local corpus on a retired-shape upstream while `lore report-issue`
- *     already refused it).
+ *     already refused it). ALSO the one NORMALIZATION point: a VENDOR-CONSENT
+ *     `{vendor: true}` config is returned as `{kind: "github", cfg: {repo:
+ *     VENDOR_INTAKE_REPO}}`, so every downstream consumer keeps seeing exactly
+ *     one addressing shape.
  *   - `fileGithubIssue(input, cfg, ctx)` — the LIVE GitHub filing path's
  *     orchestration (AC-GI-1): retry recognition over the local v2 receipt
  *     log, then `GitHubIntakePort.verifyTarget`/`.searchDuplicates`/
@@ -120,6 +133,7 @@ import {
   err,
   ok,
   redactReporterIdentity,
+  VENDOR_INTAKE_REPO,
   type DocRecord,
   type FeedbackConfig,
   type IssueFrontMatterFields,
@@ -157,7 +171,7 @@ export function resolveConsumerCorpusRoot(): string {
 }
 
 /**
- * Consumer-side `feedback.upstream.*` config, either shape — DERIVED
+ * Consumer-side `feedback.upstream.*` config, ANY of its three shapes — DERIVED
  * directly from `@lore/core`'s `FeedbackConfigSchema.upstream` inference
  * (never hand-redeclared) so this type can never drift from the schema's
  * own `exactOptionalPropertyTypes`-sensitive shape (`write_wait_ms`'s exact
@@ -193,14 +207,60 @@ export function resolveFeedbackUpstreamCfg(config: LoreConfig | undefined): Upst
 }
 
 /**
- * Type guard distinguishing the GitHub shape from the legacy SQLite shape —
- * the two are mutually exclusive by construction (`FeedbackConfigSchema`'s
- * two `.strict()` union branches), so `"repo" in cfg` is a sound
- * discriminant even though neither branch carries an explicit tag field.
+ * Consumer-side `feedback.upstream.*` config, VENDOR-CONSENT shape
+ * (`{vendor: true}`) — the branch that carries CONSENT to report into the
+ * vendor's own intake and NO address, the address being `@lore/core`'s
+ * `VENDOR_INTAKE_REPO`.
+ */
+export type VendorUpstreamCfg = Extract<UpstreamCfg, { vendor: true }>;
+
+/**
+ * Type guard for the VENDOR-CONSENT branch — `"vendor" in cfg`, sound for the
+ * same reason `isGithubUpstreamCfg`'s discriminant is: `FeedbackConfigSchema`'s
+ * three union branches are each `.strict()`, so no config can carry `vendor`
+ * alongside `repo` or `root_prd` and still parse.
+ *
+ * ⛔ A `false` from {@link isGithubUpstreamCfg} does NOT mean "legacy shape".
+ * That guard tests `"repo" in cfg`, and a `{vendor: true}` config has no `repo`
+ * key — so any chain written as `if (isGithubUpstreamCfg(cfg)) {...} else
+ * {retired}` refuses a perfectly valid vendor-consent config with
+ * {@link buildRetiredFeedbackUpstreamError}'s retired-SQLite message. That
+ * two-branch shape is what `adapters/mcp/tools.ts`'s `lore_report_issue`
+ * handler had, and it is the reason the vendor branch had to be added to
+ * {@link classifyFeedbackUpstream} rather than left to each caller.
+ *
+ * ⇒ ⛔ Do not rebuild the chain: call {@link classifyFeedbackUpstream} and read
+ * its `kind`. This guard is exported for tests and for symmetry with
+ * `isGithubUpstreamCfg`, not as a shape policy to compose by hand. (Within
+ * `classifyFeedbackUpstream` itself the two guards' relative order is NOT
+ * load-bearing — measured: swapping them keeps every assertion green, because
+ * `retired` is a fall-through at the end, not an `else`. What IS load-bearing
+ * is that the vendor branch EXISTS; see that function's own inline note for the
+ * measured deletion experiment.)
+ *
+ * @example
+ *   isVendorUpstreamCfg({ vendor: true }) // => true
+ *   isVendorUpstreamCfg({ repo: "acme/widget" }) // => false
+ */
+export function isVendorUpstreamCfg(cfg: UpstreamCfg): cfg is VendorUpstreamCfg {
+  return "vendor" in cfg;
+}
+
+/**
+ * Type guard distinguishing the GitHub shape from the other two — every branch
+ * of `FeedbackConfigSchema.upstream` is `.strict()` and their required-key sets
+ * are disjoint, so `"repo" in cfg` is a sound discriminant even though no
+ * branch carries an explicit tag field.
+ *
+ * ⛔ NOT a complete shape policy on its own: `false` means "not the GitHub
+ * shape", NOT "the legacy shape" — `{vendor: true}` also answers `false` here.
+ * Consult {@link isVendorUpstreamCfg} FIRST, or (preferably) call
+ * {@link classifyFeedbackUpstream} and read its `kind`.
  *
  * @example
  *   isGithubUpstreamCfg({ repo: "acme/widget" }) // => true
  *   isGithubUpstreamCfg({ corpus_path: "/x", root_prd: "prd-x" }) // => false
+ *   isGithubUpstreamCfg({ vendor: true }) // => false — see the warning above
  */
 export function isGithubUpstreamCfg(cfg: UpstreamCfg): cfg is GithubUpstreamCfg {
   return "repo" in cfg;
@@ -275,16 +335,50 @@ export type FeedbackUpstreamClassification =
  *   when none was found/parsed) — routed through
  *   {@link resolveFeedbackUpstreamCfg}, which STAYS the only
  *   `feedback.upstream` READ site (this module's own header)
+ * ⛔ ALSO the ONE normalization point for the VENDOR-CONSENT shape: a
+ * `{vendor: true}` config is reported as `{kind: "github", cfg: {repo:
+ * VENDOR_INTAKE_REPO}}`. That is deliberate rather than a fourth `kind` —
+ * `vendor` declares CONSENT, not a destination, and the destination it consents
+ * to is a GitHub repository reached through exactly the same
+ * `GitHubIntakePort`. Collapsing it here means `fileGithubIssue`,
+ * `resolveGithubIssueListing`, `resolveGithubJoinedRows` and the MCP handler
+ * need ZERO changes and cannot learn a second addressing path — the
+ * "capability implemented but not wired" failure mode, closed by construction.
+ *
  * @returns `{kind: "unconfigured"}` when `feedback.upstream` is absent;
  *   `{kind: "retired", error}` when configured with the legacy
  *   `{corpus_path, root_prd}` shape, `error` carrying the SAME
  *   `VALIDATION_ERROR` literal both verbs must emit verbatim
  *   ({@link buildRetiredFeedbackUpstreamError}); `{kind: "github", cfg}` when
- *   configured with the GitHub `{repo}` shape
+ *   configured with the GitHub `{repo}` shape OR with the VENDOR-CONSENT
+ *   `{vendor: true}` shape (normalized to `{repo: VENDOR_INTAKE_REPO}`)
  */
 export function classifyFeedbackUpstream(config: LoreConfig | undefined): FeedbackUpstreamClassification {
   const cfg = resolveFeedbackUpstreamCfg(config);
   if (cfg === undefined) return { kind: "unconfigured" };
+  // ⛔ This branch is what makes a `{vendor: true}` config reachable AT ALL.
+  // `isGithubUpstreamCfg` is `"repo" in cfg` and a vendor config carries no
+  // `repo`, so with this line absent a vendor config falls all the way to the
+  // `retired` return below and is refused as "the retired SQLite shape" — a
+  // false statement about a valid config, which is exactly what every surface
+  // did before this branch existed.
+  //
+  // MEASURED minimal mutation (2026-08-25) — deleting THIS line reddens 3
+  // assertions: two in `tests/unit/adapters/feedback-upstream-vendor.test.ts`
+  // (`kind: "retired"` where `"github"` is expected) and one in
+  // `tests/unit/adapters/mcp-issue-shape-message-ssot.test.ts` (the MCP
+  // handler's error field becomes `feedback.upstream` instead of
+  // `severity,category`).
+  //
+  // ⛔ Deliberately NOT claimed: that the two guards' ORDER is what does the
+  // work here. It is not — measured: SWAPPING these two `if`s leaves all 18
+  // assertions GREEN, because the `retired` verdict is a fall-through at the
+  // END rather than an `else` on the GitHub test. The order still matters to
+  // any caller that hand-rolls the chain as `if (isGithubUpstreamCfg) {...}
+  // else {retired}` (the shape the MCP handler used to have), which is why
+  // `isVendorUpstreamCfg`'s JSDoc warns about it and why every production
+  // caller routes through THIS function instead of rebuilding the chain.
+  if (isVendorUpstreamCfg(cfg)) return { kind: "github", cfg: { repo: VENDOR_INTAKE_REPO } };
   if (isGithubUpstreamCfg(cfg)) return { kind: "github", cfg };
   return { kind: "retired", error: buildRetiredFeedbackUpstreamError() };
 }
