@@ -1,6 +1,7 @@
 /**
- * @spec_ref spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-1/2/10/12
+ * @spec_ref spec-a-github-filed-defect-must-be-claimable-one-ingest-seam AC-GR-1/2/8/10/12
  * @task task-skill-implement-the-read-surface-reaches-github-and-never
+ * @task task-skill-implement-the-six-read-flags-work-on-the-github-path
  *
  * The read surface reaches GitHub and never writes: `lore issues` against a
  * GitHub-configured `feedback.upstream` used to exit 4 (a hard refusal,
@@ -10,7 +11,11 @@
  * by `commands/issues.ts::runGithubIssuesListing` — proving it (AC-GR-1)
  * reaches the real GitHub shape at all, (AC-GR-2) renders an un-ingested row
  * distinguishably from a computed resolution, (AC-GR-10) never unions in
- * the corpus's local-only pre-GitHub reports, and (AC-GR-12) never writes.
+ * the corpus's local-only pre-GitHub reports, (AC-GR-12) never writes, and
+ * (AC-GR-8, added by `task-skill-implement-the-six-read-flags-work-on-the-
+ * github-path` after a SECOND exit-4 refusal was found for
+ * `--open`/`--resolved`/`--all`/`--severity`/`--category`/`--verify`
+ * specifically) that all six read flags actually filter, not just exit 0.
  *
  * ── A service-layer test may NOT stand in for this (spec's own rule,
  *    mirrored from `github-defect-claim-lifecycle.bun.test.ts`) ──
@@ -40,17 +45,25 @@
  * ── Naming note (dispatch bundle's own warning) ──
  * `bun test -t` matches as a SUBSTRING: `-t 'AC-GR-1'` ALSO selects the
  * `describe` below titled `AC-GR-10: …`. Both must pass for AC-GR-1's own
- * oracle command to exit 0 — this file's four scenarios are independent
- * fixtures precisely so that is never a problem in practice.
+ * oracle command to exit 0 — this file's scenarios are independent
+ * fixtures precisely so that is never a problem in practice. `AC-GR-8` is
+ * NOT a substring of `AC-GR-1`/`AC-GR-2`/`AC-GR-10`/`AC-GR-12` (checked
+ * before adding it) so `-t 'AC-GR-8'` selects only its own describe below.
  *
- * Six-dimension coverage note: this file's scope is exactly AC-GR-1/2/10/12
- * (HAPPY paths proving the read surface's four declared properties).
- * `fileGithubIssue`'s own error taxonomy (NEGATIVE/ERROR/STATE) is covered
- * by `tests/unit/service/github-filing-split-write.test.ts` and
+ * Six-dimension coverage note: AC-GR-1/2/10/12's own scope is exactly those
+ * four HAPPY paths (declared read-surface properties). `fileGithubIssue`'s
+ * own error taxonomy (NEGATIVE/ERROR/STATE) is covered by
+ * `tests/unit/service/github-filing-split-write.test.ts` and
  * `github-defect-claim-lifecycle.bun.test.ts` (AC-GR-9); duplicating them
- * here would blur which file is the oracle for which AC. REGRESSION for
- * this read path is this file's own re-run after any future change to
- * `resolveGithubJoinedRows`/`runGithubIssuesListing`.
+ * here would blur which file is the oracle for which AC. AC-GR-8's OWN
+ * scope (below) is wider — HAPPY (all six flags exit 0), NEGATIVE/BOUNDARY
+ * (`--open`/`--resolved` are disjoint and non-empty, not silently ignored),
+ * MANDATORY (`--severity` narrows a strict subset), and STATE (`--verify`
+ * renders `data.clean` correctly against an agreeing fixture) — because it
+ * is the oracle for a flag actually FILTERING, not merely accepting the
+ * flag and exiting 0. REGRESSION for this read path is this file's own
+ * re-run after any future change to
+ * `resolveGithubJoinedRows`/`runGithubIssuesListing`/`runGithubVerify`.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -60,6 +73,7 @@ import { join, resolve } from "node:path";
 
 import { ISSUE_RESOLUTION_MEMBERS } from "@lore/core";
 import { createApp, type App } from "../../../src/app.js";
+import { resolutionToLabel } from "../../../src/service/resolution-projector.js";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir, type PayloadGhStubIssue } from "../helpers/payload-gh-stub";
 
@@ -186,6 +200,51 @@ async function seedIngestedIssueTask(app: App, planId: string, issueNumber: numb
   });
   if (!created.ok) {
     throw new Error(`fixture ingested-task creation failed: ${JSON.stringify(created.error)}`);
+  }
+  return created.value.slug;
+}
+
+/**
+ * AC-GR-8's fixture: seeds one "already-ingested" issue-report task with a
+ * CALLER-CHOSEN severity/category and an OPTIONAL explicit terminal
+ * resolution state (`extra.issue_report.resolution.state`,
+ * `computeIssueResolution`'s Rule 1) — unlike {@link seedIngestedIssueTask},
+ * whose severity/category/resolution are fixed, this lets one test build
+ * two rows that land on OPPOSITE sides of `--open`/`--resolved` and on
+ * different sides of a `--severity`/`--category` filter.
+ *
+ * @returns the created task's slug
+ */
+async function seedTriagedIngestedIssueTask(
+  app: App,
+  planId: string,
+  issueNumber: number,
+  repoId: number,
+  opts: { readonly severity: string; readonly category: string; readonly resolutionState?: string },
+): Promise<string> {
+  const created = await app.corpusService.create({
+    type: "task",
+    title: `[issue-report] AC-GR-8 fixture #${issueNumber}`,
+    content:
+      "Synthetic already-ingested fixture for AC-GR-8. Expected: fixture behaves as specified. Actual: fixture behaves as specified.",
+    parent_id: planId,
+    extra: {
+      plan_id: planId,
+      issue_report: {
+        severity: opts.severity,
+        category: opts.category,
+        tags: ["e2e"],
+        reporter_corpus: "lore-gr-read-surface-fixture",
+        reporter_root_prd: "prd-lore-gr-read-surface-fixture-root",
+        expected: "fixture behaves as specified",
+        actual: "fixture behaves as specified",
+        github: { repo: FAKE_REPO, number: issueNumber, repo_id: repoId },
+        ...(opts.resolutionState !== undefined ? { resolution: { state: opts.resolutionState } } : {}),
+      },
+    },
+  });
+  if (!created.ok) {
+    throw new Error(`fixture triaged ingested-task creation failed: ${JSON.stringify(created.error)}`);
   }
   return created.value.slug;
 }
@@ -466,6 +525,153 @@ describe("AC-GR-12: lore issues mutates nothing", () => {
       expect(taskCountAfter).toBe(taskCountBefore);
       expect(taskCountAfter).toBe(0);
       expect(versionCountAfter).toBe(versionCountBefore);
+    },
+    60_000,
+  );
+});
+
+describe("AC-GR-8: all six read flags work against a GitHub-configured feedback.upstream", () => {
+  const OPEN_HIGH_NUMBER = 65_001;
+  const REJECTED_CRITICAL_NUMBER = 65_002;
+  let corpusRoot: string;
+  let ghStubDir: string;
+  let openHighSlug: string;
+  let rejectedCriticalSlug: string;
+
+  beforeAll(async () => {
+    const built = makeThrowawayCorpus("ac-gr-8");
+    corpusRoot = built.corpusRoot;
+    const plan = await built.app.corpusService.create({ type: "plan", title: "AC-GR-8 fixture plan" });
+    if (!plan.ok) throw new Error(`fixture plan creation failed: ${JSON.stringify(plan.error)}`);
+
+    // Two ingested tasks on OPPOSITE sides of every filter this AC exercises:
+    // openHigh is non-terminal ("open") / severity "high" / category "regression";
+    // rejectedCritical is terminal ("rejected") / severity "critical" / category "security".
+    openHighSlug = await seedTriagedIngestedIssueTask(built.app, plan.value.id, OPEN_HIGH_NUMBER, STUB_REPO_ID, {
+      severity: "high",
+      category: "regression",
+    });
+    rejectedCriticalSlug = await seedTriagedIngestedIssueTask(
+      built.app,
+      plan.value.id,
+      REJECTED_CRITICAL_NUMBER,
+      STUB_REPO_ID,
+      { severity: "critical", category: "security", resolutionState: "rejected" },
+    );
+    built.app.close();
+
+    writeGithubUpstreamConfig(corpusRoot, FAKE_REPO);
+    ghStubDir = payloadGhStubDir({
+      repoId: STUB_REPO_ID,
+      // Each stub issue's `resolution:*` label agrees with its task's own
+      // computed resolution — this fixture is `--verify`-CLEAN by
+      // construction, so exit 0 for `--verify` proves it reached the real
+      // read path rather than accidentally landing on the divergence exit.
+      existingIssues: [
+        {
+          number: OPEN_HIGH_NUMBER,
+          title: "AC-GR-8 fixture (open, high, regression)",
+          state: "open",
+          body: "",
+          labels: [resolutionToLabel("open")],
+        },
+        {
+          number: REJECTED_CRITICAL_NUMBER,
+          title: "AC-GR-8 fixture (rejected, critical, security)",
+          state: "closed",
+          body: "",
+          labels: [resolutionToLabel("rejected")],
+        },
+      ],
+      createdNumber: 1,
+      createdUrl: "https://example.invalid/never-created",
+    });
+  });
+
+  afterAll(() => {
+    cleanupPayloadGhStubDir(ghStubDir);
+    rmSync(corpusRoot, { recursive: true, force: true });
+  });
+
+  it(
+    "AC-GR-8 HAPPY: --open/--resolved/--all/--severity/--category/--verify each exit 0 against a GitHub-configured upstream",
+    () => {
+      const invocations: string[][] = [
+        ["issues", "--open", "--json"],
+        ["issues", "--resolved", "--json"],
+        ["issues", "--all", "--json"],
+        ["issues", "--severity", "critical", "--json"],
+        ["issues", "--category", "security", "--json"],
+        ["issues", "--verify", "--json"],
+      ];
+      for (const args of invocations) {
+        const result = run(args, corpusRoot, ghStubDir);
+        expect(result.exitCode, `'${args.join(" ")}' — stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+      }
+    },
+    60_000,
+  );
+
+  it(
+    "AC-GR-8 NEGATIVE/BOUNDARY: --open and --resolved return different, non-empty, disjoint row sets — not an ignored flag",
+    () => {
+      const openResult = run(["issues", "--open", "--json"], corpusRoot, ghStubDir);
+      expect(openResult.exitCode, `stdout: ${openResult.stdout}\nstderr: ${openResult.stderr}`).toBe(0);
+      const openParsed = JSON.parse(openResult.stdout) as {
+        data: { total: number; reports: Array<{ slug?: string }> };
+      };
+
+      const resolvedResult = run(["issues", "--resolved", "--json"], corpusRoot, ghStubDir);
+      expect(resolvedResult.exitCode, `stdout: ${resolvedResult.stdout}\nstderr: ${resolvedResult.stderr}`).toBe(0);
+      const resolvedParsed = JSON.parse(resolvedResult.stdout) as {
+        data: { total: number; reports: Array<{ slug?: string }> };
+      };
+
+      // Non-vacuous: both sets must be non-empty — a filter that always
+      // returns [] would otherwise satisfy a bare "the two sets differ" check.
+      expect(openParsed.data.total).toBeGreaterThan(0);
+      expect(resolvedParsed.data.total).toBeGreaterThan(0);
+
+      const openSlugs = openParsed.data.reports.map((r) => r.slug);
+      const resolvedSlugs = resolvedParsed.data.reports.map((r) => r.slug);
+      expect(openSlugs).toContain(openHighSlug);
+      expect(openSlugs).not.toContain(rejectedCriticalSlug);
+      expect(resolvedSlugs).toContain(rejectedCriticalSlug);
+      expect(resolvedSlugs).not.toContain(openHighSlug);
+    },
+    60_000,
+  );
+
+  it(
+    "AC-GR-8 MANDATORY: --severity selects a strict, non-empty subset of --all — not an ignored flag",
+    () => {
+      const allResult = run(["issues", "--all", "--json"], corpusRoot, ghStubDir);
+      expect(allResult.exitCode, `stdout: ${allResult.stdout}\nstderr: ${allResult.stderr}`).toBe(0);
+      const allParsed = JSON.parse(allResult.stdout) as { data: { total: number } };
+      expect(allParsed.data.total).toBe(2);
+
+      const severityResult = run(["issues", "--all", "--severity", "critical", "--json"], corpusRoot, ghStubDir);
+      expect(severityResult.exitCode, `stdout: ${severityResult.stdout}\nstderr: ${severityResult.stderr}`).toBe(0);
+      const severityParsed = JSON.parse(severityResult.stdout) as {
+        data: { total: number; reports: Array<{ slug?: string; severity?: string }> };
+      };
+      // Strict, non-empty subset: fewer rows than the unfiltered --all, never zero.
+      expect(severityParsed.data.total).toBe(1);
+      expect(severityParsed.data.total).toBeLessThan(allParsed.data.total);
+      expect(severityParsed.data.reports[0]?.slug).toBe(rejectedCriticalSlug);
+      expect(severityParsed.data.reports[0]?.severity).toBe("critical");
+    },
+    60_000,
+  );
+
+  it(
+    "AC-GR-8 STATE: --verify against a matching-labels fixture is clean (data.clean true, zero divergences)",
+    () => {
+      const result = run(["issues", "--verify", "--json"], corpusRoot, ghStubDir);
+      expect(result.exitCode, `stdout: ${result.stdout}\nstderr: ${result.stderr}`).toBe(0);
+      const parsed = JSON.parse(result.stdout) as { data: { clean: boolean; divergences: unknown[] } };
+      expect(parsed.data.clean).toBe(true);
+      expect(parsed.data.divergences).toHaveLength(0);
     },
     60_000,
   );
