@@ -70,6 +70,7 @@ import { StalenessProbeService } from "./service/staleness-probe-service.js";
 import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
+import { RuleService } from "./service/rule-service.js";
 import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
@@ -381,6 +382,14 @@ export interface App {
    * `acService`; always wired in production.
    */
   requirementService?: RequirementService;
+  /**
+   * RuleService — the sole writer of a `baseline` doc's verb-owned `extra` keys (rules with
+   * permanent `BR-n` ids, label, depends_on, glossary) and of baseline node creation
+   * (`lore rule add|set`, `lore baseline add|set-label|depends|glossary`, spec
+   * baseline-slice-1 §C3). Holds the store plus the wired `corpusService.create`; same
+   * optional-DI shape as `requirementService`; always wired in production.
+   */
+  ruleService?: RuleService;
   /**
    * PrdOutlineService — the sole structured writer for a PRD's outline
    * (`lore outline set/list/rm`, SPEC-080 C1) and a plan's audited plan-close
@@ -805,6 +814,9 @@ function buildAppFromSqlite(
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled),
+    // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
+    // node creation); its one-arg `new RuleService(store)` default exists only for bare unit tests.
+    ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),
@@ -1150,6 +1162,9 @@ function buildAppFromTurso(
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled),
+    // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
+    // node creation); its one-arg `new RuleService(store)` default exists only for bare unit tests.
+    ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),

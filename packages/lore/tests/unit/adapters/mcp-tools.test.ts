@@ -956,7 +956,9 @@ describe("tool registration completeness", () => {
   // SPEC-055 adds lore_requirement_add (31 to 32); SPEC-056 adds lore_phase_status
   // (32 to 33, task-skill-implement-cli-mcp-surfaces-checklist-ref-evidence).
   // SPEC-072 T5 adds lore_report_issue (33 to 34).
-  it("registers all 34 expected tools", () => {
+  // baseline slice 1 §C3 adds the 7 baseline write tools (34 to 41): lore_rule_add/_set,
+  // lore_baseline_add/_set_label/_depends/_glossary_add/_glossary_rm.
+  it("registers all 41 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -992,12 +994,19 @@ describe("tool registration completeness", () => {
       "lore_requirement_add",
       "lore_phase_status",
       "lore_report_issue",
+      "lore_rule_add",
+      "lore_rule_set",
+      "lore_baseline_add",
+      "lore_baseline_set_label",
+      "lore_baseline_depends",
+      "lore_baseline_glossary_add",
+      "lore_baseline_glossary_rm",
     ];
 
     const internal = server as unknown as McpServerInternal;
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(34);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(41);
   });
 });

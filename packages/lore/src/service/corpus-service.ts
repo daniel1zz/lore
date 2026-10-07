@@ -5,7 +5,7 @@
  */
 
 import { ulid } from "ulidx";
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, DEDICATED_EXTRA_KEYS, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
 // Node-only-subpath-gated purely for the browser-safety barrel-isolation
@@ -315,6 +315,46 @@ function findDroppedStructuredExtraField(
     const hadEvidence = Array.isArray(evidenceBefore) && evidenceBefore.length > 0;
     if (hadEvidence && incomingExtra["verification_evidence"] === undefined) {
       return { field: "extra.verification_evidence", writerHint: "`lore evidence`" };
+    }
+  }
+  return null;
+}
+
+/**
+ * Structural JSON equality: arrays compare element-by-element IN ORDER, objects by key set
+ * (key order irrelevant), primitives by `Object.is`. `undefined` equals only `undefined`.
+ * Used by the dedicated-extra-key replace guard — `extra` is JSON data, so no Date/Map cases.
+ */
+function jsonDeepEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, index) => jsonDeepEqual(item, b[index]));
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  if (aKeys.length !== Object.keys(bRecord).length) return false;
+  return aKeys.every(
+    (key) => Object.prototype.hasOwnProperty.call(bRecord, key) && jsonDeepEqual(aRecord[key], bRecord[key]),
+  );
+}
+
+/**
+ * First `DEDICATED_EXTRA_KEYS` entry of `existing.type` whose value in `incomingExtra` is not
+ * deep-equal to the stored one (dropped, added, replaced or reordered); `null` when the doc
+ * type has no registered keys or every guarded key is echoed unchanged.
+ */
+function findDedicatedExtraKeyViolation(
+  existing: DocRecord,
+  incomingExtra: Record<string, unknown>,
+): { key: string; writer: string } | null {
+  const guarded = DEDICATED_EXTRA_KEYS[existing.type];
+  if (guarded === undefined) return null;
+  for (const entry of guarded) {
+    if (!jsonDeepEqual(existing.extra[entry.key], incomingExtra[entry.key])) {
+      return { key: entry.key, writer: entry.writer };
     }
   }
   return null;
@@ -2088,6 +2128,29 @@ export class CorpusService {
             `${existing.slug} --json\` (read \`.extra\`), merge your change into it, and pass ` +
             `the FULL merged object as \`extra\`.`,
           value: parsedPatch.data.extra,
+        });
+      }
+    }
+
+    // Dedicated-verb replace guard (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations
+    // §C3, QA-2), driven by the `DEDICATED_EXTRA_KEYS` table in @lore/core. STRONGER than the
+    // drop-only guard above: a registered key whose incoming value is dropped, added, replaced
+    // OR merely reordered (deep-equal, array order significant) is refused, because `extra`
+    // replaces wholesale and `rules`/`glossary` are order-bearing, id-bearing data owned by one
+    // verb. An `extra` that echoes every guarded key byte-equal stays allowed. Living in
+    // `set()` makes the CLI `lore set`, MCP `lore_set` and HTTP PATCH inherit it with no
+    // per-adapter copy. Only doc types listed in the table are guarded (today: baseline).
+    if (parsedPatch.data.extra !== undefined) {
+      const violation = findDedicatedExtraKeyViolation(existing, parsedPatch.data.extra);
+      if (violation !== null) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: `extra.${violation.key}`,
+          message:
+            `extra.${violation.key} on a ${existing.type} doc is owned by \`${violation.writer}\` — ` +
+            `\`lore set\` replaces \`extra\` wholesale and must not drop, replace or reorder it. ` +
+            `Use \`${violation.writer}\` instead, or pass the current value byte-equal.`,
+          value: parsedPatch.data.extra[violation.key],
         });
       }
     }
