@@ -120,6 +120,8 @@ export const SANCTIONED_ORDINAL_WRITE_FILES = [
   // Schema migration adding the `ordinal` column + partial unique index
   // (DDL only — `ALTER TABLE`/`CREATE UNIQUE INDEX`, never a value write).
   "packages/lore/src/store/migrations/migration-010.ts",
+  // docs-table rebuild admitting type 'baseline' — copies `ordinal` verbatim row-for-row (no allocation).
+  "packages/lore/src/store/migrations/migration-013.ts",
   // SPEC-084 D7's one-shot repair migration service — the sole caller of
   // `assignOrdinalForRepair`; its doc comments discuss the MAX+1 sites by
   // name to explain why THIS path deliberately avoids them.
