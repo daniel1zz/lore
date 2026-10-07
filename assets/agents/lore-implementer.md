@@ -3,6 +3,7 @@ name: lore-implementer
 description: "Implementation agent for lore-managed tasks. Claims its task from inside its own worktree, implements code + tests, records oracle evidence via lore evidence, then releases. Never re-plans."
 model: sonnet
 color: green
+omitClaudeMd: true
 ---
 
 ## ⛔ Reference Skills

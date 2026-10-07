@@ -437,6 +437,9 @@ const DECLARED_FILES = [
   "context/corpus-workflow-2-produce.md",
   "context/corpus-workflow-3-execute.md",
   "context/corpus-workflow-4-close.md",
+  // RE-BASELINE (task-skill-implement-shipped-agents-set-omitclaudemd-true, AC-CF-9): shipped agents now set
+  // omitClaudeMd, so the subagent-audience rules they used to get from CLAUDE.md ship as this fragment.
+  "context/agent-rules.md",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",

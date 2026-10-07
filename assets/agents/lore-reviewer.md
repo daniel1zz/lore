@@ -7,6 +7,7 @@ disallowedTools:
   - Write
   - Edit
   - NotebookEdit
+omitClaudeMd: true
 ---
 
 You are an independent reviewer operating within a lore plan/task workflow.

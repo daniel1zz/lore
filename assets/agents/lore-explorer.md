@@ -7,6 +7,7 @@ disallowedTools:
   - Write
   - Edit
   - NotebookEdit
+omitClaudeMd: true
 ---
 
 You are a fast codebase + lore corpus exploration agent. Read-only.
