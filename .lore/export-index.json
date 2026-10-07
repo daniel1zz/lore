@@ -7308,6 +7308,18 @@
     "01M4AGV57WQXDSVNMD2EVWTJ15": {
       "human_id": "TASK-910",
       "file_path": "docs/requirements/task/TASK-910-skill-implement-dogfood-this-repo-lore-context-roo.md"
+    },
+    "01M4AHVS35WEXJH67XZMA0DQJ5": {
+      "human_id": "KN-563",
+      "file_path": "docs/requirements/knowledge/KN-563-assessment-claude-md-root-section-structure-check.md"
+    },
+    "01M4AJ9FYYC8W8W50RJCHGJM62": {
+      "human_id": "TASK-911",
+      "file_path": "docs/requirements/task/TASK-911-lore-evidence-rejects-an-ac-command-that-lore-veri.md"
+    },
+    "01M4AHX7TW2P0JX0T2ECBTHKTG": {
+      "human_id": "TASK-912",
+      "file_path": "docs/requirements/task/TASK-912-skill-implement-setup-writes-only-the-adoption-key.md"
     }
   }
 }

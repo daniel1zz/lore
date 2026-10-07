@@ -180,6 +180,8 @@ Existing tests updated in the same slice: `claude-md-template-pointer.test.ts`, 
   script: test — bunx vitest run packages/lore/tests/integration/status-memory-pointers-adoption.test.ts 2>&1 && echo 'AC-STR-9 PASS: check-memory-pointers prints WARN + downgraded dangling slug under warn, exits 3 under enforce'
 - [⚑] [script] AC-STR-10: Memory-file discovery stops at nested git repositories: in a temp repo containing a non-root directory with its own .git (as a directory, and separately as a gitfile like a submodule) holding an over-ceiling CLAUDE.md, 'lore status --check-claude-md --json' lists no finding or advisory whose path is under that directory, while a CLAUDE.md in an ordinary subdirectory of the same repo IS still discovered; under adoption enforce the run exits 0.
   script: test — bunx vitest run packages/lore/tests/integration/claude-md-nested-repo-discovery.test.ts 2>&1 && echo 'AC-STR-10 PASS: nested git repos (dir and gitfile) are skipped by discovery, ordinary subdirectories still discovered, enforce exits 0'
+- [⚑] [script] AC-STR-11: Setup writes ONLY the adoption key: after 'lore init' + 'lore setup --project' in an empty temp repo, the raw .lore/config.yaml has context.memory_files containing exactly the key 'adoption' (no materialized root/module/rules budgets); with a pre-existing config that sets only root.max_lines, after setup memory_files has exactly {root: {max_lines}, adoption} and every other byte of the file outside that block is unchanged.
+  script: test — cd packages/lore && bun test tests/integration/setup-adoption-config-write.bun.test.ts 2>&1 && echo 'AC-STR-11 PASS: setup adds only context.memory_files.adoption, never materialized default budgets, and preserves the rest of the file'
 
 ## Code anchors
 

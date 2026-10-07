@@ -3,7 +3,7 @@ id: TASK-881
 type: task
 role: plan
 title: "[Skill:review] verify AC-STR-1..8 on main + full suite + assess"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 3: Dogfood & verify"
 created: 2026-10-07
