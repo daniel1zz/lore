@@ -178,13 +178,13 @@ import {
   err,
   ok,
   planInstall,
-  resolveMemoryFileBudgets,
   setupManifestSchema,
 } from "@lore/core";
 import type {
   AdoptionMode,
   AssetFile,
   LoreError,
+  MemoryFileBudgets,
   Result,
   SetupEntry,
   SetupEntryKind,
@@ -302,11 +302,23 @@ export type AdoptionWriteOutcome = { status: "written" } | { status: "kept"; exi
 export type WriteAdoptionMode = (repoDir: string, mode: AdoptionMode) => Result<AdoptionWriteOutcome, LoreError>;
 
 /**
+ * Resolves the target repo's REAL `context.memory_files` budgets (its own
+ * `.lore/config.yaml`, read AFTER the init step created it) so the adoption
+ * judgement uses the same ceilings `lore status --check-claude-md` will later
+ * enforce — never schema defaults.
+ *
+ * @param repoDir - Absolute repo root.
+ * @returns `err` when the config cannot be loaded — never throws.
+ */
+export type ResolveMemoryFileBudgets = (repoDir: string) => Result<MemoryFileBudgets, LoreError>;
+
+/**
  * The ports {@link scaffoldProject} depends on, bundled for constructor injection.
  *
- * `writeAdoptionMode` is OPTIONAL (additive-capability, like `ProjectFsPort.backup`):
- * when absent the adoption step is skipped and the report carries no `adoption`
- * row. The production adapter always supplies it.
+ * `writeAdoptionMode` + `resolveMemoryFileBudgets` are OPTIONAL in the TYPE only
+ * (making them required would break unanchored fixtures that predate the adoption
+ * step). Absence is NOT silent: the report carries an `adoption` row with
+ * `status: "skipped"` naming the missing port(s). The production adapter supplies both.
  */
 export interface ProjectScaffoldFlowDeps {
   fs: ProjectFsPort;
@@ -314,18 +326,20 @@ export interface ProjectScaffoldFlowDeps {
   initCorpus: InitCorpus;
   assets: ProjectAssetSource;
   writeAdoptionMode?: WriteAdoptionMode;
+  resolveMemoryFileBudgets?: ResolveMemoryFileBudgets;
 }
 
 /**
  * Outcome of the adoption step (spec D4). `mode` is the value judged on the
- * post-splice root file; `status` says whether it reached the config.
+ * post-splice root file — ABSENT exactly when nothing was judged (`skipped`, or
+ * `failed` before judgement). `status` says whether it reached the config.
  * `checklist` is the migration checklist — one line per would-be deterministic
  * finding — populated ONLY when `mode` is `warn`.
  */
 export interface AdoptionStepResult {
-  status: "written" | "kept" | "failed";
-  mode: AdoptionMode;
-  /** `kept`: the explicit value already in config; `failed`: the error text. */
+  status: "written" | "kept" | "failed" | "skipped";
+  mode?: AdoptionMode;
+  /** `kept`: the explicit value already in config; `failed`/`skipped`: the reason. */
   detail?: string;
   checklist: string[];
 }
@@ -396,8 +410,9 @@ export interface ProjectScaffoldReport {
   git_hooks_path: GitHooksPathResult;
   /**
    * Adoption-mode write (spec-claude-md-root-section-structure-check-and-adoption-mode
-   * D4) — absent only when `deps.writeAdoptionMode` is not injected or the
-   * CLAUDE.md step itself failed (nothing to judge). See {@link AdoptionStepResult}.
+   * D4) — absent ONLY when the CLAUDE.md step itself failed (nothing to judge).
+   * A missing adoption port is a `status: "skipped"` row, never absence.
+   * See {@link AdoptionStepResult}.
    */
   adoption?: AdoptionStepResult;
   /**
@@ -1093,19 +1108,29 @@ async function runClaudeMdStep(
  * persist `enforce` (zero would-be findings) or `warn` (any). The port itself only
  * writes when the key is absent, so an explicit value is never overwritten.
  *
- * reason: budgets are the schema defaults with `adoption` pinned to `enforce` so
- * `deterministic` IS the would-be finding list — the default-`warn` resolution would
- * move every finding into `advisory` and hide the count from this caller.
+ * reason: budgets are the repo's REAL resolved budgets (`deps.resolveMemoryFileBudgets`)
+ * with `adoption` pinned to `enforce` so `deterministic` IS the would-be finding list —
+ * the default-`warn` resolution would move every finding into `advisory` and hide the
+ * count from this caller. Judging against schema defaults instead would write `enforce`
+ * for a repo whose tighter ceilings `status --check-claude-md` then fails on.
  * `docExists`/`fileExists` are `() => true`: this step judges structure/capacity,
  * and a dangling-reference verdict needs the target repo on disk.
+ *
+ * A missing port is a loud `skipped` row (never an absent one); a budget-resolution
+ * failure is a `failed` row and the write port is NOT called.
  */
-function runAdoptionStep(
-  deps: ProjectScaffoldFlowDeps,
-  repoDir: string,
-  postSpliceContent: string,
-): AdoptionStepResult | undefined {
-  if (deps.writeAdoptionMode === undefined) return undefined;
-  const budgets = { ...resolveMemoryFileBudgets(undefined), adoption: "enforce" as const };
+function runAdoptionStep(deps: ProjectScaffoldFlowDeps, repoDir: string, postSpliceContent: string): AdoptionStepResult {
+  const { writeAdoptionMode, resolveMemoryFileBudgets } = deps;
+  if (writeAdoptionMode === undefined || resolveMemoryFileBudgets === undefined) {
+    const missing = [
+      ...(writeAdoptionMode === undefined ? ["writeAdoptionMode"] : []),
+      ...(resolveMemoryFileBudgets === undefined ? ["resolveMemoryFileBudgets"] : []),
+    ];
+    return { status: "skipped", detail: `adoption not judged: deps.${missing.join(" and deps.")} not injected`, checklist: [] };
+  }
+  const resolved = resolveMemoryFileBudgets(repoDir);
+  if (!resolved.ok) return { status: "failed", detail: describeError(resolved.error), checklist: [] };
+  const budgets = { ...resolved.value, adoption: "enforce" as const };
   const { deterministic } = runMemoryFileChecks(
     [{ path: CLAUDE_MD_TARGET_NAME, role: "root", content: postSpliceContent }],
     budgets,
@@ -1113,7 +1138,7 @@ function runAdoptionStep(
   );
   const mode: AdoptionMode = deterministic.length === 0 ? "enforce" : "warn";
   const checklist = mode === "warn" ? deterministic.map((finding) => finding.message) : [];
-  const written = deps.writeAdoptionMode(repoDir, mode);
+  const written = writeAdoptionMode(repoDir, mode);
   if (!written.ok) return { status: "failed", mode, detail: describeError(written.error), checklist };
   if (written.value.status === "kept") return { status: "kept", mode, detail: written.value.existing, checklist: [] };
   return { status: "written", mode, checklist };

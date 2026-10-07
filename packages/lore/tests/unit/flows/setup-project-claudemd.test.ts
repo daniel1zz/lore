@@ -32,8 +32,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { err, ok, setupManifestSchema } from "@lore/core";
-import type { LoreError, Result } from "@lore/core";
+import { err, ok, resolveMemoryFileBudgets, setupManifestSchema } from "@lore/core";
+import type { LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import {
   scaffoldProject,
   type AdoptionWriteOutcome,
@@ -43,6 +43,7 @@ import {
   type ProjectFsPort,
   type ProjectScaffoldFlowDeps,
 } from "../../../src/flows/setup-project-flow.js";
+import { renderProjectScaffoldReceipt } from "../../../src/adapters/cli/setup-render.js";
 import { spliceManagedSections, type ManagedSection } from "../../../src/service/context-projection.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -357,9 +358,11 @@ function makeAdoptionDeps(
   fs: InMemoryProjectFs,
   calls: AdoptionCall[],
   outcome: Result<AdoptionWriteOutcome, LoreError> = ok({ status: "written" }),
+  budgets: Result<MemoryFileBudgets, LoreError> = ok(resolveMemoryFileBudgets(undefined)),
 ): ProjectScaffoldFlowDeps {
   return {
     ...makeDeps(fs, { "CLAUDE.md.template": REAL_SHAPE_TEMPLATE, "CLAUDE.md.skeleton": REAL_SHAPE_SKELETON }),
+    resolveMemoryFileBudgets: () => budgets,
     writeAdoptionMode: (repoDir, mode) => {
       calls.push({ repoDir, mode });
       return outcome;
@@ -431,10 +434,69 @@ describe("setup-project-flow — adoption step (D4) — judged on POST-SPLICE co
     expect(result.value.adoption?.detail).toContain("config unreadable");
   });
 
-  it("REGRESSION: no port injected -> no adoption row; unreadable skeleton on a fresh install -> claude_md failed, port never called", async () => {
+  it("DEFECT-FIX: the repo's REAL (tighter) budgets are used — a file over a custom max_lines but under the default 300 -> warn + capacity finding", async () => {
+    const fs = new InMemoryProjectFs();
+    const tighter: MemoryFileBudgets = {
+      ...resolveMemoryFileBudgets(undefined),
+      root: { max_lines: 10, max_bytes: 30720 },
+    };
+    const calls: AdoptionCall[] = [];
+    const result = await scaffoldProject(
+      makeAdoptionDeps(fs, calls, ok({ status: "written" }), ok(tighter)),
+      { repoDir: REPO_DIR },
+      fixedNow,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Fresh install is ~25 lines: over 10, far under 300.
+    expect(calls.map((c) => c.mode)).toEqual(["warn"]);
+    expect((result.value.adoption?.checklist ?? []).some((l) => l.includes("ceiling"))).toBe(true);
+  });
+
+  it("ERROR: budgets cannot be resolved -> adoption failed (loud), port never called", async () => {
+    const fs = new InMemoryProjectFs();
+    const calls: AdoptionCall[] = [];
+    const result = await scaffoldProject(
+      makeAdoptionDeps(fs, calls, ok({ status: "written" }), err({ code: "STORE_ERROR", message: "config broken" })),
+      { repoDir: REPO_DIR },
+      fixedNow,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.adoption?.status).toBe("failed");
+    expect(result.value.adoption?.detail).toContain("config broken");
+    expect(calls).toEqual([]);
+  });
+
+  it("NO-SILENT-FALLBACK: a missing adoption port is a LOUD skipped row naming the port, never an absent row", async () => {
     const fs = new InMemoryProjectFs();
     const bare = await scaffoldProject(makeDeps(fs), { repoDir: REPO_DIR }, fixedNow);
-    expect(bare.ok && bare.value.adoption).toBeUndefined();
+    expect(bare.ok).toBe(true);
+    if (!bare.ok) return;
+    expect(bare.value.adoption?.status).toBe("skipped");
+    expect(bare.value.adoption?.mode).toBeUndefined();
+    expect(bare.value.adoption?.detail).toContain("writeAdoptionMode");
+    expect(bare.value.adoption?.detail).toContain("resolveMemoryFileBudgets");
+
+    const half = await scaffoldProject(
+      { ...makeDeps(new InMemoryProjectFs()), writeAdoptionMode: () => ok({ status: "written" }) },
+      { repoDir: REPO_DIR },
+      fixedNow,
+    );
+    expect(half.ok && half.value.adoption?.status).toBe("skipped");
+    expect(half.ok && half.value.adoption?.detail).toContain("resolveMemoryFileBudgets");
+
+    // The skip is RENDERED (visible to the operator), not just carried in the report.
+    const text = renderProjectScaffoldReceipt(
+      { ...bare.value, manifestPath: `${REPO_DIR}/.lore/.lore-project-manifest.json` },
+      { targetDir: REPO_DIR, binPath: "/usr/local/bin/lore" },
+    );
+    expect(text).toContain("Adoption: skipped — not judged");
+    expect(text).toContain("deps.writeAdoptionMode");
+  });
+
+  it("REGRESSION: unreadable skeleton on a fresh install -> claude_md failed, port never called", async () => {
+    const fs = new InMemoryProjectFs();
 
     const fs2 = new InMemoryProjectFs();
     const calls: AdoptionCall[] = [];

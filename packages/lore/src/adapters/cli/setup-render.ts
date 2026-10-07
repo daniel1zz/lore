@@ -346,7 +346,8 @@ function renderLoudBackupLines(backups: readonly string[]): string[] {
  */
 function renderAdoptionLines(adoption: AdoptionStepResult): string[] {
   const detail = adoption.detail === undefined ? "" : ` (${adoption.detail})`;
-  const lines = [`Adoption: ${adoption.status} — ${adoption.mode}${detail}`];
+  // mode is absent exactly when nothing was judged (skipped / failed before judgement) — say so, never print "undefined".
+  const lines = [`Adoption: ${adoption.status} — ${adoption.mode ?? "not judged"}${detail}`];
   if (adoption.checklist.length > 0) {
     lines.push("  CLAUDE.md does not yet satisfy the section structure; adoption set to warn. Migration checklist:");
     for (const item of adoption.checklist) lines.push(`    - [ ] ${item}`);

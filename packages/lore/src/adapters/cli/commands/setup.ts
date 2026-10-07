@@ -134,7 +134,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
 import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
-import type { AdoptionMode, LoreError, Result } from "@lore/core";
+import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { loadConfig, saveConfig } from "@lore/core/node";
 
 import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
@@ -426,6 +426,20 @@ function makeRealProjectAssetSource(projectAssetsDir: string): ProjectAssetSourc
 const CONFIG_TEMPLATE_ASSET_NAME = "lore-config-template.yaml";
 
 /**
+ * Real `ResolveMemoryFileBudgets` port: the target repo's own resolved
+ * `context.memory_files` budgets from its `.lore/config.yaml` (the init step has
+ * already created it), so the adoption judgement uses the ceilings
+ * `status --check-claude-md` will enforce. A load failure is returned, never defaulted.
+ *
+ * @param repoDir - Absolute repo root.
+ */
+function resolveRepoMemoryFileBudgets(repoDir: string): Result<MemoryFileBudgets, LoreError> {
+  const loaded = loadConfig(repoDir);
+  if (!loaded.ok) return loaded;
+  return ok(resolveMemoryFileBudgets(loaded.value));
+}
+
+/**
  * Real `WriteAdoptionMode` port (spec-claude-md-root-section-structure-check-and-adoption-mode D4):
  * reads the repo's `.lore/config.yaml` FIRST and writes `context.memory_files.adoption`
  * ONLY when it is absent — an explicit value (either mode) is never overwritten.
@@ -487,6 +501,7 @@ async function runProjectScaffold(opts: {
     },
     assets: projectAssets,
     writeAdoptionMode: writeAdoptionModeToConfig,
+    resolveMemoryFileBudgets: resolveRepoMemoryFileBudgets,
   });
 
   const result = await service.scaffold(repoDir);
