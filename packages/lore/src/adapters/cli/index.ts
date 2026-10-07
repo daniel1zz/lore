@@ -102,6 +102,9 @@ const main = defineCommand({
     // context (spec-context-verb-family-two-zone-claude-md-anatomy-lore) — init/refresh
     // the two-zone root CLAUDE.md; see commands/context.ts's module header.
     context: () => import("./commands/context.js").then(wrapDefault("context")),
+    // fragments (spec-context-fragments-config-driven-layered-rule-injection D13) — read-only,
+    // hook-facing render/check/pointers; bootstrap-stage, see commands/fragments.ts's module header.
+    fragments: () => import("./commands/fragments.js").then(wrapDefault("fragments")),
     outline: () => import("./commands/outline.js").then(wrapDefault("outline")),
     seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
     "report-issue": () => import("./commands/report-issue.js").then(wrapDefault("report-issue")),
