@@ -716,6 +716,36 @@ export function deriveLastActivityAt(plan: DocRecord, tasks: DocRecord[]): strin
   return latest;
 }
 
+/**
+ * Root memory-file health block carried by `lore bootstrap --json` as the OPTIONAL
+ * `memory_file_health` field (spec-claude-md-root-section-structure-check-and-adoption-mode,
+ * D7/D8; AC-STR-5). Computed ADAPTER-side by `adapters/cli/memory-file-health.ts`
+ * (SessionService has no filesystem) and spliced beside `sessionService.bootstrap`.
+ *
+ * @invariant Declared on the SCHEMA, not only the TS literal: a plain `z.object`
+ *   silently STRIPS unrecognised keys on `.parse()`, so omitting it here would make
+ *   the field vanish at any downstream `bootstrapReportSchema.parse`.
+ * @invariant Present iff adoption mode is `warn` OR the root file has >= 1 would-be
+ *   deterministic finding of any kind; ABSENT (never `null`) otherwise — an absent
+ *   field means "enforce and clean", so it must never be emitted as a placeholder.
+ */
+export const memoryFileHealthSchema = z.object({
+  mode: z.enum(["enforce", "warn"]),
+  mode_source: z.enum(["config", "default"]),
+  /** Missing required root H2 names, in contract order. */
+  missing: z.array(z.string()),
+  /** True iff a `section_order` finding exists for the root file. */
+  out_of_order: z.boolean(),
+  /** Distinct would-be deterministic kinds moved to advisory by `warn` (empty in `enforce`). */
+  downgraded_kinds: z.array(z.string()),
+  downgraded_count: z.number().int().min(0),
+  /** `warn` AND `downgraded_count === 0`. */
+  promotable: z.boolean(),
+});
+
+/** Derived TypeScript type for {@link memoryFileHealthSchema}. */
+export type MemoryFileHealth = z.infer<typeof memoryFileHealthSchema>;
+
 export const bootstrapReportSchema = z.object({
   root: bootstrapRootSchema.nullable(),
   active_plans: z.array(bootstrapActivePlanSchema),
@@ -768,6 +798,8 @@ export const bootstrapReportSchema = z.object({
    *   §Design Decisions D4.
    */
   archive_candidates: z.number().int().min(0),
+  /** Optional root memory-file health — see {@link memoryFileHealthSchema}. Attached by the CLI adapter, never by SessionService. */
+  memory_file_health: memoryFileHealthSchema.optional(),
 });
 
 /** Derived TypeScript type for the S1 bootstrap pointer-set. */
