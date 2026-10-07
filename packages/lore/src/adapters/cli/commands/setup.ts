@@ -125,18 +125,18 @@
  * Source: SPEC-046 §Design, §Scope; task AC-046-E.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
 import { parseDocument } from "yaml";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
-import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
-import { loadConfig } from "@lore/core/node";
+import type { AdoptionMode, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 
 import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
 import { ProjectSetupService } from "../../../service/project-setup-service.js";
@@ -154,6 +154,8 @@ import {
   type ProjectUninstallReport,
 } from "../../../flows/setup-project-uninstall.js";
 import { initCorpusAt } from "../../../flows/init-corpus.js";
+import { runContextRefresh } from "../../../flows/context-flow.js";
+import { ClaudeSettingsPort, createRealClaudeSettingsFs, resolveLanguageName } from "../../claude-settings-port.js";
 import { RealAssetSource } from "../../real-asset-source.js";
 import { RealSetupFsReader, RealSetupFsWriter, backupProjectFile, removeProjectPath } from "../../real-setup-fs.js";
 import { RealMcpRegistrar } from "../../real-mcp-registrar.js";
@@ -499,11 +501,164 @@ function writeAdoptionModeToConfig(repoDir: string, mode: AdoptionMode): Result<
   return ok({ status: "written" });
 }
 
+// ─── context.language projection (spec-context-fragments D3; AC-CF-5, AC-CF-18) ──
+
+/** One resolved `context.language` -> Claude Code `language` write. */
+interface LanguageProjection {
+  readonly layer: "global" | "project";
+  /** Absolute path of the Claude Code settings file receiving `language`. */
+  readonly settingsPath: string;
+  /** Claude Code language name (e.g. "Chinese"). */
+  readonly language: string;
+}
+
+/** Nearest ancestor of `start` holding `.lore/`; `start` itself when none does (same rule as `lore fragments`). */
+function findProjectRoot(start: string): string {
+  let dir = resolve(start);
+  for (;;) {
+    if (existsSync(join(dir, ".lore"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return resolve(start);
+    dir = parent;
+  }
+}
+
+function toContextLayer(
+  source:
+    | { context?: { language?: string | undefined; fragments?: { disable?: string[] | undefined } | undefined } | undefined }
+    | undefined,
+): ContextConfigLayer {
+  const language = source?.context?.language;
+  const disable = source?.context?.fragments?.disable;
+  return {
+    context: {
+      ...(language !== undefined ? { language } : {}),
+      ...(disable !== undefined ? { fragments: { disable } } : {}),
+    },
+  };
+}
+
+/**
+ * Resolves both config layers' `context.language` into settings writes WITHOUT touching disk:
+ * global (XDG) -> `<claudeDir>/settings.json`, project -> `<projectRoot>/.claude/settings.local.json`
+ * (the exact two paths `lore fragments check` compares). An unknown code is a VALIDATION_ERROR
+ * naming it; callers run this BEFORE any write so nothing lands on a refusal.
+ */
+function planLanguageProjections(claudeDir: string, cwd: string): Result<LanguageProjection[], LoreError> {
+  const plan: LanguageProjection[] = [];
+
+  const globalConfig = loadGlobalConfig();
+  if (!globalConfig.ok) return globalConfig;
+  const globalCode = globalConfig.value.context?.language;
+  if (globalCode !== undefined) {
+    const name = resolveLanguageName(globalCode, "global");
+    if (!name.ok) return name;
+    plan.push({ layer: "global", settingsPath: join(claudeDir, "settings.json"), language: name.value });
+  }
+
+  const projectRoot = findProjectRoot(cwd);
+  if (existsSync(join(projectRoot, ".lore", "config.yaml"))) {
+    const projectConfig = loadConfig(projectRoot);
+    if (!projectConfig.ok) return projectConfig;
+    const projectCode = projectConfig.value.context?.language;
+    if (projectCode !== undefined) {
+      const name = resolveLanguageName(projectCode, "project");
+      if (!name.ok) return name;
+      plan.push({ layer: "project", settingsPath: join(projectRoot, ".claude", "settings.local.json"), language: name.value });
+    }
+  }
+  return ok(plan);
+}
+
+/** Applies a plan through {@link ClaudeSettingsPort}; stops at the first refusal (e.g. an unparseable settings file). */
+function applyLanguageProjections(plan: readonly LanguageProjection[]): Result<void, LoreError> {
+  const port = new ClaudeSettingsPort(createRealClaudeSettingsFs());
+  for (const item of plan) {
+    const merged = port.mergeLanguage(item.settingsPath, item.language);
+    if (!merged.ok) return merged;
+  }
+  return ok(undefined);
+}
+
+/** Reports a LoreError on stderr and sets the mapped exit code. */
+function failWith(error: LoreError): void {
+  process.stderr.write(formatError(error) + "\n");
+  process.exitCode = exitCode(error);
+}
+
+/** Absolute-path `node:fs` {@link FsWritePort} for the project context-refresh flow (relative paths resolve under `repoDir`). */
+function makeRealContextFsPort(repoDir: string): FsWritePort {
+  const at = (path: string): string => (isAbsolute(path) ? path : join(repoDir, path));
+  return {
+    async exists(path) {
+      return existsSync(at(path));
+    },
+    async readFile(path) {
+      try {
+        return readFileSync(at(path), "utf8");
+      } catch {
+        return null;
+      }
+    },
+    async listDir(path) {
+      try {
+        return readdirSync(at(path));
+      } catch {
+        return [];
+      }
+    },
+    async writeFile(path, content) {
+      const target = at(path);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, "utf8");
+    },
+  };
+}
+
+/**
+ * Project half of `lore setup --project`: the same flow as `lore context refresh` (project scope)
+ * so Z1 fragments land, then the project-layer language projection. Runs AFTER the scaffold created
+ * CLAUDE.md and `.lore/config.yaml`.
+ */
+async function runProjectContextProjection(opts: {
+  repoDir: string;
+  assetsRoot: string;
+  claudeDir: string;
+}): Promise<Result<void, LoreError>> {
+  const projectConfig = loadConfig(opts.repoDir);
+  if (!projectConfig.ok) return projectConfig;
+  const globalConfig = loadGlobalConfig();
+  if (!globalConfig.ok) return globalConfig;
+  const budgets = resolveRepoMemoryFileBudgets(opts.repoDir);
+  if (!budgets.ok) return budgets;
+  const home = homedir();
+  const refreshed = await runContextRefresh(
+    {
+      fs: makeRealContextFsPort(opts.repoDir),
+      budgets: budgets.value,
+      assetsRoot: opts.assetsRoot,
+      home,
+      // reason: XDG rule (same as commands/context.ts) — a non-empty $XDG_CONFIG_HOME replaces ~/.config.
+      xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(home, ".config"),
+      globalConfig: toContextLayer(globalConfig.value),
+      projectConfig: toContextLayer(projectConfig.value),
+    },
+    "",
+    { scope: "project" },
+  );
+  if (!refreshed.ok) return refreshed;
+
+  const plan = planLanguageProjections(opts.claudeDir, opts.repoDir);
+  if (!plan.ok) return plan;
+  return applyLanguageProjections(plan.value.filter((item) => item.layer === "project"));
+}
+
 async function runProjectScaffold(opts: {
   json: boolean;
   yes: boolean;
   assetsRoot: string;
   binPath: string;
+  claudeDir: string;
 }): Promise<void> {
   const repoDir = process.cwd();
 
@@ -565,6 +720,12 @@ async function runProjectScaffold(opts: {
     console.log(renderProjectScaffoldReceipt(receipt, { targetDir: repoDir, binPath: opts.binPath }));
   }
   process.exitCode = scaffoldReportFailed(result.value) ? 1 : 0;
+
+  // reason: runs only after a scaffold that did not itself fail — a failed scaffold may lack the
+  // CLAUDE.md / config the refresh flow reads, and its own non-zero exit already reports the run.
+  if (scaffoldReportFailed(result.value)) return;
+  const projected = await runProjectContextProjection({ repoDir, assetsRoot: opts.assetsRoot, claudeDir: opts.claudeDir });
+  if (!projected.ok) failWith(projected.error);
 }
 
 /**
@@ -641,6 +802,14 @@ async function runInstall(
   mcpRegistrar: CapturingMcpRegistrar,
   opts: { targetDir: string; binPath: string; json: boolean; yes: boolean; forceDiverged: boolean },
 ): Promise<void> {
+  // reason: resolved BEFORE the confirm prompt and any write — an unknown context.language code
+  // (AC-CF-18) must refuse the whole run with nothing installed, not leave a half-applied setup.
+  const languagePlan = planLanguageProjections(opts.targetDir, process.cwd());
+  if (!languagePlan.ok) {
+    failWith(languagePlan.error);
+    return;
+  }
+
   const proceed = await confirmOrReport({
     yes: opts.yes,
     json: opts.json,
@@ -671,6 +840,9 @@ async function runInstall(
     renderDivergedSkipSection(result.value.skippedDiverged);
   }
   process.exitCode = mcpOutcomeExitCode(result.value);
+
+  const projected = applyLanguageProjections(languagePlan.value);
+  if (!projected.ok) failWith(projected.error);
 }
 
 async function runUninstall(
@@ -916,7 +1088,12 @@ export default defineCommand({
     const binPath = resolveBinPath(pathCtx);
 
     if (validated.mode === "project") {
-      await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath });
+      const claudeDir = resolveTargetDir({
+        ...(claudeDirFlag !== undefined ? { claudeDirFlag } : {}),
+        env: process.env,
+        homeDir: homedir(),
+      });
+      await runProjectScaffold({ json, yes: args.yes === true, assetsRoot, binPath, claudeDir });
       return;
     }
     if (validated.mode === "project-uninstall") {
