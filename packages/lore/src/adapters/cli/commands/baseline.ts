@@ -8,8 +8,10 @@
  *   depends <leaf> [--add BR-n]... [--remove BR-n]...
  *   glossary add <node> --term <t> --meaning <m> [--note <n>]   (root|branch only)
  *   glossary rm  <node> --term <t>
- *   tree [root]     Minimal listing (node kind, label, status, rule tallies). The per-rule
- *                   state view (`--states`, `--rule`) belongs to the RuleStateService slice.
+ *   tree [root] [--states] [--rule BR-n]
+ *                   Listing (node kind, label, status, rule tallies). `--states` adds every rule's
+ *                   verification state with its inputs and `computed_from`; `--rule BR-n` prints
+ *                   that one rule (citing ACs, state, inputs). Git is consulted only for these two.
  *
  * `lore set` cannot touch `extra.node|label|depends_on|glossary` (CorpusService replace
  * guard) — these verbs are the only writers. Exit codes follow `exitCode(LoreError)`.
@@ -23,7 +25,11 @@ import type { LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
-import type { AddNodeInput } from "../../../service/rule-service.js";
+import type { AddNodeInput, BaselineTreeEntry } from "../../../service/rule-service.js";
+import { RuleStateService } from "../../../service/rule-state-service.js";
+import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
+import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
+import { SQLiteStore } from "../../../store/sqlite-store.js";
 
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
@@ -53,6 +59,82 @@ async function withRuleService(body: (svc: NonNullable<App["ruleService"]>) => P
     if (svc === undefined) return;
     await body(svc);
   } finally {
+    app.close();
+  }
+}
+
+function renderRuleState(rule: RuleStateEntry, indent: string, statement?: string): void {
+  const reason = rule.unknown_reason !== undefined ? ` (${rule.unknown_reason})` : "";
+  const lifecycle = rule.lifecycle === "live" ? "" : ` [${rule.lifecycle}]`;
+  console.log(`${indent}${rule.rule_id} ${rule.state}${reason}${lifecycle}${statement !== undefined ? ` - ${statement}` : ""}`);
+  if (rule.inputs.length === 0) console.log(`${indent}  (no citing script-mode AC)`);
+  for (const input of rule.inputs) {
+    const run =
+      input.evidence_result === null
+        ? "no attested run"
+        : `${input.evidence_result} @ ${input.evidence_recorded_at ?? "?"} sha ${input.head_sha?.slice(0, 12) ?? "none"}`;
+    console.log(`${indent}  ${input.spec}#${input.ac_id}: ${run}; anchors: ${input.anchor_paths.length === 0 ? "none" : input.anchor_paths.join(", ")}`);
+  }
+}
+
+function renderComputedFrom(full: RuleStateFull): void {
+  console.log(
+    `computed_from: head ${full.computed_from.head_sha ?? "unavailable (git)"}, corpus version ${full.computed_from.corpus_version}; ambiguous_ac_ref ${full.ambiguous_ac_ref}`,
+  );
+}
+
+/** `tree --states` / `tree --rule`: the only baseline verbs that consult git, via a read-only second store handle. */
+async function runStatesTree(args: Record<string, unknown>): Promise<void> {
+  const json = args.json === true;
+  const { app, dbPath } = loadLoreApp();
+  const store = new SQLiteStore(dbPath);
+  try {
+    const svc = requireRuleService(app);
+    if (svc === undefined) return;
+    const stateService = new RuleStateService(store, new SpawnGitPort(resolveGitRoot(process.cwd())));
+    const rule = typeof args.rule === "string" ? args.rule : undefined;
+    const full = await stateService.full(rule !== undefined ? { rule } : undefined);
+    if (!full.ok) return reportFailure(full.error, json);
+    const tree = await svc.listBaselineTree(rule !== undefined ? undefined : (args.root as string | undefined));
+    if (!tree.ok) return reportFailure(tree.error, json);
+
+    const byLeaf = new Map<string, RuleStateEntry[]>();
+    for (const entry of full.value.rules) byLeaf.set(entry.leaf, [...(byLeaf.get(entry.leaf) ?? []), entry]);
+
+    if (rule !== undefined) {
+      const entry = full.value.rules[0] as RuleStateEntry;
+      const leafDoc = await store.findBySlug(entry.leaf);
+      const rules = leafDoc.ok && leafDoc.value !== null ? leafDoc.value.extra["rules"] : undefined;
+      const statement = Array.isArray(rules)
+        ? (rules as Array<{ id?: unknown; statement?: unknown }>).find((r) => r.id === rule)?.statement
+        : undefined;
+      if (json) {
+        console.log(JSON.stringify({ ok: true, data: { rule: entry, statement: statement ?? null, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
+        return;
+      }
+      console.log(`Leaf: ${entry.leaf}`);
+      renderRuleState(entry, "", typeof statement === "string" ? statement : undefined);
+      renderComputedFrom(full.value);
+      return;
+    }
+
+    if (json) {
+      const nodes = tree.value.map((n: BaselineTreeEntry) => ({ ...n, rule_states: n.node === "leaf" ? (byLeaf.get(n.slug) ?? []) : [] }));
+      console.log(JSON.stringify({ ok: true, data: { tree: nodes, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
+      return;
+    }
+    if (tree.value.length === 0) {
+      console.log("No baseline nodes.");
+      return;
+    }
+    for (const entry of tree.value) {
+      const indent = "  ".repeat(entry.depth);
+      console.log(`${indent}${entry.node} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})`);
+      if (entry.node === "leaf") for (const r of byLeaf.get(entry.slug) ?? []) renderRuleState(r, `${indent}  `);
+    }
+    renderComputedFrom(full.value);
+  } finally {
+    store.close();
     app.close();
   }
 }
@@ -188,9 +270,15 @@ export default defineCommand({
       meta: { name: "tree", description: "List the baseline tree (kind, label, status, rule counts)" },
       args: {
         root: { type: "positional", description: "Optional baseline node ID or slug to list only its subtree", required: false },
+        states: { type: "boolean", description: "Add each rule's verification state, inputs and computed_from (consults git)" },
+        rule: { type: "string", description: "Show one rule (BR-n): citing ACs, state and inputs; implies --states" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run({ args }) {
+        if (args.states === true || args.rule !== undefined) {
+          await runStatesTree(args);
+          return;
+        }
         await withRuleService(async (svc) => {
           const result = await svc.listBaselineTree(args.root as string | undefined);
           if (!result.ok) return reportFailure(result.error, args.json === true);

@@ -101,6 +101,12 @@
  * three-exit split, and for why a dirty tree at HEAD stays dev-synced, lives in
  * `service/binary-provenance.ts`'s D1/D2 header blocks.
  *
+ * With --check-baseline: product-baseline integrity (registry <-> leaf consistency, rules on a
+ *   non-leaf node, dangling depends_on). Any finding -> exit 3; composes with the other
+ *   app-backed --check-* flags (baseline slice 1 §C7). The PLAIN run's `--json` gains a
+ *   `baseline` block ONLY when the corpus has a live baseline doc or an AC carrying `cites`
+ *   (rollback invariant AC-BLS1-8), plus one default-output line when a warning count is non-zero.
+ *
  * Dispatch precedence inside this command, highest first:
  *   --check-binary-provenance → --enumerate → --check-claude-md →
  *   the app-backed --check-* family → the plain run.
@@ -130,6 +136,16 @@ import {
   type CodeDriftPayload,
 } from "../../../flows/drift-flow.js";
 import { buildRealFsProbe } from "../../real-fs-probe.js";
+import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { RuleStateService } from "../../../service/rule-state-service.js";
+import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
+import {
+  baselineWarningCount,
+  computeBaselineStatus,
+  findBaselineIntegrityFindings,
+  type BaselineFinding,
+  type BaselineStatus,
+} from "../../../service/baseline-status.js";
 import {
   deriveAcCoverageState,
   err,
@@ -1028,6 +1044,11 @@ export default defineCommand({
       description:
         "Verify every backtick-quoted corpus-slug pointer inside project memory files resolves against this corpus (spec-claude-md-governance-content-dimension-checks-wire-the, N14). Loads the corpus DB — unlike --check-claude-md, which cannot resolve a slug. Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget/--check-issues.",
     },
+    "check-baseline": {
+      type: "boolean",
+      description:
+        "Verify the product-baseline tree: registry <-> leaf rule ids agree, no rule sits on a non-leaf node, every depends_on names an existing rule. Any finding -> exit 3 (each is printed). Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget/--check-issues/--check-memory-pointers.",
+    },
     "check-binary-provenance": {
       type: "boolean",
       description:
@@ -1135,6 +1156,7 @@ export default defineCommand({
     const checkIssuesRequested = args["check-issues"] === true;
     const checkClaudeMdRequested = args["check-claude-md"] === true;
     const checkMemoryPointersRequested = args["check-memory-pointers"] === true;
+    const checkBaselineRequested = args["check-baseline"] === true;
 
     // ── check-claude-md branch (spec-project-claude-md-content-contract-governance-injected §D9) ──
     // reason: MUST short-circuit BEFORE loadLoreApp — the spec's Module
@@ -1206,9 +1228,10 @@ export default defineCommand({
       checkRequirementsRequested ||
       checkPrdBudgetRequested ||
       checkIssuesRequested ||
-      checkMemoryPointersRequested
+      checkMemoryPointersRequested ||
+      checkBaselineRequested
     ) {
-      const { app, config } = loadLoreApp();
+      const { app, config, dbPath } = loadLoreApp();
       try {
         // ---- Tree section — value-returning, no early process.exit (D5) ----
         let treeData: Record<string, unknown> = {};
@@ -1510,6 +1533,27 @@ export default defineCommand({
           memoryPointersInconsistent = memoryPointerFindings.length > 0;
         }
 
+        // ---- Baseline integrity section (baseline slice 1 §C7) ----
+        // reason: reads through a second, read-only store handle on the same DB because `App` does not
+        // expose its store; closed in the `finally` below via `baselineStore`.
+        let baselinePayload: { checked: true; consistent: boolean; findings: BaselineFinding[] } | undefined;
+        let baselineInconsistent = false;
+        if (checkBaselineRequested) {
+          const baselineStore = new SQLiteStore(dbPath);
+          try {
+            const findingsResult = await findBaselineIntegrityFindings(baselineStore);
+            if (!findingsResult.ok) {
+              process.stderr.write(formatError(findingsResult.error) + "\n");
+              process.exitCode = exitCode(findingsResult.error);
+              return;
+            }
+            baselinePayload = { checked: true, consistent: findingsResult.value.length === 0, findings: findingsResult.value };
+            baselineInconsistent = findingsResult.value.length > 0;
+          } finally {
+            baselineStore.close();
+          }
+        }
+
         // ---- Exit precedence (D5, pinned; SPEC-055/SPEC-080/issue-closure-loop/N14 fold into the drift tier) ----
         let finalExit: number;
         if (
@@ -1518,7 +1562,8 @@ export default defineCommand({
           requirementsInconsistent ||
           prdBudgetInconsistent ||
           issuesInconsistent ||
-          memoryPointersInconsistent
+          memoryPointersInconsistent ||
+          baselineInconsistent
         ) {
           finalExit = 3;
         } else if (blueprintUnarmable) {
@@ -1541,6 +1586,7 @@ export default defineCommand({
           if (prdBudgetPayload !== undefined) data["prd_budget"] = prdBudgetPayload;
           if (issuesPayload !== undefined) data["issues"] = issuesPayload;
           if (memoryPointersPayload !== undefined) data["memory_pointers"] = memoryPointersPayload;
+          if (baselinePayload !== undefined) data["baseline_check"] = baselinePayload;
           console.log(JSON.stringify({ ok: true, data }, null, 2));
         } else {
           for (const line of treeRenderLines) console.log(line);
@@ -1560,6 +1606,13 @@ export default defineCommand({
           if (prdBudgetPayload !== undefined) renderPrdBudgetSection(prdBudgetPayload);
           if (issuesPayload !== undefined) renderIssuesSection(issuesPayload);
           if (memoryPointersPayload !== undefined) renderMemoryPointersSection(memoryPointersPayload);
+          if (baselinePayload !== undefined) {
+            if (baselinePayload.consistent) console.log("Baseline: registry, leaves and depends_on are consistent.");
+            else {
+              console.log(`Baseline: ${baselinePayload.findings.length} integrity finding(s):`);
+              for (const f of baselinePayload.findings) console.log(`  - [${f.kind}] ${f.doc}: ${f.detail}`);
+            }
+          }
         }
 
         process.exitCode = finalExit;
@@ -1685,6 +1738,28 @@ export default defineCommand({
       // a repo is `--check-binary-provenance`'s job.
       const embeddedProvenance = readEmbeddedBuildProvenance();
 
+      // baseline slice 1 §C7 — ABSENT (key and line) unless the corpus has a live baseline doc or an
+      // AC citation, so a pre-baseline corpus prints exactly what it printed before. Git-free
+      // (`counts` mode); the second store handle exists because `App` does not expose its store.
+      const baselineStore = new SQLiteStore(dbPath);
+      let baselineStatus: BaselineStatus | null;
+      try {
+        const repoRoot = resolveGitRoot(process.cwd());
+        const baselineResult = await computeBaselineStatus(
+          baselineStore,
+          new RuleStateService(baselineStore, new SpawnGitPort(repoRoot)),
+          (path) => existsSync(join(repoRoot, path)),
+        );
+        if (!baselineResult.ok) {
+          process.stderr.write(formatError(baselineResult.error) + "\n");
+          process.exitCode = exitCode(baselineResult.error);
+          return;
+        }
+        baselineStatus = baselineResult.value;
+      } finally {
+        baselineStore.close();
+      }
+
       if (args.json) {
         console.log(
           JSON.stringify(
@@ -1709,6 +1784,7 @@ export default defineCommand({
                 // `invalid_docs`) — an omitted key would let a consumer read
                 // "absent" as "this binary is fine".
                 binary_provenance: provenanceOrNull(embeddedProvenance),
+                ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
               },
             },
             null,
@@ -1831,6 +1907,15 @@ export default defineCommand({
       // "never a silent count" discipline as `Retracted:` above: not knowing
       // which binary issued this report is itself the fact worth printing.
       console.log(formatBinaryProvenanceStatusLine(embeddedProvenance));
+
+      // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).
+      if (baselineStatus !== null && baselineWarningCount(baselineStatus) > 0) {
+        console.log(
+          `\nBaseline warnings: ${baselineStatus.cites_dangling} dangling cites, ${baselineStatus.cites_to_inactive} cites to inactive rules, ` +
+            `${baselineStatus.ambiguous_ac_ref} ambiguous evidence refs, ${baselineStatus.registry_mismatch} registry mismatches, ` +
+            `${baselineStatus.rules_with_impl_detail} rules with implementation detail (run \`lore status --check-baseline\` / \`lore baseline tree --states\`)`,
+        );
+      }
 
       // M3 (AC-FALS-10) — same "only when > 0" discipline as open_stale_candidates/
       // codeAnchorSpecs above; silent when unavailable (no companion source
