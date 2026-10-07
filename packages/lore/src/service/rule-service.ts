@@ -60,6 +60,11 @@ import { resolveActorWithSource } from "@lore/core/node";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { CorpusService, type CreateDocResult, type WriteActorOpts } from "./corpus-service.js";
+import { collectKnownRuleIds } from "./baseline-rule-ids.js";
+
+// reason: C7's `--check-baseline` imports this from the service that owns rules; the helper itself
+// lives in a pure module so CorpusService can share it without a service cycle.
+export { findUnregisteredRuleIds, type UnregisteredRule } from "./baseline-rule-ids.js";
 
 /** Immediate re-applies after a CAS miss before the STALE_VERSION error is surfaced. */
 export const MAX_CAS_REAPPLIES = 3;
@@ -384,7 +389,7 @@ export class RuleService {
     if (!registry.ok) return registry;
     const docs = await this.listBaselineDocs();
     if (!docs.ok) return docs;
-    const known = new Set([...registry.value.map((row) => row.id), ...docs.value.flatMap((d) => rulesOf(d).map((r) => r.id))]);
+    const known = collectKnownRuleIds(docs.value, registry.value);
     const unknown = add.filter((id) => !known.has(id));
     if (unknown.length > 0) {
       return err(validationError("depends_on", `rule id(s) that exist nowhere in the baseline tree or registry: ${unknown.join(", ")}`, unknown));

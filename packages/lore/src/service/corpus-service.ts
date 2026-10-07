@@ -102,6 +102,7 @@ import {
 import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
+import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import { isPlanMember } from "./plan-membership.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
@@ -1102,6 +1103,45 @@ export class CorpusService {
 
     // SPEC-079 G2 — resolved once per call, reused for this create's audit entry.
     const resolvedActor = this.resolveWriteActor(opts?.by);
+
+    // Baseline create-time guard (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations
+    // AC-BLS1-1). reason: rule ids are minted ONLY by the registry allocator
+    // (`lore rule add`). A baseline doc created with `extra.rules` already inside would carry
+    // ids the registry never saw, and a later allocation could issue the same `BR-n` twice.
+    // Lives in create() so CLI, MCP and HTTP all inherit it. `depends_on` may only name ids that
+    // exist (registry or a leaf), the same check `lore baseline depends` runs.
+    if (data.type === "baseline" && data.extra !== undefined) {
+      const carriedRules = data.extra["rules"];
+      if (Array.isArray(carriedRules) && carriedRules.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.rules",
+          message:
+            "a baseline doc cannot be created with rules already inside — rule ids are allocated " +
+            "by the registry; create the leaf empty and use `lore rule add` for each rule",
+          value: carriedRules,
+        });
+      }
+      const carriedDeps = data.extra["depends_on"];
+      if (Array.isArray(carriedDeps) && carriedDeps.length > 0) {
+        const registry = await this.store.listRuleRegistry();
+        if (!registry.ok) return registry;
+        const leaves = await this.store.findMany({ type: "baseline" });
+        if (!leaves.ok) return leaves;
+        const known = collectKnownRuleIds(leaves.value, registry.value);
+        const unknown = carriedDeps.filter((id) => typeof id !== "string" || !known.has(id));
+        if (unknown.length > 0) {
+          return err({
+            code: "VALIDATION_ERROR",
+            field: "extra.depends_on",
+            message:
+              `depends_on names rule id(s) that exist nowhere in the registry or baseline tree: ${unknown.join(", ")} — ` +
+              "create the leaf without depends_on and use `lore baseline depends --add` once the rules exist",
+            value: unknown,
+          });
+        }
+      }
+    }
 
     // Write-path exclusivity for knowledge sub_type "handoff" (SPEC-041 §3 D4).
     // reason: a Zod superRefine presence check (knowledgeExtraSchema, schemas.ts) can
