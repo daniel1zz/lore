@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "c63f7b1ac22ca0d8b763460ac4c97db19a8d2757917e1424cc48c3b9354b159d",
+  tree_digest: "aee33a1e204ea0363d32b648359290db7a03c43f92fe2017959b010808e8249d",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "e7b1610edfb25cae9d0bfcc3ffe6bcdf62940c1c37e8a5528508ea0a057429e1" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "fa900b3d95d996ba73a46dd6d7484f7d37ee945d6d51e1588c49e7cbae88c7aa" },
@@ -68,8 +68,9 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/pre-dispatch-isolation-gate.mjs", kind: "hook", ownership: "managed", sha256: "1479ddc2b6f596a8c3709d8e84571b2b5bbccda39d73ef23dca45d69150c8866" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "e238cfcf73ba5794f3decbcd0efccfc8869ce0c593032923810a0ddd41cd3b1b" },
   { path: "hooks/pre-subagent-gate.mjs", kind: "hook", ownership: "managed", sha256: "eff1c2d0cd8b92288d48e278040c6d014f1725eb54c69d21eab342f5924ccae4" },
+  { path: "hooks/session-start-fragments.mjs", kind: "hook", ownership: "managed", sha256: "931f96d61f715b43fe1f289939df9c4de63ec31b15a99fe930ced5e63845f2a4" },
   { path: "hooks/session-start-marker.mjs", kind: "hook", ownership: "managed", sha256: "b16e8993e14f18a9495be9a388b36a678e90b88537b79cf93e0b8f8615ab5408" },
-  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "3bc808352b75a7182828c61ce7f1ca89e1c3d7c16d090d808968864689b2a417" },
+  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "6a4bde0541cb2379e8cdbd9d68fb07b5130bf74b52aaf70b05346d643737d7ce" },
   { path: "hooks/stop-doc-sync.mjs", kind: "hook", ownership: "managed", sha256: "c7ca05c553446b1174839832989014741e8af9bd1c9c5f89aedb4b19a6836061" },
   { path: "hooks/stop-handoff-coverage.mjs", kind: "hook", ownership: "managed", sha256: "d2751888f5fe102e919092ff443bd73536e6abbcb846e3425ad3a43e4da6ef47" },
   { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "383beb756e74a7bcaadb884c839bb22d0a5f1c467ba4641e2ab0411eb2eb96be" },

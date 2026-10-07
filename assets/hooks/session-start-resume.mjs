@@ -2,27 +2,14 @@
 /**
  * session-start-resume.mjs — SessionStart hook.
  *
- * Phase C: governance-prose injection (`lore governance`) — SPEC-083 D2:
- *          spawns the resolved `lore` binary's `governance` verb (the SAME
- *          binary Phase E already spawns for `lore bootstrap`) and injects
- *          its stdout verbatim, ONLY when the session's resolved corpus root
- *          has .lore/ (computed after Phase D, which may redirect the root
- *          to a worktree's main checkout). Replaces the pre-SPEC-083
- *          file-read of an INSTALLED governance-snippet snapshot under
- *          `<claude-dir>/governance/` — that installed copy could silently
- *          drift out of sync with the
- *          running binary across an unreinstalled upgrade (the exact defect
- *          SPEC-083 fixes: the binary now emits its own governance prose at
- *          runtime, from its OWN assets root, so prose and binary version
- *          can never diverge). Fail-open is UNCHANGED: a missing `lore`
- *          binary, non-zero exit, or empty stdout silently skips this phase
- *          — never blocks session start, never double-injects. Unified
- *          2026-07-17: the ORIGINAL previous source
- *          (prompt/global-instructions.md) was NEVER written by `lore setup`
- *          (it installs under governance/) — the phase was a reader without
- *          a writer, product-wide dead code. The former subagent-roster
- *          block was REMOVED the same day: the harness natively lists custom
- *          agents from ~/.claude/agents.
+ * Phase C: REMOVED (spec-context-fragments-config-driven-layered-rule-injection
+ *          D6). The governance prose (`lore governance`, formerly injected
+ *          here) now ships as context fragments under assets/context/
+ *          rendered into the project CLAUDE.md Z1 by `lore context refresh`
+ *          (run by `lore setup --project`); dynamic fragments come from the
+ *          SECOND SessionStart hook, `session-start-fragments.mjs`, so each
+ *          hook string stays under the 10,000-char cap on its own. Phase
+ *          letters D-F are kept unchanged so cross-references stay valid.
  * Phase D: linked-worktree seat detection (SPEC-047) — auto-injects the
  *          seat-briefing discipline block for sessions opened inside a
  *          linked git worktree of a lore-governed repo. SPEC-085 D2: the
@@ -190,11 +177,6 @@ try {
 // ── Degradation tracker — critical component failures only ────────
 const degradations = [];
 
-// Phase C is computed AFTER Phase D (it needs the resolved corpus root);
-// see "Phase C: governance-prose injection" below. Declared here so the
-// compose order (workflow first) is unaffected.
-let workflowBlock = '';
-
 // ── Phase D: linked-worktree seat detection (SPEC-047) ─────────────
 // A linked worktree's `.git` is a file pointing at a per-worktree gitdir
 // under the MAIN checkout's `.git/worktrees/<name>`; `--git-common-dir`
@@ -297,29 +279,6 @@ try {
 } catch {
   // Fail-open — any git/fs error here must never block session start.
 }
-
-// ── Phase C: governance-prose injection (lore-governed sessions) ───
-// SPEC-083 D2 — source is now the RUNTIME `lore governance` verb (never an
-// installed file snapshot). Injection is gated on the RESOLVED corpus root
-// (Phase D may have redirected it to a worktree's main checkout) having
-// .lore/ — non-lore projects get nothing. `cwd: bootstrapCwd` mirrors Phase
-// E's own spawn (below) even though `lore governance` itself needs no
-// corpus — one consistent invocation shape. Fail-open: a missing binary
-// (ENOENT), non-zero exit, or empty stdout leaves `workflowBlock` at its
-// initial `''` — identical in effect to the pre-SPEC-083 missing-file case.
-try {
-  if (existsSync(join(bootstrapCwd, '.lore'))) {
-    const governanceResult = spawnSync('lore', ['governance'], {
-      cwd: bootstrapCwd,
-      encoding: 'utf8',
-      timeout: 5000,
-    });
-    if (governanceResult.status === 0 && typeof governanceResult.stdout === 'string'
-        && governanceResult.stdout.length > 0) {
-      workflowBlock = governanceResult.stdout;
-    }
-  }
-} catch { /* fail-open — governance injection must never block session start */ }
 
 // ── Phase E: lore bootstrap injection ──────────────────────────────
 // Corpus-global state snapshot (root doc, active plans + task counts,
@@ -492,6 +451,6 @@ try {
   // Fail-open (I6) — any fs/JSON error here must never block or crash session start.
 }
 
-// ── Compose (order: workflow → seat → bootstrap → degradation → advisory) ─
-const parts = [workflowBlock, seatBlock, bootstrapBlock, degradationBlock, advisoryBlock].filter(Boolean);
+// ── Compose (order: seat → bootstrap → degradation → advisory) ─
+const parts = [seatBlock, bootstrapBlock, degradationBlock, advisoryBlock].filter(Boolean);
 emit(parts.join('\n\n'));

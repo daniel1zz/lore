@@ -184,9 +184,29 @@ const ASSETS_ROOT = join(REPO_ROOT, "assets");
 
 /** The two assets this task changed — the manifest must carry a CURRENT digest for BOTH. */
 const HOOK_ASSET_REL = "hooks/stop-handoff-coverage.mjs";
-const GOVERNANCE_ASSET_REL = "governance/corpus-workflow.md";
+// RE-BASELINE (task-skill-implement-hooks-new-session-start-fragments-thin): the
+// governance prose carrying the per-item disposition obligation moved from the
+// retired assets/governance/corpus-workflow.md to the FEED context fragment
+// (spec-context-fragments-config-driven-layered-rule-injection D9); its delivery
+// surface is the project CLAUDE.md Z1 written by `lore context refresh`.
+const GOVERNANCE_ASSET_REL = "context/corpus-workflow-1-feed.md";
 const HOOK_SSOT_PATH = join(ASSETS_ROOT, "hooks", "stop-handoff-coverage.mjs");
-const GOVERNANCE_SSOT_PATH = join(ASSETS_ROOT, "governance", "corpus-workflow.md");
+const GOVERNANCE_SSOT_PATH = join(ASSETS_ROOT, "context", "corpus-workflow-1-feed.md");
+
+/** `lore init` + `lore context init` + `lore context refresh` in a throwaway corpus; returns the project CLAUDE.md text (the fragments' delivery surface, Z1). */
+function refreshedProjectClaudeMd(prefix: string): string {
+  const dir = makeThrowawayDir(prefix);
+  initCorpus(dir);
+  const ctxInit = runLore(["context", "init"], dir);
+  if (ctxInit.exitCode !== 0) {
+    throw new Error(`lore context init failed (exit ${ctxInit.exitCode}): ${ctxInit.stderr}`);
+  }
+  const refresh = runLore(["context", "refresh"], dir);
+  if (refresh.exitCode !== 0) {
+    throw new Error(`lore context refresh failed (exit ${refresh.exitCode}): ${refresh.stderr}`);
+  }
+  return readFileSync(join(dir, "CLAUDE.md"), "utf8");
+}
 
 interface RunResult {
   readonly stdout: string;
@@ -610,15 +630,23 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     const installedHookBytes = readFileSync(installedHookPath);
     expect(installedHookBytes.equals(hookSsotBytes)).toBe(true);
 
-    // ── (c) The edited governance asset's own distribution oracle ───────────
-    // `governance/corpus-workflow.md` is RETIRED from the machine install set
-    // (SPEC-083 D3) — assert it ABSENT rather than stale, and pin its real
-    // delivery surface: the compiled binary's own runtime `governance` verb.
+    // ── (c) The edited FEED fragment's own distribution oracle ──────────────
+    // RE-BASELINE: the original (c) asserted `governance/corpus-workflow.md`
+    // absent from the install dir and byte-equal to `lore governance` stdout;
+    // that file and topic are retired (ENOENT on readFileSync, D9), which is why
+    // the assertion went red. Correction, not weakening: the retired file stays
+    // asserted ABSENT, the verb is asserted to REFUSE the retired topic, and the
+    // byte-level delivery claim is re-pinned on the new surface — the FEED
+    // fragment's text (minus frontmatter) must appear in the project CLAUDE.md Z1.
     expect(existsSync(join(targetDir, "governance", "corpus-workflow.md"))).toBe(false);
 
     const governanceVerb = Bun.spawnSync([LORE_BIN, "governance"], { cwd: REPO_ROOT });
-    expect(governanceVerb.exitCode).toBe(0);
-    expect(governanceVerb.stdout.toString()).toBe(governanceSsotBytes.toString("utf8"));
+    expect(governanceVerb.exitCode).not.toBe(0);
+    expect(governanceVerb.stderr.toString()).toContain("retired");
+
+    const fragmentBody = governanceSsotBytes.toString("utf8").replace(/^---\n[\s\S]*?\n---\n/, "");
+    const z1 = refreshedProjectClaudeMd("lore-t4-z1-");
+    expect(z1).toContain(fragmentBody.split("\n").find((l) => l.includes("ACCOUNT, not to complete"))?.trim() ?? "<<no ACCOUNT line in fragment>>");
 
     // ── (d) NEGATIVE / liveness control for the byte comparison ─────────────
     // Perturb the INSTALLED copy and prove the comparison flips — a
@@ -652,35 +680,33 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     expect(readFileSync(installedHookPath).equals(readFileSync(HOOK_SSOT_PATH))).toBe(true);
   });
 
-  it("BOUNDARY: the governance asset carries the per-item disposition obligation, keyed on the exported grammar constants rather than remembered prose", () => {
+  it("BOUNDARY: the FEED fragment carries the per-item disposition obligation, keyed on the exported grammar constants rather than remembered prose", () => {
     // D7: the FEED rule must name the id prefixes and the disposition tokens a
     // consumer has to write — asserted through the exported constants, so a
-    // constant rename cannot leave the prose silently stale. Read from the
-    // SSOT and cross-checked against the binary's shipping `governance` verb.
-    const assetText = readFileSync(GOVERNANCE_SSOT_PATH, "utf8");
-    const feedSectionStart = assetText.indexOf("## FEED");
-    const nextSectionStart = assetText.indexOf("## PRODUCE");
-    expect(feedSectionStart).toBeGreaterThanOrEqual(0);
-    expect(nextSectionStart).toBeGreaterThan(feedSectionStart);
-    const feedSection = assetText.slice(feedSectionStart, nextSectionStart);
+    // constant rename cannot leave the prose silently stale.
+    // RE-BASELINE: originally sliced `## FEED`..`## PRODUCE` out of the retired
+    // assets/governance/corpus-workflow.md and cross-checked `lore governance`
+    // stdout (ENOENT after D9). Same constants, now asserted against the whole
+    // FEED fragment file AND the project CLAUDE.md Z1 it ships through.
+    const feedSection = readFileSync(GOVERNANCE_SSOT_PATH, "utf8");
+    expect(feedSection.length).toBeGreaterThan(0);
 
-    for (const prefix of [RESUME_ITEM_ID_PREFIX_KEY_DECISION, RESUME_ITEM_ID_PREFIX_NEXT_STEP]) {
-      expect(feedSection).toContain(`\`${prefix}<n>\``);
+    const z1 = refreshedProjectClaudeMd("lore-t4-boundary-z1-");
+    for (const surface of [feedSection, z1]) {
+      for (const prefix of [RESUME_ITEM_ID_PREFIX_KEY_DECISION, RESUME_ITEM_ID_PREFIX_NEXT_STEP]) {
+        expect(surface).toContain(`\`${prefix}<n>\``);
+      }
+
+      // Both accepted dispositions, composed from the exported grammar the verb
+      // parses — so a consumer following this prose emits what the verb accepts.
+      expect(surface).toContain(`${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DONE}`);
+      expect(surface).toContain(
+        `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>`,
+      );
+      // The obligation is ACCOUNTING, not completion (D5) — pinned as a token so
+      // a future rewrite cannot quietly turn it into a completion demand.
+      expect(surface).toContain("ACCOUNT, not to complete");
     }
-
-    // Both accepted dispositions, composed from the exported grammar the verb
-    // parses — so a consumer following this prose emits what the verb accepts.
-    expect(feedSection).toContain(`${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DONE}`);
-    expect(feedSection).toContain(
-      `${RESUME_DISPOSITION_MARKER} <item-id>: ${RESUME_DISPOSITION_DEFERRED_PREFIX}<reason>`,
-    );
-    // The obligation is ACCOUNTING, not completion (D5) — pinned as a token so
-    // a future rewrite cannot quietly turn it into a completion demand.
-    expect(feedSection).toContain("ACCOUNT, not to complete");
-
-    const governanceVerb = Bun.spawnSync([LORE_BIN, "governance"], { cwd: REPO_ROOT });
-    expect(governanceVerb.exitCode).toBe(0);
-    expect(governanceVerb.stdout.toString()).toContain(feedSection.trimEnd());
   });
 });
 
