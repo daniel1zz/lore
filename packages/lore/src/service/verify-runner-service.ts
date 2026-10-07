@@ -91,8 +91,11 @@
  *      to `taskWorkflowService.recordVerifiedEvidence`); the recorded attestation
  *      carries `first_seen: true` when step ②.5 found the command new/changed (M2
  *      command-provenance annotation), `completeness`/`executed_files` when step
- *      ③.5 ran (SPEC-061), and ALWAYS `execution_root`/`execution_mode` (SPEC-063
- *      §Design Decisions D2/D3 — see `opts.executionRoot` below). Step ③.4's
+ *      ③.5 ran (SPEC-061), ALWAYS `execution_root`/`execution_mode` (SPEC-063
+ *      §Design Decisions D2/D3 — see `opts.executionRoot` below), and `head_sha` +
+ *      `worktree_dirty` (baseline slice 1 §C5 — measured by {@link probeGitState} at
+ *      the RESOLVED execution root after the command ran; both omitted together
+ *      when git cannot answer). Step ③.4's
  *      `binary_freshness` verdict is surfaced on the in-memory `VerifyAcResult` and
  *      the run's `warnings` ONLY — it is NOT persisted onto `attestation` (the
  *      `evidenceEntrySchema.attestation` shape lives outside this task's anchors;
@@ -222,6 +225,46 @@ import {
 } from "./verify-spawn.js";
 import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
 import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
+
+// ─── Git state probe (baseline slice 1 §C5) ────────────────────────────────
+
+/** Git facts stamped onto a runner attestation; both fields present together or not at all. */
+export interface GitStateProbe {
+  readonly head_sha: string;
+  readonly worktree_dirty: boolean;
+}
+
+const GIT_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * Measures the git state of `root` for the attestation: full 40-hex `HEAD` and
+ * whether `git status --porcelain` is non-empty (untracked files count).
+ *
+ * @param root - the resolved execution root (NOT the corpus root) — a linked worktree reports its own HEAD
+ * @returns the probe, or `undefined` when git is unavailable / `root` is not a work tree / the output is not a 40-hex sha
+ * @sideeffect IO — spawns `git` twice, resolved through `PATH` at call time
+ *
+ * reason: the `undefined` return IS the specified omission contract (spec §C5: on any
+ * git failure the fields are omitted — never null/empty — and the verify run must not
+ * fail). It is not a swallowed error: consumers (rule-state derivation) read the
+ * absence as `unknown` with an explicit reason.
+ */
+export function probeGitState(root: string): GitStateProbe | undefined {
+  const run = (args: readonly string[]): string =>
+    execFileSync("git", [...args], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: GIT_PROBE_TIMEOUT_MS,
+    });
+  try {
+    const head = run(["rev-parse", "HEAD"]).trim();
+    if (!/^[0-9a-f]{40}$/.test(head)) return undefined;
+    return { head_sha: head, worktree_dirty: run(["status", "--porcelain"]).trim() !== "" };
+  } catch {
+    return undefined;
+  }
+}
 
 // ─── Pinned refusal literals (declared-scope contract) ─────────────────────
 
@@ -1192,6 +1235,7 @@ export class VerifyRunnerService {
         }
       }
 
+      const gitState = probeGitState(resolvedExecutionRoot.root);
       const recordResult = await this.recordVerifiedEvidence(
         task.id,
         {
@@ -1236,6 +1280,9 @@ export class VerifyRunnerService {
             // "corpus_root").
             execution_root: resolvedExecutionRoot.root,
             execution_mode: resolvedExecutionRoot.mode,
+            // Baseline slice 1 §C5 — git state AFTER the command ran, present-iff-computed
+            // (both omitted together when git cannot answer; see `probeGitState`).
+            ...(gitState !== undefined ? gitState : {}),
           },
         },
         opts.nowIso,

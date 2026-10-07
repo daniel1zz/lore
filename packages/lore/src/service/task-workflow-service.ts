@@ -1480,6 +1480,41 @@ const ALLOWED_SHORT_EVIDENCE_COMMANDS: ReadonlySet<string> = new Set([
   "wc",
 ]);
 
+/** Runner-measured git facts no public evidence write may declare (baseline slice 1 §C5). */
+const CALLER_FORBIDDEN_GIT_STAMP_FIELDS = ["head_sha", "worktree_dirty"] as const;
+
+/**
+ * Returns the VALIDATION_ERROR refusing a caller-supplied `head_sha` / `worktree_dirty`
+ * — top-level on the evidence input OR inside `capture_attestation` — or `undefined`
+ * when neither is present. Presence (own key, any value, even `undefined`) is the
+ * trigger, mirroring the sibling `attestation` / `ac_oracle_generation` guards: a
+ * fail-loud refusal, never a silent strip.
+ *
+ * @param entry - the raw public evidence input (may be an `as EvidenceInput`-cast untyped object)
+ * @returns the error to wrap in `err(...)`, or `undefined` when clean
+ *
+ * reason: exported so `PhaseWorkflowService._addEvidenceImpl` (a parallel
+ * implementation outside this task's anchors) can adopt the SAME guard instead of a
+ * mirrored copy — see the `promoteCapturedAttestation` SSOT precedent above.
+ */
+export function rejectCallerGitStamp(entry: EvidenceInput): LoreError | undefined {
+  const raw = entry as unknown as Record<string, unknown>;
+  const captured = raw["capture_attestation"];
+  for (const field of CALLER_FORBIDDEN_GIT_STAMP_FIELDS) {
+    const inCapture =
+      typeof captured === "object" && captured !== null && Object.prototype.hasOwnProperty.call(captured, field);
+    if (Object.prototype.hasOwnProperty.call(raw, field) || inCapture) {
+      return {
+        code: "VALIDATION_ERROR",
+        field,
+        message: `${field} is measured by the verify runner from git (not a valid evidence input field)`,
+        value: inCapture ? (captured as Record<string, unknown>)[field] : raw[field],
+      };
+    }
+  }
+  return undefined;
+}
+
 /**
  * Moves a measured `capture_attestation` into the `attestation` slot the shared append
  * path reads (SPEC-143 AC-CT-2) — the ONE place the promotion happens, called by BOTH
@@ -2119,6 +2154,12 @@ export class TaskWorkflowService {
         value: (entry as Record<string, unknown>)["attestation"],
       });
     }
+
+    // Baseline slice 1 §C5 — `head_sha` / `worktree_dirty` are MEASURED by the runner
+    // (`VerifyRunnerService`), never declared by a caller: a self-reported value would
+    // let rule-state derivation treat an unmeasured claim as an anchored run.
+    const gitStampRefusal = rejectCallerGitStamp(entry);
+    if (gitStampRefusal !== undefined) return err(gitStampRefusal);
 
     // SPEC-061 §Scope D2 — mirrors the attestation guard directly above: "inconclusive"
     // is a RUNNER-ISSUED result (the attestation-completeness guard's own verdict,
