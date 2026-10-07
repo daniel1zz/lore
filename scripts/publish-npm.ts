@@ -382,26 +382,47 @@ function readWorkspaceVersion(): Result<string, LoreError> {
   }
 }
 
-/** Physically stages every file `plan.stagingFiles` + `plan.packageJson` + the README describes, `chmod +x`-ing the binary. */
-function stageFilesToDisk(plan: PublishPlan): Result<void, LoreError> {
+/**
+ * Physically stages every file `plan.stagingFiles` + `plan.packageJson` + the README describes, `chmod +x`-ing the binary.
+ *
+ * The per-target staging dir (`plan.stagingRoot`) is REMOVED first. Staging used to be
+ * additive (`mkdirSync` + copy), so a file retired from `assets/` (e.g. the deleted
+ * `governance/corpus-workflow.md`) survived in a `dist-npm/<pkg>-<target>/` left by an
+ * older build and shipped in the tarball — a removal never converged. Only this one
+ * target's dir is cleared; sibling targets and `dist-npm/artifacts` are untouched.
+ * Guard: tests/unit/distribution/publish-staging.test.ts (pre-seeded stale file + live control).
+ *
+ * @param repoRoot - Test seam; defaults to the real repo root.
+ */
+export function stageFilesToDisk(plan: PublishPlan, repoRoot: string = REPO_ROOT): Result<void, LoreError> {
+  if (!plan.stagingRoot.startsWith("dist-npm/") || plan.stagingRoot.includes("..")) {
+    // Fail loud before any recursive delete: never rm a path outside dist-npm/.
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "stagingRoot",
+      message: `Refusing to clear staging dir "${plan.stagingRoot}": must be a subdirectory of dist-npm/`,
+    });
+  }
   try {
+    rmSync(join(repoRoot, plan.stagingRoot), { recursive: true, force: true });
+
     for (const [dest, src] of Object.entries(plan.stagingFiles)) {
-      const destAbs = join(REPO_ROOT, dest);
+      const destAbs = join(repoRoot, dest);
       mkdirSync(dirname(destAbs), { recursive: true });
-      copyFileSync(join(REPO_ROOT, src), destAbs);
+      copyFileSync(join(repoRoot, src), destAbs);
     }
 
     // README is part of packageJson.files but deliberately NOT part of
     // buildPublishPlan's stagingFiles map (see assemble.ts's own doc) — the
     // orchestrator stages it directly from the fixed repo-root README.
-    const readmeDest = join(REPO_ROOT, plan.stagingRoot, "README.md");
+    const readmeDest = join(repoRoot, plan.stagingRoot, "README.md");
     mkdirSync(dirname(readmeDest), { recursive: true });
-    copyFileSync(join(REPO_ROOT, README_SOURCE_PATH), readmeDest);
+    copyFileSync(join(repoRoot, README_SOURCE_PATH), readmeDest);
 
-    const binaryDest = join(REPO_ROOT, plan.stagingRoot, "dist", "lore");
+    const binaryDest = join(repoRoot, plan.stagingRoot, "dist", "lore");
     chmodSync(binaryDest, 0o755);
 
-    const packageJsonDest = join(REPO_ROOT, plan.stagingRoot, "package.json");
+    const packageJsonDest = join(repoRoot, plan.stagingRoot, "package.json");
     writeFileSync(packageJsonDest, `${JSON.stringify(plan.packageJson, null, 2)}\n`, "utf8");
 
     return ok(undefined);
