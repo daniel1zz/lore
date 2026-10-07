@@ -61,7 +61,7 @@ fi
 lore status --check-claude-md
 code=$?
 if [ "$code" -ne 0 ]; then
-  echo "pre-push: CLAUDE.md budget check failed (exit $code) — trim the over-ceiling file(s) (lore status --check-claude-md) or run \`lore governance claude-md\` for the content contract, or push with --no-verify" >&2
+  echo "pre-push: CLAUDE.md check failed (exit $code) — read the findings above: a budget finding means trim or evict the over-ceiling file(s), a section_missing / section_order finding means add or reorder the named root H2 section (lore status --check-claude-md); run \`lore governance claude-md\` for the content contract, or push with --no-verify" >&2
   exit 1
 fi
 # Anchor-coverage ratchet, LAST because it is the only step here that is not the

@@ -152,7 +152,9 @@ send it to the corpus.
 
 ## Root CLAUDE.md — five-section taxonomy
 
-A root CLAUDE.md is organized under exactly these headings, in this order:
+A root CLAUDE.md must contain these H2 headings verbatim, in this order. Other
+H2 sections may appear anywhere around them (reported as advisory only, never
+as a failure):
 
 1. **What This Is** — a few sentences: what the project does, who consumes
    it.
@@ -164,6 +166,26 @@ A root CLAUDE.md is organized under exactly these headings, in this order:
 5. **Finding Live Project State** — how to query the project's own dynamic
    state (its own CLI/API if it has one, or the external system that tracks
    it). Never a snapshot of that state itself.
+
+## Adoption Mode
+
+`context.memory_files.adoption` in `.lore/config.yaml` decides whether
+deterministic memory-file findings (including a missing or out-of-order root
+section) block, or only warn. It takes two values:
+
+- **enforce** — findings are deterministic: `lore status --check-claude-md`
+  exits non-zero and the pre-push hook refuses the push.
+- **warn** — the same findings are downgraded to advisory: the exit code is
+  unaffected and each is printed as a WARN line marked
+  `[downgraded by adoption=warn]`.
+
+An absent value resolves to **warn**, so an existing repo is never broken by
+upgrading. `lore setup` writes the value explicitly, so a fresh install states
+its mode instead of inheriting the default. `lore bootstrap` and
+`lore status --json` expose the resolved mode, where it came from, how many
+findings were downgraded, and a `promotable` flag. A repo is promotable when
+it is in warn mode and has zero would-be deterministic findings; once
+promotable, switch the config value to enforce so the structure stays held.
 
 ## Module CLAUDE.md — file taxonomy
 
