@@ -334,10 +334,22 @@ export async function runContextInit(
     });
   }
 
+  // reason: init MUST emit the same section list refresh does (project scope), including the Z1
+  // `fragments` section — otherwise the first refresh appends it and "init then refresh" is not
+  // idempotent (AC-CTX-3; root cause of the regression fixed in
+  // task-skill-implement-fix-refresh-idempotence-regression-ac-ctx).
+  const fragmentDepsResult = resolveFragmentDeps(deps);
+  if (!fragmentDepsResult.ok) return fragmentDepsResult;
+
   const factsResult = await collectContextFacts(deps.fs, root, resolveFlowBudgets(deps));
   if (!factsResult.ok) return factsResult;
 
   const sections = renderContextSections(factsResult.value);
+  if (fragmentDepsResult.value !== null) {
+    const fragmentsSection = await buildScopeFragmentsSection(deps.fs, fragmentDepsResult.value, "project");
+    if (!fragmentsSection.ok) return fragmentsSection;
+    sections.push(fragmentsSection.value);
+  }
 
   const narrative: ContextNarrativeOutcome = existing !== null ? "existing" : opts.narrative !== undefined ? "generated" : "skeleton";
   const baseContent = existing !== null ? existing : (opts.narrative ?? SKELETON_NARRATIVE);

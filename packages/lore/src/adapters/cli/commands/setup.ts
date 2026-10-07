@@ -125,17 +125,18 @@
  * Source: SPEC-046 §Design, §Scope; task AC-046-E.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
 import { parseDocument } from "yaml";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
-import type { AdoptionMode, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import { makeRealContextFsPort, toContextLayer } from "./context.js";
 import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 
 import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
@@ -523,21 +524,6 @@ function findProjectRoot(start: string): string {
   }
 }
 
-function toContextLayer(
-  source:
-    | { context?: { language?: string | undefined; fragments?: { disable?: string[] | undefined } | undefined } | undefined }
-    | undefined,
-): ContextConfigLayer {
-  const language = source?.context?.language;
-  const disable = source?.context?.fragments?.disable;
-  return {
-    context: {
-      ...(language !== undefined ? { language } : {}),
-      ...(disable !== undefined ? { fragments: { disable } } : {}),
-    },
-  };
-}
-
 /**
  * Resolves both config layers' `context.language` into settings writes WITHOUT touching disk:
  * global (XDG) -> `<claudeDir>/settings.json`, project -> `<projectRoot>/.claude/settings.local.json`
@@ -584,35 +570,6 @@ function applyLanguageProjections(plan: readonly LanguageProjection[]): Result<v
 function failWith(error: LoreError): void {
   process.stderr.write(formatError(error) + "\n");
   process.exitCode = exitCode(error);
-}
-
-/** Absolute-path `node:fs` {@link FsWritePort} for the project context-refresh flow (relative paths resolve under `repoDir`). */
-function makeRealContextFsPort(repoDir: string): FsWritePort {
-  const at = (path: string): string => (isAbsolute(path) ? path : join(repoDir, path));
-  return {
-    async exists(path) {
-      return existsSync(at(path));
-    },
-    async readFile(path) {
-      try {
-        return readFileSync(at(path), "utf8");
-      } catch {
-        return null;
-      }
-    },
-    async listDir(path) {
-      try {
-        return readdirSync(at(path));
-      } catch {
-        return [];
-      }
-    },
-    async writeFile(path, content) {
-      const target = at(path);
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, content, "utf8");
-    },
-  };
 }
 
 /**
