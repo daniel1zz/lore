@@ -343,6 +343,8 @@ const TYPE_PREFIX: Record<DocType, string> = {
   // SPEC-056 T4 — "phase" registered as a real DocType (compile-forced entry;
   // export-docs support for phase docs is a later task's scope).
   phase: "PHASE",
+  // baseline (spec-baseline-slice-1 C1) — compile-forced entry; "BL" avoided because BL-n names PRD requirements.
+  baseline: "BASE",
 } as const;
 
 /**
@@ -358,6 +360,7 @@ const TYPE_DIR: Record<DocType, string> = {
   knowledge: "knowledge",
   // SPEC-056 T4 — see TYPE_PREFIX's phase entry above for the same rationale.
   phase: "phase",
+  baseline: "baseline",
 } as const;
 
 // ─── ExportDocsService ────────────────────────────────────────────────────────

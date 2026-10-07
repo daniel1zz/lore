@@ -21,6 +21,9 @@ root:
         - { type: phase, min: 0 }   # SPEC-056 migration-created task->phase sweep
         - { type: knowledge, min: 0 }
     - { type: knowledge, min: 0 }
+    # baseline tree (spec-baseline-slice-1 C1): prd -> baseline (root) -> baseline (branch/leaf).
+    # Recursive depth is unmodeled, like knowledge -> knowledge below.
+    - { type: baseline, min: 0, children: [ { type: baseline, min: 0 } ] }
 # knowledge → knowledge deliberately unmodeled (unbounded recursion; see SPEC-032 §3.2 prose)
 # task is deliberately NOT declared as a child of prd here: SPEC-069 §Design
 # Decisions D2 ad-hoc tasks (extra.adhoc===true, incl. issue reports) ARE

@@ -26,7 +26,7 @@ import { describe, it, expect } from "vitest";
 import { TYPE_ACCENT, TYPE_ACCENT_BORDER_CLASS } from "../../../src/lib/type-accent";
 import type { DocType } from "@lore/core";
 
-const ALL_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task", "phase"];
+const ALL_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task", "phase", "baseline"];
 
 describe("TYPE_ACCENT", () => {
   describe("happy path", () => {
@@ -55,7 +55,7 @@ describe("TYPE_ACCENT", () => {
   });
 
   describe("boundary", () => {
-    it("covers exactly the 7 doc types, no more, no fewer (SPEC-056 T4 added 'phase')", () => {
+    it("covers exactly the 8 doc types, no more, no fewer (SPEC-056 T4 added 'phase'; baseline added by spec-baseline-slice-1)", () => {
       expect(Object.keys(TYPE_ACCENT).sort()).toEqual([...ALL_TYPES].sort());
     });
   });

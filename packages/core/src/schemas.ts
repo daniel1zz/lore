@@ -15,6 +15,7 @@ import { specAcceptanceCriteriaSchema } from "./acceptance.js";
 import { handoffExtraSchema } from "./session.js";
 import { validitySchema } from "./validity.js";
 import { acScopeArraySchema, phaseExtraSchema } from "./phase.js";
+import { baselineExtraSchema } from "./baseline.js";
 import { fnv1a32Hex } from "./slug-hash.js";
 import { isSelfDeclaredOrdinalTitle } from "./ordinal.js";
 import type { MirrorHumanId } from "./ordinal.js";
@@ -43,6 +44,7 @@ export const docTypeSchema = z.enum([
   "knowledge",
   "task",
   "phase",
+  "baseline",
 ]);
 
 export const docRoleSchema = z.enum([
@@ -700,6 +702,21 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
               issue.path[0] === "sub_type"
                 ? "knowledge requires extra.sub_type (ideation|retro|research|reference|assessment|prompt|skill|handoff)"
                 : issue.message,
+            path: ["extra", ...issue.path],
+          });
+        }
+      }
+    }
+
+    // baseline requires a schema-valid extra (node, rules, ...). Node/parent consistency is
+    // cross-entity and checked by the caller via validateBaselineParent (baseline.ts).
+    if (type === "baseline") {
+      const baselineResult = baselineExtraSchema.safeParse(extra ?? {});
+      if (!baselineResult.success) {
+        for (const issue of baselineResult.error.issues) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: issue.path[0] === "node" ? "baseline requires extra.node (root|branch|leaf)" : issue.message,
             path: ["extra", ...issue.path],
           });
         }

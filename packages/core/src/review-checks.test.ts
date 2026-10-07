@@ -41,6 +41,7 @@ const VALID_EXTRA: Record<DocType, Record<string, unknown>> = {
   // Object.keys(VALID_EXTRA), so this addition is compile-only (no new
   // assertions implied).
   phase: { plan_id: "01ARZ3PLAN0000000000001" },
+  baseline: { node: "root" },
 };
 
 function makeDoc(type: DocType, overrides: Partial<DocRecord> = {}): DocRecord {

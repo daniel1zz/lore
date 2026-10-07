@@ -40,6 +40,7 @@ import {
   taskExtraSchema,
 } from "./schemas.js";
 import { phaseExtraSchema } from "./phase.js";
+import { baselineExtraSchema } from "./baseline.js";
 
 // ─── Review Bundle ──────────────────────────────────────────────────────────
 
@@ -107,6 +108,10 @@ function safeParseExtraForType(doc: DocRecord): { success: boolean; issues: { pa
     // `default` branch). Mirrors the `task` case's shape/intent exactly.
     case "phase": {
       const r = phaseExtraSchema.safeParse(doc.extra);
+      return { success: r.success, issues: r.success ? [] : r.error.issues };
+    }
+    case "baseline": {
+      const r = baselineExtraSchema.safeParse(doc.extra);
       return { success: r.success, issues: r.success ? [] : r.error.issues };
     }
   }
