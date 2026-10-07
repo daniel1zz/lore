@@ -52,6 +52,7 @@ import {
 import { MIGRATION_010_SQL } from "../../../src/store/migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "../../../src/store/migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.js";
+import { MIGRATION_013_SQL } from "../../../src/store/migrations/migration-013.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -216,6 +217,15 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   // table-recreate, same shape as migration-004's "governs" widening — a
   // plain executeMultiple call, same as migrations 001-007/010 above.
   await client.executeMultiple(MIGRATION_012_SQL);
+
+  // migration-013 (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations
+  // §C2: widen docs.type CHECK to accept 'baseline' via a docs table-recreate,
+  // plus the rule_registry table) is a SINGLE self-contained SQL string with
+  // its own BEGIN/COMMIT and foreign_keys toggle — same shape as
+  // migration-006's docs rebuild, a plain executeMultiple call. rule_registry
+  // is NEVER in sync-push.ts's REPLICATED_TABLES; it is mirrored here only for
+  // the user_version parity guard below.
+  await client.executeMultiple(MIGRATION_013_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL
