@@ -56,7 +56,7 @@ export type FragmentMode = (typeof FRAGMENT_MODES)[number];
 export interface Fragment {
   readonly frontmatter: FragmentFrontmatter;
   readonly body: string;
-  readonly layer: "shipped" | "project";
+  readonly layer: "shipped" | "user" | "project";
   readonly path: string;
 }
 
