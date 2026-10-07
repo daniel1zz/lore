@@ -238,8 +238,6 @@ export interface AdvisoryFinding {
    * (spec-claude-md-root-section-structure-check-and-adoption-mode).
    */
   downgraded_kind?: MemoryFileFindingKind;
-  /** Present only on `kind: "downgraded"` — the original finding's `reference`, when it had one. */
-  downgraded_reference?: string;
   /** Human-readable summary. */
   message: string;
 }

@@ -133,9 +133,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
-import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
+import { parseDocument } from "yaml";
+import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
-import { loadConfig, saveConfig } from "@lore/core/node";
+import { loadConfig } from "@lore/core/node";
 
 import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
 import { ProjectSetupService } from "../../../service/project-setup-service.js";
@@ -441,25 +442,60 @@ function resolveRepoMemoryFileBudgets(repoDir: string): Result<MemoryFileBudgets
 
 /**
  * Real `WriteAdoptionMode` port (spec-claude-md-root-section-structure-check-and-adoption-mode D4):
- * reads the repo's `.lore/config.yaml` FIRST and writes `context.memory_files.adoption`
- * ONLY when it is absent — an explicit value (either mode) is never overwritten.
- * The write is a whole-config `saveConfig` of the parsed config with that one key set.
+ * adds `context.memory_files.adoption` to the repo's `.lore/config.yaml` ONLY when it is
+ * absent — an explicit value (either mode) is never overwritten and the file is left
+ * byte-identical. The edit is applied to the RAW text via the `yaml` Document API, so
+ * ONLY that one key is added (no parsed+defaulted config is round-tripped, hence no
+ * default budgets are frozen into the file) and comments / key order survive. The edited
+ * text is validated with `loadConfigFromString` BEFORE it is written (fail loud).
  *
  * @param repoDir - Absolute repo root.
  * @param mode - Mode judged on the post-splice CLAUDE.md.
- * @returns `err` when the config cannot be loaded or saved (surfaced, never swallowed).
+ * @returns `err` when the config cannot be read/parsed/validated or written (surfaced, never swallowed).
  */
 function writeAdoptionModeToConfig(repoDir: string, mode: AdoptionMode): Result<AdoptionWriteOutcome, LoreError> {
+  // reason: loadConfig first — an already-invalid config is refused with its own validation error.
   const loaded = loadConfig(repoDir);
   if (!loaded.ok) return loaded;
-  const config = loaded.value;
-  const memoryFiles = resolveMemoryFileBudgets(config);
-  if (memoryFiles.adoption !== undefined) return ok({ status: "kept", existing: memoryFiles.adoption });
-  const saved = saveConfig(repoDir, {
-    ...config,
-    context: { ...config.context, memory_files: { ...memoryFiles, adoption: mode } },
+  const path = join(repoDir, ".lore", "config.yaml");
+  const storeError = (message: string, cause: unknown): LoreError => ({
+    code: "STORE_ERROR",
+    message,
+    ...(cause instanceof Error ? { cause } : {}),
   });
-  if (!saved.ok) return saved;
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (e) {
+    return err(storeError(`Failed to read ${path}`, e));
+  }
+  const doc = parseDocument(raw);
+  if (doc.errors.length > 0) {
+    return err(storeError(`Failed to parse ${path}: ${doc.errors[0]?.message ?? "unknown"}`, doc.errors[0]));
+  }
+  const existing = doc.getIn(["context", "memory_files", "adoption"]);
+  if (existing === "enforce" || existing === "warn") return ok({ status: "kept", existing });
+  if (existing !== undefined && existing !== null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "context.memory_files.adoption",
+      message: `${path}: context.memory_files.adoption has an unsupported value; expected "enforce" or "warn"`,
+      value: existing,
+    });
+  }
+  try {
+    doc.setIn(["context", "memory_files", "adoption"], mode);
+  } catch (e) {
+    return err(storeError(`Cannot add context.memory_files.adoption to ${path}`, e));
+  }
+  const edited = doc.toString();
+  const validated = loadConfigFromString(edited);
+  if (!validated.ok) return validated;
+  try {
+    writeFileSync(path, edited, "utf8");
+  } catch (e) {
+    return err(storeError(`Failed to write ${path}`, e));
+  }
   return ok({ status: "written" });
 }
 
