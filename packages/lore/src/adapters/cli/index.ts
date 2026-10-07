@@ -86,6 +86,12 @@ const main = defineCommand({
     uat: () => import("./commands/uat.js").then(wrapDefault("uat")),
     requirement: () => import("./commands/requirement.js").then(wrapDefault("requirement")),
     anchor: () => import("./commands/anchor.js").then(wrapDefault("anchor")),
+    // rule / baseline (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C3) —
+    // dedicated writers of a baseline doc's verb-owned `extra` keys (rules, label, depends_on,
+    // glossary) and of baseline node creation; `lore set` is refused on those keys. See each
+    // command file's own module header.
+    rule: () => import("./commands/rule.js").then(wrapDefault("rule")),
+    baseline: () => import("./commands/baseline.js").then(wrapDefault("baseline")),
     // scope (spec-declared-scope-attestation-contract-task-owned-ac-scope) —
     // dedicated writer for a task's/phase's `extra.ac_scope`, the anchor
     // command's sibling; see commands/scope.ts's module header.

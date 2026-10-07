@@ -212,8 +212,18 @@ import type { LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
+import type { SetRulePatch } from "../../service/rule-service.js";
 import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
-import { handoffExtraSchema, uatVerdictSchema, REQUIREMENT_PRIORITIES, extractFileAnchors } from "@lore/core";
+import {
+  handoffExtraSchema,
+  uatVerdictSchema,
+  REQUIREMENT_PRIORITIES,
+  extractFileAnchors,
+  BASELINE_NODE_KINDS,
+  RULE_CONFIDENCES,
+  RULE_ENFORCEMENTS,
+  RULE_LIFECYCLES,
+} from "@lore/core";
 import { KNOWLEDGE_SUB_TYPES } from "@lore/core";
 import { buildUnconfiguredUpstreamRemedy, ISSUE_CATEGORY_MAX_LENGTH, ISSUE_SEVERITIES } from "@lore/core";
 import { resolveSubTypeFilter } from "../../service/corpus-service.js";
@@ -930,6 +940,71 @@ export const LoreRequirementAddSchema = z.object({
   id: z.string().min(1),
   statement: z.string().min(1),
   priority: z.enum(REQUIREMENT_PRIORITIES),
+});
+
+/**
+ * Input schemas for the baseline write tools (spec-baseline-slice-1-rules-with-permanent-ids-
+ * ac-citations §C3) — thin pipes over `RuleService`, the SOLE writer of a baseline doc's
+ * verb-owned `extra` keys (`lore_set` refuses them via the CorpusService replace guard).
+ * Enum members come from the `@lore/core` baseline SSOT, never re-typed here. `by` is
+ * required: MCP callers pass actor identity explicitly (same precedent as `lore_claim`).
+ * Statement/example length limits are enforced by `baselineRuleSchema` inside the service.
+ */
+export const LoreRuleAddSchema = z.object({
+  leaf: z.string().min(1),
+  statement: z.string().min(1),
+  confidence: z.enum(RULE_CONFIDENCES),
+  enforced_by: z.enum(RULE_ENFORCEMENTS),
+  examples: z.array(z.string()).min(1),
+  by: z.string().min(1),
+});
+
+export const LoreRuleSetSchema = z.object({
+  rule: z.string().min(1),
+  statement: z.string().min(1).optional(),
+  confidence: z.enum(RULE_CONFIDENCES).optional(),
+  enforced_by: z.enum(RULE_ENFORCEMENTS).optional(),
+  examples: z.array(z.string()).min(1).optional(),
+  lifecycle: z.enum(RULE_LIFECYCLES).optional(),
+  note: z.string().min(1).optional(),
+  move_to: z.string().min(1).optional(),
+  by: z.string().min(1),
+});
+
+export const LoreBaselineAddSchema = z.object({
+  parent: z.string().min(1),
+  node: z.enum(BASELINE_NODE_KINDS),
+  label: z.string().min(1),
+  title: z.string().min(1),
+  content: z.string().optional(),
+  by: z.string().min(1),
+});
+
+export const LoreBaselineSetLabelSchema = z.object({
+  node: z.string().min(1),
+  label: z.string().min(1),
+  by: z.string().min(1),
+});
+
+export const LoreBaselineDependsSchema = z.object({
+  leaf: z.string().min(1),
+  add: z.array(z.string().min(1)).optional(),
+  remove: z.array(z.string().min(1)).optional(),
+  by: z.string().min(1),
+});
+
+export const LoreBaselineGlossaryAddSchema = z.object({
+  node: z.string().min(1),
+  term: z.string().min(1),
+  meaning: z.string().min(1),
+  note: z.string().optional(),
+  by: z.string().min(1),
+});
+
+export const LoreBaselineGlossaryRmSchema = z.object({
+  node: z.string().min(1),
+  term: z.string().min(1),
+  by: z.string().min(1),
 });
 
 /**
@@ -2850,6 +2925,125 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       if (!result.ok) return errorContent(result.error);
       return textContent({ requirements: result.value });
     },
+  );
+
+  // ── spec-baseline-slice-1 §C3: baseline rules + node verbs ─────────────────
+  // Every tool below is a thin pipe over `RuleService` (the SOLE writer of rules, label,
+  // depends_on, glossary and baseline node creation); a refusal is `isError` with the LoreError.
+  const withRuleService = async <T>(
+    run: (svc: NonNullable<typeof app.ruleService>) => Promise<Result<T, LoreError>>,
+  ) => {
+    if (app.ruleService === undefined) {
+      return errorContent({ code: "STORE_ERROR", message: "Internal error: RuleService not wired on App" });
+    }
+    const result = await run(app.ruleService);
+    if (!result.ok) return errorContent(result.error);
+    return textContent(result.value);
+  };
+
+  // lore_rule_add
+  registerToolWithArgs(
+    server,
+    "lore_rule_add",
+    "Append a new live rule to a baseline leaf and allocate its permanent BR-n id — the sole MCP write path for extra.rules",
+    LoreRuleAddSchema,
+    async (args) =>
+      withRuleService((svc) =>
+        svc.addRule(
+          args.leaf,
+          { statement: args.statement, confidence: args.confidence, enforced_by: args.enforced_by, examples: args.examples },
+          { by: args.by },
+        ),
+      ),
+  );
+
+  // lore_rule_set
+  registerToolWithArgs(
+    server,
+    "lore_rule_set",
+    "Edit a baseline rule, advance its lifecycle (forward-only; retired needs note) or move it to another leaf keeping its BR-n id",
+    LoreRuleSetSchema,
+    async (args) => {
+      const patch: SetRulePatch = {
+        ...(args.statement !== undefined ? { statement: args.statement } : {}),
+        ...(args.confidence !== undefined ? { confidence: args.confidence } : {}),
+        ...(args.enforced_by !== undefined ? { enforced_by: args.enforced_by } : {}),
+        ...(args.examples !== undefined ? { examples: args.examples } : {}),
+        ...(args.lifecycle !== undefined ? { lifecycle: args.lifecycle } : {}),
+        ...(args.note !== undefined ? { note: args.note } : {}),
+        ...(args.move_to !== undefined ? { moveTo: args.move_to } : {}),
+      };
+      return withRuleService((svc) => svc.setRule(args.rule, patch, { by: args.by }));
+    },
+  );
+
+  // lore_baseline_add
+  registerToolWithArgs(
+    server,
+    "lore_baseline_add",
+    "Create a baseline node (root under a PRD; branch/leaf under a baseline root|branch)",
+    LoreBaselineAddSchema,
+    async (args) =>
+      withRuleService((svc) =>
+        svc.addNode(
+          args.parent,
+          { node: args.node, label: args.label, title: args.title, content: args.content ?? "" },
+          { by: args.by },
+        ),
+      ),
+  );
+
+  // lore_baseline_set_label
+  registerToolWithArgs(
+    server,
+    "lore_baseline_set_label",
+    "Set a baseline node's display label (extra.label) — the sole MCP write path for it",
+    LoreBaselineSetLabelSchema,
+    async (args) => withRuleService((svc) => svc.setLabel(args.node, args.label, { by: args.by })),
+  );
+
+  // lore_baseline_depends
+  registerToolWithArgs(
+    server,
+    "lore_baseline_depends",
+    "Add/remove depends_on rule ids (BR-n) on a baseline leaf; every added id must exist",
+    LoreBaselineDependsSchema,
+    async (args) =>
+      withRuleService((svc) =>
+        svc.setDependsOn(
+          args.leaf,
+          {
+            ...(args.add !== undefined ? { add: args.add } : {}),
+            ...(args.remove !== undefined ? { remove: args.remove } : {}),
+          },
+          { by: args.by },
+        ),
+      ),
+  );
+
+  // lore_baseline_glossary_add
+  registerToolWithArgs(
+    server,
+    "lore_baseline_glossary_add",
+    "Define a glossary term on a baseline root|branch",
+    LoreBaselineGlossaryAddSchema,
+    async (args) =>
+      withRuleService((svc) =>
+        svc.glossaryAdd(
+          args.node,
+          { term: args.term, meaning: args.meaning, ...(args.note !== undefined ? { note: args.note } : {}) },
+          { by: args.by },
+        ),
+      ),
+  );
+
+  // lore_baseline_glossary_rm
+  registerToolWithArgs(
+    server,
+    "lore_baseline_glossary_rm",
+    "Remove a glossary term from a baseline root|branch",
+    LoreBaselineGlossaryRmSchema,
+    async (args) => withRuleService((svc) => svc.glossaryRemove(args.node, args.term, { by: args.by })),
   );
 
   // ── SPEC-043: bi-temporal invalidation ────────────────────────────────────
