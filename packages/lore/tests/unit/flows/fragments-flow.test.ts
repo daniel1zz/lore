@@ -3,6 +3,12 @@
  * Spec: spec-context-fragments-config-driven-layered-rule-injection D3, D6, D7, D12 —
  * AC-CF-4 (check half), AC-CF-12 (render half), AC-CF-18 (language drift half).
  * Task: task-skill-implement-lore-fragments-render-check-cli-fragments.
+ *
+ * D15 re-baseline (task-skill-test-d15-red-static-fragments-as-lore-rules-files, owner decision
+ * 2026-10-07): static main fragments live in lore-owned `<project>/.claude/rules/lore-<id>.md`
+ * files, so drift/staleness is measured against those files (changed, missing or extra), not a
+ * CLAUDE.md Z1 `fragments` section. Fresh/stale rules files are produced by the REAL
+ * `runContextRefresh` (the hash algorithm is the renderer's business, never re-derived here).
  */
 import { describe, expect, it } from "vitest";
 import { HOOK_STRING_CAP, InMemoryFsPort, NOTICE_RESERVE } from "@lore/core";
@@ -14,8 +20,7 @@ import {
   runFragmentsRender,
   type FragmentsFlowDeps,
 } from "../../../src/flows/fragments-flow.js";
-import { buildFragmentsSection } from "../../../src/service/context-fragments/section.js";
-import { spliceManagedSections } from "../../../src/service/context-projection.js";
+import { runContextRefresh } from "../../../src/flows/context-flow.js";
 
 const ROOTS = { shipped: "/a/context", user: "/u/context", project: "/p/.lore/context" };
 const CLAUDE_MD = "/p/CLAUDE.md";
@@ -45,13 +50,41 @@ function makeDeps(files: Record<string, string>, over: Partial<FragmentsFlowDeps
   };
 }
 
-/** A project CLAUDE.md whose Z1 fragments section was rendered from `bodies`. */
-function claudeMdWithZ1(bodies: string[]): string {
-  const text = bodies.join("\n\n");
-  const section = buildFragmentsSection({ text, chars: text.length, fragmentIds: [] }, "project");
-  const spliced = spliceManagedSections("# Narrative\n", [section]);
-  if (!spliced.ok) throw new Error("fixture splice failed");
-  return spliced.value.content;
+const RULES_DIR = "/p/.claude/rules";
+
+/**
+ * Runs the REAL refresh over `files` (this file's absolute fixture paths are mapped onto the
+ * port-relative layout refresh expects: `/a/context` -> `assets/context`, `/p/.lore/context` ->
+ * `.lore/context`) and returns the rules files it wrote, keyed by this file's absolute path.
+ */
+async function renderedRules(files: Record<string, string>): Promise<Record<string, string>> {
+  const rel: Record<string, string> = { "CLAUDE.md": "# Narrative\n" };
+  for (const [path, content] of Object.entries(files)) {
+    if (path.startsWith("/a/context/")) rel[`assets/context/${path.slice("/a/context/".length)}`] = content;
+    else if (path.startsWith("/p/.lore/context/")) rel[`.lore/context/${path.slice("/p/.lore/context/".length)}`] = content;
+  }
+  const fs = new InMemoryFsPort(rel);
+  const deps = {
+    fs,
+    assetsRoot: "assets",
+    home: "/h",
+    xdgConfigHome: "/x",
+    globalConfig: {},
+    projectConfig: {},
+  } as unknown as Parameters<typeof runContextRefresh>[0];
+  const r = await runContextRefresh(deps, "", { scope: "project" } as never);
+  if (!r.ok) throw new Error(`fixture refresh failed: ${JSON.stringify(r.error)}`);
+  const out: Record<string, string> = {};
+  for (const name of await fs.listDir(".claude/rules")) {
+    out[`${RULES_DIR}/${name}`] = (await fs.readFile(`.claude/rules/${name}`)) ?? "";
+  }
+  return out;
+}
+
+/** makeDeps whose rules files were rendered from `rendered` sources while the live sources are `current`. */
+async function depsWithRules(rendered: Record<string, string>, current: Record<string, string> = rendered) {
+  const rules = await renderedRules(rendered);
+  return makeDeps({ ...current, ...rules });
 }
 
 describe("AC-CF-4 runFragmentsCheck", () => {
@@ -87,18 +120,53 @@ describe("AC-CF-4 runFragmentsCheck", () => {
     expect(over.findings.some((f) => f.kind === "cap")).toBe(true);
   });
 
-  it("flags Z1 drift when the project CLAUDE.md fragments section differs from a fresh render, clean when equal", async () => {
-    const frag = { [`${ROOTS.project}/m.md`]: fragmentFile("m", ["main"], "static", "Body M") };
-    const fresh = await runFragmentsCheck(makeDeps({ ...frag, [CLAUDE_MD]: claudeMdWithZ1(["Body M"]) }));
-    expect(fresh.findings).toEqual([]);
+  const MAIN = (body: string) => ({ [`${ROOTS.project}/m.md`]: fragmentFile("m", ["main"], "static", body) });
 
-    const stale = await runFragmentsCheck(makeDeps({ ...frag, [CLAUDE_MD]: claudeMdWithZ1(["Old body"]) }));
-    expect(stale.ok).toBe(false);
-    expect(stale.findings.map((f) => f.kind)).toContain("z1_drift");
+  it("rules files equal to a fresh render are clean (control: refresh really wrote one)", async () => {
+    const deps = await depsWithRules(MAIN("Body M"));
+    expect(await deps.fs.exists(`${RULES_DIR}/lore-m.md`)).toBe(true);
+    const fresh = await runFragmentsCheck(deps);
+    expect(fresh.findings).toEqual([]);
+    expect(fresh.ok).toBe(true);
   });
 
-  it("no CLAUDE.md at all is not drift", async () => {
-    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/m.md`]: fragmentFile("m", ["main"], "static", "Body M") }));
+  it("flags rules drift when a lore rules file differs from a fresh render (fragment changed since refresh)", async () => {
+    const stale = await runFragmentsCheck(await depsWithRules(MAIN("Old body"), MAIN("Body M")));
+    expect(stale.ok).toBe(false);
+    expect(stale.findings.map((f) => f.kind)).toContain("rules_drift");
+    expect(stale.findings.find((f) => f.kind === "rules_drift")?.message).toContain("lore-m.md");
+  });
+
+  it("flags rules drift when a winning static main fragment has NO rules file (missing)", async () => {
+    const r = await runFragmentsCheck(await depsWithRules({}, MAIN("Body M")));
+    expect(r.ok).toBe(false);
+    expect(r.findings.find((f) => f.kind === "rules_drift")?.message).toContain("lore-m.md");
+  });
+
+  it("flags rules drift when a lore-*.md file exists for a fragment that no longer exists (extra)", async () => {
+    const deps = await depsWithRules(MAIN("Body M"), {});
+    await (deps.fs as InMemoryFsPort).writeFile(`${RULES_DIR}/lore-ghost.md`, "<!-- lore:managed fragment=ghost hash=deadbeef -->\nghost body\n");
+    const r = await runFragmentsCheck(deps);
+    expect(r.ok).toBe(false);
+    expect(r.findings.find((f) => f.kind === "rules_drift")?.message).toContain("lore-ghost.md");
+  });
+
+  it("a non-lore rules file (team.md) is never drift", async () => {
+    const deps = await depsWithRules(MAIN("Body M"));
+    await (deps.fs as InMemoryFsPort).writeFile(`${RULES_DIR}/team.md`, "team rule\n");
+    expect((await runFragmentsCheck(deps)).findings).toEqual([]);
+  });
+
+  it("an old CLAUDE.md Z1 fragments section is NOT consulted any more (no z1_drift kind)", async () => {
+    const deps = await depsWithRules(MAIN("Body M"));
+    await (deps.fs as InMemoryFsPort).writeFile(CLAUDE_MD, "# N\n\n<!-- lore:managed section=fragments hash=00000000 -->\nstale\n<!-- /lore:managed -->\n");
+    const r = await runFragmentsCheck(deps);
+    expect(r.findings.map((f) => f.kind)).not.toContain("z1_drift");
+    expect(r.findings).toEqual([]);
+  });
+
+  it("no rules files and no static main fragments at all is not drift", async () => {
+    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/d.md`]: fragmentFile("d", ["main"], "dynamic", "dyn") }));
     expect(r.findings).toEqual([]);
   });
 
@@ -185,15 +253,13 @@ describe("AC-CF-12 composeSessionStart / runFragmentsRender", () => {
     expect(composeSessionStart({ block: "", stale: true, changed: [] })).toContain(FRAGMENTS_STALE_MARKER);
   });
 
-  it("render session-start end to end: fresh Z1 silent, stale Z1 carries marker + new body, dynamic block kept", async () => {
-    const files = {
-      [`${ROOTS.project}/dyn.md`]: fragmentFile("dyn", ["main"], "dynamic", "DYN-BLOCK"),
-      [`${ROOTS.project}/st.md`]: fragmentFile("st", ["main"], "static", "Changed NONCE-9"),
-    };
-    const fresh = await runFragmentsRender(makeDeps({ ...files, [CLAUDE_MD]: claudeMdWithZ1(["Changed NONCE-9"]) }), { outlet: "hook:session-start" });
+  it("render session-start end to end: fresh rules files silent, stale rules files carry marker + new body, dynamic block kept", async () => {
+    const dyn = { [`${ROOTS.project}/dyn.md`]: fragmentFile("dyn", ["main"], "dynamic", "DYN-BLOCK") };
+    const st = (body: string) => ({ [`${ROOTS.project}/st.md`]: fragmentFile("st", ["main"], "static", body) });
+    const fresh = await runFragmentsRender(await depsWithRules({ ...dyn, ...st("Changed NONCE-9") }), { outlet: "hook:session-start" });
     expect(fresh.ok && fresh.value.additionalContext.trim()).toBe("DYN-BLOCK");
 
-    const stale = await runFragmentsRender(makeDeps({ ...files, [CLAUDE_MD]: claudeMdWithZ1(["Original"]) }), { outlet: "hook:session-start" });
+    const stale = await runFragmentsRender(await depsWithRules({ ...dyn, ...st("Original") }, { ...dyn, ...st("Changed NONCE-9") }), { outlet: "hook:session-start" });
     expect(stale.ok).toBe(true);
     if (!stale.ok) return;
     expect(stale.value.additionalContext).toContain("DYN-BLOCK");

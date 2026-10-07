@@ -1,7 +1,8 @@
 /**
  * @spec_ref AC-CF-13
  *
- * RED suite: `runContextRefresh` writes CLAUDE.md compare-and-swap
+ * RED suite: `runContextRefresh` writes each lore rules file (`.claude/rules/lore-<id>.md`) compare-and-swap
+ * (D15 re-baseline, owner decision 2026-10-07: was CLAUDE.md Z1 section CAS)
  * (spec-context-fragments-config-driven-layered-rule-injection, D8 + AC-CF-13,
  * task task-skill-test-refresh-cas-red-lost-update-refusal).
  *
@@ -11,8 +12,9 @@
  *     unchanged, else refuse with `CONFLICT`; a lost update is impossible.
  *   - AC-CF-13: an interleaved write between refresh's read and its write
  *     -> err CONFLICT, and the file equals the interleaved writer's bytes.
- *   - AC-CF-6 (used only as the no-interleave control): the refreshed file
- *     carries a Z1 managed section with id `fragments`.
+ *   - AC-CF-6 / D15 (used only as the no-interleave control): the refreshed
+ *     rules file starts with the `lore:managed fragment=<id> hash=<8hex>`
+ *     fingerprint line and carries the fragment body.
  *
  * Deps shape assumed from the spec ("Deps (all injected)"): `fs`,
  * `assetsRoot`, `globalConfig`, `projectConfig` (+ home/xdgConfigHome/
@@ -22,7 +24,7 @@
  * `runContextRefresh(deps, root, { scope })`.
  *
  * MOCK RISK: the fake fs only models read/write ordering; it cannot model a
- * real kernel-level race. The interleave fires on the FIRST CLAUDE.md read
+ * real kernel-level race. The interleave fires on the FIRST read of the rules file
  * after arming, so it lands between refresh's read and its write regardless
  * of how many further reads the implementation does.
  */
@@ -36,7 +38,9 @@ const FRAGMENT_MD =
   "---\nid: cas-probe-rule\ntitle: CAS probe rule\naudience: [main]\nmode: static\n---\n" +
   "Sentinel body CAS-PROBE-7731.\n";
 
-/** Fs whose CLAUDE.md bytes are replaced by `interleaved` right after the first read once armed. */
+const RULES_FILE = ".claude/rules/lore-cas-probe-rule.md";
+
+/** Fs whose rules-file bytes are replaced by `interleaved` right after the first read once armed. */
 class InterleavingFs implements FsWritePort {
   private armed = false;
   private fired = false;
@@ -53,7 +57,7 @@ class InterleavingFs implements FsWritePort {
 
   async readFile(path: string): Promise<string | null> {
     const value = await this.inner.readFile(path);
-    if (this.armed && !this.fired && path === "CLAUDE.md" && this.interleaved !== null) {
+    if (this.armed && !this.fired && path === RULES_FILE && this.interleaved !== null) {
       this.fired = true;
       await this.inner.writeFile(path, this.interleaved); // the other writer lands AFTER our read
     }
@@ -91,42 +95,44 @@ async function setup(interleaved: string | null) {
 }
 
 describe("AC-CF-13 refresh is compare-and-swap (D8)", () => {
-  it("HAPPY: without interleaving, refresh returns ok and CLAUDE.md gains a Z1 `fragments` section carrying the fragment body", async () => {
+  it("HAPPY: without interleaving, refresh returns ok and writes the lore rules file with fingerprint first line + fragment body", async () => {
     const { inner, deps } = await setup(null);
     const result = await runContextRefresh(deps, "", { scope: "project" } as never);
     expect(result.ok).toBe(true);
-    const content = await inner.readFile("CLAUDE.md");
-    expect(content).toMatch(/<!-- lore:managed section=fragments hash=[0-9a-f]{8} -->/);
+    const content = await inner.readFile(RULES_FILE);
+    expect(content).toMatch(/^<!-- lore:managed fragment=cas-probe-rule hash=[0-9a-f]{8} -->\n/);
     expect(content).toContain("CAS-PROBE-7731");
+    expect(await inner.readFile("CLAUDE.md")).not.toContain("CAS-PROBE-7731");
   });
 
   it.each([
     ["first interleaved writer", "# someone else wrote this first\n"],
     ["a different interleaved writer", "# totally different bytes\n\nwith two paragraphs\n"],
-  ])("NEGATIVE: %s between read and write -> err CONFLICT and the file equals the interleaved bytes", async (_label, bytes) => {
+  ])("NEGATIVE: %s between read and write -> err CONFLICT and the rules file equals the interleaved bytes", async (_label, bytes) => {
     const { inner, fs, deps } = await setup(bytes);
     fs.arm();
     const result = await runContextRefresh(deps, "", { scope: "project" } as never);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect((result.error as { code: string }).code).toBe("CONFLICT");
-    expect(await inner.readFile("CLAUDE.md")).toBe(bytes);
+    expect(await inner.readFile(RULES_FILE)).toBe(bytes);
   });
 
-  it("STATE: a refused refresh performs no write at all (lost update impossible, not merely repaired afterwards)", async () => {
+  it("STATE: a refused refresh performs no write to the contested rules file (lost update impossible, not merely repaired afterwards)", async () => {
     const { fs, deps } = await setup("# interleaved\n");
     fs.arm();
     await runContextRefresh(deps, "", { scope: "project" } as never);
-    expect(fs.writes).toEqual([]);
+    expect(fs.writes.filter((w) => w.path === RULES_FILE)).toEqual([]);
   });
 
-  it("REGRESSION: after a CONFLICT, an immediate retry (no interleaving) succeeds — retry is safe", async () => {
+  it("REGRESSION: after a CONFLICT, an immediate retry (no interleaving) succeeds and never clobbers the interleaved writer's file — retry is safe", async () => {
     const { inner, fs, deps } = await setup("# interleaved\n");
     fs.arm();
     const first = await runContextRefresh(deps, "", { scope: "project" } as never);
     expect(first.ok).toBe(false);
     const second = await runContextRefresh(deps, "", { scope: "project" } as never);
     expect(second.ok).toBe(true);
-    expect(await inner.readFile("CLAUDE.md")).toContain("section=fragments");
+    // The interleaved bytes carry no valid fingerprint -> D15(b): untouched (diverged_skip), not overwritten.
+    expect(await inner.readFile(RULES_FILE)).toBe("# interleaved\n");
   });
 });
