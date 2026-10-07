@@ -67,6 +67,9 @@ export const BUILT_IN_TEMPLATES: Record<DocType, string> = {
   // template (phase generalizes/supersedes task at the plan-execution tier).
   phase:
     'Write a phase description titled "{{title}}"{{#parent_title}} for plan "{{parent_title}}"{{/parent_title}}. Sections: Checklist, Acceptance Criteria, File Anchors, Test Plan. Output GitHub-flavoured Markdown.',
+  // baseline tree node (spec-baseline-slice-1 C1) — compile-forced entry.
+  baseline:
+    'Write a product-baseline node titled "{{title}}"{{#parent_title}} under "{{parent_title}}"{{/parent_title}}. Describe current product behaviour as rules, without implementation detail. Output GitHub-flavoured Markdown.',
 };
 
 // ─── Prompt-Version Registry (SPEC-103 I1, task-t3-hardening) ───────────────────

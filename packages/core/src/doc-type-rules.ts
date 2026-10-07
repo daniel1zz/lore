@@ -20,6 +20,8 @@ export const PARENT_TYPE_CONTRACT = {
   // reason: phase's parent is always a plan (SPEC-056 §Design Decisions D1) —
   // registered by SPEC-056's PhaseWorkflowService rename task.
   phase:     ["plan"],
+  // baseline: root under a prd, branch/leaf under a baseline (node/parent detail: baseline.ts).
+  baseline:  ["prd", "baseline"],
 } as const satisfies Record<DocType, readonly DocType[]>;
 
 /**
