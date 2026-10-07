@@ -79,9 +79,13 @@
  *     any such finding refuses the whole call with `err(VALIDATION_ERROR)`
  *     naming every breach and performs NO write — a within-budget splice is
  *     unaffected (byte-identical to pre-check behavior). The ADVISORY half
- *     (dangling references, narrative smells) is computed and discarded —
- *     `runMemoryFileChecks` never lets an advisory finding refuse a write,
- *     matching every other consumer of this mechanism — so the
+ *     is NOT refusing: `runMemoryFileChecks` never lets an advisory finding
+ *     refuse a write, matching every other consumer of this mechanism. Only
+ *     its `kind: "downgraded"` entries (deterministic findings that adoption
+ *     mode `warn` moved to advisory) are surfaced, as `downgraded` on
+ *     `runContextRefresh`'s ok value (see the final `ok({... downgraded ...})`
+ *     in `runContextRefresh`); every other advisory kind (dangling
+ *     references, narrative smells) is dropped, so the
  *     `fileExists`/`docExists` predicates this call supplies are inert
  *     stand-ins (this verb reports no reference/slug advisories; that
  *     surface is `lore status --check-claude-md`'s job). `runContextInit`
@@ -351,9 +355,10 @@ export async function runContextRefresh(
   // inline size check and never a direct call into the underlying capacity
   // lint (module header, AC-COMPOSE-1). Runs on the SPLICED candidate,
   // before any write.
-  // Only `.deterministic` gates the write — `.advisory` is computed and
-  // discarded (module header explains why `fileExists`/`docExists` are inert
-  // stand-ins here).
+  // Only `.deterministic` gates the write. `.advisory` never refuses; only its
+  // `kind: "downgraded"` entries are surfaced (the `downgraded:` field of the
+  // `ok(...)` return below), the rest dropped (module header explains why
+  // `fileExists`/`docExists` are inert stand-ins here).
   const { deterministic: findings, advisory } = runMemoryFileChecks(
     [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
     budgets,
