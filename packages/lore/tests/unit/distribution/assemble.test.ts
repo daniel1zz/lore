@@ -32,6 +32,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPublishPlan,
+  mergeShippedAssetFiles,
   nameFor,
   PACKAGE_SCOPE,
   PACKAGE_BASENAME,
@@ -252,5 +253,39 @@ describe("buildPublishPlan", () => {
     it("PACKAGE_SCOPE is a structurally valid, lowercase npm scope placeholder", () => {
       expect(PACKAGE_SCOPE).toMatch(/^@[a-z0-9-]+$/);
     });
+  });
+});
+
+describe("assets/context npm assembly", () => {
+  it("mergeShippedAssetFiles puts an assets/context/*.md file into the assembled plan's staging map", () => {
+    const shipped = mergeShippedAssetFiles({
+      installSetAssetFiles: ["assets/hooks/session-start-resume.mjs"],
+      retiredFromInstallPaths: ["governance/corpus-workflow.md"],
+      binaryReadAssetPaths: ["context/zz-probe.md"],
+    });
+    expect(shipped).toContain("assets/context/zz-probe.md");
+    expect(shipped).toContain("assets/governance/corpus-workflow.md");
+    expect(shipped).toContain("assets/hooks/session-start-resume.mjs");
+
+    const result = buildPublishPlan({ ...DARWIN_ARM64_INPUT, assetFiles: shipped });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const { stagingRoot, stagingFiles } = result.value;
+    expect(stagingFiles[`${stagingRoot}assets/context/zz-probe.md`]).toBe("assets/context/zz-probe.md");
+  });
+
+  it("deduplicates and is order-deterministic; empty binary-read list adds nothing", () => {
+    const a = mergeShippedAssetFiles({
+      installSetAssetFiles: ["assets/skills/a.md", "assets/context/x.md"],
+      retiredFromInstallPaths: [],
+      binaryReadAssetPaths: ["context/x.md"],
+    });
+    expect(a.filter((p) => p === "assets/context/x.md")).toHaveLength(1);
+    const none = mergeShippedAssetFiles({
+      installSetAssetFiles: ["assets/skills/a.md"],
+      retiredFromInstallPaths: [],
+      binaryReadAssetPaths: [],
+    });
+    expect(none).toEqual(["assets/skills/a.md"]);
   });
 });

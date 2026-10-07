@@ -71,10 +71,11 @@ import type { Result, LoreError } from "@lore/core";
 import { resolvePlatform } from "./platform-map.js";
 import {
   buildPublishPlan,
+  mergeShippedAssetFiles,
   README_SOURCE_PATH,
   type PublishPlan,
 } from "../packages/lore/src/distribution/assemble.js";
-import { RealAssetSource, RETIRED_FROM_INSTALL_PATHS } from "../packages/lore/src/adapters/real-asset-source.js";
+import { RealAssetSource, RETIRED_FROM_INSTALL_PATHS, listBinaryReadAssetPaths } from "../packages/lore/src/adapters/real-asset-source.js";
 import { formatError } from "../packages/lore/src/adapters/cli/utils.js";
 
 /** Repo root, resolved from this file's own location (works whether invoked via `bun run` or a dynamic test import). */
@@ -415,7 +416,8 @@ function stageFilesToDisk(plan: PublishPlan): Result<void, LoreError> {
 
 /**
  * Stage (b): computes the `PublishPlan` (current platform, workspace
- * version, the SAME `assets/{skills,agents,hooks,governance}` tree
+ * version, the SAME `assets/{skills,agents,hooks,governance}` tree (plus the
+ * binary-read `assets/context/**`, via `mergeShippedAssetFiles`)
  * `RealAssetSource` walks for `lore setup` — reused here rather than
  * re-implemented, so "which assets ship" has exactly one SSOT) and
  * physically stages it to `dist-npm/<pkg>-<target>/`.
@@ -458,14 +460,20 @@ async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
   // added back here, explicitly, so "which files are installed" and "which
   // files ship inside the package" stay two independently correct answers
   // over the SAME assets/ tree.
-  for (const retiredPath of RETIRED_FROM_INSTALL_PATHS) {
-    assetFiles.push(`assets/${retiredPath}`);
-  }
+  // The binary-read set is wider than the two governance files: `assets/context/**`
+  // fragments (kind `context`, spec-context-fragments-config-driven-layered-rule-
+  // injection D9) are read off the binary's own assets root too and are never in
+  // the install set. `mergeShippedAssetFiles` (assemble.ts) is the single union.
+  const shippedAssetFiles = mergeShippedAssetFiles({
+    installSetAssetFiles: assetFiles,
+    retiredFromInstallPaths: RETIRED_FROM_INSTALL_PATHS,
+    binaryReadAssetPaths: listBinaryReadAssetPaths(join(REPO_ROOT, "assets")),
+  });
 
   const planResult = buildPublishPlan({
     version: versionResult.value,
     platform,
-    assetFiles,
+    assetFiles: shippedAssetFiles,
     binaryPath: "dist/lore",
   });
   if (!planResult.ok) return planResult;

@@ -15,8 +15,8 @@
  * for the kind -> ownership derivation rules.
  */
 
-/** One of the five vendored top-level `assets/` directories. */
-export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project";
+/** One of the six vendored top-level `assets/` directories. */
+export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context";
 
 /** Update-time handling region (SPEC-076 §C1) — see the generator's doc comment. */
 export type AssetOwnership = "managed" | "merged" | "user_once";
