@@ -1,0 +1,16 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What This Is
+
+<!-- One short paragraph: what this project is and who uses it. -->
+
+## Commands
+
+<!-- Build, test, lint and dev commands, verbatim from the project config. -->
+
+## Architecture
+
+<!-- Design-level overview: layers, data flow, key decisions and why. Not a file listing. -->
+

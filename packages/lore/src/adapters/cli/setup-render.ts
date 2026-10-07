@@ -57,7 +57,7 @@
  */
 
 import type { InstallPlan, PlannedSkip, PlannedWrite, SetupEntry, SetupEntryKind } from "@lore/core";
-import type { ProjectScaffoldReport } from "../../flows/setup-project-flow.js";
+import type { AdoptionStepResult, ProjectScaffoldReport } from "../../flows/setup-project-flow.js";
 import type { SetupReceipt } from "../../service/setup-service.js";
 
 /** Context every renderer in this module needs beyond the receipt/plan itself. */
@@ -338,6 +338,25 @@ function renderLoudBackupLines(backups: readonly string[]): string[] {
 }
 
 /**
+ * Renders the adoption row plus — under `warn` only — the migration checklist
+ * (one `- [ ]` line per would-be deterministic finding, spec D4).
+ *
+ * @param adoption - The adoption step outcome from `scaffoldProject`.
+ * @returns Report lines; the checklist follows the status line when non-empty.
+ */
+function renderAdoptionLines(adoption: AdoptionStepResult): string[] {
+  const detail = adoption.detail === undefined ? "" : ` (${adoption.detail})`;
+  // mode is absent exactly when nothing was judged (skipped / failed before judgement) — say so, never print "undefined".
+  const lines = [`Adoption: ${adoption.status} — ${adoption.mode ?? "not judged"}${detail}`];
+  if (adoption.checklist.length > 0) {
+    lines.push("  CLAUDE.md does not yet satisfy the section structure; adoption set to warn. Migration checklist:");
+    for (const item of adoption.checklist) lines.push(`    - [ ] ${item}`);
+    lines.push("  Fix these, then set context.memory_files.adoption: enforce in .lore/config.yaml.");
+  }
+  return lines;
+}
+
+/**
  * Renders `flows/setup-project-flow.ts::scaffoldProject()`'s outcome
  * (extended with the D1/D6 fields, see {@link ProjectScaffoldReceipt}) for
  * terminal output.
@@ -382,6 +401,7 @@ export function renderProjectScaffoldReceipt(receipt: ProjectScaffoldReceipt, ct
   );
   lines.push(`.gitignore: ${receipt.gitignore.status}${receipt.gitignore.detail ? ` (${receipt.gitignore.detail})` : ""}`);
   lines.push(`CLAUDE.md: ${receipt.claude_md.status}${receipt.claude_md.detail ? ` (${receipt.claude_md.detail})` : ""}`);
+  if (receipt.adoption !== undefined) lines.push(...renderAdoptionLines(receipt.adoption));
   lines.push(
     `Git hooksPath: ${receipt.git_hooks_path.status} (prior: ${receipt.git_hooks_path.prior_value ?? "unset"})` +
       (receipt.git_hooks_path.detail ? ` — ${receipt.git_hooks_path.detail}` : ""),

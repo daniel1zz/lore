@@ -32,16 +32,18 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { err, ok, setupManifestSchema } from "@lore/core";
-import type { LoreError, Result } from "@lore/core";
+import { err, ok, resolveMemoryFileBudgets, setupManifestSchema } from "@lore/core";
+import type { LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import {
   scaffoldProject,
+  type AdoptionWriteOutcome,
   type ExecPort,
   type InitCorpus,
   type ProjectAssetSource,
   type ProjectFsPort,
   type ProjectScaffoldFlowDeps,
 } from "../../../src/flows/setup-project-flow.js";
+import { renderProjectScaffoldReceipt } from "../../../src/adapters/cli/setup-render.js";
 import { spliceManagedSections, type ManagedSection } from "../../../src/service/context-projection.js";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -72,6 +74,8 @@ const CLAUDE_MD_TEMPLATE = `${CLAUDE_MD_MARKER_START}\n${CLAUDE_MD_BODY}${CLAUDE
 // module-private `CLAUDE_MD_SECTION_ID` constant — not imported, same
 // convention as every other fixture constant in this file).
 const CLAUDE_MD_SECTION_ID = "governance";
+// Fresh-install-only skeleton (`assets/project/CLAUDE.md.skeleton`): the managed block is spliced AFTER it.
+const CLAUDE_MD_SKELETON = "# CLAUDE.md\n\n## What This Is\n\n## Commands\n\n## Architecture\n\n";
 
 /** Splices `sections` into `existing` via the REAL shared splice function, failing the test loudly (not silently) on an unexpected splice error — used to derive the exact fingerprinted bytes `runClaudeMdStep` itself would produce, rather than hand-typing them (which would silently drift from the real hash/format the moment either changes). */
 function spliceOrThrow(existing: string, sections: ManagedSection[]): string {
@@ -83,7 +87,9 @@ function spliceOrThrow(existing: string, sections: ManagedSection[]): string {
 const CLAUDE_MD_SECTIONS: ManagedSection[] = [{ id: CLAUDE_MD_SECTION_ID, body: CLAUDE_MD_BODY }];
 
 /** What `runClaudeMdStep` writes on a from-scratch install (`existing === ""`) — freshly fingerprinted. */
-const EXPECTED_FRESH_CLAUDE_MD = spliceOrThrow("", CLAUDE_MD_SECTIONS);
+const EXPECTED_FRESH_CLAUDE_MD = spliceOrThrow(CLAUDE_MD_SKELETON, CLAUDE_MD_SECTIONS);
+/** The zone alone — what lands AFTER an existing user-authored file's bytes (no skeleton). */
+const EXPECTED_APPENDED_ZONE = spliceOrThrow("", CLAUDE_MD_SECTIONS);
 /** What `runClaudeMdStep` writes when adopting a legacy (fingerprint-less) marker zone byte-identical to `CLAUDE_MD_TEMPLATE`. */
 const EXPECTED_ADOPTED_CLAUDE_MD = spliceOrThrow(CLAUDE_MD_TEMPLATE, CLAUDE_MD_SECTIONS);
 
@@ -171,6 +177,7 @@ function makeAssets(overrides: Partial<Record<string, string>> = {}): ProjectAss
       if (name === "lore.tree.yaml.template") return ok(TREE_YAML_CONTENT);
       if (name === "gitignore.template") return ok(GITIGNORE_BLOCK);
       if (name === "CLAUDE.md.template") return ok(CLAUDE_MD_TEMPLATE);
+      if (name === "CLAUDE.md.skeleton") return ok(CLAUDE_MD_SKELETON);
       return err({ code: "VALIDATION_ERROR", field: "name", message: `unknown project asset: ${name}`, value: name });
     },
   };
@@ -298,7 +305,9 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
     // appended after it, freshly fingerprinted (the appended zone is always
     // brand new — there's no legacy zone to adopt when none existed at all).
     const afterFirst = fs.readFile(CLAUDE_MD_PATH) as string;
-    expect(afterFirst).toBe(`${original}${EXPECTED_FRESH_CLAUDE_MD}`);
+    // The skeleton is fresh-install-only: an existing file gets the zone alone, never skeleton sections.
+    expect(afterFirst).toBe(`${original}${EXPECTED_APPENDED_ZONE}`);
+    expect(afterFirst).not.toContain("## What This Is");
 
     // Exactly one backup, at the deterministic destination path, byte-identical to the pre-run file.
     const expectedBackupPath = `.lore/.lore-backups/${FIXED_NOW}/CLAUDE.md`;
@@ -333,5 +342,172 @@ describe("setup-project-flow — CLAUDE.md marker-section rewrite (SPEC-076 D7) 
     const entry = parsed.data.entries.find((e) => e.path === "CLAUDE.md");
     expect(entry).toBeDefined();
     expect(entry?.kind).toBe("governance");
+  });
+});
+
+// ─── ADOPTION (spec-claude-md-root-section-structure-check-and-adoption-mode D4) ─────────
+
+const REAL_SHAPE_BODY = "## Module Index\n\nmodules.\n\n## Finding Live Project State\n\nlore search.\n";
+const REAL_SHAPE_TEMPLATE = `${CLAUDE_MD_MARKER_START}\n${REAL_SHAPE_BODY}${CLAUDE_MD_MARKER_END}\n`;
+const REAL_SHAPE_SKELETON =
+  "# CLAUDE.md\n\n## What This Is\n\nA service.\n\n## Commands\n\n- make test\n\n## Architecture\n\nLayers.\n\n";
+
+type AdoptionCall = { repoDir: string; mode: "enforce" | "warn" };
+
+function makeAdoptionDeps(
+  fs: InMemoryProjectFs,
+  calls: AdoptionCall[],
+  outcome: Result<AdoptionWriteOutcome, LoreError> = ok({ status: "written" }),
+  budgets: Result<MemoryFileBudgets, LoreError> = ok(resolveMemoryFileBudgets(undefined)),
+): ProjectScaffoldFlowDeps {
+  return {
+    ...makeDeps(fs, { "CLAUDE.md.template": REAL_SHAPE_TEMPLATE, "CLAUDE.md.skeleton": REAL_SHAPE_SKELETON }),
+    resolveMemoryFileBudgets: () => budgets,
+    writeAdoptionMode: (repoDir, mode) => {
+      calls.push({ repoDir, mode });
+      return outcome;
+    },
+  };
+}
+
+describe("setup-project-flow — adoption step (D4) — judged on POST-SPLICE content", () => {
+  it("HAPPY: fresh install = skeleton + managed block -> enforce, empty checklist", async () => {
+    const fs = new InMemoryProjectFs();
+    const calls: AdoptionCall[] = [];
+    const result = await scaffoldProject(makeAdoptionDeps(fs, calls), { repoDir: REPO_DIR }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(calls).toEqual([{ repoDir: REPO_DIR, mode: "enforce" }]);
+    expect(result.value.adoption).toEqual({ status: "written", mode: "enforce", checklist: [] });
+    const content = fs.readFile(CLAUDE_MD_PATH) ?? "";
+    expect(content.indexOf("## What This Is")).toBeLessThan(content.indexOf("## Module Index"));
+  });
+
+  it("NEGATIVE: existing file missing the skeleton sections -> warn + one checklist line per missing section; skeleton NOT injected", async () => {
+    const fs = new InMemoryProjectFs();
+    fs.files.set(CLAUDE_MD_PATH, { content: "# Mine\n\n## Notes\n\nprose\n", mode: 0o644 });
+    const calls: AdoptionCall[] = [];
+    const result = await scaffoldProject(makeAdoptionDeps(fs, calls), { repoDir: REPO_DIR }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(calls.map((c) => c.mode)).toEqual(["warn"]);
+    const checklist = result.value.adoption?.checklist ?? [];
+    expect(checklist.filter((l) => l.includes("is missing")).map((l) => /"## ([^"]+)"/.exec(l)?.[1])).toEqual([
+      "What This Is",
+      "Commands",
+      "Architecture",
+    ]);
+    expect(fs.readFile(CLAUDE_MD_PATH)).not.toContain("A service.");
+  });
+
+  it("BOUNDARY: existing file with all five sections + block duplicates two -> warn naming the duplicates", async () => {
+    const fs = new InMemoryProjectFs();
+    fs.files.set(CLAUDE_MD_PATH, { content: `${REAL_SHAPE_SKELETON}${REAL_SHAPE_BODY}`, mode: 0o644 });
+    const calls: AdoptionCall[] = [];
+    const result = await scaffoldProject(makeAdoptionDeps(fs, calls), { repoDir: REPO_DIR }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(calls.map((c) => c.mode)).toEqual(["warn"]);
+    expect((result.value.adoption?.checklist ?? []).some((l) => l.includes("appears 2 times"))).toBe(true);
+  });
+
+  it("STATE: port reports kept -> adoption row is kept with the existing value and no checklist", async () => {
+    const fs = new InMemoryProjectFs();
+    fs.files.set(CLAUDE_MD_PATH, { content: "# Mine\n", mode: 0o644 });
+    const result = await scaffoldProject(
+      makeAdoptionDeps(fs, [], ok({ status: "kept", existing: "enforce" })),
+      { repoDir: REPO_DIR },
+      fixedNow,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.adoption).toEqual({ status: "kept", mode: "warn", detail: "enforce", checklist: [] });
+  });
+
+  it("ERROR: port failure is surfaced as adoption.status failed (never swallowed)", async () => {
+    const fs = new InMemoryProjectFs();
+    const failure: LoreError = { code: "STORE_ERROR", message: "config unreadable" };
+    const result = await scaffoldProject(makeAdoptionDeps(fs, [], err(failure)), { repoDir: REPO_DIR }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.adoption?.status).toBe("failed");
+    expect(result.value.adoption?.detail).toContain("config unreadable");
+  });
+
+  it("DEFECT-FIX: the repo's REAL (tighter) budgets are used — a file over a custom max_lines but under the default 300 -> warn + capacity finding", async () => {
+    const fs = new InMemoryProjectFs();
+    const tighter: MemoryFileBudgets = {
+      ...resolveMemoryFileBudgets(undefined),
+      root: { max_lines: 10, max_bytes: 30720 },
+    };
+    const calls: AdoptionCall[] = [];
+    const result = await scaffoldProject(
+      makeAdoptionDeps(fs, calls, ok({ status: "written" }), ok(tighter)),
+      { repoDir: REPO_DIR },
+      fixedNow,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Fresh install is ~25 lines: over 10, far under 300.
+    expect(calls.map((c) => c.mode)).toEqual(["warn"]);
+    expect((result.value.adoption?.checklist ?? []).some((l) => l.includes("ceiling"))).toBe(true);
+  });
+
+  it("ERROR: budgets cannot be resolved -> adoption failed (loud), port never called", async () => {
+    const fs = new InMemoryProjectFs();
+    const calls: AdoptionCall[] = [];
+    const result = await scaffoldProject(
+      makeAdoptionDeps(fs, calls, ok({ status: "written" }), err({ code: "STORE_ERROR", message: "config broken" })),
+      { repoDir: REPO_DIR },
+      fixedNow,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.adoption?.status).toBe("failed");
+    expect(result.value.adoption?.detail).toContain("config broken");
+    expect(calls).toEqual([]);
+  });
+
+  it("NO-SILENT-FALLBACK: a missing adoption port is a LOUD skipped row naming the port, never an absent row", async () => {
+    const fs = new InMemoryProjectFs();
+    const bare = await scaffoldProject(makeDeps(fs), { repoDir: REPO_DIR }, fixedNow);
+    expect(bare.ok).toBe(true);
+    if (!bare.ok) return;
+    expect(bare.value.adoption?.status).toBe("skipped");
+    expect(bare.value.adoption?.mode).toBeUndefined();
+    expect(bare.value.adoption?.detail).toContain("writeAdoptionMode");
+    expect(bare.value.adoption?.detail).toContain("resolveMemoryFileBudgets");
+
+    const half = await scaffoldProject(
+      { ...makeDeps(new InMemoryProjectFs()), writeAdoptionMode: () => ok({ status: "written" }) },
+      { repoDir: REPO_DIR },
+      fixedNow,
+    );
+    expect(half.ok && half.value.adoption?.status).toBe("skipped");
+    expect(half.ok && half.value.adoption?.detail).toContain("resolveMemoryFileBudgets");
+
+    // The skip is RENDERED (visible to the operator), not just carried in the report.
+    const text = renderProjectScaffoldReceipt(
+      { ...bare.value, manifestPath: `${REPO_DIR}/.lore/.lore-project-manifest.json` },
+      { targetDir: REPO_DIR, binPath: "/usr/local/bin/lore" },
+    );
+    expect(text).toContain("Adoption: skipped — not judged");
+    expect(text).toContain("deps.writeAdoptionMode");
+  });
+
+  it("REGRESSION: unreadable skeleton on a fresh install -> claude_md failed, port never called", async () => {
+    const fs = new InMemoryProjectFs();
+
+    const fs2 = new InMemoryProjectFs();
+    const calls: AdoptionCall[] = [];
+    const deps = {
+      ...makeAdoptionDeps(fs2, calls),
+      assets: makeAssets({ "CLAUDE.md.template": REAL_SHAPE_TEMPLATE, "CLAUDE.md.skeleton": undefined }),
+    };
+    const result = await scaffoldProject(deps, { repoDir: REPO_DIR }, fixedNow);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.claude_md.status).toBe("failed");
+    expect(calls).toEqual([]);
   });
 });

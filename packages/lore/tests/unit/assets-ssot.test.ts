@@ -417,6 +417,8 @@ const DECLARED_FILES = [
   // project scaffold repo-root .gitignore + CLAUDE.md stub templates (SPEC-060 D3/D4)
   "project/gitignore.template",
   "project/CLAUDE.md.template",
+  // fresh-install-only root skeleton (What This Is / Commands / Architecture), read by setup-project-flow
+  "project/CLAUDE.md.skeleton",
   // governance
   "governance/corpus-workflow.md",
   "governance/seat-briefing.md",
