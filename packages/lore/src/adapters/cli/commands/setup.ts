@@ -573,8 +573,8 @@ function failWith(error: LoreError): void {
 }
 
 /**
- * Project half of `lore setup --project`: the same flow as `lore context refresh` (project scope)
- * so the lore rules files (`.claude/rules/lore-*.md`, D15) land, then the project-layer language projection. Runs AFTER the scaffold created
+ * Project half of `lore setup --project`: `runContextRefresh` with `rulesOnly` (never touches
+ * CLAUDE.md) so the lore rules files (`.claude/rules/lore-*.md`, D15) land, then the project-layer language projection. Runs AFTER the scaffold created
  * CLAUDE.md and `.lore/config.yaml`.
  */
 async function runProjectContextProjection(opts: {
@@ -601,7 +601,9 @@ async function runProjectContextProjection(opts: {
       projectConfig: toContextLayer(projectConfig.value),
     },
     "",
-    { scope: "project" },
+    // reason: setup must not re-splice the scaffolded CLAUDE.md (its facts-Z1 lacks the root H2s the
+    // section-structure check requires, so admission would refuse) — rules files only.
+    { scope: "project", rulesOnly: true },
   );
   if (!refreshed.ok) return refreshed;
 

@@ -180,6 +180,12 @@ export type ContextRefreshScope = "project" | "user";
 export interface ContextRefreshOptions {
   /** Defaults to "project". */
   scope?: ContextRefreshScope;
+  /**
+   * When `true` (project scope), write/prune ONLY the lore rules files and never read, splice or
+   * write CLAUDE.md — used by `lore setup --project`, which must not re-splice the scaffolded
+   * template. Needs the fragment deps (else VALIDATION_ERROR).
+   */
+  rulesOnly?: boolean;
 }
 
 /** The dependency bundle every context-flow verb takes — see module header's "no config/store" invariant. */
@@ -538,8 +544,12 @@ async function planRulesFiles(
  *   project `CLAUDE.md` exists yet (naming `lore context init`), when scope
  *   "user" lacks fragment deps, when discovery/overrides/facts/splice fail
  *   loud, when a rules file breaches its budget, or when the spliced candidate
- *   would breach the root claude-md ceiling (AC-CTX-8, project scope only).
- *   `err(CONFLICT)` when any target changed between read and write. Every error performs NO write.
+ *   would breach the root claude-md ceiling (AC-CTX-8, project scope only). ⛔ That ceiling
+ *   refusal is the ONE error that does NOT suppress the rules writes (D16, AC-CF-22): CLAUDE.md
+ *   stays unchanged, the lore rules files are written, and the error message names the CLAUDE.md
+ *   refusal and lists the rules files written (see the `claudeMdRefusalMessage` branch below).
+ *   `err(CONFLICT)` when any target changed between read and write. Every other error performs NO
+ *   write; a CAS conflict on any rules file suppresses ALL rules writes.
  * @example
  * const result = await runContextRefresh({ fs: realFs }, "", { scope: "project" });
  * // result.value.sections // => [{ id: "module-index", state: "unchanged" }, ...]
@@ -556,6 +566,15 @@ export async function runContextRefresh(
   if (!fragmentDepsResult.ok) return fragmentDepsResult;
   const fragmentDeps = fragmentDepsResult.value;
 
+  const rulesOnly = opts.rulesOnly === true;
+  if (rulesOnly && fragmentDeps === null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "rulesOnly",
+      message: "rulesOnly needs the fragment deps (assetsRoot, home, xdgConfigHome, globalConfig, projectConfig).",
+      value: true,
+    });
+  }
   if (scope === "user" && fragmentDeps === null) {
     return err({
       code: "VALIDATION_ERROR",
@@ -571,7 +590,8 @@ export async function runContextRefresh(
   let claudeMdWrite: { content: string; readBytes: string } | null = null;
   let sectionOutcomes: SpliceResult["perSection"] = [];
   let downgraded: AdvisoryFinding[] = [];
-  if (scope === "project") {
+  let claudeMdRefusalMessage: string | null = null;
+  if (scope === "project" && !rulesOnly) {
     const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
     if (existing === null) {
       return err({
@@ -603,17 +623,15 @@ export async function runContextRefresh(
       { fileExists: () => true, docExists: () => true },
     );
     if (findings.length > 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "path",
-        message:
-          `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
-          findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; "),
-        value: CLAUDE_MD_PATH,
-      });
+      // reason: D16 — the CLAUDE.md refusal must NOT short-circuit the rules-file write set (it is
+      // independent of the Z1 splice); it is held here and returned AFTER the rules files are written.
+      claudeMdRefusalMessage =
+        `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
+        findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; ");
+    } else {
+      downgraded = advisory.filter((finding) => finding.kind === "downgraded");
+      claudeMdWrite = { content: finalContent, readBytes: existing };
     }
-    downgraded = advisory.filter((finding) => finding.kind === "downgraded");
-    claudeMdWrite = { content: finalContent, readBytes: existing };
   }
 
   // ── lore rules files plan ──
@@ -646,13 +664,27 @@ export async function runContextRefresh(
   }
 
   if (claudeMdWrite !== null) await deps.fs.writeFile(CLAUDE_MD_PATH, claudeMdWrite.content);
+  const rulesWritten: string[] = [];
   for (const action of actions) {
-    if (action.kind === "write") await deps.fs.writeFile(action.outcome.path, action.content);
-    else if (action.kind === "delete") await deps.fs.deleteFile?.(action.outcome.path);
+    if (action.kind === "write") {
+      await deps.fs.writeFile(action.outcome.path, action.content);
+      rulesWritten.push(action.outcome.path);
+    } else if (action.kind === "delete") await deps.fs.deleteFile?.(action.outcome.path);
+  }
+
+  if (claudeMdRefusalMessage !== null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "path",
+      message:
+        `${claudeMdRefusalMessage} — CLAUDE.md left unchanged; lore rules files written independently (D16): ` +
+        (rulesWritten.length > 0 ? rulesWritten.join(", ") : "none changed"),
+      value: CLAUDE_MD_PATH,
+    });
   }
 
   return ok({
-    path: scope === "user" && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
+    path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
     sections: sectionOutcomes,
     rules: actions.map((action) => action.outcome),
     downgraded,
