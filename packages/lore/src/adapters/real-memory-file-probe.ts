@@ -27,6 +27,12 @@
  *   wholesale any more — narrowed, not removed, so `.claude/rules/` stays
  *   reachable; only the ONE `worktrees` subdirectory of `.claude` is skipped,
  *   never a `worktrees` directory found anywhere else in the tree.
+ * @invariant AC-STR-10: the `role: "root"`/`"module"` walk never descends into
+ *   a NON-ROOT directory that contains an entry named `.git` (a directory, as
+ *   in a nested clone, OR a gitfile, as in a submodule) — that directory is
+ *   another repository's root, so its CLAUDE.md files are not modules of THIS
+ *   repo (issue #24). See `isNestedRepoRoot`; the walk's own `repoRoot` is
+ *   exempt, so the host repo's own `.git` never stops it.
  * @invariant The repo-root-level file(s) (`<repoRoot>/<filename>` for each
  *   entry in `filenames`) are ALWAYS classified `role: "root"`; every match
  *   found at any deeper level (outside `.claude/worktrees`) is `role:
@@ -44,7 +50,7 @@
  *   spec-claude-md-governance-content-dimension-checks-wire-the, N7/N8/AC-RULES-1.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import type { MemoryFileRecord } from "../service/claude-md-findings.js";
 
@@ -68,6 +74,17 @@ const EXCLUDED_DIR_NAMES: ReadonlySet<string> = new Set([
  * `claude-md-rules-discovery.test.ts`'s module header).
  */
 const EXCLUDED_RELATIVE_DIRS: ReadonlySet<string> = new Set([".claude/worktrees"]);
+
+/**
+ * True when `dir` has an entry named `.git` (directory OR gitfile) — i.e. it
+ * is the root of another repository. Callers MUST NOT pass the host repo root
+ * (see `walkForModuleMatches`): only non-root directories are tested.
+ * `existsSync` returns false on any error, matching this probe's never-throw
+ * contract.
+ */
+function isNestedRepoRoot(dir: string): boolean {
+  return existsSync(join(dir, ".git"));
+}
 
 /**
  * Reads `path` as UTF-8 text, or `undefined` if it doesn't exist / isn't a
@@ -151,6 +168,7 @@ function walkForModuleMatches(
       const childDir = join(dir, entry.name);
       const relativeChildDir = relative(repoRoot, childDir).split(sep).join("/");
       if (EXCLUDED_RELATIVE_DIRS.has(relativeChildDir)) continue;
+      if (isNestedRepoRoot(childDir)) continue; // AC-STR-10: another repo's root
       walkForModuleMatches(repoRoot, childDir, filenameSet, records);
       continue;
     }
