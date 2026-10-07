@@ -176,8 +176,8 @@ section) block, or only warn. It takes two values:
 - **enforce** — findings are deterministic: `lore status --check-claude-md`
   exits non-zero and the pre-push hook refuses the push.
 - **warn** — the same findings are downgraded to advisory: the exit code is
-  unaffected and each is printed as a WARN line marked
-  `[downgraded by adoption=warn]`.
+  unaffected, each is listed as `[downgraded:<kind>]`, and every warn run
+  prints a summary line starting `WARN adoption=warn`.
 
 An absent value resolves to **warn**, so an existing repo is never broken by
 upgrading. `lore setup` writes the value explicitly, so a fresh install states

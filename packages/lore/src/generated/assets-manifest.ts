@@ -45,12 +45,12 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "7f240428745fcbac9aa1d3260971f7b5d691d86975d0570e447724ab8355d9ff",
+  tree_digest: "34f9f278d8c1c0fb9c7e51a7b7a34226266da10c612162079459306ad5668fd6",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "a1ea1208820a942acba3e80949f97d684e552c073ea2ccbc8980e8bfef8c9da5" },
   { path: "agents/lore-reviewer.md", kind: "agent", ownership: "managed", sha256: "c3d3cfe853c49c38afca62d19cef4205a14374e62f6c8e2286f415fab3c822ee" },
-  { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "63ed1e3d2928fb5ee697210c71079d598dbfa1e9fd16cefa987f2f0683669cbd" },
+  { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "0f1dd1c23a9d03f3c3972870ef9bafc24b48d365a9e80bbdab8169a56ca58807" },
   { path: "governance/corpus-workflow.md", kind: "governance", ownership: "managed", sha256: "c7abf7ae2509fd7537509723e07f74899f5c689c3c6e07b249cb2a4201643a85" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "f9cb47c9bb7ec3af1644637e600156f8cb59f4ed9afbe538caa32a22f4107358" },
   { path: "hooks/claude-md-guard.sh", kind: "hook", ownership: "managed", sha256: "18286782787eaeb0e4b4d5bd4670fee515ac99886cf83d38cafaa53cf047c964" },
@@ -77,7 +77,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "project/gitignore.template", kind: "project", ownership: "merged", sha256: "ae5fc002a59c4c940a269a293d4e5070eda567a5ef55f7e890ad02af18968d74" },
   { path: "project/lore-config-template.yaml", kind: "project", ownership: "user_once", sha256: "10b2ad0ffcced2590c7e1639cd95a0b3590d400bd45d30be6d7c59beb8946d23" },
   { path: "project/lore.tree.yaml.template", kind: "project", ownership: "user_once", sha256: "74d313c717ea142572715ac4846df8e7e24bdfb89e1147b5c4f8700ab49e3f4d" },
-  { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "8fbe782dae7d8f90666725b959244b58e8bd51f038c4f1b8a26dd42355066ef9" },
+  { path: "project/pre-push", kind: "project", ownership: "managed", sha256: "670cc6b549e45c8fb5e74312f84a1135d083ff10b3d750d4af16dcac8f4f1920" },
   { path: "skills/lore-ai-native-coding/SKILL.md", kind: "skill", ownership: "managed", sha256: "08d4a8182e382d56c95d78d2f6a7b2526ef908c62fb398e1ef82d97cf674d3eb" },
   { path: "skills/lore-ai-native-coding/references/ai-anti-patterns.md", kind: "skill", ownership: "managed", sha256: "91edef16b885924ba3639d7b918a68c14160cf2f4ba01e27eac2492ba6b39743" },
   { path: "skills/lore-ai-native-coding/references/backend-layering.md", kind: "skill", ownership: "managed", sha256: "601e24d28845f8c08996e75bb4c64ee5b4ed67f844249d08336c1ee91328c150" },
