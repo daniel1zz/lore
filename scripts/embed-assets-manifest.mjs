@@ -101,6 +101,7 @@ const DEFAULT_OWNERSHIP_BY_KIND = {
  */
 export const OWNERSHIP_OVERRIDES = {
   "project/CLAUDE.md.template": "merged",
+  "project/CLAUDE.md.skeleton": "user_once",
   "project/gitignore.template": "merged",
   "project/lore-config-template.yaml": "user_once",
   "project/lore.tree.yaml.template": "user_once",
