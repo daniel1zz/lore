@@ -186,6 +186,10 @@ import {
   // what a `"runner"` label means — the divergence hazard this file's own
   // `rejectBlankClaimWorktree`/`computeArchiveWalk` imports already answer.
   promoteCapturedAttestation,
+  // reason: baseline slice 1 §C5 — `head_sha` / `worktree_dirty` are runner-measured;
+  // the phase evidence path adopts the SAME guard as the task path (imported, never
+  // mirrored) so the two doc types cannot disagree about what a caller may declare.
+  rejectCallerGitStamp,
   // reason: task-phaseworkflowservice-claim-captures-no-session-id-so-every
   // §Required fix 1/2 — the session-instance capture is SHARED with
   // `TaskWorkflowService.claim`, never mirrored here. `resolveClaimSessionId`
@@ -568,6 +572,11 @@ export class PhaseWorkflowService {
         value: (entry as Record<string, unknown>)["attestation"],
       });
     }
+
+    // Baseline slice 1 §C5 parity — a caller-supplied `head_sha` / `worktree_dirty`
+    // (top-level or inside `capture_attestation`) is refused, never stripped.
+    const gitStampRefusal = rejectCallerGitStamp(entry);
+    if (gitStampRefusal !== undefined) return err(gitStampRefusal);
 
     // reason: SPEC-061 §Scope D2 parity — mirrors TaskWorkflowService._addEvidenceImpl's
     // identical guard for the exact same reason the attestation check directly above
