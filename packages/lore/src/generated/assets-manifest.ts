@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "cbd6a69b76a441cce86fa771d8be85bbea7e5e34065ec0367060a9f9a5f9648d",
+  tree_digest: "a3a0e139880b05e9cf17fe43abdcac20e6155dcf9b288c1c971e47c147c68ce0",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "a1ea1208820a942acba3e80949f97d684e552c073ea2ccbc8980e8bfef8c9da5" },
@@ -71,7 +71,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "3bc808352b75a7182828c61ce7f1ca89e1c3d7c16d090d808968864689b2a417" },
   { path: "hooks/stop-doc-sync.mjs", kind: "hook", ownership: "managed", sha256: "c7ca05c553446b1174839832989014741e8af9bd1c9c5f89aedb4b19a6836061" },
   { path: "hooks/stop-handoff-coverage.mjs", kind: "hook", ownership: "managed", sha256: "d2751888f5fe102e919092ff443bd73536e6abbcb846e3425ad3a43e4da6ef47" },
-  { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "03b512da45147aab2bcac2bb441b7e066b22a4e2e2df781a0b625c7963176587" },
+  { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "383beb756e74a7bcaadb884c839bb22d0a5f1c467ba4641e2ab0411eb2eb96be" },
   { path: "hooks/subagent-stop-commit-guard.mjs", kind: "hook", ownership: "managed", sha256: "19de55e36e53490b8386acf19de9efef4c89f96a8d6d7ac1160b60156bd201d8" },
   { path: "project/CLAUDE.md.skeleton", kind: "project", ownership: "user_once", sha256: "f5dc3ff590bf1791ad5372220de491c7973216d62153452eee022b9518814fc4" },
   { path: "project/CLAUDE.md.template", kind: "project", ownership: "merged", sha256: "3cb0b1bd1feea7eadc17345ad7826e6ddb9129168b248b884ecad5328cf905ba" },
