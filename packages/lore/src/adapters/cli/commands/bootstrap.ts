@@ -68,6 +68,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, relativeTime, resolveActor } from "../utils.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { buildListSpecs, countArmedSpecs } from "../../../flows/drift-flow.js";
+import { computeMemoryFileHealth, formatMemoryFileHealthLine } from "../memory-file-health.js";
 
 /**
  * `BootstrapReport` widened with the SPEC-044 §Design Decisions D14
@@ -180,6 +181,11 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
         : ""),
   );
 
+  // spec-claude-md-root-section-structure-check-and-adoption-mode D7 — one line, only
+  // when `memory_file_health` is present (warn mode, or enforce with findings).
+  const healthLine = formatMemoryFileHealthLine(report.memory_file_health);
+  if (healthLine !== undefined) lines.push(healthLine);
+
   return lines.join("\n");
 }
 
@@ -273,8 +279,14 @@ export default defineCommand({
         return;
       }
 
+      // spec-claude-md-root-section-structure-check-and-adoption-mode D8 — root
+      // memory-file health, computed HERE (SessionService is fs-free) from the SAME
+      // `config` loadLoreApp() already parsed. Absent (not null) when nothing to report.
+      const memoryFileHealth = computeMemoryFileHealth(process.cwd(), config);
+
       const reportWithStaleness: BootstrapReportWithStaleness = {
         ...result.value,
+        ...(memoryFileHealth === undefined ? {} : { memory_file_health: memoryFileHealth }),
         corpus: {
           ...result.value.corpus,
           open_stale_candidates: staleListResult.value.length,
