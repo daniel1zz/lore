@@ -36,6 +36,8 @@ import type {
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
   NeverReadDoc,
+  RuleLeafPatch,
+  RuleRegistryRow,
   SearchHit,
   StoreFilters,
   StoreInterface,
@@ -72,6 +74,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly docs = new Map<DocId, DocRecord>();
   private links: LinkRecord[] = [];
   private readonly versions: VersionRecord[] = [];
+  /** Mirrors `rule_registry` (migration-013); rows are never removed. */
+  private readonly ruleRegistry: RuleRegistryRow[] = [];
   /**
    * SPEC-079 G3 — every entry carries its hash-chain fields (`id`/
    * `prev_hash`/`entry_hash`) alongside the plain {@link AuditEntry} fields,
@@ -553,6 +557,146 @@ export class InMemoryStore implements StoreInterface {
     }
 
     return ok(undefined);
+  }
+
+  // ── Rule registry (migration-013, spec C2) ────────────────────────────────
+
+  /**
+   * CAS-update one leaf and append its `action: "update"` version row, with NO
+   * `await` — the whole allocate/move body must run in one synchronous turn so
+   * no other call can interleave between the `MAX(n)` read and the registry
+   * push (the in-memory analogue of the real stores' write transaction).
+   * Undo is the caller's job (it holds the snapshots).
+   */
+  private applyRuleLeafPatchSync(
+    patch: RuleLeafPatch,
+    actor: string,
+    nowIso: string,
+  ): Result<DocRecord, LoreError> {
+    const existing = this.docs.get(patch.id);
+    if (!existing || existing.deleted_at != null) {
+      return err({ code: "DOC_NOT_FOUND", id: patch.id });
+    }
+    if (existing.version !== patch.expectedVersion) {
+      return err({
+        code: "STALE_VERSION",
+        id: patch.id,
+        expected: patch.expectedVersion,
+        actual: existing.version,
+      });
+    }
+    const nextVersion = patch.expectedVersion + 1;
+    if (this.versions.some((v) => v.doc_id === patch.id && v.version === nextVersion)) {
+      // reason: mirrors the real stores' (doc_id, version) PRIMARY KEY.
+      return err({
+        code: "STORE_ERROR",
+        message: `Duplicate version row (${patch.id}, ${nextVersion})`,
+      });
+    }
+    const updated: DocRecord = {
+      ...existing,
+      extra: patch.extra,
+      version: nextVersion,
+      updated_at: nowIso,
+    };
+    this.docs.set(patch.id, updated);
+    this.versions.push({
+      doc_id: updated.id,
+      version: updated.version,
+      content: updated.content,
+      extra: updated.extra,
+      status: updated.status,
+      title: updated.title,
+      action: "update",
+      created_at: nowIso,
+      created_by: actor,
+      slug: updated.slug,
+    });
+    return ok(updated);
+  }
+
+  /** @see StoreInterface.allocateRuleAndUpdateLeaf */
+  async allocateRuleAndUpdateLeaf(
+    leafId: DocId,
+    expectedVersion: number,
+    buildExtra: (ruleId: string) => Record<string, unknown>,
+    actor: string,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    const nextN = this.ruleRegistry.reduce((max, row) => Math.max(max, row.n), 0) + 1;
+    const ruleId = `BR-${nextN}`;
+    const nowIso = new Date().toISOString();
+    const versionCount = this.versions.length;
+    const before = this.docs.get(leafId);
+    let leaf: Result<DocRecord, LoreError>;
+    try {
+      leaf = this.applyRuleLeafPatchSync(
+        { id: leafId, expectedVersion, extra: buildExtra(ruleId) },
+        actor,
+        nowIso,
+      );
+    } catch (e) {
+      this.restoreDocSnapshot(leafId, before);
+      this.versions.length = versionCount;
+      return err({ code: "STORE_ERROR", message: e instanceof Error ? e.message : "buildExtra threw" });
+    }
+    if (!leaf.ok) {
+      this.restoreDocSnapshot(leafId, before);
+      this.versions.length = versionCount;
+      return leaf;
+    }
+    this.ruleRegistry.push({
+      id: ruleId,
+      n: nextN,
+      leaf_doc_id: leafId,
+      allocated_at: nowIso,
+      allocated_by: actor,
+    });
+    return ok({ ruleId, doc: leaf.value });
+  }
+
+  /** @see StoreInterface.moveRule */
+  async moveRule(
+    ruleId: string,
+    fromLeaf: RuleLeafPatch,
+    toLeaf: RuleLeafPatch,
+    actor: string,
+  ): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
+    const registryRow = this.ruleRegistry.find((row) => row.id === ruleId);
+    if (!registryRow) return err({ code: "DOC_NOT_FOUND", id: ruleId });
+    if (registryRow.leaf_doc_id !== fromLeaf.id) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "fromLeaf.id",
+        message: `rule ${ruleId} is registered to leaf ${registryRow.leaf_doc_id}, not ${fromLeaf.id}`,
+        value: fromLeaf.id,
+      });
+    }
+    const nowIso = new Date().toISOString();
+    const versionCount = this.versions.length;
+    const beforeFrom = this.docs.get(fromLeaf.id);
+    const beforeTo = this.docs.get(toLeaf.id);
+    const undo = (): void => {
+      this.restoreDocSnapshot(fromLeaf.id, beforeFrom);
+      this.restoreDocSnapshot(toLeaf.id, beforeTo);
+      this.versions.length = versionCount;
+    };
+    const from = this.applyRuleLeafPatchSync(fromLeaf, actor, nowIso);
+    if (!from.ok) {
+      undo();
+      return from;
+    }
+    const to = this.applyRuleLeafPatchSync(toLeaf, actor, nowIso);
+    if (!to.ok) {
+      undo();
+      return to;
+    }
+    registryRow.leaf_doc_id = toLeaf.id;
+    return ok({ from: from.value, to: to.value });
+  }
+
+  /** @see StoreInterface.listRuleRegistry */
+  async listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>> {
+    return ok([...this.ruleRegistry].sort((a, b) => a.n - b.n).map((row) => ({ ...row })));
   }
 
   // ── Links ─────────────────────────────────────────────────────────────────
