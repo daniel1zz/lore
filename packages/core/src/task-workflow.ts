@@ -522,6 +522,21 @@ export const evidenceEntrySchema = z.object({
        * command (SPEC-143 AC-CT-5), and no public write path may supply it.
        */
       state_stamp: stateStampSchema.optional(),
+      /**
+       * Full 40-hex git HEAD the runner measured this attested run at (baseline slice 1
+       * §C5) — lets rule-state derivation decide ancestry without trusting the caller.
+       * OPTIONAL and present-iff-computed: pre-slice attestations carry none and still
+       * parse (REGRESSION). ⛔ Runner-issued only, on the same terms as the enclosing
+       * `attestation` object — no public write path may supply it.
+       */
+      head_sha: z.string().regex(/^[0-9a-f]{40}$/, "head_sha must be a 40-hex git sha").optional(),
+      /**
+       * Whether the working tree was dirty when the runner measured this run (baseline
+       * slice 1 §C5). A dirty run's `head_sha` does not describe the measured code, so
+       * consumers must treat it as unknown. Same optionality and runner-only rule as
+       * `head_sha`.
+       */
+      worktree_dirty: z.boolean().optional(),
     })
     .optional(),
 });
