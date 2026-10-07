@@ -54,7 +54,9 @@
  *     rules_total: number;
  *     by_verification: {
  *       contradicted: number;
- *       verified: number;                   // attested pass present, staleness NOT evaluated
+ *       passing_staleness_unchecked: number; // attested pass present, staleness NOT evaluated.
+ *                                            // counts mode NEVER emits a `verified` key (a verdict must
+ *                                            // carry the state it describes); `full` keeps `verified`.
  *       unverified: number;
  *       stale: "not_computed";
  *     };
@@ -124,7 +126,12 @@ interface RuleStateCounts {
   computed_from: { head_sha: null; corpus_version: number };
   ambiguous_ac_ref: number;
   rules_total: number;
-  by_verification: { contradicted: number; verified: number; unverified: number; stale: "not_computed" };
+  by_verification: {
+    contradicted: number;
+    passing_staleness_unchecked: number;
+    unverified: number;
+    stale: "not_computed";
+  };
   stale_not_computed_reason: string;
 }
 interface RuleStateServiceLike {
@@ -740,7 +747,7 @@ describe("AC-BLS1-5 evidence attribution through plan lineage", () => {
     const svc = await makeService(w.store, new CountingGit());
     const counts = must(await svc.counts(), "counts()");
     expect(counts.ambiguous_ac_ref).toBe(1);
-    expect(counts.by_verification.verified).toBe(0);
+    expect(counts.by_verification.passing_staleness_unchecked).toBe(0);
   });
 });
 
@@ -773,8 +780,21 @@ describe("AC-BLS1-3 RuleStateService.counts — git-free", () => {
     const c = must(await svc.counts(), "counts()");
     expect(c.rules_total).toBe(4);
     expect(c.by_verification.contradicted).toBe(1);
-    expect(c.by_verification.verified).toBe(1);
+    expect(c.by_verification.passing_staleness_unchecked).toBe(1);
     expect(c.by_verification.unverified).toBe(2);
+  });
+
+  it("counts mode NEVER emits a `verified` key (staleness is not evaluated there)", async () => {
+    const w = await countsWorld();
+    const svc = await makeService(w.store, new CountingGit());
+    const c = must(await svc.counts(), "counts()");
+    expect(Object.keys(c.by_verification).sort()).toEqual([
+      "contradicted",
+      "passing_staleness_unchecked",
+      "stale",
+      "unverified",
+    ]);
+    expect("verified" in c.by_verification).toBe(false);
   });
 
   it("spawns 0 git operations in counts mode — not even headSha", async () => {
@@ -817,7 +837,12 @@ describe("AC-BLS1-3 RuleStateService.counts — git-free", () => {
     const svc = await makeService(w.store, new CountingGit());
     const c = must(await svc.counts(), "counts()");
     expect(c.rules_total).toBe(0);
-    expect(c.by_verification).toEqual({ contradicted: 0, verified: 0, unverified: 0, stale: "not_computed" });
+    expect(c.by_verification).toEqual({
+      contradicted: 0,
+      passing_staleness_unchecked: 0,
+      unverified: 0,
+      stale: "not_computed",
+    });
   });
 });
 
