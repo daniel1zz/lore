@@ -115,7 +115,19 @@ export function exitCode(error: LoreError): number {
     // DECLARED code for it (spec-report-issue-has-no-specified-concurrency-contract-ac-072
     // §Contract Details), deliberately joining this family rather than minting a new code.
     case "WRITE_CONTENTION":
+    // reason: CONFLICT is the SAME family for a plain-file compare-and-swap write (CLAUDE.md
+    // changed between read and write): re-read and retry, so it joins exit 5 rather than
+    // minting a new code. Source: spec-context-fragments D8, AC-CF-13.
+    case "CONFLICT":
       return 5;
+    case "BUDGET_EXCEEDED":
+      // reason: exit 3 — a failed budget CHECK on well-formed input, matching the `--check-*`
+      // failure convention (`lore status --check-*` exits 3), not 4: 4 means the input itself
+      // is invalid (VALIDATION_ERROR), whereas here every fragment is valid and only their sum
+      // is over the cap. 3 is shared with DOC_NOT_FOUND as an existing "lookup/check failed"
+      // bucket; callers needing the distinction read `error.code` from `--json`.
+      // Source: spec-context-fragments D6, AC-CF-3.
+      return 3;
     case "AI_PROVIDER_ERROR":
       // reason: exit 6 reserved for AI provider failures — distinct from generic store/validation
       // errors so callers can detect AI-specific failures without parsing stderr (SPEC-017 §3.4)
@@ -299,6 +311,10 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
       return `Error: ${error.message}\n  This will not succeed on retry until the local machine's gh install/login state is fixed.`;
     case "TRANSPORT_UNAVAILABLE":
       return `Error: ${error.message}\n  This is a transient network condition — retrying may succeed.`;
+    case "CONFLICT":
+      return `Error: ${error.message}\n  Nothing was written to ${error.path}; re-run the command to retry against its current bytes.`;
+    case "BUDGET_EXCEEDED":
+      return `Error: ${error.message}`;
     case "RATE_LIMITED":
       return `Error: ${error.message}\n  Rate limit resets at epoch ${String(error.reset)} — wait before retrying.`;
     default: {

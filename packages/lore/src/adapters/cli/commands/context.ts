@@ -71,19 +71,28 @@
  *   §Public Interface, §Design Decisions D2/D3; AC-CTX-3.
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineCommand } from "citty";
 import {
   AiConfigSchema,
   formatMemoryFileBudgetSubstitution,
   resolveMemoryFileBudgetsFromConfigResult,
 } from "@lore/core";
-import type { CallerSurface, FsWritePort, LoreError, MemoryFileBudgets } from "@lore/core";
-import { loadConfig } from "@lore/core/node";
+import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets } from "@lore/core";
+import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 import { exitCode, findLoreDbPath, formatError } from "../utils.js";
+import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
 import { collectContextFacts } from "../../../service/context-facts.js";
-import { runContextInit, runContextRefresh, type ContextInitReport, type ContextRefreshReport } from "../../../flows/context-flow.js";
+import {
+  runContextInit,
+  runContextRefresh,
+  type ContextInitReport,
+  type ContextRefreshReport,
+  type ContextRefreshScope,
+} from "../../../flows/context-flow.js";
 import { buildContextNarrativePrompt } from "../../../ai/context-narrative-template.js";
 import { buildProviderRegistry } from "../../../ai/registry.js";
 import { resolveAiDefault } from "../../../ai/resolve-ai.js";
@@ -91,6 +100,15 @@ import { resolveAiDefault } from "../../../ai/resolve-ai.js";
 /** The two registered `lore context` topics. */
 type ContextTopic = "init" | "refresh";
 const KNOWN_TOPICS: readonly ContextTopic[] = ["init", "refresh"];
+
+/** `--scope` values accepted by `refresh` (spec-context-fragments D4): the repo CLAUDE.md or `~/.claude/CLAUDE.md`. */
+const KNOWN_SCOPES: readonly ContextRefreshScope[] = ["project", "user"];
+
+// reason: dev-mode repo root, 6 levels up from this file — the SAME derivation
+// `commands/governance.ts` uses; compiled mode never reads it (`resolveAssetsRoot`
+// branches on `isCompiled` and derives from `execPath`), so `lore context refresh`
+// and `lore setup` resolve the SAME assets/ tree.
+const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..", "..");
 
 /**
  * Detects the caller surface for `resolveAiDefault` purposes. A narrow,
@@ -124,6 +142,22 @@ function detectContextCliSurface(): CallerSurface {
 // per invocation is the `run` handler below, whose result is threaded into
 // both flows' `ContextFlowDeps` and into `resolveInitNarrative`.
 
+/** The `context.language` / `context.fragments.disable` subset of a loaded config, as a `ContextConfigLayer`. */
+function toContextLayer(
+  source:
+    | { context?: { language?: string | undefined; fragments?: { disable?: string[] | undefined } | undefined } | undefined }
+    | undefined,
+): ContextConfigLayer {
+  const language = source?.context?.language;
+  const disable = source?.context?.fragments?.disable;
+  return {
+    context: {
+      ...(language !== undefined ? { language } : {}),
+      ...(disable !== undefined ? { fragments: { disable } } : {}),
+    },
+  };
+}
+
 /**
  * Builds a real `node:fs`-backed `FsWritePort` rooted at `repoRoot` — the
  * CLI adapter boundary D9 reserves for the "real implementation" (never
@@ -134,26 +168,33 @@ function detectContextCliSurface(): CallerSurface {
  * real error the caller must see, not silently swallow).
  */
 function buildRealFsPort(repoRoot: string): FsWritePort {
+  // reason: the fragment pipeline addresses files OUTSIDE the repo (shipped assets, the XDG
+  // user layer, `~/.claude/CLAUDE.md`) by absolute path; `join(repoRoot, "/abs")` would
+  // wrongly nest them under the repo, so absolute paths pass through unchanged.
+  const resolvePath = (path: string): string => (isAbsolute(path) ? path : join(repoRoot, path));
   return {
     async exists(path: string): Promise<boolean> {
-      return existsSync(join(repoRoot, path));
+      return existsSync(resolvePath(path));
     },
     async readFile(path: string): Promise<string | null> {
       try {
-        return readFileSync(join(repoRoot, path), "utf8");
+        return readFileSync(resolvePath(path), "utf8");
       } catch {
         return null;
       }
     },
     async listDir(path: string): Promise<string[]> {
       try {
-        return readdirSync(join(repoRoot, path));
+        return readdirSync(resolvePath(path));
       } catch {
         return [];
       }
     },
     async writeFile(path: string, content: string): Promise<void> {
-      writeFileSync(join(repoRoot, path), content, "utf8");
+      const target = resolvePath(path);
+      // reason: user scope may create `~/.claude/CLAUDE.md` before `~/.claude/` exists.
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, "utf8");
     },
   };
 }
@@ -257,6 +298,10 @@ export default defineCommand({
       // "flag passed with its default value" for a defaulted boolean.
       description: "[init only] Explicitly enable AI-generated Z2 narrative (overrides surface default). Pass --no-ai to disable.",
     },
+    scope: {
+      type: "string",
+      description: "[refresh only] Memory file to refresh: project (default, repo CLAUDE.md) | user (~/.claude/CLAUDE.md)",
+    },
     json: {
       type: "boolean",
       description: "Output result as JSON",
@@ -272,6 +317,17 @@ export default defineCommand({
     }
     if (!KNOWN_TOPICS.includes(topic as ContextTopic)) {
       process.stderr.write(`Error: unknown context topic "${topic}" (expected: ${KNOWN_TOPICS.join(" | ")})\n`);
+      process.exitCode = 2;
+      return;
+    }
+
+    const scopeArg = typeof args.scope === "string" ? args.scope : undefined;
+    if (scopeArg !== undefined && (topic !== "refresh" || !KNOWN_SCOPES.includes(scopeArg as ContextRefreshScope))) {
+      const reason =
+        topic !== "refresh"
+          ? "--scope applies to `refresh` only"
+          : `unknown --scope "${scopeArg}" (expected: ${KNOWN_SCOPES.join(" | ")})`;
+      process.stderr.write(`Error: ${reason}\n`);
       process.exitCode = 2;
       return;
     }
@@ -298,7 +354,33 @@ export default defineCommand({
     if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
 
     if (topic === "refresh") {
-      const result = await runContextRefresh({ fs: fsPort, budgets }, "");
+      const globalConfigResult = loadGlobalConfig();
+      if (!globalConfigResult.ok) {
+        process.stderr.write(formatError(globalConfigResult.error) + "\n");
+        process.exitCode = exitCode(globalConfigResult.error);
+        return;
+      }
+      const home = homedir();
+      const pathCtx: SetupPathContext = {
+        repoRoot: REPO_ROOT,
+        isCompiled: Bun.main.startsWith("/$bunfs/"),
+        execPath: process.execPath,
+      };
+      const result = await runContextRefresh(
+        {
+          fs: fsPort,
+          budgets,
+          assetsRoot: resolveAssetsRoot(pathCtx),
+          home,
+          // reason: XDG Base Directory rule (same as config-node.ts) — a set, non-empty
+          // $XDG_CONFIG_HOME replaces the ~/.config default.
+          xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(home, ".config"),
+          globalConfig: toContextLayer(globalConfigResult.value),
+          projectConfig: toContextLayer(config),
+        },
+        "",
+        { scope: (scopeArg as ContextRefreshScope | undefined) ?? "project" },
+      );
       renderOutcome(json, result);
       return;
     }

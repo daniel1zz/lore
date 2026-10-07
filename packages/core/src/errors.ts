@@ -4,7 +4,7 @@
  * Source: SPEC-001 §5
  */
 
-/** Discriminated union of all service-layer errors. 13 error codes total (20 with AI_PROVIDER_ERROR + CLAIM_CONFLICT + NEEDS_APPROVAL + WRITE_CONTENTION + AUTH_REQUIRED + TRANSPORT_UNAVAILABLE + RATE_LIMITED). */
+/** Discriminated union of all service-layer errors; the variants below are the SSOT for the code list. */
 export type LoreError =
   | { code: "DOC_NOT_FOUND"; id: string; suggestions?: string[] }
   | { code: "SLUG_NOT_FOUND"; slug: string; suggestions?: string[] }
@@ -153,6 +153,38 @@ export type LoreError =
       /** Epoch seconds parsed from `gh`'s `X-RateLimit-Reset` response header. */
       reset: number;
       retryable: true;
+    }
+  /**
+   * A compare-and-swap file write was refused because the file's bytes changed between
+   * the writer's read and its pending write (another writer interleaved). Nothing was
+   * written; the file holds the other writer's bytes, so a plain re-run is safe.
+   * Distinct from `STALE_VERSION` (corpus doc versions) and `WRITE_CONTENTION` (SQLite
+   * lock) because the contended resource is a plain file (CLAUDE.md).
+   * CLI exit code: 5 — same "someone else won the race, re-read and retry" family.
+   * Source: spec-context-fragments-config-driven-layered-rule-injection D8, AC-CF-13
+   */
+  | {
+      code: "CONFLICT";
+      /** Path of the file whose on-disk bytes no longer matched the writer's read. */
+      path: string;
+      message: string;
+    }
+  /**
+   * A rendered context-fragment block exceeds its outlet's character cap (hook strings
+   * over 10,000 chars are silently truncated by Claude Code, GH #20). Nothing is emitted.
+   * `perFragment` lists every contributing fragment id with its body length so the
+   * offender is addressable.
+   * CLI exit code: 3 — a failed budget check on well-formed input.
+   * Source: spec-context-fragments-config-driven-layered-rule-injection D6, AC-CF-3
+   */
+  | {
+      code: "BUDGET_EXCEEDED";
+      /** Outlet id whose cap was exceeded (an `OutletId` from context-fragments.ts). */
+      outlet: string;
+      cap: number;
+      chars: number;
+      perFragment: ReadonlyArray<{ readonly id: string; readonly chars: number }>;
+      message: string;
     };
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */
