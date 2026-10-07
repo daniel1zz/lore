@@ -116,6 +116,7 @@ import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
+import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -194,6 +195,12 @@ export interface SetCriterionPatch {
   rubric?: string;
   note?: string;
   covers?: string[];
+  /**
+   * Baseline rule ids this criterion cites — REPLACES the whole list (`[]` clears it).
+   * Report-only: dangling / inactive ids are stored and surfaced as audit-recorded warnings
+   * (baseline slice 1 §C4). Grammar/uniqueness/cap are the schema's (`cites`).
+   */
+  cites?: string[];
   /**
    * Untyped candidate `AcFalsifier` shape — same rationale as `buildCriterionCandidate`'s
    * `verify` field in `commands/ac.ts`: `specAcceptanceCriteriaSchema` (via `acFalsifierSchema`)
@@ -362,14 +369,130 @@ export class AcService {
       if (pathCheck.value.declaration !== null) declaration = pathCheck.value.declaration;
     }
 
-    const writeResult = await this.writeCriteria(
-      spec,
-      parsed.data,
-      "add",
-      declaration !== undefined ? { declaration } : {},
-    );
+    // §C4 — report-only citation warnings, recorded in the audit entry (never rejected, never dropped).
+    const addedCites = newCriterion?.cites;
+    const citeAudit = addedCites !== undefined ? await this.citeAuditDetails(addedCites) : undefined;
+    if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
+
+    const writeResult = await this.writeCriteria(spec, parsed.data, "add", {
+      ...(declaration !== undefined ? { declaration } : {}),
+      ...(citeAudit !== undefined ? { auditDetails: citeAudit.value } : {}),
+    });
     if (!writeResult.ok) return writeResult;
     return ok(parsed.data);
+  }
+
+  // ── citeCriterion ─────────────────────────────────────────────────────────
+
+  /**
+   * Add (or, with `remove`, drop) baseline rule citations on ONE declared criterion
+   * (baseline slice 1 §C4, AC-BLS1-6). REPORT-ONLY: a dangling / deprecated / retired id is
+   * WRITTEN and returned as a {@link CiteWarning}; it never rejects and never drops the id.
+   * Ids are set-deduplicated. Citing is NOT a contract edit: like `addCriterion` it never
+   * demotes an approved spec (the no-demote branch of `writeCriteria`); it writes exactly one
+   * version row and one audit entry with `details.operation === "cite"`.
+   *
+   * @param ruleIds - `BR-<n>` ids; grammar / cap validated by the criterion schema
+   * @param flags.remove - drop these ids instead of adding them (no warnings on removal)
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a spec / unknown AC / no ids / malformed id / over cap), STALE_VERSION
+   */
+  async citeCriterion(
+    specIdOrSlug: string,
+    acId: string,
+    ruleIds: string[],
+    flags: { remove?: boolean } = {},
+    _opts: Record<string, unknown> = {},
+  ): Promise<Result<{ criteria: AcceptanceCriterion[]; warnings: CiteWarning[] }, LoreError>> {
+    if (ruleIds.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "cites",
+        message: "lore ac cite requires at least one rule id (BR-<n>)",
+        value: ruleIds,
+      });
+    }
+    const specResult = await this.resolveSpec(specIdOrSlug);
+    if (!specResult.ok) return specResult;
+    const spec = specResult.value;
+
+    const existing = extractCriteria(spec);
+    const index = existing.findIndex((c) => c.id === acId);
+    if (index === -1) {
+      const declaredIds = existing.map((c) => c.id);
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "acceptance_criteria[].id",
+        message:
+          declaredIds.length > 0
+            ? `Acceptance criterion "${acId}" is not declared on this spec. Declared ids: ${declaredIds.join(", ")}`
+            : `Acceptance criterion "${acId}" is not declared on this spec — no criteria are declared yet`,
+        value: acId,
+      });
+    }
+    const target = existing[index] as AcceptanceCriterion;
+    const current = target.cites ?? [];
+    const requested = [...new Set(ruleIds)];
+    const next =
+      flags.remove === true
+        ? current.filter((id) => !requested.includes(id))
+        : [...current, ...requested.filter((id) => !current.includes(id))];
+
+    const { cites: _previous, ...rest } = target;
+    const candidateArray = existing.map((c, i) =>
+      i === index ? { ...rest, ...(next.length > 0 ? { cites: next } : {}) } : c,
+    );
+    const parsed = specAcceptanceCriteriaSchema.safeParse(candidateArray);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return err({
+        code: "VALIDATION_ERROR",
+        field: issue !== undefined ? `acceptance_criteria.${issue.path.join(".")}` : "acceptance_criteria",
+        message: issue !== undefined ? issue.message : "Invalid acceptance criterion",
+        value: ruleIds,
+      });
+    }
+
+    const warningsResult =
+      flags.remove === true ? ok<CiteWarning[]>([]) : await this.checkCites(requested);
+    if (!warningsResult.ok) return warningsResult;
+    const warnings = warningsResult.value;
+
+    const writeResult = await this.writeCriteria(spec, parsed.data, "cite", {
+      acId,
+      auditDetails: {
+        cites: requested,
+        cite_warnings: warnings,
+        ...(flags.remove === true ? { remove: true } : {}),
+      },
+    });
+    if (!writeResult.ok) return writeResult;
+    return ok({ criteria: parsed.data, warnings });
+  }
+
+  /**
+   * Judge `ids` against the baseline leaves (dangling / inactive) WITHOUT writing — the CLI
+   * re-uses it to print the same warnings `add`/`set` recorded in the audit entry. Reads the
+   * store directly — no RuleService dependency.
+   */
+  async checkCites(ids: readonly string[]): Promise<Result<CiteWarning[], LoreError>> {
+    const leaves = await this.store.findMany({ type: "baseline" });
+    if (!leaves.ok) return leaves;
+    return ok(citeWarnings(ids, buildRuleIndex(leaves.value)));
+  }
+
+  /** True when the corpus holds at least one baseline doc (gates the `ac add` no-cite hint — AC-BLS1-8). */
+  async hasBaselineDocs(): Promise<Result<boolean, LoreError>> {
+    const found = await this.store.findMany({ type: "baseline", limit: 1 });
+    if (!found.ok) return found;
+    return ok(found.value.length > 0);
+  }
+
+  private async citeAuditDetails(
+    cites: readonly string[],
+  ): Promise<Result<Record<string, unknown>, LoreError>> {
+    const w = await this.checkCites(cites);
+    if (!w.ok) return w;
+    return ok({ cites: [...cites], cite_warnings: w.value });
   }
 
   // ── listCriteria ──────────────────────────────────────────────────────────
@@ -517,6 +640,7 @@ export class AcService {
       patch.rubric !== undefined ||
       patch.note !== undefined ||
       patch.covers !== undefined ||
+      patch.cites !== undefined ||
       patch.falsifier !== undefined;
     if (!hasAnyField) {
       return err({
@@ -524,7 +648,7 @@ export class AcService {
         field: "patch",
         message:
           "lore ac set requires at least one field to change: --statement, --oracle, --command, --rubric, " +
-          "--note, --covers, --falsifier-path/-find/-replace/-exit-code",
+          "--note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code",
         value: patch,
       });
     }
@@ -581,6 +705,15 @@ export class AcService {
         : target.requirement_refs !== undefined
           ? { requirement_refs: target.requirement_refs }
           : {}),
+      // §C4 — `cites` REPLACES when patched; otherwise the stored list is carried through
+      // (omitting it here would silently drop every existing citation on any other edit).
+      ...(patch.cites !== undefined
+        ? patch.cites.length > 0
+          ? { cites: patch.cites }
+          : {}
+        : target.cites !== undefined
+          ? { cites: target.cites }
+          : {}),
       // §M5 (AC-DC-8) — a rewritten script-mode command is a NEW ORACLE GENERATION;
       // every other edit carries the stored value through untouched (absent included,
       // so a statement-only edit stays byte-identical to pre-M5 behavior). See
@@ -622,10 +755,14 @@ export class AcService {
     // (D3) — and every editable field on a criterion is governing contract content.
     const newStatus = resolveStatusAfterContractEdit(spec.status, true);
 
+    const citeAudit = patch.cites !== undefined ? await this.citeAuditDetails(patch.cites) : undefined;
+    if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
+
     const writeResult = await this.writeCriteria(spec, parsed.data, "set", {
       status: newStatus,
       acId,
       ...(declaration !== undefined ? { declaration } : {}),
+      ...(citeAudit !== undefined ? { auditDetails: citeAudit.value } : {}),
     });
     if (!writeResult.ok) return writeResult;
     return ok(parsed.data);
@@ -831,8 +968,14 @@ export class AcService {
   private async writeCriteria(
     spec: DocRecord,
     criteria: AcceptanceCriterion[],
-    operation: "add" | "remove" | "set",
-    opts: { status?: DocRecord["status"]; acId?: string; declaration?: AllowMissingPathDeclaration } = {},
+    operation: "add" | "remove" | "set" | "cite",
+    opts: {
+      status?: DocRecord["status"];
+      acId?: string;
+      declaration?: AllowMissingPathDeclaration;
+      /** Extra audit `details` keys (§C4: `cites`, `cite_warnings`) — spread BEFORE the fixed keys so they can never shadow them. */
+      auditDetails?: Record<string, unknown>;
+    } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const now = new Date().toISOString();
     const newVersion = spec.version + 1;
@@ -865,7 +1008,9 @@ export class AcService {
       change_summary:
         operation === "set"
           ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
-          : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
+          : operation === "cite"
+            ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
+            : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
       // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
       // current (unchanged) slug.
       slug: updateResult.value.slug,
@@ -879,6 +1024,7 @@ export class AcService {
       action: "update",
       doc_id: spec.id,
       details: {
+        ...(opts.auditDetails ?? {}),
         operation,
         criteria_count: criteria.length,
         version: newVersion,
