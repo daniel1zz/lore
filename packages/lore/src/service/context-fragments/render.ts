@@ -3,7 +3,7 @@
  * block and enforces the per-outlet hook character cap.
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D6, D13).
  *
- * Public surface: `renderOutlet`, `RenderedOutlet`, `FragmentBudgetError`, `RenderResult`.
+ * Public surface: `renderOutlet`, `RenderedOutlet`, `BudgetExceededError`. Failure is the shared `BUDGET_EXCEEDED` LoreError (errors.ts).
  * Invariants:
  *   - text = bodies in the given order joined by "\n\n"; no prefix/suffix, no trim.
  *   - chars = text.length (the separator counts toward the cap).
@@ -14,8 +14,12 @@
 import {
   SESSION_FRAGMENT_CAP,
   SUBAGENT_FRAGMENT_CAP,
+  err,
+  ok,
   type Fragment,
+  type LoreError,
   type OutletId,
+  type Result,
 } from "@lore/core";
 
 /** Separator between fragment bodies; counted in `chars`. */
@@ -30,24 +34,8 @@ export interface RenderedOutlet {
   readonly fragmentIds: readonly string[];
 }
 
-/**
- * Refusal when a hook outlet's block exceeds its cap.
- * reason: `BUDGET_EXCEEDED` is absent from the core `LoreError` union (packages/core/src/errors.ts
- * is another task's anchor), so this module carries its own typed error with the same
- * `{code, message}` shape the RED tests (render.test.ts, AC-CF-3) assert.
- */
-export interface FragmentBudgetError {
-  readonly code: "BUDGET_EXCEEDED";
-  readonly outlet: OutletId;
-  readonly cap: number;
-  readonly chars: number;
-  readonly perFragment: ReadonlyArray<{ readonly id: string; readonly chars: number }>;
-  readonly message: string;
-}
-
-export type RenderResult =
-  | { readonly ok: true; readonly value: RenderedOutlet }
-  | { readonly ok: false; readonly error: FragmentBudgetError };
+/** The only error {@link renderOutlet} returns; narrowed so callers can read its fields (still a member of `LoreError`). */
+export type BudgetExceededError = Extract<LoreError, { code: "BUDGET_EXCEEDED" }>;
 
 /** Cap for an outlet, or `null` when the outlet is uncapped (claude-md:*). */
 function getOutletCap(outlet: OutletId): number | null {
@@ -73,7 +61,7 @@ function getOutletCap(outlet: OutletId): number | null {
  * @param outlet Target outlet; decides whether a cap applies.
  * @returns `ok` with the joined block, or `BUDGET_EXCEEDED` naming every fragment id and its body length.
  */
-export function renderOutlet(fragments: readonly Fragment[], outlet: OutletId): RenderResult {
+export function renderOutlet(fragments: readonly Fragment[], outlet: OutletId): Result<RenderedOutlet, BudgetExceededError> {
   const text = fragments.map((fragment) => fragment.body).join(FRAGMENT_SEPARATOR);
   const chars = text.length;
   const cap = getOutletCap(outlet);
@@ -84,21 +72,15 @@ export function renderOutlet(fragments: readonly Fragment[], outlet: OutletId): 
       chars: fragment.body.length,
     }));
     const breakdown = perFragment.map((entry) => `${entry.id}=${entry.chars}`).join(", ");
-    return {
-      ok: false,
-      error: {
-        code: "BUDGET_EXCEEDED",
-        outlet,
-        cap,
-        chars,
-        perFragment,
-        message: `BUDGET_EXCEEDED: ${outlet} block is ${chars} chars, cap is ${cap}. Fragments (id=chars): ${breakdown}`,
-      },
-    };
+    return err({
+      code: "BUDGET_EXCEEDED",
+      outlet,
+      cap,
+      chars,
+      perFragment,
+      message: `BUDGET_EXCEEDED: ${outlet} block is ${chars} chars, cap is ${cap}. Fragments (id=chars): ${breakdown}`,
+    });
   }
 
-  return {
-    ok: true,
-    value: { text, chars, fragmentIds: fragments.map((fragment) => fragment.frontmatter.id) },
-  };
+  return ok({ text, chars, fragmentIds: fragments.map((fragment) => fragment.frontmatter.id) });
 }

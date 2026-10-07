@@ -67,7 +67,14 @@ export function loreErrorToStatus(error: LoreError): number {
     // here rather than left to the 500 catch-all, which would read as "the store broke".
     // Source: spec-report-issue-has-no-specified-concurrency-contract-ac-072 §Contract Details.
     case "WRITE_CONTENTION":
+    // reason: CONFLICT (plain-file compare-and-swap refusal, spec-context-fragments D8) is the same
+    // re-read-and-retry family; no HTTP route produces it today (context refresh is CLI-only).
+    case "CONFLICT":
       return 409;
+    // reason: BUDGET_EXCEEDED (spec-context-fragments D6) is a request-rejected-as-invalid
+    // outcome — every fragment is valid, the sum is over the cap; no HTTP route produces it today.
+    case "BUDGET_EXCEEDED":
+      return 422;
     case "DELETE_REQUIRES_CONFIRM":
       return 400;
     case "STORE_ERROR":

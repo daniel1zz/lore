@@ -205,6 +205,10 @@ function loreErrorMessage(error: LoreError): string {
       return `transport unavailable: ${error.message}`;
     case "RATE_LIMITED":
       return `rate limited: ${error.message} (reset ${error.reset})`;
+    case "CONFLICT":
+      return `conflict: ${error.message}`;
+    case "BUDGET_EXCEEDED":
+      return `budget exceeded: ${error.message}`;
   }
 }
 

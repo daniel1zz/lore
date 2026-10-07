@@ -12,9 +12,12 @@
  *
  * Public surface:
  *   - ContextInitReport / ContextRefreshReport — per-call outcome reports
- *   - ContextFlowDeps — `{ fs: FsWritePort }`, the ONLY injected dependency
+ *   - ContextFlowDeps — `{ fs: FsWritePort }` plus optional budgets and the
+ *     optional fragment-pipeline deps (`FragmentRefreshDeps`, all injected)
  *   - runContextInit(deps, root, opts) — first-write / re-init verb
- *   - runContextRefresh(deps, root) — Z1-only regeneration verb
+ *   - runContextRefresh(deps, root, opts?) — Z1-only regeneration verb;
+ *     `opts.scope` = "project" (default, repo CLAUDE.md) | "user"
+ *     (`<home>/.claude/CLAUDE.md`)
  *
  * Invariants:
  *   - `runContextRefresh` NEVER calls any AI provider and NEVER touches Z2
@@ -23,6 +26,20 @@
  *     byte-preservation and `diverged_skip` on a hand-edited section
  *     (`service/context-projection.ts`'s own invariants, reused verbatim,
  *     never re-implemented here).
+ *   - Z1 `fragments` section (spec-context-fragments D4/D8/D11/D14, AC-CF-6/13/15):
+ *     when `FragmentRefreshDeps` are supplied, refresh runs discover ->
+ *     checkOverrides -> selectFragments(outlet claude-md:<scope>) -> renderOutlet ->
+ *     buildFragmentsSection and splices the result as one more managed section.
+ *     Only PART of the fragment deps supplied = loud VALIDATION_ERROR (never a
+ *     silent skip); NONE supplied = legacy `{ fs }` callers, project scope only
+ *     (scope "user" with none is an error). Scope "user" splices ONLY the
+ *     fragments section into `<home>/.claude/CLAUDE.md`, so bytes outside the lore
+ *     markers are never touched; an absent user file is created.
+ *   - Compare-and-swap write (D8, AC-CF-13): refresh hashes the bytes it read,
+ *     re-reads right before writing and writes ONLY if the hash is unchanged;
+ *     otherwise it returns `err(CONFLICT)` with ZERO writes. Residual window:
+ *     between that re-read and `writeFile` the `FsWritePort` has no atomic
+ *     primitive, so the race is narrowed to one read-to-write gap, not eliminated.
  *   - Adoption (AC-STR-6): `runContextRefresh` honours `deps.budgets.adoption`
  *     only through `runMemoryFileChecks` (it applies adoption). enforce -> a
  *     `section_*` finding is in `.deterministic` and refuses the write naming
@@ -79,13 +96,9 @@
  *     any such finding refuses the whole call with `err(VALIDATION_ERROR)`
  *     naming every breach and performs NO write — a within-budget splice is
  *     unaffected (byte-identical to pre-check behavior). The ADVISORY half
- *     is NOT refusing: `runMemoryFileChecks` never lets an advisory finding
- *     refuse a write, matching every other consumer of this mechanism. Only
- *     its `kind: "downgraded"` entries (deterministic findings that adoption
- *     mode `warn` moved to advisory) are surfaced, as `downgraded` on
- *     `runContextRefresh`'s ok value (see the final `ok({... downgraded ...})`
- *     in `runContextRefresh`); every other advisory kind (dangling
- *     references, narrative smells) is dropped, so the
+ *     (dangling references, narrative smells) is computed and discarded —
+ *     `runMemoryFileChecks` never lets an advisory finding refuse a write,
+ *     matching every other consumer of this mechanism — so the
  *     `fileExists`/`docExists` predicates this call supplies are inert
  *     stand-ins (this verb reports no reference/slug advisories; that
  *     surface is `lore status --check-claude-md`'s job). `runContextInit`
@@ -100,12 +113,17 @@
  *   §Public Interface, §Design Decisions D1/D2/D3/D5.
  */
 
-import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
-import type { FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import { createHash } from "node:crypto";
+import { err, ok, resolveContextConfig, resolveMemoryFileBudgets } from "@lore/core";
+import type { ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, OutletId, Result } from "@lore/core";
 import type { AdvisoryFinding } from "../service/claude-md-findings.js";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
+import { discoverFragments } from "../service/context-fragments/discover.js";
+import { renderOutlet } from "../service/context-fragments/render.js";
+import { buildFragmentsSection } from "../service/context-fragments/section.js";
+import { checkOverrides, selectFragments } from "../service/context-fragments/select.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -131,8 +149,35 @@ const SKELETON_NARRATIVE =
 
 // ─── Public shapes ──────────────────────────────────────────────────────────
 
+/**
+ * Injected inputs of the fragment pipeline (spec-context-fragments "Deps (all injected)").
+ * Paths may be absolute (the real port passes absolute paths through) or relative to the
+ * port's root.
+ */
+export interface FragmentRefreshDeps {
+  /** Shipped fragments live at `<assetsRoot>/context/*.md`. */
+  assetsRoot: string;
+  /** Home directory; the user-scope target is `<home>/.claude/CLAUDE.md`. */
+  home: string;
+  /** User-layer fragments live at `<xdgConfigHome>/lore/context/*.md`. */
+  xdgConfigHome: string;
+  /** Raw global (XDG) config layer. */
+  globalConfig: ContextConfigLayer;
+  /** Raw project (`.lore/config.yaml`) config layer. */
+  projectConfig: ContextConfigLayer;
+}
+
+/** Which memory file a refresh targets. */
+export type ContextRefreshScope = "project" | "user";
+
+/** Options accepted by {@link runContextRefresh}. */
+export interface ContextRefreshOptions {
+  /** Defaults to "project". */
+  scope?: ContextRefreshScope;
+}
+
 /** The dependency bundle every context-flow verb takes — see module header's "no config/store" invariant. */
-export interface ContextFlowDeps {
+export interface ContextFlowDeps extends Partial<FragmentRefreshDeps> {
   fs: FsWritePort;
   /**
    * Resolved `context.memory_files.*` budgets for this invocation — threaded
@@ -177,7 +222,7 @@ export interface ContextInitReport {
 
 /** Outcome of one {@link runContextRefresh} call. */
 export interface ContextRefreshReport {
-  /** Repo-relative path written — always {@link CLAUDE_MD_PATH}. */
+  /** Path written: {@link CLAUDE_MD_PATH} (project scope) or `<home>/.claude/CLAUDE.md` (user scope). */
   path: string;
   sections: SpliceResult["perSection"];
   /**
@@ -216,8 +261,9 @@ function renderCommandTableBody(facts: ContextFacts): string {
 /** Renders the governance-pointer section body — static pointer text, no facts needed. */
 function renderGovernancePointerBody(): string {
   return (
-    "Run `lore governance claude-md` for this project's memory-file content contract, and " +
-    "`lore governance` for the standing corpus-workflow discipline."
+    "Run `lore governance claude-md` for this project's memory-file content contract. The standing " +
+    "corpus-workflow discipline lives in the `fragments` section of this managed zone (inspect it with " +
+    "`lore fragments`)."
   );
 }
 
@@ -305,32 +351,126 @@ export async function runContextInit(
   return ok({ path: CLAUDE_MD_PATH, narrative, sections: spliceResult.value.perSection });
 }
 
+// ─── Fragment pipeline (Z1 `fragments` section) ──────────────────────────────
+
+/** Project-layer fragment directory, relative to the port root (the repo). */
+const PROJECT_FRAGMENTS_DIR = ".lore/context";
+
+/** User-scope memory file, relative to `deps.home`. */
+const USER_CLAUDE_MD_RELATIVE = ".claude/CLAUDE.md";
+
+function joinPortPath(root: string, ...parts: string[]): string {
+  return [root.endsWith("/") ? root.slice(0, -1) : root, ...parts].join("/");
+}
+
+/** sha256 of file bytes; `null` (absent file) hashes to a sentinel no real content can equal. */
+function hashFileBytes(content: string | null): string {
+  return content === null ? "absent" : `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
+}
+
+/**
+ * Narrows `deps` to the complete fragment deps, `null` when NONE were supplied (legacy
+ * `{ fs }` callers), or a loud error when only some were (never a silent skip).
+ */
+function resolveFragmentDeps(deps: ContextFlowDeps): Result<FragmentRefreshDeps | null, LoreError> {
+  const { assetsRoot, home, xdgConfigHome, globalConfig, projectConfig } = deps;
+  const present = [assetsRoot, home, xdgConfigHome, globalConfig, projectConfig].filter((v) => v !== undefined).length;
+  if (present === 0) return ok(null);
+  if (assetsRoot === undefined || home === undefined || xdgConfigHome === undefined || globalConfig === undefined || projectConfig === undefined) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "deps",
+      message:
+        "fragment refresh deps are partially supplied — assetsRoot, home, xdgConfigHome, globalConfig and projectConfig " +
+        "must all be set together.",
+    });
+  }
+  return ok({ assetsRoot, home, xdgConfigHome, globalConfig, projectConfig });
+}
+
+/** discover -> checkOverrides -> select -> render -> `fragments` section for one claude-md outlet. */
+async function buildScopeFragmentsSection(
+  fs: FsWritePort,
+  fragmentDeps: FragmentRefreshDeps,
+  scope: ContextRefreshScope,
+): Promise<Result<ManagedSection, LoreError>> {
+  const outlet: OutletId = scope === "user" ? "claude-md:user" : "claude-md:project";
+
+  const discovered = await discoverFragments(fs, {
+    shipped: joinPortPath(fragmentDeps.assetsRoot, "context"),
+    user: joinPortPath(fragmentDeps.xdgConfigHome, "lore", "context"),
+    project: PROJECT_FRAGMENTS_DIR,
+  });
+  if (!discovered.ok) return discovered;
+
+  const overrides = checkOverrides(discovered.value, { global: fragmentDeps.globalConfig, project: fragmentDeps.projectConfig });
+  if (!overrides.ok) return overrides;
+
+  const config = resolveContextConfig(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet);
+  let selected;
+  try {
+    selected = selectFragments(discovered.value, { outlet, config });
+  } catch (e) {
+    // reason: selectFragments throws on a `when` key with no registered matcher (fail loud by
+    // design); the flow converts it to the Result channel instead of letting it escape.
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "fragments",
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  const rendered = renderOutlet(selected, outlet);
+  if (!rendered.ok) return rendered;
+  return ok(buildFragmentsSection(rendered.value, scope));
+}
+
 // ─── runContextRefresh ───────────────────────────────────────────────────────
 
 /**
- * Regenerates ONLY the lore-managed (Z1) zone of an existing root
- * `CLAUDE.md` from current facts — never calls AI, never touches Z2 bytes
- * (module header). Idempotent: re-running with unchanged facts and no
- * hand-edits reproduces byte-identical content.
+ * Regenerates ONLY the lore-managed (Z1) zone of an existing memory file
+ * from current facts and fragments — never calls AI, never touches Z2 bytes
+ * (module header). Idempotent: re-running with unchanged inputs and no
+ * hand-edits reproduces byte-identical content. The write is
+ * compare-and-swap (module header, D8).
  *
- * @param deps - `{ fs }` — the injected filesystem write capability.
- * @param root - Repo-relative directory to collect facts from (typically `""`).
+ * @param deps - `{ fs }` plus optional budgets and `FragmentRefreshDeps`.
+ * @param root - Repo-relative directory to collect facts from (typically `""`); unused for scope "user".
+ * @param opts - `{ scope? }` — "project" (default) or "user".
  * @returns `ok(report)` on success. `err(VALIDATION_ERROR)` when no
- *   `CLAUDE.md` exists yet (naming `lore context init`), when
- *   `collectContextFacts`/`spliceManagedSections` fail loud (malformed
- *   `root`, a structurally broken existing managed zone), or when the
- *   spliced candidate would breach the root claude-md ceiling (AC-CTX-8,
- *   module header) — that last case performs NO write.
+ *   project `CLAUDE.md` exists yet (naming `lore context init`), when scope
+ *   "user" lacks fragment deps, when discovery/overrides/facts/splice fail
+ *   loud, or when the spliced candidate would breach the root claude-md
+ *   ceiling (AC-CTX-8, project scope only — module header). `err(CONFLICT)`
+ *   when the file changed between read and write. Every error performs NO write.
  * @example
- * const result = await runContextRefresh({ fs: realFs }, "");
+ * const result = await runContextRefresh({ fs: realFs }, "", { scope: "project" });
  * // result.value.sections // => [{ id: "module-index", state: "unchanged" }, ...]
  */
 export async function runContextRefresh(
   deps: ContextFlowDeps,
   root: string,
+  opts: ContextRefreshOptions = {},
 ): Promise<Result<ContextRefreshReport, LoreError>> {
-  const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
-  if (existing === null) {
+  const scope: ContextRefreshScope = opts.scope ?? "project";
+
+  const fragmentDepsResult = resolveFragmentDeps(deps);
+  if (!fragmentDepsResult.ok) return fragmentDepsResult;
+  const fragmentDeps = fragmentDepsResult.value;
+
+  if (scope === "user" && fragmentDeps === null) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "scope",
+      message: "scope user needs the fragment deps (assetsRoot, home, xdgConfigHome, globalConfig, projectConfig).",
+      value: scope,
+    });
+  }
+
+  const targetPath = fragmentDeps !== null && scope === "user" ? joinPortPath(fragmentDeps.home, USER_CLAUDE_MD_RELATIVE) : CLAUDE_MD_PATH;
+
+  const existing = await deps.fs.readFile(targetPath);
+  if (existing === null && scope === "project") {
     return err({
       code: "VALIDATION_ERROR",
       field: "path",
@@ -338,14 +478,22 @@ export async function runContextRefresh(
       value: CLAUDE_MD_PATH,
     });
   }
+  const readHash = hashFileBytes(existing);
 
   const budgets = resolveFlowBudgets(deps);
-  const factsResult = await collectContextFacts(deps.fs, root, budgets);
-  if (!factsResult.ok) return factsResult;
+  const sections: ManagedSection[] = [];
+  if (scope === "project") {
+    const factsResult = await collectContextFacts(deps.fs, root, budgets);
+    if (!factsResult.ok) return factsResult;
+    sections.push(...renderContextSections(factsResult.value));
+  }
+  if (fragmentDeps !== null) {
+    const fragmentsSection = await buildScopeFragmentsSection(deps.fs, fragmentDeps, scope);
+    if (!fragmentsSection.ok) return fragmentsSection;
+    sections.push(fragmentsSection.value);
+  }
 
-  const sections = renderContextSections(factsResult.value);
-
-  const spliceResult = spliceManagedSections(existing, sections);
+  const spliceResult = spliceManagedSections(existing ?? "", sections);
   if (!spliceResult.ok) return spliceResult;
 
   const finalContent = ensureTrailingNewline(spliceResult.value.content);
@@ -359,27 +507,39 @@ export async function runContextRefresh(
   // `kind: "downgraded"` entries are surfaced (the `downgraded:` field of the
   // `ok(...)` return below), the rest dropped (module header explains why
   // `fileExists`/`docExists` are inert stand-ins here).
-  const { deterministic: findings, advisory } = runMemoryFileChecks(
-    [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
-    budgets,
-    { fileExists: () => true, docExists: () => true },
-  );
-  if (findings.length > 0) {
+  // reason: the budgets govern the PROJECT root memory file only; the user-scope file is the
+  // person's own ~/.claude/CLAUDE.md and has no corpus-governed ceiling, so scope "user" skips it.
+  let downgraded: AdvisoryFinding[] = [];
+  if (scope === "project") {
+    const { deterministic: findings, advisory } = runMemoryFileChecks(
+      [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
+      budgets,
+      { fileExists: () => true, docExists: () => true },
+    );
+    if (findings.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "path",
+        message:
+          `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
+          findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; "),
+        value: CLAUDE_MD_PATH,
+      });
+    }
+    downgraded = advisory.filter((finding) => finding.kind === "downgraded");
+  }
+
+  // D8 compare-and-swap: re-read and compare the hash of the bytes we spliced against.
+  const beforeWrite = await deps.fs.readFile(targetPath);
+  if (hashFileBytes(beforeWrite) !== readHash) {
     return err({
-      code: "VALIDATION_ERROR",
-      field: "path",
-      message:
-        `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
-        findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; "),
-      value: CLAUDE_MD_PATH,
+      code: "CONFLICT",
+      path: targetPath,
+      message: `refusing to write ${targetPath} — it changed after refresh read it (another writer interleaved); nothing was written.`,
     });
   }
 
-  await deps.fs.writeFile(CLAUDE_MD_PATH, finalContent);
+  await deps.fs.writeFile(targetPath, finalContent);
 
-  return ok({
-    path: CLAUDE_MD_PATH,
-    sections: spliceResult.value.perSection,
-    downgraded: advisory.filter((finding) => finding.kind === "downgraded"),
-  });
+  return ok({ path: targetPath, sections: spliceResult.value.perSection, downgraded });
 }
