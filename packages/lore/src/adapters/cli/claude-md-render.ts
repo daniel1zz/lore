@@ -116,6 +116,34 @@ function renderFindingLine(finding: MemoryFileFinding): string {
   return `  - [${finding.kind}] ${finding.message}`;
 }
 
+/** Text rendering for one downgraded (adoption=warn) finding — shared by `--check-claude-md` and `--check-memory-pointers`. */
+export function renderDowngradedLine(finding: AdvisoryFinding): string {
+  return `  - [downgraded:${finding.downgraded_kind ?? "unknown"}] ${finding.message}`;
+}
+
+/**
+ * The `WARN adoption=warn` line. The fixed prefix is the token consumers/tests
+ * match. Shared by `--check-claude-md` (every warn run) and
+ * `--check-memory-pointers` (only when something was downgraded).
+ */
+export function renderAdoptionWarnLine(adoption: AdoptionReport): string {
+  const promote = adoption.promotable
+    ? "the file conforms — promote with `context.memory_files.adoption: enforce` in .lore/config.yaml"
+    : "fix the downgraded findings, then set `context.memory_files.adoption: enforce` in .lore/config.yaml";
+  return `WARN adoption=warn (mode_source=${adoption.mode_source}): ${adoption.downgraded_count} finding(s) downgraded to advisory; ${promote}.`;
+}
+
+/**
+ * Lines `--check-memory-pointers` appends under adoption=warn: the WARN line
+ * plus each downgraded finding. Empty when nothing was downgraded or mode is
+ * enforce.
+ */
+export function formatAdoptionDowngradeLines(advisory: AdvisoryFinding[], adoption: AdoptionReport): string[] {
+  const downgraded = advisory.filter((finding) => finding.kind === "downgraded");
+  if (adoption.mode !== "warn" || downgraded.length === 0) return [];
+  return [renderAdoptionWarnLine(adoption), ...downgraded.map(renderDowngradedLine)];
+}
+
 /**
  * Text rendering for one headroom row — printed on EVERY run
  * (task-lore-status-check-claude-md-reports-a-saturated-file-as: a bare
@@ -129,6 +157,22 @@ function renderHeadroomLine(report: HeadroomReport): string {
     `(${report.lines.remaining} remaining), bytes ${report.bytes.used}/${report.bytes.ceiling} ` +
     `(${report.bytes.remaining} remaining)`
   );
+}
+
+const STRUCTURE_KINDS: ReadonlySet<string> = new Set(["section_missing", "section_order", "section_duplicate"]);
+const CAPACITY_KINDS: ReadonlySet<string> = new Set(["max_lines", "max_bytes", "eviction_required"]);
+
+/** Fix hint matching the finding kinds present; always ends by pointing at the content contract. */
+function renderFixHint(findings: MemoryFileFinding[]): string {
+  const steps: string[] = [];
+  if (findings.some((f) => CAPACITY_KINDS.has(f.kind))) steps.push("trim or evict content from the file");
+  if (findings.some((f) => STRUCTURE_KINDS.has(f.kind))) {
+    steps.push("add the missing, reorder, or dedupe the named H2 section(s)");
+  }
+  if (findings.some((f) => !CAPACITY_KINDS.has(f.kind) && !STRUCTURE_KINDS.has(f.kind))) {
+    steps.push("resolve the findings listed above");
+  }
+  return `${steps.join("; ")}; then run \`lore governance claude-md\` for the content contract.`;
 }
 
 /**
@@ -155,24 +199,16 @@ export function formatCheckClaudeMdHuman(input: CheckClaudeMdRenderInput): strin
         ? "CLAUDE.md: within budget (0 findings)."
         : `CLAUDE.md: 0 enforced findings (${downgraded.length} downgraded by adoption=warn, exit code unaffected):`,
     );
-    for (const finding of downgraded) lines.push(`  - [downgraded:${finding.downgraded_kind ?? "unknown"}] ${finding.message}`);
+    for (const finding of downgraded) lines.push(renderDowngradedLine(finding));
   } else {
     lines.push(`CLAUDE.md: BREACHED (${input.findings.length} finding(s)):`);
     for (const finding of input.findings) lines.push(renderFindingLine(finding));
-    lines.push("  fix: trim the file, or run `lore governance claude-md` for the content contract.");
+    lines.push(`  fix: ${renderFixHint(input.findings)}`);
   }
 
   // ⛔ Printed on EVERY warn run, conforming or not — "must not go silent":
-  // a warn project stays visibly unenforced until someone promotes it. The
-  // fixed `WARN adoption=warn` prefix is the token consumers/tests match.
-  if (input.adoption.mode === "warn") {
-    const promote = input.adoption.promotable
-      ? "the file conforms — promote with `context.memory_files.adoption: enforce` in .lore/config.yaml"
-      : "fix the downgraded findings, then set `context.memory_files.adoption: enforce` in .lore/config.yaml";
-    lines.push(
-      `WARN adoption=warn (mode_source=${input.adoption.mode_source}): ${input.adoption.downgraded_count} finding(s) downgraded to advisory; ${promote}.`,
-    );
-  }
+  // a warn project stays visibly unenforced until someone promotes it.
+  if (input.adoption.mode === "warn") lines.push(renderAdoptionWarnLine(input.adoption));
 
   for (const report of input.headroom) lines.push(renderHeadroomLine(report));
 

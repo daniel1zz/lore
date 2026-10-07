@@ -190,6 +190,7 @@ import type { MemoryFileFinding } from "../../../service/claude-md-findings.js";
 import {
   buildCheckClaudeMdJsonPayload,
   formatCheckClaudeMdHuman,
+  formatAdoptionDowngradeLines,
   type CheckClaudeMdRenderInput,
 } from "../claude-md-render.js";
 
@@ -485,18 +486,22 @@ interface MemoryPointersPayload {
   checked: number;
   consistent: boolean;
   findings: MemoryFileFinding[];
+  /** Pre-rendered `WARN adoption=warn` + downgraded lines (empty unless warn downgraded something); never exit-relevant. */
+  adoption_lines: string[];
 }
 
 /** Text rendering for the `--check-memory-pointers` section (Phase 2, N14). */
 function renderMemoryPointersSection(payload: MemoryPointersPayload): void {
   if (payload.consistent) {
     console.log(`Memory pointers: within budget (${payload.checked} memory file(s) checked).`);
+    for (const line of payload.adoption_lines) console.log(line);
     return;
   }
   console.log(`Memory pointers: BREACHED (${payload.checked} memory file(s) checked):`);
   for (const finding of payload.findings) {
     console.log(`  - ${finding.message}`);
   }
+  for (const line of payload.adoption_lines) console.log(line);
 }
 
 /**
@@ -1488,7 +1493,11 @@ export default defineCommand({
           }
           const knownSlugs = new Set(allDocsResult.value.docs.map((d) => d.slug));
 
-          const { deterministic: memoryPointerFindings } = runMemoryFileChecks(files, budgets, {
+          const {
+            deterministic: memoryPointerFindings,
+            advisory: memoryPointerAdvisory,
+            adoption: memoryPointerAdoption,
+          } = runMemoryFileChecks(files, budgets, {
             fileExists: (p) => existsSync(join(process.cwd(), p)),
             docExists: (slug) => knownSlugs.has(slug),
           });
@@ -1496,6 +1505,7 @@ export default defineCommand({
             checked: files.length,
             consistent: memoryPointerFindings.length === 0,
             findings: memoryPointerFindings,
+            adoption_lines: formatAdoptionDowngradeLines(memoryPointerAdvisory, memoryPointerAdoption),
           };
           memoryPointersInconsistent = memoryPointerFindings.length > 0;
         }
