@@ -93,6 +93,9 @@
  *   (identical echo of guarded keys is NOT refused; only that control passes
  *   against today's code, every other test is RED by design).
  *
+ * FIXTURE NOTE (re-baselined with C2): fixture leaves are seeded with rules through the registry
+ * allocator (`RuleService.addRule`), because `CorpusService.create` refuses a leaf born with rules.
+ *
  * RED NOTE: RuleService does not exist yet; it is loaded via dynamic import so
  * this file loads and each RuleService test fails with "RuleService is not
  * implemented". The InMemoryStore rule-registry methods are B2's (in flight).
@@ -199,6 +202,30 @@ const rule = (id: string, statement: string) => ({
   lifecycle: "live" as const,
 });
 
+/**
+ * Seed a freshly created (rule-less) leaf with rules through the sanctioned allocator
+ * (`RuleService.addRule`, registry ids BR-n in call order) and an optional `depends_on`,
+ * then return the leaf as stored. `CorpusService.create` refuses a leaf born with rules.
+ */
+async function seedLeaf(leaf: DocRecord, statements: string[], dependsOn: string[] = []): Promise<DocRecord> {
+  const svc = await makeRuleService(store);
+  for (const statement of statements) {
+    const added = await svc.addRule(
+      leaf.id,
+      { statement, confidence: "established", enforced_by: "guaranteed", examples: [`${statement} (example)`] },
+      { by: "fixture" },
+    );
+    if (!added.ok) throw new Error(`fixture addRule failed: ${JSON.stringify(added.error)}`);
+  }
+  if (dependsOn.length > 0) {
+    const dep = await svc.setDependsOn(leaf.id, { add: dependsOn }, { by: "fixture" });
+    if (!dep.ok) throw new Error(`fixture setDependsOn failed: ${JSON.stringify(dep.error)}`);
+  }
+  const stored = await corpusService.get(leaf.id);
+  if (!stored.ok) throw new Error(`fixture get failed: ${JSON.stringify(stored.error)}`);
+  return stored.value.doc;
+}
+
 /** prd -> baseline root -> baseline branch -> baseline leaf (two rules, label, depends_on). */
 async function makeTree(): Promise<{ prd: DocRecord; root: DocRecord; branch: DocRecord; leaf: DocRecord }> {
   const prd = await mustCreate({ type: "prd", title: "Product", content: "root" } as CreateDocInput);
@@ -210,15 +237,11 @@ async function makeTree(): Promise<{ prd: DocRecord; root: DocRecord; branch: Do
     type: "baseline", title: "Baseline branch", content: "b", parent_id: root.id,
     extra: { node: "branch", label: "Branch", glossary: [{ term: "Leaf", meaning: "A rule holder" }, { term: "Rule", meaning: "A fact" }] },
   } as CreateDocInput);
-  const leaf = await mustCreate({
+  const created = await mustCreate({
     type: "baseline", title: "Baseline leaf", content: "l", parent_id: branch.id,
-    extra: {
-      node: "leaf",
-      label: "Leaf",
-      rules: [rule("BR-1", "first rule"), rule("BR-2", "second rule")],
-      depends_on: ["BR-1"],
-    },
+    extra: { node: "leaf", label: "Leaf" },
   } as CreateDocInput);
+  const leaf = await seedLeaf(created, ["first rule", "second rule"], ["BR-1"]);
   return { prd, root, branch, leaf };
 }
 
@@ -333,10 +356,11 @@ describe("RuleService.setRule", () => {
 
   it("moveTo relocates the rule to another leaf keeping its id", async () => {
     const { branch, leaf } = await makeTree();
-    const dest = await mustCreate({
+    const destCreated = await mustCreate({
       type: "baseline", title: "Second leaf", content: "l2", parent_id: branch.id,
-      extra: { node: "leaf", label: "Leaf 2", rules: [rule("BR-3", "third rule")] },
+      extra: { node: "leaf", label: "Leaf 2" },
     } as CreateDocInput);
+    const dest = await seedLeaf(destCreated, ["third rule"]);
     const svc = await makeRuleService(store);
     const res = await svc.setRule("BR-2", { moveTo: dest.id }, { by: "t" });
     expect(res.ok).toBe(true);
