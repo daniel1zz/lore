@@ -82,6 +82,7 @@ import { z } from "zod";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
+import { BASELINE_RULE_ID_PATTERN } from "./baseline.js";
 import {
   extractEvidence,
   resolveOracleGeneration,
@@ -176,7 +177,7 @@ export type AcFalsifier = z.infer<typeof acFalsifierSchema>;
 // ─── Acceptance Criterion Schema ───────────────────────────────────────────
 
 /** Grammar of one cited baseline rule id: `BR-` plus a positive integer, no leading zero. */
-export const AC_CITE_ID_PATTERN = /^BR-[1-9][0-9]*$/;
+export const AC_CITE_ID_PATTERN = BASELINE_RULE_ID_PATTERN;
 
 /** Upper bound on `AcceptanceCriterion.cites` length (baseline slice 1 §C4). */
 export const AC_CITES_MAX = 10;

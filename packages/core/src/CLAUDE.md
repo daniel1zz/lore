@@ -24,7 +24,7 @@ Foundational types, error model, runtime validation, lifecycle rules, config, an
 ## Patterns
 
 - **Zod is SSOT for runtime-validated shapes** — `TelemetryEventSchema`, `LoreConfigSchema`, `createDocInputSchema`, etc. Derived TS types come from `z.infer<typeof Schema>`; never duplicate the shape as a hand-written interface.
-- **Type-specific validation via `superRefine`** — `createDocInputSchema` enforces `spec/task → parent_id`, `adr → extra.decision_status`, `knowledge → extra.sub_type`, `task → extra.plan_id`, `plan → extra.phases uniqueness` (`schemas.ts`).
+- **Type-specific validation via `superRefine`** — `createDocInputSchema` enforces `spec/task → parent_id`, `adr → extra.decision_status`, `knowledge → extra.sub_type`, `task → extra.plan_id`, `plan → extra.phases uniqueness`, `baseline → extra.node`, rules on leaves only (`schemas.ts`, `baseline.ts`).
 
 ### AI Plan-Outcome Assessment Schema
 
