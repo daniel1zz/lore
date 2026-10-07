@@ -74,6 +74,17 @@
  *                                   `AcCoverageFact`'s own field, serialized verbatim (see
  *                                   {@link withCoverageState}), never re-flattened into
  *                                   prose a consumer would have to re-parse.
+ *   cite <spec> <id> <BR-n>... [--remove]
+ *                                   Cite (or drop) baseline rule ids on one criterion
+ *                                   (baseline slice 1 §C4, AC-BLS1-6). REPORT-ONLY: a
+ *                                   dangling / deprecated / retired id is stored and printed
+ *                                   as one stderr `Warning:` line per id, exit 0. Never
+ *                                   demotes an approved spec; logs one version. `add`/`set`
+ *                                   take `--cite BR-n` (repeatable; `set` REPLACES, `--cite ""`
+ *                                   clears) with the same warnings. `add` prints a one-line
+ *                                   stderr hint for an uncited AC ONLY when the corpus has >= 1
+ *                                   baseline doc (corpora without one print what they always did).
+ *                                   Surface: CLI only — MCP exposes no `ac` tools today.
  *   rm   <spec> <id> [--force]     Remove a criterion (exit 4 if evidence still
  *                                   references it, unless --force).
  *   set  <spec> <id> [--statement <s>] [--oracle <o>] [--command <c>] [--rubric <r>]
@@ -173,6 +184,7 @@ import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
 import type { AcService, AcListResult, DeclarePathOpts, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
+import type { CiteWarning } from "../../../service/ac-citations.js";
 // reason: `isPlanMember` is SHARED, store-less predicate infrastructure (its own
 // module header: "not a service... exactly the shared infrastructure that pattern
 // exists to permit"), not the sibling `ac-service.ts` this task's file anchors
@@ -241,6 +253,11 @@ export default defineCommand({
           type: "string",
           description: "[repeatable] PRD requirement id this AC covers, e.g. R-1 (SPEC-055)",
         },
+        cite: {
+          type: "string",
+          description:
+            "[repeatable] baseline rule id this AC cites, e.g. BR-12 — report-only: a dangling/inactive id is stored and warned",
+        },
         "allow-missing-path": {
           type: "string",
           description:
@@ -294,6 +311,7 @@ export default defineCommand({
           }
 
           await reportDemotionIfAny(app, args.spec as string, beforeStatus);
+          await reportCiteFeedbackOnAdd(requireAcService(app), args.spec as string, args.id as string, criterion);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -349,6 +367,81 @@ export default defineCommand({
           }
 
           renderCriteriaList(result.value);
+        } finally {
+          app.close();
+        }
+      },
+    }),
+
+    cite: defineCommand({
+      meta: {
+        name: "cite",
+        description:
+          "Cite (or --remove) baseline rule ids on one criterion — report-only, never demotes an approved spec",
+      },
+      args: {
+        spec: {
+          type: "positional",
+          description: "Spec document ID or slug",
+          required: true,
+        },
+        id: {
+          type: "positional",
+          description: "Criterion id to cite from, e.g. AC-FEATURE-1",
+          required: true,
+        },
+        rule: {
+          type: "positional",
+          description: "Baseline rule id(s) BR-<n> — one or more positionals",
+          required: true,
+        },
+        remove: {
+          type: "boolean",
+          description: "Remove these ids from the criterion's cites instead of adding them",
+        },
+        json: {
+          type: "boolean",
+          description: "Output result as JSON",
+        },
+      },
+      async run({ args }) {
+        // `args._` carries EVERY positional token (spec, id, then each rule id) — citty
+        // declares only the first `rule`; the rest survive on `_` (see anchor.ts's note).
+        const ruleIds = ((args._ ?? []) as string[]).slice(2);
+        const { app } = loadLoreApp();
+        try {
+          const result = await requireAcService(app).citeCriterion(
+            args.spec as string,
+            args.id as string,
+            ruleIds,
+            { remove: args.remove === true },
+          );
+
+          if (!result.ok) {
+            process.stderr.write(formatError(result.error) + "\n");
+            process.exitCode = exitCode(result.error);
+            return;
+          }
+
+          printCiteWarnings(result.value.warnings);
+
+          if (args.json) {
+            console.log(
+              JSON.stringify(
+                { ok: true, data: { criteria: result.value.criteria, warnings: result.value.warnings } },
+                null,
+                2,
+              ),
+            );
+            return;
+          }
+
+          const verb = args.remove === true ? "Removed citation(s) from" : "Cited";
+          const cites = result.value.criteria.find((c) => c.id === (args.id as string))?.cites ?? [];
+          console.log(
+            `${verb} acceptance criterion "${args.id as string}" on spec ${args.spec as string} — ` +
+              `cites: ${cites.length > 0 ? cites.join(", ") : "(none)"}`,
+          );
         } finally {
           app.close();
         }
@@ -451,6 +544,11 @@ export default defineCommand({
           description:
             "[repeatable] replace covered PRD requirement ids wholesale (mode-agnostic); pass '' to clear to []",
         },
+        cite: {
+          type: "string",
+          description:
+            "[repeatable] REPLACE the cited baseline rule ids wholesale (mode-agnostic, report-only); pass '' to clear",
+        },
         "allow-missing-path": {
           type: "string",
           description:
@@ -507,7 +605,7 @@ export default defineCommand({
         if (patch === null) {
           process.stderr.write(
             "Error: lore ac set requires at least one field to change: --statement, --oracle, --command, " +
-              "--rubric, --note, --covers, --falsifier-path/-find/-replace/-exit-code\n",
+              "--rubric, --note, --covers, --cite, --falsifier-path/-find/-replace/-exit-code\n",
           );
           process.exitCode = 2;
           return;
@@ -531,6 +629,7 @@ export default defineCommand({
           }
 
           await reportDemotionIfAny(app, args.spec as string, beforeStatus);
+          if (patch.cites !== undefined) await reportCiteWarnings(requireAcService(app), patch.cites);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -592,11 +691,14 @@ function buildCriterionCandidate(args: Record<string, unknown>): unknown {
   const requirement_refs =
     typeof coversRaw === "string" ? [coversRaw] : Array.isArray(coversRaw) ? (coversRaw as string[]) : undefined;
 
+  const cites = normalizeCiteFlag(args.cite);
+
   return {
     id: args.id as string,
     statement: args.statement as string,
     verify,
     ...(requirement_refs !== undefined ? { requirement_refs } : {}),
+    ...(cites !== undefined && cites.length > 0 ? { cites } : {}),
   };
 }
 
@@ -729,10 +831,72 @@ function buildSetPatch(args: Record<string, unknown>): SetCriterionPatch | null 
     patch.covers = coversRaw as string[];
   }
 
+  // §C4 — `--cite` REPLACES the list; a single `--cite ""` clears it (same sentinel as `--covers`).
+  const cites = normalizeCiteFlag(args.cite);
+  if (cites !== undefined) patch.cites = cites;
+
   const falsifier = buildFalsifierCandidate(args);
   if (falsifier !== undefined) patch.falsifier = falsifier;
 
   return Object.keys(patch).length === 0 ? null : patch;
+}
+
+// ─── Citations (baseline slice 1 §C4) ────────────────────────────────────────
+
+/**
+ * citty yields a string for one `--cite`, an array for >=2, undefined for zero. A lone `""`
+ * normalizes to `[]` (the `set` clear sentinel; `add` drops an empty list entirely).
+ */
+function normalizeCiteFlag(raw: unknown): string[] | undefined {
+  if (typeof raw === "string") return raw === "" ? [] : [raw];
+  if (Array.isArray(raw)) return (raw as unknown[]).filter((x): x is string => typeof x === "string");
+  return undefined;
+}
+
+/** One stderr line per dangling / inactive id (stderr: advisory, never pollutes `--json`). */
+function printCiteWarnings(warnings: readonly CiteWarning[]): void {
+  for (const w of warnings) {
+    process.stderr.write(
+      w.kind === "dangling"
+        ? `Warning: cited rule ${w.id} does not exist in any baseline leaf (dangling) — stored anyway\n`
+        : `Warning: cited rule ${w.id} is deprecated or retired (inactive) — stored anyway\n`,
+    );
+  }
+}
+
+/** Judge `ids` against the baseline and print the warnings; a failed lookup is reported, never swallowed. */
+async function reportCiteWarnings(ac: AcService, ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const checked = await ac.checkCites(ids);
+  if (!checked.ok) {
+    process.stderr.write(`Warning: could not check cited rules against the baseline: ${formatError(checked.error)}\n`);
+    return;
+  }
+  printCiteWarnings(checked.value);
+}
+
+/**
+ * `ac add` feedback: warnings for the new AC's cites, else — ONLY when the corpus holds >= 1
+ * baseline doc — a one-line hint that the AC cites no rule. A corpus with no baseline prints
+ * exactly what it printed before (rollback invariant AC-BLS1-8).
+ */
+async function reportCiteFeedbackOnAdd(
+  ac: AcService,
+  spec: string,
+  acId: string,
+  candidate: unknown,
+): Promise<void> {
+  const cites = (candidate as { cites?: string[] }).cites ?? [];
+  if (cites.length > 0) {
+    await reportCiteWarnings(ac, cites);
+    return;
+  }
+  const has = await ac.hasBaselineDocs();
+  if (has.ok && has.value) {
+    process.stderr.write(
+      `Hint: ${acId} cites no baseline rule — attach one with \`lore ac cite ${spec} ${acId} BR-<n>\`\n`,
+    );
+  }
 }
 
 // ─── Demotion Notice (spec-governance-visibility-an-armed-gate-that-vacuously-
