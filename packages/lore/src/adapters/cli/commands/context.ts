@@ -143,7 +143,7 @@ function detectContextCliSurface(): CallerSurface {
 // both flows' `ContextFlowDeps` and into `resolveInitNarrative`.
 
 /** The `context.language` / `context.fragments.disable` subset of a loaded config, as a `ContextConfigLayer`. */
-function toContextLayer(
+export function toContextLayer(
   source:
     | { context?: { language?: string | undefined; fragments?: { disable?: string[] | undefined } | undefined } | undefined }
     | undefined,
@@ -167,7 +167,7 @@ function toContextLayer(
  * is the one method allowed to throw (a genuine disk-write failure is a
  * real error the caller must see, not silently swallow).
  */
-function buildRealFsPort(repoRoot: string): FsWritePort {
+export function makeRealContextFsPort(repoRoot: string): FsWritePort {
   // reason: the fragment pipeline addresses files OUTSIDE the repo (shipped assets, the XDG
   // user layer, `~/.claude/CLAUDE.md`) by absolute path; `join(repoRoot, "/abs")` would
   // wrongly nest them under the repo, so absolute paths pass through unchanged.
@@ -334,7 +334,7 @@ export default defineCommand({
 
     const dbPath = findLoreDbPath();
     const repoRoot = dirname(dirname(dbPath));
-    const fsPort = buildRealFsPort(repoRoot);
+    const fsPort = makeRealContextFsPort(repoRoot);
     const json = args.json === true;
 
     // ONE config load + budgets resolution per invocation (AC-CTX-8) — reused
@@ -353,31 +353,33 @@ export default defineCommand({
     const substitutionNotice = formatMemoryFileBudgetSubstitution(budgetResolution, repoRoot);
     if (substitutionNotice !== undefined) process.stderr.write(substitutionNotice + "\n");
 
+    const globalConfigResult = loadGlobalConfig();
+    if (!globalConfigResult.ok) {
+      process.stderr.write(formatError(globalConfigResult.error) + "\n");
+      process.exitCode = exitCode(globalConfigResult.error);
+      return;
+    }
+    const home = homedir();
+    const pathCtx: SetupPathContext = {
+      repoRoot: REPO_ROOT,
+      isCompiled: Bun.main.startsWith("/$bunfs/"),
+      execPath: process.execPath,
+    };
+    // reason: init and refresh MUST receive identical fragment deps — the Z1 `fragments` section
+    // is part of both verbs' section list, so "init then refresh" stays byte-identical (AC-CTX-3).
+    const fragmentDeps = {
+      assetsRoot: resolveAssetsRoot(pathCtx),
+      home,
+      // reason: XDG Base Directory rule (same as config-node.ts) — a set, non-empty
+      // $XDG_CONFIG_HOME replaces the ~/.config default.
+      xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(home, ".config"),
+      globalConfig: toContextLayer(globalConfigResult.value),
+      projectConfig: toContextLayer(config),
+    };
+
     if (topic === "refresh") {
-      const globalConfigResult = loadGlobalConfig();
-      if (!globalConfigResult.ok) {
-        process.stderr.write(formatError(globalConfigResult.error) + "\n");
-        process.exitCode = exitCode(globalConfigResult.error);
-        return;
-      }
-      const home = homedir();
-      const pathCtx: SetupPathContext = {
-        repoRoot: REPO_ROOT,
-        isCompiled: Bun.main.startsWith("/$bunfs/"),
-        execPath: process.execPath,
-      };
       const result = await runContextRefresh(
-        {
-          fs: fsPort,
-          budgets,
-          assetsRoot: resolveAssetsRoot(pathCtx),
-          home,
-          // reason: XDG Base Directory rule (same as config-node.ts) — a set, non-empty
-          // $XDG_CONFIG_HOME replaces the ~/.config default.
-          xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(home, ".config"),
-          globalConfig: toContextLayer(globalConfigResult.value),
-          projectConfig: toContextLayer(config),
-        },
+        { fs: fsPort, budgets, ...fragmentDeps },
         "",
         { scope: (scopeArg as ContextRefreshScope | undefined) ?? "project" },
       );
@@ -412,7 +414,7 @@ export default defineCommand({
     }
 
     const result = await runContextInit(
-      { fs: fsPort, budgets },
+      { fs: fsPort, budgets, ...fragmentDeps },
       "",
       narrative !== undefined ? { narrative, force: args.force === true } : { force: args.force === true },
     );
