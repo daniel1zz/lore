@@ -77,5 +77,6 @@ export * from "./outline.js";
 export * from "./ordinal.js";
 export * from "./archive-candidates.js";
 export * from "./memory-markers.js";
+export * from "./memory-file-sections.js";
 export * from "./fs-ports.js";
 export * from "./trace.js";

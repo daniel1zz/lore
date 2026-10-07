@@ -104,7 +104,16 @@ function writeConfig(dir: string, yamlText: string): void {
 
 /** A CLAUDE.md body of exactly `byteCount` UTF-8 bytes with a ceiling-safe line count. */
 function nByteBody(byteCount: number): string {
-  const base = Array.from({ length: 20 }, (_unused, i) => `Line ${i + 1}: standing discipline entry.`).join("\n") + "\n";
+  // The five required root H2 sections come first so that, under the
+  // `adoption: enforce` this file's valid-config fixtures pin, the ONLY finding a
+  // 6000-byte root can raise is the byte ceiling under test — never
+  // `section_missing` (spec-claude-md-root-section-structure-check-and-adoption-mode).
+  const sections =
+    ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+      .map((name) => `## ${name}\n\nbody of ${name}\n`)
+      .join("\n") + "\n";
+  const base =
+    sections + Array.from({ length: 20 }, (_unused, i) => `Line ${i + 1}: standing discipline entry.`).join("\n") + "\n";
   const baseBytes = Buffer.byteLength(base, "utf8");
   if (baseBytes > byteCount) throw new Error(`nByteBody: base (${baseBytes}B) exceeds requested ${byteCount}B`);
   return base.slice(0, -1) + "x".repeat(byteCount - baseBytes) + "\n";
@@ -119,8 +128,10 @@ const VALID_PROJECT_YAML = `project:\n  name: fixture\n  author: fixture-author\
 /** A `context` block whose ordered warn/evict pair is inverted — refused at parse time. */
 const INVERTED_CONTEXT_YAML =
   `context:\n  memory_files:\n    root:\n      max_bytes: ${CONFIGURED_ROOT_MAX_BYTES}\n    warn_threshold_fraction: 1\n`;
+// `adoption: enforce` is pinned: an absent key resolves to warn, which would
+// downgrade the byte-ceiling breach and make this file's exit-3 assertions unreachable.
 const VALID_STRICT_CONTEXT_YAML =
-  `context:\n  memory_files:\n    root:\n      max_bytes: ${CONFIGURED_ROOT_MAX_BYTES}\n`;
+  `context:\n  memory_files:\n    adoption: enforce\n    root:\n      max_bytes: ${CONFIGURED_ROOT_MAX_BYTES}\n`;
 
 interface HeadroomJson {
   path: string;

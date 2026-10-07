@@ -84,7 +84,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -150,6 +150,39 @@ function initCorpus(dir: string): void {
   if (run.exitCode !== 0) {
     throw new Error(`lore init failed in fixture ${dir} (exit ${run.exitCode}): ${run.stderr}`);
   }
+}
+
+/**
+ * The five required root H2 sections — every fixture that pins
+ * `adoption: enforce` carries them so the ONLY thing that can trip the check is
+ * the slug pointer under test, never `section_missing`
+ * (spec-claude-md-root-section-structure-check-and-adoption-mode).
+ */
+const SECTIONS_PREFIX =
+  ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+    .map((name) => `## ${name}\n\nbody of ${name}\n`)
+    .join("\n") + "\n";
+
+/**
+ * Appends `context.memory_files.adoption: enforce` to the fixture's
+ * `lore init`-written config (absent key resolves to warn, under which a
+ * dangling slug is downgraded and exit 3 is unreachable). Fails loud if the
+ * init config already carries a `context:` key rather than clobbering it.
+ */
+function pinEnforce(dir: string): void {
+  const configPath = join(dir, ".lore", "config.yaml");
+  const existing = existsSync(configPath) ? readFileSync(configPath, "utf8") : "";
+  if (/^context:/m.test(existing)) {
+    throw new Error(`pinEnforce: ${configPath} already has a context: key; extend this helper before pinning`);
+  }
+  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  writeFileSync(configPath, `${existing}${separator}context:\n  memory_files:\n    adoption: enforce\n`);
+}
+
+/** Pins enforce and writes a structurally conforming root CLAUDE.md whose body is `body`. */
+function writeEnforcedRoot(dir: string, body: string): void {
+  pinEnforce(dir);
+  writeFileSync(join(dir, "CLAUDE.md"), SECTIONS_PREFIX + body);
 }
 
 /** Creates a `knowledge --sub-type reference` doc (no gate applies to knowledge creation) and returns its slug. */
@@ -240,7 +273,7 @@ describe("slug pointers — a dangling slug is refused", () => {
   afterEach(() => cleanupDir(tmpDir));
 
   it("HAPPY: a backtick-quoted corpus slug absent from this corpus fires slug_pointer_missing, exit code exactly 3", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
+    writeEnforcedRoot(tmpDir, `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
 
     const { result, parsed } = runCheckMemoryPointersJson(tmpDir);
 
@@ -250,7 +283,7 @@ describe("slug pointers — a dangling slug is refused", () => {
 
   it("NEGATIVE: a backtick-quoted slug that actually exists in this corpus is never flagged, exit code exactly 0", () => {
     const realSlug = createReferenceDoc(tmpDir, "Probe Reference Doc");
-    writeFileSync(join(tmpDir, "CLAUDE.md"), `See \`${realSlug}\` for the mechanism.\n`);
+    writeEnforcedRoot(tmpDir, `See \`${realSlug}\` for the mechanism.\n`);
 
     const { result, parsed } = runCheckMemoryPointersJson(tmpDir);
 
@@ -259,7 +292,7 @@ describe("slug pointers — a dangling slug is refused", () => {
   });
 
   it("NEGATIVE (measured false-positive class): a gate name that merely LOOKS LIKE a plan-* slug inside a longer backtick-quoted command is never flagged", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), GATE_NAME_LOOKALIKE_LINE);
+    writeEnforcedRoot(tmpDir, GATE_NAME_LOOKALIKE_LINE);
 
     const { result, parsed } = runCheckMemoryPointersJson(tmpDir);
 
@@ -268,8 +301,8 @@ describe("slug pointers — a dangling slug is refused", () => {
   });
 
   it("BOUNDARY: two distinct dangling slugs in one file each produce their own finding", () => {
-    writeFileSync(
-      join(tmpDir, "CLAUDE.md"),
+    writeEnforcedRoot(
+      tmpDir,
       `See \`${DANGLING_SLUG_1}\` and also \`${DANGLING_SLUG_2}\` for the mechanism.\n`,
     );
 
@@ -290,8 +323,8 @@ describe("slug pointers — a dangling slug is refused", () => {
 
   it("STATE: a dangling slug alongside an existing one — only the dangling one is flagged", () => {
     const realSlug = createReferenceDoc(tmpDir, "Probe Reference Doc Two");
-    writeFileSync(
-      join(tmpDir, "CLAUDE.md"),
+    writeEnforcedRoot(
+      tmpDir,
       `See \`${realSlug}\` (real) and \`${DANGLING_SLUG_1}\` (dangling) for the mechanism.\n`,
     );
 
@@ -309,7 +342,7 @@ describe("slug pointers — a dangling slug is refused", () => {
   });
 
   it("REGRESSION (N14 boundary): --check-claude-md never resolves slug pointers, even against the exact same dangling-slug fixture", () => {
-    writeFileSync(join(tmpDir, "CLAUDE.md"), `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
+    writeEnforcedRoot(tmpDir, `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
 
     const { result, parsed } = runCheckClaudeMdJson(tmpDir);
 
@@ -331,7 +364,7 @@ describe("slug pointers — positive control plus real-corpus sweep", () => {
     const controlDir = makeTempDir("repo-sweep-control");
     try {
       initCorpus(controlDir);
-      writeFileSync(join(controlDir, "CLAUDE.md"), `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
+      writeEnforcedRoot(controlDir, `See \`${DANGLING_SLUG_1}\` for the mechanism.\n`);
       const control = runCheckMemoryPointersJson(controlDir);
       expect(control.result.exitCode).toBe(3);
       expect(collectFindingsByKind(control.parsed, "slug_pointer_missing").length).toBe(1);
@@ -343,6 +376,13 @@ describe("slug pointers — positive control plus real-corpus sweep", () => {
     // OWN corpus, read-only, HOME unmodified (see module header ⛔ SAFETY).
     const sweep = runCheckMemoryPointersJson(REPO_ROOT, { isolateHome: false });
     expect(collectFindingsByKind(sweep.parsed, "slug_pointer_missing")).toEqual([]);
+    // Under adoption=warn the deterministic finding would surface as advisory
+    // `downgraded` instead — read both, or "zero" is vacuously true.
+    expect(
+      collectFindingsByKind(sweep.parsed, "downgraded").filter(
+        (f) => (f as { downgraded_kind?: string }).downgraded_kind === "slug_pointer_missing",
+      ),
+    ).toEqual([]);
   });
 
   it("NON-VACUITY: the real-corpus sweep actually walked more than zero memory files (cross-checked against --check-claude-md's discovery of the same tree)", () => {

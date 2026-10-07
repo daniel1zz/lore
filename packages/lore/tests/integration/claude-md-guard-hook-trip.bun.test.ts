@@ -124,14 +124,20 @@ function writeLoreConfig(dir: string, maxLines: number): void {
   mkdirSync(loreDir, { recursive: true });
   writeFileSync(
     join(loreDir, "config.yaml"),
-    `project:\n  name: fixture\n  author: fixture\ncontext:\n  memory_files:\n    root:\n      max_lines: ${maxLines}\n      max_bytes: 1000000\n`,
+    // `adoption: enforce` is pinned: an absent key resolves to warn, under which the guard can never trip.
+    `project:\n  name: fixture\n  author: fixture\ncontext:\n  memory_files:\n    adoption: enforce\n    root:\n      max_lines: ${maxLines}\n      max_bytes: 1000000\n`,
   );
 }
 
 /** Writes a within-ceiling CLAUDE.md (a handful of short lines, always under any ceiling used below). */
 function writeWithinCeilingClaudeMd(dir: string): string {
   const target = join(dir, "CLAUDE.md");
-  writeFileSync(target, "# Title\n\nA couple of short lines.\n");
+  // Carries the five required root H2 sections: the fixture pins `adoption: enforce`, so a
+  // structurally bare file would be refused for `section_missing` and the HAPPY case could not pass.
+  const sections = ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+    .map((name) => `## ${name}\n\nbody of ${name}\n`)
+    .join("\n");
+  writeFileSync(target, `# Title\n\n${sections}`);
   return target;
 }
 
@@ -181,6 +187,9 @@ describe("claude-md-guard hook trip (AC-CTX-5)", () => {
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.exitCode).not.toBe(0);
+    // The ceiling specifically: this fixture also lacks the root sections, and
+    // `section_missing` alone must not be able to satisfy the trip case.
+    expect(combined).toContain("max_lines");
     expect(combined).toMatch(/CLAUDE\.md/i);
     expect(combined.toLowerCase()).toMatch(/budget|ceiling|exceed|breach|lines/);
   });

@@ -52,6 +52,10 @@
  *     positive); ABSENT for `reference_missing` (one finding per distinct
  *     dangling reference, not a count) — which instead carries
  *     `path`/`reference`.
+ *   - Adoption (spec-claude-md-root-section-structure-check-and-adoption-mode):
+ *     the three `section_*` deterministic kinds come from
+ *     `claude-md-structure.ts`; in `warn` mode EVERY deterministic kind is
+ *     re-emitted as an advisory `downgraded` finding carrying `downgraded_kind`.
  *
  * Side-effect class: pure (types only — zero imports, zero logic)
  *
@@ -111,7 +115,10 @@ export type MemoryFileFindingKind =
   | "max_bytes"
   | "eviction_required"
   | "slug_pointer_missing"
-  | "emphasis_saturated";
+  | "emphasis_saturated"
+  | "section_missing"
+  | "section_order"
+  | "section_duplicate";
 
 /**
  * One deterministic, exit-relevant admission-check finding — flat and
@@ -154,7 +161,11 @@ export interface MemoryFileFinding {
    * kinds (N5: density is not a capacity metric).
    */
   ceiling?: number;
-  /** Present only for `slug_pointer_missing` — the dangling backtick-quoted corpus-slug token as it appeared in content. */
+  /**
+   * Present for `slug_pointer_missing` (the dangling backtick-quoted corpus-slug
+   * token as it appeared in content) and for the structure kinds
+   * `section_missing`/`section_order`/`section_duplicate` (the H2 section NAME).
+   */
   reference?: string;
   /** Human-readable summary — always names `path`. */
   message: string;
@@ -184,7 +195,11 @@ export type AdvisoryFindingKind =
   | "headroom_warning"
   | "reference_missing"
   | "line_length"
-  | "target_distance";
+  | "target_distance"
+  | "section_extra"
+  | "section_empty"
+  | "module_section_missing"
+  | "downgraded";
 
 /**
  * One advisory observation — structurally SEPARATE from
@@ -210,8 +225,21 @@ export interface AdvisoryFinding {
    * "what this finding is ABOUT" rather than "what it points AT").
    */
   path?: string;
-  /** Present only for `reference_missing` — the raw backtick-quoted token as it appeared in content, fragment included. */
+  /**
+   * Present for `reference_missing` (the raw backtick-quoted token, fragment
+   * included) and for `section_extra`/`section_empty`/`module_section_missing`
+   * (the H2 section name).
+   */
   reference?: string;
+  /**
+   * Present ONLY on `kind: "downgraded"` — the deterministic kind that
+   * `runMemoryFileChecks` moved here because adoption mode is `warn`. Keeps
+   * rendering injective: a downgraded `max_lines` never prints as a plain one
+   * (spec-claude-md-root-section-structure-check-and-adoption-mode).
+   */
+  downgraded_kind?: MemoryFileFindingKind;
+  /** Present only on `kind: "downgraded"` — the original finding's `reference`, when it had one. */
+  downgraded_reference?: string;
   /** Human-readable summary. */
   message: string;
 }
