@@ -655,6 +655,13 @@ describe("OutlineService.resolve", () => {
         // reason: N+1 batch fix — new required StoreInterface method; mechanical
         // addition (same class of fix as every other explicit delegate above).
         findByIds: (ids) => store.findByIds(ids),
+        // reason: baseline rule registry (migration-013) — new required
+        // StoreInterface methods; mechanical addition (same class of fix as
+        // every other explicit delegate here).
+        allocateRuleAndUpdateLeaf: (leafId, expectedVersion, buildExtra, actor) =>
+          store.allocateRuleAndUpdateLeaf(leafId, expectedVersion, buildExtra, actor),
+        moveRule: (ruleId, fromLeaf, toLeaf, actor) => store.moveRule(ruleId, fromLeaf, toLeaf, actor),
+        listRuleRegistry: () => store.listRuleRegistry(),
         insert: (doc) => store.insert(doc),
         // reason: SPEC-084 — new required StoreInterface methods; mechanical
         // addition (same class of fix as every other explicit delegate above).

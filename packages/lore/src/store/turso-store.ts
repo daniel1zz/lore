@@ -38,6 +38,7 @@ import {
 import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
+import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -68,6 +69,8 @@ import type {
   CalibrationWindowFilter,
   NeverReadDoc,
   SearchHit,
+  RuleLeafPatch,
+  RuleRegistryRow,
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
@@ -645,6 +648,16 @@ export class TursoStore implements StoreInterface {
         // mid-string throw, see migration-004.ts's own @invariant), no
         // interactive transaction needed.
         await this.client.executeMultiple(MIGRATION_012_SQL);
+      }
+
+      if (currentVersion < 13) {
+        // reason: migration-013 (widen docs.type CHECK to accept 'baseline' +
+        // rule_registry) is a `docs` table-recreate, same shape as
+        // migration-006 which this file also applies via a plain
+        // `executeMultiple`. Idempotent on re-run: DROP TABLE IF EXISTS
+        // docs_new first, CREATE TABLE IF NOT EXISTS rule_registry — see
+        // migration-013.ts's module JSDoc.
+        await this.client.executeMultiple(MIGRATION_013_SQL);
       }
     })();
 
@@ -2249,6 +2262,284 @@ export class TursoStore implements StoreInterface {
       } finally {
         tx.close();
       }
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Rule registry (migration-013, spec C2) ─────────────────────────────
+
+  /**
+   * CAS-update one rule-bearing leaf's `extra` and insert its `action:
+   * "update"` version row on the caller's open write transaction. Mirror of
+   * `SQLiteStore.applyRuleLeafPatchSync`; a missing/soft-deleted leaf is
+   * `DOC_NOT_FOUND`. Never commits, rolls back or closes `tx` — an `err`
+   * return tells the caller to roll back; a thrown driver error is caught by
+   * the caller's own catch/rollback.
+   */
+  private async applyRuleLeafPatchTx(
+    tx: Transaction,
+    patch: RuleLeafPatch,
+    actor: string,
+    nowIso: string,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const existingRs = await tx.execute({
+      sql: "SELECT * FROM docs WHERE id = ?",
+      args: [patch.id],
+    });
+    const existingRow = existingRs.rows[0];
+    if (!existingRow || rowStrOrNull(existingRow, "deleted_at") !== null) {
+      return err({ code: "DOC_NOT_FOUND", id: patch.id });
+    }
+    const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
+    const updated: DocRecord = {
+      ...current,
+      extra: patch.extra,
+      version: patch.expectedVersion + 1,
+      updated_at: nowIso,
+    };
+    const tagsJson = JSON.stringify(updated.tags);
+    // reason: same shadow-column obligation as update() — an UPDATE that skips
+    // fts_* leaves CJK search reflecting pre-patch text.
+    const shadow = computeFtsShadowValues(updated.title, updated.content, tagsJson);
+    const updateRs = await tx.execute({
+      sql: `UPDATE docs SET
+             slug = ?, type = ?, role = ?, title = ?, status = ?,
+             priority = ?, content = ?, parent_id = ?, extra = ?,
+             tags = ?, version = ?, created_at = ?, updated_at = ?,
+             created_by = ?, deleted_at = ?, fts_title = ?, fts_content = ?,
+             fts_tags = ?
+           WHERE id = ? AND version = ?`,
+      args: [
+        updated.slug,
+        updated.type,
+        updated.role,
+        updated.title,
+        updated.status,
+        updated.priority,
+        updated.content,
+        updated.parent_id ?? null,
+        JSON.stringify(updated.extra),
+        tagsJson,
+        updated.version,
+        updated.created_at,
+        updated.updated_at,
+        updated.created_by,
+        updated.deleted_at ?? null,
+        shadow.fts_title,
+        shadow.fts_content,
+        shadow.fts_tags,
+        patch.id,
+        patch.expectedVersion,
+      ] as InValue[],
+    });
+    if (updateRs.rowsAffected === 0) {
+      return err({
+        code: "STALE_VERSION",
+        id: patch.id,
+        expected: patch.expectedVersion,
+        actual: current.version,
+      });
+    }
+    await tx.execute({
+      sql: `INSERT INTO versions
+             (doc_id, version, content, extra, status, title,
+              action, created_at, created_by, change_summary, slug)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        updated.id,
+        updated.version,
+        updated.content,
+        JSON.stringify(updated.extra),
+        updated.status,
+        updated.title,
+        "update",
+        nowIso,
+        actor,
+        null,
+        updated.slug,
+      ] as InValue[],
+    });
+    return ok(updated);
+  }
+
+  /**
+   * Tail of the in-process queue serialising rule-registry writes.
+   *
+   * reason: libsql's local-file client opens a fresh connection per
+   * `transaction("write")` with a 0ms busy bound, so two overlapping write
+   * transactions in ONE process make the second `BEGIN IMMEDIATE` throw
+   * SQLITE_BUSY instead of waiting. Queueing the registry writes keeps same-
+   * process callers from racing; it is ordering, not a timer/retry.
+   * Cross-process contention is not queued and still surfaces as a loud
+   * STORE_ERROR (never a duplicate id).
+   */
+  private ruleWriteTail: Promise<unknown> = Promise.resolve();
+
+  private serializeRuleWrite<T>(run: () => Promise<T>): Promise<T> {
+    const result = this.ruleWriteTail.then(run);
+    // reason: the tail only orders the NEXT write; this call's own outcome
+    // (including a rejection) is returned to its caller via `result`.
+    this.ruleWriteTail = result.catch(() => undefined);
+    return result;
+  }
+
+  /**
+   * @see StoreInterface.allocateRuleAndUpdateLeaf
+   *
+   * reason: `MAX(n)` is read on the SAME write transaction as the registry
+   * insert, so the read-then-insert is serialised by the write lock — a
+   * pre-read outside the transaction reopens the duplicate-id race (QA-1).
+   */
+  async allocateRuleAndUpdateLeaf(
+    leafId: DocId,
+    expectedVersion: number,
+    buildExtra: (ruleId: string) => Record<string, unknown>,
+    actor: string,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    return this.serializeRuleWrite(() =>
+      this.allocateRuleAndUpdateLeafSerialized(leafId, expectedVersion, buildExtra, actor),
+    );
+  }
+
+  private async allocateRuleAndUpdateLeafSerialized(
+    leafId: DocId,
+    expectedVersion: number,
+    buildExtra: (ruleId: string) => Record<string, unknown>,
+    actor: string,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    let tx: Transaction;
+    try {
+      await this.ensureReady();
+      tx = await this.client.transaction("write");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const nextRs = await tx.execute("SELECT COALESCE(MAX(n), 0) + 1 AS next_n FROM rule_registry");
+      const nextN = rowNum(nextRs.rows[0] as Row, "next_n");
+      const ruleId = `BR-${nextN}`;
+      const nowIso = new Date().toISOString();
+      const leaf = await this.applyRuleLeafPatchTx(
+        tx,
+        { id: leafId, expectedVersion, extra: buildExtra(ruleId) },
+        actor,
+        nowIso,
+      );
+      if (!leaf.ok) {
+        await tx.rollback();
+        return leaf;
+      }
+      await tx.execute({
+        sql: "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES (?, ?, ?, ?, ?)",
+        args: [ruleId, nextN, leafId, nowIso, actor] as InValue[],
+      });
+      await tx.commit();
+      return ok({ ruleId, doc: leaf.value });
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: rollback throws only when the transaction is already closed — safe to ignore.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
+   * @see StoreInterface.moveRule
+   */
+  async moveRule(
+    ruleId: string,
+    fromLeaf: RuleLeafPatch,
+    toLeaf: RuleLeafPatch,
+    actor: string,
+  ): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
+    return this.serializeRuleWrite(() => this.moveRuleSerialized(ruleId, fromLeaf, toLeaf, actor));
+  }
+
+  private async moveRuleSerialized(
+    ruleId: string,
+    fromLeaf: RuleLeafPatch,
+    toLeaf: RuleLeafPatch,
+    actor: string,
+  ): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
+    let tx: Transaction;
+    try {
+      await this.ensureReady();
+      tx = await this.client.transaction("write");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const registryRs = await tx.execute({
+        sql: "SELECT leaf_doc_id FROM rule_registry WHERE id = ?",
+        args: [ruleId],
+      });
+      const registryRow = registryRs.rows[0];
+      if (!registryRow) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id: ruleId });
+      }
+      const owner = rowStr(registryRow, "leaf_doc_id");
+      if (owner !== fromLeaf.id) {
+        await tx.rollback();
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "fromLeaf.id",
+          message: `rule ${ruleId} is registered to leaf ${owner}, not ${fromLeaf.id}`,
+          value: fromLeaf.id,
+        });
+      }
+      const nowIso = new Date().toISOString();
+      const from = await this.applyRuleLeafPatchTx(tx, fromLeaf, actor, nowIso);
+      if (!from.ok) {
+        await tx.rollback();
+        return from;
+      }
+      const to = await this.applyRuleLeafPatchTx(tx, toLeaf, actor, nowIso);
+      if (!to.ok) {
+        await tx.rollback();
+        return to;
+      }
+      await tx.execute({
+        sql: "UPDATE rule_registry SET leaf_doc_id = ? WHERE id = ?",
+        args: [toLeaf.id, ruleId] as InValue[],
+      });
+      await tx.commit();
+      return ok({ from: from.value, to: to.value });
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: same as allocateRuleAndUpdateLeaf — safe to ignore.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
+   * @see StoreInterface.listRuleRegistry
+   */
+  async listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        "SELECT id, n, leaf_doc_id, allocated_at, allocated_by FROM rule_registry ORDER BY n ASC",
+      );
+      return ok(
+        rs.rows.map((row) => ({
+          id: rowStr(row, "id"),
+          n: rowNum(row, "n"),
+          leaf_doc_id: rowStr(row, "leaf_doc_id"),
+          allocated_at: rowStr(row, "allocated_at"),
+          allocated_by: rowStr(row, "allocated_by"),
+        })),
+      );
     } catch (e) {
       return wrapStoreError(e);
     }

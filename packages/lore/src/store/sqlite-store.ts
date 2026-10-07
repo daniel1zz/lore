@@ -24,6 +24,7 @@ import {
 import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
+import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 // Re-exported here (beside the migration chain it describes) from a
 // bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
 // store/schema-probe.ts's `probeSchemaVersion`, consumed by
@@ -64,6 +65,8 @@ import type {
   CalibrationWindowFilter,
   NeverReadDoc,
   SearchHit,
+  RuleLeafPatch,
+  RuleRegistryRow,
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
@@ -495,6 +498,33 @@ export class SQLiteStore implements StoreInterface {
           this.db.exec("ROLLBACK;");
         } catch {
           // reason: same as migration-004/005/006/007/008/009/010 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 13) {
+      // reason: mirrors migration-006's catch/ROLLBACK/FK-restore wrapper (see
+      // migration-013.ts's module JSDoc) — a `docs` table-recreate widening
+      // the type CHECK to accept 'baseline', plus the rule_registry table, in
+      // one BEGIN/COMMIT with `PRAGMA foreign_keys` toggled OUTSIDE it.
+      try {
+        this.db.exec(MIGRATION_013_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        // reason: BUG-010 — the SQL's `PRAGMA foreign_keys = OFF` is a
+        // connection-level toggle that ROLLBACK does not undo; restore it so a
+        // failed migration never leaves this handle FK-unenforced (identical
+        // to the migration-006 branch above).
+        try {
+          this.db.exec("PRAGMA foreign_keys = ON");
+        } catch {
+          // reason: only throws on a closed/broken connection, where `error`
+          // below is what the caller needs anyway.
         }
         throw error;
       }
@@ -1893,6 +1923,186 @@ export class SQLiteStore implements StoreInterface {
       } catch {
         // reason: same as insertWithProvenance — safe to ignore, see above.
       }
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Rule registry (migration-013, spec C2) ─────────────────────────────────
+
+  /**
+   * CAS-update one rule-bearing leaf's `extra` and insert its `action: "update"`
+   * version row, INSIDE the caller's already-open write transaction. Shared by
+   * {@link allocateRuleAndUpdateLeaf} and {@link moveRule}. A missing or
+   * soft-deleted leaf is `DOC_NOT_FOUND` (the registry never writes into a
+   * deleted leaf). Never opens or closes a transaction itself.
+   */
+  private applyRuleLeafPatchSync(
+    patch: RuleLeafPatch,
+    actor: string,
+    nowIso: string,
+  ): Result<DocRecord, LoreError> {
+    const row = this.db
+      .prepare("SELECT * FROM docs WHERE id = ?")
+      .get(patch.id) as DocRow | null;
+    if (!row || row.deleted_at !== null) {
+      return err({ code: "DOC_NOT_FOUND", id: patch.id });
+    }
+    // reason: the CAS is checked HERE against the row read under this
+    // transaction's write lock (BEGIN IMMEDIATE — no writer can change it
+    // between this read and the UPDATE below) instead of trusting
+    // `updateDocSync`'s `result.changes === 0` miss detection. Measured under
+    // bun 1.3.10: `Statement.run().changes` after a ZERO-row UPDATE reports
+    // the FTS-trigger row count of an EARLIER write in the same transaction
+    // (4 for a miss that follows a hit), so a second CAS in one transaction —
+    // `moveRule`'s target leaf — silently "succeeds" without writing. The
+    // single-CAS-per-transaction callers never hit it.
+    if (Number(row.version) !== patch.expectedVersion) {
+      return err({
+        code: "STALE_VERSION",
+        id: patch.id,
+        expected: patch.expectedVersion,
+        actual: Number(row.version),
+      });
+    }
+    const updated = this.updateDocSync(
+      patch.id,
+      { extra: patch.extra, version: patch.expectedVersion + 1, updated_at: nowIso },
+      { expected_version: patch.expectedVersion },
+    );
+    if (!updated.ok) return updated;
+    const versionResult = this.insertVersionSync({
+      doc_id: updated.value.id,
+      version: updated.value.version,
+      content: updated.value.content,
+      extra: updated.value.extra,
+      status: updated.value.status,
+      title: updated.value.title,
+      action: "update",
+      created_at: nowIso,
+      created_by: actor,
+      slug: updated.value.slug,
+    });
+    if (!versionResult.ok) return versionResult;
+    return updated;
+  }
+
+  /**
+   * @see StoreInterface.allocateRuleAndUpdateLeaf
+   *
+   * reason: `BEGIN IMMEDIATE` takes the write lock BEFORE `MAX(n)` is read, so
+   * the read-then-insert is serialised across connections/processes — moving
+   * the MAX(n) read above the BEGIN reopens the duplicate-id race (QA-1,
+   * AC-BLS1-1; falsifier recorded on task-skill-implement-store-rule-registry-migration).
+   */
+  async allocateRuleAndUpdateLeaf(
+    leafId: DocId,
+    expectedVersion: number,
+    buildExtra: (ruleId: string) => Record<string, unknown>,
+    actor: string,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const nextRow = this.db
+        .prepare("SELECT COALESCE(MAX(n), 0) + 1 AS next_n FROM rule_registry")
+        .get() as { next_n: number };
+      const ruleId = `BR-${nextRow.next_n}`;
+      const nowIso = new Date().toISOString();
+      const leaf = this.applyRuleLeafPatchSync(
+        { id: leafId, expectedVersion, extra: buildExtra(ruleId) },
+        actor,
+        nowIso,
+      );
+      if (!leaf.ok) {
+        this.db.run("ROLLBACK");
+        return leaf;
+      }
+      this.db
+        .prepare(
+          "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(ruleId, nextRow.next_n, leafId, nowIso, actor);
+      this.db.run("COMMIT");
+      return ok({ ruleId, doc: leaf.value });
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as updateWithProvenance — ROLLBACK throws only when the
+        // transaction is already closed; `e` below is what the caller needs.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.moveRule
+   */
+  async moveRule(
+    ruleId: string,
+    fromLeaf: RuleLeafPatch,
+    toLeaf: RuleLeafPatch,
+    actor: string,
+  ): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const registryRow = this.db
+        .prepare("SELECT leaf_doc_id FROM rule_registry WHERE id = ?")
+        .get(ruleId) as { leaf_doc_id: string } | null;
+      if (!registryRow) {
+        this.db.run("ROLLBACK");
+        return err({ code: "DOC_NOT_FOUND", id: ruleId });
+      }
+      if (registryRow.leaf_doc_id !== fromLeaf.id) {
+        this.db.run("ROLLBACK");
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "fromLeaf.id",
+          message: `rule ${ruleId} is registered to leaf ${registryRow.leaf_doc_id}, not ${fromLeaf.id}`,
+          value: fromLeaf.id,
+        });
+      }
+      const nowIso = new Date().toISOString();
+      const from = this.applyRuleLeafPatchSync(fromLeaf, actor, nowIso);
+      if (!from.ok) {
+        this.db.run("ROLLBACK");
+        return from;
+      }
+      const to = this.applyRuleLeafPatchSync(toLeaf, actor, nowIso);
+      if (!to.ok) {
+        this.db.run("ROLLBACK");
+        return to;
+      }
+      this.db.prepare("UPDATE rule_registry SET leaf_doc_id = ? WHERE id = ?").run(toLeaf.id, ruleId);
+      this.db.run("COMMIT");
+      return ok({ from: from.value, to: to.value });
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as allocateRuleAndUpdateLeaf — safe to ignore.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.listRuleRegistry
+   */
+  async listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare("SELECT id, n, leaf_doc_id, allocated_at, allocated_by FROM rule_registry ORDER BY n ASC")
+        .all() as RuleRegistryRow[];
+      return ok(rows);
+    } catch (e) {
       return wrapStoreError(e);
     }
   }

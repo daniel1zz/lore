@@ -239,6 +239,34 @@ export interface TraceZeroHitListOpts {
   includeRawQueries?: boolean;
 }
 
+// ─── Rule registry (migration-013, spec C2) ────────────────────────────────
+
+/**
+ * One row of the permanent baseline rule-id registry. `id` is `"BR-<n>"`;
+ * `n` is UNIQUE, strictly increasing and never reissued — rows are never
+ * deleted, so an id stays burned after its rule is deprecated, retired or its
+ * leaf is soft-deleted.
+ */
+export interface RuleRegistryRow {
+  id: string;
+  n: number;
+  /** Current owning leaf doc id (updated by {@link StoreInterface.moveRule}). */
+  leaf_doc_id: DocId;
+  /** ISO 8601 allocation time. */
+  allocated_at: string;
+  /** Actor identity that allocated the id. */
+  allocated_by: string;
+}
+
+/** One leaf's CAS patch for {@link StoreInterface.moveRule}. */
+export interface RuleLeafPatch {
+  id: DocId;
+  /** CAS guard: the leaf's `version` the caller read. */
+  expectedVersion: number;
+  /** The leaf's NEW `extra` (already reflecting the removal / append). */
+  extra: Record<string, unknown>;
+}
+
 // ─── Interface ─────────────────────────────────────────────────────────────
 
 /**
@@ -590,6 +618,47 @@ export interface StoreInterface {
     version: VersionRecord,
     audit: AuditEntry,
   ): Promise<Result<void, LoreError>>;
+
+  // ── Rule registry (migration-013, spec C2) ─────────────────────────────
+
+  /**
+   * Allocate the next permanent rule id AND write it into the leaf in ONE
+   * write transaction: `n = COALESCE(MAX(n),0)+1` (read INSIDE the
+   * transaction), insert the registry row, CAS-update the leaf's `extra` to
+   * `buildExtra(id)` with `version = expectedVersion + 1`, and insert the
+   * matching `action: "update"` version row.
+   *
+   * Any failure rolls EVERYTHING back — a CAS miss never burns an id.
+   *
+   * @param leafId - Leaf doc to receive the rule; unknown or soft-deleted → `DOC_NOT_FOUND`.
+   * @param expectedVersion - CAS guard; mismatch → `STALE_VERSION`.
+   * @param buildExtra - Pure builder of the leaf's new `extra` given the allocated id.
+   * @param actor - Recorded as `allocated_by` and the version row's `created_by`.
+   * @returns `{ ruleId, doc }` (the updated leaf) or a loud error; never a duplicate id.
+   */
+  allocateRuleAndUpdateLeaf(
+    leafId: DocId,
+    expectedVersion: number,
+    buildExtra: (ruleId: string) => Record<string, unknown>,
+    actor: string,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
+
+  /**
+   * Move a rule between leaves in ONE write transaction: CAS-update both
+   * leaves (one `action: "update"` version row each) and set
+   * `rule_registry.leaf_doc_id = toLeaf.id`. Id and `n` are unchanged. Any
+   * failure (either CAS, a version-row insert, unknown `ruleId` →
+   * `DOC_NOT_FOUND`) leaves both leaves and the registry row exactly as before.
+   */
+  moveRule(
+    ruleId: string,
+    fromLeaf: RuleLeafPatch,
+    toLeaf: RuleLeafPatch,
+    actor: string,
+  ): Promise<Result<{ from: DocRecord; to: DocRecord }, LoreError>>;
+
+  /** All registry rows ordered by `n` ASC. There is deliberately no delete method. */
+  listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>>;
 
   // ── Links ──────────────────────────────────────────────────────────────
 
