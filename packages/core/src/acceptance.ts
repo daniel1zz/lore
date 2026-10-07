@@ -8,6 +8,8 @@
  *   - acceptanceCriterionSchema / AcceptanceCriterion — one AC declaration (script mode
  *     carries an optional `timeout_ms`, consumed by `lore verify`'s spawn executor —
  *     SPEC-039 §2 D9)
+ *   - AC_CITE_ID_PATTERN / AC_CITES_MAX — grammar and cap of `AcceptanceCriterion.cites`
+ *     (baseline rule ids a criterion cites; existence is a service-layer warning)
  *   - specAcceptanceCriteriaSchema — spec.extra.acceptance_criteria array (max 50, unique id)
  *   - computeAcCoverage(criteria, tasks) — pure pass/fail/falsified(+attested) aggregation
  *     over tasks' evidence (single-pass over tasks/evidence — SPEC-070 AC-070-17, review
@@ -173,6 +175,12 @@ export type AcFalsifier = z.infer<typeof acFalsifierSchema>;
 
 // ─── Acceptance Criterion Schema ───────────────────────────────────────────
 
+/** Grammar of one cited baseline rule id: `BR-` plus a positive integer, no leading zero. */
+export const AC_CITE_ID_PATTERN = /^BR-[1-9][0-9]*$/;
+
+/** Upper bound on `AcceptanceCriterion.cites` length (baseline slice 1 §C4). */
+export const AC_CITES_MAX = 10;
+
 /**
  * One structured acceptance criterion declared on a spec.
  *
@@ -262,6 +270,18 @@ export const acceptanceCriterionSchema = z.object({
    * requires an executed command.
    */
   oracle_generation: z.number().int().min(ORACLE_GENERATION_INITIAL).optional(),
+  /**
+   * Baseline rule ids (`BR-<n>`) this criterion cites (baseline slice 1 §C4). Optional
+   * and additive: absent parses exactly as before (REGRESSION). Unique, at most
+   * {@link AC_CITES_MAX}. Whether a cited id exists or is still live is NOT checked
+   * here — that is a service-layer warning (`cites_dangling` / `cites_to_inactive`),
+   * so a citation survives its rule being retired.
+   */
+  cites: z
+    .array(z.string().regex(AC_CITE_ID_PATTERN, "cites[] must match BR-<n> with n >= 1"))
+    .max(AC_CITES_MAX)
+    .refine((ids) => new Set(ids).size === ids.length, "cites[] must be unique")
+    .optional(),
 });
 
 /** Derived TypeScript type for one acceptance criterion declaration. */
