@@ -23,6 +23,12 @@
  *     byte-preservation and `diverged_skip` on a hand-edited section
  *     (`service/context-projection.ts`'s own invariants, reused verbatim,
  *     never re-implemented here).
+ *   - Adoption (AC-STR-6): `runContextRefresh` honours `deps.budgets.adoption`
+ *     only through `runMemoryFileChecks` (it applies adoption). enforce -> a
+ *     `section_*` finding is in `.deterministic` and refuses the write naming
+ *     its kind + section (message of each finding); warn (or absent) ->
+ *     `.deterministic` is empty, the file is written, and the `downgraded`
+ *     advisories are returned on `ContextRefreshReport.downgraded`.
  *   - `runContextInit` NEVER calls any AI provider either — `opts.narrative`
  *     is an ALREADY-RESOLVED string (or absent). Resolving whether to call
  *     AI, and rendering the narrative-compression prompt if so, is the CLI
@@ -92,6 +98,7 @@
 
 import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import type { AdvisoryFinding } from "../service/claude-md-findings.js";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
@@ -169,6 +176,14 @@ export interface ContextRefreshReport {
   /** Repo-relative path written — always {@link CLAUDE_MD_PATH}. */
   path: string;
   sections: SpliceResult["perSection"];
+  /**
+   * Advisory `downgraded` findings from adoption=warn (spec-claude-md-root-
+   * section-structure-check-and-adoption-mode D2, AC-STR-6): deterministic
+   * findings that WOULD have refused this write under enforce, each carrying
+   * `downgraded_kind` (e.g. `section_missing`). Always present; empty when the
+   * candidate conforms or adoption=enforce (where such findings refuse instead).
+   */
+  downgraded: AdvisoryFinding[];
 }
 
 // ─── Rendering (facts -> ManagedSection[]) ──────────────────────────────────
@@ -339,7 +354,7 @@ export async function runContextRefresh(
   // Only `.deterministic` gates the write — `.advisory` is computed and
   // discarded (module header explains why `fileExists`/`docExists` are inert
   // stand-ins here).
-  const { deterministic: findings } = runMemoryFileChecks(
+  const { deterministic: findings, advisory } = runMemoryFileChecks(
     [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
     budgets,
     { fileExists: () => true, docExists: () => true },
@@ -350,12 +365,16 @@ export async function runContextRefresh(
       field: "path",
       message:
         `refusing to write ${CLAUDE_MD_PATH} — the spliced candidate breaches its ceiling: ` +
-        findings.map((finding) => finding.message).join("; "),
+        findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; "),
       value: CLAUDE_MD_PATH,
     });
   }
 
   await deps.fs.writeFile(CLAUDE_MD_PATH, finalContent);
 
-  return ok({ path: CLAUDE_MD_PATH, sections: spliceResult.value.perSection });
+  return ok({
+    path: CLAUDE_MD_PATH,
+    sections: spliceResult.value.perSection,
+    downgraded: advisory.filter((finding) => finding.kind === "downgraded"),
+  });
 }

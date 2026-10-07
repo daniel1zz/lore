@@ -226,6 +226,12 @@ function renderOutcome(
   const narrativeSuffix = "narrative" in result.value ? ` (narrative: ${result.value.narrative})` : "";
   console.log(`Wrote ${result.value.path}${narrativeSuffix}`);
   renderSections(result.value.sections);
+  // AC-STR-6: adoption=warn advisories (refresh only) — stderr so stdout stays the outcome list.
+  if ("downgraded" in result.value) {
+    for (const finding of result.value.downgraded) {
+      process.stderr.write(`Advisory: ${finding.message}\n`);
+    }
+  }
 }
 
 export default defineCommand({
