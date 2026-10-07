@@ -13,6 +13,12 @@
  *   - `full()` precedence: contradicted > stale > verified > unknown > unverified. A pass
  *     with no head_sha / a dirty run / a non-ancestor sha / unavailable git is `unknown`
  *     (with a reason), NEVER verified. A latest attested FAIL contradicts without git.
+ *   - Per-input verdict, then rule state: contradicted if any input's latest run failed; else
+ *     stale if any input is stale; else verified if >= 1 input is verified; else
+ *     unknown(reason of the FIRST unknown input, in (spec, ac_id) order) if any; else unverified.
+ *     A pass whose citing spec declares no `code_anchors` is unknown(`no-code-anchors`), never
+ *     verified (vacuous truth is not truth); it still yields to any verifiable input. `counts()`
+ *     does not evaluate staleness, so such a pass stays `passing_staleness_unchecked` there.
  *   - Only runner-attested (`attestation` present), conclusive (pass|fail) rows count; the
  *     latest per (spec, AC) wins. Self-reported rows neither verify nor contradict.
  *   - Evidence -> AC: a plan-member task resolves to its plan's parent spec; a task with no
@@ -46,7 +52,12 @@ export interface GitPort {
 }
 
 export type RuleVerification = "contradicted" | "stale" | "verified" | "unverified" | "unknown";
-export type UnknownReason = "no-commit-recorded" | "dirty" | "not-ancestor" | "git-unavailable";
+export type UnknownReason =
+  | "no-commit-recorded"
+  | "dirty"
+  | "not-ancestor"
+  | "git-unavailable"
+  | "no-code-anchors";
 
 /** One per citing script-mode AC — returned for EVERY state. */
 export interface RuleStateInput {
@@ -300,9 +311,6 @@ class GitEvaluator {
     }
     if (!ancestor.ok) return { kind: "unknown", reason: "git-unavailable" };
     if (!ancestor.value) return { kind: "unknown", reason: "not-ancestor" };
-    // reason: a spec with no declared anchors has nothing that can go stale; an empty pathspec
-    // would instead diff the WHOLE tree and report every pass stale.
-    if (ownAnchorPaths.length === 0) return { kind: "verified" };
     let changed = this.changed.get(sha);
     if (changed === undefined) {
       changed = this.git.changedSince(sha, this.pathsBySha.get(sha) ?? [...ownAnchorPaths]);
@@ -334,6 +342,13 @@ function decideRule(rule: RuleModel, git: GitEvaluator): { state: RuleVerificati
       continue;
     }
     const sha = run.attestation?.head_sha as string;
+    // reason: a spec with no code_anchors makes "anchored code unchanged since the pass" vacuously
+    // true; vacuous must be distinguishable from true, so it is unknown, not verified. Checked
+    // before any git call (nothing to diff).
+    if (input.anchor_paths.length === 0) {
+      unknownReason ??= "no-code-anchors";
+      continue;
+    }
     const v = git.verdict(sha, input.anchor_paths);
     if (v.kind === "stale") stale = true;
     else if (v.kind === "verified") verified = true;
