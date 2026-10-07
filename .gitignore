@@ -18,6 +18,8 @@ packages/dashboard/.tanstack/
 .lore/*
 !.lore/export-index.json
 !.lore/audit-anchor.json
+# D14 (spec-context-fragments-config-driven-layered-rule-injection): project fragments are git-shared.
+!.lore/context/
 *.db
 *.sqlite
 .DS_Store
