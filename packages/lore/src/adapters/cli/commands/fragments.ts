@@ -6,14 +6,14 @@
  *       prints `{"hookSpecificOutput":{"hookEventName","additionalContext"}}` to stdout. For a hook
  *       outlet ANY failure still exits 0 and emits a <= 400-char banner carrying the error code (D12:
  *       hooks never block start, never emit nothing).
- *   - `check [--json]` enumerates every outlet × agent type; exits 4 on cap overflow, Z1 drift,
+ *   - `check [--json]` enumerates every outlet × agent type; exits 4 on cap overflow, rules-file drift,
  *       override refusal or Claude Code `language` drift (findings on stderr, or in the JSON report).
  *   - `pointers --cwd P` prints the project pointer lines (<= POINTER_CEILING chars).
  *
  * Bootstrap-stage exemption (adapters/cli/CLAUDE.md "Key Invariants" #4, same as commands/governance.ts):
  * this command MUST NOT import `loader.ts` / `bun:sqlite` / `loadLoreApp`. Config is read straight
  * from YAML; fragments come from three on-disk layers; `pointers` spawns `lore bootstrap --json`
- * instead of opening the corpus DB. The writer of CLAUDE.md stays `lore context` (D13).
+ * instead of opening the corpus DB. The writer of the lore rules files stays `lore context` (D13, D15).
  *
  * Layer roots: shipped `<assetsRoot>/context`, user `<global config dir>/context`
  * (`$LORE_CONFIG_HOME` > `$XDG_CONFIG_HOME/lore` > `~/.config/lore`), project `<root>/.lore/context`,
@@ -268,7 +268,7 @@ export default defineCommand({
     description:
       "Read-only context-fragment verbs, bootstrap-stage (no corpus DB): " +
       "`render --outlet <hook:session-start|hook:subagent-start>` (hook JSON), " +
-      "`check [--json]` (caps, Z1 drift, override refusal, language drift), " +
+      "`check [--json]` (caps, rules-file drift, override refusal, language drift), " +
       "`pointers --cwd P` (project pointer lines).",
   },
   args: {

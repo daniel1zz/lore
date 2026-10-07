@@ -574,7 +574,7 @@ function failWith(error: LoreError): void {
 
 /**
  * Project half of `lore setup --project`: the same flow as `lore context refresh` (project scope)
- * so Z1 fragments land, then the project-layer language projection. Runs AFTER the scaffold created
+ * so the lore rules files (`.claude/rules/lore-*.md`, D15) land, then the project-layer language projection. Runs AFTER the scaffold created
  * CLAUDE.md and `.lore/config.yaml`.
  */
 async function runProjectContextProjection(opts: {

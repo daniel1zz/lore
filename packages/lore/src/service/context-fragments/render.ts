@@ -8,7 +8,8 @@
  *   - text = bodies in the given order joined by "\n\n"; no prefix/suffix, no trim.
  *   - chars = text.length (the separator counts toward the cap).
  *   - hook outlets refuse text.length > cap (strictly greater: exactly-cap passes);
- *     claude-md outlets have no cap.
+ *     rules:* outlets have no render cap (each rules file is
+ *     budget-checked per file by the flow instead, D15).
  * Side-effect class: pure.
  */
 import {
@@ -37,15 +38,15 @@ export interface RenderedOutlet {
 /** The only error {@link renderOutlet} returns; narrowed so callers can read its fields (still a member of `LoreError`). */
 export type BudgetExceededError = Extract<LoreError, { code: "BUDGET_EXCEEDED" }>;
 
-/** Cap for an outlet, or `null` when the outlet is uncapped (claude-md:*). */
+/** Cap for an outlet, or `null` when the outlet is uncapped (rules:*). */
 function getOutletCap(outlet: OutletId): number | null {
   switch (outlet) {
     case "hook:session-start":
       return SESSION_FRAGMENT_CAP;
     case "hook:subagent-start":
       return SUBAGENT_FRAGMENT_CAP;
-    case "claude-md:project":
-    case "claude-md:user":
+    case "rules:project":
+    case "rules:user":
       return null;
     default: {
       const unreachable: never = outlet;

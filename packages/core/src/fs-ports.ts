@@ -10,7 +10,7 @@
  *
  * Public surface:
  *   - FsReadPort — read-only capability: exists / readFile / listDir.
- *   - FsWritePort — FsReadPort + writeFile.
+ *   - FsWritePort — FsReadPort + writeFile + optional deleteFile (D15 prune).
  *   - InMemoryFsPort — Map-backed FsWritePort test double.
  *
  * Invariants:
@@ -38,10 +38,16 @@ export interface FsReadPort {
   listDir(path: string): Promise<string[]>;
 }
 
-/** Read + write filesystem capability — {@link FsReadPort} plus a single write method. */
+/** Read + write filesystem capability — {@link FsReadPort} plus a write method and an optional delete. */
 export interface FsWritePort extends FsReadPort {
   /** Writes `content` to `path`, creating or overwriting it wholesale (no partial/append writes). */
   writeFile(path: string, content: string): Promise<void>;
+  /**
+   * Removes the file at `path`; a no-op when it does not exist. Optional so read/write-only test
+   * doubles stay valid; a caller that NEEDS to delete (spec-context-fragments D15 prune) must
+   * refuse loudly when the port lacks it, never skip silently.
+   */
+  deleteFile?(path: string): Promise<void>;
 }
 
 /**
@@ -91,6 +97,10 @@ export class InMemoryFsPort implements FsWritePort {
 
   async writeFile(path: string, content: string): Promise<void> {
     this.files.set(path, content);
+  }
+
+  async deleteFile(path: string): Promise<void> {
+    this.files.delete(path);
   }
 }
 

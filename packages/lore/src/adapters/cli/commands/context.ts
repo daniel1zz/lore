@@ -71,7 +71,7 @@
  *   §Public Interface, §Design Decisions D2/D3; AC-CTX-3.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,7 +101,7 @@ import { resolveAiDefault } from "../../../ai/resolve-ai.js";
 type ContextTopic = "init" | "refresh";
 const KNOWN_TOPICS: readonly ContextTopic[] = ["init", "refresh"];
 
-/** `--scope` values accepted by `refresh` (spec-context-fragments D4): the repo CLAUDE.md or `~/.claude/CLAUDE.md`. */
+/** `--scope` values accepted by `refresh` (spec-context-fragments D4/D15): the repo (CLAUDE.md + `.claude/rules/lore-*.md`) or `~/.claude/rules/lore-*.md`. */
 const KNOWN_SCOPES: readonly ContextRefreshScope[] = ["project", "user"];
 
 // reason: dev-mode repo root, 6 levels up from this file — the SAME derivation
@@ -196,6 +196,11 @@ export function makeRealContextFsPort(repoRoot: string): FsWritePort {
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, content, "utf8");
     },
+    async deleteFile(path: string): Promise<void> {
+      // reason: `force: true` makes an already-absent file a no-op (the port contract); every
+      // other failure (permissions, a directory at the path) stays loud.
+      rmSync(resolvePath(path), { force: true });
+    },
   };
 }
 
@@ -267,6 +272,11 @@ function renderOutcome(
   const narrativeSuffix = "narrative" in result.value ? ` (narrative: ${result.value.narrative})` : "";
   console.log(`Wrote ${result.value.path}${narrativeSuffix}`);
   renderSections(result.value.sections);
+  if ("rules" in result.value) {
+    for (const rule of result.value.rules) {
+      console.log(`  ${rule.path}: ${rule.state}`);
+    }
+  }
   // AC-STR-6: adoption=warn advisories (refresh only) — stderr so stdout stays the outcome list.
   if ("downgraded" in result.value) {
     for (const finding of result.value.downgraded) {
@@ -300,7 +310,7 @@ export default defineCommand({
     },
     scope: {
       type: "string",
-      description: "[refresh only] Memory file to refresh: project (default, repo CLAUDE.md) | user (~/.claude/CLAUDE.md)",
+      description: "[refresh only] Scope to refresh: project (default, repo CLAUDE.md + .claude/rules/lore-*.md) | user (~/.claude/rules/lore-*.md)",
     },
     json: {
       type: "boolean",
@@ -365,8 +375,8 @@ export default defineCommand({
       isCompiled: Bun.main.startsWith("/$bunfs/"),
       execPath: process.execPath,
     };
-    // reason: init and refresh MUST receive identical fragment deps — the Z1 `fragments` section
-    // is part of both verbs' section list, so "init then refresh" stays byte-identical (AC-CTX-3).
+    // reason: init and refresh receive identical deps; only refresh consumes the fragment deps (it owns the
+    // lore rules files, D15), so "init then refresh" leaves CLAUDE.md byte-identical (AC-CTX-3).
     const fragmentDeps = {
       assetsRoot: resolveAssetsRoot(pathCtx),
       home,
