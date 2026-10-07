@@ -133,7 +133,17 @@ Whitelisted components resolved at read time: `ChildrenOf`, `RecentDecisions`, `
 
 Enforced via Zod `superRefine` in `packages/core/src/schemas.ts`.
 
-### Dogfooding: Skill/Tool Eval Log
+### AI Default Behavior by Caller Surface (SPEC-024)
+
+AI is ON for human surfaces (`cli`, `http_cookie`) and OFF for agent surfaces (`agent` — signalled by `CLAUDECODE=1` / `CI=true` / `LORE_AI_DEFAULT=off` —, `mcp`, `http_token`), so `lore create` never nests a Claude call. Override per call with `--ai` / `--no-ai` (both → exit 2), or per surface via `ai.default_per_surface.<surface>` in `.lore/config.yaml`; resolved values in `lore status --json`. Full detection table: `lore get SPEC-024`.
+
+### Cross-cutting Rules
+
+⛔ Per-spec SSOT is the corpus, never a snapshot here: `lore get SPEC-0NN`, `lore list --type plan`. Evicted narrative: `knowledge-retired-from-root-claude-md-the-implementation-status`; FROZEN pre-2026-07-22: `docs/claude-md-archive/spec-implementation-notes.md`.
+
+Cross-cutting rules extracted from it: gates run in the SERVICE layer so CLI/MCP/HTTP writes are gated identically (per-checkpoint knob `workflow.gates.<checkpoint>.enabled`); `extra.phase` validates against the MEMBER plan via `extra.plan_id`, ⛔ never the `parent_id` proxy; `--worktree` is ALWAYS explicit on `lore claim`; `lore done` needs a RUNNER-ATTESTED pass (audited `--override-attestation` escape); `lore ready`'s `sessions[]` is plan-scoped/fresh-only while `lore bootstrap`'s `active_sessions` is corpus-wide and FLAGS `stale` (⛔ ≠ death); ⛔ a session-collapse report is NEVER fixed by prescribing a more unique `LORE_ACTOR`; ⛔ a listed doc is NOT proven live — validity is authoritative only by direct address. The v1 predecessor at `~/.claude/docman-mcp` is frozen — do not carry over its schema or API shape.
+
+## Dogfooding: Skill/Tool Eval Log
 
 Lore is built **through** the Lore-governed workflow (corpus chain + skills + gates): a discipline we skip here is one we cannot ask other teams to keep.
 
@@ -167,16 +177,6 @@ Lore is built **through** the Lore-governed workflow (corpus chain + skills + ga
 - ⛔ `--capture` NOW ATTESTS (SPEC-143 C5) and clears `lore done`'s floor, so the old "not attested" rule is FALSE for new rows — the floor asks presence, not provenance; only `verify` proves declared scope. `knowledge-lore-evidence-capture-now-clears-the-attested-floor`
 - ⛔ RUN a structural oracle BEFORE declaring it as an AC — else the author's file list becomes the AC's blind spot and the AC certifies it as covered; the GENERIC needle is the load-bearing one. `knowledge-five-findings-from-planning-the-github-read-side-a`
 - ⛔ A refusal branch on one config shape, absent on its neighbour, reads as "guarded" everywhere; a partial comparison is not an equality check — assert EQUALITY, not containment; a structural AC is only as wide as the file list it greps. `spec-the-retired-shape-refusal-message-has-two-byte-identical`
-
-### AI Default Behavior by Caller Surface (SPEC-024)
-
-AI is ON for human surfaces (`cli`, `http_cookie`) and OFF for agent surfaces (`agent` — signalled by `CLAUDECODE=1` / `CI=true` / `LORE_AI_DEFAULT=off` —, `mcp`, `http_token`), so `lore create` never nests a Claude call. Override per call with `--ai` / `--no-ai` (both → exit 2), or per surface via `ai.default_per_surface.<surface>` in `.lore/config.yaml`; resolved values in `lore status --json`. Full detection table: `lore get SPEC-024`.
-
-### Implementation Status
-
-⛔ Per-spec SSOT is the corpus, never a snapshot here: `lore get SPEC-0NN`, `lore list --type plan`. Evicted narrative: `knowledge-retired-from-root-claude-md-the-implementation-status`; FROZEN pre-2026-07-22: `docs/claude-md-archive/spec-implementation-notes.md`.
-
-Cross-cutting rules extracted from it: gates run in the SERVICE layer so CLI/MCP/HTTP writes are gated identically (per-checkpoint knob `workflow.gates.<checkpoint>.enabled`); `extra.phase` validates against the MEMBER plan via `extra.plan_id`, ⛔ never the `parent_id` proxy; `--worktree` is ALWAYS explicit on `lore claim`; `lore done` needs a RUNNER-ATTESTED pass (audited `--override-attestation` escape); `lore ready`'s `sessions[]` is plan-scoped/fresh-only while `lore bootstrap`'s `active_sessions` is corpus-wide and FLAGS `stale` (⛔ ≠ death); ⛔ a session-collapse report is NEVER fixed by prescribing a more unique `LORE_ACTOR`; ⛔ a listed doc is NOT proven live — validity is authoritative only by direct address. The v1 predecessor at `~/.claude/docman-mcp` is frozen — do not carry over its schema or API shape.
 
 <!-- auto:module-index -->
 ## Module Index
