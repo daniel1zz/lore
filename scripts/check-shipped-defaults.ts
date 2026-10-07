@@ -193,6 +193,10 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
     rationale: "Identifies the default author identity for THIS project; inherently per-installation, never shared.",
   },
   {
+    key: "context.memory_files.adoption",
+    rationale: "Judged per project by lore setup from that project's own CLAUDE.md (enforce iff it already passes); an absent key is the designed warn default, never a shipped value.",
+  },
+  {
     key: "audit.verify_since",
     rationale:
       "Names the audit hash-chain watermark for THIS corpus's own history; a shared default would misdate every other corpus's chain.",

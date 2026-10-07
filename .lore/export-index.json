@@ -7092,6 +7092,222 @@
     "01M0WQAXS3KS70QA46QF03Y0A3": {
       "human_id": "TASK-863",
       "file_path": "docs/requirements/task/TASK-863-one-documentation-edit-put-main-s-claude-md-evicti.md"
+    },
+    "01M4AC1TR9J8J8PEC5QXN5AKD8": {
+      "human_id": "SPEC-155",
+      "file_path": "docs/requirements/spec/SPEC-155-context-fragments-config-driven-layered-rule-injec.md"
+    },
+    "01M4A6MQRPHFSSW8GQQWM2R63E": {
+      "human_id": "SPEC-154",
+      "file_path": "docs/requirements/spec/SPEC-154-claude-md-root-section-structure-check-and-adoptio.md"
+    },
+    "01M4A6MK145ARKS8G7W0SKW9NY": {
+      "human_id": "ADR-040",
+      "file_path": "docs/requirements/adr/ADR-040-claude-md-root-h2-structure-is-deterministic-with.md"
+    },
+    "01M4A7SQV174K2V04TGC4D6KGV": {
+      "human_id": "PLAN-149",
+      "file_path": "docs/requirements/plan/PLAN-149-claude-md-root-section-structure-check-and-adoptio.md"
+    },
+    "01M4AC24Y4FF26QCHWZ45V11MB": {
+      "human_id": "TASK-864",
+      "file_path": "docs/requirements/task/TASK-864-skill-test-discovery-skips-nested-git-repositories.md"
+    },
+    "01M4AC2583DFBM5RWC2C836XZC": {
+      "human_id": "TASK-865",
+      "file_path": "docs/requirements/task/TASK-865-skill-implement-memory-file-probe-stops-at-nested.md"
+    },
+    "01M4ABA1MZB4VYQRTN1Y2D0KGV": {
+      "human_id": "TASK-866",
+      "file_path": "docs/requirements/task/TASK-866-claude-md-discovery-probe-descends-into-nested-git.md"
+    },
+    "01M4A7WWWGTY12H1ABDKF6N69J": {
+      "human_id": "TASK-867",
+      "file_path": "docs/requirements/task/TASK-867-skill-test-bootstrap-memory-file-health-red.md"
+    },
+    "01M4A7WX6B8XFTTQV29Z2A9WEE": {
+      "human_id": "TASK-868",
+      "file_path": "docs/requirements/task/TASK-868-skill-implement-bootstrap-memory-file-health-via-s.md"
+    },
+    "01M4A7WW8QR561BP3JNRPTJQ5B": {
+      "human_id": "TASK-869",
+      "file_path": "docs/requirements/task/TASK-869-skill-test-lore-context-write-gate-honours-adoptio.md"
+    },
+    "01M4A7WWJTKCGHC57X9KXJW379": {
+      "human_id": "TASK-870",
+      "file_path": "docs/requirements/task/TASK-870-skill-implement-lore-context-write-gate-honours-ad.md"
+    },
+    "01M4A7WXG58TEC0JB52J43KEB7": {
+      "human_id": "TASK-871",
+      "file_path": "docs/requirements/task/TASK-871-skill-test-setup-adoption-both-ends-fresh-install.md"
+    },
+    "01M4A7WXTEP9ZNPRKCAFY97334": {
+      "human_id": "TASK-872",
+      "file_path": "docs/requirements/task/TASK-872-skill-implement-setup-skeleton-managed-block-resha.md"
+    },
+    "01M4AA1KA5YKJBTEG1D0KG79W4": {
+      "human_id": "TASK-873",
+      "file_path": "docs/requirements/task/TASK-873-skill-test-check-memory-pointers-never-silent-unde.md"
+    },
+    "01M4AA1BATQBH34G9ZHGAZE0YZ": {
+      "human_id": "TASK-874",
+      "file_path": "docs/requirements/task/TASK-874-skill-implement-check-memory-pointers-renders-warn.md"
+    },
+    "01M4A7WYE8FN64QWXX9DM5HMT2": {
+      "human_id": "TASK-875",
+      "file_path": "docs/requirements/task/TASK-875-skill-implement-contract-prose-must-contain-in-ord.md"
+    },
+    "01M4A7WY4FSAWJ8E05Z03ARP9H": {
+      "human_id": "TASK-876",
+      "file_path": "docs/requirements/task/TASK-876-skill-test-contract-section-parity-real-binary-pre.md"
+    },
+    "01M4A7WVY5Y1A4M32N8CZJ4K0V": {
+      "human_id": "TASK-877",
+      "file_path": "docs/requirements/task/TASK-877-skill-implement-core-adoption-config-pure-h2-struc.md"
+    },
+    "01M4A7WVCG4P5PK0E7CK19MVN8": {
+      "human_id": "TASK-878",
+      "file_path": "docs/requirements/task/TASK-878-skill-test-structure-check-cli-adoption-surface-re.md"
+    },
+    "01M4A94D43QBV04MS3GSYJNKAJ": {
+      "human_id": "TASK-879",
+      "file_path": "docs/requirements/task/TASK-879-lore-plan-s-tdd-injection-test-task-blocks-impl-ta.md"
+    },
+    "01M4A7WYR5944TPB431MWQKMEN": {
+      "human_id": "TASK-880",
+      "file_path": "docs/requirements/task/TASK-880-skill-implement-dogfood-evict-three-architecture.md"
+    },
+    "01M4A7WZ23HZV68VRDNWE7D13W": {
+      "human_id": "TASK-881",
+      "file_path": "docs/requirements/task/TASK-881-skill-review-verify-ac-str-1-8-on-main-full-suite.md"
+    },
+    "01M4A72HHFMGH9K83TS4E822KC": {
+      "human_id": "TASK-882",
+      "file_path": "docs/requirements/task/TASK-882-lore-gate-hooks-g1-g4-are-registered-twice-in-this.md"
+    },
+    "01M4A72DYQABMT6VF75X11DM17": {
+      "human_id": "TASK-883",
+      "file_path": "docs/requirements/task/TASK-883-stop-doc-sync-blocks-on-every-turn-including-no-ed.md"
+    },
+    "01M4A72AENH0SHBHZH3HYW7FWF": {
+      "human_id": "TASK-884",
+      "file_path": "docs/requirements/task/TASK-884-sessionstart-governance-injection-exceeds-claude-c.md"
+    },
+    "01M4A6Q12A0JJ8AFFVDXC1FQW2": {
+      "human_id": "TASK-885",
+      "file_path": "docs/requirements/task/TASK-885-lore-ac-add-set-accepts-a-script-command-whose-pip.md"
+    },
+    "01M0YY2TWS98TGX287WBXJQZ4F": {
+      "human_id": "TASK-886",
+      "file_path": "docs/requirements/task/TASK-886-knowledge-sub-types-has-three-hand-written-prose-c.md"
+    },
+    "01M0YY00M26NW0SR22B2E3RXZC": {
+      "human_id": "TASK-887",
+      "file_path": "docs/requirements/task/TASK-887-a-trailing-fall-through-makes-a-guard-order-invari.md"
+    },
+    "01M0YXZ9S0HTREBDC1SDRC906D": {
+      "human_id": "TASK-888",
+      "file_path": "docs/requirements/task/TASK-888-a-worktree-has-no-node-modules-so-lore-core-resolv.md"
+    },
+    "01M4AH7EN9TDNDZGMVK6CHYKTV": {
+      "human_id": "ADR-041",
+      "file_path": "docs/requirements/adr/ADR-041-the-product-is-a-baseline-tree-specs-are-implement.md"
+    },
+    "01M4ACFFCS9204Y2H28AJ1Z7XT": {
+      "human_id": "KN-562",
+      "file_path": "docs/requirements/knowledge/KN-562-handoff-agent-main-orchestrator.md"
+    },
+    "01M4AGREYVM1JEKG2QPA35RYK9": {
+      "human_id": "PLAN-150",
+      "file_path": "docs/requirements/plan/PLAN-150-context-fragments-config-driven-layered-rule-injec.md"
+    },
+    "01M4AH22GTSCP771J37RGGEY1K": {
+      "human_id": "TASK-889",
+      "file_path": "docs/requirements/task/TASK-889-skill-implement-distribute-assets-context-manifest.md"
+    },
+    "01M4AGV0ENWAQBRV8QNZ872XRR": {
+      "human_id": "TASK-890",
+      "file_path": "docs/requirements/task/TASK-890-skill-test-discover-red-layer-override-duplicate-i.md"
+    },
+    "01M4AGV0S805PK7VRKTM84EQDT": {
+      "human_id": "TASK-891",
+      "file_path": "docs/requirements/task/TASK-891-skill-implement-discover-three-layer-fragment-disc.md"
+    },
+    "01M4AGV1EZMAE3XHJAJYVP71BB": {
+      "human_id": "TASK-892",
+      "file_path": "docs/requirements/task/TASK-892-skill-implement-select-outlet-routing-when-disable.md"
+    },
+    "01M4AGV2RV1D78HB4ZP3MANXQE": {
+      "human_id": "TASK-893",
+      "file_path": "docs/requirements/task/TASK-893-skill-implement-context-refresh-fragments-z1-secti.md"
+    },
+    "01M4AGV1SC52SHZJ21CPPP28TJ": {
+      "human_id": "TASK-894",
+      "file_path": "docs/requirements/task/TASK-894-skill-test-render-red-hook-cap-boundaries-per-outl.md"
+    },
+    "01M4AGV24637YW4HWJ6BD14BCA": {
+      "human_id": "TASK-895",
+      "file_path": "docs/requirements/task/TASK-895-skill-implement-render-section-outlet-rendering-wi.md"
+    },
+    "01M4AHMVEECZKKP605XDZ3RER1": {
+      "human_id": "TASK-896",
+      "file_path": "docs/requirements/task/TASK-896-merging-a-lore-plan-red-test-task-into-main-turns.md"
+    },
+    "01M4AGV2EM64A3G34PAQ4JH6P5": {
+      "human_id": "TASK-897",
+      "file_path": "docs/requirements/task/TASK-897-skill-test-refresh-cas-red-lost-update-refusal.md"
+    },
+    "01M4AGV13RAGT03BEMJ03TTP8T": {
+      "human_id": "TASK-898",
+      "file_path": "docs/requirements/task/TASK-898-skill-test-select-red-audience-when-disable-outlet.md"
+    },
+    "01M4AGV3367E82MCMVQNN3K282": {
+      "human_id": "TASK-899",
+      "file_path": "docs/requirements/task/TASK-899-skill-test-compiled-e2e-red-fragments-cli-hooks-se.md"
+    },
+    "01M4AH21RPMXVXS11P3W1NZYMS": {
+      "human_id": "TASK-900",
+      "file_path": "docs/requirements/task/TASK-900-skill-test-core-red-resolvecontextconfig-outlet-sc.md"
+    },
+    "01M4AGV04C2EHDJS6QJR30GKSH": {
+      "human_id": "TASK-901",
+      "file_path": "docs/requirements/task/TASK-901-skill-implement-core-context-fragments-types-schem.md"
+    },
+    "01M4AGV4XMABXC6MC6B32X8KK9": {
+      "human_id": "TASK-902",
+      "file_path": "docs/requirements/task/TASK-902-skill-implement-shipped-agents-set-omitclaudemd-tr.md"
+    },
+    "01M4AH270EMGYD7NQC580F25V8": {
+      "human_id": "TASK-903",
+      "file_path": "docs/requirements/task/TASK-903-skill-implement-hooks-subagent-subagent-context-be.md"
+    },
+    "01M4AGV4JGZQ9MCDMFNX15PA3X": {
+      "human_id": "TASK-904",
+      "file_path": "docs/requirements/task/TASK-904-skill-implement-hooks-session-new-session-start-fr.md"
+    },
+    "01M4AGV3E5S3FSF0P0HDG3Z3D2": {
+      "human_id": "TASK-905",
+      "file_path": "docs/requirements/task/TASK-905-skill-implement-lore-fragments-render-check-cli-fr.md"
+    },
+    "01M4AGV47JM2TC12PQE06KNJMR": {
+      "human_id": "TASK-906",
+      "file_path": "docs/requirements/task/TASK-906-skill-implement-setup-language-projection-via.md"
+    },
+    "01M4AGV3RWJHEZ124SDQ9WHPXZ": {
+      "human_id": "TASK-907",
+      "file_path": "docs/requirements/task/TASK-907-skill-implement-spec-083-amendment-corpus-workflow.md"
+    },
+    "01M4AGXK575XWF6ZZYMAZVKQKA": {
+      "human_id": "TASK-908",
+      "file_path": "docs/requirements/task/TASK-908-this-repo-s-gitignore-ignores-lore-config-yaml-so.md"
+    },
+    "01M4AGV5JJEEJPWRW2QKGCPQ05": {
+      "human_id": "TASK-909",
+      "file_path": "docs/requirements/task/TASK-909-skill-review-verify-ac-cf-1-21-on-main-full-suite.md"
+    },
+    "01M4AGV57WQXDSVNMD2EVWTJ15": {
+      "human_id": "TASK-910",
+      "file_path": "docs/requirements/task/TASK-910-skill-implement-dogfood-this-repo-lore-context-roo.md"
     }
   }
 }
