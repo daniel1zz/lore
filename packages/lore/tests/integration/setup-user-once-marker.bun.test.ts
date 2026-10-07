@@ -224,6 +224,9 @@ function makeAssets(
       if (name === "lore.tree.yaml.template") return ok(TREE_YAML_CONTENT);
       if (name === "gitignore.template") return ok(GITIGNORE_BLOCK);
       if (name === "CLAUDE.md.template") return ok(claudeMdTemplate);
+      // reason: this suite pins the MARKER-form write only; an empty skeleton keeps a fresh
+      // install's bytes == the bare zone. The skeleton path is pinned in setup-project-claudemd.test.ts.
+      if (name === "CLAUDE.md.skeleton") return ok("");
       return err({ code: "VALIDATION_ERROR", field: "name", message: `unknown project asset: ${name}`, value: name });
     },
   };

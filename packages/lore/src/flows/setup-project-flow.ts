@@ -172,8 +172,25 @@
 
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { CLAUDE_MD_MARKER_START, CLAUDE_MD_MARKER_END, err, ok, planInstall, setupManifestSchema } from "@lore/core";
-import type { AssetFile, LoreError, Result, SetupEntry, SetupEntryKind, SetupManifest } from "@lore/core";
+import {
+  CLAUDE_MD_MARKER_START,
+  CLAUDE_MD_MARKER_END,
+  err,
+  ok,
+  planInstall,
+  resolveMemoryFileBudgets,
+  setupManifestSchema,
+} from "@lore/core";
+import type {
+  AdoptionMode,
+  AssetFile,
+  LoreError,
+  Result,
+  SetupEntry,
+  SetupEntryKind,
+  SetupManifest,
+} from "@lore/core";
+import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections } from "../service/context-projection.js";
 import type { ManagedSection, SpliceResult } from "../service/context-projection.js";
 
@@ -264,12 +281,53 @@ export interface ProjectAssetSource {
   readAsset(name: string): Promise<Result<string, LoreError>>;
 }
 
-/** The four ports {@link scaffoldProject} depends on, bundled for constructor injection. */
+/**
+ * What {@link WriteAdoptionMode} did with `context.memory_files.adoption`:
+ * `written` — the key was absent and now holds the requested mode; `kept` —
+ * the key already held `existing`, nothing was written (an explicit value is
+ * never overwritten, spec-claude-md-root-section-structure-check-and-adoption-mode D4).
+ */
+export type AdoptionWriteOutcome = { status: "written" } | { status: "kept"; existing: AdoptionMode };
+
+/**
+ * Persists the adoption mode into the target repo's `.lore/config.yaml`
+ * (`context.memory_files.adoption`) — ONLY when that key is absent. The real
+ * implementation (adapters/cli/commands/setup.ts) reads the current value
+ * first; this flow never imports a config reader/writer or `node:fs` for it.
+ *
+ * @param repoDir - Absolute repo root whose `.lore/config.yaml` is updated.
+ * @param mode - The mode judged on the POST-SPLICE `CLAUDE.md` content.
+ * @returns `err` when the config cannot be read or written — never throws.
+ */
+export type WriteAdoptionMode = (repoDir: string, mode: AdoptionMode) => Result<AdoptionWriteOutcome, LoreError>;
+
+/**
+ * The ports {@link scaffoldProject} depends on, bundled for constructor injection.
+ *
+ * `writeAdoptionMode` is OPTIONAL (additive-capability, like `ProjectFsPort.backup`):
+ * when absent the adoption step is skipped and the report carries no `adoption`
+ * row. The production adapter always supplies it.
+ */
 export interface ProjectScaffoldFlowDeps {
   fs: ProjectFsPort;
   exec: ExecPort;
   initCorpus: InitCorpus;
   assets: ProjectAssetSource;
+  writeAdoptionMode?: WriteAdoptionMode;
+}
+
+/**
+ * Outcome of the adoption step (spec D4). `mode` is the value judged on the
+ * post-splice root file; `status` says whether it reached the config.
+ * `checklist` is the migration checklist — one line per would-be deterministic
+ * finding — populated ONLY when `mode` is `warn`.
+ */
+export interface AdoptionStepResult {
+  status: "written" | "kept" | "failed";
+  mode: AdoptionMode;
+  /** `kept`: the explicit value already in config; `failed`: the error text. */
+  detail?: string;
+  checklist: string[];
 }
 
 /** Per-call scaffold target — kept a distinct parameter (not constructor-bound), mirroring `SetupService.targetDir`. */
@@ -337,6 +395,12 @@ export interface ProjectScaffoldReport {
   claude_md: SimpleStepResult;
   git_hooks_path: GitHooksPathResult;
   /**
+   * Adoption-mode write (spec-claude-md-root-section-structure-check-and-adoption-mode
+   * D4) — absent only when `deps.writeAdoptionMode` is not injected or the
+   * CLAUDE.md step itself failed (nothing to judge). See {@link AdoptionStepResult}.
+   */
+  adoption?: AdoptionStepResult;
+  /**
    * SPEC-060 D1 — outcome of writing `.lore/.lore-project-manifest.json`
    * itself (the ledger file), LAST, after every tracked write/backup/removal
    * has been attempted. `"skipped"` means the computed manifest content was
@@ -393,6 +457,13 @@ const GITIGNORE_MARKER = "# --- lore ---";
  * SSOT owns this vocabulary now; this flow no longer declares its own copy).
  */
 const CLAUDE_MD_ASSET_NAME = "CLAUDE.md.template";
+/**
+ * `assets/project/CLAUDE.md.skeleton` — the three user-owned H2 sections
+ * (What This Is / Commands / Architecture) written ONLY when CLAUDE.md is
+ * absent, ahead of the managed block (which supplies Module Index / Finding
+ * Live Project State). Never applied to an existing file.
+ */
+const CLAUDE_MD_SKELETON_ASSET_NAME = "CLAUDE.md.skeleton";
 const CLAUDE_MD_TARGET_NAME = "CLAUDE.md";
 /** Stable section id this flow's single governance blob is spliced under (SPEC-context-verb-family D4) — the shared module's per-section fingerprint is keyed by this id. */
 const CLAUDE_MD_SECTION_ID = "governance";
@@ -962,9 +1033,16 @@ function splitManagedClaudeMdTemplate(template: string, requireWrapped: boolean)
  *   doc). Never throws for any `existing` shape itself; a structurally
  *   broken `existing` zone comes back as `Result.err` instead (see above).
  */
-function computeClaudeMdSplice(existing: string | null, template: string): Result<SpliceResult, LoreError> {
+function computeClaudeMdSplice(
+  existing: string | null,
+  template: string,
+  skeleton: string,
+): Result<SpliceResult, LoreError> {
   const templateBody = splitManagedClaudeMdTemplate(template, existing !== null);
-  const effectiveExisting = existing === null || existing === templateBody ? "" : existing;
+  // reason: an ABSENT file starts from the skeleton so the managed block lands AFTER the three
+  // user-owned sections (required order, spec D4); a byte-identical legacy stub stays an empty
+  // input — it is an existing file, and the skeleton is fresh-install only.
+  const effectiveExisting = existing === null ? skeleton : existing === templateBody ? "" : existing;
   return spliceManagedSections(effectiveExisting, [{ id: CLAUDE_MD_SECTION_ID, body: templateBody } satisfies ManagedSection]);
 }
 
@@ -986,7 +1064,15 @@ async function runClaudeMdStep(
     }
     const template = assetResult.value;
     const existing = deps.fs.readFile(targetAbsPath);
-    const spliced = computeClaudeMdSplice(existing, template);
+    let skeleton = "";
+    if (existing === null) {
+      const skeletonResult = await deps.assets.readAsset(CLAUDE_MD_SKELETON_ASSET_NAME);
+      if (!skeletonResult.ok) {
+        return { terminal: { status: "failed", detail: describeError(skeletonResult.error) } };
+      }
+      skeleton = skeletonResult.value;
+    }
+    const spliced = computeClaudeMdSplice(existing, template, skeleton);
     if (!spliced.ok) {
       return { terminal: { status: "failed", detail: describeError(spliced.error) } };
     }
@@ -997,6 +1083,40 @@ async function runClaudeMdStep(
   } catch (error) {
     return { terminal: { status: "failed", detail: toMessage(error) } };
   }
+}
+
+/**
+ * Adoption step (spec-claude-md-root-section-structure-check-and-adoption-mode D4):
+ * judges the POST-SPLICE root `CLAUDE.md` content with the SOLE composition entry
+ * `runMemoryFileChecks` (every deterministic kind counts — structure AND capacity
+ * AND emphasis; never the pre-splice file) and asks `deps.writeAdoptionMode` to
+ * persist `enforce` (zero would-be findings) or `warn` (any). The port itself only
+ * writes when the key is absent, so an explicit value is never overwritten.
+ *
+ * reason: budgets are the schema defaults with `adoption` pinned to `enforce` so
+ * `deterministic` IS the would-be finding list — the default-`warn` resolution would
+ * move every finding into `advisory` and hide the count from this caller.
+ * `docExists`/`fileExists` are `() => true`: this step judges structure/capacity,
+ * and a dangling-reference verdict needs the target repo on disk.
+ */
+function runAdoptionStep(
+  deps: ProjectScaffoldFlowDeps,
+  repoDir: string,
+  postSpliceContent: string,
+): AdoptionStepResult | undefined {
+  if (deps.writeAdoptionMode === undefined) return undefined;
+  const budgets = { ...resolveMemoryFileBudgets(undefined), adoption: "enforce" as const };
+  const { deterministic } = runMemoryFileChecks(
+    [{ path: CLAUDE_MD_TARGET_NAME, role: "root", content: postSpliceContent }],
+    budgets,
+    { fileExists: () => true, docExists: () => true },
+  );
+  const mode: AdoptionMode = deterministic.length === 0 ? "enforce" : "warn";
+  const checklist = mode === "warn" ? deterministic.map((finding) => finding.message) : [];
+  const written = deps.writeAdoptionMode(repoDir, mode);
+  if (!written.ok) return { status: "failed", mode, detail: describeError(written.error), checklist };
+  if (written.value.status === "kept") return { status: "kept", mode, detail: written.value.existing, checklist: [] };
+  return { status: "written", mode, checklist };
 }
 
 /** Finalizes the gitignore candidate's report row once the seam has run — keys off `seam.written` (see module doc). */
@@ -1121,6 +1241,10 @@ export async function scaffoldProject(
 
   const git_hooks_path = await runGitHooksPathStep(deps, repoDir);
 
+  // Judged only when the CLAUDE.md step produced a candidate (a failed step has no content to judge).
+  const adoption =
+    claudeMdOutcome.pending === undefined ? undefined : runAdoptionStep(deps, repoDir, claudeMdOutcome.pending.content);
+
   return ok({
     init,
     hooks,
@@ -1128,6 +1252,7 @@ export async function scaffoldProject(
     gitignore,
     claude_md,
     git_hooks_path,
+    ...(adoption === undefined ? {} : { adoption }),
     manifest: seam.manifestStatus,
     backups: seam.backups,
   });

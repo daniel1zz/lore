@@ -133,8 +133,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
-import { err, ok } from "@lore/core";
-import type { LoreError, Result } from "@lore/core";
+import { err, ok, resolveMemoryFileBudgets } from "@lore/core";
+import type { AdoptionMode, LoreError, Result } from "@lore/core";
+import { loadConfig, saveConfig } from "@lore/core/node";
 
 import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
 import { ProjectSetupService } from "../../../service/project-setup-service.js";
@@ -143,6 +144,7 @@ import {
   type ExecPort,
   type ProjectFsPort,
   type ProjectAssetSource,
+  type AdoptionWriteOutcome,
   type ProjectScaffoldReport,
 } from "../../../flows/setup-project-flow.js";
 import {
@@ -302,6 +304,7 @@ function scaffoldReportFailed(report: ProjectScaffoldReport): boolean {
     report.gitignore.status === "failed" ||
     report.claude_md.status === "failed" ||
     report.git_hooks_path.status === "failed" ||
+    report.adoption?.status === "failed" ||
     report.hooks.some((h) => h.status === "failed")
   );
 }
@@ -422,6 +425,30 @@ function makeRealProjectAssetSource(projectAssetsDir: string): ProjectAssetSourc
  */
 const CONFIG_TEMPLATE_ASSET_NAME = "lore-config-template.yaml";
 
+/**
+ * Real `WriteAdoptionMode` port (spec-claude-md-root-section-structure-check-and-adoption-mode D4):
+ * reads the repo's `.lore/config.yaml` FIRST and writes `context.memory_files.adoption`
+ * ONLY when it is absent — an explicit value (either mode) is never overwritten.
+ * The write is a whole-config `saveConfig` of the parsed config with that one key set.
+ *
+ * @param repoDir - Absolute repo root.
+ * @param mode - Mode judged on the post-splice CLAUDE.md.
+ * @returns `err` when the config cannot be loaded or saved (surfaced, never swallowed).
+ */
+function writeAdoptionModeToConfig(repoDir: string, mode: AdoptionMode): Result<AdoptionWriteOutcome, LoreError> {
+  const loaded = loadConfig(repoDir);
+  if (!loaded.ok) return loaded;
+  const config = loaded.value;
+  const memoryFiles = resolveMemoryFileBudgets(config);
+  if (memoryFiles.adoption !== undefined) return ok({ status: "kept", existing: memoryFiles.adoption });
+  const saved = saveConfig(repoDir, {
+    ...config,
+    context: { ...config.context, memory_files: { ...memoryFiles, adoption: mode } },
+  });
+  if (!saved.ok) return saved;
+  return ok({ status: "written" });
+}
+
 async function runProjectScaffold(opts: {
   json: boolean;
   yes: boolean;
@@ -459,6 +486,7 @@ async function runProjectScaffold(opts: {
       );
     },
     assets: projectAssets,
+    writeAdoptionMode: writeAdoptionModeToConfig,
   });
 
   const result = await service.scaffold(repoDir);

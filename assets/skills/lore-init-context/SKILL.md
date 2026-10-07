@@ -171,6 +171,8 @@ Only ask if a non-recoverable conflict exists (e.g. user wrote a non-marker vers
 | Patch missing items only | Regenerate | Append missing items inline into existing lists; don't touch surrounding prose |
 | Leave existing prose untouched | Regenerate | Touch nothing — strict marker behavior |
 
+**Existing `## Module Index` (installed by `lore setup --project`)**: the root CLAUDE.md already carries `## Module Index` and `## Finding Live Project State` inside the lore-managed block. ⛔ FILL the existing `## Module Index` in place — never add a second `## Module Index` (a duplicate is a deterministic `section_duplicate` finding under `adoption: enforce`). Same for `## What This Is`, `## Commands`, `## Architecture`: fill the skeleton's section, do not append a new one.
+
 **Root CLAUDE.md structure** (for fresh projects or full rewrites):
 
 ```markdown
@@ -179,7 +181,7 @@ Only ask if a non-recoverable conflict exists (e.g. user wrote a non-marker vers
 ## What This Is
 [1-3 sentences. What the project does, its primary users or consumers.]
 
-## Build & Dev Commands
+## Commands
 [Verbatim from project config. Build, test, lint, dev, format.]
 
 ## Architecture
