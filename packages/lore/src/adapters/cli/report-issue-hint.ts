@@ -28,8 +28,9 @@
  * Invariants:
  *   - Re-verify-first wording: both the configured and unconfigured hint tell the
  *     reader to re-check their OWN input/config before filing, mirroring the vendored
- *     corpus-workflow stanza this spec also adds to `assets/` (SPEC-073 §Scope
- *     "vendored discipline") — a caller must never be nudged to file a report as a
+ *     reporting-discipline bullet this spec also added to the vendored workflow prose
+ *     (now `assets/context/corpus-workflow-4-close.md`, fragment id
+ *     `corpus-workflow-close`; SPEC-073 §Scope "vendored discipline") — a caller must never be nudged to file a report as a
  *     reflex before ruling out user error.
  *   - Deliberately takes a pre-computed `boolean` for `upstreamConfigured`, NOT a
  *     `LoreConfig` object — callers derive it via

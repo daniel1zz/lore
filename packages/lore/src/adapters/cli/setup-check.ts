@@ -67,8 +67,8 @@
  *     counterpart, and the two must agree on scope or a fresh converged
  *     install would spuriously report every project-kind entry `missing`).
  *     **SPEC-083 D3**: the SAME filter ALSO drops every path
- *     `real-asset-source.ts`'s exported `isRetiredFromInstall` names (e.g.
- *     `governance/corpus-workflow.md`) — that predicate is `RealAssetSource`'s
+ *     `real-asset-source.ts`'s exported `isRetiredFromInstall` names (the
+ *     `RETIRED_FROM_INSTALL_PATHS` set and the binary-read `context/` top dir) — that predicate is `RealAssetSource`'s
  *     OWN install-time exclusion, imported here rather than re-declared, so
  *     the two enumerations structurally cannot drift apart again (they did
  *     once: `isRetiredFromInstall` originally existed only inside

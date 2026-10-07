@@ -44,7 +44,7 @@ import {
 const DARWIN_ARM64_INPUT: BuildPublishPlanInput = {
   version: "0.1.0",
   platform: { os: "darwin", cpu: "arm64", libsqlTarget: "darwin-arm64" },
-  assetFiles: ["assets/governance/corpus-workflow.md", "assets/hooks/session-start-resume.mjs"],
+  assetFiles: ["assets/governance/seat-briefing.md", "assets/hooks/session-start-resume.mjs"],
   binaryPath: "dist/lore",
 };
 
@@ -58,8 +58,8 @@ describe("buildPublishPlan", () => {
       const { stagingRoot, stagingFiles } = result.value;
       expect(stagingRoot).toBe("dist-npm/cli-darwin-arm64/");
       expect(stagingFiles[`${stagingRoot}dist/lore`]).toBe("dist/lore");
-      expect(stagingFiles[`${stagingRoot}assets/governance/corpus-workflow.md`]).toBe(
-        "assets/governance/corpus-workflow.md"
+      expect(stagingFiles[`${stagingRoot}assets/governance/seat-briefing.md`]).toBe(
+        "assets/governance/seat-briefing.md"
       );
       expect(stagingFiles[`${stagingRoot}assets/hooks/session-start-resume.mjs`]).toBe(
         "assets/hooks/session-start-resume.mjs"
@@ -260,11 +260,11 @@ describe("assets/context npm assembly", () => {
   it("mergeShippedAssetFiles puts an assets/context/*.md file into the assembled plan's staging map", () => {
     const shipped = mergeShippedAssetFiles({
       installSetAssetFiles: ["assets/hooks/session-start-resume.mjs"],
-      retiredFromInstallPaths: ["governance/corpus-workflow.md"],
+      retiredFromInstallPaths: ["governance/seat-briefing.md"],
       binaryReadAssetPaths: ["context/zz-probe.md"],
     });
     expect(shipped).toContain("assets/context/zz-probe.md");
-    expect(shipped).toContain("assets/governance/corpus-workflow.md");
+    expect(shipped).toContain("assets/governance/seat-briefing.md");
     expect(shipped).toContain("assets/hooks/session-start-resume.mjs");
 
     const result = buildPublishPlan({ ...DARWIN_ARM64_INPUT, assetFiles: shipped });

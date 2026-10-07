@@ -9,7 +9,7 @@
  *
  * Target behavior (spec-project-claude-md-content-contract-governance-injected
  * §Design Decisions D6, §Scope): `lore governance [topic]` is a positional
- * registry — `corpus-workflow` (default, bare `lore governance`) |
+ * registry — `corpus-workflow` (default at D6 time; RETIRED by fragments D9, exit 2) |
  * `seat-briefing` | `claude-md`. The pre-existing `--seat-briefing` boolean
  * flag becomes a DEPRECATED ALIAS for `lore governance seat-briefing` (same
  * byte output, plus one deprecation line on stderr). Passing more than one
@@ -61,8 +61,8 @@
  *               independently so a future regression's failure is
  *               unambiguous).
  *   REGRESSION: bare `governance` (no topic) is UNCHANGED — stdout stays
- *               byte-identical to `assets/governance/corpus-workflow.md`
- *               and still carries the `<corpus-workflow>` marker, exit 0
+ *               now the retired-default refusal, not byte-parity
+ *               naming `lore fragments`, exit 2
  *               (back-compat default, D6).
  *   ERROR:      `governance claude-md seat-briefing` (two topic tokens)
  *               exits 2, with a message naming both `claude-md` and
@@ -90,7 +90,6 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const CLAUDE_MD_CONTRACT_ASSET_PATH = join(REPO_ROOT, "assets", "governance", "claude-md-contract.md");
-const CORPUS_WORKFLOW_ASSET_PATH = join(REPO_ROOT, "assets", "governance", "corpus-workflow.md");
 
 interface RunResult {
   readonly stdout: string;
@@ -134,13 +133,18 @@ describe("AC-CMC-2: compiled dist/lore governance <topic> positional dispatch (R
     expect(result.stdout).toBe(expected);
   });
 
-  it("REGRESSION: bare `governance` (no topic) stays byte-identical to assets/governance/corpus-workflow.md — back-compat default unchanged", () => {
-    const expected = readFileSync(CORPUS_WORKFLOW_ASSET_PATH, "utf8");
+  // RE-BASELINE (SPEC-083 amended by spec-context-fragments-config-driven-layered-rule-injection D9):
+  // the D6 back-compat default (`corpus-workflow`) is retired. Corrected, not weakened: the byte-parity
+  // claim became a refusal claim (exit 2, stderr names `lore fragments`, zero prose on stdout), and the
+  // positional registry's remaining topics are asserted unaffected by the retirement.
+  it("REGRESSION: bare `governance` (no topic) is the retired default — exit 2, stderr names `lore fragments`, no <corpus-workflow> marker on stdout; named topics unaffected", () => {
     const result = runLore(["governance"]);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(expected);
-    expect(result.stdout).toContain("<corpus-workflow>");
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("lore fragments");
+    expect(result.stdout).toBe("");
+    expect(result.stdout).not.toContain("<corpus-workflow>");
+    expect(runLore(["governance", "claude-md"]).exitCode).toBe(0);
   });
 
   it("ERROR: `governance claude-md seat-briefing` (two topic tokens) exits 2, message names both topics", () => {

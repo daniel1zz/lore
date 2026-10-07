@@ -29,14 +29,14 @@
  *               `console.log` instead of `writeAllSync`) fails loud here
  *               rather than only showing up as an off-by-one in the hook's
  *               composed output.
- *   REGRESSION: bare `governance` (no topic) is UNCHANGED — stdout stays
- *               byte-identical to `assets/governance/corpus-workflow.md`;
+ *   REGRESSION: bare `governance` (no topic) is UNCHANGED — stdout is the RETIRED-default refusal (exit 2, `lore fragments`; SPEC-083 amended by D9) —
+ *               no longer byte-identical to a corpus-workflow asset;
  *               adding a fourth topic did not disturb the default.
  *   ERROR:      `governance bootstrap-framing seat-briefing` (two distinct
  *               topic tokens) exits 2, message names both.
  *   NEGATIVE:   `governance bootstrap-framing --bogus-flag` exits 2 (SPEC-051
  *               strict-flag seam applies regardless of which topic).
- *   STATE:      `bootstrap-framing` output and bare (`corpus-workflow`)
+ *   STATE:      `bootstrap-framing` output and `seat-briefing`
  *               output are DIFFERENT content — the topic actually switches
  *               source, not a no-op.
  *
@@ -45,7 +45,6 @@
  */
 
 import { beforeAll, describe, expect, it } from "bun:test";
-import { readFileSync } from "fs";
 import { join } from "path";
 import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
@@ -54,7 +53,6 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 // 4 levels up, same derivation as the sibling governance compiled suites.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
-const CORPUS_WORKFLOW_ASSET_PATH = join(REPO_ROOT, "assets", "governance", "corpus-workflow.md");
 
 interface RunResult {
   readonly stdout: string;
@@ -95,13 +93,18 @@ describe("AC-CP-10: compiled dist/lore governance bootstrap-framing (D2)", () =>
     expect(result.stdout.endsWith("\n")).toBe(false);
   });
 
-  it("REGRESSION: bare `governance` (no topic) stays byte-identical to assets/governance/corpus-workflow.md", () => {
-    const expected = readFileSync(CORPUS_WORKFLOW_ASSET_PATH, "utf8");
+  // RE-BASELINE (SPEC-083 amended by spec-context-fragments-config-driven-layered-rule-injection D9):
+  // the no-topic default (`corpus-workflow`) is retired. Corrected, not weakened: the byte-parity
+  // claim became a refusal claim (exit 2, stderr names `lore fragments`, zero prose on stdout) and
+  // the `bootstrap-framing` topic is asserted unaffected by the retirement.
+  it("REGRESSION: bare `governance` (no topic) is the retired default — exit 2, stderr names `lore fragments`, stdout empty; bootstrap-framing still serves", () => {
     const result = runLore(["governance"]);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(expected);
-    expect(result.stdout).toContain("<corpus-workflow>");
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("lore fragments");
+    expect(result.stdout).toBe("");
+    expect(result.stdout).not.toContain("<corpus-workflow>");
+    expect(runLore(["governance", "bootstrap-framing"]).exitCode).toBe(0);
   });
 
   it("ERROR: `governance bootstrap-framing seat-briefing` (two topic tokens) exits 2, message names both topics", () => {
@@ -117,10 +120,12 @@ describe("AC-CP-10: compiled dist/lore governance bootstrap-framing (D2)", () =>
     expect(result.exitCode).toBe(2);
   });
 
-  it("STATE: bootstrap-framing output and bare output are DIFFERENT content (the topic actually switches source, not a no-op)", () => {
+  it("STATE: bootstrap-framing output and seat-briefing output are DIFFERENT non-empty content (the topic actually switches source, not a no-op)", () => {
     const framingResult = runLore(["governance", "bootstrap-framing"]);
-    const bareResult = runLore(["governance"]);
+    const otherResult = runLore(["governance", "seat-briefing"]);
 
-    expect(framingResult.stdout).not.toBe(bareResult.stdout);
+    expect(framingResult.stdout.length).toBeGreaterThan(0);
+    expect(otherResult.stdout.length).toBeGreaterThan(0);
+    expect(framingResult.stdout).not.toBe(otherResult.stdout);
   });
 });
