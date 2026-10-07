@@ -129,6 +129,9 @@ const HOOK_SSOT_PATH = join(REPO_ROOT, "assets", "hooks", "session-start-resume.
 // to assets/context/corpus-workflow-*.md fragments
 // (spec-context-fragments-config-driven-layered-rule-injection D9), delivered to
 // the project CLAUDE.md Z1 by `lore context refresh`.
+// D15 RE-BASELINE (task-skill-test-d15-red-static-fragments-as-lore-rules-files, owner
+// decision 2026-10-07): the delivery surface is now the lore-owned rules file
+// `.claude/rules/lore-corpus-workflow-feed.md`; the same ACCOUNT-token assertion moves there.
 const CONTEXT_ASSETS_DIR = join(REPO_ROOT, "assets", "context");
 const GOVERNANCE_FRAGMENT_FILES: readonly string[] = readdirSync(CONTEXT_ASSETS_DIR)
   .filter((f) => f.startsWith("corpus-workflow-") && f.endsWith(".md"))
@@ -424,6 +427,28 @@ describe("AC-CP-9: compiled dist/lore governance FEED rule names every injected 
     // Paired assertion — prevents the carve-out from silently widening to a
     // second key: resume_hint has zero literal occurrences in the SSOT asset.
     expect(result.stdout).not.toContain("resume_hint");
+
+    // D15 RE-BASELINE (task-skill-test-d15-red-static-fragments-as-lore-rules-files, owner
+    // decision 2026-10-07): the sources above are not the delivery surface. After
+    // `lore context refresh` the same keys/categories must be readable in the project's
+    // lore-owned `.claude/rules/lore-corpus-workflow-*.md` files (and resume_hint still absent).
+    const corpusDir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-cp9-rules-")));
+    initCorpus(corpusDir);
+    expect(runLore(["context", "init"], corpusDir).exitCode).toBe(0);
+    expect(runLore(["context", "refresh"], corpusDir).exitCode).toBe(0);
+    const rulesDir = join(corpusDir, ".claude", "rules");
+    const ruleFiles = existsSync(rulesDir)
+      ? readdirSync(rulesDir).filter((f) => f.startsWith("lore-corpus-workflow-") && f.endsWith(".md"))
+      : [];
+    expect(ruleFiles.length).toBe(GOVERNANCE_FRAGMENT_FILES.length);
+    const delivered = ruleFiles.map((f) => readFileSync(join(rulesDir, f), "utf8")).join("\n");
+    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+      if (key !== "resume_hint") expect(delivered).toContain(key);
+    }
+    for (const token of SOURCE_CATEGORY_TOKENS) {
+      expect(delivered).toContain(token);
+    }
+    expect(delivered).not.toContain("resume_hint");
   });
 });
 
@@ -535,7 +560,7 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     expect(existsSync(installedGovernancePath)).toBe(false);
 
     // RE-BASELINE: the retired verb topic must now REFUSE (was: byte-equal stdout);
-    // the fragments' delivery surface is the project CLAUDE.md Z1.
+    // the fragments' delivery surface is the project .claude/rules/lore-corpus-workflow-feed.md (D15).
     const governanceVerbResult = Bun.spawnSync([LORE_BIN, "governance"], { cwd: REPO_ROOT });
     expect(governanceVerbResult.exitCode).not.toBe(0);
     expect(governanceVerbResult.stderr.toString()).toContain("retired");
@@ -544,6 +569,8 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     initCorpus(corpusDir);
     expect(runLore(["context", "init"], corpusDir).exitCode).toBe(0);
     expect(runLore(["context", "refresh"], corpusDir).exitCode).toBe(0);
-    expect(readFileSync(join(corpusDir, "CLAUDE.md"), "utf8")).toContain("ACCOUNT, not to complete");
+    const feedRules = join(corpusDir, ".claude", "rules", "lore-corpus-workflow-feed.md");
+    expect(existsSync(feedRules)).toBe(true);
+    expect(readFileSync(feedRules, "utf8")).toContain("ACCOUNT, not to complete");
   });
 });

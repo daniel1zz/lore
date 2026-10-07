@@ -189,12 +189,20 @@ const HOOK_ASSET_REL = "hooks/stop-handoff-coverage.mjs";
 // retired assets/governance/corpus-workflow.md to the FEED context fragment
 // (spec-context-fragments-config-driven-layered-rule-injection D9); its delivery
 // surface is the project CLAUDE.md Z1 written by `lore context refresh`.
+// D15 RE-BASELINE (task-skill-test-d15-red-static-fragments-as-lore-rules-files, owner
+// decision 2026-10-07): that delivery surface is now the lore-owned rules file
+// `.claude/rules/lore-corpus-workflow-feed.md`, NOT a CLAUDE.md Z1 section. Correction, not
+// weakening: the same ACCOUNT / id-prefix / disposition-grammar assertions run against the new file.
 const GOVERNANCE_ASSET_REL = "context/corpus-workflow-1-feed.md";
 const HOOK_SSOT_PATH = join(ASSETS_ROOT, "hooks", "stop-handoff-coverage.mjs");
 const GOVERNANCE_SSOT_PATH = join(ASSETS_ROOT, "context", "corpus-workflow-1-feed.md");
 
-/** `lore init` + `lore context init` + `lore context refresh` in a throwaway corpus; returns the project CLAUDE.md text (the fragments' delivery surface, Z1). */
-function refreshedProjectClaudeMd(prefix: string): string {
+/**
+ * `lore init` + `lore context init` + `lore context refresh` in a throwaway corpus; returns the text of
+ * the FEED fragment's lore rules file (the fragments' D15 delivery surface), or "" when refresh did not
+ * write it — so a missing D15 behaviour fails the caller's `toContain`, not this helper.
+ */
+function refreshedFeedRulesFile(prefix: string): string {
   const dir = makeThrowawayDir(prefix);
   initCorpus(dir);
   const ctxInit = runLore(["context", "init"], dir);
@@ -205,7 +213,8 @@ function refreshedProjectClaudeMd(prefix: string): string {
   if (refresh.exitCode !== 0) {
     throw new Error(`lore context refresh failed (exit ${refresh.exitCode}): ${refresh.stderr}`);
   }
-  return readFileSync(join(dir, "CLAUDE.md"), "utf8");
+  const rulesPath = join(dir, ".claude", "rules", "lore-corpus-workflow-feed.md");
+  return existsSync(rulesPath) ? readFileSync(rulesPath, "utf8") : "";
 }
 
 interface RunResult {
@@ -637,7 +646,7 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     // the assertion went red. Correction, not weakening: the retired file stays
     // asserted ABSENT, the verb is asserted to REFUSE the retired topic, and the
     // byte-level delivery claim is re-pinned on the new surface — the FEED
-    // fragment's text (minus frontmatter) must appear in the project CLAUDE.md Z1.
+    // fragment's text (minus frontmatter) must appear in the project .claude/rules/lore-corpus-workflow-feed.md (D15).
     expect(existsSync(join(targetDir, "governance", "corpus-workflow.md"))).toBe(false);
 
     const governanceVerb = Bun.spawnSync([LORE_BIN, "governance"], { cwd: REPO_ROOT });
@@ -645,8 +654,8 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     expect(governanceVerb.stderr.toString()).toContain("retired");
 
     const fragmentBody = governanceSsotBytes.toString("utf8").replace(/^---\n[\s\S]*?\n---\n/, "");
-    const z1 = refreshedProjectClaudeMd("lore-t4-z1-");
-    expect(z1).toContain(fragmentBody.split("\n").find((l) => l.includes("ACCOUNT, not to complete"))?.trim() ?? "<<no ACCOUNT line in fragment>>");
+    const rules = refreshedFeedRulesFile("lore-t4-rules-");
+    expect(rules).toContain(fragmentBody.split("\n").find((l) => l.includes("ACCOUNT, not to complete"))?.trim() ?? "<<no ACCOUNT line in fragment>>");
 
     // ── (d) NEGATIVE / liveness control for the byte comparison ─────────────
     // Perturb the INSTALLED copy and prove the comparison flips — a
@@ -687,12 +696,13 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     // RE-BASELINE: originally sliced `## FEED`..`## PRODUCE` out of the retired
     // assets/governance/corpus-workflow.md and cross-checked `lore governance`
     // stdout (ENOENT after D9). Same constants, now asserted against the whole
-    // FEED fragment file AND the project CLAUDE.md Z1 it ships through.
+    // FEED fragment file AND the project lore rules file it ships through (D15).
     const feedSection = readFileSync(GOVERNANCE_SSOT_PATH, "utf8");
     expect(feedSection.length).toBeGreaterThan(0);
 
-    const z1 = refreshedProjectClaudeMd("lore-t4-boundary-z1-");
-    for (const surface of [feedSection, z1]) {
+    const rules = refreshedFeedRulesFile("lore-t4-boundary-rules-");
+    expect(rules.length).toBeGreaterThan(0); // D15: refresh must have written the rules file
+    for (const surface of [feedSection, rules]) {
       for (const prefix of [RESUME_ITEM_ID_PREFIX_KEY_DECISION, RESUME_ITEM_ID_PREFIX_NEXT_STEP]) {
         expect(surface).toContain(`\`${prefix}<n>\``);
       }

@@ -1,12 +1,13 @@
 /**
  * @spec_ref AC-CTX-3, AC-CF-6
  *
- * Regression suite: `context init` -> `context refresh` idempotence once the Z1 `fragments`
- * section exists (task task-skill-implement-fix-refresh-idempotence-regression-ac-ctx).
+ * Regression suite: `context init` -> `context refresh` idempotence under D15 (static main
+ * fragments live in lore-owned `.claude/rules/lore-<id>.md` files, never in a CLAUDE.md Z1
+ * `fragments` section). Re-baselined by task-skill-test-d15-red-static-fragments-as-lore-rules-files
+ * (owner decision 2026-10-07): the former Z1 `fragments` section assertions became rules-file assertions.
  *
- * Root cause pinned here: `runContextInit` built its section list WITHOUT the `fragments`
- * section that `runContextRefresh` always adds, so the first refresh after init appended it
- * (+N lines) and a hand-edit of an earlier section could not leave the bytes untouched.
+ * Invariant pinned here: init and refresh must agree on CLAUDE.md bytes (refresh never appends
+ * anything to CLAUDE.md for fragments), and refresh is idempotent over every rules file it owns.
  *
  * Fixtures: the REAL shipped fragments (`assets/context/*.md`) seeded into an in-memory fs, so
  * "refresh twice with shipped fragments" is measured, not mocked.
@@ -48,49 +49,87 @@ async function initialized() {
   return { fs, deps };
 }
 
-describe("AC-CTX-3 init/refresh idempotence with the Z1 fragments section", () => {
-  it("HAPPY: init writes the fragments section, so shipped fragments are present right after init", async () => {
+const RULES_DIR = ".claude/rules";
+const FINGERPRINT = /^<!-- lore:managed fragment=([a-z0-9-]+) hash=[0-9a-f]{8} -->\n/;
+
+async function rulesSnapshot(fs: InMemoryFsPort): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const name of (await fs.listDir(RULES_DIR)).sort()) {
+    out[name] = (await fs.readFile(`${RULES_DIR}/${name}`)) ?? "";
+  }
+  return out;
+}
+
+describe("AC-CTX-3 init/refresh idempotence with D15 lore rules files", () => {
+  it("HAPPY: init writes no fragments section and no rules files (refresh owns rules files)", async () => {
     const { fs } = await initialized();
-    const content = await fs.readFile("CLAUDE.md");
-    expect(content).toMatch(/<!-- lore:managed section=fragments hash=[0-9a-f]{8} -->/);
+    const content = (await fs.readFile("CLAUDE.md")) ?? "";
+    expect(content).not.toMatch(/section=fragments/);
+    expect(await fs.listDir(RULES_DIR)).toEqual([]);
   });
 
-  it("REGRESSION: refresh right after init, and a second refresh, are byte-identical to init's output", async () => {
+  it("HAPPY: refresh writes one lore-<id>.md per shipped static main fragment, each with the fingerprint first line", async () => {
+    const { fs, deps } = await initialized();
+    const result = await runContextRefresh(deps, "", { scope: "project" });
+    expect(result.ok).toBe(true);
+    const names = (await fs.listDir(RULES_DIR)).sort();
+    expect(names).toEqual([
+      "lore-corpus-workflow-close.md",
+      "lore-corpus-workflow-execute.md",
+      "lore-corpus-workflow-feed.md",
+      "lore-corpus-workflow-overview.md",
+      "lore-corpus-workflow-produce.md",
+    ]);
+    for (const name of names) {
+      const body = (await fs.readFile(`${RULES_DIR}/${name}`)) ?? "";
+      const m = FINGERPRINT.exec(body);
+      expect(m?.[1], name).toBe(name.slice("lore-".length, -".md".length));
+    }
+  });
+
+  it("REGRESSION: refresh never changes CLAUDE.md bytes after init, and a second refresh changes no rules file byte", async () => {
     const { fs, deps } = await initialized();
     const afterInit = await fs.readFile("CLAUDE.md");
 
     const first = await runContextRefresh(deps, "", { scope: "project" });
     expect(first.ok).toBe(true);
-    const afterFirst = await fs.readFile("CLAUDE.md");
-    expect(afterFirst).toBe(afterInit);
+    expect(await fs.readFile("CLAUDE.md")).toBe(afterInit);
+    const rulesAfterFirst = await rulesSnapshot(fs);
+    expect(Object.keys(rulesAfterFirst).length).toBeGreaterThan(0);
 
     const second = await runContextRefresh(deps, "", { scope: "project" });
     expect(second.ok).toBe(true);
     expect(await fs.readFile("CLAUDE.md")).toBe(afterInit);
+    expect(await rulesSnapshot(fs)).toEqual(rulesAfterFirst);
     if (second.ok) {
       expect(second.value.sections.every((s) => s.state === "unchanged")).toBe(true);
     }
   });
 
-  it("STATE: a hand-edit inside the fragments section -> diverged_skip for it and the bytes stay untouched", async () => {
+  it("STATE: a hand-edit of a lore rules file -> refresh reports diverged_skip and every rules byte stays untouched", async () => {
     const { fs, deps } = await initialized();
-    const before = (await fs.readFile("CLAUDE.md")) ?? "";
-    const marker = "<!-- lore:managed section=fragments";
-    const at = before.indexOf(marker);
-    expect(at).toBeGreaterThan(-1);
-    const bodyStart = before.indexOf("\n", at) + 1;
-    const edited = before.slice(0, bodyStart) + "HAND-EDIT-MARK " + before.slice(bodyStart);
-    await fs.writeFile("CLAUDE.md", edited);
+    await runContextRefresh(deps, "", { scope: "project" });
+    const target = `${RULES_DIR}/lore-corpus-workflow-feed.md`;
+    const before = (await fs.readFile(target)) ?? "";
+    expect(before).toMatch(FINGERPRINT);
+    const firstNl = before.indexOf("\n") + 1;
+    const edited = before.slice(0, firstNl) + "HAND-EDIT-MARK " + before.slice(firstNl);
+    await fs.writeFile(target, edited);
+    const snapshot = await rulesSnapshot(fs);
 
     const result = await runContextRefresh(deps, "", { scope: "project" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.sections.find((s) => s.id === "fragments")?.state).toBe("diverged_skip");
-    expect(await fs.readFile("CLAUDE.md")).toBe(edited);
+    // Report shape for rules files is a spec gap (D15 says only "reports diverged_skip"): assert the state word and the fragment id appear.
+    const report = JSON.stringify(result.value);
+    expect(report).toContain("diverged_skip");
+    expect(report).toContain("corpus-workflow-feed");
+    expect(await rulesSnapshot(fs)).toEqual(snapshot);
   });
 
   it("STATE: a hand-edit inside a NON-fragments managed section also leaves every byte untouched", async () => {
     const { fs, deps } = await initialized();
+    await runContextRefresh(deps, "", { scope: "project" });
     const before = (await fs.readFile("CLAUDE.md")) ?? "";
     const at = before.indexOf("<!-- lore:managed section=module-index");
     expect(at).toBeGreaterThan(-1);

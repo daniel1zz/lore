@@ -132,7 +132,7 @@ describe("AC-CF-2 selectFragments hook:subagent-start audience, when and disable
   });
 });
 
-describe("AC-CF-14 claude-md:user render is independent of project config", () => {
+describe("AC-CF-14 rules:user render is independent of project config", () => {
   const all = [
     frag("u-zh", { layer: "user", when: { language: ["zh"] } }),
     frag("u-en", { layer: "user", when: { language: ["en"] } }),
@@ -142,20 +142,20 @@ describe("AC-CF-14 claude-md:user render is independent of project config", () =
   ];
 
   it("is byte-equal under project language zh vs en", () => {
-    const a = select(all, "claude-md:user", cfg("zh"), cfg("zh"));
-    const b = select(all, "claude-md:user", cfg("zh"), cfg("en"));
+    const a = select(all, "rules:user", cfg("zh"), cfg("zh"));
+    const b = select(all, "rules:user", cfg("zh"), cfg("en"));
     expect(bytes(a)).toBe(bytes(b));
   });
 
   it("is byte-equal when project disables a user fragment id", () => {
-    const a = select(all, "claude-md:user", cfg("zh"), cfg("zh"));
-    const b = select(all, "claude-md:user", cfg("zh"), cfg("zh", ["u-plain"]));
+    const a = select(all, "rules:user", cfg("zh"), cfg("zh"));
+    const b = select(all, "rules:user", cfg("zh"), cfg("zh", ["u-plain"]));
     expect(bytes(a)).toBe(bytes(b));
   });
 
   it("is non-empty and follows GLOBAL language (control: output is not hardcoded)", () => {
-    const zh = select(all, "claude-md:user", cfg("zh"), cfg("en"));
-    const en = select(all, "claude-md:user", cfg("en"), cfg("en"));
+    const zh = select(all, "rules:user", cfg("zh"), cfg("en"));
+    const en = select(all, "rules:user", cfg("en"), cfg("en"));
     expect(ids(zh)).toEqual(["u-plain", "u-zh"]);
     expect(ids(en)).toEqual(["u-en", "u-plain"]);
   });
@@ -169,14 +169,14 @@ describe("AC-CF-19 each static main fragment reaches exactly one CLAUDE.md outle
     frag("n-dynamic", { layer: "shipped", mode: "dynamic" }),
     frag("n-sub", { layer: "project", audience: ["subagent:*"] }),
   ];
-  const proj = () => select(all, "claude-md:project", cfg(), cfg());
-  const usr = () => select(all, "claude-md:user", cfg(), cfg());
+  const proj = () => select(all, "rules:project", cfg(), cfg());
+  const usr = () => select(all, "rules:user", cfg(), cfg());
 
-  it("claude-md:project returns exactly the shipped and project static main fragments", () => {
+  it("rules:project returns exactly the shipped and project static main fragments", () => {
     expect(ids(proj())).toEqual(["m-project", "m-shipped"]);
   });
 
-  it("claude-md:user returns exactly the user static main fragment", () => {
+  it("rules:user returns exactly the user static main fragment", () => {
     expect(ids(usr())).toEqual(["m-user"]);
   });
 
@@ -190,7 +190,7 @@ describe("AC-CF-19 each static main fragment reaches exactly one CLAUDE.md outle
       frag("rule", { layer: "shipped", body: "SHIPPED" }),
       frag("rule", { layer: "project", body: "PROJECT" }),
     ];
-    const r = select(o, "claude-md:project", cfg(), cfg());
+    const r = select(o, "rules:project", cfg(), cfg());
     expect(r.map((f) => f.body)).toEqual(["PROJECT"]);
   });
 });
@@ -276,7 +276,7 @@ describe("AC-CF-20 cross-file override of a static main fragment is refused", ()
   });
 });
 
-describe("AC-CF-21 claude-md:project render is independent of user layer and global config", () => {
+describe("AC-CF-21 rules:project render is independent of user layer and global config", () => {
   const shared = [
     frag("s-one", { layer: "shipped" }),
     frag("p-one", { layer: "project" }),
@@ -287,38 +287,38 @@ describe("AC-CF-21 claude-md:project render is independent of user layer and glo
   const project = cfg("zh");
 
   it("is byte-equal across differing user-layer fragment sets", () => {
-    const a = select([...shared, ...userA], "claude-md:project", cfg(), project);
-    const b = select([...shared, ...userB], "claude-md:project", cfg(), project);
+    const a = select([...shared, ...userA], "rules:project", cfg(), project);
+    const b = select([...shared, ...userB], "rules:project", cfg(), project);
     expect(bytes(a)).toBe(bytes(b));
   });
 
   it("is byte-equal across differing global language", () => {
-    const a = select(shared, "claude-md:project", cfg("en"), project);
-    const b = select(shared, "claude-md:project", cfg("ja"), project);
+    const a = select(shared, "rules:project", cfg("en"), project);
+    const b = select(shared, "rules:project", cfg("ja"), project);
     expect(bytes(a)).toBe(bytes(b));
   });
 
   it("is byte-equal when global config disables an id", () => {
-    const a = select(shared, "claude-md:project", cfg(), project);
-    const b = select(shared, "claude-md:project", cfg(undefined, ["s-one", "p-one"]), project);
+    const a = select(shared, "rules:project", cfg(), project);
+    const b = select(shared, "rules:project", cfg(undefined, ["s-one", "p-one"]), project);
     expect(bytes(a)).toBe(bytes(b));
   });
 
   it("is byte-equal when the user layer carries an id that shadows a shipped one", () => {
-    const a = select(shared, "claude-md:project", cfg(), project);
-    const b = select([...shared, frag("s-one", { layer: "user", body: "USER SHADOW" })], "claude-md:project", cfg(), project);
+    const a = select(shared, "rules:project", cfg(), project);
+    const b = select([...shared, frag("s-one", { layer: "user", body: "USER SHADOW" })], "rules:project", cfg(), project);
     expect(bytes(a)).toBe(bytes(b));
   });
 
   it("follows PROJECT language and project disable (control: output is not hardcoded)", () => {
-    expect(ids(select(shared, "claude-md:project", cfg(), cfg("zh")))).toEqual(["p-one", "s-one", "s-zh"]);
-    expect(ids(select(shared, "claude-md:project", cfg(), cfg("en")))).toEqual(["p-one", "s-one"]);
-    expect(ids(select(shared, "claude-md:project", cfg(), cfg("zh", ["p-one"])))).toEqual(["s-one", "s-zh"]);
+    expect(ids(select(shared, "rules:project", cfg(), cfg("zh")))).toEqual(["p-one", "s-one", "s-zh"]);
+    expect(ids(select(shared, "rules:project", cfg(), cfg("en")))).toEqual(["p-one", "s-one"]);
+    expect(ids(select(shared, "rules:project", cfg(), cfg("zh", ["p-one"])))).toEqual(["s-one", "s-zh"]);
   });
 
   it("returns the same order regardless of input order (id ascending, deterministic)", () => {
-    const fwd = select(shared, "claude-md:project", cfg(), project);
-    const rev = select([...shared].reverse(), "claude-md:project", cfg(), project);
+    const fwd = select(shared, "rules:project", cfg(), project);
+    const rev = select([...shared].reverse(), "rules:project", cfg(), project);
     expect(bytes(fwd)).toBe(bytes(rev));
   });
 });

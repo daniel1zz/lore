@@ -9,8 +9,8 @@
  *   HAPPY:      outlet-scoped config resolution (user -> global only, project -> project only,
  *               hooks -> project over global); schema accepts the spec example; constants.
  *   NEGATIVE:   schema rejects unknown keys, audience 'subagents:*', mode 'always';
- *               global disable never leaks into claude-md:project; project config never
- *               leaks into claude-md:user.
+ *               global disable never leaks into rules:project; project config never
+ *               leaks into rules:user.
  *   BOUNDARY:   cap arithmetic (10_000 - 600 = 9_400, 10_000 - 400 = 9_600); empty configs.
  *   ERROR:      missing required frontmatter fields fail validation, no silent default.
  *   STATE:      resolveContextConfig does not mutate its inputs.
@@ -39,12 +39,12 @@ describe("resolveContextConfig outlet scoping (D11, D14)", () => {
   const global = cfg("zh", ["g-only"]);
   const project = cfg("en", ["p-only"]);
 
-  it("claude-md:user uses the GLOBAL language only", () => {
-    expect(resolveContextConfig(global, project, "claude-md:user").language).toBe("zh");
+  it("rules:user uses the GLOBAL language only", () => {
+    expect(resolveContextConfig(global, project, "rules:user").language).toBe("zh");
   });
 
-  it("claude-md:project uses the PROJECT language only", () => {
-    expect(resolveContextConfig(global, project, "claude-md:project").language).toBe("en");
+  it("rules:project uses the PROJECT language only", () => {
+    expect(resolveContextConfig(global, project, "rules:project").language).toBe("en");
   });
 
   it("hook:subagent-start merges with project over global", () => {
@@ -61,17 +61,17 @@ describe("resolveContextConfig outlet scoping (D11, D14)", () => {
   });
 
   it("different inputs give different outputs (not hardcoded)", () => {
-    const r = resolveContextConfig(cfg("ja"), cfg("en"), "claude-md:user");
+    const r = resolveContextConfig(cfg("ja"), cfg("en"), "rules:user");
     expect(r.language).toBe("ja");
   });
 
-  it("claude-md:user ignores project language even when global has none", () => {
-    const r = resolveContextConfig(cfg(), cfg("en"), "claude-md:user");
+  it("rules:user ignores project language even when global has none", () => {
+    const r = resolveContextConfig(cfg(), cfg("en"), "rules:user");
     expect(r.language).toBeNull();
   });
 
-  it("claude-md:project ignores global language even when project has none", () => {
-    const r = resolveContextConfig(cfg("zh"), cfg(), "claude-md:project");
+  it("rules:project ignores global language even when project has none", () => {
+    const r = resolveContextConfig(cfg("zh"), cfg(), "rules:project");
     expect(r.language).toBeNull();
   });
 
@@ -79,23 +79,23 @@ describe("resolveContextConfig outlet scoping (D11, D14)", () => {
     expect(resolveContextConfig({}, {}, "hook:session-start").language).toBeNull();
   });
 
-  it("global disable list reaches claude-md:user", () => {
-    const r = resolveContextConfig(global, project, "claude-md:user");
+  it("global disable list reaches rules:user", () => {
+    const r = resolveContextConfig(global, project, "rules:user");
     expect(r.disabled.has("g-only")).toBe(true);
   });
 
-  it("global disable list does NOT reach claude-md:project", () => {
-    const r = resolveContextConfig(global, project, "claude-md:project");
+  it("global disable list does NOT reach rules:project", () => {
+    const r = resolveContextConfig(global, project, "rules:project");
     expect(r.disabled.has("g-only")).toBe(false);
   });
 
-  it("project disable list does NOT reach claude-md:user", () => {
-    const r = resolveContextConfig(global, project, "claude-md:user");
+  it("project disable list does NOT reach rules:user", () => {
+    const r = resolveContextConfig(global, project, "rules:user");
     expect(r.disabled.has("p-only")).toBe(false);
   });
 
-  it("project disable list reaches claude-md:project", () => {
-    const r = resolveContextConfig(global, project, "claude-md:project");
+  it("project disable list reaches rules:project", () => {
+    const r = resolveContextConfig(global, project, "rules:project");
     expect(r.disabled.has("p-only")).toBe(true);
   });
 
@@ -105,11 +105,11 @@ describe("resolveContextConfig outlet scoping (D11, D14)", () => {
   });
 
   it("disabled is an empty set when no config disables anything", () => {
-    expect(resolveContextConfig({}, {}, "claude-md:project").disabled.size).toBe(0);
+    expect(resolveContextConfig({}, {}, "rules:project").disabled.size).toBe(0);
   });
 
   it("exposes a languageSource field", () => {
-    const r = resolveContextConfig(global, project, "claude-md:user");
+    const r = resolveContextConfig(global, project, "rules:user");
     expect(r).toHaveProperty("languageSource");
   });
 

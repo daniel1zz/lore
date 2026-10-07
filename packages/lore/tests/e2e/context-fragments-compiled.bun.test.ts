@@ -39,6 +39,15 @@
  * `lore` to THIS worktree's dist/lore. Never touches the repo's `.lore/` or
  * the real `~/.claude`.
  *
+ * D15 RE-BASELINE (owner decision 2026-10-07, task
+ * task-skill-test-d15-red-static-fragments-as-lore-rules-files): static `main`
+ * fragments are written as lore-owned Claude Code rules files
+ * (`<corpus>/.claude/rules/lore-<id>.md`, `<HOME>/.claude/rules/lore-<id>.md`
+ * for `--scope user`), first line `<!-- lore:managed fragment=<id> hash=<8hex> -->`,
+ * and NEVER as a CLAUDE.md Z1 `fragments` section. The AC-CF-4/6/8/12/15
+ * describes below were rewritten from Z1-section assertions to rules-file
+ * assertions; every rewrite is why-corrected by D15, not loosened.
+ *
  * @spec_ref spec-context-fragments-config-driven-layered-rule-injection
  *   AC-CF-4 AC-CF-5 AC-CF-6 AC-CF-7 AC-CF-8 AC-CF-9 AC-CF-10 AC-CF-11
  *   AC-CF-12 AC-CF-15 AC-CF-17 AC-CF-18;
@@ -62,7 +71,7 @@ import {
 import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { parse as parseYaml } from "yaml";
-import { BOOTSTRAP_FRAMING_LINE, CLAUDE_MD_MARKER_END, CLAUDE_MD_MARKER_START } from "@lore/core";
+import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -239,29 +248,30 @@ function sessionStartPayload(source: string): Record<string, unknown> {
   return { hook_event_name: "SessionStart", source, session_id: "cf-e2e" };
 }
 
-/** Text strictly inside the lore-managed zone markers of a CLAUDE.md. */
-function managedZone(content: string): string {
-  const start = content.indexOf(CLAUDE_MD_MARKER_START);
-  const end = content.indexOf(CLAUDE_MD_MARKER_END);
-  if (start < 0 || end < 0 || end < start) return "";
-  return content.slice(start + CLAUDE_MD_MARKER_START.length, end);
+/** D15 fingerprint: first line of every lore-owned rules file (hash value is the renderer's business). */
+const RULES_FINGERPRINT = /^<!-- lore:managed fragment=(\S+) hash=[0-9a-f]{8} -->$/;
+
+const projectRulesDir = (sb: Sandbox): string => join(sb.corpus, ".claude", "rules");
+const homeRulesDir = (sb: Sandbox): string => join(sb.home, ".claude", "rules");
+
+/** Sorted names of `lore-*.md` files directly inside `dir` (empty when the dir is absent). */
+function loreRulesFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((n) => n.startsWith("lore-") && n.endsWith(".md"))
+    .sort();
 }
 
-const FINGERPRINT = /^<!-- lore:managed section=(\S+) hash=[0-9a-f]{8} -->$/;
-
-/** Body lines of one managed section (between its fingerprint line and the next fingerprint / end marker). */
-function sectionRange(lines: string[], id: string): { from: number; to: number } | null {
-  const idx = lines.findIndex((l) => FINGERPRINT.exec(l)?.[1] === id);
-  if (idx < 0) return null;
-  let to = lines.length;
-  for (let i = idx + 1; i < lines.length; i++) {
-    const line = lines[i] as string;
-    if (FINGERPRINT.test(line) || line.startsWith(CLAUDE_MD_MARKER_END)) {
-      to = i;
-      break;
-    }
-  }
-  return { from: idx + 1, to };
+/** Asserts `<dir>/lore-<id>.md` has the D15 fingerprint for `id` on line 1 and the verbatim `body` after it. */
+function expectRulesFile(dir: string, id: string, body: string): void {
+  const path = join(dir, `lore-${id}.md`);
+  expect(existsSync(path)).toBe(true);
+  const raw = readFileSync(path, "utf8");
+  const nl = raw.indexOf("\n");
+  expect(nl).toBeGreaterThan(0);
+  const first = RULES_FINGERPRINT.exec(raw.slice(0, nl));
+  expect(first?.[1]).toBe(id);
+  expect(raw.slice(nl + 1).trim()).toBe(body.trim());
 }
 
 function listSessionStartCommands(settings: Record<string, unknown>): { matcher: string | undefined; command: string }[] {
@@ -310,7 +320,7 @@ const combined = (r: Run): string => `${r.stdout}\n${r.stderr}`;
 
 // ─── AC-CF-4 ────────────────────────────────────────────────────────────────
 
-describe("AC-CF-4 lore fragments check enumerates every agent type and refuses oversize and Z1 drift", () => {
+describe("AC-CF-4 lore fragments check enumerates every agent type and refuses oversize and lore rules-file drift", () => {
   it("exits 0 on the shipped assets and its JSON lists at least (agent files + 1) agent types", () => {
     const sb = makeSandbox();
     const agentFiles = shippedAgentFiles().length;
@@ -338,18 +348,39 @@ describe("AC-CF-4 lore fragments check enumerates every agent type and refuses o
     expect(combined(r)).toContain("cf4-oversized");
   });
 
-  it("exits non-zero when the project CLAUDE.md fragments zone differs from a fresh render, and 0 again after refresh", () => {
+  it("exits non-zero when a project lore rules file is missing, changed or extra versus a fresh render, and 0 again after refresh", () => {
     const sb = makeSandbox();
     contextInit(sb);
     expect(lore(sb, "context", "refresh").code).toBe(0);
-    expect(lore(sb, "fragments", "check").code).toBe(0); // control: fresh zone is clean
+    expect(loreRulesFiles(projectRulesDir(sb)).length).toBeGreaterThan(0); // liveness: refresh wrote rules files
+    expect(lore(sb, "fragments", "check").code).toBe(0); // control: fresh rules files are clean
 
+    // MISSING: a new static main fragment has no rules file yet.
     writeFragment(projectCtxDir(sb), "cf4-drift", { audience: ["main"], mode: "static", body: `Drift body ${nonce("cf4")}` });
-    const drifted = lore(sb, "fragments", "check");
-    expect(drifted.code).not.toBe(0);
-
+    const missing = lore(sb, "fragments", "check");
+    expect(missing.code).not.toBe(0);
+    expect(combined(missing)).toContain("lore-cf4-drift.md");
     expect(lore(sb, "context", "refresh").code).toBe(0);
-    expect(lore(sb, "fragments", "check").code).toBe(0); // drift was the only cause
+    expect(lore(sb, "fragments", "check").code).toBe(0); // the missing file was the only cause
+
+    // CHANGED: the fragment source changes after the rules file was rendered.
+    writeFragment(projectCtxDir(sb), "cf4-drift", { audience: ["main"], mode: "static", body: `Drift body v2 ${nonce("cf4b")}` });
+    const changed = lore(sb, "fragments", "check");
+    expect(changed.code).not.toBe(0);
+    expect(combined(changed)).toContain("lore-cf4-drift.md");
+    expect(lore(sb, "context", "refresh").code).toBe(0);
+    expect(lore(sb, "fragments", "check").code).toBe(0);
+
+    // EXTRA: a lore-*.md file for a fragment that does not exist.
+    writeFileSync(join(projectRulesDir(sb), "lore-cf4-ghost.md"), "<!-- lore:managed fragment=cf4-ghost hash=deadbeef -->\nghost\n", "utf8");
+    const extra = lore(sb, "fragments", "check");
+    expect(extra.code).not.toBe(0);
+    expect(combined(extra)).toContain("lore-cf4-ghost.md");
+
+    // A non-lore rules file is never drift.
+    rmSync(join(projectRulesDir(sb), "lore-cf4-ghost.md"));
+    writeFileSync(join(projectRulesDir(sb), "team.md"), "team rule\n", "utf8");
+    expect(lore(sb, "fragments", "check").code).toBe(0);
   });
 });
 
@@ -402,8 +433,8 @@ describe("AC-CF-5 language projection to Claude Code settings, user and project 
 
 // ─── AC-CF-6 ────────────────────────────────────────────────────────────────
 
-describe("AC-CF-6 project Z1 fragments section render and diverged_skip", () => {
-  it("lore context refresh writes section=fragments holding the project fixture body and every shipped static main fragment body", () => {
+describe("AC-CF-6 project lore rules files render, diverged_skip and prune (D15)", () => {
+  it("lore context refresh writes .claude/rules/lore-<id>.md for the project fixture and every shipped static main fragment, and no fragments section into CLAUDE.md", () => {
     const sb = makeSandbox();
     contextInit(sb);
     const n = nonce("cf6");
@@ -411,42 +442,61 @@ describe("AC-CF-6 project Z1 fragments section render and diverged_skip", () => 
 
     expect(lore(sb, "context", "refresh").code).toBe(0);
 
-    const lines = readFileSync(projectClaudeMd(sb), "utf8").split("\n");
-    const range = sectionRange(lines, "fragments");
-    expect(range).not.toBeNull();
-    const body = lines.slice((range as { from: number }).from, (range as { to: number }).to).join("\n");
-    expect(body).toContain(n);
-
+    expectRulesFile(projectRulesDir(sb), "cf6-project", `Project rule ${n}`);
     const shipped = shippedStaticMainFragments();
     expect(shipped.length).toBeGreaterThan(0); // vacuous-pass guard: shipped layer must exist
     for (const frag of shipped) {
-      expect(body).toContain(frag.body);
+      expectRulesFile(projectRulesDir(sb), frag.id, frag.body);
     }
+    const claudeMd = readFileSync(projectClaudeMd(sb), "utf8");
+    expect(claudeMd).not.toMatch(/section=fragments/);
+    expect(claudeMd).not.toContain(n);
   });
 
-  it("a hand edit inside the fragments section makes the next refresh report diverged_skip and leaves the file bytes unchanged", () => {
+  it("a hand edit of a lore rules file makes the next refresh report diverged_skip and leaves that file's bytes unchanged", () => {
     const sb = makeSandbox();
     contextInit(sb);
     writeFragment(projectCtxDir(sb), "cf6-project", { audience: ["main"], mode: "static", body: `Project rule ${nonce("cf6b")}` });
     expect(lore(sb, "context", "refresh").code).toBe(0);
 
-    const path = projectClaudeMd(sb);
+    const path = join(projectRulesDir(sb), "lore-cf6-project.md");
+    expect(existsSync(path)).toBe(true); // liveness: the file exists before the edit
     const lines = readFileSync(path, "utf8").split("\n");
-    const range = sectionRange(lines, "fragments");
-    expect(range).not.toBeNull();
-    const { from, to } = range as { from: number; to: number };
-    let target = from;
-    while (target < to && (lines[target] as string).trim() === "") target++;
-    expect(target).toBeLessThan(to);
-    lines[target] = `${lines[target]} <<< HAND-EDITED BY TEST >>>`;
+    expect(lines.length).toBeGreaterThan(1);
+    lines[1] = `${lines[1]} <<< HAND-EDITED BY TEST >>>`; // body line, below the fingerprint
     writeFileSync(path, lines.join("\n"), "utf8");
     const snapshot = readFileSync(path, "utf8");
 
     const r = lore(sb, "context", "refresh", "--json");
-    const report = JSON.parse(r.stdout) as { data?: { sections?: { id: string; state: string }[] } };
-    const fragmentsState = report.data?.sections?.find((s) => s.id === "fragments")?.state;
-    expect(fragmentsState).toBe("diverged_skip");
+    // The per-file report shape is not pinned by D15 (spec gap): assert the state word and the fragment id are reported.
+    expect(r.stdout).toContain("diverged_skip");
+    expect(r.stdout).toContain("cf6-project");
     expect(readFileSync(path, "utf8")).toBe(snapshot);
+  });
+
+  it("a fragment deleted from the project layer has its lore-<id>.md pruned while a non-lore team.md and the still-selected files stay byte-unchanged", () => {
+    const sb = makeSandbox();
+    contextInit(sb);
+    const fragPath = writeFragment(projectCtxDir(sb), "cf6-doomed", { audience: ["main"], mode: "static", body: `Doomed ${nonce("cf6c")}` });
+    mkdirSync(projectRulesDir(sb), { recursive: true });
+    const teamPath = join(projectRulesDir(sb), "team.md");
+    const teamBytes = "# Team rule (not lore-owned)\n\nKeep me exactly.\n";
+    writeFileSync(teamPath, teamBytes, "utf8");
+
+    expect(lore(sb, "context", "refresh").code).toBe(0);
+    const doomedPath = join(projectRulesDir(sb), "lore-cf6-doomed.md");
+    expect(existsSync(doomedPath)).toBe(true); // BOTH ends: the file exists before the prune
+    const shippedBefore = loreRulesFiles(projectRulesDir(sb)).filter((f) => f !== "lore-cf6-doomed.md");
+    expect(shippedBefore.length).toBeGreaterThan(0);
+    const shippedBytes = shippedBefore.map((f) => readFileSync(join(projectRulesDir(sb), f), "utf8"));
+
+    rmSync(fragPath);
+    expect(lore(sb, "context", "refresh").code).toBe(0);
+
+    expect(existsSync(doomedPath)).toBe(false);
+    expect(readFileSync(teamPath, "utf8")).toBe(teamBytes);
+    expect(loreRulesFiles(projectRulesDir(sb))).toEqual(shippedBefore);
+    expect(shippedBefore.map((f) => readFileSync(join(projectRulesDir(sb), f), "utf8"))).toEqual(shippedBytes);
   });
 });
 
@@ -482,8 +532,8 @@ describe("AC-CF-7 subagent hook delivers project fragment via lore fragments ren
 
 // ─── AC-CF-8 ────────────────────────────────────────────────────────────────
 
-describe("AC-CF-8 session start output under cap and governance prose moved to Z1", () => {
-  it("setup registers resume and fragments SessionStart hooks, neither emits over 10,000 chars, and the corpus-workflow sentinel lives in Z1 not in hook output", () => {
+describe("AC-CF-8 session start output under cap and governance prose moved to lore rules files", () => {
+  it("setup registers resume and fragments SessionStart hooks, neither emits over 10,000 chars, and the corpus-workflow sentinel lives in a project lore-corpus-workflow rules file, not in hook output", () => {
     const sb = makeSandbox();
     expect(setupGlobal(sb).code).toBe(0);
 
@@ -492,7 +542,7 @@ describe("AC-CF-8 session start output under cap and governance prose moved to Z
     expect(commands.some((c) => c.includes("session-start-fragments.mjs"))).toBe(true);
 
     if (!existsSync(projectClaudeMd(sb))) contextInit(sb);
-    lore(sb, "context", "refresh"); // exit code deliberately not asserted: the Z1 content below is the oracle
+    lore(sb, "context", "refresh"); // exit code deliberately not asserted: the rules-file content below is the oracle
 
     let emitted = "";
     for (const name of ["session-start-resume.mjs", "session-start-fragments.mjs"]) {
@@ -506,7 +556,10 @@ describe("AC-CF-8 session start output under cap and governance prose moved to Z
       emitted += `\n${text}`;
     }
     expect(emitted).not.toContain(CORPUS_WORKFLOW_SENTINEL);
-    expect(managedZone(readFileSync(projectClaudeMd(sb), "utf8"))).toContain(CORPUS_WORKFLOW_SENTINEL);
+    const workflowRules = loreRulesFiles(projectRulesDir(sb)).filter((f) => f.startsWith("lore-corpus-workflow-"));
+    expect(workflowRules.length).toBeGreaterThan(0);
+    const rulesText = workflowRules.map((f) => readFileSync(join(projectRulesDir(sb), f), "utf8")).join("\n");
+    expect(rulesText).toContain(CORPUS_WORKFLOW_SENTINEL);
   });
 });
 
@@ -588,16 +641,19 @@ describe("AC-CF-11 compact matcher registered and re-injects dynamic main fragme
 
 // ─── AC-CF-12 ───────────────────────────────────────────────────────────────
 
-describe("AC-CF-12 stale Z1 backstop notice", () => {
+describe("AC-CF-12 stale lore rules-file backstop notice", () => {
   const FRAGMENTS_HOOK = join(HOOKS_DIR, "session-start-fragments.mjs");
   const STATIC_ID = "cf12-static";
 
-  /** A corpus whose project CLAUDE.md Z1 was refreshed with one static main fixture. */
-  function freshZ1(): Sandbox {
+  /** A corpus whose project lore rules files were refreshed with one static main fixture. */
+  function freshRules(): Sandbox {
     const sb = makeSandbox();
     contextInit(sb);
     writeFragment(projectCtxDir(sb), STATIC_ID, { audience: ["main"], mode: "static", body: `Original static ${nonce("cf12-orig")}` });
     expect(lore(sb, "context", "refresh").code).toBe(0);
+    const rules = join(projectRulesDir(sb), `lore-${STATIC_ID}.md`);
+    expect(existsSync(rules)).toBe(true); // liveness: staleness below is measured against a real rules file
+    expect(readFileSync(rules, "utf8")).toContain("Original static");
     return sb;
   }
 
@@ -609,15 +665,15 @@ describe("AC-CF-12 stale Z1 backstop notice", () => {
     return (out as HookOut).additionalContext;
   }
 
-  it("fresh Z1 produces neither the stale marker nor the fixture body", () => {
-    const sb = freshZ1();
+  it("fresh rules files produce neither the stale marker nor the fixture body", () => {
+    const sb = freshRules();
     const text = startHook(sb);
     expect(text).not.toContain(STALE_MARKER);
     expect(text).not.toContain("Original static");
   });
 
-  it("stale Z1 emits the stale marker and the changed fragment nonce", () => {
-    const sb = freshZ1();
+  it("a stale lore rules file emits the stale marker and the changed fragment nonce", () => {
+    const sb = freshRules();
     const changed = nonce("cf12-changed");
     writeFragment(projectCtxDir(sb), STATIC_ID, { audience: ["main"], mode: "static", body: `Changed static ${changed}` });
 
@@ -627,7 +683,7 @@ describe("AC-CF-12 stale Z1 backstop notice", () => {
   });
 
   it("when changed bodies exceed the remaining budget the output lists the changed ids instead, within 10,000 chars", () => {
-    const sb = freshZ1();
+    const sb = freshRules();
     const dynamicHead = nonce("cf12-dyn");
     const changedHead = nonce("cf12-big");
     writeFragment(projectCtxDir(sb), "cf12-dynamic-block", {
@@ -652,27 +708,30 @@ describe("AC-CF-12 stale Z1 backstop notice", () => {
 
 // ─── AC-CF-15 ───────────────────────────────────────────────────────────────
 
-describe("AC-CF-15 user scope refresh writes only inside markers", () => {
-  it("lore context refresh --scope user changes only the bytes between the lore markers of HOME/.claude/CLAUDE.md", () => {
+describe("AC-CF-15 user scope refresh writes lore rules files under HOME/.claude/rules only", () => {
+  it("lore context refresh --scope user writes HOME/.claude/rules/lore-<id>.md for user-layer static main fragments only; HOME CLAUDE.md and rules/mine.md stay byte-identical", () => {
     const sb = makeSandbox();
     const n = nonce("cf15");
     writeFragment(userCtxDir(sb), "cf15-user", { audience: ["main"], mode: "static", body: `User rule ${n}` });
 
     const claudeDir = join(sb.home, ".claude");
-    mkdirSync(claudeDir, { recursive: true });
-    const path = join(claudeDir, "CLAUDE.md");
-    const original = `# My hand notes\n\nhand text BEFORE the markers\n\n${CLAUDE_MD_MARKER_START}\n${CLAUDE_MD_MARKER_END}\n\nhand text AFTER the markers\n`;
-    writeFileSync(path, original, "utf8");
+    mkdirSync(join(claudeDir, "rules"), { recursive: true });
+    const claudeMdPath = join(claudeDir, "CLAUDE.md");
+    const claudeMdBytes = "# My hand notes\n\nhand text only, no lore markers\n";
+    writeFileSync(claudeMdPath, claudeMdBytes, "utf8");
+    const minePath = join(claudeDir, "rules", "mine.md");
+    const mineBytes = "# mine\n\nnot lore-owned\n";
+    writeFileSync(minePath, mineBytes, "utf8");
 
     const r = lore(sb, "context", "refresh", "--scope", "user");
     expect(r.code).toBe(0);
 
-    const after = readFileSync(path, "utf8");
-    const prefix = original.slice(0, original.indexOf(CLAUDE_MD_MARKER_START) + CLAUDE_MD_MARKER_START.length);
-    const suffix = original.slice(original.indexOf(CLAUDE_MD_MARKER_END));
-    expect(after.startsWith(prefix)).toBe(true);
-    expect(after.endsWith(suffix)).toBe(true);
-    expect(after.slice(prefix.length, after.length - suffix.length)).toContain(n); // liveness: something was written between
+    expectRulesFile(homeRulesDir(sb), "cf15-user", `User rule ${n}`);
+    // user-layer ONLY: no shipped/project static main fragment lands in HOME (D14 no duplication).
+    expect(loreRulesFiles(homeRulesDir(sb))).toEqual(["lore-cf15-user.md"]);
+    expect(readFileSync(claudeMdPath, "utf8")).toBe(claudeMdBytes);
+    expect(readFileSync(minePath, "utf8")).toBe(mineBytes);
+    expect(existsSync(projectRulesDir(sb))).toBe(false); // user scope never writes the project rules dir
   });
 });
 
