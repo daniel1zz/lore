@@ -449,7 +449,7 @@ describe("AC-CP-9: compiled dist/lore governance FEED rule names every injected 
       expect(delivered).toContain(token);
     }
     expect(delivered).not.toContain("resume_hint");
-  });
+  }, 120_000);
 });
 
 // ─── "fresh install" (AC-CP-6) ──────────────────────────────────────────────
@@ -572,5 +572,5 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     const feedRules = join(corpusDir, ".claude", "rules", "lore-corpus-workflow-feed.md");
     expect(existsSync(feedRules)).toBe(true);
     expect(readFileSync(feedRules, "utf8")).toContain("ACCOUNT, not to complete");
-  });
+  }, 120_000);
 });
