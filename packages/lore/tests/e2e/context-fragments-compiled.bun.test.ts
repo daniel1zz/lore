@@ -795,3 +795,27 @@ describe("AC-CF-18 language drift refused and unknown code refused", () => {
     expect(language).toBeUndefined();
   });
 });
+
+// ─── AC-CF-22 ───────────────────────────────────────────────────────────────
+
+describe("AC-CF-22 rules files are written even when the CLAUDE.md ceiling admission refuses (D16)", () => {
+  it("hand-written CLAUDE.md without Z1 markers that breaches the root ceiling: refresh exits non-zero naming the ceiling, every shipped static main fragment is a .claude/rules/lore-<id>.md, CLAUDE.md is byte-unchanged", () => {
+    const sb = makeSandbox();
+    const handWritten = `# Hand written, no Z1 markers\n\n${Array.from({ length: 400 }, (_, i) => `rule line ${i}`).join("\n")}\n`;
+    writeFileSync(projectClaudeMd(sb), handWritten, "utf8");
+    // adoption defaults to warn (downgrades the ceiling to advisory); enforce makes the ceiling refuse, as in this repo.
+    appendProjectConfig(sb, "context:\n  memory_files:\n    adoption: enforce\n");
+
+    const r = lore(sb, "context", "refresh");
+
+    expect(r.code).not.toBe(0);
+    expect(combined(r)).toContain("ceiling");
+    expect(combined(r)).toContain("CLAUDE.md");
+    const shipped = shippedStaticMainFragments();
+    expect(shipped.length).toBeGreaterThan(0); // vacuous-pass guard: shipped layer must exist
+    for (const frag of shipped) {
+      expectRulesFile(projectRulesDir(sb), frag.id, frag.body);
+    }
+    expect(readFileSync(projectClaudeMd(sb), "utf8")).toBe(handWritten);
+  });
+});
