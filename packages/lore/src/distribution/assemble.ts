@@ -22,6 +22,11 @@
  *     per publish with the current machine's platform; P3 loops it across a
  *     target matrix with ZERO change to this module's call contract.
  *
+ *   - mergeShippedAssetFiles(input) — pure union of the three "what ships in the
+ *     npm package" sources (install set, retired-from-install files, binary-read-
+ *     only `assets/context/**`), deduplicated and sorted; the SSOT for the
+ *     `assetFiles` list `scripts/publish-npm.ts` feeds to buildPublishPlan.
+ *
  * Invariants:
  *   - Pure: no fs, no `child_process`/`Bun.spawn`, no `Date.now()` /
  *     `Math.random()`. Every field of the returned `PublishPlan` is a
@@ -150,6 +155,38 @@ export const README_SOURCE_PATH = "README.md";
  */
 export function nameFor(target: string): string {
   return `${PACKAGE_SCOPE}/${PACKAGE_BASENAME}-${target}`;
+}
+
+/** Input of {@link mergeShippedAssetFiles}. Paths in the two non-install lists are relative to `assets/`. */
+export interface MergeShippedAssetFilesInput {
+  /** Repo-relative (`assets/...`) files from the machine install set (`RealAssetSource.load()`). */
+  installSetAssetFiles: readonly string[];
+  /** `assets/`-relative paths retired from install but still shipped (`RETIRED_FROM_INSTALL_PATHS`). */
+  retiredFromInstallPaths: Iterable<string>;
+  /** `assets/`-relative binary-read-only files, e.g. `context/<id>.md` (`listBinaryReadAssetPaths`). */
+  binaryReadAssetPaths: readonly string[];
+}
+
+/**
+ * Unions the three sources of "files that ship inside the npm package" into one
+ * deduplicated, sorted, `assets/`-rooted list for `BuildPublishPlanInput.assetFiles`.
+ * The install set alone is NOT the package contents: governance prose and
+ * `assets/context/**` fragments are read off the binary's own assets root at
+ * runtime (`resolveAssetsRoot`) and must ship even though `lore setup` never
+ * installs them. Pure.
+ *
+ * @param input - the three path sources.
+ * @returns sorted unique `assets/...` paths.
+ * @throws Never.
+ * @example
+ * mergeShippedAssetFiles({ installSetAssetFiles: [], retiredFromInstallPaths: [], binaryReadAssetPaths: ["context/a.md"] });
+ * // => ["assets/context/a.md"]
+ */
+export function mergeShippedAssetFiles(input: MergeShippedAssetFilesInput): string[] {
+  const all = new Set<string>(input.installSetAssetFiles);
+  for (const retired of input.retiredFromInstallPaths) all.add(`assets/${retired}`);
+  for (const binaryRead of input.binaryReadAssetPaths) all.add(`assets/${binaryRead}`);
+  return [...all].sort();
 }
 
 /**

@@ -47,6 +47,12 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
+import { buildManifest, renderGeneratedFile } from "../../../../scripts/embed-assets-manifest.mjs";
+import {
+  RealAssetSource,
+  isRetiredFromInstall,
+  listBinaryReadAssetPaths,
+} from "../../src/adapters/real-asset-source.js";
 
 // ─── Locate the REAL repo-root assets/ tree ────────────────────────────────────
 // packages/lore/tests/unit/assets-ssot.test.ts -> repo root is 4 levels up.
@@ -942,5 +948,93 @@ describe("assets-ssot — DISTRIBUTION (corpus-workflow.md manifest freshness af
     const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === GOVERNANCE_REL);
     expect(entry, `${GOVERNANCE_REL} must be declared in the embedded manifest`).toBeDefined();
     expect((entry as { sha256: string }).sha256).not.toBe(PRE_FIX_SHA256);
+  });
+});
+
+// ─── assets/context manifest (task-skill-implement-distribute-assets-context-manifest-kind) ──
+// `assets/context/` is the shipped context-fragment SSOT (spec D9): manifest-tracked
+// as kind "context", read binary-side via resolveAssetsRoot, NEVER installed into
+// ~/.claude. Every probe runs against a TEMP assets root so the real assets/ tree is
+// never touched.
+describe("assets/context manifest", () => {
+  const TOP_DIRS = ["agents", "governance", "hooks", "project", "skills"];
+
+  function makeTempAssets(withContext: boolean): string {
+    const root = mkdtempSync(join(tmpdir(), "assets-ctx-"));
+    for (const d of TOP_DIRS) {
+      mkdirSync(join(root, d), { recursive: true });
+      writeFileSync(join(root, d, "seed.md"), `seed ${d}\n`);
+    }
+    if (withContext) {
+      mkdirSync(join(root, "context"), { recursive: true });
+      writeFileSync(join(root, "context", "zz-probe.md"), "probe fragment\n");
+    }
+    return root;
+  }
+
+  it("a fixture assets/context/zz-probe.md yields manifest entry path 'context/zz-probe.md' kind 'context' ownership managed", () => {
+    const root = makeTempAssets(true);
+    try {
+      const m = buildManifest(root, REPO_ROOT);
+      const entry = m.entries.find((e: { path: string }) => e.path === "context/zz-probe.md");
+      expect(entry).toBeDefined();
+      expect(entry?.kind).toBe("context");
+      expect(entry?.ownership).toBe("managed");
+      expect(renderGeneratedFile(m)).toContain('"context"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a missing assets/context directory yields ZERO context entries, not an error", () => {
+    const root = makeTempAssets(false);
+    try {
+      const m = buildManifest(root, REPO_ROOT);
+      expect(m.entries.filter((e: { kind: string }) => e.kind === "context")).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a missing governance directory is STILL a loud error (only context is optional)", () => {
+    const root = makeTempAssets(true);
+    try {
+      rmSync(join(root, "governance"), { recursive: true, force: true });
+      expect(() => buildManifest(root, REPO_ROOT)).toThrow(/governance/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("context/* is never installed: RealAssetSource.load() yields no context path, isRetiredFromInstall covers it", async () => {
+    const root = makeTempAssets(true);
+    try {
+      const loaded = await new RealAssetSource(root).load();
+      expect(loaded.ok).toBe(true);
+      if (!loaded.ok) return;
+      expect(loaded.value.files.some((f) => f.path.startsWith("context/"))).toBe(false);
+      expect(loaded.value.files.some((f) => f.path.startsWith("skills/"))).toBe(true); // live control: walk still works
+      expect(isRetiredFromInstall("context/zz-probe.md")).toBe(true);
+      expect(isRetiredFromInstall("context")).toBe(false);
+      expect(isRetiredFromInstall("skills/seed.md")).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("listBinaryReadAssetPaths lists context files as assetsRoot-relative POSIX paths; empty for a missing dir", () => {
+    const withCtx = makeTempAssets(true);
+    const without = makeTempAssets(false);
+    try {
+      expect(listBinaryReadAssetPaths(withCtx)).toEqual(["context/zz-probe.md"]);
+      expect(listBinaryReadAssetPaths(without)).toEqual([]);
+    } finally {
+      rmSync(withCtx, { recursive: true, force: true });
+      rmSync(without, { recursive: true, force: true });
+    }
+  });
+
+  it("real assets/ tree is unchanged by these probes: no zz-probe.md under the real assets/context", () => {
+    expect(existsSync(join(ASSETS_ROOT, "context", "zz-probe.md"))).toBe(false);
   });
 });

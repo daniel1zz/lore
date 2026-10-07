@@ -2,7 +2,7 @@
 /**
  * Build-time asset manifest generator (SPEC-076 §C2, D1).
  *
- * Walks the repo's vendored `assets/{skills,agents,hooks,governance,project}/`
+ * Walks the repo's vendored `assets/{skills,agents,hooks,governance,project,context}/`
  * SSOT tree, computes a per-file sha256 plus a single sorted-pair tree digest,
  * and renders `packages/lore/src/generated/assets-manifest.ts` — a git-tracked,
  * deterministic TypeScript module exporting `EMBEDDED_ASSETS_MANIFEST`. That
@@ -79,15 +79,26 @@ export const REGENERATE_COMMAND = "bun scripts/embed-assets-manifest.mjs";
 /** Top-level `assets/` subdirectory name -> the local `AssetEntryKind` its files are tagged with. */
 export const TOP_LEVEL_KIND_MAP = {
   agents: "agent",
+  context: "context",
   governance: "governance",
   hooks: "hook",
   project: "project",
   skills: "skill",
 };
 
+/**
+ * Top-level directories that MAY be absent from `assets/` (zero entries, never an
+ * error). `context` (spec-context-fragments-config-driven-layered-rule-injection D9)
+ * is the shipped context-fragment SSOT read binary-side via `resolveAssetsRoot`;
+ * it is populated by a later task, so an absent directory is a legal state. Every
+ * other declared directory stays a loud `AssetManifestError` when missing.
+ */
+export const OPTIONAL_TOP_LEVEL_DIRS = new Set(["context"]);
+
 /** Default ownership per kind (SPEC-076 §C1) — everything is "managed" unless overridden below. */
 const DEFAULT_OWNERSHIP_BY_KIND = {
   agent: "managed",
+  context: "managed",
   governance: "managed",
   hook: "managed",
   project: "managed",
@@ -191,9 +202,10 @@ export function resolveBinaryVersion(repoRoot) {
 // ─── Manifest assembly ──────────────────────────────────────────────────────────
 
 /**
- * Walks `assetsRoot`'s five declared top-level directories and assembles the
- * full in-memory manifest (never writes anything).
- * @throws {AssetManifestError} if a declared top-level directory is missing.
+ * Walks `assetsRoot`'s declared top-level directories ({@link TOP_LEVEL_KIND_MAP})
+ * and assembles the full in-memory manifest (never writes anything).
+ * @throws {AssetManifestError} if a declared top-level directory is missing,
+ *   except those in {@link OPTIONAL_TOP_LEVEL_DIRS} (contribute zero entries).
  */
 export function buildManifest(assetsRoot, repoRoot) {
   const entries = [];
@@ -201,6 +213,7 @@ export function buildManifest(assetsRoot, repoRoot) {
     const kind = TOP_LEVEL_KIND_MAP[topDir];
     const dirPath = join(assetsRoot, topDir);
     if (!existsSync(dirPath)) {
+      if (OPTIONAL_TOP_LEVEL_DIRS.has(topDir)) continue;
       throw new AssetManifestError(`buildManifest: declared asset directory missing: ${dirPath}`);
     }
     for (const relFile of walkFilesRelative(dirPath)) {
@@ -245,8 +258,8 @@ export function renderGeneratedFile(manifest) {
  * for the kind -> ownership derivation rules.
  */
 
-/** One of the five vendored top-level \`assets/\` directories. */
-export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project";
+/** One of the six vendored top-level \`assets/\` directories. */
+export type AssetEntryKind = "skill" | "agent" | "hook" | "governance" | "project" | "context";
 
 /** Update-time handling region (SPEC-076 §C1) — see the generator's doc comment. */
 export type AssetOwnership = "managed" | "merged" | "user_once";

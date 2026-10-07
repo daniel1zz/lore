@@ -43,7 +43,13 @@
  *     yielded into the `AssetPayload`, so `lore setup` neither writes nor
  *     manifest-tracks it. The runtime `lore governance` verb reads it
  *     straight from the binary's own assets root instead -- see that
- *     command's module header. `setup-check.ts`'s `buildCheckEmbeddedManifest`
+ *     command's module header. The binary-read set is therefore NOT
+ *     governance-only: `assets/context/*.md` (context fragments, kind
+ *     `context`, spec-context-fragments-config-driven-layered-rule-injection
+ *     D9) is read the same way and is never walked by `load()` at all
+ *     (`BINARY_READ_ONLY_TOP_DIRS`, `isRetiredFromInstall`'s `context/`
+ *     prefix rule, `listBinaryReadAssetPaths`) -- grep those symbols in this
+ *     file, not this prose, for the live set. `setup-check.ts`'s `buildCheckEmbeddedManifest`
  *     imports this SAME predicate to filter the EMBEDDED manifest it
  *     classifies against -- see this predicate's own doc for why a
  *     hand-duplicated literal there was rejected.
@@ -83,7 +89,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { err, ok, buildHookSettingsEntries } from "@lore/core";
@@ -114,6 +120,9 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
  * are still fingerprinted by the embedded assets manifest — only THEIR
  * INSTALLATION is retired here; the `governance/` install directory is now
  * empty (no governance files are written to `<claude-dir>/governance/`).
+ * The binary-read set is wider than these governance files: whole
+ * `assets/context/` fragments follow the same read path via
+ * {@link BINARY_READ_ONLY_TOP_DIRS} (declared below this set).
  *
  * **Two independent consumers, one declaration** (2026-07-26 regression fix):
  * this port's own `load()` walk (below) AND `setup-check.ts`'s
@@ -153,9 +162,24 @@ export const RETIRED_FROM_INSTALL_PATHS = new Set<string>([
 ]);
 
 /**
+ * Top-level `assets/` directories that are BINARY-READ ONLY: shipped in the npm
+ * package and fingerprinted by the embedded manifest (generator kind `context`),
+ * read at runtime via `resolveAssetsRoot`, and NEVER walked by `load()` nor
+ * installed into `<claude-dir>/` (spec-context-fragments-config-driven-layered-
+ * rule-injection D9; precedent: SPEC-083's governance read). Whole-directory
+ * retirement, unlike {@link RETIRED_FROM_INSTALL_PATHS}'s per-file entries, so a
+ * newly added fragment needs no edit here. Consumers: {@link isRetiredFromInstall}
+ * (also used by `setup-check.ts`'s `buildCheckEmbeddedManifest`) and
+ * {@link listBinaryReadAssetPaths} (npm assembly in `scripts/publish-npm.ts`).
+ */
+export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context"];
+
+/**
  * Predicate form of {@link RETIRED_FROM_INSTALL_PATHS} — `path` is the FULL
  * path relative to `assetsRoot`, never a bare filename (a bare-filename check
- * would risk excluding an unrelated same-named file nested elsewhere).
+ * would risk excluding an unrelated same-named file nested elsewhere). Also
+ * true for any path under a {@link BINARY_READ_ONLY_TOP_DIRS} directory
+ * (`context/...`), matched on the `<dir>/` prefix.
  *
  * @param path - a full `assetsRoot`-relative path, e.g. `"governance/corpus-workflow.md"`.
  * @returns `true` iff `path` is retired from the machine install set.
@@ -166,12 +190,17 @@ export const RETIRED_FROM_INSTALL_PATHS = new Set<string>([
  * isRetiredFromInstall("governance/nested/corpus-workflow.md"); // => false (different path)
  */
 export function isRetiredFromInstall(path: string): boolean {
-  return RETIRED_FROM_INSTALL_PATHS.has(path);
+  if (RETIRED_FROM_INSTALL_PATHS.has(path)) return true;
+  return BINARY_READ_ONLY_TOP_DIRS.some((dir) => path.startsWith(`${dir}/`));
 }
 
 import type { AssetSource } from "../service/setup-service.js";
 
-/** Top-level `assets/` subdirectory name → the `SetupEntryKind` its files are tagged with. */
+/**
+ * Top-level `assets/` subdirectory name → the `SetupEntryKind` its files are tagged with.
+ * Deliberately has NO `context` key: `assets/context/` is binary-read only
+ * ({@link BINARY_READ_ONLY_TOP_DIRS}), never part of the install payload.
+ */
 const TOP_LEVEL_KIND_MAP: Record<string, SetupEntryKind> = {
   skills: "skill",
   agents: "agent",
@@ -221,6 +250,26 @@ function walkFilesRelative(dir: string): string[] {
   };
   walk(dir, "");
   return out;
+}
+
+/**
+ * Lists every file under the {@link BINARY_READ_ONLY_TOP_DIRS} directories of
+ * `assetsRoot` as `assetsRoot`-relative POSIX paths (`context/<file>.md`), sorted.
+ * A missing directory contributes nothing (the `context` directory is legally
+ * absent until fragments land); any other read failure propagates.
+ *
+ * @param assetsRoot - absolute path to the `assets/` directory.
+ * @returns sorted relative paths; `[]` when no binary-read directory exists.
+ * @throws Error from `readdirSync` for failures other than a missing directory.
+ */
+export function listBinaryReadAssetPaths(assetsRoot: string): string[] {
+  const out: string[] = [];
+  for (const dir of BINARY_READ_ONLY_TOP_DIRS) {
+    const dirPath = join(assetsRoot, dir);
+    if (!existsSync(dirPath)) continue;
+    for (const rel of walkFilesRelative(dirPath)) out.push(`${dir}/${rel}`);
+  }
+  return out.sort();
 }
 
 /**
