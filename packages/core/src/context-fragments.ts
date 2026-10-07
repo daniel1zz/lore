@@ -63,8 +63,8 @@ export interface Fragment {
 // ─── Outlets & config resolution (D11, D14) ───
 
 export const OUTLET_IDS = [
-  "claude-md:project",
-  "claude-md:user",
+  "rules:project",
+  "rules:user",
   "hook:session-start",
   "hook:subagent-start",
 ] as const;
@@ -88,8 +88,8 @@ export interface ResolvedContextConfig {
 
 /**
  * Resolve the effective language + disabled ids for one outlet.
- * - claude-md:user    → GLOBAL layer only
- * - claude-md:project → PROJECT layer only
+ * - rules:user    → GLOBAL layer only
+ * - rules:project → PROJECT layer only
  * - hook:*            → project language over global; disable lists unioned
  * Pure: never mutates its inputs.
  */
@@ -104,13 +104,13 @@ export function resolveContextConfig(
   const pDisable = p.fragments?.disable ?? [];
 
   switch (outlet) {
-    case "claude-md:user":
+    case "rules:user":
       return {
         language: g.language ?? null,
         languageSource: g.language !== undefined ? "global" : "none",
         disabled: new Set(gDisable),
       };
-    case "claude-md:project":
+    case "rules:project":
       return {
         language: p.language ?? null,
         languageSource: p.language !== undefined ? "project" : "none",

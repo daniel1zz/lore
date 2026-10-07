@@ -7,8 +7,8 @@
  *   - Pure (no IO, no clock); never mutates inputs; output is id-ascending (deterministic).
  *   - Pipeline order: outlet layer routing -> id override (project > user > shipped)
  *     -> disable -> audience/mode routing -> `when` matchers.
- *   - claude-md:project sees ONLY shipped+project layers; claude-md:user sees ONLY the user
- *     layer. This is what keeps each CLAUDE.md render independent of the other scope.
+ *   - rules:project sees ONLY shipped+project layers; rules:user sees ONLY the user
+ *     layer. This is what keeps each rules-file render independent of the other scope.
  *   - A `when` key missing from WHEN_MATCHERS fails loud (throws) - never silently matches.
  * Side-effect class: pure.
  */
@@ -29,10 +29,10 @@ type FragmentLayer = Fragment["layer"];
 /** Higher rank wins an id collision: project > user > shipped. */
 const LAYER_RANK: Readonly<Record<FragmentLayer, number>> = { shipped: 0, user: 1, project: 2 };
 
-/** Layers each outlet may draw from (keeps CLAUDE.md renders scope-independent). */
+/** Layers each outlet may draw from (keeps rules-file renders scope-independent). */
 const OUTLET_LAYERS: Readonly<Record<OutletId, ReadonlySet<FragmentLayer>>> = {
-  "claude-md:project": new Set<FragmentLayer>(["shipped", "project"]),
-  "claude-md:user": new Set<FragmentLayer>(["user"]),
+  "rules:project": new Set<FragmentLayer>(["shipped", "project"]),
+  "rules:user": new Set<FragmentLayer>(["user"]),
   "hook:session-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
   "hook:subagent-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
 };
@@ -79,8 +79,8 @@ function isStaticMain(fragment: Fragment): boolean {
 function matchesOutletRouting(fragment: Fragment, outlet: OutletId, agentType: string | undefined): boolean {
   const { audience, mode } = fragment.frontmatter;
   switch (outlet) {
-    case "claude-md:project":
-    case "claude-md:user":
+    case "rules:project":
+    case "rules:user":
       return mode === "static" && audience.includes("main");
     case "hook:session-start":
       return mode === "dynamic" && audience.includes("main");
@@ -128,7 +128,7 @@ export function selectFragments(all: readonly Fragment[], options: SelectOptions
 
 /**
  * Refuse cross-file targeting of a STATIC MAIN fragment that the targeting file does not own.
- * A static main fragment lands in a CLAUDE.md file, so only the scope that owns the next layer
+ * A static main fragment lands in a lore rules file (D15), so only the scope that owns the next layer
  * up may override/disable it: shipped is overridable/disable-able by project only; user-layer
  * ones by nobody outside the user file. Dynamic and subagent-only fragments are unrestricted.
  *

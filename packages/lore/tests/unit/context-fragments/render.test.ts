@@ -1,6 +1,6 @@
 /** @spec_ref AC-CF-3 */
 /**
- * RED tests (module does not exist yet): renderOutlet + buildFragmentsSection.
+ * renderOutlet + renderRulesFile/parseRulesFile (D15: the former Z1 buildFragmentsSection became the lore rules-file renderer).
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D6, D13, Module Boundary).
  *
  * JOIN FORMAT ASSUMED (the spec does not pin it):
@@ -13,7 +13,7 @@
 import { describe, expect, it } from "vitest";
 import { SESSION_FRAGMENT_CAP, SUBAGENT_FRAGMENT_CAP, type Fragment } from "@lore/core";
 import { renderOutlet } from "../../../src/service/context-fragments/render.js";
-import { buildFragmentsSection } from "../../../src/service/context-fragments/section.js";
+import { parseRulesFile, renderRulesFile } from "../../../src/service/context-fragments/section.js";
 
 function frag(id: string, body: string, audience: string[] = ["main"], mode: "static" | "dynamic" = "dynamic"): Fragment {
   return {
@@ -113,33 +113,41 @@ describe("AC-CF-3 render output shape", () => {
     expect(r.ok && r.value.text).toBe("gamma");
   });
 
-  it("claude-md outlets are not subject to the hook cap", () => {
-    const r = renderOutlet([frag("big", "y".repeat(20_000), ["main"], "static")], "claude-md:project");
+  it("rules outlets are not subject to the hook cap", () => {
+    const r = renderOutlet([frag("big", "y".repeat(20_000), ["main"], "static")], "rules:project");
     expect(r.ok).toBe(true);
   });
 });
 
-describe("AC-CF-3 buildFragmentsSection", () => {
-  it("returns a ManagedSection with id 'fragments' containing every body", () => {
-    const rendered = renderOutlet(
-      [frag("one", "BODY-ONE-nonce", ["main"], "static"), frag("two", "BODY-TWO-nonce", ["main"], "static")],
-      "claude-md:project",
-    );
-    expect(rendered.ok).toBe(true);
-    if (!rendered.ok) return;
-    const section = buildFragmentsSection(rendered.value, "project");
-    expect(section.id).toBe("fragments");
-    expect(section.body).toContain("BODY-ONE-nonce");
-    expect(section.body).toContain("BODY-TWO-nonce");
+describe("AC-CF-3 renderRulesFile (D15 file shape)", () => {
+  it("renders lore-<id>.md: fingerprint first line carrying the id + the verbatim body, intact on parse", () => {
+    const r = renderRulesFile(frag("one", "BODY-ONE-nonce", ["main"], "static"));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.fileName).toBe("lore-one.md");
+    expect(r.value.content).toMatch(/^<!-- lore:managed fragment=one hash=[0-9a-f]{8} -->\nBODY-ONE-nonce\n$/);
+    expect(parseRulesFile(r.value.content)).toMatchObject({ id: "one", intact: true });
   });
 
-  it("section body tracks the rendered input (different bodies, different section)", () => {
+  it("file bytes and hash track the body (different bodies, different file)", () => {
     const mk = (b: string) => {
-      const r = renderOutlet([frag("x", b, ["main"], "static")], "claude-md:project");
+      const r = renderRulesFile(frag("x", b, ["main"], "static"));
       if (!r.ok) throw new Error("render failed");
-      return buildFragmentsSection(r.value, "project");
+      return r.value.content;
     };
-    expect(mk("first-nonce").body).not.toBe(mk("second-nonce").body);
-    expect(mk("second-nonce").body).not.toContain("first-nonce");
+    expect(mk("first-nonce")).not.toBe(mk("second-nonce"));
+    expect(mk("second-nonce")).not.toContain("first-nonce");
+  });
+
+  it("a hand-edited body is parsed as NOT intact, and a fingerprint-less file as null", () => {
+    const r = renderRulesFile(frag("x", "orig", ["main"], "static"));
+    if (!r.ok) throw new Error("render failed");
+    expect(parseRulesFile(r.value.content.replace("orig", "orig EDIT"))).toMatchObject({ id: "x", intact: false });
+    expect(parseRulesFile("# no fingerprint\nbody\n")).toBeNull();
+  });
+
+  it("refuses an id that cannot be a file-name stem", () => {
+    const r = renderRulesFile(frag("../evil", "b", ["main"], "static"));
+    expect(r.ok).toBe(false);
   });
 });

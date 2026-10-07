@@ -4,14 +4,14 @@
  *
  * Public surface:
  *   - runFragmentsRender(deps, opts) — the additionalContext string one hook outlet emits
- *     (dynamic block, plus the D7 stale-Z1 notice at session start).
- *   - runFragmentsCheck(deps) — every outlet × agent type vs caps, Z1 drift, override refusal
+ *     (dynamic block, plus the D7 stale-rules-file notice at session start).
+ *   - runFragmentsCheck(deps) — every outlet × agent type vs caps, lore rules-file drift, override refusal
  *     and Claude Code `language` drift; findings, never throws.
  *   - composeSessionStart(parts) / buildHookBanner(error) — pure assembly helpers (exported for tests).
  *   - FragmentsFlowDeps, FragmentsFlowError, FRAGMENTS_STALE_MARKER.
  *
  * Invariants:
- *   - Read-only: this module has NO write port. Hooks never write CLAUDE.md (D7, D13).
+ *   - Read-only: this module has NO write port. Hooks never write rules files or CLAUDE.md (D7, D13, D15).
  *   - Every failure carries a stable `code` (VALIDATION_ERROR | BUDGET_EXCEEDED); nothing is
  *     swallowed — render returns it for the D12 banner, check reports it as a finding.
  *   - Session-start output (block + notice + changed bodies/ids) is always <= HOOK_STRING_CAP.
@@ -34,9 +34,8 @@ import {
 } from "@lore/core";
 import { discoverFragments, type FragmentRoots } from "../service/context-fragments/discover.js";
 import { renderOutlet } from "../service/context-fragments/render.js";
-import { buildFragmentsSection, FRAGMENTS_SECTION_ID } from "../service/context-fragments/section.js";
+import { isLoreRulesFileName, renderRulesFile } from "../service/context-fragments/section.js";
 import { checkOverrides, selectFragments } from "../service/context-fragments/select.js";
-import { parseManagedSections } from "../service/context-projection.js";
 
 /** Fixed marker the D7 backstop notice starts with (AC-CF-12). */
 export const FRAGMENTS_STALE_MARKER = "lore:stale-managed-context";
@@ -69,7 +68,10 @@ export interface FragmentsFlowDeps {
   readonly roots: FragmentRoots;
   readonly globalConfig: ContextConfigLayer;
   readonly projectConfig: ContextConfigLayer;
-  /** Absolute path of the project CLAUDE.md whose Z1 `fragments` section is compared. */
+  /**
+   * Absolute path of the project CLAUDE.md; the project's lore rules files live in
+   * `dirname(projectClaudeMdPath)/.claude/rules` (D15) and are what drift is measured against.
+   */
   readonly projectClaudeMdPath: string;
   /** Absolute path of the shipped agents directory (`<assetsRoot>/agents`). */
   readonly agentsDir: string;
@@ -125,39 +127,68 @@ function renderSafely(selected: readonly Fragment[], outlet: OutletId): FlowResu
   return { ok: true, value: rendered.value.text };
 }
 
-// ─── Z1 drift (D7) ──────────────────────────────────────────────────────────
+// ─── rules-file drift (D7, D15) ─────────────────────────────────────────────
 
-/** Outcome of comparing the project CLAUDE.md `fragments` section with a fresh render. */
-export interface Z1Drift {
+/** `<project>/.claude/rules`, derived from the project CLAUDE.md path (POSIX-absolute paths, like the rest of `deps`). */
+function projectRulesDir(deps: FragmentsFlowDeps): string {
+  const path = deps.projectClaudeMdPath;
+  const slash = path.lastIndexOf("/");
+  const root = slash <= 0 ? "" : path.slice(0, slash);
+  return `${root}/.claude/rules`;
+}
+
+/** Outcome of comparing the project's lore rules files with a fresh `rules:project` render. */
+export interface RulesDrift {
   readonly drifted: boolean;
-  /** Fresh static main fragments whose body is absent from the stored section (all of them when the section is missing). */
+  /** Fresh static main fragments whose rules file is missing or differs from the fresh render. */
   readonly changed: readonly Fragment[];
+  /** One entry per drifted file (`lore-<id>.md` + why), for `check` findings. */
+  readonly files: readonly { readonly fileName: string; readonly reason: "missing" | "changed" | "extra" }[];
 }
 
 /**
- * Compare the stored project CLAUDE.md `fragments` section against a fresh `claude-md:project` render.
- * No CLAUDE.md, or no section while the fresh render is empty, is NOT drift (nothing to be stale against).
+ * Compare the project's `lore-*.md` rules files against a fresh `rules:project` render: a winning
+ * static main fragment whose file is missing or differs is drift, and so is a `lore-*.md` file for
+ * a fragment that is no longer selected. Non-`lore-` files are never consulted.
  */
-async function detectProjectZ1Drift(deps: FragmentsFlowDeps, all: readonly Fragment[]): Promise<FlowResult<Z1Drift>> {
-  const content = await deps.fs.readFile(deps.projectClaudeMdPath);
-  if (content === null) return { ok: true, value: { drifted: false, changed: [] } };
-
-  const selected = selectSafely(all, deps, "claude-md:project", undefined);
+async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fragment[]): Promise<FlowResult<RulesDrift>> {
+  const selected = selectSafely(all, deps, "rules:project", undefined);
   if (!selected.ok) return selected;
-  const text = renderSafely(selected.value, "claude-md:project");
-  if (!text.ok) return text;
 
-  const parsed = parseManagedSections(content);
-  if (!parsed.ok) {
-    const message = "message" in parsed.error ? parsed.error.message : parsed.error.code;
-    return { ok: false, error: { code: "VALIDATION_ERROR", message: `${deps.projectClaudeMdPath}: ${message}` } };
+  const present = (await deps.fs.listDir(projectRulesDir(deps))).filter(isLoreRulesFileName).sort();
+  // reason: a project that was never put under `lore context` management (no CLAUDE.md, no lore rules
+  // file yet) has nothing to be stale against - the same "no CLAUDE.md is not drift" rule the old Z1
+  // check had - so the SHIPPED-only baseline of a fresh `lore init` stays clean (AC-CF-4 e2e control).
+  // A project- or user-layer static fragment is explicit local intent, so its missing file is always drift.
+  const adopted =
+    present.length > 0 ||
+    (await deps.fs.exists(deps.projectClaudeMdPath)) ||
+    selected.value.some((fragment) => fragment.layer !== "shipped");
+  if (!adopted) return { ok: true, value: { drifted: false, changed: [], files: [] } };
+
+  const files: { fileName: string; reason: "missing" | "changed" | "extra" }[] = [];
+  const changed: Fragment[] = [];
+  const expectedNames = new Set<string>();
+
+  for (const fragment of selected.value) {
+    const rendered = renderRulesFile(fragment);
+    if (!rendered.ok) return { ok: false, error: { code: "VALIDATION_ERROR", message: rendered.error.message } };
+    expectedNames.add(rendered.value.fileName);
+    const stored = await deps.fs.readFile(`${projectRulesDir(deps)}/${rendered.value.fileName}`);
+    if (stored === null) {
+      files.push({ fileName: rendered.value.fileName, reason: "missing" });
+      changed.push(fragment);
+    } else if (stored !== rendered.value.content) {
+      files.push({ fileName: rendered.value.fileName, reason: "changed" });
+      changed.push(fragment);
+    }
   }
 
-  const stored = parsed.value.sections.find((section) => section.id === FRAGMENTS_SECTION_ID)?.body;
-  const freshBody = buildFragmentsSection({ text: text.value, chars: text.value.length, fragmentIds: [] }, "project").body;
-  const drifted = stored === undefined ? selected.value.length > 0 : stored.trimEnd() !== freshBody.trimEnd();
-  const changed = drifted ? selected.value.filter((fragment) => stored === undefined || !stored.includes(fragment.body)) : [];
-  return { ok: true, value: { drifted, changed } };
+  for (const name of present) {
+    if (!expectedNames.has(name)) files.push({ fileName: name, reason: "extra" });
+  }
+
+  return { ok: true, value: { drifted: files.length > 0, changed, files } };
 }
 
 // ─── render ─────────────────────────────────────────────────────────────────
@@ -166,14 +197,14 @@ async function detectProjectZ1Drift(deps: FragmentsFlowDeps, all: readonly Fragm
 export interface SessionStartParts {
   /** Dynamic main fragment block (already within SESSION_FRAGMENT_CAP). */
   readonly block: string;
-  /** Changed static fragments (empty when Z1 is fresh). */
+  /** Changed static fragments (empty when the rules files are fresh). */
   readonly changed: readonly { readonly id: string; readonly body: string }[];
   readonly stale: boolean;
 }
 
 const NOTICE_LINE =
-  `${FRAGMENTS_STALE_MARKER}: the project CLAUDE.md fragments section differs from a fresh render. ` +
-  "Run `lore context refresh` to update it; the changed content follows.";
+  `${FRAGMENTS_STALE_MARKER}: the project .claude/rules/lore-*.md files differ from a fresh render. ` +
+  "Run `lore context refresh` to update them; the changed content follows.";
 
 function joinNonEmpty(parts: readonly string[]): string {
   return parts.filter((part) => part.length > 0).join("\n\n");
@@ -263,7 +294,7 @@ export async function runFragmentsRender(
     return { ok: true, value: { additionalContext: block.value, explain } };
   }
 
-  const drift = await detectProjectZ1Drift(deps, discovered.value);
+  const drift = await detectProjectRulesDrift(deps, discovered.value);
   if (!drift.ok) return drift;
   const additionalContext = composeSessionStart({
     block: block.value,
@@ -283,7 +314,7 @@ export type FindingKind =
   | "override_refusal"
   | "cap"
   | "selection"
-  | "z1_drift"
+  | "rules_drift"
   | "language_drift"
   | "language_unknown"
   | "settings_unreadable"
@@ -313,8 +344,8 @@ export interface FragmentsCheckReport {
 }
 
 const CHECK_OUTLETS: readonly OutletId[] = [
-  "claude-md:project",
-  "claude-md:user",
+  "rules:project",
+  "rules:user",
   "hook:session-start",
   "hook:subagent-start",
 ];
@@ -423,20 +454,19 @@ export async function runFragmentsCheck(deps: FragmentsFlowDeps): Promise<Fragme
       }
     }
 
-    const drift = await detectProjectZ1Drift(deps, all);
+    const drift = await detectProjectRulesDrift(deps, all);
     if (!drift.ok) {
-      findings.push({ kind: "z1_drift", ...drift.error });
-    } else if (drift.value.drifted) {
-      findings.push({
-        kind: "z1_drift",
-        code: "VALIDATION_ERROR",
-        message:
-          `${deps.projectClaudeMdPath}: the "${FRAGMENTS_SECTION_ID}" managed section differs from a fresh render` +
-          (drift.value.changed.length > 0
-            ? ` (changed: ${drift.value.changed.map((fragment) => fragment.frontmatter.id).join(", ")})`
-            : "") +
-          ". Run `lore context refresh`.",
-      });
+      findings.push({ kind: "rules_drift", ...drift.error });
+    } else {
+      for (const file of drift.value.files) {
+        findings.push({
+          kind: "rules_drift",
+          code: "VALIDATION_ERROR",
+          message:
+            `${projectRulesDir(deps)}/${file.fileName}: lore rules file is ${file.reason} versus a fresh render` +
+            ". Run `lore context refresh`.",
+        });
+      }
     }
   }
 

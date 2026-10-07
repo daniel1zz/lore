@@ -15,9 +15,9 @@
  *   - ContextFlowDeps — `{ fs: FsWritePort }` plus optional budgets and the
  *     optional fragment-pipeline deps (`FragmentRefreshDeps`, all injected)
  *   - runContextInit(deps, root, opts) — first-write / re-init verb
- *   - runContextRefresh(deps, root, opts?) — Z1-only regeneration verb;
- *     `opts.scope` = "project" (default, repo CLAUDE.md) | "user"
- *     (`<home>/.claude/CLAUDE.md`)
+ *   - runContextRefresh(deps, root, opts?) — Z1 + lore-rules-file regeneration verb;
+ *     `opts.scope` = "project" (default, repo CLAUDE.md + `.claude/rules/lore-*.md`) | "user"
+ *     (`<home>/.claude/rules/lore-*.md` only)
  *
  * Invariants:
  *   - `runContextRefresh` NEVER calls any AI provider and NEVER touches Z2
@@ -26,20 +26,27 @@
  *     byte-preservation and `diverged_skip` on a hand-edited section
  *     (`service/context-projection.ts`'s own invariants, reused verbatim,
  *     never re-implemented here).
- *   - Z1 `fragments` section (spec-context-fragments D4/D8/D11/D14, AC-CF-6/13/15):
- *     when `FragmentRefreshDeps` are supplied, refresh runs discover ->
- *     checkOverrides -> selectFragments(outlet claude-md:<scope>) -> renderOutlet ->
- *     buildFragmentsSection and splices the result as one more managed section.
- *     Only PART of the fragment deps supplied = loud VALIDATION_ERROR (never a
- *     silent skip); NONE supplied = legacy `{ fs }` callers, project scope only
- *     (scope "user" with none is an error). Scope "user" splices ONLY the
- *     fragments section into `<home>/.claude/CLAUDE.md`, so bytes outside the lore
- *     markers are never touched; an absent user file is created.
- *   - Compare-and-swap write (D8, AC-CF-13): refresh hashes the bytes it read,
- *     re-reads right before writing and writes ONLY if the hash is unchanged;
- *     otherwise it returns `err(CONFLICT)` with ZERO writes. Residual window:
- *     between that re-read and `writeFile` the `FsWritePort` has no atomic
- *     primitive, so the race is narrowed to one read-to-write gap, not eliminated.
+ *   - Lore rules files (spec-context-fragments D15/D4/D8/D11/D14, AC-CF-6/13/15): when
+ *     `FragmentRefreshDeps` are supplied, refresh runs discover -> checkOverrides ->
+ *     selectFragments(outlet rules:<scope>) -> `renderRulesFile` per fragment and writes
+ *     `<project>/.claude/rules/lore-<id>.md` (scope project) or `<home>/.claude/rules/lore-<id>.md`
+ *     (scope user). It NEVER splices a `fragments` section into CLAUDE.md (that code path was
+ *     removed: `runContextInit` writes no fragment content at all). Per file: absent -> `created`;
+ *     intact (fingerprint hash matches body) and different -> `updated`; identical -> `unchanged`;
+ *     hand-edited / fingerprint-less -> `diverged_skip` (bytes untouched). `lore-*.md` files whose
+ *     fragment is no longer selected are deleted (`pruned`); files without the `lore-` prefix are
+ *     never read, written or deleted. Only PART of the fragment deps supplied = loud
+ *     VALIDATION_ERROR (never a silent skip); NONE supplied = legacy `{ fs }` callers, project
+ *     scope, no rules files (scope "user" with none is an error). Scope "user" never touches any
+ *     CLAUDE.md. Each rules file must pass the `context.memory_files.rules` budget or the whole
+ *     call is refused with zero writes.
+ *   - Compare-and-swap writes (D8, AC-CF-13): refresh hashes the bytes it read for EVERY target
+ *     (CLAUDE.md, each rules file it will write or delete), re-reads ALL of them right before the
+ *     first write and proceeds ONLY if every hash is unchanged; otherwise it returns
+ *     `err(CONFLICT)` with ZERO writes. Residual window: between that re-read and each
+ *     write/delete the `FsWritePort` has no atomic primitive, so the race is narrowed to one
+ *     read-to-write gap, not eliminated. Prune needs `FsWritePort.deleteFile`; a port without it
+ *     makes a refresh that must prune fail loud (VALIDATION_ERROR), never skip.
  *   - Adoption (AC-STR-6): `runContextRefresh` honours `deps.budgets.adoption`
  *     only through `runMemoryFileChecks` (it applies adoption). enforce -> a
  *     `section_*` finding is in `.deterministic` and refuses the write naming
@@ -115,14 +122,13 @@
 
 import { createHash } from "node:crypto";
 import { err, ok, resolveContextConfig, resolveMemoryFileBudgets } from "@lore/core";
-import type { ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, OutletId, Result } from "@lore/core";
+import type { ContextConfigLayer, Fragment, FsWritePort, LoreError, MemoryFileBudgets, OutletId, Result } from "@lore/core";
 import type { AdvisoryFinding } from "../service/claude-md-findings.js";
 import { collectContextFacts, type ContextFacts } from "../service/context-facts.js";
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 import { discoverFragments } from "../service/context-fragments/discover.js";
-import { renderOutlet } from "../service/context-fragments/render.js";
-import { buildFragmentsSection } from "../service/context-fragments/section.js";
+import { isLoreRulesFileName, parseRulesFile, renderRulesFile, RULES_FILE_PREFIX, RULES_FILE_SUFFIX } from "../service/context-fragments/section.js";
 import { checkOverrides, selectFragments } from "../service/context-fragments/select.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -157,7 +163,7 @@ const SKELETON_NARRATIVE =
 export interface FragmentRefreshDeps {
   /** Shipped fragments live at `<assetsRoot>/context/*.md`. */
   assetsRoot: string;
-  /** Home directory; the user-scope target is `<home>/.claude/CLAUDE.md`. */
+  /** Home directory; the user-scope target dir is `<home>/.claude/rules`. */
   home: string;
   /** User-layer fragments live at `<xdgConfigHome>/lore/context/*.md`. */
   xdgConfigHome: string;
@@ -220,11 +226,26 @@ export interface ContextInitReport {
   sections: SpliceResult["perSection"];
 }
 
+/** What refresh did with one lore rules file (D15). */
+export type RulesFileState = "created" | "updated" | "unchanged" | "diverged_skip" | "pruned";
+
+/** Per-file outcome of the rules-file pass of one {@link runContextRefresh} call. */
+export interface RulesFileOutcome {
+  /** Fragment id (the file-name stem after `lore-`). */
+  id: string;
+  /** Port path of the rules file. */
+  path: string;
+  state: RulesFileState;
+}
+
 /** Outcome of one {@link runContextRefresh} call. */
 export interface ContextRefreshReport {
-  /** Path written: {@link CLAUDE_MD_PATH} (project scope) or `<home>/.claude/CLAUDE.md` (user scope). */
+  /** Path written: {@link CLAUDE_MD_PATH} (project scope) or the user rules dir `<home>/.claude/rules` (user scope). */
   path: string;
+  /** Z1 managed-section outcomes; empty for scope "user" (it writes no CLAUDE.md). */
   sections: SpliceResult["perSection"];
+  /** One entry per lore rules file considered (selected or pruned); empty without fragment deps. */
+  rules: RulesFileOutcome[];
   /**
    * Advisory `downgraded` findings from adoption=warn (spec-claude-md-root-
    * section-structure-check-and-adoption-mode D2, AC-STR-6): deterministic
@@ -262,8 +283,8 @@ function renderCommandTableBody(facts: ContextFacts): string {
 function renderGovernancePointerBody(): string {
   return (
     "Run `lore governance claude-md` for this project's memory-file content contract. The standing " +
-    "corpus-workflow discipline lives in the `fragments` section of this managed zone (inspect it with " +
-    "`lore fragments`)."
+    "corpus-workflow discipline lives in the lore-owned `.claude/rules/lore-*.md` files (written by " +
+    "`lore context refresh`; inspect them with `lore fragments`)."
   );
 }
 
@@ -334,22 +355,13 @@ export async function runContextInit(
     });
   }
 
-  // reason: init MUST emit the same section list refresh does (project scope), including the Z1
-  // `fragments` section — otherwise the first refresh appends it and "init then refresh" is not
-  // idempotent (AC-CTX-3; root cause of the regression fixed in
-  // task-skill-implement-fix-refresh-idempotence-regression-ac-ctx).
-  const fragmentDepsResult = resolveFragmentDeps(deps);
-  if (!fragmentDepsResult.ok) return fragmentDepsResult;
-
+  // reason: init writes NO fragment content (D15): static fragments live in lore rules files owned by
+  // `runContextRefresh`, and CLAUDE.md never carries a fragments section, so init and refresh agree
+  // on CLAUDE.md bytes by construction (AC-CTX-3).
   const factsResult = await collectContextFacts(deps.fs, root, resolveFlowBudgets(deps));
   if (!factsResult.ok) return factsResult;
 
   const sections = renderContextSections(factsResult.value);
-  if (fragmentDepsResult.value !== null) {
-    const fragmentsSection = await buildScopeFragmentsSection(deps.fs, fragmentDepsResult.value, "project");
-    if (!fragmentsSection.ok) return fragmentsSection;
-    sections.push(fragmentsSection.value);
-  }
 
   const narrative: ContextNarrativeOutcome = existing !== null ? "existing" : opts.narrative !== undefined ? "generated" : "skeleton";
   const baseContent = existing !== null ? existing : (opts.narrative ?? SKELETON_NARRATIVE);
@@ -363,13 +375,16 @@ export async function runContextInit(
   return ok({ path: CLAUDE_MD_PATH, narrative, sections: spliceResult.value.perSection });
 }
 
-// ─── Fragment pipeline (Z1 `fragments` section) ──────────────────────────────
+// ─── Fragment pipeline (lore rules files, D15) ───────────────────────────────
 
 /** Project-layer fragment directory, relative to the port root (the repo). */
 const PROJECT_FRAGMENTS_DIR = ".lore/context";
 
-/** User-scope memory file, relative to `deps.home`. */
-const USER_CLAUDE_MD_RELATIVE = ".claude/CLAUDE.md";
+/** Project rules directory, relative to the port root (the repo). */
+const PROJECT_RULES_DIR = ".claude/rules";
+
+/** User rules directory, relative to `deps.home`. */
+const USER_RULES_RELATIVE = ".claude/rules";
 
 function joinPortPath(root: string, ...parts: string[]): string {
   return [root.endsWith("/") ? root.slice(0, -1) : root, ...parts].join("/");
@@ -400,13 +415,13 @@ function resolveFragmentDeps(deps: ContextFlowDeps): Result<FragmentRefreshDeps 
   return ok({ assetsRoot, home, xdgConfigHome, globalConfig, projectConfig });
 }
 
-/** discover -> checkOverrides -> select -> render -> `fragments` section for one claude-md outlet. */
-async function buildScopeFragmentsSection(
+/** discover -> checkOverrides -> select for one rules outlet. */
+async function selectScopeFragments(
   fs: FsWritePort,
   fragmentDeps: FragmentRefreshDeps,
   scope: ContextRefreshScope,
-): Promise<Result<ManagedSection, LoreError>> {
-  const outlet: OutletId = scope === "user" ? "claude-md:user" : "claude-md:project";
+): Promise<Result<Fragment[], LoreError>> {
+  const outlet: OutletId = scope === "user" ? "rules:user" : "rules:project";
 
   const discovered = await discoverFragments(fs, {
     shipped: joinPortPath(fragmentDeps.assetsRoot, "context"),
@@ -419,9 +434,8 @@ async function buildScopeFragmentsSection(
   if (!overrides.ok) return overrides;
 
   const config = resolveContextConfig(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet);
-  let selected;
   try {
-    selected = selectFragments(discovered.value, { outlet, config });
+    return ok(selectFragments(discovered.value, { outlet, config }));
   } catch (e) {
     // reason: selectFragments throws on a `when` key with no registered matcher (fail loud by
     // design); the flow converts it to the Result channel instead of letting it escape.
@@ -431,20 +445,91 @@ async function buildScopeFragmentsSection(
       message: e instanceof Error ? e.message : String(e),
     });
   }
+}
 
-  const rendered = renderOutlet(selected, outlet);
-  if (!rendered.ok) return rendered;
-  return ok(buildFragmentsSection(rendered.value, scope));
+/** One planned action on a rules file; `write`/`delete` carry the bytes the CAS hash was taken over. */
+type RulesAction =
+  | { kind: "write"; outcome: RulesFileOutcome; content: string; readBytes: string | null }
+  | { kind: "delete"; outcome: RulesFileOutcome; readBytes: string | null }
+  | { kind: "none"; outcome: RulesFileOutcome };
+
+/**
+ * Plans (reads only, no writes) what refresh does to every lore rules file of one scope:
+ * create / update / unchanged / diverged_skip for each selected fragment, delete for every
+ * `lore-*.md` whose fragment is no longer selected. Also applies the per-file `rules` budget.
+ */
+async function planRulesFiles(
+  deps: ContextFlowDeps,
+  rulesDir: string,
+  selected: readonly Fragment[],
+  budgets: MemoryFileBudgets,
+): Promise<Result<RulesAction[], LoreError>> {
+  const actions: RulesAction[] = [];
+  const keep = new Set<string>();
+
+  for (const fragment of selected) {
+    const rendered = renderRulesFile(fragment);
+    if (!rendered.ok) return rendered;
+    const { id, fileName, content } = rendered.value;
+    keep.add(fileName);
+    const path = joinPortPath(rulesDir, fileName);
+
+    const { deterministic: findings } = runMemoryFileChecks([{ path, role: "rules", content }], budgets, {
+      fileExists: () => true,
+      docExists: () => true,
+    });
+    if (findings.length > 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "path",
+        message:
+          `refusing to write ${path} — fragment "${id}" (${fragment.path}) breaches the rules-file budget: ` +
+          findings.map((finding) => `[${finding.kind}] ${finding.message}`).join("; "),
+        value: path,
+      });
+    }
+
+    const existing = await deps.fs.readFile(path);
+    if (existing === null) {
+      actions.push({ kind: "write", outcome: { id, path, state: "created" }, content, readBytes: null });
+      continue;
+    }
+    const parsed = parseRulesFile(existing);
+    if (parsed === null || !parsed.intact || parsed.id !== id) {
+      actions.push({ kind: "none", outcome: { id, path, state: "diverged_skip" } });
+    } else if (existing === content) {
+      actions.push({ kind: "none", outcome: { id, path, state: "unchanged" } });
+    } else {
+      actions.push({ kind: "write", outcome: { id, path, state: "updated" }, content, readBytes: existing });
+    }
+  }
+
+  // reason: prune deletes ONLY the lore-reserved namespace (`lore-*.md`); every other file in the
+  // rules dir belongs to the person and is never read, so it cannot be touched (D15 d).
+  const stale = (await deps.fs.listDir(rulesDir)).filter((name) => isLoreRulesFileName(name) && !keep.has(name)).sort();
+  for (const name of stale) {
+    const path = joinPortPath(rulesDir, name);
+    const id = name.slice(RULES_FILE_PREFIX.length, name.length - RULES_FILE_SUFFIX.length);
+    if (deps.fs.deleteFile === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "deps.fs",
+        message: `cannot prune stale ${path}: the injected FsWritePort has no deleteFile.`,
+        value: path,
+      });
+    }
+    actions.push({ kind: "delete", outcome: { id, path, state: "pruned" }, readBytes: await deps.fs.readFile(path) });
+  }
+  return ok(actions);
 }
 
 // ─── runContextRefresh ───────────────────────────────────────────────────────
 
 /**
- * Regenerates ONLY the lore-managed (Z1) zone of an existing memory file
- * from current facts and fragments — never calls AI, never touches Z2 bytes
- * (module header). Idempotent: re-running with unchanged inputs and no
- * hand-edits reproduces byte-identical content. The write is
- * compare-and-swap (module header, D8).
+ * Regenerates the lore-managed (Z1) zone of the project memory file and the lore-owned rules
+ * files from current facts and fragments — never calls AI, never touches Z2 bytes or any
+ * non-`lore-` rules file (module header). Idempotent: re-running with unchanged inputs and no
+ * hand-edits reproduces byte-identical files. Every write is compare-and-swap (module header, D8).
  *
  * @param deps - `{ fs }` plus optional budgets and `FragmentRefreshDeps`.
  * @param root - Repo-relative directory to collect facts from (typically `""`); unused for scope "user".
@@ -452,12 +537,13 @@ async function buildScopeFragmentsSection(
  * @returns `ok(report)` on success. `err(VALIDATION_ERROR)` when no
  *   project `CLAUDE.md` exists yet (naming `lore context init`), when scope
  *   "user" lacks fragment deps, when discovery/overrides/facts/splice fail
- *   loud, or when the spliced candidate would breach the root claude-md
- *   ceiling (AC-CTX-8, project scope only — module header). `err(CONFLICT)`
- *   when the file changed between read and write. Every error performs NO write.
+ *   loud, when a rules file breaches its budget, or when the spliced candidate
+ *   would breach the root claude-md ceiling (AC-CTX-8, project scope only).
+ *   `err(CONFLICT)` when any target changed between read and write. Every error performs NO write.
  * @example
  * const result = await runContextRefresh({ fs: realFs }, "", { scope: "project" });
  * // result.value.sections // => [{ id: "module-index", state: "unchanged" }, ...]
+ * // result.value.rules    // => [{ id: "corpus-workflow-feed", path: ".claude/rules/lore-corpus-workflow-feed.md", state: "unchanged" }, ...]
  */
 export async function runContextRefresh(
   deps: ContextFlowDeps,
@@ -479,50 +565,38 @@ export async function runContextRefresh(
     });
   }
 
-  const targetPath = fragmentDeps !== null && scope === "user" ? joinPortPath(fragmentDeps.home, USER_CLAUDE_MD_RELATIVE) : CLAUDE_MD_PATH;
-
-  const existing = await deps.fs.readFile(targetPath);
-  if (existing === null && scope === "project") {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "path",
-      message: `no ${CLAUDE_MD_PATH} found — run \`lore context init\` first.`,
-      value: CLAUDE_MD_PATH,
-    });
-  }
-  const readHash = hashFileBytes(existing);
-
   const budgets = resolveFlowBudgets(deps);
-  const sections: ManagedSection[] = [];
-  if (scope === "project") {
-    const factsResult = await collectContextFacts(deps.fs, root, budgets);
-    if (!factsResult.ok) return factsResult;
-    sections.push(...renderContextSections(factsResult.value));
-  }
-  if (fragmentDeps !== null) {
-    const fragmentsSection = await buildScopeFragmentsSection(deps.fs, fragmentDeps, scope);
-    if (!fragmentsSection.ok) return fragmentsSection;
-    sections.push(fragmentsSection.value);
-  }
 
-  const spliceResult = spliceManagedSections(existing ?? "", sections);
-  if (!spliceResult.ok) return spliceResult;
-
-  const finalContent = ensureTrailingNewline(spliceResult.value.content);
-
-  // AC-CTX-8 pre-write admission — SSOT: the SAME composition entry `lore
-  // status --check-claude-md` runs (`runMemoryFileChecks`), never a second
-  // inline size check and never a direct call into the underlying capacity
-  // lint (module header, AC-COMPOSE-1). Runs on the SPLICED candidate,
-  // before any write.
-  // Only `.deterministic` gates the write. `.advisory` never refuses; only its
-  // `kind: "downgraded"` entries are surfaced (the `downgraded:` field of the
-  // `ok(...)` return below), the rest dropped (module header explains why
-  // `fileExists`/`docExists` are inert stand-ins here).
-  // reason: the budgets govern the PROJECT root memory file only; the user-scope file is the
-  // person's own ~/.claude/CLAUDE.md and has no corpus-governed ceiling, so scope "user" skips it.
+  // ── Z1 candidate (project scope only; user scope never touches a CLAUDE.md) ──
+  let claudeMdWrite: { content: string; readBytes: string } | null = null;
+  let sectionOutcomes: SpliceResult["perSection"] = [];
   let downgraded: AdvisoryFinding[] = [];
   if (scope === "project") {
+    const existing = await deps.fs.readFile(CLAUDE_MD_PATH);
+    if (existing === null) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "path",
+        message: `no ${CLAUDE_MD_PATH} found — run \`lore context init\` first.`,
+        value: CLAUDE_MD_PATH,
+      });
+    }
+    const factsResult = await collectContextFacts(deps.fs, root, budgets);
+    if (!factsResult.ok) return factsResult;
+
+    const spliceResult = spliceManagedSections(existing, renderContextSections(factsResult.value));
+    if (!spliceResult.ok) return spliceResult;
+    const finalContent = ensureTrailingNewline(spliceResult.value.content);
+    sectionOutcomes = spliceResult.value.perSection;
+
+    // AC-CTX-8 pre-write admission — SSOT: the SAME composition entry `lore
+    // status --check-claude-md` runs (`runMemoryFileChecks`), never a second
+    // inline size check and never a direct call into the underlying capacity
+    // lint (module header, AC-COMPOSE-1). Runs on the SPLICED candidate,
+    // before any write. Only `.deterministic` gates the write. `.advisory` never
+    // refuses; only its `kind: "downgraded"` entries are surfaced (the
+    // `downgraded:` field of the `ok(...)` return below), the rest dropped
+    // (module header explains why `fileExists`/`docExists` are inert stand-ins here).
     const { deterministic: findings, advisory } = runMemoryFileChecks(
       [{ path: CLAUDE_MD_PATH, role: "root", content: finalContent }],
       budgets,
@@ -539,19 +613,48 @@ export async function runContextRefresh(
       });
     }
     downgraded = advisory.filter((finding) => finding.kind === "downgraded");
+    claudeMdWrite = { content: finalContent, readBytes: existing };
   }
 
-  // D8 compare-and-swap: re-read and compare the hash of the bytes we spliced against.
-  const beforeWrite = await deps.fs.readFile(targetPath);
-  if (hashFileBytes(beforeWrite) !== readHash) {
-    return err({
-      code: "CONFLICT",
-      path: targetPath,
-      message: `refusing to write ${targetPath} — it changed after refresh read it (another writer interleaved); nothing was written.`,
-    });
+  // ── lore rules files plan ──
+  const rulesDir =
+    fragmentDeps === null ? null : scope === "user" ? joinPortPath(fragmentDeps.home, USER_RULES_RELATIVE) : PROJECT_RULES_DIR;
+  let actions: RulesAction[] = [];
+  if (fragmentDeps !== null && rulesDir !== null) {
+    const selected = await selectScopeFragments(deps.fs, fragmentDeps, scope);
+    if (!selected.ok) return selected;
+    const planned = await planRulesFiles(deps, rulesDir, selected.value, budgets);
+    if (!planned.ok) return planned;
+    actions = planned.value;
   }
 
-  await deps.fs.writeFile(targetPath, finalContent);
+  // ── D8 compare-and-swap: re-read EVERY target before the FIRST write; any change = zero writes ──
+  const casTargets: Array<{ path: string; readBytes: string | null }> = [];
+  if (claudeMdWrite !== null) casTargets.push({ path: CLAUDE_MD_PATH, readBytes: claudeMdWrite.readBytes });
+  for (const action of actions) {
+    if (action.kind !== "none") casTargets.push({ path: action.outcome.path, readBytes: action.readBytes });
+  }
+  for (const target of casTargets) {
+    const beforeWrite = await deps.fs.readFile(target.path);
+    if (hashFileBytes(beforeWrite) !== hashFileBytes(target.readBytes)) {
+      return err({
+        code: "CONFLICT",
+        path: target.path,
+        message: `refusing to write ${target.path} — it changed after refresh read it (another writer interleaved); nothing was written.`,
+      });
+    }
+  }
 
-  return ok({ path: targetPath, sections: spliceResult.value.perSection, downgraded });
+  if (claudeMdWrite !== null) await deps.fs.writeFile(CLAUDE_MD_PATH, claudeMdWrite.content);
+  for (const action of actions) {
+    if (action.kind === "write") await deps.fs.writeFile(action.outcome.path, action.content);
+    else if (action.kind === "delete") await deps.fs.deleteFile?.(action.outcome.path);
+  }
+
+  return ok({
+    path: scope === "user" && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
+    sections: sectionOutcomes,
+    rules: actions.map((action) => action.outcome),
+    downgraded,
+  });
 }
