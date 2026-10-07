@@ -312,6 +312,11 @@
       "slug": "spec-governance-weight-must-scale-with-measured-blast-radius-a",
       "cohort": "debt",
       "reason": "Anchor debt by the mechanical date split (created 2026-08-24, after the 2026-07-14 backfill cutoff; the cohort field is decided by created_at, not by judgment). MEASURED 2026-08-25 from a different session than the one that authored this spec: it declares no code_anchors, and a git log --all over every branch finds ZERO commits referencing it, so its child plan plan-land-measured-blast-radius-grading-one-fan-in has landed no implementation and no measured anchor is declarable yet. This row was filed to unblock the ratchet, NOT as a judgement that anchoring is unwarranted — retire it in the same commit that declares real anchors, which the authoring session should do as soon as its implementation lands."
+    },
+    {
+      "slug": "spec-product-baseline-architecture-trees-the-product-s-current",
+      "cohort": "debt",
+      "reason": "Created 2026-10-07 after the anchor backfill cutoff, so the measured cohort is debt. It is the domain-overview narrative for the product-baseline domain (PRD-level requirements BL-1..BL-16) with no implementation of its own: each delivery slice has its own spec that declares the real code anchors (slice 1: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations). Retire this row only if the overview itself ever gains code it alone owns."
     }
   ]
 }
