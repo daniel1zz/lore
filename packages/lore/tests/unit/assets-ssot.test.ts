@@ -391,10 +391,11 @@ const DECLARED_FILES = [
   "agents/lore-explorer.md",
   "agents/lore-implementer.md",
   "agents/lore-reviewer.md",
-  // hooks (10 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
+  // hooks (11 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
   "hooks/session-start-resume.mjs",
   // session-start-marker (same-session-authorship fact for the resume-ticket
   // coverage floor, task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01)
+  "hooks/session-start-fragments.mjs", // blind pipe to `lore fragments render` (task-skill-implement-hooks-new-session-start-fragments-thin)
   "hooks/session-start-marker.mjs",
   "hooks/stop-doc-sync.mjs",
   // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)

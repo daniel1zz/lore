@@ -97,7 +97,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -124,7 +124,19 @@ const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const HOOK_PATH = join(REPO_ROOT, "assets", "hooks", "session-start-resume.mjs");
 const HOOK_SSOT_PATH = join(REPO_ROOT, "assets", "hooks", "session-start-resume.mjs");
-const GOVERNANCE_SSOT_PATH = join(REPO_ROOT, "assets", "governance", "corpus-workflow.md");
+// RE-BASELINE (task-skill-implement-hooks-new-session-start-fragments-thin): the
+// governance prose moved from the retired assets/governance/corpus-workflow.md
+// to assets/context/corpus-workflow-*.md fragments
+// (spec-context-fragments-config-driven-layered-rule-injection D9), delivered to
+// the project CLAUDE.md Z1 by `lore context refresh`.
+const CONTEXT_ASSETS_DIR = join(REPO_ROOT, "assets", "context");
+const GOVERNANCE_FRAGMENT_FILES: readonly string[] = readdirSync(CONTEXT_ASSETS_DIR)
+  .filter((f) => f.startsWith("corpus-workflow-") && f.endsWith(".md"))
+  .sort();
+/** Concatenated corpus-workflow fragment sources — the successor of the retired single SSOT asset. */
+function governanceFragmentText(): string {
+  return GOVERNANCE_FRAGMENT_FILES.map((f) => readFileSync(join(CONTEXT_ASSETS_DIR, f), "utf8")).join("\n");
+}
 
 interface RunResult {
   readonly stdout: string;
@@ -381,10 +393,16 @@ describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout a
 
 describe("AC-CP-9: compiled dist/lore governance FEED rule names every injected key (except resume_hint) + every source category (D4)", () => {
   it("governance rule — FEED text names every BOOTSTRAP_INJECTION_KNOWN_KEYS member except resume_hint, every SOURCE_CATEGORY_TOKENS member, and resume_hint stays absent from the asset", () => {
-    // Bootstrap-stage command — needs no `.lore/` corpus at all, read-only
-    // against the repo's checked-in assets (never a write).
-    const result = runLore(["governance"], REPO_ROOT);
-    expect(result.exitCode).toBe(0);
+    // RE-BASELINE: originally `lore governance` stdout (the retired
+    // corpus-workflow topic; now exits non-zero, D9) — the same assertions run
+    // against the fragment sources that replaced it. Not a weakening: the
+    // retired verb is asserted to REFUSE, and the fragment text must still name
+    // every key / category.
+    const retired = runLore(["governance"], REPO_ROOT);
+    expect(retired.exitCode).not.toBe(0);
+    expect(retired.stderr).toContain("retired");
+    expect(GOVERNANCE_FRAGMENT_FILES.length).toBeGreaterThan(0);
+    const result = { stdout: governanceFragmentText() };
 
     // The exclusion is MANDATORY, not incidental: spec-session-start-handoff-neutrality
     // pins resume_hint to ZERO literal occurrences in this SAME asset, so an
@@ -405,8 +423,7 @@ describe("AC-CP-9: compiled dist/lore governance FEED rule names every injected 
 
     // Paired assertion — prevents the carve-out from silently widening to a
     // second key: resume_hint has zero literal occurrences in the SSOT asset.
-    const assetContent = readFileSync(GOVERNANCE_SSOT_PATH, "utf8");
-    expect(assetContent).not.toContain("resume_hint");
+    expect(result.stdout).not.toContain("resume_hint");
   });
 });
 
@@ -469,7 +486,6 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
 describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T2/T4-edited assets (D5)", () => {
   it("manifest parity — the embedded manifest reflects both edited assets' CURRENT bytes; the hook installs byte-identical; corpus-workflow.md (retired from machine install) is byte-identical via the binary's own governance verb instead", () => {
     const hookSsotBytes = readFileSync(HOOK_SSOT_PATH);
-    const governanceSsotBytes = readFileSync(GOVERNANCE_SSOT_PATH);
 
     // The manifest only stores a sha256 (not raw content) — this is the
     // strongest form of "byte-compare" available against the EMBEDDED
@@ -477,16 +493,20 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     // (regenerating the manifest) actually reflects BOTH edited assets,
     // rather than assuming the `bun run build` side effect was complete.
     const hookSha = createHash("sha256").update(hookSsotBytes).digest("hex");
-    const governanceSha = createHash("sha256").update(governanceSsotBytes).digest("hex");
-
     const hookEntry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === "hooks/session-start-resume.mjs");
-    const governanceEntry = EMBEDDED_ASSETS_MANIFEST.entries.find(
-      (e) => e.path === "governance/corpus-workflow.md",
-    );
     expect(hookEntry).toBeDefined();
-    expect(governanceEntry).toBeDefined();
     expect(hookEntry?.sha256).toBe(hookSha);
-    expect(governanceEntry?.sha256).toBe(governanceSha);
+
+    // RE-BASELINE: the retired `governance/corpus-workflow.md` manifest entry is
+    // replaced by one entry PER fragment file (non-empty set asserted so an
+    // empty loop cannot pass vacuously), each digest-equal to its CURRENT bytes.
+    expect(GOVERNANCE_FRAGMENT_FILES.length).toBeGreaterThan(0);
+    for (const f of GOVERNANCE_FRAGMENT_FILES) {
+      const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === `context/${f}`);
+      expect(entry).toBeDefined();
+      expect(entry?.sha256).toBe(createHash("sha256").update(readFileSync(join(CONTEXT_ASSETS_DIR, f))).digest("hex"));
+    }
+    expect(EMBEDDED_ASSETS_MANIFEST.entries.some((e) => e.path === "governance/corpus-workflow.md")).toBe(false);
 
     const scratch = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-setup-")));
     const targetDir = join(scratch, ".claude");
@@ -514,10 +534,16 @@ describe("AC-CP-7: embedded manifest + lore setup distribution parity for both T
     const installedGovernancePath = join(targetDir, "governance", "corpus-workflow.md");
     expect(existsSync(installedGovernancePath)).toBe(false);
 
-    // Its own distribution oracle is therefore the compiled binary's runtime
-    // verb — the SAME freshly built dist/lore this whole file spawns.
+    // RE-BASELINE: the retired verb topic must now REFUSE (was: byte-equal stdout);
+    // the fragments' delivery surface is the project CLAUDE.md Z1.
     const governanceVerbResult = Bun.spawnSync([LORE_BIN, "governance"], { cwd: REPO_ROOT });
-    expect(governanceVerbResult.exitCode).toBe(0);
-    expect(governanceVerbResult.stdout.toString()).toBe(governanceSsotBytes.toString("utf8"));
+    expect(governanceVerbResult.exitCode).not.toBe(0);
+    expect(governanceVerbResult.stderr.toString()).toContain("retired");
+
+    const corpusDir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-z1-")));
+    initCorpus(corpusDir);
+    expect(runLore(["context", "init"], corpusDir).exitCode).toBe(0);
+    expect(runLore(["context", "refresh"], corpusDir).exitCode).toBe(0);
+    expect(readFileSync(join(corpusDir, "CLAUDE.md"), "utf8")).toContain("ACCOUNT, not to complete");
   });
 });
