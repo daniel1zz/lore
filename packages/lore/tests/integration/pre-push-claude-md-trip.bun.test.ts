@@ -179,14 +179,30 @@ function writeOverCeilingClaudeMd(dir: string): void {
     { length: 420 },
     (_, i) => `line ${i} of filler content padding this fixture CLAUDE.md past the root ceiling`,
   );
-  writeFileSync(join(dir, "CLAUDE.md"), `${lines.join("\n")}\n`);
+  // The five required root H2 sections come first: under the `adoption: enforce`
+  // these scenarios pin, the fixture must be refused for its CEILING and nothing
+  // else — never `section_missing` (spec-claude-md-root-section-structure-check-and-adoption-mode).
+  writeFileSync(join(dir, "CLAUDE.md"), `${SECTIONS_PREFIX}${lines.join("\n")}\n`);
 }
 
-/** Appends `context.memory_files.enabled: false` to an already-initialised fixture's config.yaml. */
-function disableMemoryFileCheck(dir: string): void {
+const SECTIONS_PREFIX =
+  ["What This Is", "Commands", "Architecture", "Module Index", "Finding Live Project State"]
+    .map((name) => `## ${name}\n\nbody of ${name}\n`)
+    .join("\n") + "\n";
+
+/**
+ * Appends `context.memory_files` to an already-initialised fixture's config.yaml, ALWAYS with
+ * `adoption: enforce` (an absent key resolves to warn, under which the hook can never trip).
+ */
+function configureMemoryFiles(dir: string, extraLines = ""): void {
   const configPath = join(dir, ".lore", "config.yaml");
   const existing = readFileSync(configPath, "utf8");
-  writeFileSync(configPath, `${existing}\ncontext:\n  memory_files:\n    enabled: false\n`);
+  writeFileSync(configPath, `${existing}\ncontext:\n  memory_files:\n    adoption: enforce\n${extraLines}`);
+}
+
+/** Appends `context.memory_files.enabled: false` (plus the pinned `adoption: enforce`) to an already-initialised fixture's config.yaml. */
+function disableMemoryFileCheck(dir: string): void {
+  configureMemoryFiles(dir, "    enabled: false\n");
 }
 
 // ─── Suite ──────────────────────────────────────────────────────────────────
@@ -224,11 +240,15 @@ describe("pre-push hook — CLAUDE.md budget trip (AC-CMC-3)", () => {
   it("BOUNDARY (RED — the trip case): an over-ceiling CLAUDE.md under the clean fixture must exit non-zero and name the budget failure — FAILS today because the hook has no CLAUDE.md step yet", () => {
     buildBaselineFixture(tmpDir);
     writeOverCeilingClaudeMd(tmpDir);
+    configureMemoryFiles(tmpDir);
 
     const result = runHook(tmpDir);
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.exitCode).not.toBe(0);
+    // The ceiling specifically — the fixture is structurally conforming, so a
+    // `section_missing` refusal cannot satisfy this.
+    expect(combined).toContain("max_lines");
     expect(combined).toMatch(/CLAUDE\.md/i);
     expect(combined.toLowerCase()).toMatch(/budget|ceiling|exceed|breach|lines/);
   });
@@ -255,6 +275,7 @@ describe("pre-push hook — CLAUDE.md budget trip (AC-CMC-3)", () => {
   it("REGRESSION: the pre-existing tree/audit/prd-budget checks' own clean output is still present in the BOUNDARY scenario — a future trip-step failure is additive, never a silent replacement", () => {
     buildBaselineFixture(tmpDir);
     writeOverCeilingClaudeMd(tmpDir);
+    configureMemoryFiles(tmpDir);
 
     const result = runHook(tmpDir);
     const combined = `${result.stdout}\n${result.stderr}`;

@@ -258,6 +258,9 @@ describe("claude-md wiring — reference_missing reaches the CLI as advisory", (
 
   it("STATE: a dangling reference alongside a REAL deterministic ceiling breach still reports both — advisory is not crowded out by a real finding", () => {
     const oversized = nLineBody(400); // root ceiling is 300 lines — real breach
+    // Absent `adoption` resolves to warn (exit 0); this case asserts ENFORCEMENT, so it pins the mode.
+    mkdirSync(join(tmpDir, ".lore"), { recursive: true });
+    writeFileSync(join(tmpDir, ".lore", "config.yaml"), "context:\n  memory_files:\n    adoption: enforce\n");
     writeFileSync(
       join(tmpDir, "CLAUDE.md"),
       oversized + "See `packages/lore/src/definitely-missing-file-xyz-456.ts` too.\n",

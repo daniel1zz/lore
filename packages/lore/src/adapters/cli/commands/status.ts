@@ -1169,12 +1169,20 @@ export default defineCommand({
         advisory,
         headroom,
         warnings,
+        adoption,
       } = runMemoryFileChecks(files, budgets, {
         fileExists: (p) => existsSync(join(process.cwd(), p)),
         docExists: () => true,
       });
 
-      const renderInput: CheckClaudeMdRenderInput = { findings, advisory, headroom, warnings, budgetResolution };
+      const renderInput: CheckClaudeMdRenderInput = {
+        findings,
+        advisory,
+        headroom,
+        warnings,
+        budgetResolution,
+        adoption,
+      };
 
       if (args.json) {
         console.log(JSON.stringify(buildCheckClaudeMdJsonPayload(renderInput), null, 2));

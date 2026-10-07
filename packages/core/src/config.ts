@@ -55,6 +55,7 @@ import { AiConfigSchema } from "./ai.js";
 import { verificationProfileSchema } from "./verification-profile.js";
 import { SPEC_KINDS } from "./spec-kind.js";
 import type { BootstrapInjectionBudgets } from "./session.js";
+import type { AdoptionMode } from "./memory-file-sections.js";
 
 // ─── Shared Defaults Schema ───────────────────────────────────────────────────
 
@@ -1252,6 +1253,15 @@ export const contextConfigSchema = z
           })
           .strict()
           .default({}),
+        /**
+         * Adoption mode (spec-claude-md-root-section-structure-check-and-adoption-mode,
+         * D2/D3): `enforce` keeps every deterministic memory-file finding
+         * exit-relevant; `warn` reports ALL of them as advisory `downgraded`.
+         * ⛔ Deliberately NO `.default(...)`: an absent key must stay
+         * distinguishable from a written one so `mode_source` is honest —
+         * {@link resolveAdoption} is the ONE place the absent→`warn` default lives.
+         */
+        adoption: z.enum(["enforce", "warn"]).optional(),
       })
       .strict()
       .superRefine((value, ctx) => {
@@ -2115,6 +2125,27 @@ export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined)
  */
 export function resolveMemoryFileBudgets(config: LoreConfig | undefined): MemoryFileBudgets {
   return (config?.context ?? contextConfigSchema.parse({})).memory_files;
+}
+
+/**
+ * The effective adoption mode and where it came from. ⛔ The ONLY site that
+ * defaults an absent `memory_files.adoption` (to `warn`, `mode_source:
+ * "default"`) — consumers call this, never `?? "warn"` themselves, so a
+ * project that never wrote the key is never silently enforced NOR silently
+ * unenforced (spec D3/D7: the default is announced via `mode_source`).
+ *
+ * @param budgets - Resolved {@link MemoryFileBudgets}.
+ * @returns `{ mode, mode_source }` — `"config"` iff the key was written.
+ * @example
+ *   resolveAdoption(resolveMemoryFileBudgets(undefined)) // => { mode: "warn", mode_source: "default" }
+ */
+export function resolveAdoption(budgets: MemoryFileBudgets): {
+  readonly mode: AdoptionMode;
+  readonly mode_source: "config" | "default";
+} {
+  return budgets.adoption === undefined
+    ? { mode: "warn", mode_source: "default" }
+    : { mode: budgets.adoption, mode_source: "config" };
 }
 
 /**

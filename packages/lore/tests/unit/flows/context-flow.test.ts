@@ -137,6 +137,17 @@ describe("runContextRefresh", () => {
     return content.endsWith("\n") ? parts.length - 1 : parts.length;
   }
 
+  /**
+   * Budgets that PIN `adoption: enforce`. Absent `adoption` resolves to warn
+   * (spec-claude-md-root-section-structure-check-and-adoption-mode D3), under
+   * which `runMemoryFileChecks` downgrades every deterministic finding and the
+   * write gate has nothing to refuse — so every REFUSAL assertion below must
+   * name enforce explicitly or it is unreachable.
+   */
+  function enforcedBudgets(base = resolveMemoryFileBudgets(undefined)) {
+    return { ...base, adoption: "enforce" as const };
+  }
+
   /** Grows `fs`'s tree by `count` distinct single-file top-level module directories (`m0000/x.ts`, `m0001/x.ts`, ...). */
   async function growModuleIndex(fs: InMemoryFsPort, count: number): Promise<void> {
     for (let i = 0; i < count; i++) {
@@ -153,13 +164,14 @@ describe("runContextRefresh", () => {
     // the boundary itself moved. Derived from config, never a literal, so a
     // config change moves the fixture with it.
     const budgets = resolveMemoryFileBudgets(undefined);
+    const enforced = enforcedBudgets(budgets);
     const lineFloor = Math.ceil(budgets.root.max_lines * budgets.evict_threshold_fraction);
     // `renderModuleIndexBody` adds exactly one line per top-level module dir on
     // top of the 15-line zero-module baseline (measured against current src).
     const BASELINE_LINES = 15;
     const modulesForLines = (lines: number): number => lines - BASELINE_LINES;
 
-    // Side A — one line under the floor: allowed.
+    // Side A — one line under the floor: allowed (default budgets, i.e. warn).
     const underFloorFs = new InMemoryFsPort({});
     await runContextInit({ fs: underFloorFs }, "", {});
     await growModuleIndex(underFloorFs, modulesForLines(lineFloor - 1));
@@ -171,13 +183,29 @@ describe("runContextRefresh", () => {
       expect(countLines(underFloorContent as string)).toBe(lineFloor - 1);
     }
 
+    // Side A' — the same candidate under ENFORCE: whatever else the flow's
+    // skeleton may still be refused for (its root structure is another task's
+    // concern), the refusal must NEVER name the capacity boundary one line
+    // under the floor. Without this, Side B below would pass on a structure
+    // refusal alone and the floor boundary would go undiscriminated.
+    const underFloorEnforcedFs = new InMemoryFsPort({});
+    await runContextInit({ fs: underFloorEnforcedFs }, "", {});
+    await growModuleIndex(underFloorEnforcedFs, modulesForLines(lineFloor - 1));
+    const underFloorEnforced = await runContextRefresh({ fs: underFloorEnforcedFs, budgets: enforced }, "");
+    if (!underFloorEnforced.ok && underFloorEnforced.error.code === "VALIDATION_ERROR") {
+      expect(underFloorEnforced.error.message).not.toMatch(/ceiling of|eviction floor/i);
+    }
+
     // Side B — exactly AT the floor: must be refused with NO write.
     const atFloorFs = new InMemoryFsPort({});
     await runContextInit({ fs: atFloorFs }, "", {});
     const beforeAtFloor = await atFloorFs.readFile("CLAUDE.md");
     await growModuleIndex(atFloorFs, modulesForLines(lineFloor));
-    const atFloorResult = await runContextRefresh({ fs: atFloorFs }, "");
+    const atFloorResult = await runContextRefresh({ fs: atFloorFs, budgets: enforced }, "");
     expect(atFloorResult.ok).toBe(false);
+    if (!atFloorResult.ok && atFloorResult.error.code === "VALIDATION_ERROR") {
+      expect(atFloorResult.error.message).toMatch(/ceiling of|eviction floor/i);
+    }
     const afterAtFloor = await atFloorFs.readFile("CLAUDE.md");
     expect(afterAtFloor).toBe(beforeAtFloor);
 
@@ -187,7 +215,7 @@ describe("runContextRefresh", () => {
     await runContextInit({ fs: overCeilingFs }, "", {});
     const beforeOverCeiling = await overCeilingFs.readFile("CLAUDE.md");
     await growModuleIndex(overCeilingFs, modulesForLines(budgets.root.max_lines + 1));
-    const overCeilingResult = await runContextRefresh({ fs: overCeilingFs }, "");
+    const overCeilingResult = await runContextRefresh({ fs: overCeilingFs, budgets: enforced }, "");
     expect(overCeilingResult.ok).toBe(false);
     expect(await overCeilingFs.readFile("CLAUDE.md")).toBe(beforeOverCeiling);
   });
@@ -202,7 +230,7 @@ describe("runContextRefresh", () => {
     // the BOUNDARY case above.
     await growModuleIndex(fs, 320);
 
-    const refreshResult = await runContextRefresh({ fs }, "");
+    const refreshResult = await runContextRefresh({ fs, budgets: enforcedBudgets() }, "");
     // RED under current src: today this returns ok:true and writes (verified
     // against current src via the same 285/286-module harness above scaled
     // up — current runContextRefresh has no admission check to refuse with).
@@ -242,7 +270,7 @@ describe("runContextRefresh", () => {
     const before = await fs.readFile("CLAUDE.md");
 
     const defaultBudgets = resolveMemoryFileBudgets(undefined);
-    const tightenedBudgets = { ...defaultBudgets, root: { ...defaultBudgets.root, max_lines: 60 } };
+    const tightenedBudgets = enforcedBudgets({ ...defaultBudgets, root: { ...defaultBudgets.root, max_lines: 60 } });
 
     // RED under pre-fix src: `runContextRefresh` ignored `deps.budgets`
     // entirely (always called `resolveMemoryFileBudgets(undefined)`

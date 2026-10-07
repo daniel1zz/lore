@@ -151,7 +151,15 @@
  * anatomy-lore, AC-CTX-2.
  */
 
-import { docTypeSchema, normalizeFileAnchors, type MemoryFileBudgets } from "@lore/core";
+import {
+  docTypeSchema,
+  normalizeFileAnchors,
+  resolveAdoption,
+  ROOT_REQUIRED_SECTIONS,
+  MODULE_REQUIRED_SECTIONS,
+  type AdoptionMode,
+  type MemoryFileBudgets,
+} from "@lore/core";
 import {
   computeHeadroom,
   computeHeadroomWarnings,
@@ -159,6 +167,7 @@ import {
   type HeadroomReport,
 } from "./claude-md-budget.js";
 import type { AdvisoryFinding, MemoryFileFinding, MemoryFileRecord } from "./claude-md-findings.js";
+import { checkModuleStructure, checkRootStructure } from "./claude-md-structure.js";
 
 // ─── Reference existence (advisory, N13 / spec §D6) ─────────────────────────
 
@@ -776,6 +785,19 @@ export interface AdmissionDeps {
 }
 
 /**
+ * Adoption verdict `runMemoryFileChecks` returns beside the findings
+ * (spec-claude-md-root-section-structure-check-and-adoption-mode, D2/D7).
+ * `promotable` is mode `warn` AND zero would-be deterministic findings
+ * (`downgraded_count === 0`); advisory kinds never affect it.
+ */
+export interface AdoptionReport {
+  mode: AdoptionMode;
+  mode_source: "config" | "default";
+  downgraded_count: number;
+  promotable: boolean;
+}
+
+/**
  * The SOLE composition entry for the memory-file admission mechanism (spec
  * §Module Boundary, N15) — folds `claude-md-budget.ts`'s `lintMemoryFiles` +
  * `computeHeadroom` + `computeHeadroomWarnings` together with this module's
@@ -803,6 +825,13 @@ export interface AdmissionDeps {
  *   every `checkReferenceExistence` + `detectNarrativeSmells` finding, across
  *   all `files`. `headroom` — `computeHeadroom`'s output. `warnings` —
  *   `computeHeadroomWarnings(headroom)`.
+ *   `adoption` — the resolved mode and how many deterministic findings it
+ *   moved to advisory. Root files also run `checkRootStructure` (deterministic
+ *   `section_*` findings), module files `checkModuleStructure` (advisory); in
+ *   `warn` mode EVERY deterministic finding of EVERY kind is re-emitted as an
+ *   advisory `downgraded` finding (`downgraded_kind` = the original kind) and
+ *   `deterministic` is empty — `enforce` leaves it untouched. Rules files get
+ *   no structure check.
  * @example
  * runMemoryFileChecks(
  *   [{ path: "CLAUDE.md", role: "root", content: "See `gone.ts`." }],
@@ -820,8 +849,9 @@ export function runMemoryFileChecks(
   advisory: AdvisoryFinding[];
   headroom: HeadroomReport[];
   warnings: AdvisoryFinding[];
+  adoption: AdoptionReport;
 } {
-  const deterministic = lintMemoryFiles(files, budgets);
+  const wouldBeDeterministic = lintMemoryFiles(files, budgets);
 
   // Always-on advisories (Phase 4, N9) — computed directly from `files`,
   // independent of `budgets.enabled`, one pair per file.
@@ -834,15 +864,56 @@ export function runMemoryFileChecks(
     advisory.push(...detectNarrativeSmells(file.content));
 
     for (const finding of checkSlugPointers(file.content, deps.docExists)) {
-      deterministic.push({ ...finding, path: file.path, role: file.role });
+      wouldBeDeterministic.push({ ...finding, path: file.path, role: file.role });
     }
     for (const finding of measureEmphasis(file.content, budgets.emphasis.max_per_kb)) {
-      deterministic.push({ ...finding, path: file.path, role: file.role });
+      wouldBeDeterministic.push({ ...finding, path: file.path, role: file.role });
+    }
+
+    if (file.role === "root") {
+      const structure = checkRootStructure(file, ROOT_REQUIRED_SECTIONS);
+      wouldBeDeterministic.push(...structure.deterministic);
+      advisory.push(...structure.advisory);
+    } else if (file.role === "module") {
+      advisory.push(...checkModuleStructure(file, MODULE_REQUIRED_SECTIONS));
     }
   }
 
   const headroom = computeHeadroom(files, budgets);
   const warnings = computeHeadroomWarnings(headroom);
 
-  return { deterministic, advisory, headroom, warnings };
+  // Adoption is applied HERE and nowhere else (spec D2): the checks above are
+  // mode-free, so one place decides what is exit-relevant.
+  const { mode, mode_source } = resolveAdoption(budgets);
+  if (mode === "enforce") {
+    return {
+      deterministic: wouldBeDeterministic,
+      advisory,
+      headroom,
+      warnings,
+      adoption: { mode, mode_source, downgraded_count: 0, promotable: false },
+    };
+  }
+  for (const finding of wouldBeDeterministic) {
+    advisory.push({
+      kind: "downgraded",
+      downgraded_kind: finding.kind,
+      path: finding.path,
+      ...(finding.reference === undefined ? {} : { reference: finding.reference }),
+      ...(finding.measured === undefined ? {} : { measured: finding.measured }),
+      message: `[downgraded by adoption=warn] ${finding.message}`,
+    });
+  }
+  return {
+    deterministic: [],
+    advisory,
+    headroom,
+    warnings,
+    adoption: {
+      mode,
+      mode_source,
+      downgraded_count: wouldBeDeterministic.length,
+      promotable: wouldBeDeterministic.length === 0,
+    },
+  };
 }
