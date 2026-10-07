@@ -78,7 +78,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -91,7 +91,22 @@ const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..",
 const ASSETS_ROOT = join(REPO_ROOT, "assets");
 const SESSION_START_HOOK_PATH = join(ASSETS_ROOT, "hooks", "session-start-resume.mjs");
 const SEAT_BRIEFING_SSOT_PATH = join(ASSETS_ROOT, "governance", "seat-briefing.md");
-const CORPUS_WORKFLOW_SSOT_PATH = join(ASSETS_ROOT, "governance", "corpus-workflow.md");
+const CORPUS_WORKFLOW_RETIRED_FILE = join(ASSETS_ROOT, "governance", "corpus-workflow.md");
+const CONTEXT_FRAGMENT_DIR = join(ASSETS_ROOT, "context");
+
+/**
+ * RE-BASELINE (SPEC-083 amended by spec-context-fragments-config-driven-layered-rule-injection D9,
+ * task-skill-implement-spec-083-amendment-corpus-workflow-prose): the corpus-workflow prose SSOT is
+ * now the shipped `assets/context/corpus-workflow-*.md` fragments. Content assertions that read the
+ * old single file read the concatenated fragments instead — same needles, new source.
+ */
+function readCorpusWorkflowFragments(): string {
+  return readdirSync(CONTEXT_FRAGMENT_DIR)
+    .filter((n) => n.startsWith("corpus-workflow-") && n.endsWith(".md"))
+    .sort()
+    .map((n) => readFileSync(join(CONTEXT_FRAGMENT_DIR, n), "utf8"))
+    .join("\n");
+}
 
 const RETIRED_PATH_CORPUS_WORKFLOW = "governance/corpus-workflow.md";
 const RETIRED_PATH_SEAT_BRIEFING = "governance/seat-briefing.md";
@@ -353,38 +368,38 @@ describe("setup-governance-retirement — STATE (seat-briefing.md SSOT content, 
 // sentence would still be caught by SOME assertion rather than the whole
 // suite silently degrading to no-match.
 
-describe("setup-governance-retirement — STATE (corpus-workflow.md handoff-neutrality content, spec-session-start-handoff-neutrality D4)", () => {
+describe("setup-governance-retirement — STATE (corpus-workflow fragments handoff-neutrality content, spec-session-start-handoff-neutrality D4)", () => {
   it("HAPPY: the FEED bullet describes latest_handoffs as a neutral open-thread directory", () => {
-    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const content = readCorpusWorkflowFragments();
     expect(content).toContain("NEUTRAL");
     expect(content).toContain("open thread");
   });
 
   it("HAPPY: the FEED bullet prohibits self-initiated resumption from an injected handoff pointer", () => {
-    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const content = readCorpusWorkflowFragments();
     expect(content).toContain("NEVER start resuming");
     expect(content).toContain("own initiative");
   });
 
   it("HAPPY: the FEED bullet names the ticket-or-explicit-instruction exception to the prohibition", () => {
-    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const content = readCorpusWorkflowFragments();
     expect(content).toContain("pasted ticket");
     expect(content).toContain("explicit instruction");
   });
 
   it("HAPPY: the CLOSE bullet names the handoff ticket as the sole sanctioned resumption path", () => {
-    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const content = readCorpusWorkflowFragments();
     expect(content).toContain("sanctioned resumption path");
   });
 
   it("NEGATIVE: zero occurrences of the retired resume_hint field name anywhere in the file", () => {
-    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const content = readCorpusWorkflowFragments();
     const occurrences = content.split("resume_hint").length - 1;
     expect(occurrences).toBe(0);
   });
 
   it("NEGATIVE: zero occurrences of the stale 'fallback discovery aid' phrasing (D1 made resume_hint no longer even present ambiently)", () => {
-    const content = readFileSync(CORPUS_WORKFLOW_SSOT_PATH, "utf8");
+    const content = readCorpusWorkflowFragments();
     const occurrences = content.split("fallback discovery aid").length - 1;
     expect(occurrences).toBe(0);
   });
@@ -419,8 +434,10 @@ describe("setup-governance-retirement — STATE (corpus-workflow.md handoff-neut
 // ─── REGRESSION — both retired files still exist on disk (SSOT, not deleted) ──
 
 describe("setup-governance-retirement — REGRESSION (files stay on disk as the runtime verb's SSOT)", () => {
-  it("assets/governance/corpus-workflow.md still physically exists (install-set exclusion, not a file deletion)", () => {
-    expect(existsSync(join(ASSETS_ROOT, RETIRED_PATH_CORPUS_WORKFLOW))).toBe(true);
+  it("assets/governance/corpus-workflow.md is DELETED (D9) and its prose lives in at least one shipped assets/context/corpus-workflow-*.md fragment", () => {
+    expect(existsSync(CORPUS_WORKFLOW_RETIRED_FILE)).toBe(false);
+    const fragments = readdirSync(CONTEXT_FRAGMENT_DIR).filter((n) => n.startsWith("corpus-workflow-") && n.endsWith(".md"));
+    expect(fragments.length).toBeGreaterThanOrEqual(4);
   });
 
   it("assets/governance/seat-briefing.md still physically exists (install-set exclusion, not a file deletion)", () => {

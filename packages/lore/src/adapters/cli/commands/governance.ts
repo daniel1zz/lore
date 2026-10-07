@@ -1,13 +1,19 @@
 /**
  * `lore governance [topic]` — SPEC-083 D1 origin, extended by
  * spec-project-claude-md-content-contract-governance-injected §Design
- * Decisions D6 into a positional TOPIC REGISTRY: `corpus-workflow` (default,
- * bare `lore governance`) | `seat-briefing` | `claude-md` | `bootstrap-framing`
- * (spec-context-provenance-injected-corpus-global-state-and-a D2). Prints the
- * resolved topic's governance prose verbatim to stdout, exit 0.
+ * Decisions D6 into a positional TOPIC REGISTRY: `seat-briefing` | `claude-md` |
+ * `bootstrap-framing` (spec-context-provenance-injected-corpus-global-state-and-a
+ * D2). Prints the resolved topic's governance prose verbatim to stdout, exit 0.
+ *
+ * RETIRED (spec-context-fragments-config-driven-layered-rule-injection D9,
+ * amending SPEC-083): the `corpus-workflow` topic and the no-topic default that
+ * used to serve it. Its prose now ships as static `main` fragments under
+ * `assets/context/corpus-workflow-*.md`, delivered by `lore fragments render` and
+ * the project CLAUDE.md Z1 `fragments` section. A retired-topic request (named, or
+ * bare `lore governance`) exits 2 with stderr naming `lore fragments`
+ * (`RETIRED_TOPIC_MESSAGE`); it never prints prose.
  *
  * Registry (topic → source):
- *   - `corpus-workflow`  (default) → file, `assets/governance/corpus-workflow.md`
  *   - `seat-briefing`              → file, `assets/governance/seat-briefing.md`
  *   - `claude-md`                  → file, `assets/governance/claude-md-contract.md`
  *   - `bootstrap-framing`          → IN-MEMORY constant, `BOOTSTRAP_FRAMING_LINE`
@@ -104,14 +110,22 @@ import { exitCode, formatError } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
 
 /** A registered `lore governance` topic name. */
-type GovernanceTopic = "corpus-workflow" | "seat-briefing" | "claude-md" | "bootstrap-framing";
+type GovernanceTopic = "seat-briefing" | "claude-md" | "bootstrap-framing";
 
 /**
- * Default topic when no positional/flag resolves one — SPEC-083 D1
- * back-compat. Typed as the file-backed subset (never `bootstrap-framing`)
- * so it can index `GOVERNANCE_TOPIC_ASSETS` directly without narrowing.
+ * The retired topic (spec-context-fragments-config-driven-layered-rule-injection D9).
+ * A request for it — by name, or by bare `lore governance` (the old default) — is a
+ * usage error pointing at `lore fragments`, never a prose print.
  */
-const DEFAULT_GOVERNANCE_TOPIC: Exclude<GovernanceTopic, "bootstrap-framing"> = "corpus-workflow";
+const RETIRED_GOVERNANCE_TOPIC = "corpus-workflow";
+
+/** stderr text for a retired-topic request (exit 2). Names `lore fragments` so the caller can migrate. */
+const RETIRED_TOPIC_MESSAGE =
+  "Error: the `corpus-workflow` governance topic is retired " +
+  "(spec-context-fragments-config-driven-layered-rule-injection D9). " +
+  "Its prose now ships as context fragments: run `lore fragments render` to read it, " +
+  "or `lore context refresh` to write it into the project CLAUDE.md. " +
+  "Remaining topics: seat-briefing, claude-md, bootstrap-framing.\n";
 
 /**
  * Topic → repo-relative asset path registry (D6). SSOT for every FILE-BACKED
@@ -121,7 +135,6 @@ const DEFAULT_GOVERNANCE_TOPIC: Exclude<GovernanceTopic, "bootstrap-framing"> = 
  * `KNOWN_GOVERNANCE_TOPICS` for the full topic set including it).
  */
 const GOVERNANCE_TOPIC_ASSETS: Record<Exclude<GovernanceTopic, "bootstrap-framing">, string> = {
-  "corpus-workflow": "governance/corpus-workflow.md",
   "seat-briefing": "governance/seat-briefing.md",
   "claude-md": "governance/claude-md-contract.md",
 };
@@ -133,7 +146,6 @@ const GOVERNANCE_TOPIC_ASSETS: Record<Exclude<GovernanceTopic, "bootstrap-framin
  * keys are deliberately incomplete (it excludes `bootstrap-framing`).
  */
 const KNOWN_GOVERNANCE_TOPICS: readonly GovernanceTopic[] = [
-  "corpus-workflow",
   "seat-briefing",
   "claude-md",
   "bootstrap-framing",
@@ -209,7 +221,7 @@ function resolveDistinctTopicsRequested(positionalTopics: string[], legacyFlag: 
  */
 export function readGovernanceAsset(
   assetsRoot: string,
-  relPath: string = GOVERNANCE_TOPIC_ASSETS[DEFAULT_GOVERNANCE_TOPIC],
+  relPath: string,
 ): { ok: true; value: string } | { ok: false; error: LoreError } {
   const assetPath = join(assetsRoot, relPath);
   try {
@@ -234,7 +246,7 @@ export default defineCommand({
     name: "governance",
     description:
       "Print a governance prose topic verbatim to stdout — bootstrap-stage, no corpus required. " +
-      "Topic registry: corpus-workflow (default) | seat-briefing | claude-md (D6) | " +
+      "Topic registry: seat-briefing | claude-md (D6) | " +
       "bootstrap-framing (spec-context-provenance-injected-corpus-global-state-and-a D2). " +
       "--seat-briefing is a deprecated alias for the positional `seat-briefing` form (SPEC-085 D1).",
   },
@@ -242,7 +254,7 @@ export default defineCommand({
     topic: {
       type: "positional",
       description:
-        "Governance topic to print: corpus-workflow (default) | seat-briefing | claude-md | bootstrap-framing",
+        "Governance topic to print: seat-briefing | claude-md | bootstrap-framing (corpus-workflow is retired: see `lore fragments`)",
       required: false,
     },
     "seat-briefing": {
@@ -268,8 +280,10 @@ export default defineCommand({
 
     const requestedTopic = distinctTopics[0];
     let topic: GovernanceTopic;
-    if (requestedTopic === undefined) {
-      topic = DEFAULT_GOVERNANCE_TOPIC;
+    if (requestedTopic === undefined || requestedTopic === RETIRED_GOVERNANCE_TOPIC) {
+      process.stderr.write(RETIRED_TOPIC_MESSAGE);
+      process.exitCode = 2;
+      return;
     } else if (isKnownGovernanceTopic(requestedTopic)) {
       topic = requestedTopic;
     } else {

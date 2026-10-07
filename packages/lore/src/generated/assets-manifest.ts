@@ -45,13 +45,17 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "9d7c164048b5ae7b28cfcb2c4dda25dd727f2fcf0c4f6067e2a2c02451ec2ca6",
+  tree_digest: "cbd6a69b76a441cce86fa771d8be85bbea7e5e34065ec0367060a9f9a5f9648d",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "18b80554da11704960849d5b68ea9ef763bdc88315ebe89acc26a1e86d7e5629" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "a1ea1208820a942acba3e80949f97d684e552c073ea2ccbc8980e8bfef8c9da5" },
   { path: "agents/lore-reviewer.md", kind: "agent", ownership: "managed", sha256: "c3d3cfe853c49c38afca62d19cef4205a14374e62f6c8e2286f415fab3c822ee" },
+  { path: "context/corpus-workflow-0-overview.md", kind: "context", ownership: "managed", sha256: "a3a243597a5414169a7f7f65a1028f477edfe4311fede245b590296952bfea4a" },
+  { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "601bda61152a3c3c3cce5ae78d223282bc35795780a821d8350c47988b846ca1" },
+  { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "130a4712e5e36d2bc0febdfb856d04d5257480cb88920c757dc17127965ad6ee" },
+  { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "a8b09aee199f06687a71a235a0aaa861d5f6bc7f894a30268f1fe030c61fcce4" },
+  { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "135730be6c4e15cca127b4dbc0543cdc4d94a7b06758e41c09e0b1d24bb69ddf" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "0f1dd1c23a9d03f3c3972870ef9bafc24b48d365a9e80bbdab8169a56ca58807" },
-  { path: "governance/corpus-workflow.md", kind: "governance", ownership: "managed", sha256: "c7abf7ae2509fd7537509723e07f74899f5c689c3c6e07b249cb2a4201643a85" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "f9cb47c9bb7ec3af1644637e600156f8cb59f4ed9afbe538caa32a22f4107358" },
   { path: "hooks/claude-md-guard.sh", kind: "hook", ownership: "managed", sha256: "18286782787eaeb0e4b4d5bd4670fee515ac99886cf83d38cafaa53cf047c964" },
   { path: "hooks/lib/turn-state.mjs", kind: "hook", ownership: "managed", sha256: "a8f5214280d9c22835507e24e32ba6648bb1d8dd9646328553915e693518b1c9" },

@@ -2,7 +2,7 @@
  * AC-083-1 (extended by AC-085-1) — compiled-binary e2e oracle for
  * `lore governance` (SPEC-083 D1) and its `--seat-briefing` flag (SPEC-085
  * D1): spawning the COMPILED `dist/lore governance` binary exits 0 and its
- * stdout is BYTE-IDENTICAL to `assets/governance/corpus-workflow.md` on
+ * stdout (RETIRED topic: now exit 2 naming `lore fragments`, see RE-BASELINE note below) was BYTE-IDENTICAL to the retired corpus-workflow asset on
  * disk; spawning `dist/lore governance --seat-briefing` exits 0 with stdout
  * byte-identical to `assets/governance/seat-briefing.md` (RAW template,
  * placeholders intact — substitution stays the session-start hook's job).
@@ -51,14 +51,13 @@
  */
 
 import { describe, expect, it, beforeAll } from "bun:test";
-import { readFileSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 
 // tests/integration/governance-compiled.bun.test.ts -> repo root is 4 levels up.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
-const GOVERNANCE_ASSET_PATH = join(REPO_ROOT, "assets", "governance", "corpus-workflow.md");
 const SEAT_BRIEFING_ASSET_PATH = join(REPO_ROOT, "assets", "governance", "seat-briefing.md");
 
 interface RunResult {
@@ -84,13 +83,32 @@ beforeAll(() => {
   ]);
 });
 
-describe("AC-083-1: compiled dist/lore governance (SPEC-083 D1)", () => {
-  it("HAPPY: exits 0 with stdout byte-identical to assets/governance/corpus-workflow.md", () => {
-    const expected = readFileSync(GOVERNANCE_ASSET_PATH, "utf8");
-    const result = runLore(["governance"]);
+// RE-BASELINE (SPEC-083 amended by spec-context-fragments-config-driven-layered-rule-injection D9,
+// task-skill-implement-spec-083-amendment-corpus-workflow-prose): the `corpus-workflow` topic and the
+// no-topic default are RETIRED — `assets/governance/corpus-workflow.md` no longer exists, its prose
+// ships as `assets/context/corpus-workflow-*.md` fragments. The corpus-workflow assertions below were
+// corrected (not weakened): each retired byte-parity claim became (a) a refusal claim on the CLI
+// (exit 2, stderr names `lore fragments`, zero prose on stdout) PLUS (b) a positive claim that the
+// same prose is carried by the shipped fragment files.
+const CONTEXT_FRAGMENT_DIR = join(REPO_ROOT, "assets", "context");
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(expected);
+/** Concatenated body of every shipped `corpus-workflow-*.md` fragment, in file-name order. */
+function readCorpusWorkflowFragments(): string {
+  return readdirSync(CONTEXT_FRAGMENT_DIR)
+    .filter((n) => n.startsWith("corpus-workflow-") && n.endsWith(".md"))
+    .sort()
+    .map((n) => readFileSync(join(CONTEXT_FRAGMENT_DIR, n), "utf8"))
+    .join("\n");
+}
+
+describe("AC-083-1: compiled dist/lore governance (SPEC-083 D1, amended by D9)", () => {
+  it("HAPPY: `governance corpus-workflow` is retired — exits 2, stderr names `lore fragments`, stdout empty — and the fragments carry the prose", () => {
+    const result = runLore(["governance", "corpus-workflow"]);
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("lore fragments");
+    expect(result.stdout).toBe("");
+    expect(readCorpusWorkflowFragments()).toContain("a released-but-uncommitted worktree is what routine cleanup destroys");
   });
 
   it("NEGATIVE: an unknown flag is rejected exit 2 (SPEC-051 strict-flag seam wraps this command)", () => {
@@ -98,19 +116,27 @@ describe("AC-083-1: compiled dist/lore governance (SPEC-083 D1)", () => {
     expect(result.exitCode).toBe(2);
   });
 
-  it("BOUNDARY: stdout is non-empty and its last byte matches the source file's own trailing newline", () => {
-    const expected = readFileSync(GOVERNANCE_ASSET_PATH, "utf8");
-    const result = runLore(["governance"]);
+  it("BOUNDARY: a file-backed topic's stdout is non-empty and its last byte matches the source file's own trailing newline (seat-briefing)", () => {
+    const expected = readFileSync(SEAT_BRIEFING_ASSET_PATH, "utf8");
+    const result = runLore(["governance", "seat-briefing"]);
 
+    expect(result.exitCode).toBe(0);
     expect(result.stdout.length).toBeGreaterThan(0);
     expect(expected.endsWith("\n")).toBe(true);
     expect(result.stdout.endsWith("\n")).toBe(true);
   });
 
-  it("REGRESSION: printed content still carries the <corpus-workflow> tag and a FEED section header", () => {
+  it("REGRESSION: bare `governance` no longer prints the <corpus-workflow> tag or a FEED header; the shipped fragments carry the FEED/PRODUCE/EXECUTE/CLOSE headers", () => {
     const result = runLore(["governance"]);
-    expect(result.stdout).toContain("<corpus-workflow>");
-    expect(result.stdout).toContain("## FEED");
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("lore fragments");
+    expect(result.stdout).not.toContain("<corpus-workflow>");
+    expect(result.stdout).not.toContain("## FEED");
+
+    const fragments = readCorpusWorkflowFragments();
+    for (const header of ["## FEED", "## PRODUCE", "## EXECUTE", "## CLOSE"]) {
+      expect(fragments).toContain(header);
+    }
   });
 });
 
@@ -126,13 +152,13 @@ describe("AC-085-1: compiled dist/lore governance --seat-briefing (SPEC-085 D1)"
     expect(result.stdout).toContain("{{MAIN_CHECKOUT}}");
   });
 
-  it("REGRESSION: bare `dist/lore governance` (no flag) stays byte-identical to the SPEC-083 corpus-workflow output — adding the flag did not change the default", () => {
-    const expected = readFileSync(GOVERNANCE_ASSET_PATH, "utf8");
+  it("REGRESSION: bare `dist/lore governance` (no flag) is the retired default — exit 2 naming `lore fragments`, never the seat briefing; the flag form stays unaffected", () => {
     const result = runLore(["governance"]);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(expected);
-    expect(result.stdout).not.toContain("<session-seat>");
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("lore fragments");
+    expect(result.stdout).toBe("");
+    expect(runLore(["governance", "--seat-briefing"]).exitCode).toBe(0);
   });
 
   it("NEGATIVE: an unknown flag alongside --seat-briefing is still rejected exit 2 (strict-flag seam applies regardless of --seat-briefing)", () => {
@@ -140,10 +166,12 @@ describe("AC-085-1: compiled dist/lore governance --seat-briefing (SPEC-085 D1)"
     expect(result.exitCode).toBe(2);
   });
 
-  it("BOUNDARY: --seat-briefing output and bare output are DIFFERENT content (the flag actually switches the source file, not a no-op)", () => {
+  it("BOUNDARY: --seat-briefing output and `governance claude-md` output are DIFFERENT non-empty content (the flag actually switches the source file, not a no-op)", () => {
     const seatResult = runLore(["governance", "--seat-briefing"]);
-    const bareResult = runLore(["governance"]);
+    const otherResult = runLore(["governance", "claude-md"]);
 
-    expect(seatResult.stdout).not.toBe(bareResult.stdout);
+    expect(seatResult.stdout.length).toBeGreaterThan(0);
+    expect(otherResult.stdout.length).toBeGreaterThan(0);
+    expect(seatResult.stdout).not.toBe(otherResult.stdout);
   });
 });

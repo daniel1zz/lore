@@ -514,7 +514,7 @@ const PROJECT_MANIFEST_VERSION = "1";
  * settings-hook/mcp) and has no member that names "repo scaffold config".
  * `"governance"` is the closest existing fit (a repo-level configuration
  * artifact — the same rough category as the machine installer's own
- * `governance/corpus-workflow.md`). Chosen over widening `SETUP_ENTRY_KINDS`
+ * `governance/claude-md-contract.md`). Chosen over widening `SETUP_ENTRY_KINDS`
  * itself because that enum backs an exhaustive `Record<..., string>` in
  * `adapters/cli/setup-render.ts`. Reused unchanged by the SPEC-060 D3/D4
  * `.gitignore`/`CLAUDE.md` candidates below — four total consumers now
