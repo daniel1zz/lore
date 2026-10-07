@@ -10,8 +10,10 @@
  * "what shipped" — drifting the real tree away from this list (adding, removing,
  * or renaming a shipped file) fails this suite, on purpose.
  *
- * It also enforces R2 from the spec's risk table: the governance snippet
- * (`assets/governance/corpus-workflow.md`) was authored FRESH, standalone, and
+ * It also enforces R2 from the spec's risk table: the corpus-workflow prose
+ * (now the shipped `assets/context/corpus-workflow-*.md` fragments; formerly
+ * `assets/governance/corpus-workflow.md`, deleted by
+ * spec-context-fragments-config-driven-layered-rule-injection D9) was authored FRESH, standalone, and
  * must never carry the owner's private global-CLAUDE.md personal markers
  * (absolute home paths, browser-profile mentions, personal email/domain) or
  * leftover CJK text — it ships to third parties who are not this repo's owner.
@@ -22,8 +24,9 @@
  *   NEGATIVE:   the completeness CHECKER itself is proven non-tautological — it
  *               flags a synthetic missing file — plus a whole-tree grep proving
  *               zero files anywhere under assets/ hardcode `/Users/apple`
- *   BOUNDARY:   the `<corpus-workflow>` tag pair is exactly one open + one close,
- *               open before close; all four `## ` FEED/PRODUCE/EXECUTE/CLOSE
+ *   BOUNDARY:   the corpus-workflow fragments are schema-valid, one per H2 section
+ *               (plus the overview), tag-free, with body sha256 pins proving the
+ *               text is verbatim; all four `## ` FEED/PRODUCE/EXECUTE/CLOSE
  *               section headers are present; every SKILL.md starts with `---`
  *               frontmatter carrying a `name:` line; no declared top-level asset
  *               directory is empty
@@ -46,6 +49,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
+import { parse as parseYaml } from "yaml";
+import { FragmentFrontmatterSchema, splitFrontmatter } from "@lore/core";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 import { buildManifest, renderGeneratedFile } from "../../../../scripts/embed-assets-manifest.mjs";
 import {
@@ -425,8 +430,14 @@ const DECLARED_FILES = [
   "project/CLAUDE.md.template",
   // fresh-install-only root skeleton (What This Is / Commands / Architecture), read by setup-project-flow
   "project/CLAUDE.md.skeleton",
+  // context fragments (spec-context-fragments-config-driven-layered-rule-injection D9) —
+  // binary-read, never installed; the corpus-workflow prose lives here since governance/corpus-workflow.md was deleted
+  "context/corpus-workflow-0-overview.md",
+  "context/corpus-workflow-1-feed.md",
+  "context/corpus-workflow-2-produce.md",
+  "context/corpus-workflow-3-execute.md",
+  "context/corpus-workflow-4-close.md",
   // governance
-  "governance/corpus-workflow.md",
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",
 ] as const;
@@ -435,10 +446,36 @@ const SKILL_MD_FILES = DECLARED_FILES.filter((f) => f.endsWith("SKILL.md"));
 const EXECUTABLE_REQUIRED_FILES = DECLARED_FILES.filter(
   (f) => f.endsWith(".sh") || f.endsWith("/pre-push"),
 );
-const DECLARED_TOP_LEVEL_DIRS = ["skills", "agents", "hooks", "project", "governance"];
+const DECLARED_TOP_LEVEL_DIRS = ["skills", "agents", "hooks", "project", "governance", "context"];
 
-const GOVERNANCE_REL = "governance/corpus-workflow.md";
-const GOVERNANCE_PATH = join(ASSETS_ROOT, GOVERNANCE_REL);
+// RE-BASELINE (SPEC-083 amended by spec-context-fragments D9): the single corpus-workflow.md is
+// replaced by these fragment files. Every assertion that pinned the old file now asserts the same
+// fact over the fragments (see readCorpusWorkflowFragments).
+const RETIRED_GOVERNANCE_REL = "governance/corpus-workflow.md";
+const CORPUS_WORKFLOW_FRAGMENT_RELS = [
+  "context/corpus-workflow-0-overview.md",
+  "context/corpus-workflow-1-feed.md",
+  "context/corpus-workflow-2-produce.md",
+  "context/corpus-workflow-3-execute.md",
+  "context/corpus-workflow-4-close.md",
+] as const;
+/** sha256 of each fragment BODY (text after the frontmatter) — measured equal to the verbatim sections of the deleted file. */
+const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)[number], string> = {
+  "context/corpus-workflow-0-overview.md": "31bec6c00584c31708413d8c34e0494bbfe758b9d3d43c6bc3d1e8780c0b070f",
+  "context/corpus-workflow-1-feed.md": "8fd858cefd4ba170382f3745f2a8c7ea2c8edf77ddf34297509ab071485d962f",
+  "context/corpus-workflow-2-produce.md": "cc4ed9f31e30468f2fddea7f4d296620ec81399c62a1b835b4d1388465f4def2",
+  "context/corpus-workflow-3-execute.md": "6248a242c66fdc804765486686424a0ac0e53767684bc6c569d4526dc5e6b68b",
+  "context/corpus-workflow-4-close.md": "96bf543c9c898b1d0e3dc4424e24949e5e1edeb24fce438eb11d256eb4b3fabf",
+};
+
+/** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
+function readCorpusWorkflowFragments(): string {
+  return CORPUS_WORKFLOW_FRAGMENT_RELS.map((rel) => {
+    const split = splitFrontmatter(readFileSync(join(ASSETS_ROOT, rel), "utf-8"), "strict");
+    if (!split.ok) throw new Error(`${rel}: ${split.error}`);
+    return split.body;
+  }).join("\n");
+}
 
 const SEAT_BRIEFING_REL = "governance/seat-briefing.md";
 const SEAT_BRIEFING_PATH = join(ASSETS_ROOT, SEAT_BRIEFING_REL);
@@ -514,14 +551,14 @@ describe("assets-ssot — NEGATIVE", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("governance snippet contains none of the private global-CLAUDE.md personal markers", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments contain none of the private global-CLAUDE.md personal markers", () => {
+    const content = readCorpusWorkflowFragments();
     const found = PERSONAL_MARKERS.filter((marker) => content.includes(marker));
     expect(found).toEqual([]);
   });
 
-  it("governance snippet contains zero CJK characters", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments contain zero CJK characters", () => {
+    const content = readCorpusWorkflowFragments();
     expect(CJK_RANGE.test(content)).toBe(false);
   });
 });
@@ -568,30 +605,55 @@ describe("assets-ssot — BOUNDARY (skill-name grammar)", () => {
 });
 
 describe("assets-ssot — BOUNDARY", () => {
-  it("corpus-workflow.md contains exactly one <corpus-workflow> open tag", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
-    const opens = content.match(/<corpus-workflow>/g) ?? [];
-    expect(opens.length).toBe(1);
+  // Tag-pair assertions (one `<corpus-workflow>` open + one close, open before close) pinned the
+  // retired single-file wrapper. The fragments carry NO wrapper tags by design (the renderer owns
+  // framing), so the corrected claims are: schema-valid frontmatter, unique prefixed ids, tag-free
+  // bodies, and verbatim bodies (sha256 pins measured equal to the deleted file's sections).
+  it("every corpus-workflow fragment parses with FragmentFrontmatterSchema (audience [main], mode static, id corpus-workflow-*)", () => {
+    const ids: string[] = [];
+    for (const rel of CORPUS_WORKFLOW_FRAGMENT_RELS) {
+      const split = splitFrontmatter(readRequiredFile(join(ASSETS_ROOT, rel)), "strict");
+      expect(split.ok, rel).toBe(true);
+      if (!split.ok) continue;
+      const parsed = FragmentFrontmatterSchema.safeParse(parseYaml(split.frontmatter));
+      expect(parsed.success, rel).toBe(true);
+      if (!parsed.success) continue;
+      expect(parsed.data.audience).toEqual(["main"]);
+      expect(parsed.data.mode).toBe("static");
+      expect(parsed.data.id.startsWith("corpus-workflow-")).toBe(true);
+      ids.push(parsed.data.id);
+    }
+    expect(new Set(ids).size).toBe(CORPUS_WORKFLOW_FRAGMENT_RELS.length);
   });
 
-  it("corpus-workflow.md contains exactly one </corpus-workflow> close tag", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
-    const closes = content.match(/<\/corpus-workflow>/g) ?? [];
-    expect(closes.length).toBe(1);
+  it("the corpus-workflow fragments carry no <corpus-workflow> wrapper tag and the deleted governance file is gone", () => {
+    const content = readCorpusWorkflowFragments();
+    expect(content).not.toContain("<corpus-workflow>");
+    expect(content).not.toContain("</corpus-workflow>");
+    expect(existsSync(join(ASSETS_ROOT, RETIRED_GOVERNANCE_REL))).toBe(false);
   });
 
-  it("the <corpus-workflow> open tag appears before the </corpus-workflow> close tag", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
-    const openIdx = content.indexOf("<corpus-workflow>");
-    const closeIdx = content.indexOf("</corpus-workflow>");
-    expect(openIdx).toBeGreaterThanOrEqual(0);
-    expect(closeIdx).toBeGreaterThan(openIdx);
+  it.each(CORPUS_WORKFLOW_FRAGMENT_RELS)("%s body is verbatim (sha256 equals the pin measured against the deleted file's section)", (rel) => {
+    const split = splitFrontmatter(readRequiredFile(join(ASSETS_ROOT, rel)), "strict");
+    expect(split.ok).toBe(true);
+    if (!split.ok) return;
+    expect(createHash("sha256").update(split.body).digest("hex")).toBe(CORPUS_WORKFLOW_BODY_SHA256[rel]);
+  });
+
+  it("there is exactly one fragment per H2 section: each of FEED/PRODUCE/EXECUTE/CLOSE heads exactly one fragment body", () => {
+    for (const header of ["## FEED", "## PRODUCE", "## EXECUTE", "## CLOSE"]) {
+      const holders = CORPUS_WORKFLOW_FRAGMENT_RELS.filter((rel) => {
+        const split = splitFrontmatter(readRequiredFile(join(ASSETS_ROOT, rel)), "strict");
+        return split.ok && split.body.split("\n").some((l) => l.startsWith(header));
+      });
+      expect(holders, header).toHaveLength(1);
+    }
   });
 
   it.each(["## FEED", "## PRODUCE", "## EXECUTE", "## CLOSE"])(
-    "corpus-workflow.md contains a %s section header",
+    "corpus-workflow fragments contain a %s section header",
     (headerPrefix) => {
-      const content = readRequiredFile(GOVERNANCE_PATH);
+      const content = readCorpusWorkflowFragments();
       const hasHeader = content
         .split("\n")
         .some((line) => line.startsWith(headerPrefix));
@@ -604,13 +666,13 @@ describe("assets-ssot — BOUNDARY", () => {
   // report-issue`. Two independent token assertions (the command name AND the
   // re-verify-first clause) so byte-parity checks elsewhere can never vacuously
   // pass with the stanza silently absent from BOTH the SSOT and an installed copy.
-  it("corpus-workflow.md AC-073-4: reporting-discipline stanza names lore report-issue", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments AC-073-4: reporting-discipline stanza names lore report-issue", () => {
+    const content = readCorpusWorkflowFragments();
     expect(content).toContain("lore report-issue");
   });
 
-  it("corpus-workflow.md AC-073-4: reporting-discipline stanza carries the re-verify-first clause", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments AC-073-4: reporting-discipline stanza carries the re-verify-first clause", () => {
+    const content = readCorpusWorkflowFragments();
     expect(content).toContain("Re-verify your own input first");
   });
 
@@ -623,14 +685,14 @@ describe("assets-ssot — BOUNDARY", () => {
   // proximity assertions below so it can never vacuously pass alone (a stray
   // "lore done" mention elsewhere, unrelated to the two-party split, would
   // still satisfy AC-1 but not AC-2).
-  it("corpus-workflow.md AC-1: EXECUTE section names lore done at least once", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments AC-1: EXECUTE section names lore done at least once", () => {
+    const content = readCorpusWorkflowFragments();
     const count = (content.match(/lore done/g) ?? []).length;
     expect(count).toBeGreaterThanOrEqual(1);
   });
 
-  it("corpus-workflow.md AC-1: the lore-done mention lives inside the EXECUTE section, not FEED/PRODUCE/CLOSE", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments AC-1: the lore-done mention lives inside the EXECUTE section, not FEED/PRODUCE/CLOSE", () => {
+    const content = readCorpusWorkflowFragments();
     const executeStart = content.indexOf("## EXECUTE");
     const closeStart = content.indexOf("## CLOSE");
     expect(executeStart).toBeGreaterThanOrEqual(0);
@@ -644,17 +706,17 @@ describe("assets-ssot — BOUNDARY", () => {
   // and `release` sits near an explicit negation of archival (it is NOT the
   // archiving verb). Either half alone would pass on `grep -c "lore done"`
   // wording tweaks that lose the actual two-party semantics.
-  it("corpus-workflow.md AC-2: 'done' sits near an 'archiv*' token — lore done is named as the archiving step", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments AC-2: 'done' sits near an 'archiv*' token — lore done is named as the archiving step", () => {
+    const content = readCorpusWorkflowFragments();
     expect(/done[^\n]{0,200}archiv/i.test(content)).toBe(true);
   });
 
-  it("corpus-workflow.md AC-2: 'release' sits near an explicit negation of archival — release does not archive", () => {
-    const content = readRequiredFile(GOVERNANCE_PATH);
+  it("corpus-workflow fragments AC-2: 'release' sits near an explicit negation of archival — release does not archive", () => {
+    const content = readCorpusWorkflowFragments();
     expect(/release[^\n]{0,200}does not archive/i.test(content)).toBe(true);
   });
 
-  it("corpus-workflow.md AC-2 REGRESSION control: the negation-proximity assertion is not vacuous — a synthetic string missing the negation fails the identical regex", () => {
+  it("corpus-workflow fragments AC-2 REGRESSION control: the negation-proximity assertion is not vacuous — a synthetic string missing the negation fails the identical regex", () => {
     const missingNegation = "lore release <task> archives the task immediately.";
     expect(/release[^\n]{0,200}does not archive/i.test(missingNegation)).toBe(false);
     // and the positive form the real asset satisfies is reachable at all:
@@ -934,20 +996,17 @@ describe("assets-ssot — DISTRIBUTION (AC-GS-6: argument-aware git-safety-gate 
 // so it is paired with an explicit "differs from the measured pre-fix value"
 // assertion — the exact sha256 the orchestrator measured on `main @ 6788989`
 // before this fix landed.
-describe("assets-ssot — DISTRIBUTION (corpus-workflow.md manifest freshness after the lore-done fix)", () => {
-  const PRE_FIX_SHA256 = "1bc6107144914ae357d7b661f53356c5a288f8d3e88ab50e9e63577db7dbbd65";
-
-  it("the embedded manifest sha256 for governance/corpus-workflow.md equals the sha256 of its bytes under assets/ on disk", () => {
-    const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === GOVERNANCE_REL);
-    expect(entry, `${GOVERNANCE_REL} must be declared in the embedded manifest`).toBeDefined();
-    const onDisk = createHash("sha256").update(readFileSync(GOVERNANCE_PATH)).digest("hex");
+describe("assets-ssot — DISTRIBUTION (corpus-workflow fragments manifest freshness; replaces the corpus-workflow.md sha pins)", () => {
+  it.each(CORPUS_WORKFLOW_FRAGMENT_RELS)("the embedded manifest sha256 for %s equals the sha256 of its bytes under assets/ on disk (kind context)", (rel) => {
+    const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === rel);
+    expect(entry, `${rel} must be declared in the embedded manifest`).toBeDefined();
+    const onDisk = createHash("sha256").update(readFileSync(join(ASSETS_ROOT, rel))).digest("hex");
     expect((entry as { sha256: string }).sha256).toBe(onDisk);
+    expect((entry as { kind: string }).kind).toBe("context");
   });
 
-  it("the embedded manifest sha256 for governance/corpus-workflow.md differs from the measured pre-fix value", () => {
-    const entry = EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === GOVERNANCE_REL);
-    expect(entry, `${GOVERNANCE_REL} must be declared in the embedded manifest`).toBeDefined();
-    expect((entry as { sha256: string }).sha256).not.toBe(PRE_FIX_SHA256);
+  it("the embedded manifest has NO entry for the deleted governance/corpus-workflow.md (a stale entry means the manifest was not regenerated)", () => {
+    expect(EMBEDDED_ASSETS_MANIFEST.entries.find((e) => e.path === RETIRED_GOVERNANCE_REL)).toBeUndefined();
   });
 });
 

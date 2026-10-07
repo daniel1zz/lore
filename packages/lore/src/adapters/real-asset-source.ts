@@ -37,7 +37,7 @@
  *     `skills → "skill"`, `agents → "agent"`, `hooks → "hook"`,
  *     `governance → "governance"` (`TOP_LEVEL_KIND_MAP`).
  *   - SPEC-083 D3: `isRetiredFromInstall`/`RETIRED_FROM_INSTALL_PATHS` (exported
- *     SSOT, see their own doc comment) skip `governance/corpus-workflow.md`
+ *     SSOT, see their own doc comment) skip `governance/seat-briefing.md`
  *     specifically -- that file stays in the walked `assets/governance/` tree
  *     (still fingerprinted by the embedded assets manifest) but is never
  *     yielded into the `AssetPayload`, so `lore setup` neither writes nor
@@ -103,24 +103,24 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
  * SINGLE SOURCE OF TRUTH for files retired from the MACHINE install set
  * (SPEC-083 D3, extended by SPEC-085 D3) while still shipping/fingerprinted
  * under `assets/`. Keyed by the FULL path relative to `assetsRoot` (e.g.
- * `"governance/corpus-workflow.md"`) — the SAME shape both `AssetFile.path`
+ * `"governance/seat-briefing.md"`) — the SAME shape both `AssetFile.path`
  * (this port, below) and `EmbeddedAssetEntry.path`
  * (`../generated/assets-manifest.js`, built by `scripts/embed-assets-manifest.mjs`
  * walking `assets/` directly) use.
  *
- * `corpus-workflow.md` is retired from `<claude-dir>/governance/` — the
- * bootstrap-stage `lore governance` verb (SPEC-083 D1) prints it straight
- * from the binary's OWN `assets/` tree at read time, so an installed,
- * setup-time-snapshotted copy can no longer drift out of sync with the
- * binary. `seat-briefing.md` is retired the same way (SPEC-085 D3) — the
- * SAME verb's `--seat-briefing` flag (SPEC-085 D1) now serves it at runtime,
- * and Phase D of the session-start hook spawns that flag instead of reading
- * an installed copy (SPEC-085 D2). Both files still live under
- * `assets/governance/` (this port's `load()` never walks anything else) and
- * are still fingerprinted by the embedded assets manifest — only THEIR
- * INSTALLATION is retired here; the `governance/` install directory is now
- * empty (no governance files are written to `<claude-dir>/governance/`).
- * The binary-read set is wider than these governance files: whole
+ * `seat-briefing.md` is retired from `<claude-dir>/governance/` (SPEC-085 D3) —
+ * the bootstrap-stage `lore governance seat-briefing` verb (SPEC-085 D1,
+ * `adapters/cli/commands/governance.ts`: `GOVERNANCE_TOPIC_ASSETS`) serves it
+ * straight from the binary's OWN `assets/` tree at read time, and Phase D of
+ * the session-start hook spawns that verb instead of reading an installed copy
+ * (SPEC-085 D2), so a setup-time-snapshotted copy cannot drift from the binary.
+ * It still lives under `assets/governance/` and is still fingerprinted by the
+ * embedded assets manifest — only ITS INSTALLATION is retired here.
+ * `governance/corpus-workflow.md` is NOT a member any more: the file was deleted
+ * and its prose now ships as `assets/context/corpus-workflow-*.md` fragments
+ * (spec-context-fragments-config-driven-layered-rule-injection D9; guard:
+ * `tests/unit/setup-governance-retirement.test.ts`, its REGRESSION describe).
+ * The binary-read set is wider than the governance files: whole
  * `assets/context/` fragments follow the same read path via
  * {@link BINARY_READ_ONLY_TOP_DIRS} (declared below this set).
  *
@@ -130,7 +130,7 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
  * SEPARATE data source that also fingerprints every file under `assets/`)
  * BOTH exclude via {@link isRetiredFromInstall}. Before this export existed,
  * the exclusion lived ONLY in this port's walk — `lore setup --check`
- * classified `governance/corpus-workflow.md` `missing` on every freshly
+ * classified a retired governance file `missing` on every freshly
  * converged target (the embedded manifest still listed it, nothing told the
  * check's classifier to skip it) even though the file was NEVER supposed to
  * be installed. A hand-duplicated literal path string in `setup-check.ts`
@@ -155,7 +155,6 @@ const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
  * "file never existed" code path for this one entry.
  */
 export const RETIRED_FROM_INSTALL_PATHS = new Set<string>([
-  "governance/corpus-workflow.md",
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",
   "skills/lore-init-context/SKILL.md",
@@ -181,13 +180,13 @@ export const BINARY_READ_ONLY_TOP_DIRS: readonly string[] = ["context"];
  * true for any path under a {@link BINARY_READ_ONLY_TOP_DIRS} directory
  * (`context/...`), matched on the `<dir>/` prefix.
  *
- * @param path - a full `assetsRoot`-relative path, e.g. `"governance/corpus-workflow.md"`.
+ * @param path - a full `assetsRoot`-relative path, e.g. `"governance/seat-briefing.md"`.
  * @returns `true` iff `path` is retired from the machine install set.
  * @throws Never.
  * @example
- * isRetiredFromInstall("governance/corpus-workflow.md"); // => true
  * isRetiredFromInstall("governance/seat-briefing.md"); // => true
- * isRetiredFromInstall("governance/nested/corpus-workflow.md"); // => false (different path)
+ * isRetiredFromInstall("governance/nested/seat-briefing.md"); // => false (different path)
+ * isRetiredFromInstall("governance/corpus-workflow.md"); // => false (file deleted by fragments D9; no longer a member)
  */
 export function isRetiredFromInstall(path: string): boolean {
   if (RETIRED_FROM_INSTALL_PATHS.has(path)) return true;
@@ -303,7 +302,7 @@ export class RealAssetSource implements AssetSource {
         const assetRelPath = `${topDir}/${relPath}`;
 
         // SPEC-083 D3 / SPEC-085 D3 — skip files retired from the install set
-        // (governance/corpus-workflow.md, governance/seat-briefing.md); every
+        // (RETIRED_FROM_INSTALL_PATHS entries and the BINARY_READ_ONLY_TOP_DIRS dirs); every
         // other file is unaffected. See RETIRED_FROM_INSTALL_PATHS's doc for
         // why this is a full-path, not bare-filename, exclusion.
         if (isRetiredFromInstall(assetRelPath)) {

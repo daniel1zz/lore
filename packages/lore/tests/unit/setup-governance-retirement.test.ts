@@ -110,7 +110,8 @@ function readCorpusWorkflowFragments(): string {
 
 const RETIRED_PATH_CORPUS_WORKFLOW = "governance/corpus-workflow.md";
 const RETIRED_PATH_SEAT_BRIEFING = "governance/seat-briefing.md";
-const RETIRED_PATHS = [RETIRED_PATH_CORPUS_WORKFLOW, RETIRED_PATH_SEAT_BRIEFING];
+// RE-BASELINE (fragments D9): corpus-workflow.md left RETIRED_FROM_INSTALL_PATHS when the file was deleted.
+const RETIRED_PATHS = [RETIRED_PATH_SEAT_BRIEFING];
 
 // ─── HAPPY — RealAssetSource.load() excludes BOTH governance files (SPEC-085 D3) ─
 
@@ -444,9 +445,14 @@ describe("setup-governance-retirement — REGRESSION (files stay on disk as the 
     expect(existsSync(join(ASSETS_ROOT, RETIRED_PATH_SEAT_BRIEFING))).toBe(true);
   });
 
-  it("both retired paths are members of RETIRED_FROM_INSTALL_PATHS (cross-check, not a hand-duplicated list)", () => {
+  it("every still-retired path is a member of RETIRED_FROM_INSTALL_PATHS (cross-check, not a hand-duplicated list)", () => {
     for (const path of RETIRED_PATHS) {
       expect(isRetiredFromInstall(path)).toBe(true);
     }
+  });
+
+  it("governance/corpus-workflow.md is NOT a member any more (its file is deleted; a stale entry makes npm staging copy a missing file), while the assets/context/ fragments are binary-read retired", () => {
+    expect(isRetiredFromInstall(RETIRED_PATH_CORPUS_WORKFLOW)).toBe(false);
+    expect(isRetiredFromInstall("context/corpus-workflow-1-feed.md")).toBe(true);
   });
 });

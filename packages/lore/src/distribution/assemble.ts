@@ -204,7 +204,7 @@ export function mergeShippedAssetFiles(input: MergeShippedAssetFilesInput): stri
  * buildPublishPlan({
  *   version: "0.1.0",
  *   platform: { os: "darwin", cpu: "arm64", libsqlTarget: "darwin-arm64" },
- *   assetFiles: ["assets/governance/corpus-workflow.md"],
+ *   assetFiles: ["assets/governance/seat-briefing.md"],
  *   binaryPath: "dist/lore",
  * });
  * // => ok({
@@ -213,8 +213,8 @@ export function mergeShippedAssetFiles(input: MergeShippedAssetFilesInput): stri
  * //   stagingRoot: "dist-npm/cli-darwin-arm64/",
  * //   stagingFiles: {
  * //     "dist-npm/cli-darwin-arm64/dist/lore": "dist/lore",
- * //     "dist-npm/cli-darwin-arm64/assets/governance/corpus-workflow.md":
- * //       "assets/governance/corpus-workflow.md",
+ * //     "dist-npm/cli-darwin-arm64/assets/governance/seat-briefing.md":
+ * //       "assets/governance/seat-briefing.md",
  * //     "dist-npm/cli-darwin-arm64/postinstall.mjs": "npm-pkg/postinstall.mjs",
  * //   },
  * //   packageJson: {

@@ -445,7 +445,7 @@ async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
   // SPEC-085 D3 byproduct fix: `RealAssetSource.load()`'s payload is the
   // MACHINE INSTALL SET view — it deliberately EXCLUDES files retired from
   // `<claude-dir>/...` installation (`RETIRED_FROM_INSTALL_PATHS`:
-  // governance/corpus-workflow.md, governance/seat-briefing.md). But the
+  // the governance files named in real-asset-source.ts:RETIRED_FROM_INSTALL_PATHS). But the
   // npm package's OWN `assets/` tree is a SEPARATE concern: the bootstrap-
   // stage `lore governance` verb (and its `--seat-briefing` flag) reads
   // these exact files directly off the BINARY'S OWN assets root at runtime
@@ -456,11 +456,11 @@ async function realAssemble(): Promise<Result<PublishPlan, LoreError>> {
   // install — SPEC-085 D3 surfaced this because retiring the SECOND
   // (last-remaining) governance file emptied the directory entirely,
   // turning a previously-silent one-file gap into a hard ENOENT during
-  // `lore setup --dry-run` staging verification. Both retired files are
+  // `lore setup --dry-run` staging verification. The retired files are
   // added back here, explicitly, so "which files are installed" and "which
   // files ship inside the package" stay two independently correct answers
   // over the SAME assets/ tree.
-  // The binary-read set is wider than the two governance files: `assets/context/**`
+  // The binary-read set is wider than the retired governance files: `assets/context/**`
   // fragments (kind `context`, spec-context-fragments-config-driven-layered-rule-
   // injection D9) are read off the binary's own assets root too and are never in
   // the install set. `mergeShippedAssetFiles` (assemble.ts) is the single union.
