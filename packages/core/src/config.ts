@@ -166,6 +166,28 @@ export type MountState = (typeof MOUNT_STATES)[number];
 
 // ─── Global Config Schema (XDG / $LORE_CONFIG_HOME) ──────────────────────────
 
+// ─── Context Fragments Config (spec-context-fragments-config-driven-layered-rule-injection D3/D11) ──
+
+/**
+ * `context.language` + `context.fragments.disable` — the subset shared by the
+ * project (`.lore/config.yaml`) and global (XDG) config layers. Which layer an
+ * outlet reads is decided by `resolveContextConfig` (context-fragments.ts), not here.
+ * @invariant strict — an unknown key under `fragments` fails loud.
+ */
+export const ContextFragmentsSettingsSchema = z
+  .object({
+    /** ISO-ish language code (`zh`/`en`/`ja`); absent = no language fragment selected. */
+    language: z.string().min(1).optional(),
+    fragments: z
+      .object({
+        /** Fragment ids excluded from selection at the outlets this layer reaches. */
+        disable: z.array(z.string().min(1)).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 /**
  * Global user-level Lore config (SPEC-003 §6.2).
  * Loaded from the first existing path in XDG resolution order, where step 3
@@ -190,6 +212,8 @@ export const GlobalLoreConfigSchema = z
      * single-project mode, unchanged from pre-SPEC-078 behavior (R-15).
      */
     dashboard: DashboardConfigSchema.optional(),
+    /** Context-fragment settings, user-scope subset (D11): language + fragments.disable. */
+    context: ContextFragmentsSettingsSchema.optional(),
   })
   .strict();
 
@@ -1122,6 +1146,10 @@ export type SetupConfig = z.infer<typeof SetupConfigSchema>;
  */
 export const contextConfigSchema = z
   .object({
+    /** Context-fragment language code (spec-context-fragments D3). Absent = none. */
+    language: z.string().min(1).optional(),
+    /** Context-fragment controls (D11): `disable` lists fragment ids to drop at project-reaching outlets. */
+    fragments: ContextFragmentsSettingsSchema.shape.fragments,
     memory_files: z
       .object({
         /** `false` disables the memory-file line/byte ceiling lint entirely. Default: true. */

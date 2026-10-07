@@ -1,0 +1,146 @@
+/**
+ * Context fragments — browser-safe types, schema, config resolution and cap constants.
+ * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D11, D14).
+ *
+ * @invariant Pure module: NO Node builtin imports (default-barrel browser-safety rule,
+ *   see packages/core/src/CLAUDE.md). Discovery / rendering live in packages/lore.
+ * @invariant No silent defaults: frontmatter fields are required unless marked optional;
+ *   an unset language resolves to `null`, never a made-up default.
+ */
+import { z } from "zod";
+
+// ─── Cap constants (D6, GH #20: hook strings over 10_000 chars are silently truncated) ───
+
+/** Claude Code truncates a hook-emitted string above this many characters. */
+export const HOOK_STRING_CAP = 10_000;
+/** Reserved for the subagent pointer line appended after fragments. */
+export const POINTER_CEILING = 600;
+/** Reserved for the truncation/budget notice appended after session fragments. */
+export const NOTICE_RESERVE = 400;
+/** Max fragment chars at hook:subagent-start (HOOK_STRING_CAP - POINTER_CEILING). */
+export const SUBAGENT_FRAGMENT_CAP = HOOK_STRING_CAP - POINTER_CEILING;
+/** Max fragment chars at hook:session-start (HOOK_STRING_CAP - NOTICE_RESERVE). */
+export const SESSION_FRAGMENT_CAP = HOOK_STRING_CAP - NOTICE_RESERVE;
+
+// ─── Language names (D3) ───
+
+/** Language code → name written into Claude Code's `language` setting. */
+export const LANGUAGE_NAMES = {
+  zh: "Chinese",
+  en: "English",
+  ja: "Japanese",
+} as const;
+
+// ─── Fragment frontmatter ───
+
+/** `main` or `subagent:*` or `subagent:<agent_type>`. */
+export const AUDIENCE_PATTERN = /^(main|subagent:(\*|[A-Za-z0-9_:-]+))$/;
+
+export const FRAGMENT_MODES = ["static", "dynamic"] as const;
+
+export const FragmentFrontmatterSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    audience: z.array(z.string().regex(AUDIENCE_PATTERN, "audience must be 'main' or 'subagent:<*|agent_type>'")).min(1),
+    mode: z.enum(FRAGMENT_MODES),
+    when: z.object({ language: z.array(z.string().min(1)).min(1).optional() }).strict().optional(),
+  })
+  .strict();
+
+export type FragmentFrontmatter = z.infer<typeof FragmentFrontmatterSchema>;
+export type Audience = FragmentFrontmatter["audience"][number];
+export type FragmentMode = (typeof FRAGMENT_MODES)[number];
+
+/** A discovered fragment: validated frontmatter + body + where it came from. */
+export interface Fragment {
+  readonly frontmatter: FragmentFrontmatter;
+  readonly body: string;
+  readonly layer: "shipped" | "project";
+  readonly path: string;
+}
+
+// ─── Outlets & config resolution (D11, D14) ───
+
+export const OUTLET_IDS = [
+  "claude-md:project",
+  "claude-md:user",
+  "hook:session-start",
+  "hook:subagent-start",
+] as const;
+export type OutletId = (typeof OUTLET_IDS)[number];
+
+/** Structural subset of project / global config this module reads (avoids a config.ts import cycle). */
+export interface ContextConfigLayer {
+  readonly context?: {
+    readonly language?: string;
+    readonly fragments?: { readonly disable?: readonly string[] };
+  };
+}
+
+export type LanguageSource = "global" | "project" | "none";
+
+export interface ResolvedContextConfig {
+  readonly language: string | null;
+  readonly languageSource: LanguageSource;
+  readonly disabled: ReadonlySet<string>;
+}
+
+/**
+ * Resolve the effective language + disabled ids for one outlet.
+ * - claude-md:user    → GLOBAL layer only
+ * - claude-md:project → PROJECT layer only
+ * - hook:*            → project language over global; disable lists unioned
+ * Pure: never mutates its inputs.
+ */
+export function resolveContextConfig(
+  global: ContextConfigLayer,
+  project: ContextConfigLayer,
+  outlet: OutletId,
+): ResolvedContextConfig {
+  const g = global.context ?? {};
+  const p = project.context ?? {};
+  const gDisable = g.fragments?.disable ?? [];
+  const pDisable = p.fragments?.disable ?? [];
+
+  switch (outlet) {
+    case "claude-md:user":
+      return {
+        language: g.language ?? null,
+        languageSource: g.language !== undefined ? "global" : "none",
+        disabled: new Set(gDisable),
+      };
+    case "claude-md:project":
+      return {
+        language: p.language ?? null,
+        languageSource: p.language !== undefined ? "project" : "none",
+        disabled: new Set(pDisable),
+      };
+    case "hook:session-start":
+    case "hook:subagent-start": {
+      const language = p.language ?? g.language ?? null;
+      const languageSource: LanguageSource =
+        p.language !== undefined ? "project" : g.language !== undefined ? "global" : "none";
+      return { language, languageSource, disabled: new Set([...gDisable, ...pDisable]) };
+    }
+    default: {
+      const unreachable: never = outlet;
+      throw new Error(`resolveContextConfig: unknown outlet ${String(unreachable)}`);
+    }
+  }
+}
+
+// ─── `when` matchers (D3) ───
+
+/** Selection context a `when` clause is evaluated against. */
+export interface WhenContext {
+  readonly language: string | null;
+}
+
+/**
+ * Registry of `when` key → predicate. A fragment with a `when` key absent from this
+ * registry must be refused by the caller (fail loud), never silently matched.
+ */
+export const WHEN_MATCHERS: Readonly<Record<string, (allowed: readonly string[], ctx: WhenContext) => boolean>> = {
+  language: (allowed, ctx) => ctx.language !== null && allowed.includes(ctx.language),
+};

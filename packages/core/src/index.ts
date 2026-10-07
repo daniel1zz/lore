@@ -80,3 +80,4 @@ export * from "./memory-markers.js";
 export * from "./memory-file-sections.js";
 export * from "./fs-ports.js";
 export * from "./trace.js";
+export * from "./context-fragments.js";
