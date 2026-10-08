@@ -29,7 +29,7 @@
  *         returns ok:false (code VALIDATION_ERROR). Two concurrent calls must never both win the
  *         last slot.
  *       - `listAcExemptions()` -> Promise<Result<AcExemptionRow[], LoreError>>
- *         `AcExemptionRow = { spec_id, ac_id, reason, expires_at, granted_by, granted_at }`.
+ *         `AcExemptionRow = { doc_id, ac_id, reason, expires_at, granted_by, granted_at }`.
  *
  * Dimensions: HAPPY (grant, counts), NEGATIVE (no reason / no expiry / over cap), BOUNDARY
  * (cap exactly reached, 2 vs 3 of 20), STATE (expired excluded from active), ERROR (unknown AC),
@@ -222,7 +222,7 @@ describe("AcExemptionService: 10% cap", () => {
     const s = cappedStore(store);
     const now = new Date().toISOString();
     const rows = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
-      spec_id: "SPEC1",
+      doc_id: "SPEC1",
       ac_id: `AC-E-${n}`,
       reason: "r",
       expires_at: inDays(30),

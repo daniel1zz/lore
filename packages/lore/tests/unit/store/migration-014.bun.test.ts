@@ -3,7 +3,7 @@
  * @task task-skill-test-red-migration-014-indexes-backfill-and-mismatch (RED; paired impl = migration-014 task)
  *
  * Tests for migration-014: rule_registry gains `lifecycle` + `version`; new tables
- * `ac_cites(spec_id, ac_id, rule_id)`, `rule_depends(leaf_id, rule_id)` and an empty
+ * `ac_cites(doc_id, ac_id, rule_id)`, `rule_depends(leaf_id, rule_id)` and an empty
  * `ac_exemptions`; all backfilled FROM THE DOCUMENTS inside the migration. Status reports any
  * index-vs-document disagreement as a count. Runner: `bun test` (bun:sqlite) — never vitest.
  *
@@ -199,7 +199,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
   function snapshot(db: Database): Record<string, unknown[]> {
     return {
       registry: db.query("SELECT * FROM rule_registry ORDER BY n").all(),
-      cites: db.query("SELECT * FROM ac_cites ORDER BY spec_id, ac_id, rule_id").all(),
+      cites: db.query("SELECT * FROM ac_cites ORDER BY doc_id, ac_id, rule_id").all(),
       depends: db.query("SELECT * FROM rule_depends ORDER BY leaf_id, rule_id").all(),
       exemptions: db.query("SELECT * FROM ac_exemptions").all(),
     };
@@ -250,14 +250,14 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     store.close();
   });
 
-  it("HAPPY: ac_cites has exactly the 3 citing criteria as (spec_id, ac_id, rule_id) rows; the uncited AC adds none", async () => {
+  it("HAPPY: ac_cites has exactly the 3 citing criteria as (doc_id, ac_id, rule_id) rows; the uncited AC adds none", async () => {
     await seedSchema13();
     const store = new SQLiteStore(path);
-    const rows = store.getDatabase().query("SELECT spec_id, ac_id, rule_id FROM ac_cites ORDER BY spec_id, ac_id").all();
+    const rows = store.getDatabase().query("SELECT doc_id, ac_id, rule_id FROM ac_cites ORDER BY doc_id, ac_id").all();
     expect(rows).toEqual([
-      { spec_id: SPEC_1, ac_id: "AC-1", rule_id: "BR-1" },
-      { spec_id: SPEC_1, ac_id: "AC-2", rule_id: "BR-2" },
-      { spec_id: SPEC_2, ac_id: "AC-1", rule_id: "BR-4" },
+      { doc_id: SPEC_1, ac_id: "AC-1", rule_id: "BR-1" },
+      { doc_id: SPEC_1, ac_id: "AC-2", rule_id: "BR-2" },
+      { doc_id: SPEC_2, ac_id: "AC-1", rule_id: "BR-4" },
     ]);
     store.close();
   });
@@ -314,7 +314,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     await seedSchema13();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(db.prepare("DELETE FROM ac_cites WHERE spec_id = ? AND ac_id = 'AC-2'").run(SPEC_1).changes).toBe(1);
+    expect(db.prepare("DELETE FROM ac_cites WHERE doc_id = ? AND ac_id = 'AC-2'").run(SPEC_1).changes).toBe(1);
     expect((await statusOf(store))["index_mismatch"]).toBe(1);
     store.close();
   });
@@ -323,7 +323,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     await seedSchema13();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    db.prepare("INSERT INTO ac_cites (spec_id, ac_id, rule_id) VALUES (?, 'AC-3', 'BR-5')").run(SPEC_1);
+    db.prepare("INSERT INTO ac_cites (doc_id, ac_id, rule_id) VALUES (?, 'AC-3', 'BR-5')").run(SPEC_1);
     db.prepare("DELETE FROM rule_depends WHERE leaf_id = ? AND rule_id = 'BR-2'").run(LEAF_B);
     expect((await statusOf(store))["index_mismatch"]).toBe(2);
     store.close();
