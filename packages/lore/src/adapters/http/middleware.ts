@@ -74,6 +74,9 @@ export function loreErrorToStatus(error: LoreError): number {
     // reason: BUDGET_EXCEEDED (spec-context-fragments D6) is a request-rejected-as-invalid
     // outcome — every fragment is valid, the sum is over the cap; no HTTP route produces it today.
     case "BUDGET_EXCEEDED":
+    // reason: AC_WRITE_NOT_VIA_AC_VERB is a request rejected as invalid by a dedicated-writer
+    // guard (same family as VALIDATION_ERROR). Source: spec-baseline-slice-2 §C3.
+    case "AC_WRITE_NOT_VIA_AC_VERB":
       return 422;
     case "DELETE_REQUIRES_CONFIRM":
       return 400;

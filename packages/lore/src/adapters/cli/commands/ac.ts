@@ -179,7 +179,7 @@ import { defineCommand } from "citty";
 import { existsSync } from "fs";
 import { dirname } from "path";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
 import type { AcService, AcListResult, DeclarePathOpts, SetCriterionPatch } from "../../../service/ac-service.js";
@@ -213,6 +213,10 @@ export default defineCommand({
     add: defineCommand({
       meta: { name: "add", description: "Append a new acceptance criterion to a spec" },
       args: {
+        by: {
+          type: "string",
+          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
+        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -380,6 +384,10 @@ export default defineCommand({
           "Cite (or --remove) baseline rule ids on one criterion — report-only, never demotes an approved spec",
       },
       args: {
+        by: {
+          type: "string",
+          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
+        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -415,6 +423,7 @@ export default defineCommand({
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
+            { by: resolveActor(typeof args.by === "string" ? args.by : undefined) },
           );
 
           if (!result.ok) {
@@ -454,6 +463,10 @@ export default defineCommand({
         description: "Remove a declared acceptance criterion (fails if evidence still references it)",
       },
       args: {
+        by: {
+          type: "string",
+          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
+        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -478,6 +491,7 @@ export default defineCommand({
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
+            by: resolveActor(typeof args.by === "string" ? args.by : undefined),
           });
 
           if (!result.ok) {
@@ -509,6 +523,10 @@ export default defineCommand({
         description: "Edit one declared acceptance criterion in place (id/mode are NOT editable)",
       },
       args: {
+        by: {
+          type: "string",
+          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
+        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -785,6 +803,7 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
 function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string): DeclarePathOpts {
   const reason = args["allow-missing-path"];
   return {
+    by: resolveActor(typeof args["by"] === "string" ? args["by"] : undefined),
     pathContext: {
       fileExists: existsSync,
       cwd: process.cwd(),

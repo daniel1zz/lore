@@ -160,23 +160,14 @@
  * adapter-agnostic and reusable the moment a future task threads
  * `caller_cwd` through `lore_set`/`lore_link`/`lore_unlink`.
  *
- * ⛔ NO AC-DECLARING TOOL EXISTS ON THIS SURFACE (measured while wiring D8's
- * `--allow-missing-path` escape into production, task-wire-allow-missing-
- * path-and-the-unredeemed-declaration, spec-oracle-executability-a-runner-s-
- * discovery-refusal-is-not-a §D8) — there is no `lore_ac_add`/`lore_ac_set`
- * registered anywhere below (grep `"lore_ac` in this file: zero hits). `lore
- * ac add`/`ac set` (`../cli/commands/ac.ts`) are the ONLY writers of
- * `spec.extra.acceptance_criteria`; `lore_set` cannot reach them either — it
- * replaces `extra` wholesale (this module's own Key Invariants), the same
- * reason `extra.file_anchors`/`extra.ac_scope`/etc. all have dedicated
- * writers instead. This is a PRE-EXISTING gap, not introduced by the D8
- * wiring — recorded explicitly here per that task's own instruction ("if MCP
- * genuinely has no AC-declaring tool, say so rather than silently skipping")
- * rather than fabricating a tool this task was not scoped to design. An MCP
- * caller therefore cannot exercise the D8 escape at all today; the CLI/MCP
- * gate-parity invariant this module's CLAUDE.md documents ("gates run in the
- * SERVICE layer so CLI/MCP/HTTP writes are gated identically") does not (yet)
- * apply to D8, because MCP has no write path to be gated in the first place.
+ * ⛔ NO AC-DECLARING TOOL EXISTS ON THIS SURFACE (there is no `lore_ac_add`/`lore_ac_set`;
+ * `lore ac add|set|rm|cite` — `../cli/commands/ac.ts` — are the ONLY writers of
+ * `spec.extra.acceptance_criteria`). `lore_set` replaces `extra` wholesale, so it could
+ * otherwise rewrite the criteria; it cannot: `CorpusService.set` routes every write through
+ * `service/ac-write-chokepoint.ts::applyAcChange` and refuses a changed array with
+ * `AC_WRITE_NOT_VIA_AC_VERB` (a byte-identical echo of the stored array passes). The refusal
+ * lives in the SERVICE layer, so this adapter only renders it as `isError` — it has no gate
+ * of its own. The D8 `--allow-missing-path` escape remains unreachable from MCP (no AC verb).
  *
  * Architecture: Tools with input use the `registerToolWithArgs` helper defined below, which:
  *   1. Calls `server.tool(name, desc, handler)` in 3-arg form (avoids ZodRawShapeCompat type bomb)

@@ -120,6 +120,10 @@ export function exitCode(error: LoreError): number {
     // minting a new code. Source: spec-context-fragments D8, AC-CF-13.
     case "CONFLICT":
       return 5;
+    // reason: AC_WRITE_NOT_VIA_AC_VERB is an input rejected by a dedicated-writer guard — same
+    // bucket as the VALIDATION_ERROR it parallels (exit 4). Source: spec-baseline-slice-2 §C3.
+    case "AC_WRITE_NOT_VIA_AC_VERB":
+      return 4;
     case "BUDGET_EXCEEDED":
       // reason: exit 3 — a failed budget CHECK on well-formed input, matching the `--check-*`
       // failure convention (`lore status --check-*` exits 3), not 4: 4 means the input itself
@@ -315,6 +319,8 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
       return `Error: ${error.message}\n  Nothing was written to ${error.path}; re-run the command to retry against its current bytes.`;
     case "BUDGET_EXCEEDED":
       return `Error: ${error.message}`;
+    case "AC_WRITE_NOT_VIA_AC_VERB":
+      return `Error [${error.code}]: ${error.message}`;
     case "RATE_LIMITED":
       return `Error: ${error.message}\n  Rate limit resets at epoch ${String(error.reset)} — wait before retrying.`;
     default: {

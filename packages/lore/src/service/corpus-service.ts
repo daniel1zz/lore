@@ -6,6 +6,7 @@
 
 import { ulid } from "ulidx";
 import { err, ok, DEDICATED_EXTRA_KEYS, type Result } from "@lore/core";
+import { applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
 // Node-only-subpath-gated purely for the browser-safety barrel-isolation
@@ -1101,6 +1102,12 @@ export class CorpusService {
 
     const data = parsed.data;
 
+    // AC write chokepoint (spec-baseline-slice-2 §C3, AC-BLS2-1): a doc is born with NO criteria —
+    // they are declared afterwards through `lore ac add`, the only sanctioned writer. Runs before
+    // any store write so a refused create leaves no doc behind.
+    const acGate = applyAcChange("wholesale", undefined, data.extra);
+    if (!acGate.ok) return acGate;
+
     // SPEC-079 G2 — resolved once per call, reused for this create's audit entry.
     const resolvedActor = this.resolveWriteActor(opts?.by);
 
@@ -2170,6 +2177,14 @@ export class CorpusService {
           value: parsedPatch.data.extra,
         });
       }
+    }
+
+    // AC write chokepoint (spec-baseline-slice-2 §C3, AC-BLS2-1): a wholesale `extra` that changes
+    // `acceptance_criteria` is refused — only the `AcService` verbs may change it. Placed in
+    // `set()` so CLI `lore set`, MCP `lore_set` and HTTP PATCH inherit it with no adapter copy.
+    if (parsedPatch.data.extra !== undefined) {
+      const acGate = applyAcChange("wholesale", existing.extra, parsedPatch.data.extra, existing.id);
+      if (!acGate.ok) return acGate;
     }
 
     // Dedicated-verb replace guard (spec-baseline-slice-1-rules-with-permanent-ids-ac-citations
