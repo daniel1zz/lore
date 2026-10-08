@@ -1,0 +1,337 @@
+/**
+ * RED tests for the AC write chokepoint (baseline slice 2a §C3, closes #36 for ACs) —
+ * task-skill-test-red-ac-write-chokepoint-on-every-entry-point-ac. Paired impl: C3.
+ *
+ * SPEC (C3): every write that changes `extra.acceptance_criteria` passes through ONE service
+ * function. A write that does not come through the AcService verbs is refused with
+ * `AC_WRITE_NOT_VIA_AC_VERB` unless its AC array is byte-identical to the stored one.
+ *
+ * PINNED CONTRACT for C3 (the implementer must satisfy exactly this surface):
+ *  1. Refusal code string is `AC_WRITE_NOT_VIA_AC_VERB`, returned as `Result.error.code` by
+ *     `CorpusService.set` and `CorpusService.create`; surfaced verbatim by the MCP `lore_set`
+ *     handler (error text carries the code) and by HTTP PATCH `/api/docs/:id`
+ *     (`{ ok: false, error: { code } }`). A refused write leaves the doc (extra, version,
+ *     status) byte-for-byte unchanged.
+ *  2. "Byte-identical" = the `acceptance_criteria` value in the patch/extra serialises
+ *     (JSON.stringify) identically to the stored one; other `extra` keys may change freely.
+ *  3. AcService verbs accept the calling actor as `opts.by` (add/set: 3rd/4th arg opts;
+ *     cite: 5th arg opts) and write that string as the audit row's `actor` instead of the
+ *     hard-coded "system".
+ *
+ * Dimensions: HAPPY (identical array accepted; verbs accepted), NEGATIVE (3 entry points +
+ * create refuse), BOUNDARY (reordered / one-char-changed / removed array is a change),
+ * STATE (refused write leaves the doc untouched), REGRESSION (the stale MCP comment claim).
+ *
+ * @spec_ref AC-BLS2-1
+ */
+
+import { describe, it, expect } from "vitest";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { NoOpTelemetry } from "@lore/core";
+import type { CreateDocInput, DocId } from "@lore/core";
+import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { CorpusService } from "../../../src/service/corpus-service.js";
+import { AcService } from "../../../src/service/ac-service.js";
+import { registerTools } from "../../../src/adapters/mcp/tools.js";
+import { handleApiRoute } from "../../../src/adapters/http/routes.js";
+import type { App } from "../../../src/app.js";
+import type { ActorContext } from "../../../src/adapters/http/auth.js";
+
+const REFUSAL = "AC_WRITE_NOT_VIA_AC_VERB";
+const CALLER = "agent:chokepoint-caller";
+
+const AC = (id: string, statement = "Does the thing") => ({
+  id,
+  statement,
+  verify: { mode: "script", oracle: "test", command: "bun test x" },
+});
+
+// ─── Fixtures ────────────────────────────────────────────────────────────────
+
+async function setup() {
+  const store = new InMemoryStore();
+  const cs = new CorpusService(store);
+  const ac = new AcService(store);
+  const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
+  if (!prd.ok) throw new Error("prd");
+  const spec = await cs.create({
+    type: "spec",
+    title: "S",
+    parent_id: prd.value.id,
+    content: "body",
+  } as CreateDocInput);
+  if (!spec.ok) throw new Error("spec");
+  const specId = spec.value.id;
+  for (const c of [AC("AC-W-1"), AC("AC-W-2", "Second thing")]) {
+    const added = await ac.addCriterion(specId, c);
+    if (!added.ok) throw new Error(`seed ac: ${JSON.stringify(added.error)}`);
+  }
+  const approved = await store.update(specId, { status: "approved" });
+  if (!approved.ok) throw new Error("approve");
+  return { store, cs, ac, specId };
+}
+
+async function stored(store: InMemoryStore, specId: string) {
+  const d = await store.find(specId as DocId);
+  if (!d.ok || d.value === null) throw new Error("find");
+  return d.value;
+}
+
+/** Serialised snapshot of everything a refused write must not touch. */
+async function fingerprint(store: InMemoryStore, specId: string): Promise<string> {
+  const d = await stored(store, specId);
+  const v = await store.findVersions(specId as DocId);
+  if (!v.ok) throw new Error("versions");
+  return JSON.stringify({ extra: d.extra, version: d.version, status: d.status, versions: v.value.length });
+}
+
+const CHANGED = [AC("AC-W-1", "A different statement"), AC("AC-W-2", "Second thing")];
+
+// ─── MCP / HTTP harness (same wiring as mcp-tools.test.ts / http/routes.test.ts) ──
+
+function appFor(cs: CorpusService): App {
+  // MOCK RISK: every service other than corpusService is a null-cast stub; lore_set / PATCH only
+  // reach corpusService, so this hides nothing about the path under test.
+  return {
+    corpusService: cs,
+    telemetry: new NoOpTelemetry(),
+    callerSurface: "cli" as const,
+    resolveAiDefault: () => ({ ai: false, source: "cli_flag" as const }),
+    close: () => undefined,
+  } as unknown as App;
+}
+
+type McpServerInternal = {
+  _registeredTools: Record<
+    string,
+    { handler: (args: Record<string, unknown>, extra: unknown) => Promise<CallToolResult> }
+  >;
+};
+
+function mcpSet(cs: CorpusService) {
+  const server = new McpServer({ name: "test", version: "0.0.0" });
+  registerTools(server, appFor(cs));
+  const tool = (server as unknown as McpServerInternal)._registeredTools["lore_set"];
+  if (!tool) throw new Error("lore_set not registered");
+  return (args: Record<string, unknown>) => tool.handler(args, {} as unknown);
+}
+
+function mcpText(r: CallToolResult): string {
+  const c = r.content[0];
+  if (!c || c.type !== "text") throw new Error("Expected text content");
+  return c.text;
+}
+
+const HTTP_ACTOR: ActorContext = { name: "http-agent", session_id: "s" };
+
+async function httpPatch(cs: CorpusService, id: string, body: unknown) {
+  const url = new URL(`http://localhost/api/docs/${id}`);
+  const req = new Request(url.toString(), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const res = await handleApiRoute(req, url, appFor(cs), HTTP_ACTOR);
+  if (res === null) throw new Error("route not handled");
+  return { status: res.status, body: (await res.json()) as { ok: boolean; error?: { code?: string } } };
+}
+
+// ─── NEGATIVE: every non-verb entry point refuses a changed AC array ─────────
+
+describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
+  it("CorpusService.set with wholesale extra holding changed criteria is refused with AC_WRITE_NOT_VIA_AC_VERB", async () => {
+    const { store, cs, specId } = await setup();
+    const res = await cs.set(specId, { extra: { acceptance_criteria: CHANGED } });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.code).toBe(REFUSAL);
+  });
+
+  it("a refused CorpusService.set leaves extra, version, status and version log unchanged", async () => {
+    const { store, cs, specId } = await setup();
+    const before = await fingerprint(store, specId);
+    await cs.set(specId, { extra: { acceptance_criteria: CHANGED } });
+    expect(await fingerprint(store, specId)).toBe(before);
+  });
+
+  it("MCP lore_set with changed criteria is refused with the same code", async () => {
+    const { cs, specId } = await setup();
+    const res = await mcpSet(cs)({ id_or_slug: specId, extra: { acceptance_criteria: CHANGED } });
+    expect(res.isError).toBe(true);
+    expect(mcpText(res)).toContain(REFUSAL);
+  });
+
+  it("a refused MCP lore_set leaves the spec unchanged", async () => {
+    const { store, cs, specId } = await setup();
+    const before = await fingerprint(store, specId);
+    await mcpSet(cs)({ id_or_slug: specId, extra: { acceptance_criteria: CHANGED } });
+    expect(await fingerprint(store, specId)).toBe(before);
+  });
+
+  it("HTTP PATCH /api/docs/:id with changed criteria is refused with the same code", async () => {
+    const { cs, specId } = await setup();
+    const res = await httpPatch(cs, specId, { extra: { acceptance_criteria: CHANGED } });
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error?.code).toBe(REFUSAL);
+  });
+
+  it("a refused HTTP PATCH leaves the spec unchanged", async () => {
+    const { store, cs, specId } = await setup();
+    const before = await fingerprint(store, specId);
+    await httpPatch(cs, specId, { extra: { acceptance_criteria: CHANGED } });
+    expect(await fingerprint(store, specId)).toBe(before);
+  });
+
+  it("CorpusService.create with acceptance_criteria in extra is refused with the same code", async () => {
+    const { cs } = await setup();
+    const prd = await cs.create({ type: "prd", title: "P2", content: "root" } as CreateDocInput);
+    if (!prd.ok) throw new Error("prd");
+    const res = await cs.create({
+      type: "spec",
+      title: "Born with ACs",
+      parent_id: prd.value.id,
+      content: "body",
+      extra: { acceptance_criteria: [AC("AC-N-1")] },
+    } as CreateDocInput);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.code).toBe(REFUSAL);
+  });
+
+  it("a refused create does not leave a doc behind", async () => {
+    const { store, cs } = await setup();
+    const prd = await cs.create({ type: "prd", title: "P3", content: "root" } as CreateDocInput);
+    if (!prd.ok) throw new Error("prd");
+    await cs.create({
+      type: "spec",
+      title: "Ghost Spec",
+      parent_id: prd.value.id,
+      content: "body",
+      extra: { acceptance_criteria: [AC("AC-N-2")] },
+    } as CreateDocInput);
+    const listed = await store.findMany({ type: "spec" });
+    if (!listed.ok) throw new Error("list");
+    expect(listed.value.some((d) => d.title === "Ghost Spec")).toBe(false);
+  });
+});
+
+// ─── BOUNDARY: what counts as "changed" ──────────────────────────────────────
+
+describe("AC write chokepoint — change detection boundaries (AC-BLS2-1)", () => {
+  it("a reordered criteria array is a change and is refused", async () => {
+    const { cs, specId } = await setup();
+    const d = await cs.set(specId, {
+      extra: { acceptance_criteria: [AC("AC-W-2", "Second thing"), AC("AC-W-1")] },
+    });
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.error.code).toBe(REFUSAL);
+  });
+
+  it("dropping all criteria via wholesale extra is a change and is refused", async () => {
+    const { cs, specId } = await setup();
+    const d = await cs.set(specId, { extra: { acceptance_criteria: [] } });
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.error.code).toBe(REFUSAL);
+  });
+
+  it("appending a criterion via wholesale extra is a change and is refused", async () => {
+    const { cs, specId } = await setup();
+    const d = await cs.set(specId, {
+      extra: { acceptance_criteria: [AC("AC-W-1"), AC("AC-W-2", "Second thing"), AC("AC-W-3")] },
+    });
+    expect(d.ok).toBe(false);
+    if (d.ok) return;
+    expect(d.error.code).toBe(REFUSAL);
+  });
+});
+
+// ─── HAPPY: byte-identical array is accepted ─────────────────────────────────
+
+describe("AC write chokepoint — byte-identical criteria accepted (AC-BLS2-1)", () => {
+  it("set carrying the stored criteria byte-identically plus another changed key is accepted and persists that key", async () => {
+    const { store, cs, specId } = await setup();
+    const current = (await stored(store, specId)).extra["acceptance_criteria"];
+    const res = await cs.set(specId, { extra: { acceptance_criteria: current, ac_scope: ["packages/lore"] } });
+    expect(res.ok).toBe(true);
+    const after = await stored(store, specId);
+    expect(after.extra["ac_scope"]).toEqual(["packages/lore"]);
+  });
+
+  it("the accepted byte-identical write leaves the criteria array exactly as stored", async () => {
+    const { store, cs, specId } = await setup();
+    const current = (await stored(store, specId)).extra["acceptance_criteria"];
+    await cs.set(specId, { extra: { acceptance_criteria: current, ac_scope: ["x"] } });
+    const after = await stored(store, specId);
+    expect(JSON.stringify(after.extra["acceptance_criteria"])).toBe(JSON.stringify(current));
+  });
+
+  it("MCP lore_set with byte-identical criteria and a different extra key is accepted", async () => {
+    const { store, cs, specId } = await setup();
+    const current = (await stored(store, specId)).extra["acceptance_criteria"];
+    const res = await mcpSet(cs)({
+      id_or_slug: specId,
+      extra: { acceptance_criteria: current, ac_scope: ["packages/other"] },
+    });
+    expect(res.isError).toBeFalsy();
+  });
+});
+
+// ─── HAPPY / STATE: the verbs are the accepted path, attributed to the caller ──
+
+async function acAuditActors(store: InMemoryStore, specId: string, operation: string): Promise<string[]> {
+  const a = await store.queryAudit({ doc_id: specId });
+  if (!a.ok) throw new Error("audit");
+  return a.value
+    .filter((e) => (e.details as Record<string, unknown>)["operation"] === operation)
+    .map((e) => e.actor);
+}
+
+describe("AC write chokepoint — verbs accepted, actor attributed (AC-BLS2-1)", () => {
+  it("ac add is accepted and its audit row carries the calling actor, not 'system'", async () => {
+    const { store, ac, specId } = await setup();
+    const res = await ac.addCriterion(specId, AC("AC-W-3"), { by: CALLER } as never);
+    expect(res.ok).toBe(true);
+    expect(await acAuditActors(store, specId, "add")).toContain(CALLER);
+  });
+
+  it("ac add audit rows never fall back to 'system' when an actor is supplied", async () => {
+    const { store, ac, specId } = await setup();
+    await ac.addCriterion(specId, AC("AC-W-3"), { by: CALLER } as never);
+    const actors = await acAuditActors(store, specId, "add");
+    expect(actors.filter((a) => a === "system")).toEqual([]);
+  });
+
+  it("ac set is accepted and its audit row carries the calling actor", async () => {
+    const { store, ac, specId } = await setup();
+    const res = await ac.setCriterion(specId, "AC-W-1", { statement: "Reworded statement" }, {
+      by: CALLER,
+    } as never);
+    expect(res.ok).toBe(true);
+    expect(await acAuditActors(store, specId, "set")).toContain(CALLER);
+  });
+
+  it("ac cite is accepted and its audit row carries the calling actor", async () => {
+    const { store, ac, specId } = await setup();
+    const res = await ac.citeCriterion(specId, "AC-W-1", ["BR-1"], {}, { by: CALLER });
+    expect(res.ok).toBe(true);
+    expect(await acAuditActors(store, specId, "cite")).toContain(CALLER);
+  });
+
+  it("two different callers produce two different audit actors (not a hardcoded value)", async () => {
+    const { store, ac, specId } = await setup();
+    await ac.addCriterion(specId, AC("AC-W-3"), { by: "agent:alpha" } as never);
+    await ac.addCriterion(specId, AC("AC-W-4"), { by: "agent:beta" } as never);
+    const actors = await acAuditActors(store, specId, "add");
+    expect(actors).toEqual(expect.arrayContaining(["agent:alpha", "agent:beta"]));
+  });
+
+  it("the verb path still changes the criteria array (the chokepoint admits it)", async () => {
+    const { store, ac, specId } = await setup();
+    await ac.addCriterion(specId, AC("AC-W-3"), { by: CALLER } as never);
+    const after = await stored(store, specId);
+    expect((after.extra["acceptance_criteria"] as unknown[]).length).toBe(3);
+  });
+});
