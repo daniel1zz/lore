@@ -37,6 +37,7 @@ import {
   resolveVerifyEnvConfig,
   resolveVerifyRequireCommandApproval,
   resolveRequirementQuantifiableEnabled,
+  resolveCiteGateRaw,
   resolveAttestationMinRatio,
   resolveTraceEnabled,
   resolveTraceRetentionDays,
@@ -640,6 +641,11 @@ function buildAppFromSqlite(
   // — `close()` falls back to closing immediately, byte-identical to
   // pre-hardening behavior).
   pruneState?: { inFlight?: Promise<void> },
+  // spec-baseline-slice-2 §C4 — the raw `workflow.gates."ac-cite"` entry (`resolveCiteGateRaw`, `@lore/core`),
+  // validated per write by the AC write chokepoint. The composition root ALWAYS arms the citation gate
+  // (even with `undefined`): it then resolves to its default — off without baseline docs, report with
+  // them. Only a bare `new AcService(store)` / `new CorpusService(store)` is ungated.
+  citeGateRaw?: unknown,
 ): App {
   const db = store.getDatabase();
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -657,6 +663,7 @@ function buildAppFromSqlite(
     traceRecorder,
     ledgerAutoApprove,
   );
+  corpusService.setCiteGate(citeGateRaw);
   const outlineService = new OutlineService(store);
   // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
   // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
@@ -816,7 +823,7 @@ function buildAppFromSqlite(
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store),
+    acService: new AcService(store, { citeGate: citeGateRaw }),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
@@ -1013,6 +1020,8 @@ function buildAppFromTurso(
   // parameter JSDoc; the SAME mutable box `pruneTrigger` (above) writes its
   // in-flight promise into, read by `close()` below.
   pruneState?: { inFlight?: Promise<void> },
+  // See buildAppFromSqlite's identical parameter JSDoc.
+  citeGateRaw?: unknown,
 ): App {
   const apiKeyDb = new Database(dbPath);
   // reason: claimTtlMinutes flows into DocSummary.meta's task.claim_stale (SPEC-036 §2
@@ -1029,6 +1038,7 @@ function buildAppFromTurso(
     traceRecorder,
     ledgerAutoApprove,
   );
+  corpusService.setCiteGate(citeGateRaw);
   const outlineService = new OutlineService(store);
   // reason: extracted to a local (see buildAppFromSqlite's identical comment) so
   // VerifyRunnerService can bind its recordVerifiedEvidence method below. 5th arg
@@ -1166,7 +1176,7 @@ function buildAppFromTurso(
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store),
+    acService: new AcService(store, { citeGate: citeGateRaw }),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
@@ -1368,6 +1378,9 @@ export function createApp(
   // to enabled (true) when config/workflow section absent.
   const requirementQuantifiableEnabled = resolveRequirementQuantifiableEnabled(config);
 
+  // Citation gate config entry (spec-baseline-slice-2 §C4) — raw; validated per write by the chokepoint.
+  const citeGateRaw = resolveCiteGateRaw(config);
+
   // Attestation-floor ratio (SPEC-069/SPEC-075) — the SAME resolved value
   // GateEnforcer.resolveAttestationMinRatio feeds attestationFloor, threaded here
   // so VerificationProjectionService's plan Evidence-panel and the plan-close gate
@@ -1487,6 +1500,7 @@ export function createApp(
       ledgerAutoApprove,
       judgmentRequiredTypes,
       pruneState,
+      citeGateRaw,
     );
   }
 
@@ -1591,6 +1605,7 @@ export function createApp(
         ledgerAutoApprove,
         judgmentRequiredTypes,
         pruneState,
+        citeGateRaw,
       ),
     };
   } catch (e) {

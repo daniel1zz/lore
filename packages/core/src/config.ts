@@ -247,6 +247,10 @@ const SyncConfigSchema = z
 
 // ─── Workflow Section Schema ───────────────────────────────────────────────
 
+/** The citation gate's three states (spec-baseline-slice-2 §C4/D5) — SSOT for the schema and the resolver. */
+export const CITE_GATE_MODES = ["off", "report", "enforce"] as const;
+export type CiteGateMode = (typeof CITE_GATE_MODES)[number];
+
 /**
  * Per-checkpoint override for `lore gate` (IoC vertical-slice tech-spec §4.1/§11).
  * `enabled` is OPTIONAL — its absence (and the absence of the whole `gates` map, and
@@ -348,6 +352,17 @@ export const GateCheckpointConfigSchema = z
      * sub-predicates-and`, AC-CP-4).
      */
     foreign_corpus_write: z.object({ enabled: z.boolean().optional() }).strict().optional(),
+    /**
+     * `"ac-cite"`-ONLY three-state citation-gate mode (spec-baseline-slice-2 §C4/D5, AC-BLS2-2).
+     * ⛔ OPPOSITE polarity to the two-state `enabled` keys above ("missing key = enabled"): an
+     * ABSENT `mode` resolves to `off` when the corpus holds no baseline docs and `report`
+     * otherwise (see `resolveCiteGateConfig`, packages/lore/src/service/ac-cite-gate.ts), so an
+     * upgraded consumer corpus is never refused. `enforce` refuses a new/revised criterion that
+     * cites no live rule, but only on an armed branch (`armed_branches`).
+     */
+    mode: z.enum(CITE_GATE_MODES).optional(),
+    /** `"ac-cite"`-ONLY: slugs of baseline docs with `extra.node === "branch"` the gate is armed for. */
+    armed_branches: z.array(z.string().min(1)).optional(),
   })
   .strict();
 
@@ -2594,4 +2609,25 @@ export function resolveSyncCredentials(
   }
 
   return ok({ url: remoteUrl, token });
+}
+
+/**
+ * The raw `workflow.gates."ac-cite"` citation-gate entry — ONLY its `mode` / `armed_branches`
+ * keys (the shared checkpoint `enabled` key is deliberately not honoured here: the gate's
+ * on/off is its three-state `mode`, whose absent default is NOT "enabled").
+ *
+ * @returns `undefined` when neither key is configured (the resolver then applies the
+ *   baseline-presence default); otherwise an object holding just the configured keys, to be
+ *   validated by `resolveCiteGateConfig` (packages/lore) — no validation or defaulting here.
+ */
+export function resolveCiteGateRaw(
+  config: LoreConfig | undefined,
+): { mode?: unknown; armed_branches?: unknown } | undefined {
+  const entry = config?.workflow?.gates?.["ac-cite"];
+  if (entry === undefined) return undefined;
+  if (entry.mode === undefined && entry.armed_branches === undefined) return undefined;
+  return {
+    ...(entry.mode !== undefined ? { mode: entry.mode } : {}),
+    ...(entry.armed_branches !== undefined ? { armed_branches: entry.armed_branches } : {}),
+  };
 }

@@ -123,6 +123,8 @@ export function exitCode(error: LoreError): number {
     // reason: AC_WRITE_NOT_VIA_AC_VERB is an input rejected by a dedicated-writer guard — same
     // bucket as the VALIDATION_ERROR it parallels (exit 4). Source: spec-baseline-slice-2 §C3.
     case "AC_WRITE_NOT_VIA_AC_VERB":
+    // reason: AC_CITE_REQUIRED — input rejected by the citation gate, same bucket (exit 4). Source: spec-baseline-slice-2 §C4.
+    case "AC_CITE_REQUIRED":
       return 4;
     case "BUDGET_EXCEEDED":
       // reason: exit 3 — a failed budget CHECK on well-formed input, matching the `--check-*`
@@ -321,6 +323,8 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
       return `Error: ${error.message}`;
     case "AC_WRITE_NOT_VIA_AC_VERB":
       return `Error [${error.code}]: ${error.message}`;
+    case "AC_CITE_REQUIRED":
+      return renderAcCiteRefusal(error);
     case "RATE_LIMITED":
       return `Error: ${error.message}\n  Rate limit resets at epoch ${String(error.reset)} — wait before retrying.`;
     default: {
@@ -329,6 +333,24 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
       return "Error: An unexpected error occurred.";
     }
   }
+}
+
+/**
+ * Renders the citation gate's refusal: the message, then (when the service attached one) its feeding
+ * pack — up to 5 candidate rules, the paste-ready `lore ac cite` line and the exemption headroom.
+ */
+function renderAcCiteRefusal(error: Extract<LoreError, { code: "AC_CITE_REQUIRED" }>): string {
+  const lines = [`Error [${error.code}]: ${error.message}`];
+  const pack = error.feeding_pack;
+  if (pack !== undefined) {
+    if (pack.candidates.length > 0) {
+      lines.push("  Candidate rules:");
+      for (const c of pack.candidates) lines.push(`    ${c.id}  ${c.statement}`);
+    }
+    lines.push(`  Cite one:  ${pack.cite_line}`);
+    lines.push(`  Exemption headroom: ${String(pack.exemption_headroom)}`);
+  }
+  return lines.join("\n");
 }
 
 // ─── Retry command line (write-contention template's third part) ────────────

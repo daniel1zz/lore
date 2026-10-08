@@ -19,16 +19,11 @@ import type { DocRecord, LoreError, Result } from "@lore/core";
 import type { AcExemptionRow, StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 
-/** Active exemptions may not exceed this share of live criteria. */
-export const EXEMPTION_CAP_RATIO = 0.1;
-
-/**
- * Largest number of active exemptions allowed for `liveCriteria` live criteria: floor(10% x live).
- * Integer arithmetic (`floor(live / 10)`) so 0.1 float error never shifts the boundary.
- */
-export function maxActiveExemptions(liveCriteria: number): number {
-  return Math.floor(liveCriteria / 10);
-}
+// reason: the 10% budget has ONE home, `ac-cite-gate.ts`, because the citation gate's feeding pack reports
+// the remaining headroom and must never disagree with what `grant` enforces. Re-exported so every existing
+// importer of these two names is unchanged.
+import { countLiveCriteria, maxActiveExemptions } from "./ac-cite-gate.js";
+export { EXEMPTION_CAP_RATIO, maxActiveExemptions } from "./ac-cite-gate.js";
 
 /** Input of {@link AcExemptionService.grant}. */
 export interface GrantAcExemptionInput {
@@ -170,6 +165,6 @@ export class AcExemptionService {
   private async countLiveCriteria(): Promise<Result<number, LoreError>> {
     const specs = await this.store.findMany({ type: "spec" });
     if (!specs.ok) return specs;
-    return ok(specs.value.reduce((sum, spec) => sum + criteriaOf(spec).length, 0));
+    return ok(countLiveCriteria(specs.value));
   }
 }

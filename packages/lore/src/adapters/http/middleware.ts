@@ -77,6 +77,9 @@ export function loreErrorToStatus(error: LoreError): number {
     // reason: AC_WRITE_NOT_VIA_AC_VERB is a request rejected as invalid by a dedicated-writer
     // guard (same family as VALIDATION_ERROR). Source: spec-baseline-slice-2 §C3.
     case "AC_WRITE_NOT_VIA_AC_VERB":
+    // reason: AC_CITE_REQUIRED is the citation gate refusing a new/revised criterion — an input
+    // rejected on a business rule, same family as AC_WRITE_NOT_VIA_AC_VERB. Source: spec-baseline-slice-2 §C4.
+    case "AC_CITE_REQUIRED":
       return 422;
     case "DELETE_REQUIRES_CONFIRM":
       return 400;

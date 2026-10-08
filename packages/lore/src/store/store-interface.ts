@@ -64,6 +64,22 @@ export interface UpdateOpts {
   expected_version?: number;
 }
 
+/**
+ * Extras for {@link StoreInterface.updateWithProvenance}, honoured INSIDE its single write transaction.
+ * The citation gate's liveness read must share the citing write's transaction, or a concurrent retire
+ * can commit between the check and the write (spec-baseline-slice-2 §C4/D6, QA-2).
+ */
+export interface ProvenanceWriteExtras {
+  /**
+   * Rule ids that MUST be `live` when the write commits. Read from `rule_registry.lifecycle`
+   * (migration-014) in the SAME transaction as the doc write (InMemoryStore: the baseline leaf docs).
+   * A non-live id returns `AC_CITE_REQUIRED` (its violations name the ids) and NOTHING is written.
+   */
+  require_live_rules?: readonly string[];
+  /** Further audit entries appended in the SAME transaction (e.g. the gate's would-refuse row). */
+  also_audit?: readonly AuditEntry[];
+}
+
 // ─── Filter Types ──────────────────────────────────────────────────────────
 
 export interface StoreFilters {
@@ -662,6 +678,7 @@ export interface StoreInterface {
     opts: UpdateOpts | undefined,
     version: VersionRecord,
     audit: AuditEntry,
+    extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>>;
 
   /**

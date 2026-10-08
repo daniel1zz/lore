@@ -431,6 +431,67 @@ export function acScopeRequiredAtCreate(
   return { ok: false, reason: AC_SCOPE_REQUIRED_REASON, field: AC_SCOPE_REQUIRED_FIELD };
 }
 
+// ─── ac-cite (citation gate, spec-baseline-slice-2 §C4, AC-BLS2-2) ───────────────────────────
+
+/** The `PredicateResult.reason` the citation gate fails with — also the `LoreError` code it surfaces as. */
+export const AC_CITE_REQUIRED_REASON = "AC_CITE_REQUIRED";
+
+/** The `PredicateResult.field` the citation gate fails with. */
+export const AC_CITE_FIELD = "ac-cite";
+
+/** One added or revised criterion offered to the citation gate: its id and the rule ids it cites. */
+export interface AcCiteCandidate {
+  ac_id: string;
+  cites: readonly string[];
+}
+
+/** Lifecycle of every rule a leaf lists, keyed by rule id; an id absent from the map is dangling. */
+export type AcCiteRuleStates = Readonly<Record<string, "live" | "deprecated" | "retired">>;
+
+/**
+ * Every way the candidates fail the citation rule: a candidate citing nothing is `uncited`; each cited id
+ * that is not live is its own violation (`missing` when no leaf lists it, else its lifecycle). A candidate
+ * with at least one violation is refused whole — a criterion that cites a retired rule next to a live one
+ * is still citing a retired rule (spec C4: "cites a missing / deprecated / retired id").
+ *
+ * @param candidates - the added/revised criteria (never untouched legacy ones)
+ * @param ruleStates - lifecycle per rule id, from the baseline leaves
+ * @returns violations in candidate order, then cite order; `[]` when every candidate cites only live rules
+ * @example
+ * findAcCiteViolations([{ ac_id: "AC-1", cites: [] }], {}); // [{ ac_id: "AC-1", reason: "uncited" }]
+ */
+export function findAcCiteViolations(
+  candidates: readonly AcCiteCandidate[],
+  ruleStates: AcCiteRuleStates,
+): Array<{ ac_id: string; rule_id?: string; reason: "uncited" | "missing" | "deprecated" | "retired" }> {
+  const out: Array<{ ac_id: string; rule_id?: string; reason: "uncited" | "missing" | "deprecated" | "retired" }> = [];
+  for (const candidate of candidates) {
+    if (candidate.cites.length === 0) {
+      out.push({ ac_id: candidate.ac_id, reason: "uncited" });
+      continue;
+    }
+    for (const ruleId of candidate.cites) {
+      const state = Object.prototype.hasOwnProperty.call(ruleStates, ruleId) ? ruleStates[ruleId] : undefined;
+      if (state === "live") continue;
+      out.push({ ac_id: candidate.ac_id, rule_id: ruleId, reason: state ?? "missing" });
+    }
+  }
+  return out;
+}
+
+/**
+ * `ac-cite` predicate: passes iff every added/revised criterion cites at least one rule and every cited
+ * rule is live. Pure; whether the gate APPLIES (mode, armed branch) is decided by the caller before it
+ * builds the context — this predicate only measures citations.
+ *
+ * @returns `{ok: true}` or `{ok: false, reason: AC_CITE_REQUIRED_REASON, field: AC_CITE_FIELD}`
+ */
+export function acCiteLive(candidates: readonly AcCiteCandidate[], ruleStates: AcCiteRuleStates): PredicateResult {
+  return findAcCiteViolations(candidates, ruleStates).length === 0
+    ? { ok: true }
+    : { ok: false, reason: AC_CITE_REQUIRED_REASON, field: AC_CITE_FIELD };
+}
+
 /**
  * One sibling task's claim snapshot, precomputed by the CALLER (SPEC-042 §Design
  * Decisions D5 seam pinning) — `stale` is derived from the SAME `nowIso` +

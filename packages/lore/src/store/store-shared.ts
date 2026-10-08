@@ -1319,3 +1319,35 @@ export function buildAcExemptionAlreadyActiveError(docId: string, acId: string):
     value: acId,
   } as LoreError;
 }
+
+// ─── In-transaction rule liveness (citation gate, spec-baseline-slice-2 §C4/D6) ───────────────
+
+/**
+ * Builds the `AC_CITE_REQUIRED` refusal a store raises when, INSIDE the citing write's transaction, a
+ * required rule is not `live` — the check-then-write window closer for the retire-vs-cite race (QA-2).
+ * Shared so SQLiteStore, TursoStore and InMemoryStore word the refusal identically.
+ *
+ * @param docId - the spec whose write is being refused
+ * @param lifecycles - one entry per required rule id: its stored lifecycle, or `null` when no registry
+ *   row / leaf lists it (a dangling id)
+ * @returns the refusal, or `null` when every required rule is live
+ */
+export function buildNonLiveRuleRefusal(
+  docId: string,
+  lifecycles: ReadonlyArray<{ rule_id: string; lifecycle: string | null }>,
+): LoreError | null {
+  const violations: Array<{ rule_id: string; reason: "missing" | "deprecated" | "retired" }> = [];
+  for (const { rule_id, lifecycle } of lifecycles) {
+    if (lifecycle === "live") continue;
+    if (lifecycle === "deprecated" || lifecycle === "retired") violations.push({ rule_id, reason: lifecycle });
+    else violations.push({ rule_id, reason: "missing" });
+  }
+  if (violations.length === 0) return null;
+  const named = violations.map((v) => `${v.rule_id} (${v.reason})`).join(", ");
+  return {
+    code: "AC_CITE_REQUIRED",
+    id: docId,
+    message: `citation gate: the write cites rule(s) that are not live at commit time: ${named}. Nothing was written.`,
+    violations,
+  };
+}
