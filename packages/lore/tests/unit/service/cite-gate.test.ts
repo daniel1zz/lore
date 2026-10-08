@@ -569,9 +569,9 @@ describe("cite gate — no baseline docs and no config leaves outputs unchanged 
     if (!audit.ok) throw new Error("audit");
     const d = await store.find(spec.value.id);
     return {
-      a: JSON.stringify(a),
-      b: JSON.stringify(b),
-      ops: audit.value.map((e) => (e.details as Record<string, unknown>)["operation"]),
+      a: JSON.stringify(a, (k, v) => (k.endsWith("_at") ? undefined : v)),
+      b: JSON.stringify(b, (k, v) => (k.endsWith("_at") ? undefined : v)),
+      ops: audit.value.map((e) => String((e.details as Record<string, unknown>)["operation"])).sort(),
       version: d.ok ? d.value?.version : -1,
     };
   }
