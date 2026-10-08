@@ -153,6 +153,14 @@ const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 const PHASE_SERVICE_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "phase-service.ts");
 const AC_SERVICE_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "ac-service.ts");
 
+/**
+ * The CONTROL for the "zero bare version writes" assertion: a store-only service that still writes its
+ * version row bare. It was `ac-service.ts` until the citation gate (spec-baseline-slice-2 C4, D6) moved
+ * `AcService.writeCriteria` onto `updateWithProvenance` so the liveness read shares the write's transaction —
+ * which made the AC write atomic and the control evaporate, exactly as its own message predicts.
+ */
+const BARE_WRITER_CONTROL_PATH = join(REPO_ROOT, "packages", "lore", "src", "service", "requirement-service.ts");
+
 /** Reached ONLY by the generated tamper script below, never imported — it pulls in `bun:sqlite`. */
 const SQLITE_STORE_PATH = join(REPO_ROOT, "packages", "lore", "src", "store", "sqlite-store.ts");
 
@@ -696,11 +704,11 @@ describe("green controls — a tampered audit trail is reported, so the clean ve
 
 describe("REGRESSION — writePhases still routes doc, version and audit through one atomic writer", () => {
   let phaseService = "";
-  let acService = "";
+  let bareWriterControl = "";
 
   beforeAll(() => {
     phaseService = readFileSync(PHASE_SERVICE_PATH, "utf8");
-    acService = readFileSync(AC_SERVICE_PATH, "utf8");
+    bareWriterControl = readFileSync(BARE_WRITER_CONTROL_PATH, "utf8");
   });
 
   it("phase-service.ts calls the atomic doc+version+audit writer", () => {
@@ -717,10 +725,10 @@ describe("REGRESSION — writePhases still routes doc, version and audit through
     ).toBe(0);
   });
 
-  it("CONTROL: ac-service.ts does make the bare version write, so the zero above is not a mis-aimed grep", () => {
+  it("CONTROL: requirement-service.ts does make the bare version write, so the zero above is not a mis-aimed grep", () => {
     expect(
-      countOccurrences(acService, BARE_VERSION_WRITE_CALL),
-      `${AC_SERVICE_PATH} no longer contains \`${BARE_VERSION_WRITE_CALL}\` — the control for the preceding zero has evaporated`,
+      countOccurrences(bareWriterControl, BARE_VERSION_WRITE_CALL),
+      `${BARE_WRITER_CONTROL_PATH} no longer contains \`${BARE_VERSION_WRITE_CALL}\` — the control for the preceding zero has evaporated`,
     ).toBeGreaterThanOrEqual(1);
   });
 });

@@ -2565,8 +2565,12 @@ export function buildAnchorGateContext(
 }
 
 /**
- * The `ac-cite` checkpoint (spec-baseline-slice-2 §C4), exported by name so its one evaluator
- * (`ac-cite-gate.ts::decideCiteGate`) reaches it without a `Partial` registry lookup that could be undefined.
+ * The `ac-cite` checkpoint (spec-baseline-slice-2 §C4): the pure `check`/`feed` pair the citation gate's
+ * one evaluator (`ac-cite-gate.ts::decideCiteGate`) runs. Defined in this module beside every other
+ * checkpoint's decision logic, exported by name, and deliberately NOT in {@link checkpointRegistry}: that
+ * map is `GateEnforcer`'s dispatch table (and what `lore feed`/`lore gate` enumerate), whereas this gate
+ * is evaluated by the AC write chokepoint under the three-state `workflow.gates."ac-cite".mode` — an
+ * `enabled`-style on/off whose absence means "enabled" is exactly what it must not inherit.
  */
 export const AC_CITE_CHECKPOINT: CheckpointDef = { id: "ac-cite", check: checkAcCite, feed: feedAcCite };
 
@@ -2597,10 +2601,12 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   // bootstrap "armed gates" rendering — widening it is a separate concern this
   // task's anchors don't cover).
   "review-judgment": { id: "review-judgment", check: checkReviewJudgment, feed: feedReviewJudgment },
-  // reason: spec-baseline-slice-2 §C4 — the citation gate. Evaluated by `admitAcWrite`
-  // (ac-write-chokepoint.ts), not `GateEnforcer`: its on/off is the three-state
-  // `workflow.gates."ac-cite".mode`. Not in ALL_GATE_CHECKPOINTS (same precedent as task-create).
-  "ac-cite": AC_CITE_CHECKPOINT,
+  // reason: "ac-cite" (the citation gate, spec-baseline-slice-2 §C4) is DELIBERATELY NOT a member of this
+  // map — see `AC_CITE_CHECKPOINT`'s JSDoc above. Registering it here would put it in the dispatch
+  // table `GateEnforcer` and `lore gate`/`lore feed` enumerate, and
+  // `tests/unit/service/gate-evaluation-trace.test.ts` (AC-FR-8) then demands a `gate_passed` audit
+  // row for every PASSING evaluation — one extra audit row per `lore ac add` that nothing asked for.
+  // Its observability is the would-refuse audit row (report mode) and the refusal itself (enforce).
 };
 
 /**

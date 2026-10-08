@@ -30,9 +30,9 @@
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation §C4, D3-D6, QA-1, QA-5.
  */
 
-import { z } from "zod";
 import {
   CITE_GATE_MODES,
+  CiteGateConfigSchema,
   specAcceptanceCriteriaSchema,
   type AcCiteFeedingPack,
   type AcCiteViolation,
@@ -75,13 +75,6 @@ export class CiteGateConfigError extends Error {
   }
 }
 
-const CiteGateRawSchema = z
-  .object({
-    mode: z.enum(CITE_GATE_MODES).optional(),
-    armed_branches: z.array(z.string().min(1)).optional(),
-  })
-  .strict();
-
 /**
  * Resolve the raw `workflow.gates."ac-cite"` entry into a {@link CiteGateConfig}.
  *
@@ -96,7 +89,7 @@ const CiteGateRawSchema = z
  * resolveCiteGateConfig({ mode: "block" }, true); // throws CiteGateConfigError
  */
 export function resolveCiteGateConfig(raw: unknown, hasBaselineDocs: boolean): CiteGateConfig {
-  const parsed = CiteGateRawSchema.safeParse(raw === undefined ? {} : raw);
+  const parsed = CiteGateConfigSchema.safeParse(raw === undefined ? {} : raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const key = issue !== undefined && issue.path.length > 0 ? `.${issue.path.join(".")}` : "";

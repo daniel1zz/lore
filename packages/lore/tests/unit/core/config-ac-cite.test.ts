@@ -36,7 +36,11 @@ describe("workflow.gates.\"ac-cite\" schema", () => {
     expect(LoreConfigSchema.safeParse(withGate({ armed_branches: [""] })).success).toBe(false);
   });
 
-  it("still parses a gates entry that carries only the legacy `enabled` key", () => {
+  it("rejects the two-state `enabled` key on the ac-cite entry (its switch is the three-state mode)", () => {
+    expect(LoreConfigSchema.safeParse(withGate({ enabled: false })).success).toBe(false);
+  });
+
+  it("still parses every other gates entry that carries only the legacy `enabled` key", () => {
     expect(LoreConfigSchema.safeParse({ ...base, workflow: { gates: { "task-claim": { enabled: false } } } }).success).toBe(true);
   });
 });
@@ -56,6 +60,6 @@ describe("resolveCiteGateRaw", () => {
   it("returns undefined when no config, no workflow, no entry, or neither key is set", () => {
     expect(resolveCiteGateRaw(undefined)).toBeUndefined();
     expect(resolveCiteGateRaw(LoreConfigSchema.parse(base))).toBeUndefined();
-    expect(resolveCiteGateRaw(parsed({ enabled: false }))).toBeUndefined();
+    expect(resolveCiteGateRaw(parsed({}))).toBeUndefined();
   });
 });

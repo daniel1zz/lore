@@ -352,19 +352,34 @@ export const GateCheckpointConfigSchema = z
      * sub-predicates-and`, AC-CP-4).
      */
     foreign_corpus_write: z.object({ enabled: z.boolean().optional() }).strict().optional(),
-    /**
-     * `"ac-cite"`-ONLY three-state citation-gate mode (spec-baseline-slice-2 §C4/D5, AC-BLS2-2).
-     * ⛔ OPPOSITE polarity to the two-state `enabled` keys above ("missing key = enabled"): an
-     * ABSENT `mode` resolves to `off` when the corpus holds no baseline docs and `report`
-     * otherwise (see `resolveCiteGateConfig`, packages/lore/src/service/ac-cite-gate.ts), so an
-     * upgraded consumer corpus is never refused. `enforce` refuses a new/revised criterion that
-     * cites no live rule, but only on an armed branch (`armed_branches`).
-     */
+  })
+  .strict();
+
+/**
+ * The `workflow.gates."ac-cite"` entry — the citation gate's three-state config (spec-baseline-slice-2
+ * §C4/D5, AC-BLS2-2). ⛔ A DIFFERENT SHAPE from {@link GateCheckpointConfigSchema} on purpose: it is not a
+ * two-state "enabled" switch whose absence means "enabled". An ABSENT `mode` resolves to `off` when the
+ * corpus has no baseline docs and `report` otherwise (`resolveCiteGateConfig`,
+ * packages/lore/src/service/ac-cite-gate.ts), so an upgraded consumer corpus is never refused; `enforce`
+ * refuses a new/revised criterion that cites no live rule, but only on an armed branch.
+ * `armed_branches` holds slugs of baseline docs with `extra.node === "branch"`.
+ */
+export const CiteGateConfigSchema = z
+  .object({
     mode: z.enum(CITE_GATE_MODES).optional(),
-    /** `"ac-cite"`-ONLY: slugs of baseline docs with `extra.node === "branch"` the gate is armed for. */
     armed_branches: z.array(z.string().min(1)).optional(),
   })
   .strict();
+
+/**
+ * `workflow.gates`: the one named non-checkpoint entry (`"ac-cite"`, {@link CiteGateConfigSchema}) plus a
+ * catch-all of per-checkpoint entries ({@link GateCheckpointConfigSchema}). A named key wins over the
+ * catch-all, so `ac-cite` is validated ONLY by its own shape and `GateCheckpointConfigSchema` keeps exactly
+ * the seven sub-predicate keys that `tests/e2e/foreign-corpus-write-default.bun.test.ts` pins.
+ */
+const GatesConfigSchema = z
+  .object({ "ac-cite": CiteGateConfigSchema.optional() })
+  .catchall(GateCheckpointConfigSchema);
 
 /**
  * Task execution workflow configuration (SPEC-025) + gate enable/disable overrides.
@@ -394,7 +409,7 @@ const WorkflowConfigSchema = z
     /** Minutes after which a handoff doc is flagged stale by `SessionService.resume`. */
     handoff_ttl_minutes: z.number().int().positive().default(10080),
     /** Per-checkpoint `lore gate` enable/disable overrides. Absent → all enabled. */
-    gates: z.record(z.string(), GateCheckpointConfigSchema).optional(),
+    gates: GatesConfigSchema.optional(),
     /**
      * Staleness-probe behavioral knobs (SPEC-044 §Design Decisions D8) — the DEFAULT
      * batch size and minimum-age threshold `lore review --staleness` applies when the
