@@ -249,9 +249,9 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     const { claim } = claimFromWorktree("scoped-claim", fx.tasks[0]!, "agent:csl-claim", fx.branchX);
     expect(claim.stderr).not.toMatch(/unknown (flag|option)|unrecognized/i);
     expect(claim.exitCode).toBe(0);
-    const doc = JSON.parse(mustRun(["get", fx.tasks[0]!, "--json"], fx.repo).stdout) as {
-      extra: { claim?: { corpus_scope?: unknown } };
-    };
+    const doc = (JSON.parse(mustRun(["get", fx.tasks[0]!, "--json"], fx.repo).stdout) as {
+      data: { doc: { extra: { claim?: { corpus_scope?: unknown } } } };
+    }).data.doc;
     expect(JSON.stringify(doc.extra.claim?.corpus_scope ?? null)).toContain(fx.branchX);
   });
 
