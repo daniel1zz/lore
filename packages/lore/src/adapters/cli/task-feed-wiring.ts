@@ -76,6 +76,9 @@ import type { Result, LoreError, LoreConfig, EvidenceEntry, AcCoverageFact, DocR
 import type { App } from "../../app.js";
 import { extractSpecCriteria } from "../../flows/phase-status-flow.js";
 import { isNonPlanParentError } from "../../service/checkpoint-registry.js";
+import { selectGoverningRules } from "../../service/governing-rules.js";
+import type { GoverningRules } from "../../service/governing-rules.js";
+import { deriveAcCites } from "../../store/index-rows.js";
 import type {
   TaskFeedFlowDeps,
   TaskBundle,
@@ -163,6 +166,35 @@ function extractEvidenceTolerant(
  * two sections instead of a fabricated plan name.
  */
 const NO_GOVERNING_PLAN_SENTINEL = "(none — ad-hoc task, no governing plan)";
+
+/**
+ * Baseline rules governing a task, capped at 40 (BL-15, spec baseline-slice-2 C6).
+ *
+ * Reads through `app.corpusService` (the one store handle every `App` carries, so a bare test App
+ * works) and runs the pure `rule-index-queries` over it — the SAME queries `RuleReadService.find`
+ * answers with. `ac_cites` rows come from `deriveAcCites`, the store's own derivation of that
+ * index, so no criterion is re-parsed here. A store failure is propagated (fail loud), never read
+ * as "no governing rules".
+ */
+async function loadGoverningRules(
+  app: App,
+  specSlug: string | null,
+  anchors: readonly string[],
+): Promise<Result<GoverningRules | undefined, LoreError>> {
+  const baseline = await app.corpusService.listFull({ type: "baseline" });
+  if (!baseline.ok) return baseline;
+  if (baseline.value.docs.length === 0) return ok(undefined);
+  const specs = await app.corpusService.listFull({ type: "spec" });
+  if (!specs.ok) return specs;
+  return ok(
+    selectGoverningRules(specSlug, anchors, {
+      baseline: baseline.value.docs,
+      specs: specs.value.docs,
+      cites: deriveAcCites(specs.value.docs),
+      depends: [],
+    }),
+  );
+}
 
 /**
  * `TaskFeedFlowDeps.getTaskBundle` real binding — resolves `taskIdOrSlug`, walks its
@@ -285,6 +317,9 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
 
   const anchors = extractFileAnchors(task);
 
+  const governingRulesResult = await loadGoverningRules(app, spec !== undefined ? spec.slug : null, anchors);
+  if (!governingRulesResult.ok) return governingRulesResult;
+
   const nowIso = new Date().toISOString();
   const ttlMinutes = app.taskWorkflowService.claimTtlMinutes;
   const claim = extractClaim(task);
@@ -333,6 +368,7 @@ async function buildTaskBundle(app: App, taskIdOrSlug: string): Promise<Result<T
     claimView,
     upstreamSpecApproved,
     relatedKnowledge,
+    ...(governingRulesResult.value !== undefined ? { governingRules: governingRulesResult.value } : {}),
   });
 }
 

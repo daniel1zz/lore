@@ -126,6 +126,7 @@
 import { ok, err, truncateSection } from "@lore/core";
 import type { AcOracleGenerationSplit, AcVerifyMode, LoreError, DocRecord, Result, deriveAcCoverageState } from "@lore/core";
 import { projectValidityStatus, type ValidityStatus } from "../service/validity-service.js";
+import type { GoverningRules } from "../service/governing-rules.js";
 import type { KnowledgePointer, HandoffPointer } from "./feed-shared-types.js";
 
 /** Re-exported for import-compat — see `feed-shared-types.ts` for the authoritative shapes. */
@@ -279,6 +280,11 @@ export interface TaskBundle {
    * consumes this directly instead of re-fetching the task doc.
    */
   readonly relatedKnowledge: RelatedKnowledgeRef[];
+  /**
+   * Baseline rules governing the task, already capped (`selectGoverningRules`, BL-15). ABSENT when
+   * no baseline rule governs it — the pack then carries no `governing_rules` and renders no section.
+   */
+  readonly governingRules?: GoverningRules;
 }
 
 /**
@@ -378,6 +384,11 @@ export interface TaskStartPack {
    * cross-surface checks against `lore ac list`'s own coverage fact).
    */
   readonly acceptance_detail: readonly AcceptanceView[];
+  /**
+   * Baseline rules governing the task: at most 40, cited-by-spec first, then rules reached through
+   * the task's file anchors, plus the overflow count (BL-15). ABSENT (key omitted) when none govern.
+   */
+  readonly governing_rules?: GoverningRules;
 }
 
 /** The fixed scoped-oracle discipline line embedded in every `boundaries` section (2026-07-23 full-suite-contention lesson, mechanized as pack text — SPEC-070 D3). */
@@ -686,5 +697,11 @@ export async function buildTaskStartPack(
     handoff: clip("handoff", rawSections.handoff, resolvedBudgets.max_handoff_chars),
   };
 
-  return ok({ task_id: taskId, sections, truncated, acceptance_detail: bundle.acceptance });
+  return ok({
+    task_id: taskId,
+    sections,
+    truncated,
+    acceptance_detail: bundle.acceptance,
+    ...(bundle.governingRules !== undefined ? { governing_rules: bundle.governingRules } : {}),
+  });
 }
