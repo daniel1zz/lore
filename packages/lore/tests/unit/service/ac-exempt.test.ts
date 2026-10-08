@@ -149,7 +149,7 @@ describe("AcExemptionService.grant: reason + expiry required", () => {
 
   it("refuses a grant with no reason and stores nothing", async () => {
     const { svc, specId } = await setup();
-    const r = await svc.grant(valid(specId, 1, { reason: undefined }));
+    const r = await svc.grant(valid(specId, 1, { reason: undefined } as unknown as Partial<GrantInput>));
     expect(r.ok).toBe(false);
     const l = await svc.list();
     expect(l.ok && l.value).toHaveLength(0);
@@ -163,7 +163,7 @@ describe("AcExemptionService.grant: reason + expiry required", () => {
 
   it("refuses a grant with no expiry and stores nothing", async () => {
     const { svc, specId } = await setup();
-    const r = await svc.grant(valid(specId, 1, { expiresAt: undefined }));
+    const r = await svc.grant(valid(specId, 1, { expiresAt: undefined } as unknown as Partial<GrantInput>));
     expect(r.ok).toBe(false);
     const l = await svc.list();
     expect(l.ok && l.value).toHaveLength(0);

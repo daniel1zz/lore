@@ -38,12 +38,28 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DocRecord } from "@lore/core";
-import { MIGRATION_014_SQL } from "../../../src/store/migrations/migration-014.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { RuleStateService } from "../../../src/service/rule-state-service.js";
 import { computeBaselineStatus } from "../../../src/service/baseline-status.js";
 import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+
+// Variable specifier: migration-014.ts does not exist yet; the file must still load and typecheck.
+const MIGRATION_014_MODULE = "../../../src/store/migrations/migration-014.js";
+
+async function loadMigration014Sql(): Promise<string> {
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await import(MIGRATION_014_MODULE)) as Record<string, unknown>;
+  } catch (e) {
+    throw new Error(`MISSING BEHAVIOUR: module ${MIGRATION_014_MODULE} not found (${String(e)})`);
+  }
+  const sql = mod.MIGRATION_014_SQL;
+  if (typeof sql !== "string") {
+    throw new Error(`MISSING BEHAVIOUR: ${MIGRATION_014_MODULE} does not export MIGRATION_014_SQL: string`);
+  }
+  return sql;
+}
 
 const STAMP = "2026-10-08T00:00:00.000Z";
 const LEAF_A = "01HM014LEAFA000000000001";
@@ -278,6 +294,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     expect(snapshot(second.getDatabase())).toEqual(before);
     second.close();
 
+    const MIGRATION_014_SQL = await loadMigration014Sql();
     const raw = new Database(path);
     raw.exec("PRAGMA foreign_keys = ON");
     expect(() => raw.exec(MIGRATION_014_SQL)).not.toThrow();
