@@ -8,8 +8,44 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listSites } from "../../../src/service/site-census.js";
-import { computeLeafCoverage } from "../../../src/service/leaf-coverage.js";
+
+interface Site {
+  key: string;
+  file: string;
+  symbol: string;
+  code?: string;
+  dynamic: boolean;
+}
+interface CensusApi {
+  listSites(input: { rootDir: string; entry: { file: string; symbol: string } }): Site[];
+}
+interface CoverageApi {
+  computeLeafCoverage(input: {
+    sites: Site[];
+    siteMap: Record<string, string[]>;
+    liveRuleIds: string[];
+  }): { gaps: string[]; notMeasured: string[]; ok: boolean };
+}
+
+// Variable specifiers: the modules do not exist yet; the file must still load and typecheck.
+const CENSUS_MODULE = "../../../src/service/site-census.js";
+const COVERAGE_MODULE = "../../../src/service/leaf-coverage.js";
+
+async function loadFn<T>(modulePath: string, name: string): Promise<T> {
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await import(/* @vite-ignore */ modulePath)) as Record<string, unknown>;
+  } catch (e) {
+    throw new Error(`MISSING BEHAVIOUR: module ${modulePath} not found (${String(e)})`);
+  }
+  const fn = mod[name];
+  if (typeof fn !== "function") {
+    throw new Error(`MISSING BEHAVIOUR: ${modulePath} does not export ${name}`);
+  }
+  return mod as T;
+}
+const loadCensus = () => loadFn<CensusApi>(CENSUS_MODULE, "listSites");
+const loadCoverage = () => loadFn<CoverageApi>(COVERAGE_MODULE, "computeLeafCoverage");
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -22,11 +58,12 @@ const KEYED = [
   "service.ts#Service.process#ZERO_INPUT",
   "service.ts#Service.process#TOO_LARGE",
   "service.ts#Service.process#GATE_NOT_READY",
-];
+] as const;
 const LIVE = ["BR-001", "BR-002", "BR-003"];
 
 describe("listSites (census)", () => {
-  it("lists exactly the 4 keyed err/gate sites reached from the entry", () => {
+  it("lists exactly the 4 keyed err/gate sites reached from the entry", async () => {
+    const { listSites } = await loadCensus();
     const keys = listSites({ rootDir, entry })
       .filter((s) => !s.dynamic)
       .map((s) => s.key)
@@ -34,19 +71,22 @@ describe("listSites (census)", () => {
     expect(keys).toEqual([...KEYED].sort());
   });
 
-  it("reports the registry-lookup call as exactly 1 dynamic (not_measured) site", () => {
+  it("reports the registry-lookup call as exactly 1 dynamic (not_measured) site", async () => {
+    const { listSites } = await loadCensus();
     const dyn = listSites({ rootDir, entry }).filter((s) => s.dynamic);
     expect(dyn).toHaveLength(1);
-    expect(dyn[0].file).toBe("service.ts");
+    expect(dyn[0]!.file).toBe("service.ts");
   });
 
-  it("each keyed site has key === file#symbol#code", () => {
+  it("each keyed site has key === file#symbol#code", async () => {
+    const { listSites } = await loadCensus();
     for (const s of listSites({ rootDir, entry }).filter((x) => !x.dynamic)) {
       expect(s.key).toBe(`${s.file}#${s.symbol}#${s.code}`);
     }
   });
 
-  it("an entry that calls nothing yields no sites (different input, different output)", () => {
+  it("an entry that calls nothing yields no sites (different input, different output)", async () => {
+    const { listSites } = await loadCensus();
     expect(
       listSites({ rootDir, entry: { file: "service.ts", symbol: "isReady" } }),
     ).toEqual([]);
@@ -54,51 +94,60 @@ describe("listSites (census)", () => {
 });
 
 describe("computeLeafCoverage", () => {
-  const sites = () => listSites({ rootDir, entry });
-  const dynKey = () => sites().find((s) => s.dynamic)!.key;
+  const setup = async () => {
+    const { listSites } = await loadCensus();
+    const { computeLeafCoverage } = await loadCoverage();
+    const sites = listSites({ rootDir, entry });
+    const dynKey = sites.find((s) => s.dynamic)!.key;
+    return { computeLeafCoverage, sites, dynKey };
+  };
 
-  it("3 of 4 mapped -> exactly 1 gap, 1 not_measured, ok=false", () => {
+  it("3 of 4 mapped -> exactly 1 gap, 1 not_measured, ok=false", async () => {
+    const { computeLeafCoverage, sites, dynKey } = await setup();
     const siteMap = {
       [KEYED[0]]: ["BR-001"],
       [KEYED[1]]: ["BR-002"],
       [KEYED[2]]: ["BR-003"],
     };
-    const r = computeLeafCoverage({ sites: sites(), siteMap, liveRuleIds: LIVE });
+    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
     expect(r.gaps).toEqual([KEYED[3]]);
-    expect(r.notMeasured).toEqual([dynKey()]);
+    expect(r.notMeasured).toEqual([dynKey]);
     expect(r.ok).toBe(false);
   });
 
-  it("a site mapped only to a retired rule id counts as a gap", () => {
+  it("a site mapped only to a retired rule id counts as a gap", async () => {
+    const { computeLeafCoverage, sites, dynKey } = await setup();
     const siteMap = {
       [KEYED[0]]: ["BR-001"],
       [KEYED[1]]: ["BR-002"],
       [KEYED[2]]: ["BR-003"],
       [KEYED[3]]: ["BR-999"],
-      [dynKey()]: ["non-business:registry dispatch"],
+      [dynKey]: ["non-business:registry dispatch"],
     };
-    const r = computeLeafCoverage({ sites: sites(), siteMap, liveRuleIds: LIVE });
+    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
     expect(r.gaps).toEqual([KEYED[3]]);
     expect(r.ok).toBe(false);
   });
 
-  it("all mapped + dynamic justified with non-business:<reason> -> ok=true", () => {
+  it("all mapped + dynamic justified with non-business:<reason> -> ok=true", async () => {
+    const { computeLeafCoverage, sites, dynKey } = await setup();
     const siteMap = {
       [KEYED[0]]: ["BR-001"],
       [KEYED[1]]: ["BR-002"],
       [KEYED[2]]: ["BR-003"],
       [KEYED[3]]: ["BR-001"],
-      [dynKey()]: ["non-business:registry dispatch"],
+      [dynKey]: ["non-business:registry dispatch"],
     };
-    const r = computeLeafCoverage({ sites: sites(), siteMap, liveRuleIds: LIVE });
+    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
     expect(r).toEqual({ gaps: [], notMeasured: [], ok: true });
   });
 
-  it("all keyed mapped but dynamic unjustified -> not_measured remains, ok=false", () => {
+  it("all keyed mapped but dynamic unjustified -> not_measured remains, ok=false", async () => {
+    const { computeLeafCoverage, sites, dynKey } = await setup();
     const siteMap = Object.fromEntries(KEYED.map((k) => [k, ["BR-001"]]));
-    const r = computeLeafCoverage({ sites: sites(), siteMap, liveRuleIds: LIVE });
+    const r = computeLeafCoverage({ sites, siteMap, liveRuleIds: LIVE });
     expect(r.gaps).toEqual([]);
-    expect(r.notMeasured).toEqual([dynKey()]);
+    expect(r.notMeasured).toEqual([dynKey]);
     expect(r.ok).toBe(false);
   });
 });

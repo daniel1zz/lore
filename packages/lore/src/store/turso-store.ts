@@ -3000,6 +3000,20 @@ export class TursoStore implements StoreInterface {
     this.client.close();
   }
 
+  async maxDocVersion(): Promise<Result<number, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        "SELECT MAX(version) AS max_version FROM docs WHERE deleted_at IS NULL",
+      );
+      // MAX() over zero rows yields one row holding NULL; rowNum maps NULL to 0.
+      const row = rs.rows[0];
+      return ok(row ? rowNum(row, "max_version") : 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async dbSizeBytes(): Promise<Result<number, LoreError>> {
     try {
       await this.ensureReady();

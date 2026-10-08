@@ -23,6 +23,6 @@ export class Service {
     if (!isReady(n)) {
       return gateFailure({ code: "GATE_NOT_READY" });
     }
-    return handlers[kind](n);
+    return handlers[kind]!(n);
   }
 }

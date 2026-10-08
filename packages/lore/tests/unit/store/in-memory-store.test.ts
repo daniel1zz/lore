@@ -1052,6 +1052,22 @@ describe("InMemoryStore", () => {
     });
   });
 
+  // AC-BLS2-9: maxDocVersion — max version over live docs of every type.
+  describe("maxDocVersion (AC-BLS2-9)", () => {
+    it("BOUNDARY: empty corpus reports 0", async () => {
+      expect(await store.maxDocVersion()).toEqual({ ok: true, value: 0 });
+    });
+
+    it("HAPPY: max over live docs of any type, ignoring soft-deleted rows", async () => {
+      await store.insert(makeDoc({ slug: "k-high", type: "knowledge", version: 17 }));
+      const gone = makeDoc({ slug: "k-gone", type: "knowledge", version: 40 });
+      await store.insert(gone);
+      expect(await store.maxDocVersion()).toEqual({ ok: true, value: 40 });
+      await store.softDelete(gone.id);
+      expect(await store.maxDocVersion()).toEqual({ ok: true, value: 17 });
+    });
+  });
+
   // AC-STORE-010: dbSizeBytes — no disk footprint for in-memory store
   describe("dbSizeBytes", () => {
     it("always reports 0 bytes — no disk-backed storage", async () => {

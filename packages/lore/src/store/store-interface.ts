@@ -973,4 +973,14 @@ export interface StoreInterface {
    * `InMemoryStore` has no disk footprint and always returns `ok(0)`.
    */
   dbSizeBytes(): Promise<Result<number, LoreError>>;
+
+  /**
+   * Highest `version` among live (non-soft-deleted) docs of ANY type; `0` for an
+   * empty corpus.
+   *
+   * A pure aggregate (`SELECT MAX(version)` in the SQL stores) that parses no
+   * document. `RuleStateService` uses it for `computed_from.corpus_version` so its
+   * snapshot can skip fetching knowledge docs without changing that field's meaning.
+   */
+  maxDocVersion(): Promise<Result<number, LoreError>>;
 }
