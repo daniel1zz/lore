@@ -632,7 +632,7 @@ describe("cite gate — latency on a 1,500-rule corpus (AC-BLS2-2, QA-1)", () =>
     // Guard against a vacuous pass: every call must really have been accepted by the gate path.
     expect(accepted).toBe(50);
     // The armed gate must be live in this very run, else the latency number measures nothing.
-    const uncited = await svc.addCriterion(specs[0] as string, AC("AC-L0-uncited"));
+    const uncited = await svc.addCriterion(specs[0] as string, AC("AC-L0-UNCITED"));
     expect(refusalOf(uncited)?.code).toBe(REFUSAL);
     expect(p95).toBeLessThanOrEqual(50);
   });
