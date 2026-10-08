@@ -8,8 +8,9 @@
  * surface without touching `commands/feed.ts` (D7).
  *
  * Public surface:
- *   - renderTaskStartPack(pack) — all eight section headers + bodies + an optional
- *     truncation footer.
+ *   - renderTaskStartPack(pack) — all eight section headers + bodies, an optional
+ *     `## Governing rules` section (id + statement, capped, `+N more` overflow) and an
+ *     optional truncation footer.
  *
  * Side-effect class: pure
  * Source: spec-070-deterministic-task-dispatch-bundle-lore-feed-task-start
@@ -48,6 +49,11 @@ export function renderTaskStartPack(pack: TaskStartPack): string {
   lines.push(pack.sections.knowledge_pointers);
   lines.push("\n## Latest handoff");
   lines.push(pack.sections.handoff);
+  if (pack.governing_rules !== undefined) {
+    lines.push("\n## Governing rules");
+    for (const rule of pack.governing_rules.rules) lines.push(`- ${rule.id}: ${rule.statement}`);
+    if (pack.governing_rules.overflow > 0) lines.push(`+${pack.governing_rules.overflow} more`);
+  }
   if (pack.truncated.length > 0) {
     lines.push(`\n(truncated sections: ${pack.truncated.join(", ")})`);
   }
