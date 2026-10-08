@@ -40,6 +40,8 @@ import type {
   RuleDependsRow,
   RuleLeafPatch,
   RuleRegistryRow,
+  AcExemptionRow,
+  AcExemptionCap,
   SearchHit,
   StoreFilters,
   StoreInterface,
@@ -53,7 +55,12 @@ import type {
   TraceZeroHitSearch,
   UpdateOpts,
 } from "./store-interface.js";
-import { allocateWithBoundedRetry, computeAuditEntryHash } from "./store-shared.js";
+import {
+  allocateWithBoundedRetry,
+  buildAcExemptionAlreadyActiveError,
+  buildAcExemptionCapError,
+  computeAuditEntryHash,
+} from "./store-shared.js";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
@@ -79,6 +86,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly versions: VersionRecord[] = [];
   /** Mirrors `rule_registry` (migration-013); rows are never removed. */
   private readonly ruleRegistry: RuleRegistryRow[] = [];
+  /** Mirrors `ac_exemptions` (migration-014), keyed `doc_id` + NUL + `ac_id`. */
+  private readonly acExemptions = new Map<string, AcExemptionRow>();
   /**
    * SPEC-079 G3 — every entry carries its hash-chain fields (`id`/
    * `prev_hash`/`entry_hash`) alongside the plain {@link AuditEntry} fields,
@@ -721,6 +730,40 @@ export class InMemoryStore implements StoreInterface {
             version: owner.version,
           };
         }),
+    );
+  }
+
+  /**
+   * @see StoreInterface.insertAcExemptionCapped
+   *
+   * reason: the count and the insert run with no `await` between them, so on the single JS thread
+   * they are atomic — the in-memory analogue of the real stores' one-transaction insert.
+   */
+  async insertAcExemptionCapped(
+    row: AcExemptionRow,
+    cap: AcExemptionCap,
+  ): Promise<Result<AcExemptionRow, LoreError>> {
+    const key = `${row.doc_id}\u0000${row.ac_id}`;
+    const existing = this.acExemptions.get(key);
+    if (existing !== undefined && existing.expires_at > cap.now) {
+      return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
+    }
+    if (existing !== undefined) this.acExemptions.delete(key);
+    const active = [...this.acExemptions.values()].filter((r) => r.expires_at > cap.now).length;
+    if (active >= cap.maxActive) {
+      if (existing !== undefined) this.acExemptions.set(key, existing);
+      return err(buildAcExemptionCapError(active, cap.liveCriteria, cap.maxActive));
+    }
+    this.acExemptions.set(key, { ...row });
+    return ok({ ...row });
+  }
+
+  /** @see StoreInterface.listAcExemptions */
+  async listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>> {
+    return ok(
+      [...this.acExemptions.values()]
+        .map((r) => ({ ...r }))
+        .sort((a, b) => (a.doc_id === b.doc_id ? a.ac_id.localeCompare(b.ac_id) : a.doc_id.localeCompare(b.doc_id))),
     );
   }
 

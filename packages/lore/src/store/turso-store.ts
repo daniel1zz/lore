@@ -75,6 +75,8 @@ import type {
   SearchHit,
   RuleLeafPatch,
   RuleRegistryRow,
+  AcExemptionRow,
+  AcExemptionCap,
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
@@ -112,6 +114,8 @@ import {
   type JudgmentRow,
   type LinkRow,
   type VersionRow,
+  buildAcExemptionAlreadyActiveError,
+  buildAcExemptionCapError,
 } from "./store-shared.js";
 
 // ─── Deferred @libsql/client load (spec-eager-libsql-load-makes-every-command-depend-on-a-healthy) ──
@@ -2568,6 +2572,98 @@ export class TursoStore implements StoreInterface {
           // CHECK(lifecycle IN (...)) in migration-014 guarantees the cast
           lifecycle: rowStr(row, "lifecycle") as RuleRegistryRow["lifecycle"],
           version: rowNum(row, "version"),
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.insertAcExemptionCapped
+   *
+   * reason: runs on the same write-serialisation tail as the rule writes and inside one write
+   * transaction whose INSERT is `INSERT ... SELECT ... WHERE (SELECT COUNT(*) ...) < ?`, so
+   * count-then-insert is atomic in-process and at the database (AC-BLS2-10).
+   */
+  async insertAcExemptionCapped(
+    row: AcExemptionRow,
+    cap: AcExemptionCap,
+  ): Promise<Result<AcExemptionRow, LoreError>> {
+    return this.serializeRuleWrite(() => this.insertAcExemptionCappedSerialized(row, cap));
+  }
+
+  private async insertAcExemptionCappedSerialized(
+    row: AcExemptionRow,
+    cap: AcExemptionCap,
+  ): Promise<Result<AcExemptionRow, LoreError>> {
+    let tx: Transaction;
+    try {
+      await this.ensureReady();
+      tx = await this.client.transaction("write");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const existing = await tx.execute({
+        sql: "SELECT expires_at FROM ac_exemptions WHERE doc_id = ? AND ac_id = ?",
+        args: [row.doc_id, row.ac_id],
+      });
+      const existingRow = existing.rows[0];
+      if (existingRow !== undefined && rowStr(existingRow, "expires_at") > cap.now) {
+        await tx.rollback();
+        return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
+      }
+      if (existingRow !== undefined) {
+        await tx.execute({
+          sql: "DELETE FROM ac_exemptions WHERE doc_id = ? AND ac_id = ?",
+          args: [row.doc_id, row.ac_id],
+        });
+      }
+      const inserted = await tx.execute({
+        sql: `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at)
+              SELECT ?, ?, ?, ?, ?, ?
+              WHERE (SELECT COUNT(*) FROM ac_exemptions WHERE expires_at > ?) < ?`,
+        args: [row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at, cap.now, cap.maxActive],
+      });
+      if (inserted.rowsAffected === 0) {
+        const count = await tx.execute({
+          sql: "SELECT COUNT(*) AS n FROM ac_exemptions WHERE expires_at > ?",
+          args: [cap.now],
+        });
+        await tx.rollback();
+        return err(buildAcExemptionCapError(rowNum(count.rows[0] as Row, "n"), cap.liveCriteria, cap.maxActive));
+      }
+      await tx.commit();
+      return ok({ ...row });
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: same as allocateRuleAndUpdateLeaf — rollback throws only when the transaction is
+        // already closed; `e` below is what the caller needs.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /** @see StoreInterface.listAcExemptions */
+  async listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        "SELECT doc_id, ac_id, reason, expires_at, granted_by, granted_at FROM ac_exemptions ORDER BY doc_id, ac_id",
+      );
+      return ok(
+        rs.rows.map((r) => ({
+          doc_id: rowStr(r, "doc_id"),
+          ac_id: rowStr(r, "ac_id"),
+          reason: rowStr(r, "reason"),
+          expires_at: rowStr(r, "expires_at"),
+          granted_by: rowStr(r, "granted_by"),
+          granted_at: rowStr(r, "granted_at"),
         })),
       );
     } catch (e) {

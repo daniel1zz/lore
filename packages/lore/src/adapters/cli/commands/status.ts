@@ -1918,6 +1918,14 @@ export default defineCommand({
         );
       }
 
+      // baseline slice 2 §C4 — exemptions on this branch's corpus, only when any exist (report-only).
+      if (baselineStatus !== null && baselineStatus.exemptions_active + baselineStatus.exemptions_expired > 0) {
+        console.log(
+          `\nExemptions: ${baselineStatus.exemptions_active} active, ${baselineStatus.exemptions_expired} expired ` +
+            `(${(baselineStatus.exemption_ratio * 100).toFixed(1)}% of live criteria, cap 10%)`,
+        );
+      }
+
       // M3 (AC-FALS-10) — same "only when > 0" discipline as open_stale_candidates/
       // codeAnchorSpecs above; silent when unavailable (no companion source
       // checkout, e.g. an external `lore` install) or when the scan found nothing.

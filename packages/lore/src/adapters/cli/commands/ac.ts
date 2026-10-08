@@ -179,6 +179,8 @@ import { defineCommand } from "citty";
 import { existsSync } from "fs";
 import { dirname } from "path";
 import { loadLoreApp } from "../loader.js";
+import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { AcExemptionService } from "../../../service/ac-exemption-service.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
@@ -377,6 +379,54 @@ export default defineCommand({
       },
     }),
 
+    exempt: defineCommand({
+      meta: {
+        name: "exempt",
+        description:
+          "Exempt one uncited criterion from the citation gate for a bounded time (needs --reason and --expires; active exemptions are capped at 10% of live criteria)",
+      },
+      args: {
+        by: {
+          type: "string",
+          description: "Actor identity recorded as the grantor; defaults to $LORE_ACTOR, then session/worktree/OS username",
+        },
+        spec: { type: "positional", description: "Spec document ID or slug", required: true },
+        id: { type: "positional", description: "Criterion id to exempt, e.g. AC-FEATURE-1", required: true },
+        reason: { type: "string", description: "Why this criterion cannot cite a rule yet (required, non-blank)" },
+        expires: { type: "string", description: "ISO 8601 date/time the exemption lapses; must be in the future (required)" },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        // reason: the exemption table is read/written through a second store handle because `App`
+        // does not expose its store (same precedent as `lore status`'s baseline block).
+        const { app, dbPath } = loadLoreApp();
+        const store = new SQLiteStore(dbPath);
+        try {
+          const result = await new AcExemptionService(store).grant({
+            specIdOrSlug: args.spec as string,
+            acId: args.id as string,
+            reason: args.reason as string,
+            expiresAt: args.expires as string,
+            by: resolveActor(typeof args.by === "string" ? args.by : undefined),
+          });
+          if (!result.ok) {
+            process.stderr.write(formatError(result.error) + "\n");
+            process.exitCode = exitCode(result.error);
+            return;
+          }
+          if (args.json) {
+            console.log(JSON.stringify({ ok: true, data: { exemption: result.value } }, null, 2));
+            return;
+          }
+          console.log(
+            `Exempted ${args.id as string} on spec ${args.spec as string} until ${result.value.expires_at} (by ${result.value.granted_by})`,
+          );
+        } finally {
+          store.close();
+          app.close();
+        }
+      },
+    }),
     cite: defineCommand({
       meta: {
         name: "cite",
