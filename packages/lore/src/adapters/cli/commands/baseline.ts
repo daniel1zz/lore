@@ -179,6 +179,7 @@ interface LeafCoverageReport {
   sites: number;
   gaps: string[];
   not_measured: string[];
+  bootstrap: string[];
   ok: boolean;
 }
 
@@ -209,13 +210,17 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
     const reports: LeafCoverageReport[] = leaves.map((leaf) => {
       const commands = Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : [];
       const byKey = new Map<string, Site>();
+      const bootstrapByKey = new Map<string, Site>();
       for (const command of commands) {
-        for (const site of listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) })) byKey.set(site.key, site);
+        const census = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
+        for (const site of census) byKey.set(site.key, site);
+        for (const site of census.bootstrap) bootstrapByKey.set(site.key, site);
       }
       const siteMap = (leaf.extra["site_map"] ?? {}) as Record<string, string[]>;
       const rules = Array.isArray(leaf.extra["rules"]) ? (leaf.extra["rules"] as Array<{ id: string; lifecycle: string }>) : [];
       const verdict = computeLeafCoverage({
         sites: [...byKey.values()],
+        bootstrap: [...bootstrapByKey.values()],
         siteMap,
         liveRuleIds: rules.filter((r) => r.lifecycle === "live").map((r) => r.id),
       });
@@ -225,6 +230,7 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
         sites: byKey.size,
         gaps: verdict.gaps,
         not_measured: verdict.notMeasured,
+        bootstrap: [...bootstrapByKey.keys()].sort(),
         ok: commands.length > 0 && verdict.ok,
       };
     });
@@ -235,9 +241,10 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
       if (reports.length === 0) console.log(`${resolved.value.slug}: no leaves under this node.`);
       for (const r of reports) {
         const state = r.commands.length === 0 ? "UNMEASURED (no commands declared; use `lore baseline map --command`)" : r.ok ? "complete" : "INCOMPLETE";
-        console.log(`${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured`);
+        console.log(`${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.bootstrap.length} bootstrap (not counted as gaps)`);
         for (const key of r.gaps) console.log(`  gap          ${key}`);
         for (const key of r.not_measured) console.log(`  not_measured ${key}`);
+        for (const key of r.bootstrap) console.log(`  bootstrap    ${key}`);
       }
     }
     if (!ok) process.exitCode = 1;
@@ -440,11 +447,12 @@ export default defineCommand({
           const sites = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
-            console.log(JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, sites } }, null, 2));
+            console.log(JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, sites, bootstrap: sites.bootstrap } }, null, 2));
             return;
           }
-          console.log(`${command}: ${sites.length} site(s), ${dynamicCount} not_measured`);
+          console.log(`${command}: ${sites.length} site(s), ${dynamicCount} not_measured, ${sites.bootstrap.length} bootstrap`);
           for (const site of sites) console.log(`${site.dynamic ? "~" : " "} ${site.key}`);
+          for (const site of sites.bootstrap) console.log(`  bootstrap ${site.key}`);
         } catch (cause) {
           reportCensusFailure(cause, json);
         }
