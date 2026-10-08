@@ -35,7 +35,9 @@ import type {
   AuditFilters,
   CalibrationRecordWithPromptVersion,
   CalibrationWindowFilter,
+  AcCiteRow,
   NeverReadDoc,
+  RuleDependsRow,
   RuleLeafPatch,
   RuleRegistryRow,
   SearchHit,
@@ -52,6 +54,7 @@ import type {
   UpdateOpts,
 } from "./store-interface.js";
 import { allocateWithBoundedRetry, computeAuditEntryHash } from "./store-shared.js";
+import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
 
@@ -650,6 +653,8 @@ export class InMemoryStore implements StoreInterface {
       leaf_doc_id: leafId,
       allocated_at: nowIso,
       allocated_by: actor,
+      lifecycle: listedRuleLifecycle(leaf.value.extra, ruleId) ?? "live",
+      version: leaf.value.version,
     });
     return ok({ ruleId, doc: leaf.value });
   }
@@ -691,12 +696,42 @@ export class InMemoryStore implements StoreInterface {
       return to;
     }
     registryRow.leaf_doc_id = toLeaf.id;
+    registryRow.lifecycle = listedRuleLifecycle(to.value.extra, ruleId) ?? "live";
+    registryRow.version = to.value.version;
     return ok({ from: from.value, to: to.value });
   }
 
-  /** @see StoreInterface.listRuleRegistry */
+  /**
+   * @see StoreInterface.listRuleRegistry
+   *
+   * reason: the in-memory store has no triggers, so `lifecycle`/`version` are PROJECTED from the
+   * owning leaf at read time — the doc map is the single source, which is the in-memory analogue of
+   * the real stores' same-transaction writers (and survives the undo/restore paths for free).
+   */
   async listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>> {
-    return ok([...this.ruleRegistry].sort((a, b) => a.n - b.n).map((row) => ({ ...row })));
+    return ok(
+      [...this.ruleRegistry]
+        .sort((a, b) => a.n - b.n)
+        .map((row) => {
+          const owner = this.docs.get(row.leaf_doc_id);
+          if (owner === undefined) return { ...row };
+          return {
+            ...row,
+            lifecycle: listedRuleLifecycle(owner.extra, row.id) ?? row.lifecycle,
+            version: owner.version,
+          };
+        }),
+    );
+  }
+
+  /** @see StoreInterface.listAcCites — a computed view of the live specs (see {@link listRuleRegistry}'s reason). */
+  async listAcCites(): Promise<Result<AcCiteRow[], LoreError>> {
+    return ok(deriveAcCites([...this.docs.values()]));
+  }
+
+  /** @see StoreInterface.listRuleDepends — a computed view of the live baseline docs. */
+  async listRuleDepends(): Promise<Result<RuleDependsRow[], LoreError>> {
+    return ok(deriveRuleDepends([...this.docs.values()]));
   }
 
   // ── Links ─────────────────────────────────────────────────────────────────

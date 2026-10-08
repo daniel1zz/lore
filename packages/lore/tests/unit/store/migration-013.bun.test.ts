@@ -50,6 +50,8 @@ const EXPECTED_DOC_INDEXES = [
   "idx_docs_updated",
 ];
 const EXPECTED_DOC_TRIGGERS = ["docs_ad", "docs_ai", "docs_au"];
+// reason: migration-014 adds four docs_idx_* index-maintenance triggers; a re-run of MIGRATION_013_SQL recreates docs and drops them (see migration-014.ts invariants), so only the HEAD schema expects them.
+const EXPECTED_DOC_TRIGGERS_HEAD = [...EXPECTED_DOC_TRIGGERS, "docs_idx_baseline_ai", "docs_idx_baseline_au", "docs_idx_spec_ai", "docs_idx_spec_au"].sort();
 /** child table -> expected parent-table FK targets (all `docs`). */
 const EXPECTED_FK_CHILDREN = ["calibration_records", "links", "review_judgments", "versions"];
 
@@ -226,7 +228,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     const { rowids } = await seedSchema12();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(13);
+    expect(userVersion(db)).toBe(14);
 
     // docs + rowids (external-content FTS depends on rowid stability)
     const after = db.query("SELECT rowid AS rid, id FROM docs").all() as { rid: number; id: string }[];
@@ -266,7 +268,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     const db = store.getDatabase();
 
     expect(namesOf(db, "index", "docs")).toEqual(EXPECTED_DOC_INDEXES);
-    expect(namesOf(db, "trigger", "docs")).toEqual(EXPECTED_DOC_TRIGGERS);
+    expect(namesOf(db, "trigger", "docs")).toEqual(EXPECTED_DOC_TRIGGERS_HEAD);
     const fts = db.query("SELECT sql FROM sqlite_master WHERE name = 'docs_fts'").get() as { sql: string };
     expect(fts.sql).toContain("content=docs");
     expect(fts.sql).toContain("content_rowid=rowid");
@@ -300,9 +302,12 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
       ["leaf_doc_id", 1, 0],
       ["allocated_at", 1, 0],
       ["allocated_by", 1, 0],
+      // migration-014 adds these two (head schema); migration-014.bun.test.ts pins their semantics
+      ["lifecycle", 1, 0],
+      ["version", 1, 0],
     ]);
-    db.prepare("INSERT INTO rule_registry VALUES ('BR-1', 1, 'x', ?, 'a')").run(STAMP);
-    expect(() => db.prepare("INSERT INTO rule_registry VALUES ('BR-9', 1, 'x', ?, 'a')").run(STAMP)).toThrow(/UNIQUE constraint failed/);
+    db.prepare("INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES ('BR-1', 1, 'x', ?, 'a')").run(STAMP);
+    expect(() => db.prepare("INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES ('BR-9', 1, 'x', ?, 'a')").run(STAMP)).toThrow(/UNIQUE constraint failed/);
     store.close();
   });
 
@@ -313,7 +318,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     raw.close();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(13);
+    expect(userVersion(db)).toBe(14);
     expect((db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys).toBe(1);
     expect(db.query("SELECT name FROM sqlite_master WHERE name = 'docs_new'").all()).toEqual([]);
     store.close();
@@ -332,20 +337,20 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     expect(preserved.ok && preserved.value?.id).toBe("01HM013SPEC0000000000001");
     turso.close();
     const raw = new Database(path);
-    expect(userVersion(raw)).toBe(13);
+    expect(userVersion(raw)).toBe(14);
     expect(namesOf(raw, "index", "docs")).toEqual(EXPECTED_DOC_INDEXES);
-    expect(namesOf(raw, "trigger", "docs")).toEqual(EXPECTED_DOC_TRIGGERS);
+    expect(namesOf(raw, "trigger", "docs")).toEqual(EXPECTED_DOC_TRIGGERS_HEAD);
     raw.close();
   });
 
   it("REGRESSION: re-opening and re-running MIGRATION_013_SQL on a migrated file is idempotent and keeps rule_registry rows", async () => {
     await seedSchema12();
     const first = new SQLiteStore(path);
-    first.getDatabase().prepare("INSERT INTO rule_registry VALUES ('BR-1', 1, 'leaf', ?, 'a')").run(STAMP);
+    first.getDatabase().prepare("INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES ('BR-1', 1, 'leaf', ?, 'a')").run(STAMP);
     first.close();
 
     const second = new SQLiteStore(path);
-    expect(userVersion(second.getDatabase())).toBe(13);
+    expect(userVersion(second.getDatabase())).toBe(14);
     second.close();
 
     const raw = new Database(path);

@@ -39,6 +39,8 @@ import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
+import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
+import { listedRuleLifecycle } from "./index-rows.js";
 import type {
   AuditEntry,
   CalibrationRecord,
@@ -63,6 +65,8 @@ import {
   type Result,
 } from "@lore/core";
 import type {
+  AcCiteRow,
+  RuleDependsRow,
   AuditChainEntry,
   AuditFilters,
   CalibrationRecordWithPromptVersion,
@@ -658,6 +662,13 @@ export class TursoStore implements StoreInterface {
         // docs_new first, CREATE TABLE IF NOT EXISTS rule_registry — see
         // migration-013.ts's module JSDoc.
         await this.client.executeMultiple(MIGRATION_013_SQL);
+      }
+
+      if (currentVersion < 14) {
+        // reason: migration-014 (rule_registry lifecycle/version, ac_cites, rule_depends,
+        // ac_exemptions + docs_idx_* triggers) is one BEGIN/COMMIT string, idempotent on re-run
+        // (rebuild-from-docs + DROP/CREATE TRIGGER) — `executeMultiple`, same as 012/013.
+        await this.client.executeMultiple(MIGRATION_014_SQL);
       }
     })();
 
@@ -2431,8 +2442,18 @@ export class TursoStore implements StoreInterface {
         return leaf;
       }
       await tx.execute({
-        sql: "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES (?, ?, ?, ?, ?)",
-        args: [ruleId, nextN, leafId, nowIso, actor] as InValue[],
+        // reason: the docs_idx_baseline_au trigger ran inside the leaf UPDATE BEFORE this row existed,
+        // so lifecycle/version are written explicitly (mirrors SQLiteStore.allocateRuleAndUpdateLeaf).
+        sql: "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        args: [
+          ruleId,
+          nextN,
+          leafId,
+          nowIso,
+          actor,
+          listedRuleLifecycle(leaf.value.extra, ruleId) ?? "live",
+          leaf.value.version,
+        ] as InValue[],
       });
       await tx.commit();
       return ok({ ruleId, doc: leaf.value });
@@ -2505,8 +2526,14 @@ export class TursoStore implements StoreInterface {
         return to;
       }
       await tx.execute({
-        sql: "UPDATE rule_registry SET leaf_doc_id = ? WHERE id = ?",
-        args: [toLeaf.id, ruleId] as InValue[],
+        // reason: see SQLiteStore.moveRule — owner + lifecycle + version re-pointed at the destination.
+        sql: "UPDATE rule_registry SET leaf_doc_id = ?, lifecycle = ?, version = ? WHERE id = ?",
+        args: [
+          toLeaf.id,
+          listedRuleLifecycle(to.value.extra, ruleId) ?? "live",
+          to.value.version,
+          ruleId,
+        ] as InValue[],
       });
       await tx.commit();
       return ok({ from: from.value, to: to.value });
@@ -2529,7 +2556,7 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
       const rs = await this.client.execute(
-        "SELECT id, n, leaf_doc_id, allocated_at, allocated_by FROM rule_registry ORDER BY n ASC",
+        "SELECT id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version FROM rule_registry ORDER BY n ASC",
       );
       return ok(
         rs.rows.map((row) => ({
@@ -2538,6 +2565,46 @@ export class TursoStore implements StoreInterface {
           leaf_doc_id: rowStr(row, "leaf_doc_id"),
           allocated_at: rowStr(row, "allocated_at"),
           allocated_by: rowStr(row, "allocated_by"),
+          // CHECK(lifecycle IN (...)) in migration-014 guarantees the cast
+          lifecycle: rowStr(row, "lifecycle") as RuleRegistryRow["lifecycle"],
+          version: rowNum(row, "version"),
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /** @see StoreInterface.listAcCites */
+  async listAcCites(): Promise<Result<AcCiteRow[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        "SELECT doc_id, ac_id, rule_id FROM ac_cites ORDER BY doc_id, ac_id, rule_id",
+      );
+      return ok(
+        rs.rows.map((row) => ({
+          doc_id: rowStr(row, "doc_id"),
+          ac_id: rowStr(row, "ac_id"),
+          rule_id: rowStr(row, "rule_id"),
+        })),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /** @see StoreInterface.listRuleDepends */
+  async listRuleDepends(): Promise<Result<RuleDependsRow[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute(
+        "SELECT leaf_id, rule_id FROM rule_depends ORDER BY leaf_id, rule_id",
+      );
+      return ok(
+        rs.rows.map((row) => ({
+          leaf_id: rowStr(row, "leaf_id"),
+          rule_id: rowStr(row, "rule_id"),
         })),
       );
     } catch (e) {

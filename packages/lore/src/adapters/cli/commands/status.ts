@@ -1913,6 +1913,7 @@ export default defineCommand({
         console.log(
           `\nBaseline warnings: ${baselineStatus.cites_dangling} dangling cites, ${baselineStatus.cites_to_inactive} cites to inactive rules, ` +
             `${baselineStatus.ambiguous_ac_ref} ambiguous evidence refs, ${baselineStatus.registry_mismatch} registry mismatches, ` +
+            `${baselineStatus.index_mismatch} index mismatches, ` +
             `${baselineStatus.rules_with_impl_detail} rules with implementation detail (run \`lore status --check-baseline\` / \`lore baseline tree --states\`)`,
         );
       }

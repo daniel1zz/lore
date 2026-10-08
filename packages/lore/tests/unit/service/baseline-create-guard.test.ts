@@ -120,7 +120,7 @@ describe("CorpusService.create — baseline rules guard", () => {
 describe("findUnregisteredRuleIds", () => {
   const leaf = (id: string, ruleIds: string[]): DocRecord =>
     ({ id, slug: id, type: "baseline", extra: { node: "leaf", rules: ruleIds.map((r) => ({ ...aRule, id: r })) } }) as unknown as DocRecord;
-  const row = (id: string) => ({ id, n: Number(id.slice(3)), leaf_doc_id: "x", allocated_at: "t", allocated_by: "a" });
+  const row = (id: string) => ({ id, n: Number(id.slice(3)), leaf_doc_id: "x", allocated_at: "t", allocated_by: "a", lifecycle: "live" as const, version: 1 });
 
   it("reports every rule id carried by a leaf that has no registry row, with its leaf", () => {
     const found = findUnregisteredRuleIds([leaf("L1", ["BR-1", "BR-2"]), leaf("L2", ["BR-3"])], [row("BR-1")]);

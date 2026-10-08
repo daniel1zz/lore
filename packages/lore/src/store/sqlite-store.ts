@@ -25,6 +25,7 @@ import { MIGRATION_010_SQL } from "./migrations/migration-010.js";
 import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
+import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 // Re-exported here (beside the migration chain it describes) from a
 // bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
 // store/schema-probe.ts's `probeSchemaVersion`, consumed by
@@ -58,7 +59,10 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import { listedRuleLifecycle } from "./index-rows.js";
 import type {
+  AcCiteRow,
+  RuleDependsRow,
   AuditChainEntry,
   AuditFilters,
   CalibrationRecordWithPromptVersion,
@@ -525,6 +529,22 @@ export class SQLiteStore implements StoreInterface {
         } catch {
           // reason: only throws on a closed/broken connection, where `error`
           // below is what the caller needs anyway.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 14) {
+      // reason: migration-014 (rule_registry lifecycle/version, ac_cites, rule_depends,
+      // ac_exemptions + the docs_idx_* triggers) is one BEGIN/COMMIT with no PRAGMA toggles, so a
+      // failure only needs ROLLBACK (see migration-014.ts's module JSDoc).
+      try {
+        this.db.exec(MIGRATION_014_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
         }
         throw error;
       }
@@ -2022,9 +2042,20 @@ export class SQLiteStore implements StoreInterface {
       }
       this.db
         .prepare(
-          "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
-        .run(ruleId, nextRow.next_n, leafId, nowIso, actor);
+        // reason: the docs_idx_baseline_au trigger already ran (inside the leaf UPDATE above) BEFORE
+        // this row existed, so lifecycle/version are written explicitly here, in the same transaction.
+        // 'live' is the fallback only for a `buildExtra` that does not list the new rule (test stubs).
+        .run(
+          ruleId,
+          nextRow.next_n,
+          leafId,
+          nowIso,
+          actor,
+          listedRuleLifecycle(leaf.value.extra, ruleId) ?? "live",
+          leaf.value.version,
+        );
       this.db.run("COMMIT");
       return ok({ ruleId, doc: leaf.value });
     } catch (e) {
@@ -2080,7 +2111,11 @@ export class SQLiteStore implements StoreInterface {
         this.db.run("ROLLBACK");
         return to;
       }
-      this.db.prepare("UPDATE rule_registry SET leaf_doc_id = ? WHERE id = ?").run(toLeaf.id, ruleId);
+      // reason: both leaf UPDATEs fired their docs_idx_baseline_au trigger while the row still named the
+      // source leaf, so owner + lifecycle + version are re-pointed here at the destination leaf.
+      this.db
+        .prepare("UPDATE rule_registry SET leaf_doc_id = ?, lifecycle = ?, version = ? WHERE id = ?")
+        .run(toLeaf.id, listedRuleLifecycle(to.value.extra, ruleId) ?? "live", to.value.version, ruleId);
       this.db.run("COMMIT");
       return ok({ from: from.value, to: to.value });
     } catch (e) {
@@ -2099,8 +2134,34 @@ export class SQLiteStore implements StoreInterface {
   async listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>> {
     try {
       const rows = this.db
-        .prepare("SELECT id, n, leaf_doc_id, allocated_at, allocated_by FROM rule_registry ORDER BY n ASC")
+        .prepare(
+          "SELECT id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version FROM rule_registry ORDER BY n ASC",
+        )
         .all() as RuleRegistryRow[];
+      return ok(rows);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /** @see StoreInterface.listAcCites */
+  async listAcCites(): Promise<Result<AcCiteRow[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare("SELECT doc_id, ac_id, rule_id FROM ac_cites ORDER BY doc_id, ac_id, rule_id")
+        .all() as AcCiteRow[];
+      return ok(rows);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /** @see StoreInterface.listRuleDepends */
+  async listRuleDepends(): Promise<Result<RuleDependsRow[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare("SELECT leaf_id, rule_id FROM rule_depends ORDER BY leaf_id, rule_id")
+        .all() as RuleDependsRow[];
       return ok(rows);
     } catch (e) {
       return wrapStoreError(e);
