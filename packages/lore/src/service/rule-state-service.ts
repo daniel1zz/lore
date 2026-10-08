@@ -33,7 +33,7 @@
  */
 
 import { err, extractEvidence, ok, parseCodeAnchor } from "@lore/core";
-import type { DocRecord, EvidenceEntry, LoreError, Result, RuleLifecycle } from "@lore/core";
+import type { DocRecord, DocType, EvidenceEntry, LoreError, Result, RuleLifecycle } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
 // ─── Public contract ────────────────────────────────────────────────────────────────────────
@@ -362,6 +362,9 @@ function decideRule(rule: RuleModel, git: GitEvaluator): { state: RuleVerificati
 
 // ─── Service ────────────────────────────────────────────────────────────────────────────────
 
+/** Doc types the rule-state snapshot depends on; any other type is never fetched. */
+const SNAPSHOT_DOC_TYPES: readonly DocType[] = ["baseline", "spec", "plan", "task"];
+
 /**
  * Read-time rule verification state (see the module header for the precedence and
  * evidence-resolution rules). Stateless: holds only the store and the git port.
@@ -458,8 +461,14 @@ export class RuleStateService {
   }
 
   private async loadSnapshot(): Promise<Result<Snapshot, LoreError>> {
-    const docs = await this.store.findMany({});
-    if (!docs.ok) return docs;
-    return ok(buildSnapshot(docs.value));
+    // reason: rule state reads only these four types; an unfiltered findMany({}) parsed every
+    // knowledge doc (~70% of extra bytes) and made `lore status --json` ~19 s (AC-BLS2-9, C6).
+    const all: DocRecord[] = [];
+    for (const type of SNAPSHOT_DOC_TYPES) {
+      const docs = await this.store.findMany({ type });
+      if (!docs.ok) return docs;
+      all.push(...docs.value);
+    }
+    return ok(buildSnapshot(all));
   }
 }
