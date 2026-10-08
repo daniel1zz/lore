@@ -263,6 +263,54 @@ export interface RuleRegistryRow {
   version: number;
 }
 
+/** One `ac_exemptions` row (migration-014): criterion `ac_id` of spec `doc_id` is excused from the citation gate. */
+export interface AcExemptionRow {
+  doc_id: DocId;
+  ac_id: string;
+  /** Non-blank justification. */
+  reason: string;
+  /** ISO 8601 (`toISOString()` form) instant at which the exemption stops counting as active. */
+  expires_at: string;
+  /** Actor identity that granted it. */
+  granted_by: string;
+  /** ISO 8601 grant time. */
+  granted_at: string;
+}
+
+/** Cap input of {@link StoreInterface.insertAcExemptionCapped}. */
+export interface AcExemptionCap {
+  /** Live criteria count the cap was derived from (named in the refusal message). */
+  liveCriteria: number;
+  /** Largest number of ACTIVE (unexpired) exemptions allowed after the insert. */
+  maxActive: number;
+  /** ISO 8601 instant: a row is active iff `expires_at > now`. */
+  now: string;
+}
+
+/** One `ac_exemptions` row (migration-014): criterion `ac_id` of spec `doc_id` is excused from the citation gate. */
+export interface AcExemptionRow {
+  doc_id: DocId;
+  ac_id: string;
+  /** Non-blank justification. */
+  reason: string;
+  /** ISO 8601 (`toISOString()` form) instant at which the exemption stops counting as active. */
+  expires_at: string;
+  /** Actor identity that granted it. */
+  granted_by: string;
+  /** ISO 8601 grant time. */
+  granted_at: string;
+}
+
+/** Cap input of {@link StoreInterface.insertAcExemptionCapped}. */
+export interface AcExemptionCap {
+  /** Live criteria count the cap was derived from (named in the refusal message). */
+  liveCriteria: number;
+  /** Largest number of ACTIVE (unexpired) exemptions allowed after the insert. */
+  maxActive: number;
+  /** ISO 8601 instant: a row is active iff `expires_at > now`. */
+  now: string;
+}
+
 /** One `ac_cites` index row (migration-014): spec `doc_id`'s criterion `ac_id` cites rule `rule_id`. */
 export interface AcCiteRow {
   doc_id: DocId;
@@ -687,6 +735,30 @@ export interface StoreInterface {
 
   /** Every `rule_depends` row (migration-014), sorted by (leaf_id, rule_id); same contract as {@link listAcCites}. */
   listRuleDepends(): Promise<Result<RuleDependsRow[], LoreError>>;
+
+  /**
+   * Insert one `ac_exemptions` row under the cap in ONE write transaction (count active rows, then
+   * insert only if `count < cap.maxActive`), so concurrent grants never exceed the cap. An EXPIRED row
+   * for the same (doc_id, ac_id) is replaced (renewal); an ACTIVE one is refused.
+   *
+   * @returns the inserted row; `VALIDATION_ERROR` (message names the 10% cap) when full or already active.
+   */
+  insertAcExemptionCapped(row: AcExemptionRow, cap: AcExemptionCap): Promise<Result<AcExemptionRow, LoreError>>;
+
+  /** Every `ac_exemptions` row (active and expired), sorted by (doc_id, ac_id). */
+  listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>>;
+
+  /**
+   * Insert one `ac_exemptions` row under the cap in ONE write transaction (count active rows, then
+   * insert only if `count < cap.maxActive`), so concurrent grants never exceed the cap. An EXPIRED row
+   * for the same (doc_id, ac_id) is replaced (renewal); an ACTIVE one is refused.
+   *
+   * @returns the inserted row; `VALIDATION_ERROR` (message names the 10% cap) when full or already active.
+   */
+  insertAcExemptionCapped(row: AcExemptionRow, cap: AcExemptionCap): Promise<Result<AcExemptionRow, LoreError>>;
+
+  /** Every `ac_exemptions` row (active and expired), sorted by (doc_id, ac_id). */
+  listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>>;
 
   // ── Links ──────────────────────────────────────────────────────────────
 

@@ -71,6 +71,8 @@ import type {
   SearchHit,
   RuleLeafPatch,
   RuleRegistryRow,
+  AcExemptionRow,
+  AcExemptionCap,
   StoreFilters,
   StoreInterface,
   TraceDenyByCheckpoint,
@@ -108,6 +110,8 @@ import {
   rowToVersionRecord,
   toStoreError,
   wrapStoreError,
+  buildAcExemptionAlreadyActiveError,
+  buildAcExemptionCapError,
 } from "./store-shared.js";
 
 // ─── SQLiteStore ─────────────────────────────────────────────────────────────
@@ -2138,6 +2142,74 @@ export class SQLiteStore implements StoreInterface {
           "SELECT id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version FROM rule_registry ORDER BY n ASC",
         )
         .all() as RuleRegistryRow[];
+      return ok(rows);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.insertAcExemptionCapped
+   *
+   * reason: `BEGIN IMMEDIATE` takes the write lock BEFORE the active count is read, and the INSERT
+   * itself is `INSERT ... SELECT ... WHERE (SELECT COUNT(*) ...) < ?`, so count-then-insert is one
+   * serialised step across connections/processes (AC-BLS2-10). Do not split the count into its own read.
+   */
+  async insertAcExemptionCapped(
+    row: AcExemptionRow,
+    cap: AcExemptionCap,
+  ): Promise<Result<AcExemptionRow, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const existing = this.db
+        .prepare("SELECT expires_at FROM ac_exemptions WHERE doc_id = ? AND ac_id = ?")
+        .get(row.doc_id, row.ac_id) as { expires_at: string } | null;
+      if (existing !== null && existing.expires_at > cap.now) {
+        this.db.run("ROLLBACK");
+        return err(buildAcExemptionAlreadyActiveError(row.doc_id, row.ac_id));
+      }
+      if (existing !== null) {
+        this.db.prepare("DELETE FROM ac_exemptions WHERE doc_id = ? AND ac_id = ?").run(row.doc_id, row.ac_id);
+      }
+      const inserted = this.db
+        .prepare(
+          `INSERT INTO ac_exemptions (doc_id, ac_id, reason, expires_at, granted_by, granted_at)
+           SELECT ?, ?, ?, ?, ?, ?
+           WHERE (SELECT COUNT(*) FROM ac_exemptions WHERE expires_at > ?) < ?`,
+        )
+        .run(row.doc_id, row.ac_id, row.reason, row.expires_at, row.granted_by, row.granted_at, cap.now, cap.maxActive);
+      if (inserted.changes === 0) {
+        const count = this.db
+          .prepare("SELECT COUNT(*) AS n FROM ac_exemptions WHERE expires_at > ?")
+          .get(cap.now) as { n: number };
+        this.db.run("ROLLBACK");
+        return err(buildAcExemptionCapError(count.n, cap.liveCriteria, cap.maxActive));
+      }
+      this.db.run("COMMIT");
+      return ok({ ...row });
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as allocateRuleAndUpdateLeaf — ROLLBACK throws only when the transaction is
+        // already closed; `e` below is what the caller needs.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /** @see StoreInterface.listAcExemptions */
+  async listAcExemptions(): Promise<Result<AcExemptionRow[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare(
+          "SELECT doc_id, ac_id, reason, expires_at, granted_by, granted_at FROM ac_exemptions ORDER BY doc_id, ac_id",
+        )
+        .all() as AcExemptionRow[];
       return ok(rows);
     } catch (e) {
       return wrapStoreError(e);

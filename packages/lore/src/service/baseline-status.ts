@@ -30,6 +30,7 @@ import {
 import { countCitations, buildRuleIndex } from "./ac-citations.js";
 import { collectKnownRuleIds, findUnregisteredRuleIds } from "./baseline-rule-ids.js";
 import type { RuleStateService, RuleStateCounts } from "./rule-state-service.js";
+import { AcExemptionService } from "./ac-exemption-service.js";
 
 export interface BaselineStatus {
   rules_total: number;
@@ -52,6 +53,12 @@ export interface BaselineStatus {
    * A count only — never repaired by the status check.
    */
   index_mismatch: number;
+  /** Criterion exemptions (spec C4) whose expiry is still in the future at status time. */
+  exemptions_active: number;
+  /** Criterion exemptions past their expiry (kept for the record, no longer excusing anything). */
+  exemptions_expired: number;
+  /** `exemptions_active / live criteria` (0 when none); the cap is 0.10. */
+  exemption_ratio: number;
 }
 
 export type BaselineFindingKind =
@@ -224,11 +231,13 @@ async function countIndexMismatch(
  * baseline doc nor any AC citation (and no index row that would be a mismatch).
  *
  * @param pathExists - repo-relative path probe for the BL-11 lint (fs check from the repo root).
+ * @param now - ISO 8601 instant deciding which exemptions are active (default: the current time).
  */
 export async function computeBaselineStatus(
   store: StoreInterface,
   ruleState: RuleStateService,
   pathExists: (path: string) => boolean,
+  now: string = new Date().toISOString(),
 ): Promise<Result<BaselineStatus | null, LoreError>> {
   const baselineDocs = await store.findMany({ type: "baseline" });
   if (!baselineDocs.ok) return baselineDocs;
@@ -244,6 +253,8 @@ export async function computeBaselineStatus(
   if (!counts.ok) return counts;
   const findings = await findBaselineIntegrityFindings(store);
   if (!findings.ok) return findings;
+  const exemptions = await new AcExemptionService(store).counts({ now });
+  if (!exemptions.ok) return exemptions;
 
   const index = buildRuleIndex(leaves);
   const citations = countCitations(specs.value, index);
@@ -285,5 +296,8 @@ export async function computeBaselineStatus(
       (f) => f.kind === "unregistered-rule" || f.kind === "registry-leaf-mismatch",
     ).length,
     index_mismatch: indexMismatch.value,
+    exemptions_active: exemptions.value.active,
+    exemptions_expired: exemptions.value.expired,
+    exemption_ratio: exemptions.value.ratio,
   });
 }

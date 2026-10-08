@@ -1295,3 +1295,27 @@ export function escapeFtsQuery(raw: string): string {
   const escaped = pieces.map((piece) => expandFtsQueryPiece(piece));
   return escaped.join(" ");
 }
+
+// ─── Criterion exemptions (migration-014 `ac_exemptions`, spec C4) ───────────
+
+/** Refusal when the active-exemption cap (10% of live criteria) is already full. Shared by all three stores. */
+export function buildAcExemptionCapError(activeCount: number, liveCriteria: number, maxActive: number): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "exemptions",
+    message:
+      `Exemption cap reached: ${activeCount} active exemption(s) already fill the 10% cap ` +
+      `(max ${maxActive} = floor(10% x ${liveCriteria} live criteria)). ` +
+      "Cite a baseline rule instead, or wait for an existing exemption to expire.",
+  } as LoreError;
+}
+
+/** Refusal when (doc_id, ac_id) already carries an ACTIVE exemption. */
+export function buildAcExemptionAlreadyActiveError(docId: string, acId: string): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "ac_id",
+    message: `Criterion ${acId} of ${docId} already has an active exemption.`,
+    value: acId,
+  } as LoreError;
+}
