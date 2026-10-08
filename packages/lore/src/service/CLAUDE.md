@@ -68,7 +68,7 @@ One line per service — scope keywords only; mechanism detail lives in the arch
 | `ProjectSetupService` | Thin wrapper over `scaffoldProject` — per-repo `lore setup --project` scaffold |
 | `GateEnforcer` | `enforce(checkpoint, ctx)` — service-layer runner for the seven `lore gate` checkpoints |
 | `RequirementService` | add/list/removeRequirement on `prd.extra.requirements`; mirrors `AcService` one tier up |
-| `RuleService` / `RuleStateService` | baseline rules (registry-allocated ids) + evidence-computed rule state. Contract: `spec-baseline-slice-1-rules-with-permanent-ids-ac-citations` |
+| `Rule*` / `ImpactService` / `AcExemptionService` | baseline rules, rule state, read/impact, exemptions; every AC write goes through `ac-write-chokepoint`. Contracts: `SPEC-156`, `SPEC-157` (`lore get` resolves both) |
 | `UatService` | `record` — sole UAT-verdict write orchestrator; refuses a non-plan target BEFORE doc creation (no orphan, no `--force`) |
 | `DriftCheckService` | `checkDrift` over `extra.code_anchors` for `ANCHOR_SCANNED_DOC_TYPES` (spec + knowledge) — one list read by the scan, the RMW refusal and the CLI alike; owns those RMW verbs. Evicted detail: same doc as `AcService` |
 | `VerificationProjectionService` | `evidencePanel` dashboard projection; zero local derivation math, all of it from `@lore/core` |

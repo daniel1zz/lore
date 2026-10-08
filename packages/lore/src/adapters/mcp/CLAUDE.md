@@ -4,7 +4,7 @@
 
 MCP (Model Context Protocol) stdio adapter. Entered via `lore --mcp-server`
 (top-level flag intercepted in `packages/lore/src/index.ts`) or `lore agent`.
-Registers 33 `lore_*` tools plus a small set of MCP resources against
+Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.test.ts` — never restate it here) plus a small set of MCP resources against
 `@modelcontextprotocol/sdk`'s `McpServer`, connects over
 `StdioServerTransport`. Per-spec mechanism history:
 `lore search "mcp"` or the frozen snapshot
@@ -85,7 +85,7 @@ Registers 33 `lore_*` tools plus a small set of MCP resources against
 ## Files
 
 - `index.ts` — `startMcpServer(app, getConfig?)`; wires `McpServer` + `StdioServerTransport`.
-- `tools.ts` — 33 tool registrations, schema constants, Zod input shapes.
+- `tools.ts` — the tool registrations, schema constants, Zod input shapes.
 - `assess-render.ts` — `buildAssessSummaryText(result)` — Markdown digest for `lore_assess`'s `summary` field.
 - `resources.ts` — MCP resource registrations (corpus snapshots, etc.).
 - `schema-info.ts` — `CORPUS_SCHEMA_INFO` constant describing doc types and `extra` requirements.
