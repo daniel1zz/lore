@@ -616,6 +616,12 @@ export const LoreClaimSchema = z.object({
   branch: z.string().optional(),
   machine: z.string().optional(),
   worktree: z.string().optional(),
+  /**
+   * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8): the baseline branch this
+   * worktree session may write under in the main corpus. Requires `worktree`; stored on the lease as
+   * `extra.claim.corpus_scope` — same field the CLI's `--corpus-scope` writes.
+   */
+  corpus_scope: z.string().optional(),
   steal: z.boolean().optional(),
 });
 
@@ -1998,6 +2004,7 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       ...(args.branch !== undefined ? { branch: args.branch } : {}),
       ...(args.machine !== undefined ? { machine: args.machine } : {}),
       ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
+      ...(args.corpus_scope !== undefined ? { corpusScope: args.corpus_scope } : {}),
       // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
       // AC-IDENTITY-REJECT — MCP's `by` is a REQUIRED, always-explicit tool
       // argument (no $LORE_ACTOR/OS-username fallback chain like the CLI, per

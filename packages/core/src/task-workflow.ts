@@ -712,6 +712,15 @@ export const taskClaimSchema = z.object({
    * session env) — NOT "the same session as yours".
    */
   session_id: z.string().optional(),
+  /**
+   * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8, issue #39):
+   * the slug of the ONE baseline branch this worktree session may write (rules, cites,
+   * site maps) into the MAIN checkout's corpus. A LEASE FACT declared on the claiming
+   * call and read back by `ForeignCorpusWriteGuard` — never an argv flag re-read later.
+   * Absent ⇒ no corpus-authoring intent; a worktree session's baseline writes stay refused.
+   * Like `worktree`, NEVER carried forward on a refresh (see {@link buildTaskClaim}).
+   */
+  corpus_scope: z.string().min(1).optional(),
 });
 
 /** Derived TypeScript type for a task claim lease. */
@@ -726,6 +735,8 @@ export interface ClaimCaptureInput {
   worktree?: string;
   /** See {@link taskClaimSchema}'s `session_id` — NEVER carried forward (see {@link buildTaskClaim}). */
   session_id?: string;
+  /** See {@link taskClaimSchema}'s `corpus_scope` — explicit-only, NEVER carried forward. */
+  corpus_scope?: string;
 }
 
 /**
@@ -802,6 +813,11 @@ export function buildTaskClaim(
   // carry-forward exemption paragraph in this function's own doc. A future
   // session "fixing the inconsistency" by adding the `??` re-opens the defect.
   const sessionId = input.session_id;
+  // reason: corpus_scope is authorization intent, so like session_id it is NOT inherited
+  // from `previous`: a refresh that omits it drops the scope rather than silently
+  // re-granting write authority nobody re-declared (foreign-corpus-write-guard.ts header,
+  // "a claim REFRESH must keep declaring intent explicitly").
+  const corpusScope = input.corpus_scope;
 
   return {
     by: input.by,
@@ -810,6 +826,7 @@ export function buildTaskClaim(
     ...(machine !== undefined ? { machine } : {}),
     ...(worktree !== undefined ? { worktree } : {}),
     ...(sessionId !== undefined ? { session_id: sessionId } : {}),
+    ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
   };
 }
 

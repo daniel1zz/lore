@@ -119,6 +119,7 @@ import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 import { applyAcChange } from "./ac-write-chokepoint.js";
+import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -300,6 +301,47 @@ export class AcService {
    */
   constructor(private readonly store: StoreInterface) {}
 
+  /**
+   * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8): armed post-construction
+   * by `adapters/cli/loader.ts`; absent ⇒ `citeCriterion` is ungated, byte-identical to before.
+   */
+  private writeAuthority: CorpusWriteAuthority | undefined;
+
+  /** Arms the claim-scoped corpus-write guard for {@link citeCriterion}. Called once per CLI process. */
+  setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
+    this.writeAuthority = new CorpusWriteAuthority(this.store, context);
+  }
+
+  /**
+   * From a linked worktree, a cite write is authorized by the BASELINE RULES it names, not by the
+   * spec it lands on: every cited rule must live on a leaf under the lease's `corpus_scope` branch.
+   * A rule id that no leaf carries cannot be proven in scope, so it refuses (inert outside a
+   * foreign crossing — the authority short-circuits before any lookup matters).
+   */
+  private async authorizeCite(ruleIds: readonly string[], by: string | undefined): Promise<Result<void, LoreError>> {
+    if (this.writeAuthority === undefined) return ok(undefined);
+    const leaves = await this.store.findMany({ type: "baseline" });
+    if (!leaves.ok) return leaves;
+    const carrying = new Map<string, DocRecord>();
+    for (const leaf of leaves.value) {
+      const rules = leaf.extra["rules"];
+      if (!Array.isArray(rules)) continue;
+      for (const rule of rules as Array<{ id?: unknown }>) {
+        if (typeof rule.id === "string" && ruleIds.includes(rule.id)) carrying.set(rule.id, leaf);
+      }
+    }
+    const known = ruleIds.map((id) => carrying.get(id));
+    const allCarried = known.every((t) => t !== undefined);
+    // reason: an uncarried id cannot be proven in scope; an EMPTY target set never authorizes
+    // (CorpusWriteAuthority.findCoveringGrant), so a foreign crossing refuses while an own-corpus
+    // write stays inert.
+    const targets = allCarried ? [...new Set(known as DocRecord[])] : [];
+    const actor = resolveActorWithSource(by, process.env).actor;
+    const verdict = await this.writeAuthority.authorize(targets, "ac-cite", actor);
+    if (!verdict.ok) return verdict;
+    return ok(undefined);
+  }
+
   // ── addCriterion ──────────────────────────────────────────────────────────
 
   /**
@@ -445,6 +487,8 @@ export class AcService {
     const target = existing[index] as AcceptanceCriterion;
     const current = target.cites ?? [];
     const requested = [...new Set(ruleIds)];
+    const authorized = await this.authorizeCite(requested, opts.by);
+    if (!authorized.ok) return authorized;
     const next =
       flags.remove === true
         ? current.filter((id) => !requested.includes(id))

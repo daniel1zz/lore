@@ -1,6 +1,6 @@
 /**
  * lore claim <task> [--by <name>] [--branch <branch>] [--machine <name>]
- *   [--worktree <path>] [--steal] — acquire an advisory execution lease on a task OR
+ *   [--worktree <path>] [--corpus-scope <baseline-branch>] [--steal] — acquire an advisory execution lease on a task OR
  *   phase document.
  *
  * Target-type dispatch (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-
@@ -26,6 +26,13 @@
  *   - A same-holder fresh refresh MERGES FORWARD `branch`/`machine`/`worktree`
  *     from the existing claim when a field is omitted here (D2 carry-forward,
  *     `TaskWorkflowService.claim`'s job, not this adapter's).
+ *
+ * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8, issue #39):
+ * `--corpus-scope <branch>` (requires `--worktree`; TASK targets only) declares ON THE LEASE
+ * that this worktree session may write baseline rules/cites/site maps under that one baseline
+ * branch into the main checkout's corpus. The scope is a lease fact read back by the
+ * foreign-corpus-write guard — never an argv flag re-read later — and is re-declared on
+ * every refresh (never carried forward).
  *
  * Semantics (SPEC-025 §8.3):
  *   - No existing claim → acquired.
@@ -81,6 +88,11 @@ export default defineCommand({
       type: "string",
       description: "Worktree path (optional); ALWAYS explicit — never auto-captured from cwd (SPEC-042 D2)",
     },
+    "corpus-scope": {
+      type: "string",
+      description:
+        "Baseline branch (id or slug) this worktree session may write rules/cites/maps under in the main corpus; requires --worktree (task claims only)",
+    },
     steal: {
       type: "boolean",
       description: "Override even a fresh claim held by someone else",
@@ -101,6 +113,7 @@ export default defineCommand({
         ...(typeof args.branch === "string" ? { branch: args.branch } : {}),
         machine,
         ...(typeof args.worktree === "string" ? { worktree: args.worktree } : {}),
+        ...(typeof args["corpus-scope"] === "string" ? { corpusScope: args["corpus-scope"] } : {}),
         // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
         // AC-IDENTITY-REJECT — threads the resolved tier into the task-claim
         // gate's collision-signature test (`TaskWorkflowService.enforceClaimGate`);
@@ -129,6 +142,13 @@ export default defineCommand({
         result.error.field === "type" &&
         result.error.value === "phase"
       ) {
+        // reason: corpus scope is a TASK-lease fact; PhaseWorkflowService has no such field, so
+        // passing it on would silently drop an authority the caller believes they were granted.
+        if (claimOpts.corpusScope !== undefined) {
+          process.stderr.write("Error: --corpus-scope applies to task claims only; this target is a phase\n");
+          process.exitCode = 2;
+          return;
+        }
         result = await requirePhaseWorkflowService(app).claim(args.task as string, claimOpts);
       }
 
