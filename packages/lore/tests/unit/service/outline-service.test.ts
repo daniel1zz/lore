@@ -736,6 +736,7 @@ describe("OutlineService.resolve", () => {
         pruneTraceEvents: (cutoffIso, batchSize) => store.pruneTraceEvents(cutoffIso, batchSize),
         close: () => store.close(),
         dbSizeBytes: () => store.dbSizeBytes(),
+        maxDocVersion: () => store.maxDocVersion(),
       };
 
       const brokenService = new OutlineService(brokenStore);

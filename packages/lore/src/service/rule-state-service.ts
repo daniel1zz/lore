@@ -469,6 +469,11 @@ export class RuleStateService {
       if (!docs.ok) return docs;
       all.push(...docs.value);
     }
-    return ok(buildSnapshot(all));
+    // reason: corpus_version keeps its "max version over ALL live docs" meaning (slice-1
+    // AC-BLS1-3/4) without parsing the knowledge docs this snapshot no longer fetches.
+    const maxVersion = await this.store.maxDocVersion();
+    if (!maxVersion.ok) return maxVersion;
+    const snapshot = buildSnapshot(all);
+    return ok({ ...snapshot, corpusVersion: maxVersion.value });
   }
 }
