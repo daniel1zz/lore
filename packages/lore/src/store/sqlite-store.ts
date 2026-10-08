@@ -2521,6 +2521,17 @@ export class SQLiteStore implements StoreInterface {
     this.db.close();
   }
 
+  async maxDocVersion(): Promise<Result<number, LoreError>> {
+    try {
+      const row = this.db
+        .query("SELECT MAX(version) AS max_version FROM docs WHERE deleted_at IS NULL")
+        .get() as { max_version: number | null };
+      return ok(row.max_version ?? 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async dbSizeBytes(): Promise<Result<number, LoreError>> {
     try {
       const { page_count: pageCount } = this.db

@@ -1512,6 +1512,31 @@ describe("SQLiteStore.dbSizeBytes (AC-STORE-010)", () => {
   });
 });
 
+// AC-BLS2-9: maxDocVersion — SELECT MAX(version) over live docs of every type, no doc parsing.
+describe("SQLiteStore.maxDocVersion (AC-BLS2-9)", () => {
+  let store: SQLiteStore;
+  beforeEach(() => {
+    _counter = 0;
+    store = new SQLiteStore(":memory:");
+  });
+  afterEach(() => store.close());
+
+  it("BOUNDARY: empty corpus reports 0", async () => {
+    const r = await store.maxDocVersion();
+    expect(r).toEqual({ ok: true, value: 0 });
+  });
+
+  it("HAPPY: max over live docs of any type, ignoring soft-deleted rows", async () => {
+    await store.insert(makeDoc({ slug: "k-high", type: "knowledge", version: 17 }));
+    const gone = makeDoc({ slug: "k-gone", type: "knowledge", version: 40 });
+    await store.insert(gone);
+    await store.insert(makeDoc({ slug: "t-low", type: "task", version: 3 }));
+    expect((await store.maxDocVersion())).toEqual({ ok: true, value: 40 });
+    await store.softDelete(gone.id);
+    expect((await store.maxDocVersion())).toEqual({ ok: true, value: 17 });
+  });
+});
+
 // SPEC-034 §3: review_judgments + calibration_records store methods.
 // PRAGMA foreign_keys = ON is set in SQLiteStore.init() — every judgment/calibration
 // insert below first inserts a real parent doc (and, for calibration, a real judgment)

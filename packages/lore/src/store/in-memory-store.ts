@@ -1246,6 +1246,14 @@ export class InMemoryStore implements StoreInterface {
     // intentionally empty — in-memory store has no resources to release
   }
 
+  async maxDocVersion(): Promise<Result<number, LoreError>> {
+    let max = 0;
+    for (const doc of this.docs.values()) {
+      if (doc.deleted_at === null && doc.version > max) max = doc.version;
+    }
+    return ok(max);
+  }
+
   /** No disk footprint — always reports 0 bytes. */
   async dbSizeBytes(): Promise<Result<number, LoreError>> {
     return ok(0);
