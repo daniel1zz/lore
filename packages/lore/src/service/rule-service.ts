@@ -61,6 +61,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { CorpusService, type CreateDocResult, type WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
+import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // reason: C7's `--check-baseline` imports this from the service that owns rules; the helper itself
 // lives in a pure module so CorpusService can share it without a service cycle.
@@ -136,6 +137,12 @@ type Mutation = Result<{ extra: Record<string, unknown>; summary: string; detail
 
 export class RuleService {
   private readonly createDoc: CreateBaselineDocPort;
+  /**
+   * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8): set post-construction by
+   * `adapters/cli/loader.ts` — never via the constructor, so every bare `new RuleService(store)`
+   * stays byte-identical (absent ⇒ every write is ungated, exactly as before the guard existed).
+   */
+  private writeAuthority: CorpusWriteAuthority | undefined;
 
   /**
    * @param store - Storage abstraction.
@@ -154,6 +161,45 @@ export class RuleService {
       const corpus = new CorpusService(store);
       this.createDoc = corpus.create.bind(corpus);
     }
+  }
+
+  /**
+   * Arms the claim-scoped corpus-write guard for every baseline write this instance performs
+   * from now on. Called once per CLI process by the composition root.
+   */
+  setCorpusWriteContext(context: CorpusWriteAuthorityContext): void {
+    this.writeAuthority = new CorpusWriteAuthority(this.store, context);
+  }
+
+  /**
+   * Authorizes a baseline write by `by` against `targets` — the ONE entry every writer in this
+   * service (and `lore baseline map`) shares. Inert without {@link setCorpusWriteContext} or
+   * outside a foreign (worktree) crossing; otherwise requires a fresh lease whose `corpus_scope`
+   * covers every target, and records the authorization in the audit log.
+   *
+   * @returns ok, or the `gate:corpus-write:foreign-provenance` refusal.
+   */
+  async authorizeCorpusWrite(
+    targets: readonly DocRecord[],
+    operation: string,
+    by?: string,
+  ): Promise<Result<void, LoreError>> {
+    if (this.writeAuthority === undefined) return ok(undefined);
+    const verdict = await this.writeAuthority.authorize(targets, operation, this.resolveActor(by));
+    if (!verdict.ok) return verdict;
+    return ok(undefined);
+  }
+
+  /**
+   * Authorize a write on the baseline node `idOrSlug` (resolved here) — for adapter verbs whose
+   * write path lives outside this service (`lore baseline map`).
+   */
+  async authorizeNodeWrite(idOrSlug: string, operation: string, by?: string): Promise<Result<DocRecord, LoreError>> {
+    const target = await this.resolveBaselineDoc(idOrSlug);
+    if (!target.ok) return target;
+    const gate = await this.authorizeCorpusWrite([target.value], operation, by);
+    if (!gate.ok) return gate;
+    return target;
   }
 
   // ── rules ──────────────────────────────────────────────────────────────────
@@ -185,6 +231,8 @@ export class RuleService {
     }
     const target = await this.resolveBaselineDoc(leaf, "leaf");
     if (!target.ok) return target;
+    const gate = await this.authorizeCorpusWrite([target.value], "rule-add", opts?.by);
+    if (!gate.ok) return gate;
     const leafId = target.value.id;
 
     let lastStale: LoreError | undefined;
@@ -239,6 +287,7 @@ export class RuleService {
     if (!patchCheck.ok) return patchCheck;
 
     let lastStale: LoreError | undefined;
+    let authorized = false; // reason: one authorization (and one audit row) per call, not per CAS re-apply
     for (let attempt = 0; attempt <= MAX_CAS_REAPPLIES; attempt += 1) {
       const located = await this.locateRule(ruleId);
       if (!located.ok) return located;
@@ -247,6 +296,11 @@ export class RuleService {
       if (!edited.ok) return edited;
 
       if (patch.moveTo === undefined) {
+        if (!authorized) {
+          const gate = await this.authorizeCorpusWrite([sourceLeaf], "rule-set", opts?.by);
+          if (!gate.ok) return gate;
+          authorized = true;
+        }
         const written = await this.writeLeafExtra(
           sourceLeaf, actor,
           (doc) => replaceRule(doc, ruleId, edited.value, patchSummary(patch), {
@@ -264,6 +318,11 @@ export class RuleService {
       if (!dest.ok) return dest;
       if (dest.value.id === sourceLeaf.id) {
         return err(validationError("moveTo", `rule ${ruleId} already lives on that leaf`, patch.moveTo));
+      }
+      if (!authorized) {
+        const gate = await this.authorizeCorpusWrite([sourceLeaf, dest.value], "rule-move", opts?.by);
+        if (!gate.ok) return gate;
+        authorized = true;
       }
       const fromReady = await this.demoteIfApproved(sourceLeaf, actor, "rule move");
       if (!fromReady.ok) {
@@ -357,6 +416,8 @@ export class RuleService {
     if (label.trim() === "") return err(validationError("label", "label must not be empty"));
     const target = await this.resolveBaselineDoc(node);
     if (!target.ok) return target;
+    const gate = await this.authorizeCorpusWrite([target.value], "label-set", opts?.by);
+    if (!gate.ok) return gate;
     return this.retryWrite(target.value.id, opts?.by, (doc) => ok({
       extra: { ...doc.extra, label },
       summary: `Baseline label set to '${label}'`,
@@ -380,6 +441,8 @@ export class RuleService {
     }
     const target = await this.resolveBaselineDoc(leaf, "leaf");
     if (!target.ok) return target;
+    const gate = await this.authorizeCorpusWrite([target.value], "depends-on", opts?.by);
+    if (!gate.ok) return gate;
     for (const id of [...add, ...remove]) {
       if (!BASELINE_RULE_ID_PATTERN.test(id)) {
         return err(validationError("depends_on", `'${id}' is not a rule id (BR-<n>)`, id));
@@ -422,6 +485,8 @@ export class RuleService {
     }
     const target = await this.resolveBaselineDoc(node, ["root", "branch"]);
     if (!target.ok) return target;
+    const gate = await this.authorizeCorpusWrite([target.value], "glossary-add", opts?.by);
+    if (!gate.ok) return gate;
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
       const current = glossaryOf(doc);
       if (current.some((g) => g.term === parsed.data.term)) {
@@ -439,6 +504,8 @@ export class RuleService {
   async glossaryRemove(node: string, term: string, opts?: { by?: string }): Promise<Result<DocRecord, LoreError>> {
     const target = await this.resolveBaselineDoc(node, ["root", "branch"]);
     if (!target.ok) return target;
+    const gate = await this.authorizeCorpusWrite([target.value], "glossary-remove", opts?.by);
+    if (!gate.ok) return gate;
     return this.retryWrite(target.value.id, opts?.by, (doc) => {
       const current = glossaryOf(doc);
       if (!current.some((g) => g.term === term)) {

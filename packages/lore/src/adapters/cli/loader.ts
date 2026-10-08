@@ -54,7 +54,7 @@
  */
 
 import { dirname } from "path";
-import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
+import { mergeDefaults, isAiConfigValidationError, extractClaim, resolveClaimTtlMinutes, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
 import type {
   LoreConfig,
   LoreDefaults,
@@ -504,6 +504,16 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     (idOrSlug) => readTaskClaimLease(app, idOrSlug),
     foreignWriteContext,
   );
+  // Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8, #39) — the baseline-write
+  // half of the guard: RuleService/AcService write via the store directly (never through
+  // CorpusService), so they consult the SAME context + the caller's claim lease themselves.
+  const corpusWriteAuthority = {
+    foreign: foreignWriteContext,
+    callerDir: process.cwd(),
+    claimTtlMinutes: resolveClaimTtlMinutes(telemetryOnlyConfig),
+  };
+  app.ruleService?.setCorpusWriteContext(corpusWriteAuthority);
+  app.acService?.setCorpusWriteContext(corpusWriteAuthority);
 
   // SPEC-102 §Migration Strategy — opportunistic bounded-batch trace
   // retention prune, fired ONCE per CLI invocation (not MCP/HTTP — those are

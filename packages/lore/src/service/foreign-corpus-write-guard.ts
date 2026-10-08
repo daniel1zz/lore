@@ -33,6 +33,12 @@
  *     into the `LoreError` shape every CorpusService write method already
  *     returns (`VALIDATION_ERROR`, CLI exit code 4 via the existing
  *     `utils.ts::exitCode` mapping — no new error code).
+ *   - checkCorpusScopedWrite(context, scopeAuthorizesTarget) — the PURE decision for a
+ *     baseline write (rule/cite/map) from a linked worktree: claim-scoped corpus
+ *     authoring (spec-baseline-slice-2 §C8, AC-BLS2-8, issue #39).
+ *   - CorpusWriteAuthority — the IO half of that decision: finds the caller's fresh
+ *     claim lease carrying `corpus_scope`, resolves the target's branch through the
+ *     baseline parent chain, and records the authorization in the audit log.
  *   - guardTaskLifecycleWrites(taskWorkflow, readExistingClaim, context) —
  *     the ONE non-pure piece: wires the SAME predicate into
  *     `TaskWorkflowService.claim`/`.addEvidence`/`.release` from OUTSIDE
@@ -140,9 +146,12 @@
  * AC-CP-3.
  */
 
-import { err, type LoreError, type Result } from "@lore/core";
+import { realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
+import { err, extractClaim, isClaimStale, ok, type LoreError, type Result } from "@lore/core";
 import type { CorpusProvenance } from "@lore/core";
 import type { DocRecord, TaskClaim } from "@lore/core";
+import type { StoreInterface } from "../store/store-interface.js";
 import type { ClaimOpts, EvidenceInput, ReleaseOpts, TaskWorkflowService } from "./task-workflow-service.js";
 
 /**
@@ -387,5 +396,206 @@ export function guardTaskLifecycleWrites(
     const verdict = await checkLeaseDeclaresIntent(idOrSlug);
     if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
     return originalRelease(idOrSlug, opts, now);
+  };
+}
+
+// ─── Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8, #39) ───
+
+/**
+ * PURE decision for a BASELINE write (rule / cite / site map) reached from a linked
+ * worktree. Same shape as {@link checkForeignCorpusWrite}, but intent is not a boolean
+ * on the call: it is the ONE fact the caller measured from the lease —
+ * `scopeAuthorizesTarget` is true only when the caller's fresh claim declares a
+ * `corpus_scope` that is the target's branch (or an ancestor branch of it).
+ *
+ * Decision table: disabled / not-a-crossing → allowed (the write is not foreign);
+ * otherwise allowed iff `scopeAuthorizesTarget`. An UNSCOPED worktree session is
+ * refused — before this existed, rule/cite writes never consulted the guard at all.
+ *
+ * @example
+ * checkCorpusScopedWrite({ provenance: "git_common_dir", enabled: true }, false);
+ *   // => { allowed: false, reason: "gate:corpus-write:foreign-provenance: ..." }
+ */
+export function checkCorpusScopedWrite(
+  context: ForeignCorpusWriteContext,
+  scopeAuthorizesTarget: boolean,
+): ForeignCorpusWriteVerdict {
+  if (!context.enabled) return { allowed: true };
+  if (context.provenance !== "git_common_dir") return { allowed: true };
+  if (scopeAuthorizesTarget) return { allowed: true };
+  return {
+    allowed: false,
+    reason:
+      `${FOREIGN_CORPUS_WRITE_TOKEN}: this baseline write resolved a corpus OUTSIDE the caller's ` +
+      "own working tree, and no fresh claim lease held from THIS worktree declares a corpus scope " +
+      "covering the target's branch. Declare it on the claim: " +
+      "'lore claim <task> --worktree <path> --corpus-scope <baseline-branch>' — scope is a lease " +
+      "fact, re-declared on every refresh, and covers only that branch's subtree.",
+  };
+}
+
+/** Maximum baseline parent-chain depth walked — a cycle guard, far above any real tree. */
+const MAX_BASELINE_CHAIN_DEPTH = 32;
+
+/**
+ * What a successful scoped authorization proves — the claim the write rode on. Every
+ * field comes from the lease, never from the write's own arguments.
+ */
+export interface CorpusScopeGrant {
+  readonly task: string;
+  readonly by: string;
+  readonly worktree: string;
+  readonly sessionId?: string;
+  readonly scope: string;
+}
+
+/** Ambient facts {@link CorpusWriteAuthority} needs — resolved once per process by the composition root. */
+export interface CorpusWriteAuthorityContext {
+  readonly foreign: ForeignCorpusWriteContext;
+  /** The CALLING process's cwd — matched against each lease's `worktree`. */
+  readonly callerDir: string;
+  /** `workflow.claim_ttl_minutes` — a stale lease authorizes nothing. */
+  readonly claimTtlMinutes: number;
+}
+
+/** Realpath when the path exists, else the lexically resolved path (a lease may name a removed worktree). */
+function canonicalDir(path: string): string {
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    // reason: a lease may legitimately name a worktree that no longer exists; the lexical
+    // path then simply fails to contain the caller's real cwd — a refusal, not a guess.
+    return abs;
+  }
+}
+
+/** True when `dir` is `root` or sits beneath it. */
+function isWithin(root: string, dir: string): boolean {
+  const rel = relative(root, dir);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Authorizes baseline writes from a linked worktree against the caller's claim lease.
+ *
+ * The lease is looked up by WORKTREE (a fresh `extra.claim` whose `worktree` contains the
+ * caller's cwd and whose `corpus_scope` is set), never by actor: the write's actor
+ * resolves from `--by`/env/worktree and legitimately differs from the claiming `by`
+ * (`ac cite` is typically run without `--by`). The claim's own by/session/worktree is
+ * what the audit row carries.
+ *
+ * @invariant Inert (`ok(undefined)`) unless the context is a confirmed `git_common_dir`
+ *   crossing with the gate enabled — own-corpus and main-checkout writes are untouched.
+ * @invariant Every target must be a baseline doc whose ancestor-or-self chain contains the
+ *   lease's scope branch; one uncovered target refuses the whole write.
+ * @invariant On success appends ONE audit entry (`action: "corpus-scope-write"`, no
+ *   `version` key so it can never satisfy or disturb `lore audit --verify`'s version join).
+ */
+export class CorpusWriteAuthority {
+  constructor(
+    private readonly store: StoreInterface,
+    private readonly context: CorpusWriteAuthorityContext,
+    private readonly now: () => string = () => new Date().toISOString(),
+  ) {}
+
+  /**
+   * @param targets - The baseline docs this write mutates (a rule's leaf, both leaves of a move).
+   * @param operation - Short verb recorded on the audit entry (`rule-add`, `ac-cite`, `baseline-map`, ...).
+   * @param actor - The write's resolved actor (recorded beside the claim's own `by`).
+   * @returns `undefined` when the guard is inert (no foreign crossing), the {@link CorpusScopeGrant}
+   *   when a fresh scoped lease covers every target, or the foreign-write refusal.
+   */
+  async authorize(
+    targets: readonly DocRecord[],
+    operation: string,
+    actor: string,
+  ): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
+    // reason: inert short-circuit through the shared predicate — never re-derive the table here.
+    if (checkForeignCorpusWrite(this.context.foreign, false).allowed) return ok(undefined);
+
+    const grant = await this.findCoveringGrant(targets);
+    if (!grant.ok) return grant;
+    const verdict = checkCorpusScopedWrite(this.context.foreign, grant.value !== undefined);
+    if (!verdict.allowed) return err(foreignCorpusWriteRefusalError(verdict));
+    if (grant.value === undefined) return ok(undefined);
+
+    const first = targets[0];
+    const audited = await this.store.appendAuditEntry({
+      timestamp: this.now(),
+      actor,
+      session_id: first?.id ?? grant.value.task,
+      action: "corpus-scope-write",
+      ...(first !== undefined ? { doc_id: first.id } : {}),
+      details: {
+        operation,
+        targets: targets.map((t) => t.slug),
+        claim_task: grant.value.task,
+        claim_by: grant.value.by,
+        claim_worktree: grant.value.worktree,
+        ...(grant.value.sessionId !== undefined ? { claim_session_id: grant.value.sessionId } : {}),
+        corpus_scope: grant.value.scope,
+      },
+    });
+    if (!audited.ok) return audited;
+    return ok(grant.value);
+  }
+
+  /** First fresh scoped lease from this worktree whose scope branch covers EVERY target. */
+  private async findCoveringGrant(
+    targets: readonly DocRecord[],
+  ): Promise<Result<CorpusScopeGrant | undefined, LoreError>> {
+    if (targets.length === 0) return ok(undefined);
+    const chains: Array<Set<string>> = [];
+    for (const target of targets) {
+      const chain = await this.baselineChain(target);
+      if (!chain.ok) return chain;
+      chains.push(chain.value);
+    }
+    if (chains.some((c) => c.size === 0)) return ok(undefined); // a non-baseline target is never in scope
+
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const callerDir = canonicalDir(this.context.callerDir);
+    const nowIso = this.now();
+    for (const task of tasks.value) {
+      const claim = extractClaim(task);
+      if (claim?.corpus_scope === undefined || claim.worktree === undefined) continue;
+      if (isClaimStale(claim, nowIso, this.context.claimTtlMinutes)) continue;
+      if (!isWithin(canonicalDir(claim.worktree), callerDir)) continue;
+      const scope = claim.corpus_scope;
+      if (chains.every((c) => c.has(scope))) return ok(grantOf(task, claim, scope));
+    }
+    return ok(undefined);
+  }
+
+  /**
+   * The ids AND slugs of `doc` and every baseline ancestor (leaf, branch, root), so a lease
+   * naming either spelling matches. Empty set for a non-baseline doc.
+   */
+  private async baselineChain(doc: DocRecord): Promise<Result<Set<string>, LoreError>> {
+    const names = new Set<string>();
+    if (doc.type !== "baseline") return ok(names);
+    let cursor: DocRecord | null = doc;
+    for (let depth = 0; cursor !== null && depth < MAX_BASELINE_CHAIN_DEPTH; depth += 1) {
+      if (cursor.type !== "baseline") break;
+      names.add(cursor.id);
+      names.add(cursor.slug);
+      if (cursor.parent_id === null) break;
+      const parent = await this.store.find(cursor.parent_id);
+      if (!parent.ok) return parent;
+      cursor = parent.value;
+    }
+    return ok(names);
+  }
+}
+
+function grantOf(task: DocRecord, claim: TaskClaim, scope: string): CorpusScopeGrant {
+  return {
+    task: task.slug,
+    by: claim.by,
+    worktree: claim.worktree ?? "",
+    ...(claim.session_id !== undefined ? { sessionId: claim.session_id } : {}),
+    scope,
   };
 }

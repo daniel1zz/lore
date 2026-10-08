@@ -8,6 +8,9 @@
  *   depends <leaf> [--add BR-n]... [--remove BR-n]...
  *   glossary add <node> --term <t> --meaning <m> [--note <n>]   (root|branch only)
  *   glossary rm  <node> --term <t>
+ *   map <leaf>      STUB (claim-scoped corpus authoring, AC-BLS2-8): authorizes a site-map write on the
+ *                   leaf through the corpus-write guard and reports the scope verdict. It records NO
+ *                   map — the census/sites/coverage task replaces this body, keeping the authorize call.
  *   tree [root] [--states] [--rule BR-n]
  *                   Listing (node kind, label, status, rule tallies). `--states` adds every rule's
  *                   verification state with its inputs and `computed_from`; `--rule BR-n` prints
@@ -264,6 +267,22 @@ export default defineCommand({
             });
           },
         }),
+      },
+    }),
+    map: defineCommand({
+      meta: { name: "map", description: "Authorize a site-map write on a baseline leaf (stub: records no map yet)" },
+      args: {
+        leaf: { type: "positional", description: "Baseline leaf ID or slug", required: true },
+        ...commonArgs,
+      },
+      async run({ args }) {
+        await withRuleService(async (svc) => {
+          const authorized = await svc.authorizeNodeWrite(args.leaf as string, "baseline-map", resolveActor(args.by as string | undefined));
+          if (!authorized.ok) return reportFailure(authorized.error, args.json === true);
+          const slug = authorized.value.slug;
+          if (args.json) console.log(JSON.stringify({ ok: true, data: { slug, authorized: true, recorded: false } }, null, 2));
+          else console.log(`${slug}: site-map write authorized; no map recorded (the site census is not implemented in this build).`);
+        });
       },
     }),
     tree: defineCommand({

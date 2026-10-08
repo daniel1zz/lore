@@ -405,6 +405,15 @@ export interface ClaimOpts {
    */
   worktree?: string;
   /**
+   * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8, issue #39) — the
+   * baseline BRANCH (id or slug) this worktree session may write rules/cites/site maps under
+   * in the main checkout's corpus. Persisted as `extra.claim.corpus_scope` (canonical slug);
+   * `ForeignCorpusWriteGuard` reads it back from the lease. Requires `worktree` (a scope with no
+   * worktree has no session to bind to) and must resolve to a baseline `branch` node. Explicit
+   * per call — never carried forward on a refresh.
+   */
+  corpusScope?: string;
+  /**
    * How `by` was resolved (spec claim-time-actor-identity-guard-zero-evidence-
    * release-advis, AC-IDENTITY-REJECT) — CLI: `resolveActorWithIdentitySource`'s
    * `--by` flag > `$LORE_ACTOR` > SPEC-071 session tier > OS-username-fallback
@@ -2541,6 +2550,10 @@ export class TaskWorkflowService {
     if (!taskResult.ok) return taskResult;
     const task = taskResult.value;
 
+    const scopeResult = await this.resolveCorpusScope(opts);
+    if (!scopeResult.ok) return scopeResult;
+    const corpusScope = scopeResult.value;
+
     // reason: SPEC-042 D5 seam pinning — nowIso is resolved BEFORE the gate call
     // (was previously resolved AFTER) so the anchor-overlap predicate's sibling
     // staleness and this method's OWN existing-claim staleness check below share
@@ -2606,6 +2619,7 @@ export class TaskWorkflowService {
         // replaces (task-two-concurrent-orchestrators-both-resolve-to-agent-main
         // §Opt-in). `buildTaskClaim` never carries it forward.
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
+        ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
       },
       carryForward,
     );
@@ -2683,6 +2697,40 @@ export class TaskWorkflowService {
     }
 
     return writeResult;
+  }
+
+  /**
+   * Validates `opts.corpusScope` (claim-scoped corpus authoring, AC-BLS2-8) and returns the
+   * canonical branch slug to persist, or `undefined` when no scope was declared. Fails loud:
+   * a scope without a worktree, an unresolvable doc, or a non-branch node persists nothing —
+   * a silently-dropped scope would read as "claimed with authority" to the caller.
+   */
+  private async resolveCorpusScope(opts: ClaimOpts): Promise<Result<string | undefined, LoreError>> {
+    if (opts.corpusScope === undefined) return ok(undefined);
+    if (opts.worktree === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "corpus_scope",
+        message:
+          "--corpus-scope requires --worktree: corpus-authoring authority binds to the worktree " +
+          "session that holds the lease, so a scope with no worktree has nothing to authorize",
+        value: opts.corpusScope,
+      });
+    }
+    const resolved = await resolveDoc(this.store, opts.corpusScope);
+    if (!resolved.ok) return resolved;
+    const doc = resolved.value;
+    if (doc.type !== "baseline" || doc.extra["node"] !== "branch") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "corpus_scope",
+        message:
+          `--corpus-scope must name a baseline branch node; '${opts.corpusScope}' is ` +
+          (doc.type === "baseline" ? `a baseline ${String(doc.extra["node"])}` : `a ${doc.type}`),
+        value: opts.corpusScope,
+      });
+    }
+    return ok(doc.slug);
   }
 
   /**
