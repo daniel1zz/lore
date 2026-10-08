@@ -24,7 +24,7 @@
  *     the spec doc is left untouched. report mode never refuses (records a would-refuse audit row).
  *   - Liveness is read from `rule_registry.lifecycle` (migration-014) in the citing write's
  *     transaction; `RuleService.setRule(.., {lifecycle:"retired"})` updates it in the retire tx.
- *   - `ac_cites(spec_id, ac_id, rule_id)` has a row for every criterion that cites a rule (C5).
+ *   - `ac_cites(doc_id, ac_id, rule_id)` has a row for every criterion that cites a rule (C5).
  *   - "flagged" = counted in `computeBaselineStatus(...).cites_to_inactive`.
  *
  * ── RED STATE ───────────────────────────────────────────────────────────────────────────
@@ -205,9 +205,9 @@ async function readState(fx: Fixture) {
     } catch (cause) {
       registryLifecycle = { missing: String(cause) };
     }
-    let acCitesRows: Array<{ spec_id: string }> | { missing: string };
+    let acCitesRows: Array<{ doc_id: string }> | { missing: string };
     try {
-      acCitesRows = db.query("SELECT spec_id FROM ac_cites WHERE rule_id = ? AND ac_id = ?").all(RULE_ID, AC_ID) as Array<{ spec_id: string }>;
+      acCitesRows = db.query("SELECT doc_id FROM ac_cites WHERE rule_id = ? AND ac_id = ?").all(RULE_ID, AC_ID) as Array<{ doc_id: string }>;
     } catch (cause) {
       acCitesRows = { missing: String(cause) };
     }
@@ -274,7 +274,7 @@ describe("enforce mode, armed branch: 8 citers race 1 retirer (QA-2 / D6)", () =
       expect(state.registryLifecycle).toBe("retired");
       expect(Array.isArray(state.acCitesRows)).toBe(true);
       if (Array.isArray(state.acCitesRows)) {
-        expect(state.acCitesRows.map((r) => r.spec_id).sort()).toEqual(landed.map((s) => s.id).sort());
+        expect(state.acCitesRows.map((r) => r.doc_id).sort()).toEqual(landed.map((s) => s.id).sort());
       }
     }
   }, 180_000);
