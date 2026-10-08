@@ -28,12 +28,10 @@ describe("checkCorpusScopedWrite decision table", () => {
     expect(checkCorpusScopedWrite(foreign, true)).toEqual({ allowed: true });
   });
 
-  it.each([
-    ["own", true],
-    ["undetermined", true],
-    [null, true],
-  ] as const)("stays inert for provenance %s", (provenance) => {
-    expect(checkCorpusScopedWrite({ provenance, enabled: true }, false)).toEqual({ allowed: true });
+  it("stays inert for provenance own / undetermined / null", () => {
+    for (const provenance of ["own", "undetermined", null] as const) {
+      expect(checkCorpusScopedWrite({ provenance, enabled: true }, false)).toEqual({ allowed: true });
+    }
   });
 
   it("stays inert when the gate is disabled by config", () => {
