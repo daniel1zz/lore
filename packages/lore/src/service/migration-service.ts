@@ -29,6 +29,7 @@ import type {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { walkFiles } from "./fs-walk.js";
+import { applyAcChange } from "./ac-write-chokepoint.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -355,6 +356,18 @@ export class MigrationService {
         tags: doc.tags,
         extra,
       };
+
+      // AC write chokepoint (spec-baseline-slice-2 §C3, #54): imported frontmatter criteria are a
+      // sanctioned "import" write, re-validated like any other incoming AC array. A malformed
+      // array is reported per-file and skipped, never inserted.
+      const acGate = applyAcChange("import", undefined, extra);
+      if (!acGate.ok) {
+        importErrors.push({
+          file: doc.filePath,
+          error: `Invalid acceptance_criteria: ${acGate.error.code === "VALIDATION_ERROR" ? acGate.error.message : acGate.error.code}`,
+        });
+        continue;
+      }
 
       const insertResult = await this.store.insert(docRecord);
       if (!insertResult.ok) {

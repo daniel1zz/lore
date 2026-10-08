@@ -9,6 +9,7 @@ import type { DocId, DocRecord, DocStatus, VersionAction } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDocId } from "./resolve.js";
+import { applyAcChange } from "./ac-write-chokepoint.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────────
 
@@ -234,6 +235,12 @@ export class VersionService {
     // lore log/diff would surface forever. Update doc record to match
     // restored version first; only insert the version snapshot + audit entry
     // once that succeeds.
+    // AC write chokepoint (spec-baseline-slice-2 §C3, #54): a restore may change the criteria
+    // array back to a historical one — a sanctioned "restore" write, re-validated like any other
+    // incoming array before the CAS update so a refusal leaves no phantom history.
+    const acGate = applyAcChange("restore", currentDoc.extra, targetRecord.extra, docId);
+    if (!acGate.ok) return acGate;
+
     const updateResult = await this.store.update(docId, {
       content: targetRecord.content,
       extra: { ...targetRecord.extra },

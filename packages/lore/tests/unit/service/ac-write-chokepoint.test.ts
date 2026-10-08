@@ -3,12 +3,14 @@
  * task-skill-test-red-ac-write-chokepoint-on-every-entry-point-ac. Paired impl: C3.
  *
  * SPEC (C3): every write that changes `extra.acceptance_criteria` passes through ONE service
- * function. A write that does not come through the AcService verbs is refused with
- * `AC_WRITE_NOT_VIA_AC_VERB` unless its AC array is byte-identical to the stored one.
+ * function. The sanctioned paths are the AcService verbs, create (inline criteria are additions,
+ * validated + wording-gated), restore and v1 import. A WHOLESALE set (CLI / MCP lore_set / HTTP
+ * PATCH) that changes the array is refused with `AC_WRITE_NOT_VIA_AC_VERB` unless byte-identical.
+ * Re-baselined per spec Amendment log (2026-10-08): create is sanctioned, no longer refused.
  *
  * PINNED CONTRACT for C3 (the implementer must satisfy exactly this surface):
  *  1. Refusal code string is `AC_WRITE_NOT_VIA_AC_VERB`, returned as `Result.error.code` by
- *     `CorpusService.set` and `CorpusService.create`; surfaced verbatim by the MCP `lore_set`
+ *     `CorpusService.set`; surfaced verbatim by the MCP `lore_set`
  *     handler (error text carries the code) and by HTTP PATCH `/api/docs/:id`
  *     (`{ ok: false, error: { code } }`). A refused write leaves the doc (extra, version,
  *     status) byte-for-byte unchanged.
@@ -18,8 +20,8 @@
  *     cite: 5th arg opts) and write that string as the audit row's `actor` instead of the
  *     hard-coded "system".
  *
- * Dimensions: HAPPY (identical array accepted; verbs accepted), NEGATIVE (3 entry points +
- * create refuse), BOUNDARY (reordered / one-char-changed / removed array is a change),
+ * Dimensions: HAPPY (identical array accepted; verbs accepted), NEGATIVE (3 wholesale entry
+ * points refuse; create gated by the wording check), BOUNDARY (reordered / one-char-changed / removed array is a change),
  * STATE (refused write leaves the doc untouched), REGRESSION (the stale MCP comment claim).
  *
  * @spec_ref AC-BLS2-1
@@ -33,6 +35,13 @@ import type { CreateDocInput, DocId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
+import { VersionService } from "../../../src/service/version-service.js";
+import { MigrationService } from "../../../src/service/migration-service.js";
+import { applyAcChange } from "../../../src/service/ac-write-chokepoint.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import { handleApiRoute } from "../../../src/adapters/http/routes.js";
 import type { App } from "../../../src/app.js";
@@ -183,36 +192,57 @@ describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
     expect(await fingerprint(store, specId)).toBe(before);
   });
 
-  it("CorpusService.create with acceptance_criteria in extra is refused with the same code", async () => {
-    const { cs } = await setup();
+  // Re-baseline per spec Amendment log (2026-10-08): create is a SANCTIONED path — its inline
+  // criteria are additions validated by the chokepoint and by the spec-create wording gate
+  // (baseline rule BR-5). The two former "create refused" scenarios are replaced by the three
+  // below (HAPPY accepted + attributed, NEGATIVE vague criterion refused by the live gate,
+  // STATE the refused create leaves no doc behind).
+  it("CorpusService.create with valid inline criteria is accepted, stores them, and attributes the version and audit rows to the caller", async () => {
+    const { store, cs } = await setup();
     const prd = await cs.create({ type: "prd", title: "P2", content: "root" } as CreateDocInput);
+    if (!prd.ok) throw new Error("prd");
+    const res = await cs.create(
+      {
+        type: "spec",
+        title: "Born with ACs",
+        parent_id: prd.value.id,
+        content: "body",
+        extra: { acceptance_criteria: [AC("AC-N-1")] },
+      } as CreateDocInput,
+      { by: CALLER, attributeCreatedBy: true },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const doc = await stored(store, res.value.id);
+    expect(JSON.stringify(doc.extra["acceptance_criteria"])).toBe(JSON.stringify([AC("AC-N-1")]));
+    const audit = await store.queryAudit({ doc_id: res.value.id });
+    if (!audit.ok) throw new Error("audit");
+    expect(audit.value.map((e) => e.actor)).toContain(CALLER);
+    const versions = await store.findVersions(res.value.id);
+    if (!versions.ok) throw new Error("versions");
+    expect(versions.value.some((v) => v.created_by === CALLER)).toBe(true);
+  });
+
+  it("CorpusService.create with a vague human-mode criterion is refused by the spec-create wording check (the gate is live through the chokepoint)", async () => {
+    const store = new InMemoryStore();
+    const cs = new CorpusService(store, undefined, undefined, new GateEnforcer(undefined));
+    const prd = await cs.create({ type: "prd", title: "P4", content: "root" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd");
     const res = await cs.create({
       type: "spec",
-      title: "Born with ACs",
+      title: "Vague Spec",
       parent_id: prd.value.id,
-      content: "body",
-      extra: { acceptance_criteria: [AC("AC-N-1")] },
+      content: "## Overview\n\nBody.",
+      extra: {
+        acceptance_criteria: [{ id: "AC-V-1", statement: "the dashboard loads fast", verify: { mode: "human" } }],
+      },
     } as CreateDocInput);
     expect(res.ok).toBe(false);
     if (res.ok) return;
-    expect(res.error.code).toBe(REFUSAL);
-  });
-
-  it("a refused create does not leave a doc behind", async () => {
-    const { store, cs } = await setup();
-    const prd = await cs.create({ type: "prd", title: "P3", content: "root" } as CreateDocInput);
-    if (!prd.ok) throw new Error("prd");
-    await cs.create({
-      type: "spec",
-      title: "Ghost Spec",
-      parent_id: prd.value.id,
-      content: "body",
-      extra: { acceptance_criteria: [AC("AC-N-2")] },
-    } as CreateDocInput);
+    expect(JSON.stringify(res.error)).toContain("AC-V-1");
     const listed = await store.findMany({ type: "spec" });
     if (!listed.ok) throw new Error("list");
-    expect(listed.value.some((d) => d.title === "Ghost Spec")).toBe(false);
+    expect(listed.value.some((d) => d.title === "Vague Spec")).toBe(false);
   });
 });
 
@@ -333,5 +363,78 @@ describe("AC write chokepoint — verbs accepted, actor attributed (AC-BLS2-1)",
     await ac.addCriterion(specId, AC("AC-W-3"), { by: CALLER } as never);
     const after = await stored(store, specId);
     expect((after.extra["acceptance_criteria"] as unknown[]).length).toBe(3);
+  });
+});
+
+// ─── Sanctioned non-verb paths: restore and v1 import (GitHub #54) ───────────
+
+describe("AC write chokepoint — restore and import are sanctioned, validated paths (AC-BLS2-1, #54)", () => {
+  it("VersionService.restore of a valid historical criteria array is accepted and the criteria come back", async () => {
+    const { store, ac, specId } = await setup();
+    await ac.addCriterion(specId, AC("AC-W-3"), { by: CALLER } as never);
+    // setup() wrote 2 criteria (v2,v3 + approve) — find the version holding exactly 2 criteria.
+    const versions = await store.findVersions(specId as DocId);
+    if (!versions.ok) throw new Error("versions");
+    const twoAcs = versions.value.find(
+      (v) => Array.isArray(v.extra["acceptance_criteria"]) && (v.extra["acceptance_criteria"] as unknown[]).length === 2,
+    );
+    if (!twoAcs) throw new Error("fixture: no 2-criteria version");
+    const res = await new VersionService(store).restore(specId, twoAcs.version);
+    expect(res.ok).toBe(true);
+    expect(((await stored(store, specId)).extra["acceptance_criteria"] as unknown[]).length).toBe(2);
+  });
+
+  it("VersionService.restore of a version whose criteria array is malformed is refused and leaves the doc untouched", async () => {
+    const { store, specId } = await setup();
+    const doc = await stored(store, specId);
+    const dup = [AC("AC-D-1"), AC("AC-D-1")];
+    const ins = await store.insertVersion({
+      doc_id: doc.id,
+      version: 500,
+      content: doc.content,
+      extra: { ...doc.extra, acceptance_criteria: dup },
+      status: doc.status,
+      title: doc.title,
+      action: "update",
+      created_at: new Date().toISOString(),
+      created_by: "test",
+      change_summary: "malformed history row",
+      slug: doc.slug,
+    });
+    if (!ins.ok) throw new Error("insertVersion");
+    const before = await fingerprint(store, specId);
+    const res = await new VersionService(store).restore(specId, 500);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error.code).toBe("VALIDATION_ERROR");
+    // fingerprint counts versions; the injected row is already in `before`.
+    expect(await fingerprint(store, specId)).toBe(before);
+  });
+
+  it("MigrationService v1 import never writes frontmatter acceptance_criteria into extra", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ac-chokepoint-import-"));
+    try {
+      writeFileSync(
+        join(dir, "a.md"),
+        `---\nid: "v1-a"\ntype: prd\nstatus: published\npriority: high\ncreated: "2025-01-01"\nupdated: "2025-06-01"\ntags: []\nlinks: []\nacceptance_criteria:\n  - id: AC-X-1\n    statement: smuggled\n---\n\n# Smuggle\n`,
+      );
+      const store = new InMemoryStore();
+      const res = await new MigrationService(store).execute(dir, { dryRun: false, skipSecretScan: true } as never);
+      expect(res.ok).toBe(true);
+      const all = await store.findMany({});
+      if (!all.ok) throw new Error("list");
+      expect(all.value.length).toBeGreaterThan(0);
+      expect(all.value.every((d) => d.extra["acceptance_criteria"] === undefined)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("applyAcChange('import') admits a valid array and refuses a malformed one with VALIDATION_ERROR", () => {
+    expect(applyAcChange("import", undefined, { acceptance_criteria: [AC("AC-I-1")] }).ok).toBe(true);
+    const bad = applyAcChange("import", undefined, { acceptance_criteria: [AC("AC-I-1"), AC("AC-I-1")] });
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.error.code).toBe("VALIDATION_ERROR");
   });
 });

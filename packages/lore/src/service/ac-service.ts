@@ -71,7 +71,7 @@
  *   globally — a coincidental cross-spec id collision must not double-count).
  * @invariant Writes are CAS-guarded (`store.update`'s `expected_version`) and produce
  *   exactly one `insertVersion` snapshot + one `appendAuditEntry` (action "update",
- *   actor "system") — same shape as `CorpusService.set`'s spec-extra write path, so
+ *   actor = the calling `opts.by`, else the $LORE_ACTOR/session/OS-user chain — never "system") — same shape as `CorpusService.set`'s spec-extra write path, so
  *   `AuditService.verify`'s versions⋈audit completeness oracle (SPEC-035 §2) is
  *   satisfied without a special case for AC writes.
  * @invariant `setCriterion` applies the SAME approved→draft demotion rule
@@ -96,6 +96,7 @@
  */
 
 import { err, ok, type Result } from "@lore/core";
+import { resolveActorWithSource } from "@lore/core/node";
 import type { LoreError } from "@lore/core";
 import {
   specAcceptanceCriteriaSchema,
@@ -117,6 +118,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
+import { applyAcChange } from "./ac-write-chokepoint.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -148,6 +150,8 @@ export interface AcListResult {
 export interface RemoveCriterionOpts {
   /** Remove even when task evidence still references this id (see class invariant). */
   force?: boolean;
+  /** The calling actor — see {@link DeclarePathOpts.by}. */
+  by?: string;
 }
 
 /**
@@ -255,6 +259,14 @@ export interface OraclePathContext {
 export interface DeclarePathOpts {
   pathContext?: OraclePathContext;
   allowMissingPath?: string;
+  /**
+   * The calling actor (CLI: resolved `--by`/`$LORE_ACTOR`; MCP/HTTP: their own resolution),
+   * written as the version row's `created_by` and the audit row's `actor`. Omitted only by bare
+   * service constructions (unit tests, internal callers) — the actor then resolves through the
+   * env chain (`$LORE_ACTOR` → session tier → OS username), exactly as `CorpusService` does.
+   * Source: spec-baseline-slice-2 §C3 (actor provenance on AC writes).
+   */
+  by?: string;
 }
 
 /**
@@ -375,6 +387,7 @@ export class AcService {
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "add", {
+      ...(opts.by !== undefined ? { by: opts.by } : {}),
       ...(declaration !== undefined ? { declaration } : {}),
       ...(citeAudit !== undefined ? { auditDetails: citeAudit.value } : {}),
     });
@@ -401,7 +414,7 @@ export class AcService {
     acId: string,
     ruleIds: string[],
     flags: { remove?: boolean } = {},
-    _opts: Record<string, unknown> = {},
+    opts: { by?: string } = {},
   ): Promise<Result<{ criteria: AcceptanceCriterion[]; warnings: CiteWarning[] }, LoreError>> {
     if (ruleIds.length === 0) {
       return err({
@@ -458,6 +471,7 @@ export class AcService {
     const warnings = warningsResult.value;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "cite", {
+      ...(opts.by !== undefined ? { by: opts.by } : {}),
       acId,
       auditDetails: {
         cites: requested,
@@ -596,7 +610,12 @@ export class AcService {
     }
 
     const updated = existing.filter((c) => c.id !== acId);
-    const writeResult = await this.writeCriteria(spec, updated, "remove");
+    const writeResult = await this.writeCriteria(
+      spec,
+      updated,
+      "remove",
+      opts.by !== undefined ? { by: opts.by } : {},
+    );
     if (!writeResult.ok) return writeResult;
     return ok(updated);
   }
@@ -759,6 +778,7 @@ export class AcService {
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "set", {
+      ...(opts.by !== undefined ? { by: opts.by } : {}),
       status: newStatus,
       acId,
       ...(declaration !== undefined ? { declaration } : {}),
@@ -975,11 +995,20 @@ export class AcService {
       declaration?: AllowMissingPathDeclaration;
       /** Extra audit `details` keys (§C4: `cites`, `cite_warnings`) — spread BEFORE the fixed keys so they can never shadow them. */
       auditDetails?: Record<string, unknown>;
+      /** The calling actor; omitted → the env actor chain (see writeCriteria). */
+      by?: string;
     } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const now = new Date().toISOString();
     const newVersion = spec.version + 1;
     const newExtra: Record<string, unknown> = { ...spec.extra, acceptance_criteria: criteria };
+    // The sanctioned half of the AC write chokepoint (spec-baseline-slice-2 §C3): every verb's
+    // write is declared through the SAME function CorpusService's wholesale paths are refused by.
+    const gate = applyAcChange("ac-verb", spec.extra, newExtra, spec.id);
+    if (!gate.ok) return gate;
+    // Same resolution CorpusService.resolveWriteActor applies (SPEC-079 G2): explicit `by`, else
+    // $LORE_ACTOR → session tier → OS username. Never the literal "system" — that was the defect.
+    const actor = resolveActorWithSource(opts.by, process.env).actor;
     if (opts.declaration !== undefined) {
       newExtra["allow_missing_path_declarations"] = upsertAllowMissingPathDeclaration(
         extractAllowMissingPathDeclarations(spec),
@@ -1004,7 +1033,7 @@ export class AcService {
       title: updateResult.value.title,
       action: "update",
       created_at: now,
-      created_by: "system",
+      created_by: actor,
       change_summary:
         operation === "set"
           ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
@@ -1019,7 +1048,7 @@ export class AcService {
 
     const auditResult = await this.store.appendAuditEntry({
       timestamp: now,
-      actor: "system",
+      actor,
       session_id: spec.id,
       action: "update",
       doc_id: spec.id,

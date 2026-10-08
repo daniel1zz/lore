@@ -36,9 +36,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
+import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
-import type { CreateDocInput, LoreConfig } from "@lore/core";
+import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
 
@@ -321,16 +322,20 @@ const DOMAIN_OVERVIEW_PROFILE_CONFIG = {
  * bare `store.insert` (not available through this file's `createApp()` shape).
  */
 async function setAcceptanceCriteriaDirectly(specId: string, criteria: unknown[]): Promise<void> {
-  const app = createApp(join(tmpDir, ".lore", "lore.db"));
+  // The AC write chokepoint (spec-baseline-slice-2 §C3) now refuses a wholesale
+  // `CorpusService.set` that changes the criteria, so this fixture plants the legacy
+  // "predates the gate" state straight through the store — the only remaining way to
+  // simulate it.
+  const store = new SQLiteStore(join(tmpDir, ".lore", "lore.db"));
   try {
-    const getResult = await app.corpusService.get(specId);
-    if (!getResult.ok) throw new Error(`get failed: ${JSON.stringify(getResult.error)}`);
-    const setResult = await app.corpusService.set(specId, {
-      extra: { ...getResult.value.doc.extra, acceptance_criteria: criteria },
+    const found = await store.find(specId as DocId);
+    if (!found.ok || found.value === null) throw new Error(`find failed: ${specId}`);
+    const updated = await store.update(found.value.id, {
+      extra: { ...found.value.extra, acceptance_criteria: criteria },
     });
-    if (!setResult.ok) throw new Error(`set failed: ${JSON.stringify(setResult.error)}`);
+    if (!updated.ok) throw new Error(`update failed: ${JSON.stringify(updated.error)}`);
   } finally {
-    app.close();
+    store.close();
   }
 }
 

@@ -185,6 +185,20 @@ export type LoreError =
       chars: number;
       perFragment: ReadonlyArray<{ readonly id: string; readonly chars: number }>;
       message: string;
+    }
+  /**
+   * A write that would change `extra.acceptance_criteria` did not come through an `AcService`
+   * verb (`lore ac add|set|rm|cite`). The AC array is judge-consumed, id-bearing data owned by
+   * those verbs; `CorpusService.create`/`set` (hence CLI `lore set`, MCP `lore_set`, HTTP PATCH)
+   * refuse any change to it. Nothing was written. A byte-identical echo of the stored array passes.
+   * CLI exit code: 4 (input rejected); HTTP 422.
+   * Source: spec-baseline-slice-2-completeness-census-per-branch-citation §C3, AC-BLS2-1 (issue #36)
+   */
+  | {
+      code: "AC_WRITE_NOT_VIA_AC_VERB";
+      /** The doc whose criteria the refused write would have changed (absent on create — no id yet). */
+      id?: string;
+      message: string;
     };
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */
