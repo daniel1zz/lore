@@ -958,7 +958,8 @@ describe("tool registration completeness", () => {
   // SPEC-072 T5 adds lore_report_issue (33 to 34).
   // baseline slice 1 §C3 adds the 7 baseline write tools (34 to 41): lore_rule_add/_set,
   // lore_baseline_add/_set_label/_depends/_glossary_add/_glossary_rm.
-  it("registers all 41 expected tools", () => {
+  // baseline slice 2 C6 adds the 3 rule read tools (41 to 44): lore_rule_show/_find/_impact.
+  it("registers all 44 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -996,6 +997,9 @@ describe("tool registration completeness", () => {
       "lore_report_issue",
       "lore_rule_add",
       "lore_rule_set",
+      "lore_rule_show",
+      "lore_rule_find",
+      "lore_rule_impact",
       "lore_baseline_add",
       "lore_baseline_set_label",
       "lore_baseline_depends",
@@ -1007,6 +1011,6 @@ describe("tool registration completeness", () => {
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(41);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(44);
   });
 });

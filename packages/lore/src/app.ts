@@ -71,6 +71,8 @@ import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
 import { RuleService } from "./service/rule-service.js";
+import { RuleReadService } from "./service/rule-read-service.js";
+import { ImpactService } from "./service/impact-service.js";
 import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
@@ -390,6 +392,12 @@ export interface App {
    * optional-DI shape as `requirementService`; always wired in production.
    */
   ruleService?: RuleService;
+  /**
+   * RuleReadService / ImpactService — the read path of baseline rules (`lore rule show|find|impact`,
+   * spec baseline-slice-2 C6). Store-only; optional like `ruleService` so bare test stubs stay valid.
+   */
+  ruleReadService?: RuleReadService;
+  impactService?: ImpactService;
   /**
    * PrdOutlineService — the sole structured writer for a PRD's outline
    * (`lore outline set/list/rm`, SPEC-080 C1) and a plan's audited plan-close
@@ -817,6 +825,8 @@ function buildAppFromSqlite(
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its one-arg `new RuleService(store)` default exists only for bare unit tests.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
+    ruleReadService: new RuleReadService(store),
+    impactService: new ImpactService(store),
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),
@@ -1165,6 +1175,8 @@ function buildAppFromTurso(
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its one-arg `new RuleService(store)` default exists only for bare unit tests.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
+    ruleReadService: new RuleReadService(store),
+    impactService: new ImpactService(store),
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),
