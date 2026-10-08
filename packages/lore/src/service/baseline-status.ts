@@ -20,6 +20,13 @@
 import { ok, lintRuleStatement } from "@lore/core";
 import type { DocRecord, LoreError, Result, RuleLifecycle } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import {
+  canonicalAcCites,
+  canonicalRuleDepends,
+  deriveAcCites,
+  deriveRuleDepends,
+  listedRuleLifecycle,
+} from "../store/index-rows.js";
 import { countCitations, buildRuleIndex } from "./ac-citations.js";
 import { collectKnownRuleIds, findUnregisteredRuleIds } from "./baseline-rule-ids.js";
 import type { RuleStateService, RuleStateCounts } from "./rule-state-service.js";
@@ -39,6 +46,12 @@ export interface BaselineStatus {
   cites_to_inactive: number;
   ambiguous_ac_ref: number;
   registry_mismatch: number;
+  /**
+   * Disagreements between the migration-014 index tables and the documents they mirror: missing or
+   * stray `ac_cites` / `rule_depends` rows plus registry rows whose lifecycle/version is stale.
+   * A count only — never repaired by the status check.
+   */
+  index_mismatch: number;
 }
 
 export type BaselineFindingKind =
@@ -61,6 +74,7 @@ export function baselineWarningCount(status: BaselineStatus): number {
     status.cites_to_inactive +
     status.ambiguous_ac_ref +
     status.registry_mismatch +
+    status.index_mismatch +
     status.rules_with_impl_detail
   );
 }
@@ -157,9 +171,57 @@ export async function findBaselineIntegrityFindings(
   return ok(findings);
 }
 
+/** Size of the symmetric difference of two canonical (sorted, de-duplicated) row lists. */
+function symmetricDifferenceSize<T>(expected: T[], actual: T[], keyOf: (row: T) => string): number {
+  const expectedKeys = new Set(expected.map(keyOf));
+  const actualKeys = new Set(actual.map(keyOf));
+  let differing = 0;
+  for (const key of expectedKeys) if (!actualKeys.has(key)) differing += 1; // missing from the index
+  for (const key of actualKeys) if (!expectedKeys.has(key)) differing += 1; // stray in the index
+  return differing;
+}
+
+/**
+ * Count the index-vs-document disagreements of migration-014: missing/stray `ac_cites` rows,
+ * missing/stray `rule_depends` rows, and registry rows whose lifecycle or version differs from the
+ * live leaf that lists the rule (one per row). Reads only; repairs nothing.
+ */
+async function countIndexMismatch(
+  store: StoreInterface,
+  specs: DocRecord[],
+  baselineDocs: DocRecord[],
+): Promise<Result<number, LoreError>> {
+  const cites = await store.listAcCites();
+  if (!cites.ok) return cites;
+  const depends = await store.listRuleDepends();
+  if (!depends.ok) return depends;
+  const registry = await store.listRuleRegistry();
+  if (!registry.ok) return registry;
+
+  let mismatch = symmetricDifferenceSize(
+    deriveAcCites(specs),
+    canonicalAcCites(cites.value),
+    (r) => `${r.doc_id}\u0000${r.ac_id}\u0000${r.rule_id}`,
+  );
+  mismatch += symmetricDifferenceSize(
+    deriveRuleDepends(baselineDocs),
+    canonicalRuleDepends(depends.value),
+    (r) => `${r.leaf_id}\u0000${r.rule_id}`,
+  );
+  const liveById = new Map(baselineDocs.filter((d) => d.deleted_at === null).map((d) => [d.id, d]));
+  for (const row of registry.value) {
+    const owner = liveById.get(row.leaf_doc_id);
+    if (owner === undefined) continue; // owner missing/soft-deleted: registry_mismatch's concern, nothing to compare
+    const listed = listedRuleLifecycle(owner.extra, row.id);
+    if (listed === undefined) continue; // leaf does not (validly) list the rule: registry_mismatch's concern
+    if (row.lifecycle !== listed || row.version !== owner.version) mismatch += 1;
+  }
+  return ok(mismatch);
+}
+
 /**
  * Compute the `baseline` status block, or `ok(null)` when the corpus has neither a live
- * baseline doc nor any AC citation.
+ * baseline doc nor any AC citation (and no index row that would be a mismatch).
  *
  * @param pathExists - repo-relative path probe for the BL-11 lint (fs check from the repo root).
  */
@@ -172,7 +234,10 @@ export async function computeBaselineStatus(
   if (!baselineDocs.ok) return baselineDocs;
   const specs = await store.findMany({ type: "spec" });
   if (!specs.ok) return specs;
-  if (baselineDocs.value.length === 0 && !specs.value.some(hasCites)) return ok(null);
+  const indexMismatch = await countIndexMismatch(store, specs.value, baselineDocs.value);
+  if (!indexMismatch.ok) return indexMismatch;
+  // reason: a stray index row in an otherwise baseline-free corpus is itself a finding worth a block.
+  if (baselineDocs.value.length === 0 && !specs.value.some(hasCites) && indexMismatch.value === 0) return ok(null);
 
   const leaves = baselineDocs.value.filter((d) => d.extra["node"] === "leaf");
   const counts = await ruleState.counts();
@@ -219,5 +284,6 @@ export async function computeBaselineStatus(
     registry_mismatch: findings.value.filter(
       (f) => f.kind === "unregistered-rule" || f.kind === "registry-leaf-mismatch",
     ).length,
+    index_mismatch: indexMismatch.value,
   });
 }

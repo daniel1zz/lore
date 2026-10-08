@@ -53,6 +53,7 @@ import { MIGRATION_010_SQL } from "../../../src/store/migrations/migration-010.j
 import { MIGRATION_011_SQL } from "../../../src/store/migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "../../../src/store/migrations/migration-013.js";
+import { MIGRATION_014_SQL } from "../../../src/store/migrations/migration-014.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -226,6 +227,16 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   // is NEVER in sync-push.ts's REPLICATED_TABLES; it is mirrored here only for
   // the user_version parity guard below.
   await client.executeMultiple(MIGRATION_013_SQL);
+
+  // migration-014 (spec-baseline-slice-2-completeness-census-per-branch-citation
+  // §C5: rule_registry lifecycle/version, ac_cites, rule_depends, ac_exemptions
+  // + the docs_idx_* triggers) is a SINGLE self-contained SQL string — a plain
+  // executeMultiple call. Its tables are NEVER in sync-push.ts's
+  // REPLICATED_TABLES (they are derived from docs, which are replicated); the
+  // docs_idx_* triggers DO fire on the remote when sync-push upserts docs, so
+  // the remote keeps the indexes in step like any other store. Mirrored here
+  // for the user_version parity guard below.
+  await client.executeMultiple(MIGRATION_014_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

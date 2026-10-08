@@ -17,6 +17,7 @@ import type {
   LinkType,
   ReviewJudgment,
   ReviewJudgmentKind,
+  RuleLifecycle,
   SearchHit,
   Slug,
   VersionRecord,
@@ -256,6 +257,23 @@ export interface RuleRegistryRow {
   allocated_at: string;
   /** Actor identity that allocated the id. */
   allocated_by: string;
+  /** The rule's lifecycle in its owning leaf (migration-014); kept in the same transaction as the leaf write. */
+  lifecycle: RuleLifecycle;
+  /** The owning leaf doc's `version` (migration-014); kept in the same transaction as the leaf write. */
+  version: number;
+}
+
+/** One `ac_cites` index row (migration-014): spec `doc_id`'s criterion `ac_id` cites rule `rule_id`. */
+export interface AcCiteRow {
+  doc_id: DocId;
+  ac_id: string;
+  rule_id: string;
+}
+
+/** One `rule_depends` index row (migration-014): baseline leaf `leaf_id` depends on rule `rule_id`. */
+export interface RuleDependsRow {
+  leaf_id: DocId;
+  rule_id: string;
 }
 
 /** One leaf's CAS patch for {@link StoreInterface.moveRule}. */
@@ -659,6 +677,16 @@ export interface StoreInterface {
 
   /** All registry rows ordered by `n` ASC. There is deliberately no delete method. */
   listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>>;
+
+  /**
+   * Every `ac_cites` row (migration-014), sorted by (doc_id, ac_id, rule_id). Written in the SAME
+   * transaction as the citing spec; `InMemoryStore` serves the equivalent computed view. The citation
+   * gate and `computeBaselineStatus` (`index_mismatch`) read this — never repaired on read.
+   */
+  listAcCites(): Promise<Result<AcCiteRow[], LoreError>>;
+
+  /** Every `rule_depends` row (migration-014), sorted by (leaf_id, rule_id); same contract as {@link listAcCites}. */
+  listRuleDepends(): Promise<Result<RuleDependsRow[], LoreError>>;
 
   // ── Links ──────────────────────────────────────────────────────────────
 

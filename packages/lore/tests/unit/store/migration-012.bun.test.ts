@@ -95,11 +95,11 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("HAPPY: a fresh SQLiteStore lands on user_version 13 and accepts a 'resolves' link row", () => {
+  it("HAPPY: a fresh SQLiteStore lands on user_version 14 and accepts a 'resolves' link row", () => {
     const store = new SQLiteStore(":memory:");
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(13);
+    expect(userVersion(db)).toBe(14);
 
     insertDoc(db, "01HRESOLVESFIX000000001", "fix-doc");
     insertDoc(db, "01HRESOLVESISSUE0000001", "issue-doc");
@@ -309,7 +309,7 @@ describe("migration-012 (widen links.link_type CHECK to accept 'resolves')", () 
     const store = new SQLiteStore(dbPath);
     const db = store.getDatabase();
 
-    expect(userVersion(db)).toBe(13);
+    expect(userVersion(db)).toBe(14);
 
     const preservedGovernsLink = db
       .query("SELECT * FROM links WHERE from_id = ? AND link_type = 'governs'")
