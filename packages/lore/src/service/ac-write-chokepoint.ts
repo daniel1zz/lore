@@ -6,8 +6,14 @@
  * Invariants:
  *   - A change is detected on the canonical JSON of the array (`JSON.stringify`; order and every
  *     field significant) — reordered, reworded, appended, dropped, added-from-absent all count.
- *   - `"ac-verb"` (the `AcService` verbs) is the only sanctioned path that may change the array.
- *   - `"wholesale"` (CorpusService.create/set — hence CLI `lore set`, MCP `lore_set`, HTTP PATCH)
+ *   - `"ac-verb"` (the `AcService` verbs) is a sanctioned path: it always passes (the verb has
+ *     already schema-validated and linted its candidate).
+ *   - `"create"`, `"restore"`, `"import"` are the other sanctioned paths (spec amendment log,
+ *     2026-10-08: refusing create deleted baseline rule BR-5). Their incoming array is treated
+ *     as an addition and re-validated here with `specAcceptanceCriteriaSchema` (shape, unique
+ *     ids, 50 cap); create's wording gate (`acQuantifiable` via GateEnforcer) runs in
+ *     `_createImpl` on the same array. An invalid array is refused with VALIDATION_ERROR.
+ *   - `"wholesale"` (CorpusService.set — hence CLI `lore set`, MCP `lore_set`, HTTP PATCH)
  *     passes only when the incoming array is byte-identical to the stored one (an echo).
  *   - Pure: no IO, no clock. Returns a Result; never throws.
  * Side-effect class: pure.
@@ -15,13 +21,13 @@
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation §C3, AC-BLS2-1.
  */
 
-import { err, ok, type LoreError, type Result } from "@lore/core";
+import { err, ok, specAcceptanceCriteriaSchema, type LoreError, type Result } from "@lore/core";
 
 /** The refusal code — also the `LoreError` discriminant in `@lore/core` errors.ts. */
 export const AC_WRITE_NOT_VIA_AC_VERB = "AC_WRITE_NOT_VIA_AC_VERB" as const;
 
-/** Who is writing: an `AcService` verb, or any other path that replaces `extra` wholesale. */
-export type AcWritePath = "ac-verb" | "wholesale";
+/** Who is writing: a sanctioned path (verb/create/restore/import) or a wholesale `extra` replace. */
+export type AcWritePath = "ac-verb" | "create" | "restore" | "import" | "wholesale";
 
 const KEY = "acceptance_criteria";
 
@@ -47,7 +53,21 @@ export function applyAcChange(
   after: Record<string, unknown> | undefined,
   docId?: string,
 ): Result<void, LoreError> {
-  if (path === "ac-verb" || after === undefined) return ok(undefined);
+  if (after === undefined) return ok(undefined);
+  if (path === "ac-verb") return ok(undefined);
+  if (path !== "wholesale") {
+    const incoming = after[KEY];
+    if (incoming === undefined) return ok(undefined);
+    const parsed = specAcceptanceCriteriaSchema.safeParse(incoming);
+    if (parsed.success) return ok(undefined);
+    const issue = parsed.error.issues[0];
+    return err({
+      code: "VALIDATION_ERROR",
+      field: issue !== undefined ? `${KEY}.${issue.path.join(".")}` : KEY,
+      message: `${path}: ${issue !== undefined ? issue.message : "invalid acceptance criteria"}`,
+      value: incoming,
+    });
+  }
   if (canonical(before?.[KEY]) === canonical(after[KEY])) return ok(undefined);
   return err({
     code: AC_WRITE_NOT_VIA_AC_VERB,

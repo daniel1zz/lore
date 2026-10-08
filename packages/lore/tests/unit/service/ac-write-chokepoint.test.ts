@@ -225,7 +225,7 @@ describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
 
   it("CorpusService.create with a vague human-mode criterion is refused by the spec-create wording check (the gate is live through the chokepoint)", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store, undefined, undefined, new GateEnforcer());
+    const cs = new CorpusService(store, undefined, undefined, new GateEnforcer(undefined));
     const prd = await cs.create({ type: "prd", title: "P4", content: "root" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd");
     const res = await cs.create({

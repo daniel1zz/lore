@@ -27,6 +27,7 @@
 import { describe, it, expect } from "vitest";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { AcService } from "../../../src/service/ac-service.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
 import { buildAssessPromptV6, extractDeclaredAcceptanceCriteria } from "../../../src/ai/assess-template.js";
@@ -98,7 +99,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
     const store = new InMemoryStore();
     const { corpusService, specId } = await makeStaleScopeFixture(store);
 
-    const setResult = await corpusService.set(specId, { extra: { acceptance_criteria: ONE_CRITERION } });
+    const setResult = await new AcService(store).removeCriterion(specId, "AC-X-2");
     expect(setResult.ok).toBe(true);
   });
 
@@ -106,7 +107,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
     const store = new InMemoryStore();
     const { corpusService, specId, planId } = await makeStaleScopeFixture(store);
 
-    const setResult = await corpusService.set(specId, { extra: { acceptance_criteria: ONE_CRITERION } });
+    const setResult = await new AcService(store).removeCriterion(specId, "AC-X-2");
     expect(setResult.ok).toBe(true);
 
     const bundleResult = await corpusService.getPlanBundle(planId);
@@ -129,7 +130,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
     const store = new InMemoryStore();
     const { corpusService, specId, planId } = await makeStaleScopeFixture(store);
 
-    const setResult = await corpusService.set(specId, { extra: { acceptance_criteria: ONE_CRITERION } });
+    const setResult = await new AcService(store).removeCriterion(specId, "AC-X-2");
     expect(setResult.ok).toBe(true);
 
     const bundleResult = await corpusService.getPlanBundle(planId);
@@ -201,7 +202,7 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
     const store = new InMemoryStore();
     const { corpusService, specId, planId } = await makeStaleScopeFixture(store);
 
-    const setResult = await corpusService.set(specId, { extra: { acceptance_criteria: ONE_CRITERION } });
+    const setResult = await new AcService(store).removeCriterion(specId, "AC-X-2");
     expect(setResult.ok).toBe(true);
 
     const bundleResult = await corpusService.getPlanBundle(planId);

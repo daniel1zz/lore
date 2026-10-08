@@ -1102,10 +1102,11 @@ export class CorpusService {
 
     const data = parsed.data;
 
-    // AC write chokepoint (spec-baseline-slice-2 §C3, AC-BLS2-1): a doc is born with NO criteria —
-    // they are declared afterwards through `lore ac add`, the only sanctioned writer. Runs before
-    // any store write so a refused create leaves no doc behind.
-    const acGate = applyAcChange("wholesale", undefined, data.extra);
+    // AC write chokepoint (spec-baseline-slice-2 §C3, AC-BLS2-1; amendment log 2026-10-08):
+    // create is a SANCTIONED path — inline criteria are additions, re-validated here, and the
+    // `acQuantifiable` spec-create gate below runs on the same array (baseline rule BR-5).
+    // Runs before any store write so a refused create leaves no doc behind.
+    const acGate = applyAcChange("create", undefined, data.extra);
     if (!acGate.ok) return acGate;
 
     // SPEC-079 G2 — resolved once per call, reused for this create's audit entry.
