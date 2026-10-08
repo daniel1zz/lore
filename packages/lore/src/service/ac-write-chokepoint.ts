@@ -73,8 +73,8 @@ export function applyAcChange(
     code: AC_WRITE_NOT_VIA_AC_VERB,
     ...(docId !== undefined ? { id: docId } : {}),
     message:
-      `extra.${KEY} is owned by \`lore ac add|set|rm|cite\` — \`lore set\`/\`lore_set\`/PATCH/create ` +
+      `extra.${KEY} is owned by \`lore ac add|set|rm|cite\` — \`lore set\`/\`lore_set\`/PATCH ` +
       `replace \`extra\` wholesale and must not add, drop, reword or reorder criteria. ` +
-      `Use the \`lore ac\` verbs, or pass the stored array byte-identical.`,
+      `Use \`lore ac add|set|rm|cite\` instead, or pass the stored array byte-identical.`,
   });
 }
