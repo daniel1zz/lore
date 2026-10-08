@@ -83,6 +83,7 @@ import type {
   TraceZeroHitListOpts,
   TraceZeroHitSearch,
   UpdateOpts,
+  ProvenanceWriteExtras,
 } from "./store-interface.js";
 import {
   type AuditChainRow,
@@ -112,6 +113,7 @@ import {
   wrapStoreError,
   buildAcExemptionAlreadyActiveError,
   buildAcExemptionCapError,
+  buildNonLiveRuleRefusal,
 } from "./store-shared.js";
 
 // ─── SQLiteStore ─────────────────────────────────────────────────────────────
@@ -1859,6 +1861,7 @@ export class SQLiteStore implements StoreInterface {
     opts: UpdateOpts | undefined,
     version: VersionRecord,
     audit: AuditEntry,
+    extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     // See insertWithProvenance's identical split above: BEGIN IMMEDIATE gets
     // its own try/catch so a synchronous open-transaction throw returns
@@ -1870,6 +1873,23 @@ export class SQLiteStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
+      // reason: D6 / QA-2 — the citation gate's liveness read MUST run after BEGIN IMMEDIATE (the
+      // write lock is held), so a concurrent retire either committed before this read (we see
+      // `retired` and refuse) or waits for this commit. Hoisting this above the BEGIN reopens the
+      // check-then-write window (cite-retire-race.bun.test.ts goes red).
+      if (extras?.require_live_rules !== undefined && extras.require_live_rules.length > 0) {
+        const refusal = buildNonLiveRuleRefusal(
+          id,
+          extras.require_live_rules.map((ruleId) => ({
+            rule_id: ruleId,
+            lifecycle: this.readRegistryLifecycleSync(ruleId),
+          })),
+        );
+        if (refusal !== null) {
+          this.db.run("ROLLBACK");
+          return err(refusal);
+        }
+      }
       const updateResult = this.updateDocSync(id, patch, opts);
       if (!updateResult.ok) {
         // reason: DOC_NOT_FOUND / STALE_VERSION — the doc write touched zero
@@ -1891,6 +1911,14 @@ export class SQLiteStore implements StoreInterface {
         return auditResult;
       }
 
+      for (const extraAudit of extras?.also_audit ?? []) {
+        const extraResult = this.appendAuditEntrySync(extraAudit);
+        if (!extraResult.ok) {
+          this.db.run("ROLLBACK");
+          return extraResult;
+        }
+      }
+
       this.db.run("COMMIT");
       return ok(updateResult.value);
     } catch (e) {
@@ -1901,6 +1929,17 @@ export class SQLiteStore implements StoreInterface {
       }
       return wrapStoreError(e);
     }
+  }
+
+  /**
+   * One rule's `rule_registry.lifecycle` (migration-014), or `null` when no registry row exists.
+   * Synchronous so it can run inside an open transaction; callers hold the write lock.
+   */
+  private readRegistryLifecycleSync(ruleId: string): string | null {
+    const row = this.db
+      .prepare("SELECT lifecycle FROM rule_registry WHERE id = ?")
+      .get(ruleId) as { lifecycle: string } | null;
+    return row === null ? null : row.lifecycle;
   }
 
   /**

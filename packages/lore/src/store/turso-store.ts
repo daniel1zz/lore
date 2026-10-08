@@ -87,6 +87,7 @@ import type {
   TraceZeroHitListOpts,
   TraceZeroHitSearch,
   UpdateOpts,
+  ProvenanceWriteExtras,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
@@ -116,6 +117,7 @@ import {
   type VersionRow,
   buildAcExemptionAlreadyActiveError,
   buildAcExemptionCapError,
+  buildNonLiveRuleRefusal,
 } from "./store-shared.js";
 
 // ─── Deferred @libsql/client load (spec-eager-libsql-load-makes-every-command-depend-on-a-healthy) ──
@@ -1696,6 +1698,7 @@ export class TursoStore implements StoreInterface {
     opts: UpdateOpts | undefined,
     version: VersionRecord,
     audit: AuditEntry,
+    extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     await this.ensureReady();
     const tx = await this.client.transaction("write");
@@ -1709,6 +1712,21 @@ export class TursoStore implements StoreInterface {
       if (!existingRow) {
         await tx.rollback();
         return err({ code: "DOC_NOT_FOUND", id });
+      }
+
+      // reason: D6 / QA-2 — liveness is read INSIDE the write transaction (see SQLiteStore's twin).
+      if (extras?.require_live_rules !== undefined && extras.require_live_rules.length > 0) {
+        const lifecycles: Array<{ rule_id: string; lifecycle: string | null }> = [];
+        for (const ruleId of extras.require_live_rules) {
+          const rs = await tx.execute({ sql: "SELECT lifecycle FROM rule_registry WHERE id = ?", args: [ruleId] });
+          const row = rs.rows[0];
+          lifecycles.push({ rule_id: ruleId, lifecycle: row ? rowStr(row, "lifecycle") : null });
+        }
+        const refusal = buildNonLiveRuleRefusal(id, lifecycles);
+        if (refusal !== null) {
+          await tx.rollback();
+          return err(refusal);
+        }
       }
 
       const current = rowToDocRecord(libsqlRowToDocRow(existingRow));
@@ -1831,6 +1849,9 @@ export class TursoStore implements StoreInterface {
       });
 
       await this.appendAuditEntryTx(tx, audit);
+      for (const extraAudit of extras?.also_audit ?? []) {
+        await this.appendAuditEntryTx(tx, extraAudit);
+      }
 
       await tx.commit();
       return ok(updated);

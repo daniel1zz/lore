@@ -247,6 +247,10 @@ const SyncConfigSchema = z
 
 // ─── Workflow Section Schema ───────────────────────────────────────────────
 
+/** The citation gate's three states (spec-baseline-slice-2 §C4/D5) — SSOT for the schema and the resolver. */
+export const CITE_GATE_MODES = ["off", "report", "enforce"] as const;
+export type CiteGateMode = (typeof CITE_GATE_MODES)[number];
+
 /**
  * Per-checkpoint override for `lore gate` (IoC vertical-slice tech-spec §4.1/§11).
  * `enabled` is OPTIONAL — its absence (and the absence of the whole `gates` map, and
@@ -352,6 +356,32 @@ export const GateCheckpointConfigSchema = z
   .strict();
 
 /**
+ * The `workflow.gates."ac-cite"` entry — the citation gate's three-state config (spec-baseline-slice-2
+ * §C4/D5, AC-BLS2-2). ⛔ A DIFFERENT SHAPE from {@link GateCheckpointConfigSchema} on purpose: it is not a
+ * two-state "enabled" switch whose absence means "enabled". An ABSENT `mode` resolves to `off` when the
+ * corpus has no baseline docs and `report` otherwise (`resolveCiteGateConfig`,
+ * packages/lore/src/service/ac-cite-gate.ts), so an upgraded consumer corpus is never refused; `enforce`
+ * refuses a new/revised criterion that cites no live rule, but only on an armed branch.
+ * `armed_branches` holds slugs of baseline docs with `extra.node === "branch"`.
+ */
+export const CiteGateConfigSchema = z
+  .object({
+    mode: z.enum(CITE_GATE_MODES).optional(),
+    armed_branches: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+/**
+ * `workflow.gates`: the one named non-checkpoint entry (`"ac-cite"`, {@link CiteGateConfigSchema}) plus a
+ * catch-all of per-checkpoint entries ({@link GateCheckpointConfigSchema}). A named key wins over the
+ * catch-all, so `ac-cite` is validated ONLY by its own shape and `GateCheckpointConfigSchema` keeps exactly
+ * the seven sub-predicate keys that `tests/e2e/foreign-corpus-write-default.bun.test.ts` pins.
+ */
+const GatesConfigSchema = z
+  .object({ "ac-cite": CiteGateConfigSchema.optional() })
+  .catchall(GateCheckpointConfigSchema);
+
+/**
  * Task execution workflow configuration (SPEC-025) + gate enable/disable overrides.
  * Controls the advisory claim-lease TTL consumed by TaskWorkflowService, and (per
  * checkpoint) whether `lore gate` even runs its predicates.
@@ -379,7 +409,7 @@ const WorkflowConfigSchema = z
     /** Minutes after which a handoff doc is flagged stale by `SessionService.resume`. */
     handoff_ttl_minutes: z.number().int().positive().default(10080),
     /** Per-checkpoint `lore gate` enable/disable overrides. Absent → all enabled. */
-    gates: z.record(z.string(), GateCheckpointConfigSchema).optional(),
+    gates: GatesConfigSchema.optional(),
     /**
      * Staleness-probe behavioral knobs (SPEC-044 §Design Decisions D8) — the DEFAULT
      * batch size and minimum-age threshold `lore review --staleness` applies when the
@@ -2594,4 +2624,25 @@ export function resolveSyncCredentials(
   }
 
   return ok({ url: remoteUrl, token });
+}
+
+/**
+ * The raw `workflow.gates."ac-cite"` citation-gate entry — ONLY its `mode` / `armed_branches`
+ * keys (the shared checkpoint `enabled` key is deliberately not honoured here: the gate's
+ * on/off is its three-state `mode`, whose absent default is NOT "enabled").
+ *
+ * @returns `undefined` when neither key is configured (the resolver then applies the
+ *   baseline-presence default); otherwise an object holding just the configured keys, to be
+ *   validated by `resolveCiteGateConfig` (packages/lore) — no validation or defaulting here.
+ */
+export function resolveCiteGateRaw(
+  config: LoreConfig | undefined,
+): { mode?: unknown; armed_branches?: unknown } | undefined {
+  const entry = config?.workflow?.gates?.["ac-cite"];
+  if (entry === undefined) return undefined;
+  if (entry.mode === undefined && entry.armed_branches === undefined) return undefined;
+  return {
+    ...(entry.mode !== undefined ? { mode: entry.mode } : {}),
+    ...(entry.armed_branches !== undefined ? { armed_branches: entry.armed_branches } : {}),
+  };
 }

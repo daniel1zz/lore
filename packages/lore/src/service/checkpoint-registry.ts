@@ -90,6 +90,7 @@ import {
   deriveClaimedAcCoverage,
   UNRESOLVED_DECLARED_SCOPE,
   type AcceptanceCriterion,
+  type AcCiteFeedingPack,
   type AcCoverageFact,
   type DeclaredScopeCoverage,
   type DocRecord,
@@ -121,6 +122,10 @@ import {
   attestationExemptKindValid,
   assessmentFreshness,
   acScopeRequiredAtCreate,
+  acCiteLive,
+  findAcCiteViolations,
+  type AcCiteCandidate,
+  type AcCiteRuleStates,
   findAnchorOverlapConflict,
   ANCHOR_OVERLAP_FIELD,
   ACTOR_IDENTITY_FIELD,
@@ -188,7 +193,17 @@ export type GateCheckpoint =
    * checkpoints for SPEC-041/-043's bootstrap "armed gates" rendering, widening
    * it is a separate concern (same precedent `"review-judgment"` set above).
    */
-  | "task-create";
+  | "task-create"
+  /**
+   * spec-baseline-slice-2 §C4 (AC-BLS2-2) — the citation gate: an AC added or revised on an armed
+   * branch must cite at least one rule and every cited rule must be live. A COMMIT-TIME admission rule
+   * evaluated by the AC write chokepoint (`ac-write-chokepoint.ts::admitAcWrite`) on every sanctioned
+   * path (`lore ac add|set|cite`, create's inline criteria) — never by `GateEnforcer`, because its
+   * on/off is the three-state `workflow.gates."ac-cite".mode` (default off/report), NOT the shared
+   * two-state `enabled` key whose absence means "enabled". Deliberately NOT in `ALL_GATE_CHECKPOINTS`
+   * (same precedent as `"task-create"` / `"review-judgment"`).
+   */
+  | "ac-cite";
 
 /**
  * Pre-fetched, checkpoint-agnostic input to a `CheckpointDef`'s `check` / `feed`
@@ -632,6 +647,14 @@ export interface GateContext {
    * none, which is the same state `[]` describes.
    */
   readonly reviewJudgmentBlockingQuestions?: readonly string[];
+
+  // -- ac-cite (spec-baseline-slice-2 §C4; read by checkAcCite / feedAcCite) --
+  /** The added/revised criteria offered to the citation gate (never untouched legacy ones). */
+  readonly citeCandidates?: readonly AcCiteCandidate[];
+  /** Lifecycle of every rule the baseline leaves list; an id absent from it is dangling. */
+  readonly citeRuleStates?: AcCiteRuleStates;
+  /** How to satisfy the gate — rendered by `feedAcCite`; computed by the caller (it needs store reads). */
+  readonly citeFeedingPack?: AcCiteFeedingPack;
 
   // -- ENFORCER-ONLY (every checkpoint) — never read by check()/feed() --
   /**
@@ -2430,6 +2453,43 @@ function feedTaskCreate(ctx: GateContext, failures: PredicateResult[]): string {
 }
 
 /**
+ * `ac-cite`'s predicate run (spec-baseline-slice-2 §C4): every added/revised criterion in
+ * `ctx.citeCandidates` must cite at least one rule and every cited rule must be live in
+ * `ctx.citeRuleStates`. An absent candidate list is "nothing was added or revised" — a vacuous pass,
+ * the same shape `plan-promote` uses for "no spec ancestor".
+ */
+function checkAcCite(ctx: GateContext): PredicateResult[] {
+  return [acCiteLive(ctx.citeCandidates ?? [], ctx.citeRuleStates ?? {})];
+}
+
+/**
+ * `ac-cite`'s refusal text: one line per violation, then (when the caller attached one) the feeding
+ * pack — up to 5 live candidate rules, the paste-ready `lore ac cite` line and the exemption headroom.
+ * Pure over `ctx`; the violations are re-derived with the SAME `findAcCiteViolations` the predicate
+ * used, so the message can never name a different offender than the verdict did.
+ */
+function feedAcCite(ctx: GateContext, _failures: PredicateResult[]): string {
+  const violations = findAcCiteViolations(ctx.citeCandidates ?? [], ctx.citeRuleStates ?? {});
+  const lines = violations.map((v) =>
+    v.reason === "uncited"
+      ? `${v.ac_id} cites no rule`
+      : `${v.ac_id} cites ${v.rule_id ?? "?"}, which is ${v.reason === "missing" ? "not a rule any leaf lists" : v.reason}`,
+  );
+  const pack = ctx.citeFeedingPack;
+  const tail =
+    pack === undefined
+      ? []
+      : [
+          ...(pack.candidates.length > 0
+            ? ["Candidate rules:", ...pack.candidates.map((c) => `  ${c.id}  ${c.statement}`)]
+            : ["No live candidate rule found for this spec's anchors or branch."]),
+          `Cite one: ${pack.cite_line}`,
+          `Exemption headroom: ${String(pack.exemption_headroom)}`,
+        ];
+  return [`Citation gate: ${lines.join("; ")}.`, ...tail].join("\n");
+}
+
+/**
  * Builds the `candidateBy` / `candidateAnchors` / `siblingClaims` /
  * `candidateSessionId` set `task-claim`'s `noAnchorOverlap` predicate consumes
  * (SPEC-042 §Design Decisions D5, extended by
@@ -2505,6 +2565,16 @@ export function buildAnchorGateContext(
 }
 
 /**
+ * The `ac-cite` checkpoint (spec-baseline-slice-2 §C4): the pure `check`/`feed` pair the citation gate's
+ * one evaluator (`ac-cite-gate.ts::decideCiteGate`) runs. Defined in this module beside every other
+ * checkpoint's decision logic, exported by name, and deliberately NOT in {@link checkpointRegistry}: that
+ * map is `GateEnforcer`'s dispatch table (and what `lore feed`/`lore gate` enumerate), whereas this gate
+ * is evaluated by the AC write chokepoint under the three-state `workflow.gates."ac-cite".mode` — an
+ * `enabled`-style on/off whose absence means "enabled" is exactly what it must not inherit.
+ */
+export const AC_CITE_CHECKPOINT: CheckpointDef = { id: "ac-cite", check: checkAcCite, feed: feedAcCite };
+
+/**
  * The gate checkpoint registry — see module invariants for why this stays
  * `Partial<Record<...>>` even though all five `GateCheckpoint` members are now
  * populated.
@@ -2531,6 +2601,12 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   // bootstrap "armed gates" rendering — widening it is a separate concern this
   // task's anchors don't cover).
   "review-judgment": { id: "review-judgment", check: checkReviewJudgment, feed: feedReviewJudgment },
+  // reason: "ac-cite" (the citation gate, spec-baseline-slice-2 §C4) is DELIBERATELY NOT a member of this
+  // map — see `AC_CITE_CHECKPOINT`'s JSDoc above. Registering it here would put it in the dispatch
+  // table `GateEnforcer` and `lore gate`/`lore feed` enumerate, and
+  // `tests/unit/service/gate-evaluation-trace.test.ts` (AC-FR-8) then demands a `gate_passed` audit
+  // row for every PASSING evaluation — one extra audit row per `lore ac add` that nothing asked for.
+  // Its observability is the would-refuse audit row (report mode) and the refusal itself (enforce).
 };
 
 /**

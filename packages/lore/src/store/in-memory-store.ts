@@ -54,11 +54,13 @@ import type {
   TraceZeroHitListOpts,
   TraceZeroHitSearch,
   UpdateOpts,
+  ProvenanceWriteExtras,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
   buildAcExemptionAlreadyActiveError,
   buildAcExemptionCapError,
+  buildNonLiveRuleRefusal,
   computeAuditEntryHash,
 } from "./store-shared.js";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
@@ -520,8 +522,20 @@ export class InMemoryStore implements StoreInterface {
     opts: UpdateOpts | undefined,
     version: VersionRecord,
     audit: AuditEntry,
+    extras?: ProvenanceWriteExtras,
   ): Promise<Result<DocRecord, LoreError>> {
     const before = this.docs.get(id);
+
+    // reason: the in-memory store has no registry rows for leaves a test inserted directly, so the
+    // liveness read is the baseline leaf docs themselves (the doc map is the single source here —
+    // see listRuleRegistry). The read and the write below share one synchronous turn up to `update`.
+    if (extras?.require_live_rules !== undefined && extras.require_live_rules.length > 0) {
+      const refusal = buildNonLiveRuleRefusal(
+        id,
+        extras.require_live_rules.map((ruleId) => ({ rule_id: ruleId, lifecycle: this.readLeafLifecycle(ruleId) })),
+      );
+      if (refusal !== null) return err(refusal);
+    }
 
     const updateResult = await this.update(id, patch, opts);
     if (!updateResult.ok) return updateResult;
@@ -532,6 +546,7 @@ export class InMemoryStore implements StoreInterface {
       return versionResult;
     }
 
+    const chainLength = this.auditChain.length;
     const auditResult = await this.appendAuditEntry(audit);
     if (!auditResult.ok) {
       this.restoreDocSnapshot(id, before);
@@ -539,7 +554,27 @@ export class InMemoryStore implements StoreInterface {
       return auditResult;
     }
 
+    for (const extraAudit of extras?.also_audit ?? []) {
+      const extraResult = await this.appendAuditEntry(extraAudit);
+      if (!extraResult.ok) {
+        this.restoreDocSnapshot(id, before);
+        this.removeVersionEntry(version);
+        this.auditChain.length = chainLength;
+        return extraResult;
+      }
+    }
+
     return ok(updateResult.value);
+  }
+
+  /** A rule's lifecycle as listed by its live baseline leaf, or `null` when no leaf lists it. */
+  private readLeafLifecycle(ruleId: string): string | null {
+    for (const doc of this.docs.values()) {
+      if (doc.type !== "baseline" || (doc.deleted_at ?? null) !== null) continue;
+      const lifecycle = listedRuleLifecycle(doc.extra, ruleId);
+      if (lifecycle !== undefined) return lifecycle;
+    }
+    return null;
   }
 
   /**

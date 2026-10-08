@@ -211,6 +211,8 @@ function loreErrorMessage(error: LoreError): string {
       return `budget exceeded: ${error.message}`;
     case "AC_WRITE_NOT_VIA_AC_VERB":
       return `ac write not via ac verb: ${error.message}`;
+    case "AC_CITE_REQUIRED":
+      return `ac cite required: ${error.message}`;
   }
 }
 

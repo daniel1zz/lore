@@ -6,7 +6,7 @@
 
 import { ulid } from "ulidx";
 import { err, ok, DEDICATED_EXTRA_KEYS, type Result } from "@lore/core";
-import { applyAcChange } from "./ac-write-chokepoint.js";
+import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
 import type { LoreError } from "@lore/core";
 // reason: getTransliterateCjk/containsCjk (SPEC-068 D1, hotfix 2026-07-23) are
 // Node-only-subpath-gated purely for the browser-safety barrel-isolation
@@ -808,6 +808,21 @@ export class CorpusService {
   }
 
   /**
+   * Arms the citation gate for `create`'s inline acceptance criteria (spec-baseline-slice-2 §C3/§C4,
+   * AC-BLS2-2): create is a SANCTIONED AC write path, so it must not bypass the gate `AcService` applies
+   * to `ac add|set|cite`. Called once by `app.ts` with the raw `workflow.gates."ac-cite"` entry; absent
+   * (every bare `new CorpusService(store)`) ⇒ create is ungated, byte-identical to before.
+   *
+   * @param rawGateConfig - the raw, untrusted gate entry (`undefined` = not configured)
+   */
+  setCiteGate(rawGateConfig: unknown): void {
+    this.citeGate = { raw: rawGateConfig };
+  }
+
+  /** Present iff {@link setCiteGate} was called; `raw` is validated per write by the chokepoint. */
+  private citeGate: { raw: unknown } | undefined;
+
+  /**
    * Sets the foreign-corpus-write guard's ambient facts for every write this
    * instance performs from now on (spec-corpus-resolution-carries-
    * provenance-and-a-foreign-write §D5). Called EXACTLY ONCE per CLI process
@@ -1597,6 +1612,34 @@ export class CorpusService {
       if (!taskCreateGateResult.ok) return taskCreateGateResult;
     }
 
+    // Citation gate on create's inline criteria (spec-baseline-slice-2 §C3: create is a sanctioned AC path
+    // whose criteria are additions "with the same citation gate"). Decided by the SAME chokepoint function
+    // `AcService` uses; runs before the insert, so a refused create leaves no doc behind. Report-mode
+    // would-refuse rows are appended after the insert (the doc id exists only then in the store).
+    // Residual (documented, D6): create's liveness read is the chokepoint's early read — the creating
+    // transaction (`insertWithProvenance`) has no in-transaction re-read; a cite that loses a race with a
+    // retire still shows in `cites_to_inactive` (flagged), it is just not refused.
+    let citeGateAudit: AuditEntry[] = [];
+    if (this.citeGate !== undefined && data.type === "spec") {
+      const inline = specAcceptanceCriteriaSchema.safeParse(resolvedExtra["acceptance_criteria"]);
+      if (inline.success && inline.data.length > 0) {
+        const anchors = resolvedExtra["code_anchors"];
+        const admission = await admitAcWrite(this.store, {
+          rawGateConfig: this.citeGate.raw,
+          target: {
+            id,
+            slug,
+            anchors: Array.isArray(anchors) ? (anchors as unknown[]).filter((a): a is string => typeof a === "string") : [],
+          },
+          existing: [],
+          next: inline.data,
+          actor: resolvedActor,
+        });
+        if (!admission.ok) return admission;
+        citeGateAudit = admission.value.wouldRefuseAudit;
+      }
+    }
+
     const doc: DocRecord = {
       id,
       slug,
@@ -1694,6 +1737,11 @@ export class CorpusService {
       ? await this.store.insertWithAllocatedOrdinalAndProvenance(doc, creationVersion, creationAudit)
       : await this.store.insertWithProvenance(doc, creationVersion, creationAudit);
     if (!insertResult.ok) return insertResult;
+
+    for (const entry of citeGateAudit) {
+      const recorded = await this.store.appendAuditEntry(entry);
+      if (!recorded.ok) return recorded;
+    }
 
     // Provenance auto-write (IoC vertical-slice tech-spec §4.1 P4, "governs" edge from
     // the feeding skill to the artifact it fed) — fail-soft by construction, see

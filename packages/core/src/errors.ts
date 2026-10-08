@@ -199,7 +199,41 @@ export type LoreError =
       /** The doc whose criteria the refused write would have changed (absent on create — no id yet). */
       id?: string;
       message: string;
+    }
+  /**
+   * The citation gate (`workflow.gates."ac-cite"`, mode `enforce`, armed branch) refused an AC add or
+   * revise: the criterion cites no live baseline rule, or cites a missing / deprecated / retired id.
+   * Nothing was written (spec extra, version, status and version log are unchanged). `feeding_pack`
+   * says how to satisfy the gate. CLI exit code: 4 (input rejected); HTTP 422.
+   * Source: spec-baseline-slice-2-completeness-census-per-branch-citation §C4, AC-BLS2-2, AC-BLS2-3
+   */
+  | {
+      code: "AC_CITE_REQUIRED";
+      /** The spec whose write was refused (absent on create — no id yet). */
+      id?: string;
+      message: string;
+      /** One entry per offending (criterion, rule) — `rule_id` absent when the criterion cites nothing. */
+      violations: AcCiteViolation[];
+      /** Present on every refusal the service raises; absent only on the store's bare in-transaction refusal. */
+      feeding_pack?: AcCiteFeedingPack;
     };
+
+/** Why one criterion fails the citation gate; `rule_id` names the offending id when it cites one. */
+export interface AcCiteViolation {
+  ac_id?: string;
+  rule_id?: string;
+  reason: "uncited" | "missing" | "deprecated" | "retired";
+}
+
+/** What a refused citation write tells the author (spec C4: top 5 candidates, a paste-ready cite line, headroom). */
+export interface AcCiteFeedingPack {
+  /** At most 5 LIVE rules, anchor-matched first, then the spec's branch. */
+  candidates: Array<{ id: string; statement: string }>;
+  /** `lore ac cite <spec-slug> <ac-id> <BR-id>` for the first candidate. */
+  cite_line: string;
+  /** `floor(10% x live ACs) - exemptions granted`, never negative. */
+  exemption_headroom: number;
+}
 
 /** Result type — success or failure. Use ok()/err() helpers to construct. */
 export type Result<T, E = LoreError> =

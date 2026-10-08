@@ -113,12 +113,13 @@ import {
   type AcVerifyMode,
   type FileExistsPort,
 } from "@lore/core";
-import type { DocId, DocRecord } from "@lore/core";
+import type { AuditEntry, DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
-import { applyAcChange } from "./ac-write-chokepoint.js";
+import { admitAcWrite, applyAcChange, decorateCiteRefusal, resolveCiteGateFor } from "./ac-write-chokepoint.js";
+import type { CiteGateConfig } from "./ac-cite-gate.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
@@ -295,11 +296,42 @@ export interface AllowMissingPathDeclaration {
 
 // ─── AcService ─────────────────────────────────────────────────────────────
 
+/**
+ * Constructor options of {@link AcService}. PRESENCE of this object arms the citation gate
+ * (spec-baseline-slice-2 §C4); a bare `new AcService(store)` is ungated and byte-identical to before —
+ * the same optional-DI shape `GateEnforcer` has for the services it guards.
+ */
+export interface AcServiceOptions {
+  /**
+   * The raw, untrusted `workflow.gates."ac-cite"` entry (`resolveCiteGateRaw`, `@lore/core`);
+   * `undefined` = not configured, which resolves to `off` without baseline docs and `report` with them.
+   */
+  citeGate?: unknown;
+}
+
 export class AcService {
+  /** Present iff the gate is armed (constructed with {@link AcServiceOptions}); `raw` is validated per write. */
+  private readonly citeGate: { raw: unknown } | undefined;
+
   /**
    * @param store - Storage abstraction (same instance passed to CorpusService)
+   * @param options - citation-gate wiring; omit for an ungated service (bare unit tests)
    */
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    options?: AcServiceOptions,
+  ) {
+    this.citeGate = options === undefined ? undefined : { raw: options.citeGate };
+  }
+
+  /**
+   * The citation gate's resolved configuration as THIS service applies it. A bare (ungated) service
+   * reports `off`. An invalid configured mode is `ok: false` (VALIDATION_ERROR) — never a default.
+   */
+  async resolveCiteGate(): Promise<Result<CiteGateConfig, LoreError>> {
+    if (this.citeGate === undefined) return ok({ mode: "off", armed_branches: [] });
+    return resolveCiteGateFor(this.store, this.citeGate.raw);
+  }
 
   /**
    * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8): armed post-construction
@@ -1061,52 +1093,76 @@ export class AcService {
     }
     const newStatus = opts.status ?? spec.status;
 
-    const updateResult = await this.store.update(
+    // The citation gate (spec-baseline-slice-2 §C4) — decided by the SAME chokepoint module, before any
+    // write, so a refusal leaves the spec's extra, version, status and version log untouched. A removal
+    // can add or revise nothing, so it is never gated.
+    const existing = extractCriteria(spec);
+    const target = { id: spec.id as string, slug: spec.slug, anchors: codeAnchorsOf(spec) };
+    let requireLiveRules: string[] = [];
+    let wouldRefuseAudit: AuditEntry[] = [];
+    if (this.citeGate !== undefined && operation !== "remove") {
+      const admission = await admitAcWrite(this.store, {
+        rawGateConfig: this.citeGate.raw,
+        target,
+        existing,
+        next: criteria,
+        actor,
+      });
+      if (!admission.ok) return admission;
+      requireLiveRules = admission.value.requireLiveRules;
+      wouldRefuseAudit = admission.value.wouldRefuseAudit;
+    }
+
+    // ONE atomic composite write (doc CAS + version row + audit row + any would-refuse rows). The
+    // liveness of every cited rule is re-read INSIDE this write's transaction (D6): a concurrent
+    // retire either committed first — and the write is refused — or waits for this commit.
+    const written = await this.store.updateWithProvenance(
       spec.id,
       { extra: newExtra, updated_at: now, version: newVersion, status: newStatus },
       { expected_version: spec.version },
-    );
-    if (!updateResult.ok) return updateResult;
-
-    const versionResult = await this.store.insertVersion({
-      doc_id: spec.id,
-      version: newVersion,
-      content: updateResult.value.content,
-      extra: updateResult.value.extra,
-      status: updateResult.value.status,
-      title: updateResult.value.title,
-      action: "update",
-      created_at: now,
-      created_by: actor,
-      change_summary:
-        operation === "set"
-          ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
-          : operation === "cite"
-            ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
-            : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
-      // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
-      // current (unchanged) slug.
-      slug: updateResult.value.slug,
-    });
-    if (!versionResult.ok) return versionResult;
-
-    const auditResult = await this.store.appendAuditEntry({
-      timestamp: now,
-      actor,
-      session_id: spec.id,
-      action: "update",
-      doc_id: spec.id,
-      details: {
-        ...(opts.auditDetails ?? {}),
-        operation,
-        criteria_count: criteria.length,
+      {
+        doc_id: spec.id,
         version: newVersion,
-        ...(opts.acId !== undefined ? { ac_id: opts.acId } : {}),
+        content: spec.content,
+        extra: newExtra,
+        status: newStatus,
+        title: spec.title,
+        action: "update",
+        created_at: now,
+        created_by: actor,
+        change_summary:
+          operation === "set"
+            ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
+            : operation === "cite"
+              ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
+              : `Acceptance criteria ${operation === "add" ? "updated" : "updated (removal)"} — ${criteria.length} entries`,
+        // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
+        // current (unchanged) slug.
+        slug: spec.slug,
       },
-    });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(updateResult.value);
+      {
+        timestamp: now,
+        actor,
+        session_id: spec.id,
+        action: "update",
+        doc_id: spec.id,
+        details: {
+          ...(opts.auditDetails ?? {}),
+          operation,
+          criteria_count: criteria.length,
+          version: newVersion,
+          ...(opts.acId !== undefined ? { ac_id: opts.acId } : {}),
+        },
+      },
+      {
+        ...(requireLiveRules.length > 0 ? { require_live_rules: requireLiveRules } : {}),
+        ...(wouldRefuseAudit.length > 0 ? { also_audit: wouldRefuseAudit } : {}),
+      },
+    );
+    if (!written.ok) {
+      return { ok: false, error: await decorateCiteRefusal(this.store, written.error, { target, existing, next: criteria }) };
+    }
+    return written;
   }
 }
 
@@ -1118,6 +1174,11 @@ export class AcService {
  * schema-based (not duck-typed) since the discriminated `verify` union is too
  * structural for a hand-rolled type guard to safely narrow.
  */
+function codeAnchorsOf(spec: DocRecord): string[] {
+  const anchors = spec.extra["code_anchors"];
+  return Array.isArray(anchors) ? (anchors as unknown[]).filter((a): a is string => typeof a === "string") : [];
+}
+
 function extractCriteria(spec: DocRecord): AcceptanceCriterion[] {
   const parsed = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
   return parsed.success ? parsed.data : [];
