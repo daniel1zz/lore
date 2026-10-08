@@ -9,8 +9,21 @@
  *   {@link findCensusRoot}, {@link Site}, {@link SiteCensusEntry}, {@link ERR_CALLEES}.
  * Invariants:
  *   - Deterministic: sites are de-duplicated by key and sorted by key (code-unit order).
- *   - A site key is `file#symbol#code` (file relative to rootDir, `/`-separated; symbol is the
- *     enclosing named function, see {@link enclosingSymbolName}).
+ *   - A site key is `file#symbol#code`, plus a 4th segment `#field` when the refusal carries a
+ *     `field`: the literal when it is a string literal, else a decimal ordinal (0-based, by source
+ *     position) among the same file+symbol+code refusals with a non-literal field. A refusal with
+ *     no `field` has no 4th segment. File is relative to rootDir, `/`-separated; symbol is the
+ *     enclosing named function, see {@link enclosingSymbolName}.
+ *   - A failure site is (a) a call to {@link ERR_CALLEES}, or (b) any object literal whose
+ *     CONTEXTUAL type is assignable to the product error type: the parameter type of the `err` /
+ *     `gateFailure` declaration found in the analysed program (a generic parameter contributes its
+ *     constraint). So a pure core `{ ok: false, error: { code, field } }` and a CLI
+ *     `const refusal: LoreError = { code }` are sites though they never call err(). A program that
+ *     declares no err/gateFailure has no product error type and only (a) applies.
+ *   - Layout independence: workspace packages (root package.json `workspaces`, each package's
+ *     `name`) resolve to their in-root source and tsconfig `paths` apply; node_modules symlink
+ *     targets of workspace packages are never followed. A followed function body that nevertheless
+ *     lies outside rootDir (and outside node_modules) is a loud SiteCensusError, never a drop.
  *   - A code is only ever READ (string literal, or a `const` / property initialised with one,
  *     through ternaries and `as`); anything else is reported as a dynamic (not_measured) site —
  *     never guessed.
@@ -30,7 +43,7 @@
  * compiled binary does not embed it, and its absence is a loud {@link SiteCensusError}.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type * as TS from "typescript";
@@ -59,6 +72,19 @@ export interface Site {
   readonly dynamic: boolean;
 }
 
+/** How a refusal's `field` shows in its key: nothing, the literal, or a per-(file,symbol,code) ordinal. */
+type FieldKey = { readonly kind: "none" } | { readonly kind: "literal"; readonly value: string } | { readonly kind: "ordinal" };
+
+/** A coded failure site awaiting key finalisation (ordinals need every site of the walk). */
+interface PendingSite {
+  readonly rel: string;
+  readonly symbol: string;
+  readonly code: string;
+  readonly field: FieldKey;
+  readonly pos: number;
+  readonly bootstrap: boolean;
+}
+
 /**
  * The main site list, carrying the app-bootstrap sites (symbols in {@link NON_BUSINESS_SYMBOLS})
  * as a `bootstrap` property. The two lists never share a key; a consumer that only spreads or
@@ -76,7 +102,10 @@ export type SiteCensusErrorReason =
   | "typescript-unavailable"
   | "entry-file-missing"
   | "entry-symbol-missing"
-  | "command-unresolved";
+  | "command-unresolved"
+  | "callee-outside-root"
+  | "workspace-import-unresolved"
+  | "workspace-pattern-unsupported";
 
 /** Typed failure of the census; `context` carries what the caller must fix. */
 export class SiteCensusError extends Error {
@@ -140,7 +169,7 @@ export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }):
   if (!existsSync(entryPath)) {
     throw new SiteCensusError("entry-file-missing", { file: input.entry.file, rootDir });
   }
-  const program = ts.createProgram([entryPath], {
+  const options: TS.CompilerOptions = {
     target: ts.ScriptTarget.ESNext,
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
@@ -149,13 +178,17 @@ export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }):
     noEmit: true,
     types: [], // reason: ambient bun-types are irrelevant to call resolution and cost seconds.
     jsx: ts.JsxEmit.ReactJSX,
-  });
+    ...tsconfigPathOptions(ts, rootDir),
+  };
+  const host = createWorkspaceHost(ts, options, rootDir);
+  const program = ts.createProgram({ rootNames: [entryPath], options, host });
   const checker = program.getTypeChecker();
   const entryFile = program.getSourceFile(entryPath);
   if (entryFile === undefined) {
     throw new SiteCensusError("entry-file-missing", { file: input.entry.file, rootDir });
   }
   const walker = new CensusWalker(ts, program, checker, rootDir);
+  walker.resolveErrorTypes();
   const roots = walker.functionsNamed(entryFile, input.entry.symbol);
   if (roots.length === 0) {
     throw new SiteCensusError("entry-symbol-missing", {
@@ -221,12 +254,127 @@ export function findCensusRoot(startDir: string): string | undefined {
   }
 }
 
+/** tsconfig `paths` / `baseUrl` of the analysed root (with `extends` resolved); `{}` when it has no tsconfig. */
+function tsconfigPathOptions(ts: typeof TS, rootDir: string): TS.CompilerOptions {
+  const configPath = path.join(rootDir, "tsconfig.json");
+  if (!existsSync(configPath)) return {};
+  const read = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (read.error !== undefined) {
+    throw new SiteCensusError("typescript-unavailable", { cause: ts.flattenDiagnosticMessageText(read.error.messageText, "\n"), file: configPath });
+  }
+  const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, rootDir, undefined, configPath);
+  const picked: TS.CompilerOptions = {};
+  if (parsed.options.paths !== undefined) {
+    picked.paths = parsed.options.paths;
+    // reason: `paths` without baseUrl resolve against pathsBasePath, which the parser records.
+    const base = (parsed.options as Record<string, unknown>)["pathsBasePath"];
+    if (typeof base === "string") (picked as Record<string, unknown>)["pathsBasePath"] = base;
+  }
+  if (parsed.options.baseUrl !== undefined) picked.baseUrl = parsed.options.baseUrl;
+  return picked;
+}
+
+/** A workspace package of the analysed root: its `name`, in-root directory and `exports` map. */
+interface WorkspacePackage {
+  readonly name: string;
+  readonly dir: string;
+  readonly exportsMap: unknown;
+}
+
+/** Directories matched by one `workspaces` pattern: `<dir>/*` (one level) or a literal directory. */
+function expandWorkspacePattern(rootDir: string, pattern: string): string[] {
+  if (!pattern.includes("*")) return [path.resolve(rootDir, pattern)];
+  if (!pattern.endsWith("/*") || pattern.slice(0, -2).includes("*")) {
+    throw new SiteCensusError("workspace-pattern-unsupported", { pattern, supported: "literal dir or <dir>/*" });
+  }
+  const parent = path.resolve(rootDir, pattern.slice(0, -2));
+  if (!existsSync(parent)) return [];
+  return readdirSync(parent, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => path.join(parent, e.name));
+}
+
+/** Workspace packages declared by rootDir/package.json `workspaces`; `[]` when it declares none. */
+function readWorkspacePackages(rootDir: string): WorkspacePackage[] {
+  const manifestPath = path.join(rootDir, "package.json");
+  if (!existsSync(manifestPath)) return [];
+  const root = JSON.parse(readFileSync(manifestPath, "utf8")) as { workspaces?: string[] | { packages?: string[] } };
+  const patterns = Array.isArray(root.workspaces) ? root.workspaces : (root.workspaces?.packages ?? []);
+  const found: WorkspacePackage[] = [];
+  for (const pattern of patterns) {
+    for (const dir of expandWorkspacePattern(rootDir, pattern)) {
+      const pkgPath = path.join(dir, "package.json");
+      if (!existsSync(pkgPath)) continue;
+      const manifest = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: string; exports?: unknown };
+      if (typeof manifest.name === "string") found.push({ name: manifest.name, dir, exportsMap: manifest.exports });
+    }
+  }
+  return found;
+}
+
+/** First string found in an `exports` target (string, or a conditions object preferring types/import/default). */
+function exportTarget(target: unknown): string | undefined {
+  if (typeof target === "string") return target;
+  if (target === null || typeof target !== "object") return undefined;
+  for (const condition of ["types", "import", "default"]) {
+    const nested = exportTarget((target as Record<string, unknown>)[condition]);
+    if (nested !== undefined) return nested;
+  }
+  return undefined;
+}
+
+/**
+ * Compiler host whose module resolution maps workspace package names to their in-root source
+ * (so a worktree's node_modules links to another checkout can never change what is analysed);
+ * every other specifier goes through TypeScript's normal resolution.
+ */
+function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir: string): TS.CompilerHost {
+  const host = ts.createCompilerHost(options);
+  const packages = readWorkspacePackages(rootDir);
+  const resolveFile = (specifier: string, containingFile: string): TS.ResolvedModuleFull | undefined =>
+    ts.resolveModuleName(specifier, containingFile, options, host).resolvedModule;
+  // reason: a workspace target is an absolute `*.ts` path, so TypeScript flags it resolvedUsingTsExtension and then
+  // asserts the ORIGINAL specifier (`@lore/core`) ends in `.ts`: a Debug Failure. The flag is false for the bare specifier.
+  const asBareResolution = (resolved: TS.ResolvedModuleFull | undefined): TS.ResolvedModuleFull | undefined =>
+    resolved === undefined ? undefined : { ...resolved, resolvedUsingTsExtension: false };
+  const resolveWorkspace = (pkg: WorkspacePackage, subpath: string, containingFile: string): TS.ResolvedModuleFull | undefined => {
+    const key = subpath === "" ? "." : `./${subpath}`;
+    const mapped =
+      pkg.exportsMap !== null && typeof pkg.exportsMap === "object" && !Array.isArray(pkg.exportsMap)
+        ? exportTarget((pkg.exportsMap as Record<string, unknown>)[key])
+        : undefined;
+    return asBareResolution(resolveFile(path.resolve(pkg.dir, mapped ?? subpath), containingFile));
+  };
+  host.resolveModuleNameLiterals = (literals, containingFile) =>
+    literals.map((literal): TS.ResolvedModuleWithFailedLookupLocations => {
+      const specifier = literal.text;
+      const pkg = packages.find((p) => specifier === p.name || specifier.startsWith(`${p.name}/`));
+      if (pkg === undefined) return { resolvedModule: resolveFile(specifier, containingFile) };
+      const resolved = resolveWorkspace(pkg, specifier.slice(pkg.name.length + 1), containingFile);
+      if (resolved === undefined) {
+        throw new SiteCensusError("workspace-import-unresolved", {
+          specifier,
+          containingFile: path.relative(rootDir, containingFile),
+          packageDir: path.relative(rootDir, pkg.dir),
+        });
+      }
+      return { resolvedModule: resolved };
+    });
+  return host;
+}
+
 /** Whole-walk state: visited set, collected sites, and the per-file symbol index. */
 class CensusWalker {
   private readonly visited = new Set<TS.Node>();
   private readonly sites = new Map<string, Site>();
   private readonly bootstrapSites = new Map<string, Site>();
   private readonly index = new Map<TS.SourceFile, Map<string, FunctionLike[]>>();
+  /** Coded failure sites keyed by `<file>:<node start>` (a node scanned twice is one site). */
+  private readonly pending = new Map<string, PendingSite>();
+  /** Object literals already recorded as the argument of an err()/gateFailure() call. */
+  private readonly consumedArguments = new Set<TS.Node>();
+  /** The product error type(s): parameter types of the program's err/gateFailure declarations. */
+  private errorTypes: TS.Type[] = [];
 
   constructor(
     private readonly ts: typeof TS,
@@ -235,12 +383,83 @@ class CensusWalker {
     private readonly rootDir: string,
   ) {}
 
+  /**
+   * Find the product error type: the first-parameter type of every top-level `err` /
+   * `gateFailure` function or const-arrow under rootDir (a type-parameter contributes its
+   * constraint). Empty when the program declares neither: then only err()/gateFailure() calls
+   * can be sites (nothing is typed as a product error).
+   */
+  resolveErrorTypes(): void {
+    const ts = this.ts;
+    if (typeof this.checker.isTypeAssignableTo !== "function") {
+      throw new SiteCensusError("typescript-unavailable", { cause: "TypeChecker.isTypeAssignableTo missing (typescript >= 5.4 required)" });
+    }
+    const found: TS.Type[] = [];
+    for (const file of this.program.getSourceFiles()) {
+      if (!this.isFollowable(file)) continue;
+      for (const statement of file.statements) {
+        const fns: FunctionLike[] = [];
+        if (ts.isFunctionDeclaration(statement) && statement.name !== undefined && ERR_CALLEES.includes(statement.name.text)) fns.push(statement);
+        if (ts.isVariableStatement(statement)) {
+          for (const decl of statement.declarationList.declarations) {
+            if (!ts.isIdentifier(decl.name) || !ERR_CALLEES.includes(decl.name.text) || decl.initializer === undefined) continue;
+            const init = this.unwrap(decl.initializer);
+            if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) fns.push(init);
+          }
+        }
+        for (const fn of fns) {
+          const param = fn.parameters[0];
+          if (param === undefined) continue;
+          let type = this.checker.getTypeAtLocation(param);
+          if ((type.flags & ts.TypeFlags.TypeParameter) !== 0) type = this.checker.getBaseConstraintOfType(type) ?? type;
+          if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Never)) === 0) found.push(type);
+        }
+      }
+    }
+    this.errorTypes = found;
+  }
+
   result(): Site[] {
-    return CensusWalker.sortedByKey(this.sites);
+    return CensusWalker.sortedByKey(this.mergedSites(this.sites, false));
   }
 
   bootstrapResult(): Site[] {
-    return CensusWalker.sortedByKey(this.bootstrapSites);
+    return CensusWalker.sortedByKey(this.mergedSites(this.bootstrapSites, true));
+  }
+
+  /** Ready-keyed sites plus the pending coded sites of one sink, keys finalised (ordinals by source position). */
+  private mergedSites(ready: ReadonlyMap<string, Site>, bootstrap: boolean): Map<string, Site> {
+    const merged = new Map(ready);
+    const ordered = [...this.pending.values()].filter((p) => p.bootstrap === bootstrap).sort((a, b) => (a.rel === b.rel ? a.pos - b.pos : a.rel < b.rel ? -1 : 1));
+    const ordinals = new Map<string, number>();
+    const bases: string[] = [];
+    for (const p of ordered) {
+      let tail = p.code;
+      if (p.field.kind === "literal") tail = `${p.code}#${p.field.value}`;
+      if (p.field.kind === "ordinal") {
+        const group = `${p.rel}#${p.symbol}#${p.code}`;
+        const next = ordinals.get(group) ?? 0;
+        ordinals.set(group, next + 1);
+        tail = `${p.code}#${next}`;
+      }
+      bases.push(`${p.rel}#${p.symbol}#${tail}`);
+    }
+    // Distinct sites that still share a base key (same code and the same literal field, or both field-less) must not
+    // collapse (issue #59: one key covering a dozen refusals): every member of such a group gets `~<n>` by source position.
+    const sizes = new Map<string, number>();
+    for (const base of bases) sizes.set(base, (sizes.get(base) ?? 0) + 1);
+    const seen = new Map<string, number>();
+    ordered.forEach((p, i) => {
+      const base = bases[i] as string;
+      let key = base;
+      if ((sizes.get(base) ?? 0) > 1) {
+        const n = seen.get(base) ?? 0;
+        seen.set(base, n + 1);
+        key = p.field.kind === "none" ? `${base}#~${n}` : `${base}~${n}`;
+      }
+      if (!merged.has(key)) merged.set(key, { key, file: p.rel, symbol: p.symbol, code: p.code, dynamic: false });
+    });
+    return merged;
   }
 
   private static sortedByKey(sites: ReadonlyMap<string, Site>): Site[] {
@@ -269,6 +488,7 @@ class CensusWalker {
     this.visited.add(fn);
     const scan = (node: TS.Node): void => {
       if (this.ts.isCallExpression(node)) this.handleCall(node, depth);
+      else if (this.ts.isObjectLiteralExpression(node)) this.handleTypedLiteral(node);
       this.ts.forEachChild(node, scan);
     };
     scan(fn.body);
@@ -337,7 +557,72 @@ class CensusWalker {
       this.addSite(call, undefined, `dynamic:${callee}(${arg === undefined ? "" : this.label(arg)})`);
       return;
     }
-    for (const code of codes) this.addSite(call, code, code);
+    const object = this.unwrap(arg as TS.Expression) as TS.ObjectLiteralExpression;
+    this.consumedArguments.add(object);
+    const field = this.fieldKeyOf(object);
+    for (const code of codes) this.addCodedSite(call, code, field);
+  }
+
+  /**
+   * An object literal whose contextual type is the product error type is a failure site even
+   * when no err() wraps it (pure core refusals, CLI usage refusals). Literals that are the
+   * argument of err()/gateFailure() are recorded by the call path and skipped here.
+   */
+  private handleTypedLiteral(object: TS.ObjectLiteralExpression): void {
+    if (this.consumedArguments.has(object) || this.errorTypes.length === 0) return;
+    if (!this.isTypedAsProductError(object)) return;
+    const codes = this.codesOfErrArgument(object);
+    if (codes !== undefined && codes.length > 0) {
+      const field = this.fieldKeyOf(object);
+      for (const code of codes) this.addCodedSite(object, code, field);
+      return;
+    }
+    const hasCodeKey = object.properties.some((p) => (this.ts.isPropertyAssignment(p) || this.ts.isShorthandPropertyAssignment(p)) && this.propertyName(p.name) === "code");
+    const hasSpread = object.properties.some((p) => this.ts.isSpreadAssignment(p));
+    // reason: a literal typed as the error but with neither a `code` key nor a spread cannot occur (it would not type-check); with
+    // a spread or an unreadable code the refusal exists but cannot be named, so it is reported as dynamic, never dropped.
+    if (hasCodeKey || hasSpread) this.addSite(object, undefined, `dynamic:error-literal(${this.label(object)})`);
+  }
+
+  private isTypedAsProductError(object: TS.ObjectLiteralExpression): boolean {
+    const contextual = this.checker.getContextualType(object);
+    if (contextual === undefined) return false;
+    const constituents = contextual.isUnion() ? contextual.types : [contextual];
+    const nullish = this.ts.TypeFlags.Undefined | this.ts.TypeFlags.Null;
+    const unusable = this.ts.TypeFlags.Any | this.ts.TypeFlags.Unknown | this.ts.TypeFlags.Never;
+    return constituents.some(
+      (t) => (t.flags & (nullish | unusable)) === 0 && this.errorTypes.some((errorType) => this.checker.isTypeAssignableTo(t, errorType)),
+    );
+  }
+
+  /** The `field` of a refusal literal: absent, a single string literal, or non-literal (ordinal-keyed). */
+  private fieldKeyOf(object: TS.Expression): FieldKey {
+    if (!this.ts.isObjectLiteralExpression(object)) return { kind: "none" };
+    for (const prop of object.properties) {
+      if (this.ts.isPropertyAssignment(prop) && this.propertyName(prop.name) === "field") return this.fieldKeyFrom(this.literalsOf(prop.initializer, 0));
+      if (this.ts.isShorthandPropertyAssignment(prop) && prop.name.text === "field") {
+        return this.fieldKeyFrom(this.literalsOfSymbol(this.checker.getShorthandAssignmentValueSymbol(prop), 0));
+      }
+    }
+    return { kind: "none" };
+  }
+
+  private fieldKeyFrom(literals: string[] | undefined): FieldKey {
+    return literals !== undefined && literals.length === 1 ? { kind: "literal", value: (literals[0] as string).replace(/#/g, "~") } : { kind: "ordinal" };
+  }
+
+  private addCodedSite(node: TS.Node, code: string, field: FieldKey): void {
+    const file = node.getSourceFile();
+    const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
+    const symbol = this.enclosingSymbolName(node);
+    this.pending.set(`${rel}:${node.getStart()}:${code}`, {
+      rel,
+      symbol,
+      code,
+      field,
+      pos: node.getStart(),
+      bootstrap: this.isNonBusinessSymbol(symbol, file),
+    });
   }
 
   /** The literal codes of `err({ code: <here> })`, or undefined when not statically readable. */
@@ -391,7 +676,13 @@ class CensusWalker {
     const targets: FunctionLike[] = [];
     for (const decl of symbol?.declarations ?? []) {
       const fn = this.functionOfDeclaration(decl);
-      if (fn !== undefined && fn.body !== undefined && this.isFollowable(fn.getSourceFile())) targets.push(fn);
+      if (fn === undefined || fn.body === undefined) continue;
+      const source = fn.getSourceFile();
+      if (this.isFollowable(source)) targets.push(fn);
+      else if (this.isOutsideRootSource(source)) {
+        // reason: dropping a callee body that lies outside rootDir is the #60 silent omission; fail loud instead.
+        throw new SiteCensusError("callee-outside-root", { file: source.fileName, rootDir: this.rootDir });
+      }
     }
     return targets;
   }
@@ -409,6 +700,13 @@ class CensusWalker {
     if (file.isDeclarationFile) return false;
     const rel = path.relative(this.rootDir, file.fileName);
     return !rel.startsWith("..") && !path.isAbsolute(rel) && !rel.split(path.sep).includes("node_modules");
+  }
+
+  /** A real (non-.d.ts, non-node_modules) source file that lies outside rootDir. */
+  private isOutsideRootSource(file: TS.SourceFile): boolean {
+    if (file.isDeclarationFile) return false;
+    const rel = path.relative(this.rootDir, file.fileName);
+    return (rel.startsWith("..") || path.isAbsolute(rel)) && !file.fileName.split(path.sep).includes("node_modules");
   }
 
   private dealias(symbol: TS.Symbol | undefined): TS.Symbol | undefined {
@@ -486,7 +784,11 @@ class CensusWalker {
   private enclosingSymbolName(node: TS.Node): string {
     const ts = this.ts;
     const segments: string[] = [];
+    // reason: property names only name a symbol once a function sits below them (`subCommands.add.run`); a refusal literal
+    // `{ ok: false, error: { code } }` inside `validateX` must be `validateX`, not `validateX.error`.
+    let insideFunction = false;
     for (let cur: TS.Node | undefined = node; cur !== undefined; cur = cur.parent) {
+      if (this.isFunctionLike(cur)) insideFunction = true;
       if (ts.isExportAssignment(cur)) {
         segments.push("default");
         break;
@@ -503,7 +805,7 @@ class CensusWalker {
           break;
         }
       }
-      if ((ts.isMethodDeclaration(cur) || ts.isPropertyAssignment(cur)) && cur.name !== undefined) {
+      if (insideFunction && (ts.isMethodDeclaration(cur) || ts.isPropertyAssignment(cur)) && cur.name !== undefined) {
         const segment = this.propertyName(cur.name);
         if (segment !== undefined) segments.push(segment);
       }
