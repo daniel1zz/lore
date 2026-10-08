@@ -11,6 +11,9 @@
  *     is a gap.
  *   - A dynamic site is "not_measured" until it is mapped to a live rule or justified
  *     `non-business:<reason>`; it never counts as a gap.
+ *   - An interface-dispatch site (see site-census) is a dynamic site, so it follows the same rule.
+ *   - Bootstrap sites (site-census `bootstrap`, app wiring / config loading) are never gaps, never
+ *     not_measured and never affect `ok`; the verdict does not echo them (the caller reports them).
  *   - `ok` iff `gaps` and `notMeasured` are both empty. Output follows the order of `sites`.
  * Side-effect class: pure.
  */
@@ -41,6 +44,7 @@ function isAccountedFor(entries: readonly string[] | undefined, live: ReadonlySe
  * Compare census sites against a leaf's site map.
  *
  * @param input.sites - Sites from `listSites`.
+ * @param input.bootstrap - Bootstrap sites from the census (`listSites(...).bootstrap`); default none.
  * @param input.siteMap - siteKey -> rule ids (`BR-n`) and/or `non-business:<reason>`.
  * @param input.liveRuleIds - ids of the leaf's live rules.
  * @example
@@ -48,13 +52,16 @@ function isAccountedFor(entries: readonly string[] | undefined, live: ReadonlySe
  */
 export function computeLeafCoverage(input: {
   sites: readonly Site[];
+  bootstrap?: readonly Site[];
   siteMap: Readonly<Record<string, readonly string[]>>;
   liveRuleIds: readonly string[];
 }): LeafCoverage {
   const live = new Set(input.liveRuleIds);
   const gaps: string[] = [];
   const notMeasured: string[] = [];
+  const bootstrap = new Set((input.bootstrap ?? []).map((s) => s.key));
   for (const site of input.sites) {
+    if (bootstrap.has(site.key)) continue;
     if (isAccountedFor(input.siteMap[site.key], live)) continue;
     (site.dynamic ? notMeasured : gaps).push(site.key);
   }

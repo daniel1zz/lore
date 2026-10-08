@@ -17,9 +17,13 @@
  *   - A call through an element access (`registry[k](..)`) is a dynamic site: the callee is data.
  *   - Only functions whose source file lies under rootDir (and is neither node_modules nor .d.ts)
  *     are followed; recursion is bounded by {@link MAX_CALL_DEPTH} and a visited set.
- * Known blind spot (reported, not hidden): a call through an interface / abstract method has no
- *   statically-resolvable body, so implementations behind it are NOT visited and NOT marked
- *   dynamic (marking every store call dynamic would drown the signal).
+ *   - A call through an interface / abstract method has no statically-resolvable body (the
+ *     implementation is chosen at runtime), so it is a dynamic (not_measured) site keyed
+ *     `<declaring file>#<Interface>#<method>`, de-duplicated per interface method; the
+ *     implementations behind it are NOT visited.
+ *   - A failure site whose enclosing symbol is named in {@link NON_BUSINESS_SYMBOLS} (app
+ *     bootstrap) lands in the result's `bootstrap` list, never in the main list. An interface call
+ *     made from such a symbol is plumbing too and is not recorded.
  * Side-effect class: IO (reads source files via the compiler host); no writes.
  *
  * `typescript` is a devDependency: it is loaded lazily with a non-literal specifier so the
@@ -30,6 +34,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import type * as TS from "typescript";
+import { NON_BUSINESS_SYMBOLS } from "./site-census-nonbusiness.js";
 
 /** Callee names whose call is a failure site: the Result error constructor and the gate-predicate failure constructor. */
 export const ERR_CALLEES: readonly string[] = ["err", "gateFailure"];
@@ -50,9 +55,16 @@ export interface Site {
   readonly symbol: string;
   /** The error code; absent exactly when `dynamic` is true. */
   readonly code?: string;
-  /** True when the census could not measure the site (registry call or non-literal code). */
+  /** True when the census could not measure the site (registry call, interface call or non-literal code). */
   readonly dynamic: boolean;
 }
+
+/**
+ * The main site list, carrying the app-bootstrap sites (symbols in {@link NON_BUSINESS_SYMBOLS})
+ * as a `bootstrap` property. The two lists never share a key; a consumer that only spreads or
+ * maps the array sees the business sites alone.
+ */
+export type SiteList = Site[] & { bootstrap: Site[] };
 
 /** Where the walk starts: a file (relative to rootDir) and the {@link enclosingSymbolName}-style symbol in it. */
 export interface SiteCensusEntry {
@@ -97,18 +109,23 @@ type FunctionLike = TS.FunctionDeclaration | TS.MethodDeclaration | TS.FunctionE
  *
  * @param input.rootDir - Absolute directory bounding both the entry file and every followed callee.
  * @param input.entry - Entry file (relative to rootDir) and symbol (see {@link enclosingSymbolName}).
- * @returns Sites sorted by key, de-duplicated; `[]` when the entry reaches none.
+ * @returns Sites sorted by key, de-duplicated; `[]` when the entry reaches none. The array's
+ *   `bootstrap` property lists the app-bootstrap sites (never in the array itself).
  * @throws SiteCensusError when typescript, the entry file or the entry symbol cannot be found.
  * @example
  * listSites({ rootDir, entry: { file: "command.ts", symbol: "runCommand" } });
  */
-export function listSites(input: { rootDir: string; entry: SiteCensusEntry }): Site[] {
-  return traceCensus(input).sites;
+export function listSites(input: { rootDir: string; entry: SiteCensusEntry }): SiteList {
+  const { sites, bootstrap } = traceCensus(input);
+  // reason: non-enumerable so structural equality / spreads of the main list ignore the bootstrap side-channel.
+  return Object.defineProperty([...sites], "bootstrap", { value: bootstrap, enumerable: false }) as SiteList;
 }
 
 /** {@link listSites} plus the walk's footprint: every `file#symbol` whose body was visited (sorted, unique). */
 export interface CensusTrace {
   readonly sites: Site[];
+  /** App-bootstrap sites (see {@link NON_BUSINESS_SYMBOLS}); disjoint from `sites`. */
+  readonly bootstrap: Site[];
   readonly reached: string[];
 }
 
@@ -148,7 +165,7 @@ export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }):
     });
   }
   for (const root of roots) walker.visit(root, 0);
-  return { sites: walker.result(), reached: walker.reachedSymbols() };
+  return { sites: walker.result(), bootstrap: walker.bootstrapResult(), reached: walker.reachedSymbols() };
 }
 
 /**
@@ -208,6 +225,7 @@ export function findCensusRoot(startDir: string): string | undefined {
 class CensusWalker {
   private readonly visited = new Set<TS.Node>();
   private readonly sites = new Map<string, Site>();
+  private readonly bootstrapSites = new Map<string, Site>();
   private readonly index = new Map<TS.SourceFile, Map<string, FunctionLike[]>>();
 
   constructor(
@@ -218,7 +236,15 @@ class CensusWalker {
   ) {}
 
   result(): Site[] {
-    return [...this.sites.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    return CensusWalker.sortedByKey(this.sites);
+  }
+
+  bootstrapResult(): Site[] {
+    return CensusWalker.sortedByKey(this.bootstrapSites);
+  }
+
+  private static sortedByKey(sites: ReadonlyMap<string, Site>): Site[] {
+    return [...sites.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
 
   reachedSymbols(): string[] {
@@ -258,8 +284,50 @@ class CensusWalker {
       this.addSite(call, undefined, `dynamic:${this.label(callee)}`);
       return;
     }
+    const dispatch = this.interfaceMethodOf(callee);
+    if (dispatch !== undefined) {
+      if (!this.isNonBusinessSymbol(this.enclosingSymbolName(call), call.getSourceFile())) this.addInterfaceSite(dispatch);
+      return;
+    }
     if (depth >= MAX_CALL_DEPTH) return;
     for (const target of this.resolveTargets(callee)) this.visit(target, depth + 1);
+  }
+
+  /** True when `symbol` in `file` (bare or `<file>#<symbol>`) is on the shared non-business list. */
+  private isNonBusinessSymbol(symbol: string, file: TS.SourceFile): boolean {
+    const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
+    return NON_BUSINESS_SYMBOLS.includes(symbol) || NON_BUSINESS_SYMBOLS.includes(`${rel}#${symbol}`);
+  }
+
+  /**
+   * The interface / abstract method a call dispatches through, when the callee has declarations
+   * under rootDir but none with a body (so the runtime implementation is unknown statically).
+   */
+  private interfaceMethodOf(callee: TS.Expression): { file: string; iface: string; method: string } | undefined {
+    if (!this.ts.isPropertyAccessExpression(callee)) return undefined;
+    const symbol = this.dealias(this.checker.getSymbolAtLocation(callee.name));
+    const decls = symbol?.declarations ?? [];
+    if (decls.length === 0) return undefined;
+    const ts = this.ts;
+    for (const decl of decls) {
+      if (!this.isFollowable(decl.getSourceFile())) return undefined;
+      if (this.functionOfDeclaration(decl) !== undefined) return undefined;
+    }
+    const decl = decls[0] as TS.Declaration;
+    const isInterfaceMember = ts.isMethodSignature(decl) && (ts.isInterfaceDeclaration(decl.parent) || ts.isTypeLiteralNode(decl.parent));
+    const isAbstractMethod = ts.isMethodDeclaration(decl) && decl.body === undefined && (ts.getCombinedModifierFlags(decl) & ts.ModifierFlags.Abstract) !== 0;
+    if (!isInterfaceMember && !isAbstractMethod) return undefined;
+    const owner = decl.parent;
+    const iface = ts.isInterfaceDeclaration(owner) || ts.isClassDeclaration(owner) ? owner.name?.text : this.enclosingSymbolName(owner);
+    if (iface === undefined || iface.length === 0) return undefined;
+    const file = path.relative(this.rootDir, decl.getSourceFile().fileName).split(path.sep).join("/");
+    return { file, iface, method: callee.name.text };
+  }
+
+  private addInterfaceSite(dispatch: { file: string; iface: string; method: string }): void {
+    const key = `${dispatch.file}#${dispatch.iface}#${dispatch.method}`;
+    if (this.sites.has(key)) return;
+    this.sites.set(key, { key, file: dispatch.file, symbol: dispatch.iface, dynamic: true });
   }
 
   private recordFailureCall(call: TS.CallExpression, callee: string): void {
@@ -353,8 +421,9 @@ class CensusWalker {
     const rel = path.relative(this.rootDir, file.fileName).split(path.sep).join("/");
     const symbol = this.enclosingSymbolName(node);
     const key = `${rel}#${symbol}#${tail}`;
-    if (this.sites.has(key)) return;
-    this.sites.set(key, code === undefined ? { key, file: rel, symbol, dynamic: true } : { key, file: rel, symbol, code, dynamic: false });
+    const sink = this.isNonBusinessSymbol(symbol, file) ? this.bootstrapSites : this.sites;
+    if (sink.has(key)) return;
+    sink.set(key, code === undefined ? { key, file: rel, symbol, dynamic: true } : { key, file: rel, symbol, code, dynamic: false });
   }
 
   private label(node: TS.Node): string {
