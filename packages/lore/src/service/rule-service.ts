@@ -13,6 +13,7 @@
  *   addNode(parent, input, opts?)          → DocRecord        (new baseline root|branch|leaf)
  *   setLabel(node, label, opts?)           → DocRecord
  *   setDependsOn(leaf, change, opts?)      → DocRecord
+ *   setSiteMap(leaf, change, opts?)        → DocRecord   (`extra.site_map` + `extra.commands`, leaf only)
  *   glossaryAdd(node, entry, opts?)        → DocRecord
  *   glossaryRemove(node, term, opts?)      → DocRecord
  *   listBaselineTree(root?)                → BaselineTreeEntry[]   (read-only, depth-first)
@@ -58,6 +59,7 @@ import {
 import type { CreateDocInput } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
 import type { StoreInterface } from "../store/store-interface.js";
+import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
 import { resolveDoc } from "./resolve.js";
 import { CorpusService, type CreateDocResult, type WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
@@ -132,6 +134,18 @@ function validationError(field: string, message: string, value?: unknown): LoreE
 
 /** Result of one mutation attempt against a fresh read: the new extra, or a refusal. */
 type Mutation = Result<{ extra: Record<string, unknown>; summary: string; details: Record<string, unknown> }, LoreError>;
+
+/**
+ * One `lore baseline map` edit of a leaf's completeness-census state.
+ * `sites` SETS (replaces) each key's mapping; entries are rule ids of THIS leaf or
+ * `non-business:<reason>`.
+ */
+export interface SiteMapChange {
+  sites?: Record<string, string[]>;
+  removeSites?: string[];
+  addCommands?: string[];
+  removeCommands?: string[];
+}
 
 // ─── Service ─────────────────────────────────────────────────────────────────
 
@@ -472,6 +486,71 @@ export class RuleService {
     });
   }
 
+  /**
+   * Edit a leaf's `site_map` (census site key -> rule ids | `non-business:<reason>`) and its
+   * `commands` list — the ONLY writer of both keys (`lore baseline map`).
+   *
+   * @returns the updated leaf; VALIDATION_ERROR for an empty change, a non-leaf, a rule id the
+   *   leaf does not carry, a `non-business:` entry without a reason, or removing something absent.
+   */
+  async setSiteMap(
+    leaf: string,
+    change: SiteMapChange,
+    opts?: { by?: string },
+  ): Promise<Result<DocRecord, LoreError>> {
+    const sites = change.sites ?? {};
+    const removeSites = change.removeSites ?? [];
+    const addCommands = (change.addCommands ?? []).map((c) => c.trim());
+    const removeCommands = (change.removeCommands ?? []).map((c) => c.trim());
+    if (Object.keys(sites).length + removeSites.length + addCommands.length + removeCommands.length === 0) {
+      return err(validationError("site_map", "nothing to change: pass at least one site mapping, removal or command"));
+    }
+    if ([...addCommands, ...removeCommands].some((c) => c.length === 0)) {
+      return err(validationError("commands", "a command name must not be blank"));
+    }
+    const target = await this.resolveBaselineDoc(leaf, "leaf");
+    if (!target.ok) return target;
+    const gate = await this.authorizeCorpusWrite([target.value], "baseline-map", opts?.by);
+    if (!gate.ok) return gate;
+    return this.retryWrite(target.value.id, opts?.by, (doc) => {
+      const ruleIds = new Set(rulesOf(doc).map((r) => r.id));
+      for (const [site, entries] of Object.entries(sites)) {
+        if (site.trim().length === 0 || entries.length === 0) {
+          return err(validationError("site_map", `site '${site}' needs a non-empty key and at least one rule id or non-business reason`, site));
+        }
+        for (const entry of entries) {
+          const isReason = entry.startsWith(NON_BUSINESS_PREFIX) && entry.slice(NON_BUSINESS_PREFIX.length).trim().length > 0;
+          if (!isReason && !ruleIds.has(entry)) {
+            return err(validationError("site_map", `'${entry}' for site '${site}' is neither a rule of this leaf nor '${NON_BUSINESS_PREFIX}<reason>'`, entry));
+          }
+        }
+      }
+      const currentMap = siteMapOf(doc);
+      const absentSites = removeSites.filter((k) => !(k in currentMap));
+      if (absentSites.length > 0) {
+        return err(validationError("site_map", `cannot remove, not mapped: ${absentSites.join(", ")}`, absentSites));
+      }
+      const currentCommands = commandsOf(doc);
+      const absentCommands = removeCommands.filter((c) => !currentCommands.includes(c));
+      if (absentCommands.length > 0) {
+        return err(validationError("commands", `cannot remove, not present: ${absentCommands.join(", ")}`, absentCommands));
+      }
+      const nextMap: Record<string, string[]> = { ...currentMap, ...sites };
+      for (const key of removeSites) delete nextMap[key];
+      const nextCommands = [...new Set([...currentCommands.filter((c) => !removeCommands.includes(c)), ...addCommands])];
+      const extra: Record<string, unknown> = { ...doc.extra };
+      if (Object.keys(nextMap).length > 0) extra["site_map"] = nextMap;
+      else delete extra["site_map"];
+      if (nextCommands.length > 0) extra["commands"] = nextCommands;
+      else delete extra["commands"];
+      return ok({
+        extra,
+        summary: `site_map set ${Object.keys(sites).length} removed ${removeSites.length}; commands +${addCommands.length} -${removeCommands.length}`,
+        details: { operation: "baseline-map", sites: Object.keys(sites), removeSites, addCommands, removeCommands },
+      });
+    });
+  }
+
   /** Add a glossary entry to a root|branch node; a duplicate term is refused. */
   async glossaryAdd(
     node: string,
@@ -782,6 +861,16 @@ function rulesOf(doc: DocRecord): BaselineRule[] {
 
 function dependsOnOf(doc: DocRecord): string[] {
   const raw = doc.extra["depends_on"];
+  return Array.isArray(raw) ? (raw as string[]) : [];
+}
+
+function siteMapOf(doc: DocRecord): Record<string, string[]> {
+  const raw = doc.extra["site_map"];
+  return raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, string[]>) : {};
+}
+
+function commandsOf(doc: DocRecord): string[] {
+  const raw = doc.extra["commands"];
   return Array.isArray(raw) ? (raw as string[]) : [];
 }
 

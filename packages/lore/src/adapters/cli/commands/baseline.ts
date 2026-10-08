@@ -8,9 +8,20 @@
  *   depends <leaf> [--add BR-n]... [--remove BR-n]...
  *   glossary add <node> --term <t> --meaning <m> [--note <n>]   (root|branch only)
  *   glossary rm  <node> --term <t>
- *   map <leaf>      STUB (claim-scoped corpus authoring, AC-BLS2-8): authorizes a site-map write on the
- *                   leaf through the corpus-write guard and reports the scope verdict. It records NO
- *                   map — the census/sites/coverage task replaces this body, keeping the authorize call.
+ *   map <leaf> [--site <key> (--rule BR-n... | --non-business <reason>)] [--remove-site <key>]...
+ *               [--command <name>]... [--remove-command <name>]...
+ *                   The ONLY writer of `extra.site_map` / `extra.commands` (leaf only). With no change
+ *                   flag it authorizes through the corpus-write guard (claim scope, AC-BLS2-8), reports
+ *                   the verdict and records nothing.
+ *   sites <command> Static census (TypeScript compiler API) of the failure sites the CLI command can
+ *                   reach: prints the count and every key; `~` marks a not_measured (dynamic) site.
+ *                   Name rule: token 1 = commands/<token>.ts, further tokens = nested subCommands;
+ *                   `ac-add` = file `ac` + subcommand `add` (see site-census.ts::resolveCommandEntry).
+ *   coverage <leaf|branch> [--json]
+ *                   Per leaf: census of its declared `commands` vs its `site_map`. Exit 0 only when
+ *                   every leaf has commands, 0 gaps and 0 unaccounted not_measured sites. The leaf's
+ *                   commands are an explicit stored field (`--command`), not derived: a leaf's
+ *                   Command section is prose without CLI names.
  *   tree [root] [--states] [--rule BR-n]
  *                   Listing (node kind, label, status, rule tallies). `--states` adds every rule's
  *                   verification state with its inputs and `computed_from`; `--rule BR-n` prints
@@ -24,11 +35,15 @@
 
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
-import type { LoreError } from "@lore/core";
+import type { DocRecord, LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
-import type { AddNodeInput, BaselineTreeEntry } from "../../../service/rule-service.js";
+import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
+import { NON_BUSINESS_PREFIX, computeLeafCoverage } from "../../../service/leaf-coverage.js";
+import { resolveDoc } from "../../../service/resolve.js";
+import { SiteCensusError, findCensusRoot, listSites, resolveCommandEntry } from "../../../service/site-census.js";
+import type { Site } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
@@ -136,6 +151,98 @@ async function runStatesTree(args: Record<string, unknown>): Promise<void> {
       if (entry.node === "leaf") for (const r of byLeaf.get(entry.slug) ?? []) renderRuleState(r, `${indent}  `);
     }
     renderComputedFrom(full.value);
+  } finally {
+    store.close();
+    app.close();
+  }
+}
+
+function requireCensusRoot(): string {
+  const root = findCensusRoot(process.cwd());
+  if (root === undefined) {
+    throw new SiteCensusError("command-unresolved", {
+      reason: "not inside a lore source checkout (packages/lore/src/adapters/cli/commands not found upward from cwd); the census analyses source, an installed binary has none",
+      cwd: process.cwd(),
+    });
+  }
+  return root;
+}
+
+function reportCensusFailure(cause: unknown, json: boolean): void {
+  if (!(cause instanceof SiteCensusError)) throw cause;
+  reportFailure({ code: "VALIDATION_ERROR", field: `census:${cause.reason}`, message: cause.message }, json);
+}
+
+interface LeafCoverageReport {
+  slug: string;
+  commands: string[];
+  sites: number;
+  gaps: string[];
+  not_measured: string[];
+  ok: boolean;
+}
+
+/**
+ * `coverage <leaf|branch>`: census each leaf's declared `commands`, compare with its `site_map`.
+ * A leaf declaring no command is NOT ok — completeness of an unmeasured leaf is unproven.
+ */
+async function runCoverage(target: string, json: boolean): Promise<void> {
+  const { app, dbPath } = loadLoreApp();
+  const store = new SQLiteStore(dbPath);
+  try {
+    const rootDir = requireCensusRoot();
+    const resolved = await resolveDoc(store, target);
+    if (!resolved.ok) return reportFailure(resolved.error, json);
+    if (resolved.value.type !== "baseline") {
+      return reportFailure({ code: "VALIDATION_ERROR", field: "target", message: `'${target}' is a ${resolved.value.type}, not a baseline node` }, json);
+    }
+    const all = await store.findMany({ type: "baseline" });
+    if (!all.ok) return reportFailure(all.error, json);
+    const leaves: DocRecord[] = [];
+    const queue: DocRecord[] = [resolved.value];
+    while (queue.length > 0) {
+      const doc = queue.shift() as DocRecord;
+      if (doc.extra["node"] === "leaf") leaves.push(doc);
+      else queue.push(...all.value.filter((d) => d.parent_id === doc.id));
+    }
+    leaves.sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+    const reports: LeafCoverageReport[] = leaves.map((leaf) => {
+      const commands = Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : [];
+      const byKey = new Map<string, Site>();
+      for (const command of commands) {
+        for (const site of listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) })) byKey.set(site.key, site);
+      }
+      const siteMap = (leaf.extra["site_map"] ?? {}) as Record<string, string[]>;
+      const rules = Array.isArray(leaf.extra["rules"]) ? (leaf.extra["rules"] as Array<{ id: string; lifecycle: string }>) : [];
+      const verdict = computeLeafCoverage({
+        sites: [...byKey.values()],
+        siteMap,
+        liveRuleIds: rules.filter((r) => r.lifecycle === "live").map((r) => r.id),
+      });
+      return {
+        slug: leaf.slug,
+        commands,
+        sites: byKey.size,
+        gaps: verdict.gaps,
+        not_measured: verdict.notMeasured,
+        ok: commands.length > 0 && verdict.ok,
+      };
+    });
+    const ok = reports.length > 0 && reports.every((r) => r.ok);
+    if (json) {
+      console.log(JSON.stringify({ ok: true, data: { target: resolved.value.slug, complete: ok, leaves: reports } }, null, 2));
+    } else {
+      if (reports.length === 0) console.log(`${resolved.value.slug}: no leaves under this node.`);
+      for (const r of reports) {
+        const state = r.commands.length === 0 ? "UNMEASURED (no commands declared; use `lore baseline map --command`)" : r.ok ? "complete" : "INCOMPLETE";
+        console.log(`${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured`);
+        for (const key of r.gaps) console.log(`  gap          ${key}`);
+        for (const key of r.not_measured) console.log(`  not_measured ${key}`);
+      }
+    }
+    if (!ok) process.exitCode = 1;
+  } catch (cause) {
+    reportCensusFailure(cause, json);
   } finally {
     store.close();
     app.close();
@@ -270,19 +377,87 @@ export default defineCommand({
       },
     }),
     map: defineCommand({
-      meta: { name: "map", description: "Authorize a site-map write on a baseline leaf (stub: records no map yet)" },
+      meta: { name: "map", description: "Map census sites of a baseline leaf to rules (or non-business reasons) and declare its commands" },
       args: {
         leaf: { type: "positional", description: "Baseline leaf ID or slug", required: true },
+        site: { type: "string", description: "Census site key (file#symbol#code, from `lore baseline sites`) to map; needs --rule or --non-business" },
+        rule: { type: "string", description: "[repeatable] Rule id (BR-n) of this leaf that the --site refusal enforces" },
+        "non-business": { type: "string", description: "Reason the --site is not business behaviour (stored as non-business:<reason>)" },
+        "remove-site": { type: "string", description: "[repeatable] Site key to unmap" },
+        command: { type: "string", description: "[repeatable] CLI command name (e.g. 'ac add') this leaf answers for" },
+        "remove-command": { type: "string", description: "[repeatable] Command name to drop" },
         ...commonArgs,
       },
       async run({ args }) {
         await withRuleService(async (svc) => {
-          const authorized = await svc.authorizeNodeWrite(args.leaf as string, "baseline-map", resolveActor(args.by as string | undefined));
-          if (!authorized.ok) return reportFailure(authorized.error, args.json === true);
-          const slug = authorized.value.slug;
-          if (args.json) console.log(JSON.stringify({ ok: true, data: { slug, authorized: true, recorded: false } }, null, 2));
-          else console.log(`${slug}: site-map write authorized; no map recorded (the site census is not implemented in this build).`);
+          const json = args.json === true;
+          const by = resolveActor(args.by as string | undefined);
+          const site = typeof args.site === "string" ? args.site : undefined;
+          const rules = repeatable(args.rule);
+          const reason = typeof args["non-business"] === "string" ? args["non-business"] : undefined;
+          if (site === undefined && (rules.length > 0 || reason !== undefined)) {
+            return reportFailure({ code: "VALIDATION_ERROR", field: "site", message: "--rule / --non-business need --site <key>" }, json);
+          }
+          if (site !== undefined && (rules.length > 0) === (reason !== undefined)) {
+            return reportFailure({ code: "VALIDATION_ERROR", field: "site", message: "--site needs exactly one of --rule BR-n (repeatable) or --non-business <reason>" }, json);
+          }
+          const change: SiteMapChange = {
+            ...(site !== undefined ? { sites: { [site]: reason !== undefined ? [`${NON_BUSINESS_PREFIX}${reason}`] : rules } } : {}),
+            removeSites: repeatable(args["remove-site"]),
+            addCommands: repeatable(args.command),
+            removeCommands: repeatable(args["remove-command"]),
+          };
+          const noChange = site === undefined && (change.removeSites?.length ?? 0) + (change.addCommands?.length ?? 0) + (change.removeCommands?.length ?? 0) === 0;
+          if (noChange) {
+            // Authorization-only: reports the claim-scope verdict (AC-BLS2-8) and records nothing.
+            const authorized = await svc.authorizeNodeWrite(args.leaf as string, "baseline-map", by);
+            if (!authorized.ok) return reportFailure(authorized.error, json);
+            const slug = authorized.value.slug;
+            if (json) console.log(JSON.stringify({ ok: true, data: { slug, authorized: true, recorded: false } }, null, 2));
+            else console.log(`${slug}: site-map write authorized; nothing to record (pass --site/--command to change the map).`);
+            return;
+          }
+          const result = await svc.setSiteMap(args.leaf as string, change, { by });
+          if (!result.ok) return reportFailure(result.error, json);
+          const siteMap = (result.value.extra["site_map"] ?? {}) as Record<string, string[]>;
+          const commands = (result.value.extra["commands"] ?? []) as string[];
+          if (json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, site_map: siteMap, commands } }, null, 2));
+          else console.log(`${result.value.slug}: ${Object.keys(siteMap).length} site(s) mapped; commands: ${commands.length > 0 ? commands.join(", ") : "(none)"}`);
         });
+      },
+    }),
+    sites: defineCommand({
+      meta: { name: "sites", description: "List the failure sites a CLI command can reach (static census, TypeScript compiler API)" },
+      args: {
+        command: { type: "positional", description: "CLI command name, e.g. 'ac add' (or 'ac-add'); token 1 = commands/<token>.ts, further tokens = nested subcommands", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const json = args.json === true;
+        try {
+          const rootDir = requireCensusRoot();
+          const command = args.command as string;
+          const sites = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
+          const dynamicCount = sites.filter((s) => s.dynamic).length;
+          if (json) {
+            console.log(JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, sites } }, null, 2));
+            return;
+          }
+          console.log(`${command}: ${sites.length} site(s), ${dynamicCount} not_measured`);
+          for (const site of sites) console.log(`${site.dynamic ? "~" : " "} ${site.key}`);
+        } catch (cause) {
+          reportCensusFailure(cause, json);
+        }
+      },
+    }),
+    coverage: defineCommand({
+      meta: { name: "coverage", description: "Check that a baseline leaf (or every leaf under a branch) accounts for every census site; exit 0 only when complete" },
+      args: {
+        target: { type: "positional", description: "Baseline leaf or branch|root ID or slug", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        await runCoverage(args.target as string, args.json === true);
       },
     }),
     tree: defineCommand({
