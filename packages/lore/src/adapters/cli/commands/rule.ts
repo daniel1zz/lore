@@ -9,6 +9,10 @@
  *       Edit a rule, move it forward through its lifecycle (never back to live; retired needs
  *       --note), or relocate it to another leaf keeping its id.
  *
+ *   show <BR-n> [--json]                                         statement, leaf, confidence, state, citing criteria
+ *   find --spec <slug> | --file <path> | --text <q> [--json]     ranked rule ids
+ *   impact <BR-n> [--json]                                       citing criteria, dependent leaves, depends_on cycles
+ *
  * `lore set` cannot touch `extra.rules` (CorpusService replace guard) — this is the only writer.
  * Exit codes follow `exitCode(LoreError)`; `--json` emits `{ ok, data | error }`.
  *
@@ -43,9 +47,83 @@ function requireRuleService(app: App) {
   return app.ruleService;
 }
 
+function failUsage(message: string, json: boolean): void {
+  if (json) console.log(JSON.stringify({ ok: false, error: { code: "VALIDATION_ERROR", field: "args", message } }, null, 2));
+  else process.stderr.write(`Error: ${message}\n`);
+  process.exitCode = 2;
+}
+
 export default defineCommand({
-  meta: { name: "rule", description: "Add and edit baseline rules (permanent BR-n ids)" },
+  meta: { name: "rule", description: "Add, edit and read baseline rules (permanent BR-n ids)" },
   subCommands: {
+    show: defineCommand({
+      meta: { name: "show", description: "Show a rule: statement, leaf, confidence, state and every citing criterion" },
+      args: {
+        rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const { app } = loadLoreApp();
+        try {
+          if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
+          const result = await app.ruleReadService.show(args.rule as string);
+          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          const v = result.value;
+          console.log(`${v.id} [${v.state}, ${v.confidence}] on ${v.leaf}\n${v.statement}`);
+          console.log(v.citingCriteria.length === 0 ? "Cited by: (none)" : `Cited by:\n${v.citingCriteria.map((c) => `  ${c.spec} ${c.ac}`).join("\n")}`);
+        } finally {
+          app.close();
+        }
+      },
+    }),
+    find: defineCommand({
+      meta: { name: "find", description: "Find rule ids by --spec <slug>, --file <path> or --text <q> (exactly one)" },
+      args: {
+        spec: { type: "string", description: "Rules cited by this spec (slug or id)" },
+        file: { type: "string", description: "Rules cited by specs whose code anchors include this file" },
+        text: { type: "string", description: "Rules whose statement contains this text (case-insensitive)" },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const given = [args.spec, args.file, args.text].filter((v) => typeof v === "string");
+        if (given.length !== 1) return failUsage("pass exactly one of --spec, --file, --text", args.json === true);
+        const { app } = loadLoreApp();
+        try {
+          if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
+          const query =
+            typeof args.spec === "string" ? { spec: args.spec } : typeof args.file === "string" ? { file: args.file } : { text: args.text as string };
+          const result = await app.ruleReadService.find(query);
+          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (args.json) return void console.log(JSON.stringify({ ok: true, data: { rules: result.value } }, null, 2));
+          console.log(result.value.length === 0 ? "No matching rules." : result.value.join("\n"));
+        } finally {
+          app.close();
+        }
+      },
+    }),
+    impact: defineCommand({
+      meta: { name: "impact", description: "Impact of changing or retiring a rule: citing criteria, dependent leaves, cycles" },
+      args: {
+        rule: { type: "positional", description: "Rule id, e.g. BR-12", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const { app } = loadLoreApp();
+        try {
+          if (app.impactService === undefined) return failUsage("ImpactService is not available in this build.", args.json === true);
+          const result = await app.impactService.impact(args.rule as string);
+          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          const v = result.value;
+          console.log(`Citing criteria (${v.citingCriteria.length}):${v.citingCriteria.map((c) => `\n  ${c.spec} ${c.ac}`).join("")}`);
+          console.log(`Dependent leaves (${v.dependentLeaves.length}):${v.dependentLeaves.map((l) => `\n  ${l}`).join("")}`);
+          console.log(`Cycles (${v.cycles.length}):${v.cycles.map((c) => `\n  ${c.join(" <-> ")}`).join("")}`);
+        } finally {
+          app.close();
+        }
+      },
+    }),
     add: defineCommand({
       meta: { name: "add", description: "Append a new live rule to a baseline leaf; prints the allocated BR-n id" },
       args: {

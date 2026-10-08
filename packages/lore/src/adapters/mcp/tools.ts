@@ -968,6 +968,24 @@ export const LoreRuleSetSchema = z.object({
   by: z.string().min(1),
 });
 
+export const LoreRuleShowSchema = z.object({
+  rule: z.string().min(1),
+});
+
+export const LoreRuleFindSchema = z
+  .object({
+    spec: z.string().min(1).optional(),
+    file: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+  })
+  .refine((a) => [a.spec, a.file, a.text].filter((v) => v !== undefined).length === 1, {
+    message: "exactly one of spec, file, text is required",
+  });
+
+export const LoreRuleImpactSchema = z.object({
+  rule: z.string().min(1),
+});
+
 export const LoreBaselineAddSchema = z.object({
   parent: z.string().min(1),
   node: z.enum(BASELINE_NODE_KINDS),
@@ -2973,6 +2991,46 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
       };
       return withRuleService((svc) => svc.setRule(args.rule, patch, { by: args.by }));
     },
+  );
+
+  // lore_rule_show / lore_rule_find / lore_rule_impact — read path (spec baseline-slice-2 C6)
+  const withReadService = async <S, T>(
+    svc: S | undefined,
+    name: string,
+    run: (svc: S) => Promise<Result<T, LoreError>>,
+  ) => {
+    if (svc === undefined) return errorContent({ code: "STORE_ERROR", message: `Internal error: ${name} not wired on App` });
+    const result = await run(svc);
+    return result.ok ? textContent(result.value) : errorContent(result.error);
+  };
+
+  registerToolWithArgs(
+    server,
+    "lore_rule_show",
+    "Show one baseline rule: statement, leaf, confidence, computed state and every citing (spec, AC)",
+    LoreRuleShowSchema,
+    async (args) => withReadService(app.ruleReadService, "RuleReadService", (svc) => svc.show(args.rule)),
+  );
+
+  registerToolWithArgs(
+    server,
+    "lore_rule_find",
+    "Find baseline rule ids by spec (cited by it), file (cited by specs anchored to it) or statement text — exactly one",
+    LoreRuleFindSchema,
+    async (args) =>
+      withReadService(app.ruleReadService, "RuleReadService", (svc) =>
+        svc.find(
+          args.spec !== undefined ? { spec: args.spec } : args.file !== undefined ? { file: args.file } : { text: args.text as string },
+        ),
+      ),
+  );
+
+  registerToolWithArgs(
+    server,
+    "lore_rule_impact",
+    "Impact of changing or retiring a rule: citing criteria, transitively dependent leaves and depends_on cycles",
+    LoreRuleImpactSchema,
+    async (args) => withReadService(app.impactService, "ImpactService", (svc) => svc.impact(args.rule)),
   );
 
   // lore_baseline_add
