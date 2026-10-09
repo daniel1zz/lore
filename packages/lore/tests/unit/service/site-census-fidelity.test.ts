@@ -161,7 +161,8 @@ describe("census reaches standalone-const subcommands (#94)", () => {
   // Each subcommand's `run` is on a top-level const (recordCommand, syncSetup, agentCreate, ...),
   // not an inline `default.subCommands.<x>.run`. The census must still return its refusal sites
   // rather than throwing census:entry-symbol-missing.
-  it.each(["uat record", "uat show", "eval migration", "sync setup", "sync status", "agent create"])(
+  // `sync push`, not `sync status`: status has no business refusal site (only bootstrap sites), so "> 0" was unsatisfiable.
+  it.each(["uat record", "uat show", "eval migration", "sync setup", "sync push", "agent create"])(
     "`%s` resolves to a measurable entry and reports > 0 refusal sites",
     async (command) => {
       const sites = await sitesOfCommand(command);
