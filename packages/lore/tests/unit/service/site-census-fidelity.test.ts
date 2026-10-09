@@ -22,7 +22,7 @@
  * @spec_ref AC-BLS2-15
  */
 import { describe, it, expect, afterAll } from "vitest";
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,6 +130,110 @@ describe("census completeness (#59)", () => {
     const keys = (await keysAt(layoutInsideRoot())).filter((k) => k.includes("#VALIDATION_ERROR"));
     // x (core literal), a, b (service.check), two ordinals (service.checkDynamic)
     expect(keys).toHaveLength(5);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Issue #94: the census must reach standalone-const subcommands and must not present an
+// unresolved cross-package import as a complete (smaller) site list.
+// Real repo root = this checkout (the worktree); commands are the real CLI command files.
+// ---------------------------------------------------------------------------------------------
+interface TraceApi {
+  resolveCommandEntry(input: { rootDir: string; command: string }): { file: string; symbol: string };
+  traceCensus(input: { rootDir: string; entry: { file: string; symbol: string } }): {
+    sites: Site[];
+    unresolvedImports?: unknown;
+  };
+}
+async function loadTrace(): Promise<TraceApi> {
+  const mod = (await import(/* @vite-ignore */ CENSUS_MODULE)) as Record<string, unknown>;
+  return mod as unknown as TraceApi;
+}
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
+
+async function sitesOfCommand(command: string): Promise<Site[]> {
+  const api = await loadTrace();
+  const entry = api.resolveCommandEntry({ rootDir: REPO_ROOT, command });
+  return api.traceCensus({ rootDir: REPO_ROOT, entry }).sites;
+}
+
+describe("census reaches standalone-const subcommands (#94)", () => {
+  // Each subcommand's `run` is on a top-level const (recordCommand, syncSetup, agentCreate, ...),
+  // not an inline `default.subCommands.<x>.run`. The census must still return its refusal sites
+  // rather than throwing census:entry-symbol-missing.
+  it.each(["uat record", "uat show", "eval migration", "sync setup", "sync status", "agent create"])(
+    "`%s` resolves to a measurable entry and reports > 0 refusal sites",
+    async (command) => {
+      const sites = await sitesOfCommand(command);
+      expect(sites.length).toBeGreaterThan(0);
+    },
+    120_000,
+  );
+
+  it("`uat record` includes the known UatService VALIDATION_ERROR field=plan refusal (non-plan target)", async () => {
+    const keys = (await sitesOfCommand("uat record")).map((s) => s.key);
+    expect(keys.filter((k) => k.startsWith("packages/lore/src/service/uat-service.ts#") && k.endsWith("#VALIDATION_ERROR#plan"))).toHaveLength(1);
+  }, 120_000);
+
+  it("different standalone-const subcommands yield different site sets (not one shared stub)", async () => {
+    const uat = (await sitesOfCommand("uat record")).map((s) => s.key);
+    const agent = (await sitesOfCommand("agent create")).map((s) => s.key);
+    expect(JSON.stringify(uat)).not.toBe(JSON.stringify(agent));
+  }, 120_000);
+
+  it("`issue adopt` (inline subcommand, no standalone const) still resolves with sites", async () => {
+    const sites = await sitesOfCommand("issue adopt");
+    expect(sites.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it("a subcommand that does not exist is still refused, not silently measured as empty", async () => {
+    await expect(sitesOfCommand("uat nosuchsub")).rejects.toMatchObject({ reason: "entry-symbol-missing" });
+  }, 120_000);
+});
+
+describe("unresolved cross-package imports are reported as not measured (#94)", () => {
+  /** A root whose workspace manifest declares no workspaces and has no node_modules: `@fx/core` cannot resolve. */
+  function layoutUnresolvable(): string {
+    const root = path.join(tmp(), "repo");
+    cpSync(FIXTURE, root, { recursive: true });
+    writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "no-workspaces-fixture", private: true }));
+    return root;
+  }
+
+  it("never returns a bare smaller site list: it throws a SiteCensusError or lists the unresolved import", async () => {
+    const api = await loadTrace();
+    const full = api.traceCensus({ rootDir: layoutInsideRoot(), entry: ENTRY });
+    let outcome: { sites: Site[]; unresolvedImports?: unknown } | undefined;
+    let thrown: unknown;
+    try {
+      outcome = api.traceCensus({ rootDir: layoutUnresolvable(), entry: ENTRY });
+    } catch (e) {
+      thrown = e;
+    }
+    // Sanity: the unresolvable layout really loses the core sites (otherwise the test proves nothing).
+    if (outcome !== undefined) expect(outcome.sites.length).toBeLessThan(full.sites.length);
+    const reported =
+      thrown !== undefined
+        ? (thrown as { name?: string }).name === "SiteCensusError"
+        : Array.isArray(outcome?.unresolvedImports) && (outcome?.unresolvedImports as unknown[]).length > 0;
+    expect(reported).toBe(true);
+  });
+
+  it("names the unresolved specifier `@fx/core` in the report", async () => {
+    const api = await loadTrace();
+    let text: string;
+    try {
+      text = JSON.stringify(api.traceCensus({ rootDir: layoutUnresolvable(), entry: ENTRY }).unresolvedImports ?? null);
+    } catch (e) {
+      text = String(e) + JSON.stringify((e as { context?: unknown }).context ?? {});
+    }
+    expect(text).toContain("@fx/core");
+  });
+
+  it("reports an EMPTY unresolved list when every cross-package import resolves", async () => {
+    const api = await loadTrace();
+    const trace = api.traceCensus({ rootDir: layoutInsideRoot(), entry: ENTRY });
+    expect(trace.unresolvedImports).toEqual([]);
   });
 });
 
