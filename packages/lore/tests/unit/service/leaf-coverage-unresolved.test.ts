@@ -66,6 +66,11 @@ describe("census unresolved-import report vs missing relative assets (#94 follow
     expect([...got].sort()).toEqual(["./gone.js", "./nope"]);
   }, 120_000);
 
+  it("still reports a missing dotted code name and an unknown extension (no silent drop)", async () => {
+    const got = await unresolvedWith(['import "./foo.service";', 'import "./thing.weird";']);
+    expect([...got].sort()).toEqual(["./foo.service", "./thing.weird"]);
+  }, 120_000);
+
   it("still reports a missing bare package specifier", async () => {
     expect(await unresolvedWith(['import "left-pad-nonexistent";'])).toEqual(["left-pad-nonexistent"]);
   }, 120_000);
