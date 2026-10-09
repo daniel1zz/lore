@@ -338,6 +338,11 @@ function readWorkspacePackages(rootDir: string): WorkspacePackage[] {
   return found;
 }
 
+// Explicit allowlist: anything not listed (dotted code names like `./foo.service`, unknown extensions) stays reported.
+const ASSET_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".css", ".scss", ".html", ".htm", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".md", ".txt",
+]);
+
 /** First string found in an `exports` target (string, or a conditions object preferring types/import/default). */
 function exportTarget(target: unknown): string | undefined {
   if (typeof target === "string") return target;
@@ -373,9 +378,12 @@ function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir
   };
   // reason: runtime-provided modules (`node:fs`, `bun:sqlite`) have no source to walk and no err() sites: never "missing".
   const runtimeProvided = (specifier: string): boolean => isBuiltin(specifier) || specifier.startsWith("bun:") || specifier === "bun";
+  // reason: a relative import of a non-code asset (`./x.html`, `../dist/a.css`) is a build artefact with no err() sites; missing on a fresh checkout is not "not measured".
+  const relativeAsset = (specifier: string): boolean =>
+    (specifier.startsWith(".") || specifier.startsWith("/")) && ASSET_EXTENSIONS.has(path.extname(specifier).toLowerCase());
   const recordUnresolved = (specifier: string, containingFile: string): void => {
     const rel = path.relative(rootDir, containingFile);
-    if (rel.startsWith("..") || path.isAbsolute(rel) || rel.split(path.sep).includes("node_modules") || runtimeProvided(specifier)) return;
+    if (rel.startsWith("..") || path.isAbsolute(rel) || rel.split(path.sep).includes("node_modules") || runtimeProvided(specifier) || relativeAsset(specifier)) return;
     const from = rel.split(path.sep).join("/");
     unresolved.set(`${specifier}\0${from}`, { specifier, from });
   };
