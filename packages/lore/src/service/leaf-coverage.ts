@@ -14,11 +14,13 @@
  *   - An interface-dispatch site (see site-census) is a dynamic site, so it follows the same rule.
  *   - Bootstrap sites (site-census `bootstrap`, app wiring / config loading) are never gaps, never
  *     not_measured and never affect `ok`; the verdict does not echo them (the caller reports them).
- *   - `ok` iff `gaps` and `notMeasured` are both empty. Output follows the order of `sites`.
+ *   - A census with unresolved imports (site-census `unresolvedImports`) is a lower bound, never a
+ *     complete list: they are reported as `unresolvedImports` (`<specifier> (from <file>)`) and make `ok` false.
+ *   - `ok` iff `gaps`, `notMeasured` and `unresolvedImports` are all empty. Output follows the order of `sites`.
  * Side-effect class: pure.
  */
 
-import type { Site } from "./site-census.js";
+import type { Site, UnresolvedImport } from "./site-census.js";
 
 /** Prefix of a siteMap entry that justifies a site as not business behaviour: `non-business:<reason>`. */
 export const NON_BUSINESS_PREFIX = "non-business:";
@@ -29,6 +31,8 @@ export interface LeafCoverage {
   readonly gaps: string[];
   /** Dynamic sites the census could not measure and nobody has accounted for. */
   readonly notMeasured: string[];
+  /** `<specifier> (from <file>)` for each import the census could not resolve: sites behind it are missing. */
+  readonly unresolvedImports?: string[];
   readonly ok: boolean;
 }
 
@@ -53,6 +57,7 @@ function isAccountedFor(entries: readonly string[] | undefined, live: ReadonlySe
 export function computeLeafCoverage(input: {
   sites: readonly Site[];
   bootstrap?: readonly Site[];
+  unresolvedImports?: readonly UnresolvedImport[];
   siteMap: Readonly<Record<string, readonly string[]>>;
   liveRuleIds: readonly string[];
 }): LeafCoverage {
@@ -65,5 +70,12 @@ export function computeLeafCoverage(input: {
     if (isAccountedFor(input.siteMap[site.key], live)) continue;
     (site.dynamic ? notMeasured : gaps).push(site.key);
   }
-  return { gaps, notMeasured, ok: gaps.length === 0 && notMeasured.length === 0 };
+  const unresolvedImports = (input.unresolvedImports ?? []).map((u) => `${u.specifier} (from ${u.from})`);
+  // reason: the key appears only when non-empty, so a complete verdict keeps its pre-#94 shape byte-for-byte.
+  return {
+    gaps,
+    notMeasured,
+    ...(unresolvedImports.length > 0 ? { unresolvedImports } : {}),
+    ok: gaps.length === 0 && notMeasured.length === 0 && unresolvedImports.length === 0,
+  };
 }
