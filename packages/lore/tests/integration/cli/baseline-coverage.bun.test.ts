@@ -85,6 +85,10 @@ beforeAll(() => {
   git(repo, ["add", "."]);
   git(repo, ["commit", "-q", "-m", "init"]);
   symlinkSync(join(REPO_ROOT, "packages"), join(repo, "packages"));
+  // #94: the census now REPORTS unresolved imports (and coverage refuses to call such a census complete), so the
+  // fixture must resolve like a real checkout: the workspace manifest names the packages, node_modules supplies third parties.
+  writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "blc-fixture", private: true, workspaces: ["packages/*"] }));
+  symlinkSync(join(REPO_ROOT, "node_modules"), join(repo, "node_modules"));
   mustRun(["init"], repo);
 
   const prd = slugOf(mustRun(["create", "prd", "--title", "BLC PRD", "--content", "root", "--no-ai"], repo).stdout);

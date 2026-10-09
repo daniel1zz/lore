@@ -32,7 +32,7 @@ export interface LeafCoverage {
   /** Dynamic sites the census could not measure and nobody has accounted for. */
   readonly notMeasured: string[];
   /** `<specifier> (from <file>)` for each import the census could not resolve: sites behind it are missing. */
-  readonly unresolvedImports: string[];
+  readonly unresolvedImports?: string[];
   readonly ok: boolean;
 }
 
@@ -71,5 +71,11 @@ export function computeLeafCoverage(input: {
     (site.dynamic ? notMeasured : gaps).push(site.key);
   }
   const unresolvedImports = (input.unresolvedImports ?? []).map((u) => `${u.specifier} (from ${u.from})`);
-  return { gaps, notMeasured, unresolvedImports, ok: gaps.length === 0 && notMeasured.length === 0 && unresolvedImports.length === 0 };
+  // reason: the key appears only when non-empty, so a complete verdict keeps its pre-#94 shape byte-for-byte.
+  return {
+    gaps,
+    notMeasured,
+    ...(unresolvedImports.length > 0 ? { unresolvedImports } : {}),
+    ok: gaps.length === 0 && notMeasured.length === 0 && unresolvedImports.length === 0,
+  };
 }

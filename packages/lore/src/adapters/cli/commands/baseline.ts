@@ -235,7 +235,7 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
         sites: byKey.size,
         gaps: verdict.gaps,
         not_measured: verdict.notMeasured,
-        unresolved_imports: verdict.unresolvedImports,
+        unresolved_imports: verdict.unresolvedImports ?? [],
         bootstrap: [...bootstrapByKey.keys()].sort(),
         ok: commands.length > 0 && verdict.ok,
       };
