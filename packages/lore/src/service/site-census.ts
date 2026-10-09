@@ -8,6 +8,14 @@
  * Public surface: {@link listSites}, {@link resolveCommandEntry}, {@link SiteCensusError},
  *   {@link findCensusRoot}, {@link Site}, {@link SiteCensusEntry}, {@link ERR_CALLEES}.
  * Invariants:
+ *   - A command entry symbol `default(.subCommands.<x>)*.run` is resolved by following the declared
+ *     structure: a `subCommands.<x>` value may be an inline command or an identifier bound to a
+ *     standalone `defineCommand` const (same file or imported), and `run` may be inline or an identifier.
+ *     A symbol that is neither a named function nor resolvable this way is entry-symbol-missing.
+ *   - Completeness is never faked: an import of an in-root file that the compiler cannot resolve
+ *     (excluding node/bun built-ins) is reported in `unresolvedImports` (non-enumerable on the
+ *     {@link listSites} array); its callees are unwalked so the site list is then a lower bound,
+ *     and a consumer MUST treat the census as incomplete (`computeLeafCoverage` does).
  *   - Deterministic: sites are de-duplicated by key and sorted by key (code-unit order).
  *   - A site key is `file#symbol#code`, plus a 4th segment `#field` when the refusal carries a
  *     `field`: the literal when it is a string literal, else a decimal ordinal (0-based, by source
@@ -44,7 +52,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, isBuiltin } from "node:module";
 import path from "node:path";
 import type * as TS from "typescript";
 import { NON_BUSINESS_SYMBOLS } from "./site-census-nonbusiness.js";
@@ -90,7 +98,7 @@ interface PendingSite {
  * as a `bootstrap` property. The two lists never share a key; a consumer that only spreads or
  * maps the array sees the business sites alone.
  */
-export type SiteList = Site[] & { bootstrap: Site[] };
+export type SiteList = Site[] & { bootstrap: Site[]; unresolvedImports: UnresolvedImport[] };
 
 /** Where the walk starts: a file (relative to rootDir) and the {@link enclosingSymbolName}-style symbol in it. */
 export interface SiteCensusEntry {
@@ -145,9 +153,12 @@ type FunctionLike = TS.FunctionDeclaration | TS.MethodDeclaration | TS.FunctionE
  * listSites({ rootDir, entry: { file: "command.ts", symbol: "runCommand" } });
  */
 export function listSites(input: { rootDir: string; entry: SiteCensusEntry }): SiteList {
-  const { sites, bootstrap } = traceCensus(input);
-  // reason: non-enumerable so structural equality / spreads of the main list ignore the bootstrap side-channel.
-  return Object.defineProperty([...sites], "bootstrap", { value: bootstrap, enumerable: false }) as SiteList;
+  const { sites, bootstrap, unresolvedImports } = traceCensus(input);
+  // reason: non-enumerable so structural equality / spreads of the main list ignore the side-channels.
+  const list = [...sites];
+  Object.defineProperty(list, "bootstrap", { value: bootstrap, enumerable: false });
+  Object.defineProperty(list, "unresolvedImports", { value: unresolvedImports, enumerable: false });
+  return list as SiteList;
 }
 
 /** {@link listSites} plus the walk's footprint: every `file#symbol` whose body was visited (sorted, unique). */
@@ -156,6 +167,18 @@ export interface CensusTrace {
   /** App-bootstrap sites (see {@link NON_BUSINESS_SYMBOLS}); disjoint from `sites`. */
   readonly bootstrap: Site[];
   readonly reached: string[];
+  /**
+   * Imports made by in-root source files that the compiler could not resolve (sorted, unique). Their
+   * callees were never walked, so any site behind them is MISSING from `sites`: a non-empty list means
+   * the census is incomplete, never "a smaller complete list". `[]` when every import resolved.
+   */
+  readonly unresolvedImports: UnresolvedImport[];
+}
+
+/** One import specifier the census could not resolve, with the in-root file (relative, `/`-separated) that imports it. */
+export interface UnresolvedImport {
+  readonly specifier: string;
+  readonly from: string;
 }
 
 /**
@@ -180,7 +203,8 @@ export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }):
     jsx: ts.JsxEmit.ReactJSX,
     ...tsconfigPathOptions(ts, rootDir),
   };
-  const host = createWorkspaceHost(ts, options, rootDir);
+  const unresolved = new Map<string, UnresolvedImport>();
+  const host = createWorkspaceHost(ts, options, rootDir, unresolved);
   const program = ts.createProgram({ rootNames: [entryPath], options, host });
   const checker = program.getTypeChecker();
   const entryFile = program.getSourceFile(entryPath);
@@ -189,7 +213,8 @@ export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }):
   }
   const walker = new CensusWalker(ts, program, checker, rootDir);
   walker.resolveErrorTypes();
-  const roots = walker.functionsNamed(entryFile, input.entry.symbol);
+  let roots = walker.functionsNamed(entryFile, input.entry.symbol);
+  if (roots.length === 0) roots = walker.commandRunNamed(entryFile, input.entry.symbol);
   if (roots.length === 0) {
     throw new SiteCensusError("entry-symbol-missing", {
       file: input.entry.file,
@@ -198,7 +223,8 @@ export function traceCensus(input: { rootDir: string; entry: SiteCensusEntry }):
     });
   }
   for (const root of roots) walker.visit(root, 0);
-  return { sites: walker.result(), bootstrap: walker.bootstrapResult(), reached: walker.reachedSymbols() };
+  const unresolvedImports = [...unresolved.values()].sort((a, b) => (a.specifier === b.specifier ? (a.from < b.from ? -1 : a.from > b.from ? 1 : 0) : a.specifier < b.specifier ? -1 : 1));
+  return { sites: walker.result(), bootstrap: walker.bootstrapResult(), reached: walker.reachedSymbols(), unresolvedImports };
 }
 
 /**
@@ -328,7 +354,7 @@ function exportTarget(target: unknown): string | undefined {
  * (so a worktree's node_modules links to another checkout can never change what is analysed);
  * every other specifier goes through TypeScript's normal resolution.
  */
-function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir: string): TS.CompilerHost {
+function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir: string, unresolved: Map<string, UnresolvedImport>): TS.CompilerHost {
   const host = ts.createCompilerHost(options);
   const packages = readWorkspacePackages(rootDir);
   const resolveFile = (specifier: string, containingFile: string): TS.ResolvedModuleFull | undefined =>
@@ -345,11 +371,24 @@ function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir
         : undefined;
     return asBareResolution(resolveFile(path.resolve(pkg.dir, mapped ?? subpath), containingFile));
   };
+  // reason: runtime-provided modules (`node:fs`, `bun:sqlite`) have no source to walk and no err() sites: never "missing".
+  const runtimeProvided = (specifier: string): boolean => isBuiltin(specifier) || specifier.startsWith("bun:") || specifier === "bun";
+  const recordUnresolved = (specifier: string, containingFile: string): void => {
+    const rel = path.relative(rootDir, containingFile);
+    if (rel.startsWith("..") || path.isAbsolute(rel) || rel.split(path.sep).includes("node_modules") || runtimeProvided(specifier)) return;
+    const from = rel.split(path.sep).join("/");
+    unresolved.set(`${specifier}\0${from}`, { specifier, from });
+  };
   host.resolveModuleNameLiterals = (literals, containingFile) =>
     literals.map((literal): TS.ResolvedModuleWithFailedLookupLocations => {
       const specifier = literal.text;
       const pkg = packages.find((p) => specifier === p.name || specifier.startsWith(`${p.name}/`));
-      if (pkg === undefined) return { resolvedModule: resolveFile(specifier, containingFile) };
+      if (pkg === undefined) {
+        const resolvedModule = resolveFile(specifier, containingFile);
+        // reason: the compiler appends a synthetic `react/jsx-runtime` import (position -1) to every file under `jsx: ReactJSX`; it is not source.
+        if (resolvedModule === undefined && literal.pos >= 0) recordUnresolved(specifier, containingFile);
+        return { resolvedModule };
+      }
       const resolved = resolveWorkspace(pkg, specifier.slice(pkg.name.length + 1), containingFile);
       if (resolved === undefined) {
         throw new SiteCensusError("workspace-import-unresolved", {
@@ -480,6 +519,81 @@ class CensusWalker {
 
   namedFunctions(file: TS.SourceFile): string[] {
     return [...this.indexOf(file).keys()].sort();
+  }
+
+  /**
+   * Resolve a command-shaped entry symbol `default(.subCommands.<x>)*.run` by FOLLOWING the declared
+   * structure: the default export's command object, each `subCommands.<x>` value (an inline object /
+   * `defineCommand(...)` call, or an identifier bound to one — a standalone const, possibly imported),
+   * then its `run` (inline function, method, or identifier bound to a function). `[]` when the symbol
+   * is not command-shaped or any step is absent (the caller then refuses with entry-symbol-missing).
+   */
+  commandRunNamed(file: TS.SourceFile, symbol: string): FunctionLike[] {
+    const ts = this.ts;
+    const match = /^default((?:\.subCommands\.[^.]+)*)\.run$/.exec(symbol);
+    if (match === null) return [];
+    const subs = (match[1] ?? "").split(".subCommands.").filter((t) => t.length > 0);
+    const exported = file.statements.find((st): st is TS.ExportAssignment => ts.isExportAssignment(st));
+    if (exported === undefined) return [];
+    let command = this.commandObject(exported.expression, 0, false);
+    for (const sub of subs) {
+      if (command === undefined) return [];
+      const group = this.propertyValue(command, "subCommands");
+      const container = group === undefined ? undefined : this.commandObject(group.expr, 0, group.shorthand);
+      const entry = container === undefined ? undefined : this.propertyValue(container, sub);
+      command = entry === undefined ? undefined : this.commandObject(entry.expr, 0, entry.shorthand);
+    }
+    const run = command === undefined ? undefined : this.runFunction(command);
+    return run === undefined ? [] : [run];
+  }
+
+  /** Object literal behind `expr`: itself, the first argument of a call (`defineCommand({..})`), or an identifier's initializer. */
+  private commandObject(expr: TS.Node, depth: number, shorthand: boolean): TS.ObjectLiteralExpression | undefined {
+    const ts = this.ts;
+    if (depth > MAX_CODE_RESOLVE_DEPTH) return undefined;
+    const node = ts.isExpression(expr) ? this.unwrap(expr) : expr;
+    if (ts.isObjectLiteralExpression(node)) return node;
+    if (ts.isCallExpression(node)) {
+      const arg = node.arguments[0];
+      return arg === undefined ? undefined : this.commandObject(arg, depth + 1, false);
+    }
+    if (ts.isIdentifier(node)) {
+      const decl = this.valueDeclarationOf(node, shorthand);
+      if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return undefined;
+      return this.commandObject(decl.initializer, depth + 1, false);
+    }
+    return undefined;
+  }
+
+  private valueDeclarationOf(id: TS.Identifier, shorthand: boolean): TS.Declaration | undefined {
+    const symbol = shorthand && this.ts.isShorthandPropertyAssignment(id.parent) ? this.checker.getShorthandAssignmentValueSymbol(id.parent) : this.checker.getSymbolAtLocation(id);
+    return this.dealias(symbol)?.valueDeclaration;
+  }
+
+  /** The value of property `name` in `obj` (a plain or shorthand assignment, or a method). */
+  private propertyValue(obj: TS.ObjectLiteralExpression, name: string): { expr: TS.Node; shorthand: boolean } | undefined {
+    const ts = this.ts;
+    for (const prop of obj.properties) {
+      if (prop.name === undefined || this.propertyName(prop.name) !== name) continue;
+      if (ts.isPropertyAssignment(prop)) return { expr: prop.initializer, shorthand: false };
+      if (ts.isShorthandPropertyAssignment(prop)) return { expr: prop.name, shorthand: true };
+      if (ts.isMethodDeclaration(prop)) return { expr: prop, shorthand: false };
+    }
+    return undefined;
+  }
+
+  private runFunction(command: TS.ObjectLiteralExpression): FunctionLike | undefined {
+    const ts = this.ts;
+    const run = this.propertyValue(command, "run");
+    if (run === undefined) return undefined;
+    if (ts.isMethodDeclaration(run.expr)) return run.expr;
+    const node = ts.isExpression(run.expr) ? this.unwrap(run.expr) : run.expr;
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return node;
+    if (ts.isIdentifier(node)) {
+      const decl = this.valueDeclarationOf(node, run.shorthand);
+      return decl === undefined ? undefined : this.functionOfDeclaration(decl);
+    }
+    return undefined;
   }
 
   /** Walk one function body, recording sites and recursing into statically resolvable callees. */

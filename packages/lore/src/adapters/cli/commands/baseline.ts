@@ -42,7 +42,7 @@ import type { App } from "../../../app.js";
 import type { AddNodeInput, BaselineTreeEntry, SiteMapChange } from "../../../service/rule-service.js";
 import { NON_BUSINESS_PREFIX, computeLeafCoverage } from "../../../service/leaf-coverage.js";
 import { resolveDoc } from "../../../service/resolve.js";
-import { SiteCensusError, findCensusRoot, listSites, resolveCommandEntry } from "../../../service/site-census.js";
+import { SiteCensusError, type UnresolvedImport, findCensusRoot, listSites, resolveCommandEntry } from "../../../service/site-census.js";
 import type { Site } from "../../../service/site-census.js";
 import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
@@ -179,6 +179,8 @@ interface LeafCoverageReport {
   sites: number;
   gaps: string[];
   not_measured: string[];
+  /** Imports the census could not resolve; non-empty means the site list is a lower bound and the leaf is NOT complete. */
+  unresolved_imports: string[];
   bootstrap: string[];
   ok: boolean;
 }
@@ -211,8 +213,10 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
       const commands = Array.isArray(leaf.extra["commands"]) ? (leaf.extra["commands"] as string[]) : [];
       const byKey = new Map<string, Site>();
       const bootstrapByKey = new Map<string, Site>();
+      const unresolvedByKey = new Map<string, UnresolvedImport>();
       for (const command of commands) {
         const census = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
+        for (const u of census.unresolvedImports) unresolvedByKey.set(`${u.specifier}\0${u.from}`, u);
         for (const site of census) byKey.set(site.key, site);
         for (const site of census.bootstrap) bootstrapByKey.set(site.key, site);
       }
@@ -221,6 +225,7 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
       const verdict = computeLeafCoverage({
         sites: [...byKey.values()],
         bootstrap: [...bootstrapByKey.values()],
+        unresolvedImports: [...unresolvedByKey.values()],
         siteMap,
         liveRuleIds: rules.filter((r) => r.lifecycle === "live").map((r) => r.id),
       });
@@ -230,6 +235,7 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
         sites: byKey.size,
         gaps: verdict.gaps,
         not_measured: verdict.notMeasured,
+        unresolved_imports: verdict.unresolvedImports,
         bootstrap: [...bootstrapByKey.keys()].sort(),
         ok: commands.length > 0 && verdict.ok,
       };
@@ -241,7 +247,8 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
       if (reports.length === 0) console.log(`${resolved.value.slug}: no leaves under this node.`);
       for (const r of reports) {
         const state = r.commands.length === 0 ? "UNMEASURED (no commands declared; use `lore baseline map --command`)" : r.ok ? "complete" : "INCOMPLETE";
-        console.log(`${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.bootstrap.length} bootstrap (not counted as gaps)`);
+        console.log(`${r.slug}: ${state} - ${r.sites} site(s), ${r.gaps.length} gap(s), ${r.not_measured.length} not_measured, ${r.unresolved_imports.length} unresolved import(s), ${r.bootstrap.length} bootstrap (not counted as gaps)`);
+        for (const key of r.unresolved_imports) console.log(`  unresolved  ${key} (census incomplete: sites behind this import are not listed)`);
         for (const key of r.gaps) console.log(`  gap          ${key}`);
         for (const key of r.not_measured) console.log(`  not_measured ${key}`);
         for (const key of r.bootstrap) console.log(`  bootstrap    ${key}`);
@@ -447,8 +454,13 @@ export default defineCommand({
           const sites = listSites({ rootDir, entry: resolveCommandEntry({ rootDir, command }) });
           const dynamicCount = sites.filter((s) => s.dynamic).length;
           if (json) {
-            console.log(JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, sites, bootstrap: sites.bootstrap } }, null, 2));
+            console.log(JSON.stringify({ ok: true, data: { command, count: sites.length, not_measured: dynamicCount, unresolved_imports: sites.unresolvedImports, sites, bootstrap: sites.bootstrap } }, null, 2));
+            if (sites.unresolvedImports.length > 0) process.exitCode = 1;
             return;
+          }
+          if (sites.unresolvedImports.length > 0) {
+            for (const u of sites.unresolvedImports) console.log(`unresolved import ${u.specifier} (from ${u.from}): census INCOMPLETE, sites behind it are not listed`);
+            process.exitCode = 1;
           }
           console.log(`${command}: ${sites.length} site(s), ${dynamicCount} not_measured, ${sites.bootstrap.length} bootstrap`);
           for (const site of sites) console.log(`${site.dynamic ? "~" : " "} ${site.key}`);
