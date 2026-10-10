@@ -23,7 +23,7 @@
  * @spec_ref spec-baseline-close-out-fixes-audit-surface-node-validation AC-BLC-1
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -31,6 +31,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { NoOpTelemetry } from "@lore/core";
 import type { AuditEntry } from "@lore/core";
+import { clearProcessAuditSurface } from "../../../src/store/audit-surface.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { ApiKeyStore } from "../../../src/adapters/http/auth.js";
@@ -268,6 +269,10 @@ describe("AC-BLC-1 HTTP surfaces", () => {
 // ─── Store-level: no ambient surface, explicit entry surface ─────────────────
 
 describe("AC-BLC-1 audit stamping rules", () => {
+  // reason: the process surface is module state set by any in-process CLI/MCP boot earlier in the same `bun test`
+  // run; "no adapter-declared surface" is this block's precondition, so it establishes it rather than inheriting it.
+  beforeEach(() => clearProcessAuditSurface());
+
   it("a write with no adapter-declared surface records NO surface key, never a guessed one", async () => {
     const store = new InMemoryStore();
     const svc = new CorpusService(store);

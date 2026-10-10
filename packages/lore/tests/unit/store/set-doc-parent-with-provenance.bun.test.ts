@@ -59,10 +59,10 @@ interface Fixture {
 async function seed(store: StoreInterface): Promise<{ prdId: string; specId: string }> {
   const cs = new CorpusService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Set parent prd", content: "p" } as CreateDocInput), "prd");
-  const spec = await must(
-    await cs.create({ type: "spec", title: "Set parent spec", content: "s", parent_id: prd.id } as CreateDocInput),
-    "spec",
-  );
+  // A spec cannot be created with a parent any more (BR-2), so seed the LEGACY state this migration
+  // primitive exists to clear: create it parentless, then write parent_id straight through the store.
+  const created = await must(await cs.create({ type: "spec", title: "Set parent spec", content: "s" } as CreateDocInput), "spec");
+  const spec = await must(await store.update(created.id, { parent_id: prd.id }), "legacy parent");
   // A `parent` link row alongside parent_id, to prove the clear removes both.
   await must(
     await store.addLink({ from_id: spec.id, to_id: prd.id, link_type: "parent", created_at: "2026-10-10T00:00:00.000Z", created_by: "t" }),

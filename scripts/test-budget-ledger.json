@@ -12,13 +12,6 @@
     },
     {
       "path": "packages/lore/tests/e2e/cli.bun.test.ts",
-      "titleFingerprint": "HAPPY: tree --json shows PRD with spec as child (AC-E2E-001.11)",
-      "spawnCount": 3,
-      "line": 341,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
-    },
-    {
-      "path": "packages/lore/tests/e2e/cli.bun.test.ts",
       "titleFingerprint": "HAPPY: tree human-readable output contains parent and child titles",
       "spawnCount": 3,
       "line": 358,
@@ -156,13 +149,6 @@
       "spawnCount": 3,
       "line": 572,
       "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped). Line moved 566->572 on 2026-08-01 when the task-create ac_scope gate's back-catalog fixture sweep edited this file; the violation itself is unchanged and still unfixed."
-    },
-    {
-      "path": "packages/lore/tests/integration/cli-outline.bun.test.ts",
-      "titleFingerprint": "a SECOND outline set on a different section leaves the first entry byte-identical (single-entry CAS, not a wholesale array replace)",
-      "spawnCount": 3,
-      "line": 183,
-      "reason": "Pre-existing test-budget debt measured at ledger-landing time (task-land-the-baseline-ledger-policy-for-check-test-budgets-55); not yet fixed. Retire this row in the SAME commit that adds an explicit it()/test() timeout argument to this test case (adr-a-newly-armed-structural-oracle-enforces-from-a-baseline criterion 3 — an orphaned row fails loud, it is never silently dropped)."
     },
     {
       "path": "packages/lore/tests/integration/cli/assess-ai.bun.test.ts",

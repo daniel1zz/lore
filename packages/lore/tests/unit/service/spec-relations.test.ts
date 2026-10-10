@@ -84,9 +84,9 @@ describe("computeImplementedBy", () => {
     const view = computeImplementedBy(leaf, [a, b]);
     expect(view.count).toBe(3);
     expect(view.citations).toEqual([
-      { rule_id: "BR-1", spec: "spec-a", spec_status: "draft", criterion: "AC-A-1" },
-      { rule_id: "BR-1", spec: "spec-a", spec_status: "draft", criterion: "AC-A-2" },
-      { rule_id: "BR-1", spec: "spec-b", spec_status: "archived", criterion: "AC-B-1" },
+      { rule_id: "BR-1", spec: "spec-a", doc_status: "draft", criterion: "AC-A-1" },
+      { rule_id: "BR-1", spec: "spec-a", doc_status: "draft", criterion: "AC-A-2" },
+      { rule_id: "BR-1", spec: "spec-b", doc_status: "archived", criterion: "AC-B-1" },
     ]);
     expect(view.rules).toEqual([{ rule_id: "BR-1", state: "live" }, { rule_id: "BR-2", state: "retired" }]);
   });

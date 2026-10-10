@@ -84,6 +84,23 @@ async function stateOf(slug: string): Promise<DocState> {
   }
 }
 
+/**
+ * A spec cannot be created with a parent any more (BR-2), so the LEGACY state this migration clears is seeded
+ * straight through the store: write `parent_id` on an already-created, parentless spec.
+ */
+async function forceLegacyParent(slug: string, parentSlug: string): Promise<void> {
+  const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
+  try {
+    const doc = await store.findBySlug(slug);
+    const parent = await store.findBySlug(parentSlug);
+    if (!doc.ok || doc.value === null || !parent.ok || parent.value === null) throw new Error(`no doc ${slug} / ${parentSlug}`);
+    const r = await store.update(doc.value.id, { parent_id: parent.value.id });
+    if (!r.ok) throw new Error("legacy parent seed failed");
+  } finally {
+    store.close();
+  }
+}
+
 async function forceApproved(slug: string): Promise<void> {
   const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
   try {
@@ -116,9 +133,9 @@ beforeAll(async () => {
   mustRun(["init"]);
   prdSlug = slugOf(mustRun(["create", "prd", "--title", "Parents PRD", "--content", "root", "--no-ai"]).stdout);
   for (const title of ["Spec Alpha", "Spec Beta", "Spec Gamma"]) {
-    specs.push(
-      slugOf(mustRun(["create", "spec", "--title", title, "--content", SKELETON, "--parent", prdSlug, "--no-ai"]).stdout),
-    );
+    const slug = slugOf(mustRun(["create", "spec", "--title", title, "--content", SKELETON, "--no-ai"]).stdout);
+    await forceLegacyParent(slug, prdSlug);
+    specs.push(slug);
   }
   await forceApproved(specs[0] as string);
   const store = new SQLiteStore(join(dir, ".lore", "lore.db"));

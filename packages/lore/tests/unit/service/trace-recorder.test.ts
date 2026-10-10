@@ -170,7 +170,6 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const enforcer = new GateEnforcer(undefined, undefined, recorder);
 
     const result = enforcer.enforce("spec-create", {
-      parentType: "prd",
       specKind: "feature",
       content: "no heading here",
     });
@@ -202,7 +201,6 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const enforcer = new GateEnforcer(undefined, undefined, recorder);
 
     const result = enforcer.enforce("spec-create", {
-      parentType: "prd",
       specKind: "feature",
       content: "## Overview\n\nBody.",
     });
@@ -219,7 +217,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const store = makeStore();
     const enforcer = new GateEnforcer(undefined); // no traceRecorder — mirrors every pre-existing unit test construction
 
-    const result = enforcer.enforce("spec-create", { parentType: "prd", specKind: "feature", content: "no heading" });
+    const result = enforcer.enforce("spec-create", { specKind: "feature", content: "no heading" });
     expect(result.ok).toBe(false);
 
     const denies = await store.listTraceGateDenies({ since: "2000-01-01T00:00:00.000Z" });
@@ -238,7 +236,6 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     let result: ReturnType<typeof enforcer.enforce> | undefined;
     expect(() => {
       result = enforcer.enforce("spec-create", {
-        parentType: "prd",
         specKind: "feature",
         content: "no heading here",
       });
@@ -286,7 +283,6 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const enforcer = new GateEnforcer(undefined, undefined, recorder);
 
     const result = enforcer.enforce("spec-create", {
-      parentType: "prd",
       specKind: "feature",
       content: "no heading here",
     });
@@ -305,7 +301,6 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
     const enforcer = new GateEnforcer(undefined, undefined, recorder);
 
     const result = enforcer.enforce("spec-create", {
-      parentType: "prd",
       specKind: "feature",
       content: "no heading here",
     });

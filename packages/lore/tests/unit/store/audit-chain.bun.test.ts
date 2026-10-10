@@ -51,6 +51,7 @@ import { join } from "node:path";
 import type { AuditEntry, DocRecord, VersionRecord } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { TursoStore } from "../../../src/store/turso-store.js";
+import { clearProcessAuditSurface } from "../../../src/store/audit-surface.js";
 import { MIGRATION_001_SQL } from "../../../src/store/migrations/migration-001.js";
 import { MIGRATION_002_SQL } from "../../../src/store/migrations/migration-002.js";
 import { MIGRATION_003_SQL } from "../../../src/store/migrations/migration-003.js";
@@ -209,6 +210,10 @@ function runChainConstructionSuite(label: string, createHandle: () => StoreHandl
     let destroy: () => void | Promise<void>;
 
     beforeEach(() => {
+      // reason: the audit surface is process-wide module state; a file that booted the CLI/MCP adapter earlier in the
+      // same `bun test` process leaves it set, and the stores stamp it into `details` (inside the hash payload) —
+      // this suite hand-rolls the digest of the entry it appended, so it asserts the no-adapter state it needs.
+      clearProcessAuditSurface();
       const handle = createHandle();
       store = handle.store;
       destroy = handle.destroy;

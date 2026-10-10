@@ -101,7 +101,7 @@ function fileArgs(title: string, extra: string[]): string[] {
 
 /** Wraps the payload stub's `gh` so the issue-create POST's `body=` argument is written (verbatim, no trailing newline) to `recordTo`. */
 function wrapStubToRecordBody(dir: string, recordTo: string): void {
-  const quote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
+  const quote = (value: string): string => ["'", value.split("'").join("'\\''"), "'"].join("");
   renameSync(join(dir, "gh"), join(dir, "gh-payload"));
   const wrapper = `#!/bin/sh
 for arg in "$@"; do

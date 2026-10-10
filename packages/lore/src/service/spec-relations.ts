@@ -46,7 +46,7 @@ export interface ImplementsView {
 export interface ImplementedByCitation {
   rule_id: string;
   spec: string;
-  spec_status: string;
+  doc_status: string;
   criterion: string;
 }
 
@@ -126,7 +126,7 @@ export function computeImplementedBy(node: DocRecord, specs: readonly DocRecord[
     for (const criterion of criteriaOf(spec)) {
       for (const ruleId of new Set(criterion.cites)) {
         if (ownIds.has(ruleId)) {
-          citations.push({ rule_id: ruleId, spec: spec.slug, spec_status: spec.status, criterion: criterion.id });
+          citations.push({ rule_id: ruleId, spec: spec.slug, doc_status: spec.status, criterion: criterion.id });
         }
       }
     }
@@ -152,7 +152,7 @@ export function formatImplementedByLines(view: ImplementedByView): string[] {
   for (const c of view.citations) {
     const state = stateOf.get(c.rule_id);
     const rule = state === undefined || state === "live" ? c.rule_id : `${c.rule_id} [${state}]`;
-    lines.push(`${rule}: ${c.spec} (${c.spec_status}) ${c.criterion}`);
+    lines.push(`${rule}: ${c.spec} (${c.doc_status}) ${c.criterion}`);
   }
   lines.push(`Count: ${view.count} citation${view.count === 1 ? "" : "s"}`);
   return lines;
