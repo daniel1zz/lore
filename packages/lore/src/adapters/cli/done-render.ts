@@ -21,6 +21,7 @@
  */
 
 import type { DoneResult } from "../../service/task-workflow-service.js";
+import { formatWorktreeOutcomeLine } from "../../service/worktree-cleanup.js";
 
 /**
  * Renders `lore done`'s success message — one branch per {@link DoneResult}
@@ -39,7 +40,10 @@ export function formatDoneMessage(result: DoneResult): string {
     return `${slug} is already ${result.task.status} (no-op — lore done is idempotent)`;
   }
   const path = result.transitions.join(" -> ");
-  return `${slug} archived (v${result.task.version}): ${path}`;
+  const archived = `${slug} archived (v${result.task.version}): ${path}`;
+  // issue #106: one `worktree: ...` line per claim-recorded worktree (removed / kept <reason> / not-measured).
+  const worktreeLines = (result.worktree_outcomes ?? []).map(formatWorktreeOutcomeLine);
+  return [archived, ...worktreeLines].join("\n");
 }
 
 /**
