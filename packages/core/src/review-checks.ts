@@ -200,6 +200,21 @@ function checkTreePosition(bundle: ReviewBundle): CheckResult {
   }
 
   const actualParentType: DocType | null = parent?.type ?? null;
+
+  // BR-2 / BR-400: a PARENTLESS type's slot is "no parent" (it belongs to the trees through criterion
+  // citations), whatever parent the blueprint's layout picture draws above it. Same notion as
+  // tree-check-service (`isParentlessType`), so review and `status --check-tree` cannot disagree.
+  if (isParentlessType(doc.type)) {
+    if (actualParentType === null) {
+      return { check: "tree_position", outcome: "pass" };
+    }
+    return {
+      check: "tree_position",
+      outcome: "fail",
+      detail: `'${doc.type}' takes no parent (BR-2) but has a '${actualParentType}' parent — misplaced`,
+    };
+  }
+
   if (allowedParentTypes.has(actualParentType)) {
     return { check: "tree_position", outcome: "pass" };
   }
