@@ -19,7 +19,7 @@
  *   - {@link applyAcChange} is pure: no IO, no clock. Returns a Result; never throws.
  *   - {@link admitAcWrite} is the citation-gate half (spec C4, AC-BLS2-2): the SAME chokepoint decides, on
  *     every sanctioned path (`ac-verb`, `create`), whether an ADDED or REVISED criterion may be written. It
- *     reads the store (baseline docs; on refusal also specs, `ac_cites` and exemptions) but never writes;
+ *     reads the store (baseline docs; exemptions, which the gate honours — an unexpired one waives an uncited criterion, BR-959; on refusal also specs and `ac_cites`) but never writes;
  *     the decision itself is the pure `ac-cite-gate.ts::decideCiteGate`. The liveness re-check that closes
  *     the retire-vs-cite race happens in the write transaction (`ProvenanceWriteExtras.require_live_rules`),
  *     not here — a read here is only the early, friendly answer.
@@ -44,6 +44,7 @@ import {
   buildCiteFeedingPack,
   changedCriteria,
   CiteGateConfigError,
+  activeExemptedAcIds,
   decideCiteGate,
   indexBaseline,
   placeSpecInBranch,
@@ -223,11 +224,16 @@ export async function admitAcWrite(
   const baseline = await store.findMany({ type: "baseline" });
   if (!baseline.ok) return baseline;
   const index = indexBaseline(baseline.value);
-  const decision = decideCiteGate(config.value, input.existing, input.next, index);
+  // reason: BR-959 / #105 — an unexpired exemption must be known BEFORE the decision. A failed read is
+  // returned, never read as "no exemptions" (that would refuse a legitimately exempted write).
+  const exemptions = await store.listAcExemptions();
+  if (!exemptions.ok) return exemptions;
+  const nowIso = new Date().toISOString();
+  const exempted = activeExemptedAcIds(exemptions.value, input.target.id, nowIso);
+  const decision = decideCiteGate(config.value, input.existing, input.next, index, exempted);
 
   if (decision.kind === "skip") return ok(NO_ADMISSION_CONSTRAINTS);
   if (decision.kind === "admit") {
-    const nowIso = new Date().toISOString();
     return ok({
       requireLiveRules: decision.requireLiveRules,
       wouldRefuseAudit: decision.findings.map((f) =>

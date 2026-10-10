@@ -637,3 +637,66 @@ describe("cite gate — latency on a 1,500-rule corpus (AC-BLS2-2, QA-1)", () =>
     expect(p95).toBeLessThanOrEqual(50);
   });
 });
+
+// ─── decideCiteGate: exemption input (BR-959, #105, AC-BLS2-19) ──────────────
+
+describe("decideCiteGate — exempted criteria (AC-BLS2-19)", () => {
+  const INDEX = {
+    states: { "BR-1": "live", "BR-2": "retired" } as Record<string, "live" | "deprecated" | "retired">,
+    branchOfRule: new Map([["BR-1", "b1"]]),
+    branches: ["b1"],
+  };
+  const ENFORCE = { mode: "enforce" as const, armed_branches: ["b1"] };
+  const REPORT = { mode: "report" as const, armed_branches: [] };
+  const ac = (id: string, cites: string[]) =>
+    ({
+      id,
+      statement: `Does ${id}`,
+      verify: { mode: "script", oracle: "test", command: "bun test x" },
+      cites,
+    }) as never;
+  const before = [ac("AC-1", ["BR-1"]), ac("AC-2", ["BR-1"])];
+
+  async function gate() {
+    return (await import(GATE_MODULE)) as typeof import("../../../src/service/ac-cite-gate.js");
+  }
+
+  it("exempt + uncited -> admit (enforce, armed)", async () => {
+    const { decideCiteGate } = await gate();
+    const d = decideCiteGate(ENFORCE, before, [ac("AC-1", []), before[1]!], INDEX, new Set(["AC-1"]));
+    expect(d.kind).toBe("admit");
+  });
+
+  it("not exempt + uncited -> refuse (control)", async () => {
+    const { decideCiteGate } = await gate();
+    const d = decideCiteGate(ENFORCE, before, [ac("AC-1", []), before[1]!], INDEX, new Set(["AC-2"]));
+    expect(d.kind).toBe("refuse");
+  });
+
+  it("exempt + retired cite -> refuse (exemption waives uncited only)", async () => {
+    const { decideCiteGate } = await gate();
+    const d = decideCiteGate(ENFORCE, before, [ac("AC-1", ["BR-2"]), before[1]!], INDEX, new Set(["AC-1"]));
+    expect(d.kind).toBe("refuse");
+    if (d.kind === "refuse") expect(d.findings[0]?.violations[0]?.reason).toBe("retired");
+  });
+
+  it("report mode records no would-refuse finding for exempt + uncited", async () => {
+    const { decideCiteGate } = await gate();
+    const exempt = decideCiteGate(REPORT, before, [ac("AC-1", []), before[1]!], INDEX, new Set(["AC-1"]));
+    expect(exempt).toEqual({ kind: "admit", requireLiveRules: [], findings: [] });
+    const plain = decideCiteGate(REPORT, before, [ac("AC-1", []), before[1]!], INDEX, new Set());
+    expect(plain.kind === "admit" && plain.findings.length).toBe(1);
+  });
+
+  it("activeExemptedAcIds: expires_at == now is expired; other spec's rows ignored", async () => {
+    const { activeExemptedAcIds } = await gate();
+    const now = "2026-01-01T00:00:00.000Z";
+    const row = (doc_id: string, ac_id: string, expires_at: string) => ({ doc_id, ac_id, expires_at }) as never;
+    const ids = activeExemptedAcIds(
+      [row("S1", "A", "2026-01-01T00:00:01.000Z"), row("S1", "B", now), row("S1", "C", "2025-01-01T00:00:00.000Z"), row("S2", "D", "2999-01-01T00:00:00.000Z")],
+      "S1",
+      now,
+    );
+    expect([...ids]).toEqual(["A"]);
+  });
+});

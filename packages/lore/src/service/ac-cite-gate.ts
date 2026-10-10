@@ -8,7 +8,7 @@
  * Public surface: {@link resolveCiteGateConfig}, {@link CiteGateConfigError}, {@link indexBaseline},
  *   {@link placeSpecInBranch}, {@link isBranchArmed}, {@link changedCriteria}, {@link decideCiteGate},
  *   {@link buildCiteFeedingPack}, {@link maxActiveExemptions}, {@link exemptionHeadroom},
- *   {@link countLiveCriteria}, and the config / decision types.
+ *   {@link countLiveCriteria}, {@link activeExemptedAcIds}, and the config / decision types.
  * Invariants:
  *   - Mode is three-state (`off` | `report` | `enforce`). ⛔ UNLIKE every other gate key, an ABSENT mode
  *     is NOT "enabled": it resolves to `off` when the corpus has no baseline docs (a consumer project
@@ -16,7 +16,8 @@
  *   - Only ADDED or REVISED criteria are gated (`changedCriteria`: id new, or its canonical JSON differs).
  *     An untouched legacy uncited criterion is never a candidate, however many siblings change.
  *   - A criterion is refused when it cites nothing OR cites any id that is not live (missing / deprecated /
- *     retired) — the measure is `findAcCiteViolations` (gate-predicates.ts), run through the registered
+ *     retired) — EXCEPT that an UNEXPIRED exemption on (spec, ac) waives the "cites nothing" case only
+ *     (rule BR-959, #105); a non-live cite is refused regardless of any exemption. The measure is `findAcCiteViolations` (gate-predicates.ts), run through the registered
  *     `ac-cite` checkpoint, so verdict and message cannot disagree.
  *   - `enforce` refuses only on an ARMED branch. A spec's branch is the branch of the leaf most of its
  *     criteria cite; a spec citing nothing is "unplaced" and armed only when EVERY branch is armed
@@ -248,6 +249,10 @@ function groupFindings(
  * @param existing - the spec's criteria BEFORE the write (`[]` on create)
  * @param next - the spec's criteria AFTER the write
  * @param index - the baseline index (rule lifecycles + branches)
+ * @param exemptedAcIds - ids of this spec's criteria holding an ACTIVE exemption (`expires_at > nowIso`),
+ *   computed by the caller (see {@link activeExemptedAcIds}); an exempt criterion that cites NOTHING is not
+ *   a violation (no refusal, no report-mode would-refuse finding). Exempt criteria that cite anything are
+ *   still checked, so a missing / deprecated / retired cite stays refused.
  * @returns skip / admit / refuse — see {@link CiteGateDecision}
  */
 export function decideCiteGate(
@@ -255,10 +260,14 @@ export function decideCiteGate(
   existing: readonly AcceptanceCriterion[],
   next: readonly AcceptanceCriterion[],
   index: BaselineCiteIndex,
+  exemptedAcIds: ReadonlySet<string>,
 ): CiteGateDecision {
   if (config.mode === "off") return { kind: "skip" };
-  const candidates = changedCriteria(existing, next);
-  if (candidates.length === 0) return { kind: "skip" };
+  const changed = changedCriteria(existing, next);
+  if (changed.length === 0) return { kind: "skip" };
+  // reason: BR-959 / #105 — the exemption waives ONLY the uncited case, so only an exempt candidate with
+  // no cites leaves the checked set; an exempt one citing a non-live id stays in and is refused.
+  const candidates = changed.filter((c) => !(c.cites.length === 0 && exemptedAcIds.has(c.ac_id)));
 
   const checkpoint = AC_CITE_CHECKPOINT;
   const context: GateContext = { citeCandidates: candidates, citeRuleStates: index.states };
@@ -302,6 +311,20 @@ export function countLiveCriteria(specs: readonly DocRecord[]): number {
     if (parsed.success) total += parsed.data.length;
   }
   return total;
+}
+
+/**
+ * The ac_ids holding an ACTIVE exemption for one spec: `doc_id` matches and `expires_at > nowIso` — the
+ * same activity rule as {@link exemptionHeadroom} and `AcExemptionService.counts`.
+ */
+export function activeExemptedAcIds(
+  exemptions: readonly Pick<AcExemptionRow, "doc_id" | "ac_id" | "expires_at">[],
+  specId: string,
+  nowIso: string,
+): Set<string> {
+  return new Set(
+    exemptions.filter((row) => (row.doc_id as string) === specId && row.expires_at > nowIso).map((row) => row.ac_id),
+  );
 }
 
 /**
