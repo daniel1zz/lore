@@ -739,6 +739,39 @@ const TraceConfigSchema = z
 /** Read/deny trace observability config section. Source: SPEC-102 §Scope. */
 export type TraceConfig = z.infer<typeof TraceConfigSchema>;
 
+// ─── Budget Section Schema ──────────────────────────────────────────────────
+
+/**
+ * Per-kind size caps of a baseline node (Baseline slice 3b, BR-1010 / BR-422 / BR-423 / BR-425) — the ONE home of
+ * the default numbers; `resolveBaselineNodeBudgets` and every consumer read them through this schema.
+ *
+ * @invariant A node exactly AT its cap is compliant; one over is a finding (comparisons live in
+ *   `service/baseline-node-budget.ts`, strictly greater-than).
+ * @invariant `*_chars` measure the stored body (`doc.content`); `leaf_rules` counts `extra.rules` entries.
+ */
+export const BaselineBudgetSchema = z
+  .object({
+    /** Max body chars of a business leaf. Default: 16000. */
+    leaf_chars: z.number().int().positive().default(16000),
+    /** Max rules (`extra.rules` length) of a business leaf. Default: 30. */
+    leaf_rules: z.number().int().positive().default(30),
+    /** Max body chars of a business branch. Default: 16000. */
+    branch_chars: z.number().int().positive().default(16000),
+    /** Max body chars of an architecture standard. Default: 8000. */
+    standard_chars: z.number().int().positive().default(8000),
+  })
+  .strict();
+
+/** `budget.*` config section: today only the baseline node caps. */
+const BudgetConfigSchema = z
+  .object({
+    baseline: BaselineBudgetSchema.optional(),
+  })
+  .strict();
+
+/** Resolved baseline node caps (every field populated). */
+export type BaselineNodeBudgets = z.infer<typeof BaselineBudgetSchema>;
+
 // ─── Feedback Section Schema ────────────────────────────────────────────────
 
 /**
@@ -1427,10 +1460,30 @@ export const LoreConfigSchema = z
      * return the schema defaults (enabled: true, retention_days: 90).
      */
     trace: TraceConfigSchema.optional(),
+    /**
+     * Size budgets (`budget.baseline.*`, Baseline slice 3b). When absent,
+     * {@link resolveBaselineNodeBudgets} returns the schema defaults (leaf 16000 chars / 30 rules,
+     * branch 16000 chars, standard 8000 chars).
+     */
+    budget: BudgetConfigSchema.optional(),
   })
   .strict();
 
 export type LoreConfig = z.infer<typeof LoreConfigSchema>;
+
+/**
+ * Resolve the effective `budget.baseline.*` caps, filling every omitted field from
+ * {@link BaselineBudgetSchema}'s defaults (the single SSOT for them).
+ *
+ * @param config - The parsed project config, or `undefined` when none is loaded.
+ * @returns All four caps, populated.
+ * @example
+ *   resolveBaselineNodeBudgets(undefined) // => { leaf_chars: 16000, leaf_rules: 30, branch_chars: 16000, standard_chars: 8000 }
+ *   resolveBaselineNodeBudgets({ ..., budget: { baseline: { leaf_rules: 40 } } } as LoreConfig) // leaf_rules 40, rest default
+ */
+export function resolveBaselineNodeBudgets(config: LoreConfig | undefined): BaselineNodeBudgets {
+  return BaselineBudgetSchema.parse(config?.budget?.baseline ?? {});
+}
 
 /**
  * Resolve the effective claim TTL in minutes from an optional LoreConfig.

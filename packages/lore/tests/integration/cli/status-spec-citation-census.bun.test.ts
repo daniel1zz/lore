@@ -109,6 +109,11 @@ describe("AC-BLS3B-3 census over a corpus with baseline docs", () => {
   let dir = "";
   let run: (args: string[]) => RunResult;
   const slugs: Record<string, string> = {};
+  const slugOfKey = (key: string): string => {
+    const slug = slugs[key];
+    if (slug === undefined) throw new Error(`fixture spec ${key} was not created`);
+    return slug;
+  };
 
   beforeAll(() => {
     dir = realpathSync(mkdtempSync(join(tmpdir(), "census-")));
@@ -162,8 +167,8 @@ describe("AC-BLS3B-3 census over a corpus with baseline docs", () => {
 
   it("reports exactly the 3 uncited live specs and the 1 parented live spec, not the archived or deprecated ones", () => {
     const data = statusJson().data;
-    expect(data.specs_without_citation).toEqual({ count: 3, slugs: [slugs["U1"], slugs["U2"], slugs["U3"]].sort() });
-    expect(data.specs_with_parent).toEqual({ count: 1, slugs: [slugs["P"]] });
+    expect(data.specs_without_citation).toEqual({ count: 3, slugs: [slugOfKey("U1"), slugOfKey("U2"), slugOfKey("U3")].sort() });
+    expect(data.specs_with_parent).toEqual({ count: 1, slugs: [slugOfKey("P")] });
   });
 
   it("prints both counts in the human output", () => {
@@ -178,7 +183,7 @@ describe("AC-BLS3B-3 census over a corpus with baseline docs", () => {
     const live = ruleIdOf(rules.stdout);
     mustOf(run)(["ac", "cite", slugs["U1"]!, "AC-U1-1", live]);
     const data = statusJson().data;
-    expect(data.specs_without_citation).toEqual({ count: 2, slugs: [slugs["U2"], slugs["U3"]].sort() });
+    expect(data.specs_without_citation).toEqual({ count: 2, slugs: [slugOfKey("U2"), slugOfKey("U3")].sort() });
   });
 });
 

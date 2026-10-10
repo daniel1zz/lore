@@ -157,8 +157,8 @@ import {
   resolveMemoryFileBudgetsFromConfigResult,
   resolveStaleAfterDays,
   SPEC_KINDS,
-  outlineEntrySchema,
   outlineBudgetSchema,
+  resolveBaselineNodeBudgets,
 } from "@lore/core";
 import type {
   CallerSurface,
@@ -168,12 +168,16 @@ import type {
   OutlineBudget,
   Result,
 } from "@lore/core";
-import { z } from "zod";
 import {
   checkPrdBudget,
-  type OutlineBudgetLike,
   type PrdBudgetBreach,
+  type PrdBudgetLike,
 } from "../../../service/prd-budget-check.js";
+import {
+  checkBaselineNodeBudget,
+  type BaselineNodeBreach,
+} from "../../../service/baseline-node-budget.js";
+import { computeSpecCitationCensus, type SpecCitationCensus } from "../../../service/spec-citation-census.js";
 import {
   BINARY_PROVENANCE_EXIT_CODES,
   classifyBinaryProvenance,
@@ -266,21 +270,21 @@ function configuredVerificationProfileKinds(config: LoreConfig | undefined): str
 /**
  * Maps `@lore/core`'s `OutlineBudget` (SPEC-080 C3 corpus-governed schema,
  * field names `core_max_chars`/`domain_max_chars`/`whole_body_max_chars`)
- * onto `prd-budget-check.ts`'s own pure-fn input shape (`OutlineBudgetLike`,
- * field names `core_chars`/`domain_chars`/`whole_doc_chars`) — the two
- * modules deliberately do not share field names (see `prd-budget-check.ts`'s
- * module header), so this adapter is the ONE place the mapping happens.
+ * onto `prd-budget-check.ts`'s own pure-fn input shape (`PrdBudgetLike`,
+ * field name `whole_doc_chars`) — the two modules deliberately do not share
+ * field names (see `prd-budget-check.ts`'s module header), so this adapter is
+ * the ONE place the mapping happens. The per-tier `core_max_chars` /
+ * `domain_max_chars` fields are retired history (Baseline slice 3b, D7) and
+ * are not read.
  *
  * @param core - A Zod-validated `prd.extra.outline_budget`, or `undefined`
  *   when the PRD declares none (checkPrdBudget then falls back to the
- *   SPEC-080 C3 stated defaults for every field).
- * @returns The equivalent `Partial<OutlineBudgetLike>`, or `undefined`.
+ *   stated defaults for every field).
+ * @returns The equivalent `Partial<PrdBudgetLike>`, or `undefined`.
  */
-function toOutlineBudgetLike(core: OutlineBudget | undefined): Partial<OutlineBudgetLike> | undefined {
+function toPrdBudgetLike(core: OutlineBudget | undefined): Partial<PrdBudgetLike> | undefined {
   if (core === undefined) return undefined;
   return {
-    core_chars: core.core_max_chars,
-    domain_chars: core.domain_max_chars,
     whole_doc_chars: core.whole_body_max_chars,
     extra_prose_chars: core.extra_prose_chars,
   };
@@ -288,8 +292,27 @@ function toOutlineBudgetLike(core: OutlineBudget | undefined): Partial<OutlineBu
 
 /** Text rendering for one PRD's budget breaches — used by `renderPrdBudgetSection`. */
 function renderPrdBudgetBreach(prdSlug: string, breach: PrdBudgetBreach): void {
-  const sectionSuffix = breach.section !== undefined ? ` (${breach.section})` : "";
-  console.log(`  - ${prdSlug} [${breach.kind}]${sectionSuffix}: ${breach.detail}`);
+  console.log(`  - ${prdSlug} [${breach.kind}]: ${breach.detail}`);
+}
+
+/** The `data.baseline_budget` payload of `--check-prd-budget` (Baseline slice 3b, AC-BLS3B-8). */
+interface BaselineBudgetPayload {
+  checked: number;
+  consistent: boolean;
+  nodes: BaselineNodeBreach[];
+}
+
+/** Text rendering for the per-kind baseline node budget section; one line per finding naming node, kind, measured and cap. */
+function renderBaselineBudgetSection(payload: BaselineBudgetPayload): void {
+  if (payload.consistent) {
+    console.log(`Baseline node budget: within budget (${payload.checked} node(s) checked).`);
+    return;
+  }
+  console.log(`Baseline node budget: BREACHED (${payload.checked} node(s) checked):`);
+  for (const n of payload.nodes) {
+    const unit = n.metric === "chars" ? "chars" : "rules";
+    console.log(`  - ${n.slug} [${n.kind}]: ${n.measured} ${unit}, exceeding the ${n.kind} cap of ${n.cap} ${unit}`);
+  }
 }
 
 /**
@@ -1414,10 +1437,9 @@ export default defineCommand({
 
         // ---- PRD budget section (SPEC-080 C3) ----
         // reason: mirrors the requirements section immediately above — aggregate across
-        // every PRD in the corpus, zero-LLM, zero fs probing. Detail-link target facts
-        // (AC-080-10) are pre-resolved here via `corpusService.get` (a doc lookup, not a
-        // filesystem probe) and handed to the pure `checkPrdBudget` as caller-injected
-        // data — the check module itself never touches the store.
+        // every PRD in the corpus, zero-LLM, zero fs probing. The check module itself
+        // never touches the store. The outline tier / detail-link checks are retired
+        // (Baseline slice 3b, D7); the per-kind baseline node budget below replaces them.
         let prdBudgetPayload:
           | {
               checked: number;
@@ -1443,33 +1465,13 @@ export default defineCommand({
             }
             const doc = getResult.value.doc;
 
-            const outlineParse = z.array(outlineEntrySchema).safeParse(doc.extra["outline"]);
-            const outline = outlineParse.success ? outlineParse.data : undefined;
-
             const budgetParse = outlineBudgetSchema.safeParse(doc.extra["outline_budget"]);
-            const budget = budgetParse.success ? toOutlineBudgetLike(budgetParse.data) : undefined;
-
-            let detailLinkTargets: Record<string, boolean> | undefined;
-            if (outline !== undefined) {
-              const detailSlugs = new Set<string>();
-              for (const entry of outline) {
-                for (const link of entry.links) {
-                  if (link.rel === "detail") detailSlugs.add(link.slug);
-                }
-              }
-              detailLinkTargets = {};
-              for (const slug of detailSlugs) {
-                const targetResult = await app.corpusService.get(slug);
-                detailLinkTargets[slug] = targetResult.ok && targetResult.value.doc.deleted_at === null;
-              }
-            }
+            const budget = budgetParse.success ? toPrdBudgetLike(budgetParse.data) : undefined;
 
             const checkResult = checkPrdBudget({
               raw_body: doc.content,
-              outline,
               extra: doc.extra,
               budget,
-              detail_link_targets: detailLinkTargets,
             });
 
             prds.push({ slug: doc.slug, whole_doc_chars: checkResult.whole_doc_chars, breaches: checkResult.breaches });
@@ -1480,6 +1482,30 @@ export default defineCommand({
             consistent: !prdBudgetInconsistent,
             prds,
           };
+        }
+
+        // ---- Baseline node budget section (Baseline slice 3b, AC-BLS3B-8) ----
+        // reason: rides the same flag as the PRD budget (one size gate, one exit-3). Reads through a second
+        // store handle (like the baseline integrity section below) instead of `corpusService.get` per node:
+        // a `get` records a read trace row, and the corpus holds hundreds of baseline nodes.
+        let baselineBudgetPayload: BaselineBudgetPayload | undefined;
+        let baselineBudgetInconsistent = false;
+        if (checkPrdBudgetRequested) {
+          const budgets = resolveBaselineNodeBudgets(config);
+          const budgetStore = new SQLiteStore(dbPath);
+          try {
+            const nodesResult = await budgetStore.findMany({ type: "baseline" });
+            if (!nodesResult.ok) {
+              process.stderr.write(formatError(nodesResult.error) + "\n");
+              process.exitCode = exitCode(nodesResult.error);
+              return;
+            }
+            const nodes = nodesResult.value.flatMap((doc) => checkBaselineNodeBudget(doc, budgets));
+            baselineBudgetInconsistent = nodes.length > 0;
+            baselineBudgetPayload = { checked: nodesResult.value.length, consistent: nodes.length === 0, nodes };
+          } finally {
+            budgetStore.close();
+          }
         }
 
         // ---- Issues section (D5, spec-issue-closure-loop-computed-resolution-agent-reachable) ----
@@ -1566,6 +1592,7 @@ export default defineCommand({
           driftInconsistent ||
           requirementsInconsistent ||
           prdBudgetInconsistent ||
+          baselineBudgetInconsistent ||
           issuesInconsistent ||
           memoryPointersInconsistent ||
           baselineInconsistent
@@ -1594,6 +1621,7 @@ export default defineCommand({
             data["requirements"] = requirementsPayload;
           }
           if (prdBudgetPayload !== undefined) data["prd_budget"] = prdBudgetPayload;
+          if (baselineBudgetPayload !== undefined) data["baseline_budget"] = baselineBudgetPayload;
           if (issuesPayload !== undefined) data["issues"] = issuesPayload;
           if (memoryPointersPayload !== undefined) data["memory_pointers"] = memoryPointersPayload;
           if (baselinePayload !== undefined) data["baseline_check"] = baselinePayload;
@@ -1619,6 +1647,7 @@ export default defineCommand({
             }
           }
           if (prdBudgetPayload !== undefined) renderPrdBudgetSection(prdBudgetPayload);
+          if (baselineBudgetPayload !== undefined) renderBaselineBudgetSection(baselineBudgetPayload);
           if (issuesPayload !== undefined) renderIssuesSection(issuesPayload);
           if (memoryPointersPayload !== undefined) renderMemoryPointersSection(memoryPointersPayload);
           if (baselinePayload !== undefined) {
@@ -1761,6 +1790,7 @@ export default defineCommand({
       // AC-BLS2-11: `ac_cite` is emitted only with baseline docs or a stored gate mode (a corpus with
       // neither prints exactly what slice 1 printed), so it stays null when neither holds.
       let acCiteStatus: AcCiteStatus | null = null;
+      let specCitationCensus: SpecCitationCensus | null = null;
       try {
         const repoRoot = resolveGitRoot(process.cwd());
         const baselineResult = await computeBaselineStatus(
@@ -1774,6 +1804,24 @@ export default defineCommand({
           return;
         }
         baselineStatus = baselineResult.value;
+
+        // baseline slice 3b BR-1011 (AC-BLS3B-3) — the spec citation census, emitted only when the corpus has baseline
+        // docs (AC-BLS2-11: a corpus without them prints exactly what it printed before).
+        const censusBaseline = await baselineStore.findMany({ type: "baseline" });
+        if (!censusBaseline.ok) {
+          process.stderr.write(formatError(censusBaseline.error) + "\n");
+          process.exitCode = exitCode(censusBaseline.error);
+          return;
+        }
+        if (censusBaseline.value.length > 0) {
+          const censusSpecs = await baselineStore.findMany({ type: "spec" });
+          if (!censusSpecs.ok) {
+            process.stderr.write(formatError(censusSpecs.error) + "\n");
+            process.exitCode = exitCode(censusSpecs.error);
+            return;
+          }
+          specCitationCensus = computeSpecCitationCensus(censusSpecs.value, censusBaseline.value);
+        }
 
         // baseline slice 3a BL-8 (AC-BLS3-8) — the gate's mode and whether `lore baseline adopt` produced it.
         const rawGate = resolveCiteGateRaw(config);
@@ -1827,6 +1875,7 @@ export default defineCommand({
                 binary_provenance: provenanceOrNull(embeddedProvenance),
                 ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
                 ...(acCiteStatus !== null ? { ac_cite: acCiteStatus } : {}),
+                ...(specCitationCensus !== null ? specCitationCensus : {}),
               },
             },
             null,
@@ -1958,6 +2007,13 @@ export default defineCommand({
             `${baselineStatus.index_mismatch} index mismatches, ` +
             `${baselineStatus.rules_with_impl_detail} rules with implementation detail (run \`lore status --check-baseline\` / \`lore baseline tree --states\`)`,
         );
+      }
+
+      // baseline slice 3b BR-1011 — both census counts, printed even at 0 (a count that vanishes at 0 reads as "not measured");
+      // the whole pair is absent without baseline docs. The slugs live in `--json`.
+      if (specCitationCensus !== null) {
+        console.log(`\nSpecs without citation: ${specCitationCensus.specs_without_citation.count}`);
+        console.log(`Specs with a parent:    ${specCitationCensus.specs_with_parent.count}`);
       }
 
       // baseline slice 2 §C4 — exemptions on this branch's corpus, only when any exist (report-only).
