@@ -177,12 +177,13 @@ describe("evaluateRecordedWorktree (fake probe)", () => {
     expect(e.reason).toContain("no claim-time base");
   });
 
-  it.each([
-    ["listing fails", { listed: { ok: false, reason: "x" } } as Partial<FakeState>],
-    ["status fails", { dirty: { ok: false, reason: "x" } }],
-    ["own-count fails", { own: { ok: false, reason: "x" } }],
-    ["merged check fails", { unmerged: { ok: false, reason: "x" } }],
-    ["reflog fails", { reflog: { ok: false, reason: "x" } }],
+  const failed = { ok: false, reason: "x" } as const;
+  it.each<[string, Partial<FakeState>]>([
+    ["listing fails", { listed: failed }],
+    ["status fails", { dirty: failed }],
+    ["own-count fails", { own: failed }],
+    ["merged check fails", { unmerged: failed }],
+    ["reflog fails", { reflog: failed }],
   ])("not-measured when a git call fails: %s", (_n, over) => {
     expect(evaluateRecordedWorktree(fakeProbe(over).probe, rec, ctx()).decision).toBe("not-measured");
   });
