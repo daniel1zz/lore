@@ -45,7 +45,7 @@
 
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
-import { AiConfigSchema, BASELINE_TREES } from "@lore/core";
+import { AiConfigSchema, BASELINE_TREES, ruleIdPrefixOfNode } from "@lore/core";
 import type { AIProvider, BaselineTree, DocRecord, LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
@@ -634,7 +634,10 @@ export default defineCommand({
           }
           for (const entry of result.value) {
             const counts = `live ${entry.rules.live} / deprecated ${entry.rules.deprecated} / retired ${entry.rules.retired}`;
-            const rules = entry.node === "leaf" ? `  [rules: ${counts}]` : "";
+            // reason: BR-674 / #125 — counts follow the node kinds that hold rules (business leaf, architecture
+            // standard, debt-registry), decided by core's ruleIdPrefixOfNode, never by `node === "leaf"`.
+            const holdsRules = ruleIdPrefixOfNode({ tree: entry.tree, node: entry.node }) !== undefined;
+            const rules = holdsRules ? `  [rules: ${counts}]` : "";
             const kind = entry.tree === "architecture" ? `architecture ${entry.node}` : entry.node;
             console.log(`${"  ".repeat(entry.depth)}${kind} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})${rules}`);
           }
