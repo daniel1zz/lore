@@ -84,7 +84,7 @@ import {
   specAcceptanceCriteriaSchema,
   baselineExtraSchema,
 } from "@lore/core";
-import type { CheckResult, ReviewBundle, AcceptanceCriterion } from "@lore/core";
+import type { CheckResult, ReviewBundle, AcceptanceCriterion, BaselineRule } from "@lore/core";
 
 /**
  * Judge prompt schema version — the active key into {@link REVIEW_TEMPLATES}. Persisted
@@ -341,6 +341,31 @@ function wrapStructuredData(heading: string, intro: string, body: string): strin
   return `# ${heading}\n${intro}\n\`\`\`\n${body}\n\`\`\`\n\n`;
 }
 
+/**
+ * Render an architecture standard rule's four parts verbatim as indented continuation lines of
+ * its rule entry (BR-960). Returns `""` for a rule without them — business leaf rules and debt
+ * entries never carry them (the baseline schema allows them only on `AS-n` rules, all four or
+ * none), so their prompts stay unchanged. Kept inside the rule's own entry string so the
+ * `renderCappedEntries` count-not-drop rule (BR-269) governs these lines too.
+ */
+function renderStandardFourParts(rule: BaselineRule): string {
+  if (
+    rule.current_reality === undefined ||
+    rule.target_rule === undefined ||
+    rule.current_exceptions === undefined ||
+    rule.migration === undefined
+  ) {
+    return "";
+  }
+  const exceptions = rule.current_exceptions.length > 0 ? rule.current_exceptions.join(", ") : "(none)";
+  return (
+    `\n  current_reality: ${rule.current_reality}` +
+    `\n  target_rule: ${rule.target_rule}` +
+    `\n  current_exceptions: ${exceptions}` +
+    `\n  migration: ${rule.migration}`
+  );
+}
+
 /** Pure render of a baseline node's structured parts (rules, depends_on, glossary). */
 function renderBaselineStructuredSection(doc: ReviewBundle["doc"]): string {
   const heading = "Structured Data of the Document Under Review";
@@ -368,7 +393,8 @@ function renderBaselineStructuredSection(doc: ReviewBundle["doc"]): string {
     const entries = extra.rules.map(
       (r) =>
         `- ${r.id} [confidence=${r.confidence}, lifecycle=${r.lifecycle}, enforced_by=${r.enforced_by}]: ${r.statement}` +
-        (r.retired_note !== undefined ? ` (retired: ${r.retired_note})` : ""),
+        (r.retired_note !== undefined ? ` (retired: ${r.retired_note})` : "") +
+        renderStandardFourParts(r),
     );
     parts.push(`rules (${entries.length}):\n${renderCappedEntries(entries, "rules")}`);
   }

@@ -21,7 +21,7 @@ function makeBaselineBundle(extra: Record<string, unknown>): ReviewBundle {
     id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
     slug: "baseline-node",
     type: "baseline",
-    role: "requirement",
+    role: "spec",
     title: "Node",
     status: "in-review",
     priority: "medium",
