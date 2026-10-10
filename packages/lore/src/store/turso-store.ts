@@ -1973,6 +1973,75 @@ export class TursoStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.addLinkWithProvenance
+   *
+   * One `client.transaction("write")` around the link INSERT, the parent_id patch and the audit append
+   * (the same interactive-transaction shape `updateWithProvenance` uses). The cycle walk runs BEFORE the
+   * transaction opens — same check-then-write order `addLink` always had.
+   */
+  async addLinkWithProvenance(
+    link: LinkRecord,
+    audit: AuditEntry,
+  ): Promise<Result<LinkRecord, LoreError>> {
+    try {
+      await this.ensureReady();
+      if (link.link_type === "parent") {
+        const cycleResult = await this.detectParentCycle(link.from_id, link.to_id);
+        if (!cycleResult.ok) return cycleResult;
+      }
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+
+    let tx: Transaction;
+    try {
+      tx = await this.client.transaction("write");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      try {
+        await tx.execute({
+          sql: `INSERT INTO links (from_id, to_id, link_type, created_at, created_by)
+                 VALUES (?, ?, ?, ?, ?)`,
+          args: [link.from_id, link.to_id, link.link_type, link.created_at, link.created_by],
+        });
+      } catch (e) {
+        await tx.rollback();
+        const msg = e instanceof Error ? e.message : "";
+        if (msg.includes("UNIQUE constraint failed: links.")) {
+          return err({ code: "DUPLICATE_LINK", from: link.from_id, to: link.to_id, type: link.link_type });
+        }
+        return wrapStoreError(e);
+      }
+
+      if (link.link_type === "parent") {
+        const updateRs = await tx.execute({
+          sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ?",
+          args: [link.to_id, link.created_at, link.from_id],
+        });
+        if (updateRs.rowsAffected === 0) {
+          await tx.rollback();
+          return err({ code: "DOC_NOT_FOUND", id: link.from_id });
+        }
+      }
+
+      await this.appendAuditEntryTx(tx, audit);
+      await tx.commit();
+      return ok(link);
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: same as updateWithProvenance — rollback throws only when the transaction is already gone.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
    * Detect whether adding from_id → to_id parent link would create a cycle.
    * Delegates to {@link detectParentCycleViaAncestry} (store-shared.ts) for the
    * walk/depth-cap/self-link logic; this store's per-hop lookup resolves each

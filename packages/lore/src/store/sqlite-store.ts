@@ -1331,6 +1331,84 @@ export class SQLiteStore implements StoreInterface {
   }
 
   /**
+   * Synchronous core of {@link addLink}'s INSERT — see {@link insertDocSync}'s JSDoc for why this
+   * split exists ({@link addLinkWithProvenance} reuses it inside a transaction). The cycle check is
+   * NOT here: it is async (shared walk) and must run before a transaction opens.
+   */
+  private insertLinkSync(link: LinkRecord): Result<LinkRecord, LoreError> {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO links (from_id, to_id, link_type, created_at, created_by)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(link.from_id, link.to_id, link.link_type, link.created_at, link.created_by);
+      return ok(link);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.includes("UNIQUE constraint failed: links.")) {
+        return err({ code: "DUPLICATE_LINK", from: link.from_id, to: link.to_id, type: link.link_type });
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
+   * @see StoreInterface.addLinkWithProvenance
+   */
+  async addLinkWithProvenance(
+    link: LinkRecord,
+    audit: AuditEntry,
+  ): Promise<Result<LinkRecord, LoreError>> {
+    // reason: the cycle walk is async (shared with TursoStore) so it runs BEFORE BEGIN IMMEDIATE — an
+    // `await` inside the transaction would let another caller's statements interleave on this one
+    // connection. Same ordering `addLink` always had (check, then write).
+    if (link.link_type === "parent") {
+      const cycleResult = await this.detectParentCycle(link.from_id, link.to_id);
+      if (!cycleResult.ok) return cycleResult;
+    }
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const linkResult = this.insertLinkSync(link);
+      if (!linkResult.ok) {
+        this.db.run("ROLLBACK");
+        return linkResult;
+      }
+
+      if (link.link_type === "parent") {
+        const updateResult = this.updateDocSync(link.from_id, {
+          parent_id: link.to_id,
+          updated_at: link.created_at,
+        });
+        if (!updateResult.ok) {
+          this.db.run("ROLLBACK");
+          return updateResult;
+        }
+      }
+
+      const auditResult = this.appendAuditEntrySync(audit);
+      if (!auditResult.ok) {
+        this.db.run("ROLLBACK");
+        return auditResult;
+      }
+
+      this.db.run("COMMIT");
+      return ok(link);
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as updateWithProvenance — ROLLBACK throws only when the transaction is already gone.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
    * Detect whether adding a parent link from_id → to_id would create a cycle.
    * Delegates to {@link detectParentCycleViaAncestry} (store-shared.ts) for the
    * walk/depth-cap/self-link logic; this store's per-hop lookup resolves each
