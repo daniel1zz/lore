@@ -179,6 +179,15 @@ describe("lore rule add on architecture nodes", () => {
     expect(r.exitCode).toBe(4);
   });
 
+  it("--current-exceptions-none stores an empty exception list; combined with --current-exception exits 2", () => {
+    const four = ["--current-reality", "r", "--target-rule", "t", "--migration", "m"];
+    const none = runLore(["rule", "add", standard, "--statement", "Clean standard", ...RULE, ...four, "--current-exceptions-none"], dir);
+    expect(none.exitCode).toBe(0);
+    expect(none.stdout).toContain("Added AS-");
+    const both = runLore(["rule", "add", standard, "--statement", "Both", ...RULE, ...four, "--current-exceptions-none", "--current-exception", "AD-1"], dir);
+    expect(both.exitCode).toBe(2);
+  });
+
   it("business rule add is unchanged (no four-part flags)", () => {
     const leaf = slugOf(mustRun(["baseline", "add", businessRoot, "--node", "leaf", "--label", "l", "--title", "Biz Leaf"], dir).stdout);
     const r = runLore(["rule", "add", leaf, "--statement", "Business rule", ...RULE], dir);
@@ -233,7 +242,7 @@ describe("MCP tools accept the architecture fields", () => {
     const prevHome = process.env["HOME"];
     process.chdir(dir);
     process.env["HOME"] = dir;
-    const { app } = loadLoreApp({ surface: "mcp" });
+    const { app } = loadLoreApp({ surface: "http" });
     try {
       const server = new McpServer({ name: "arch", version: "0.0.0" });
       registerTools(server, app);

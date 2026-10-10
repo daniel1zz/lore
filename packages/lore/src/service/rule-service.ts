@@ -114,6 +114,11 @@ export interface SetRulePatch {
   note?: string;
   /** Destination leaf id|slug — relocates the rule, keeping its id. */
   moveTo?: string;
+  /** Four-part standard parts (AS rules only); each replaces the stored part, `current_exceptions` wholesale. */
+  current_reality?: string;
+  target_rule?: string;
+  current_exceptions?: string[];
+  migration?: string;
 }
 
 /** Fields of a new baseline node. */
@@ -143,6 +148,8 @@ export interface BaselineTreeEntry {
   label: string | null;
   /** Rule counts by lifecycle (leaf only; all zero elsewhere). */
   rules: Record<RuleLifecycle, number>;
+  /** Which tree the node belongs to (`extra.tree`; absent on the doc = business). */
+  tree: BaselineTree;
 }
 
 // ─── Errors (value constructors) ─────────────────────────────────────────────
@@ -334,6 +341,8 @@ export class RuleService {
     }
     const patchCheck = validateSetRulePatch(patch);
     if (!patchCheck.ok) return patchCheck;
+    const exceptions = await this.checkCurrentExceptions(patch.current_exceptions);
+    if (!exceptions.ok) return exceptions;
 
     let lastStale: LoreError | undefined;
     let authorized = false; // reason: one authorization (and one audit row) per call, not per CAS re-apply
@@ -688,6 +697,7 @@ export class RuleService {
         node: String(doc.extra["node"] ?? "?"),
         label: typeof label === "string" ? label : null,
         rules: tally,
+        tree: doc.extra["tree"] === "architecture" ? "architecture" : "business",
       });
       const children = [...(byParent.get(doc.id) ?? [])].sort((a, b) => a.slug.localeCompare(b.slug));
       for (const child of children) visit(child, depth + 1);
@@ -953,12 +963,12 @@ function glossaryOf(doc: DocRecord): GlossaryEntry[] {
   return Array.isArray(raw) ? (raw as GlossaryEntry[]) : [];
 }
 
-const SETTABLE_RULE_FIELDS = ["statement", "confidence", "enforced_by", "examples", "lifecycle", "note", "moveTo"] as const;
+const SETTABLE_RULE_FIELDS = ["statement", "confidence", "enforced_by", "examples", "lifecycle", "note", "moveTo", "current_reality", "target_rule", "current_exceptions", "migration"] as const;
 
 /** Patch-level refusals that need no stored state. */
 function validateSetRulePatch(patch: SetRulePatch): Result<void, LoreError> {
   if (!SETTABLE_RULE_FIELDS.some((field) => patch[field] !== undefined)) {
-    return err(validationError("patch", "nothing to change: pass at least one of statement, confidence, enforced_by, examples, lifecycle, note, moveTo"));
+    return err(validationError("patch", "nothing to change: pass at least one of statement, confidence, enforced_by, examples, lifecycle, note, moveTo, current_reality, target_rule, current_exceptions, migration"));
   }
   if (patch.lifecycle === "retired" && (patch.note === undefined || patch.note.trim() === "")) {
     return err(validationError("note", "lifecycle=retired requires --note (stored as retired_note)"));
@@ -986,6 +996,10 @@ function applyRulePatch(current: BaselineRule, patch: SetRulePatch): Result<Base
     ...(patch.examples !== undefined ? { examples: patch.examples } : {}),
     ...(patch.lifecycle !== undefined ? { lifecycle: patch.lifecycle } : {}),
     ...(patch.note !== undefined ? { retired_note: patch.note } : {}),
+    ...(patch.current_reality !== undefined ? { current_reality: patch.current_reality } : {}),
+    ...(patch.target_rule !== undefined ? { target_rule: patch.target_rule } : {}),
+    ...(patch.current_exceptions !== undefined ? { current_exceptions: patch.current_exceptions } : {}),
+    ...(patch.migration !== undefined ? { migration: patch.migration } : {}),
   };
   const parsed = baselineRuleSchema.safeParse(next);
   if (!parsed.success) {
