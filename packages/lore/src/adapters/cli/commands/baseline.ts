@@ -22,6 +22,12 @@
  *                   every leaf has commands, 0 gaps and 0 unaccounted not_measured sites. The leaf's
  *                   commands are an explicit stored field (`--command`), not derived: a leaf's
  *                   Command section is prose without CLI names.
+ *   fidelity --size N --seed S [--judges 1|2] [--exclusions] [--ai] [--json]
+ *                   Seeded sample of live (criterion, rule) citations - or, with --exclusions, of the
+ *                   `non-business:` site-map entries - judged by the AI provider; the record is stored as
+ *                   a `research` knowledge doc and printed. Read-only on rules/citations/site_map.
+ *                   Never skips the judge: without --ai on a surface whose AI default is off it refuses
+ *                   (exit 2); size > pool or a bad flag exits 2; a judge failure or malformed reply exits 6.
  *   tree [root] [--states] [--rule BR-n]
  *                   Listing (node kind, label, status, rule tallies). `--states` adds every rule's
  *                   verification state with its inputs and `computed_from`; `--rule BR-n` prints
@@ -35,7 +41,8 @@
 
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
-import type { DocRecord, LoreError } from "@lore/core";
+import { AiConfigSchema } from "@lore/core";
+import type { AIProvider, DocRecord, LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
@@ -48,6 +55,9 @@ import { RuleStateService } from "../../../service/rule-state-service.js";
 import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { buildProviderRegistry } from "../../../ai/registry.js";
+import { runFidelity } from "../../../service/fidelity-sample.js";
+import type { FidelityRecord } from "../../../service/fidelity-sample.js";
 
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
@@ -257,6 +267,94 @@ async function runCoverage(target: string, json: boolean): Promise<void> {
     if (!ok) process.exitCode = 1;
   } catch (cause) {
     reportCensusFailure(cause, json);
+  } finally {
+    store.close();
+    app.close();
+  }
+}
+
+/** `--seed` stays a number when it is a plain integer, so the record and title read `seed 42`, not `seed "42"`. */
+function parseSeed(raw: unknown): number | string | undefined {
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  return /^-?\d+$/.test(raw.trim()) ? Number(raw.trim()) : raw.trim();
+}
+
+function renderFidelityContent(record: FidelityRecord): string {
+  const headline =
+    record.mode === "exclusions"
+      ? `${(((record.wrong_share ?? 0) * 100)).toFixed(1)}% of ${record.size} sampled exclusions judged wrong`
+      : `${(record.faithful_share * 100).toFixed(1)}% of ${record.size} sampled citations judged faithful`;
+  const catchAll = record.catch_all.map((c) => `- ${c.rule_id}: cited by ${c.citing_criteria.length} criteria`).join("\n");
+  return [
+    `# Baseline fidelity sample (${record.mode}, seed ${String(record.seed)})`,
+    "",
+    `${headline} (pool ${record.pool}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`,
+    ...(record.catch_all.length > 0 ? ["", `## Catch-all rules (> ${record.threshold_share * 100}% of citing criteria)`, catchAll] : []),
+    "",
+    "## Record",
+    "```json",
+    JSON.stringify(record, null, 2),
+    "```",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Fidelity failures: SPEC-157 AC-BLS2-21 fixes a refused sample (size > pool, bad flag, AI off) at exit 2,
+ * whereas `exitCode()` maps VALIDATION_ERROR to 4 - so VALIDATION_ERROR is pinned to 2 here and every other
+ * error keeps its `exitCode()` (AI_PROVIDER_ERROR -> 6).
+ */
+function reportFidelityFailure(error: LoreError, json: boolean): void {
+  reportFailure(error, json);
+  if (error.code === "VALIDATION_ERROR") process.exitCode = 2;
+}
+
+/** `fidelity`: validate flags, resolve the AI provider (never skipping the judge), run, store, print. */
+async function runFidelityCommand(args: Record<string, unknown>): Promise<void> {
+  const json = args.json === true;
+  const fail = (field: string, message: string): void => reportFidelityFailure({ code: "VALIDATION_ERROR", field, message }, json);
+  const rawArgv = process.argv.slice(2);
+  // reason: SPEC-024 tri-state AI flag - citty collapses --ai/--no-ai, so detect them in argv like assess.ts does.
+  const hasExplicitAi = rawArgv.includes("--ai");
+  if (rawArgv.includes("--no-ai")) return fail("ai", "lore baseline fidelity needs an AI judge; --no-ai is a contradiction (BR-964: the judge is never skipped)");
+
+  const size = typeof args.size === "string" && /^\d+$/.test(args.size.trim()) ? Number(args.size.trim()) : undefined;
+  if (size === undefined || size < 1) return fail("size", "--size <N> is required and must be a positive integer");
+  const seed = parseSeed(args.seed);
+  if (seed === undefined) return fail("seed", "--seed <S> is required (the same seed redraws the same sample)");
+  const judgesRaw = args.judges === undefined ? "1" : String(args.judges);
+  if (judgesRaw !== "1" && judgesRaw !== "2") return fail("judges", `--judges must be 1 or 2, got '${judgesRaw}'`);
+  const judges = judgesRaw === "2" ? 2 : 1;
+
+  const { app, dbPath, config } = loadLoreApp();
+  const store = new SQLiteStore(dbPath);
+  try {
+    if (!hasExplicitAi && !app.resolveAiDefault(undefined).ai) {
+      return fail("ai", "lore baseline fidelity needs an AI judge and AI is off by default on this surface; pass --ai (the judge is never silently skipped)");
+    }
+    const registry = buildProviderRegistry(config?.ai ?? AiConfigSchema.parse({}));
+    if (!registry.ok) return reportFidelityFailure(registry.error, json);
+    const provider: AIProvider | undefined = registry.value.providers.get(registry.value.active);
+    if (provider === undefined) return fail("ai", `active AI provider '${registry.value.active}' is not registered`);
+
+    const result = await runFidelity({ store, ai: provider, size, seed, judges, exclusions: args.exclusions === true });
+    if (!result.ok) return reportFidelityFailure(result.error, json);
+    const record = result.value;
+    const share = record.mode === "exclusions" ? `${((record.wrong_share ?? 0) * 100).toFixed(1)}% wrong` : `${(record.faithful_share * 100).toFixed(1)}% faithful`;
+    const created = await app.corpusService.create({
+      type: "knowledge",
+      title: `Baseline fidelity (${record.mode}) seed ${String(record.seed)}: ${share}`,
+      extra: { sub_type: "research" },
+      content: renderFidelityContent(record),
+    });
+    if (!created.ok) return reportFidelityFailure(created.error, json);
+    if (json) {
+      console.log(JSON.stringify({ ok: true, data: { record, doc: { id: created.value.id, slug: created.value.slug } } }, null, 2));
+      return;
+    }
+    console.log(`Stored ${created.value.slug}: ${share} of ${record.size} sampled (pool ${record.pool}, seed ${String(record.seed)}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`);
+    for (const v of record.verdicts) console.log(`  ${v.n}. ${v.verdict === "faithful" ? "ok " : "BAD"} ${v.key} - ${v.reason}`);
+    for (const c of record.catch_all) console.log(`  catch-all ${c.rule_id}: cited by ${c.citing_criteria.length} criteria`);
   } finally {
     store.close();
     app.close();
@@ -478,6 +576,20 @@ export default defineCommand({
       },
       async run({ args }) {
         await runCoverage(args.target as string, args.json === true);
+      },
+    }),
+    fidelity: defineCommand({
+      meta: { name: "fidelity", description: "Judge a seeded sample of citations (or non-business exclusions) with the AI provider and store the record (read-only on the baseline)" },
+      args: {
+        size: { type: "string", description: "Sample size N (refused when larger than the pool)", required: true },
+        seed: { type: "string", description: "Sampling seed; the same seed redraws the same sample", required: true },
+        judges: { type: "string", description: "1 (default) or 2 (second judge + adjudicator for disagreements)" },
+        exclusions: { type: "boolean", description: "Sample the non-business site-map exclusions instead of the citations" },
+        ai: { type: "boolean", description: "Confirm AI use (required on surfaces where AI is off by default)" },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        await runFidelityCommand(args);
       },
     }),
     tree: defineCommand({
