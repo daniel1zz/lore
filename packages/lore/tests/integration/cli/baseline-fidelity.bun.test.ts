@@ -33,6 +33,7 @@ let corpus = "";
 let capture = "";
 let judgeScript = "";
 let replyFile = "";
+let specSlug = "";
 
 function runLore(args: string[], surface: "agent" | "human" = "human"): RunResult {
   const env: Record<string, string | undefined> = { ...process.env, HOME: corpus, LORE_ACTOR: "agent:fid-test" };
@@ -72,7 +73,7 @@ beforeAll(() => {
   capture = join(corpus, "captured-prompt.txt");
   replyFile = join(corpus, "scripted-reply.txt");
   judgeScript = join(corpus, "fake-judge.sh");
-  writeFileSync(judgeScript, `#!/bin/sh\ncat > "${capture}"\ncat "${replyFile}"\n`, { mode: 0o755 });
+  writeFileSync(judgeScript, `#!/bin/sh\ncat > "${capture}"\nn=$(grep -o '### Item [0-9]*' "${capture}" | grep -o '[0-9]*' | head -1)\nsed "s/@N@/$n/g" "${replyFile}"\n`, { mode: 0o755 });
   mustRun(["init"]);
   mkdirSync(join(corpus, ".lore"), { recursive: true });
   writeFileSync(
@@ -99,6 +100,7 @@ beforeAll(() => {
   const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "Fid Leaf"]).stdout);
   mustRun(["rule", "add", leaf, "--statement", "an AC id is unique within its spec", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "duplicate id refused"]);
   const spec = slugOf(mustRun(["create", "spec", "--title", "Fid Spec", "--parent", prd, "--content", "## Overview/Goal\nx\n\n## Scope\nx\n\n## Acceptance Criteria\nx", "--no-ai"]).stdout);
+  specSlug = spec;
   mustRun(["ac", "add", spec, "AC-FID-1", "--statement", "a duplicate criterion id is refused", "--mode", "human", "--cite", "BR-1"]);
 });
 
@@ -161,5 +163,24 @@ describe("lore baseline fidelity (CLI)", () => {
   it("BOUNDARY: --judges 3 is refused with exit 2", () => {
     const r = runLore(["baseline", "fidelity", "--size", "1", "--seed", "12", "--judges", "3", "--ai"], "agent");
     expect(r.exitCode).toBe(2);
+  });
+
+  it("AS-17: human output prints a NOT SEEN line naming the unreadable test file and a not_seen count, never BAD for it", () => {
+    mustRun([
+      "ac", "add", specSlug, "AC-FID-2", "--statement", "a criterion whose test file is missing", "--mode", "script",
+      "--oracle", "test", "--command", "bunx vitest run tests/missing-fid.test.ts", "--cite", "BR-1", "--allow-missing-path", "fixture: file intentionally absent",
+    ]);
+    // the judge sees only the readable item; its position is not known in advance, so the stub fills @N@.
+    scriptReply('[{"n": @N@, "verdict": "faithful", "reason": "ok"}]');
+    const r = runLore(["baseline", "fidelity", "--size", "2", "--seed", "13", "--ai"]);
+    expect(r.stderr).not.toContain("Error:");
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("NOT SEEN tests/missing-fid.test.ts");
+    expect(r.stdout).not.toMatch(/BAD .*AC-FID-2/);
+    expect(r.stdout).toContain("not_seen: 1");
+    expect(readFileSync(capture, "utf8")).not.toContain("missing-fid");
+    const slug = r.stdout.match(/Stored (\S+):/)?.[1] ?? "";
+    const doc = JSON.parse(mustRun(["get", slug, "--json"]).stdout) as { data: { doc?: { content: string }; content?: string } };
+    expect((doc.data.doc ?? doc.data).content).toContain("not_seen: 1");
   });
 });
