@@ -36,6 +36,10 @@ export interface BaselineStatus {
   rules_total: number;
   rules_by_lifecycle: Record<RuleLifecycle, number>;
   rules_by_verification: RuleStateCounts["by_verification"];
+  /** Which family each counted rule belongs to; BR + AS = `rules_total`. */
+  rules_by_family: { BR: number; AS: number };
+  /** AD-n debt entries (architecture debt-registry): not citable, so NOT in the rules_* totals — reported apart. */
+  debt_entries: number;
   /** Live rules no AC cites. */
   rules_uncovered: number;
   /** Live rules whose statement trips the BL-11 implementation-detail lint. */
@@ -251,7 +255,13 @@ export async function computeBaselineStatus(
   // reason: a stray index row in an otherwise baseline-free corpus is itself a finding worth a block.
   if (baselineDocs.value.length === 0 && !specs.value.some(hasCites) && indexMismatch.value === 0) return ok(null);
 
-  const leaves = baselineDocs.value.filter((d) => d.extra["node"] === "leaf");
+  // reason: BR-670 — totals cover every citable rule-holding node (business leaf BR, architecture standard AS);
+  // the family comes from core's node-kind SSOT, never a hand-listed kind. Debt-registry AD entries are counted apart.
+  const holders = baselineDocs.value.filter((d) => {
+    const family = ruleIdPrefixOfNode(d.extra);
+    return family === "BR" || family === "AS";
+  });
+  const debtRegistries = baselineDocs.value.filter((d) => ruleIdPrefixOfNode(d.extra) === "AD");
   const counts = await ruleState.counts();
   if (!counts.ok) return counts;
   const findings = await findBaselineIntegrityFindings(store);
@@ -260,7 +270,7 @@ export async function computeBaselineStatus(
   if (!exemptions.ok) return exemptions;
 
   // reason: a criterion may cite an AS-n (BR-980), so the citation judgement (dangling / inactive) indexes
-  // every rule-holding node; the rules_* MEASURES below iterate the business `leaves` only (BR-979).
+  // every rule-holding node; the rules_* MEASURES below iterate the citable holders (BR leaf + AS standard, BR-670).
   const index = buildRuleIndex(baselineDocs.value.filter((d) => ruleIdPrefixOfNode(d.extra) !== undefined));
   const citations = countCitations(specs.value, index);
   const cited = new Set<string>();
@@ -276,14 +286,18 @@ export async function computeBaselineStatus(
   const byLifecycle: Record<RuleLifecycle, number> = { live: 0, deprecated: 0, retired: 0 };
   let uncovered = 0;
   let implDetail = 0;
+  const byFamily = { BR: 0, AS: 0 };
   const seen = new Set<string>();
-  for (const leaf of leaves) {
-    for (const rule of ruleRecordsOf(leaf)) {
+  for (const holder of holders) {
+    for (const rule of ruleRecordsOf(holder)) {
       if (seen.has(rule.id) || index.get(rule.id) === undefined) continue;
       seen.add(rule.id);
+      const family = ruleIdPrefixOfNode(holder.extra) as "BR" | "AS";
+      byFamily[family] += 1;
       const lifecycle = index.get(rule.id)?.lifecycle as RuleLifecycle;
       byLifecycle[lifecycle] += 1;
-      if (lifecycle !== "live") continue;
+      // reason: BR-979 — completeness (uncovered / implementation-detail lint) measures business rules only.
+      if (family !== "BR" || lifecycle !== "live") continue;
       if (!cited.has(rule.id)) uncovered += 1;
       if (lintRuleStatement(rule.statement, { pathExists }).length > 0) implDetail += 1;
     }
@@ -293,6 +307,8 @@ export async function computeBaselineStatus(
     rules_total: counts.value.rules_total,
     rules_by_lifecycle: byLifecycle,
     rules_by_verification: counts.value.by_verification,
+    rules_by_family: byFamily,
+    debt_entries: debtRegistries.reduce((n, d) => n + ruleRecordsOf(d).length, 0),
     rules_uncovered: uncovered,
     rules_with_impl_detail: implDetail,
     ...citations,

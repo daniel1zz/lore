@@ -261,7 +261,9 @@ const SLICE1_BASELINE_STATUS_KEYS = [
   "acs_total", "acs_citing", "acs_uncited", "cites_dangling", "cites_to_inactive", "ambiguous_ac_ref", "registry_mismatch",
 ];
 /** spec-baseline-slice-2 C5: the only status additions slice 2a may make. */
-const C5_STATUS_ADDITIONS = ["index_mismatch", "exemptions_active", "exemptions_expired", "exemption_ratio"];
+// RE-BASELINE (fip AC-FIP-4, BR-670): old set = the four C5 keys only; the baseline block also names the rule family
+// of every counted rule (`rules_by_family`) and the AD entries the totals leave out (`debt_entries`).
+const C5_STATUS_ADDITIONS = ["index_mismatch", "exemptions_active", "exemptions_expired", "exemption_ratio", "rules_by_family", "debt_entries"];
 
 /** Literal `data` key set of `status --json` in a no-baseline corpus before slice 3a added `ac_cite` (observed, then frozen). */
 const PRE_SLICE_3A_STATUS_DATA_KEYS: string[] = ["total_docs", "invalid_docs", "by_type", "by_status", "last_updated", "db_size_bytes", "invalidated_feeding_source_warnings", "exempt_plans", "ai_defaults", "open_stale_candidates", "code_anchor_specs", "verification_profiles", "pass_unfalsified_count", "unclaimed_oracle", "unredeemed_allow_missing_path_count", "capture_source_runner_count", "capture_source_self_report_count", "adopted_abandoned_count", "binary_provenance"];

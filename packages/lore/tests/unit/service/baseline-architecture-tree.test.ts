@@ -27,8 +27,9 @@
  *   C6. Numbering: the spec says "never collide" and "never reused", not whether n is global or per
  *       prefix. This file asserts only what holds under BOTH: every full id is unique, ids of one family
  *       strictly increase over time, and a retired id's n is never handed out again in its family.
- *   C7. `computeBaselineStatus` counts business rules only: rules_total, rules_by_lifecycle and
- *       rules_uncovered ignore AS and AD rules; a citation of a live AS-n is not `cites_dangling`.
+ *   C7. `computeBaselineStatus` (BR-670): rules_total and rules_by_lifecycle count BR and AS rules (AD debt
+ *       entries are reported apart as `debt_entries`); rules_uncovered stays business-only (BR-979); a
+ *       citation of a live AS-n is not `cites_dangling`.
  *   C8. `indexBaseline(docs).branches` lists business branches only (an architecture section is never a
  *       branch); `branchOfRule` never maps an AS/AD rule (they hang under no business branch).
  *
@@ -482,16 +483,18 @@ describe("architecture tree (BL-5)", () => {
       expect((await status(w)).rules_uncovered).toBe(1);
     });
 
-    it("AS and AD rules are not counted in rules_total or rules_by_lifecycle", async () => {
+    it("AS rules are counted in rules_total and rules_by_lifecycle; AD entries are not (BR-670)", async () => {
       const w = await world();
       await seedBusiness(w);
       await addRuleId(w.rules, w.standards[0] as DocRecord, "std");
       await addRuleId(w.rules, w.debts[0] as DocRecord, "debt");
       const s = await status(w);
-      expect({ total: s.rules_total, live: s.rules_by_lifecycle.live }).toEqual({ total: 2, live: 2 });
+      expect({ total: s.rules_total, live: s.rules_by_lifecycle.live, family: s.rules_by_family, debt: s.debt_entries }).toEqual({
+        total: 3, live: 3, family: { BR: 2, AS: 1 }, debt: 1,
+      });
     });
 
-    it("the business measurements are identical with and without an architecture tree (negative control)", async () => {
+    it("the business completeness measurements are identical with and without an architecture tree (negative control)", async () => {
       const bare = await world({ architecture: false });
       await seedBusiness(bare);
       const full = await world();
@@ -499,9 +502,10 @@ describe("architecture tree (BL-5)", () => {
       await addRuleId(full.rules, full.standards[0] as DocRecord, "std");
       const a = await status(bare);
       const b = await status(full);
-      expect({ total: b.rules_total, uncovered: b.rules_uncovered, lifecycle: b.rules_by_lifecycle, mismatch: b.registry_mismatch }).toEqual({
-        total: a.rules_total, uncovered: a.rules_uncovered, lifecycle: a.rules_by_lifecycle, mismatch: a.registry_mismatch,
+      expect({ uncovered: b.rules_uncovered, business: b.rules_by_family.BR, mismatch: b.registry_mismatch }).toEqual({
+        uncovered: a.rules_uncovered, business: a.rules_by_family.BR, mismatch: a.registry_mismatch,
       });
+      expect(b.rules_total).toBe(a.rules_total + 1);
     });
 
     it("a citation of a live AS rule is not a dangling cite", async () => {

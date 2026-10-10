@@ -152,7 +152,7 @@ async function runStatesTree(args: Record<string, unknown>): Promise<void> {
     }
 
     if (json) {
-      const nodes = tree.value.map((n: BaselineTreeEntry) => ({ ...n, rule_states: n.node === "leaf" ? (byLeaf.get(n.slug) ?? []) : [] }));
+      const nodes = tree.value.map((n: BaselineTreeEntry) => ({ ...n, rule_states: byLeaf.get(n.slug) ?? [] }));
       console.log(JSON.stringify({ ok: true, data: { tree: nodes, computed_from: full.value.computed_from, ambiguous_ac_ref: full.value.ambiguous_ac_ref } }, null, 2));
       return;
     }
@@ -163,7 +163,8 @@ async function runStatesTree(args: Record<string, unknown>): Promise<void> {
     for (const entry of tree.value) {
       const indent = "  ".repeat(entry.depth);
       console.log(`${indent}${entry.node} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})`);
-      if (entry.node === "leaf") for (const r of byLeaf.get(entry.slug) ?? []) renderRuleState(r, `${indent}  `);
+      // reason: byLeaf is keyed by the rule-holding doc (business leaf or architecture standard, BR-670); any other node has no entry.
+      for (const r of byLeaf.get(entry.slug) ?? []) renderRuleState(r, `${indent}  `);
     }
     renderComputedFrom(full.value);
   } finally {

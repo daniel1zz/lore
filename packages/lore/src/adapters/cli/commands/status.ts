@@ -1999,6 +1999,16 @@ export default defineCommand({
       // which binary issued this report is itself the fact worth printing.
       console.log(formatBinaryProvenanceStatusLine(embeddedProvenance));
 
+      // BR-670 / AC-FIP-4 — rule totals over BOTH trees, one line, only when the baseline block exists
+      // (a corpus without baseline docs prints byte-identical output). AD debt entries are named apart.
+      if (baselineStatus !== null) {
+        console.log(
+          `\nBaseline rules: ${baselineStatus.rules_total} (BR ${baselineStatus.rules_by_family.BR}, AS ${baselineStatus.rules_by_family.AS}; ` +
+            `live ${baselineStatus.rules_by_lifecycle.live}, deprecated ${baselineStatus.rules_by_lifecycle.deprecated}, retired ${baselineStatus.rules_by_lifecycle.retired}); ` +
+            `${baselineStatus.debt_entries} AD debt entries not counted`,
+        );
+      }
+
       // baseline slice 1 §C7 — one line, only when a warning count is non-zero (report-only).
       if (baselineStatus !== null && baselineWarningCount(baselineStatus) > 0) {
         console.log(

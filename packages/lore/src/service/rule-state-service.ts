@@ -2,7 +2,7 @@
  * Module: rule-state-service — read-time verification state of baseline rules.
  *
  * Purpose: answer "is this baseline rule backed by evidence that still holds?" by joining
- *   baseline leaf rules -> citing script-mode ACs (`cites`) -> runner-attested evidence
+ *   baseline rules (business leaf BR-n and architecture standard AS-n; AD-n debt entries are not citable and are excluded) -> citing script-mode ACs (`cites`) -> runner-attested evidence
  *   (resolved to (spec, AC) through plan lineage) -> git staleness of the citing spec's
  *   code anchors. State is computed on read and never stored.
  * Public surface: {@link RuleStateService} (`counts`, `full`), {@link GitPort}, and the
@@ -32,7 +32,7 @@
  * Source: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C6, QA-3/4/5.
  */
 
-import { err, extractEvidence, ok, parseCodeAnchor } from "@lore/core";
+import { err, extractEvidence, ok, parseCodeAnchor, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, DocType, EvidenceEntry, LoreError, Result, RuleLifecycle } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
@@ -188,7 +188,7 @@ function isConclusiveAttested(e: EvidenceEntry): e is EvidenceEntry & { result: 
   return e.attestation !== undefined && (e.result === "pass" || e.result === "fail");
 }
 
-/** Index of rules in leaf docs: first occurrence of an id wins (same rule as `buildRuleIndex`). */
+/** Index of rules in citable rule-holding docs (business leaf, architecture standard): first occurrence of an id wins (same rule as `buildRuleIndex`). */
 function collectRules(leaves: readonly DocRecord[]): Array<{ id: string; leaf: string; lifecycle: RuleLifecycle }> {
   const seen = new Map<string, { id: string; leaf: string; lifecycle: RuleLifecycle }>();
   for (const leaf of leaves) {
@@ -213,7 +213,10 @@ function buildSnapshot(docs: readonly DocRecord[]): Snapshot {
   const tasks: DocRecord[] = [];
   for (const doc of docs) {
     if (doc.version > corpusVersion) corpusVersion = doc.version;
-    if (doc.type === "baseline" && doc.extra["node"] === "leaf") leaves.push(doc);
+    // reason: a rule is citable (BR-980) on every node whose family is BR or AS; AD debt entries are not
+    // citable, so they never get a verification state. Family comes from core's node-kind SSOT.
+    const family = doc.type === "baseline" ? ruleIdPrefixOfNode(doc.extra) : undefined;
+    if (family === "BR" || family === "AS") leaves.push(doc);
     else if (doc.type === "spec") specs.push(doc);
     else if (doc.type === "plan") plans.set(doc.id, doc);
     else if (doc.type === "task") tasks.push(doc);
@@ -420,7 +423,7 @@ export class RuleStateService {
         return err({
           code: "VALIDATION_ERROR",
           field: "rule",
-          message: `rule '${opts.rule}' is not held by any live baseline leaf`,
+          message: `rule '${opts.rule}' is not held by any live business leaf or architecture standard`,
           value: opts.rule,
         });
       }
