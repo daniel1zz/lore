@@ -8,13 +8,14 @@
  * REGRESSION (existing rule line fields still rendered).
  */
 import { describe, it, expect } from "vitest";
-import { REVIEW_TEMPLATES } from "../../../src/ai/review-template.js";
+import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
 import type { DocRecord, ReviewBundle, CheckResult } from "@lore/core";
 
 const BUDGETS = { max_doc_chars: 8000, max_context_chars: 4000 };
 const NOW = "2026-02-01T00:00:00.000Z";
 const CHECKS: CheckResult[] = [{ check: "schema", outcome: "pass" }];
-const v2 = REVIEW_TEMPLATES["v2"]!;
+// The ACTIVE version must carry the four parts (AC-BLC-5); v2 is frozen and tested separately below.
+const v2 = REVIEW_TEMPLATES[REVIEW_PROMPT_VERSION]!;
 
 function makeBaselineBundle(extra: Record<string, unknown>): ReviewBundle {
   const doc = {
@@ -105,5 +106,43 @@ describe("AC-BLC-5 — judge sees architecture standard four parts", () => {
     const out = v2(standardNode(rules), CHECKS, BUDGETS, NOW).prompt;
     expect(out).toMatch(/\[\d+ rules omitted for prompt budget/);
     expect(out).toContain("REALITY-1-");
+  });
+});
+
+describe("AC-BLC-5 — prompt version freeze", () => {
+  const frozenV2 = REVIEW_TEMPLATES["v2"]!;
+  const v3 = REVIEW_TEMPLATES["v3"]!;
+
+  it("STATE: the active version is v3", () => {
+    expect(REVIEW_PROMPT_VERSION).toBe("v3");
+  });
+
+  it("REGRESSION: v2 output for a standard node is byte-identical to its pre-fix render (no four parts)", () => {
+    const bundle = standardNode([standardRule(1)]);
+    const out = frozenV2(bundle, CHECKS, BUDGETS, NOW).prompt;
+    // Pre-fix block: the rule line is the last entry line before the closing fence.
+    expect(out).toContain(
+      "rules (1):\n- AS-1 [confidence=established, lifecycle=live, enforced_by=prompt-only]: standard statement 1\n```\n",
+    );
+    for (const key of ["current_reality", "target_rule", "current_exceptions", "migration"]) {
+      expect(out).not.toContain(key);
+    }
+  });
+
+  it("HAPPY: v3 equals v2 plus exactly the four-part lines", () => {
+    const bundle = standardNode([standardRule(1)]);
+    const v2Out = frozenV2(bundle, CHECKS, BUDGETS, NOW).prompt;
+    const v3Out = v3(bundle, CHECKS, BUDGETS, NOW).prompt;
+    expect(v3Out).toContain("current_reality: REALITY-1-x");
+    const stripped = v3Out.replace(/\n {2}(current_reality|target_rule|current_exceptions|migration): [^\n]*/g, "");
+    expect(stripped).toBe(v2Out);
+  });
+
+  it("REGRESSION: v2 and v3 are byte-identical for a business leaf", () => {
+    const leaf = makeBaselineBundle({
+      node: "leaf",
+      rules: [{ id: "BR-1", statement: "s", confidence: "established", enforced_by: "guaranteed", examples: ["e"], lifecycle: "live" }],
+    });
+    expect(v3(leaf, CHECKS, BUDGETS, NOW).prompt).toBe(frozenV2(leaf, CHECKS, BUDGETS, NOW).prompt);
   });
 });

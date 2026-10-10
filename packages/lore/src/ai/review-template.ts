@@ -91,7 +91,7 @@ import type { CheckResult, ReviewBundle, AcceptanceCriterion, BaselineRule } fro
  * verbatim into `judge.prompt_version` on every review judgment (SPEC-034 §2) so calibration
  * queries can filter/aggregate per prompt version without a join.
  */
-export const REVIEW_PROMPT_VERSION = "v2";
+export const REVIEW_PROMPT_VERSION = "v3";
 
 /**
  * The exact advisory-only clause the v2 prompt embeds (SPEC-053 AC-053-4). Exported so a
@@ -367,7 +367,7 @@ function renderStandardFourParts(rule: BaselineRule): string {
 }
 
 /** Pure render of a baseline node's structured parts (rules, depends_on, glossary). */
-function renderBaselineStructuredSection(doc: ReviewBundle["doc"]): string {
+function renderBaselineStructuredSection(doc: ReviewBundle["doc"], withFourParts: boolean): string {
   const heading = "Structured Data of the Document Under Review";
   const parsed = baselineExtraSchema.safeParse(doc.extra ?? {});
   if (!parsed.success) {
@@ -394,7 +394,7 @@ function renderBaselineStructuredSection(doc: ReviewBundle["doc"]): string {
       (r) =>
         `- ${r.id} [confidence=${r.confidence}, lifecycle=${r.lifecycle}, enforced_by=${r.enforced_by}]: ${r.statement}` +
         (r.retired_note !== undefined ? ` (retired: ${r.retired_note})` : "") +
-        renderStandardFourParts(r),
+        (withFourParts ? renderStandardFourParts(r) : ""),
     );
     parts.push(`rules (${entries.length}):\n${renderCappedEntries(entries, "rules")}`);
   }
@@ -440,8 +440,8 @@ function renderPlanParentCriteriaSection(parent: NonNullable<ReviewBundle["paren
  * -> its rules/depends_on/glossary; plan -> its parent spec's acceptance criteria; any other
  * doc type -> `""` (a spec's own criteria are already rendered by the v2 advisory block).
  */
-function renderStructuredPartsSection(bundle: ReviewBundle): string {
-  if (bundle.doc.type === "baseline") return renderBaselineStructuredSection(bundle.doc);
+function renderStructuredPartsSection(bundle: ReviewBundle, withFourParts: boolean): string {
+  if (bundle.doc.type === "baseline") return renderBaselineStructuredSection(bundle.doc, withFourParts);
   if (bundle.doc.type === "plan" && bundle.parent !== undefined) {
     return renderPlanParentCriteriaSection(bundle.parent);
   }
@@ -599,8 +599,33 @@ function buildReviewPromptV2(
   budgets: ReviewBudgets,
   nowIso?: string,
 ): BuildReviewPromptResult {
+  return buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, false);
+}
+
+/**
+ * v3 review judge prompt (lore #126, BR-960) — v2 plus, for an architecture standard rule, its
+ * four parts (current reality, target rule, current exceptions, migration) rendered verbatim.
+ * Output for every doc without a four-part rule is byte-identical to v2.
+ */
+function buildReviewPromptV3(
+  bundle: ReviewBundle,
+  checks: CheckResult[],
+  budgets: ReviewBudgets,
+  nowIso?: string,
+): BuildReviewPromptResult {
+  return buildReviewPromptWithStructuredParts(bundle, checks, budgets, nowIso, true);
+}
+
+/** Shared v2/v3 body; `withFourParts` is the ONLY difference between the two versions. */
+function buildReviewPromptWithStructuredParts(
+  bundle: ReviewBundle,
+  checks: CheckResult[],
+  budgets: ReviewBudgets,
+  nowIso: string | undefined,
+  withFourParts: boolean,
+): BuildReviewPromptResult {
   const criteria = extractSpecAcceptanceCriteria(bundle);
-  const structuredSection = renderStructuredPartsSection(bundle);
+  const structuredSection = renderStructuredPartsSection(bundle, withFourParts);
   if (criteria.length === 0) {
     return assembleReviewPrompt(bundle, checks, budgets, nowIso, NO_ADVISORY, structuredSection);
   }
@@ -621,13 +646,15 @@ function buildReviewPromptV2(
 /**
  * Version-keyed registry of review judge prompt builders. `v1` (SPEC-034, frozen —
  * byte-identical to its original output, locked by the `review-prompt-v1.txt` fixture) and
- * `v2` (SPEC-053, adds the non-blocking AC-quantifiability advisory dimension). The active
+ * `v2` (SPEC-053, adds the non-blocking AC-quantifiability advisory dimension, frozen) and
+ * `v3` (lore #126, v2 plus an architecture standard rule's four parts). The active
  * key is `REVIEW_PROMPT_VERSION`. A future prompt spec adds a NEW key here rather than
  * mutating an existing one, so historical judgments' `judge.prompt_version` stays meaningful.
  */
 export const REVIEW_TEMPLATES: Record<string, ReviewTemplateFn> = {
   v1: buildReviewPromptV1,
   v2: buildReviewPromptV2,
+  v3: buildReviewPromptV3,
 };
 
 /**
