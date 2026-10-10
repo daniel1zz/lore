@@ -104,6 +104,7 @@ import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
+import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import { isPlanMember } from "./plan-membership.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
@@ -3460,7 +3461,28 @@ export class CorpusService {
   // ── Tree ─────────────────────────────────────────────────────────────────
 
   /**
-   * Build a document tree starting from rootIdOrSlug (or first PRD if none given).
+   * The strategy document (first PRD, `created_at` ASC) — the SSOT every navigation caller shares
+   * (see `navigation-roots.ts`). `ok(null)` when the corpus has no live PRD.
+   */
+  async findStrategyDocument(): Promise<Result<DocRecord | null, LoreError>> {
+    const prdsResult = await this.store.findMany({ type: "prd" });
+    if (!prdsResult.ok) return prdsResult;
+    return ok(pickStrategyDocument(prdsResult.value) ?? null);
+  }
+
+  /**
+   * The baseline root (`extra.node === "root"`; oldest created when several exist) or `ok(null)`.
+   */
+  async findBaselineRoot(): Promise<Result<DocRecord | null, LoreError>> {
+    const baselineResult = await this.store.findMany({ type: "baseline" });
+    if (!baselineResult.ok) return baselineResult;
+    return ok(pickBaselineRoot(baselineResult.value) ?? null);
+  }
+
+  /**
+   * Build a document tree starting from rootIdOrSlug. With no root given the default is the
+   * baseline root when one exists, else the strategy document (first PRD). An explicit root is
+   * never redirected (AC-BLS3-3, BR-981/BR-982).
    * Depth defaults to 3.
    */
   async tree(rootIdOrSlug?: string, opts?: TreeOpts): Promise<Result<TreeNode, LoreError>> {
@@ -3479,10 +3501,11 @@ export class CorpusService {
       }
       rootDoc = findResult.value;
     } else {
-      // Find first PRD
-      const prdsResult = await this.store.findMany({ type: "prd" });
-      if (!prdsResult.ok) return prdsResult;
-      const first = prdsResult.value[0];
+      const baselineRootResult = await this.findBaselineRoot();
+      if (!baselineRootResult.ok) return baselineRootResult;
+      const strategyResult = baselineRootResult.value === null ? await this.findStrategyDocument() : baselineRootResult;
+      if (!strategyResult.ok) return strategyResult;
+      const first = baselineRootResult.value ?? strategyResult.value;
       if (!first) {
         return err({ code: "DOC_NOT_FOUND", id: "prd", suggestions: ["No PRD documents found"] });
       }

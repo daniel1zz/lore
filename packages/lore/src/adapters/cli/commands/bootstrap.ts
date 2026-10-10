@@ -103,6 +103,7 @@ export function formatBootstrapReport(report: BootstrapReportWithStaleness, by: 
   lines.push(
     report.root !== null ? `Root: ${report.root.slug} "${report.root.title}"` : "Root: (none)",
   );
+  if (report.strategy !== undefined) lines.push(`Strategy: ${report.strategy.slug} "${report.strategy.title}"`);
   lines.push("");
 
   lines.push(`Active plans (${report.active_plans.length}):`);
