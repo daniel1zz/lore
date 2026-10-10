@@ -211,6 +211,7 @@ import {
   REQUIREMENT_PRIORITIES,
   extractFileAnchors,
   BASELINE_NODE_KINDS,
+  BASELINE_TREES,
   RULE_CONFIDENCES,
   RULE_ENFORCEMENTS,
   RULE_LIFECYCLES,
@@ -947,12 +948,24 @@ export const LoreRequirementAddSchema = z.object({
  * required: MCP callers pass actor identity explicitly (same precedent as `lore_claim`).
  * Statement/example length limits are enforced by `baselineRuleSchema` inside the service.
  */
+/**
+ * Four-part standard fields (architecture `AS-n` rules only; all four or none — `baselineRuleSchema`
+ * enforces it, and every `current_exceptions` id must be a live `AD-n`). Shared by rule add and set.
+ */
+const FOUR_PART_STANDARD_SHAPE = {
+  current_reality: z.string().min(1).optional(),
+  target_rule: z.string().min(1).optional(),
+  current_exceptions: z.array(z.string().min(1)).optional(),
+  migration: z.string().min(1).optional(),
+};
+
 export const LoreRuleAddSchema = z.object({
   leaf: z.string().min(1),
   statement: z.string().min(1),
   confidence: z.enum(RULE_CONFIDENCES),
   enforced_by: z.enum(RULE_ENFORCEMENTS),
   examples: z.array(z.string()).min(1),
+  ...FOUR_PART_STANDARD_SHAPE,
   by: z.string().min(1),
 });
 
@@ -965,6 +978,7 @@ export const LoreRuleSetSchema = z.object({
   lifecycle: z.enum(RULE_LIFECYCLES).optional(),
   note: z.string().min(1).optional(),
   move_to: z.string().min(1).optional(),
+  ...FOUR_PART_STANDARD_SHAPE,
   by: z.string().min(1),
 });
 
@@ -988,6 +1002,7 @@ export const LoreRuleImpactSchema = z.object({
 
 export const LoreBaselineAddSchema = z.object({
   parent: z.string().min(1),
+  tree: z.enum(BASELINE_TREES).optional(),
   node: z.enum(BASELINE_NODE_KINDS),
   label: z.string().min(1),
   title: z.string().min(1),
@@ -2961,13 +2976,22 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   registerToolWithArgs(
     server,
     "lore_rule_add",
-    "Append a new live rule to a baseline leaf and allocate its permanent BR-n id — the sole MCP write path for extra.rules",
+    "Append a new live rule to a baseline leaf (BR-n), architecture standard (AS-n) or debt-registry (AD-n) and allocate its permanent id; a standard may carry the four parts current_reality/target_rule/current_exceptions/migration (all or none) — the sole MCP write path for extra.rules",
     LoreRuleAddSchema,
     async (args) =>
       withRuleService((svc) =>
         svc.addRule(
           args.leaf,
-          { statement: args.statement, confidence: args.confidence, enforced_by: args.enforced_by, examples: args.examples },
+          {
+            statement: args.statement,
+            confidence: args.confidence,
+            enforced_by: args.enforced_by,
+            examples: args.examples,
+            ...(args.current_reality !== undefined ? { current_reality: args.current_reality } : {}),
+            ...(args.target_rule !== undefined ? { target_rule: args.target_rule } : {}),
+            ...(args.current_exceptions !== undefined ? { current_exceptions: args.current_exceptions } : {}),
+            ...(args.migration !== undefined ? { migration: args.migration } : {}),
+          },
           { by: args.by },
         ),
       ),
@@ -2977,7 +3001,7 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   registerToolWithArgs(
     server,
     "lore_rule_set",
-    "Edit a baseline rule, advance its lifecycle (forward-only; retired needs note) or move it to another leaf keeping its BR-n id",
+    "Edit a baseline rule (incl. an AS rule's four parts), advance its lifecycle (forward-only; retired needs note) or move it to another leaf keeping its id",
     LoreRuleSetSchema,
     async (args) => {
       const patch: SetRulePatch = {
@@ -2988,6 +3012,10 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
         ...(args.lifecycle !== undefined ? { lifecycle: args.lifecycle } : {}),
         ...(args.note !== undefined ? { note: args.note } : {}),
         ...(args.move_to !== undefined ? { moveTo: args.move_to } : {}),
+        ...(args.current_reality !== undefined ? { current_reality: args.current_reality } : {}),
+        ...(args.target_rule !== undefined ? { target_rule: args.target_rule } : {}),
+        ...(args.current_exceptions !== undefined ? { current_exceptions: args.current_exceptions } : {}),
+        ...(args.migration !== undefined ? { migration: args.migration } : {}),
       };
       return withRuleService((svc) => svc.setRule(args.rule, patch, { by: args.by }));
     },
@@ -3037,13 +3065,13 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   registerToolWithArgs(
     server,
     "lore_baseline_add",
-    "Create a baseline node (root under a PRD; branch/leaf under a baseline root|branch)",
+    "Create a baseline node. Business (default): root under a PRD, branch/leaf under a root|branch. tree=architecture: root under a PRD, section under the architecture root, module-card|standard|debt-registry under a section",
     LoreBaselineAddSchema,
     async (args) =>
       withRuleService((svc) =>
         svc.addNode(
           args.parent,
-          { node: args.node, label: args.label, title: args.title, content: args.content ?? "" },
+          { ...(args.tree !== undefined ? { tree: args.tree } : {}), node: args.node, label: args.label, title: args.title, content: args.content ?? "" },
           { by: args.by },
         ),
       ),

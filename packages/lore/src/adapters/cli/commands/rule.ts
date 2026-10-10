@@ -2,9 +2,12 @@
  * lore rule — the dedicated writer of baseline rules (permanent `BR-n` ids).
  *
  * Subcommands (thin pipes over `RuleService`):
- *   add <leaf> --statement <s> --confidence <c> --enforced-by <e> --example <x> [--example <y> ...]
- *       Allocate the next permanent id and append a `live` rule to a baseline leaf.
+ *   add <leaf|standard|debt-registry> --statement <s> --confidence <c> --enforced-by <e> --example <x> [--example <y> ...]
+ *       [--current-reality <t> --target-rule <t> (--current-exception AD-n... | --current-exceptions-none) --migration <t>]
+ *       Allocate the next permanent id (BR-n on a business leaf, AS-n on an architecture standard, AD-n on a
+ *       debt-registry) and append a `live` rule. The four-part standard flags are AS-only, all four or none.
  *   set <BR-n> [--statement ..] [--confidence ..] [--enforced-by ..] [--example ..]
+ *              [--current-reality ..] [--target-rule ..] [--current-exception AD-n ... | --current-exceptions-none] [--migration ..]
  *              [--lifecycle deprecated|retired] [--note <retirement note>] [--move-to <leaf>]
  *       Edit a rule, move it forward through its lifecycle (never back to live; retired needs
  *       --note), or relocate it to another leaf keeping its id.
@@ -46,6 +49,28 @@ function requireRuleService(app: App) {
   }
   return app.ruleService;
 }
+
+/**
+ * The four-part standard fields from flags. `--current-exception` and `--current-exceptions-none`
+ * are mutually exclusive; each part is passed only when given (the service enforces all-or-nothing).
+ */
+function fourPartFromArgs(args: Record<string, unknown>): { ok: true; parts: FourPartFlags } | { ok: false; message: string } {
+  const exceptions = repeatable(args["current-exception"]);
+  if (exceptions !== undefined && args["current-exceptions-none"] === true) {
+    return { ok: false, message: "pass either --current-exception AD-n... or --current-exceptions-none, not both" };
+  }
+  return {
+    ok: true,
+    parts: {
+      ...(args["current-reality"] !== undefined ? { current_reality: args["current-reality"] as string } : {}),
+      ...(args["target-rule"] !== undefined ? { target_rule: args["target-rule"] as string } : {}),
+      ...(exceptions !== undefined ? { current_exceptions: exceptions } : args["current-exceptions-none"] === true ? { current_exceptions: [] } : {}),
+      ...(args.migration !== undefined ? { migration: args.migration as string } : {}),
+    },
+  };
+}
+
+type FourPartFlags = Pick<AddRuleInput, "current_reality" | "target_rule" | "current_exceptions" | "migration">;
 
 function failUsage(message: string, json: boolean): void {
   if (json) console.log(JSON.stringify({ ok: false, error: { code: "VALIDATION_ERROR", field: "args", message } }, null, 2));
@@ -132,6 +157,11 @@ export default defineCommand({
         confidence: { type: "string", description: "established | undecided | unconfirmed | observed", required: true },
         "enforced-by": { type: "string", description: "guaranteed | both | prompt-only", required: true },
         example: { type: "string", description: "[repeatable, 1-3 required] A concrete example, <= 300 chars" },
+        "current-reality": { type: "string", description: "[architecture standard] What the code does today (four-part standard: all four parts or none)" },
+        "target-rule": { type: "string", description: "[architecture standard] The rule the code should follow" },
+        "current-exception": { type: "string", description: "[architecture standard, repeatable] A live debt entry id (AD-n) that excepts this standard today" },
+        "current-exceptions-none": { type: "boolean", description: "[architecture standard] State that the standard has no current exceptions (empty list)" },
+        migration: { type: "string", description: "[architecture standard] How the exceptions get closed" },
         by: { type: "string", description: "Actor identity (default: resolved from $LORE_ACTOR)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
@@ -140,11 +170,14 @@ export default defineCommand({
         try {
           const svc = requireRuleService(app);
           if (svc === undefined) return;
-          const input = {
+          const four = fourPartFromArgs(args);
+          if (!four.ok) return failUsage(four.message, args.json === true);
+          const input: AddRuleInput = {
             statement: args.statement as string,
             confidence: args.confidence as AddRuleInput["confidence"],
             enforced_by: args["enforced-by"] as AddRuleInput["enforced_by"],
             examples: repeatable(args.example) ?? [],
+            ...four.parts,
           };
           const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(args.by as string | undefined) });
           if (!result.ok) return reportFailure(result.error, args.json === true);
@@ -166,6 +199,11 @@ export default defineCommand({
         confidence: { type: "string", description: "established | undecided | unconfirmed | observed" },
         "enforced-by": { type: "string", description: "guaranteed | both | prompt-only" },
         example: { type: "string", description: "[repeatable] Replace the examples wholesale (1-3)" },
+        "current-reality": { type: "string", description: "[architecture standard] What the code does today (replaces the stored part)" },
+        "target-rule": { type: "string", description: "[architecture standard] The rule the code should follow" },
+        "current-exception": { type: "string", description: "[architecture standard, repeatable] Replace the exceptions wholesale with these live debt entry ids (AD-n)" },
+        "current-exceptions-none": { type: "boolean", description: "[architecture standard] State that the standard has no current exceptions (empty list)" },
+        migration: { type: "string", description: "[architecture standard] How the exceptions get closed" },
         lifecycle: { type: "string", description: "deprecated | retired (forward-only; never back to live)" },
         note: { type: "string", description: "Retirement note — required with --lifecycle retired, stored as retired_note" },
         "move-to": { type: "string", description: "Destination baseline leaf (ID or slug); the BR-n id is unchanged" },
@@ -178,6 +216,8 @@ export default defineCommand({
           const svc = requireRuleService(app);
           if (svc === undefined) return;
           const examples = repeatable(args.example);
+          const four = fourPartFromArgs(args);
+          if (!four.ok) return failUsage(four.message, args.json === true);
           const patch: SetRulePatch = {
             ...(args.statement !== undefined ? { statement: args.statement as string } : {}),
             ...(args.confidence !== undefined ? { confidence: args.confidence as AddRuleInput["confidence"] } : {}),
@@ -186,6 +226,7 @@ export default defineCommand({
             ...(args.lifecycle !== undefined ? { lifecycle: args.lifecycle as NonNullable<SetRulePatch["lifecycle"]> } : {}),
             ...(args.note !== undefined ? { note: args.note as string } : {}),
             ...(args["move-to"] !== undefined ? { moveTo: args["move-to"] as string } : {}),
+            ...four.parts,
           };
           const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(args.by as string | undefined) });
           if (!result.ok) return reportFailure(result.error, args.json === true);

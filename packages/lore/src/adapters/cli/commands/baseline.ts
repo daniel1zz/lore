@@ -2,8 +2,10 @@
  * lore baseline — the dedicated writer of the product-baseline tree's nodes.
  *
  * Subcommands (thin pipes over `RuleService`):
- *   add <parent> --node root|branch|leaf --label <l> --title <t> [--content-file <path>]
- *       Create a baseline node (root under a PRD; branch/leaf under a root|branch).
+ *   add <parent> [--tree business|architecture] --node <kind> --label <l> --title <t> [--content-file <path>]
+ *       Create a baseline node. Business (default): root under a PRD, branch/leaf under a root|branch.
+ *       Architecture: root under a PRD, section under the architecture root, module-card|standard|
+ *       debt-registry under a section.
  *   set-label <node> <label>
  *   depends <leaf> [--add BR-n]... [--remove BR-n]...
  *   glossary add <node> --term <t> --meaning <m> [--note <n>]   (root|branch only)
@@ -43,8 +45,8 @@
 
 import { readFileSync } from "node:fs";
 import { defineCommand } from "citty";
-import { AiConfigSchema } from "@lore/core";
-import type { AIProvider, DocRecord, LoreError } from "@lore/core";
+import { AiConfigSchema, BASELINE_TREES } from "@lore/core";
+import type { AIProvider, BaselineTree, DocRecord, LoreError } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
@@ -376,7 +378,8 @@ export default defineCommand({
       meta: { name: "add", description: "Create a baseline node under a parent" },
       args: {
         parent: { type: "positional", description: "Parent: a PRD (for --node root) or a baseline root|branch (ID or slug)", required: true },
-        node: { type: "string", description: "root | branch | leaf", required: true },
+        tree: { type: "string", description: "business (default) | architecture. architecture nodes: root | section | module-card | standard | debt-registry" },
+        node: { type: "string", description: "business: root | branch | leaf; architecture: root | section | module-card | standard | debt-registry", required: true },
         label: { type: "string", description: "Short display label for the node", required: true },
         title: { type: "string", description: "Document title", required: true },
         "content-file": { type: "string", description: "Read the node body from this file (default: empty body)" },
@@ -384,6 +387,13 @@ export default defineCommand({
       },
       async run({ args }) {
         await withRuleService(async (svc) => {
+          if (args.tree !== undefined && !(BASELINE_TREES as readonly string[]).includes(args.tree as string)) {
+            reportFailure(
+              { code: "VALIDATION_ERROR", field: "tree", message: `--tree must be one of ${BASELINE_TREES.join(" | ")} (got '${String(args.tree)}')`, value: args.tree },
+              args.json === true,
+            );
+            return;
+          }
           let content = "";
           if (args["content-file"] !== undefined) {
             try {
@@ -396,7 +406,9 @@ export default defineCommand({
               return;
             }
           }
+          const tree = (args.tree as BaselineTree | undefined) ?? "business";
           const input: AddNodeInput = {
+            ...(args.tree !== undefined ? { tree } : {}),
             node: args.node as AddNodeInput["node"],
             label: args.label as string,
             title: args.title as string,
@@ -404,7 +416,7 @@ export default defineCommand({
           };
           const result = await svc.addNode(args.parent as string, input, { by: resolveActor(args.by as string | undefined) });
           if (!result.ok) return reportFailure(result.error, args.json === true);
-          if (args.json) console.log(JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node } }, null, 2));
+          if (args.json) console.log(JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node, tree } }, null, 2));
           else console.log(`Created baseline ${input.node} ${result.value.slug} (${result.value.id}).`);
         });
       },
@@ -623,7 +635,8 @@ export default defineCommand({
           for (const entry of result.value) {
             const counts = `live ${entry.rules.live} / deprecated ${entry.rules.deprecated} / retired ${entry.rules.retired}`;
             const rules = entry.node === "leaf" ? `  [rules: ${counts}]` : "";
-            console.log(`${"  ".repeat(entry.depth)}${entry.node} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})${rules}`);
+            const kind = entry.tree === "architecture" ? `architecture ${entry.node}` : entry.node;
+            console.log(`${"  ".repeat(entry.depth)}${kind} ${entry.label ?? entry.title} (${entry.slug}, ${entry.status})${rules}`);
           }
         });
       },
