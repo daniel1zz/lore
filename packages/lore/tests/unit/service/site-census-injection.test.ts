@@ -70,6 +70,7 @@ describe("census follows injected functions (#104)", () => {
       // `dynamic:` accepted: TursoStore's only refusal here is err(await getDuplicateSlugErrorFor(...)), a non-literal code.
       const hits = keys().filter((k) => /^packages\/lore\/src\/store\/[^#]+#[^#]*insertWithProvenance#(dynamic:|[A-Z_])/.test(k));
       expect(hits.length).toBeGreaterThanOrEqual(1);
+      expect(keys()).toContain("packages/lore/src/store/sqlite-store.ts#SQLiteStore.insertDocSync#DUPLICATE_SLUG");
     }, 120_000);
 
     it("lists a store addLink refusal site reached via injected addLink", () => {
