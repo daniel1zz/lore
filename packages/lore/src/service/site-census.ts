@@ -42,6 +42,15 @@
  *     implementation is chosen at runtime), so it is a dynamic (not_measured) site keyed
  *     `<declaring file>#<Interface>#<method>`, de-duplicated per interface method; the
  *     implementations behind it are NOT visited.
+ *   - Dependency injection is followed STATICALLY (issue #104, BR-659/BR-660). A call through a function-typed
+ *     property / parameter (`this.deps.create(x)`), and an interface call whose receiver is an injected property /
+ *     parameter (`this.store.insert(x)`), is resolved from the values BOUND to that property / parameter anywhere in
+ *     the analysed program: object-literal members whose contextual type declares the property, and the arguments
+ *     of every call / `new` that resolves to the parameter's function. A bound value is followed when it is an
+ *     arrow / function expression, a function reference, or `x.m.bind(x)`; an interface receiver is resolved from
+ *     the bound value's static type. Exactly one resolvable implementation -> it is followed and no dynamic site is
+ *     recorded; several are ALL followed AND one dynamic site is recorded (the runtime choice is not known); none, or
+ *     any bound value that is not statically resolvable -> one dynamic site. Never a guess, never a silent drop.
  *   - A failure site whose enclosing symbol is named in {@link NON_BUSINESS_SYMBOLS} (app
  *     bootstrap) lands in the result's `bootstrap` list, never in the main list. An interface call
  *     made from such a symbol is plumbing too and is not recorded.
@@ -410,6 +419,18 @@ function createWorkspaceHost(ts: typeof TS, options: TS.CompilerOptions, rootDir
   return host;
 }
 
+/** A value bound to an injected property / parameter; `shorthand` when `expr` is the name of `{ name }`. */
+interface BoundValue {
+  readonly expr: TS.Node;
+  readonly shorthand: boolean;
+}
+
+/** Functions an injected call may reach; `opaque` when some bound value could not be resolved statically. */
+interface BoundFunctions {
+  readonly fns: FunctionLike[];
+  readonly opaque: boolean;
+}
+
 /** Whole-walk state: visited set, collected sites, and the per-file symbol index. */
 class CensusWalker {
   private readonly visited = new Set<TS.Node>();
@@ -628,11 +649,285 @@ class CensusWalker {
     }
     const dispatch = this.interfaceMethodOf(callee);
     if (dispatch !== undefined) {
-      if (!this.isNonBusinessSymbol(this.enclosingSymbolName(call), call.getSourceFile())) this.addInterfaceSite(dispatch);
+      if (this.isNonBusinessSymbol(this.enclosingSymbolName(call), call.getSourceFile())) return;
+      const injected: BoundFunctions = this.ts.isPropertyAccessExpression(callee) ? this.implementationsBehindReceiver(callee) : { fns: [], opaque: true };
+      if (depth < MAX_CALL_DEPTH) for (const fn of injected.fns) this.visit(fn, depth + 1);
+      if (injected.fns.length !== 1 || injected.opaque) this.addInterfaceSite(dispatch);
+      return;
+    }
+    const targets = this.resolveTargets(callee);
+    if (targets.length === 0) {
+      this.handleInjectedCall(call, callee, depth);
       return;
     }
     if (depth >= MAX_CALL_DEPTH) return;
-    for (const target of this.resolveTargets(callee)) this.visit(target, depth + 1);
+    for (const target of targets) this.visit(target, depth + 1);
+  }
+
+  // ── dependency injection (#104) ──────────────────────────────────────────────
+
+  /** Declarations that hold an injected value: a function-typed member or a parameter (incl. a constructor parameter property). */
+  private isInjectionSource(decl: TS.Declaration): decl is TS.PropertySignature | TS.PropertyDeclaration | TS.ParameterDeclaration {
+    const ts = this.ts;
+    return ts.isPropertySignature(decl) || ts.isPropertyDeclaration(decl) || ts.isParameter(decl);
+  }
+
+  /** All of `decls` are injection sources declared in followable source. */
+  private allInjectionSources(decls: readonly TS.Declaration[]): boolean {
+    return decls.length > 0 && decls.every((d) => this.isInjectionSource(d) && this.isFollowable(d.getSourceFile()));
+  }
+
+  /**
+   * A call whose callee has no statically-resolvable body because it is an injected function-typed property /
+   * parameter: follow the bound implementations, and report a dynamic site unless exactly one resolved cleanly.
+   */
+  private handleInjectedCall(call: TS.CallExpression, callee: TS.Expression, depth: number): void {
+    const ts = this.ts;
+    const location = ts.isPropertyAccessExpression(callee) ? callee.name : callee;
+    if (!ts.isIdentifier(location)) return;
+    const decls = this.dealias(this.checker.getSymbolAtLocation(location))?.declarations ?? [];
+    if (!this.allInjectionSources(decls)) return;
+    const type = this.checker.getTypeAtLocation(location);
+    if (type.getCallSignatures().length === 0 && (type.flags & ts.TypeFlags.Any) === 0) return;
+    if (this.isNonBusinessSymbol(this.enclosingSymbolName(call), call.getSourceFile())) return;
+    const resolved = this.functionsBoundTo(decls, new Set(), 0);
+    if (depth < MAX_CALL_DEPTH) for (const fn of resolved.fns) this.visit(fn, depth + 1);
+    if (resolved.fns.length !== 1 || resolved.opaque) this.addSite(call, undefined, `dynamic:${this.label(callee)}`);
+  }
+
+  /** Implementations behind `receiver.method(..)` when `receiver` is an injected member / parameter bound to concrete values. */
+  private implementationsBehindReceiver(callee: TS.PropertyAccessExpression): BoundFunctions {
+    const through = this.injectionSourcesOf(callee.expression);
+    return through === undefined ? { fns: [], opaque: true } : this.methodsOfBoundValues(through, callee.name.text, new Set(), 0);
+  }
+
+  /** Functions bound to the injection sources `decls` (a function-typed member / parameter that is itself called). */
+  private functionsBoundTo(decls: readonly TS.Declaration[], seen: Set<TS.Node>, depth: number): BoundFunctions {
+    const fns = new Set<FunctionLike>();
+    let opaque = depth > MAX_CODE_RESOLVE_DEPTH;
+    if (opaque) return { fns: [], opaque };
+    for (const decl of decls) {
+      if (!this.isInjectionSource(decl)) {
+        opaque = true;
+        continue;
+      }
+      const bound = this.valuesBoundTo(decl, seen);
+      if (bound.opaque) opaque = true;
+      for (const value of bound.values) {
+        const inner = this.functionsOfValue(value, seen, depth + 1);
+        if (inner.opaque) opaque = true;
+        for (const fn of inner.fns) fns.add(fn);
+      }
+    }
+    return { fns: [...fns], opaque };
+  }
+
+  /** Concrete method bodies `method` resolves to across the static types of the values bound to `decls`. */
+  private methodsOfBoundValues(decls: readonly TS.Declaration[], method: string, seen: Set<TS.Node>, depth: number): BoundFunctions {
+    const ts = this.ts;
+    const fns = new Set<FunctionLike>();
+    let opaque = depth > MAX_CODE_RESOLVE_DEPTH;
+    if (opaque) return { fns: [], opaque };
+    for (const decl of decls) {
+      if (!this.isInjectionSource(decl)) {
+        opaque = true;
+        continue;
+      }
+      const bound = this.valuesBoundTo(decl, seen);
+      if (bound.opaque) opaque = true;
+      for (const value of bound.values) {
+        const type = value.shorthand ? this.shorthandValueType(value.expr) : this.checker.getTypeAtLocation(value.expr);
+        if (type === undefined) {
+          opaque = true;
+          continue;
+        }
+        for (const constituent of type.isUnion() ? type.types : [type]) {
+          if ((constituent.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) !== 0) continue;
+          const members = this.checker.getPropertyOfType(constituent, method)?.declarations ?? [];
+          const bodies = members.map((m) => this.functionOfDeclaration(m)).filter((f): f is FunctionLike => f !== undefined && f.body !== undefined);
+          if (members.length > 0 && bodies.length === members.length && bodies.every((f) => this.isFollowable(f.getSourceFile()))) {
+            for (const fn of bodies) fns.add(fn);
+            continue;
+          }
+          // The bound value is itself typed as the interface: look through to what it was bound from, else not resolvable.
+          const through = this.injectionSourcesOf(value.expr);
+          if (through === undefined) {
+            opaque = true;
+            continue;
+          }
+          const inner = this.methodsOfBoundValues(through, method, seen, depth + 1);
+          if (inner.opaque) opaque = true;
+          for (const fn of inner.fns) fns.add(fn);
+        }
+      }
+    }
+    return { fns: [...fns], opaque };
+  }
+
+  private shorthandValueType(name: TS.Node): TS.Type | undefined {
+    const parent = name.parent;
+    if (!this.ts.isShorthandPropertyAssignment(parent)) return undefined;
+    const symbol = this.checker.getShorthandAssignmentValueSymbol(parent);
+    return symbol === undefined ? undefined : this.checker.getTypeOfSymbolAtLocation(symbol, name);
+  }
+
+  /** Injection-source declarations an identifier / property access refers to, or undefined when it refers to none. */
+  private injectionSourcesOf(expr: TS.Node): readonly TS.Declaration[] | undefined {
+    const ts = this.ts;
+    const node = ts.isExpression(expr) ? this.unwrap(expr) : expr;
+    const location = ts.isPropertyAccessExpression(node) ? node.name : node;
+    if (!ts.isIdentifier(location)) return undefined;
+    const decls = this.dealias(this.checker.getSymbolAtLocation(location))?.declarations ?? [];
+    return this.allInjectionSources(decls) ? decls : undefined;
+  }
+
+  /** Functions an expression evaluates to: arrow / function expression, function reference, `f.bind(x)`, a ternary of those. */
+  private functionsOfValue(value: BoundValue, seen: Set<TS.Node>, depth: number): BoundFunctions {
+    const ts = this.ts;
+    if (depth > MAX_CODE_RESOLVE_DEPTH) return { fns: [], opaque: true };
+    if (value.shorthand) {
+      const parent = value.expr.parent;
+      const symbol = ts.isShorthandPropertyAssignment(parent) ? this.checker.getShorthandAssignmentValueSymbol(parent) : undefined;
+      return this.functionsOfSymbol(this.dealias(symbol), seen, depth);
+    }
+    if (ts.isMethodDeclaration(value.expr)) return { fns: [value.expr], opaque: false };
+    if (!ts.isExpression(value.expr)) return { fns: [], opaque: true };
+    const node = this.unwrap(value.expr);
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return { fns: [node], opaque: false };
+    if (ts.isConditionalExpression(node)) {
+      const a = this.functionsOfValue({ expr: node.whenTrue, shorthand: false }, seen, depth + 1);
+      const b = this.functionsOfValue({ expr: node.whenFalse, shorthand: false }, seen, depth + 1);
+      return { fns: [...new Set([...a.fns, ...b.fns])], opaque: a.opaque || b.opaque };
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "bind") {
+      return this.functionsOfValue({ expr: node.expression.expression, shorthand: false }, seen, depth + 1);
+    }
+    if (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) {
+      const location = ts.isPropertyAccessExpression(node) ? node.name : node;
+      return this.functionsOfSymbol(this.dealias(this.checker.getSymbolAtLocation(location)), seen, depth);
+    }
+    return { fns: [], opaque: true };
+  }
+
+  private functionsOfSymbol(symbol: TS.Symbol | undefined, seen: Set<TS.Node>, depth: number): BoundFunctions {
+    const decls = symbol?.declarations ?? [];
+    if (decls.length === 0) return { fns: [], opaque: true };
+    const fns = new Set<FunctionLike>();
+    let opaque = false;
+    for (const decl of decls) {
+      const fn = this.functionOfDeclaration(decl);
+      if (fn !== undefined && fn.body !== undefined && this.isFollowable(fn.getSourceFile())) {
+        fns.add(fn);
+        continue;
+      }
+      let inner: BoundFunctions | undefined;
+      if (this.ts.isVariableDeclaration(decl) && decl.initializer !== undefined && (decl.parent.flags & this.ts.NodeFlags.Const) !== 0) {
+        inner = this.functionsOfValue({ expr: decl.initializer, shorthand: false }, seen, depth + 1);
+      } else if (this.isInjectionSource(decl) && this.isFollowable(decl.getSourceFile())) {
+        inner = this.functionsBoundTo([decl], seen, depth + 1);
+      }
+      if (inner === undefined) {
+        opaque = true;
+        continue;
+      }
+      if (inner.opaque) opaque = true;
+      for (const f of inner.fns) fns.add(f);
+    }
+    return { fns: [...fns], opaque };
+  }
+
+  /**
+   * Every value bound to an injection source in the analysed program. A property: the members of object literals whose
+   * contextual type declares it (plus its own initializer). A parameter: the argument of every call / `new` that resolves
+   * to the parameter's function (or the parameter's default). `opaque` when some binding cannot be enumerated.
+   */
+  private valuesBoundTo(decl: TS.PropertySignature | TS.PropertyDeclaration | TS.ParameterDeclaration, seen: Set<TS.Node>): { values: BoundValue[]; opaque: boolean } {
+    const ts = this.ts;
+    if (seen.has(decl)) return { values: [], opaque: false };
+    seen.add(decl);
+    if (ts.isParameter(decl)) {
+      const owner = decl.parent;
+      if (!(this.isFunctionLike(owner) || ts.isConstructorDeclaration(owner)) || owner.body === undefined) return { values: [], opaque: true };
+      const index = owner.parameters.indexOf(decl);
+      const values: BoundValue[] = [];
+      let opaque = decl.dotDotDotToken !== undefined;
+      for (const site of this.callSitesOf(owner)) {
+        const args = site.arguments ?? [];
+        const arg = args[index];
+        if (args.slice(0, index + 1).some((a) => ts.isSpreadElement(a))) opaque = true;
+        else if (arg !== undefined) values.push({ expr: arg, shorthand: false });
+        else if (decl.initializer !== undefined) values.push({ expr: decl.initializer, shorthand: false });
+      }
+      return { values, opaque };
+    }
+    const propertyName = this.propertyName(decl.name);
+    if (propertyName === undefined) return { values: [], opaque: true };
+    const values: BoundValue[] = [];
+    if (ts.isPropertyDeclaration(decl) && decl.initializer !== undefined) values.push({ expr: decl.initializer, shorthand: false });
+    for (const prop of this.objectMembersNamed(propertyName)) {
+      if (!ts.isObjectLiteralExpression(prop.parent) || !this.isBoundTo(prop.parent, propertyName, decl)) continue;
+      if (ts.isPropertyAssignment(prop)) values.push({ expr: prop.initializer, shorthand: false });
+      else if (ts.isShorthandPropertyAssignment(prop)) values.push({ expr: prop.name, shorthand: true });
+      else values.push({ expr: prop, shorthand: false });
+    }
+    return { values, opaque: false };
+  }
+
+  /** True when the object literal's contextual type declares `name` as the very member `decl`. */
+  private isBoundTo(literal: TS.ObjectLiteralExpression, name: string, decl: TS.Declaration): boolean {
+    const contextual = this.checker.getContextualType(literal);
+    if (contextual === undefined) return false;
+    const constituents = contextual.isUnion() ? contextual.types : [contextual];
+    return constituents.some((t) => (this.checker.getPropertyOfType(t, name)?.declarations ?? []).includes(decl));
+  }
+
+  private memberIndex: Map<string, Array<TS.PropertyAssignment | TS.ShorthandPropertyAssignment | TS.MethodDeclaration>> | undefined;
+
+  /** Object-literal members named `name` across every followable file (syntactic index, built once). */
+  private objectMembersNamed(name: string): Array<TS.PropertyAssignment | TS.ShorthandPropertyAssignment | TS.MethodDeclaration> {
+    if (this.memberIndex === undefined) {
+      const ts = this.ts;
+      const index = new Map<string, Array<TS.PropertyAssignment | TS.ShorthandPropertyAssignment | TS.MethodDeclaration>>();
+      for (const file of this.program.getSourceFiles()) {
+        if (!this.isFollowable(file)) continue;
+        const scan = (node: TS.Node): void => {
+          if (ts.isObjectLiteralExpression(node)) {
+            for (const prop of node.properties) {
+              if (!(ts.isPropertyAssignment(prop) || ts.isShorthandPropertyAssignment(prop) || ts.isMethodDeclaration(prop))) continue;
+              const key = this.propertyName(prop.name);
+              if (key !== undefined) index.set(key, [...(index.get(key) ?? []), prop]);
+            }
+          }
+          ts.forEachChild(node, scan);
+        };
+        scan(file);
+      }
+      this.memberIndex = index;
+    }
+    return this.memberIndex.get(name) ?? [];
+  }
+
+  private callIndex: Map<TS.Node, Array<TS.CallExpression | TS.NewExpression>> | undefined;
+
+  /** Every call / `new` in a followable file whose resolved signature is declared by `owner` (built once). */
+  private callSitesOf(owner: TS.Node): Array<TS.CallExpression | TS.NewExpression> {
+    if (this.callIndex === undefined) {
+      const ts = this.ts;
+      const index = new Map<TS.Node, Array<TS.CallExpression | TS.NewExpression>>();
+      for (const file of this.program.getSourceFiles()) {
+        if (!this.isFollowable(file)) continue;
+        const scan = (node: TS.Node): void => {
+          if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+            const declaration = this.checker.getResolvedSignature(node)?.declaration;
+            if (declaration !== undefined) index.set(declaration, [...(index.get(declaration) ?? []), node]);
+          }
+          ts.forEachChild(node, scan);
+        };
+        scan(file);
+      }
+      this.callIndex = index;
+    }
+    return this.callIndex.get(owner) ?? [];
   }
 
   /** True when `symbol` in `file` (bare or `<file>#<symbol>`) is on the shared non-business list. */
@@ -910,6 +1205,8 @@ class CensusWalker {
     // `{ ok: false, error: { code } }` inside `validateX` must be `validateX`, not `validateX.error`.
     let insideFunction = false;
     for (let cur: TS.Node | undefined = node; cur !== undefined; cur = cur.parent) {
+      // reason: a node with no named root (e.g. an anonymous type literal at module level) climbs to the SourceFile, whose parent is undefined.
+      if (ts.isSourceFile(cur)) break;
       if (this.isFunctionLike(cur)) insideFunction = true;
       if (ts.isExportAssignment(cur)) {
         segments.push("default");
