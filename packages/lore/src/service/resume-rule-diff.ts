@@ -21,7 +21,7 @@
 
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError, DocRecord, VersionRecord } from "@lore/core";
-import { BASELINE_RULE_ID_PATTERN, baselineRuleSchema, type BaselineRule } from "@lore/core";
+import { AC_CITE_ID_PATTERN, baselineRuleSchema, type BaselineRule } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 
@@ -63,7 +63,7 @@ function rulesIn(extra: Record<string, unknown>): unknown[] {
   return Array.isArray(raw) ? raw : [];
 }
 
-/** Governing rule ids: every BR-id cited by the spec's acceptance criteria, first-seen order. */
+/** Governing rule ids: every citable id (BR-n or AS-n) cited by the spec's acceptance criteria, first-seen order. */
 function governingRuleIds(spec: DocRecord): string[] {
   const criteria = spec.extra["acceptance_criteria"];
   if (!Array.isArray(criteria)) return [];
@@ -72,7 +72,7 @@ function governingRuleIds(spec: DocRecord): string[] {
     const cites = (c as { cites?: unknown } | null)?.cites;
     if (!Array.isArray(cites)) continue;
     for (const entry of cites) {
-      if (typeof entry === "string" && BASELINE_RULE_ID_PATTERN.test(entry)) seen.add(entry);
+      if (typeof entry === "string" && AC_CITE_ID_PATTERN.test(entry)) seen.add(entry);
     }
   }
   return [...seen];

@@ -716,7 +716,12 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
         for (const issue of baselineResult.error.issues) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: issue.path[0] === "node" ? "baseline requires extra.node (root|branch|leaf)" : issue.message,
+            // reason: a wrong-tree kind is a custom issue that already names the tree; only a missing /
+            // unknown node gets the generic "requires extra.node" line.
+            message:
+              issue.path[0] === "node" && issue.code !== z.ZodIssueCode.custom
+                ? "baseline requires extra.node (business: root|branch|leaf; tree=architecture: root|section|module-card|standard|debt-registry)"
+                : issue.message,
             path: ["extra", ...issue.path],
           });
         }

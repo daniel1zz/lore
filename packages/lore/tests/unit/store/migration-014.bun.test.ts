@@ -225,11 +225,11 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     raw.close();
   });
 
-  it("STATE: opening a schema-13 file lands on user_version 14 == LATEST_SCHEMA_VERSION", async () => {
+  it("STATE: opening a schema-13 file lands on user_version 15 == LATEST_SCHEMA_VERSION (014 then 015: per-prefix rule ids)", async () => {
     await seedSchema13();
     const store = new SQLiteStore(path);
-    expect(LATEST_SCHEMA_VERSION).toBe(14);
-    expect(userVersion(store.getDatabase())).toBe(14);
+    expect(LATEST_SCHEMA_VERSION).toBe(15);
+    expect(userVersion(store.getDatabase())).toBe(15);
     store.close();
   });
 
@@ -299,6 +299,11 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     raw.exec("PRAGMA foreign_keys = ON");
     expect(() => raw.exec(MIGRATION_014_SQL)).not.toThrow();
     expect(userVersion(raw)).toBe(14);
+    // reason: 014 rebuilds rule_registry from its five original columns (dropping migration-015's
+    // `prefix`), so a re-run of 014 on a migrated file is only complete once the chain tail (015) re-runs.
+    const { MIGRATION_015_SQL } = await import("../../../src/store/migrations/migration-015.js");
+    expect(() => raw.exec(MIGRATION_015_SQL)).not.toThrow();
+    expect(userVersion(raw)).toBe(15);
     expect(snapshot(raw)).toEqual(before);
     raw.close();
   });

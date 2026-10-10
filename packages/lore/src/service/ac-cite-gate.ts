@@ -34,6 +34,7 @@
 import {
   CITE_GATE_MODES,
   CiteGateConfigSchema,
+  ruleIdPrefix,
   specAcceptanceCriteriaSchema,
   type AcCiteFeedingPack,
   type AcCiteViolation,
@@ -138,6 +139,9 @@ export function indexBaseline(baselineDocs: readonly DocRecord[]): BaselineCiteI
   const states: Record<string, "live" | "deprecated" | "retired"> = {};
   const branchOfRule = new Map<string, string>();
   for (const rule of collectLeafRules(baselineDocs).values()) {
+    // reason: BR-980 — a debt entry (AD-n) is never citable, so it has no gate state: a cite of one is
+    // refused earlier (applyAcChange) and would read "missing" here, never "live".
+    if (ruleIdPrefix(rule.id) === "AD") continue;
     states[rule.id] = rule.lifecycle;
     const parent = rule.leaf.parent_id;
     const branchSlug = parent === null || parent === undefined ? undefined : slugById.get(parent as string);
@@ -380,7 +384,8 @@ export function buildCiteFeedingPack(input: CiteFeedingPackInput): AcCiteFeeding
   const ordered: string[] = [];
   const take = (ruleId: string): void => {
     if (ordered.length >= FEEDING_PACK_MAX_CANDIDATES || ordered.includes(ruleId)) return;
-    if (rules.get(ruleId)?.lifecycle !== "live") return;
+    // AD-n is never a candidate (BR-980)
+    if (rules.get(ruleId)?.lifecycle !== "live" || ruleIdPrefix(ruleId) === "AD") return;
     ordered.push(ruleId);
   };
 

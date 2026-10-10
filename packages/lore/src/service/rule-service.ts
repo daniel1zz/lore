@@ -1,7 +1,7 @@
 /**
  * RuleService — the dedicated writer of a `baseline` doc's verb-owned `extra` keys:
- * rules (permanent `BR-n` ids), node label, `depends_on`, glossary — plus baseline node
- * creation.
+ * rules (permanent ids: `BR-n` on a business leaf, `AS-n` on an architecture standard, `AD-n` on a
+ * debt registry), node label, `depends_on`, glossary — plus baseline node creation.
  *
  * Purpose: single write path for `lore rule add|set` and `lore baseline add|set-label|
  *   depends|glossary`; `CorpusService.set` refuses to touch these keys
@@ -10,7 +10,7 @@
  * Public surface:
  *   addRule(leaf, input, opts?)            → { ruleId, doc }
  *   setRule(ruleId, patch, opts?)          → { rule, doc }   (edit | lifecycle | moveTo)
- *   addNode(parent, input, opts?)          → DocRecord        (new baseline root|branch|leaf)
+ *   addNode(parent, input, opts?)          → DocRecord        (new baseline node of either tree)
  *   setLabel(node, label, opts?)           → DocRecord
  *   setDependsOn(leaf, change, opts?)      → DocRecord
  *   setSiteMap(leaf, change, opts?)        → DocRecord   (`extra.site_map` + `extra.commands`, leaf only)
@@ -43,16 +43,21 @@
 import { err, ok, type Result } from "@lore/core";
 import type { LoreError, DocRecord, DocStatus, VersionRecord } from "@lore/core";
 import {
+  ANY_RULE_ID_PATTERN,
   BASELINE_RULE_ID_PATTERN,
   baselineExtraSchema,
   baselineNodeSchema,
   baselineRuleSchema,
   glossaryEntrySchema,
   isLawfulRuleLifecycleTransition,
+  isNodeOfTree,
   resolveStatusAfterContractEdit,
+  ruleIdPrefix,
+  ruleIdPrefixOfNode,
   validateBaselineParent,
   type BaselineNode,
   type BaselineRule,
+  type BaselineTree,
   type GlossaryEntry,
   type RuleLifecycle,
 } from "@lore/core";
@@ -63,6 +68,7 @@ import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
 import { resolveDoc } from "./resolve.js";
 import { CorpusService, type CreateDocResult, type WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
+import { collectLeafRules } from "./rule-index-queries.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
 // reason: C7's `--check-baseline` imports this from the service that owns rules; the helper itself
@@ -72,8 +78,12 @@ export { findUnregisteredRuleIds, type UnregisteredRule } from "./baseline-rule-
 /** Immediate re-applies after a CAS miss before the STALE_VERSION error is surfaced. */
 export const MAX_CAS_REAPPLIES = 3;
 
-/** Placeholder id used only to pre-validate a candidate rule before the registry allocates the real one. */
-const PREVALIDATION_RULE_ID = "BR-999999999";
+/**
+ * Placeholder number used only to pre-validate a candidate rule before the registry allocates the real
+ * id. The family prefix is the TARGET NODE's (`ruleIdPrefixOfNode`), so the node/family check and the
+ * four-part-standard check run against the real family.
+ */
+const PREVALIDATION_NUMBER = "999999999";
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -83,6 +93,15 @@ export interface AddRuleInput {
   confidence: BaselineRule["confidence"];
   enforced_by: BaselineRule["enforced_by"];
   examples: string[];
+  /**
+   * Four-part standard (AS rules only; all four or none — `baselineRuleSchema` enforces it):
+   * what the code does today / the target rule / the debt entries (`AD-n`, each must be a LIVE
+   * debt entry; may be empty) / how the exceptions get closed.
+   */
+  current_reality?: string;
+  target_rule?: string;
+  current_exceptions?: string[];
+  migration?: string;
 }
 
 /** Partial rule edit. `note` is the retirement note (stored as `retired_note`). */
@@ -99,6 +118,8 @@ export interface SetRulePatch {
 
 /** Fields of a new baseline node. */
 export interface AddNodeInput {
+  /** Which tree the node joins; absent = business. */
+  tree?: BaselineTree;
   node: BaselineNode;
   label: string;
   title: string;
@@ -219,12 +240,14 @@ export class RuleService {
   // ── rules ──────────────────────────────────────────────────────────────────
 
   /**
-   * Append a new `live` rule to a baseline leaf, allocating its permanent `BR-n` id.
+   * Append a new `live` rule to a rule-holding baseline node, allocating its permanent id. The id
+   * family comes from the node: business leaf -> `BR-n`, architecture standard -> `AS-n`,
+   * architecture debt-registry -> `AD-n` (each family numbers from 1, one never-reused registry).
    *
-   * @param leaf - Doc id or slug of a baseline doc with `extra.node === "leaf"`.
-   * @returns `{ ruleId, doc }` (the updated leaf), VALIDATION_ERROR for a non-leaf or an
-   *   invalid rule (no id burned, leaf untouched), DOC_NOT_FOUND, or STALE_VERSION once the
-   *   CAS re-apply budget is spent.
+   * @param leaf - Doc id or slug of a business leaf, an architecture standard or a debt-registry.
+   * @returns `{ ruleId, doc }` (the updated node), VALIDATION_ERROR for a node that holds no rules
+   *   or an invalid rule — incl. a `current_exceptions` id that is not a live `AD-n` (no id
+   *   burned, node untouched), DOC_NOT_FOUND, or STALE_VERSION once the CAS re-apply budget is spent.
    * @example
    * await rules.addRule("baseline-claims", { statement: "…", confidence: "established",
    *   enforced_by: "guaranteed", examples: ["…"] }, { by: "agent:x" });
@@ -235,7 +258,9 @@ export class RuleService {
     opts?: { by?: string },
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
-    const candidate = baselineRuleSchema.safeParse({ ...input, id: PREVALIDATION_RULE_ID, lifecycle: "live" });
+    // reason: first pass validates the rule's own fields only; "AS" is the one family that admits every
+    // field (four-part standard included). The family-specific verdict comes from the extra check below.
+    const candidate = baselineRuleSchema.safeParse({ ...input, id: `AS-${PREVALIDATION_NUMBER}`, lifecycle: "live" });
     if (!candidate.success) {
       const issue = candidate.error.issues[0];
       return err(validationError(
@@ -243,8 +268,18 @@ export class RuleService {
         issue ? issue.message : "invalid rule",
       ));
     }
-    const target = await this.resolveBaselineDoc(leaf, "leaf");
+    const target = await this.resolveBaselineDoc(leaf);
     if (!target.ok) return target;
+    const family = ruleIdPrefixOfNode(target.value.extra);
+    if (family === undefined) {
+      return err(validationError(
+        "node",
+        `rules live only on a business leaf, an architecture standard or an architecture debt-registry (got tree=${String(target.value.extra["tree"] ?? "business")} node=${String(target.value.extra["node"])})`,
+        target.value.extra["node"],
+      ));
+    }
+    const exceptions = await this.checkCurrentExceptions(candidate.data.current_exceptions);
+    if (!exceptions.ok) return exceptions;
     const gate = await this.authorizeCorpusWrite([target.value], "rule-add", opts?.by);
     if (!gate.ok) return gate;
     const leafId = target.value.id;
@@ -263,12 +298,12 @@ export class RuleService {
         ...base.extra,
         rules: [...rulesOf(base), { ...candidate.data, id: ruleId }],
       });
-      const shape = baselineExtraSchema.safeParse(withRule(PREVALIDATION_RULE_ID));
+      const shape = baselineExtraSchema.safeParse(withRule(`${family}-${PREVALIDATION_NUMBER}`));
       if (!shape.success) {
         const issue = shape.error.issues[0];
         return err(validationError(issue ? `extra.${issue.path.join(".")}` : "extra", issue ? issue.message : "invalid leaf extra"));
       }
-      const allocated = await this.store.allocateRuleAndUpdateLeaf(base.id, base.version, withRule, actor);
+      const allocated = await this.store.allocateRuleAndUpdateLeaf(base.id, base.version, withRule, actor, family);
       if (!allocated.ok) {
         if (allocated.error.code === "STALE_VERSION") { lastStale = allocated.error; continue; }
         return allocated;
@@ -283,7 +318,7 @@ export class RuleService {
   /**
    * Edit a rule, move it through its lifecycle, or relocate it to another leaf.
    *
-   * @param ruleId - Permanent id `BR-<n>`; unknown → DOC_NOT_FOUND.
+   * @param ruleId - Permanent id `BR-<n>`, `AS-<n>` or `AD-<n>`; unknown → DOC_NOT_FOUND.
    * @param patch - At least one field. `lifecycle` is forward-only; `retired` needs `note`;
    *   `note` is valid only together with `lifecycle: "retired"`.
    * @returns `{ rule, doc }` — the rule as stored and the leaf that now holds it.
@@ -294,8 +329,8 @@ export class RuleService {
     opts?: { by?: string },
   ): Promise<Result<{ rule: BaselineRule; doc: DocRecord }, LoreError>> {
     const actor = this.resolveActor(opts?.by);
-    if (!BASELINE_RULE_ID_PATTERN.test(ruleId)) {
-      return err(validationError("ruleId", `rule id must match BR-<n> (got '${ruleId}')`, ruleId));
+    if (!ANY_RULE_ID_PATTERN.test(ruleId)) {
+      return err(validationError("ruleId", `rule id must match BR-<n>, AS-<n> or AD-<n> (got '${ruleId}')`, ruleId));
     }
     const patchCheck = validateSetRulePatch(patch);
     if (!patchCheck.ok) return patchCheck;
@@ -328,8 +363,15 @@ export class RuleService {
         return ok({ rule: edited.value, doc: written.value });
       }
 
-      const dest = await this.resolveBaselineDoc(patch.moveTo, "leaf");
+      const dest = await this.resolveBaselineDoc(patch.moveTo, ["leaf", "standard", "debt-registry"]);
       if (!dest.ok) return dest;
+      if (ruleIdPrefixOfNode(dest.value.extra) !== ruleIdPrefix(ruleId)) {
+        return err(validationError(
+          "moveTo",
+          `rule ${ruleId} cannot move to a ${String(dest.value.extra["tree"] ?? "business")} ${String(dest.value.extra["node"])}: it holds ${ruleIdPrefixOfNode(dest.value.extra) ?? "no"} ids`,
+          patch.moveTo,
+        ));
+      }
       if (dest.value.id === sourceLeaf.id) {
         return err(validationError("moveTo", `rule ${ruleId} already lives on that leaf`, patch.moveTo));
       }
@@ -389,8 +431,10 @@ export class RuleService {
   /**
    * Create a baseline node under `parent`.
    *
-   * @param parent - A prd (for `node: "root"`) or a baseline root|branch (for branch|leaf).
-   * @returns the created doc, or VALIDATION_ERROR naming why the node/parent pair is illegal.
+   * @param parent - A prd (for `node: "root"`), a business root|branch (for branch|leaf), an
+   *   architecture root (for a section) or an architecture section (for module-card|standard|debt-registry).
+   * @returns the created doc, or VALIDATION_ERROR naming why the tree/node/parent triple is illegal
+   *   (a kind that does not belong to `input.tree` creates nothing).
    */
   async addNode(
     parent: string,
@@ -399,17 +443,23 @@ export class RuleService {
   ): Promise<Result<DocRecord, LoreError>> {
     const node = baselineNodeSchema.safeParse(input.node);
     if (!node.success) {
-      return err(validationError("node", `node must be root|branch|leaf (got '${String(input.node)}')`, input.node));
+      return err(validationError("node", `node must be one of ${baselineNodeSchema.options.join("|")} (got '${String(input.node)}')`, input.node));
+    }
+    if (!isNodeOfTree(input.tree, node.data)) {
+      return err(validationError("node", `node=${node.data} does not belong to tree=${input.tree ?? "business"}`, input.node));
     }
     if (input.label.trim() === "") return err(validationError("label", "label must not be empty"));
     const parentDoc = await resolveDoc(this.store, parent);
     if (!parentDoc.ok) return parentDoc;
     const parentNode = parentDoc.value.type === "baseline" ? parentDoc.value.extra["node"] : undefined;
+    const parentTree = parentDoc.value.type === "baseline" ? parentDoc.value.extra["tree"] : undefined;
     const verdict = validateBaselineParent(
-      { node: node.data },
-      typeof parentNode === "string"
-        ? { type: parentDoc.value.type, node: parentNode }
-        : { type: parentDoc.value.type },
+      { node: node.data, ...(input.tree !== undefined ? { tree: input.tree } : {}) },
+      {
+        type: parentDoc.value.type,
+        ...(typeof parentNode === "string" ? { node: parentNode } : {}),
+        ...(typeof parentTree === "string" ? { tree: parentTree } : {}),
+      },
     );
     if (!verdict.ok) return err(validationError("parent", verdict.reason, parent));
     const created = await this.createDoc(
@@ -418,7 +468,9 @@ export class RuleService {
         title: input.title,
         content: input.content,
         parent_id: parentDoc.value.id,
-        extra: { node: node.data, label: input.label },
+        // reason: `tree` is written only for the architecture tree — an absent tree means business, so a
+        // business node's stored `extra` stays byte-identical to what it was before the architecture tree.
+        extra: { ...(input.tree === "architecture" ? { tree: "architecture" } : {}), node: node.data, label: input.label },
       } as CreateDocInput,
       opts?.by !== undefined ? { by: opts.by } : undefined,
     );
@@ -676,6 +728,28 @@ export class RuleService {
       }
     }
     return ok(doc);
+  }
+
+  /**
+   * Every id of a four-part standard's `current_exceptions` must be a LIVE `AD-n` debt entry that some
+   * architecture debt-registry carries. Runs BEFORE allocation, so a refusal burns no registry id.
+   */
+  private async checkCurrentExceptions(ids: readonly string[] | undefined): Promise<Result<void, LoreError>> {
+    if (ids === undefined || ids.length === 0) return ok(undefined);
+    const docs = await this.listBaselineDocs();
+    if (!docs.ok) return docs;
+    const held = collectLeafRules(docs.value);
+    for (const id of ids) {
+      const entry = held.get(id);
+      if (ruleIdPrefix(id) !== "AD" || entry === undefined || entry.lifecycle !== "live") {
+        return err(validationError(
+          "current_exceptions",
+          `${id} is not a live AD-<n> debt entry (a standard's current exceptions name existing, live debt entries only)`,
+          id,
+        ));
+      }
+    }
+    return ok(undefined);
   }
 
   private async readLeaf(id: string): Promise<Result<DocRecord, LoreError>> {

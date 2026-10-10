@@ -19,7 +19,7 @@
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation C6 (BL-10, BL-15).
  */
 
-import type { DocRecord, RuleLifecycle } from "@lore/core";
+import { ruleIdPrefix, ruleIdPrefixOfNode, type DocRecord, type RuleLifecycle } from "@lore/core";
 import type { AcCiteRow, RuleDependsRow } from "../store/store-interface.js";
 
 export interface CitingCriterion {
@@ -30,7 +30,7 @@ export interface CitingCriterion {
 export interface RuleView {
   id: string;
   statement: string;
-  /** Slug of the baseline leaf carrying the rule. */
+  /** Slug of the baseline node (leaf, standard or debt-registry) carrying the rule. */
   leaf: string;
   confidence: string;
   state: RuleLifecycle;
@@ -70,13 +70,18 @@ export function stripAnchorSymbol(anchor: string): string {
   return i === -1 ? anchor : anchor.slice(0, i);
 }
 
-/** BR-n ids ascending by n; anything else after, lexicographically. */
+const RULE_FAMILY_ORDER = ["BR", "AS", "AD"] as const;
+
+/** Rule ids by family (BR, then AS, then AD), each ascending by n; anything else after, lexicographically. */
 export function compareRuleIds(a: string, b: string): number {
-  const na = /^BR-(\d+)$/.exec(a);
-  const nb = /^BR-(\d+)$/.exec(b);
-  if (na && nb) return Number(na[1]) - Number(nb[1]);
-  if (na) return -1;
-  if (nb) return 1;
+  const fa = ruleIdPrefix(a);
+  const fb = ruleIdPrefix(b);
+  if (fa !== undefined && fb !== undefined) {
+    if (fa !== fb) return RULE_FAMILY_ORDER.indexOf(fa) - RULE_FAMILY_ORDER.indexOf(fb);
+    return Number(a.slice(3)) - Number(b.slice(3));
+  }
+  if (fa !== undefined) return -1;
+  if (fb !== undefined) return 1;
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
@@ -84,11 +89,15 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** Rules listed by live leaf docs, keyed by rule id (first leaf wins; duplicates are status's concern). */
+/**
+ * Rules listed by live rule-holding nodes — business leaves (BR), architecture standards (AS) and
+ * architecture debt registries (AD) — keyed by rule id (first node wins; duplicates are status's
+ * concern). `LeafRule.leaf` is the owning node whatever its kind.
+ */
 export function collectLeafRules(baselineDocs: readonly DocRecord[]): Map<string, LeafRule> {
   const byId = new Map<string, LeafRule>();
   for (const doc of baselineDocs) {
-    if ((doc.deleted_at ?? null) !== null || doc.extra["node"] !== "leaf") continue;
+    if ((doc.deleted_at ?? null) !== null || ruleIdPrefixOfNode(doc.extra) === undefined) continue;
     const rules = doc.extra["rules"];
     if (!Array.isArray(rules)) continue;
     for (const r of rules as unknown[]) {

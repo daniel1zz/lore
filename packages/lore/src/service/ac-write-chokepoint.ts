@@ -29,6 +29,7 @@
  */
 
 import {
+  DEBT_RULE_ID_PATTERN,
   err,
   ok,
   specAcceptanceCriteriaSchema,
@@ -56,11 +57,32 @@ import { loadRuleIndexData } from "./rule-index-loader.js";
 
 /** The refusal code — also the `LoreError` discriminant in `@lore/core` errors.ts. */
 export const AC_WRITE_NOT_VIA_AC_VERB = "AC_WRITE_NOT_VIA_AC_VERB" as const;
+const AC_CITE_REQUIRED = "AC_CITE_REQUIRED" as const;
 
 /** Who is writing: a sanctioned path (verb/create/restore/import) or a wholesale `extra` replace. */
 export type AcWritePath = "ac-verb" | "create" | "restore" | "import" | "wholesale";
 
 const KEY = "acceptance_criteria";
+
+/**
+ * BR-980: a debt entry `AD-n` is never citable. Every criterion in `incoming` that cites one yields
+ * one violation; works on the raw (unvalidated) value, so it holds on every write path.
+ */
+function debtCiteViolations(incoming: unknown): AcCiteViolation[] {
+  if (!Array.isArray(incoming)) return [];
+  const found: AcCiteViolation[] = [];
+  for (const criterion of incoming as unknown[]) {
+    if (typeof criterion !== "object" || criterion === null) continue;
+    const { id, cites } = criterion as { id?: unknown; cites?: unknown };
+    if (!Array.isArray(cites)) continue;
+    for (const cited of cites as unknown[]) {
+      if (typeof cited === "string" && DEBT_RULE_ID_PATTERN.test(cited)) {
+        found.push({ ...(typeof id === "string" ? { ac_id: id } : {}), rule_id: cited, reason: "debt" });
+      }
+    }
+  }
+  return found;
+}
 
 /** Canonical JSON of the criteria value; `undefined` (absent) is its own distinct token. */
 function canonical(value: unknown): string {
@@ -85,6 +107,20 @@ export function applyAcChange(
   docId?: string,
 ): Result<void, LoreError> {
   if (after === undefined) return ok(undefined);
+  // reason: BR-980 is unconditional — it holds on every path, the sanctioned verbs included, and
+  // needs no gate mode or armed branch; it runs before any write so a refusal leaves nothing behind.
+  const debtViolations = debtCiteViolations(after[KEY]);
+  if (debtViolations.length > 0) {
+    const ids = [...new Set(debtViolations.map((v) => v.rule_id))].join(", ");
+    return err({
+      code: AC_CITE_REQUIRED,
+      ...(docId !== undefined ? { id: docId } : {}),
+      message:
+        `${ids} is a debt entry: a criterion cites a business rule (BR-n) or an architecture standard (AS-n), ` +
+        `never a debt entry. Debt ids are named only in a standard's current_exceptions.`,
+      violations: debtViolations,
+    });
+  }
   if (path === "ac-verb") return ok(undefined);
   if (path !== "wholesale") {
     const incoming = after[KEY];
