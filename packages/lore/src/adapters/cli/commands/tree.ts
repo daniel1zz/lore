@@ -214,7 +214,7 @@ export default defineCommand({
   args: {
     root: {
       type: "positional",
-      description: "Root document ID or slug (default: first PRD)",
+      description: "Root document ID or slug (default: the business baseline root; the first PRD when there is none)",
       required: false,
     },
     depth: {

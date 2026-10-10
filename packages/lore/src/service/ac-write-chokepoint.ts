@@ -310,6 +310,7 @@ async function buildRefusal(
       specSlug: target.slug,
       acId: first.ac_id,
       acStatement: refused?.statement,
+      refusedIsNew: !existing.some((c) => c.id === first.ac_id),
       specAnchors: target.anchors,
       branch: placeSpecInBranch(existing.length > 0 ? existing : next, index),
       data: data.value,

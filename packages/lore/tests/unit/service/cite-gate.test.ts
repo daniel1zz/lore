@@ -529,9 +529,9 @@ describe("cite gate — refusal feeding pack (AC-BLS2-2)", () => {
     expect(pack?.candidates.every((c) => c.statement === `rule ${c.id} statement`)).toBe(true);
   });
 
-  it("includes a paste-ready `lore ac cite` line naming the spec, the new AC and the first candidate", async () => {
+  it("a refused ADD names `lore ac add ... --cite` with the spec, the unwritten AC and the first candidate (BR-86)", async () => {
     const { w, pack } = await refuse(["packages/lore/src/x.ts"], ["packages/lore/src/x.ts"]);
-    expect(pack?.cite_line).toBe(`lore ac cite ${w.specSlug} AC-NEW-1 BR-9`);
+    expect(pack?.cite_line).toBe(`lore ac add ${w.specSlug} AC-NEW-1 ... --cite BR-9`);
   });
 
   it("reports remaining exemption headroom as 10% of the 40 live ACs (4) when none are granted", async () => {
