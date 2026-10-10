@@ -139,7 +139,7 @@ export interface PredicateNotApplicable {
 /**
  * The full verdict space for a predicate that CAN be structurally inapplicable —
  * `PredicateResult`'s existing pass/fail PLUS {@link PredicateNotApplicable}. Only
- * `prdOutlineSynced` and `attestationFloor` (this module) return this union; every
+ * `attestationFloor` (this module) returns this union; every
  * other predicate keeps returning bare `PredicateResult`, unchanged, since a
  * `PredicateResult[]` is structurally assignable wherever `ApplicablePredicateResult[]`
  * is expected (function return-type covariance) — the blast radius of this type is
@@ -1516,72 +1516,45 @@ export function attestationExemptKindValid(
   return { ok: true };
 }
 
-/** `prdOutlineSynced`'s single machine-readable failure reason. */
-export const PRD_SYNC_NOT_SYNCED_REASON = "PRD_OUTLINE_NOT_SYNCED";
+/** `citedRuleStateClean`'s single machine-readable failure reason. */
+export const CITED_RULE_STATE_REASON = "CITED_RULE_REFUTED";
 
 /**
- * The `PredicateResult.field` value `prdOutlineSynced`'s failure carries (SPEC-080
- * C4) — deliberately the SHORT suffix (mirrors `ATTESTATION_FLOOR_FIELD`/
- * `PLAN_CLOSE_FIELD`'s shape, not the fully-qualified `gate:plan-close:...` form):
- * `GateEnforcer.enforce` composes the caller-facing `LoreError.field` as
- * `gate:<checkpoint>:<field>`, so this constant's value becomes
- * `"gate:plan-close:prd-outline-synced"` — the EXACT string SPEC-080 T5r's RED
- * suite (`plan-close-prd-sync.test.ts`) pins on `result.error.field` — only once
- * composed by the enforcer, never written out in full here.
+ * The `PredicateResult.field` value `citedRuleStateClean`'s failure carries (BR-984) — the SHORT
+ * suffix (mirrors `ATTESTATION_FLOOR_FIELD`): `GateEnforcer.enforce` composes the caller-facing
+ * `LoreError.field` as `gate:plan-close:cited-rule-state`.
  */
-export const PRD_SYNC_FIELD = "prd-outline-synced";
+export const CITED_RULE_STATE_FIELD = "cited-rule-state";
+
+/** The two rule states BR-984 refuses a plan close on (`verified`/`unverified`/`unknown` never refuse). */
+export type RefusingRuleState = "contradicted" | "stale";
+
+/** One cited rule that makes the closing plan refuse — id plus the state word the message names. */
+export interface CitedRuleViolation {
+  readonly rule_id: string;
+  readonly state: RefusingRuleState;
+}
 
 /**
- * `plan-close`'s domain-doc sync predicate (SPEC-080 §C4) — default-OFF
- * (`workflow.gates."plan-close".prd_sync.enabled`, resolved by the CALLER via
- * `GateEnforcer.isPrdSyncEnabled`; this predicate itself takes no config, module
- * invariant: no store, no IO, no config access). The CALLER
- * (`CorpusService.set`) does ALL the IO this predicate would otherwise need:
- * resolving the plan's ancestor spec, walking its `parent`/`implements` edge to
- * a domain doc, deriving the plan's execution window (`[earliest task-claim
- * `at` (fallback plan `created_at`), close-write `now`)`, start-inclusive
- * end-exclusive — SPEC-080 C4), reading the domain doc's version history, and
- * checking a valid `extra.prd_sync_exempt` — collapsing all of that into ONE
- * boolean this predicate switches on. `checkPlanClose` (`checkpoint-registry.ts`)
- * only pushes this predicate's result when BOTH `ctx.prdSyncEnabled === true`
- * AND `ctx.prdSyncSynced !== undefined` — the latter is the caller's own
- * "applicable at all" signal (absent for a plan with no spec-tier ancestor,
- * mirroring `plan-promote`'s `hasSpecParent` vacuous-pass shape); a plan WITH a
- * valid exemption is passed in here already pre-resolved to `synced: true` by
- * the caller (an exemption bypasses the content-diff check entirely, it does
- * not become a THIRD outcome this predicate has to know about).
+ * `plan-close`'s rule-state predicate (BR-984; replaces the retired domain-document-edit proxy
+ * `prdOutlineSynced`). Default-OFF behind `workflow.gates."plan-close".prd_sync.enabled` (resolved
+ * by the CALLER). Pure: no store, no IO, no config. The CALLER (`CorpusService.set`) resolves the
+ * rules the closing plan's spec criteria cite, reads their state through `RuleStateService.full()`,
+ * and passes ONLY the offending ones here.
  *
- * @param synced - Pre-computed by the caller: `true` when >= 1 domain-doc
- *   version's content differs from its predecessor within the plan's execution
- *   window, OR a valid `extra.prd_sync_exempt` is present; `false` when neither
- *   holds; `null` (spec-plan-close-predicates-measure-invariants-an-
- *   applicability §Design Decisions D1/D6) when the ancestor spec resolves NO
- *   domain doc at ALL (`resolvePrdSyncDomainDoc` returned `ok(null)`, a FACT
- *   about the corpus graph) — distinct from `false`, which means a domain doc
- *   DOES exist but wasn't edited in-window.
- * @param referent - The ancestor spec's slug (or id) this predicate's domain-doc
- *   resolution is anchored to — carried on the `PredicateNotApplicable` result
- *   when `synced` is `null`, ignored otherwise.
- * @returns `{notApplicable: true, reason: "referent-absent", referent}` when
- *   `synced` is `null`; `{ok: true}` when `synced` is `true`; `{ok: false,
- *   reason: "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced"}` when
- *   `synced` is `false`.
+ * @param violations - Cited rules whose state is `contradicted`, or `stale` with no attested pass
+ *   recorded by the plan's own tasks since it went stale (a later pass makes the rule `verified`,
+ *   so it never reaches this list). Empty = nothing to refuse.
+ * @returns `{ok: true}` when `violations` is empty; otherwise `{ok: false, reason:
+ *   "CITED_RULE_REFUTED", field: "cited-rule-state"}`.
  * @example
- * prdOutlineSynced(true, "spec-x");  // => { ok: true }
+ * citedRuleStateClean([]);                                   // => { ok: true }
  * @example
- * prdOutlineSynced(false, "spec-x"); // => { ok: false, reason: "PRD_OUTLINE_NOT_SYNCED", field: "prd-outline-synced" }
- * @example
- * prdOutlineSynced(null, "spec-x");
- *   // => { notApplicable: true, reason: "referent-absent", referent: "spec-x" }
+ * citedRuleStateClean([{ rule_id: "BR-5", state: "stale" }]); // => { ok: false, reason: "CITED_RULE_REFUTED", field: "cited-rule-state" }
  */
-export function prdOutlineSynced(synced: boolean | null, referent: string): ApplicablePredicateResult {
-  if (synced === null) {
-    return { notApplicable: true, reason: "referent-absent", referent };
-  }
-  if (synced) {
-    return { ok: true };
-  }
-  return { ok: false, reason: PRD_SYNC_NOT_SYNCED_REASON, field: PRD_SYNC_FIELD };
+export function citedRuleStateClean(violations: readonly CitedRuleViolation[]): PredicateResult {
+  if (violations.length === 0) return { ok: true };
+  return { ok: false, reason: CITED_RULE_STATE_REASON, field: CITED_RULE_STATE_FIELD };
 }
 
 /** `assessmentFreshness`'s single machine-readable failure reason. */

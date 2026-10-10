@@ -75,6 +75,8 @@ import { RuleService } from "./service/rule-service.js";
 import { RuleReadService } from "./service/rule-read-service.js";
 import { ImpactService } from "./service/impact-service.js";
 import { PrdOutlineService } from "./service/prd-outline-service.js";
+import { RuleStateService } from "./service/rule-state-service.js";
+import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
@@ -400,11 +402,9 @@ export interface App {
   ruleReadService?: RuleReadService;
   impactService?: ImpactService;
   /**
-   * PrdOutlineService — the sole structured writer for a PRD's outline
-   * (`lore outline set/list/rm`, SPEC-080 C1) and a plan's audited plan-close
-   * sync exemption (`lore outline exempt`, SPEC-080 C4). Store-only, same
-   * optional-DI shape as `acService`/`requirementService`; always wired in
-   * production.
+   * PrdOutlineService — READ-ONLY reader of a PRD's stored outline (`lore outline list`); its writers
+   * and the plan-close exemption writer were retired by slice 3a (BR-985). Store-only, same
+   * optional-DI shape as `acService`/`requirementService`; always wired in production.
    */
   prdOutlineService?: PrdOutlineService;
   /**
@@ -664,6 +664,11 @@ function buildAppFromSqlite(
     ledgerAutoApprove,
   );
   corpusService.setCiteGate(citeGateRaw);
+  // reason: BR-984 — plan-close's cited-rule-state predicate reads rule state through the real git port.
+  // Built lazily (git root resolved on first use) so an app that never closes a plan never spawns git.
+  corpusService.setRuleStateService({
+    full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(process.cwd()))).full(),
+  });
   const outlineService = new OutlineService(store);
   // reason: own telemetry wiring restores parity with CorpusService (D8) — TaskWorkflowService
   // never routes writes through CorpusService (cross-service calls forbidden). SPEC-025 §3 D5, D8.
@@ -1039,6 +1044,11 @@ function buildAppFromTurso(
     ledgerAutoApprove,
   );
   corpusService.setCiteGate(citeGateRaw);
+  // reason: BR-984 — plan-close's cited-rule-state predicate reads rule state through the real git port.
+  // Built lazily (git root resolved on first use) so an app that never closes a plan never spawns git.
+  corpusService.setRuleStateService({
+    full: () => new RuleStateService(store, new SpawnGitPort(resolveGitRoot(process.cwd()))).full(),
+  });
   const outlineService = new OutlineService(store);
   // reason: extracted to a local (see buildAppFromSqlite's identical comment) so
   // VerifyRunnerService can bind its recordVerifiedEvidence method below. 5th arg

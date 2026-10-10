@@ -125,7 +125,6 @@ import {
   describeCheckpointVacuity,
   isCheckpointBlocked,
   planPromoteReachabilityAdvisory,
-  planPromotePrdSyncAdvisory,
   selectFailures,
   type GateCheckpoint,
   type GateContext,
@@ -226,30 +225,23 @@ export function buildGateSkipAuditEntry(
  * A typed classification for a gate advisory message (spec-plan-close-
  * predicates-measure-invariants-an-applicability §Design Decisions D2) — the
  * enforcer boundary's vocabulary for "this is worth surfacing but must NEVER
- * block". `"verify-reachability"` is `planPromoteReachabilityAdvisory`'s
- * PRE-EXISTING class (unchanged — still surfaced only via
- * `ApproveResult.reachability_advisories`); `"prd-sync-domain-doc"` tags BOTH
- * `plan-promote`'s new early-warning advisory (`planPromotePrdSyncAdvisory`,
- * surfaced via `ApproveResult.prd_sync_advisories`) AND a plan-close
- * `prdOutlineSynced` not-applicable verdict when `enforce()` audits it — the
- * SAME underlying corpus fact ("this ancestor spec resolves no domain doc"),
- * observed at two different times; `"attestation-not-applicable"` tags a
- * plan-close `attestationFloor` not-applicable verdict (`reason:
- * "no-evidence"`) AND `checkPlanClose`'s Amendment A companion verdict for an
- * unresolved `planClaimedAcCoverage` (task-t8, §D3) — the latter ALSO carries
- * `reason: "referent-absent"` (`prdOutlineSynced`'s reason), so `reason` alone
- * is NOT the discriminator between these two kinds; `notApplicableAdvisoryKind`
- * (below) keys on `referent` first. Never widens an EXISTING field's meaning —
- * each kind lands on its own key/audit-detail value.
+ * block". `"verify-reachability"` is `planPromoteReachabilityAdvisory`'s class
+ * (surfaced via `ApproveResult.reachability_advisories`);
+ * `"attestation-not-applicable"` tags a plan-close `attestationFloor`
+ * not-applicable verdict (`reason: "no-evidence"`) AND `checkPlanClose`'s
+ * Amendment A companion verdict for an unresolved `planClaimedAcCoverage`
+ * (task-t8, §D3, `reason: "referent-absent"`). The former `"prd-sync-domain-doc"`
+ * kind was retired with the domain-document-edit predicate (BR-984). Never widens
+ * an EXISTING field's meaning — each kind lands on its own key/audit-detail value.
  *
  * `"attestation-not-applicable"` ALSO tags `attestationFloor`'s `reason:
  * "scope-undeclared"` verdict (spec-declared-scope-attestation-contract-task-
  * owned-ac-scope §Facts D4) — the same predicate reporting the same class of fact
  * ("this floor did not apply to this plan"), so it shares the kind rather than
- * inventing a fourth; the machine-readable `reason` on the audit row is what
+ * inventing a third; the machine-readable `reason` on the audit row is what
  * distinguishes zero-evidence from undeclared-scope.
  */
-export type GateAdvisoryKind = "verify-reachability" | "prd-sync-domain-doc" | "attestation-not-applicable";
+export type GateAdvisoryKind = "verify-reachability" | "attestation-not-applicable";
 
 /** One gate-produced advisory — see {@link GateAdvisoryKind} for the kind vocabulary. */
 export interface GateAdvisory {
@@ -261,9 +253,8 @@ export interface GateAdvisory {
  * The `PredicateNotApplicable.referent` sentinel `checkPlanClose`'s Amendment A
  * companion push (`checkpoint-registry.ts`, spec-plan-close-predicates-
  * measure-invariants-an-applicability §D3) writes when `ctx.planClaimedAcCoverage`
- * was never resolved by the caller — a FIXED literal, never a real doc slug,
- * unlike `prdOutlineSynced`'s OWN `reason: "referent-absent"` case, whose
- * `referent` names the actual ancestor spec (e.g. `"spec-x"`). This module's
+ * was never resolved by the caller — a FIXED literal, never a real doc slug.
+ * This module's
  * file anchor is `gate-enforcer.ts` alone — it cannot import the producer's
  * own constant without widening that anchor into `checkpoint-registry.ts` (a
  * DIFFERENT task's file); `checkpoint-registry.ts`'s `checkPlanClose` is the
@@ -272,24 +263,20 @@ export interface GateAdvisory {
 const PLAN_CLAIMED_AC_COVERAGE_REFERENT = "planClaimedAcCoverage";
 
 /**
- * Maps a {@link PredicateNotApplicable} verdict to its {@link GateAdvisoryKind}
- * — keyed on `referent` FIRST, `reason` only as the fallback discriminator.
- * `reason: "referent-absent"` alone is NOT 1:1 with a kind: `prdOutlineSynced`
- * produces it when a plan's ancestor spec resolves no domain doc (`referent`
- * names that spec), but `checkPlanClose`'s Amendment A companion push ALSO
- * produces `reason: "referent-absent"` when `ctx.planClaimedAcCoverage` was
- * never resolved (`referent` is always the fixed sentinel
- * {@link PLAN_CLAIMED_AC_COVERAGE_REFERENT}) — keying on `reason` alone would
- * label the second producer's audit row as a prd-sync domain-doc issue, which
- * is untrue. The `referent` check MUST run before the `reason` checks so this
- * distinction is preserved; `reason: "no-evidence"` (attestationFloor's own
- * zero-evidence case) has no competing referent and keeps its direct mapping.
+ * Maps a {@link PredicateNotApplicable} verdict to its {@link GateAdvisoryKind}.
+ * `reason: "referent-absent"` is now produced ONLY by `checkPlanClose`'s Amendment A
+ * companion push (`ctx.planClaimedAcCoverage` never resolved; `referent` is the fixed
+ * sentinel {@link PLAN_CLAIMED_AC_COVERAGE_REFERENT}) — the former second producer
+ * (the domain-doc predicate) was retired by BR-984 — so every `referent-absent` verdict is
+ * an attestation concern; `referent` is still checked first so a future second producer
+ * cannot be mislabelled silently. `reason: "no-evidence"` (attestationFloor's own
+ * zero-evidence case) keeps its direct mapping.
  * Exhaustive `never`-checked default — a future third `NotApplicableReason`
  * fails typecheck here until this mapping is updated.
  */
 function notApplicableAdvisoryKind(result: PredicateNotApplicable): GateAdvisoryKind {
   if (result.referent === PLAN_CLAIMED_AC_COVERAGE_REFERENT) return "attestation-not-applicable";
-  if (result.reason === "referent-absent") return "prd-sync-domain-doc";
+  if (result.reason === "referent-absent") return "attestation-not-applicable";
   if (result.reason === "no-evidence") return "attestation-not-applicable";
   // reason: RETAINED BUT CURRENTLY UNREACHED, deliberately. `attestationFloor`
   // stopped producing this verdict (task-plan-close-must-block-when-the-coverage-
@@ -335,7 +322,7 @@ const GATE_NOT_APPLICABLE_AUDIT_ACTION = "gate_not_applicable";
  * @example
  * buildNotApplicableAuditEntry(
  *   "plan-close",
- *   { kind: "prd-sync-domain-doc", message: "..." },
+ *   { kind: "attestation-not-applicable", message: "..." },
  *   "spec-x",
  *   "2026-07-30T00:00:00.000Z",
  *   "alice",
@@ -344,7 +331,7 @@ const GATE_NOT_APPLICABLE_AUDIT_ACTION = "gate_not_applicable";
  *   // => { timestamp: "2026-07-30T00:00:00.000Z", actor: "alice",
  *   //      session_id: "gate-not-applicable", action: "gate_not_applicable",
  *   //      doc_id: "plan-y",
- *   //      details: { checkpoint: "plan-close", kind: "prd-sync-domain-doc",
+ *   //      details: { checkpoint: "plan-close", kind: "attestation-not-applicable",
  *   //                 referent: "spec-x", target: "plan-y" } }
  */
 export function buildNotApplicableAuditEntry(
@@ -733,32 +720,6 @@ export class GateEnforcer {
   }
 
   /**
-   * `plan-promote` EARLY-WARNING domain-doc advisory lines for `ctx`
-   * (spec-plan-close-predicates-measure-invariants-an-applicability, task T1
-   * item 9) — mirrors {@link planPromoteReachabilityAdvisories}'s exact shape: a
-   * SEPARATE call from `enforce("plan-promote", ctx)`, never folded into it, so
-   * it can never influence whether that call returns ok/err. `ReviewService.
-   * enforceApprovalGate` calls this ALONGSIDE `planPromoteReachabilityAdvisories`
-   * and surfaces the result on its OWN `ApproveResult.prd_sync_advisories` key —
-   * `reachability_advisories` keeps carrying ONLY the verify-reachability class.
-   *
-   * @param ctx - The SAME `GateContext` the caller built for
-   *   `enforce("plan-promote", ctx)` — reads only `prdSyncEnabled`,
-   *   `hasSpecParent`, `prdSyncDomainDocResolved`, and
-   *   `parentSpecPointer`/`targetIdOrSlug` (for the message).
-   * @returns `[]` when there is nothing to warn about (see
-   *   `planPromotePrdSyncAdvisory`'s own JSDoc for the exact conditions); a
-   *   single-element array with the advisory text otherwise.
-   * @example
-   * enforcer.planPromotePrdSyncAdvisories({ prdSyncEnabled: false, hasSpecParent: true });
-   *   // => []
-   */
-  planPromotePrdSyncAdvisories(ctx: GateContext): readonly string[] {
-    const advisory = planPromotePrdSyncAdvisory(ctx);
-    return advisory === null ? [] : [advisory];
-  }
-
-  /**
    * SPEC-080 G4 — best-effort, fire-and-forget `gate_skipped` audit write for a
    * config-disabled checkpoint skip. A no-op (zero IO, no wall-clock/`process.env`
    * read) when `recordGateSkip` was not wired at construction. Otherwise resolves
@@ -834,7 +795,7 @@ export class GateEnforcer {
    * write, ONE row per `PredicateNotApplicable` verdict `enforce()`'s
    * `checkpointDef.check(ctx)` call produced. A no-op (zero IO) when
    * `recordGateSkip` was not wired at construction, OR `notApplicable` is empty
-   * (the common case — only `plan-close`'s `prdOutlineSynced`/`attestationFloor`
+   * (the common case — only `plan-close`'s `citedRuleStateClean`/`attestationFloor`
    * can ever produce one today). Each verdict's `reason` maps to a
    * {@link GateAdvisoryKind} via `notApplicableAdvisoryKind`, naming the absent
    * `referent` on the audit row. Fires via the SAME {@link fireAndForgetAudit}
@@ -1063,7 +1024,7 @@ export class GateEnforcer {
   }
 
   /**
-   * Whether `plan-close`'s `prdOutlineSynced` sub-predicate specifically is
+   * Whether `plan-close`'s `citedRuleStateClean` (BR-984) sub-predicate specifically is
    * enabled (`workflow.gates."plan-close".prd_sync.enabled`, SPEC-080 §C4) —
    * NARROWER than `isEnabled("plan-close")`, which governs the WHOLE
    * checkpoint. A caller building `GateContext.prdSyncEnabled`

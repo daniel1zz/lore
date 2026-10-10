@@ -117,7 +117,8 @@ import {
   oracleCoverage,
   requiresUatDeclared,
   attestationFloor,
-  prdOutlineSynced,
+  citedRuleStateClean,
+  type CitedRuleViolation,
   verifyReachability,
   attestationExemptKindValid,
   assessmentFreshness,
@@ -138,7 +139,7 @@ import {
   ATTESTATION_FLOOR_FIELD,
   ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
-  PRD_SYNC_FIELD,
+  CITED_RULE_STATE_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
   isNotApplicable,
   type AnchorOverlapConflictKind,
@@ -519,62 +520,24 @@ export interface GateContext {
    */
   readonly planDeclaredScopeCoverage?: DeclaredScopeCoverage;
 
-  // -- plan-close: check() + feed() (SPEC-080 §C4, prdOutlineSynced) --
+  // -- plan-close: check() + feed() (BR-984, cited-rule state) --
   /**
-   * Whether the `prdOutlineSynced` sub-predicate is enabled at all
+   * Whether the cited-rule-state predicate (`citedRuleStateClean`) is enabled at all
    * (`workflow.gates."plan-close".prd_sync.enabled`, resolved by the CALLER via
    * `GateEnforcer.isPrdSyncEnabled` — module invariant: no config access here).
    * DEFAULT-OFF, the opposite polarity of every other per-predicate knob on this
-   * checkpoint (SPEC-080 Migration Plan Phase 0: "plan-close predicate behind
-   * default-OFF knob") — `undefined`/`false` means the predicate never runs,
-   * regardless of `prdSyncSynced`.
+   * checkpoint — `undefined`/`false` means the predicate never runs, regardless of
+   * `citedRuleViolations`.
    */
   readonly prdSyncEnabled?: boolean;
   /**
-   * Pre-computed by the CALLER (`CorpusService.set`): `true` when the closing
-   * plan's linked domain doc carries >= 1 version whose content differs from
-   * its predecessor within the plan's execution window, OR the plan carries a
-   * valid `extra.prd_sync_exempt`; `false` when a domain doc resolved but
-   * neither of those hold; `null` (spec-plan-close-predicates-measure-
-   * invariants-an-applicability §Design Decisions D1/D6) when the plan's
-   * ancestor spec resolves NO domain doc AT ALL (`resolvePrdSyncDomainDoc`
-   * returned `ok(null)`, a FACT about the corpus graph, never a violation) —
-   * `checkPlanClose` pushes `prdOutlineSynced`'s NOT-APPLICABLE verdict for
-   * this case, instead of the pre-fix `false` that rendered domain-doc absence
-   * as an unclearable denial. `undefined` means a DIFFERENT thing — "not
-   * applicable at the checkpoint level" — the plan has no spec-tier ancestor
-   * to resolve a domain doc from in the first place (mirrors `hasSpecParent`'s
-   * vacuous-pass shape); `checkPlanClose` only pushes `prdOutlineSynced`'s
-   * result at all when this field IS defined (`null` or a boolean, as well as
-   * `prdSyncEnabled === true`).
+   * Pre-computed by the CALLER (`CorpusService.set`) from `RuleStateService.full()`: the rules cited
+   * by the closing plan's spec criteria whose state is `contradicted`, or `stale` with no attested
+   * pass recorded by the plan's tasks since it went stale (BR-984). `[]` = every cited rule is fine.
+   * `undefined` = no rule state was consulted (no rule-state service wired, or the plan has no spec
+   * ancestor) — `checkPlanClose` then pushes nothing for this predicate.
    */
-  readonly prdSyncSynced?: boolean | null;
-  /**
-   * The resolved domain doc's slug, for the feeding-pack message only — present
-   * iff the caller successfully resolved a domain doc from the plan's ancestor
-   * spec (`parent` or `implements` edge), regardless of whether its content
-   * turned out synced. `undefined` when no domain doc resolved (e.g. the
-   * ancestor spec declares no `implements` link and its own parent isn't a
-   * spec) — the feeding pack degrades to a link-first recovery message instead
-   * of naming a doc that doesn't exist.
-   */
-  readonly prdSyncDomainDocSlug?: string;
-  /**
-   * `plan-promote`'s EARLY-WARNING domain-doc signal (spec-plan-close-
-   * predicates-measure-invariants-an-applicability, task T1 item 9) — whether
-   * the plan's ancestor spec resolves a prd-sync domain doc AT ALL
-   * (`resolvePrdSyncDomainDoc(store, spec) !== null`), regardless of whether
-   * its content is in-window-synced (that is `plan-close`'s concern, via
-   * `prdSyncSynced`, not `plan-promote`'s). Populated by the CALLER
-   * (`ReviewService.enforceApprovalGate`) ONLY when `prdSyncEnabled` is `true`
-   * AND `hasSpecParent` is `true` — the two preconditions
-   * `planPromotePrdSyncAdvisory` itself gates on before ever reading this
-   * field, mirroring `parentSpecScriptAcCount`'s "populate only when relevant"
-   * shape. Consumed ONLY by `planPromotePrdSyncAdvisory`; `checkPlanPromote`'s
-   * own blocking predicates never read it (advisory never changes the
-   * outcome).
-   */
-  readonly prdSyncDomainDocResolved?: boolean;
+  readonly citedRuleViolations?: readonly CitedRuleViolation[];
 
   // -- plan-close: check() + feed() (SPEC-106, assessment freshness) --
   /**
@@ -693,7 +656,7 @@ export interface CheckpointDef {
    * PURE — see module invariant. The return type is the WIDEST possible shape
    * (`ApplicablePredicateResult[]`) because this ONE field type is shared across
    * every registered checkpoint — only `plan-close` (`checkPlanClose`) ever
-   * actually produces a `PredicateNotApplicable` member (via `prdOutlineSynced`/
+   * actually produces a `PredicateNotApplicable` member (via
    * `attestationFloor`); every other checkpoint's `check` function keeps
    * returning bare `PredicateResult[]`, which is structurally assignable here
    * unchanged (function return-type covariance) — spec-plan-close-predicates-
@@ -1115,61 +1078,6 @@ export function planPromoteReachabilityAdvisory(ctx: GateContext): string | null
 }
 
 /**
- * `plan-promote`'s domain-doc EARLY-WARNING advisory (spec-plan-close-
- * predicates-measure-invariants-an-applicability, task T1 item 9) — mirrors
- * {@link planPromoteReachabilityAdvisory}'s exact shape: a SEPARATE output from
- * `checkPlanPromote`'s verdict, never folded into its `PredicateResult[]`
- * (advisory never changes the outcome). Fires when `prd_sync` is enabled AND
- * the plan's ancestor spec resolves NO domain doc at all — the same corpus
- * fact `plan-close`'s `prdOutlineSynced` would later find itself NOT-APPLICABLE
- * against (§Design Decisions D1/D6), surfaced here EARLY (at promote time)
- * rather than only discovered as a close-time advisory, per the governing
- * ADR's own reasoning that a plan with nothing to verify/sync must be flagged
- * when it is promoted, not discovered later.
- *
- * @param ctx - Reads only `prdSyncEnabled`, `hasSpecParent`,
- *   `prdSyncDomainDocResolved`, and `parentSpecPointer`/`targetIdOrSlug` (for
- *   the message) — ignores every other field.
- * @returns `null` when `prdSyncEnabled` is not `true`, OR `hasSpecParent` is
- *   not `true` (nothing to resolve a domain doc FROM — `plan-close`'s own
- *   `prdSyncSynced` field would never even be populated in that case either),
- *   OR `prdSyncDomainDocResolved` is `true`; an advisory string naming the
- *   ancestor spec and the `lore link ... --type implements` wiring command
- *   otherwise (including when the caller never populated
- *   `prdSyncDomainDocResolved` at all — an unresolved fact is conservatively
- *   treated the same as "no domain doc resolved", mirroring this module's
- *   existing bias toward surfacing rather than silently suppressing an
- *   advisory).
- * @example
- * planPromotePrdSyncAdvisory({ prdSyncEnabled: false, hasSpecParent: true }); // => null
- * @example
- * planPromotePrdSyncAdvisory({
- *   prdSyncEnabled: true, hasSpecParent: true, prdSyncDomainDocResolved: true,
- * }); // => null
- * @example
- * planPromotePrdSyncAdvisory({
- *   prdSyncEnabled: true, hasSpecParent: true, prdSyncDomainDocResolved: false,
- *   parentSpecPointer: { slug: "spec-x", title: "X", status: "approved" },
- * }); // => advisory string naming "spec-x"
- */
-export function planPromotePrdSyncAdvisory(ctx: GateContext): string | null {
-  if (ctx.prdSyncEnabled !== true || ctx.hasSpecParent !== true) {
-    return null;
-  }
-  if (ctx.prdSyncDomainDocResolved === true) {
-    return null;
-  }
-  const spec = ctx.parentSpecPointer?.slug ?? "<spec>";
-  return (
-    `ADVISORY (does not block this promote): this plan's ancestor spec "${spec}" resolves ` +
-    `no domain doc for the prd-sync predicate (no \`parent\`/\`implements\` edge to another ` +
-    `spec) — at plan-close, \`prdOutlineSynced\` will be NOT-APPLICABLE rather than enforced ` +
-    `against it. Wire one via \`lore link ${spec} <domain-spec> --type implements\`, or ignore ` +
-    `this if the ancestor spec genuinely has no domain-level narrative to sync.`
-  );
-}
-
-/**
  * `task-claim`'s predicates (SPEC-042 §Design Decisions D5): `noAnchorOverlap`
  * runs UNCONDITIONALLY (subject only to `ctx.anchorOverlapEnabled`, D6's
  * per-predicate config knob) — NOT gated by `hasSpecParent`, unlike
@@ -1507,12 +1415,11 @@ const DEFAULT_ATTESTATION_MIN_RATIO: number | null = null;
  *     not) — a plan claiming exemption with a missing/invalid kind is denied
  *     by THIS predicate's own failure, independent of whatever
  *     `attestationFloor` itself concludes from the evidence.
- *   - `prdOutlineSynced` — OPT-IN, default-OFF (SPEC-080 §C4): only runs when
- *     `ctx.prdSyncEnabled === true` AND `ctx.prdSyncSynced !== undefined` (the
- *     latter is the caller's own "a spec-tier ancestor resolved, so this
- *     predicate is even applicable" signal — a plan hanging off a `prd`
- *     directly, or unparented, never has this field set, mirroring
- *     `plan-promote`'s `hasSpecParent` vacuous-pass shape).
+ *   - `citedRuleStateClean` — OPT-IN, default-OFF (BR-984): only runs when
+ *     `ctx.prdSyncEnabled === true` AND `ctx.citedRuleViolations !== undefined` (the
+ *     latter is the caller's own "rule state was consulted for a spec-tier
+ *     ancestor" signal — absent when no rule-state service is wired or the plan
+ *     has no spec ancestor).
  *   - `assessmentFreshness` — OPT-OUT (SPEC-106 D1): runs for EVERY closing plan
  *     UNLESS `ctx.assessmentFreshnessExempt === true` (D4 — flag + non-empty
  *     reason, resolved by the caller; mirrors `attestationExempt`'s shape, but
@@ -1530,7 +1437,7 @@ const DEFAULT_ATTESTATION_MIN_RATIO: number | null = null;
  * module's "run every predicate, don't short-circuit on the first failure"
  * contract) — a plan can fail ANY subset of them independently. A
  * `PredicateNotApplicable` member (from `attestationFloor`'s zero-evidence
- * case, `prdOutlineSynced`'s absent-domain-doc case, or — Amendment A,
+ * case, or — Amendment A,
  * spec-plan-close-predicates-measure-invariants-an-applicability — a companion
  * entry naming `"planClaimedAcCoverage"` when the caller never resolved
  * claimed-AC coverage at all) is pushed into this SAME array too (§Design
@@ -1613,8 +1520,8 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
       results.push({ notApplicable: true, reason: "referent-absent", referent: "planClaimedAcCoverage" });
     }
   }
-  if (ctx.prdSyncEnabled === true && ctx.prdSyncSynced !== undefined) {
-    results.push(prdOutlineSynced(ctx.prdSyncSynced, ctx.parentSpecPointer?.slug ?? "<spec>"));
+  if (ctx.prdSyncEnabled === true && ctx.citedRuleViolations !== undefined) {
+    results.push(citedRuleStateClean(ctx.citedRuleViolations));
   }
   if (ctx.assessmentFreshnessExempt !== true) {
     // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
@@ -1644,7 +1551,7 @@ function checkPlanClose(ctx: GateContext): ApplicablePredicateResult[] {
     // §B1.1's entire purpose (the spec this task closes: "an armed gate that
     // vacuously passes lends its authority to everything it waves through" —
     // the fix is making a vacuous pass auditable, not silencing it). The
-    // mechanism is the SAME one `attestationFloor`'s/`prdOutlineSynced`'s own
+    // mechanism is the SAME one `attestationFloor`'s/`citedRuleStateClean`'s own
     // not-applicable pushes already exercise (D1/D2's "observability never
     // changes the outcome" — a throwing/rejecting audit port can never alter
     // `enforce()`'s returned `Result`, `gate-enforcer.ts::fireAndForgetAudit`),
@@ -1911,52 +1818,25 @@ function assessmentFreshnessNote(ctx: GateContext): string {
 }
 
 /**
- * Renders the `prdOutlineSynced`-specific feeding pack (SPEC-080 §C4, contract
- * pointer added by spec-plan-close-predicates-measure-invariants-an-
- * applicability §D7/Deliver-4) — names all three repair verbs the spec's own
- * text calls for (`lore outline set`, `lore set <domain-doc>`,
- * `lore outline exempt`), degrading to a link-first message when the caller
- * never resolved a domain doc at all (`ctx.prdSyncDomainDocSlug` absent — no
- * ancestor-spec `parent`/`implements` edge to a domain doc exists yet).
- * Pointers only (domain doc slug, never its content), mirroring
- * `feedAttestationFloor`'s "recompute the recovery text from ctx" shape.
- *
- * Quotes a POINTER-SIZED slice of `PREDICATE_CONTRACTS[PRD_SYNC_FIELD]` (field
- * + invariant + measured — never the full `known_false_*` lists, §D7's own
- * "keep it pointer-sized" instruction) so the operator blocked on this
- * predicate reads its invariant/measurement directly, without a second
- * `lore gate --explain plan-close` round trip.
+ * Renders the cited-rule-state feeding pack (BR-984): names every offending rule with its state word
+ * and the recovery that clears each (re-run the citing criteria's attested `lore verify`; a
+ * contradicted rule needs the code or the rule fixed first).
  */
-function feedPrdOutlineSynced(ctx: GateContext, failures: PredicateResult[]): string {
+function feedCitedRuleState(ctx: GateContext, failures: PredicateResult[]): string {
   const plan = ctx.targetIdOrSlug ?? "<plan>";
-  const domainDoc = ctx.prdSyncDomainDocSlug;
-  const contract = PREDICATE_CONTRACTS[PRD_SYNC_FIELD];
-  const contractLine = `Contract (field: ${PRD_SYNC_FIELD}) — invariant: ${contract.invariant} Measured: ${contract.measured} `;
-  const recovery =
-    domainDoc !== undefined
-      ? `Recovery: update the outline entry (\`lore outline set <prd> --section <key> ...\`) ` +
-        `and/or the linked domain doc's narrative (\`lore set ${domainDoc} --content ...\`) — ` +
-        `or, if this plan genuinely made no domain-narrative-affecting change, record an ` +
-        `exemption via \`lore outline exempt ${plan} --reason "..."\`.`
-      : `No domain doc is linked from this plan's ancestor spec (via \`parent\` or ` +
-        `\`implements\`). Recovery: link one via \`lore outline set <prd> --section <key> ` +
-        `--links <domain-doc-slug>:detail\`, or, if this plan genuinely has no domain ` +
-        `narrative to sync, record an exemption via \`lore outline exempt ${plan} --reason ` +
-        `"..."\`.`;
+  const violations = ctx.citedRuleViolations ?? [];
+  const listed = violations.map((v) => `${v.rule_id} (${v.state})`).join(", ");
+  const contract = PREDICATE_CONTRACTS[CITED_RULE_STATE_FIELD];
   const pack = buildFeedingPack({
-    ruleSource: "corpus (domain doc content diff)",
+    ruleSource: "corpus (cited baseline rule state)",
     ruleMarkdown:
-      `Required for plan-close: the plan's linked domain doc must carry at least one ` +
-      `version whose content differs from its predecessor within the plan's execution ` +
-      `window (SPEC-080 C4). ${contractLine}${recovery}`,
+      `Required for plan-close: no rule cited by the plan's spec criteria may be contradicted, or ` +
+      `stale with no attested pass recorded by this plan's tasks since it went stale. ` +
+      `Offending rules: ${listed}. Contract (field: ${CITED_RULE_STATE_FIELD}) — invariant: ` +
+      `${contract.invariant} Measured: ${contract.measured} Recovery: for a stale rule re-run the citing criterion's attested ` +
+      `\`lore verify ${plan} --task <task>\`; for a contradicted rule fix the code (or the rule) ` +
+      `until the criterion passes, then re-verify. \`lore baseline tree --states\` shows the live state.`,
     missing: selectFailures(failures).map((f) => f.reason),
-    // reason: this is synthesized guidance text (contract pointer + repair-verb
-    // recovery instructions), not a slice of an arbitrary-length doc — the
-    // thing `DEFAULT_FEEDING_MAX_CHARS` (800) protects against — so a wider
-    // explicit budget is safe here, mirroring `feedAttestationFloor`'s
-    // identical rationale. Without this, the §D7 contract pointer (~600 chars)
-    // pushes the mandatory `lore outline set`/`lore set`/`lore outline exempt`
-    // repair verbs past the default truncation point.
     maxChars: 1800,
   });
   return renderFeedingPack(pack);
@@ -1964,13 +1844,13 @@ function feedPrdOutlineSynced(ctx: GateContext, failures: PredicateResult[]): st
 
 /**
  * `plan-close`'s feeding message — dispatches between FOUR independent failure
- * families (SPEC-054's `uatP0Accepted`, SPEC-069's `attestationFloor`, SPEC-080's
- * `prdOutlineSynced`, SPEC-106's `assessmentFreshness`, all on `checkPlanClose`,
+ * families (SPEC-054's `uatP0Accepted`, SPEC-069's `attestationFloor`, BR-984's
+ * `citedRuleStateClean`, SPEC-106's `assessmentFreshness`, all on `checkPlanClose`,
  * see that function's own JSDoc):
  *
  *   - ONLY `assessmentFreshness` failed → {@link feedAssessmentFreshness} alone.
- *   - ONLY `prdOutlineSynced` failed → {@link feedPrdOutlineSynced} alone.
- *   - ONLY `attestationFloor` failed (with or without `prdOutlineSynced`/
+ *   - ONLY `citedRuleStateClean` failed → {@link feedCitedRuleState} alone.
+ *   - ONLY `attestationFloor` failed (with or without `citedRuleStateClean`/
  *     `assessmentFreshness` also failing) → {@link feedAttestationFloor}, with
  *     one extra sentence appended per OTHER also-failing predicate — REGRESSION:
  *     byte-identical to pre-SPEC-106 when `assessmentFreshness` didn't fail
@@ -2005,7 +1885,7 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
         // `feedAttestationFloor` renders the scope-specific line for it.
         f.field === ATTESTATION_SCOPE_UNDECLARED_FIELD),
   );
-  const prdSyncFailed = failures.some((f) => !f.ok && f.field === PRD_SYNC_FIELD);
+  const prdSyncFailed = failures.some((f) => !f.ok && f.field === CITED_RULE_STATE_FIELD);
   const assessmentStaleFailed = failures.some((f) => !f.ok && f.field === ASSESSMENT_FRESHNESS_FIELD);
   const assessmentNote = assessmentStaleFailed ? assessmentFreshnessNote(ctx) : "";
 
@@ -2014,7 +1894,7 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
   }
 
   if (prdSyncFailed && !uatFailed && !attestationFailed) {
-    return feedPrdOutlineSynced(ctx, failures) + assessmentNote;
+    return feedCitedRuleState(ctx, failures) + assessmentNote;
   }
 
   if (attestationFailed && !uatFailed) {
@@ -2023,9 +1903,8 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
       return attestationText + assessmentNote;
     }
     return (
-      `${attestationText}\n\nAdditionally, the domain-doc sync predicate is unmet — see ` +
-      `\`lore outline exempt ${ctx.targetIdOrSlug ?? "<plan>"} --reason "..."\` or update the ` +
-      `linked domain doc.${assessmentNote}`
+      `${attestationText}\n\nAdditionally, a rule cited by the spec's criteria is contradicted or stale — see ` +
+      `\`lore baseline tree --states\`.${assessmentNote}`
     );
   }
 
@@ -2039,8 +1918,8 @@ function feedPlanClose(ctx: GateContext, failures: PredicateResult[]): string {
       `\`lore verify ${ctx.targetIdOrSlug ?? "<plan>"}\`.`
     : "";
   const prdSyncNote = prdSyncFailed
-    ? ` Additionally, the domain-doc sync predicate is unmet — see \`lore outline exempt ` +
-      `${ctx.targetIdOrSlug ?? "<plan>"} --reason "..."\` or update the linked domain doc.`
+    ? ` Additionally, a rule cited by the spec's criteria is contradicted or stale — see ` +
+      `\`lore baseline tree --states\`.`
     : "";
   const pack = buildFeedingPack({
     ruleSource: "corpus (UAT verdict)",

@@ -344,20 +344,19 @@ describe("plan-close leaves a zero-evidence plan advisory (PCI-19)", () => {
  * A plan-close ctx whose EVERY conjunct is inapplicable — the "completely dark
  * gate" shape:
  *   - zero evidence anywhere         -> attestationFloor: notApplicable(no-evidence)
- *   - prd_sync on, domain doc absent -> prdOutlineSynced: notApplicable(referent-absent)
  *   - assessment freshness exempted  -> that predicate is not pushed at all
  *   - not UAT-gated, no exemption claimed -> neither predicate is pushed
+ *   - cited-rule-state is two-valued (BR-984): with no violation list it is not pushed at all
  * `planClaimedAcCoverage` stays OMITTED and its companion push is suppressed by
- * the no-evidence reason, so the array holds exactly the two verdicts above.
+ * the no-evidence reason, so the array holds exactly the one verdict above.
+ * (Slice 3a retired the domain-doc predicate that used to contribute a second
+ * notApplicable(referent-absent) verdict here; the notice now names one predicate.)
  */
 function fullyInapplicableCtx(): GateContext {
   return {
     targetIdOrSlug: "plan-dark",
     planTasksAttestation: [],
     attestationMinRatio: null,
-    prdSyncEnabled: true,
-    prdSyncSynced: null,
-    parentSpecPointer: { slug: "spec-dark", title: "Dark governing spec", status: "approved" },
     assessmentFreshnessExempt: true,
   };
 }
@@ -366,8 +365,8 @@ function fullyInapplicableCtx(): GateContext {
  *  than rebuilt from the same template the implementation uses — a test that
  *  re-derives the string cannot detect the string changing. */
 const EXPECTED_DARK_NOTICE =
-  'VACUOUS-GATE: checkpoint "plan-close" returned no verdict — all 2 predicate(s) ' +
-  "reported notApplicable (no-evidence:plan-dark, referent-absent:spec-dark). " +
+  'VACUOUS-GATE: checkpoint "plan-close" returned no verdict — all 1 predicate(s) ' +
+  "reported notApplicable (no-evidence:plan-dark). " +
   "Nothing was measured, so this pass is not evidence of the checkpoint's invariant.";
 
 describe("an all-inapplicable checkpoint run reports its own vacuity (PCI-20)", () => {
@@ -379,8 +378,8 @@ describe("an all-inapplicable checkpoint run reports its own vacuity (PCI-20)", 
 
     // Fixture integrity — if this ever stops holding, the equality below would
     // be measuring a different shape than the one the AC names.
-    expect(results).toHaveLength(2);
-    expect(results.filter(isNotApplicable)).toHaveLength(2);
+    expect(results).toHaveLength(1);
+    expect(results.filter(isNotApplicable)).toHaveLength(1);
 
     expect(describeCheckpointVacuity("plan-close", results)).toBe(EXPECTED_DARK_NOTICE);
   });

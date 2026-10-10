@@ -1,53 +1,30 @@
 /**
- * lore outline — SPEC-080 C1/C4 structured PRD outline + plan-close sync
- * exemption verb family. Thin pipe over `PrdOutlineService` — zero business
- * logic here (upsert/CAS/validation rules all live in the service; see its
- * module header). Mirrors `lore ac`/`lore requirement` one tier up.
+ * lore outline — read-only after slice 3a (BR-985). The structured PRD outline and the plan-close
+ * sync exemption are superseded by the baseline tree: `set`, `rm` and `exempt` are RETIRED and refuse
+ * with outcome code 4 (VALIDATION_ERROR) naming the baseline action that replaces them; `list` still
+ * prints whatever entries are already stored. Thin pipe over `PrdOutlineService.outlineList` — zero
+ * business logic here.
  *
  * Subcommands:
- *   set    <prd> --section <key> --title <t> --tier <core|domain>
- *          --direction <text> [--decision-pointer <adr-slug> repeatable]
- *          [--constraint <text> repeatable] [--link <slug:rel> repeatable]
- *            Single-entry CAS upsert (`PrdOutlineService.outlineSet`, always
- *            called with `{ create: true }` — see below). An existing entry
- *            with a matching `section` is replaced wholesale; every sibling
- *            entry is carried through byte-identical.
- *   list   <prd> [--json]
- *            List declared outline entries in declaration order.
- *   rm     <prd> <section>
- *            Remove a declared entry by its `section` key.
- *   exempt <plan> --reason <text> [--by <name>]
- *            Record an audited plan-close sync exemption
- *            (`plan.extra.prd_sync_exempt`). `--reason` is required — a
- *            missing/blank value is a CLI usage error (exit 2), never
- *            forwarded to the service as an empty string.
+ *   list   <prd> [--json]   List stored outline entries in declaration order (works as before).
+ *   set | rm | exempt       Retired: exit 4, nothing written, stderr (or the `--json` error envelope)
+ *                           names `lore baseline add`. The retired check runs FIRST, before any
+ *                           argument-completeness check, so a bare `outline exempt <plan>` is also 4.
  *
- * All subcommands accept --json for machine-readable output.
- * Exit codes per SPEC-003 §5 (via utils.ts::exitCode):
- *   0 = success
- *   2 = CLI usage error (missing --reason on `exempt`; unknown flag via the
- *       SPEC-051 strict-flag seam)
- *   3 = DOC_NOT_FOUND
- *   4 = VALIDATION_ERROR (not a prd/plan target, malformed entry, unknown
- *       section on `rm`, blank reason reaching the service)
- *   5 = STALE_VERSION
+ * Exit codes per SPEC-003 §5 (via utils.ts::exitCode): 0 = list success, 3 = DOC_NOT_FOUND,
+ * 4 = VALIDATION_ERROR (every retired write; not a prd target on `list`).
  *
- * @invariant `set` always passes `{ create: true }` to `outlineSet` — the
- *   CLI verb is upsert-shaped by design (a human/agent authoring a section
- *   for the first time should not need a separate "create" ceremony); the
- *   service's own default (update-only, reject unmatched `section`) exists
- *   to protect OTHER, non-CLI callers from an accidental new entry, not this
- *   adapter (SPEC-080 C1, `PrdOutlineService.outlineSet`'s own invariant
- *   doc). This is a parameter-default choice, not a business rule — the
- *   actual upsert/CAS logic still lives entirely in the service.
+ * The retired verbs keep their flag declarations (all optional) only so the SPEC-051 strict-flag seam
+ * does not turn an old invocation into an unrelated usage error (exit 2) before the refusal runs.
  *
- * Source: SPEC-080 C1, C4; adapters/cli/CLAUDE.md thin-adapter invariant
+ * Source: spec-baseline-slice-3a-architecture-tree-baseline-root (Design "Outline"), BR-985;
+ * adapters/cli/CLAUDE.md thin-adapter invariant
  */
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor } from "../utils.js";
-import type { OutlineEntry, OutlineLinkRel } from "@lore/core";
+import { exitCode, formatError } from "../utils.js";
+import type { LoreError, OutlineEntry } from "@lore/core";
 import type { PrdOutlineService } from "../../../service/prd-outline-service.js";
 import type { App } from "../../../app.js";
 
@@ -65,83 +42,53 @@ function requireOutlineService(app: App): PrdOutlineService {
   return app.prdOutlineService;
 }
 
+/**
+ * The refusal every retired outline write returns (BR-985): names the baseline action that replaces
+ * the outline, so the operator is never left at a dead end.
+ */
+function retiredOutlineWrite(verb: string): LoreError {
+  return {
+    code: "VALIDATION_ERROR",
+    field: "outline",
+    message:
+      `\`lore outline ${verb}\` is retired: the outline is superseded by the baseline tree. ` +
+      `Record the same knowledge as baseline structure with \`lore baseline add\` ` +
+      `(see \`lore baseline --help\` for rules, branches and glossary). \`lore outline list\` still reads existing entries.`,
+  };
+}
+
+/** Prints the refusal (text or `--json` envelope) and sets exit code 4. Writes nothing. */
+function refuseRetiredWrite(verb: string, json: unknown): void {
+  const error = retiredOutlineWrite(verb);
+  if (json === true) console.log(JSON.stringify({ ok: false, error }, null, 2));
+  else process.stderr.write(formatError(error) + "\n");
+  process.exitCode = exitCode(error);
+}
+
 export default defineCommand({
   meta: {
     name: "outline",
-    description: "Manage a PRD's structured outline and plan-close sync exemptions (SPEC-080)",
+    description: "List a PRD's stored outline entries (writes are retired — see `lore baseline add`)",
   },
   subCommands: {
     set: defineCommand({
-      meta: { name: "set", description: "Upsert a single outline entry on a PRD" },
+      meta: { name: "set", description: "RETIRED (BR-985): refused with exit 4; use `lore baseline add`" },
       args: {
-        prd: {
-          type: "positional",
-          description: "PRD document ID or slug",
-          required: true,
-        },
-        section: {
-          type: "string",
-          description: "Stable section key, e.g. 'distribution'",
-          required: true,
-        },
-        title: {
-          type: "string",
-          description: "Rendered heading for this entry",
-          required: true,
-        },
-        tier: {
-          type: "string",
-          description: "Budget tier: core | domain",
-          required: true,
-        },
-        direction: {
-          type: "string",
-          description: "Bounded summary prose",
-          required: true,
-        },
-        "decision-pointer": {
-          type: "string",
-          description: "[repeatable] ADR slug this entry's narrative embeds/depends on",
-        },
-        constraint: {
-          type: "string",
-          description: "[repeatable] Hard invariant (not general narrative)",
-        },
-        link: {
-          type: "string",
-          description: "[repeatable] 'slug:rel' pointer, rel one of detail|landing-spec|adr",
-        },
+        "prd": { type: "positional", description: "(retired — ignored)" },
+        "section": { type: "string", description: "(retired — ignored)" },
+        "title": { type: "string", description: "(retired — ignored)" },
+        "tier": { type: "string", description: "(retired — ignored)" },
+        "direction": { type: "string", description: "(retired — ignored)" },
+        "decision-pointer": { type: "string", description: "(retired — ignored)" },
+        "constraint": { type: "string", description: "(retired — ignored)" },
+        "link": { type: "string", description: "(retired — ignored)" },
         json: {
           type: "boolean",
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
-        try {
-          const candidate = buildOutlineEntryCandidate(args);
-          const result = await requireOutlineService(app).outlineSet(args.prd as string, candidate, {
-            create: true,
-          });
-
-          if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
-          }
-
-          if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
-          }
-
-          console.log(
-            `Set outline entry "${args.section as string}" on ${args.prd as string} (${result.value.length} entries).`,
-          );
-        } finally {
-          app.close();
-        }
+      run({ args }) {
+        refuseRetiredWrite("set", args.json);
       },
     }),
 
@@ -188,156 +135,37 @@ export default defineCommand({
     }),
 
     rm: defineCommand({
-      meta: { name: "rm", description: "Remove a declared outline entry by section key" },
+      meta: { name: "rm", description: "RETIRED (BR-985): refused with exit 4; use `lore baseline add`" },
       args: {
-        prd: {
-          type: "positional",
-          description: "PRD document ID or slug",
-          required: true,
-        },
-        section: {
-          type: "positional",
-          description: "Section key to remove",
-          required: true,
-        },
+        "prd": { type: "positional", description: "(retired — ignored)" },
+        "section": { type: "positional", description: "(retired — ignored)" },
         json: {
           type: "boolean",
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        const { app } = loadLoreApp();
-        try {
-          const result = await requireOutlineService(app).outlineRm(args.prd as string, args.section as string);
-
-          if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
-          }
-
-          if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
-          }
-
-          console.log(`Removed outline entry "${args.section as string}" from ${args.prd as string}.`);
-          if (result.value.length > 0) {
-            renderOutlineList(result.value);
-          } else {
-            console.log("No outline entries remaining.");
-          }
-        } finally {
-          app.close();
-        }
+      run({ args }) {
+        refuseRetiredWrite("rm", args.json);
       },
     }),
 
     exempt: defineCommand({
-      meta: { name: "exempt", description: "Record an audited plan-close sync exemption" },
+      meta: { name: "exempt", description: "RETIRED (BR-985): refused with exit 4; use `lore baseline add`" },
       args: {
-        plan: {
-          type: "positional",
-          description: "Plan document ID or slug",
-          required: true,
-        },
-        reason: {
-          type: "string",
-          description: "Required justification for the exemption",
-        },
-        by: {
-          type: "string",
-          description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-        },
+        "plan": { type: "positional", description: "(retired — ignored)" },
+        "reason": { type: "string", description: "(retired — ignored)" },
+        "by": { type: "string", description: "(retired — ignored)" },
         json: {
           type: "boolean",
           description: "Output result as JSON",
         },
       },
-      async run({ args }) {
-        // reason is a CLI usage error when missing/blank (exit 2), not forwarded
-        // to the service (which would surface it as VALIDATION_ERROR, exit 4) —
-        // mirrors evidence.ts's mutual-flag usage-error convention.
-        if (typeof args.reason !== "string" || args.reason.trim().length === 0) {
-          process.stderr.write("Error: --reason is required and must not be blank.\n");
-          process.exitCode = 2;
-          return;
-        }
-
-        const { app } = loadLoreApp();
-        try {
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
-          const result = await requireOutlineService(app).exempt(args.plan as string, {
-            reason: args.reason,
-            by,
-          });
-
-          if (!result.ok) {
-            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
-            else process.stderr.write(formatError(result.error) + "\n");
-            process.exitCode = exitCode(result.error);
-            return;
-          }
-
-          if (args.json) {
-            console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
-            return;
-          }
-
-          console.log(`Recorded plan-close sync exemption for ${args.plan as string}: ${result.value.reason}`);
-        } finally {
-          app.close();
-        }
+      run({ args }) {
+        refuseRetiredWrite("exempt", args.json);
       },
     }),
   },
 });
-
-// ─── Input Assembly ──────────────────────────────────────────────────────────
-
-/**
- * Assemble a candidate outline entry from raw CLI args — deliberately
- * untyped (`unknown` at the `PrdOutlineService` boundary): `outlineEntrySchema`
- * is the single source of truth for shape validation. This function only
- * shapes the object (incl. citty's single-value/array normalization for
- * repeatable flags and `slug:rel` link-pair parsing); it does not validate.
- */
-function buildOutlineEntryCandidate(args: Record<string, unknown>): unknown {
-  return {
-    section: args.section as string,
-    title: args.title as string,
-    tier: args.tier as string,
-    direction: args.direction as string,
-    decision_pointers: toStringArray(args["decision-pointer"]),
-    constraints: toStringArray(args.constraint),
-    links: toStringArray(args.link).map(parseLinkPair),
-  };
-}
-
-/**
- * citty yields a string for one occurrence of a repeatable flag, an array for
- * ≥2, and `undefined` for zero — normalize to a string array (mirrors
- * `ac.ts`'s `--covers` handling).
- */
-function toStringArray(raw: unknown): string[] {
-  if (typeof raw === "string") return [raw];
-  if (Array.isArray(raw)) return raw as string[];
-  return [];
-}
-
-/**
- * Parses a `--link "slug:rel"` value into `{ slug, rel }`. Splits on the
- * FIRST colon only (a slug never contains one, per `slugSchema`) — passed
- * through untyped when malformed so `outlineEntrySchema`'s discriminated
- * `rel` enum surfaces the actual bad value in its VALIDATION_ERROR, not a
- * CLI-side pre-check.
- */
-function parseLinkPair(raw: string): { slug: string; rel: string } {
-  const idx = raw.indexOf(":");
-  if (idx === -1) return { slug: raw, rel: "" };
-  return { slug: raw.slice(0, idx), rel: raw.slice(idx + 1) as OutlineLinkRel };
-}
 
 // ─── Output Helpers ──────────────────────────────────────────────────────────
 

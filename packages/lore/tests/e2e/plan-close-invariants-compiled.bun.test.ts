@@ -17,6 +17,11 @@
  * sibling plan's unattested claimed AC genuinely blocks the SAME command for
  * the RIGHT reason (proved via a control run, not merely a passing assertion).
  *
+ * UPDATED for slice 3a (BR-984/BR-985): the domain-doc predicate and its plan-promote advisory are retired,
+ * so scenario A now asserts that `lore approve` prints NO prd-sync advisory (the spec still has no domain
+ * doc — the fixture shape below is unchanged — and that no longer matters), and the close stays clean with
+ * the knob ON because the spec cites no baseline rule.
+ *
  * Fixture shape (one PRD -> one spec -> two sibling plans):
  *   - The spec is parented DIRECTLY under the root PRD and declares zero
  *     `implements` edges, so `resolvePrdSyncDomainDoc` returns `ok(null)` — a
@@ -245,7 +250,7 @@ function createPrd(dir: string, title: string): string {
 }
 
 /** Parented DIRECTLY under the PRD — no `implements` edge declared anywhere,
- *  so `resolvePrdSyncDomainDoc` resolves NO domain doc for this spec (§D6). */
+ *  so it resolves NO domain doc (historically §D6; irrelevant since BR-984). */
 function createSpec(dir: string, prdSlug: string, title: string): string {
   const r = runLore(
     ["create", "spec", "--title", title, "--parent", prdSlug, "--content", "## Overview\n\nBody.", "--no-ai"],
@@ -371,7 +376,7 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     }
   });
 
-  it("compiled close — scenario A: an attested single-claimed-AC plan archives at exit 0, with the not-applicable advisory genuinely printed (never a silent vacuous pass)", () => {
+  it("compiled close — scenario A: an attested single-claimed-AC plan archives at exit 0 with prd_sync ON, and approve prints NO retired prd-sync advisory", () => {
     const planSlug = createPlan(dir, specSlug, "T5 PCI-12 Plan A (clean close)");
     const taskSlug = createTask(dir, planSlug, "T5 PCI-12 Task A");
 
@@ -386,28 +391,18 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     expect(verifyResult.exitCode).toBe(0);
     expect(verifyResult.stdout).toContain(AC_ID);
 
-    // `lore approve <plan>` is where §D2's "loud on two channels" becomes
-    // OBSERVABLE from this CLI surface: the plan-promote early-warning
-    // advisory, naming the ancestor spec and the wiring command, on stderr —
-    // never stdout (D1: an advisory never changes the outcome; exit stays 0
-    // whether or not it prints). A test that skipped this assertion and only
-    // checked the final archive's exit code would let a silently-swallowed
-    // advisory pass unnoticed — exactly the vacuous-pass defect class §D2
-    // fixes.
+    // `lore approve <plan>`: the retired plan-promote prd-sync advisory must never print (BR-984). Exit
+    // stays 0 and neither channel carries it.
     const approveResult = approvePlan(dir, planSlug);
     expect(approveResult.exitCode).toBe(0);
-    expect(approveResult.stderr).toContain("prd-sync predicate");
-    expect(approveResult.stderr).toContain("NOT-APPLICABLE");
-    expect(approveResult.stderr).toContain(specSlug);
-    expect(approveResult.stderr).toContain("lore link");
-    expect(approveResult.stderr).toContain("--type implements");
-    // Channel discipline — the advisory never leaks to stdout.
+    expect(approveResult.stderr).not.toContain("prd-sync predicate");
+    expect(approveResult.stderr).not.toContain("NOT-APPLICABLE");
+    expect(approveResult.stderr).not.toContain("--type implements");
     expect(approveResult.stdout).not.toContain("NOT-APPLICABLE");
     expect(approveResult.stdout).not.toContain("ADVISORY");
 
-    // Archive: every claimed AC attested, no `min_ratio` configured, domain
-    // doc absent (not-applicable, never a violation) — clean close, exit 0,
-    // no exemption field needed anywhere.
+    // Archive: every claimed AC attested, no `min_ratio` configured, the spec cites no rule — clean
+    // close, exit 0, no exemption field needed anywhere.
     const archiveResult = archivePlan(dir, planSlug);
     expect(archiveResult.exitCode).toBe(0);
     expect(archiveResult.stderr).not.toContain("attestation-floor");
