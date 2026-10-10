@@ -301,7 +301,7 @@ export type ProjectScaffoldReceipt = ProjectScaffoldReport & {
  * Order is semantic, not incidental — each step's output is the next step's
  * input: `/lore-init-context` fills the module-level `CLAUDE.md` layer the
  * scaffold left as an empty stub (D4); `/lore-kickoff` bootstraps the initial
- * corpus (root PRD + first spec) INTO the `.lore/` this run created (D1); the
+ * corpus (root PRD, baseline leaf + rule, first citing spec) INTO the `.lore/` this run created (D1); the
  * first `lore create prd` is the literal first corpus-write command a
  * follower can copy-paste once both skills have run. This is the ONE ordered
  * list both this module's text renderer and the CLI adapter's future `--json`
@@ -311,7 +311,7 @@ export type ProjectScaffoldReceipt = ProjectScaffoldReport & {
  */
 export const PROJECT_NEXT_STEPS: readonly string[] = [
   "Run /lore-init-context to fill in this repo's CLAUDE.md module layer.",
-  "Run /lore-kickoff to bootstrap the initial corpus (root PRD + first spec).",
+  "Run /lore-kickoff to bootstrap the initial corpus (root PRD, a baseline leaf + rule, then a first spec citing it).",
   'Run `lore create prd --title "<your product>"` to start your first PRD.',
 ];
 
