@@ -297,11 +297,29 @@ describe("check: tree_position", () => {
     expect(findCheck(results, "tree_position")?.outcome).toBe("pass");
   });
 
-  it("HAPPY: spec under prd matches the modeled position", () => {
+  it("HAPPY (AC-FIP-1, BR-2/BR-400): a PARENTLESS spec passes — its slot is 'no parent'", () => {
+    const doc = makeDoc("spec", { parent_id: null });
+    const results = runDeterministicChecks(makeBundle(doc, { blueprint: SIMPLE_BLUEPRINT }));
+    expect(findCheck(results, "tree_position")?.outcome).toBe("pass");
+  });
+
+  // re-baseline: old assertion "spec under prd passes" -> fails, because BR-2/BR-400 make parentless the only legal
+  // spec position (tree-check reports a parented spec as misplaced; review must agree).
+  it("NEGATIVE (REGRESSION): a spec that still HAS a parent fails — misplaced, same verdict as check-tree", () => {
     const parent = makeDoc("prd", { id: "01ARZ3PARENT00000000002" });
     const doc = makeDoc("spec", { parent_id: parent.id });
     const results = runDeterministicChecks(makeBundle(doc, { parent, blueprint: SIMPLE_BLUEPRINT }));
-    expect(findCheck(results, "tree_position")?.outcome).toBe("pass");
+    const check = findCheck(results, "tree_position");
+    expect(check?.outcome).toBe("fail");
+    expect(check?.detail).toContain("takes no parent");
+  });
+
+  it("NEGATIVE (control): a parentless task (type that requires a parent) still fails", () => {
+    const doc = makeDoc("task", { parent_id: null });
+    const results = runDeterministicChecks(makeBundle(doc, { blueprint: SIMPLE_BLUEPRINT }));
+    const check = findCheck(results, "tree_position");
+    expect(check?.outcome).toBe("fail");
+    expect(check?.detail).toContain("(none)");
   });
 
   it("HAPPY (STATE): knowledge is modeled under BOTH plan and prd — matching EITHER modeled parent passes", () => {
