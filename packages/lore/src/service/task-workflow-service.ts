@@ -364,6 +364,19 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import {
+  applyWorktreeRemoval,
+  buildActiveClaimedPathSet,
+  collectRecordedWorktrees,
+  createRealWorktreeProbe,
+  evaluateRecordedWorktree,
+  parseQuietMinutes,
+  type RecordedWorktree,
+  type WorktreeDecisionKind,
+  type WorktreeEvaluation,
+  type WorktreeGitProbe,
+  type WorktreeOutcome,
+} from "./worktree-cleanup.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import { compareClaimSessions, type SessionComparison } from "./gate-predicates.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
@@ -595,6 +608,20 @@ export interface DoneResult {
    * task-plan-membership-is-extra-plan-id-but-the-last-task.
    */
   plan_membership_disagreement?: PlanMembershipDisagreement;
+  /**
+   * Issue #106 / BR-961 — one outcome per worktree this task's claims recorded, from the cleanup
+   * pass that runs AFTER a real archive walk (absent on the idempotent no-op branch). Never an
+   * error: a kept / not-measured worktree is reported here and `done` still succeeds.
+   */
+  worktree_outcomes?: WorktreeOutcome[];
+}
+
+/** One `lore worktree sweep` row (issue #106): a claim-recorded worktree of an archived/deprecated task and its decision. */
+export interface WorktreeSweepRow {
+  task: string;
+  worktree: string;
+  decision: WorktreeDecisionKind;
+  reason: string;
 }
 
 /**
@@ -2067,6 +2094,11 @@ export class TaskWorkflowService {
       worktree: string,
       sessionId: string,
     ) => Promise<void> = unbindClaimSessionForTrailer,
+    // reason: issue #106 — the git/fs probe behind `done()`'s worktree cleanup and
+    // `sweepWorktrees()`; defaults to real git so every shipped surface cleans up without
+    // `app.ts` wiring (same leaf-IO-port precedent as `detectBranch` above).
+    private readonly worktreeProbe: WorktreeGitProbe = createRealWorktreeProbe(),
+    private readonly nowEpochSeconds: () => number = () => Math.floor(Date.now() / 1000),
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
@@ -2630,10 +2662,17 @@ export class TaskWorkflowService {
         ? `Claimed by ${opts.by} (previous holder: ${existingClaim.by})`
         : `Claimed by ${opts.by}`;
 
+    // reason: issue #106 / BR-961 — the worktree HEAD at claim time is the "base" that defines a
+    // task's OWN commits (branch commits beyond it). Recorded on the claim AUDIT row (which survives
+    // `lore release`, unlike `extra.claim`). An unmeasurable HEAD is left ABSENT: cleanup then reports
+    // `not-measured`, never guesses a base.
+    const claimBase = opts.worktree !== undefined ? this.worktreeProbe.headSha(opts.worktree) : undefined;
     const writeResult = await this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "claim", {
       by: opts.by,
       steal: opts.steal === true,
       ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
+      ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
+      ...(claimBase !== undefined && claimBase.ok ? { base_sha: claimBase.value } : {}),
     });
     if (!writeResult.ok) return writeResult;
 
@@ -3189,10 +3228,13 @@ export class TaskWorkflowService {
     if (!planFactResult.ok) return planFactResult;
     const planFact = planFactResult.value;
 
+    const worktreeOutcomes = await this.cleanupRecordedWorktrees(task, opts.by, now());
+
     return ok({
       task,
       already_done: false,
       transitions,
+      worktree_outcomes: worktreeOutcomes,
       ...(planFact?.kind === "fully_terminal"
         ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug } }
         : {}),
@@ -3205,6 +3247,133 @@ export class TaskWorkflowService {
           }
         : {}),
     });
+  }
+
+  // ── Worktree cleanup (issue #106, BR-961 / BR-962) ──────────────────────────
+
+  /**
+   * Normalized paths recorded by the CURRENT claim of every task that is not yet terminal. A worktree
+   * still named by such a claim belongs to live work (one orchestrator worktree is routinely claimed by
+   * several sequential tasks), so cleanup of an archived sibling must never remove it.
+   */
+  private async collectActiveClaimedPaths(): Promise<Result<Set<string>, LoreError>> {
+    const tasksResult = await this.store.findMany({ type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    const paths: string[] = [];
+    for (const candidate of tasksResult.value) {
+      if (candidate.status === "archived" || candidate.status === "deprecated") continue;
+      const worktree = readClaim(candidate)?.worktree;
+      if (worktree !== undefined) paths.push(worktree);
+    }
+    return ok(buildActiveClaimedPathSet(this.worktreeProbe, paths));
+  }
+
+  /** Worktrees `task`'s claims recorded (claim audit history, which survives release, + current claim). */
+  private async readRecordedWorktrees(task: DocRecord): Promise<Result<RecordedWorktree[], LoreError>> {
+    const auditResult = await this.store.queryAudit({ doc_id: task.id, action: "claim" });
+    if (!auditResult.ok) return auditResult;
+    return ok(collectRecordedWorktrees(auditResult.value, readClaim(task)?.worktree));
+  }
+
+  private async recordWorktreeCleanupAudit(
+    task: DocRecord,
+    by: string,
+    nowIso: string,
+    trigger: "done" | "sweep",
+    outcomes: readonly WorktreeOutcome[],
+  ): Promise<Result<void, LoreError>> {
+    return this.store.appendAuditEntry({
+      timestamp: nowIso,
+      actor: by,
+      session_id: `${trigger}-${task.id}`,
+      action: "worktree-cleanup",
+      doc_id: task.id,
+      details: { by, trigger, worktree_cleanup: outcomes.map((o) => ({ ...o })) },
+    });
+  }
+
+  /**
+   * `done()`'s cleanup pass — runs AFTER the archive walk committed, so it can never fail archival: every
+   * failure becomes a `not-measured` outcome the caller prints. Evaluates each recorded worktree
+   * (BR-961 predicate), removes the `remove` ones, and stores the outcomes in one audit row
+   * (`action: "worktree-cleanup"`, `trigger: "done"`).
+   */
+  private async cleanupRecordedWorktrees(task: DocRecord, by: string, nowIso: string): Promise<WorktreeOutcome[]> {
+    const unmeasurable = (reason: string): WorktreeOutcome[] => [
+      { worktree: "(recorded worktrees)", decision: "not-measured", reason },
+    ];
+    const recordedResult = await this.readRecordedWorktrees(task);
+    if (!recordedResult.ok) return unmeasurable(`claim history unreadable: ${recordedResult.error.code}`);
+    if (recordedResult.value.length === 0) return [];
+
+    const quiet = parseQuietMinutes(this.processEnv["LORE_WORKTREE_QUIET_MINUTES"]);
+    if (!quiet.ok) {
+      return recordedResult.value.map((r) => ({ worktree: r.path, decision: "not-measured" as const, reason: `invalid LORE_WORKTREE_QUIET_MINUTES "${this.processEnv["LORE_WORKTREE_QUIET_MINUTES"] ?? ""}" (want a non-negative integer)` }));
+    }
+    const activeResult = await this.collectActiveClaimedPaths();
+    if (!activeResult.ok) return unmeasurable(`active-claim scan failed: ${activeResult.error.code}`);
+
+    const outcomes: WorktreeOutcome[] = [];
+    for (const recorded of recordedResult.value) {
+      const evaluation = evaluateRecordedWorktree(this.worktreeProbe, recorded, {
+        quietMinutes: quiet.value,
+        nowEpochSeconds: this.nowEpochSeconds(),
+        activeClaimedPaths: activeResult.value,
+      });
+      outcomes.push(applyWorktreeRemoval(this.worktreeProbe, evaluation));
+    }
+    const auditResult = await this.recordWorktreeCleanupAudit(task, by, nowIso, "done", outcomes);
+    if (!auditResult.ok) {
+      outcomes.push({ worktree: "(audit)", decision: "not-measured", reason: `cleanup outcome not audited: ${auditResult.error.code}` });
+    }
+    return outcomes;
+  }
+
+  /**
+   * `lore worktree sweep` — evaluates every worktree recorded by a claim of an ARCHIVED/DEPRECATED task
+   * (current claim + claim audit history) against the BR-961 predicate. Report-only unless
+   * `opts.apply`; with `apply`, removes exactly the `remove` rows (plain `git worktree remove` +
+   * `git branch -d`), one audit row per removal. A worktree no claim recorded is never listed.
+   *
+   * @returns rows sorted by task slug then path; an `apply` failure is a `not-measured` row whose
+   *   reason starts `remove-failed:`; a malformed `LORE_WORKTREE_QUIET_MINUTES` is a VALIDATION_ERROR.
+   */
+  async sweepWorktrees(opts: { apply: boolean; by: string }, now: () => string = defaultNow): Promise<Result<WorktreeSweepRow[], LoreError>> {
+    const quiet = parseQuietMinutes(this.processEnv["LORE_WORKTREE_QUIET_MINUTES"]);
+    if (!quiet.ok) return quiet;
+    const activeResult = await this.collectActiveClaimedPaths();
+    if (!activeResult.ok) return activeResult;
+
+    const terminal: DocRecord[] = [];
+    for (const status of ["archived", "deprecated"] as const) {
+      const found = await this.store.findMany({ type: "task", status });
+      if (!found.ok) return found;
+      terminal.push(...found.value);
+    }
+    terminal.sort((a, b) => a.slug.localeCompare(b.slug));
+
+    const rows: WorktreeSweepRow[] = [];
+    for (const task of terminal) {
+      const recordedResult = await this.readRecordedWorktrees(task);
+      if (!recordedResult.ok) return recordedResult;
+      for (const recorded of recordedResult.value) {
+        const evaluation: WorktreeEvaluation = evaluateRecordedWorktree(this.worktreeProbe, recorded, {
+          quietMinutes: quiet.value,
+          nowEpochSeconds: this.nowEpochSeconds(),
+          activeClaimedPaths: activeResult.value,
+        });
+        const outcome: WorktreeOutcome =
+          opts.apply && evaluation.decision === "remove"
+            ? applyWorktreeRemoval(this.worktreeProbe, evaluation)
+            : { worktree: evaluation.worktree, decision: evaluation.decision, reason: evaluation.reason };
+        if (opts.apply && evaluation.decision === "remove") {
+          const auditResult = await this.recordWorktreeCleanupAudit(task, opts.by, now(), "sweep", [outcome]);
+          if (!auditResult.ok) return auditResult;
+        }
+        rows.push({ task: task.slug, worktree: outcome.worktree, decision: outcome.decision, reason: outcome.reason });
+      }
+    }
+    return ok(rows);
   }
 
   // ── Anchor Mutations (SPEC-042 D3) ──────────────────────────────────────────

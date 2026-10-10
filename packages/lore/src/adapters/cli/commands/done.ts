@@ -444,6 +444,7 @@ export default defineCommand({
                 doc: result.value.task,
                 already_done: result.value.already_done,
                 transitions: result.value.transitions,
+                ...(result.value.worktree_outcomes !== undefined ? { worktree_outcomes: result.value.worktree_outcomes } : {}),
               },
             },
             null,
