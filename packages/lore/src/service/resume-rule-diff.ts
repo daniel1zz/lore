@@ -36,6 +36,8 @@ export interface RuleChange {
 
 export interface RuleDiff {
   readonly claimed_at: string;
+  /** Rule ids the task's spec cites. Empty = the task governs no baseline rule (nothing to report). */
+  readonly governing: readonly string[];
   readonly changes: readonly RuleChange[];
   readonly retired: readonly string[];
 }
@@ -171,7 +173,7 @@ export async function computeRuleDiffSinceClaim(args: {
       else changes.push({ rule_id: id, kind: "lifecycle", old: before.lifecycle, new: current.lifecycle });
     }
   }
-  return ok({ claimed_at: claimedAt, changes, retired });
+  return ok({ claimed_at: claimedAt, governing, changes, retired });
 }
 
 /** Renders a diff as feed lines; an empty diff is exactly {@link RULES_UNCHANGED_LINE}. */

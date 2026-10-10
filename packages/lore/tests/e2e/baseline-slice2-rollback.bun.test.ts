@@ -103,7 +103,10 @@ interface Corpus {
   readonly dir: string;
   readonly specSlug: string;
   readonly taskSlug: string;
+  readonly planSlug: string;
   readonly branchSlug: string | undefined;
+  /** BR-id of the baseline rule, when the corpus holds baseline docs. */
+  readonly ruleId: string | undefined;
 }
 
 /** prd, spec (1 script + 1 human AC), plan, task — plus optional baseline docs and gate config. */
@@ -134,6 +137,7 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
   );
 
   let branchSlug: string | undefined;
+  let ruleId: string | undefined;
   if (setup.kind === "baseline") {
     const root = parseBaselineSlug(
       mustRun(["baseline", "add", prdSlug, "--node", "root", "--label", "Root", "--title", "S2 BL Root"], dir).stdout,
@@ -144,10 +148,12 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
     const leaf = parseBaselineSlug(
       mustRun(["baseline", "add", branchSlug, "--node", "leaf", "--label", "Leaf", "--title", "S2 BL Leaf"], dir).stdout,
     );
-    mustRun(
+    const ruleOut = mustRun(
       ["rule", "add", leaf, "--statement", "Users see the first thing", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "example one"],
       dir,
     );
+    ruleId = ruleOut.stdout.match(/\bBR-\d+\b/)?.[0];
+    if (ruleId === undefined) throw new Error(`could not parse rule id from: ${ruleOut.stdout}`);
     if (setup.gate !== "absent") {
       appendFileSync(
         join(dir, ".lore", "config.yaml"),
@@ -155,7 +161,7 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
       );
     }
   }
-  return { dir, specSlug, taskSlug, branchSlug };
+  return { dir, specSlug, taskSlug, planSlug, branchSlug, ruleId };
 }
 
 /** The fixed command script, identical for every corpus. */
@@ -344,5 +350,63 @@ describe("AC-BLS2-11 — non-vacuity: the same script DOES show the gate when it
 
   it("the no-trace scan is not blind: report mode's output differs from mode off's audit", () => {
     expect(capC.audit.stdout).not.toBe(capB.audit.stdout);
+  });
+});
+
+// ── AC-BLS2-11 x BL-15: `feed session-resume` must not grow a rule-diff block without governing baseline rules ──
+
+const RULE_DIFF_HEADER = "Governing rules since claim";
+const RULES_UNCHANGED = "governing rules unchanged since claim";
+
+/** Claims the corpus' task and prints the session-resume feed for its plan. */
+function claimAndResume(c: Corpus): RunResult {
+  // reason: throwaway corpus; the review-judgment gate needs an LLM judge, irrelevant to this fixture.
+  mustRun(["approve", c.specSlug, "--override-no-judgment"], c.dir);
+  mustRun(["approve", c.planSlug, "--override-no-judgment"], c.dir);
+  mustRun(["claim", c.taskSlug, "--by", "agent:baseline-slice2-rollback-e2e"], c.dir);
+  return mustRun(["feed", "session-resume", "--plan", c.planSlug], c.dir);
+}
+
+describe("AC-BLS2-11 — BL-15: `feed session-resume` carries no rule-diff trace without governing baseline rules", () => {
+  let resumeA: RunResult;
+  let resumeA2: RunResult;
+  let resumeB: RunResult;
+  let E: Corpus;
+  let resumeE: RunResult;
+
+  beforeAll(() => {
+    resumeA = claimAndResume(A);
+    resumeA2 = claimAndResume(A2);
+    resumeB = claimAndResume(B);
+    E = buildCorpus("e-cited", { kind: "baseline", gate: "absent" });
+    mustRun(["ac", "cite", E.specSlug, "AC-S2-1", E.ruleId as string], E.dir);
+    resumeE = claimAndResume(E);
+  }, SETUP_TIMEOUT_MS);
+
+  afterAll(() => {
+    if (E !== undefined) rmSync(E.dir, { recursive: true, force: true });
+  });
+
+  it("(a) no baseline docs: a claimed task's resume prints no rule-diff block and no unchanged line", () => {
+    expect(resumeA.exitCode).toBe(0);
+    expect(resumeA.stdout.length).toBeGreaterThan(0);
+    expect(`${resumeA.stdout}${resumeA.stderr}`).not.toContain(RULE_DIFF_HEADER);
+    expect(`${resumeA.stdout}${resumeA.stderr}`).not.toContain(RULES_UNCHANGED);
+  });
+
+  it("(a) is byte-identical to the control run after normalisation", () => {
+    expect(norm(resumeA2.stdout, A2.dir)).toEqual(norm(resumeA.stdout, A.dir));
+  });
+
+  it("(b) baseline docs but the task's spec cites no rule: still no rule-diff block", () => {
+    expect(resumeB.exitCode).toBe(0);
+    expect(`${resumeB.stdout}${resumeB.stderr}`).not.toContain(RULE_DIFF_HEADER);
+    expect(`${resumeB.stdout}${resumeB.stderr}`).not.toContain(RULES_UNCHANGED);
+  });
+
+  it("non-vacuity: baseline docs + a cited rule + a claimed task DOES print the block", () => {
+    expect(resumeE.exitCode).toBe(0);
+    expect(resumeE.stdout).toContain(RULE_DIFF_HEADER);
+    expect(resumeE.stdout).toContain(RULES_UNCHANGED);
   });
 });

@@ -825,6 +825,8 @@ export class SessionService {
       if (by !== undefined && claim.by !== by) continue;
       const diff = await computeRuleDiffSinceClaim({ store: this.store, taskId: task.id });
       if (!diff.ok) return diff;
+      // AC-BLS2-11: a task whose spec cites no baseline rule has nothing to report - print nothing.
+      if (diff.value.governing.length === 0) continue;
       out.push({ task_slug: task.slug, lines: renderRuleDiff(diff.value) });
     }
     return ok(out);
