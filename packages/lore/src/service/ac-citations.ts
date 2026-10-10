@@ -4,7 +4,7 @@
  * Purpose: SSOT for how a `cites` id is judged (dangling / inactive) and how a set of
  *   specs is counted; shared by `AcService.citeCriterion` / add / set (warnings) and
  *   C7's RuleStateService / `lore status` (counts), so the two never disagree.
- * Public surface: `CiteWarning`, `RuleIndex`, `buildRuleIndex`, `citeWarnings`, `countCitations`.
+ * Public surface: `CiteWarning`, `RuleIndex`, `buildRuleIndex`, `citeWarnings`, `countCitations`, `collectLiveScriptCitedRuleIds`.
  * Invariants: report-only — nothing here rejects or drops an id; a missing id is
  *   "dangling", a `deprecated`/`retired` rule is "inactive", a `live` rule yields nothing.
  *   Malformed `extra.rules` / `extra.acceptance_criteria` entries are skipped, never thrown.
@@ -91,4 +91,35 @@ export function countCitations(specs: readonly DocRecord[], ruleIndex: RuleIndex
   }
   counts.acs_uncited = counts.acs_total - counts.acs_citing;
   return counts;
+}
+
+/**
+ * Rule ids cited by a LIVE script-mode criterion (BR-983): `verify.mode === "script"`, spec not
+ * `archived`/`deprecated`, and (when `ruleIndex` is given) the rule is `live` in the baseline.
+ * `ruleIndex === undefined` means the corpus has no baseline docs, so no liveness can be judged
+ * and every cited id counts; a given index refuses deprecated/retired/absent rules, consistent
+ * with the citation gate's dangling/inactive verdicts.
+ * Malformed criteria are skipped, never thrown.
+ */
+export function collectLiveScriptCitedRuleIds(
+  specs: readonly DocRecord[],
+  ruleIndex: RuleIndex | undefined,
+): string[] {
+  const cited = new Set<string>();
+  for (const spec of specs) {
+    if (spec.status === "archived" || spec.status === "deprecated") continue;
+    const raw = spec.extra["acceptance_criteria"];
+    if (!Array.isArray(raw)) continue;
+    for (const c of raw as unknown[]) {
+      if (typeof c !== "object" || c === null) continue;
+      const { verify, cites } = c as { verify?: { mode?: unknown }; cites?: unknown };
+      if (verify?.mode !== "script" || !Array.isArray(cites)) continue;
+      for (const id of cites as unknown[]) {
+        if (typeof id !== "string") continue;
+        if (ruleIndex !== undefined && ruleIndex.get(id)?.lifecycle !== "live") continue;
+        cited.add(id);
+      }
+    }
+  }
+  return [...cited];
 }

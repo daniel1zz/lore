@@ -153,7 +153,7 @@ describe("SPEC-055 AC-055-6 — CorpusService.computeRequirementCoverageForPrd",
     const cov = await corpusService.computeRequirementCoverageForPrd(prd.id);
     expect(cov.ok).toBe(true);
     if (!cov.ok) return;
-    expect(cov.value).toEqual({ total: 0, covered: [], uncovered: [], uncovered_p0: [] });
+    expect(cov.value).toEqual({ total: 0, covered: [], uncovered: [], uncovered_p0: [], migrated: [], unmigrated: [] });
   });
 });
 
