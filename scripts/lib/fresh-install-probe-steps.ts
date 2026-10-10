@@ -238,7 +238,7 @@ export function buildSteps(ctx: ProbeContext): readonly ProbeStep[] {
     cmd("bootstrap-root-and-strategy", ["bootstrap"], 0, mustContain(new RegExp(`Root:\\s*${BASELINE_ROOT_SLUG}\\b`), new RegExp(`Strategy:\\s*${PRD_SLUG}\\b`))),
     cmd("tree-help-default-root", ["tree", "--help"], 0, (o) => {
       const text = combined(o);
-      if (/first PRD/i.test(text)) return 'tree --help still says the default root is the "first PRD"';
+      if (/default:\s*first PRD/i.test(text)) return 'tree --help still says the default root is the "first PRD"';
       return /default[^\n]*baseline/i.test(text) ? null : "tree --help does not name the business baseline root as the default root";
     }),
     cmd("tree-default-root", ["tree"], 0, mustContain("Probe Business Baseline")),
