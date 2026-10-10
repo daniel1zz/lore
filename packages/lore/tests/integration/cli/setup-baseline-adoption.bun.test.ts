@@ -9,7 +9,8 @@
  * CONTRACT (the spec leaves these open; the simplest reading consistent with the Design text is pinned here):
  *   C1. Seeding mirrors the existing `context.memory_files.adoption` step in setup-project-flow.ts: write only when the
  *       key is ABSENT, never overwrite an explicit value (off | report | enforce), never touch `armed_branches` or any
- *       other config key. Seeding does not write an audit row.
+ *       other config key. Re-baselined by BR-987 / AC-FIP-3: a real seed IS an audited adoption (one
+ *       `baseline_adopt` row, actor = the setup caller); a kept explicit mode writes no row.
  *   C2. The skill and templates live in the assets SSOT as `assets/skills/lore-baseline/SKILL.md` and
  *       `assets/skills/lore-baseline/templates/<name>.md` (at least one template) and are embedded in the generated
  *       assets manifest under `skills/lore-baseline/...`.

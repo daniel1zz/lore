@@ -74,8 +74,15 @@ function adoptRowCount(repo: string): number {
   return parsed.data.entries.filter((e) => e.action === "baseline_adopt").length;
 }
 
-function acCite(repo: string): { mode?: string; provenance?: string } | undefined {
-  const parsed = JSON.parse(mustRun(["status", "--json"], repo).stdout) as { data: { ac_cite?: { mode?: string; provenance?: string } } };
+interface AcCiteJson {
+  mode?: string;
+  provenance?: string;
+  armed_branches?: string[];
+  enforce_refuses_nothing?: boolean;
+}
+
+function acCite(repo: string): AcCiteJson | undefined {
+  const parsed = JSON.parse(mustRun(["status", "--json"], repo).stdout) as { data: { ac_cite?: AcCiteJson } };
   return parsed.data.ac_cite;
 }
 
@@ -95,7 +102,8 @@ afterAll(() => {
 
 describe("baseline adopt gaps (BL-8)", () => {
   it("G2: no stored mode, baseline docs present -> status reports the effective default (report) with provenance default", () => {
-    expect(acCite(withBaseline)).toEqual({ mode: "report", provenance: "default" });
+    // re-baseline (BR-987, AC-FIP-3): ac_cite now also lists armed_branches and the enforce_refuses_nothing flag.
+    expect(acCite(withBaseline)).toEqual({ mode: "report", provenance: "default", armed_branches: [], enforce_refuses_nothing: false });
   });
 
   it("G2: no stored mode, no baseline docs -> ac_cite is absent (AC-BLS2-11: slice-1 status output, byte for byte)", () => {

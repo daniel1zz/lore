@@ -22,16 +22,17 @@
  * Side-effect class: IO (config file write, one audit append).
  */
 
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { defineCommand } from "citty";
-import { CITE_GATE_MODES } from "@lore/core";
-import type { CiteGateMode, LoreError } from "@lore/core";
+import { CITE_GATE_MODES, err, ok } from "@lore/core";
+import type { CiteGateMode, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { resolveDoc } from "../../../service/resolve.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
-import { readAcCiteStored, writeAcCiteStored } from "../../ac-cite-config-file.js";
-import type { AcCiteStored } from "../../ac-cite-config-file.js";
+import { readAcCiteStored, seedAcCiteModeIfAbsent, writeAcCiteStored } from "../../ac-cite-config-file.js";
+import type { AcCiteSeedOutcome, AcCiteStored } from "../../ac-cite-config-file.js";
+import { ENFORCE_REFUSES_NOTHING_WARNING, isEnforceRefusingNothing } from "../../../service/ac-cite-status.js";
 
 /** The audit `action` of an adopt row; `lore status` provenance reads it back. SSOT for both sides. */
 export const BASELINE_ADOPT_AUDIT_ACTION = "baseline_adopt";
@@ -40,6 +41,49 @@ export const BASELINE_ADOPT_AUDIT_ACTION = "baseline_adopt";
 const ADOPT_MODES = CITE_GATE_MODES.filter((m): m is Exclude<CiteGateMode, "off"> => m !== "off");
 
 const ADOPT_AUDIT_SESSION_ID = "baseline-adopt";
+
+/** Appends the ONE `baseline_adopt` audit row (the single provenance mechanism, BR-987) for `old` -> `next`. */
+async function appendAdoptAuditRow(
+  store: SQLiteStore,
+  actor: string,
+  old: AcCiteStored,
+  next: AcCiteStored,
+): Promise<Result<void, LoreError>> {
+  const appended = await store.appendAuditEntry({
+    timestamp: new Date().toISOString(),
+    actor,
+    session_id: ADOPT_AUDIT_SESSION_ID,
+    action: BASELINE_ADOPT_AUDIT_ACTION,
+    details: { old, new: next },
+  });
+  return appended.ok ? ok(undefined) : err(appended.error);
+}
+
+/**
+ * `lore setup --project`'s mode seed as an AUDITED adoption (BR-987, AC-FIP-3): seeds `mode: report` only when
+ * absent (as {@link seedAcCiteModeIfAbsent}) and, only on a real write, records the same `baseline_adopt` row
+ * `lore baseline adopt` writes (actor = the setup caller), so status reads the seeded mode as `audited`.
+ * A kept explicit mode writes no row. A failed row append is returned loudly (the config was already seeded).
+ *
+ * @param repoDir - the repo whose `.lore/` setup just initialised (the DB exists: init runs before the seed)
+ */
+export async function seedAcCiteModeAudited(repoDir: string): Promise<Result<AcCiteSeedOutcome, LoreError>> {
+  const seeded = seedAcCiteModeIfAbsent(repoDir);
+  if (!seeded.ok || seeded.value.status !== "written") return seeded;
+  const store = new SQLiteStore(join(repoDir, ".lore", "lore.db"));
+  try {
+    const row = await appendAdoptAuditRow(
+      store,
+      resolveActor(undefined),
+      { mode: null, armed_branches: [] },
+      { mode: "report", armed_branches: [] },
+    );
+    if (!row.ok) return err(row.error);
+    return seeded;
+  } finally {
+    store.close();
+  }
+}
 
 function repeatable(value: unknown): string[] {
   if (value === undefined) return [];
@@ -145,13 +189,7 @@ async function runAdopt(args: Record<string, unknown>): Promise<void> {
       if (!written.ok) return fail(written.error, json, exitCode(written.error));
     }
 
-    const audited = await store.appendAuditEntry({
-      timestamp: new Date().toISOString(),
-      actor: resolveActor(args.by as string | undefined),
-      session_id: ADOPT_AUDIT_SESSION_ID,
-      action: BASELINE_ADOPT_AUDIT_ACTION,
-      details: { old, new: next },
-    });
+    const audited = await appendAdoptAuditRow(store, resolveActor(args.by as string | undefined), old, next);
     if (!audited.ok) {
       return fail(
         {
@@ -163,8 +201,15 @@ async function runAdopt(args: Record<string, unknown>): Promise<void> {
       );
     }
 
-    if (json) console.log(JSON.stringify({ ok: true, data: { changed: true, old, new: next } }, null, 2));
-    else console.log(`Adopted: mode ${old.mode ?? "(unset)"} -> ${next.mode ?? "(unset)"}; armed branches [${next.armed_branches.join(", ")}]`);
+    // BR-987: enforce with no armed branch is accepted (exit 0, not a refusal) but reported as refusing nothing.
+    const refusesNothing = next.mode !== null && isEnforceRefusingNothing(next.mode, next.armed_branches);
+    if (json) {
+      const warnings = refusesNothing ? { warnings: [ENFORCE_REFUSES_NOTHING_WARNING] } : {};
+      console.log(JSON.stringify({ ok: true, data: { changed: true, old, new: next, ...warnings } }, null, 2));
+    } else {
+      console.log(`Adopted: mode ${old.mode ?? "(unset)"} -> ${next.mode ?? "(unset)"}; armed branches [${next.armed_branches.join(", ")}]`);
+      if (refusesNothing) process.stderr.write(`Warning: ${ENFORCE_REFUSES_NOTHING_WARNING}\n`);
+    }
   } finally {
     store.close();
     app.close();

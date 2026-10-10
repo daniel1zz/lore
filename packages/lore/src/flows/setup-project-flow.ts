@@ -303,11 +303,13 @@ export type AcCiteSeedResult = { status: "written" } | { status: "kept"; existin
 
 /**
  * Seeds `workflow.gates."ac-cite".mode: report` into the target repo's `.lore/config.yaml` ONLY when `mode` is
- * absent (an explicit off | report | enforce and `armed_branches` are never touched; no audit row).
+ * absent (an explicit off | report | enforce and `armed_branches` are never touched). A real write is an AUDITED
+ * adoption (BR-987): the adapter records the same `baseline_adopt` row `lore baseline adopt` writes, so status
+ * reports the seeded mode as `audited`; a kept mode writes no row.
  *
- * @returns `err` when the config cannot be read or written — never throws.
+ * @returns `err` when the config cannot be read or written or the audit row cannot be appended — never throws.
  */
-export type SeedAcCiteMode = (repoDir: string) => Result<AcCiteSeedResult, LoreError>;
+export type SeedAcCiteMode = (repoDir: string) => Promise<Result<AcCiteSeedResult, LoreError>>;
 
 /**
  * What {@link WriteAdoptionMode} did with `context.memory_files.adoption`:
@@ -1240,9 +1242,9 @@ function finalizeSkillsRow(candidates: AssetFile[], seam: ManifestSeamResult): S
 }
 
 /** BL-8 — runs the injected ac-cite mode seed; `undefined` when the port is absent. */
-function runAcCiteSeedStep(deps: ProjectScaffoldFlowDeps, repoDir: string): SimpleStepResult | undefined {
+async function runAcCiteSeedStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<SimpleStepResult | undefined> {
   if (deps.seedAcCiteMode === undefined) return undefined;
-  const seeded = deps.seedAcCiteMode(repoDir);
+  const seeded = await deps.seedAcCiteMode(repoDir);
   if (!seeded.ok) return { status: "failed", detail: describeError(seeded.error) };
   return seeded.value.status === "written"
     ? { status: "done", detail: "workflow.gates.ac-cite.mode: report" }
@@ -1362,7 +1364,7 @@ export async function scaffoldProject(
 
   const skills: SimpleStepResult | undefined =
     deps.skillAssets === undefined ? undefined : (skillsOutcome.terminal ?? finalizeSkillsRow(skillsOutcome.candidates, seam));
-  const ac_cite = runAcCiteSeedStep(deps, repoDir);
+  const ac_cite = await runAcCiteSeedStep(deps, repoDir);
 
   // Judged only when the CLAUDE.md step produced a candidate (a failed step has no content to judge).
   const adoption =
