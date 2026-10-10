@@ -14,9 +14,9 @@
  *
  * Dimension mapping:
  *   HAPPY:      create/set/approve rows carry the expected surface on all four surfaces
- *   NEGATIVE:   no row written by a surface carries a DIFFERENT surface or "unknown"
+ *   NEGATIVE:   no row written by a surface carries a DIFFERENT surface (every row is compared to the one expected value)
  *   BOUNDARY:   the set that moves a doc to in-review (a status-only patch) is audited too
- *   ERROR:      a write with no surface context records the explicit "unknown" (never a guess)
+ *   ERROR:      a write with no adapter-declared surface records no surface key (never a guess)
  *   STATE:      the hash chain still verifies after surface-stamped writes
  *   REGRESSION: an explicit details.surface already on an entry is never overwritten
  *
@@ -268,13 +268,14 @@ describe("AC-BLC-1 HTTP surfaces", () => {
 // ─── Store-level: no ambient surface, explicit entry surface ─────────────────
 
 describe("AC-BLC-1 audit stamping rules", () => {
-  it("a write with no surface context records the explicit 'unknown', never a guessed surface", async () => {
+  it("a write with no adapter-declared surface records NO surface key, never a guessed one", async () => {
     const store = new InMemoryStore();
     const svc = new CorpusService(store);
     const created = await svc.create({ type: "prd", title: "No Surface" });
     if (!created.ok) throw new Error("create failed");
     const rows = await auditFor(store, created.value.id);
-    expect(surfacesOf(rows)).toEqual(["unknown"]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.details !== undefined && "surface" in rows[0].details).toBe(false);
   });
 
   it("an entry that already carries details.surface keeps it", async () => {

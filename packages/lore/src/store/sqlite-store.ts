@@ -117,6 +117,7 @@ import {
   buildAcExemptionCapError,
   buildNonLiveRuleRefusal,
 } from "./store-shared.js";
+import { stampAuditSurface } from "./audit-surface.js";
 
 // ─── SQLiteStore ─────────────────────────────────────────────────────────────
 
@@ -1669,8 +1670,9 @@ export class SQLiteStore implements StoreInterface {
    * immediately, so a second writer's own `BEGIN IMMEDIATE` blocks — up to
    * `PRAGMA busy_timeout` — until this one commits or rolls back).
    */
-  private appendAuditEntrySync(entry: AuditEntry): Result<void, LoreError> {
+  private appendAuditEntrySync(rawEntry: AuditEntry): Result<void, LoreError> {
     try {
+      const entry = stampAuditSurface(rawEntry);
       const headRow = this.db
         .query("SELECT entry_hash FROM audit ORDER BY id DESC LIMIT 1")
         .get() as { entry_hash: string | null } | null;

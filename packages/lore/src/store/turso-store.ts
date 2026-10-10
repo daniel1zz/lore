@@ -121,6 +121,7 @@ import {
   buildAcExemptionCapError,
   buildNonLiveRuleRefusal,
 } from "./store-shared.js";
+import { stampAuditSurface } from "./audit-surface.js";
 
 // ─── Deferred @libsql/client load (spec-eager-libsql-load-makes-every-command-depend-on-a-healthy) ──
 //
@@ -1447,7 +1448,8 @@ export class TursoStore implements StoreInterface {
    * `tx.execute` call in this file — callers already wrap this in their own
    * try/catch with a rollback-on-catch.
    */
-  private async appendAuditEntryTx(tx: Transaction, entry: AuditEntry): Promise<void> {
+  private async appendAuditEntryTx(tx: Transaction, rawEntry: AuditEntry): Promise<void> {
+    const entry = stampAuditSurface(rawEntry);
     const headRs = await tx.execute("SELECT entry_hash FROM audit ORDER BY id DESC LIMIT 1");
     const headRow = headRs.rows[0];
     const prevHash = headRow ? (rowStrOrNull(headRow, "entry_hash") ?? "") : "";

@@ -199,6 +199,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
+import { runWithAuditSurface } from "../../store/audit-surface.js";
 import type { LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
@@ -1421,7 +1422,9 @@ function registerToolWithArgs<T>(
   // Step 1: 3-arg registration — avoids ZodRawShapeCompat inference entirely
   // The handler is cast to () => Promise<CallToolResult> so TypeScript resolves
   // it as ToolCallback<undefined> (no ShapeOutput computation).
-  server.tool(name, desc, handler as unknown as () => Promise<CallToolResult>);
+  // reason: AC-BLC-1 — each MCP tool call declares its audit surface explicitly (per call, not process state).
+  const surfaced = (args: T): Promise<CallToolResult> => runWithAuditSurface("mcp", () => handler(args));
+  server.tool(name, desc, surfaced as unknown as () => Promise<CallToolResult>);
 
   // Step 2: Post-registration inputSchema patch — restores correct runtime routing.
   // The SDK reads tool.inputSchema at CALL TIME (not registration time), so patching
