@@ -339,7 +339,14 @@ describe("AC-BLS2-11 — mode off / no baseline docs: slice-1 behaviour, byte fo
     const dataB = parseStatus(capB.status.stdout).data;
     const keysA = Object.keys(parseStatus(capA.status.stdout).data);
     // slice 3a group E adds `ac_cite` whenever baseline docs exist (BL-8), so B legitimately carries it too.
-    expect(Object.keys(dataB).filter((k) => !keysA.includes(k))).toEqual(["baseline", "ac_cite"]);
+    // RE-BASELINE (slice 3b, BR-1011 / AC-BLS3B-3): old assertion `["baseline", "ac_cite"]`; with baseline docs `status --json`
+    // also carries the spec citation census (`specs_without_citation`, `specs_with_parent`); A (no baseline docs) still lacks all four.
+    expect(Object.keys(dataB).filter((k) => !keysA.includes(k))).toEqual([
+      "baseline",
+      "ac_cite",
+      "specs_without_citation",
+      "specs_with_parent",
+    ]);
     expect(keysA.filter((k) => !(k in dataB))).toEqual([]);
     const block = dataB.baseline as Record<string, unknown>;
     expect(Object.keys(block).sort()).toEqual([...SLICE1_BASELINE_STATUS_KEYS, ...C5_STATUS_ADDITIONS].sort());

@@ -290,7 +290,10 @@ describe("lore status --check-prd-budget detail-link invariants (AC-080-10)", ()
 
   afterEach(() => cleanupDir(tmpDir));
 
-  it("detail-link: exits 3 naming the entry when an outline entry declares zero rel=\"detail\" links", () => {
+  // RE-BASELINE (Baseline slice 3b, D7 / AC-BLS3B-8): the outline detail-link check is retired (the outline is
+  // read-only history, BR-694). Old assertion: exit 3 naming the entry; new: exit 0, no finding. The test names
+  // keep "detail-link" so AC-BLS3-12's `-t detail-link` selector still matches (the orchestrator retires that criterion).
+  it("detail-link: retired — an outline entry declaring zero rel=\"detail\" links is no longer a finding (exit 0)", () => {
     const landingSpec = createSpec(tmpDir, "Landing Spec Only", prd.slug);
     injectExtra(tmpDir, prd.id, {
       outline: [
@@ -308,12 +311,13 @@ describe("lore status --check-prd-budget detail-link invariants (AC-080-10)", ()
     });
 
     const result = runLore(["status", "--check-prd-budget"], tmpDir);
-    expect(result.exitCode).toBe(3);
+    expect(result.exitCode).toBe(0);
     const output = (result.stdout + result.stderr).toLowerCase();
-    expect(output).toContain("distribution");
+    expect(output).not.toContain("distribution");
   });
 
-  it("detail-link: exits 3 when an outline entry's rel=\"detail\" link points at a soft-deleted doc", () => {
+  // RE-BASELINE (same reason): old assertion exit 3; new exit 0.
+  it("detail-link: retired — a rel=\"detail\" link to a soft-deleted doc is no longer a finding (exit 0)", () => {
     const detailTarget = createSpec(tmpDir, "Detail Target Doc", prd.slug);
     const del = runLore(["delete", detailTarget.slug, "--confirm"], tmpDir);
     if (del.exitCode !== 0) throw new Error(`delete failed: ${del.stderr}`);
@@ -333,7 +337,7 @@ describe("lore status --check-prd-budget detail-link invariants (AC-080-10)", ()
     });
 
     const result = runLore(["status", "--check-prd-budget"], tmpDir);
-    expect(result.exitCode).toBe(3);
+    expect(result.exitCode).toBe(0);
   });
 
   it("detail-link: exits 0 when every outline entry declares >=1 rel=\"detail\" link resolving to an existing non-deleted doc", () => {

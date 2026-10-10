@@ -71,16 +71,19 @@
 
 import { describe, it, expect } from "vitest";
 import { checkPrdBudget, scanContentFlight } from "../../../src/service/prd-budget-check.js";
-import type { OutlineEntryLike, OutlineBudgetLike } from "../../../src/service/prd-budget-check.js";
+import type { PrdBudgetLike } from "../../../src/service/prd-budget-check.js";
+
+// RE-BASELINE (Baseline slice 3b, D7 / AC-BLS3B-8): the outline per-tier cap (core 4000 / domain 2000) and the
+// detail-link check are retired — the tier describe blocks, the tier custom-budget test and the `outline`
+// input are removed; whole-doc 24000 and the free-text check are kept unchanged.
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const SPEC_DEFAULT_CORE_CHARS = 4000;
-const SPEC_DEFAULT_DOMAIN_CHARS = 2000;
 const SPEC_DEFAULT_WHOLE_DOC_CHARS = 24000;
 const SPEC_DEFAULT_EXTRA_PROSE_CHARS = 1000;
 
-function makeOutlineEntry(overrides: Partial<OutlineEntryLike> = {}): OutlineEntryLike {
+/** A stored (read-only history) outline entry — never measured, never flagged. */
+function makeOutlineEntry(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     section: "distribution",
     title: "Distribution",
@@ -143,48 +146,14 @@ describe("scanContentFlight", () => {
   });
 });
 
-// ─── checkPrdBudget — tier boundary math (AC-080-1, core tier explicitly requested) ──
+// ─── checkPrdBudget — whole-doc boundary math ──
 
-describe("checkPrdBudget: tier=\"core\" entry budget", () => {
-  // BOUNDARY — 4001 breaches, naming the tier budget (4000); 4000 exactly is clean.
-  it("flags a tier=\"core\" outline entry one char over the 4000-char budget, naming the tier budget", () => {
-    const entry = makeOutlineEntry({ tier: "core", direction: "a".repeat(SPEC_DEFAULT_CORE_CHARS + 1) });
-    const result = checkPrdBudget({ raw_body: "short compliant body", outline: [entry] });
-    expect(result.consistent).toBe(false);
-    const tierBreach = result.breaches.find((b) => b.kind === "tier");
-    expect(tierBreach).toBeDefined();
-    expect(tierBreach?.section).toBe("distribution");
-    expect(tierBreach?.detail).toContain(String(SPEC_DEFAULT_CORE_CHARS));
-  });
-
-  it("does not flag a tier=\"core\" outline entry at exactly the 4000-char budget", () => {
-    const entry = makeOutlineEntry({ tier: "core", direction: "a".repeat(SPEC_DEFAULT_CORE_CHARS) });
-    const result = checkPrdBudget({ raw_body: "short compliant body", outline: [entry] });
+describe("checkPrdBudget: a stored outline is retired history, never measured", () => {
+  it("reports no breach for an outline entry far over the old 4000-char core budget", () => {
+    const entry = makeOutlineEntry({ tier: "core", direction: "a".repeat(5000) });
+    const result = checkPrdBudget({ raw_body: "short compliant body", extra: { outline: [entry] } });
     expect(result.consistent).toBe(true);
-    expect(breachKinds(result)).not.toContain("tier");
-  });
-});
-
-// ─── checkPrdBudget — tier=domain + whole-doc boundary math (Downstream Handoff pin) ──
-
-describe("checkPrdBudget: tier=\"domain\" entry budget (=2000 invariant)", () => {
-  it("flags a tier=\"domain\" outline entry one char over the 2000-char budget", () => {
-    const entry = makeOutlineEntry({
-      section: "feedback-loop",
-      tier: "domain",
-      direction: "b".repeat(SPEC_DEFAULT_DOMAIN_CHARS + 1),
-    });
-    const result = checkPrdBudget({ raw_body: "short compliant body", outline: [entry] });
-    expect(result.consistent).toBe(false);
-    const tierBreach = result.breaches.find((b) => b.kind === "tier" && b.section === "feedback-loop");
-    expect(tierBreach).toBeDefined();
-    expect(tierBreach?.detail).toContain(String(SPEC_DEFAULT_DOMAIN_CHARS));
-  });
-
-  it("does not flag a tier=\"domain\" outline entry at exactly the 2000-char budget", () => {
-    const entry = makeOutlineEntry({ tier: "domain", direction: "b".repeat(SPEC_DEFAULT_DOMAIN_CHARS) });
-    const result = checkPrdBudget({ raw_body: "short compliant body", outline: [entry] });
-    expect(breachKinds(result)).not.toContain("tier");
+    expect(result.breaches).toEqual([]);
   });
 });
 
@@ -217,7 +186,7 @@ describe("checkPrdBudget: legacy PRD without extra.outline", () => {
     expect(result.breaches).toEqual([]);
   });
 
-  it("degrades to whole-doc budget only — an over-budget legacy body flags ONLY whole_doc, never tier", () => {
+  it("an over-budget legacy body flags ONLY whole_doc", () => {
     const result = checkPrdBudget({ raw_body: "d".repeat(SPEC_DEFAULT_WHOLE_DOC_CHARS + 1) });
     expect(breachKinds(result)).toEqual(["whole_doc"]);
   });
@@ -250,7 +219,7 @@ describe("checkPrdBudget: custom corpus-governed budget overrides the spec defau
   it("honours a caller-supplied whole_doc_chars smaller than the spec default", () => {
     // 50 chars is comfortably UNDER the spec default (24000) but OVER this custom budget (30).
     // A hardcoded-24000 implementation would wrongly report this as consistent.
-    const customBudget: Partial<OutlineBudgetLike> = { whole_doc_chars: 30 };
+    const customBudget: Partial<PrdBudgetLike> = { whole_doc_chars: 30 };
     const result = checkPrdBudget({ raw_body: "e".repeat(50), budget: customBudget });
     expect(result.consistent).toBe(false);
     const wholeDocBreach = result.breaches.find((b) => b.kind === "whole_doc");
@@ -260,12 +229,11 @@ describe("checkPrdBudget: custom corpus-governed budget overrides the spec defau
     expect(wholeDocBreach?.detail).not.toContain(String(SPEC_DEFAULT_WHOLE_DOC_CHARS));
   });
 
-  it("honours a caller-supplied core_chars smaller than the spec default", () => {
-    // A hardcoded-4000 implementation would wrongly pass this 100-char entry as compliant.
-    const entry = makeOutlineEntry({ tier: "core", direction: "f".repeat(51) });
-    const customBudget: Partial<OutlineBudgetLike> = { core_chars: 50 };
-    const result = checkPrdBudget({ raw_body: "short compliant body", outline: [entry], budget: customBudget });
+  it("honours a caller-supplied extra_prose_chars smaller than the spec default", () => {
+    // A hardcoded-1000 implementation would wrongly pass this 51-char string as compliant.
+    const customBudget: Partial<PrdBudgetLike> = { extra_prose_chars: 50 };
+    const result = checkPrdBudget({ raw_body: "short compliant body", extra: { note: "f".repeat(51) }, budget: customBudget });
     expect(result.consistent).toBe(false);
-    expect(breachKinds(result)).toContain("tier");
+    expect(breachKinds(result)).toContain("extra_prose");
   });
 });
