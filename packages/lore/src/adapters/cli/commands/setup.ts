@@ -125,7 +125,7 @@
  * Source: SPEC-046 §Design, §Scope; task AC-046-E.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
@@ -133,6 +133,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
+import { seedAcCiteModeIfAbsent } from "../../ac-cite-config-file.js";
 import { parseDocument } from "yaml";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
@@ -148,6 +149,8 @@ import {
   type ProjectAssetSource,
   type AdoptionWriteOutcome,
   type ProjectScaffoldReport,
+  type ProjectSkillAsset,
+  type ProjectSkillAssetSource,
 } from "../../../flows/setup-project-flow.js";
 import {
   uninstallProject,
@@ -309,6 +312,8 @@ function scaffoldReportFailed(report: ProjectScaffoldReport): boolean {
     report.claude_md.status === "failed" ||
     report.git_hooks_path.status === "failed" ||
     report.adoption?.status === "failed" ||
+    report.skills?.status === "failed" ||
+    report.ac_cite?.status === "failed" ||
     report.hooks.some((h) => h.status === "failed")
   );
 }
@@ -414,6 +419,43 @@ function makeRealProjectAssetSource(projectAssetsDir: string): ProjectAssetSourc
           value: name,
         });
       }
+    },
+  };
+}
+
+/** The consumer skill whose files `lore setup --project` installs into `.claude/` (assets SSOT: `assets/skills/<name>/**`). */
+const BASELINE_SKILL_DIRNAME = "lore-baseline";
+
+/**
+ * Real {@link ProjectSkillAssetSource}: every file under `<assetsRoot>/skills/lore-baseline/` (recursive, sorted,
+ * paths relative to the assets root with `/` separators). A missing or empty tree is an error, never an empty list.
+ */
+function makeRealProjectSkillSource(assetsRoot: string): ProjectSkillAssetSource {
+  return {
+    listSkillAssets(): Result<ProjectSkillAsset[], LoreError> {
+      const rel = `skills/${BASELINE_SKILL_DIRNAME}`;
+      const collected: ProjectSkillAsset[] = [];
+      const walk = (relDir: string): void => {
+        for (const entry of readdirSync(join(assetsRoot, relDir), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+          const relPath = `${relDir}/${entry.name}`;
+          if (entry.isDirectory()) walk(relPath);
+          else if (entry.isFile()) collected.push({ path: relPath, content: readFileSync(join(assetsRoot, relPath), "utf-8") });
+        }
+      };
+      try {
+        walk(rel);
+      } catch (cause) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "skills",
+          message: `cannot read the ${rel} assets under ${assetsRoot}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          value: rel,
+        });
+      }
+      if (collected.length === 0) {
+        return err({ code: "VALIDATION_ERROR", field: "skills", message: `no files under ${join(assetsRoot, rel)}`, value: rel });
+      }
+      return ok(collected);
     },
   };
 }
@@ -652,6 +694,8 @@ async function runProjectScaffold(opts: {
     assets: projectAssets,
     writeAdoptionMode: writeAdoptionModeToConfig,
     resolveMemoryFileBudgets: resolveRepoMemoryFileBudgets,
+    skillAssets: makeRealProjectSkillSource(opts.assetsRoot),
+    seedAcCiteMode: seedAcCiteModeIfAbsent,
   });
 
   const result = await service.scaffold(repoDir);

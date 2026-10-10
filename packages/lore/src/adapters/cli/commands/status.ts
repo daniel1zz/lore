@@ -200,6 +200,11 @@ import {
 // Boundary invariant 2 must NEVER reach loadLoreApp/bun:sqlite — mirrors
 // setup-check.ts's identical precedent for this exact import.
 import { loadConfig } from "@lore/core/node";
+import { resolveCiteGateRaw } from "@lore/core";
+import { resolveCiteGateFor } from "../../../service/ac-write-chokepoint.js";
+import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
+import { decideAcCiteStatus, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
+import type { AcCiteStatus } from "../../../service/ac-cite-status.js";
 import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
 import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
 import type { MemoryFileFinding } from "../../../service/claude-md-findings.js";
@@ -1753,6 +1758,7 @@ export default defineCommand({
       // (`counts` mode); the second store handle exists because `App` does not expose its store.
       const baselineStore = new SQLiteStore(dbPath);
       let baselineStatus: BaselineStatus | null;
+      let acCiteStatus: AcCiteStatus;
       try {
         const repoRoot = resolveGitRoot(process.cwd());
         const baselineResult = await computeBaselineStatus(
@@ -1766,6 +1772,26 @@ export default defineCommand({
           return;
         }
         baselineStatus = baselineResult.value;
+
+        // baseline slice 3a BL-8 (AC-BLS3-8) — the gate's mode and whether `lore baseline adopt` produced it.
+        const rawGate = resolveCiteGateRaw(config);
+        const effective = await resolveCiteGateFor(baselineStore, rawGate);
+        if (!effective.ok) {
+          process.stderr.write(formatError(effective.error) + "\n");
+          process.exitCode = exitCode(effective.error);
+          return;
+        }
+        const adoptRows = await app.auditService.query({ action: BASELINE_ADOPT_AUDIT_ACTION, limit: 1 });
+        if (!adoptRows.ok) {
+          process.stderr.write(formatError(adoptRows.error) + "\n");
+          process.exitCode = exitCode(adoptRows.error);
+          return;
+        }
+        acCiteStatus = decideAcCiteStatus({
+          storedMode: typeof rawGate?.mode === "string" ? rawGate.mode : null,
+          effectiveMode: effective.value.mode,
+          lastAdoptedMode: lastAdoptedModeOf(adoptRows.value[0]),
+        });
       } finally {
         baselineStore.close();
       }
@@ -1795,6 +1821,7 @@ export default defineCommand({
                 // "absent" as "this binary is fine".
                 binary_provenance: provenanceOrNull(embeddedProvenance),
                 ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
+                ac_cite: acCiteStatus,
               },
             },
             null,

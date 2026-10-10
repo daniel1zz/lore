@@ -402,6 +402,8 @@ export function renderProjectScaffoldReceipt(receipt: ProjectScaffoldReceipt, ct
   lines.push(`.gitignore: ${receipt.gitignore.status}${receipt.gitignore.detail ? ` (${receipt.gitignore.detail})` : ""}`);
   lines.push(`CLAUDE.md: ${receipt.claude_md.status}${receipt.claude_md.detail ? ` (${receipt.claude_md.detail})` : ""}`);
   if (receipt.adoption !== undefined) lines.push(...renderAdoptionLines(receipt.adoption));
+  if (receipt.skills !== undefined) lines.push(`Baseline skill: ${receipt.skills.status}${receipt.skills.detail ? ` (${receipt.skills.detail})` : ""}`);
+  if (receipt.ac_cite !== undefined) lines.push(`AC-cite gate: ${receipt.ac_cite.status}${receipt.ac_cite.detail ? ` (${receipt.ac_cite.detail})` : ""}`);
   lines.push(
     `Git hooksPath: ${receipt.git_hooks_path.status} (prior: ${receipt.git_hooks_path.prior_value ?? "unset"})` +
       (receipt.git_hooks_path.detail ? ` — ${receipt.git_hooks_path.detail}` : ""),
