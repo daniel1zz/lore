@@ -94,6 +94,7 @@ import { resolveDoc } from "./resolve.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
 import { computeArmedGates } from "./checkpoint-registry.js";
 import { isPlanMember } from "./plan-membership.js";
+import { computeRuleDiffSinceClaim, renderRuleDiff } from "./resume-rule-diff.js";
 import { deriveLivenessVerdict, type LivenessVerdict } from "./session-liveness.js";
 import { probeProcessStartTime, type ProcessStartTimeProbe } from "../adapters/process-probe-port.js";
 import {
@@ -786,6 +787,47 @@ export class SessionService {
     };
 
     return this.deps.createHandoffDoc(createInput);
+  }
+
+  // ── Resume rule diff (BL-15, SPEC-157 AC-BLS2-22 / BR-966) ───────────────
+
+  /**
+   * For every non-terminal CLAIMED task of `planRef`, the governing-rule diff since its claim
+   * (`computeRuleDiffSinceClaim`) plus its rendered lines — what `lore feed session-resume`
+   * prints so a resumed session sees which rules moved under it.
+   *
+   * @param planRef - Plan id/slug; unresolvable, or not a plan → err (never an empty result).
+   * @param by - When given, only tasks claimed by this actor.
+   * @returns one entry per claimed task, in store order; `[]` when the plan has no claimed task.
+   */
+  async resumeRuleDiffs(
+    planRef: string,
+    by?: string,
+  ): Promise<Result<Array<{ task_slug: string; lines: string[] }>, LoreError>> {
+    const plan = await resolveDoc(this.store, planRef);
+    if (!plan.ok) return plan;
+    if (plan.value.type !== "plan") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "plan",
+        message: `"${planRef}" does not resolve to a plan document`,
+        value: planRef,
+      });
+    }
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const out: Array<{ task_slug: string; lines: string[] }> = [];
+    for (const task of tasks.value) {
+      if (!isPlanMember(task, plan.value.id)) continue;
+      if (task.status === "archived" || task.status === "deprecated") continue;
+      const claim = task.extra["claim"] as { by?: unknown } | null | undefined;
+      if (claim === null || claim === undefined || typeof claim !== "object") continue;
+      if (by !== undefined && claim.by !== by) continue;
+      const diff = await computeRuleDiffSinceClaim({ store: this.store, taskId: task.id });
+      if (!diff.ok) return diff;
+      out.push({ task_slug: task.slug, lines: renderRuleDiff(diff.value) });
+    }
+    return ok(out);
   }
 
   // ── Resume (S2 read path) ────────────────────────────────────────────────
