@@ -379,6 +379,11 @@ export interface CiteFeedingPackInput {
   /** The refused criterion — the id the cite line names, and whose statement feeds the text tier. */
   acId: string;
   acStatement: string | undefined;
+  /**
+   * `true` when the refused criterion does NOT exist yet (a refused `ac add`): it was never written, so
+   * `lore ac cite` would fail "not declared" and the line must be an `ac add ... --cite` (BR-86).
+   */
+  refusedIsNew: boolean;
   /** The spec's `extra.code_anchors` (`path[#Symbol]`). */
   specAnchors: readonly string[];
   /** The spec's branch (`undefined` = unplaced). */
@@ -397,7 +402,7 @@ const TEXT_TIER_MAX_WORDS = 6;
  * Build the refusal's feeding pack: up to 5 LIVE candidate rules ranked (1) cited by OTHER specs whose
  * code anchors match this spec's (the ranking is `findRules({file})`, once per anchor, in anchor order),
  * (2) the remaining live rules of the spec's branch in BR-n order, (3) a text match of the refused
- * criterion's longer words; a paste-ready `lore ac cite` line for the first candidate; and the exemption
+ * criterion's longer words; a ready line for the first candidate (`lore ac cite` for an existing criterion, `lore ac add ... --cite` for one the refusal did not write); and the exemption
  * headroom.
  */
 export function buildCiteFeedingPack(input: CiteFeedingPackInput): AcCiteFeedingPack {
@@ -439,9 +444,12 @@ export function buildCiteFeedingPack(input: CiteFeedingPackInput): AcCiteFeeding
 
   const candidates = ordered.map((id) => ({ id, statement: rules.get(id)?.statement ?? "" }));
   const first = candidates[0];
+  const citeRule = first !== undefined ? first.id : "<BR-id>";
   return {
     candidates,
-    cite_line: `lore ac cite ${input.specSlug} ${input.acId} ${first !== undefined ? first.id : "<BR-id>"}`,
+    cite_line: input.refusedIsNew
+      ? `lore ac add ${input.specSlug} ${input.acId} ... --cite ${citeRule}`
+      : `lore ac cite ${input.specSlug} ${input.acId} ${citeRule}`,
     exemption_headroom: exemptionHeadroom(countLiveCriteria(input.data.specs), input.exemptions, input.nowIso),
   };
 }

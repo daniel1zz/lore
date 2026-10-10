@@ -1075,46 +1075,31 @@ export function formatTree(
   prefix: string = "",
   badges: ReadonlyMap<string, string> = new Map(),
 ): string {
-  const label = `${formatShortId(node.doc.id)} ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
-  const lines: string[] = [prefix === "" ? label : label];
-
-  for (let i = 0; i < node.children.length; i++) {
-    const child = node.children[i];
-    if (!child) continue;
-    const isLast = i === node.children.length - 1;
-    const connector = isLast ? "└── " : "├── ";
-    const childPrefix = isLast ? "    " : "│   ";
-    const childLines = formatTreeChildren(child, childPrefix, badges);
-    lines.push(prefix + connector + childLines[0]);
-    for (let j = 1; j < childLines.length; j++) {
-      lines.push(prefix + childLines[j]);
-    }
-  }
-
+  const lines: string[] = [treeLabel(node, badges)];
+  for (const line of formatTreeDescendants(node, badges)) lines.push(prefix + line);
   return lines.join("\n");
 }
 
-function formatTreeChildren(
-  node: TreeNode,
-  prefix: string,
-  badges: ReadonlyMap<string, string>,
-): string[] {
-  const label = `${formatShortId(node.doc.id)} ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
-  const lines: string[] = [label];
+function treeLabel(node: TreeNode, badges: ReadonlyMap<string, string>): string {
+  return `${formatShortId(node.doc.id)} ${node.doc.title} (${node.doc.status})${badges.get(node.doc.id) ?? ""}`;
+}
 
+/**
+ * The rows BELOW `node`, indented relative to `node`'s own column. Each level adds ONE connector
+ * (`├── `/`└── `) to its own row and ONE indent (`│   `/`    `) to the rows of its descendants, so the
+ * rule is identical at every depth: a caller never re-applies an ancestor's prefix (the old
+ * absolute-prefix recursion did, which doubled the indent from depth 3 on).
+ */
+function formatTreeDescendants(node: TreeNode, badges: ReadonlyMap<string, string>): string[] {
+  const lines: string[] = [];
   for (let i = 0; i < node.children.length; i++) {
     const child = node.children[i];
     if (!child) continue;
     const isLast = i === node.children.length - 1;
-    const connector = isLast ? "└── " : "├── ";
-    const childPrefix = prefix + (isLast ? "    " : "│   ");
-    const childLines = formatTreeChildren(child, childPrefix, badges);
-    lines.push(prefix + connector + childLines[0]);
-    for (let j = 1; j < childLines.length; j++) {
-      lines.push(prefix + childLines[j]);
-    }
+    lines.push((isLast ? "└── " : "├── ") + treeLabel(child, badges));
+    const indent = isLast ? "    " : "│   ";
+    for (const line of formatTreeDescendants(child, badges)) lines.push(indent + line);
   }
-
   return lines;
 }
 
