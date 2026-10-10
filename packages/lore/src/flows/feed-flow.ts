@@ -606,15 +606,16 @@ export function renderResumeFeed(
   resume: ResumeResult,
   suppressFloor = false,
   authorshipUndeterminedNote?: string,
+  ruleDiffBlock = "",
 ): string {
   if (!resume.found) {
-    return "(no handoff recorded)";
+    return ["(no handoff recorded)", ruleDiffBlock].filter((s) => s !== "").join("\n\n");
   }
   if (resume.multi_actor) {
     const records = resume.handoffs ?? [];
     const header = `${records.length} actors have handoffs`;
     const body = records.map(renderResumeRecord).join("\n\n");
-    return [header, "", body, renderReadinessPointer(resume.readiness), RESUME_SCOPE_CLOSURE]
+    return [header, "", body, renderReadinessPointer(resume.readiness), ruleDiffBlock, RESUME_SCOPE_CLOSURE]
       .filter((s) => s !== "")
       .join("\n\n");
   }
@@ -625,6 +626,7 @@ export function renderResumeFeed(
   return [
     renderResumeRecord(record),
     renderReadinessPointer(resume.readiness),
+    ruleDiffBlock,
     ...(authorshipUndeterminedNote !== undefined ? [authorshipUndeterminedNote] : []),
     ...(suppressFloor ? [] : [RESUME_COVERAGE_FLOOR]),
     RESUME_SCOPE_CLOSURE,
@@ -756,6 +758,26 @@ function describeUnmeasuredAuthorship(result: UnmeasuredSessionStartReadResult):
 }
 
 /**
+ * BL-15 (SPEC-157 AC-BLS2-22 / BR-966): the "governing rules since claim" block for every
+ * claimed task in the resume's plan scope (`opts.plan`, else the readiness pointer's plan).
+ * `""` when no plan scopes the resume or the plan has no claimed task — nothing to report.
+ * A diff failure is an `err` (never silently dropped): the resume fails loud with it.
+ */
+async function buildRuleDiffBlock(
+  sessions: NonNullable<App["sessionService"]>,
+  opts: { plan?: string; by?: string },
+  resume: ResumeResult,
+): Promise<Result<string, LoreError>> {
+  const planRef = opts.plan ?? resume.readiness?.plan_slug;
+  if (planRef === undefined) return ok("");
+  const diffs = await sessions.resumeRuleDiffs(planRef, opts.by);
+  if (!diffs.ok) return diffs;
+  if (diffs.value.length === 0) return ok("");
+  const body = diffs.value.map((d) => [`${d.task_slug}:`, ...d.lines.map((l) => `  ${l}`)].join("\n"));
+  return ok(["── Governing rules since claim ──", ...body].join("\n"));
+}
+
+/**
  * Dispatches the `session-resume` checkpoint to `SessionService.resume` — the
  * SPEC-041 §3 D5 branch both `lore feed`/`lore_feed` consult BEFORE the
  * `CHECKPOINT_PRODUCED_TYPE` gate-checkpoint lookup (`buildFeed` above). Unlike
@@ -813,6 +835,8 @@ export async function buildResumeFeed(
   if (!result.ok) return result;
 
   const resume = result.value;
+  const ruleDiffBlock = await buildRuleDiffBlock(app.sessionService, opts, resume);
+  if (!ruleDiffBlock.ok) return ruleDiffBlock;
   let suppressFloor = false;
   let authorshipUndeterminedNote: string | undefined;
   if (resume.found && !resume.multi_actor && resume.handoff !== undefined) {
@@ -841,7 +865,7 @@ export async function buildResumeFeed(
   return ok({
     checkpoint: SESSION_RESUME_CHECKPOINT,
     resume,
-    feed: renderResumeFeed(resume, suppressFloor, authorshipUndeterminedNote),
+    feed: renderResumeFeed(resume, suppressFloor, authorshipUndeterminedNote, ruleDiffBlock.value),
   });
 }
 
