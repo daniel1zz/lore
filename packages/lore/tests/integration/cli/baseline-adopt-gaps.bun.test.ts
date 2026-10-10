@@ -1,7 +1,7 @@
 /**
  * Gap cases of Baseline slice 3a group E that the RED files left open, decided by the orchestrator:
  *   G1. A no-op adopt (state unchanged) writes no audit row, prints `no change`, exits 0.
- *   G2. No stored mode: `lore status --json` reports data.ac_cite = { mode: <effective default>, provenance: "default" }.
+ *   G2. No stored mode: with baseline docs `lore status --json` reports data.ac_cite = { mode: <effective default>, provenance: "default" }; with no baseline docs it omits ac_cite (AC-BLS2-11).
  *   G3. `--arm X --disarm X` in one call exits 2 and writes nothing.
  *   G4. `lore setup --project --uninstall` removes the installed lore-baseline skill files (ledger-driven).
  *
@@ -98,9 +98,9 @@ describe("baseline adopt gaps (BL-8)", () => {
     expect(acCite(withBaseline)).toEqual({ mode: "report", provenance: "default" });
   });
 
-  it("G2: no stored mode, no baseline docs -> effective default off with provenance default", () => {
+  it("G2: no stored mode, no baseline docs -> ac_cite is absent (AC-BLS2-11: slice-1 status output, byte for byte)", () => {
     const bare = makeRepo();
-    expect(acCite(bare)).toEqual({ mode: "off", provenance: "default" });
+    expect(acCite(bare)).toBeUndefined();
   });
 
   it("G1: a no-op adopt exits 0, prints `no change`, leaves the config byte-identical and writes no extra row", () => {

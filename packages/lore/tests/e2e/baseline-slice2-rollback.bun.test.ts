@@ -262,6 +262,9 @@ const SLICE1_BASELINE_STATUS_KEYS = [
 /** spec-baseline-slice-2 C5: the only status additions slice 2a may make. */
 const C5_STATUS_ADDITIONS = ["index_mismatch", "exemptions_active", "exemptions_expired", "exemption_ratio"];
 
+/** Literal `data` key set of `status --json` in a no-baseline corpus before slice 3a added `ac_cite` (observed, then frozen). */
+const PRE_SLICE_3A_STATUS_DATA_KEYS: string[] = ["total_docs", "invalid_docs", "by_type", "by_status", "last_updated", "db_size_bytes", "invalidated_feeding_source_warnings", "exempt_plans", "ai_defaults", "open_stale_candidates", "code_anchor_specs", "verification_profiles", "pass_unfalsified_count", "unclaimed_oracle", "unredeemed_allow_missing_path_count", "capture_source_runner_count", "capture_source_self_report_count", "adopted_abandoned_count", "binary_provenance"];
+
 function allOutput(cap: Capture): string {
   return Object.values(cap)
     .map((r) => `${r.stdout}\n${r.stderr}`)
@@ -303,6 +306,12 @@ describe("AC-BLS2-11 — mode off / no baseline docs: slice-1 behaviour, byte fo
     expect(Object.keys(parseStatus(capA.status.stdout).data)).not.toContain("baseline");
   });
 
+  it("(a) status --json has no ac_cite key and its data key set equals the pre-slice-3a literal list", () => {
+    const keys = Object.keys(parseStatus(capA.status.stdout).data);
+    expect(keys).not.toContain("ac_cite");
+    expect([...keys].sort()).toEqual([...PRE_SLICE_3A_STATUS_DATA_KEYS].sort());
+  });
+
   it("control vs control: normalisation is sufficient (A == A2) and non-vacuous (raw `get` differs)", () => {
     expect(comparable(capA2, A2.dir)).toEqual(comparable(capA, A.dir));
     expect(statusWithoutBaseline(capA2.status.stdout, A2.dir)).toEqual(statusWithoutBaseline(capA.status.stdout, A.dir));
@@ -326,10 +335,11 @@ describe("AC-BLS2-11 — mode off / no baseline docs: slice-1 behaviour, byte fo
     expect(treatment.feed).toEqual(control.feed);
   });
 
-  it("(b) status --json: only the baseline block is added; its keys are the slice-1 set plus the C5 additions", () => {
+  it("(b) status --json: only the baseline block and ac_cite are added; its keys are the slice-1 set plus the C5 additions", () => {
     const dataB = parseStatus(capB.status.stdout).data;
     const keysA = Object.keys(parseStatus(capA.status.stdout).data);
-    expect(Object.keys(dataB).filter((k) => !keysA.includes(k))).toEqual(["baseline"]);
+    // slice 3a group E adds `ac_cite` whenever baseline docs exist (BL-8), so B legitimately carries it too.
+    expect(Object.keys(dataB).filter((k) => !keysA.includes(k))).toEqual(["baseline", "ac_cite"]);
     expect(keysA.filter((k) => !(k in dataB))).toEqual([]);
     const block = dataB.baseline as Record<string, unknown>;
     expect(Object.keys(block).sort()).toEqual([...SLICE1_BASELINE_STATUS_KEYS, ...C5_STATUS_ADDITIONS].sort());

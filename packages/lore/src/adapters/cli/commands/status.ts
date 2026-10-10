@@ -1758,7 +1758,9 @@ export default defineCommand({
       // (`counts` mode); the second store handle exists because `App` does not expose its store.
       const baselineStore = new SQLiteStore(dbPath);
       let baselineStatus: BaselineStatus | null;
-      let acCiteStatus: AcCiteStatus;
+      // AC-BLS2-11: `ac_cite` is emitted only with baseline docs or a stored gate mode (a corpus with
+      // neither prints exactly what slice 1 printed), so it stays null when neither holds.
+      let acCiteStatus: AcCiteStatus | null = null;
       try {
         const repoRoot = resolveGitRoot(process.cwd());
         const baselineResult = await computeBaselineStatus(
@@ -1787,11 +1789,14 @@ export default defineCommand({
           process.exitCode = exitCode(adoptRows.error);
           return;
         }
-        acCiteStatus = decideAcCiteStatus({
-          storedMode: typeof rawGate?.mode === "string" ? rawGate.mode : null,
-          effectiveMode: effective.value.mode,
-          lastAdoptedMode: lastAdoptedModeOf(adoptRows.value[0]),
-        });
+        const storedMode = typeof rawGate?.mode === "string" ? rawGate.mode : null;
+        if (baselineStatus !== null || storedMode !== null) {
+          acCiteStatus = decideAcCiteStatus({
+            storedMode,
+            effectiveMode: effective.value.mode,
+            lastAdoptedMode: lastAdoptedModeOf(adoptRows.value[0]),
+          });
+        }
       } finally {
         baselineStore.close();
       }
@@ -1821,7 +1826,7 @@ export default defineCommand({
                 // "absent" as "this binary is fine".
                 binary_provenance: provenanceOrNull(embeddedProvenance),
                 ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
-                ac_cite: acCiteStatus,
+                ...(acCiteStatus !== null ? { ac_cite: acCiteStatus } : {}),
               },
             },
             null,
