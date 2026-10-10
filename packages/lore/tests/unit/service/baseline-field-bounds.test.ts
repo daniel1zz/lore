@@ -83,9 +83,7 @@ describe("BR-613 node label, tree and kind", () => {
     expect(res.ok).toBe(true);
   });
 
-  // reason: whitespace-only labels are NOT asserted on this path - CorpusService.create accepts them
-  // (baselineExtraSchema label is z.string().min(1)); reported as a BR-613 violation, not committed.
-  it.each([["empty", ""]])(
+  it.each([["empty", ""], ["spaces", "   "], ["tab and newline", "\t\n "]])(
     "CorpusService.create refuses a baseline with a %s label and creates nothing",
     async (_name, label) => {
       const w = await world();
@@ -107,8 +105,15 @@ describe("BR-613 node label, tree and kind", () => {
     expect(await baselineCount(w.store)).toBe(before);
   });
 
-  // reason: RuleService.addNode with an unrecognised runtime `tree` is NOT asserted - it silently treats it as
-  // business (isNodeOfTree, packages/core/src/baseline.ts:67); reported as a BR-613 violation, not committed.
+  it("RuleService.addNode refuses an unknown tree and creates nothing", async () => {
+    const w = await world();
+    const before = await baselineCount(w.store);
+    const res = await w.rules.addNode(w.root.id, { node: "branch", label: "L", title: "T", content: "c", tree: "marketing" as never }, { by: "t" });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe("VALIDATION_ERROR");
+    expect(await baselineCount(w.store)).toBe(before);
+  });
+
   it("an unknown tree on CorpusService.create is refused and creates nothing", async () => {
     const w = await world();
     const before = await baselineCount(w.store);
