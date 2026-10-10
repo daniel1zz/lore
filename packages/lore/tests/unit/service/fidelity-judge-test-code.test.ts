@@ -91,8 +91,8 @@ describe("AC-BLC-8: the fidelity judge sees the cited test code", () => {
     const prompt = ai.prompts[0] as string;
     expect(prompt).toContain("SEEN-MARKER the rule holds");
     expect(prompt).toContain(SEEN_PATH);
-    expect(prompt.indexOf("SEEN-MARKER")).toBeGreaterThan(prompt.indexOf("<<DATA-N0NCE>>"));
-    expect(prompt.indexOf("SEEN-MARKER")).toBeLessThan(prompt.indexOf("<<END-N0NCE>>"));
+    expect(prompt.indexOf("SEEN-MARKER")).toBeGreaterThan(prompt.lastIndexOf("<<DATA-N0NCE>>"));
+    expect(prompt.indexOf("SEEN-MARKER")).toBeLessThan(prompt.lastIndexOf("<<END-N0NCE>>"));
     if (r.ok) {
       expect(r.value.not_seen).toBe(0);
       expect(r.value.verdicts[0]?.verdict).toBe("faithful");

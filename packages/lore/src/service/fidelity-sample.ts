@@ -14,6 +14,11 @@
  *     or a provider error ends the run as AI_PROVIDER_ERROR; there is no partial record (BR-964).
  *   - Two judges: judge A, judge B, then an adjudicator for the disagreeing `n` only (BR-965).
  *   - `faithful_share` = faithful / size and `wrong_share` = not_faithful / size (whole-sample denominator).
+ *   - The judge sees the source of each test file a criterion's command names (paths extracted by
+ *     `@lore/core`'s `extractTestFileTokens`, the parser verify's precheck uses), capped at
+ *     {@link TEST_SOURCE_MAX_CHARS} per file with a counted truncation note. A criterion with any
+ *     named test file that cannot be read is NOT judged: its verdict is `not_seen`, it names the
+ *     unreadable paths, it is counted in `not_seen`, and it is never folded into faithful or wrong (AS-17).
  *   - Catch-all rules (cited by > 5% of live-rule-citing criteria) are computed over the whole corpus,
  *     independent of the drawn sample (BR-965).
  * Side-effect class: store reads + AI provider calls. Writes nothing.
@@ -21,13 +26,18 @@
 
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { err, ok } from "@lore/core";
+import { readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { describePrecheckRoots, err, extractTestFileTokens, ok, truncateSection } from "@lore/core";
 import type { AIProvider, DocRecord, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
 
 /** A rule cited by more than this share of the live-rule-citing criteria is a catch-all. */
 export const CATCH_ALL_THRESHOLD_SHARE = 0.05;
+
+/** Per-file character cap on test source shown to the judge; a longer file is cut with a counted note. */
+export const TEST_SOURCE_MAX_CHARS = 20_000;
 
 /** One live citation of a live rule, with the text the judge needs. */
 export interface CitationPair {
@@ -41,13 +51,18 @@ export interface CitationPair {
 
 export type FidelityVerdictValue = "faithful" | "not_faithful";
 
+/** A sampled item's final state: the judge's verdict, or `not_seen` when its cited test file was unreadable (never judged). */
+export type FidelityOutcome = FidelityVerdictValue | "not_seen";
+
 export interface FidelityVerdict {
   /** 1-based position in the drawn sample. */
   n: number;
   /** Stable identity of the sampled item (citation `spec#ac->rule` or exclusion `leaf site-key`). */
   key: string;
-  verdict: FidelityVerdictValue;
+  verdict: FidelityOutcome;
   reason: string;
+  /** Present only when `verdict` is `not_seen`: the named test files that could not be read. */
+  unseen_paths?: string[];
 }
 
 export interface FidelityDisagreement {
@@ -72,6 +87,8 @@ export interface FidelityRecord {
   verdicts: FidelityVerdict[];
   disagreements: FidelityDisagreement[];
   faithful_share: number;
+  /** Sampled items never judged because a cited test file could not be read; excluded from faithful and wrong. */
+  not_seen: number;
   /** Present in exclusions mode only: not_faithful / size (the share of exclusions judged wrong). */
   wrong_share?: number;
   /** Citations mode only; always `[]` in exclusions mode (the catch-all question is about citations). */
@@ -272,9 +289,57 @@ const CITATION_INSTRUCTIONS =
   "You judge citation fidelity. Each item is an acceptance criterion and a business rule it cites. " +
   "'faithful' means the criterion really exercises or verifies the rule's claim; 'not_faithful' means the citation is unrelated, too loose or wrong.";
 
-function citationBody(p: CitationPair): string {
+function citationBody(p: CitationPair, testSource = ""): string {
   const examples = p.rule.examples.length > 0 ? `\nRule examples: ${p.rule.examples.join(" | ")}` : "";
-  return `Criterion ${p.spec}#${p.ac}: ${p.criterion}\nCriterion verify: ${JSON.stringify(p.verify)}\nCited rule ${p.rule_id}: ${p.rule.statement}${examples}`;
+  return `Criterion ${p.spec}#${p.ac}: ${p.criterion}\nCriterion verify: ${JSON.stringify(p.verify)}\nCited rule ${p.rule_id}: ${p.rule.statement}${examples}${testSource}`;
+}
+
+// ─── Cited test source ────────────────────────────────────────────────────────
+
+/** The test source rendered for one criterion, or the named files that could not be read. */
+interface TestSourceRead {
+  /** Text appended to the item body: one `Test source` block per readable file; `""` when the command names none. */
+  section: string;
+  /** Named test files unreadable under every candidate root; non-empty means the item is `not_seen`. */
+  unseen: string[];
+}
+
+function verifyCommand(verify: unknown): string | undefined {
+  return isRecord(verify) && verify["mode"] === "script" && typeof verify["command"] === "string" ? verify["command"] : undefined;
+}
+
+/**
+ * Read the test files a criterion's command names. Paths come from `extractTestFileTokens` (the parser
+ * verify's precheck uses); each is looked up under the same candidate roots (`describePrecheckRoots`).
+ * A path unreadable under every root is reported in `unseen`; a read file over the cap is cut with a
+ * note stating how many characters were shown of how many.
+ */
+function readCitedTestSource(verify: unknown, repoRoot: string): TestSourceRead {
+  const command = verifyCommand(verify);
+  if (command === undefined) return { section: "", unseen: [] };
+  const roots = describePrecheckRoots(command, { cwd: repoRoot });
+  const blocks: string[] = [];
+  const unseen: string[] = [];
+  for (const path of extractTestFileTokens(command)) {
+    const candidates = isAbsolute(path) ? [path] : roots.map((root) => join(root, path));
+    let source: string | undefined;
+    for (const candidate of candidates) {
+      try {
+        source = readFileSync(candidate, "utf8");
+        break;
+      } catch {
+        // reason: not under this root (or unreadable); try the next candidate, and report `unseen` if none reads.
+      }
+    }
+    if (source === undefined) {
+      unseen.push(path);
+      continue;
+    }
+    const cut = truncateSection(source, TEST_SOURCE_MAX_CHARS);
+    const note = cut.truncated ? `\n[truncated: showing ${TEST_SOURCE_MAX_CHARS} of ${source.length} characters]` : "";
+    blocks.push(`Test source (${path}):\n${cut.text}${note}`);
+  }
+  return { section: blocks.length > 0 ? `\n${blocks.join("\n")}` : "", unseen };
 }
 
 /**
@@ -338,6 +403,11 @@ export interface RunFidelityInput {
   exclusions: boolean;
   /** Fence nonce; a fresh random one per run when omitted. */
   nonce?: string;
+  /**
+   * Directory the cited test paths are resolved against (verify's precheck roots are derived from it).
+   * Defaults to the process cwd, which is where `lore baseline fidelity` runs from.
+   */
+  repoRoot?: string;
 }
 
 /**
@@ -348,34 +418,45 @@ export interface RunFidelityInput {
  */
 export async function runFidelity(input: RunFidelityInput): Promise<Result<FidelityRecord, LoreError>> {
   const nonce = input.nonce ?? randomBytes(6).toString("hex");
-  let pool: Array<{ key: string; body: string }>;
+  const repoRoot = input.repoRoot ?? process.cwd();
+  let pool: Array<{ key: string; read: () => { body: string; unseen: string[] } }>;
   let catchAll: CatchAllRule[] = [];
   let instructions: string;
   if (input.exclusions) {
     const entries = await buildExclusionEntries(input.store);
     if (!entries.ok) return entries;
-    pool = entries.value.map((e) => ({ key: `${e.leaf} ${e.site}`, body: exclusionBody(e) }));
+    pool = entries.value.map((e) => ({ key: `${e.leaf} ${e.site}`, read: () => ({ body: exclusionBody(e), unseen: [] }) }));
     instructions = EXCLUSION_INSTRUCTIONS;
   } else {
     const pairs = await buildCitationPairs(input.store);
     if (!pairs.ok) return pairs;
-    pool = pairs.value.map((p) => ({ key: `${p.spec}#${p.ac}->${p.rule_id}`, body: citationBody(p) }));
+    // reason: test files are read only for the drawn sample (after the draw), never for the whole pool.
+    pool = pairs.value.map((p) => ({
+      key: `${p.spec}#${p.ac}->${p.rule_id}`,
+      read: () => {
+        const tests = readCitedTestSource(p.verify, repoRoot);
+        return { body: citationBody(p, tests.section), unseen: tests.unseen };
+      },
+    }));
     catchAll = findCatchAllRules(pairs.value);
     instructions = CITATION_INSTRUCTIONS;
   }
   const sample = drawFidelitySample(pool, input.size, input.seed);
   if (!sample.ok) return sample;
-  const items: JudgeItem[] = sample.value.map((s, i) => ({ n: i + 1, body: s.body }));
+  const reads = sample.value.map((s) => s.read());
+  const allPositions = reads.map((_, i) => i + 1);
+  // An item whose cited test file is unreadable is never sent to a judge: it ends as `not_seen` (AS-17).
+  const items: JudgeItem[] = reads.flatMap((r, i) => (r.unseen.length === 0 ? [{ n: i + 1, body: r.body }] : []));
   const allN = items.map((i) => i.n);
   if (items.some((i) => i.body.includes(`<<END-${nonce}>>`))) {
     return err(validationError("nonce", "the sampled text contains the closing fence; pass another --nonce"));
   }
 
-  const first = await askJudge(input.ai, fenceItems(instructions, items, nonce), allN, "judge A");
+  const first: Result<Judged, LoreError> = allN.length === 0 ? ok(new Map()) : await askJudge(input.ai, fenceItems(instructions, items, nonce), allN, "judge A");
   if (!first.ok) return first;
   const final: Judged = new Map(first.value);
   const disagreements: FidelityDisagreement[] = [];
-  if (input.judges === 2) {
+  if (input.judges === 2 && allN.length > 0) {
     const second = await askJudge(input.ai, fenceItems(instructions, items, nonce), allN, "judge B");
     if (!second.ok) return second;
     const disputed = allN.filter((n) => first.value.get(n)?.verdict !== second.value.get(n)?.verdict);
@@ -405,11 +486,18 @@ export async function runFidelity(input: RunFidelityInput): Promise<Result<Fidel
     }
   }
 
-  const verdicts: FidelityVerdict[] = allN.map((n) => {
+  const verdicts: FidelityVerdict[] = allPositions.map((n) => {
+    const key = (sample.value[n - 1] as { key: string }).key;
+    const unseen = (reads[n - 1] as { unseen: string[] }).unseen;
+    if (unseen.length > 0) {
+      return { n, key, verdict: "not_seen", reason: `not judged: cited test file(s) could not be read: ${unseen.join(", ")}`, unseen_paths: unseen };
+    }
     const v = final.get(n) as { verdict: FidelityVerdictValue; reason: string };
-    return { n, key: (sample.value[n - 1] as { key: string }).key, verdict: v.verdict, reason: v.reason };
+    return { n, key, verdict: v.verdict, reason: v.reason };
   });
   const faithful = verdicts.filter((v) => v.verdict === "faithful").length;
+  const notFaithful = verdicts.filter((v) => v.verdict === "not_faithful").length;
+  const notSeen = verdicts.length - faithful - notFaithful;
   return ok({
     mode: input.exclusions ? "exclusions" : "citations",
     seed: input.seed,
@@ -419,7 +507,8 @@ export async function runFidelity(input: RunFidelityInput): Promise<Result<Fidel
     verdicts,
     disagreements,
     faithful_share: faithful / input.size,
-    ...(input.exclusions ? { wrong_share: (input.size - faithful) / input.size } : {}),
+    not_seen: notSeen,
+    ...(input.exclusions ? { wrong_share: notFaithful / input.size } : {}),
     catch_all: catchAll,
     threshold_share: CATCH_ALL_THRESHOLD_SHARE,
   });
