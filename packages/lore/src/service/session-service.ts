@@ -59,6 +59,7 @@
  * Source: SPEC-041 §3 D1-D5; task-active-sessions-derives-only-over-active-plans-tasks-with.
  */
 
+import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import {
   err,
   ok,
@@ -307,9 +308,15 @@ export class SessionService {
     // deterministic" — deliberately NOT an error for >1 PRDs (unlike writeHandoff's
     // stricter parent-resolution rule below, D3) — bootstrap is an advisory snapshot,
     // not a write path that needs disambiguation.
-    const prds = allDocs.filter((d) => d.type === "prd").sort(byCreatedAtAsc);
-    const firstPrd = prds[0];
-    const root = firstPrd !== undefined ? { slug: firstPrd.slug, title: truncateTitle(firstPrd.title) } : null;
+    // AC-BLS3-3: with a baseline root, `root` names it and the PRD moves to `strategy`; with none,
+    // `root` is the PRD and `strategy` stays ABSENT (byte-identical to before). One ordering SSOT:
+    // navigation-roots.ts (created_at ASC).
+    const firstPrd = pickStrategyDocument(allDocs);
+    const baselineRoot = pickBaselineRoot(allDocs);
+    const toRootRef = (d: DocRecord): { slug: string; title: string } => ({ slug: d.slug, title: truncateTitle(d.title) });
+    const navigationRoot = baselineRoot ?? firstPrd;
+    const root = navigationRoot !== undefined ? toRootRef(navigationRoot) : null;
+    const strategy = baselineRoot !== undefined && firstPrd !== undefined ? toRootRef(firstPrd) : undefined;
 
     // Active (non-terminal) plans + per-plan task readiness counts. Batched: ONE
     // findLinksByToIds across every active plan's tasks (below) instead of the
@@ -528,6 +535,7 @@ export class SessionService {
 
     const report: BootstrapReport = {
       root,
+      ...(strategy !== undefined ? { strategy } : {}),
       active_plans: activePlans,
       pending_reviews: pendingReviews,
       my_claims: myClaims,

@@ -748,6 +748,12 @@ export type MemoryFileHealth = z.infer<typeof memoryFileHealthSchema>;
 
 export const bootstrapReportSchema = z.object({
   root: bootstrapRootSchema.nullable(),
+  /**
+   * The strategy document (first PRD, created_at ASC). Present ONLY when a baseline root exists —
+   * then `root` is the baseline root and this names the PRD. ABSENT (not null) otherwise, so a
+   * no-baseline corpus's report stays byte-identical (AC-BLS3-3).
+   */
+  strategy: bootstrapRootSchema.optional(),
   active_plans: z.array(bootstrapActivePlanSchema),
   pending_reviews: bootstrapPendingReviewsSchema,
   my_claims: z.array(bootstrapMyClaimSchema),
