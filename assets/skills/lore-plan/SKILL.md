@@ -26,7 +26,7 @@ Read `references/mode-$0.md` for modes with reference files. No mode → ask use
 
 Plan Skill is the **orchestration layer** on top of the lore corpus (per-project `.lore/` SQLite, `lore` CLI on PATH, `CLAUDECODE=1` exported so AI-assist defaults off):
 
-- **Document chain**: `prd → spec → plan → task` — all typed lore docs addressed by slug (e.g. `plan-user-auth`, `task-jwt-middleware`). Parentage via `--parent`; a plan's parent is its governing spec.
+- **Document chain**: `prd → spec → plan → task` — all typed lore docs addressed by slug (e.g. `plan-user-auth`, `task-jwt-middleware`). A plan's parent (`--parent`) is its governing spec; the spec itself has no parent and cites baseline rules.
 - **Structured ACs live on the spec**: `lore ac add <spec> <AC-ID> --statement "..." --mode script|ai|human [--oracle ...] [--command "..."]`. The `spec-promote` gate requires ≥1 AC. Task-level AC text (in task content) covers spec AC ids; evidence references them via `--ac`.
 - **Phases**: `lore phase add <plan> <name> [--description "..."]` — declared on the plan; tasks reference one via `--phase`.
 - **Tasks**: `lore create task --title "..." --parent <plan> --plan-id <plan> --phase <name> --anchor <path>` — content carries Estimate / Approach / AC.

@@ -41,7 +41,7 @@ Always search first — duplicating an existing doc fragments team knowledge. Li
 | Type | Required besides --title |
 |---|---|
 | prd, plan | — |
-| spec | `--parent <id-or-slug>` (+ optional `--kind feature\|tech\|design`, defaults `feature`) |
+| spec | no parent (a spec takes none; it relates to the trees by criteria citing rules, `lore ac add ... --cite BR-<n>`); optional `--kind feature\|tech\|design`, defaults `feature` |
 | task | `--parent <plan>` + `--plan-id <plan>` (+ optional `--phase <name>`, must be declared on the plan) |
 | adr | `--decision-status proposed\|accepted\|deprecated\|superseded` |
 | knowledge | `--sub-type ideation\|retro\|research\|reference\|assessment` |

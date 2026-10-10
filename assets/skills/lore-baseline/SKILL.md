@@ -89,9 +89,11 @@ When a leaf's rule is only valid because another leaf's rule holds, declare it: 
 | Declare a dependency | `lore baseline depends <leaf> --add BR-n` |
 | Cite a rule from a criterion | `lore ac cite <spec> <ac-id> BR-n` |
 | See the tree and rule states | `lore baseline tree [--states] [--rule BR-n]` |
-| Map failure sites to rules | `lore baseline sites <command>`, then `lore baseline map <leaf> --command <name> --site <key> --rule BR-n` (or `--non-business <reason>`) |
-| Check coverage of a leaf or branch | `lore baseline coverage <leaf\|branch>` |
+| Map failure sites to rules (lore-source-only) | `lore baseline sites <command>`, then `lore baseline map <leaf> --command <name> --site <key> --rule BR-n` (or `--non-business <reason>`) |
+| Check coverage of a leaf or branch (lore-source-only) | `lore baseline coverage <leaf\|branch>` |
 | Adopt the citation gate | `lore baseline adopt --mode report\|enforce [--arm <branch-slug>]... [--disarm <branch-slug>]...` |
+
+**`baseline sites`, `baseline map` and `baseline coverage` are lore-source-only.** The census analyses lore's own CLI source, so in any consumer project they exit 4 ("not inside a lore source checkout"). A consumer uses instead: rule counts and lifecycle in `lore status`, the criteria that cite a rule via `lore rule impact BR-n`, and `lore baseline tree --states` / `--rule BR-n`.
 
 Node bodies start from `templates/branch.md` and `templates/leaf.md` (pass with `--content-file`). Rules are
 never in the body: they go through `lore rule add`.
