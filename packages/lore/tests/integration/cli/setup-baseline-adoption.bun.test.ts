@@ -258,7 +258,9 @@ function readEmbeddedManifest(): EmbeddedManifestShape {
     }
   }
   if (end < 0) throw new Error("could not delimit EMBEDDED_ASSETS_MANIFEST literal");
-  return JSON.parse(src.slice(open, end + 1)) as EmbeddedManifestShape;
+  // reason: the generated literal is a TypeScript object literal (unquoted keys, a `LORE_BINARY_VERSION` identifier),
+  // NOT JSON as first assumed; evaluating it with that identifier bound parses it without a TS import graph.
+  return new Function("LORE_BINARY_VERSION", `return ${src.slice(open, end + 1)}`)("embedded") as EmbeddedManifestShape;
 }
 
 const readEmbeddedManifestPaths = (): string[] => readEmbeddedManifest().entries.map((e) => e.path);

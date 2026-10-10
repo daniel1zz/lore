@@ -83,7 +83,8 @@ describe("setup writes only the adoption key (AC-STR-11)", () => {
     expect(text.indexOf("project:")).toBeLessThan(text.indexOf("workflow:"));
     expect(text.indexOf("workflow:")).toBeLessThan(text.indexOf("context:"));
     const parsed = parse(text) as Record<string, any>;
-    expect(parsed["workflow"]).toEqual({ claim_ttl_minutes: 77 });
+    // BL-8 (AC-BLS3-7): setup additionally seeds the citation gate's `report` mode when absent.
+    expect(parsed["workflow"]).toEqual({ claim_ttl_minutes: 77, gates: { "ac-cite": { mode: "report" } } });
     expect(Object.keys(parsed).sort()).toEqual(["context", "project", "workflow"]);
     expect(parsed["context"]).toEqual({ memory_files: { adoption: expect.stringMatching(/^(enforce|warn)$/) } });
   });
@@ -121,7 +122,8 @@ describe("setup writes only the adoption key (AC-STR-11)", () => {
   });
 
   it("STATE: an explicit adoption value is never overwritten and the file stays byte-identical", () => {
-    const seeded = `${MINIMAL}context:\n  memory_files:\n    adoption: warn # explicit\n`;
+    // BL-8: an explicit ac-cite mode is "explicit" too (seeded only when absent), so it is pinned here as well.
+    const seeded = `${MINIMAL}  gates:\n    ac-cite:\n      mode: off # explicit\ncontext:\n  memory_files:\n    adoption: warn # explicit\n`;
     const dir = makeRepoWithConfig(seeded);
     expect(setup(dir).exitCode).toBe(0);
     expect(readConfig(dir)).toBe(seeded);

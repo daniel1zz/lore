@@ -28,6 +28,8 @@
  *                   a `research` knowledge doc and printed. Read-only on rules/citations/site_map.
  *                   Never skips the judge: without --ai on a surface whose AI default is off it refuses
  *                   (exit 2); size > pool or a bad flag exits 2; a judge failure or malformed reply exits 6.
+ *   adopt [--mode report|enforce] [--arm <branch>]... [--disarm <branch>]...
+ *                   Audited writer of workflow.gates."ac-cite" (config + one `baseline_adopt` audit row); see baseline-adopt.ts.
  *   tree [root] [--states] [--rule BR-n]
  *                   Listing (node kind, label, status, rule tallies). `--states` adds every rule's
  *                   verification state with its inputs and `computed_from`; `--rule BR-n` prints
@@ -56,6 +58,7 @@ import type { RuleStateEntry, RuleStateFull } from "../../../service/rule-state-
 import { SpawnGitPort, resolveGitRoot } from "../../../service/rule-state-git-port.js";
 import { SQLiteStore } from "../../../store/sqlite-store.js";
 import { buildProviderRegistry } from "../../../ai/registry.js";
+import { adoptCommand } from "./baseline-adopt.js";
 import { runFidelity } from "../../../service/fidelity-sample.js";
 import type { FidelityRecord } from "../../../service/fidelity-sample.js";
 
@@ -592,6 +595,7 @@ export default defineCommand({
         await runFidelityCommand(args);
       },
     }),
+    adopt: adoptCommand,
     tree: defineCommand({
       meta: { name: "tree", description: "List the baseline tree (kind, label, status, rule counts)" },
       args: {

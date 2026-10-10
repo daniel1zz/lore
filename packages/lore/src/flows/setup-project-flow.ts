@@ -281,6 +281,34 @@ export interface ProjectAssetSource {
   readAsset(name: string): Promise<Result<string, LoreError>>;
 }
 
+/** One shipped consumer skill file: `path` is relative to the assets root (`skills/lore-baseline/SKILL.md`). */
+export interface ProjectSkillAsset {
+  path: string;
+  content: string;
+}
+
+/**
+ * Lists the `skills/lore-baseline/**` authoring-skill files shipped in the assets SSOT (Baseline slice 3a, BL-8).
+ * Kept apart from {@link ProjectAssetSource} (which reads single named files under `assets/project/`) because the
+ * set is a directory tree whose membership the flow must not hard-code.
+ *
+ * @returns `err` when the skill tree is missing/unreadable or empty — never throws, never an empty `ok`.
+ */
+export interface ProjectSkillAssetSource {
+  listSkillAssets(): Result<ProjectSkillAsset[], LoreError>;
+}
+
+/** What {@link SeedAcCiteMode} did: `written` (mode was absent) or `kept` (an explicit mode already there). */
+export type AcCiteSeedResult = { status: "written" } | { status: "kept"; existing: string };
+
+/**
+ * Seeds `workflow.gates."ac-cite".mode: report` into the target repo's `.lore/config.yaml` ONLY when `mode` is
+ * absent (an explicit off | report | enforce and `armed_branches` are never touched; no audit row).
+ *
+ * @returns `err` when the config cannot be read or written — never throws.
+ */
+export type SeedAcCiteMode = (repoDir: string) => Result<AcCiteSeedResult, LoreError>;
+
 /**
  * What {@link WriteAdoptionMode} did with `context.memory_files.adoption`:
  * `written` — the key was absent and now holds the requested mode; `kept` —
@@ -327,6 +355,10 @@ export interface ProjectScaffoldFlowDeps {
   assets: ProjectAssetSource;
   writeAdoptionMode?: WriteAdoptionMode;
   resolveMemoryFileBudgets?: ResolveMemoryFileBudgets;
+  /** BL-8 — the authoring-skill source; absent means the `skills` row is omitted (bare-port test fixtures). */
+  skillAssets?: ProjectSkillAssetSource;
+  /** BL-8 — the ac-cite mode seed; absent means the `ac_cite` row is omitted (bare-port test fixtures). */
+  seedAcCiteMode?: SeedAcCiteMode;
 }
 
 /**
@@ -415,6 +447,17 @@ export interface ProjectScaffoldReport {
    * See {@link AdoptionStepResult}.
    */
   adoption?: AdoptionStepResult;
+  /**
+   * BL-8 (AC-BLS3-7) — the `skills/lore-baseline/**` install into `.claude/` (ledger kind `skill`). `done` = at
+   * least one file written this run; `skipped` = every file already byte-identical; `failed` names the cause.
+   * Absent only when `deps.skillAssets` was not injected.
+   */
+  skills?: SimpleStepResult;
+  /**
+   * BL-8 (AC-BLS3-7) — the `workflow.gates."ac-cite".mode` seed: `done` = seeded `report`, `skipped` = an explicit
+   * mode was kept (detail names it). Absent only when `deps.seedAcCiteMode` was not injected.
+   */
+  ac_cite?: SimpleStepResult;
   /**
    * SPEC-060 D1 — outcome of writing `.lore/.lore-project-manifest.json`
    * itself (the ledger file), LAST, after every tracked write/backup/removal
@@ -1158,6 +1201,54 @@ function finalizeClaudeMdRow(seam: ManifestSeamResult): SimpleStepResult {
   return { status: seam.written.has(CLAUDE_MD_TARGET_NAME) ? "done" : "skipped", detail: CLAUDE_MD_TARGET_NAME };
 }
 
+/** Where the lore-baseline skill files are installed: `<repo>/.claude/<asset path>`. */
+const SKILL_TARGET_PREFIX = ".claude/";
+
+/**
+ * BL-8 — turns every shipped `skills/lore-baseline/**` file into a ledger candidate at `.claude/<path>` (kind `skill`).
+ * NEVER writes itself (writing is {@link runManifestWriteSeam}'s job); a listing failure is a terminal `failed` row.
+ */
+function runSkillsStep(deps: ProjectScaffoldFlowDeps): { terminal?: SimpleStepResult; candidates: AssetFile[] } {
+  if (deps.skillAssets === undefined) return { candidates: [] };
+  try {
+    const listed = deps.skillAssets.listSkillAssets();
+    if (!listed.ok) return { terminal: { status: "failed", detail: describeError(listed.error) }, candidates: [] };
+    const candidates = listed.value.map(
+      (asset): AssetFile => ({
+        path: `${SKILL_TARGET_PREFIX}${asset.path}`,
+        kind: "skill",
+        content: asset.content,
+        sha256: sha256Hex(asset.content),
+      }),
+    );
+    return { candidates };
+  } catch (error) {
+    return { terminal: { status: "failed", detail: toMessage(error) }, candidates: [] };
+  }
+}
+
+/** Finalizes the skills row once the seam has run: failed if any file failed, done if any was written, else skipped. */
+function finalizeSkillsRow(candidates: AssetFile[], seam: ManifestSeamResult): SimpleStepResult {
+  const failedFiles = candidates.filter((c) => seam.failed.has(c.path));
+  if (failedFiles.length > 0) {
+    return { status: "failed", detail: failedFiles.map((c) => `${c.path}: ${seam.failed.get(c.path)}`).join("; ") };
+  }
+  const writtenCount = candidates.filter((c) => seam.written.has(c.path)).length;
+  return writtenCount > 0
+    ? { status: "done", detail: `${writtenCount} of ${candidates.length} file(s) written` }
+    : { status: "skipped", detail: `${candidates.length} file(s) already up to date` };
+}
+
+/** BL-8 — runs the injected ac-cite mode seed; `undefined` when the port is absent. */
+function runAcCiteSeedStep(deps: ProjectScaffoldFlowDeps, repoDir: string): SimpleStepResult | undefined {
+  if (deps.seedAcCiteMode === undefined) return undefined;
+  const seeded = deps.seedAcCiteMode(repoDir);
+  if (!seeded.ok) return { status: "failed", detail: describeError(seeded.error) };
+  return seeded.value.status === "written"
+    ? { status: "done", detail: "workflow.gates.ac-cite.mode: report" }
+    : { status: "skipped", detail: `kept existing mode ${seeded.value.existing}` };
+}
+
 async function runGitHooksPathStep(deps: ProjectScaffoldFlowDeps, repoDir: string): Promise<GitHooksPathResult> {
   try {
     const getResult = await deps.exec.run(["git", "config", "--get", "core.hooksPath"], repoDir);
@@ -1236,14 +1327,17 @@ export async function scaffoldProject(
   const treeYamlOutcome = await runTreeYamlStep(deps, repoDir);
   const gitignoreOutcome = await runGitignoreStep(deps, repoDir);
   const claudeMdOutcome = await runClaudeMdStep(deps, repoDir);
+  const skillsOutcome = runSkillsStep(deps);
 
   const candidates: AssetFile[] = [
     ...hooksOutcome.pending.map((p) => p.candidate),
     ...(treeYamlOutcome.pending ? [treeYamlOutcome.pending.candidate] : []),
     ...(gitignoreOutcome.pending ? [gitignoreOutcome.pending] : []),
     ...(claudeMdOutcome.pending ? [claudeMdOutcome.pending] : []),
+    ...skillsOutcome.candidates,
   ];
   const managedPaths = new Set<string>([
+    ...skillsOutcome.candidates.map((c) => c.path),
     ...HOOK_ASSET_NAMES.map((name) => `hooks/${name}`),
     TREE_TEMPLATE_TARGET_NAME,
     GITIGNORE_TARGET_NAME,
@@ -1266,6 +1360,10 @@ export async function scaffoldProject(
 
   const git_hooks_path = await runGitHooksPathStep(deps, repoDir);
 
+  const skills: SimpleStepResult | undefined =
+    deps.skillAssets === undefined ? undefined : (skillsOutcome.terminal ?? finalizeSkillsRow(skillsOutcome.candidates, seam));
+  const ac_cite = runAcCiteSeedStep(deps, repoDir);
+
   // Judged only when the CLAUDE.md step produced a candidate (a failed step has no content to judge).
   const adoption =
     claudeMdOutcome.pending === undefined ? undefined : runAdoptionStep(deps, repoDir, claudeMdOutcome.pending.content);
@@ -1278,6 +1376,8 @@ export async function scaffoldProject(
     claude_md,
     git_hooks_path,
     ...(adoption === undefined ? {} : { adoption }),
+    ...(skills === undefined ? {} : { skills }),
+    ...(ac_cite === undefined ? {} : { ac_cite }),
     manifest: seam.manifestStatus,
     backups: seam.backups,
   });
