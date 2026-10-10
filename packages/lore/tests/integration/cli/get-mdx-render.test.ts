@@ -72,7 +72,7 @@ function createPrd(title: string, content: string, cwd: string): string {
 /** Create a spec under the given prd parent and return its slug. */
 function createSpec(title: string, parentSlug: string, cwd: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai", "--content", "body"],
+    ["create", "spec", "--title", title,"--no-ai", "--content", "body"],
     cwd,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);

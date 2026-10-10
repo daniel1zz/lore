@@ -160,7 +160,7 @@ function seedFixture(cwd: string): void {
   );
   mustRun(["create", "prd", "--title", "Scope Root", "--content", "## Overview\nroot", "--no-ai"], cwd);
   mustRun(
-    ["create", "spec", "--title", "Scope Fixture", "--parent", PRD_SLUG, "--content", "## Overview\nspec body", "--no-ai"],
+    ["create", "spec", "--title", "Scope Fixture","--content", "## Overview\nspec body", "--no-ai"],
     cwd,
   );
   for (const id of ["AC-SC-1", "AC-SC-2"]) {

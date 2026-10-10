@@ -670,7 +670,9 @@ async function runSpecCreateGate(
     input.extra?.acceptance_criteria,
   );
   const ctx: GateContext = {
-    parentType: parentDoc !== null ? parentDoc.type : null,
+    // reason: BR-2 — a spec takes no parent, so a parent_id that names ANY document, or one that
+    // resolves to nothing, is refused; `parentLegal` only needs to know a parent was named.
+    parentType: parentDoc !== null ? parentDoc.type : input.parent_id !== undefined ? "unresolved" : null,
     ...(input.extra?.spec_kind !== undefined ? { specKind: input.extra.spec_kind } : {}),
     content: input.content ?? "",
     ...(acceptanceCriteriaParsed.success

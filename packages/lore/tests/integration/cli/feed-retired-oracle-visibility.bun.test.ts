@@ -222,7 +222,6 @@ function buildCorpus(): Observed {
     [
       "create", "spec",
       "--title", "Feed Gen Spec",
-      "--parent", "prd-feed-gen-prd",
       "--no-ai",
       "--content", "## Overview\nbody",
     ],

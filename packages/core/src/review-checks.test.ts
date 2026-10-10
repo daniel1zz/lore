@@ -175,11 +175,11 @@ describe("check: parent_contract", () => {
     expect(findCheck(results, "parent_contract")).toEqual({ check: "parent_contract", outcome: "pass" });
   });
 
-  it("HAPPY: spec parented under prd passes", () => {
+  it("NEGATIVE: spec parented under prd fails (BR-2: a spec takes no parent)", () => {
     const parent = makeDoc("prd", { id: "01ARZ3PARENT00000000001" });
     const doc = makeDoc("spec", { parent_id: parent.id });
     const results = runDeterministicChecks(makeBundle(doc, { parent }));
-    expect(findCheck(results, "parent_contract")?.outcome).toBe("pass");
+    expect(findCheck(results, "parent_contract")?.outcome).toBe("fail");
   });
 
   it("HAPPY: adr parented under spec passes (adr allows prd OR spec)", () => {
@@ -203,12 +203,17 @@ describe("check: parent_contract", () => {
     expect(findCheck(results, "parent_contract")?.outcome).toBe("pass");
   });
 
-  it("NEGATIVE: a spec with no resolvable parent fails (spec is not a ROOT_TYPE)", () => {
+  it("HAPPY: a spec with no parent passes (spec is parentless, BR-1)", () => {
     const doc = makeDoc("spec", { parent_id: null });
     const results = runDeterministicChecks(makeBundle(doc));
-    const check = findCheck(results, "parent_contract");
-    expect(check?.outcome).toBe("fail");
-    expect(check?.detail).toContain("spec");
+    expect(findCheck(results, "parent_contract")?.outcome).toBe("pass");
+  });
+
+  it("NEGATIVE: a spec WITH a resolved parent fails (BR-2: a spec is never filed under a document)", () => {
+    const parent = makeDoc("prd", { id: "01ARZ3PARENT00000000009" });
+    const doc = makeDoc("spec", { parent_id: parent.id });
+    const results = runDeterministicChecks(makeBundle(doc, { parent }));
+    expect(findCheck(results, "parent_contract")?.outcome).toBe("fail");
   });
 
   it("NEGATIVE: a task parented under a spec fails (task only allows plan)", () => {
@@ -227,8 +232,8 @@ describe("check: parent_contract", () => {
     expect(findCheck(results, "parent_contract")?.outcome).toBe("fail");
   });
 
-  it("REGRESSION: ROOT_TYPES contains only 'prd' — every other type without a parent fails", () => {
-    const nonRootTypes: DocType[] = ["spec", "adr", "plan", "task", "knowledge"];
+  it("REGRESSION: ROOT_TYPES contains only 'prd' — every other parented type without a parent fails (spec is parentless, BR-1)", () => {
+    const nonRootTypes: DocType[] = ["adr", "plan", "task", "knowledge"];
     for (const type of nonRootTypes) {
       const doc = makeDoc(type, { parent_id: null });
       const results = runDeterministicChecks(makeBundle(doc));

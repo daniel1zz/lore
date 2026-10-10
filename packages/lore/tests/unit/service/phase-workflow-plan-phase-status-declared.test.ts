@@ -57,7 +57,6 @@ async function makeFixture() {
   const spec = await corpusService.create({
     type: "spec",
     title: "Declared Phase Spec",
-    parent_id: prd.value.id,
     content: "## Spec",
     extra: {
       acceptance_criteria: [

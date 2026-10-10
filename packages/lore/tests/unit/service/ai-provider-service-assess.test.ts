@@ -100,7 +100,6 @@ async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
   const specResult = await corpusService.create({
     type: "spec",
     title: "Assess Test Spec",
-    parent_id: prdResult.value.id,
     content: "## Acceptance Criteria\n\n**AC-ASSESS-1** Something must happen.\n",
   } as CreateDocInput);
   if (!specResult.ok) throw new Error("spec create failed");
@@ -157,7 +156,6 @@ async function makeStructuredAcBundle(store: InMemoryStore): Promise<PlanBundle>
   const specResult = await corpusService.create({
     type: "spec",
     title: "Structured AC Test Spec",
-    parent_id: prdResult.value.id,
     content: "Spec body prose (unused when structured ACs are declared — the table replaces it).",
     extra: {
       acceptance_criteria: [
@@ -233,7 +231,6 @@ async function makeAttestedStructuredAcBundle(store: InMemoryStore): Promise<Pla
   const specResult = await corpusService.create({
     type: "spec",
     title: "Attested Coverage Test Spec",
-    parent_id: prdResult.value.id,
     content: "Spec body prose (unused — structured ACs replace it).",
     extra: {
       acceptance_criteria: [
@@ -1162,7 +1159,6 @@ async function makeBundleWithTaskAnchors(store: InMemoryStore, anchors: string[]
   const specResult = await corpusService.create({
     type: "spec",
     title: "Scope Guard Test Spec",
-    parent_id: prdResult.value.id,
     content: "## Acceptance Criteria\n\n**AC-SG-1** Something must happen.\n",
   } as CreateDocInput);
   if (!specResult.ok) throw new Error("spec create failed");

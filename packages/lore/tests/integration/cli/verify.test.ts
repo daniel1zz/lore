@@ -199,7 +199,7 @@ function createPrd(title: string): string {
 
 function createSpec(title: string, parentSlug: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai", "--content", "body"],
+    ["create", "spec", "--title", title,"--no-ai", "--content", "body"],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);

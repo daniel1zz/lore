@@ -98,7 +98,7 @@ describe("NEGATIVE — create: parent type contract hard gate (RED — impl miss
    * Current impl: only checks parent EXISTS, not that parent TYPE is allowed.
    * This test will FAIL (RED) until the hard gate is added.
    */
-  it("AC-HARDGATE-001.N01: create spec with task parent → INVALID_PARENT_TYPE (child=spec, parent=task, allowed=[prd])", async () => {
+  it("AC-HARDGATE-001.N01: create spec with task parent → refused naming citations (BR-2: a spec takes no parent, any type)", async () => {
     const { service, store } = makeService();
 
     // Seed a task doc directly via store (bypasses service Zod, verifies service-level gate)
@@ -112,11 +112,10 @@ describe("NEGATIVE — create: parent type contract hard gate (RED — impl miss
 
     expect(result.ok).toBe(false);
     if (result.ok) return; // narrow for TS — test already fails above
-    expect(result.error.code).toBe("INVALID_PARENT_TYPE");
-    if (result.error.code === "INVALID_PARENT_TYPE") {
-      expect(result.error.child).toBe("spec");
-      expect(result.error.parent).toBe("task");
-      expect(result.error.allowed).toContain("prd");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    if (result.error.code === "VALIDATION_ERROR") {
+      expect(result.error.field).toBe("parent_id");
+      expect(result.error.message).toContain("lore ac cite");
     }
   });
 
@@ -182,7 +181,7 @@ describe("NEGATIVE — create: parent type contract hard gate (RED — impl miss
    * The PASS half is a positive control (HAPPY path added inline here).
    * The FAIL half will be RED until gate is implemented.
    */
-  it("AC-HARDGATE-001.N04: spec→prd succeeds but spec→adr fails (different inputs → different outputs)", async () => {
+  it("AC-HARDGATE-001.N04: a parentless spec succeeds but spec→prd and spec→adr are both refused (different inputs → different outputs)", async () => {
     const { service, store } = makeService();
 
     // Create a prd through the service (allowed)
@@ -190,18 +189,25 @@ describe("NEGATIVE — create: parent type contract hard gate (RED — impl miss
     expect(prdResult.ok).toBe(true);
     if (!prdResult.ok) return;
 
-    // spec with prd parent should succeed (positive control)
-    const specOkResult = await service.create({
+    // a spec with no parent succeeds (positive control)
+    const specOkResult = await service.create({ type: "spec", title: "Auth Feature Spec" });
+    expect(specOkResult.ok).toBe(true);
+
+    // a spec with a prd parent is refused (BR-2)
+    const specPrdResult = await service.create({
       type: "spec",
-      title: "Auth Feature Spec",
+      title: "Filed Spec",
       parent_id: prdResult.value.id,
     });
-    expect(specOkResult.ok).toBe(true);
+    expect(specPrdResult.ok).toBe(false);
+    if (!specPrdResult.ok) {
+      expect(specPrdResult.error.code).toBe("VALIDATION_ERROR");
+    }
 
     // Now seed an adr (not a valid parent for spec)
     const adrDoc = await insertRawDoc(store, "adr", "Old Decision");
 
-    // spec with adr parent should fail with INVALID_PARENT_TYPE
+    // spec with adr parent is refused too
     const specBadResult = await service.create({
       type: "spec",
       title: "Another Spec",
@@ -209,7 +215,7 @@ describe("NEGATIVE — create: parent type contract hard gate (RED — impl miss
     });
     expect(specBadResult.ok).toBe(false);
     if (!specBadResult.ok) {
-      expect(specBadResult.error.code).toBe("INVALID_PARENT_TYPE");
+      expect(specBadResult.error.code).toBe("VALIDATION_ERROR");
     }
   });
 });
@@ -225,19 +231,13 @@ describe("NEGATIVE — link: parent type contract hard gate (RED — impl missin
    * then updates parent_id. The type gate does not exist yet.
    * This test will FAIL (RED) until the hard gate is added.
    */
-  it("AC-HARDGATE-001.N05: link(spec, task, 'parent') → INVALID_PARENT_TYPE (link path)", async () => {
+  it("AC-HARDGATE-001.N05: link(spec, task, 'parent') → refused naming citations (link path, BR-2)", async () => {
     const { service, store } = makeService();
 
-    // Create a prd first so we can create a spec properly
-    const prdResult = await service.create(prdInput("Product"));
-    expect(prdResult.ok).toBe(true);
-    if (!prdResult.ok) return;
-
-    // Create a spec under prd (valid)
+    // Create a parentless spec (valid, BR-1)
     const specResult = await service.create({
       type: "spec",
       title: "Auth Spec",
-      parent_id: prdResult.value.id,
     });
     expect(specResult.ok).toBe(true);
     if (!specResult.ok) return;
@@ -250,11 +250,9 @@ describe("NEGATIVE — link: parent type contract hard gate (RED — impl missin
 
     expect(linkResult.ok).toBe(false);
     if (linkResult.ok) return;
-    expect(linkResult.error.code).toBe("INVALID_PARENT_TYPE");
-    if (linkResult.error.code === "INVALID_PARENT_TYPE") {
-      expect(linkResult.error.child).toBe("spec");
-      expect(linkResult.error.parent).toBe("task");
-      expect(linkResult.error.allowed).toContain("prd");
+    expect(linkResult.error.code).toBe("VALIDATION_ERROR");
+    if (linkResult.error.code === "VALIDATION_ERROR") {
+      expect(linkResult.error.message).toContain("lore ac cite");
     }
   });
 
@@ -263,7 +261,7 @@ describe("NEGATIVE — link: parent type contract hard gate (RED — impl missin
    * plan→spec as parent is invalid (spec is not a valid parent for plan per §4.1).
    * This test will FAIL (RED) until the hard gate is added.
    */
-  it("AC-HARDGATE-001.N06: link(plan, spec, 'parent') → INVALID_PARENT_TYPE (link path, different types)", async () => {
+  it("AC-HARDGATE-001.N06: link(plan, task, 'parent') → INVALID_PARENT_TYPE (link path, different types)", async () => {
     const { service, store } = makeService();
 
     // Create a plan via service
@@ -271,18 +269,18 @@ describe("NEGATIVE — link: parent type contract hard gate (RED — impl missin
     expect(planResult.ok).toBe(true);
     if (!planResult.ok) return;
 
-    // Seed a spec doc directly (it normally needs prd parent, bypass that for gate testing)
-    const specDoc = await insertRawDoc(store, "spec", "Auth Spec");
+    // Seed a task doc directly
+    const taskDoc = await insertRawDoc(store, "task", "Backend Task");
 
-    // Attempt to link plan → spec as parent — spec is not an allowed parent for plan
-    const linkResult = await service.link(planResult.value.id, specDoc.id, "parent");
+    // Attempt to link plan → task as parent — task is not an allowed parent for plan
+    const linkResult = await service.link(planResult.value.id, taskDoc.id, "parent");
 
     expect(linkResult.ok).toBe(false);
     if (linkResult.ok) return;
     expect(linkResult.error.code).toBe("INVALID_PARENT_TYPE");
     if (linkResult.error.code === "INVALID_PARENT_TYPE") {
       expect(linkResult.error.child).toBe("plan");
-      expect(linkResult.error.parent).toBe("spec");
+      expect(linkResult.error.parent).toBe("task");
     }
   });
 });
@@ -304,7 +302,7 @@ describe("ERROR — create: soft-deleted parent → DOC_NOT_FOUND", () => {
    * test is RED and reveals a bug. If resolve() already excludes deleted docs, this
    * test is a REGRESSION guard.
    */
-  it("AC-HARDGATE-001.E01: create spec with soft-deleted prd parent → DOC_NOT_FOUND", async () => {
+  it("AC-HARDGATE-001.E01: create plan with soft-deleted prd parent → DOC_NOT_FOUND", async () => {
     const { service, store } = makeService();
 
     // Create a prd and then soft-delete it
@@ -318,8 +316,8 @@ describe("ERROR — create: soft-deleted parent → DOC_NOT_FOUND", () => {
 
     // Now try to create a spec with the deleted prd as parent
     const specResult = await service.create({
-      type: "spec",
-      title: "Orphaned Spec",
+      type: "plan",
+      title: "Orphaned Plan",
       parent_id: prdId,
     });
 
@@ -399,17 +397,14 @@ describe("REGRESSION — create: Zod schema gate (two-stage defense)", () => {
    *
    * @regression PARENT_REQUIRED Zod superRefine
    */
-  it("AC-HARDGATE-001.R03: create spec without parent_id → PARENT_REQUIRED (Zod gate, first stage)", async () => {
+  it("AC-HARDGATE-001.R03: create spec without parent_id → ok, parent_id null (BR-1: Zod no longer requires a spec parent)", async () => {
     const { service } = makeService();
 
-    const result = await service.create({ type: "spec", title: "Orphan Spec" });
+    const result = await service.create({ type: "spec", title: "Parentless Spec" });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("PARENT_REQUIRED");
-    if (result.error.code === "PARENT_REQUIRED") {
-      expect(result.error.type).toBe("spec");
-    }
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.parent_id).toBeNull();
   });
 
   /**
@@ -443,26 +438,26 @@ describe("HAPPY — create: valid parent types are allowed through", () => {
    * If the type-gate impl incorrectly blocks valid parent types, this test catches it.
    * Ensures the gate returns ok for allowed combinations.
    */
-  it("AC-HARDGATE-001.H01: create spec with prd parent → success", async () => {
+  it("AC-HARDGATE-001.H01: create plan with prd parent → success (a parent-taking type is not over-blocked)", async () => {
     const { service } = makeService();
 
     const prdResult = await service.create(prdInput("Valid Product"));
     expect(prdResult.ok).toBe(true);
     if (!prdResult.ok) return;
 
-    const specResult = await service.create({
-      type: "spec",
-      title: "Valid Spec",
+    const planResult = await service.create({
+      type: "plan",
+      title: "Valid Plan",
       parent_id: prdResult.value.id,
     });
 
-    expect(specResult.ok).toBe(true);
-    if (!specResult.ok) {
+    expect(planResult.ok).toBe(true);
+    if (!planResult.ok) {
       // If it fails, surface the error for debugging
-      throw new Error(`Expected ok=true but got error: ${JSON.stringify(specResult.error)}`);
+      throw new Error(`Expected ok=true but got error: ${JSON.stringify(planResult.error)}`);
     }
-    expect(specResult.value.type).toBe("spec");
-    expect(specResult.value.parent_id).toBe(prdResult.value.id);
+    expect(planResult.value.type).toBe("plan");
+    expect(planResult.value.parent_id).toBe(prdResult.value.id);
   });
 
   /**
@@ -471,23 +466,25 @@ describe("HAPPY — create: valid parent types are allowed through", () => {
    * Different input than N05/N06, different expected output (ok=true).
    * Defeats hardcoded-return false pass.
    */
-  it("AC-HARDGATE-001.H02: link(spec, prd, 'parent') → success (link path allows valid type)", async () => {
-    const { service, store } = makeService();
+  it("AC-HARDGATE-001.H02: link(plan, prd, 'parent') → success (link path allows valid type)", async () => {
+    const { service } = makeService();
 
-    // Seed spec directly (bypassing service to avoid circular dependency setup)
-    const specDoc = await insertRawDoc(store, "spec", "Unlinked Spec");
+    const planResult = await service.create(planInput("Unlinked Plan"));
+    expect(planResult.ok).toBe(true);
+    if (!planResult.ok) return;
+    const planDoc = planResult.value;
     const prdResult = await service.create(prdInput("Target PRD"));
     expect(prdResult.ok).toBe(true);
     if (!prdResult.ok) return;
 
-    const linkResult = await service.link(specDoc.id, prdResult.value.id, "parent");
+    const linkResult = await service.link(planDoc.id, prdResult.value.id, "parent");
 
     expect(linkResult.ok).toBe(true);
     if (!linkResult.ok) {
       throw new Error(`Expected ok=true but got: ${JSON.stringify(linkResult.error)}`);
     }
     expect(linkResult.value.link_type).toBe("parent");
-    expect(linkResult.value.from_id).toBe(specDoc.id);
+    expect(linkResult.value.from_id).toBe(planDoc.id);
     expect(linkResult.value.to_id).toBe(prdResult.value.id);
   });
 });

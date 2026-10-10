@@ -28,6 +28,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ulid } from "ulidx";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
@@ -97,6 +98,10 @@ async function insertRawSpec(
   specKind: string,
   acceptanceCriteria: unknown[],
 ): Promise<DocRecord> {
+  // BR-1007: every criterion cites the live fixture rule, so a spec that passes the gates under
+  // test is also approvable; a spec with zero criteria stays uncitable (asserted where it matters).
+  await seedLiveRule(store);
+  const citedCriteria = acceptanceCriteria.map((c) => ({ ...(c as Record<string, unknown>), cites: [LIVE_RULE_ID] }));
   const id = ulid() as DocId;
   const now = new Date().toISOString();
   const doc: DocRecord = {
@@ -115,7 +120,7 @@ async function insertRawSpec(
     version: 1,
     deleted_at: null,
     tags: [],
-    extra: { spec_kind: specKind, acceptance_criteria: acceptanceCriteria },
+    extra: { spec_kind: specKind, acceptance_criteria: citedCriteria },
   };
   const result = await store.insert(doc);
   if (!result.ok) throw new Error(`insertRawSpec failed: ${JSON.stringify(result.error)}`);
@@ -229,18 +234,24 @@ function domainOverviewConfig(overrides?: Record<string, unknown>): LoreConfig {
 }
 
 describe("acCountMeetsFloor — spec-promote min_acs (CorpusService.set / ReviewService.approve)", () => {
-  // HAPPY — a domain-overview spec with ZERO declared ACs promotes cleanly
-  it("promotes a domain-overview spec with zero declared ACs when its profile's min_acs is 0", async () => {
+  // HAPPY — a domain-overview spec with ZERO declared ACs passes the min_acs floor (min_acs is 0)
+  // and is then refused ONLY by BR-1007: with no criterion there is nothing to cite, so the
+  // refusal is the citation one, never the spec-promote floor's.
+  it("a domain-overview spec with zero declared ACs passes the min_acs-0 floor and is refused only for citing nothing (BR-1007)", async () => {
     const { corpusService, store } = makeCorpusService(domainOverviewConfig());
     const prd = await createPrd(corpusService);
     const spec = await insertRawSpec(store, prd.id, "domain-overview", []);
 
     const result = await corpusService.set(spec.id, { status: "approved" });
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("acceptance_criteria");
+      expect((result.error as { message?: string }).message).toContain("lore ac cite");
+    }
   });
 
   // HAPPY — same scenario via ReviewService.approve, the OTHER spec-promote write path
-  it("ReviewService.approve also promotes the same AC-less domain-overview spec", async () => {
+  it("ReviewService.approve refuses the same AC-less domain-overview spec only for citing nothing (BR-1007), not on the floor", async () => {
     const store = new InMemoryStore();
     const corpusService = new CorpusService(store);
     const enforcer = new GateEnforcer(domainOverviewConfig());
@@ -252,7 +263,11 @@ describe("acCountMeetsFloor — spec-promote min_acs (CorpusService.set / Review
     const spec = await insertRawSpec(store, prd.id, "domain-overview", []);
 
     const result = await reviewService.approve(spec.id);
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as { field?: string }).field).toBe("acceptance_criteria");
+      expect((result.error as { message?: string }).message).toContain("lore ac cite");
+    }
   });
 
   // NEGATIVE — a DIFFERENT spec_kind with no min_acs knob at all is still blocked at 0 ACs,

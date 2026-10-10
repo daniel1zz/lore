@@ -115,7 +115,6 @@ async function createSpecUnderPrd(
   const spec = await service.create({
     type: "spec",
     title: specTitle,
-    parent_id: prd.value.id,
     content: "body",
   } as CreateDocInput);
   if (!spec.ok) throw new Error(`create spec failed: ${JSON.stringify(spec.error)}`);
@@ -225,7 +224,6 @@ describe("CorpusService.create() provenance auto-write — ERROR (fail-soft)", (
     const spec = await service.create({
       type: "spec",
       title: "Another Fail-soft Spec",
-      parent_id: prd.value.id,
       content: "body",
     } as CreateDocInput);
     expect(spec.ok).toBe(true);

@@ -120,7 +120,6 @@ describe("lore_create — GateEnforcer wired (MCP surface, retro follow-up item 
     const specResult = await call()({
       type: "spec",
       title: "Ungated Agent Spec",
-      parent_id: prd.id,
       content: "no heading here",
     });
 
@@ -138,7 +137,6 @@ describe("lore_create — GateEnforcer wired (MCP surface, retro follow-up item 
     const specResult = await call()({
       type: "spec",
       title: "Gated Agent Spec",
-      parent_id: prd.id,
       content: "## Overview\n\nSpec body.\n",
     });
 

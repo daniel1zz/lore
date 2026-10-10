@@ -50,7 +50,7 @@ async function world(gate: { mode: "off" | "report" | "enforce"; armed_branches:
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");
   const createSpec = (title: string, criteria: unknown[]) =>
-    cs.create({ type: "spec", title, parent_id: prd.value.id, content: "body", extra: { acceptance_criteria: criteria } } as CreateDocInput);
+    cs.create({ type: "spec", title,content: "body", extra: { acceptance_criteria: criteria } } as CreateDocInput);
   return { store, cs, createSpec };
 }
 

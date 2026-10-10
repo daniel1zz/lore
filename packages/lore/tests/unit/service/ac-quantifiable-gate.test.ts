@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ulid } from "ulidx";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
@@ -34,6 +35,7 @@ const BAD_AC = {
   id: "AC-BAD-1",
   statement: "the dashboard loads fast",
   verify: { mode: "human" as const },
+  cites: [LIVE_RULE_ID],
 };
 
 /** The same claim, restated with a numeric threshold — passes the lint. */
@@ -41,6 +43,7 @@ const GOOD_AC = {
   id: "AC-GOOD-1",
   statement: "the dashboard P95 load time is < 200ms",
   verify: { mode: "human" as const },
+  cites: [LIVE_RULE_ID],
 };
 
 /** A second, distinctly-quantified AC — used where a spec needs ≥2 declared ACs. */
@@ -48,10 +51,12 @@ const GOOD_AC_2 = {
   id: "AC-GOOD-2",
   statement: "the export completes within 5s for a 10MB corpus",
   verify: { mode: "script" as const, oracle: "test" as const, command: "bun test export.test.ts" },
+  cites: [LIVE_RULE_ID],
 };
 
-function makeCorpusService(config?: LoreConfig) {
+async function makeCorpusService(config?: LoreConfig) {
   const store = new InMemoryStore();
+  await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, undefined, undefined, enforcer);
   return { store, corpusService, enforcer };
@@ -67,7 +72,6 @@ function specInput(acceptanceCriteria: unknown[], parentId: string): CreateDocIn
   return {
     type: "spec",
     title: "Quantifiability Test Spec",
-    parent_id: parentId,
     content: "## Overview\n\nBody.",
     extra: { acceptance_criteria: acceptanceCriteria },
   } as CreateDocInput;
@@ -120,7 +124,7 @@ async function insertRawSpec(
 describe("acQuantifiable — spec-create (CorpusService.create)", () => {
   // HAPPY
   it("creates a spec whose declared ACs are all quantified", async () => {
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const result = await corpusService.create(specInput([GOOD_AC], prd.id));
     expect(result.ok).toBe(true);
@@ -128,7 +132,7 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
 
   // NEGATIVE — AC-ACQ-3
   it("rejects a spec with an unquantified abstract-word AC, exit-mapped VALIDATION_ERROR naming the AC id", async () => {
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const result = await corpusService.create(specInput([BAD_AC], prd.id));
     expect(result.ok).toBe(false);
@@ -144,7 +148,7 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
 
   // STATE — mixed set: one good, one bad — still blocked, names the bad one
   it("rejects when only ONE of several declared ACs is unquantified", async () => {
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const result = await corpusService.create(specInput([GOOD_AC, BAD_AC], prd.id));
     expect(result.ok).toBe(false);
@@ -157,12 +161,11 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
 
   // BOUNDARY — no declared ACs at all (the common create-then-`lore ac add` case) → vacuous pass
   it("does not block a spec created with no acceptance_criteria at all", async () => {
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const result = await corpusService.create({
       type: "spec",
       title: "No ACs Yet",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
     } as CreateDocInput);
     expect(result.ok).toBe(true);
@@ -170,7 +173,7 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
 
   // REGRESSION — a script-mode AC using an abstract word is never blocked (oracle-bound by construction)
   it("does not block a script-mode AC even though its statement carries an abstract word", async () => {
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const result = await corpusService.create(
       specInput(
@@ -190,6 +193,7 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
   // REGRESSION — an ungated CorpusService (no GateEnforcer wired) never blocks, byte-identical to pre-gate behavior
   it("does not block when the service was constructed with NO GateEnforcer (bare unit-test shape)", async () => {
     const store = new InMemoryStore();
+    await seedLiveRule(store);
     const bareCorpusService = new CorpusService(store);
     const prd = await mustCreate(bareCorpusService, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
     const result = await bareCorpusService.create(specInput([BAD_AC], prd.id));
@@ -202,12 +206,12 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
 describe("acQuantifiable — AcService.addCriterion (immediate-feedback layer)", () => {
   async function makeSpec(): Promise<{ corpusService: CorpusService; spec: DocRecord; acService: AcService }> {
     const store = new InMemoryStore();
+    await seedLiveRule(store);
     const corpusService = new CorpusService(store);
     const prd = await mustCreate(corpusService, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "AC Service Spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
     } as CreateDocInput);
     return { corpusService, spec, acService: new AcService(store) };
@@ -254,7 +258,7 @@ describe("acQuantifiable — AcService.addCriterion (immediate-feedback layer)",
 
 describe("acQuantifiable — spec-promote (CorpusService.set + ReviewService.approve)", () => {
   it("CorpusService.set blocks an approve-transition when a declared AC is unquantified", async () => {
-    const { corpusService, store } = makeCorpusService();
+    const { corpusService, store } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const spec = await insertRawSpec(store, prd.id, [GOOD_AC_2, BAD_AC]);
     const result = await corpusService.set(spec.id, { status: "approved" });
@@ -267,7 +271,7 @@ describe("acQuantifiable — spec-promote (CorpusService.set + ReviewService.app
   });
 
   it("CorpusService.set allows an approve-transition when every declared AC is quantified", async () => {
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const spec = await mustCreate(corpusService, specInput([GOOD_AC, GOOD_AC_2], prd.id));
     const result = await corpusService.set(spec.id, { status: "approved" });
@@ -276,6 +280,7 @@ describe("acQuantifiable — spec-promote (CorpusService.set + ReviewService.app
 
   it("ReviewService.approve blocks the same unquantified-AC spec via the plan-promote-shaped GateDependencies bundle", async () => {
     const store = new InMemoryStore();
+    await seedLiveRule(store);
     const corpusService = new CorpusService(store);
     const enforcer = new GateEnforcer(undefined);
     const reviewService = new ReviewService(store, undefined, {
@@ -300,7 +305,7 @@ describe("config-escape", () => {
       project: { name: "t", author: "t" },
       workflow: { gates: { "spec-create": { ac_quantifiable: { enabled: false } } } },
     } as unknown as LoreConfig;
-    const { corpusService } = makeCorpusService(config);
+    const { corpusService } = await makeCorpusService(config);
     const prd = await createPrd(corpusService);
     const result = await corpusService.create(specInput([BAD_AC], prd.id));
     expect(result.ok).toBe(true);
@@ -311,7 +316,7 @@ describe("config-escape", () => {
       project: { name: "t", author: "t" },
       workflow: { gates: { "spec-promote": { ac_quantifiable: { enabled: false } } } },
     } as unknown as LoreConfig;
-    const { corpusService, store } = makeCorpusService(config);
+    const { corpusService, store } = await makeCorpusService(config);
     const prd = await createPrd(corpusService);
     // spec-create's own ac_quantifiable sub-knob is untouched by this config (still
     // enabled) — insert the doc directly so this test isolates the spec-PROMOTE
@@ -326,7 +331,7 @@ describe("config-escape", () => {
       project: { name: "t", author: "t" },
       workflow: { gates: { "spec-create": { ac_quantifiable: { enabled: false } } } },
     } as unknown as LoreConfig;
-    const { corpusService } = makeCorpusService(config);
+    const { corpusService } = await makeCorpusService(config);
     const prd = await createPrd(corpusService);
     // spec-create allows the bad AC through because only ITS sub-knob is disabled
     const spec = await mustCreate(corpusService, specInput([BAD_AC], prd.id));
@@ -343,12 +348,11 @@ describe("config-escape", () => {
       project: { name: "t", author: "t" },
       workflow: { gates: { "spec-create": { ac_quantifiable: { enabled: false } } } },
     } as unknown as LoreConfig;
-    const { corpusService } = makeCorpusService(config);
+    const { corpusService } = await makeCorpusService(config);
     const prd = await createPrd(corpusService);
     const result = await corpusService.create({
       type: "spec",
       title: "No Skeleton",
-      parent_id: prd.id,
       content: "no heading at all",
       extra: { acceptance_criteria: [BAD_AC] },
     } as CreateDocInput);
@@ -368,14 +372,14 @@ describe("advisory-only", () => {
     // CorpusService/GateEnforcer/AcService/ReviewService take no AI-provider
     // dependency at all — this constructs the full gate path with only a store
     // and a GateEnforcer, proving the deterministic gate never needs one.
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const result = await corpusService.create(specInput([GOOD_AC], prd.id));
     expect(result.ok).toBe(true);
   });
 
   it("spec-promote passes for a quantified spec with NO AI provider reachable anywhere in the construction graph", async () => {
-    const { corpusService } = makeCorpusService();
+    const { corpusService } = await makeCorpusService();
     const prd = await createPrd(corpusService);
     const spec = await mustCreate(corpusService, specInput([GOOD_AC], prd.id));
     const result = await corpusService.set(spec.id, { status: "approved" });

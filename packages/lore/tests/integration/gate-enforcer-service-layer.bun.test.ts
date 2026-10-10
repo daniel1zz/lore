@@ -52,6 +52,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
+import { citeSpecWithLiveRule } from "../helpers/app-live-rule.js";
 
 // ─── Project setup ────────────────────────────────────────────────────────────
 
@@ -130,7 +131,6 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Minimal Spec",
-        parent_id: prd.value.id,
         content: "no heading here",
       } as CreateDocInput);
 
@@ -154,7 +154,6 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Skeletal Spec",
-        parent_id: prd.value.id,
         content: "## Overview\n\nSpec body.\n",
       } as CreateDocInput);
 
@@ -173,7 +172,6 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Ungated Minimal Spec",
-        parent_id: prd.value.id,
         content: "no heading here",
       } as CreateDocInput);
 
@@ -188,15 +186,12 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
   // so a service-layer spec-create denial's feeding pack matches `lore gate
   // spec-create`'s, not just the bare discriminator. ────────────────────────
   describe("D3: spec-create denial embeds the feeding-skill rule slice", () => {
-    it("NEGATIVE + found feeding skill: message contains the rule slice, its [source: <slug>] header, and the parent slice", async () => {
+    // reason: BR-2 - a spec takes no parent, and `CorpusService.create` refuses a spec that names one
+    // BEFORE the gate runs, so the service-layer denial never carries a parent slice for a spec; the
+    // parent slice of the gate's pack is still exercised by `lore gate spec-create` (render-seam).
+    it("NEGATIVE + found feeding skill: message contains the rule slice and its [source: <slug>] header", async () => {
       const app = openApp();
       try {
-        const prd = await app.corpusService.create({
-          type: "prd",
-          title: "Root PRD With Parent Content",
-          content: "## Parent Overview\n\nDistinctive parent body text for slicing.",
-        } as CreateDocInput);
-        if (!prd.ok) throw new Error(`prd create failed: ${JSON.stringify(prd.error)}`);
 
         const skillCreate = await app.corpusService.create({
           type: "knowledge",
@@ -211,7 +206,6 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         const spec = await app.corpusService.create({
           type: "spec",
           title: "D3 Enrichment Spec",
-          parent_id: prd.value.id,
           content: "no heading here",
         } as CreateDocInput);
 
@@ -221,7 +215,6 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         const message = (spec.error as { message?: string }).message ?? "";
         expect(message).toContain(`[source: ${skillApprove.value.slug}, trust: team-authored]`);
         expect(message).toContain("Every spec needs a `## ` heading skeleton.");
-        expect(message).toContain("Distinctive parent body text for slicing.");
         expect(message).toContain("MISSING_SKELETON");
       } finally {
         app.close();
@@ -251,7 +244,6 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         const spec = await app.corpusService.create({
           type: "spec",
           title: "No Feeding Skill Spec",
-          parent_id: prd.value.id,
           content: "no heading here",
         } as CreateDocInput);
 
@@ -265,7 +257,7 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         // The fallback rule slice itself must be genuinely present, not just a
         // non-"unknown" source label with an empty body.
         expect(message).toContain("## Rules a candidate spec must satisfy");
-        expect(message).toContain("Legal parent.");
+        expect(message).toContain("No parent.");
       } finally {
         app.close();
       }
@@ -296,7 +288,6 @@ describe("GateEnforcer — spec-create (via CorpusService.create, default config
         const spec = await app.corpusService.create({
           type: "spec",
           title: "Disabled Gate D3 Spec",
-          parent_id: prd.value.id,
           content: "no heading here",
         } as CreateDocInput);
 
@@ -317,7 +308,6 @@ describe("GateEnforcer — spec-promote (via ReviewService.approve, default conf
     const spec = await app.corpusService.create({
       type: "spec",
       title: "Approve-Target Spec",
-      parent_id: prd.value.id,
       content: "## Overview\n\nSpec body.\n",
     } as CreateDocInput);
     if (!spec.ok) throw new Error(`spec create failed: ${JSON.stringify(spec.error)}`);
@@ -356,6 +346,7 @@ describe("GateEnforcer — spec-promote (via ReviewService.approve, default conf
         verify: { mode: "human" },
       });
       if (!acResult.ok) throw new Error(`addCriterion failed: ${JSON.stringify(acResult.error)}`);
+      await citeSpecWithLiveRule(app, spec.id, "AC-GATE-1"); // BR-1007: approvable only when a criterion cites a live rule
 
       const result = await app.reviewService.approve(spec.id);
       expect(result.ok).toBe(true);
@@ -364,12 +355,17 @@ describe("GateEnforcer — spec-promote (via ReviewService.approve, default conf
     }
   });
 
-  it("STATE: workflow.gates.spec-promote.enabled=false approves a 0-AC spec", async () => {
+  it("STATE: workflow.gates.spec-promote.enabled=false skips the AC-count floor; a 0-AC spec is then refused only by BR-1007", async () => {
     const app = openApp(ALL_GATES_DISABLED_CONFIG);
     try {
       const spec = await createSkeletalSpec(app);
       const result = await app.reviewService.approve(spec.id);
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        // not `gate:spec-promote:...` - that checkpoint is disabled; the citation requirement is unconditional.
+        expect((result.error as { field?: string }).field).toBe("acceptance_criteria");
+        expect((result.error as { message?: string }).message).toContain("lore ac cite");
+      }
     } finally {
       app.close();
     }
@@ -387,7 +383,6 @@ describe("GateEnforcer — plan-promote (via ReviewService.approve, default conf
     const spec = await app.corpusService.create({
       type: "spec",
       title: "Plan-Promote Spec",
-      parent_id: prd.value.id,
       content: "## Overview\n\nSpec body.\n",
     } as CreateDocInput);
     if (!spec.ok) throw new Error(`spec create failed: ${JSON.stringify(spec.error)}`);
@@ -428,6 +423,7 @@ describe("GateEnforcer — plan-promote (via ReviewService.approve, default conf
         verify: { mode: "human" },
       });
       if (!acResult.ok) throw new Error(`addCriterion failed: ${JSON.stringify(acResult.error)}`);
+      await citeSpecWithLiveRule(app, specId, "AC-GATE-PP-1");
       const specApprove = await app.reviewService.approve(specId);
       if (!specApprove.ok) throw new Error(`spec approve failed: ${JSON.stringify(specApprove.error)}`);
 
@@ -461,7 +457,6 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
     const spec = await app.corpusService.create({
       type: "spec",
       title: "Task-Claim Spec",
-      parent_id: prd.value.id,
       content: "## Overview\n\nSpec body.\n",
     } as CreateDocInput);
     if (!spec.ok) throw new Error(`spec create failed: ${JSON.stringify(spec.error)}`);
@@ -510,6 +505,7 @@ describe("GateEnforcer — task-claim (via TaskWorkflowService.claim, default co
         verify: { mode: "human" },
       });
       if (!acResult.ok) throw new Error(`addCriterion failed: ${JSON.stringify(acResult.error)}`);
+      await citeSpecWithLiveRule(app, specId, "AC-GATE-TC-1");
       const specApprove = await app.reviewService.approve(specId);
       if (!specApprove.ok) throw new Error(`spec approve failed: ${JSON.stringify(specApprove.error)}`);
 
@@ -619,7 +615,6 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "No-Bypass-Env Spec",
-        parent_id: parentId,
         content: "no heading here",
       } as CreateDocInput);
 
@@ -647,7 +642,6 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-Set Spec",
-        parent_id: parentId,
         content: "no heading here",
       } as CreateDocInput);
 
@@ -677,7 +671,6 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-Truthy Spec",
-        parent_id: parentId,
         content: "no heading here",
       } as CreateDocInput);
 
@@ -701,7 +694,6 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-Approve Spec",
-        parent_id: parentId,
         content: "## Overview\n\nBody.\n",
       } as CreateDocInput);
       if (!spec.ok) throw new Error(`spec create failed: ${JSON.stringify(spec.error)}`);
@@ -729,7 +721,6 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-Audit Spec",
-        parent_id: parentId,
         content: "no heading here",
       } as CreateDocInput);
       expect(spec.ok).toBe(false);
@@ -760,7 +751,6 @@ describe("GateEnforcer — LORE_GATE_BYPASS write-path boundary note (task-lore-
       const spec = await app.corpusService.create({
         type: "spec",
         title: "Bypass-Env-And-Config-Disabled Spec",
-        parent_id: parentId,
         content: "no heading here", // would otherwise fail MISSING_SKELETON
       } as CreateDocInput);
 

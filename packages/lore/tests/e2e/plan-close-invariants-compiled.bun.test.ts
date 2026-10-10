@@ -88,6 +88,7 @@ import { tmpdir } from "node:os";
 import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // ─── Path / spawn setup ─────────────────────────────────────────────────────
 
@@ -253,7 +254,7 @@ function createPrd(dir: string, title: string): string {
  *  so it resolves NO domain doc (historically §D6; irrelevant since BR-984). */
 function createSpec(dir: string, prdSlug: string, title: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title, "--parent", prdSlug, "--content", "## Overview\n\nBody.", "--no-ai"],
+    ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
@@ -370,6 +371,7 @@ describe("AC-PCI-12: compiled close — throwaway corpus, dist/lore binary, one 
     specSlug = createSpec(dir, prdSlug, "T5 PCI-12 Governing Spec (no domain doc)");
     addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
 
+    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID); // BR-1007: approvable only when a criterion cites a live rule
     const approveSpec = runLore(["approve", specSlug], dir);
     if (approveSpec.exitCode !== 0) {
       throw new Error(`approve spec failed (setup): ${approveSpec.stderr}`);
@@ -496,6 +498,7 @@ describe("AC-PCI-21: an undeclared scope carrying evidence is denied through the
     specSlug = createSpec(dir, prdSlug, "PCI-21 Governing Spec");
     addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
 
+    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID); // BR-1007: approvable only when a criterion cites a live rule
     const approveSpec = runLore(["approve", specSlug], dir);
     if (approveSpec.exitCode !== 0) {
       throw new Error(`approve spec failed (setup): ${approveSpec.stderr}`);

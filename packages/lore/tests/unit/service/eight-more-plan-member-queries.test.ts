@@ -63,7 +63,6 @@ async function createSpec(
   const result = await cs.create({
     type: "spec",
     title,
-    parent_id: parentId,
     content: "spec body",
     extra: { acceptance_criteria: acceptanceCriteria },
   } as CreateDocInput);

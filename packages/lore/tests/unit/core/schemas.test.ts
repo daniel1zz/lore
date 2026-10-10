@@ -190,7 +190,6 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "Auth Service",
-      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
       extra: {},
     });
     expect(result.success).toBe(true);
@@ -272,13 +271,9 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
     expect(result.success).toBe(true);
   });
 
-  it("AC-CORE-002.N01: spec without parent_id fails", () => {
-    const result = createDocInputSchema.safeParse({
-      type: "spec",
-      title: "Auth Service",
-      extra: {},
-    });
-    expect(result.success).toBe(false);
+  it("AC-CORE-002.N01: spec without parent_id is valid (BR-1: a spec takes no parent); a task without one still fails", () => {
+    expect(createDocInputSchema.safeParse({ type: "spec", title: "Auth Service", extra: {} }).success).toBe(true);
+    expect(createDocInputSchema.safeParse({ type: "task", title: "Auth Task", extra: {} }).success).toBe(false);
   });
 
   it("AC-CORE-002.N02: adr without decision_status in extra fails", () => {
@@ -530,7 +525,6 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "Auth Service",
-      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
       extra: {},
     });
     expect(result.success).toBe(true);
@@ -540,7 +534,6 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "Design Spec",
-      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
       extra: { spec_kind: "design" },
     });
     expect(result.success).toBe(true);
@@ -550,7 +543,6 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "Tech Spec",
-      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
       extra: { spec_kind: "tech" },
     });
     expect(result.success).toBe(true);
@@ -560,7 +552,6 @@ describe("createDocInputSchema (AC-CORE-002)", () => {
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "Auth Service",
-      parent_id: "01J5X7KZRF4AXRHX9WKE6DVP6P",
       extra: { spec_kind: "bogus" },
     });
     expect(result.success).toBe(false);

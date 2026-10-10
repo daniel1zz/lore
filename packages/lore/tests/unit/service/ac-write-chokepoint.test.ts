@@ -67,7 +67,6 @@ async function setup() {
   const spec = await cs.create({
     type: "spec",
     title: "S",
-    parent_id: prd.value.id,
     content: "body",
   } as CreateDocInput);
   if (!spec.ok) throw new Error("spec");
@@ -205,7 +204,6 @@ describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
       {
         type: "spec",
         title: "Born with ACs",
-        parent_id: prd.value.id,
         content: "body",
         extra: { acceptance_criteria: [AC("AC-N-1")] },
       } as CreateDocInput,
@@ -231,7 +229,6 @@ describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
     const res = await cs.create({
       type: "spec",
       title: "Vague Spec",
-      parent_id: prd.value.id,
       content: "## Overview\n\nBody.",
       extra: {
         acceptance_criteria: [{ id: "AC-V-1", statement: "the dashboard loads fast", verify: { mode: "human" } }],

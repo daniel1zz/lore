@@ -36,6 +36,7 @@
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
@@ -48,6 +49,7 @@ const AC = {
   id: "AC-1",
   statement: "the parser round-trips every fixture file",
   verify: { mode: "script" as const, oracle: "test" as const, command: "bun test parser.test.ts" },
+  cites: [LIVE_RULE_ID],
 };
 
 async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<DocRecord> {
@@ -102,6 +104,7 @@ async function setupApprovedSpecAndDraftPlan(): Promise<{
   plan: DocRecord;
 }> {
   const store = new InMemoryStore();
+  await seedLiveRule(store);
   const enforcer = new GateEnforcer(undefined);
   const corpusService = new CorpusService(store, undefined, undefined, enforcer);
 
@@ -109,7 +112,6 @@ async function setupApprovedSpecAndDraftPlan(): Promise<{
   const specDraft = await mustCreate(corpusService, {
     type: "spec",
     title: "Feature spec",
-    parent_id: prd.id,
     content: "## Overview\n\nBody.",
     extra: { spec_kind: "feature", acceptance_criteria: [AC] },
   } as CreateDocInput);
@@ -214,6 +216,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
   // ── REGRESSION: a spec approval is unaffected — no ancestor to race against ──
   it("REGRESSION: a spec's own approve() never invokes getPlanBundle (spec-promote reads only its own row)", async () => {
     const store = new InMemoryStore();
+    await seedLiveRule(store);
     const enforcer = new GateEnforcer(undefined);
     const corpusService = new CorpusService(store, undefined, undefined, enforcer);
 
@@ -221,7 +224,6 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
     const specDraft = await mustCreate(corpusService, {
       type: "spec",
       title: "Feature spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [AC] },
     } as CreateDocInput);

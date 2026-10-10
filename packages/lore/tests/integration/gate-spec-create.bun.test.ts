@@ -107,11 +107,11 @@ function createPrd(tmpDir: string, title: string): string {
 
 const COMPLIANT_CONTENT = "## Overview\n\nSome text.\n\n## Scope\n\nIn scope.\n\n## Acceptance Criteria\n\n- AC1\n";
 
-function compliantPayload(parentSlug: string): Record<string, unknown> {
+// reason: BR-1 - a compliant spec payload carries NO parent; the argument is kept so callers read the same.
+function compliantPayload(_parentSlug: string): Record<string, unknown> {
   return {
     type: "spec",
     title: "A well-formed spec",
-    parent_id: parentSlug,
     content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
@@ -137,21 +137,23 @@ describe("lore gate spec-create", () => {
   afterEach(() => cleanupDir(tmpDir));
 
   // HAPPY — AC2: compliant candidate passes all three predicates.
-  it("AC2: exits 0 for a compliant candidate (legal prd parent, spec_kind=tech, skeleton content)", () => {
+  it("AC2: exits 0 for a compliant candidate (no parent, spec_kind=tech, skeleton content)", () => {
     const result = runGate(tmpDir, compliantPayload(prdSlug));
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("gate: pass");
   });
 
-  // NEGATIVE — AC1: omitting parent_id entirely fails parentLegal → PARENT_REQUIRED.
-  it("AC1: exits 4 and feeds back [source:...] + a rule slice when parent_id is omitted", () => {
+  // NEGATIVE — AC1: supplying a parent_id fails parentLegal (BR-2: a spec takes no parent) and the
+  // reason names criterion citations.
+  it("AC1: exits 4 and feeds back [source:...] + a rule slice when a parent_id is supplied", () => {
     const payload = compliantPayload(prdSlug);
-    delete payload["parent_id"];
+    payload["parent_id"] = prdSlug;
     const result = runGate(tmpDir, payload);
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("[source:");
     expect(result.stdout).toContain("trust: team-authored");
-    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout).toContain("a spec takes no parent");
+    expect(result.stdout).toContain("lore ac cite");
     expect(result.stdout).toContain("## Rule");
   });
 
@@ -164,13 +166,14 @@ describe("lore gate spec-create", () => {
     expect(result.stdout).toContain("INVALID_SPEC_KIND");
   });
 
-  // BOUNDARY — parent_id set but does not resolve to any doc → treated as no parent.
-  it("BOUNDARY: exits 4 with PARENT_REQUIRED when parent_id does not resolve to any doc", () => {
+  // BOUNDARY — parent_id set but does not resolve to any doc → still refused: the contract is that a
+  // spec names NO parent, not that the named parent be legal.
+  it("BOUNDARY: exits 4 refusing the parent when parent_id does not resolve to any doc", () => {
     const payload = compliantPayload(prdSlug);
     payload["parent_id"] = "does-not-exist-slug";
     const result = runGate(tmpDir, payload);
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout).toContain("a spec takes no parent");
   });
 
   // BOUNDARY — content present but carries no `## ` heading → MISSING_SKELETON.
@@ -187,11 +190,12 @@ describe("lore gate spec-create", () => {
     const result = runGate(tmpDir, {
       type: "spec",
       title: "Broken spec",
+      parent_id: prdSlug,
       content: "no headings",
       extra: { spec_kind: "bogus" },
     });
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).toContain("INVALID_SPEC_KIND");
     expect(result.stdout).toContain("MISSING_SKELETON");
   });
@@ -236,7 +240,7 @@ describe("lore gate spec-create", () => {
 
     runGate(tmpDir, compliantPayload(prdSlug)); // exit 0 path
     const payload = compliantPayload(prdSlug);
-    delete payload["parent_id"];
+    payload["parent_id"] = prdSlug;
     runGate(tmpDir, payload); // exit 4 path
 
     const after = runLore(["status", "--json"], tmpDir);
@@ -348,9 +352,9 @@ describe("lore gate spec-create: no seeded rule doc", () => {
   afterEach(() => cleanupDir(tmpDir));
 
   it("BOUNDARY: still exits 4 with missing reasons even when no approved rule doc exists", () => {
-    const result = runGate(tmpDir, { type: "spec", title: "x", content: "no headings" });
+    const result = runGate(tmpDir, { type: "spec", title: "x", parent_id: "some-parent", content: "no headings" });
     expect(result.exitCode).toBe(4);
-    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout).toContain("MISSING_SKELETON");
     expect(result.stdout).toContain("[source:");
     expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");

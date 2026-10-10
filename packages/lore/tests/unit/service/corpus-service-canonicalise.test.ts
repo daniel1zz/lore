@@ -35,7 +35,6 @@ describe("CorpusService.create — canonicalises content on write", () => {
     const specResult = await service.create({
       type: "spec",
       title: "Child Spec",
-      parent_id: prdResult.value.id,
       content: rawContent,
     });
 
@@ -59,7 +58,6 @@ describe("CorpusService.create — canonicalises content on write", () => {
     const specAResult = await service.create({
       type: "spec",
       title: "Spec A",
-      parent_id: prdResult.value.id,
       content: "alpha\n\n",
     });
     expect(specAResult.ok).toBe(true);
@@ -68,7 +66,6 @@ describe("CorpusService.create — canonicalises content on write", () => {
     const specBResult = await service.create({
       type: "spec",
       title: "Spec B",
-      parent_id: prdResult.value.id,
       content: "beta\n\n\n",
     });
     expect(specBResult.ok).toBe(true);
@@ -95,7 +92,6 @@ describe("CorpusService.set — canonicalises content on update", () => {
     const specResult = await service.create({
       type: "spec",
       title: "My Spec",
-      parent_id: prdResult.value.id,
       content: "original\n",
     });
     expect(specResult.ok).toBe(true);
@@ -125,7 +121,6 @@ describe("CorpusService.set — canonicalises content on update", () => {
     const specResult = await service.create({
       type: "spec",
       title: "Spec for dual-set test",
-      parent_id: prdResult.value.id,
       content: "initial\n",
     });
     expect(specResult.ok).toBe(true);

@@ -30,7 +30,7 @@
 import type { CheckResult } from "./review-judgment.js";
 import type { DocId, DocRecord, DocType, LinkRecord } from "./types.js";
 import type { TreeBlueprint, TreeNodeSpec } from "./tree-blueprint.js";
-import { isValidParentType, ROOT_TYPES } from "./doc-type-rules.js";
+import { isParentlessType, isValidParentType, ROOT_TYPES } from "./doc-type-rules.js";
 import {
   adrExtraSchema,
   knowledgeExtraSchema,
@@ -135,7 +135,7 @@ function checkParentContract(bundle: ReviewBundle): CheckResult {
   const { doc, parent } = bundle;
 
   if (parent === undefined) {
-    if (ROOT_TYPES.includes(doc.type)) {
+    if (ROOT_TYPES.includes(doc.type) || isParentlessType(doc.type)) {
       return { check: "parent_contract", outcome: "pass" };
     }
     return {

@@ -419,7 +419,6 @@ describe("AC-BFI-9: the pre-push hook actually RUNS the anchor-coverage ratchet"
         type: "spec",
         title: "BFI9 Fixture Spec Alpha Unanchored",
         content: skeleton("Declares no code anchors."),
-        parent_id: prd.value.id,
         extra: { spec_kind: "tech" },
       });
       if (!specA.ok) throw new Error(`fixture unanchored spec create failed: ${JSON.stringify(specA.error)}`);
@@ -429,7 +428,6 @@ describe("AC-BFI-9: the pre-push hook actually RUNS the anchor-coverage ratchet"
         type: "spec",
         title: "BFI9 Fixture Spec Beta Anchored",
         content: skeleton("Declares one code anchor."),
-        parent_id: prd.value.id,
         extra: { spec_kind: "tech", code_anchors: ["packages/lore/src/app.ts#createApp"] },
       });
       if (!specB.ok) throw new Error(`fixture anchored spec create failed: ${JSON.stringify(specB.error)}`);
@@ -787,7 +785,6 @@ describe("AC-BFI-15 fixture-forced-anchor-red: the anchor-value assertion is for
         type: "spec",
         title: "BFI15 Anchor Red Fixture Spec Green",
         content: skeleton("green — never repointed"),
-        parent_id: prd.value.id,
         extra: { spec_kind: "tech", code_anchors: [ANCHOR_FILE_A] },
       });
       if (!greenSpec.ok) throw new Error(`fixture green-spec create failed: ${JSON.stringify(greenSpec.error)}`);
@@ -797,7 +794,6 @@ describe("AC-BFI-15 fixture-forced-anchor-red: the anchor-value assertion is for
         type: "spec",
         title: "BFI15 Anchor Red Fixture Spec Red",
         content: skeleton("red — repointed by its own case below"),
-        parent_id: prd.value.id,
         extra: { spec_kind: "tech", code_anchors: [ANCHOR_FILE_A] },
       });
       if (!redSpec.ok) throw new Error(`fixture red-spec create failed: ${JSON.stringify(redSpec.error)}`);

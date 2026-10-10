@@ -873,7 +873,7 @@ describe("lore create — state verification", () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
 
-    // spec requires --parent (see "spec still requires --parent" regression test below)
+    // a spec takes no parent (BR-1); see "spec refuses --parent" regression test below
     const outPrd = captureOutput();
     try {
       await runCmd(cmd, { type: "prd", title: "Root PRD For Kind", ai: false });
@@ -894,7 +894,6 @@ describe("lore create — state verification", () => {
       await runCmd(cmd, {
         type: "spec",
         title: "Undeclared Kind Spec",
-        parent: prdSlug,
         content: "## Overview\n\nbody",
         ai: false,
       });
@@ -946,7 +945,6 @@ describe("lore create — state verification", () => {
       await runCmd(cmd, {
         type: "spec",
         title: "Design Kind Spec",
-        parent: prdSlug,
         kind: "design",
         content: "## Overview\n\nbody",
         ai: false,
@@ -995,16 +993,15 @@ describe("lore create — state verification", () => {
     const output = captureOutput();
     // reason: this is NOT a CLI usage-error pre-check (like --decision-status) — --kind is
     // OPTIONAL, so an invalid value is deliberately passed through to createDocInputSchema's
-    // superRefine and surfaces as VALIDATION_ERROR mapped to exit 4 (SPEC-032 §3.1). --parent
-    // is supplied so PARENT_REQUIRED (also exit 4, but the wrong reason) cannot mask the
-    // assertion under test.
+    // superRefine and surfaces as VALIDATION_ERROR mapped to exit 4 (SPEC-032 §3.1). No --parent
+    // is supplied (a spec takes no parent, BR-2) so the parent refusal (also exit 4, but the wrong
+    // reason) cannot mask the assertion under test.
     process.exitCode = 0;
 
     try {
       await runCmd(cmd, {
         type: "spec",
         title: "Bogus Kind Spec",
-        parent: prdSlug,
         kind: "bogus",
         ai: false,
       });
@@ -1315,27 +1312,39 @@ describe("lore create — orphan advisory", () => {
 // ─── REGRESSION guards ────────────────────────────────────────────────────────
 
 describe("lore create — regression guards", () => {
-  // Regression: spec create still requires --parent (not broken by type-specific changes)
-  it("spec still requires --parent (existing behaviour preserved)", async () => {
+  // Regression: a spec takes no parent (BR-2) - `--parent` on a spec is refused, exit 4, naming citations
+  it("spec refuses --parent (BR-2), exit 4, nothing created", async () => {
     await initLoreDb();
     const cmd = await importCreateCommand();
+    const outPrd = captureOutput();
+    try {
+      await runCmd(cmd, { type: "prd", title: "Root PRD For Refusal", ai: false });
+    } catch (e: unknown) {
+      if (!(e instanceof Error) || !e.message.startsWith("process.exit(")) throw e;
+    } finally {
+      outPrd.restore();
+    }
+    const prdSlug = outPrd.stdout.find((l) => l.includes("prd-"))?.match(/prd-[\w-]+/)?.[0];
+    expect(prdSlug).toBeTruthy();
+
     const output = captureOutput();
     // reason: FU#4 refactored post-app exits to process.exitCode = N; return; so
     // service-layer errors no longer trigger the process.exit spy. Read exitCode directly.
     process.exitCode = 0;
-
     try {
-      // reason: --no-ai bypasses AI path (SPEC-017) so the command reaches the service layer
-      // where PARENT_REQUIRED is enforced for spec type. In non-TTY context, openEditor
-      // returns ok("") so no real editor is launched.
-      await runCmd(cmd, { type: "spec", title: "Spec Without Parent", ai: false });
+      await runCmd(cmd, {
+        type: "spec",
+        title: "Spec With Parent",
+        parent: prdSlug,
+        content: "## Overview\n\nbody",
+        ai: false,
+      });
     } finally {
       output.restore();
     }
 
-    // Should fail (parent required for spec)
-    expect(process.exitCode).toBeDefined();
-    expect(process.exitCode).not.toBe(0);
+    expect(process.exitCode).toBe(4);
+    expect(output.stderr.join("")).toContain("lore ac cite");
     process.exitCode = 0; // reset for subsequent tests
   });
 

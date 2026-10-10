@@ -142,7 +142,6 @@ async function setup() {
   const spec = await cs.create({
     type: "spec",
     title: "S",
-    parent_id: prd.value.id,
     content: "body",
   } as CreateDocInput);
   if (!spec.ok) throw new Error("spec");

@@ -127,7 +127,7 @@ async function world(
       if (!set.ok) throw new Error(`setRule failed: ${JSON.stringify(set.error)}`);
     }
   }
-  const spec = await mustCreate(corpus, { type: "spec", title: "S", parent_id: prd.id, content: "body" } as CreateDocInput);
+  const spec = await mustCreate(corpus, { type: "spec", title: "S",content: "body" } as CreateDocInput);
   for (let j = 0; j < acCites.length; j += 1) {
     const cites = acCites[j]!.map((c) => (typeof c === "number" ? ruleIds[c]! : c));
     const added = await ac.addCriterion(spec.id, {

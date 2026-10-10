@@ -8,10 +8,9 @@
  * human-prose message — the caller (the not-yet-implemented `lore gate spec-create`
  * command) maps `reason` to CLI exit codes / messages.
  *
- * @invariant `parentLegal`'s notion of "legal parent type for spec" is sourced
- *   exclusively from `PARENT_TYPE_CONTRACT.spec` (`@lore/core`, doc-type-rules.ts) —
- *   never a locally hardcoded type list. That table is the corpus-wide SSOT also
- *   consumed by `CorpusService._createImpl` and `TreeCheckService`.
+ * @invariant `parentLegal` admits a spec only WITHOUT a parent (BR-1/BR-2); its refusal
+ *   text is `parentlessRefusalMessage` (`@lore/core`, doc-type-rules.ts) — the same SSOT
+ *   `CorpusService` create and link use, never a locally written message.
  * @invariant `specKindValid`'s notion of "valid spec kind" is sourced exclusively
  *   from `SPEC_KINDS` (`@lore/core`, spec-kind.ts) — never a locally hardcoded
  *   literal union. `undefined` is explicitly PASS (not a failure): `CorpusService.
@@ -56,7 +55,7 @@
  */
 
 import {
-  PARENT_TYPE_CONTRACT,
+  parentlessRefusalMessage,
   SPEC_KINDS,
   specAcceptanceCriteriaSchema,
   UPSTREAM_APPROVED_STATUSES,
@@ -168,30 +167,22 @@ export function isNotApplicable(
   return "notApplicable" in result && result.notApplicable === true;
 }
 
-const SPEC_LEGAL_PARENT_TYPES: readonly DocType[] = PARENT_TYPE_CONTRACT.spec;
-
 /**
- * Checks whether `parent` is a legal parent document for a new `spec`.
+ * Checks that a new `spec` carries NO parent (BR-1/BR-2: a spec relates to the product
+ * trees only through its criteria's citations, never through a parent document).
  *
- * @param parent - The candidate parent's type, or `null`/`undefined` when no parent
- *   was supplied (a `spec` always requires a `parent_id` — see `createDocInputSchema`
- *   `superRefine` in `@lore/core/schemas.ts`).
- * @returns `{ok: true}` when `parent.type` is a member of `PARENT_TYPE_CONTRACT.spec`;
- *   `{ok: false, reason: "PARENT_REQUIRED"}` when `parent` is missing;
- *   `{ok: false, reason: "INVALID_PARENT_TYPE"}` when `parent.type` is not legal.
+ * @param parent - the candidate parent's type, or `null`/`undefined` when none was supplied
+ * @returns `{ok: true}` when there is no parent; `{ok: false, reason, field: "parent"}` when
+ *   any parent is supplied — the reason names criterion citations (`lore ac cite`)
  * @example
- * parentLegal({ type: "prd" });  // => { ok: true }
- * parentLegal(null);             // => { ok: false, reason: "PARENT_REQUIRED" }
- * parentLegal({ type: "task" }); // => { ok: false, reason: "INVALID_PARENT_TYPE" }
+ * parentLegal(null);            // => { ok: true }
+ * parentLegal({ type: "prd" }); // => { ok: false, reason: "a spec takes no parent: ...", field: "parent" }
  */
 export function parentLegal(parent: { type: string } | null | undefined): PredicateResult {
   if (parent === null || parent === undefined) {
-    return { ok: false, reason: "PARENT_REQUIRED" };
+    return { ok: true };
   }
-  if (!SPEC_LEGAL_PARENT_TYPES.includes(parent.type as DocType)) {
-    return { ok: false, reason: "INVALID_PARENT_TYPE" };
-  }
-  return { ok: true };
+  return { ok: false, reason: parentlessRefusalMessage("spec"), field: "parent" };
 }
 
 /**

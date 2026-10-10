@@ -173,8 +173,6 @@ beforeAll(() => {
       "spec",
       "--title",
       "AC-061-21 Spec",
-      "--parent",
-      parseSlug(prd.stdout),
       "--content",
       "## Spec\n\nbody",
       "--no-ai",

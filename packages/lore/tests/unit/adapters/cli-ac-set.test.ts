@@ -95,8 +95,6 @@ describe("BOUNDARY — `lore ac set` with zero field flags (AC-ACS-3)", () => {
       [
         "create",
         "spec",
-        "--parent",
-        prdSlug,
         "--title",
         "AC Set CLI Spec",
         "--content",

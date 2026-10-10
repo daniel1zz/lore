@@ -177,7 +177,7 @@ function createRootPrd(dir: string): string {
 
 function createSpec(dir: string, prdSlug: string, title: string): { id: string; slug: string; ordinal: number | null } {
   const result = runLore(
-    ["create", "spec", "--title", title, "--parent", prdSlug, "--content", "## Overview\nfixture body", "--no-ai", "--json"],
+    ["create", "spec", "--title", title,"--content", "## Overview\nfixture body", "--no-ai", "--json"],
     dir,
   );
   expect(result.exitCode).toBe(0);

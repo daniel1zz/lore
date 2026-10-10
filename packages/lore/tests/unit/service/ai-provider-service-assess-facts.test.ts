@@ -58,7 +58,6 @@ async function makeIncompleteEvidenceBundle(store: InMemoryStore): Promise<PlanB
   const specResult = await corpusService.create({
     type: "spec",
     title: "Facts Frozen Test Spec",
-    parent_id: prdResult.value.id,
     content: "Spec body (unused — structured ACs replace it).",
     extra: {
       acceptance_criteria: [

@@ -116,7 +116,6 @@ async function makeReviewBundle(store: InMemoryStore, content: string) {
   const specResult = await corpusService.create({
     type: "spec",
     title: "Review Truncation Test Spec",
-    parent_id: prdResult.value.id,
     content,
   } as CreateDocInput);
   if (!specResult.ok) throw new Error("spec create failed");

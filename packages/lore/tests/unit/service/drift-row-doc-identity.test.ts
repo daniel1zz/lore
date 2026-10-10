@@ -93,7 +93,6 @@ async function createSpec(
   return createDoc(corpusService, {
     type: "spec",
     title,
-    parent_id: parentId,
     content: "spec body",
     extra: { code_anchors: codeAnchors },
   } as CreateDocInput);

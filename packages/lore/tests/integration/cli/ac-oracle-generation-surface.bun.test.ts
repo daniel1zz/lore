@@ -202,7 +202,7 @@ function buildCorpus(): Observed {
   mustRun(["init"], dir);
   mustRun(["create", "prd", "--title", "Gen PRD", "--no-ai", "--content", "## Overview\nbody"], dir);
   mustRun(
-    ["create", "spec", "--title", "Gen Spec", "--parent", "prd-gen-prd", "--no-ai", "--content", "## Overview\nbody"],
+    ["create", "spec", "--title", "Gen Spec","--no-ai", "--content", "## Overview\nbody"],
     dir,
   );
 
@@ -432,7 +432,7 @@ describe("lore ac list — degrades loudly, never crashes, with no coverage to r
     mustRun(["init"], errDir);
     mustRun(["create", "prd", "--title", "Bare PRD", "--no-ai", "--content", "## Overview\nbody"], errDir);
     mustRun(
-      ["create", "spec", "--title", "Bare Spec", "--parent", "prd-bare-prd", "--no-ai", "--content", "## Overview\nbody"],
+      ["create", "spec", "--title", "Bare Spec","--no-ai", "--content", "## Overview\nbody"],
       errDir,
     );
     addScriptAc("spec-bare-spec", "AC-BARE-1", "A token is present in the corpus root.", "grep -rq BARE .", errDir);

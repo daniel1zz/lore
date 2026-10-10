@@ -551,7 +551,7 @@ function buildFixtureB(): FixtureBCaptures {
 
   mustSucceed(["create", "prd", "--title", "Row Contract Prd", "--content", "Prd body."], dir);
   mustSucceed(
-    ["create", "spec", "--title", "Row Contract Spec", "--content", B_SPEC_BODY, "--parent", B_PRD, "--kind", "tech"],
+    ["create", "spec", "--title", "Row Contract Spec", "--content", B_SPEC_BODY,"--kind", "tech"],
     dir,
   );
   mustSucceed(["create", "plan", "--title", "Row Contract Plan B", "--content", "Plan body."], dir);

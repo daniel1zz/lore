@@ -112,7 +112,6 @@ async function makeBundle(
   const specResult = await corpusService.create({
     type: "spec",
     title: "Review Test Spec",
-    parent_id: prdResult.value.id,
     content: opts?.content ?? "## Acceptance Criteria\n\nSomething must happen.\n",
   } as CreateDocInput);
   if (!specResult.ok) throw new Error("spec create failed");

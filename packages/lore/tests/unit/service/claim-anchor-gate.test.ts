@@ -29,6 +29,7 @@
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
@@ -72,15 +73,14 @@ async function createTopLevelPlan(cs: CorpusService): Promise<string> {
 }
 
 /** PRD → APPROVED spec → plan, so hasSpecParent resolves true with an approved ancestor. */
-async function createApprovedAncestorPlan(cs: CorpusService): Promise<string> {
+async function createApprovedAncestorPlan(cs: CorpusService, store: InMemoryStore): Promise<string> {
   const prd = await mustCreate(cs, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
   const spec = await mustCreate(cs, {
     type: "spec",
     title: "Spec",
-    parent_id: prd.id,
     content: "## Overview\nBody.",
   } as CreateDocInput);
-  const approveResult = await cs.set(spec.id, { status: "approved" });
+  const approveResult = await approveCitedSpec(store, cs, spec.id);
   if (!approveResult.ok) throw new Error(`spec approve failed: ${JSON.stringify(approveResult.error)}`);
   const plan = await mustCreate(cs, {
     type: "plan",
@@ -97,7 +97,6 @@ async function createUnapprovedAncestorPlan(cs: CorpusService): Promise<string> 
   const spec = await mustCreate(cs, {
     type: "spec",
     title: "Unapproved Spec",
-    parent_id: prd.id,
     content: "## Overview\nBody.",
   } as CreateDocInput);
   const plan = await mustCreate(cs, {
@@ -349,8 +348,8 @@ describe("TaskWorkflowService.claim — anchor-overlap gate wired end-to-end (SP
 
   // HAPPY — approved ancestor + no conflict → passes
   it("an approved ancestor spec with no anchor conflict succeeds", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
-    const planId = await createApprovedAncestorPlan(corpusService);
+    const { corpusService, taskWorkflowService, store } = makeServices();
+    const planId = await createApprovedAncestorPlan(corpusService, store);
     const taskId = await createTask(corpusService, planId, "Solo Task", ["src/a"]);
 
     const result = await taskWorkflowService.claim(taskId, { by: "agent:t1" });

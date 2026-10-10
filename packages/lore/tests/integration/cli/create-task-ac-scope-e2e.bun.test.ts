@@ -130,7 +130,7 @@ describe("lore verify — ac_scope ABSENT + explicit --ac (AC-ACS-6, back-catalo
 
     mustRun(["create", "prd", "--title", "Regression PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
     mustRun(
-      ["create", "spec", "--title", "Regression Spec", "--parent", "prd-regression-prd", "--no-ai", "--content", "## Overview\nbody"],
+      ["create", "spec", "--title", "Regression Spec","--no-ai", "--content", "## Overview\nbody"],
       tmpDir,
     );
     mustRun(
@@ -202,7 +202,7 @@ describe("lore verify — a task created under this rule is attested end-to-end 
 
     mustRun(["create", "prd", "--title", "E2E PRD", "--no-ai", "--content", "## Overview\nbody"], tmpDir);
     mustRun(
-      ["create", "spec", "--title", "E2E Spec", "--parent", "prd-e2e-prd", "--no-ai", "--content", "## Overview\nbody"],
+      ["create", "spec", "--title", "E2E Spec","--no-ai", "--content", "## Overview\nbody"],
       tmpDir,
     );
     mustRun(

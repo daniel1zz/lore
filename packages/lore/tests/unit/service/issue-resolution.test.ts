@@ -68,7 +68,6 @@ async function createFixingSpec(cs: CorpusService, rootPrdId: string): Promise<D
   return mustCreate(cs, {
     type: "spec",
     title: "Fix for the defect",
-    parent_id: rootPrdId,
     content: "# Overview/Goal\nfix\n## Scope\nn/a\n## Acceptance Criteria\nn/a",
   } as CreateDocInput);
 }

@@ -44,6 +44,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
+import { citeSpecViaCli, loreRunnerFor } from "../../helpers/cli-live-rule.js";
 
 // tests/integration/cli/ -> tests/integration/ -> tests/ -> packages/lore/ -> packages/ -> repo root (5 up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -116,7 +117,7 @@ function createPrd(dir: string): DocEnvelope {
  */
 function createSpecWithAc(dir: string, parentSlug: string, title: string): DocEnvelope {
   const createResult = runLore(
-    ["create", "spec", "--title", title, "--parent", parentSlug, "--content", "## Overview\n\nBody.", "--json"],
+    ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--json"],
     dir,
   );
   if (createResult.exitCode !== 0) {
@@ -143,6 +144,9 @@ function createSpecWithAc(dir: string, parentSlug: string, title: string): DocEn
   if (acResult.exitCode !== 0) {
     throw new Error(`lore ac add failed: ${acResult.stderr}`);
   }
+  // BR-1007: the criterion cites a live rule, so the spec is approvable once its judgment gate passes.
+  // The cite bumps the version, so the snapshot below (the version judgments are seeded against) is read AFTER it.
+  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, created.slug, "AC-1");
   return getDoc(dir, created.slug);
 }
 

@@ -43,7 +43,6 @@ describe("getPlanBundle — HAPPY (spec-parented plan, AC-ASSESS-12)", () => {
     const spec = await service.create({
       type: "spec",
       title: "Feature Spec",
-      parent_id: prd.value.id,
       content: "AC-1: must do X",
     } as CreateDocInput);
     if (!spec.ok) throw new Error("spec failed");
@@ -158,7 +157,6 @@ describe("getPlanBundle — NEGATIVE (non-plan input)", () => {
     const spec = await service.create({
       type: "spec",
       title: "Not A Plan",
-      parent_id: prd.value.id,
       content: "x",
     } as CreateDocInput);
     if (!spec.ok) throw new Error("spec failed");

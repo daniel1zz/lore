@@ -22,8 +22,8 @@
  * real `git status` output and prints the offending paths on rejection.
  *
  * Closed loop under test (tech-spec §9 AC6), six steps:
- *   1. gate spec-create on a no-parent candidate           → exit 4, feeding pack.
- *   2. gate spec-create on the corrected candidate         → exit 0.
+ *   1. gate spec-create on a candidate that names a parent → exit 4, feeding pack (BR-2).
+ *   2. gate spec-create on the corrected (parentless) one  → exit 0 (BR-1).
  *   3. actually create that spec via CorpusService.create  → specId obtained.
  *   4. gate spec-promote on the fresh spec (0 AC)          → exit 4.
  *   5. add one structured AC via AcService.addCriterion.
@@ -211,20 +211,22 @@ async function createPrd(title: string): Promise<string> {
   }
 }
 
-function noParentPayload(): Record<string, unknown> {
+/** A candidate the gate must refuse: a spec takes no parent (BR-2), so naming one is the violation. */
+function parentedPayload(parentSlug: string): Record<string, unknown> {
   return {
     type: "spec",
     title: "A well-formed spec",
+    parent_id: parentSlug,
     content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
 }
 
-function compliantPayload(parentSlug: string): Record<string, unknown> {
+// reason: BR-1 - the corrected candidate carries no parent; the argument is kept so callers read the same.
+function compliantPayload(_parentSlug: string): Record<string, unknown> {
   return {
     type: "spec",
     title: "A well-formed spec",
-    parent_id: parentSlug,
     content: COMPLIANT_CONTENT,
     extra: { spec_kind: "tech" },
   };
@@ -323,14 +325,14 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
     // ── STATE: before any spec exists, corpus has zero specs ──
     expect(await countDocs()).toBe(0);
 
-    // ── step 1 (NEGATIVE): no-parent candidate is intercepted, never reaches creation ──
-    const step1 = await runGateSpecCreate(noParentPayload());
+    // ── step 1 (NEGATIVE): a candidate naming a parent is intercepted, never reaches creation ──
+    const step1 = await runGateSpecCreate(parentedPayload(prdSlug));
     expect(step1.exitCode).toBe(4);
     expect(step1.stdout).toContain("[source:");
     expect(step1.stdout).toContain("Missing:");
-    expect(step1.stdout).toContain("PARENT_REQUIRED");
+    expect(step1.stdout).toContain("a spec takes no parent");
 
-    // ── step 2 (HAPPY): corrected candidate (legal parent) passes the pre-flight gate ──
+    // ── step 2 (HAPPY): corrected candidate (no parent) passes the pre-flight gate ──
     const step2 = await runGateSpecCreate(compliantPayload(prdSlug));
     expect(step2.exitCode).toBe(0);
     expect(step2.stdout).toContain("gate: pass");
@@ -358,12 +360,12 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
 
   // ── ERROR: feeding pack still reports Missing: reasons even with no seeded rule doc ──
   it("ERROR: gate spec-create still exits 4 with Missing: reasons when the rule doc was never seeded", async () => {
-    // Deliberately skip seedWriteSpecRule — no PRD parent either, so the deterministic
+    // Deliberately skip seedWriteSpecRule — the candidate names a parent, so the deterministic
     // gate has no way to pass regardless of the rule doc's presence.
-    const result = await runGateSpecCreate(noParentPayload());
+    const result = await runGateSpecCreate(parentedPayload("some-parent"));
     expect(result.exitCode).toBe(4);
     expect(result.stdout).toContain("Missing:");
-    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout).toContain("a spec takes no parent");
     expect(result.stdout.toLowerCase()).toContain("seed-write-spec-rule");
   });
 
@@ -371,7 +373,7 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
   it("REGRESSION: LORE_GATE_BYPASS=1 skips both gates entirely, even for maximally non-compliant input", async () => {
     process.env["LORE_GATE_BYPASS"] = "1";
 
-    const createGateResult = await runGateSpecCreate(noParentPayload());
+    const createGateResult = await runGateSpecCreate(parentedPayload("some-parent"));
     expect(createGateResult.exitCode).toBe(0);
 
     const promoteGateResult = await runGateSpecPromote("totally-nonexistent-spec-slug");

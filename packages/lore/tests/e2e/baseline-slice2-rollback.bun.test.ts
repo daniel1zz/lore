@@ -42,6 +42,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { Database } from "bun:sqlite";
 import { appendFileSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -118,7 +119,7 @@ function buildCorpus(label: string, setup: GateSetup): Corpus {
     mustRun(["create", "prd", "--title", "Slice2 Rollback Root", "--content", "# PRD\n\nroot.", "--no-ai"], dir).stdout,
   );
   const specSlug = parseSlug(
-    mustRun(["create", "spec", "--title", "Slice2 Rollback Spec", "--parent", prdSlug, "--content", "## Spec\n\nbody", "--no-ai"], dir)
+    mustRun(["create", "spec", "--title", "Slice2 Rollback Spec","--content", "## Spec\n\nbody", "--no-ai"], dir)
       .stdout,
   );
   mustRun(
@@ -325,12 +326,11 @@ describe("AC-BLS2-11 — mode off / no baseline docs: slice-1 behaviour, byte fo
     expect(treatment.acAdd.exit).toEqual(control.acAdd.exit);
     expect(treatment.acAdd.stderr).toEqual(slice1Hint(B));
     expect(treatment.acSet).toEqual(control.acSet);
-    // N5: the only `get` difference is the fixture's own baseline root appearing as a sibling of the spec's
-    // parent-level navigation (slice-1 tree behaviour, not a gate trace); pinned exactly, then masked.
-    expect(treatment.get.stdout).toContain("Siblings: <ULID> S2 BL Root\n");
+    // N5 (slice 3b, BR-1): a spec takes no parent, so `get <spec>` lists no siblings in either corpus and the
+    // fixture's own baseline root no longer shows up beside it - the outputs are now plainly byte-identical.
+    expect(treatment.get.stdout).toContain("Siblings: (none)\n");
     expect(control.get.stdout).toContain("Siblings: (none)\n");
-    const maskSiblings = (t: string) => t.replace(/^Siblings: .*$/m, "Siblings: <MASKED>");
-    expect(maskSiblings(treatment.get.stdout)).toEqual(maskSiblings(control.get.stdout));
+    expect(treatment.get.stdout).toEqual(control.get.stdout);
     expect({ exit: treatment.get.exit, stderr: treatment.get.stderr }).toEqual({ exit: control.get.exit, stderr: control.get.stderr });
     expect(treatment.feed).toEqual(control.feed);
   });
@@ -369,9 +369,21 @@ const RULE_DIFF_HEADER = "Governing rules since claim";
 const RULES_UNCHANGED = "governing rules unchanged since claim";
 
 /** Claims the corpus' task and prints the session-resume feed for its plan. */
-function claimAndResume(c: Corpus): RunResult {
-  // reason: throwaway corpus; the review-judgment gate needs an LLM judge, irrelevant to this fixture.
-  mustRun(["approve", c.specSlug, "--override-no-judgment"], c.dir);
+function claimAndResume(c: Corpus, specCitesRule = false): RunResult {
+  // reason: BR-1007 - corpora A / A2 / B hold a spec that cites NO rule (that is the premise: no governing
+  // rules, hence no rule-diff), and an uncited spec can no longer be approved through any verb. The approved
+  // state is written directly, the shape a corpus holding a pre-BR-1007 approved spec has. E's spec cites a
+  // live rule, so it goes through the real verb.
+  if (specCitesRule) {
+    mustRun(["approve", c.specSlug, "--override-no-judgment"], c.dir);
+  } else {
+    const db = new Database(join(c.dir, ".lore", "lore.db"));
+    try {
+      db.query("UPDATE docs SET status = 'approved' WHERE slug = ?").run(c.specSlug);
+    } finally {
+      db.close();
+    }
+  }
   mustRun(["approve", c.planSlug, "--override-no-judgment"], c.dir);
   mustRun(["claim", c.taskSlug, "--by", "agent:baseline-slice2-rollback-e2e"], c.dir);
   return mustRun(["feed", "session-resume", "--plan", c.planSlug], c.dir);
@@ -390,7 +402,7 @@ describe("AC-BLS2-11 — BL-15: `feed session-resume` carries no rule-diff trace
     resumeB = claimAndResume(B);
     E = buildCorpus("e-cited", { kind: "baseline", gate: "absent" });
     mustRun(["ac", "cite", E.specSlug, "AC-S2-1", E.ruleId as string], E.dir);
-    resumeE = claimAndResume(E);
+    resumeE = claimAndResume(E, true);
   }, SETUP_TIMEOUT_MS);
 
   afterAll(() => {

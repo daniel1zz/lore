@@ -368,7 +368,6 @@ describe("REGRESSION — the pre-existing spec-doc refusal through the same MCP 
     const result = await call({
       type: "spec",
       title: "ZzzMcpAnchorGrammarSpecRefused",
-      parent_id: prdId,
       content: "spec body",
       extra: { spec_kind: "feature", code_anchors: ["../escapes/the/repo.ts"] },
     });
@@ -384,7 +383,6 @@ describe("REGRESSION — the pre-existing spec-doc refusal through the same MCP 
     const specResult = await corpusService.create({
       type: "spec",
       title: "ZzzMcpAnchorGrammarSpecSetFixture",
-      parent_id: prdId,
       content: "spec body",
       extra: { spec_kind: "feature" },
     } as CreateDocInput);

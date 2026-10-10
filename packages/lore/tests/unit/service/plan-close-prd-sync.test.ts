@@ -55,13 +55,11 @@ async function makeLinkedAncestry(cs: CorpusService): Promise<{ domainDoc: DocRe
   const domainDoc = await mustCreate(cs, {
     type: "spec",
     title: "Domain overview: billing",
-    parent_id: prd.id,
     content: "## Overview\n\nOriginal domain narrative.",
   } as CreateDocInput);
   const featureSpec = await mustCreate(cs, {
     type: "spec",
     title: "Feature spec: billing checkout",
-    parent_id: prd.id,
     content: "## Overview\n\nLanding feature spec.",
   } as CreateDocInput);
   const linkResult = await cs.link(featureSpec.id, domainDoc.id, "implements");

@@ -8,7 +8,7 @@
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
-import type { CreateDocInput } from "@lore/core";
+import type { CreateDocInput, DocId } from "@lore/core";
 
 // ─── Test helpers ───────────────────────────────────────────────────────────
 
@@ -25,9 +25,33 @@ function prdInput(title = "My Product"): CreateDocInput {
   return { type: "prd", title };
 }
 
-/** Create a valid spec input that requires parent_id */
-function specInput(parentId: string, title = "My Spec"): CreateDocInput {
-  return { type: "spec", title, parent_id: parentId };
+/** Create a valid spec input — a spec takes NO parent (BR-1) */
+function specInput(title = "My Spec"): CreateDocInput {
+  return { type: "spec", title };
+}
+
+/** Create a valid plan input under a parent (the parent-taking child used for tree/navigation shapes) */
+function planInput(parentId: string, title = "My Plan"): CreateDocInput {
+  return { type: "plan", title, parent_id: parentId };
+}
+
+/**
+ * A spec carrying a parent_id — the LEGACY pre-migration shape (`lore migrate spec-parents` clears it).
+ * reason: create refuses a spec parent (BR-2), so the shape is built the way a corrupted/legacy row
+ * arises: a parentless create, then a direct store write. Tests of tree walking and ancestry must still
+ * hold on such rows until the migration has run.
+ */
+async function createLegacyParentedSpec(
+  service: CorpusService,
+  store: InMemoryStore,
+  parentId: string,
+  title: string,
+) {
+  const created = await service.create(specInput(title));
+  if (!created.ok) return created;
+  const updated = await store.update(created.value.id, { parent_id: parentId as DocId });
+  if (!updated.ok) return updated;
+  return created.ok ? { ...created, value: updated.value } : created;
 }
 
 /** Create a valid ADR input */
@@ -90,45 +114,48 @@ describe("resolve", () => {
 // ─── create ─────────────────────────────────────────────────────────────────
 
 describe("create", () => {
-  it("AC-SVC-002.01: spec with parent → success, slug auto-generated", async () => {
+  it("AC-SVC-002.01: spec with no parent → success, slug auto-generated, parent_id null (BR-1)", async () => {
     const { service } = makeService();
-    const prdResult = await service.create(prdInput("Product Requirement"));
-    expect(prdResult.ok).toBe(true);
-    if (!prdResult.ok) return;
-
-    const specResult = await service.create(specInput(prdResult.value.id, "Auth Feature"));
+    const specResult = await service.create(specInput("Auth Feature"));
     expect(specResult.ok).toBe(true);
     if (!specResult.ok) return;
 
     expect(specResult.value.type).toBe("spec");
     expect(specResult.value.slug).toMatch(/^spec-/);
-    expect(specResult.value.parent_id).toBe(prdResult.value.id);
+    expect(specResult.value.parent_id).toBeNull();
     expect(specResult.value.version).toBe(1);
     expect(specResult.value.status).toBe("draft");
   });
 
-  it("AC-SVC-002.02: spec can resolve parent by slug", async () => {
+  it("AC-SVC-002.02: a parent-taking type (plan) can resolve its parent by slug", async () => {
     const { service } = makeService();
     const prdResult = await service.create(prdInput("Root PRD"));
     expect(prdResult.ok).toBe(true);
     if (!prdResult.ok) return;
 
     const prdSlug = prdResult.value.slug;
-    const specResult = await service.create(specInput(prdSlug, "Child Spec"));
-    expect(specResult.ok).toBe(true);
-    if (!specResult.ok) return;
-    expect(specResult.value.parent_id).toBe(prdResult.value.id);
+    const planResult = await service.create(planInput(prdSlug, "Child Plan"));
+    expect(planResult.ok).toBe(true);
+    if (!planResult.ok) return;
+    expect(planResult.value.parent_id).toBe(prdResult.value.id);
   });
 
-  it("AC-SVC-002.03: spec without parent → PARENT_REQUIRED error", async () => {
-    const { service } = makeService();
-    const result = await service.create({ type: "spec", title: "Orphan Spec" });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("PARENT_REQUIRED");
-    if (result.error.code === "PARENT_REQUIRED") {
-      expect(result.error.type).toBe("spec");
+  it("AC-SVC-002.03: spec WITH a parent (by id or slug) → VALIDATION_ERROR naming citations, nothing written (BR-2)", async () => {
+    const { service, store } = makeService();
+    const prd = await service.create(prdInput("Root PRD"));
+    expect(prd.ok).toBe(true);
+    if (!prd.ok) return;
+    for (const parent of [prd.value.id as string, prd.value.slug as string]) {
+      const result = await service.create({ type: "spec", title: "Filed Spec", parent_id: parent });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      if (result.error.code === "VALIDATION_ERROR") {
+        expect(result.error.message).toContain("lore ac cite");
+      }
     }
+    const specs = await store.findMany({ type: "spec" });
+    expect(specs.ok && specs.value.length).toBe(0);
   });
 
   it("AC-SVC-002.04: task without parent → PARENT_REQUIRED error", async () => {
@@ -195,7 +222,7 @@ describe("create", () => {
       expect(prdResult.ok).toBe(true);
       if (!prdResult.ok) return;
 
-      const specResult = await service.create(specInput(prdResult.value.id, "Undeclared Kind Spec"));
+      const specResult = await service.create(specInput("Undeclared Kind Spec"));
       expect(specResult.ok).toBe(true);
       if (!specResult.ok) return;
       expect(specResult.value.extra["spec_kind"]).toBe("feature");
@@ -210,7 +237,6 @@ describe("create", () => {
       const specResult = await service.create({
         type: "spec",
         title: "Design Spec",
-        parent_id: prdResult.value.id,
         extra: { spec_kind: "design" },
       });
       expect(specResult.ok).toBe(true);
@@ -227,7 +253,6 @@ describe("create", () => {
       const specResult = await service.create({
         type: "spec",
         title: "Bogus Kind Spec",
-        parent_id: prdResult.value.id,
         extra: { spec_kind: "bogus" },
       });
       expect(specResult.ok).toBe(false);
@@ -252,7 +277,6 @@ describe("create", () => {
       const specResult = await service.create({
         type: "spec",
         title: "Spec With Other Extra",
-        parent_id: prdResult.value.id,
         extra: { custom_field: "preserved" },
       });
       expect(specResult.ok).toBe(true);
@@ -272,7 +296,7 @@ describe("get", () => {
     expect(prdResult.ok).toBe(true);
     if (!prdResult.ok) return;
 
-    const specResult = await service.create(specInput(prdResult.value.id, "Child A"));
+    const specResult = await service.create(planInput(prdResult.value.id, "Child A"));
     expect(specResult.ok).toBe(true);
     if (!specResult.ok) return;
 
@@ -292,8 +316,8 @@ describe("get", () => {
     expect(prdResult.ok).toBe(true);
     if (!prdResult.ok) return;
 
-    const spec1 = await service.create(specInput(prdResult.value.id, "Sibling A"));
-    const spec2 = await service.create(specInput(prdResult.value.id, "Sibling B"));
+    const spec1 = await service.create(planInput(prdResult.value.id, "Sibling A"));
+    const spec2 = await service.create(planInput(prdResult.value.id, "Sibling B"));
     expect(spec1.ok && spec2.ok).toBe(true);
     if (!spec1.ok || !spec2.ok) return;
 
@@ -345,12 +369,12 @@ describe("get", () => {
 
 describe("get — ancestors (SPEC-036 §2 D1)", () => {
   it("AC-36-1: 4-level chain prd→spec→plan→task → ancestors is [prd, spec, plan], root-first, self excluded", async () => {
-    const { service } = makeService();
+    const { service, store } = makeService();
     const prd = await service.create(prdInput("Root PRD"));
     expect(prd.ok).toBe(true);
     if (!prd.ok) return;
 
-    const spec = await service.create(specInput(prd.value.id, "Mid Spec"));
+    const spec = await createLegacyParentedSpec(service, store, prd.value.id, "Mid Spec");
     expect(spec.ok).toBe(true);
     if (!spec.ok) return;
 
@@ -401,7 +425,7 @@ describe("get — ancestors (SPEC-036 §2 D1)", () => {
     expect(a.ok).toBe(true);
     if (!a.ok) return;
 
-    const b = await service.create(specInput(a.value.id, "Node B"));
+    const b = await createLegacyParentedSpec(service, store, a.value.id, "Node B");
     expect(b.ok).toBe(true);
     if (!b.ok) return;
 
@@ -489,7 +513,7 @@ describe("list — DocSummary meta field (AC-36-7)", () => {
     expect(prd.ok).toBe(true);
     if (!prd.ok) return;
 
-    const spec = await service.create(specInput(prd.value.id, "Spec With Default Kind"));
+    const spec = await service.create(specInput("Spec With Default Kind"));
     expect(spec.ok).toBe(true);
     if (!spec.ok) return;
 
@@ -597,7 +621,7 @@ describe("set", () => {
     const parent = await service.create(prdInput("Spec Kind Parent"));
     expect(parent.ok).toBe(true);
     if (!parent.ok) return;
-    const spec = await service.create(specInput(parent.value.id, "Kind Target Spec"));
+    const spec = await service.create(specInput("Kind Target Spec"));
     expect(spec.ok).toBe(true);
     if (!spec.ok) return;
 
@@ -615,7 +639,7 @@ describe("set", () => {
     const parent = await service.create(prdInput("Spec Kind Parent Valid"));
     expect(parent.ok).toBe(true);
     if (!parent.ok) return;
-    const spec = await service.create(specInput(parent.value.id, "Kind Target Spec Valid"));
+    const spec = await service.create(specInput("Kind Target Spec Valid"));
     expect(spec.ok).toBe(true);
     if (!spec.ok) return;
 
@@ -630,7 +654,7 @@ describe("set", () => {
     const parent = await service.create(prdInput("Spec Kind Parent Absent"));
     expect(parent.ok).toBe(true);
     if (!parent.ok) return;
-    const spec = await service.create(specInput(parent.value.id, "Kind Target Spec Absent"));
+    const spec = await service.create(specInput("Kind Target Spec Absent"));
     expect(spec.ok).toBe(true);
     if (!spec.ok) return;
     // create() defaults spec_kind to "feature" when absent (SPEC-032 §3.1) — patch a
@@ -1089,14 +1113,14 @@ describe("search", () => {
 
 describe("tree", () => {
   it("AC-SVC-008.01: PRD with 3 child specs → tree has 3 children", async () => {
-    const { service } = makeService();
+    const { service, store } = makeService();
     const prd = await service.create(prdInput("Root PRD"));
     expect(prd.ok).toBe(true);
     if (!prd.ok) return;
 
-    await service.create(specInput(prd.value.id, "Spec A"));
-    await service.create(specInput(prd.value.id, "Spec B"));
-    await service.create(specInput(prd.value.id, "Spec C"));
+    await createLegacyParentedSpec(service, store, prd.value.id, "Spec A");
+    await createLegacyParentedSpec(service, store, prd.value.id, "Spec B");
+    await createLegacyParentedSpec(service, store, prd.value.id, "Spec C");
 
     const treeResult = await service.tree(prd.value.id);
     expect(treeResult.ok).toBe(true);
@@ -1118,16 +1142,16 @@ describe("tree", () => {
   });
 
   it("AC-SVC-008.03: depth=1 → children only, no grandchildren", async () => {
-    const { service } = makeService();
+    const { service, store } = makeService();
     const prd = await service.create(prdInput("Depth Test PRD"));
     expect(prd.ok).toBe(true);
     if (!prd.ok) return;
 
-    const spec = await service.create(specInput(prd.value.id, "Child Spec"));
+    const spec = await createLegacyParentedSpec(service, store, prd.value.id, "Child Spec");
     expect(spec.ok).toBe(true);
     if (!spec.ok) return;
 
-    await service.create(specInput(spec.value.id, "Grandchild"));
+    await service.create(planInput(spec.value.id, "Grandchild"));
 
     const treeResult = await service.tree(prd.value.id, { depth: 1 });
     expect(treeResult.ok).toBe(true);
@@ -1163,7 +1187,7 @@ describe("tree", () => {
     const a = await service.create(prdInput("Cycle A"));
     expect(a.ok).toBe(true);
     if (!a.ok) return;
-    const b = await service.create(specInput(a.value.id, "Cycle B"));
+    const b = await createLegacyParentedSpec(service, store, a.value.id, "Cycle B");
     expect(b.ok).toBe(true);
     if (!b.ok) return;
     const c = await service.create({ type: "plan", title: "Cycle C", parent_id: b.value.id });
@@ -1190,11 +1214,11 @@ describe("tree", () => {
   });
 
   it("BUG-008: Infinity depth on a normal (non-cyclic) tree still terminates within the hard cap", async () => {
-    const { service } = makeService();
+    const { service, store } = makeService();
     const prd = await service.create(prdInput("Infinity Depth PRD"));
     expect(prd.ok).toBe(true);
     if (!prd.ok) return;
-    await service.create(specInput(prd.value.id, "Only Child"));
+    await createLegacyParentedSpec(service, store, prd.value.id, "Only Child");
 
     const treeResult = await service.tree(prd.value.id, { depth: Infinity });
     expect(treeResult.ok).toBe(true);
@@ -1207,11 +1231,11 @@ describe("tree", () => {
   });
 
   it("REGRESSION: a sane finite depth (well under the hard cap) is completely unaffected by TREE_NODE_DEPTH_CAP", async () => {
-    const { service } = makeService();
+    const { service, store } = makeService();
     const prd = await service.create(prdInput("Sane Depth PRD"));
     expect(prd.ok).toBe(true);
     if (!prd.ok) return;
-    const spec = await service.create(specInput(prd.value.id, "Sane Child"));
+    const spec = await createLegacyParentedSpec(service, store, prd.value.id, "Sane Child");
     expect(spec.ok).toBe(true);
     if (!spec.ok) return;
     const grandchild = await service.create({ type: "plan", title: "Sane Grandchild", parent_id: spec.value.id });

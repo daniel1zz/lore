@@ -231,7 +231,6 @@ describe("P1 asset-discovery + feeding closed loop (e2e, no seed script)", () =>
     const result = await runGateSpecCreate({
       type: "spec",
       title: "A fully compliant spec",
-      parent_id: prdSlug,
       extra: { spec_kind: "tech" },
       content: "## Overview\n\nA properly-structured spec body.",
     });

@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
@@ -46,8 +47,9 @@ function prdSyncConfig(overrides?: Record<string, unknown>): LoreConfig {
   } as unknown as LoreConfig;
 }
 
-function makeHarness(config?: LoreConfig) {
+async function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
+  await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, undefined, undefined, enforcer);
   const reviewService = new ReviewService(store, undefined, {
@@ -63,15 +65,19 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
   return result.value;
 }
 
+/** BR-1007: every fixture criterion cites the live rule `makeHarness` seeds, so the ancestor spec is approvable. */
+function citing(criteria: unknown[]): unknown[] {
+  return criteria.map((c) => ({ ...(c as Record<string, unknown>), cites: [LIVE_RULE_ID] }));
+}
+
 /** PRD -> spec parented DIRECTLY under the PRD (no domain-doc link at all), approved. */
 async function createUnlinkedSpec(cs: CorpusService, criteria: unknown[]): Promise<DocRecord> {
   const prd = await mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
   const spec = await mustCreate(cs, {
     type: "spec",
     title: "Feature spec: billing checkout",
-    parent_id: prd.id,
     content: "## Overview\n\nBody.",
-    extra: { acceptance_criteria: criteria },
+    extra: { acceptance_criteria: citing(criteria) },
   } as CreateDocInput);
   const approved = await cs.set(spec.id, { status: "approved" });
   if (!approved.ok) throw new Error(`spec approve failed (setup): ${JSON.stringify(approved.error)}`);
@@ -84,15 +90,13 @@ async function createLinkedSpec(cs: CorpusService, criteria: unknown[]): Promise
   const domainDoc = await mustCreate(cs, {
     type: "spec",
     title: "Domain overview: billing",
-    parent_id: prd.id,
     content: "## Overview\n\nDomain narrative.",
   } as CreateDocInput);
   const featureSpec = await mustCreate(cs, {
     type: "spec",
     title: "Feature spec: billing checkout",
-    parent_id: prd.id,
     content: "## Overview\n\nBody.",
-    extra: { acceptance_criteria: criteria },
+    extra: { acceptance_criteria: citing(criteria) },
   } as CreateDocInput);
   const linkResult = await cs.link(featureSpec.id, domainDoc.id, "implements");
   if (!linkResult.ok) throw new Error(`link failed (setup): ${JSON.stringify(linkResult.error)}`);
@@ -113,7 +117,7 @@ async function createPlan(cs: CorpusService, parentId: string): Promise<DocRecor
 describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984)", () => {
   // HAPPY (inverted) — the scenario that USED to yield the advisory (knob on, no domain doc) now yields none.
   it("HAPPY: an ancestor spec with no domain doc approves with NO prd_sync_advisories and no domain-doc wording anywhere", async () => {
-    const { corpusService, reviewService } = makeHarness(prdSyncConfig());
+    const { corpusService, reviewService } = await makeHarness(prdSyncConfig());
     const spec = await createUnlinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
@@ -129,7 +133,7 @@ describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984
 
   // NEGATIVE — a resolvable domain doc is equally silent (the linkage no longer matters at all).
   it("NEGATIVE: a resolvable domain doc yields no prd_sync_advisories", async () => {
-    const { corpusService, reviewService } = makeHarness(prdSyncConfig());
+    const { corpusService, reviewService } = await makeHarness(prdSyncConfig());
     const spec = await createLinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
@@ -141,7 +145,7 @@ describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984
 
   // BOUNDARY — knob OFF (default) behaves identically.
   it("BOUNDARY: prd_sync disabled (default) yields no prd_sync_advisories either", async () => {
-    const { corpusService, reviewService } = makeHarness();
+    const { corpusService, reviewService } = await makeHarness();
     const spec = await createUnlinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
@@ -153,7 +157,7 @@ describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984
 
   // ERROR (config-shaped) — the whole plan-promote checkpoint disabled: still no key.
   it("ERROR: plan-promote checkpoint disabled by config still yields no prd_sync_advisories", async () => {
-    const { corpusService, reviewService } = makeHarness(prdSyncConfig({ "plan-promote": { enabled: false } }));
+    const { corpusService, reviewService } = await makeHarness(prdSyncConfig({ "plan-promote": { enabled: false } }));
     const spec = await createUnlinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
@@ -165,14 +169,13 @@ describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984
 
   // STATE — approving a spec doc itself never produced one and still does not.
   it("STATE: approving a spec doc itself never produces a prd_sync_advisories key", async () => {
-    const { corpusService, reviewService } = makeHarness(prdSyncConfig());
+    const { corpusService, reviewService } = await makeHarness(prdSyncConfig());
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "Standalone spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
-      extra: { acceptance_criteria: [SCRIPT_AC] },
+      extra: { acceptance_criteria: citing([SCRIPT_AC]) },
     } as CreateDocInput);
 
     const result = await reviewService.approve(spec.id);
@@ -184,7 +187,7 @@ describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984
   // REGRESSION — the sibling reachability channel is untouched: a human-mode-only spec (no script AC, so
   // `lore verify` is unreachable) still warns on `reachability_advisories`, and only there.
   it("REGRESSION: reachability_advisories still fires on its own key, with no prd_sync_advisories beside it", async () => {
-    const { corpusService, reviewService } = makeHarness(prdSyncConfig());
+    const { corpusService, reviewService } = await makeHarness(prdSyncConfig());
     const spec = await createUnlinkedSpec(corpusService, [HUMAN_AC]);
     const plan = await createPlan(corpusService, spec.id);
 

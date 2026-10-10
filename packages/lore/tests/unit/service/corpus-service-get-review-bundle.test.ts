@@ -43,17 +43,17 @@ function makeService() {
 // ─── HAPPY ─────────────────────────────────────────────────────────────────
 
 describe("getReviewBundle — HAPPY (doc with a live parent)", () => {
-  it("a spec parented under a prd returns { doc, parent, links: [] }, parent populated", async () => {
+  it("a plan parented under a prd returns { doc, parent, links: [] }, parent populated", async () => {
     const { service } = makeService();
     const prd = await service.create({ type: "prd", title: "Root PRD", content: "x" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd failed");
     const spec = await service.create({
-      type: "spec",
-      title: "Child Spec",
+      type: "plan",
+      title: "Child Plan",
       parent_id: prd.value.id,
-      content: "spec body",
+      content: "plan body",
     } as CreateDocInput);
-    if (!spec.ok) throw new Error("spec failed");
+    if (!spec.ok) throw new Error("plan failed");
 
     const bundleResult = await service.getReviewBundle(spec.value.id);
     expect(bundleResult.ok).toBe(true);
@@ -164,7 +164,6 @@ describe("getReviewBundle — STATE (parent existed, then soft-deleted)", () => 
     const spec = await service.create({
       type: "spec",
       title: "Orphaned-Soon Spec",
-      parent_id: prd.value.id,
       content: "x",
     } as CreateDocInput);
     if (!spec.ok) throw new Error("spec failed");

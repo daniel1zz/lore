@@ -316,7 +316,7 @@ function seedSixTypeFixture(): Fixture {
   runLore(fixture, ["init", "--author", "mirror-prune-scope-test"]);
 
   const prdId = createDoc(fixture, ["create", "prd", "--title", "Prune Scope Root PRD", "--content", "# Prune Scope Root PRD\n"]);
-  createDoc(fixture, ["create", "spec", "--title", "Prune Scope Spec", "--parent", prdId, "--kind", "tech", "--content", SPEC_SKELETON]);
+  createDoc(fixture, ["create", "spec", "--title", "Prune Scope Spec","--kind", "tech", "--content", SPEC_SKELETON]);
   createDoc(fixture, ["create", "adr", "--title", "Prune Scope Decision One", "--decision-status", "accepted", "--content", "# Prune Scope Decision One\n"]);
   createDoc(fixture, ["create", "adr", "--title", "Prune Scope Decision Two", "--decision-status", "accepted", "--content", "# Prune Scope Decision Two\n"]);
   createDoc(fixture, ["create", "knowledge", "--title", "Prune Scope Note One", "--sub-type", "reference", "--content", "# Prune Scope Note One\n"]);

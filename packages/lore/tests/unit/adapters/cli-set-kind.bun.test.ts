@@ -144,7 +144,7 @@ describe("lore set --kind (SPEC-032 §3.1)", () => {
     const setCmd = await importSetCommand();
     const getCmd = await importGetCommand();
 
-    // Parent prd (spec requires --parent)
+    // PRD (a spec takes no parent, BR-1 - it is created unparented below)
     const outPrd = captureOutput();
     try {
       await runCmd(createCmd, { type: "prd", title: "Root PRD", ai: false });
@@ -165,7 +165,6 @@ describe("lore set --kind (SPEC-032 §3.1)", () => {
       await runCmd(createCmd, {
         type: "spec",
         title: "My Spec",
-        parent: prdSlug,
         content: "## Overview\n\nbody",
         ai: false,
       });

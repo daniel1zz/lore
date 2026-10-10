@@ -262,7 +262,6 @@ describe("loadLoreApp — REGRESSION (all telemetry-instrumented corpus operatio
       const createSpec = await app.corpusService.create({
         type: "spec",
         title: "Test Spec",
-        parent_id: prd.id,
         content: "## Overview\n\nbody",
       });
       expect(createSpec.ok).toBe(true);

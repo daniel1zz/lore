@@ -78,7 +78,8 @@ import {
   type LinkRecord,
   type LinkType,
 } from "@lore/core";
-import { isValidParentType, PARENT_TYPE_CONTRACT } from "@lore/core";
+import { requireSpecCitesLiveRule } from "./spec-approval-citation.js";
+import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
   SearchHit,
   StoreInterface,
@@ -182,8 +183,9 @@ const FALLBACK_SPEC_CREATE_RULE_SOURCE = "built-in fallback (no seeded rule doc)
  */
 const FALLBACK_SPEC_CREATE_RULE_MARKDOWN = `## Rules a candidate spec must satisfy
 
-1. **Legal parent.** A spec must be parented to a \`prd\`. No parent, or a
-   parent of the wrong type, is rejected.
+1. **No parent.** A spec takes no parent: it belongs to the product trees
+   through its criteria's citations of rules (\`lore ac cite\`). A spec created
+   with a parent is rejected.
 2. **Declared spec_kind.** Declare \`extra.spec_kind\` as one of \`feature\`,
    \`tech\`, or \`design\` (defaults to \`feature\` when absent).
 3. **Required skeleton sections.** Content must include at minimum:
@@ -1206,6 +1208,18 @@ export class CorpusService {
           'knowledge sub_type "uat" may only be created via `lore uat record` — ' +
           "direct creation through `lore create` / `lore_create` is not permitted",
         value: "uat",
+      });
+    }
+
+    // BR-1/BR-2: a spec takes no parent — refused before anything is resolved or written.
+    // reason: VALIDATION_ERROR (exit 4) rather than INVALID_PARENT_TYPE, whose message lists
+    // allowed parent types; for a spec the answer is "none, cite rules instead".
+    if (isParentlessType(data.type) && data.parent_id) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "parent_id",
+        message: parentlessRefusalMessage(data.type),
+        value: data.parent_id,
       });
     }
 
@@ -2488,6 +2502,15 @@ export class CorpusService {
         targetDocId: existing.id,
       });
       if (!gateResult.ok) return gateResult;
+    }
+
+    // BR-1007 on the `set` promotion path — unconditional (no gateEnforcer, no config switch),
+    // placed AFTER the spec-promote gate so a spec that fails a gate on its own merits is refused
+    // for that reason first. Same predicate `ReviewService.approve` runs (spec-approval-citation.ts).
+    if (existing.type === "spec" && newStatus === "approved" && existing.status !== "approved") {
+      const effectiveExtra = parsedPatch.data.extra !== undefined ? parsedPatch.data.extra : existing.extra;
+      const cited = await requireSpecCitesLiveRule(this.store, existing.slug, effectiveExtra["acceptance_criteria"]);
+      if (!cited.ok) return cited;
     }
 
     // Gate `plan-close` on a plan's → archived TRANSITION reached via `set` (SPEC-054 +
@@ -4467,6 +4490,16 @@ export class CorpusService {
       const toDoc = toDocResult.value;
       if (toDoc === null || toDoc.deleted_at !== null) {
         return err({ code: "DOC_NOT_FOUND", id: toResult.value });
+      }
+
+      // BR-2: a spec is never filed under a document by a parent link either.
+      if (isParentlessType(fromDoc.type)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "type",
+          message: parentlessRefusalMessage(fromDoc.type),
+          value: type,
+        });
       }
 
       const allowedParents = PARENT_TYPE_CONTRACT[fromDoc.type];

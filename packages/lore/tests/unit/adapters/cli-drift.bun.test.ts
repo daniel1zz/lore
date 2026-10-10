@@ -163,8 +163,6 @@ function createSpec(tmpDir: string, prdSlug: string, title: string, codeAnchors:
     "spec",
     "--title",
     title,
-    "--parent",
-    prdSlug,
     "--kind",
     "feature",
     "--no-ai",

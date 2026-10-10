@@ -376,8 +376,6 @@ describe("check-anchor-coverage: the ratchet blocks new debt (AC-BFI-6)", () => 
       try {
         const prd = createDoc(cwd, "prd", "Anchor coverage fixture root", "Fixture prd body.", []);
         const spec = createDoc(cwd, "spec", "Anchor coverage fixture unanchored spec", FIXTURE_SPEC_CONTENT, [
-          "--parent",
-          prd.id,
         ]);
 
         // RED: no disposition anywhere.
@@ -409,8 +407,6 @@ describe("check-anchor-coverage: the ratchet blocks new debt (AC-BFI-6)", () => 
       try {
         const prd = createDoc(cwd, "prd", "Anchor coverage cohort fixture root", "Fixture prd body.", []);
         const spec = createDoc(cwd, "spec", "Anchor coverage cohort fixture spec", FIXTURE_SPEC_CONTENT, [
-          "--parent",
-          prd.id,
         ]);
 
         const red = runCheckerWithLedger(cwd, {
@@ -438,8 +434,6 @@ describe("check-anchor-coverage: the ratchet blocks new debt (AC-BFI-6)", () => 
       try {
         const prd = createDoc(cwd, "prd", "Anchor coverage duplicate fixture root", "Fixture prd body.", []);
         const spec = createDoc(cwd, "spec", "Anchor coverage duplicate fixture spec", FIXTURE_SPEC_CONTENT, [
-          "--parent",
-          prd.id,
         ]);
 
         const red = runCheckerWithLedger(cwd, {

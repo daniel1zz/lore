@@ -21,7 +21,7 @@ async function setup(liveCriteria: number) {
   const ac = new AcService(store);
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");
-  const spec = await cs.create({ type: "spec", title: "S", parent_id: prd.value.id, content: "body" } as CreateDocInput);
+  const spec = await cs.create({ type: "spec", title: "S",content: "body" } as CreateDocInput);
   if (!spec.ok) throw new Error("spec");
   for (let i = 1; i <= liveCriteria; i++) {
     const r = await ac.addCriterion(spec.value.id, {

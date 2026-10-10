@@ -75,7 +75,6 @@ async function makeDocOfType(cs: CorpusService, type: DocType): Promise<DocRecor
       type: "spec",
       title: "Test spec",
       content: "## Overview\nbody",
-      parent_id: prd.id,
       extra: {},
     });
   }

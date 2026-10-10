@@ -197,7 +197,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     expect(result.stderr).toContain(HINT_TOKEN);
     expect(result.stderr.toLowerCase()).toContain(REVERIFY_TOKEN);
     // The pre-existing feeding-pack content (stdout) is untouched by this seam.
-    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout).toContain("MISSING_SKELETON");
   });
 
   it("BOUNDARY: unconfigured consumer's IDENTICAL gate denial now carries exactly 1 provision-guidance line naming feedback.upstream.repo (SPEC-OOB supersedes the old SPEC-073 byte-absent baseline)", () => {
@@ -222,7 +222,7 @@ describe("AC-073-1: gate-denial hint — configured consumer earns exactly 1 hin
     expect(nonEmptyLineCount(result.stderr)).toBe(1);
     expect(result.stderr).not.toBe("");
     // The pre-existing feeding-pack content (stdout) is untouched by this seam.
-    expect(result.stdout).toContain("PARENT_REQUIRED");
+    expect(result.stdout).toContain("MISSING_SKELETON");
   });
 });
 
@@ -378,7 +378,6 @@ describe("REGRESSION: the hint wiring never fires on an ALLOW branch", () => {
         JSON.stringify({
           type: "spec",
           title: "x",
-          parent_id: data.id,
           content: "## Overview\nsomething",
           extra: { spec_kind: "feature" },
         }),

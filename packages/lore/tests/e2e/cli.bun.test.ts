@@ -267,17 +267,31 @@ describe("Scenario 2: full CRUD lifecycle", () => {
     expect(result.stdout).toContain("Created prd document");
   });
 
-  it("HAPPY: create spec with --parent links to parent", () => {
+  it("HAPPY: create spec with no parent leaves parent_id null; create plan with --parent links to parent", () => {
     const prdResult = runLore(["create", "prd", "--title", "Parent PRD", "--json", "--no-ai"], tmpDir);
     const prd = parseJson<{ id: string; slug: string }>(prdResult).data!;
 
-    const specResult = runLore(
-      ["create", "spec", "--title", "Child Spec", "--parent", prd.slug, "--json", "--no-ai"],
+    const specResult = runLore(["create", "spec", "--title", "Free Spec", "--json", "--no-ai"], tmpDir);
+    expect(specResult.exitCode).toBe(0);
+    expect(parseJson<{ parent_id: string | null }>(specResult).data!.parent_id).toBeNull();
+
+    const planResult = runLore(
+      ["create", "plan", "--title", "Child Plan", "--parent", prd.slug, "--json", "--no-ai"],
       tmpDir,
     );
-    expect(specResult.exitCode).toBe(0);
-    const spec = parseJson<{ parent_id: string }>(specResult).data!;
-    expect(spec.parent_id).toBe(prd.id);
+    expect(planResult.exitCode).toBe(0);
+    expect(parseJson<{ parent_id: string }>(planResult).data!.parent_id).toBe(prd.id);
+  });
+
+  it("NEGATIVE: create spec with --parent is refused, exit 4, naming `lore ac cite` (BR-2)", () => {
+    const prdResult = runLore(["create", "prd", "--title", "Parent PRD", "--json", "--no-ai"], tmpDir);
+    const prd = parseJson<{ slug: string }>(prdResult).data!;
+    const specResult = runLore(
+      ["create", "spec", "--title", "Filed Spec", "--parent", prd.slug, "--no-ai"],
+      tmpDir,
+    );
+    expect(specResult.exitCode).toBe(4);
+    expect(specResult.stderr).toContain("lore ac cite");
   });
 
   it("NEGATIVE: get nonexistent doc exits code 3 with error message (AC-E2E-001.N01)", () => {
@@ -338,11 +352,11 @@ describe("Scenario 3: spec with parent and tree hierarchy", () => {
     cleanupDir(tmpDir);
   });
 
-  it("HAPPY: tree --json shows PRD with spec as child (AC-E2E-001.11)", () => {
+  it("HAPPY: tree --json shows PRD with plan as child (AC-E2E-001.11; a spec takes no parent, BR-2)", () => {
     const prdResult = runLore(["create", "prd", "--title", "Parent PRD", "--json", "--no-ai"], tmpDir);
     const prd = parseJson<{ id: string; slug: string }>(prdResult).data!;
 
-    runLore(["create", "spec", "--title", "Auth Spec", "--parent", prd.slug, "--no-ai"], tmpDir);
+    runLore(["create", "plan", "--title", "Auth Plan", "--parent", prd.slug, "--no-ai"], tmpDir);
 
     const treeResult = runLore(["tree", "--json"], tmpDir);
     expect(treeResult.exitCode).toBe(0);
@@ -352,18 +366,18 @@ describe("Scenario 3: spec with parent and tree hierarchy", () => {
     }>(treeResult);
     expect(treeJson.data!.doc.slug).toBe(prd.slug);
     expect(treeJson.data!.children).toHaveLength(1);
-    expect(treeJson.data!.children[0]!.doc.slug).toBe("spec-auth-spec");
+    expect(treeJson.data!.children[0]!.doc.slug).toBe("plan-auth-plan");
   });
 
   it("HAPPY: tree human-readable output contains parent and child titles", () => {
     const prdResult = runLore(["create", "prd", "--title", "Root Doc", "--json", "--no-ai"], tmpDir);
     const prd = parseJson<{ slug: string }>(prdResult).data!;
-    runLore(["create", "spec", "--title", "Child Spec", "--parent", prd.slug, "--no-ai"], tmpDir);
+    runLore(["create", "plan", "--title", "Child Plan", "--parent", prd.slug, "--no-ai"], tmpDir);
 
     const treeResult = runLore(["tree"], tmpDir);
     expect(treeResult.exitCode).toBe(0);
     expect(treeResult.stdout).toContain("Root Doc");
-    expect(treeResult.stdout).toContain("Child Spec");
+    expect(treeResult.stdout).toContain("Child Plan");
   });
 
   // NEGATIVE: N/A — standalone documents are valid
@@ -387,7 +401,7 @@ describe("Scenario 4: discovery (list + search)", () => {
     // Seed 3 docs of different types (prd, spec, plan — no extra fields required)
     const prdResult = runLore(["create", "prd", "--title", "My PRD", "--json", "--no-ai"], tmpDir);
     prdSlug = parseJson<{ slug: string }>(prdResult).data!.slug;
-    runLore(["create", "spec", "--title", "Auth Feature Spec", "--parent", prdSlug, "--no-ai"], tmpDir);
+    runLore(["create", "spec", "--title", "Auth Feature Spec","--no-ai"], tmpDir);
     runLore(["create", "plan", "--title", "General Plan", "--no-ai"], tmpDir);
   });
 

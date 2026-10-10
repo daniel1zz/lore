@@ -346,8 +346,20 @@ describe("POST /api/docs", () => {
       expect(body.ok).toBe(false);
     });
 
-    it("returns 422 for spec without parent_id (type-specific validation)", async () => {
-      const { req, url } = makePostRequest("/api/docs", { type: "spec", title: "Orphan Spec" });
+    it("returns 422 for a spec WITH a parent_id (BR-2: a spec takes no parent)", async () => {
+      const prdReq = makePostRequest("/api/docs", { type: "prd", title: "Parent PRD" });
+      const prdRes = await handleApiRoute(prdReq.req, prdReq.url, app, TEST_ACTOR);
+      const prd = (await parseResponse(prdRes!)) as { data: { id: string } };
+      const { req, url } = makePostRequest("/api/docs", { type: "spec", title: "Filed Spec", parent_id: prd.data.id });
+      const res = await handleApiRoute(req, url, app, TEST_ACTOR);
+      expect(res).not.toBeNull();
+      expect(res!.status).toBe(422);
+      const body = await parseResponse(res!);
+      expect(body.ok).toBe(false);
+    });
+
+    it("returns 422 for a task without parent_id (type-specific validation)", async () => {
+      const { req, url } = makePostRequest("/api/docs", { type: "task", title: "Orphan Task", extra: { plan_id: "p" } });
       const res = await handleApiRoute(req, url, app, TEST_ACTOR);
       expect(res).not.toBeNull();
       expect(res!.status).toBe(422);

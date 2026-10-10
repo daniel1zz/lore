@@ -147,8 +147,6 @@ describe("lore create --content-file — HAPPY path", () => {
         "spec",
         "--title",
         "Spec with dashes",
-        "--parent",
-        prdSlug,
         "--content-file",
         contentFile,
         "--no-ai",

@@ -66,7 +66,7 @@ async function makeFixture(): Promise<Fixture> {
   if (!added.ok) throw new Error(`addRule failed: ${JSON.stringify(added.error)}`);
   const ruleId = added.value.ruleId;
   const spec = await mustCreate({
-    type: "spec", title: "Wiring Spec", parent_id: prd.id, content: "s",
+    type: "spec", title: "Wiring Spec",content: "s",
     extra: {
       acceptance_criteria: [{
         id: "AC-W-1", statement: "Criterion AC-W-1 is satisfied.",

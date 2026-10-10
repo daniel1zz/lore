@@ -320,7 +320,6 @@ describe("specExtraSchema.acceptance_criteria (AC-ACODE-2)", () => {
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "A spec",
-      parent_id: "01HPARENT0000000000000000",
       extra: { acceptance_criteria: [{ id: "bad id", statement: "x", verify: { mode: "human" } }] },
     });
     expect(result.success).toBe(false);
@@ -330,7 +329,6 @@ describe("specExtraSchema.acceptance_criteria (AC-ACODE-2)", () => {
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "A spec",
-      parent_id: "01HPARENT0000000000000000",
       extra: { acceptance_criteria: [scriptAc("AC-1")] },
     });
     expect(result.success).toBe(true);

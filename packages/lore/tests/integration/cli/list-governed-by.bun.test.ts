@@ -128,7 +128,6 @@ async function seedGovernedSpec(loreDir: string, specTitle: string): Promise<{ s
     const spec = await app.corpusService.create({
       type: "spec",
       title: specTitle,
-      parent_id: prd.value.id,
       // reason: spec-create's GateEnforcer checkpoint (retro follow-up item 8) requires
       // a `## ` skeleton heading — this file predates that gate and used bare "body".
       content: "## Overview\n\nbody",

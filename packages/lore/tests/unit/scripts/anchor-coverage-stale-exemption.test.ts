@@ -164,8 +164,6 @@ describe("check-anchor-coverage: a ledger row cannot outlive its debt (AC-BFI-7)
       try {
         const prd = createDoc(cwd, "prd", "Anchor coverage stale fixture root", "Fixture prd body.", []);
         const spec = createDoc(cwd, "spec", "Anchor coverage stale fixture spec", FIXTURE_SPEC_CONTENT, [
-          "--parent",
-          prd.id,
         ]);
         const ledgered: LedgerFile = { entries: [{ slug: spec.slug, cohort: "debt", reason: FIXTURE_REASON }] };
 
@@ -200,15 +198,13 @@ describe("check-anchor-coverage: a ledger row cannot outlive its debt (AC-BFI-7)
       try {
         const prd = createDoc(cwd, "prd", "Anchor coverage forward-only fixture root", "Fixture prd body.", []);
         const anchoredSpec = createDoc(cwd, "spec", "Anchor coverage forward-only anchored spec", FIXTURE_SPEC_CONTENT, [
-          "--parent",
-          prd.id,
         ]);
         const unanchoredSpec = createDoc(
           cwd,
           "spec",
           "Anchor coverage forward-only unanchored spec",
           FIXTURE_SPEC_CONTENT,
-          ["--parent", prd.id],
+          [],
         );
         addCodeAnchor(cwd, anchoredSpec.id, FIXTURE_ANCHOR);
 
@@ -243,8 +239,6 @@ describe("check-anchor-coverage: a ledger row cannot outlive its debt (AC-BFI-7)
       try {
         const prd = createDoc(cwd, "prd", "Anchor coverage unknown-slug fixture root", "Fixture prd body.", []);
         const spec = createDoc(cwd, "spec", "Anchor coverage unknown-slug fixture spec", FIXTURE_SPEC_CONTENT, [
-          "--parent",
-          prd.id,
         ]);
         const ghost = "spec-this-slug-was-never-a-live-spec-in-this-corpus";
 

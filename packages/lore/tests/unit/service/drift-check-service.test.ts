@@ -62,7 +62,6 @@ async function createSpec(
   const result = await cs.create({
     type: "spec",
     title: "Test Spec",
-    parent_id: parentId,
     content: "spec body",
     ...overrides,
   } as CreateDocInput);
@@ -326,7 +325,6 @@ describe("NEGATIVE — D6a: CorpusService create/set grammar seams", () => {
     const result = await corpusService.create({
       type: "spec",
       title: "Bad Spec",
-      parent_id: prdId,
       content: "body",
       extra: { code_anchors: ["src/dir/#Foo"] },
     } as CreateDocInput);
@@ -342,7 +340,6 @@ describe("NEGATIVE — D6a: CorpusService create/set grammar seams", () => {
     const result = await corpusService.create({
       type: "spec",
       title: "Good Spec",
-      parent_id: prdId,
       content: "body",
       extra: { code_anchors: ["src/a.ts#Foo"] },
     } as CreateDocInput);

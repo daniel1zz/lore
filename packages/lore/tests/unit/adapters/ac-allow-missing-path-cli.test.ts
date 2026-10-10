@@ -129,8 +129,6 @@ describe("PRODUCTION WIRING — lore ac add --allow-missing-path + lore status -
         [
           "create",
           "spec",
-          "--parent",
-          prdSlug,
           "--title",
           "AC-OX-10 Spec",
           "--content",
