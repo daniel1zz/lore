@@ -44,6 +44,9 @@ const grantOf = (specId: string, n: number, over: Record<string, unknown> = {}) 
   ...over,
 });
 
+/** LoreError is a union; only some members carry `message`. */
+const msgOf = (e: unknown): string => (e as { message?: string }).message ?? "";
+
 async function listed(svc: AcExemptionService) {
   const l = await svc.list({ now: NOW.toISOString() });
   if (!l.ok) throw new Error("list");
@@ -57,7 +60,7 @@ describe("BR-971 exemption grant refusals", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error.code).toBe("VALIDATION_ERROR");
-      expect(r.error.message).toContain("Expected a spec document");
+      expect(msgOf(r.error)).toContain("Expected a spec document");
     }
     expect(await listed(svc)).toHaveLength(0);
   });
@@ -66,7 +69,7 @@ describe("BR-971 exemption grant refusals", () => {
     const { svc, specId } = await setup(15);
     const equal = await svc.grant(grantOf(specId, 1, { expiresAt: NOW.toISOString() }));
     expect(equal.ok).toBe(false);
-    if (!equal.ok) expect(equal.error.message).toContain("not in the future");
+    if (!equal.ok) expect(msgOf(equal.error)).toContain("not in the future");
     expect(await listed(svc)).toHaveLength(0);
     const after = await svc.grant(grantOf(specId, 1, { expiresAt: new Date(NOW.getTime() + 1).toISOString() }));
     expect(after.ok).toBe(true);
@@ -86,7 +89,7 @@ describe("BR-971 exemption grant refusals", () => {
     const { svc, specId } = await setup(15);
     const r = await svc.grant(grantOf(specId, 1, { by }));
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error.message).toContain("named grantor");
+    if (!r.ok) expect(msgOf(r.error)).toContain("named grantor");
     expect(await listed(svc)).toHaveLength(0);
   });
 
@@ -102,7 +105,7 @@ describe("BR-971 exemption grant refusals", () => {
     expect((await svc.grant(grantOf(specId, 1))).ok).toBe(true);
     const second = await svc.grant(grantOf(specId, 2));
     expect(second.ok).toBe(false);
-    if (!second.ok) expect(second.error.message).toMatch(/10\s*%/);
+    if (!second.ok) expect(msgOf(second.error)).toMatch(/10\s*%/);
     const c = await svc.counts({ now: NOW.toISOString() });
     expect(c.ok && c.value.active).toBe(1);
     expect(c.ok && c.value.liveCriteria).toBe(15);
