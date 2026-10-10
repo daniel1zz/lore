@@ -377,6 +377,7 @@ const DECLARED_FILES = [
   // skills/lore-write-a-skill (vendored upstream workflow skill, 2026-07-17)
   "skills/lore-write-a-skill/SKILL.md",
   // skills/shared (cross-skill reference library — verification-family convergence, 2026-07-17)
+  "skills/shared/batched-governance.md",
   "skills/shared/docs-lookup-guide.md",
   "skills/shared/ears-spec-generation.md",
   "skills/shared/lore-cli-map.md",

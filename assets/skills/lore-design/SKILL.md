@@ -181,26 +181,15 @@ The preview starts a Vite dev server (HMR-enabled). It auto-replaces previous in
 
 > Headless: add `--no-open`, provide the file path to user.
 
-## User Approval Gate (HARD GATE — Two-Stage for UI mode)
+## Governance — batched (the only flow)
 
-### Stage 1: Style Approval (UI mode only, after Multi-Option Visual Comparison)
+⛔ Read `~/.claude/skills/shared/batched-governance.md` first. This skill runs inside its four stages; it has NO approval stop of its own:
 
-Already embedded in Multi-Option Visual Comparison: user selects a variant → Token Crystallization proceeds → Product Prototype Generation proceeds automatically. No extra gate needed — the variant selection IS the style approval.
-
-### Stage 2: Prototype / Design Approval (all modes)
-
-Before persisting, you MUST present the final design to the user and get explicit approval:
-
-1. **Preview**: Generate the HTML preview (for UI mode: the full product prototype with all screens) so the user can visually inspect
-2. **Summarize**: Present a concise design summary in chat — key decisions, trade-offs, screen coverage (for UI: list all prototype screens)
-3. **Confirm**: Call `AskUserQuestion` with:
-   - Question: "设计方案确认 (HTML preview has been opened in your browser)" — present the design summary and ask if approved
-   - Options: "批准，进入实现" / "需要调整" / "重新设计"
-4. **Gate**: Only proceed to Persist if user selects "批准". If "需要调整", iterate on specific screens/components and regenerate preview. If "重新设计", restart from Phase 1 (Multi-Option Visual Comparison).
-
-⛔ Do NOT persist design artifacts or create tasks/plans until user has explicitly approved the design.
+- **S1** — the design's preference questions (trade-offs that turn on preference, not evidence) join the ONE decision interview. In UI mode the style pick (Multi-Option Visual Comparison) is the one S1 question that needs rendered variants: generate them, ask, then continue — Token Crystallization and the Product Prototype follow without another stop.
+- **S2** — design EVERY slice of the initiative in this run, not only the next one; a slice that depends on an earlier slice's measurement carries a pre-registered branch instead of being deferred. Mode-internal parallel agent dispatch and scoring still run — they are design methodology, not review. ≥2-option choices are made by the AI and recorded with the rejected options.
+- **S3 / S4** — the mode's Quality Gates above become one lens of the single bundle review; the HTML preview and design summary go into the single S4 approval. No `lore review` / `lore approve` / `AskUserQuestion` here.
 
 ## Persist
 
-- Create design output via `lore create spec --title ... --parent <prd> --kind design --content ...` (run `lore feed spec-create --parent <prd>` first) or `lore create adr --title ... --decision-status proposed --content ...` for decision records
-- Link to upstream PRD and related ADRs via `lore link <from> <to> --type=relates-to|implements|informs`
+- Persist as DRAFT during S2 — never wait for approval to write: `lore create spec --title ... --parent <prd> --kind design --content ...` (run `lore feed spec-create --parent <prd>` first) or `lore create adr --title ... --decision-status proposed --content ...` for decision records; declare every AC (`lore ac add`) before S3
+- Link to upstream PRD and related ADRs via `lore link <from> <to> --type=relates-to|implements|informs`; a slice spec ALSO links to the spec it slices (`lore link <slice-spec> <parent-spec> --type=implements`) — its `parent_id` alone does not record that relation

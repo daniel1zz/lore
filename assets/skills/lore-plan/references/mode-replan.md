@@ -36,7 +36,8 @@
   - `New risks: {list or NONE}`
   - `In-flight collisions: {tasks currently claimed that this replan touches — coordinate before modifying}`
   - `Recommended approach: {option N} — {rationale}`
-- User must confirm approach before proceeding to step 4
+- Approach inside the pre-registered branches → the AI picks the recommended option, logs it, proceeds to step 4 (no stop)
+- Outside every pre-registered branch → the approach is one question in a scoped batched-governance S1 interview, together with every other question this replan raises
 
 # 4. Execute Plan Modifications
 - Operations available (can combine multiple):
@@ -88,7 +89,8 @@
 - lore ready <plan> --json → structural check: no orphaned tasks, no anchor conflicts,
   non-empty ready set (empty + nothing archived = cycle in blocks links)
 - Verify DoR compliance for new/modified tasks
-- Material restructure (>30% of remaining tasks) → re-dispatch lore-reviewer for the
+- Material restructure (>30% of remaining tasks) → ONE lore-reviewer pass over every
+  changed artifact together (batched-governance S3 scoped to the change) — the
   5-dimension audit (executability / ac_oracle_binding / context_sufficiency /
   atomicity / dependency & anchor safety)
 - If validation fails → fix before proceeding
@@ -102,10 +104,11 @@
 - lore set <plan> --content-file /tmp/plan-content.md
 - lore approve <plan>   # edit reset it to draft; re-approval re-fires plan-promote (expected pass)
 
-# 8. User confirmation
-- lore tree <plan> → display modified task tree
-- Display critical path delta + risk register changes
-- User confirms modifications
+# 8. User confirmation — only when the change leaves the pre-registered branches
+- Replan that follows a pre-registered branch path → no stop; display the
+  modified tree + critical path delta + risk changes and continue
+- Replan outside every pre-registered branch → batched-governance S1–S4 scoped to
+  the affected artifacts: one interview, one review, one approval
 ```
 
 ## Replan Scope Guard
@@ -126,4 +129,4 @@
 - Risk register updates
 - Decisions Log entry added (batched plan edit + re-approve)
 - Estimation delta: old vs. new total
-- User confirmation received
+- User confirmation received (only for a replan outside the pre-registered branches)

@@ -12,8 +12,12 @@ The plan doc's content (`lore create plan --content-file ...`) contains:
 ## Overview
 [1-2 paragraph scope description]
 
-## Governance Mode
-attended | unattended
+## Pre-registered Branches
+[Decisions that depend on a future measurement, approved by the user in the batched-governance S1 interview — a result landing on a listed path proceeds without asking]
+
+| # | Trigger (measurable) | Path if met | Path if not met | Assessed when |
+|---|---|---|---|---|
+| B1 | [e.g. pilot probe ≥ 9/10] | [continue to slice 2 as designed] | [switch to method v2: task-xxx] | [at pilot plan close] |
 
 ## Invariants
 [Global constraints ALL tasks MUST obey — each must be verifiable]
@@ -44,7 +48,7 @@ Status values: `active` → `mitigated` | `triggered` | `accepted` | `closed`
 ## Exit Criteria
 - [ ] All phases passed Phase Gates
 - [ ] Script-mode spec ACs attested: `lore verify <plan>` all pass
-- [ ] Post-execution `lore assess <plan>` verdict reviewed; gaps fixed or accepted
+- [ ] Post-execution `lore assess <plan>` (initiative's end-of-run batch) verdict reviewed; gaps fixed or accepted
 - [ ] Coverage backtrack: 100% spec ACs covered (or gaps accepted)
 - [ ] Risk register: no open H-impact risks without acceptance
 - [ ] DoD checklist: all 7 items satisfied (SKILL.md § Definition of Done)

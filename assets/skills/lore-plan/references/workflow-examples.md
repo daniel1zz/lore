@@ -88,9 +88,10 @@
 8. Validation gate:
    lore ready plan-user-authentication --json   # structural: all tasks present, ready set non-empty, no anchor conflicts
    lore ac list spec-user-auth                  # coverage: every AC id in some task's Covers → 4/4
-   Dispatch lore-reviewer (5-dimension audit) → PASS
-   lore approve plan-user-authentication        # plan-promote gate: spec approved + >=1 AC → pass
-   lore tree plan-user-authentication           # display for user confirmation
+   S3 bundle review: ONE lore-reviewer dispatch over spec-user-auth + this plan (5-dimension plan lens) → PASS
+   lore review spec-user-auth                   # per-version judgment, once, on the final spec
+   S4: one AskUserQuestion over the whole bundle (lore tree output, strategy chosen/rejected, branches) → 批准
+   lore approve spec-user-auth && lore approve plan-user-authentication   # specs first; plan-promote → pass
 
 9. lore ready plan-user-authentication --json → first ready task: task-evaluate-auth-approaches (⭐ critical path)
 ```
@@ -201,7 +202,7 @@ Last Phase 2 task archived → Phase Gate triggered:
    lore get plan-user-authentication --raw → edit → lore set plan-user-authentication --content-file /tmp/plan.md
    lore approve plan-user-authentication    # edit reset it to draft; re-approve
 
-7. User confirmation: ✅
+7. No user stop: gate passed, no Invariant violated → auto-proceed
 
 Phase Gate: PASSED → proceed to Phase 3
 ```
@@ -232,7 +233,7 @@ Skill("plan","replan") on plan-user-authentication
    New risks: 1H (OAuth callback security), 1M (provider API changes)
    In-flight collisions: none (no fresh claims per lore ready sessions[])
    Recommended approach: Option A — keep Phase 3, add Phase 4 for OAuth
-   User confirms Option A.
+   New scope outside every pre-registered branch → S1–S4 scoped to the change: user confirms Option A.
 
 4. Execute modifications:
    lore phase add plan-user-authentication "Phase 4: OAuth"
@@ -320,10 +321,10 @@ Blocked: 0 | Active risks: 2 (1H mitigated, 1M active)
 lore ready → task-auth-routes newly unblocked (⭐ critical path)
 ... continue loop ...
 
-[PHASE GATE] Phase 2 complete → risk review + estimation accuracy → user confirmation
+[PHASE GATE] Phase 2 complete → risk review + estimation accuracy → auto-proceed
 [PLAN COMPLETE]
 lore verify plan-user-authentication --allow-new-commands   # attested script ACs
-lore assess plan-user-authentication --diff main..HEAD      # LLM-as-judge vs spec ACs
+lore assess plan-user-authentication --diff main..HEAD      # LLM-as-judge vs spec ACs — the initiative's single end-of-run assess (one plan here)
 lore handoff --plan plan-user-authentication --by $LORE_ACTOR --next "monitor prod rollout"
 Completed: 8 tasks | Estimate accuracy: 86% | Risks: 1 mitigated, 1 accepted
 ```

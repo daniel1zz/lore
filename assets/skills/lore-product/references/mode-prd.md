@@ -36,9 +36,9 @@ Missing an artifact with no exception → route to the producing mode first and 
 
 ### Phase 1A: Key Decisions Gate (HARD — before writing full PRD)
 
-After ST analysis and before drafting the full PRD, present **3-5 key decisions** to the user via `AskUserQuestion`. These are the highest-leverage questions — they shape the entire PRD.
+After ST analysis and before drafting the full PRD, identify **3-5 key decisions** — the highest-leverage questions that shape the entire PRD. They are asked in the ONE batched-governance S1 decision interview (`~/.claude/skills/shared/batched-governance.md`), in the same sitting as the design and plan questions for this initiative — not in a PRD-only stop.
 
-⛔ **REFUSE to write the full PRD body** until user has answered these questions.
+⛔ **REFUSE to write the full PRD body** until the S1 interview has answered these questions.
 
 **How to identify key decisions:**
 - Dimensions/scope: "Which of these capabilities do you want in v1?" (multi-select)
@@ -77,7 +77,7 @@ Output: **Draft PRD** for stakeholder review.
 **P0 rule (HARD)**: a P0 requirement whose value risk is `⚠️ unvalidated` must be one of:
 1. Demoted below P0, or
 2. Preceded by a validation task in the downstream plan, or
-3. Escalated to the user via `AskUserQuestion` and, if they choose to proceed, recorded as `🎲 accepted bet` — using that word, in the PRD.
+3. Escalated to the user in the S1 decision interview and, if they choose to proceed, recorded as `🎲 accepted bet` — using that word, in the PRD.
 
 ⛔ **Never silently promote `unvalidated` to `validated`** because the idea is compelling, the stakeholder review liked it, or the schedule is tight.
 
@@ -88,6 +88,8 @@ Output: **Draft PRD** for stakeholder review.
 > | "5 stakeholder agents approved it" | Agents review the document's structural quality. None of them are a user, and none of them ran an experiment. |
 
 ## Phase 2: Multi-Stakeholder Parallel Review
+
+These 5 lenses are the PRD lens of the ONE batched-governance S3 bundle review — dispatched when the whole initiative (PRD + every spec + every plan) exists as drafts, each lens reading the full bundle, never a PRD-only review round of its own. A PRD with no downstream work in this run (standalone PRD update) is its own bundle.
 
 Launch **5 parallel subagents**, each reviewing the draft PRD from a different stakeholder lens.
 Use `Agent` tool — send ALL 5 in a single message for true parallel execution.
@@ -139,20 +141,17 @@ After all 5 stakeholders return, synthesize:
 3. **Quality Score Aggregation**: average + lowest score highlights weakest area
 4. **Revised PRD** — incorporate all must-fix items, evaluate perspective-specific items
 
-## Phase 3.5: User Approval Gate (HARD — before marking PRD "approved")
+## Phase 3.5: User Approval — the single S4 approval (HARD — before marking PRD "approved")
 
-⛔ **REFUSE to set PRD status to "approved"** without explicit user confirmation.
+⛔ **REFUSE to set PRD status to "approved"** without explicit user confirmation — given ONCE, in the batched-governance S4 approval of the whole bundle, never in a PRD-only stop.
 
-After stakeholder synthesis and revision, present to the user:
+The PRD's contribution to the S4 summary:
 1. **Executive summary** (2-3 sentences)
 2. **Key trade-offs made** (what we chose and what we rejected)
 3. **Scope boundaries** (what's IN and what's explicitly OUT)
 4. **Top risk** (the #1 thing that could go wrong)
 
-Use `AskUserQuestion`:
-- "PRD 最终确认" — 批准进入设计阶段 / 需要调整 / 推翻重来
-- If "需要调整" → iterate and re-present
-- Only "批准" → set status to approved
+On S4 approve, the PRD is approved FIRST in the batch (before its specs and plans).
 
 > | 🚩 AI rationalization | Reality |
 > |---|---|

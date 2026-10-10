@@ -35,7 +35,7 @@ Plan Skill is the **orchestration layer** on top of the lore corpus (per-project
 - **Evidence**: `lore evidence <task> --oracle ... --command "..." --result pass|fail [--ac <id>]` — append-only oracle records. Script-mode ACs get attested runs via `lore verify <plan>` (exit code decides, never self-asserted).
 - **Deterministic gates**: `spec-create` / `spec-promote` / `plan-promote` / `task-claim` intercept writes automatically (exit 4 + feeding pack). **Expect denials; fix per the pack.** Never bypass (`LORE_GATE_BYPASS=1`) without explicit user say-so. **Legacy alias (SPEC-056 D7)**: a `phase` doc's claim gates on `phase-claim` (same anchor-overlap predicate, additive to `task-claim` — legacy `task` docs still gate on `task-claim` unchanged until migration); a config still keyed under `workflow.gates."task-claim"` is honored for `phase-claim` too (one deprecation warning per process, never a silent drop).
 - **feed-before-produce**: `lore feed <checkpoint>` pulls governing rules before authoring (e.g. `lore feed spec-create --parent <prd>`, `lore feed plan-promote`). Session resume: `lore feed session-resume`.
-- **Validation**: pre-exec = `lore ready <plan> --json` + gates + independent lore-reviewer audit; post-exec = `lore assess <plan>` (LLM-as-judge vs spec ACs + evidence trail).
+- **Validation**: pre-exec = `lore ready <plan> --json` + gates + the lore-reviewer audit as one lens of the single bundle review (batched-governance S3); post-exec = `lore assess <plan>` (LLM-as-judge vs spec ACs + evidence trail), batched once at the END of the initiative across all its plans.
 
 Plan Skill adds **ceremony**: Invariants, Phase Gates, AC verification, estimation, critical path analysis, risk register, carry-forward constraints.
 
@@ -60,7 +60,7 @@ Plan's core is structured decomposition. **Uses `mcp__sequential-thinking__seque
 ### Definition of Done (DoD) — plan complete when ALL met:
 1. All tasks archived, or explicitly cancelled (deprecated with rationale in Decisions Log)
 2. All AC verified: every task carries pass evidence (`lore evidence`); script ACs carry attested evidence (`lore verify`)
-3. Post-execution assessment run: `lore assess <plan>` — findings triaged (fix or accept with rationale)
+3. Post-execution assessment run: `lore assess <plan>` — in the initiative's single end-of-run assess batch (batched-governance § Execution and closure); findings triaged (fix or accept with rationale)
 4. Risk register reviewed — all H/M risks either mitigated or accepted with rationale
 5. No open `[NEEDS CLARIFICATION]` markers
 6. Handoff written (`lore handoff --plan <plan>`) with carry-forward context
@@ -89,7 +89,7 @@ Plan's core is structured decomposition. **Uses `mcp__sequential-thinking__seque
 4. ⛔ NO `docs/plans/` files — plan content lives in the plan doc, tasks are task docs
 5. Every plan has **Invariants** in its content — verified at each Phase Gate
 6. Every task has **AC** in its content — verified against oracle evidence before archiving. Spec-level structured ACs are the SSOT the plan decomposes (`lore ac list <spec>`)
-7. Phase transitions require Phase Gate. In **attended** mode (default): user confirmation required before proceeding. In **unattended** mode (autopilot): auto-proceed unless Invariant violations are detected (hard block regardless of mode). Set `governance_mode` in plan content at creation time.
+7. ⛔ **Governance is batched — one flow, no modes**: `~/.claude/skills/shared/batched-governance.md` (S1 one decision interview → S2 uninterrupted production of ALL plans as drafts → S3 one bundle review → S4 one user approval). Phase Gates run and auto-proceed; an Invariant violation hard-blocks. The user is consulted mid-execution only per that file's Execution section. There is no `governance_mode` field.
 8. **Skill→Task mapping**: matched skill chain auto-maps to task tree
 9. Phases are declared via `lore phase add`; every task assigns one via `--phase`
 10. Every task has **Estimate** (T-shirt: S/M/L/XL) — XL tasks MUST be split

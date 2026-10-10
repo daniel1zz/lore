@@ -93,12 +93,13 @@
   - lore approve <plan> → back to approved (gate re-checks the spec chain — expected to pass)
 - Fix deviations before proceeding, or escalate to user
 
-# 7. User Confirmation Gate
-- Present Phase Gate results to user (including risk review + estimation accuracy)
-- MUST receive explicit user confirmation before proceeding to next phase
-  (unattended governance_mode: auto-proceed unless an Invariant is violated — hard block)
-- User may request fixes → loop back to step 2
-- User may request replan → switch to mode-replan
+# 7. Proceed — no per-phase user stop (shared/batched-governance.md § Execution)
+- Phase Gate passed → auto-proceed to the next phase; record the gate result
+  (risk review + estimation accuracy) in the batched plan-doc edit of step 6
+- Invariant violated → hard block: fix, re-run the gate (loop back to step 2)
+- A measured result on a pre-registered branch path → follow that path, log it
+- A result outside every pre-registered branch, or an unfixable Invariant
+  violation → the only case to ask the user; replan → switch to mode-replan
 ```
 
 ### Session-End Handoff (replaces in-doc session logs)
@@ -129,7 +130,7 @@ Before declaring the plan complete, verify all 7 DoD criteria from SKILL.md § D
 Checklist items (by reference):
 1. All tasks archived or deprecated with rationale? ✅/❌
 2. Pass evidence per task; attested evidence for script ACs (`lore verify <plan>`)? ✅/❌
-3. `lore assess <plan>` run + findings triaged? ✅/❌
+3. `lore assess <plan>` run (in the initiative's end-of-run batch) + findings triaged? ✅/❌
 4. Risk register reviewed — all H/M risks mitigated or accepted with rationale? ✅/❌
 5. No open `[NEEDS CLARIFICATION]` markers? ✅/❌
 6. Handoff written with carry-forward context? ✅/❌

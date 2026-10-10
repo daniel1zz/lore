@@ -152,20 +152,13 @@ The Vite dev server auto-replaces previous instances. To stop manually: `kill $(
 
 > Headless: add `--no-open`, provide the file path to the user.
 
-## User Approval Gate (HARD GATE — Two-Stage)
+## Governance — batched (the only flow)
 
-### Stage 1: Style Approval (after Multi-Option Visual Comparison)
-Embedded in Multi-Option Visual Comparison: user selects a variant → Token Crystallization → Product Prototype Generation proceed automatically. The variant selection IS the style approval — no extra gate.
+⛔ Read `~/.claude/skills/shared/batched-governance.md` first. This skill has NO approval stop of its own:
 
-### Stage 2: Prototype Approval (before persisting)
-1. **Preview**: Generate the full product prototype (all screens) for visual inspection
-2. **Summarize**: Present a concise summary in chat — key decisions, trade-offs, screen coverage (list all prototype screens)
-3. **Confirm**: Call `AskUserQuestion`:
-   - Question: "设计方案确认 (HTML preview has been opened in your browser)" — present the summary, ask if approved
-   - Options: "批准，进入实现" / "需要调整" / "重新设计"
-4. **Gate**: Proceed to Persist only on "批准". On "需要调整", iterate on specific screens and regenerate. On "重新设计", restart from Multi-Option Visual Comparison.
-
-⛔ Do NOT persist design artifacts or create tasks/plans until the user has explicitly approved.
+- **S1** — the style pick (Multi-Option Visual Comparison) is the one S1 question that needs rendered variants: generate them, ask, then continue. Token Crystallization and Product Prototype Generation follow without another stop.
+- **S2** — the full product prototype (all screens) is produced and persisted as draft design artifacts without asking.
+- **S3 / S4** — this skill's Quality Gates are one lens of the single bundle review; the prototype preview and design summary (key decisions, trade-offs, screen list) go into the single S4 approval, where "adjust" names the screens to change.
 
 ## Downstream Handoff
 

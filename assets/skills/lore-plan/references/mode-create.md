@@ -11,7 +11,7 @@
 
 For small plans (≤3 tasks, single session, clear scope), skip the full ceremony:
 - Skip: Risk Register (2.1), Critical Path (6), Estimation Summary (8.4), Overlap Review (8.5)
-- Keep: Invariants (2), task creation (5), validation gate (8), user confirmation (8.7)
+- Keep: Invariants (2), task creation (5), validation gate (8), the bundle's single S4 approval (8.7)
 - This avoids overhead that doesn't pay off for simple, well-understood work.
 
 ## Workflow
@@ -55,7 +55,9 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #
 # Check 2: Spec exists for this initiative? (lore get <spec> / lore ac list <spec>)
 #   YES → save spec slug; scan content for [NEEDS CLARIFICATION] markers
-#         (resolve before step 2); verify status=approved and ≥1 structured AC.
+#         (resolve before step 2); verify ≥1 structured AC. A DRAFT spec produced
+#         in this same batched-governance S2 run is fine — specs and plans are
+#         approved together in S4 (specs first); an approved spec is fine too.
 #         Spec approved but has 0 ACs → the gap belongs to the SPEC AUTHOR:
 #         report it upstream (Skill("design") owns `lore ac add`), don't
 #         self-author ACs silently.
@@ -63,7 +65,8 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #         it runs `lore feed spec-create --parent <prd>` then
 #         `lore create spec --title ... --parent <prd> [--kind feature|tech|design]`
 #         and declares ACs via `lore ac add`.
-#         After spec created + approved → re-enter step 1.1.
+#         After the spec exists as a draft with its ACs → re-enter step 1.1
+#         (same S2 run — do not wait for its approval).
 #
 # ── Technical plans (refactor/bugfix/debt/upgrade) ──
 #
@@ -85,45 +88,30 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #   Each link is a dedicated skill with its own quality standards.
 #   The plan-promote gate re-checks this chain deterministically at approve time.
 
-# 1.2. ⛔ Clarification Sprint (HARD GATE — REFUSE decomposition without it)
+# 1.2. Clarification — answered in the batched-governance S1 interview
 #
-# ⛔ REFUSE to create task docs until minimum dimension coverage is met.
-# This is NOT optional. "Upstream docs are detailed enough" is NOT a valid skip reason.
-# Upstream docs capture WHAT to build; clarification captures HOW the user wants it built.
+# The plan's HOW questions are asked in the ONE S1 decision interview
+# (`~/.claude/skills/shared/batched-governance.md`), together with the
+# product and design questions — never in a separate plan-time sitting,
+# never one question per message.
 #
-# Minimum dimension coverage by complexity:
-#   medium plan: >= 5 dimensions covered
-#   complex plan: >= 8 dimensions covered
-# Small plans (≤3 tasks): skip this step.
+# Coverage the S1 interview must include for this plan (skip ≤3-task plans):
+#   medium plan: >= 5 dimensions | complex plan: >= 8 dimensions
+#   □ Tech stack & framework constraints   □ Data model / storage approach
+#   □ Auth & permissions model             □ Third-party dependencies (search
+#     npm/context7/deepwiki FIRST, present findings as options)
+#   □ Error handling & failure modes       □ Testing strategy
+#   □ Deployment & infrastructure          □ Performance / scalability
+#   □ Security considerations              □ Migration / backward compatibility
 #
-# Dimension checklist — ask user about each applicable dimension:
-#   □ Tech stack & framework constraints
-#   □ Data model / storage approach
-#   □ Auth & permissions model
-#   □ Third-party dependencies / existing libraries to leverage
-#   □ Error handling & failure modes
-#   □ Testing strategy (unit/integration/e2e)
-#   □ Deployment & infrastructure
-#   □ Performance / scalability requirements
-#   □ Security considerations
-#   □ Migration / backward compatibility
-#
-# Rules:
-#   - One question per message (not batched)
-#   - Prefer closed-form questions (AskUserQuestion with options)
-#   - For "Third-party dependencies": MUST search npm/context7/deepwiki
-#     BEFORE asking — present findings as options, not open-ended
-#   - Track: dimension_name + question + answer
-#   - Only proceed to 1.3 after minimum coverage met
-#
-# Anti-pattern guard:
-#   ⛔ "The PRD/spec already covers these dimensions" — PRD/spec define
-#      WHAT; clarification validates the user's preferences for HOW.
-#      Example: PRD says "5-min cache" but user may prefer "invalidate on write".
-#   ⛔ "I'll use ST to answer these myself" — ST is for AI reasoning, NOT for
-#      substituting user input. If a question is about user preference, ASK THE USER.
+# A dimension already answered by code, corpus or upstream docs is NOT asked —
+# record the answer and its source. A dimension the S1 interview missed is
+# decided by the AI during S2 and listed as an AI-made decision in S4; it never
+# opens a new mid-production stop.
+#   ⛔ "I'll use ST to answer a preference question myself" — preference
+#      questions belong in S1; ST is for questions with a factual answer.
 
-# 1.3. Strategy Exploration (MANDATORY for complex, RECOMMENDED for medium)
+# 1.3. Strategy Exploration (MANDATORY for medium and complex; skip small)
 # Use Sequential Thinking (mcp__sequential-thinking__sequentialthinking) to
 # generate >= 2 decomposition strategies. Each strategy includes:
 #   - Name (e.g., "Vertical Slices", "Horizontal Layers", "Risk-First")
@@ -132,9 +120,9 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #   - Which Skills each phase leverages
 #   - Estimated total phase count
 #
-# Present comparison to user with recommendation. User selects strategy.
-# Record: chosen strategy name + rationale → goes into the plan doc's
-# Decisions Log at creation time.
+# The AI selects the strategy (unless the user stated a preference in S1) and
+# records chosen + rejected strategies with rationale in the plan's Decisions
+# Log. The comparison is shown in the single S4 approval — no separate pick.
 #
 # Common archetypes (non-exhaustive):
 #   - Vertical Slices: each phase delivers end-to-end functionality
@@ -142,23 +130,6 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #   - Risk-First: spike unknowns → core features → polish
 #   - Dependency-Ordered: build foundation → dependents → integration
 #   - TDD-Driven: test infrastructure → red-green per feature → refactor
-#
-# Enforcement:
-#   - complex: MUST present >= 2 strategies (HARD GATE)
-#   - medium: MUST present >= 2 strategies (HARD GATE — upgraded from advisory)
-#   - small: skip
-#
-# ⛔ User Selection Gate:
-#   REFUSE to create the plan doc until user has selected a strategy.
-#   Present strategies via AskUserQuestion with:
-#     - Strategy name + phase outline as preview
-#     - Pros/Cons in description
-#     - Recommended option marked
-#
-#   Anti-pattern guard:
-#   ⛔ "Interface-First is clearly optimal, no need to ask" — present it as
-#      the recommended option, but the user MUST see and select it.
-#      The act of choosing creates ownership; the act of skipping creates drift.
 #
 # Anti-pattern:
 #   ⛔ "Only one reasonable way to decompose this" — almost never true.
@@ -174,7 +145,7 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #      - deepwiki reference architectures
 #      - lore search — a prior research/reference knowledge doc may already answer this
 #   3. Record: library name, version, fit, decision (USE/REJECT + reason)
-#   4. Present findings to user with recommendation
+#   4. Record the USE/REJECT decision in the plan's Decisions Log (shown in S4)
 #   5. Only AFTER research → create the phase's task docs
 #   6. Non-trivial conclusions worth reuse → lore create knowledge --sub-type research
 #
@@ -243,10 +214,9 @@ For each implement task, determine approach source:
 - # NOTE: `lore feed` supports artifact checkpoints only (spec-create etc.) — there is NO plan-promote feed checkpoint (verified 2026-07-19: `unknown checkpoint`). The plan-promote gate's rules are enforced at `lore approve` (step 8.6); nothing to pre-pull here.
 - Write plan content to a temp file (Overview, Invariants, Risk Register, Estimation
   Summary, Critical Path placeholder, Exit Criteria, Phase Descriptions,
-  Governance Mode, Decisions Log — see plan-file-format.md)
-  - **Governance Mode**: `attended` (default) or `unattended`. Attended = phase gate
-    requires user confirmation. Unattended = auto-proceed (autopilot sets this).
-    Invariant violations hard-block regardless of mode.
+  Pre-registered Branches, Decisions Log — see plan-file-format.md)
+  - Governance: batched, one flow (`shared/batched-governance.md`) — no mode field.
+    Phase Gates auto-proceed; Invariant violations hard-block.
 - lore create plan --title "{title}" --parent <spec-slug> --content-file /tmp/plan-content.md --json
   → save the returned plan slug
 
@@ -463,15 +433,17 @@ Skip when: pure research/design plan, no implement tasks, or user explicitly opt
 - If coverage < 100% → create missing tasks or justify gap before proceeding
 - If orphan tasks > 0 → review: either link to a requirement or remove
 
-# 8.3. Independent Review Loop (Self-Verification Paradox mitigation)
-- Dispatch the lore-reviewer agent for a manual 5-dimension task-quality audit:
+# 8.3. Independent review — one lens of the single S3 bundle review
+- Do NOT dispatch a reviewer per plan. When EVERY plan of the initiative exists
+  as a draft, the S3 bundle review dispatches lore-reviewer ONCE over all of
+  them (plus their specs) with this 5-dimension task-quality audit as its plan lens:
   1. executability — can a cold-start implementer execute each task from its content alone?
   2. ac_oracle_binding — is every AC verifiable by a named oracle (tsc/test/lint/build/e2e/script)?
   3. context_sufficiency — Approach + Source + Covers present where required?
   4. atomicity — INVEST-compliant, no XL, no under-decomposed grab-bags?
   5. dependency & anchor safety — every blocks edge artifact-justified; anchors declared
      and non-overlapping for parallel tasks?
-- Verdict = BLOCK or NEEDS_WORK → fix the flagged issues, request re-review (max 2 iterations)
+- Verdict = BLOCK or NEEDS_WORK → fix in one pass, re-review only what changed (S3: max 2 rounds total)
 - Verdict = PASS → proceed
 - **DoR check**: verify every task meets Definition of Ready (see SKILL.md § Definitions)
 - **Risk validation**: verify all H-impact risks have mitigation tasks in the tree
@@ -491,18 +463,18 @@ Skip when: pure research/design plan, no implement tasks, or user explicitly opt
 - If duplicates > 0: merge or remove before proceeding
 - If near-duplicates > 0: add clarifying Scope.in/Scope.out to each task's content
 
-# 8.6. Promote the plan
-- lore approve <plan>
+# 8.6. Promote the plan — in the S4 approval batch, after its specs
+- lore approve <plan>   # only after the user's single S4 approval; specs/ADRs first
 - This fires the deterministic plan-promote gate: spec-tier ancestor must be approved
   with ≥1 structured AC. Exit 4 + feeding pack = fix per the pack (usually: the spec
   is unapproved or missing ACs — route the gap upstream per step 1.1), then retry.
   ⛔ Never LORE_GATE_BYPASS=1 without explicit user say-so.
 
-# 8.7. User confirmation
-- lore tree <plan> → display task tree (grouped under phase headers) for user review
-- Display: Invariants + Risk Register + Critical Path + Estimation Summary +
-  reviewer verdict + coverage check
-- User must confirm before execution begins
+# 8.7. User confirmation — the single S4 approval, not a per-plan stop
+- Contribute to the S4 bundle summary: lore tree <plan> (tasks under phase headers),
+  Invariants + Risk Register + Critical Path + Estimation Summary + reviewer
+  verdict + coverage check + chosen/rejected strategy + pre-registered branches
+- The user approves the whole bundle once; no separate per-plan confirmation
 - lore ready <plan> --json → show first ready tasks (critical path tasks highlighted)
 ```
 
@@ -527,14 +499,14 @@ All 6 INVEST criteria are enforced:
 
 ## Required Output
 
-- lore plan doc created (with Invariants + Risk Register + Exit Criteria in content), approved (plan-promote gate passed)
+- lore plan doc created (with Invariants + Risk Register + Exit Criteria in content), approved in the S4 batch (plan-promote gate passed)
 - Phases declared + all task docs created (with estimates, anchors, priorities, blocks links)
 - Upstream docs linked
 - **Risk register displayed** (count by impact level, mitigation task links)
 - **Critical path identified** (longest dependency chain, total session-units)
 - **Estimation summary** (per-phase and total session-units)
-- **lore-reviewer verdict displayed** (PASS + iteration count)
-- Task tree displayed (`lore tree <plan>`) for user confirmation
+- **Bundle-review verdict displayed** (PASS + round count)
+- Task tree included in the single S4 approval summary
 - First ready tasks shown (`lore ready <plan> --json`, critical path tasks highlighted)
 
 ## Dual Validation — pre-exec and post-exec
@@ -543,7 +515,8 @@ Validation happens at **two** points:
 1. **Pre-execution** (step 8): `lore ready --json` structural check + coverage check +
    independent lore-reviewer audit + the deterministic plan-promote gate → catches missing
    coverage, weak AC, unsplit tasks, anchor conflicts BEFORE any dispatch
-2. **Post-execution** (when all tasks done): `lore assess <plan> [--diff <git-range>]` —
+2. **Post-execution** (once, at the END of the initiative — all its plans in parallel; a
+   pre-registered pilot plan is the only one assessed as it closes): `lore assess <plan> [--diff <git-range>]` —
    LLM-as-judge grades the plan's evidence trail against the spec's ACs and persists the
    verdict as an assessment knowledge doc linked to the plan
 

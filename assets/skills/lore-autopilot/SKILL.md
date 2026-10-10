@@ -23,7 +23,7 @@ All corpus state lives in lore — it is the SSOT; never track task state in par
 ## Doctrine (3 First-Principles)
 
 ⛔ **D1 — Default Unattended**
-- Ready tasks execute without "continue?" prompts. Oracle failures enter the Fix Loop, they do not escalate.
+- Ready tasks execute without "continue?" prompts. Oracle failures enter the Fix Loop, they do not escalate. This is the execution half of the single batched governance flow (`shared/batched-governance.md`) — the user's approval was given once, in S4, before execution.
 
 ⛔ **D2 — Best Solution First**
 - ≥2 candidate approaches → Sequential-Thinking before locking in. No hacks / TODO-later / silent fallbacks (`Skill(my-best-practice)` semantics apply inside implementers too).
@@ -130,12 +130,12 @@ When `lore ready <plan>` returns no ready tasks and nothing is in flight:
 
 1. **Full-plan attested run**: `lore verify <plan> --allow-new-commands --by autopilot` (all script-mode ACs). FAIL → Fix Loop.
 2. **Project oracles** on main: typecheck + full test suite (whatever the repo's CLAUDE.md names). FAIL → Fix Loop.
-3. **LLM-as-judge closure**: `lore assess <plan> [--diff <merge-base>..HEAD]` — persists an assessment knowledge doc linked to the plan. Exit 6 (AI provider error) → retry once, then report assess as skipped with the error; do not block completion on it.
+3. **LLM-as-judge closure — batched** (`~/.claude/skills/shared/batched-governance.md` § Execution and closure): if other plans of the same initiative still have ready/in-flight tasks, DEFER assess and report it as `deferred to initiative end`. When this is the initiative's LAST plan to drain, run `lore assess <plan> [--diff <merge-base>..HEAD]` for EVERY plan of the initiative in parallel and triage all findings in one pass. Exception: a pilot plan that a pre-registered branch reads as its trigger is assessed as it closes. Exit 6 (AI provider error) → retry once, then report assess as skipped with the error; do not block completion on it.
 4. **Final report**:
    ```
    **[AUTOPILOT DONE]** plan: {slug}
    Completed: {n} | Blocked: {n} ({slugs + reasons/holders}) | Skipped (claim conflicts): {n}
-   Verify: {attested pass/fail per AC} | Assess: {verdict or skipped}
+   Verify: {attested pass/fail per AC} | Assess: {verdict | deferred to initiative end | skipped}
    Worktrees: all merged + cleaned
    ```
    ⛔ **Every shared-state claim in the report must be derived from queries run AFTER closure, in this same turn** — `lore ready`/`lore status`/`git worktree list` NOW, never from earlier-in-context tool output. This is a multi-session workspace: a `lore tree` snapshot from hours ago is another session's history, not current state (live incident 2026-07-27: a "Phase 3 has 3 open tasks" claim about a SIBLING plan was hours stale — that plan had been completed and archived by a parallel session). Mentioning OTHER plans' status is optional; if you do, query them fresh or say "as of {time of my last look}".

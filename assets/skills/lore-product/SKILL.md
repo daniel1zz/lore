@@ -46,6 +46,10 @@ Two failures dominate AI-assisted product work, and each has one mode that owns 
 | [ideation-methods.md](references/ideation-methods.md) | Method selection, challenge techniques, validation | Brainstorming, prioritization, quick validation |
 | [strategic-thinking.md](references/strategic-thinking.md) | Porter's, TAM/SAM/SOM, Strategy Canvas, Moat analysis | Market analysis, positioning, strategic decisions |
 
+## ⛔ Governance — batched (the only flow)
+
+Every user stop and review in this skill's modes runs inside `~/.claude/skills/shared/batched-governance.md`: user questions join the ONE S1 decision interview, drafts are produced without stopping, reviews run once over the whole bundle (S3), and the user approves once (S4). PRD mode's Phase 1A / 1C / 2 / 3.5 are its PRD-side contributions to S1 / S1 / S3 / S4.
+
 ## ⛔ Evidence-First Gate (HARD — checked before any mode)
 
 Before entering ANY product mode, verify the mode's inputs are **evidence, not recall**:
