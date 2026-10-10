@@ -8,7 +8,7 @@
  *   rm   <prd> <id> [--force]
  *
  * Thin pipe over `RequirementService`. The inventory is what `lore status
- * --check-requirements` audits against descendant spec AC `--covers` refs.
+ * --check-requirements` audits against every spec's AC `--covers` refs.
  *
  * Source: SPEC-055 §Scope.
  */
@@ -131,7 +131,7 @@ export default defineCommand({
       args: {
         prd: { type: "positional", description: "PRD document ID or slug", required: true },
         id: { type: "positional", description: "Requirement id to remove", required: true },
-        force: { type: "boolean", description: "Remove even if a descendant spec AC still references it" },
+        force: { type: "boolean", description: "Remove even if a spec AC still references it" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run({ args }) {

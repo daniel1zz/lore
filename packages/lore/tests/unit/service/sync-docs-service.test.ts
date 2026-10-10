@@ -292,19 +292,31 @@ describe("AC-SD-6 STATE — drift reported but corpus body unchanged", () => {
   });
 });
 
-// ─── AC-SD-7: exactly 1 PRD → use it for all synced specs ───────────────────
+// ─── AC-SD-7..10: a synced spec takes NO parent (BR-789, BR-2) ───────────────
+//
+// re-baseline (BR-789, BR-2): these four ACs used to pin PRD-parent resolution (single PRD →
+// auto-parent, 2 PRDs → match the frontmatter title, no match / 0 PRDs → per-file error). A spec now
+// takes no parent — it relates to the trees through criterion citations — so the sync creates every
+// spec parentless and a frontmatter `parent:` is ignored with one stderr note. The PRD count of the
+// corpus is irrelevant, so the ambiguity and no-PRD errors no longer exist.
 
-describe("AC-SD-7 HAPPY — single PRD in corpus used for all specs", () => {
-  it("1 PRD → specs created with that PRD as parent regardless of frontmatter", async () => {
+/** Reads one created spec back through the corpus and returns its parent_id. */
+async function parentIdOfSlug(corpus: CorpusService, slug: string): Promise<string | null> {
+  const got = await corpus.get(slug);
+  if (!got.ok) throw new Error(`get ${slug} failed: ${got.error.code}`);
+  return got.value.doc.parent_id;
+}
+
+describe("AC-SD-7 HAPPY — single PRD in corpus is NOT used as a parent", () => {
+  it("1 PRD → the spec is created with parent_id null, whatever the frontmatter says", async () => {
     const { corpus, sync } = makeServices();
-    const prd = await createPrd(corpus, "The Only PRD");
+    await createPrd(corpus, "The Only PRD");
     const dir = makeTempDir();
 
-    // Frontmatter parent doesn't match PRD title — but with single PRD it's ignored
     writeSpecFile(dir, "SPEC-001.md", {
       type: "spec",
       title: "Auth Spec",
-      parent: "Some Other PRD Title",
+      parent: "The Only PRD",
       body: "# Auth Spec\n\nBody.",
     });
 
@@ -314,25 +326,18 @@ describe("AC-SD-7 HAPPY — single PRD in corpus used for all specs", () => {
     expect(result.value.created).toHaveLength(1);
     expect(result.value.errors).toHaveLength(0);
 
-    // Verify the created spec has the PRD as parent
     const listResult = await corpus.list({ type: "spec" });
     expect(listResult.ok).toBe(true);
     if (!listResult.ok) return;
     expect(listResult.value.docs[0]?.title).toBe("Auth Spec");
-
-    const getResult = await corpus.get(listResult.value.docs[0]!.slug);
-    expect(getResult.ok).toBe(true);
-    if (!getResult.ok) return;
-    expect(getResult.value.doc.parent_id).toBe(prd.id);
+    expect(await parentIdOfSlug(corpus, listResult.value.docs[0]!.slug)).toBeNull();
   });
 });
 
-// ─── AC-SD-8: ≥2 PRDs, frontmatter parent matches one PRD title ─────────────
-
-describe("AC-SD-8 HAPPY — 2 PRDs, frontmatter parent matches one by title", () => {
-  it("2 PRDs and matching parent hint → correct PRD selected", async () => {
+describe("AC-SD-8 HAPPY — 2 PRDs, a matching frontmatter parent is ignored", () => {
+  it("2 PRDs and a matching parent hint → parentless spec, one stderr note", async () => {
     const { corpus, sync } = makeServices();
-    const prd1 = await createPrd(corpus, "PRD-001");
+    await createPrd(corpus, "PRD-001");
     await createPrd(corpus, "PRD-002");
     const dir = makeTempDir();
 
@@ -343,38 +348,40 @@ describe("AC-SD-8 HAPPY — 2 PRDs, frontmatter parent matches one by title", ()
       body: "# Scoped Spec\n\nBody.",
     });
 
-    const result = await sync.run({ fromDir: dir, dryRun: false });
+    const notes: string[] = [];
+    const realWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      notes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    let result;
+    try {
+      result = await sync.run({ fromDir: dir, dryRun: false });
+    } finally {
+      process.stderr.write = realWrite;
+    }
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.created).toHaveLength(1);
     expect(result.value.errors).toHaveLength(0);
-
-    // Verify spec has prd1 as parent
-    const getResult = await corpus.get("spec-scoped-spec");
-    expect(getResult.ok).toBe(true);
-    if (!getResult.ok) return;
-    expect(getResult.value.doc.parent_id).toBe(prd1.id);
+    expect(await parentIdOfSlug(corpus, "spec-scoped-spec")).toBeNull();
+    expect(notes.filter((n) => n.includes("ignoring frontmatter parent"))).toHaveLength(1);
   });
 });
 
-// ─── AC-SD-9: ≥2 PRDs, frontmatter parent matches none → VALIDATION_ERROR ───
-
-describe("AC-SD-9 NEGATIVE — 2 PRDs, no matching parent → error for that file, others process", () => {
-  it("2 PRDs + ambiguous parent → error for that file; second valid file still created", async () => {
+describe("AC-SD-9 NEGATIVE — 2 PRDs and an unmatched parent is no longer an error", () => {
+  it("2 PRDs + a hint matching neither → both files are created parentless, no error", async () => {
     const { corpus, sync } = makeServices();
     await createPrd(corpus, "PRD-001");
     await createPrd(corpus, "PRD-002");
     const dir = makeTempDir();
 
-    // Ambiguous — parent doesn't match either PRD title
     writeSpecFile(dir, "SPEC-ambiguous.md", {
       type: "spec",
       title: "Ambiguous Spec",
       parent: "ghost",
       body: "# Ambiguous\n\nBody.",
     });
-
-    // Valid — parent matches PRD-001
     writeSpecFile(dir, "SPEC-valid.md", {
       type: "spec",
       title: "Valid Spec",
@@ -386,34 +393,32 @@ describe("AC-SD-9 NEGATIVE — 2 PRDs, no matching parent → error for that fil
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    // Valid file created, ambiguous file reported as error
-    expect(result.value.errors).toHaveLength(1);
-    expect(result.value.errors[0]?.file).toContain("SPEC-ambiguous.md");
-    expect(result.value.created).toHaveLength(1);
-    expect(result.value.created[0]?.slug).not.toContain("ambiguous");
+    expect(result.value.errors).toHaveLength(0);
+    expect(result.value.created).toHaveLength(2);
+    for (const entry of result.value.created) {
+      expect(await parentIdOfSlug(corpus, entry.slug)).toBeNull();
+    }
   });
 });
 
-// ─── AC-SD-10: 0 PRDs → VALIDATION_ERROR ────────────────────────────────────
-
-describe("AC-SD-10 NEGATIVE — 0 PRDs in corpus → error per file", () => {
-  it("no PRD in corpus → each spec file gets VALIDATION_ERROR in errors", async () => {
-    const { sync } = makeServices();
+describe("AC-SD-10 BOUNDARY — a corpus with 0 PRDs still accepts synced specs", () => {
+  it("no PRD in corpus → the spec is created parentless, no error", async () => {
+    const { corpus, sync } = makeServices();
     const dir = makeTempDir();
 
     writeSpecFile(dir, "SPEC-001.md", {
       type: "spec",
-      title: "Orphan Spec",
-      body: "# Orphan\n\nBody.",
+      title: "Standalone Spec",
+      body: "# Standalone\n\nBody.",
     });
 
     const result = await sync.run({ fromDir: dir, dryRun: false });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.errors).toHaveLength(1);
-    expect(result.value.errors[0]?.error).toContain("no PRD in corpus");
-    expect(result.value.created).toHaveLength(0);
+    expect(result.value.errors).toHaveLength(0);
+    expect(result.value.created).toHaveLength(1);
+    expect(await parentIdOfSlug(corpus, result.value.created[0]!.slug)).toBeNull();
   });
 });
 

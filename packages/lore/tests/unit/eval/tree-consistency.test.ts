@@ -90,10 +90,11 @@ function makeDoc(
 // ─── HAPPY ───────────────────────────────────────────────────────────────────
 
 describe("HAPPY — healthy corpus passes tree-consistency", () => {
-  it("prd root + spec child → passed=true, all counts 0", async () => {
+  it("prd root + a parentless spec → passed=true, all counts 0 (BR-572, BR-2)", async () => {
     const store = new InMemoryStore();
     const prd = makeDoc({ type: "prd", parent_id: null });
-    const spec = makeDoc({ type: "spec", parent_id: prd.id });
+    // re-baseline (BR-2): a spec takes no parent, so the healthy shape is a PARENTLESS spec
+    const spec = makeDoc({ type: "spec", parent_id: null });
     await store.insert(prd);
     await store.insert(spec);
 
@@ -113,11 +114,12 @@ describe("HAPPY — healthy corpus passes tree-consistency", () => {
 // ─── NEGATIVE ────────────────────────────────────────────────────────────────
 
 describe("NEGATIVE — orphan doc causes passed=false", () => {
-  it("spec with no parent → orphan detected, passed=false", async () => {
+  it("knowledge with no parent → orphan detected, passed=false", async () => {
+    // re-baseline (BR-2): this used a spec; a parentless spec is legal now, so the control that
+    // must still be an orphan is a doc of a type that DOES need a parent.
     const store = new InMemoryStore();
-    // spec without a parent — orphan since spec requires a prd parent
-    const spec = makeDoc({ type: "spec", parent_id: null });
-    await store.insert(spec);
+    const knowledge = makeDoc({ type: "knowledge", parent_id: null });
+    await store.insert(knowledge);
 
     const app = makeApp(store);
     const result = await runTreeConsistency(app);
@@ -125,7 +127,21 @@ describe("NEGATIVE — orphan doc causes passed=false", () => {
 
     expect(result.passed).toBe(false);
     expect(result.orphans).toBeGreaterThanOrEqual(1);
-    expect(result.details.orphan_ids).toContain(spec.id);
+    expect(result.details.orphan_ids).toContain(knowledge.id);
+  });
+
+  it("spec with no parent → NOT an orphan, passed=true (BR-572 agrees with BR-400)", async () => {
+    const store = new InMemoryStore();
+    const spec = makeDoc({ type: "spec", parent_id: null });
+    await store.insert(spec);
+
+    const app = makeApp(store);
+    const result = await runTreeConsistency(app);
+    app.close();
+
+    expect(result.orphans).toBe(0);
+    expect(result.details.orphan_ids).not.toContain(spec.id);
+    expect(result.passed).toBe(true);
   });
 });
 
@@ -233,7 +249,7 @@ describe("STATE — runTreeConsistency is deterministic", () => {
   it("same corpus + two runs → identical results", async () => {
     const store = new InMemoryStore();
     const prd = makeDoc({ type: "prd", parent_id: null });
-    const spec = makeDoc({ type: "spec", parent_id: prd.id });
+    const spec = makeDoc({ type: "spec", parent_id: null });
     await store.insert(prd);
     await store.insert(spec);
 
@@ -256,13 +272,13 @@ describe("REGRESSION — 50+ doc corpus completes in <1s", () => {
   it("large corpus performance test", async () => {
     const store = new InMemoryStore();
 
-    // Create 10 PRDs each with 4 specs = 50 docs total
+    // Create 10 PRDs each beside 4 parentless specs = 50 docs total
     const docs: DocRecord[] = [];
     for (let i = 0; i < 10; i++) {
       const prd = makeDoc({ type: "prd", parent_id: null });
       docs.push(prd);
       for (let j = 0; j < 4; j++) {
-        docs.push(makeDoc({ type: "spec", parent_id: prd.id }));
+        docs.push(makeDoc({ type: "spec", parent_id: null }));
       }
     }
 

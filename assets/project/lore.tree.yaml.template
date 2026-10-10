@@ -2,6 +2,8 @@ version: 1
 root:
   type: prd
   children:
+    # spec sits here to show its place in the layout, but takes NO parent (BR-2): its slot is "no parent",
+    # so min:1 counts parentless specs and a parentless spec is neither orphan nor misplaced (BR-400).
     - type: spec
       min: 1
       children:

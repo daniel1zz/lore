@@ -1050,7 +1050,7 @@ export default defineCommand({
     "check-requirements": {
       type: "boolean",
       description:
-        "Verify every PRD requirement is covered by a descendant spec AC (SPEC-055). Uncovered P0 → exit 3. Composes with --check-tree/--check-drift.",
+        "Verify every PRD requirement is covered by an AC of some spec (SPEC-055; specs take no parent, every spec counts). Uncovered P0 → exit 3. Composes with --check-tree/--check-drift.",
     },
     "check-prd-budget": {
       type: "boolean",

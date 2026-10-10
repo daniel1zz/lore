@@ -414,7 +414,8 @@ describe("gate-feeding fresh-install both-ends probe", () => {
           // is actually seeded with (scripts/seed-write-spec-rule.ts), not
           // another compiled-in fallback string.
           expect(controlSource).toContain("write-spec-rules");
-          expect(controlDeny.stderr).toContain("Legal parent.");
+          // re-baseline (BR-1, BR-2): rule 1 of the seeded doc is now "No parent." (a spec belongs to the trees through citations)
+          expect(controlDeny.stderr).toContain("No parent.");
         } finally {
           rmSync(controlDir, { recursive: true, force: true });
         }

@@ -72,8 +72,9 @@ these rules.
 
 ## Rules
 
-1. **Legal parent.** A spec must be parented to a legal upstream document type — a
-   \`prd\`. Creating a spec with no parent, or a parent of the wrong type, is rejected.
+1. **No parent.** A spec is created with no parent document: it belongs to the product trees
+   only through its criteria's rule citations (BR-n, AS-n). Creating a spec with a parent, or
+   filing one under a document by a parent link, is rejected (exit 4).
 2. **Declared spec_kind.** A spec must declare \`extra.spec_kind\` as one of
    \`feature\`, \`tech\`, or \`design\`. An absent value defaults to \`feature\` at create
    time; an explicit unrecognised value is rejected.
@@ -83,7 +84,9 @@ these rules.
    checkable by a deterministic oracle — an exit code, a test assertion, a concrete
    observable outcome. Vague verbs (\"works\", \"support\", \"跑通\") are not acceptable
    AC language; they cannot be mechanically verified.
-5. **Structured AC via \`lore ac add\`.** Once the skeleton exists, add machine-checkable
+5. **Structured AC via \`lore ac add\`, citing rules.** A spec is approved only when at least one
+   criterion cites a live BR or AS rule (\`--cite BR-n\` on \`ac add\`, or \`lore ac cite\`; BR-1007).
+   **Structured AC.** Once the skeleton exists, add machine-checkable
    acceptance criteria with \`lore ac add <spec> <id> --statement <s> --mode <script|ai|human>\`
    rather than only prose under \`## Acceptance Criteria\` — structured ACs are what
    \`lore verify\` / \`lore assess\` can actually execute and score against.

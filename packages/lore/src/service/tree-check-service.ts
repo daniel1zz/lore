@@ -8,13 +8,18 @@
  * true` parented to the corpus root PRD is a sanctioned deviation from
  * `PARENT_TYPE_CONTRACT` (see `isAdhocTaskUnderRoot`, below) and never
  * reports `misplaced` — a non-adhoc task under a PRD still does.
+ *
+ * BR-400 / BR-2 (baseline-slice-3b): a PARENTLESS type (`spec`, see `isParentlessType`) with no
+ * parent is neither an orphan nor misplaced — it belongs to the trees through criterion citations.
+ * A spec that still HAS a parent is `misplaced` (the contract has no legal parent for it), and
+ * `fix()` never re-parents one: its blueprint slot lives at "no parent", so it yields no candidate.
  */
 
 import type { StoreInterface } from "../store/store-interface.js";
 import type { TreeBlueprint, TreeNodeSpec } from "@lore/core";
 import type { DocType, DocId, DocRecord, DocStatus } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
-import { isValidParentType, ROOT_TYPES } from "@lore/core";
+import { isParentlessType, isValidParentType, ROOT_TYPES } from "@lore/core";
 import { ancestorChainWalk } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
 
@@ -121,7 +126,7 @@ export class TreeCheckService {
       if (cyclic.has(d.id)) continue;
 
       const isOrphan =
-        (d.parent_id === null && !ROOT_TYPES.includes(d.type)) ||
+        (d.parent_id === null && !ROOT_TYPES.includes(d.type) && !isParentlessType(d.type)) ||
         (d.parent_id !== null && !byId.has(d.parent_id));
 
       if (isOrphan) {
@@ -538,9 +543,12 @@ function walkBlueprint(
   misplacedIds: Set<DocId>,
   drifts: TreeDrift[],
 ): void {
-  // Docs at this level: same parent, not cyclic
+  // Docs at this level: same parent, not cyclic. A parentless type's slot is "no parent" wherever
+  // the blueprint draws it (the YAML nests `spec` under `prd` to show where it sits in the product
+  // layout; the tree contract gives it no parent, BR-2) — so its matches are the parentless docs.
+  const slotParentId = isParentlessType(node.type) ? null : actualParentId;
   const siblings = allDocs.filter(
-    (d) => d.parent_id === actualParentId && !cyclic.has(d.id),
+    (d) => d.parent_id === slotParentId && !cyclic.has(d.id),
   );
 
   // Matched: siblings of this node's type that match the slug glob
@@ -561,8 +569,8 @@ function walkBlueprint(
   if (adjustedDeficit > 0) {
     drifts.push({
       kind: "missing",
-      expected: { type: node.type, min: node.min, max: node.max, at: String(actualParentId) },
-      detail: `Expected at least ${node.min} ${node.type} under parent ${actualParentId ?? "root"}, found ${matched.length}`,
+      expected: { type: node.type, min: node.min, max: node.max, at: String(slotParentId) },
+      detail: `Expected at least ${node.min} ${node.type} under parent ${slotParentId ?? "root"}, found ${matched.length}`,
     });
   }
 
@@ -570,8 +578,8 @@ function walkBlueprint(
   if (node.max !== null && matched.length > node.max) {
     drifts.push({
       kind: "extra",
-      expected: { type: node.type, min: node.min, max: node.max, at: String(actualParentId) },
-      detail: `Expected at most ${node.max} ${node.type} under parent ${actualParentId ?? "root"}, found ${matched.length}`,
+      expected: { type: node.type, min: node.min, max: node.max, at: String(slotParentId) },
+      detail: `Expected at most ${node.max} ${node.type} under parent ${slotParentId ?? "root"}, found ${matched.length}`,
     });
   }
 
@@ -613,7 +621,10 @@ function collectBlueprintPositions(
 ): BlueprintPosition[] {
   const positions: BlueprintPosition[] = [];
 
-  if (parentType === null) {
+  if (isParentlessType(node.type)) {
+    // A parentless type has no parent slot to fill: contribute no position (so `fix()` finds no
+    // candidate and never re-parents it), but still recurse so its own children keep their slots.
+  } else if (parentType === null) {
     // Root node: parentDoc = null (this type lives at root)
     positions.push({ childType: node.type, parentDoc: null });
   } else {

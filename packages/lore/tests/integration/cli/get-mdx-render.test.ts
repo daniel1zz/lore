@@ -69,16 +69,24 @@ function createPrd(title: string, content: string, cwd: string): string {
   return slug;
 }
 
-/** Create a spec under the given prd parent and return its slug. */
-function createSpec(title: string, parentSlug: string, cwd: string): string {
+/**
+ * Create an ADR under the given prd parent and return its slug.
+ *
+ * re-baseline (BR-1, BR-2): this helper used to create a SPEC and rely on it landing under
+ * the PRD. A spec now takes no parent (it relates to the trees through citations), so a spec
+ * is no longer a child of any PRD and `<ChildrenOf />` on a PRD can never list one. The
+ * placeholder's semantics are unchanged — it lists a doc's children — so the fixture uses a
+ * doc type that is still legitimately parented to a PRD.
+ */
+function createChildAdr(title: string, parentSlug: string, cwd: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title,"--no-ai", "--content", "body"],
+    ["create", "adr", "--title", title, "--no-ai", "--content", "body", "--parent", parentSlug, "--decision-status", "accepted"],
     cwd,
   );
-  if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
+  if (r.exitCode !== 0) throw new Error(`create adr failed: ${r.stderr}`);
   const slugM = r.stdout.match(/Slug:\s+(\S+)/);
   const slug = slugM?.[1];
-  if (!slug) throw new Error(`Could not extract spec slug from: ${r.stdout}`);
+  if (!slug) throw new Error(`Could not extract adr slug from: ${r.stdout}`);
   return slug;
 }
 
@@ -87,7 +95,7 @@ function createSpec(title: string, parentSlug: string, cwd: string): string {
  * (retro follow-up item 8 test-fallout reconciliation — GateEnforcer is now wired ON
  * by default in every production `createApp`, which every subprocess-spawned `lore`
  * command in this file goes through). None of this file's ACs exercise spec-create
- * gating — `createSpec`'s fixed "body" content is purely a `ChildrenOf` list member,
+ * gating — `createChildAdr`'s fixed "body" content is purely a `ChildrenOf` list member,
  * never itself asserted. Mirrors the config shape
  * `tests/integration/gate-config-disable.bun.test.ts` establishes
  * (`workflow.gates.<checkpoint>.enabled`, `@lore/core::resolveGateEnabled`).
@@ -142,13 +150,13 @@ afterEach(() => {
 describe("HAPPY — `lore get` (non-raw) renders <ChildrenOf /> as a bulleted list (AC-3)", () => {
   it("stdout shows the rendered child list, not the literal tag", () => {
     const prdSlug = createPrd("Root With Children", "# Root With Children\n\n<ChildrenOf />", tmpDir);
-    createSpec("Child Spec One", prdSlug, tmpDir);
+    createChildAdr("Child Adr One", prdSlug, tmpDir);
 
     const result = runLore(["get", prdSlug], tmpDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).not.toContain("<ChildrenOf");
-    expect(result.stdout).toContain("- [spec] Child Spec One (draft)");
+    expect(result.stdout).toContain("- [adr] Child Adr One (draft)");
   });
 });
 
@@ -157,13 +165,13 @@ describe("HAPPY — `lore get` (non-raw) renders <ChildrenOf /> as a bulleted li
 describe("BOUNDARY — `lore get --raw` prints the literal tag unchanged (AC-3)", () => {
   it("stdout contains the raw <ChildrenOf /> tag, not a rendered list", () => {
     const prdSlug = createPrd("Root Raw", "# Root Raw\n\n<ChildrenOf />", tmpDir);
-    createSpec("Child Spec Raw", prdSlug, tmpDir);
+    createChildAdr("Child Adr Raw", prdSlug, tmpDir);
 
     const result = runLore(["get", prdSlug, "--raw"], tmpDir);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("<ChildrenOf />");
-    expect(result.stdout).not.toContain("Child Spec Raw (draft)");
+    expect(result.stdout).not.toContain("Child Adr Raw (draft)");
   });
 });
 
@@ -172,7 +180,7 @@ describe("BOUNDARY — `lore get --raw` prints the literal tag unchanged (AC-3)"
 describe("STATE — `lore get --json` exposes non-empty resolved_components (AC-7)", () => {
   it("data.resolved_components is non-empty for a doc with a whitelisted placeholder", () => {
     const prdSlug = createPrd("Root Json", "# Root Json\n\n<ChildrenOf />", tmpDir);
-    createSpec("Child Spec Json", prdSlug, tmpDir);
+    createChildAdr("Child Adr Json", prdSlug, tmpDir);
 
     const result = runLore(["get", prdSlug, "--json"], tmpDir);
 

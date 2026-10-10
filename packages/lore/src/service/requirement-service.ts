@@ -29,8 +29,8 @@
  *   the new entry" scoping. `workflow.requirement_quantifiable.enabled: false`
  *   (`resolveRequirementQuantifiableEnabled`, `@lore/core`) disables this check entirely —
  *   the write then proceeds exactly as it did pre-SPEC-059.
- * @invariant `removeRequirement` fails loud when a descendant spec AC still lists the id in
- *   its `requirement_refs`, UNLESS `opts.force` — a forced removal leaves those refs dangling
+ * @invariant `removeRequirement` fails loud when the AC of ANY spec that is not deleted still lists the id in
+ *   its `requirement_refs` (BR-692 — specs hang under no PRD, so the scan is corpus-wide), UNLESS `opts.force` — a forced removal leaves those refs dangling
  *   (they simply cover nothing) rather than silently rewriting AC declarations.
  * @invariant `migrateRequirement` (and `addRequirement` with `opts.requireLiveRule`) refuse a
  *   `migrated_to` rule that is not `live` in a baseline leaf (absent, deprecated or retired) with
@@ -65,7 +65,7 @@ export interface AddRequirementOpts {
 
 /** Options for {@link RequirementService.removeRequirement}. */
 export interface RemoveRequirementOpts {
-  /** Remove even when a descendant spec AC still references this id (see class invariant). */
+  /** Remove even when a spec AC still references this id (see class invariant). */
   force?: boolean;
 }
 
@@ -222,8 +222,8 @@ export class RequirementService {
   // ── removeRequirement ─────────────────────────────────────────────────────────
 
   /**
-   * Remove a requirement from a PRD. Fails if any descendant spec AC still references the id
-   * in `requirement_refs`, unless `opts.force`.
+   * Remove a requirement from a PRD. Fails if any spec that is not deleted still references the id in an
+   * AC's `requirement_refs` (BR-692: every such spec is checked, wherever it is filed), unless `opts.force`.
    *
    * @param prdIdOrSlug - PRD document ULID or slug
    * @param reqId - Requirement id to remove (exact match)
@@ -250,14 +250,14 @@ export class RequirementService {
     }
 
     if (opts.force !== true) {
-      const refsResult = await this.gatherDescendantAcRefs(prd.id);
+      const refsResult = await this.gatherSpecAcRefs();
       if (!refsResult.ok) return refsResult;
       if (refsResult.value.has(reqId)) {
         return err({
           code: "VALIDATION_ERROR",
           field: "requirements[].id",
           message:
-            `Cannot remove "${reqId}" — a descendant spec acceptance criterion still references it. ` +
+            `Cannot remove "${reqId}" — a spec acceptance criterion still references it. ` +
             "Pass --force to remove anyway (the AC ref keeps its value and becomes dangling).",
           value: reqId,
         });
@@ -312,9 +312,12 @@ export class RequirementService {
     return ok(doc);
   }
 
-  /** Every `requirement_refs` id declared across a PRD's descendant specs' ACs. */
-  private async gatherDescendantAcRefs(prdId: DocId): Promise<Result<Set<string>, LoreError>> {
-    const specsResult = await this.store.findMany({ parent_id: prdId, type: "spec" });
+  /**
+   * Every `requirement_refs` id declared across the ACs of EVERY spec that is not deleted, whatever its
+   * status and wherever it is filed (BR-692). A spec has no parent, so no PRD owns a subset of them.
+   */
+  private async gatherSpecAcRefs(): Promise<Result<Set<string>, LoreError>> {
+    const specsResult = await this.store.findMany({ type: "spec" });
     if (!specsResult.ok) return specsResult;
     const refs = new Set<string>();
     for (const spec of specsResult.value) {

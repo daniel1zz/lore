@@ -32,6 +32,9 @@ import {
   NO_ACCEPTANCE_CRITERIA_REASON,
   AC_COUNT_FIELD,
   DEFAULT_MIN_ACS,
+  specCitesLiveRulePredicate,
+  SPEC_CITES_NO_LIVE_RULE_REASON,
+  SPEC_CITATION_FIELD,
 } from "../../../src/service/gate-predicates.js";
 
 // Amendment A (task-t3-domain-doc-sync-requires-attribution-to-the-closing-
@@ -584,5 +587,31 @@ describe("gate-predicates", () => {
       });
       expect(acCountMeetsFloor(1, featureProfile)).toEqual({ ok: true });
     });
+  });
+});
+
+// ─── specCitesLiveRulePredicate (BR-1007, issue #137) ───────────────────────────
+
+describe("specCitesLiveRulePredicate — spec-promote's citation parity predicate", () => {
+  it("HAPPY: a measured `true` passes", () => {
+    expect(specCitesLiveRulePredicate(true)).toEqual({ ok: true });
+  });
+
+  it("NEGATIVE: a measured `false` fails with the dedicated reason and field", () => {
+    expect(specCitesLiveRulePredicate(false)).toEqual({
+      ok: false,
+      reason: SPEC_CITES_NO_LIVE_RULE_REASON,
+      field: SPEC_CITATION_FIELD,
+    });
+  });
+
+  it("BOUNDARY: `undefined` (the caller did not measure) is NOT evaluated — passes, and is distinct from `false`", () => {
+    expect(specCitesLiveRulePredicate(undefined)).toEqual({ ok: true });
+    expect(specCitesLiveRulePredicate(undefined)).not.toEqual(specCitesLiveRulePredicate(false));
+  });
+
+  it("REGRESSION: the failure reason/field are the stable machine-readable literals", () => {
+    expect(SPEC_CITES_NO_LIVE_RULE_REASON).toBe("SPEC_CITES_NO_LIVE_RULE");
+    expect(SPEC_CITATION_FIELD).toBe("acceptance-criteria-cites");
   });
 });

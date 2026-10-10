@@ -146,6 +146,44 @@ describe("checkpointRegistry", () => {
   describe("spec-promote checkpoint", () => {
     const checkpoint = checkpointRegistry["spec-promote"]!;
 
+    // BR-1007 / issue #137 — the pre-flight agrees with the approval about an uncited spec
+    describe("BR-1007 citation predicate", () => {
+      const ac = { id: "AC-1", statement: "x holds within 5 seconds", verify: { mode: "human" as const } };
+      const base = { acceptanceCriteriaCount: 1, acceptanceCriteria: [ac], specIdOrSlug: "spec-x", specKind: "feature" as const };
+
+      it("NEGATIVE: specCitesLiveRule=false blocks, and feed() names the spec and `lore ac cite`", () => {
+        const ctx: GateContext = { ...base, specCitesLiveRule: false };
+        const results = checkpoint.check(ctx);
+        expect(isCheckpointBlocked(results)).toBe(true);
+        const failures = selectFailures(results);
+        expect(failures).toHaveLength(1);
+        const text = checkpoint.feed(ctx, failures);
+        expect(text).toContain('spec "spec-x" cites no live business or architecture rule');
+        expect(text).toContain("lore ac cite");
+      });
+
+      it("HAPPY: specCitesLiveRule=true adds a passing result and no failure", () => {
+        const results = checkpoint.check({ ...base, specCitesLiveRule: true });
+        expect(isCheckpointBlocked(results)).toBe(false);
+      });
+
+      it("BOUNDARY: an absent specCitesLiveRule is not evaluated — no extra result (service paths enforce BR-1007 themselves)", () => {
+        const absent = checkpoint.check(base);
+        const measured = checkpoint.check({ ...base, specCitesLiveRule: true });
+        expect(measured).toHaveLength(absent.length + 1);
+      });
+
+      it("REGRESSION: uncited AND zero criteria — feed() keeps the AC-count message and appends the citation refusal", () => {
+        const ctx: GateContext = { specCitesLiveRule: false, acceptanceCriteriaCount: 0, specIdOrSlug: "spec-y", specKind: "feature" };
+        const failures = selectFailures(checkpoint.check(ctx));
+        expect(failures).toHaveLength(2);
+        const text = checkpoint.feed(ctx, failures);
+        expect(text).toContain("no structured acceptance criteria");
+        expect(text).toContain("lore ac cite");
+      });
+    });
+
+
     // HAPPY
     it("check() passes when at least one acceptance criterion is declared", () => {
       const ctx: GateContext = { acceptanceCriteriaCount: 1, specIdOrSlug: "spec-x" };

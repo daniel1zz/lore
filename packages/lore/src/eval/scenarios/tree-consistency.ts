@@ -3,7 +3,8 @@
  *
  * Validates the Lore corpus tree against three structural invariants:
  *   1. No orphan docs — every non-root doc must have a parent_id pointing
- *      to an existing, non-deleted document.
+ *      to an existing, non-deleted document. A parentless type (spec, BR-2) is
+ *      exempt: no parent is its legal state, and a parent on one is invalid (3).
  *   2. No cycles — no parent chain may contain a cycle.
  *   3. No invalid parent types — every child's parent must satisfy
  *      PARENT_TYPE_CONTRACT (doc-type-rules.ts).

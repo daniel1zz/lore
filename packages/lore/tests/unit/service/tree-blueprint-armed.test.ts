@@ -167,7 +167,7 @@ describe("repo-root lore.tree.yaml — HAPPY", () => {
     const svc = new TreeCheckService(store);
 
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
-    const spec = await seedDoc(store, { id: makeId(), type: "spec", parent_id: prd.id });
+    const spec = await seedDoc(store, { id: makeId(), type: "spec" });
     const plan = await seedDoc(store, { id: makeId(), type: "plan", parent_id: spec.id });
     await seedDoc(store, { id: makeId(), type: "task", parent_id: plan.id });
     await seedDoc(store, { id: makeId(), type: "knowledge", parent_id: plan.id });
@@ -193,7 +193,7 @@ describe("repo-root lore.tree.yaml — HAPPY", () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
-    await seedDoc(store, { id: makeId(), type: "spec", parent_id: prd.id });
+    await seedDoc(store, { id: makeId(), type: "spec" });
 
     const result = await svc.checkTree(blueprint);
     expect(result.ok).toBe(true);
@@ -226,7 +226,7 @@ describe("repo-root lore.tree.yaml — BOUNDARY (missing)", () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
-    await seedDoc(store, { id: makeId(), type: "spec", parent_id: prd.id });
+    await seedDoc(store, { id: makeId(), type: "spec" });
 
     const result = await svc.checkTree(blueprint);
     expect(result.ok).toBe(true);
@@ -239,7 +239,23 @@ describe("repo-root lore.tree.yaml — BOUNDARY (missing)", () => {
 // ─── NEGATIVE — misplaced doc against the real blueprint's topology ───────
 
 describe("repo-root lore.tree.yaml — NEGATIVE (misplaced)", () => {
-  it("AC-2.NEG-01: a spec parented under a plan (blueprint says spec lives under prd) → misplaced drift, non-conformant", async () => {
+  it("AC-2.NEG-00: a spec parented directly under the prd is misplaced — the blueprint's spec slot is \"no parent\" (BR-2, BR-400)", async () => {
+    // re-baseline: the repo blueprint still DRAWS spec under prd, but a spec takes no parent, so a
+    // spec that carries the prd as its parent is the defect, not the conformant shape.
+    const store = new InMemoryStore();
+    const svc = new TreeCheckService(store);
+    const prd = await seedDoc(store, { id: makeId(), type: "prd" });
+    const parentedSpec = await seedDoc(store, { id: makeId(), type: "spec", parent_id: prd.id });
+
+    const result = await svc.checkTree(blueprint);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.consistent).toBe(false);
+    const misplaced = result.value.drifts.filter((d) => d.kind === "misplaced");
+    expect(misplaced.map((d) => d.actual?.id)).toEqual([parentedSpec.id]);
+  });
+
+  it("AC-2.NEG-01: a spec parented under a plan → misplaced drift, non-conformant", async () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
@@ -263,7 +279,7 @@ describe("repo-root lore.tree.yaml — NEGATIVE (misplaced)", () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
-    const spec = await seedDoc(store, { id: makeId(), type: "spec", parent_id: prd.id });
+    const spec = await seedDoc(store, { id: makeId(), type: "spec" });
     const plan = await seedDoc(store, { id: makeId(), type: "plan", parent_id: spec.id });
     const task = await seedDoc(store, { id: makeId(), type: "task", parent_id: plan.id });
     const orphanKnowledge = await seedDoc(store, {
@@ -292,7 +308,7 @@ describe("repo-root lore.tree.yaml — NEGATIVE (misplaced)", () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
     const prd = await seedDoc(store, { id: makeId(), type: "prd" });
-    const spec = await seedDoc(store, { id: makeId(), type: "spec", parent_id: prd.id });
+    const spec = await seedDoc(store, { id: makeId(), type: "spec" });
     const parentKnowledge = await seedDoc(store, {
       id: makeId(),
       type: "knowledge",
