@@ -17,6 +17,7 @@ import type {
   LinkType,
   ReviewJudgment,
   ReviewJudgmentKind,
+  RuleIdPrefix,
   RuleLifecycle,
   SearchHit,
   Slug,
@@ -259,8 +260,9 @@ export interface TraceZeroHitListOpts {
 // ─── Rule registry (migration-013, spec C2) ────────────────────────────────
 
 /**
- * One row of the permanent baseline rule-id registry. `id` is `"BR-<n>"`;
- * `n` is UNIQUE, strictly increasing and never reissued — rows are never
+ * One row of the permanent baseline rule-id registry. `id` is `"<prefix>-<n>"` with prefix
+ * `BR` (business rule), `AS` (architecture standard rule) or `AD` (architecture debt entry);
+ * `n` is UNIQUE per prefix, strictly increasing within it and never reissued — rows are never
  * deleted, so an id stays burned after its rule is deprecated, retired or its
  * leaf is soft-deleted.
  */
@@ -705,8 +707,8 @@ export interface StoreInterface {
   // ── Rule registry (migration-013, spec C2) ─────────────────────────────
 
   /**
-   * Allocate the next permanent rule id AND write it into the leaf in ONE
-   * write transaction: `n = COALESCE(MAX(n),0)+1` (read INSIDE the
+   * Allocate the next permanent rule id of family `prefix` AND write it into the leaf in ONE
+   * write transaction: `n = COALESCE(MAX(n),0)+1` over that prefix's rows (read INSIDE the
    * transaction), insert the registry row, CAS-update the leaf's `extra` to
    * `buildExtra(id)` with `version = expectedVersion + 1`, and insert the
    * matching `action: "update"` version row.
@@ -717,6 +719,8 @@ export interface StoreInterface {
    * @param expectedVersion - CAS guard; mismatch → `STALE_VERSION`.
    * @param buildExtra - Pure builder of the leaf's new `extra` given the allocated id.
    * @param actor - Recorded as `allocated_by` and the version row's `created_by`.
+   * @param prefix - The id family (`BR` business leaf, `AS` architecture standard, `AD` debt registry);
+   *   each family numbers from 1 independently (migration-015). Defaults to `BR`, the original family.
    * @returns `{ ruleId, doc }` (the updated leaf) or a loud error; never a duplicate id.
    */
   allocateRuleAndUpdateLeaf(
@@ -724,6 +728,7 @@ export interface StoreInterface {
     expectedVersion: number,
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
+    prefix?: RuleIdPrefix,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
 
   /**

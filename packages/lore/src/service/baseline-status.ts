@@ -17,7 +17,7 @@
  * Source: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C7.
  */
 
-import { ok, lintRuleStatement } from "@lore/core";
+import { ok, lintRuleStatement, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, LoreError, Result, RuleLifecycle } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import {
@@ -119,20 +119,23 @@ export async function findBaselineIntegrityFindings(
 
   const live = docs.value.filter((d) => d.deleted_at === null);
   const liveLeaves = live.filter((d) => d.extra["node"] === "leaf");
+  // Every live node that may hold rules: business leaves (BR) AND architecture standards / debt registries
+  // (AS / AD). Registry<->node consistency covers all three families; the business measures below do not.
+  const ruleNodes = live.filter((d) => ruleIdPrefixOfNode(d.extra) !== undefined);
   const liveById = new Map(live.map((d) => [d.id, d]));
   const deletedIds = new Set(docs.value.filter((d) => d.deleted_at !== null).map((d) => d.id));
   const rowById = new Map(registry.value.map((row) => [row.id, row]));
   const findings: BaselineFinding[] = [];
 
-  const slugOf = new Map(liveLeaves.map((l) => [l.id, l.slug]));
-  for (const { ruleId, leafId } of findUnregisteredRuleIds(liveLeaves, registry.value)) {
+  const slugOf = new Map(ruleNodes.map((l) => [l.id, l.slug]));
+  for (const { ruleId, leafId } of findUnregisteredRuleIds(ruleNodes, registry.value)) {
     findings.push({
       kind: "unregistered-rule",
       doc: slugOf.get(leafId) ?? leafId,
       detail: `${ruleId} is listed on the leaf but the registry never allocated it`,
     });
   }
-  for (const leaf of liveLeaves) {
+  for (const leaf of ruleNodes) {
     for (const rule of ruleRecordsOf(leaf)) {
       const row = rowById.get(rule.id);
       if (row !== undefined && row.leaf_doc_id !== leaf.id) {
@@ -157,15 +160,15 @@ export async function findBaselineIntegrityFindings(
   }
 
   for (const doc of live) {
-    if (doc.extra["node"] !== "leaf" && ruleRecordsOf(doc).length > 0) {
+    if (ruleIdPrefixOfNode(doc.extra) === undefined && ruleRecordsOf(doc).length > 0) {
       findings.push({
         kind: "rule-on-non-leaf",
         doc: doc.slug,
-        detail: `${String(doc.extra["node"] ?? "?")} node carries ${ruleRecordsOf(doc).length} rule(s); rules belong on leaves only`,
+        detail: `${String(doc.extra["node"] ?? "?")} node carries ${ruleRecordsOf(doc).length} rule(s); rules belong on business leaves, architecture standards and debt registries only`,
       });
     }
   }
-  const known = collectKnownRuleIds(liveLeaves, registry.value);
+  const known = collectKnownRuleIds(ruleNodes, registry.value);
   for (const leaf of liveLeaves) {
     const deps = leaf.extra["depends_on"];
     if (!Array.isArray(deps)) continue;
@@ -256,7 +259,9 @@ export async function computeBaselineStatus(
   const exemptions = await new AcExemptionService(store).counts({ now });
   if (!exemptions.ok) return exemptions;
 
-  const index = buildRuleIndex(leaves);
+  // reason: a criterion may cite an AS-n (BR-980), so the citation judgement (dangling / inactive) indexes
+  // every rule-holding node; the rules_* MEASURES below iterate the business `leaves` only (BR-979).
+  const index = buildRuleIndex(baselineDocs.value.filter((d) => ruleIdPrefixOfNode(d.extra) !== undefined));
   const citations = countCitations(specs.value, index);
   const cited = new Set<string>();
   for (const spec of specs.value) {

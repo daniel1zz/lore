@@ -54,6 +54,7 @@ import { MIGRATION_011_SQL } from "../../../src/store/migrations/migration-011.j
 import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "../../../src/store/migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "../../../src/store/migrations/migration-014.js";
+import { MIGRATION_015_SQL } from "../../../src/store/migrations/migration-015.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -237,6 +238,7 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   // the remote keeps the indexes in step like any other store. Mirrored here
   // for the user_version parity guard below.
   await client.executeMultiple(MIGRATION_014_SQL);
+  await client.executeMultiple(MIGRATION_015_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

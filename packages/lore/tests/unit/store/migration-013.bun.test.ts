@@ -228,7 +228,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     const { rowids } = await seedSchema12();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(14);
+    expect(userVersion(db)).toBe(15);
 
     // docs + rowids (external-content FTS depends on rowid stability)
     const after = db.query("SELECT rowid AS rid, id FROM docs").all() as { rid: number; id: string }[];
@@ -298,6 +298,8 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     const cols = (db.query("PRAGMA table_info(rule_registry)").all() as { name: string; notnull: number; pk: number }[]).map((c) => [c.name, c.notnull, c.pk]);
     expect(cols).toEqual([
       ["id", 0, 1],
+      // migration-015 adds `prefix` (BR|AS|AD) and moves uniqueness from `n` to (prefix, n)
+      ["prefix", 1, 0],
       ["n", 1, 0],
       ["leaf_doc_id", 1, 0],
       ["allocated_at", 1, 0],
@@ -318,7 +320,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     raw.close();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(14);
+    expect(userVersion(db)).toBe(15);
     expect((db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys).toBe(1);
     expect(db.query("SELECT name FROM sqlite_master WHERE name = 'docs_new'").all()).toEqual([]);
     store.close();
@@ -337,7 +339,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     expect(preserved.ok && preserved.value?.id).toBe("01HM013SPEC0000000000001");
     turso.close();
     const raw = new Database(path);
-    expect(userVersion(raw)).toBe(14);
+    expect(userVersion(raw)).toBe(15);
     expect(namesOf(raw, "index", "docs")).toEqual(EXPECTED_DOC_INDEXES);
     expect(namesOf(raw, "trigger", "docs")).toEqual(EXPECTED_DOC_TRIGGERS_HEAD);
     raw.close();
@@ -350,7 +352,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     first.close();
 
     const second = new SQLiteStore(path);
-    expect(userVersion(second.getDatabase())).toBe(14);
+    expect(userVersion(second.getDatabase())).toBe(15);
     second.close();
 
     const raw = new Database(path);

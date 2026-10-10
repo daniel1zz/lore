@@ -30,6 +30,68 @@
  * Side-effect class: schema DDL + data backfill (executed once per store).
  */
 
+/**
+ * The four `docs_idx_*` triggers (spec/baseline insert+update), shared so a later migration that
+ * recreates `rule_registry` or `docs` re-creates them from ONE definition (migration-015 does).
+ * Contains the `CREATE TRIGGER` statements only — the caller owns the surrounding `DROP TRIGGER IF EXISTS`.
+ */
+export const DOCS_IDX_TRIGGERS_SQL = `CREATE TRIGGER docs_idx_spec_ai AFTER INSERT ON docs WHEN new.type = 'spec' AND new.deleted_at IS NULL
+BEGIN
+  INSERT OR IGNORE INTO ac_cites (doc_id, ac_id, rule_id)
+    SELECT new.id, json_extract(a.value, '$.id'), c.value
+    FROM json_each(CASE WHEN json_type(new.extra, '$.acceptance_criteria') = 'array' THEN new.extra ELSE '{}' END, '$.acceptance_criteria') AS a,
+         json_each(CASE WHEN a.type = 'object' AND json_type(a.value, '$.cites') = 'array' THEN a.value ELSE '{}' END, '$.cites') AS c
+    WHERE a.type = 'object' AND json_type(a.value, '$.id') = 'text' AND c.type = 'text';
+END;
+
+CREATE TRIGGER docs_idx_spec_au AFTER UPDATE ON docs WHEN new.type = 'spec' OR old.type = 'spec'
+BEGIN
+  DELETE FROM ac_cites WHERE doc_id = new.id;
+  INSERT OR IGNORE INTO ac_cites (doc_id, ac_id, rule_id)
+    SELECT new.id, json_extract(a.value, '$.id'), c.value
+    FROM json_each(CASE WHEN json_type(new.extra, '$.acceptance_criteria') = 'array' THEN new.extra ELSE '{}' END, '$.acceptance_criteria') AS a,
+         json_each(CASE WHEN a.type = 'object' AND json_type(a.value, '$.cites') = 'array' THEN a.value ELSE '{}' END, '$.cites') AS c
+    WHERE new.type = 'spec' AND new.deleted_at IS NULL
+      AND a.type = 'object' AND json_type(a.value, '$.id') = 'text' AND c.type = 'text';
+END;
+
+CREATE TRIGGER docs_idx_baseline_ai AFTER INSERT ON docs WHEN new.type = 'baseline'
+BEGIN
+  INSERT OR IGNORE INTO rule_depends (leaf_id, rule_id)
+    SELECT new.id, j.value
+    FROM json_each(CASE WHEN json_type(new.extra, '$.depends_on') = 'array' THEN new.extra ELSE '{}' END, '$.depends_on') AS j
+    WHERE new.deleted_at IS NULL AND j.type = 'text';
+  UPDATE rule_registry SET
+    version = new.version,
+    lifecycle = COALESCE((
+      SELECT json_extract(r.value, '$.lifecycle')
+      FROM json_each(CASE WHEN json_type(new.extra, '$.rules') = 'array' THEN new.extra ELSE '{}' END, '$.rules') AS r
+      WHERE r.type = 'object' AND json_extract(r.value, '$.id') = rule_registry.id
+        AND json_extract(r.value, '$.lifecycle') IN ('live','deprecated','retired')
+      LIMIT 1), rule_registry.lifecycle)
+  WHERE leaf_doc_id = new.id;
+END;
+
+CREATE TRIGGER docs_idx_baseline_au AFTER UPDATE ON docs WHEN new.type = 'baseline' OR old.type = 'baseline'
+BEGIN
+  DELETE FROM rule_depends WHERE leaf_id = new.id;
+  INSERT OR IGNORE INTO rule_depends (leaf_id, rule_id)
+    SELECT new.id, j.value
+    FROM json_each(CASE WHEN json_type(new.extra, '$.depends_on') = 'array' THEN new.extra ELSE '{}' END, '$.depends_on') AS j
+    WHERE new.type = 'baseline' AND new.deleted_at IS NULL AND j.type = 'text';
+  UPDATE rule_registry SET
+    version = new.version,
+    lifecycle = COALESCE((
+      SELECT json_extract(r.value, '$.lifecycle')
+      FROM json_each(CASE WHEN json_type(new.extra, '$.rules') = 'array' THEN new.extra ELSE '{}' END, '$.rules') AS r
+      WHERE r.type = 'object' AND json_extract(r.value, '$.id') = rule_registry.id
+        AND json_extract(r.value, '$.lifecycle') IN ('live','deprecated','retired')
+      LIMIT 1), rule_registry.lifecycle)
+  WHERE leaf_doc_id = new.id AND new.type = 'baseline';
+END;
+
+`;
+
 export const MIGRATION_014_SQL = `-- Migration: 014-registry-lifecycle-version-and-citation-indexes
 -- Schema version: 14
 -- See migration-014.ts's module JSDoc for the invariants this depends on.
@@ -116,62 +178,7 @@ INSERT OR IGNORE INTO rule_depends (leaf_id, rule_id)
   WHERE d.type = 'baseline' AND d.deleted_at IS NULL AND j.type = 'text';
 
 -- (4) same-transaction writers: triggers on docs --------------------------------------------------
-CREATE TRIGGER docs_idx_spec_ai AFTER INSERT ON docs WHEN new.type = 'spec' AND new.deleted_at IS NULL
-BEGIN
-  INSERT OR IGNORE INTO ac_cites (doc_id, ac_id, rule_id)
-    SELECT new.id, json_extract(a.value, '$.id'), c.value
-    FROM json_each(CASE WHEN json_type(new.extra, '$.acceptance_criteria') = 'array' THEN new.extra ELSE '{}' END, '$.acceptance_criteria') AS a,
-         json_each(CASE WHEN a.type = 'object' AND json_type(a.value, '$.cites') = 'array' THEN a.value ELSE '{}' END, '$.cites') AS c
-    WHERE a.type = 'object' AND json_type(a.value, '$.id') = 'text' AND c.type = 'text';
-END;
-
-CREATE TRIGGER docs_idx_spec_au AFTER UPDATE ON docs WHEN new.type = 'spec' OR old.type = 'spec'
-BEGIN
-  DELETE FROM ac_cites WHERE doc_id = new.id;
-  INSERT OR IGNORE INTO ac_cites (doc_id, ac_id, rule_id)
-    SELECT new.id, json_extract(a.value, '$.id'), c.value
-    FROM json_each(CASE WHEN json_type(new.extra, '$.acceptance_criteria') = 'array' THEN new.extra ELSE '{}' END, '$.acceptance_criteria') AS a,
-         json_each(CASE WHEN a.type = 'object' AND json_type(a.value, '$.cites') = 'array' THEN a.value ELSE '{}' END, '$.cites') AS c
-    WHERE new.type = 'spec' AND new.deleted_at IS NULL
-      AND a.type = 'object' AND json_type(a.value, '$.id') = 'text' AND c.type = 'text';
-END;
-
-CREATE TRIGGER docs_idx_baseline_ai AFTER INSERT ON docs WHEN new.type = 'baseline'
-BEGIN
-  INSERT OR IGNORE INTO rule_depends (leaf_id, rule_id)
-    SELECT new.id, j.value
-    FROM json_each(CASE WHEN json_type(new.extra, '$.depends_on') = 'array' THEN new.extra ELSE '{}' END, '$.depends_on') AS j
-    WHERE new.deleted_at IS NULL AND j.type = 'text';
-  UPDATE rule_registry SET
-    version = new.version,
-    lifecycle = COALESCE((
-      SELECT json_extract(r.value, '$.lifecycle')
-      FROM json_each(CASE WHEN json_type(new.extra, '$.rules') = 'array' THEN new.extra ELSE '{}' END, '$.rules') AS r
-      WHERE r.type = 'object' AND json_extract(r.value, '$.id') = rule_registry.id
-        AND json_extract(r.value, '$.lifecycle') IN ('live','deprecated','retired')
-      LIMIT 1), rule_registry.lifecycle)
-  WHERE leaf_doc_id = new.id;
-END;
-
-CREATE TRIGGER docs_idx_baseline_au AFTER UPDATE ON docs WHEN new.type = 'baseline' OR old.type = 'baseline'
-BEGIN
-  DELETE FROM rule_depends WHERE leaf_id = new.id;
-  INSERT OR IGNORE INTO rule_depends (leaf_id, rule_id)
-    SELECT new.id, j.value
-    FROM json_each(CASE WHEN json_type(new.extra, '$.depends_on') = 'array' THEN new.extra ELSE '{}' END, '$.depends_on') AS j
-    WHERE new.type = 'baseline' AND new.deleted_at IS NULL AND j.type = 'text';
-  UPDATE rule_registry SET
-    version = new.version,
-    lifecycle = COALESCE((
-      SELECT json_extract(r.value, '$.lifecycle')
-      FROM json_each(CASE WHEN json_type(new.extra, '$.rules') = 'array' THEN new.extra ELSE '{}' END, '$.rules') AS r
-      WHERE r.type = 'object' AND json_extract(r.value, '$.id') = rule_registry.id
-        AND json_extract(r.value, '$.lifecycle') IN ('live','deprecated','retired')
-      LIMIT 1), rule_registry.lifecycle)
-  WHERE leaf_doc_id = new.id AND new.type = 'baseline';
-END;
-
-PRAGMA user_version = 14;
+${DOCS_IDX_TRIGGERS_SQL}PRAGMA user_version = 14;
 
 COMMIT;
 `;

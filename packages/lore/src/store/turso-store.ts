@@ -40,6 +40,8 @@ import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
+import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
+import type { RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
   AuditEntry,
@@ -675,6 +677,12 @@ export class TursoStore implements StoreInterface {
         // ac_exemptions + docs_idx_* triggers) is one BEGIN/COMMIT string, idempotent on re-run
         // (rebuild-from-docs + DROP/CREATE TRIGGER) — `executeMultiple`, same as 012/013.
         await this.client.executeMultiple(MIGRATION_014_SQL);
+      }
+
+      if (currentVersion < 15) {
+        // reason: migration-015 (rule_registry prefix + UNIQUE(prefix, n), triggers re-created) is one
+        // BEGIN/COMMIT string rebuilt via rule_registry_new — `executeMultiple`, same as 012-014.
+        await this.client.executeMultiple(MIGRATION_015_SQL);
       }
     })();
 
@@ -2432,9 +2440,10 @@ export class TursoStore implements StoreInterface {
     expectedVersion: number,
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
+    prefix: RuleIdPrefix = "BR",
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     return this.serializeRuleWrite(() =>
-      this.allocateRuleAndUpdateLeafSerialized(leafId, expectedVersion, buildExtra, actor),
+      this.allocateRuleAndUpdateLeafSerialized(leafId, expectedVersion, buildExtra, actor, prefix),
     );
   }
 
@@ -2443,6 +2452,7 @@ export class TursoStore implements StoreInterface {
     expectedVersion: number,
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
+    prefix: RuleIdPrefix,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     let tx: Transaction;
     try {
@@ -2452,9 +2462,12 @@ export class TursoStore implements StoreInterface {
       return wrapStoreError(e);
     }
     try {
-      const nextRs = await tx.execute("SELECT COALESCE(MAX(n), 0) + 1 AS next_n FROM rule_registry");
+      const nextRs = await tx.execute({
+        sql: "SELECT COALESCE(MAX(n), 0) + 1 AS next_n FROM rule_registry WHERE prefix = ?",
+        args: [prefix],
+      });
       const nextN = rowNum(nextRs.rows[0] as Row, "next_n");
-      const ruleId = `BR-${nextN}`;
+      const ruleId = `${prefix}-${nextN}`;
       const nowIso = new Date().toISOString();
       const leaf = await this.applyRuleLeafPatchTx(
         tx,
@@ -2469,9 +2482,10 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         // reason: the docs_idx_baseline_au trigger ran inside the leaf UPDATE BEFORE this row existed,
         // so lifecycle/version are written explicitly (mirrors SQLiteStore.allocateRuleAndUpdateLeaf).
-        sql: "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        sql: "INSERT INTO rule_registry (id, prefix, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         args: [
           ruleId,
+          prefix,
           nextN,
           leafId,
           nowIso,
@@ -2581,7 +2595,7 @@ export class TursoStore implements StoreInterface {
     try {
       await this.ensureReady();
       const rs = await this.client.execute(
-        "SELECT id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version FROM rule_registry ORDER BY n ASC",
+        "SELECT id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version FROM rule_registry ORDER BY n ASC, prefix ASC",
       );
       return ok(
         rs.rows.map((row) => ({

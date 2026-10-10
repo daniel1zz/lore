@@ -5,23 +5,85 @@
  * Purpose: SSOT for the product-baseline tree's typed `extra` (spec
  *   `spec-baseline-slice-1-rules-with-permanent-ids-ac-citations` §C1, §C3).
  * Public surface: `baselineExtraSchema`, `baselineRuleSchema`, `glossaryEntrySchema`,
- *   `BASELINE_RULE_ID_PATTERN`, `validateBaselineParent`, `isLawfulRuleLifecycleTransition`,
- *   `lintRuleStatement`, and their derived types.
- * Invariants: rules only on `node=leaf`; glossary only on root|branch; rule lifecycle only
- *   moves forward (live -> deprecated -> retired, or live -> retired); a retired rule
- *   carries a `retired_note`.
+ *   `BASELINE_RULE_ID_PATTERN` (BR), `STANDARD_RULE_ID_PATTERN` (AS), `DEBT_RULE_ID_PATTERN` (AD),
+ *   `ANY_RULE_ID_PATTERN`, `ruleIdPrefix`, `ruleIdPrefixOfNode`, `isBusinessBaseline`, `isNodeOfTree`,
+ *   `validateBaselineParent`, `isLawfulRuleLifecycleTransition`, `lintRuleStatement`, and their
+ *   derived types.
+ * Invariants: two trees share the `baseline` type (`extra.tree`, absent = business). Business nodes
+ *   are root|branch|leaf, architecture nodes root|section|module-card|standard|debt-registry. Rules
+ *   live on a business `leaf` (ids `BR-n`), an architecture `standard` (`AS-n`) and an architecture
+ *   `debt-registry` (`AD-n`) only; the id family must match the node. Glossary only on a business
+ *   root|branch; rule lifecycle only moves forward (live -> deprecated -> retired, or live ->
+ *   retired); a retired rule carries a `retired_note`. The four-part standard fields
+ *   (current_reality / target_rule / current_exceptions / migration) exist only on `AS-n` rules and
+ *   are all-or-nothing.
  * Side effects: none (pure). ⛔ Browser-safe barrel member — no Node import. The lint's
  *   repo-path check therefore takes an INJECTED `pathExists` predicate; the caller
  *   (service layer) owns the filesystem probe.
  */
 import { z } from "zod";
 
-/** Permanent rule id grammar: `BR-` + positive integer without leading zero. */
+/** Permanent business rule id grammar: `BR-` + positive integer without leading zero. */
 export const BASELINE_RULE_ID_PATTERN = /^BR-[1-9][0-9]*$/;
+/** Architecture standard rule id grammar (`AS-n`). */
+export const STANDARD_RULE_ID_PATTERN = /^AS-[1-9][0-9]*$/;
+/** Architecture debt entry id grammar (`AD-n`). Never citable by a criterion; named only in a standard's current exceptions. */
+export const DEBT_RULE_ID_PATTERN = /^AD-[1-9][0-9]*$/;
+/** Any of the three permanent id families. */
+export const ANY_RULE_ID_PATTERN = /^(BR|AS|AD)-[1-9][0-9]*$/;
 
-export const BASELINE_NODE_KINDS = ["root", "branch", "leaf"] as const;
+/** The three id families: business rule, architecture standard rule, architecture debt entry. */
+export const RULE_ID_PREFIXES = ["BR", "AS", "AD"] as const;
+export type RuleIdPrefix = (typeof RULE_ID_PREFIXES)[number];
+
+/** The family of a well-formed rule id, or `undefined` when `id` is none of BR-n / AS-n / AD-n. */
+export function ruleIdPrefix(id: string): RuleIdPrefix | undefined {
+  if (BASELINE_RULE_ID_PATTERN.test(id)) return "BR";
+  if (STANDARD_RULE_ID_PATTERN.test(id)) return "AS";
+  if (DEBT_RULE_ID_PATTERN.test(id)) return "AD";
+  return undefined;
+}
+
+export const BASELINE_TREES = ["business", "architecture"] as const;
+export const baselineTreeSchema = z.enum(BASELINE_TREES);
+export type BaselineTree = z.infer<typeof baselineTreeSchema>;
+
+export const BUSINESS_NODE_KINDS = ["root", "branch", "leaf"] as const;
+export const ARCHITECTURE_NODE_KINDS = ["root", "section", "module-card", "standard", "debt-registry"] as const;
+/** Every node kind of either tree (`root` is shared). Whether a kind belongs to a tree is {@link isNodeOfTree}. */
+export const BASELINE_NODE_KINDS = [
+  "root",
+  "branch",
+  "leaf",
+  "section",
+  "module-card",
+  "standard",
+  "debt-registry",
+] as const;
 export const baselineNodeSchema = z.enum(BASELINE_NODE_KINDS);
 export type BaselineNode = z.infer<typeof baselineNodeSchema>;
+
+/** True when `node` is a kind of `tree` (absent tree = business). */
+export function isNodeOfTree(tree: BaselineTree | undefined, node: string): boolean {
+  const kinds: readonly string[] = tree === "architecture" ? ARCHITECTURE_NODE_KINDS : BUSINESS_NODE_KINDS;
+  return kinds.includes(node);
+}
+
+/** True for a business-tree baseline `extra` (absent `tree` means business). */
+export function isBusinessBaseline(extra: { tree?: string | undefined } | undefined): boolean {
+  return extra?.tree === undefined || extra.tree === "business";
+}
+
+/**
+ * The id family a node holds rules in: business leaf -> BR, architecture standard -> AS,
+ * architecture debt-registry -> AD; `undefined` for every node that holds no rules.
+ */
+export function ruleIdPrefixOfNode(extra: { tree?: string | undefined; node?: string | undefined }): RuleIdPrefix | undefined {
+  if (isBusinessBaseline(extra)) return extra.node === "leaf" ? "BR" : undefined;
+  if (extra.node === "standard") return "AS";
+  if (extra.node === "debt-registry") return "AD";
+  return undefined;
+}
 
 export const RULE_CONFIDENCES = ["established", "undecided", "unconfirmed", "observed"] as const;
 export const RULE_ENFORCEMENTS = ["guaranteed", "both", "prompt-only"] as const;
@@ -31,15 +93,46 @@ export type RuleLifecycle = (typeof RULE_LIFECYCLES)[number];
 /** One behavioural rule of a baseline leaf. `observed` = what the system does today, intent unconfirmed (BL-12). */
 export const baselineRuleSchema = z
   .object({
-    id: z.string().regex(BASELINE_RULE_ID_PATTERN, "rule id must match BR-<n> (n >= 1, no leading zero)"),
+    id: z.string().regex(ANY_RULE_ID_PATTERN, "rule id must match BR-<n>, AS-<n> or AD-<n> (n >= 1, no leading zero)"),
     statement: z.string().min(1).max(500),
     confidence: z.enum(RULE_CONFIDENCES),
     enforced_by: z.enum(RULE_ENFORCEMENTS),
     examples: z.array(z.string().max(300)).min(1).max(3),
     lifecycle: z.enum(RULE_LIFECYCLES),
     retired_note: z.string().min(1).optional(),
+    /** Four-part standard (AS-n only; all four or none): what the code does today. */
+    current_reality: z.string().min(1).max(1000).optional(),
+    /** Four-part standard: the rule the code is migrating toward. */
+    target_rule: z.string().min(1).max(1000).optional(),
+    /** Four-part standard: the debt entries (`AD-n`) that still violate it; may be empty. */
+    current_exceptions: z
+      .array(z.string().regex(DEBT_RULE_ID_PATTERN, "current_exceptions[] must match AD-<n>"))
+      .optional(),
+    /** Four-part standard: how the exceptions get closed. */
+    migration: z.string().min(1).max(1000).optional(),
   })
   .superRefine((rule, ctx) => {
+    const fourPart = {
+      current_reality: rule.current_reality,
+      target_rule: rule.target_rule,
+      current_exceptions: rule.current_exceptions,
+      migration: rule.migration,
+    };
+    const present = Object.entries(fourPart).filter(([, value]) => value !== undefined);
+    const missing = Object.entries(fourPart).filter(([, value]) => value === undefined);
+    if (present.length > 0 && !STANDARD_RULE_ID_PATTERN.test(rule.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${present.map(([key]) => key).join(", ")} exist only on an AS-<n> standard rule (got ${rule.id})`,
+        path: [present[0]?.[0] ?? "id"],
+      });
+    } else if (present.length > 0 && missing.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `a four-part standard needs all of current_reality, target_rule, current_exceptions, migration (missing ${missing.map(([key]) => key).join(", ")})`,
+        path: [missing[0]?.[0] ?? "current_reality"],
+      });
+    }
     if (rule.lifecycle === "retired" && rule.retired_note === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -64,6 +157,8 @@ export type GlossaryEntry = z.infer<typeof glossaryEntrySchema>;
  */
 export const baselineExtraSchema = z
   .object({
+    /** Which tree this node belongs to; ABSENT means business (every pre-existing doc stays valid). */
+    tree: baselineTreeSchema.optional(),
     node: baselineNodeSchema,
     label: z.string().min(1).optional(),
     rules: z.array(baselineRuleSchema).optional(),
@@ -84,22 +179,38 @@ export const baselineExtraSchema = z
         });
       }
     }
-    if (extra.rules !== undefined && extra.node !== "leaf") {
+    if (!isNodeOfTree(extra.tree, extra.node)) {
+      const kinds = extra.tree === "architecture" ? ARCHITECTURE_NODE_KINDS : BUSINESS_NODE_KINDS;
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `rules are allowed only on node=leaf (got node=${extra.node})`,
+        message: `node=${extra.node} does not belong to tree=${extra.tree ?? "business"} (allowed: ${kinds.join("|")})`,
+        path: ["node"],
+      });
+    }
+    const family = ruleIdPrefixOfNode(extra);
+    if (extra.rules !== undefined && family === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `rules are allowed only on a business leaf, an architecture standard or debt-registry (got tree=${extra.tree ?? "business"} node=${extra.node})`,
         path: ["rules"],
       });
     }
-    if (extra.glossary !== undefined && extra.node === "leaf") {
+    if (extra.glossary !== undefined && !(isBusinessBaseline(extra) && extra.node !== "leaf")) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "glossary is allowed only on node=root|branch",
+        message: "glossary is allowed only on a business node=root|branch",
         path: ["glossary"],
       });
     }
     const seen = new Set<string>();
     (extra.rules ?? []).forEach((rule, index) => {
+      if (family !== undefined && ruleIdPrefix(rule.id) !== family) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `rule ${rule.id} does not belong on this node (a ${extra.tree ?? "business"} ${extra.node} holds ${family}-<n> ids)`,
+          path: ["rules", index, "id"],
+        });
+      }
       if (seen.has(rule.id)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -112,41 +223,52 @@ export const baselineExtraSchema = z
   });
 export type BaselineExtra = z.infer<typeof baselineExtraSchema>;
 
-/** Minimal parent description the node/parent check needs (`node` only for baseline parents). */
+/** Minimal parent description the node/parent check needs (`node`/`tree` only for baseline parents). */
 export interface BaselineParentRef {
   type: string;
   node?: string;
+  /** The parent's `extra.tree`; absent means business. */
+  tree?: string;
 }
 
 export type BaselineParentVerdict = { ok: true } | { ok: false; reason: string };
 
 /**
- * Check that a baseline doc's `node` kind is consistent with its parent.
- * node=root => parent is a prd; node=branch|leaf => parent is a baseline whose node is root|branch.
+ * Check that a baseline doc's `node` kind is consistent with its parent, per tree.
+ * Business: root => prd parent; branch|leaf => business baseline root|branch.
+ * Architecture: root => prd parent; section => architecture root; module-card|standard|debt-registry
+ * => architecture section. A node never hangs under a parent of the other tree.
  * Cross-entity, so it lives outside the Zod schema (the caller supplies the parent).
  */
 export function validateBaselineParent(
-  extra: { node: string },
+  extra: { node: string; tree?: string },
   parent: BaselineParentRef,
 ): BaselineParentVerdict {
+  const tree = extra.tree === "architecture" ? "architecture" : "business";
   if (extra.node === "root") {
     return parent.type === "prd"
       ? { ok: true }
       : { ok: false, reason: `node=root requires a prd parent (got ${parent.type})` };
   }
-  if (extra.node === "branch" || extra.node === "leaf") {
-    if (parent.type !== "baseline") {
-      return { ok: false, reason: `node=${extra.node} requires a baseline parent (got ${parent.type})` };
-    }
-    if (parent.node !== "root" && parent.node !== "branch") {
-      return {
-        ok: false,
-        reason: `node=${extra.node} requires a parent baseline with node root|branch (got ${parent.node ?? "none"})`,
-      };
-    }
-    return { ok: true };
+  if (!isNodeOfTree(tree, extra.node)) {
+    return { ok: false, reason: `node=${extra.node} does not belong to tree=${tree}` };
   }
-  return { ok: false, reason: `unknown baseline node '${extra.node}'` };
+  if (parent.type !== "baseline") {
+    return { ok: false, reason: `node=${extra.node} requires a baseline parent (got ${parent.type})` };
+  }
+  const parentTree = parent.tree === "architecture" ? "architecture" : "business";
+  if (parentTree !== tree) {
+    return { ok: false, reason: `node=${extra.node} (tree=${tree}) cannot hang under a tree=${parentTree} parent` };
+  }
+  const allowedParents: readonly string[] =
+    tree === "business" ? ["root", "branch"] : extra.node === "section" ? ["root"] : ["section"];
+  if (parent.node === undefined || !allowedParents.includes(parent.node)) {
+    return {
+      ok: false,
+      reason: `node=${extra.node} requires a parent baseline with node ${allowedParents.join("|")} (got ${parent.node ?? "none"})`,
+    };
+  }
+  return { ok: true };
 }
 
 /** Allowed forward moves of a rule's lifecycle. Nothing returns to `live`. */

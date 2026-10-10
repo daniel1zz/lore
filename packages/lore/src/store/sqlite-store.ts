@@ -26,6 +26,7 @@ import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
+import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 // Re-exported here (beside the migration chain it describes) from a
 // bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
 // store/schema-probe.ts's `probeSchemaVersion`, consumed by
@@ -59,6 +60,7 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import type { RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
   AcCiteRow,
@@ -546,6 +548,21 @@ export class SQLiteStore implements StoreInterface {
       // failure only needs ROLLBACK (see migration-014.ts's module JSDoc).
       try {
         this.db.exec(MIGRATION_014_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 15) {
+      // reason: migration-015 (rule_registry rebuilt with prefix + UNIQUE(prefix, n), triggers
+      // re-created) is one BEGIN/COMMIT with no PRAGMA toggles — a failure only needs ROLLBACK.
+      try {
+        this.db.exec(MIGRATION_015_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -2062,6 +2079,7 @@ export class SQLiteStore implements StoreInterface {
     expectedVersion: number,
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
+    prefix: RuleIdPrefix = "BR",
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     try {
       this.db.run("BEGIN IMMEDIATE");
@@ -2070,9 +2088,9 @@ export class SQLiteStore implements StoreInterface {
     }
     try {
       const nextRow = this.db
-        .prepare("SELECT COALESCE(MAX(n), 0) + 1 AS next_n FROM rule_registry")
-        .get() as { next_n: number };
-      const ruleId = `BR-${nextRow.next_n}`;
+        .prepare("SELECT COALESCE(MAX(n), 0) + 1 AS next_n FROM rule_registry WHERE prefix = ?")
+        .get(prefix) as { next_n: number };
+      const ruleId = `${prefix}-${nextRow.next_n}`;
       const nowIso = new Date().toISOString();
       const leaf = this.applyRuleLeafPatchSync(
         { id: leafId, expectedVersion, extra: buildExtra(ruleId) },
@@ -2085,13 +2103,14 @@ export class SQLiteStore implements StoreInterface {
       }
       this.db
         .prepare(
-          "INSERT INTO rule_registry (id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO rule_registry (id, prefix, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         // reason: the docs_idx_baseline_au trigger already ran (inside the leaf UPDATE above) BEFORE
         // this row existed, so lifecycle/version are written explicitly here, in the same transaction.
         // 'live' is the fallback only for a `buildExtra` that does not list the new rule (test stubs).
         .run(
           ruleId,
+          prefix,
           nextRow.next_n,
           leafId,
           nowIso,
@@ -2178,7 +2197,7 @@ export class SQLiteStore implements StoreInterface {
     try {
       const rows = this.db
         .prepare(
-          "SELECT id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version FROM rule_registry ORDER BY n ASC",
+          "SELECT id, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version FROM rule_registry ORDER BY n ASC, prefix ASC",
         )
         .all() as RuleRegistryRow[];
       return ok(rows);

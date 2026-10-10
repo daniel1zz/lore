@@ -222,7 +222,7 @@ export type LoreError =
 export interface AcCiteViolation {
   ac_id?: string;
   rule_id?: string;
-  reason: "uncited" | "missing" | "deprecated" | "retired";
+  reason: "uncited" | "missing" | "deprecated" | "retired" | "debt";
 }
 
 /** What a refused citation write tells the author (spec C4: top 5 candidates, a paste-ready cite line, headroom). */

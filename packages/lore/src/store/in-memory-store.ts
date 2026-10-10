@@ -63,6 +63,7 @@ import {
   buildNonLiveRuleRefusal,
   computeAuditEntryHash,
 } from "./store-shared.js";
+import type { RuleIdPrefix } from "@lore/core";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
 // ─── InMemoryStore ─────────────────────────────────────────────────────────────
@@ -668,9 +669,13 @@ export class InMemoryStore implements StoreInterface {
     expectedVersion: number,
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
+    prefix: RuleIdPrefix = "BR",
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
-    const nextN = this.ruleRegistry.reduce((max, row) => Math.max(max, row.n), 0) + 1;
-    const ruleId = `BR-${nextN}`;
+    const nextN =
+      this.ruleRegistry
+        .filter((row) => row.id.startsWith(`${prefix}-`))
+        .reduce((max, row) => Math.max(max, row.n), 0) + 1;
+    const ruleId = `${prefix}-${nextN}`;
     const nowIso = new Date().toISOString();
     const versionCount = this.versions.length;
     const before = this.docs.get(leafId);
@@ -755,7 +760,7 @@ export class InMemoryStore implements StoreInterface {
   async listRuleRegistry(): Promise<Result<RuleRegistryRow[], LoreError>> {
     return ok(
       [...this.ruleRegistry]
-        .sort((a, b) => a.n - b.n)
+        .sort((a, b) => a.n - b.n || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
         .map((row) => {
           const owner = this.docs.get(row.leaf_doc_id);
           if (owner === undefined) return { ...row };

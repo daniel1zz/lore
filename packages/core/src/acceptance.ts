@@ -82,7 +82,7 @@ import { z } from "zod";
 import { ok, err } from "./errors.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocRecord } from "./types.js";
-import { BASELINE_RULE_ID_PATTERN } from "./baseline.js";
+import { ANY_RULE_ID_PATTERN } from "./baseline.js";
 import {
   extractEvidence,
   resolveOracleGeneration,
@@ -176,8 +176,18 @@ export type AcFalsifier = z.infer<typeof acFalsifierSchema>;
 
 // ─── Acceptance Criterion Schema ───────────────────────────────────────────
 
-/** Grammar of one cited baseline rule id: `BR-` plus a positive integer, no leading zero. */
-export const AC_CITE_ID_PATTERN = BASELINE_RULE_ID_PATTERN;
+/**
+ * Grammar of one CITABLE rule id: a business rule `BR-n` or an architecture standard rule `AS-n`
+ * (positive integer, no leading zero). A debt entry `AD-n` is deliberately NOT citable (BR-980).
+ */
+export const AC_CITE_ID_PATTERN = /^(BR|AS)-[1-9][0-9]*$/;
+
+/**
+ * Grammar `cites[]` is SHAPE-checked against: any permanent rule id. `AD-n` passes the shape so the
+ * write chokepoint (`ac-write-chokepoint.ts`) can refuse it with the citation-gate outcome
+ * (`AC_CITE_REQUIRED`, exit 4) instead of an anonymous schema error; unknown families (`XX-1`) still fail here.
+ */
+export const AC_CITE_SHAPE_PATTERN = ANY_RULE_ID_PATTERN;
 
 /** Upper bound on `AcceptanceCriterion.cites` length (baseline slice 1 §C4). */
 export const AC_CITES_MAX = 10;
@@ -272,14 +282,14 @@ export const acceptanceCriterionSchema = z.object({
    */
   oracle_generation: z.number().int().min(ORACLE_GENERATION_INITIAL).optional(),
   /**
-   * Baseline rule ids (`BR-<n>`) this criterion cites (baseline slice 1 §C4). Optional
+   * Rule ids (`BR-<n>` business, `AS-<n>` architecture standard; never `AD-<n>`) this criterion cites (baseline slice 1 §C4). Optional
    * and additive: absent parses exactly as before (REGRESSION). Unique, at most
    * {@link AC_CITES_MAX}. Whether a cited id exists or is still live is NOT checked
    * here — that is a service-layer warning (`cites_dangling` / `cites_to_inactive`),
    * so a citation survives its rule being retired.
    */
   cites: z
-    .array(z.string().regex(AC_CITE_ID_PATTERN, "cites[] must match BR-<n> with n >= 1"))
+    .array(z.string().regex(AC_CITE_SHAPE_PATTERN, "cites[] must match BR-<n> or AS-<n> with n >= 1"))
     .max(AC_CITES_MAX)
     .refine((ids) => new Set(ids).size === ids.length, "cites[] must be unique")
     .optional(),
