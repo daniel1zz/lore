@@ -45,11 +45,15 @@ export function pickStrategyDocument(docs: readonly DocRecord[]): DocRecord | un
 }
 
 /**
- * The baseline root: the oldest live baseline doc with `extra.node === "root"`, or `undefined`.
+ * The baseline root: the oldest live BUSINESS-tree baseline doc with `extra.node === "root"`, or `undefined`.
+ * Business = `extra.tree` absent or "business"; an architecture root is never the navigation root (BR-981).
  *
  * @param docs - Any superset of the corpus' docs.
  * @returns the baseline root (oldest created when, abnormally, several exist).
  */
 export function pickBaselineRoot(docs: readonly DocRecord[]): DocRecord | undefined {
-  return oldestLive(docs, (d) => d.type === "baseline" && d.extra["node"] === "root");
+  return oldestLive(
+    docs,
+    (d) => d.type === "baseline" && d.extra["node"] === "root" && (d.extra["tree"] === undefined || d.extra["tree"] === "business"),
+  );
 }

@@ -455,3 +455,15 @@ describe("baseline root navigation (BL-6)", () => {
     });
   });
 });
+
+describe("baseline root navigation ignores an architecture root (#122, BR-981)", () => {
+  it("an architecture root created BEFORE the business root changes neither bootstrap Root: nor the lore tree default", () => {
+    const c = makeCorpus(["Arch PRD"]);
+    const prd = c.prds[0] as string;
+    mustRun(["baseline", "add", prd, "--tree", "architecture", "--node", "root", "--label", "arch-root", "--title", "Arch Root"], c.dir);
+    const biz = slugOf(mustRun(["baseline", "add", prd, "--node", "root", "--label", "root", "--title", "Biz Root"], c.dir).stdout);
+    expect(bootstrapText(c).split("\n")).toContain(`Root: ${biz} "Biz Root"`);
+    expect(treeJson(c).doc.slug).toBe(biz);
+    expect(treeText(c).split("\n")[0]).toContain("Biz Root");
+  });
+});
