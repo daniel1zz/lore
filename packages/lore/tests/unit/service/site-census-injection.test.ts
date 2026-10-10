@@ -67,7 +67,8 @@ describe("census follows injected functions (#104)", () => {
     }, 120_000);
 
     it("lists a store insertWithProvenance refusal site reached via injected createUatDoc", () => {
-      const hits = keys().filter((k) => /^packages\/lore\/src\/store\/[^#]+#[^#]*insertWithProvenance#[A-Z_]+/.test(k));
+      // `dynamic:` accepted: TursoStore's only refusal here is err(await getDuplicateSlugErrorFor(...)), a non-literal code.
+      const hits = keys().filter((k) => /^packages\/lore\/src\/store\/[^#]+#[^#]*insertWithProvenance#(dynamic:|[A-Z_])/.test(k));
       expect(hits.length).toBeGreaterThanOrEqual(1);
     }, 120_000);
 
