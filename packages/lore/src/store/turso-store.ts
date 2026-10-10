@@ -2042,6 +2042,64 @@ export class TursoStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.setDocParentWithProvenance
+   *
+   * One `client.transaction("write")` around the parent_id UPDATE, the parent-link DELETE (clear case
+   * only) and the audit append — same interactive-transaction shape `addLinkWithProvenance` uses.
+   */
+  async setDocParentWithProvenance(
+    id: DocId,
+    parentId: DocId | null,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    try {
+      await this.ensureReady();
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    let tx: Transaction;
+    try {
+      tx = await this.client.transaction("write");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const updateRs = await tx.execute({
+        sql: "UPDATE docs SET parent_id = ?, updated_at = ? WHERE id = ?",
+        args: [parentId, audit.timestamp, id] as InValue[],
+      });
+      if (updateRs.rowsAffected === 0) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+      if (parentId === null) {
+        await tx.execute({
+          sql: "DELETE FROM links WHERE from_id = ? AND link_type = 'parent'",
+          args: [id],
+        });
+      }
+      await this.appendAuditEntryTx(tx, audit);
+      const rowRs = await tx.execute({ sql: "SELECT * FROM docs WHERE id = ?", args: [id] });
+      const row = rowRs.rows[0];
+      if (!row) {
+        await tx.rollback();
+        return err({ code: "DOC_NOT_FOUND", id });
+      }
+      await tx.commit();
+      return ok(rowToDocRecord(libsqlRowToDocRow(row)));
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {
+        // reason: same as addLinkWithProvenance — rollback throws only when the transaction is already gone.
+      }
+      return wrapStoreError(e);
+    } finally {
+      tx.close();
+    }
+  }
+
+  /**
    * Detect whether adding from_id → to_id parent link would create a cycle.
    * Delegates to {@link detectParentCycleViaAncestry} (store-shared.ts) for the
    * walk/depth-cap/self-link logic; this store's per-hop lookup resolves each

@@ -29,6 +29,11 @@
  *                      preview); `--apply` executes. Idempotent — a second `--apply` run performs
  *                      zero writes. Thin pipe over `OrdinalMigrationService.migrateOrdinals`.
  *                      (SPEC-084 §One-shot repair migration, AC-084-4)
+ *   spec-parents [--apply | --revert] Clear every spec's parent_id (BR-1009). Preview is the DEFAULT
+ *                      (lists count + slugs, writes nothing); `--apply` writes one `migrate_spec_parent`
+ *                      audit entry per spec (no version row, no status change); `--revert` restores each
+ *                      parent from those entries. Both idempotent. Thin pipe over
+ *                      `SpecParentMigrationService`. (AC-BLS3B-7)
  */
 
 import { dirname } from "path";
@@ -42,12 +47,12 @@ export default defineCommand({
   meta: {
     name: "migrate",
     description:
-      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), or `ordinals` (SPEC-084 ordinal repair migration)",
+      "Corpus migration: `v1 --from <path>` (v1 import), `phases` (phase schema sweep), `spec-kind` (spec_kind mistype audit), `tasks-to-phases` (task→phase doc-type sweep), `prd-to-outline` (per-section PRD→outline domain relocation), `ordinals` (SPEC-084 ordinal repair migration), or `spec-parents` (clear every spec parent_id; preview by default, `--apply` writes, `--revert` restores)",
   },
   args: {
     version: {
       type: "positional",
-      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals",
+      description: "Migration action: v1 | phases | spec-kind | tasks-to-phases | prd-to-outline | ordinals | spec-parents",
       required: true,
     },
     from: {
@@ -68,7 +73,11 @@ export default defineCommand({
     },
     apply: {
       type: "boolean",
-      description: "[ordinals only] Execute the migration (default is dry-run/preview-only)",
+      description: "[ordinals, spec-parents] Execute the migration (default is dry-run/preview-only)",
+    },
+    revert: {
+      type: "boolean",
+      description: "[spec-parents only] Restore every spec parent_id from its migrate_spec_parent audit entry",
     },
     "skip-secret-scan": {
       type: "boolean",
@@ -91,12 +100,79 @@ export default defineCommand({
       args.version !== "spec-kind" &&
       args.version !== "tasks-to-phases" &&
       args.version !== "prd-to-outline" &&
-      args.version !== "ordinals"
+      args.version !== "ordinals" &&
+      args.version !== "spec-parents"
     ) {
       process.stderr.write(
-        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals.\n`,
+        `Error: Unknown migration action '${args.version}'. Supported: v1, phases, spec-kind, tasks-to-phases, prd-to-outline, ordinals, spec-parents.\n`,
       );
       process.exit(2);
+    }
+
+    // ── spec-parents action ───────────────────────────────────────────────
+    if (args.version === "spec-parents") {
+      if (args.apply === true && args.revert === true) {
+        process.stderr.write("Error: --apply and --revert are mutually exclusive for `migrate spec-parents`.\n");
+        process.exit(2);
+      }
+      const { app } = loadLoreApp();
+      try {
+        const service = app.specParentMigrationService;
+        if (service === undefined) {
+          process.stderr.write("Internal error: SpecParentMigrationService not wired on App\n");
+          process.exitCode = 1;
+          return;
+        }
+        const mode = args.revert === true ? "revert" : args.apply === true ? "apply" : "preview";
+        const result =
+          mode === "revert" ? await service.revert() : mode === "apply" ? await service.apply() : await service.preview();
+        if (!result.ok) {
+          if (args.json) {
+            console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
+          } else {
+            process.stderr.write(formatError(result.error) + "\n");
+          }
+          process.exitCode = exitCode(result.error);
+          return;
+        }
+        const report = result.value;
+        const failed = report.errors.length > 0;
+        if (args.json) {
+          console.log(
+            JSON.stringify(
+              {
+                ok: !failed,
+                data: {
+                  applied: mode === "apply",
+                  reverted: mode === "revert",
+                  count: report.count,
+                  slugs: report.rows.map((r) => r.slug),
+                  skipped: report.skipped,
+                  errors: report.errors,
+                },
+              },
+              null,
+              2,
+            ),
+          );
+          process.exitCode = failed ? 4 : 0;
+          return;
+        }
+        const label =
+          mode === "revert" ? "Spec-parent revert complete" : mode === "apply" ? "Spec-parent migration complete" : "Spec-parent migration (preview)";
+        console.log(label);
+        console.log("─".repeat(40));
+        const noun = mode === "revert" ? "restored" : mode === "apply" ? "cleared" : "would clear";
+        console.log(`Specs ${noun}: ${report.count}`);
+        for (const row of report.rows) console.log(`  ${row.slug}`);
+        for (const skip of report.skipped) console.log(`  skipped ${skip.slug}: ${skip.reason}`);
+        for (const e of report.errors) console.log(`  error ${e}`);
+        if (mode === "preview") console.log("\nRe-run with --apply to execute, --revert to undo a previous apply.");
+        process.exitCode = failed ? 4 : 0;
+      } finally {
+        app.close();
+      }
+      return;
     }
 
     // ── ordinals action ───────────────────────────────────────────────────

@@ -814,6 +814,28 @@ export interface StoreInterface {
    */
   addLinkWithProvenance(link: LinkRecord, audit: AuditEntry): Promise<Result<LinkRecord, LoreError>>;
 
+  /**
+   * Set or clear a doc's `parent_id` and append ONE audit entry, all in a single write transaction
+   * (BR-1009: the spec-parent migration and its revert). Either every step lands or none does.
+   *
+   * With `parentId === null` the doc's outgoing `parent` link row (if any) is deleted in the same
+   * transaction, so the column and the link table never disagree. With a non-null `parentId` only the
+   * column is written (a revert restores the column; link rows are never recreated here — use
+   * {@link addLinkWithProvenance} for that). The doc's `updated_at` becomes `audit.timestamp`; its
+   * `version`, `status`, content and judgments are untouched and NO `versions` row is written — an
+   * approved doc stays approved and its review judgment stays current.
+   *
+   * @param id - The doc whose parent changes
+   * @param parentId - The new parent id, or `null` to clear it
+   * @param audit - The single audit entry to append (e.g. `migrate_spec_parent`)
+   * @returns `ok(updatedDoc)`; `DOC_NOT_FOUND` when `id` is absent (nothing written); `STORE_ERROR` otherwise
+   */
+  setDocParentWithProvenance(
+    id: DocId,
+    parentId: DocId | null,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>>;
+
   /** Remove a specific directed link by composite key. */
   removeLink(
     fromId: DocId,
