@@ -88,7 +88,8 @@ test.describe("SPEC-078 multi-project isolation", () => {
     const approveRes = await page.request.post(
       `${API_ORIGIN}/api/p/project-a/api/dashboard/docs/${fixture.seed.a.draftSpecId}/approve`,
     );
-    expect(approveRes.ok()).toBe(true);
+    // The message carries status + body so a refusal is diagnosable from the report alone.
+    expect(approveRes.ok(), `approve on A -> ${approveRes.status()} ${await approveRes.text()}`).toBe(true);
     const approveBody = (await approveRes.json()) as { data: { doc: { status: string } } };
     expect(approveBody.data.doc.status).toBe("approved");
 
