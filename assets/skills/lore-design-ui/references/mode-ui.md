@@ -49,7 +49,7 @@ override:
 9. **⛔ Product Prototype Generation** (HARD — see below): Apply confirmed style to ALL major screens → produce navigable multi-page prototype
 10. **Responsive viewport verification**: Test ALL prototype screens at ALL 4 breakpoints (375/768/1024/1440px) — REFUSE to proceed if any screen at any breakpoint is broken
 11. **Multi-Perspective UI Review** (see below): Review the FULL prototype, not just individual screens
-12. **Persist decisions** (MANDATORY): `lore create spec --title ... --parent <prd> --kind design --content ...` or update existing (`lore set <spec> ...`)
+12. **Persist decisions** (MANDATORY): `lore create spec --title ... --kind design --content ...` or update existing (`lore set <spec> ...`)
 
 ## Phase: Multi-Option Visual Comparison (HARD)
 

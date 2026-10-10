@@ -33,7 +33,7 @@ Review the session transcript yourself (no bootstrap tool — reflection is your
 | Bug pattern / retro learning | `lore create knowledge --sub-type retro` |
 | Research finding / benchmark | `lore create knowledge --sub-type research` |
 | SDK gotcha / reusable reference | `lore create knowledge --sub-type reference` |
-| Feature requirements discovered | Real spec: `lore feed spec-create --parent <prd>` first, then `lore create spec --parent <prd> --kind feature` + `lore ac add` |
+| Feature requirements discovered | Real spec: `lore feed spec-create` first, then `lore create spec --kind feature` + `lore ac add` |
 | Existing doc now inaccurate | UPDATE it: `lore set <doc> --content ...` (approved doc auto-resets to draft) |
 | Superseded / disproven knowledge | INVALIDATE — see step 5 |
 

@@ -471,7 +471,7 @@ const CORPUS_WORKFLOW_FRAGMENT_RELS = [
 /** sha256 of each fragment BODY (text after the frontmatter) — measured equal to the verbatim sections of the deleted file. */
 const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)[number], string> = {
   "context/corpus-workflow-0-overview.md": "31bec6c00584c31708413d8c34e0494bbfe758b9d3d43c6bc3d1e8780c0b070f",
-  "context/corpus-workflow-1-feed.md": "8fd858cefd4ba170382f3745f2a8c7ea2c8edf77ddf34297509ab071485d962f",
+  "context/corpus-workflow-1-feed.md": "c855096f19fc2fa7b727112789303c542dbe91c2d6df56ff7edffd145c3eaa30",
   "context/corpus-workflow-2-produce.md": "cc4ed9f31e30468f2fddea7f4d296620ec81399c62a1b835b4d1388465f4def2",
   "context/corpus-workflow-3-execute.md": "6248a242c66fdc804765486686424a0ac0e53767684bc6c569d4526dc5e6b68b",
   "context/corpus-workflow-4-close.md": "96bf543c9c898b1d0e3dc4424e24949e5e1edeb24fce438eb11d256eb4b3fabf",

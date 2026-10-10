@@ -78,9 +78,9 @@ root:
 ### 2d. First spec (gated — feed before produce)
 
 ```bash
-lore feed spec-create --parent <prd-slug>    # read the feeding pack FIRST
-lore create spec --title "..." --parent <prd-slug> --kind feature|tech
-lore ac add <spec-slug> AC-1 --statement "..." --mode script|ai|human [--oracle test --command "..."]
+lore feed spec-create    # read the feeding pack FIRST
+lore create spec --title "..." --kind feature|tech   # a spec takes no parent: it relates to the trees by citing rules
+lore ac add <spec-slug> AC-1 --statement "..." --mode script|ai|human [--oracle test --command "..."] --cite BR-<n>   # or later: lore ac cite <spec-slug> AC-1 BR-<n>; no approval without a citing criterion (BR-1007)
 ```
 
 Every spec needs a parent and should declare acceptance criteria up front — `lore verify` / `lore assess` judge against them later.

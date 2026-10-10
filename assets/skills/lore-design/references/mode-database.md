@@ -107,5 +107,5 @@ Apply conventions from [database-design.md](database-design.md): naming, ID type
 ```
 
 ## Persist
-- Create via `lore create spec --title ... --parent <prd> --kind tech --content ...`
+- Create via `lore create spec --title ... --kind tech --content ...`
 - Link to upstream PRD/spec via `lore link <from> <to> --type=implements`

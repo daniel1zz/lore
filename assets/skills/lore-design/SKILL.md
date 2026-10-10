@@ -191,5 +191,5 @@ The preview starts a Vite dev server (HMR-enabled). It auto-replaces previous in
 
 ## Persist
 
-- Persist as DRAFT during S2 — never wait for approval to write: `lore create spec --title ... --parent <prd> --kind design --content ...` (run `lore feed spec-create --parent <prd>` first) or `lore create adr --title ... --decision-status proposed --content ...` for decision records; declare every AC (`lore ac add`) before S3
+- Persist as DRAFT during S2 — never wait for approval to write: `lore create spec --title ... --kind design --content ...` (run `lore feed spec-create` first) or `lore create adr --title ... --decision-status proposed --content ...` for decision records; declare every AC (`lore ac add`) before S3, and cite the baseline rules each AC implements (`lore ac add ... --cite BR-<n>` or `lore ac cite <spec> <AC> BR-<n>`) — a spec takes no parent and cannot be approved without a citing criterion (BR-1007)
 - Link to upstream PRD and related ADRs via `lore link <from> <to> --type=relates-to|implements|informs`; a slice spec ALSO links to the spec it slices (`lore link <slice-spec> <parent-spec> --type=implements`) — its `parent_id` alone does not record that relation

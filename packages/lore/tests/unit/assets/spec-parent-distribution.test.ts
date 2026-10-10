@@ -25,15 +25,18 @@ function walk(dir: string, out: string[]): string[] {
   return out;
 }
 
-/** Lines that pair `create spec` with `--parent` (same line, or the next 2 for wrapped commands). */
+/** Lines that pair `create spec` with `--parent` (same command; backslash-wrapped continuations included). */
 function findOffenders(root: string): string[] {
   const hits: string[] = [];
   for (const file of walk(join(REPO_ROOT, root), [])) {
     const lines = readFileSync(file, "utf8").split("\n");
     lines.forEach((line, i) => {
       if (!/create spec/.test(line)) return;
-      const window = lines.slice(i, i + 3).join(" ");
-      if (/--parent\b/.test(window)) {
+      // the command's own text: this line, plus continuation lines while a trailing backslash wraps it
+      let command = line;
+      for (let j = i; /\\\s*$/.test(lines[j] ?? "") && j < i + 4; j++) command += " " + (lines[j + 1] ?? "");
+      // a plan's `--parent <spec>` in a later backticked command on the same line is allowed
+      if (/create spec[^`]*--parent\b/.test(command)) {
         hits.push(`${relative(REPO_ROOT, file)}:${i + 1}: ${line.trim().slice(0, 140)}`);
       }
     });

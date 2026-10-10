@@ -62,8 +62,9 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 #         report it upstream (Skill("design") owns `lore ac add`), don't
 #         self-author ACs silently.
 #   NO  → ⛔ STOP. Invoke Skill("design") to create the spec first —
-#         it runs `lore feed spec-create --parent <prd>` then
-#         `lore create spec --title ... --parent <prd> [--kind feature|tech|design]`
+#         it runs `lore feed spec-create` then
+#         `lore create spec --title ... [--kind feature|tech|design]` (no parent: cite rules with
+#         `lore ac add ... --cite BR-<n>` / `lore ac cite`; BR-1007)
 #         and declares ACs via `lore ac add`.
 #         After the spec exists as a draft with its ACs → re-enter step 1.1
 #         (same S2 run — do not wait for its approval).
