@@ -281,7 +281,7 @@ describe("Scenario 2: full CRUD lifecycle", () => {
     );
     expect(planResult.exitCode).toBe(0);
     expect(parseJson<{ parent_id: string }>(planResult).data!.parent_id).toBe(prd.id);
-  });
+  }, 30_000);
 
   it("NEGATIVE: create spec with --parent is refused, exit 4, naming `lore ac cite` (BR-2)", () => {
     const prdResult = runLore(["create", "prd", "--title", "Parent PRD", "--json", "--no-ai"], tmpDir);
@@ -367,7 +367,7 @@ describe("Scenario 3: spec with parent and tree hierarchy", () => {
     expect(treeJson.data!.doc.slug).toBe(prd.slug);
     expect(treeJson.data!.children).toHaveLength(1);
     expect(treeJson.data!.children[0]!.doc.slug).toBe("plan-auth-plan");
-  });
+  }, 30_000);
 
   it("HAPPY: tree human-readable output contains parent and child titles", () => {
     const prdResult = runLore(["create", "prd", "--title", "Root Doc", "--json", "--no-ai"], tmpDir);

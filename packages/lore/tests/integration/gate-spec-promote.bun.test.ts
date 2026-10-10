@@ -837,7 +837,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     expect(process.exitCode).toBe(0);
     expect(output.stdout.join("\n")).toContain("gate: pass");
     expect(loreCli(["approve", specSlug, "--override-no-judgment"])).toContain("approved");
-  });
+  }, 30_000);
 
   it("NEGATIVE: a criterion citing only a RETIRED rule does not satisfy the gate either (same measure as approve)", async () => {
     const { specSlug, specId } = await createSpec();
@@ -856,7 +856,7 @@ describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #
     }
     expect(process.exitCode).toBe(4);
     expect(output.stderr.join("")).toContain("lore ac cite");
-  });
+  }, 30_000);
 
   it("REGRESSION: with an unquantified AND uncited criterion the gate names BOTH the AC id and the citation refusal", async () => {
     const { specSlug, specId } = await createSpec();

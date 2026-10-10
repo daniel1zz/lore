@@ -152,7 +152,7 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
     expect(result.value.doc_version).toBe(bundle.doc.version);
   });
 
-  it("judge identity: provider === model === activeProviderName, prompt_version === 'v2'", async () => {
+  it("judge identity: provider === model === activeProviderName, prompt_version === 'v3'", async () => {
     const store = new InMemoryStore();
     const { bundle, checks } = await makeBundle(store);
     const provider = new InMemoryAIProvider("my-custom-provider", { kind: "ok", content: VALID_JSON });
@@ -164,9 +164,9 @@ describe("judgeDoc — HAPPY (single-attempt success)", () => {
     expect(result.value.judge).toEqual({
       provider: "my-custom-provider",
       model: "my-custom-provider",
-      // reason: SPEC-053 bumped the active REVIEW_PROMPT_VERSION v1 → v2; judgeDoc stamps
-      // the currently-active version, so a real judge run now records "v2".
-      prompt_version: "v2",
+      // reason: judgeDoc stamps the currently-active REVIEW_PROMPT_VERSION (v1 → v2 SPEC-053, v2 → v3 #126),
+      // so a real judge run now records "v3".
+      prompt_version: "v3",
     });
   });
 

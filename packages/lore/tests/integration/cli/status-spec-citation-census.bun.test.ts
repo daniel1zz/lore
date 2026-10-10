@@ -75,10 +75,11 @@ interface StatusJson {
   data: { specs_without_citation?: Census; specs_with_parent?: Census };
 }
 
-function clearParent(cwd: string, slug: string): void {
+/** Seeds the LEGACY parented-spec state directly: creating a spec under a parent is refused since BR-2 (BR-1007). */
+function setLegacyParent(cwd: string, slug: string, parentSlug: string): void {
   const db = new Database(join(cwd, ".lore", "lore.db"), { readwrite: true });
   try {
-    db.run("UPDATE docs SET parent_id = NULL WHERE slug = ?", [slug]);
+    db.run("UPDATE docs SET parent_id = (SELECT id FROM docs WHERE slug = ?) WHERE slug = ?", [parentSlug, slug]);
   } finally {
     db.close();
   }
@@ -134,11 +135,10 @@ describe("AC-BLS3B-3 census over a corpus with baseline docs", () => {
     must(["rule", "set", dying, "--lifecycle", "retired", "--note", "superseded in the fixture"]);
 
     const makeSpec = (key: string, title: string, parent: string | null): string => {
-      // reason: parentless creation is a sibling task's contract (BR-1007); this fixture creates under the PRD and
-      // clears the parent directly, so it holds on either side of that change.
-      const args = ["create", "spec", "--title", title, "--content", "x", "--no-ai", "--parent", prd];
+      // reason: a spec is created parentless (BR-1007); the one parented spec P is seeded as legacy state directly.
+      const args = ["create", "spec", "--title", title, "--content", "x", "--no-ai"];
       slugs[key] = slugOf(must(args).stdout);
-      if (parent === null) clearParent(dir, slugs[key]!);
+      if (parent !== null) setLegacyParent(dir, slugs[key]!, parent);
       must(["ac", "add", slugs[key]!, `AC-${key}-1`, "--statement", `criterion ${key} holds`, "--mode", "human"]);
       return slugs[key]!;
     };
@@ -195,8 +195,8 @@ describe("AC-BLS3B-3 census is absent when the corpus has no baseline docs (AC-B
       const run = runnerFor(dir);
       const must = mustOf(run);
       must(["init"]);
-      const prd = slugOf(must(["create", "prd", "--title", "Plain PRD", "--content", "root", "--no-ai"]).stdout);
-      must(["create", "spec", "--title", "Plain Spec", "--parent", prd, "--content", "## Overview\nx", "--no-ai"]);
+      slugOf(must(["create", "prd", "--title", "Plain PRD", "--content", "root", "--no-ai"]).stdout);
+      must(["create", "spec", "--title", "Plain Spec", "--content", "## Overview\nx", "--no-ai"]);
       const json = JSON.parse(run(["status", "--json"]).stdout) as StatusJson;
       expect(json.data.specs_without_citation).toBeUndefined();
       expect(json.data.specs_with_parent).toBeUndefined();

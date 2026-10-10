@@ -8,7 +8,7 @@
  *
  * CONTRACT (the spec leaves these open):
  *   C1. `get <spec> --json` carries `data.implements = {rules:[{rule_id,node_slug,state,criteria}], count}`.
- *   C2. `get <leaf|standard> --json` carries `data.implemented_by = {rules, citations:[{rule_id,spec,spec_status,criterion}], count}`.
+ *   C2. `get <leaf|standard> --json` carries `data.implemented_by = {rules, citations:[{rule_id,spec,doc_status,criterion}], count}`.
  *   C3. `count` = number of (rule, criterion) citation pairs. A missing rule is listed, `node_slug: null`, state "missing".
  *   C4. Human render: an `Implements` header on a spec, an `Implemented by` header + a `Count: N` line on a node.
  *
@@ -71,7 +71,7 @@ interface GetJson {
     };
     implemented_by?: {
       rules: Array<{ rule_id: string; state: string }>;
-      citations: Array<{ rule_id: string; spec: string; spec_status: string; criterion: string }>;
+      citations: Array<{ rule_id: string; spec: string; doc_status: string; criterion: string }>;
       count: number;
     };
   };
@@ -126,8 +126,8 @@ beforeAll(() => {
   brB = ruleIdOf(mustRun(["rule", "add", leaf1, "--statement", "Rule B holds", ...RULE]).stdout);
   asA = ruleIdOf(mustRun(["rule", "add", standard, "--statement", "Standard A holds", ...RULE]).stdout);
 
-  specA = slugOf(mustRun(["create", "spec", "--title", "IV Spec A", "--parent", prd, "--content", "x", "--no-ai"]).stdout);
-  specB = slugOf(mustRun(["create", "spec", "--title", "IV Spec B", "--parent", prd, "--content", "x", "--no-ai"]).stdout);
+  specA = slugOf(mustRun(["create", "spec", "--title", "IV Spec A", "--content", "x", "--no-ai"]).stdout);
+  specB = slugOf(mustRun(["create", "spec", "--title", "IV Spec B", "--content", "x", "--no-ai"]).stdout);
   for (const [spec, id] of [[specA, "AC-A-1"], [specA, "AC-A-2"], [specB, "AC-B-1"]] as const) {
     mustRun(["ac", "add", spec, id, "--statement", `criterion ${id} holds`, "--mode", "human"]);
   }
@@ -183,7 +183,7 @@ describe("lore get <baseline node> — Implemented by (AC-BLS3B-4)", () => {
       [`${specA}:AC-A-1`, `${specA}:AC-A-2`, `${specB}:AC-B-1`].sort(),
     );
     expect(new Set(forA.map((c) => c.spec)).size).toBe(2);
-    expect(forA.every((c) => c.spec_status === "draft")).toBe(true);
+    expect(forA.every((c) => c.doc_status === "draft")).toBe(true);
     expect(view!.rules.map((r) => r.rule_id).sort()).toEqual([brA, brB].sort());
   });
 
@@ -198,7 +198,7 @@ describe("lore get <baseline node> — Implemented by (AC-BLS3B-4)", () => {
   it("an architecture standard shows its citing criterion too", () => {
     const view = getJson(standard).data.implemented_by;
     expect(view!.count).toBe(1);
-    expect(view!.citations).toEqual([{ rule_id: asA, spec: specA, spec_status: "draft", criterion: "AC-A-2" }]);
+    expect(view!.citations).toEqual([{ rule_id: asA, spec: specA, doc_status: "draft", criterion: "AC-A-2" }]);
   });
 
   it("BOUNDARY: a node whose rules nobody cites shows count 0", () => {

@@ -51,7 +51,7 @@ async function world(commands: string[]): Promise<InMemoryStore> {
   const leaf = await mustCreate(corpus, { type: "baseline", title: "L", content: "l", parent_id: branch.id, extra: { node: "leaf", label: "Leaf" } } as CreateDocInput);
   const added = await rules.addRule(leaf.id, { statement: "the rule claim", confidence: "established", enforced_by: "guaranteed", examples: ["ex"] }, { by: "fixture" });
   if (!added.ok) throw new Error(`addRule failed: ${JSON.stringify(added.error)}`);
-  const spec = await mustCreate(corpus, { type: "spec", title: "S", parent_id: prd.id, content: "body" } as CreateDocInput);
+  const spec = await mustCreate(corpus, { type: "spec", title: "S", content: "body" } as CreateDocInput);
   for (let i = 0; i < commands.length; i += 1) {
     const r = await ac.addCriterion(spec.id, {
       id: `AC-F-${i + 1}`,

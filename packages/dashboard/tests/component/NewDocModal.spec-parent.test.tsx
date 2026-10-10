@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * NewDocModal spec-parent contract (AC-BLS3B-9, BR-1 / BR-2 / AS-18).
  *

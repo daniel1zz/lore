@@ -51,9 +51,9 @@ function retiredOutlineWrite(verb: string): LoreError {
     code: "VALIDATION_ERROR",
     field: "outline",
     message:
-      `\`lore outline ${verb}\` is retired: the outline is superseded by the baseline tree. ` +
+      `The outline write "${verb}" is retired: the outline is superseded by the baseline tree. ` +
       `Record the same knowledge as baseline structure with \`lore baseline add\` ` +
-      `(see \`lore baseline --help\` for rules, branches and glossary). \`lore outline list\` still reads existing entries.`,
+      `(rules, branches and glossary; see its --help). \`lore outline list\` still reads existing entries.`,
   };
 }
 

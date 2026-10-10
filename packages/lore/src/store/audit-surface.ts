@@ -40,6 +40,17 @@ export function setProcessAuditSurface(surface: CallerSurface): void {
   processSurface = surface;
 }
 
+/**
+ * Drop any process-scoped surface a previous {@link setProcessAuditSurface} declared, restoring the
+ * "no adapter" state (key absent). The process surface is module state that outlives the call that set
+ * it, so a single process that boots an adapter in-process and then exercises a store directly (one `bun test`
+ * run over many files) must be able to put that state back: callers that assert the no-adapter behaviour
+ * establish it with this instead of relying on whichever file ran before them.
+ */
+export function clearProcessAuditSurface(): void {
+  processSurface = undefined;
+}
+
 /** Run `fn` (and everything it awaits) with `surface` as the request-scoped audit surface. */
 export function runWithAuditSurface<T>(surface: CallerSurface, fn: () => T): T {
   return requestSurface.run(surface, fn);
