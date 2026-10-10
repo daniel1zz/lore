@@ -148,7 +148,7 @@ export interface BaselineTreeEntry {
   depth: number;
   node: string;
   label: string | null;
-  /** Rule counts by lifecycle (leaf only; all zero elsewhere). */
+  /** Rule counts by lifecycle (rule-holding kinds: leaf, standard, debt-registry; all zero elsewhere). */
   rules: Record<RuleLifecycle, number>;
   /** Which tree the node belongs to (`extra.tree`; absent on the doc = business). */
   tree: BaselineTree;
