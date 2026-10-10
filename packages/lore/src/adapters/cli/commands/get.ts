@@ -74,12 +74,44 @@
  */
 
 import { defineCommand } from "citty";
+import { ok, ruleIdPrefixOfNode } from "@lore/core";
+import type { DocRecord, LoreError, Result } from "@lore/core";
+import {
+  computeImplementedBy,
+  computeImplements,
+  formatImplementedByLines,
+  formatImplementsLines,
+} from "../../../service/spec-relations.js";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatNavigation, formatShortId } from "../utils.js";
 import { projectValidityStatus } from "../../../service/validity-service.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
 import { renderDocBodyWithoutLossNotice } from "../../../flows/feed-flow.js";
 import { composeWithStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
+
+/**
+ * BR-1008 relation view for `doc`: `implements` for a spec, `implemented_by` for a baseline node
+ * carrying rules; any other doc yields nothing (no `--json` key, no human section). Reads through
+ * `corpusService.listFull` — no new service wiring.
+ */
+async function loadSpecRelations(
+  app: ReturnType<typeof loadLoreApp>["app"],
+  doc: DocRecord,
+): Promise<Result<{ json: Record<string, unknown>; lines: string[] }, LoreError>> {
+  if (doc.type === "spec") {
+    const baseline = await app.corpusService.listFull({ type: "baseline" });
+    if (!baseline.ok) return baseline;
+    const view = computeImplements(doc, baseline.value.docs);
+    return ok({ json: { implements: view }, lines: formatImplementsLines(view) });
+  }
+  if (doc.type === "baseline" && ruleIdPrefixOfNode(doc.extra) !== undefined) {
+    const specs = await app.corpusService.listFull({ type: "spec" });
+    if (!specs.ok) return specs;
+    const view = computeImplementedBy(doc, specs.value.docs);
+    return ok({ json: { implemented_by: view }, lines: formatImplementedByLines(view) });
+  }
+  return ok({ json: {}, lines: [] });
+}
 
 export default defineCommand({
   meta: {
@@ -145,14 +177,22 @@ export default defineCommand({
         displayBody = await renderDocBodyWithoutLossNotice(app, doc);
       }
 
+      // BR-1008 — Implements (spec) / Implemented by (baseline node), computed from citations on demand.
+      const relations = await loadSpecRelations(app, doc);
+      if (!relations.ok) {
+        process.stderr.write(formatError(relations.error) + "\n");
+        process.exitCode = exitCode(relations.error);
+        return;
+      }
+
       if (args.json) {
         // reason: ONE wall-clock read, taken here rather than reused from a wider scope —
         // this is the only validity evaluation in this command, and `--raw` must not
         // change it (see placement rule 2 in this file's header).
         const validityStatus = projectValidityStatus(doc, new Date().toISOString());
         const data = resolvedComponents !== undefined
-          ? { ...result.value, validity_status: validityStatus, resolved_components: resolvedComponents }
-          : { ...result.value, validity_status: validityStatus };
+          ? { ...result.value, validity_status: validityStatus, ...relations.value.json, resolved_components: resolvedComponents }
+          : { ...result.value, validity_status: validityStatus, ...relations.value.json };
         console.log(JSON.stringify({ ok: true, data }, null, 2));
         return;
       }
@@ -184,6 +224,10 @@ export default defineCommand({
         composeWithStructuredExtraNotice(displayBody || "(no content)", doc, renderedBodyFacts, "below-body"),
       );
       console.log("");
+      if (relations.value.lines.length > 0) {
+        console.log(relations.value.lines.join("\n"));
+        console.log("");
+      }
       console.log(formatNavigation(navigation));
     } finally {
       app.close();
