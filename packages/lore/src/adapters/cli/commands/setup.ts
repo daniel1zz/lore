@@ -133,7 +133,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
-import { seedAcCiteModeIfAbsent } from "../../ac-cite-config-file.js";
+import { seedAcCiteModeAudited } from "./baseline-adopt.js";
 import { parseDocument } from "yaml";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
@@ -695,7 +695,7 @@ async function runProjectScaffold(opts: {
     writeAdoptionMode: writeAdoptionModeToConfig,
     resolveMemoryFileBudgets: resolveRepoMemoryFileBudgets,
     skillAssets: makeRealProjectSkillSource(opts.assetsRoot),
-    seedAcCiteMode: seedAcCiteModeIfAbsent,
+    seedAcCiteMode: seedAcCiteModeAudited,
   });
 
   const result = await service.scaffold(repoDir);

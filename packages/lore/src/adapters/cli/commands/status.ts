@@ -207,7 +207,7 @@ import { loadConfig } from "@lore/core/node";
 import { resolveCiteGateRaw } from "@lore/core";
 import { resolveCiteGateFor } from "../../../service/ac-write-chokepoint.js";
 import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
-import { decideAcCiteStatus, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
+import { decideAcCiteStatus, ENFORCE_REFUSES_NOTHING_WARNING, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
 import type { AcCiteStatus } from "../../../service/ac-cite-status.js";
 import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
 import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
@@ -1843,6 +1843,7 @@ export default defineCommand({
             storedMode,
             effectiveMode: effective.value.mode,
             lastAdoptedMode: lastAdoptedModeOf(adoptRows.value[0]),
+            armedBranches: effective.value.armed_branches,
           });
         }
       } finally {
@@ -2024,6 +2025,11 @@ export default defineCommand({
       if (specCitationCensus !== null) {
         console.log(`\nSpecs without citation: ${specCitationCensus.specs_without_citation.count}`);
         console.log(`Specs with a parent:    ${specCitationCensus.specs_with_parent.count}`);
+      }
+
+      // BR-987 (AC-FIP-3) — printed only when true, so a corpus whose gate refuses something prints what it printed before.
+      if (acCiteStatus !== null && acCiteStatus.enforce_refuses_nothing) {
+        console.log(`\nWarning: ${ENFORCE_REFUSES_NOTHING_WARNING}`);
       }
 
       // baseline slice 2 §C4 — exemptions on this branch's corpus, only when any exist (report-only).
