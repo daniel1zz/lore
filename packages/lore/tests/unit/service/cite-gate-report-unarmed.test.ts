@@ -61,7 +61,7 @@ async function world() {
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");
   const mk = async (title: string, seed?: Record<string, unknown>) => {
-    const s = await cs.create({ type: "spec", title, parent_id: prd.value.id, content: "b" } as CreateDocInput);
+    const s = await cs.create({ type: "spec", title,content: "b" } as CreateDocInput);
     if (!s.ok) throw new Error("spec");
     if (seed !== undefined) {
       const a = await plain.addCriterion(s.value.id, seed);

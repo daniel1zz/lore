@@ -105,7 +105,7 @@ function createSpecParentedPlanAndTask(tmpDir: string): {
   );
   const specSlug = parseSlug(
     runLore(
-      ["create", "spec", "--title", "Gate Config Disable Spec", "--parent", prdSlug, "--content", "## Overview\n\nBody.\n", "--no-ai"],
+      ["create", "spec", "--title", "Gate Config Disable Spec","--content", "## Overview\n\nBody.\n", "--no-ai"],
       tmpDir,
     ).stdout,
   );
@@ -165,7 +165,7 @@ describe("AC-P2-7: LORE_GATE_BYPASS=1 forces every checkpoint to exit 0", () => 
     );
     const specSlug = parseSlug(
       runLore(
-        ["create", "spec", "--title", "Bypass Spec", "--parent", prdSlug, "--content", "## Overview\n\nBody.\n", "--no-ai"],
+        ["create", "spec", "--title", "Bypass Spec","--content", "## Overview\n\nBody.\n", "--no-ai"],
         tmpDir,
       ).stdout,
     );

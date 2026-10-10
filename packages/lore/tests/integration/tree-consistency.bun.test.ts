@@ -17,7 +17,7 @@
  *                no blueprint → exit 4
  *   STATE      — --fix bumps doc version+1; second --fix idempotent (0 fixed);
  *                fix on would-create-cycle doc → SKIPPED
- *   REGRESSION — `lore create spec` without --parent → PARENT_REQUIRED (exit 4, not 3);
+ *   REGRESSION — `lore create spec --parent` → refused naming `lore ac cite` (exit 4, not 3; BR-2);
  *                existing `lore list/get/tree` commands unaffected;
  *                dup-count: misplaced spec counted ONCE (not once-misplaced + once-missing)
  *
@@ -130,7 +130,7 @@ function createPrd(tmpDir: string, title: string): string {
 }
 
 function createSpec(tmpDir: string, title: string, parentSlug: string): string {
-  return extractSlug(runLore(["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai"], tmpDir));
+  return extractSlug(runLore(["create", "spec", "--title", title,"--no-ai"], tmpDir));
 }
 
 function createPlan(tmpDir: string, title: string): string {
@@ -560,39 +560,37 @@ describe("[STATE] --fix increments doc version and is idempotent on second run",
 
 // ─── REGRESSION ───────────────────────────────────────────────────────────────
 
-describe("[REGRESSION] lore create spec without --parent → PARENT_REQUIRED (exit 4, not 3)", () => {
+describe("[REGRESSION] lore create spec --parent → refused naming citations (exit 4, not 3; BR-2)", () => {
   let tmpDir: string;
+  let prdSlug: string;
 
   beforeEach(() => {
-    tmpDir = makeTempDir("reg-parent-required");
+    tmpDir = makeTempDir("reg-parent-refused");
     initCorpus(tmpDir);
-    createPrd(tmpDir, "main prd");
+    prdSlug = createPrd(tmpDir, "main prd");
   });
 
   afterEach(() => cleanupDir(tmpDir));
 
-  // SPEC (SPEC-002): spec type requires parent_id — schema enforced at service layer.
-  // REGRESSION: This must remain a schema-layer PARENT_REQUIRED error (exit 4),
-  // NOT an INVALID_PARENT_TYPE error. The two-stage check is: first validate parent_id
-  // exists (PARENT_REQUIRED), then validate parent type is correct (INVALID_PARENT_TYPE).
+  // SPEC (slice 3b, BR-1/BR-2): a spec takes NO parent - it belongs to the trees through criterion citations.
+  // A parent is refused at the service layer with the validation exit code (4), never a lookup failure (3),
+  // and the message names `lore ac cite`; it is a VALIDATION_ERROR, not an INVALID_PARENT_TYPE.
   //
   // reason: --no-ai added so the command reaches the service layer (not the AI provider
   // path which would exit 6 before ever calling service.create). In non-TTY context,
   // openEditor returns ok("") immediately, so no actual editor is launched. SPEC-017.
-  it("exits 4 (not 0 or 3) when creating spec without --parent", () => {
-    const r = runLore(["create", "spec", "--title", "test spec", "--no-ai"], tmpDir);
+  it("exits 4 (not 0 or 3) when creating a spec WITH --parent", () => {
+    const r = runLore(["create", "spec", "--title", "test spec", "--parent", prdSlug, "--no-ai"], tmpDir);
     expect(r.exitCode).toBe(4);
   });
 
-  it("stderr mentions 'parent' when creating spec without --parent", () => {
-    const r = runLore(["create", "spec", "--title", "test spec", "--no-ai"], tmpDir);
-    expect(r.stderr.toLowerCase()).toMatch(/parent/);
+  it("stderr names criterion citations when creating a spec with --parent", () => {
+    const r = runLore(["create", "spec", "--title", "test spec", "--parent", prdSlug, "--no-ai"], tmpDir);
+    expect(r.stderr).toContain("lore ac cite");
   });
 
-  it("does not emit INVALID_PARENT_TYPE when parent is missing entirely", () => {
-    const r = runLore(["create", "spec", "--title", "test spec", "--no-ai"], tmpDir);
-    // Must be PARENT_REQUIRED not INVALID_PARENT_TYPE
-    // (INVALID_PARENT_TYPE only triggers when parent exists but type is wrong)
+  it("does not emit INVALID_PARENT_TYPE: the refusal is about having a parent at all, not its type", () => {
+    const r = runLore(["create", "spec", "--title", "test spec", "--parent", prdSlug, "--no-ai"], tmpDir);
     expect(r.stderr).not.toMatch(/invalid.parent.type/i);
   });
 });

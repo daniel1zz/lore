@@ -171,7 +171,7 @@ function buildFixture(): Fixture {
     mustRun(["create", "plan", "--title", "CSL Plan", "--parent", prd, "--content", "x", "--no-ai"], repo).stdout,
   );
   const spec = slugOf(
-    mustRun(["create", "spec", "--title", "CSL Spec", "--parent", prd, "--content", "x", "--no-ai"], repo).stdout,
+    mustRun(["create", "spec", "--title", "CSL Spec","--content", "x", "--no-ai"], repo).stdout,
   );
   mustRun(
     ["ac", "add", spec, "AC-CSL-1", "--statement", "something holds", "--mode", "human"],

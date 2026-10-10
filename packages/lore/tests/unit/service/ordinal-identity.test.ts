@@ -48,7 +48,7 @@ function prdInput(title = "My Product"): CreateDocInput {
 }
 
 function specInput(parentId: string, title = "My Spec"): CreateDocInput {
-  return { type: "spec", title, parent_id: parentId };
+  return { type: "spec", title};
 }
 
 async function makeParentPrd(service: CorpusService): Promise<string> {
@@ -94,7 +94,6 @@ describe("CorpusService.create — ordinal auto-allocation (AC-084-3 HAPPY)", ()
     const result = await service.create({
       type: "spec",
       title: "Domain Detail Doc",
-      parent_id: parentId,
       extra: { spec_kind: "domain-overview" },
     });
     expect(result.ok).toBe(true);

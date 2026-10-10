@@ -46,6 +46,7 @@
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import type { CreateDocInput } from "@lore/core";
@@ -69,7 +70,6 @@ async function createSpec(cs: CorpusService, parentId: string, title = "Test Spe
   const result = await cs.create({
     type: "spec",
     title,
-    parent_id: parentId,
     content: "spec body",
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create spec: ${JSON.stringify(result.error)}`);
@@ -212,7 +212,7 @@ describe("STATE — demotes an approved spec to draft (AC-ACS-4)", () => {
     const prdId1 = await createPrd(corpusService, "Test PRD Approved");
     const approvedSpecId = await createSpec(corpusService, prdId1, "Approved Spec");
     await acService.addCriterion(approvedSpecId, scriptCriterion());
-    const promoted = await corpusService.set(approvedSpecId, { status: "approved" });
+    const promoted = await approveCitedSpec(store, corpusService, approvedSpecId);
     expect(promoted.ok).toBe(true);
     if (!promoted.ok) return;
     expect(promoted.value.status).toBe("approved");

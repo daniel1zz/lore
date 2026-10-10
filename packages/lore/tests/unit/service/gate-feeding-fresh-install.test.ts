@@ -190,7 +190,6 @@ describe("CorpusService spec-create fallback — HAPPY", () => {
     const spec = await service.create({
       type: "spec",
       title: "Bad Spec",
-      parent_id: prd.id,
       content: NO_HEADING_CONTENT,
     } as CreateDocInput);
 
@@ -211,7 +210,6 @@ describe("CorpusService spec-create fallback — NEGATIVE", () => {
     const spec = await service.create({
       type: "spec",
       title: "Bad Spec",
-      parent_id: prd.id,
       content: NO_HEADING_CONTENT,
     } as CreateDocInput);
 
@@ -226,7 +224,7 @@ describe("CorpusService spec-create fallback — NEGATIVE", () => {
     // still-empty label (the exact failure shape a single "not unknown"
     // assertion alone would miss).
     expect(message).toContain("## Rules a candidate spec must satisfy");
-    expect(message).toContain("Legal parent.");
+    expect(message).toContain("No parent.");
   });
 });
 
@@ -247,7 +245,6 @@ describe("CorpusService spec-create fallback — ERROR", () => {
     const spec = await service.create({
       type: "spec",
       title: "Bad Spec",
-      parent_id: prd.id,
       content: NO_HEADING_CONTENT,
     } as CreateDocInput);
 
@@ -273,7 +270,6 @@ describe("CorpusService spec-create fallback — STATE", () => {
     const spec = await service.create({
       type: "spec",
       title: "Skeleton-less Spec",
-      parent_id: prd.id,
       content: NO_HEADING_CONTENT,
     } as CreateDocInput);
 
@@ -328,8 +324,6 @@ describe("gate-feeding fresh-install both-ends probe", () => {
             "spec",
             "--title",
             "Bad Fresh Spec",
-            "--parent",
-            freshPrdSlug,
             "--content",
             NO_HEADING_CONTENT,
             "--kind",
@@ -345,7 +339,7 @@ describe("gate-feeding fresh-install both-ends probe", () => {
         expect(freshSource).not.toBeNull();
         expect(freshSource).toBe("built-in fallback (no seeded rule doc)");
         expect(freshDeny.stderr).toContain("## Rules a candidate spec must satisfy");
-        expect(freshDeny.stderr).toContain("Legal parent.");
+        expect(freshDeny.stderr).toContain("No parent.");
   
         // ── END 2: this repo's populated corpus, used as a LIVE CONTROL ──────
         // A `.backup`-based snapshot, never the original file (see module header).
@@ -396,8 +390,6 @@ describe("gate-feeding fresh-install both-ends probe", () => {
               "spec",
               "--title",
               "Bad Control Spec (gate-feeding-fresh-install probe, throwaway)",
-              "--parent",
-              controlPrdSlug,
               "--content",
               NO_HEADING_CONTENT,
               "--kind",

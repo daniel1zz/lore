@@ -113,7 +113,7 @@ function buildControlCorpus(label: string): Corpus {
   const prd = mustRun(["create", "prd", "--title", "Rollback Root", "--content", "# PRD\n\nroot.", "--no-ai"], dir);
   const prdSlug = parseSlug(prd.stdout);
   const spec = mustRun(
-    ["create", "spec", "--title", SPEC_TITLE, "--parent", prdSlug, "--content", "## Spec\n\nbody", "--no-ai"],
+    ["create", "spec", "--title", SPEC_TITLE,"--content", "## Spec\n\nbody", "--no-ai"],
     dir,
   );
   const specSlug = parseSlug(spec.stdout);

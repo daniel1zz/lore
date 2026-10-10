@@ -67,7 +67,7 @@ beforeEach(async () => {
   for (const statement of ["First rule", "Second rule"]) {
     await must(await rs.addRule(leaf.id, { statement, confidence: "established", enforced_by: "guaranteed", examples: ["e"] }, { by: "agent:seed" }), "rule");
   }
-  const spec = await must(await cs.create({ type: "spec", title: "Exempt spec", content: SKELETON, parent_id: prd.id } as CreateDocInput), "spec");
+  const spec = await must(await cs.create({ type: "spec", title: "Exempt spec", content: SKELETON} as CreateDocInput), "spec");
   specId = spec.id;
   // Seed criteria while every cite is live (BR-1, BR-2 are the two rules just added).
   await must(await app.acService!.addCriterion(specId, AC("AC-E-1", ["BR-1"])), "AC-E-1");

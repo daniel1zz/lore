@@ -44,6 +44,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -128,8 +129,6 @@ function createFixtureChain(dir: string): { planSlug: string } {
       "spec",
       "--title",
       "AC-CLOSURE-6 Regression Spec",
-      "--parent",
-      prdSlug,
       "--kind",
       "tech",
       "--content",
@@ -186,6 +185,7 @@ function createFixtureChain(dir: string): { planSlug: string } {
   // WORDING, per this file's header, not which conjunct produced it).
   appendWorkflowConfig(dir, "\nworkflow:\n  attestation:\n    min_ratio: 0.5\n");
 
+  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-CLOSURE-6-1"); // BR-1007: approvable only when a criterion cites a live rule
   const approveSpecResult = runLore(["approve", specSlug], dir);
   expect(approveSpecResult.exitCode).toBe(0);
 

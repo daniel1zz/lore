@@ -35,6 +35,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
+import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
 
 /**
@@ -211,7 +212,6 @@ async function createSpecParentedPlan(): Promise<{
     const specResult = await app.corpusService.create({
       type: "spec",
       title: "Gate P2 Target Spec",
-      parent_id: prdResult.value.id,
       content: "## Overview\n\nSpec body for gate P2 cross-tier tests.\n",
     } as CreateDocInput);
     if (!specResult.ok) throw new Error(`spec create failed: ${JSON.stringify(specResult.error)}`);
@@ -334,10 +334,30 @@ async function releaseTask(taskId: string, by: string): Promise<void> {
   }
 }
 
-/** Fast-tracks a doc from draft straight to approved (SPEC-002 §3 valid transition). */
+/**
+ * Fast-tracks a doc from draft straight to approved (SPEC-002 §3 valid transition).
+ *
+ * reason: BR-1007 - approving a spec through `ReviewService` now needs a criterion citing a live rule,
+ * which is a concern of spec-approve-requires-citation, not of these plan-promote / task-claim
+ * pre-flight scenarios (some of which need an approved spec with ZERO criteria, a legacy shape).
+ * A spec's approved state is therefore written directly, the way a corpus holding a pre-BR-1007
+ * approved spec looks; every other type still goes through the real approve path.
+ */
 async function approveDoc(id: string): Promise<void> {
   const app = createFixtureApp(dbPath());
   try {
+    const found = await app.corpusService.get(id);
+    if (!found.ok) throw new Error(`get failed: ${JSON.stringify(found.error)}`);
+    if (found.value.doc.type === "spec") {
+      const store = new SQLiteStore(dbPath());
+      try {
+        const written = await store.update(found.value.doc.id, { status: "approved" });
+        if (!written.ok) throw new Error(`approve (direct write) failed: ${JSON.stringify(written.error)}`);
+      } finally {
+        store.close();
+      }
+      return;
+    }
     const result = await app.reviewService.approve(id);
     if (!result.ok) throw new Error(`approve failed: ${JSON.stringify(result.error)}`);
   } finally {

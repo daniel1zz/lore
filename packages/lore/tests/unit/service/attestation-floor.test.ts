@@ -104,7 +104,6 @@ async function makeSpecWithAc(
   return mustCreate(cs, {
     type: "spec",
     title: "Governing spec",
-    parent_id: prd.id,
     content: "## Spec\n\nbody",
     extra: { acceptance_criteria: criteria },
   } as CreateDocInput);

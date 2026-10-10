@@ -38,6 +38,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -122,7 +123,6 @@ function createDeniedPlan(dir: string): { planSlug: string } {
     [
       "create", "spec",
       "--title", "AC-069-13 Exemption Spec",
-      "--parent", parseSlug(prd.stdout),
       "--kind", "tech",
       "--content", "## Overview\n\nFixture spec for the attestation-exemption pair.\n",
       "--no-ai",
@@ -149,6 +149,7 @@ function createDeniedPlan(dir: string): { planSlug: string } {
   appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
   appendWorkflowConfig(dir, "\nworkflow:\n  attestation:\n    min_ratio: 0.5\n");
 
+  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-069-13-1"); // BR-1007: approvable only when a criterion cites a live rule
   expect(runLore(["approve", specSlug], dir).exitCode).toBe(0);
 
   const plan = runLore(

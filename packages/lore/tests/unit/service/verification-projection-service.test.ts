@@ -86,7 +86,6 @@ async function makeSpec(
   return mustCreate(cs, {
     type: "spec",
     title: "Test Spec",
-    parent_id: prd.id,
     content: "## Spec\n\nbody",
     extra: criteria.length > 0 ? { acceptance_criteria: criteria } : {},
   } as CreateDocInput);

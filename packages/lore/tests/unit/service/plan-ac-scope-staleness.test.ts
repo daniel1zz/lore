@@ -69,7 +69,6 @@ async function makeStaleScopeFixture(store: InMemoryStore) {
   const specResult = await corpusService.create({
     type: "spec",
     title: "Staleness Test Spec",
-    parent_id: prdResult.value.id,
     content: "Spec body.",
     extra: { acceptance_criteria: TWO_CRITERIA },
   } as CreateDocInput);
@@ -159,7 +158,6 @@ describe("plan.extra.ac_scope staleness — dropping a declared AC from the spec
     const specResult = await corpusService.create({
       type: "spec",
       title: "No-Drift Spec",
-      parent_id: prdResult.value.id,
       content: "Spec body.",
       extra: { acceptance_criteria: TWO_CRITERIA },
     } as CreateDocInput);

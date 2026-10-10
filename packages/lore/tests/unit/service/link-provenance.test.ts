@@ -186,13 +186,13 @@ describe("NEGATIVE — no state change means no audit entry", () => {
     const plan = await insertRawDoc(store, "plan", "A Plan", prd.id);
     const task = await insertRawDoc(store, "task", "A Task", plan.id);
 
-    // spec's allowed parent types = ["prd"]; task is not a legal "parent" link target.
-    const result = await cs.link(spec.id, task.id, "parent");
+    // plan's allowed parent types = ["prd", "spec"]; task is not a legal "parent" link target.
+    const result = await cs.link(plan.id, task.id, "parent");
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("INVALID_PARENT_TYPE");
 
-    const entries = await linkAudit(store, spec.id, "link");
+    const entries = await linkAudit(store, plan.id, "link");
     expect(entries).toHaveLength(0);
   });
 });
@@ -314,13 +314,11 @@ describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMIL
     const specA = await cs.create({
       type: "spec",
       title: "Verify Spec A",
-      parent_id: root.id,
       content: "x",
     } as CreateDocInput);
     const specB = await cs.create({
       type: "spec",
       title: "Verify Spec B",
-      parent_id: root.id,
       content: "x",
     } as CreateDocInput);
     if (!specA.ok || !specB.ok) throw new Error("fixture spec creation failed");

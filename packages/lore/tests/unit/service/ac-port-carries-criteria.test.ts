@@ -98,7 +98,6 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
       const specId = await createDoc(corpusService, {
         type: "spec",
         title: "Port Carries Criteria Spec",
-        parent_id: prdId,
         content: "spec body",
         extra: { acceptance_criteria: [criterionWithGeneration(STORE_GENERATION)] },
       } as CreateDocInput);
@@ -171,7 +170,6 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
       const specId = await createDoc(corpusService, {
         type: "spec",
         title: "Port Carries Criteria Adhoc Spec",
-        parent_id: prdId,
         content: "spec body",
         extra: { acceptance_criteria: [criterionWithGeneration(STORE_GENERATION)] },
       } as CreateDocInput);

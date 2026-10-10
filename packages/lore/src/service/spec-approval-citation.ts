@@ -1,0 +1,50 @@
+/**
+ * Module: spec-approval-citation — the BR-1007 approval precondition for a spec.
+ *
+ * Purpose: refuse the draft→approved promotion of a spec none of whose criteria cites a LIVE
+ *   business (BR) or architecture standard (AS) rule; every other document type is untouched.
+ * Public surface: {@link requireSpecCitesLiveRule}.
+ * Invariants:
+ *   - ONE definition of "live rule": `indexBaseline(...).states` / `specCitesLiveRule`
+ *     (ac-cite-gate.ts), the same measure the citation gate uses.
+ *   - A store read failure is returned as itself, never read as "cites nothing" and never as "cites".
+ *   - Nothing is written; the caller decides where in its gate order this runs and must call it from
+ *     EVERY path that can promote a spec to `approved` (ReviewService.approve and CorpusService.set).
+ * Side-effect class: IO (one `store.findMany({type: "baseline"})` read).
+ * Source: rule BR-1007 (spec-baseline-slice-3b AC-BLS3B-2).
+ */
+
+import { err, ok, specAcceptanceCriteriaSchema, type LoreError, type Result } from "@lore/core";
+import type { StoreInterface } from "../store/store-interface.js";
+import { indexBaseline, specCitesLiveRule } from "./ac-cite-gate.js";
+
+/**
+ * @param store - read-only use: the baseline docs are listed to learn each rule's lifecycle
+ * @param specSlug - the spec's slug, named in the refusal
+ * @param rawAcceptanceCriteria - the spec's `extra.acceptance_criteria` as stored (unvalidated);
+ *   an absent or malformed value counts as zero criteria
+ * @returns `ok(true)` when at least one criterion cites a live BR/AS rule; otherwise
+ *   `VALIDATION_ERROR` (exit 4) on field `acceptance_criteria` whose message names `lore ac cite`
+ * @example
+ * const cited = await requireSpecCitesLiveRule(store, spec.slug, spec.extra["acceptance_criteria"]);
+ * if (!cited.ok) return cited;
+ */
+export async function requireSpecCitesLiveRule(
+  store: StoreInterface,
+  specSlug: string,
+  rawAcceptanceCriteria: unknown,
+): Promise<Result<true, LoreError>> {
+  const parsed = specAcceptanceCriteriaSchema.safeParse(rawAcceptanceCriteria);
+  const criteria = parsed.success ? parsed.data : [];
+  const baseline = await store.findMany({ type: "baseline" });
+  if (!baseline.ok) return baseline;
+  if (specCitesLiveRule(criteria, indexBaseline(baseline.value).states)) return ok(true);
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "acceptance_criteria",
+    message:
+      `spec "${specSlug}" cites no live business or architecture rule — none of its criteria cites a live ` +
+      "BR or AS rule, so it cannot be approved. Cite one with `lore ac cite <spec> <ac-id> <rule-id>`",
+    value: specSlug,
+  });
+}

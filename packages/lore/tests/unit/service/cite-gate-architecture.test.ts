@@ -120,7 +120,7 @@ async function world(): Promise<World> {
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");
   const mk = async (title: string) => {
-    const s = await cs.create({ type: "spec", title, parent_id: prd.value.id, content: "b" } as CreateDocInput);
+    const s = await cs.create({ type: "spec", title,content: "b" } as CreateDocInput);
     if (!s.ok) throw new Error("spec");
     return s.value.id as string;
   };

@@ -214,6 +214,28 @@ export function changedCriteria(
   return out;
 }
 
+/**
+ * BR-1007: does any criterion cite at least one LIVE business or architecture standard rule?
+ * Liveness is the SAME measure the citation gate uses (`BaselineCiteIndex.states` from
+ * {@link indexBaseline}, which holds BR/AS rules only), so "live rule" has one definition.
+ *
+ * @param criteria - the spec's structured acceptance criteria
+ * @param states - lifecycle per rule id from {@link indexBaseline}
+ * @returns true iff at least one criterion cites a rule whose state is `live`
+ * @example
+ * specCitesLiveRule([{ id: "AC-1", cites: ["BR-1"] }], { "BR-1": "live" }); // => true
+ */
+export function specCitesLiveRule(
+  criteria: readonly Pick<AcceptanceCriterion, "cites">[],
+  states: AcCiteRuleStates,
+): boolean {
+  return criteria.some((criterion) =>
+    (criterion.cites ?? []).some(
+      (ruleId) => Object.prototype.hasOwnProperty.call(states, ruleId) && states[ruleId] === "live",
+    ),
+  );
+}
+
 // ─── The decision ────────────────────────────────────────────────────────────
 
 /** One criterion the gate would refuse (report mode records it; enforce mode refuses with it). */

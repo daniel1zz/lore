@@ -152,7 +152,8 @@ export default defineCommand({
     },
     parent: {
       type: "string",
-      description: "Parent document ID or slug",
+      description:
+        "Parent document ID or slug (refused for a spec: a spec takes no parent — relate it to the trees with `lore ac cite`)",
     },
     content: {
       type: "string",

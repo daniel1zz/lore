@@ -84,7 +84,7 @@ async function createPrd(corpus: CorpusService, title = "Product Requirements Do
 
 /** Create a spec in the corpus and return its record. */
 async function createSpec(corpus: CorpusService, parentId: string, title: string, content = "spec body") {
-  const input: CreateDocInput = { type: "spec", title, parent_id: parentId, content };
+  const input: CreateDocInput = { type: "spec", title,content };
   const result = await corpus.create(input);
   if (!result.ok) throw new Error(`Failed to create spec: ${result.error.code}`);
   return result.value;

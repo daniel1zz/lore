@@ -41,7 +41,6 @@ describe("LoreCreateSchema", () => {
         type: "spec",
         title: "Auth Spec",
         content: "# Content",
-        parent_id: "01AAAAAAAAAAAAAAAAAAAAAAAAA",
         tags: ["auth", "security"],
         extra: { key: "value" },
       });

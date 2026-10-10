@@ -74,6 +74,7 @@ import { mkdtempSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors tests/e2e/bootstrap-injection-compiled.bun.test.ts's own REPO_ROOT derivation.
@@ -185,8 +186,6 @@ function createSpec(tmpDir: string, prdSlug: string, title: string): CreatedDoc 
       "spec",
       "--title",
       title,
-      "--parent",
-      prdSlug,
       "--kind",
       "feature",
       "--no-ai",
@@ -207,6 +206,10 @@ function setStatus(tmpDir: string, slug: string, status: string): void {
 
 /** Walks a doc from `draft` all the way to `archived` via the fast-track edge (draft -> approved -> active -> archived) — valid for spec/plan/adr per VALID_TRANSITIONS. */
 function archiveViaFastTrack(tmpDir: string, slug: string): void {
+  // BR-1007: a spec is approved only when a criterion cites a live rule; the fixing spec gets one.
+  const lore = loreRunnerFor(runLore, tmpDir);
+  lore(["ac", "add", slug, "AC-FT-1", "--statement", "the fixing spec behaviour responds in < 200ms", "--mode", "human"]);
+  citeSpecViaCli(lore, tmpDir, undefined, slug, "AC-FT-1");
   setStatus(tmpDir, slug, "approved");
   setStatus(tmpDir, slug, "active");
   setStatus(tmpDir, slug, "archived");

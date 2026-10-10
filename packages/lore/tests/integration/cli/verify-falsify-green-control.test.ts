@@ -199,7 +199,7 @@ function createPrd(dir: string, title: string): string {
 
 function createSpec(dir: string, title: string, parentSlug: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai", "--content", "body"],
+    ["create", "spec", "--title", title,"--no-ai", "--content", "body"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
@@ -401,7 +401,6 @@ async function buildInMemoryFixture(): Promise<InMemoryFixture> {
   const spec = await corpusService.create({
     type: "spec",
     title: "Launch-Fail Spec",
-    parent_id: prd.value.id,
     content: "body",
   } as CreateDocInput);
   if (!spec.ok) throw new Error(`spec create failed: ${JSON.stringify(spec.error)}`);

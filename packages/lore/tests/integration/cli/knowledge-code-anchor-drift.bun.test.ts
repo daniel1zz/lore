@@ -177,8 +177,6 @@ const specSlug = parseJsonSlug(
       "spec",
       "--title",
       "Suspension Signal Contract",
-      "--parent",
-      prdSlug,
       "--kind",
       "tech",
       "--no-ai",

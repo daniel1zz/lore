@@ -107,7 +107,7 @@ function extractShortIdBeforeTitle(line: string, title: string): string {
 }
 
 /**
- * Builds two sibling `spec` docs under a fresh root PRD, forcing them into
+ * Builds two sibling `plan` docs (a spec takes no parent, BR-2) under a fresh root PRD, forcing them into
  * the SAME 1024ms ULID timestamp window (see this module's header for the
  * `Date.now()` freeze trick). `content` supplies the minimal `## ` skeleton
  * heading the `spec-create` gate requires (`hasSkeleton`, gate-predicates.ts)
@@ -125,13 +125,13 @@ async function createCollidingSiblingPair(dbPath: string, parentId: string): Pro
     try {
       Date.now = () => FIXED_TS;
       resultA = await app.corpusService.create({
-        type: "spec",
+        type: "plan",
         title: "Doc Alpha",
         parent_id: parentId,
         content: "## Overview\nDoc Alpha body.",
       });
       resultB = await app.corpusService.create({
-        type: "spec",
+        type: "plan",
         title: "Doc Bravo",
         parent_id: parentId,
         content: "## Overview\nDoc Bravo body.",

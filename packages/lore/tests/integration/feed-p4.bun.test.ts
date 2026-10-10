@@ -249,10 +249,10 @@ describe("lore feed <checkpoint> — feed-before-produce PULL (P4)", () => {
     expect(feedResult.stdout).toContain("Some PRD content for the SSOT check.");
     expect(feedResult.stdout).toContain("## Parent");
 
-    // Gate payload: legal parent (prd) + default spec_kind, but content lacking a
-    // `## ` heading — the ONLY predicate that fails is hasSkeleton (MISSING_SKELETON).
-    // Same skill doc, same parent doc => same rule/parent slices via the shared
-    // flows/feed-flow.ts helpers; the only textual delta is the inserted "Missing:" block.
+    // Gate payload: names the same parent (BR-2 refuses ANY spec parent, so `parentLegal` fails) and
+    // its content lacks a `## ` heading (MISSING_SKELETON). Same skill doc, same parent doc => same
+    // rule/parent slices via the shared flows/feed-flow.ts helpers; the only textual delta is the
+    // inserted "Missing:" block, which lists both reasons.
     const violatingPayload = {
       type: "spec",
       title: "A spec missing its skeleton",

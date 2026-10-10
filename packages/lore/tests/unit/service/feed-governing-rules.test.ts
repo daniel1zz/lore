@@ -163,7 +163,7 @@ interface TaskFixture { task: DocRecord; spec: DocRecord; prd: DocRecord }
 async function makeTask(opts: { cites?: string[]; fileAnchors?: string[]; prd?: DocRecord } = {}): Promise<TaskFixture> {
   const prd = opts.prd ?? (await mustCreate({ type: "prd", title: "Governing PRD", content: "p" } as CreateDocInput));
   const spec = await mustCreate({
-    type: "spec", title: "Governed Spec", parent_id: prd.id, content: "s",
+    type: "spec", title: "Governed Spec",content: "s",
     extra: { acceptance_criteria: criteria(opts.cites ?? []) },
   } as CreateDocInput);
   const plan = await mustCreate({ type: "plan", title: "Governed Plan", parent_id: spec.id, content: "p" } as CreateDocInput);
@@ -177,7 +177,7 @@ async function makeTask(opts: { cites?: string[]; fileAnchors?: string[]; prd?: 
 /** A second spec whose code anchors cover FILE_F and whose single AC cites `ruleId`. */
 async function makeFileCoveringSpec(prd: DocRecord, ruleId: string): Promise<void> {
   await mustCreate({
-    type: "spec", title: "Other Spec Covering F", parent_id: prd.id, content: "s2",
+    type: "spec", title: "Other Spec Covering F",content: "s2",
     extra: { code_anchors: [FILE_F], acceptance_criteria: criteria([ruleId]) },
   } as CreateDocInput);
 }

@@ -463,7 +463,7 @@ function createPrd(dir: string, title: string): string {
 }
 
 function createSpec(dir: string, title: string, parentSlug: string): string {
-  const r = runLore(["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai", "--content", "body"], dir);
+  const r = runLore(["create", "spec", "--title", title,"--no-ai", "--content", "body"], dir);
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
   return extractSlug(r.stdout);
 }

@@ -7,7 +7,7 @@
  * Test design (spec-first, before reading implementation):
  * PARENT_TYPE_CONTRACT spec:
  *   prd       → [] (root type, no valid parents)
- *   spec      → ["prd"]
+ *   spec      → [] (parentless, not a root — BR-1/BR-2)
  *   adr       → ["prd", "spec"]
  *   plan      → ["prd", "spec"]
  *   task      → ["plan"]
@@ -33,13 +33,14 @@ import {
   PARENT_TYPE_CONTRACT,
   isValidParentType,
   ROOT_TYPES,
+  isParentlessType,
 } from "@lore/core";
 
 // ── HAPPY path ───────────────────────────────────────────────────────────────
 
 describe("isValidParentType — happy path (AC-DOCTYPE-HAPPY)", () => {
-  it("spec → prd is a valid parent relationship", () => {
-    expect(isValidParentType("spec", "prd")).toBe(true);
+  it("spec → prd is NOT a valid parent relationship (BR-2: a spec takes no parent)", () => {
+    expect(isValidParentType("spec", "prd")).toBe(false);
   });
 
   it("task → plan is a valid parent relationship", () => {
@@ -135,9 +136,11 @@ describe("PARENT_TYPE_CONTRACT — boundary values (AC-DOCTYPE-BOUNDARY)", () =>
     expect(Array.from(PARENT_TYPE_CONTRACT.task)).toContain("plan");
   });
 
-  it("PARENT_TYPE_CONTRACT.spec contains exactly one entry: 'prd'", () => {
-    expect(PARENT_TYPE_CONTRACT.spec).toHaveLength(1);
-    expect(Array.from(PARENT_TYPE_CONTRACT.spec)).toContain("prd");
+  it("PARENT_TYPE_CONTRACT.spec is empty and spec is parentless but NOT a root type (BR-1/BR-2)", () => {
+    expect(PARENT_TYPE_CONTRACT.spec).toHaveLength(0);
+    expect(isParentlessType("spec")).toBe(true);
+    expect(ROOT_TYPES).not.toContain("spec");
+    expect(Array.from(ROOT_TYPES)).toEqual(["prd"]);
   });
 
   it("PARENT_TYPE_CONTRACT.knowledge contains all 5 other types plus itself (6 allowed parents per spec)", () => {

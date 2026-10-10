@@ -28,6 +28,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { JudgmentService } from "../../../src/service/judgment-service.js";
@@ -82,6 +83,7 @@ const SCRIPT_AC = {
   id: "AC-1",
   statement: "the parser round-trips every fixture file",
   verify: { mode: "script" as const, oracle: "test" as const, command: "bun test parser.test.ts" },
+  cites: [LIVE_RULE_ID],
 };
 
 const VALID_ASSESSMENT = {
@@ -117,10 +119,11 @@ const VALID_UAT_VERDICT = {
  * document is overridden here so the harness exercises the WIRED path, not the
  * ungated bare-test path.
  */
-function makeApp(
+async function makeApp(
   opts: { ledgerAutoApprove?: boolean; judgmentRequiredTypes?: readonly string[] } = {},
 ) {
   const store = new InMemoryStore();
+  await seedLiveRule(store);
   const telemetry = makeTelemetry();
   const enforcer = new GateEnforcer(undefined);
   const corpusService = new CorpusService(
@@ -160,7 +163,7 @@ function makeNewJudgment(overrides: Partial<NewReviewJudgment> = {}): NewReviewJ
 
 describe("AC-TIER-1 ledger create fast-track", () => {
   it("creating knowledge assessment lands approved in the same write with a ledger-fast-track audit row", async () => {
-    const { corpusService, store } = makeApp();
+    const { corpusService, store } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const doc = await mustCreate(corpusService, {
       type: "knowledge",
@@ -181,7 +184,7 @@ describe("AC-TIER-1 ledger create fast-track", () => {
   });
 
   it("creating knowledge retro lands approved", async () => {
-    const { corpusService } = makeApp();
+    const { corpusService } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const doc = await mustCreate(corpusService, {
       type: "knowledge",
@@ -194,7 +197,7 @@ describe("AC-TIER-1 ledger create fast-track", () => {
   });
 
   it("creating a handoff doc (via createHandoffDoc) lands approved", async () => {
-    const { corpusService } = makeApp();
+    const { corpusService } = await makeApp();
     const doc = await corpusService.createHandoffDoc({
       type: "knowledge",
       title: "Handoff X",
@@ -206,7 +209,7 @@ describe("AC-TIER-1 ledger create fast-track", () => {
   });
 
   it("creating a uat verdict doc (via createUatDoc) lands approved", async () => {
-    const { corpusService } = makeApp();
+    const { corpusService } = await makeApp();
     const doc = await corpusService.createUatDoc({
       type: "knowledge",
       title: "UAT X",
@@ -218,14 +221,13 @@ describe("AC-TIER-1 ledger create fast-track", () => {
   });
 
   it("creating spec/adr/prd lands draft (durable promises, not ledger records)", async () => {
-    const { corpusService } = makeApp();
+    const { corpusService } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
     expect(prd.status).toBe("draft");
 
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature" },
     } as CreateDocInput);
@@ -242,7 +244,7 @@ describe("AC-TIER-1 ledger create fast-track", () => {
   });
 
   it("creating knowledge reference/research/ideation lands draft (durable promises, not ledger records)", async () => {
-    const { corpusService } = makeApp();
+    const { corpusService } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     for (const subType of ["reference", "research", "ideation"] as const) {
       const doc = await mustCreate(corpusService, {
@@ -261,7 +263,7 @@ describe("AC-TIER-1 ledger create fast-track", () => {
 
 describe("AC-TIER-2 ledger edit atomic reset + re-fast-track", () => {
   it("editing an approved ledger doc ends approved (atomic reset + re-fast-track, both audited)", async () => {
-    const { corpusService, store } = makeApp();
+    const { corpusService, store } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const doc = await mustCreate(corpusService, {
       type: "knowledge",
@@ -304,12 +306,11 @@ describe("AC-TIER-2 ledger edit atomic reset + re-fast-track", () => {
   });
 
   it("REGRESSION: editing an approved spec still resets to draft (unaffected by M1)", async () => {
-    const { corpusService } = makeApp();
+    const { corpusService } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const specDraft = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\noriginal",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);
@@ -331,7 +332,7 @@ describe("AC-TIER-3 pending filter — task + ledger sub_types hidden by default
     // ledgerAutoApprove: false — so the ledger doc STAYS draft, isolating M3's own
     // filter from M1's create-time fast-track (which would otherwise also hide it,
     // just for a different reason).
-    const { corpusService, reviewService } = makeApp({ ledgerAutoApprove: false });
+    const { corpusService, reviewService } = await makeApp({ ledgerAutoApprove: false });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const plan = await mustCreate(corpusService, {
       type: "plan",
@@ -363,7 +364,6 @@ describe("AC-TIER-3 pending filter — task + ledger sub_types hidden by default
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature" },
     } as CreateDocInput);
@@ -434,13 +434,12 @@ describe("AC-TIER-6 provenance write half (AIProviderService.generate)", () => {
 
 describe("AC-TIER-6 gate half — I1 provenance collision", () => {
   it("a doc with extra.ai_provenance equal to the judgment's judge tuple denies naming the collision", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const { corpusService, judgmentService, reviewService } = await makeApp({ judgmentRequiredTypes: ["spec"] });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const aiTuple = { provider: "claude-cli", model: "claude-cli", prompt_version: "v2" };
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC], ai_provenance: aiTuple },
     } as CreateDocInput);
@@ -459,12 +458,11 @@ describe("AC-TIER-6 gate half — I1 provenance collision", () => {
   });
 
   it("a provenance-less doc passes on judgment-required alone", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const { corpusService, judgmentService, reviewService } = await makeApp({ judgmentRequiredTypes: ["spec"] });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);
@@ -486,12 +484,11 @@ describe("AC-TIER-6 gate half — I1 provenance collision", () => {
   });
 
   it("approve of a spec with zero judgments for the current version exits with VALIDATION_ERROR naming lore review", async () => {
-    const { corpusService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const { corpusService, reviewService } = await makeApp({ judgmentRequiredTypes: ["spec"] });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);
@@ -514,12 +511,11 @@ describe("AC-TIER-6 gate half — I1 provenance collision", () => {
 // (audit row via the compiled binary) lives in tiered-review-gate.bun.test.ts.
 describe("AC-TIER-5 zero-judgment reachable override (ReviewService.approve)", () => {
   it("overrideNoJudgment approves a never-judged doc and records details.override_no_judgment", async () => {
-    const { corpusService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const { corpusService, reviewService } = await makeApp({ judgmentRequiredTypes: ["spec"] });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);
@@ -535,12 +531,11 @@ describe("AC-TIER-5 zero-judgment reachable override (ReviewService.approve)", (
   });
 
   it("overrideNoJudgment is rejected loud when the doc already has a judgment recorded", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const { corpusService, judgmentService, reviewService } = await makeApp({ judgmentRequiredTypes: ["spec"] });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);
@@ -559,12 +554,11 @@ describe("AC-TIER-5 zero-judgment reachable override (ReviewService.approve)", (
   });
 
   it("passing both overrideJudgmentId and overrideNoJudgment is rejected loud", async () => {
-    const { corpusService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const { corpusService, reviewService } = await makeApp({ judgmentRequiredTypes: ["spec"] });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);
@@ -583,7 +577,7 @@ describe("AC-TIER-5 zero-judgment reachable override (ReviewService.approve)", (
 
 describe("AC-TIER-7 kill-switches", () => {
   it("ledger_auto_approve=false: creating a ledger doc lands draft (legacy behavior)", async () => {
-    const { corpusService } = makeApp({ ledgerAutoApprove: false });
+    const { corpusService } = await makeApp({ ledgerAutoApprove: false });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const doc = await mustCreate(corpusService, {
       type: "knowledge",
@@ -596,12 +590,11 @@ describe("AC-TIER-7 kill-switches", () => {
   });
 
   it("judgment_required_types=[]: a spec approve needs no judgment (legacy behavior)", async () => {
-    const { corpusService, reviewService } = makeApp({ judgmentRequiredTypes: [] });
+    const { corpusService, reviewService } = await makeApp({ judgmentRequiredTypes: [] });
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "A spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);

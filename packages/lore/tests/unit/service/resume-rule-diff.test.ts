@@ -119,11 +119,11 @@ async function makeFixture(): Promise<Fixture> {
   const governed2 = await addRule(leaf, "Governed rule beta holds");
   const foreign = await addRule(leaf, "Foreign rule gamma holds");
   const spec = await mustCreate({
-    type: "spec", title: "Governing Spec", parent_id: prd.id, content: "s",
+    type: "spec", title: "Governing Spec",content: "s",
     extra: { acceptance_criteria: [criterion("AC-RES-1", [governed, governed2])] },
   } as CreateDocInput);
   await mustCreate({
-    type: "spec", title: "Other Spec", parent_id: prd.id, content: "s2",
+    type: "spec", title: "Other Spec",content: "s2",
     extra: { acceptance_criteria: [criterion("AC-OTH-1", [foreign])] },
   } as CreateDocInput);
   const plan = await mustCreate({ type: "plan", title: "Resume Plan", parent_id: spec.id, content: "p" } as CreateDocInput);

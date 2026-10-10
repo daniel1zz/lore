@@ -185,8 +185,6 @@ function createSpec(dir: string, prdSlug: string, title: string, codeAnchors: re
     "spec",
     "--title",
     title,
-    "--parent",
-    prdSlug,
     "--kind",
     "feature",
     "--no-ai",

@@ -121,7 +121,7 @@ function createSpec(
   // MISSING_SKELETON before this helper's caller ever reaches the budget-check assertion.
   content = "## Overview\nspec body",
 ): CreatedDoc {
-  return createDoc(tmpDir, "spec", title, content, ["--parent", parentSlug]);
+  return createDoc(tmpDir, "spec", title, content, []);
 }
 
 /**

@@ -33,6 +33,7 @@
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { PhaseService } from "../../../src/service/phase-service.js";
@@ -746,7 +747,6 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     const specResult = await corpusService.create({
       type: "spec",
       title: "Upstream Test Spec",
-      parent_id: prdResult.value.id,
       content: "spec body",
     } as CreateDocInput);
     if (!specResult.ok) throw new Error("spec create failed");
@@ -771,7 +771,7 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
   });
 
   it("once the parent spec is approved, upstream_unapproved is no longer set", async () => {
-    const { corpusService, taskWorkflowService } = makeServices();
+    const { corpusService, taskWorkflowService, store } = makeServices();
 
     const prdResult = await corpusService.create({
       type: "prd",
@@ -783,7 +783,6 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     const specResult = await corpusService.create({
       type: "spec",
       title: "Approved-Path Spec",
-      parent_id: prdResult.value.id,
       content: "spec body",
     } as CreateDocInput);
     if (!specResult.ok) throw new Error("spec create failed");
@@ -804,7 +803,7 @@ describe("STATE — ready() upstream_unapproved advisory (SPEC-032 §3.4, AC-6)"
     if (!beforeApproval.ok) return;
     expect(beforeApproval.value.records.find((r) => r.task.id === taskId)?.upstream_unapproved).toBe(true);
 
-    const approveResult = await corpusService.set(specId, { status: "approved" });
+    const approveResult = await approveCitedSpec(store, corpusService, specId);
     expect(approveResult.ok).toBe(true);
 
     const afterApproval = await taskWorkflowService.ready(planId);
@@ -1150,7 +1149,6 @@ async function createSpecWithCriteria(
   const result = await cs.create({
     type: "spec",
     title,
-    parent_id: parentId,
     content: "spec body",
     extra: { acceptance_criteria: criteria },
   } as CreateDocInput);

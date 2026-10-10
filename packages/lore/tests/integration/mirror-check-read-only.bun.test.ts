@@ -215,7 +215,6 @@ async function setupCleanExportedCorpus(): Promise<ThrowawayCorpus> {
       const specResult = await app.corpusService.create({
         type: "spec",
         title,
-        parent_id: prdResult.value.id,
         content: `## Overview\n\n${title} body.\n`,
       } as CreateDocInput);
       if (!specResult.ok) throw new Error(`test setup: spec create failed: ${JSON.stringify(specResult.error)}`);

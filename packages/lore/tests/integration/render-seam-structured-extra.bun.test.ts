@@ -120,18 +120,19 @@ function denyPayload(parentIdOrSlug: string): string {
   return JSON.stringify({
     type: "spec",
     title: "Seam gate probe spec",
+    // reason: BR-2 - a spec takes no parent, so a payload that names one is refused by the gate too;
+    // the denial pack still quotes that parent's slice, which is what this suite probes.
     parent_id: parentIdOrSlug,
     content: "just prose with no level-two heading at all",
     extra: { spec_kind: "tech" },
   });
 }
 
-/** The SAME payload shape, compliant — the HAPPY control that must exit 0. */
-function passPayload(parentIdOrSlug: string): string {
+/** The SAME payload shape, compliant and parentless (BR-1) - the HAPPY control that must exit 0. */
+function passPayload(_parentIdOrSlug: string): string {
   return JSON.stringify({
     type: "spec",
     title: "Seam gate probe spec",
-    parent_id: parentIdOrSlug,
     content: "## Overview\n\nSome text.\n\n## Scope\n\nIn scope.\n\n## Acceptance Criteria\n\n- AC1\n",
     extra: { spec_kind: "tech" },
   });

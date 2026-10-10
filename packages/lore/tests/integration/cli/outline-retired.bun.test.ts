@@ -128,7 +128,7 @@ beforeAll(() => {
   mustRun(["init"], dir);
   const root = slugOf(mustRun(["create", "prd", "--title", "Spec Parent PRD", "--content", "root", "--no-ai"], dir).stdout);
   sharedSpec = slugOf(
-    mustRun(["create", "spec", "--title", "Outline Spec", "--parent", root, "--no-ai", "--content", "## Overview\nbody"], dir).stdout,
+    mustRun(["create", "spec", "--title", "Outline Spec","--no-ai", "--content", "## Overview\nbody"], dir).stdout,
   );
 });
 

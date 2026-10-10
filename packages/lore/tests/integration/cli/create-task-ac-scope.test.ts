@@ -116,7 +116,7 @@ function createPrd(title: string): string {
 
 function createSpec(title: string, parentSlug: string): string {
   return extractSlug(
-    mustRun(["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai", "--content", "## Overview\nbody"])
+    mustRun(["create", "spec", "--title", title,"--no-ai", "--content", "## Overview\nbody"])
       .stdout,
   );
 }

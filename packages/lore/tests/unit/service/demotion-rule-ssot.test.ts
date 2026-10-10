@@ -97,6 +97,7 @@ vi.mock("@lore/core", async (importOriginal) => {
 // selected when a future session edits either of them — the mechanism would exist but
 // never run.
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 
@@ -115,7 +116,7 @@ function makeServices(): Services {
 
 /** An APPROVED spec carrying one script-mode criterion (`AC-X-1`). */
 async function createApprovedSpec(services: Services, titleSuffix: string): Promise<string> {
-  const { corpusService, acService } = services;
+  const { corpusService, acService, store } = services;
   const prd = await corpusService.create({
     type: "prd",
     title: `Demotion SSOT PRD ${titleSuffix}`,
@@ -126,7 +127,6 @@ async function createApprovedSpec(services: Services, titleSuffix: string): Prom
   const spec = await corpusService.create({
     type: "spec",
     title: `Demotion SSOT Spec ${titleSuffix}`,
-    parent_id: prd.value.id,
     content: "spec body",
   } as CreateDocInput);
   if (!spec.ok) throw new Error(`spec create failed: ${JSON.stringify(spec.error)}`);
@@ -138,7 +138,7 @@ async function createApprovedSpec(services: Services, titleSuffix: string): Prom
   });
   if (!added.ok) throw new Error(`addCriterion failed: ${JSON.stringify(added.error)}`);
 
-  const promoted = await corpusService.set(spec.value.id, { status: "approved" });
+  const promoted = await approveCitedSpec(store, corpusService, spec.value.id);
   if (!promoted.ok) throw new Error(`promote failed: ${JSON.stringify(promoted.error)}`);
   if (promoted.value.status !== "approved") throw new Error(`fixture spec is ${promoted.value.status}, not approved`);
   return spec.value.id;

@@ -217,7 +217,6 @@ async function makeSpec(h: H, parent: DocRecord, title = "Spec"): Promise<DocRec
     type: "spec",
     title,
     content: "## Overview\n\nbody",
-    parent_id: parent.id,
     extra: { spec_kind: "feature" },
   } as CreateDocInput);
   if (!r.ok) throw new Error(`spec create failed: ${JSON.stringify(r.error)}`);
@@ -510,7 +509,7 @@ function freshCorpus(): { dir: string; prd: string; spec: string } {
     ["workflow:", "  gates:", "    spec-create:", "      enabled: false", "    spec-promote:", "      enabled: false", ""].join("\n"),
   );
   const prd = createDoc(dir, "prd", []);
-  const spec = createDoc(dir, "spec", ["--parent", prd, "--kind", "feature"]);
+  const spec = createDoc(dir, "spec", ["--kind", "feature"]);
   return { dir, prd, spec };
 }
 

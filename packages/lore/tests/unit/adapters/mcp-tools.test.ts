@@ -133,10 +133,8 @@ describe("lore_create", () => {
       expect(data.version).toBe(1);
     });
 
-    it("creates a spec with parent_id", async () => {
-      const prdResult = await call()({ type: "prd", title: "Parent PRD" });
-      const prd = parseResult(prdResult) as { id: string };
-      const specResult = await call()({ type: "spec", title: "Auth Spec", parent_id: prd.id });
+    it("creates a spec with no parent (BR-1)", async () => {
+      const specResult = await call()({ type: "spec", title: "Auth Spec" });
       expect(specResult.isError).toBeFalsy();
       const spec = parseResult(specResult) as { type: string };
       expect(spec.type).toBe("spec");
@@ -144,8 +142,17 @@ describe("lore_create", () => {
   });
 
   describe("negative cases", () => {
-    it("returns error when spec missing parent_id", async () => {
-      const result = await call()({ type: "spec", title: "Orphan Spec" });
+    it("returns error when a spec is given a parent_id (BR-2), naming criterion citations", async () => {
+      const prd = parseResult(await call()({ type: "prd", title: "Parent PRD" })) as { id: string };
+      const result = await call()({ type: "spec", title: "Parented Spec", parent_id: prd.id });
+      expect(result.isError).toBe(true);
+      const error = parseResult(result) as { code: string; message: string };
+      expect(error.code).toBe("VALIDATION_ERROR");
+      expect(error.message).toContain("lore ac cite");
+    });
+
+    it("returns error when a task is missing parent_id (parent still required for task)", async () => {
+      const result = await call()({ type: "task", title: "Orphan Task" });
       expect(result.isError).toBe(true);
       const error = parseResult(result) as { code: string };
       expect(["SCHEMA_VIOLATION", "PARENT_REQUIRED", "VALIDATION_ERROR"]).toContain(error.code);
@@ -172,7 +179,7 @@ describe("lore_create", () => {
 
   describe("error handling", () => {
     it("returns isError=true with LoreError JSON on failure", async () => {
-      const result = await call()({ type: "spec", title: "No Parent" });
+      const result = await call()({ type: "task", title: "No Parent" });
       expect(result.isError).toBe(true);
       const text = result.content[0];
       expect(text?.type).toBe("text");
@@ -340,7 +347,7 @@ describe("lore_list", () => {
       const cc = getToolHandler(server, "lore_create");
       const prd = await cc({ type: "prd", title: "PRD" });
       const prdData = parseResult(prd) as { id: string };
-      await cc({ type: "spec", title: "Spec", parent_id: prdData.id });
+      await cc({ type: "spec", title: "Spec" });
 
       const result = await getToolHandler(server, "lore_list")({ type: "spec" });
       const data = parseResult(result) as { docs: Array<{ type: string }> };
@@ -485,9 +492,7 @@ describe("lore_list governed_by", () => {
       const approveResult = await ca({ id_or_slug: skill.id });
       expect(approveResult.isError).toBeFalsy();
 
-      const prdResult = await cc({ type: "prd", title: "Root PRD" });
-      const prd = parseResult(prdResult) as { id: string };
-      const specResult = await cc({ type: "spec", title: "Governed Spec", parent_id: prd.id, content: "body" });
+      const specResult = await cc({ type: "spec", title: "Governed Spec", content: "body" });
       expect(specResult.isError).toBeFalsy();
       const spec = parseResult(specResult) as { id: string };
 
@@ -588,7 +593,7 @@ describe("lore_tree", () => {
     it("returns tree with children", async () => {
       const cr = await getToolHandler(server, "lore_create")({ type: "prd", title: "Root" });
       const prdData = parseResult(cr) as { id: string };
-      await getToolHandler(server, "lore_create")({ type: "spec", title: "Child Spec", parent_id: prdData.id });
+      await getToolHandler(server, "lore_create")({ type: "plan", title: "Child Plan", parent_id: prdData.id });
 
       const result = await getToolHandler(server, "lore_tree")({ root: prdData.id });
       expect(result.isError).toBeFalsy();
@@ -608,9 +613,14 @@ describe("lore_tree", () => {
     it("depth=1 returns children but no grandchildren", async () => {
       const cr = await getToolHandler(server, "lore_create")({ type: "prd", title: "Root" });
       const prd = parseResult(cr) as { id: string };
-      const sr = await getToolHandler(server, "lore_create")({ type: "spec", title: "Child", parent_id: prd.id });
-      const spec = parseResult(sr) as { id: string };
-      await getToolHandler(server, "lore_create")({ type: "spec", title: "GrandChild", parent_id: spec.id });
+      const sr = await getToolHandler(server, "lore_create")({ type: "plan", title: "Child", parent_id: prd.id });
+      const plan = parseResult(sr) as { id: string };
+      await getToolHandler(server, "lore_create")({
+        type: "knowledge",
+        title: "GrandChild",
+        parent_id: plan.id,
+        extra: { sub_type: "reference" },
+      });
 
       const result = await getToolHandler(server, "lore_tree")({ root: prd.id, depth: 1 });
       const data = parseResult(result) as {

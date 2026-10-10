@@ -301,7 +301,6 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: truncated:true s
     const specResult = await corpusService.create({
       type: "spec",
       title: "Truncation Headings Test Spec",
-      parent_id: prdResult.value.id,
       content,
     } as CreateDocInput);
     if (!specResult.ok) throw new Error("spec create failed");

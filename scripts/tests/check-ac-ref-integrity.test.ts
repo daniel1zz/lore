@@ -958,7 +958,7 @@ const FIXTURE_AC_ID = "AC-FIX-1";
  */
 function buildFixture(cwd: string, opts: { forceRemove: boolean }): { taskSlug: string; specSlug: string } {
   const prd = createDoc(cwd, "prd", "Fixture root PRD", "Fixture prd body.", []);
-  const spec = createDoc(cwd, "spec", "Fixture spec with a retired criterion", FIXTURE_SPEC_CONTENT, ["--parent", prd.id]);
+  const spec = createDoc(cwd, "spec", "Fixture spec with a retired criterion", FIXTURE_SPEC_CONTENT, []);
 
   const addAc = runLore(
     ["ac", "add", spec.id, FIXTURE_AC_ID, "--statement", "check-ac-ref-integrity negative-control criterion", "--mode", "script", "--oracle", "test", "--command", "true", "--json"],

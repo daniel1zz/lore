@@ -152,7 +152,7 @@ function createDoc(type: string, extraArgs: string[]): string {
 /** Build a minimally-conformant corpus: prd -> spec (satisfies the spec min:1 slot). */
 function buildConformantCorpus(): { prd: string; spec: string } {
   const prd = createDoc("prd", []);
-  const spec = createDoc("spec", ["--parent", prd, "--kind", "feature"]);
+  const spec = createDoc("spec", ["--kind", "feature"]);
   return { prd, spec };
 }
 

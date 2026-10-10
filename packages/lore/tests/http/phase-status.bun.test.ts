@@ -84,7 +84,6 @@ async function makeTestServer(): Promise<TestContext> {
   const specResult = await app.corpusService.create({
     type: "spec",
     title: "Phase Status Spec",
-    parent_id: prdResult.value.id,
     content: "## Spec",
     extra: {
       acceptance_criteria: [

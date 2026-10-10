@@ -163,14 +163,15 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
 
   // ── REGRESSION: spec/task unaffected — schema already mandates their parent_id ──
 
-  it("spec always requires parent_id — schema rejects a parentless create before advisory logic runs", async () => {
+  it("a parentless spec is legal (BR-1) and never carries the orphan advisory — a spec belongs to the trees through citations", async () => {
     const { service } = makeService();
     await createRootPrd(service);
 
-    const result = await service.create({ type: "spec", title: "Orphan Spec" } as CreateDocInput);
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("PARENT_REQUIRED");
+    const result = await service.create({ type: "spec", title: "Parentless Spec" } as CreateDocInput);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.parent_id).toBeNull();
+    expect(result.value.orphan_advisory).toBeUndefined();
   });
 
   it("task always requires parent_id (non-adhoc) — schema rejects a parentless create before advisory logic runs", async () => {
@@ -187,7 +188,7 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
     expect(result.error.code).toBe("PARENT_REQUIRED");
   });
 
-  it("a successfully-created spec (with parent, root PRD present) never carries the advisory field", async () => {
+  it("a spec given the root PRD as parent is refused (BR-2), so no advisory field exists to carry", async () => {
     const { service } = makeService();
     const rootPrd = await createRootPrd(service);
 
@@ -196,8 +197,8 @@ describe("create-time orphan advisory (task-create-time-orphan-advisory-warn-or-
       title: "Attached Spec",
       parent_id: rootPrd.id,
     } as CreateDocInput);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.orphan_advisory).toBeUndefined();
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
   });
 });

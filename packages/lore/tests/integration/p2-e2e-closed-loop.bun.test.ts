@@ -42,6 +42,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { saveConfig } from "@lore/core/node";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -107,8 +108,6 @@ function createFullChain(dir: string): {
       "spec",
       "--title",
       "P2 E2E Spec",
-      "--parent",
-      prdSlug,
       "--content",
       "## Overview\n\nSpec body for the P2 closed-loop e2e.\n",
       "--no-ai",
@@ -223,6 +222,7 @@ describe("AC-P2-8: authoring is free, every COMMIT transition gates on real upst
     );
     expect(acResult.exitCode).toBe(0);
 
+    citeSpecViaCli(loreRunnerFor(runLore, tmpDir), tmpDir, undefined, specSlug, "AC-P2-8-1"); // BR-1007: approvable only when a criterion cites a live rule
     const approveResult = runLore(["approve", specSlug], tmpDir);
     expect(approveResult.exitCode).toBe(0);
     expect(approveResult.stdout).toContain("approved");

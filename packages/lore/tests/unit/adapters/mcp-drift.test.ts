@@ -161,7 +161,6 @@ async function createSpecWithAnchors(prdId: string, title: string, codeAnchors: 
   const result = await corpusService.create({
     type: "spec",
     title,
-    parent_id: prdId,
     content: "## Overview\n\nBody.",
     extra: { spec_kind: "feature", code_anchors: codeAnchors },
   } as CreateDocInput);

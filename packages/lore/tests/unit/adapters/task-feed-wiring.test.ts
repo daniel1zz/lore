@@ -123,7 +123,6 @@ async function createSpec(
   const result = await corpusService.create({
     type: "spec",
     title,
-    parent_id: parentId,
     content: "Spec body.",
     extra: { acceptance_criteria: criteria },
   } as CreateDocInput);

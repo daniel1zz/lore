@@ -34,6 +34,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { JudgmentService } from "../../../src/service/judgment-service.js";
@@ -59,8 +60,9 @@ function makeTelemetry(): Telemetry {
  * judgmentRequiredTypes all threaded), so these tests exercise the GATED production
  * path rather than the ungated bare-construction default the constructors document.
  */
-function makeApp(opts: { judgmentRequiredTypes?: readonly string[] } = {}) {
+async function makeApp(opts: { judgmentRequiredTypes?: readonly string[] } = {}) {
   const store = new InMemoryStore();
+  await seedLiveRule(store);
   const telemetry = makeTelemetry();
   const enforcer = new GateEnforcer(undefined);
   const corpusService = new CorpusService(store, telemetry, undefined, enforcer, undefined, true);
@@ -85,6 +87,7 @@ const SCRIPT_AC = {
   id: "AC-1",
   statement: "the parser round-trips every fixture file",
   verify: { mode: "script" as const, oracle: "test" as const, command: "bun test parser.test.ts" },
+  cites: [LIVE_RULE_ID],
 };
 
 const INDEPENDENT_JUDGE: JudgeIdentity = {
@@ -131,7 +134,6 @@ async function makeSpec(cs: CorpusService, prd: DocRecord, extra: Record<string,
   return mustCreate(cs, {
     type: "spec",
     title: "A spec",
-    parent_id: prd.id,
     content: "## Overview\n\nBody.",
     extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC], ...extra },
   } as CreateDocInput);
@@ -149,7 +151,7 @@ function judgmentMessage(error: unknown): string {
 
 describe("AC-ESC-1 escalate blocks an ungated type", () => {
   it("a knowledge doc whose current version carries an escalate is refused under the default spec+adr scoping", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
     expect(doc.status).toBe("draft");
@@ -173,7 +175,7 @@ describe("AC-ESC-1 escalate blocks an ungated type", () => {
   });
 
   it("the escalate still blocks a knowledge doc when the type list names only spec", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: ["spec"] });
+    const { corpusService, judgmentService, reviewService } = await makeApp({ judgmentRequiredTypes: ["spec"] });
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
 
@@ -198,7 +200,7 @@ describe("AC-ESC-1 escalate blocks an ungated type", () => {
 
 describe("AC-ESC-2 reject on an ungated type still approves", () => {
   it("a knowledge doc carrying a reject judgment approves (reject keeps its type scoping)", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
 
@@ -219,7 +221,7 @@ describe("AC-ESC-2 reject on an ungated type still approves", () => {
 
 describe("AC-ESC-3 empty judgment_required_types remains a total kill switch", () => {
   it("an ESCALATE on an empty type list still approves (short-circuits before the escalate path)", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: [] });
+    const { corpusService, judgmentService, reviewService } = await makeApp({ judgmentRequiredTypes: [] });
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
 
@@ -240,7 +242,7 @@ describe("AC-ESC-3 empty judgment_required_types remains a total kill switch", (
   });
 
   it("an ESCALATE on a spec — a type the DEFAULT list gates — still approves when the list is empty", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: [] });
+    const { corpusService, judgmentService, reviewService } = await makeApp({ judgmentRequiredTypes: [] });
     const prd = await makeRootPrd(corpusService);
     const spec = await makeSpec(corpusService, prd);
 
@@ -271,7 +273,7 @@ describe("AC-ESC-4 denial renders the blocking questions", () => {
   ];
 
   it("every blocking_questions entry appears verbatim on its own line for an UNGATED type", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
 
@@ -295,7 +297,7 @@ describe("AC-ESC-4 denial renders the blocking questions", () => {
   });
 
   it("every blocking_questions entry appears verbatim on its own line for a GATED type too", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const spec = await makeSpec(corpusService, prd);
 
@@ -319,7 +321,7 @@ describe("AC-ESC-4 denial renders the blocking questions", () => {
   });
 
   it("ERROR: an escalate carrying ZERO questions says so explicitly instead of printing an empty section", async () => {
-    const { corpusService, store, reviewService } = makeApp();
+    const { corpusService, store, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const spec = await makeSpec(corpusService, prd);
 
@@ -360,7 +362,7 @@ describe("AC-ESC-4 denial renders the blocking questions", () => {
 
 describe("AC-ESC-5 gated types unchanged", () => {
   it("a spec carrying a reject is still refused", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const spec = await makeSpec(corpusService, prd);
 
@@ -376,7 +378,7 @@ describe("AC-ESC-5 gated types unchanged", () => {
   });
 
   it("an adr carrying a reject is still refused", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const adr = await mustCreate(corpusService, {
       type: "adr",
@@ -398,7 +400,7 @@ describe("AC-ESC-5 gated types unchanged", () => {
   });
 
   it("a spec carrying an approve-judgment still approves", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const spec = await makeSpec(corpusService, prd);
 
@@ -414,7 +416,7 @@ describe("AC-ESC-5 gated types unchanged", () => {
   });
 
   it("a spec with NO judgment is still refused (the precondition stays scoped to gated types)", async () => {
-    const { corpusService, reviewService } = makeApp();
+    const { corpusService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const spec = await makeSpec(corpusService, prd);
 
@@ -429,7 +431,7 @@ describe("AC-ESC-5 gated types unchanged", () => {
 
 describe("AC-ESC-7 ungated type with no judgment still approves", () => {
   it("a knowledge doc with NO judgment at all approves (NO_JUDGMENT never universalises)", async () => {
-    const { corpusService, reviewService } = makeApp();
+    const { corpusService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
 
@@ -440,7 +442,7 @@ describe("AC-ESC-7 ungated type with no judgment still approves", () => {
   });
 
   it("a knowledge doc whose ONLY judgment collided with extra.ai_provenance approves", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const doc = await mustCreate(corpusService, {
       type: "knowledge",
@@ -555,7 +557,7 @@ describe("AC-ESC-9 escalate present blocks even alongside a reject", () => {
 
   /** Records `escalate` + `reject` on `doc`'s current version, in the given order. */
   async function recordPair(
-    judgmentService: ReturnType<typeof makeApp>["judgmentService"],
+    judgmentService: Awaited<ReturnType<typeof makeApp>>["judgmentService"],
     doc: DocRecord,
     order: readonly ReviewDecision[],
   ): Promise<void> {
@@ -573,7 +575,7 @@ describe("AC-ESC-9 escalate present blocks even alongside a reject", () => {
   }
 
   it("an ungated type carrying BOTH a reject and an escalate is refused ON THE ESCALATE", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
     await recordPair(judgmentService, doc, ["escalate", "reject"]);
@@ -590,7 +592,7 @@ describe("AC-ESC-9 escalate present blocks even alongside a reject", () => {
   });
 
   it("BOUNDARY: the block is order-independent — the reject recorded FIRST still blocks on the escalate", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
     await recordPair(judgmentService, doc, ["reject", "escalate"]);
@@ -602,7 +604,7 @@ describe("AC-ESC-9 escalate present blocks even alongside a reject", () => {
   });
 
   it("CONTROL: a GATED type with the same pair still blocks on the REJECT (worst-decision-wins intact)", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp();
+    const { corpusService, judgmentService, reviewService } = await makeApp();
     const prd = await makeRootPrd(corpusService);
     const spec = await makeSpec(corpusService, prd);
     await recordPair(judgmentService, spec, ["escalate", "reject"]);
@@ -618,7 +620,7 @@ describe("AC-ESC-9 escalate present blocks even alongside a reject", () => {
   });
 
   it("CONTROL: an empty judgment_required_types still APPROVES the same pair (D3 short-circuits first)", async () => {
-    const { corpusService, judgmentService, reviewService } = makeApp({ judgmentRequiredTypes: [] });
+    const { corpusService, judgmentService, reviewService } = await makeApp({ judgmentRequiredTypes: [] });
     const prd = await makeRootPrd(corpusService);
     const doc = await makeUngatedKnowledge(corpusService, prd);
     await recordPair(judgmentService, doc, ["escalate", "reject"]);

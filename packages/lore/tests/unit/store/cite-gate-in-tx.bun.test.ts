@@ -93,7 +93,7 @@ async function seed(dir: string): Promise<Fixture> {
     }, { by: "agent:seed" }),
     "rule",
   );
-  const spec = await must(await cs.create({ type: "spec", title: "Window spec", content: "s", parent_id: prd.id } as CreateDocInput), "spec");
+  const spec = await must(await cs.create({ type: "spec", title: "Window spec", content: "s"} as CreateDocInput), "spec");
   await must(
     await ac.addCriterion(spec.id, {
       id: AC_ID,

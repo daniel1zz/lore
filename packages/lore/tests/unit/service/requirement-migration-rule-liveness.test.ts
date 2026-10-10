@@ -82,7 +82,6 @@ async function makePrdWithCitingSpec(h: H, migratedTo: string): Promise<DocRecor
     type: "spec",
     title: "Spec",
     content: "## Overview\n\nbody",
-    parent_id: prd.value.id,
     extra: { spec_kind: "feature" },
   } as CreateDocInput);
   if (!spec.ok) throw new Error(JSON.stringify(spec.error));

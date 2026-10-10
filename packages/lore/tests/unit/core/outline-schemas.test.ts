@@ -150,7 +150,6 @@ describe("SPEC_KINDS domain-overview extension + createDocInputSchema (SPEC-080 
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "Feedback Loop Domain Overview",
-      parent_id: VALID_PARENT_ID,
       extra: { spec_kind: "domain-overview" },
     });
     expect(result.success).toBe(true);
@@ -160,7 +159,6 @@ describe("SPEC_KINDS domain-overview extension + createDocInputSchema (SPEC-080 
     const result = createDocInputSchema.safeParse({
       type: "spec",
       title: "Feedback Loop Domain Overview",
-      parent_id: VALID_PARENT_ID,
       extra: { spec_kind: "domain-orview" },
     });
     expect(result.success).toBe(false);

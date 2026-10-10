@@ -12,7 +12,10 @@ import type { DocType } from "./types.js";
  */
 export const PARENT_TYPE_CONTRACT = {
   prd:       [],
-  spec:      ["prd"],
+  // reason: BR-1/BR-2 (baseline-slice-3b D5) — a spec takes NO parent: it belongs to the
+  // product trees through its criteria's rule citations. Empty list here + membership in
+  // PARENTLESS_TYPES below; spec is deliberately NOT a root type (see ROOT_TYPES).
+  spec:      [],
   adr:       ["prd", "spec"],
   plan:      ["prd", "spec"],
   task:      ["plan"],
@@ -32,9 +35,34 @@ export function isValidParentType(child: DocType, parent: DocType): boolean {
 }
 
 /**
- * DocTypes that have no valid parents — i.e., root documents.
- * Per spec §3: only "prd" qualifies.
+ * DocTypes that take no parent at all and are NOT tree roots: a parentless doc of
+ * these types is legal, and a parent on one is refused (BR-2). They relate to the
+ * rest of the corpus by other means (a spec: criterion citations of BR/AS rules).
+ */
+export const PARENTLESS_TYPES: readonly DocType[] = ["spec"];
+
+/** True iff `type` takes no parent (see {@link PARENTLESS_TYPES}). */
+export function isParentlessType(type: DocType): boolean {
+  return PARENTLESS_TYPES.includes(type);
+}
+
+/**
+ * Operator-facing refusal text for a parent supplied to a parentless type.
+ * SSOT for create, link and gate paths so every surface names the same relation.
+ */
+export function parentlessRefusalMessage(type: DocType): string {
+  return (
+    `a ${type} takes no parent: it belongs to the product trees through its criteria's ` +
+    "citations of business and architecture rules — cite with `lore ac cite <spec> <ac-id> <rule-id>`"
+  );
+}
+
+/**
+ * DocTypes that have no valid parents — i.e., root documents (the tree roots).
+ * Only "prd" qualifies; parentless types (spec) are excluded on purpose — treating
+ * spec as a root would leak the ad-hoc-task exemption (tree-check) and the link
+ * parent guard (corpus-service) to spec parents.
  */
 export const ROOT_TYPES: readonly DocType[] =
   (Object.keys(PARENT_TYPE_CONTRACT) as DocType[])
-    .filter(t => PARENT_TYPE_CONTRACT[t].length === 0);
+    .filter(t => PARENT_TYPE_CONTRACT[t].length === 0 && !isParentlessType(t));

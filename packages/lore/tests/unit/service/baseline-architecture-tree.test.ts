@@ -464,7 +464,7 @@ describe("architecture tree (BL-5)", () => {
     async function seedBusiness(w: World): Promise<void> {
       const brCited = await addRuleId(w.rules, w.leaves[0] as DocRecord, "cited");
       await addRuleId(w.rules, w.leaves[1] as DocRecord, "uncited");
-      const spec = await must(await w.cs.create({ type: "spec", title: "Spec one", content: "b", parent_id: w.prd.id } as CreateDocInput), "spec");
+      const spec = await must(await w.cs.create({ type: "spec", title: "Spec one", content: "b"} as CreateDocInput), "spec");
       await must(
         await new AcService(w.store).addCriterion(spec.id, {
           id: "AC-C-1", statement: "Does the cited thing",
@@ -508,7 +508,7 @@ describe("architecture tree (BL-5)", () => {
       const w = await world();
       await seedBusiness(w);
       const as = await addRuleId(w.rules, w.standards[0] as DocRecord, "std");
-      const spec = await must(await w.cs.create({ type: "spec", title: "Spec two", content: "b", parent_id: w.prd.id } as CreateDocInput), "spec2");
+      const spec = await must(await w.cs.create({ type: "spec", title: "Spec two", content: "b"} as CreateDocInput), "spec2");
       await must(
         await new AcService(w.store).addCriterion(spec.id, {
           id: "AC-S-1", statement: "Does the standard thing",

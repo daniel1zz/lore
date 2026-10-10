@@ -30,6 +30,7 @@
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
+import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
@@ -46,12 +47,14 @@ const DESIGN_SPEC_AC = {
   id: "AC-DESIGN-1",
   statement: "the checkout flow completes end-to-end within 30s",
   verify: { mode: "script" as const, oracle: "e2e" as const, command: "bun run e2e:checkout" },
+  cites: [LIVE_RULE_ID],
 };
 
 const FEATURE_SPEC_AC = {
   id: "AC-FEATURE-1",
   statement: "the parser round-trips every fixture file",
   verify: { mode: "script" as const, oracle: "test" as const, command: "bun test parser.test.ts" },
+  cites: [LIVE_RULE_ID],
 };
 
 const ACCEPT_VERDICT: UatVerdict = {
@@ -75,8 +78,9 @@ function configWithDesignRequiresUat(overrides?: Record<string, unknown>): LoreC
   } as unknown as LoreConfig;
 }
 
-function makeHarness(config?: LoreConfig) {
+async function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
+  await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, undefined, undefined, enforcer);
   const reviewService = new ReviewService(store, undefined, {
@@ -111,7 +115,6 @@ async function createApprovedSpec(
   const spec = await mustCreate(cs, {
     type: "spec",
     title: `${specKind} spec`,
-    parent_id: prd.id,
     content: "## Overview\n\nBody.",
     extra: { spec_kind: specKind, acceptance_criteria: criteria },
   } as CreateDocInput);
@@ -148,7 +151,7 @@ async function walkToActive(cs: CorpusService, plan: DocRecord): Promise<void> {
 describe("requiresUat — plan-promote matched pair (ReviewService.approve)", () => {
   // NEGATIVE
   it("blocks promoting a design-spec plan that does NOT declare extra.requires_uat", async () => {
-    const { corpusService, reviewService } = makeHarness(configWithDesignRequiresUat());
+    const { corpusService, reviewService } = await makeHarness(configWithDesignRequiresUat());
     const { spec } = await createApprovedSpec(corpusService, "design", [DESIGN_SPEC_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
@@ -165,7 +168,7 @@ describe("requiresUat — plan-promote matched pair (ReviewService.approve)", ()
 
   // HAPPY (positive twin — same ancestor spec, plan DOES declare requires_uat)
   it("promotes the same design-spec plan once extra.requires_uat: true is declared", async () => {
-    const { corpusService, reviewService } = makeHarness(configWithDesignRequiresUat());
+    const { corpusService, reviewService } = await makeHarness(configWithDesignRequiresUat());
     const { spec } = await createApprovedSpec(corpusService, "design", [DESIGN_SPEC_AC]);
     const plan = await createPlan(corpusService, spec.id, { requires_uat: true });
 
@@ -175,7 +178,7 @@ describe("requiresUat — plan-promote matched pair (ReviewService.approve)", ()
 
   // BOUNDARY — requires_uat: false (explicit, not merely absent) is treated identically to absent
   it("treats extra.requires_uat: false the same as absent — still blocked", async () => {
-    const { corpusService, reviewService } = makeHarness(configWithDesignRequiresUat());
+    const { corpusService, reviewService } = await makeHarness(configWithDesignRequiresUat());
     const { spec } = await createApprovedSpec(corpusService, "design", [DESIGN_SPEC_AC]);
     const plan = await createPlan(corpusService, spec.id, { requires_uat: false });
 
@@ -188,7 +191,7 @@ describe("requiresUat — plan-promote matched pair (ReviewService.approve)", ()
 
 describe("requiresUat — NEGATIVE: unaffected scopes", () => {
   it("a feature-spec plan (no declared feature profile) promotes ok with no requires_uat declared", async () => {
-    const { corpusService, reviewService } = makeHarness(configWithDesignRequiresUat());
+    const { corpusService, reviewService } = await makeHarness(configWithDesignRequiresUat());
     const { spec } = await createApprovedSpec(corpusService, "feature", [FEATURE_SPEC_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
@@ -200,7 +203,7 @@ describe("requiresUat — NEGATIVE: unaffected scopes", () => {
   // exactly as the pre-existing upstreamApproved/upstreamHasAcceptanceCriteria pair is
   // (checkPlanPromote's `hasSpecParent === false` short-circuit, unchanged by SPEC-058).
   it("a plan with no spec ancestor at all (prd-parented) promotes ok with no requires_uat declared", async () => {
-    const { corpusService, reviewService } = makeHarness(configWithDesignRequiresUat());
+    const { corpusService, reviewService } = await makeHarness(configWithDesignRequiresUat());
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
     const plan = await createPlan(corpusService, prd.id);
 
@@ -216,7 +219,7 @@ describe("requiresUat — config escape", () => {
     const config = configWithDesignRequiresUat({
       gates: { "plan-promote": { requires_uat: { enabled: false } } },
     });
-    const { corpusService, reviewService } = makeHarness(config);
+    const { corpusService, reviewService } = await makeHarness(config);
     const { spec } = await createApprovedSpec(corpusService, "design", [DESIGN_SPEC_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
@@ -229,13 +232,12 @@ describe("requiresUat — config escape", () => {
 
 describe("requiresUat — REGRESSION: pre-existing plan-promote predicates unaffected", () => {
   it("a plan under an UNAPPROVED design spec is still blocked by upstreamApproved, regardless of requires_uat", async () => {
-    const { corpusService, reviewService } = makeHarness(configWithDesignRequiresUat());
+    const { corpusService, reviewService } = await makeHarness(configWithDesignRequiresUat());
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
     // Spec stays in DRAFT (never approved) — the pre-existing upstreamApproved predicate's job.
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "unapproved design spec",
-      parent_id: prd.id,
       content: "## Overview\n\nBody.",
       extra: { spec_kind: "design", acceptance_criteria: [DESIGN_SPEC_AC] },
     } as CreateDocInput);
@@ -255,7 +257,7 @@ describe("requiresUat — REGRESSION: pre-existing plan-promote predicates unaff
 
 describe("requiresUat — STATE: promote-time flag composes with SPEC-054's plan-close gate end-to-end", () => {
   it("a design-spec plan promotes (requires_uat declared), walks to active, then archives only after a P0-accepted UAT verdict is recorded", async () => {
-    const { corpusService, reviewService, uatService } = makeHarness(configWithDesignRequiresUat());
+    const { corpusService, reviewService, uatService } = await makeHarness(configWithDesignRequiresUat());
     const { spec } = await createApprovedSpec(corpusService, "design", [DESIGN_SPEC_AC]);
     const plan = await createPlan(corpusService, spec.id, { requires_uat: true });
 

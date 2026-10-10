@@ -32,6 +32,7 @@ import {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { requireSpecCitesLiveRule } from "./spec-approval-citation.js";
 import {
   buildUpstreamSpecContext,
   countScriptModeAcceptanceCriteria,
@@ -241,6 +242,29 @@ export class ReviewService {
    *   `ok`/`err` (D1).
    */
   private async enforceApprovalGate(
+    doc: DocRecord,
+    opts?: { skipJudgmentGate?: boolean },
+  ): Promise<Result<ApprovalGateOutcome, LoreError>> {
+    const gated = await this.enforceTypeGates(doc, opts);
+    if (!gated.ok) return gated;
+    // reason: BR-1007 — unconditional (no `gate` dependency, no config switch): a spec's
+    // only relation to the product trees is its citations, so an uncited spec is not
+    // approvable. Runs AFTER the type gates so a spec that fails a gate on its own merits
+    // (judgment, AC count, oracle coverage) is refused for that reason first; a spec that
+    // would otherwise pass is still refused here.
+    if (doc.type === "spec") {
+      const citationResult = await requireSpecCitesLiveRule(this.store, doc.slug, doc.extra["acceptance_criteria"]);
+      if (!citationResult.ok) return citationResult;
+    }
+    return gated;
+  }
+
+  /**
+   * The checkpoint half of {@link enforceApprovalGate}: judgment gate, then `spec-promote` /
+   * `plan-promote`. Split out so the unconditional BR-1007 citation check can follow every
+   * early `ok` return below without being repeated at each one.
+   */
+  private async enforceTypeGates(
     doc: DocRecord,
     opts?: { skipJudgmentGate?: boolean },
   ): Promise<Result<ApprovalGateOutcome, LoreError>> {

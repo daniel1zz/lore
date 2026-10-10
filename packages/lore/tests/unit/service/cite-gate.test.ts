@@ -156,7 +156,7 @@ async function world(): Promise<World> {
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");
   const mk = async (title: string) => {
-    const s = await cs.create({ type: "spec", title, parent_id: prd.value.id, content: "body" } as CreateDocInput);
+    const s = await cs.create({ type: "spec", title,content: "body" } as CreateDocInput);
     if (!s.ok) throw new Error("spec");
     return s.value;
   };
@@ -340,7 +340,6 @@ describe("cite gate — enforce but branch not armed (AC-BLS2-2)", () => {
     const gs = await w.cs.create({
       type: "spec",
       title: "Beta Spec",
-      parent_id: (await w.store.find(w.specId as DocId).then((d) => (d.ok ? d.value?.parent_id : null))) as DocId,
       content: "body",
     } as CreateDocInput);
     if (!gs.ok) throw new Error("spec");
@@ -353,7 +352,7 @@ describe("cite gate — enforce but branch not armed (AC-BLS2-2)", () => {
   it("an accepted add on an unarmed branch writes no would-refuse audit row", async () => {
     const w = await world();
     const parent = await w.store.find(w.specId as DocId).then((d) => (d.ok ? d.value?.parent_id : null));
-    const gs = await w.cs.create({ type: "spec", title: "Beta Spec", parent_id: parent as DocId, content: "b" } as CreateDocInput);
+    const gs = await w.cs.create({ type: "spec", title: "Beta Spec",content: "b" } as CreateDocInput);
     if (!gs.ok) throw new Error("spec");
     await w.plain.addCriterion(gs.value.id, AC("AC-B-1", { cites: ["BR-20"] }));
     await gated(w.store, ENFORCE_ALPHA).addCriterion(gs.value.id, AC("AC-B-2"));
@@ -363,7 +362,7 @@ describe("cite gate — enforce but branch not armed (AC-BLS2-2)", () => {
   it("an unplaced spec (cites nothing) is NOT armed when only some branches are armed", async () => {
     const w = await world();
     const parent = await w.store.find(w.specId as DocId).then((d) => (d.ok ? d.value?.parent_id : null));
-    const gs = await w.cs.create({ type: "spec", title: "Unplaced", parent_id: parent as DocId, content: "b" } as CreateDocInput);
+    const gs = await w.cs.create({ type: "spec", title: "Unplaced",content: "b" } as CreateDocInput);
     if (!gs.ok) throw new Error("spec");
     const res = await gated(w.store, ENFORCE_ALPHA).addCriterion(gs.value.id, AC("AC-U-1"));
     expect(res.ok).toBe(true);
@@ -372,7 +371,7 @@ describe("cite gate — enforce but branch not armed (AC-BLS2-2)", () => {
   it("an unplaced spec IS armed when every branch is armed", async () => {
     const w = await world();
     const parent = await w.store.find(w.specId as DocId).then((d) => (d.ok ? d.value?.parent_id : null));
-    const gs = await w.cs.create({ type: "spec", title: "Unplaced", parent_id: parent as DocId, content: "b" } as CreateDocInput);
+    const gs = await w.cs.create({ type: "spec", title: "Unplaced",content: "b" } as CreateDocInput);
     if (!gs.ok) throw new Error("spec");
     const all: GateCfg = { mode: "enforce", armed_branches: ["baseline-branch-alpha", "baseline-branch-beta"] };
     const res = await gated(w.store, all).addCriterion(gs.value.id, AC("AC-U-1"));
@@ -509,7 +508,7 @@ describe("cite gate — refusal feeding pack (AC-BLS2-2)", () => {
     await setAnchors(w.store, w.otherSpecId, ["zzz/other.ts"]);
     // Re-anchor O's AC-O-2 (BR-11) as the match by moving the anchor onto a fresh spec citing only BR-11.
     const parent = await w.store.find(w.specId as DocId).then((d) => (d.ok ? d.value?.parent_id : null));
-    const m = await w.cs.create({ type: "spec", title: "Matcher", parent_id: parent as DocId, content: "b" } as CreateDocInput);
+    const m = await w.cs.create({ type: "spec", title: "Matcher",content: "b" } as CreateDocInput);
     if (!m.ok) throw new Error("spec");
     await w.plain.addCriterion(m.value.id, AC("AC-M-1", { cites: ["BR-12"] }));
     await setAnchors(w.store, m.value.id, ["a/b.ts"]);
@@ -560,7 +559,7 @@ describe("cite gate — no baseline docs and no config leaves outputs unchanged 
     const cs = new CorpusService(store);
     const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd");
-    const spec = await cs.create({ type: "spec", title: "S", parent_id: prd.value.id, content: "b" } as CreateDocInput);
+    const spec = await cs.create({ type: "spec", title: "S",content: "b" } as CreateDocInput);
     if (!spec.ok) throw new Error("spec");
     const svc = svcFactory(store);
     const a = await svc.addCriterion(spec.value.id, AC("AC-Z-1"));
@@ -611,7 +610,7 @@ describe("cite gate — latency on a 1,500-rule corpus (AC-BLS2-2, QA-1)", () =>
     if (!prd.ok) throw new Error("prd");
     const specs: string[] = [];
     for (let s = 0; s < 5; s++) {
-      const sp = await cs.create({ type: "spec", title: `Lat ${s}`, parent_id: prd.value.id, content: "b" } as CreateDocInput);
+      const sp = await cs.create({ type: "spec", title: `Lat ${s}`,content: "b" } as CreateDocInput);
       if (!sp.ok) throw new Error("spec");
       const seeded = await plain.addCriterion(sp.value.id, AC(`AC-L${s}-0`, { cites: [`BR-${s + 1}`] }));
       if (!seeded.ok) throw new Error("seed");

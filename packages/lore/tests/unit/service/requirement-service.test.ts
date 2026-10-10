@@ -34,7 +34,6 @@ async function makeSpecUnder(cs: CorpusService, prd: DocRecord): Promise<DocReco
     type: "spec",
     title: "Child spec",
     content: "## Overview\n\nbody",
-    parent_id: prd.id,
     extra: { spec_kind: "feature" },
   } as CreateDocInput);
   if (!r.ok) throw new Error(`spec create failed: ${JSON.stringify(r.error)}`);

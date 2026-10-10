@@ -43,7 +43,6 @@ async function makePrdAndSpec(store: InMemoryStore, criteria: unknown[]) {
   const specResult = await corpusService.create({
     type: "spec",
     title: "AC Scope Test Spec",
-    parent_id: prdResult.value.id,
     content: "Spec body.",
     extra: { acceptance_criteria: criteria },
   } as CreateDocInput);

@@ -648,13 +648,13 @@ export const createDocInputSchema = baseCreateDocInputSchema.superRefine(
       });
     }
 
-    // spec, task, and phase require parent_id (phase: SPEC-056 D1 — always a plan).
+    // task and phase require parent_id (spec takes none — BR-1; phase: SPEC-056 D1 — always a plan).
     // reason: an ad-hoc task (SPEC-069 §Design Decisions D2, extra.adhoc === true)
     // is the ONE exception — it deliberately supplies no --parent/--plan-id;
     // CorpusService._createImpl resolves parent_id to the corpus root PRD instead.
     // Zod cannot see that resolution (it happens after this parse succeeds), so
     // this check must not fire for that one shape.
-    if ((type === "spec" || type === "task" || type === "phase") && !parent_id) {
+    if ((type === "task" || type === "phase") && !parent_id) {
       const isAdhocTask =
         type === "task" && (extra as { adhoc?: unknown } | undefined)?.adhoc === true;
       if (!isAdhocTask) {

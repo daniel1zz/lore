@@ -128,7 +128,6 @@ async function createSpec(): Promise<{ specId: string; specSlug: string }> {
     const specResult = await app.corpusService.create({
       type: "spec",
       title: "Gate Spec-Promote Target Spec",
-      parent_id: prdResult.value.id,
       content: "## Overview\n\nSpec body for gate spec-promote tests.\n",
     } as CreateDocInput);
     if (!specResult.ok) throw new Error(`spec create failed: ${JSON.stringify(specResult.error)}`);
@@ -174,7 +173,6 @@ async function createSpecWithKind(kind: string): Promise<{ specId: string; specS
     const specResult = await app.corpusService.create({
       type: "spec",
       title: `Gate Spec-Promote ${kind} Target Spec`,
-      parent_id: prdResult.value.id,
       content: "## Overview\n\nSpec body for gate spec-promote spec_kind parity tests.\n",
       extra: { spec_kind: kind },
     } as CreateDocInput);
@@ -670,10 +668,14 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     // ── Service-layer parity: the SAME draft→approved transition through
     // CorpusService.set (the sibling gated write path ReviewService.approve also
     // uses) must reach the IDENTICAL verdict against the SAME config profile.
+    // reason: BR-1007 - the AC-count floor is waived by the profile, but a spec with no criterion has
+    // nothing to cite, so the service refuses it for THAT reason (field `acceptance_criteria`), never on
+    // the spec-promote floor: the floor-level verdict still matches the CLI's.
     const gatedApp = createApp(join(tmpDir, ".lore", "lore.db"), DOMAIN_OVERVIEW_PROFILE_CONFIG) as App;
     try {
       const setResult = await gatedApp.corpusService.set(specId, { status: "approved" });
-      expect(setResult.ok).toBe(true);
+      expect(setResult.ok).toBe(false);
+      if (!setResult.ok) expect((setResult.error as { field?: string }).field).toBe("acceptance_criteria");
     } finally {
       gatedApp.close();
     }

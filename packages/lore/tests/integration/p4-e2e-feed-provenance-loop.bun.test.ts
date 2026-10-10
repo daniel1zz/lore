@@ -226,7 +226,6 @@ describe("P4 e2e: feed-before-produce + provenance closed loop (AC-P4-7)", () =>
       const compliantGateResult = await runGateSpecCreate({
         type: "spec",
         title: "Gate-compliant candidate (not actually created)",
-        parent_id: prd.id,
         content: "## Overview\n\nCompliant skeleton content.",
         extra: { spec_kind: "tech" },
       });
@@ -238,7 +237,6 @@ describe("P4 e2e: feed-before-produce + provenance closed loop (AC-P4-7)", () =>
         const created = await app.corpusService.create({
           type: "spec",
           title: "E2E Governed Spec",
-          parent_id: prd.id,
           content: "## Overview\n\nE2E governed spec body.",
           extra: { spec_kind: "tech" },
         } as CreateDocInput);

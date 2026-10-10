@@ -82,6 +82,7 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import { CorpusService } from "../../src/service/corpus-service.js";
 import type { CreateDocInput, DocRecord, DocStatus } from "@lore/core";
+import { approveCitedSpec } from "../helpers/live-rule-fixture.js";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // same derivation as tests/e2e/issue-closure.bun.test.ts.
@@ -232,7 +233,6 @@ async function seedFixingSpec(cs: CorpusService, prdId: string, title: string): 
     type: "spec",
     title,
     content: "## Overview\n\nFixing doc body.",
-    parent_id: prdId,
   } as CreateDocInput);
 }
 
@@ -246,14 +246,22 @@ async function seedFixingPlan(cs: CorpusService, prdId: string, title: string): 
 }
 
 /** Walks a doc draft -> approved -> active (both legal `VALID_TRANSITIONS` steps) — a terminal `resolves`-edge source per D2 ("active OR archived" -> fixed), WITHOUT reaching archived. */
-async function walkToActive(cs: CorpusService, docId: string): Promise<void> {
-  await mustSet(cs, docId, "approved");
+async function walkToActive(cs: CorpusService, docId: string, store: SQLiteStore): Promise<void> {
+  // BR-1007: a spec is approved only through a criterion citing a live rule; every other type walks as before.
+  const got = await cs.get(docId);
+  if (!got.ok) throw new Error(`seed get failed for ${docId}: ${JSON.stringify(got.error)}`);
+  if (got.value.doc.type === "spec") {
+    const approved = await approveCitedSpec(store, cs, docId);
+    if (!approved.ok) throw new Error(`seed spec approve failed for ${docId}: ${JSON.stringify(approved.error)}`);
+  } else {
+    await mustSet(cs, docId, "approved");
+  }
   await mustSet(cs, docId, "active");
 }
 
 /** Walks a doc all the way to `archived` via the fast-track edge (draft -> approved -> active -> archived) — valid for spec/plan per `VALID_TRANSITIONS`. */
-async function walkToArchived(cs: CorpusService, docId: string): Promise<void> {
-  await walkToActive(cs, docId);
+async function walkToArchived(cs: CorpusService, docId: string, store: SQLiteStore): Promise<void> {
+  await walkToActive(cs, docId, store);
   await mustSet(cs, docId, "archived");
 }
 
@@ -298,7 +306,7 @@ describe("AC-ICL-8: filed issue + archived spec resolves-edge computes fixed", (
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (happy)");
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 Fixing Spec");
-    await walkToArchived(cs, fixingSpec.id);
+    await walkToArchived(cs, fixingSpec.id, store);
     store.close();
 
     // The real CLI path, against a real SQLite-backed corpus — no widening workaround.
@@ -336,7 +344,7 @@ describe("AC-ICL-8: --check-issues flags the unclosed escalation exactly while t
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (state)");
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 State Fixing Spec");
-    await walkToArchived(cs, fixingSpec.id);
+    await walkToArchived(cs, fixingSpec.id, store);
     store.close();
 
     const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
@@ -431,7 +439,7 @@ describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not ju
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (boundary)");
     const fixingPlan = await seedFixingPlan(cs, prd.id, "AC-ICL-8 Boundary Fixing Plan");
-    await walkToActive(cs, fixingPlan.id); // stops at "active" -- never archived
+    await walkToActive(cs, fixingPlan.id, store); // stops at "active" -- never archived
     store.close();
 
     const linkResult = runLore(["link", fixingPlan.slug, issue.slug, "--type", "resolves"], dir);
@@ -467,7 +475,7 @@ describe("AC-ICL-8: the hand-set anti-pattern is rejected even inside a genuinel
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (error)");
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 Error Fixing Spec");
-    await walkToArchived(cs, fixingSpec.id);
+    await walkToArchived(cs, fixingSpec.id, store);
     store.close();
 
     const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
@@ -514,7 +522,7 @@ describe("AC-ICL-8: archived-with-a-fixed-edge never regresses to closed; an unr
     // corpus -- proves the link/archive sequence below never leaks onto it.
     const sibling = await seedIssueTask(cs, "AC-ICL-8 unrelated sibling report (regression)");
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 Regression Fixing Spec");
-    await walkToArchived(cs, fixingSpec.id);
+    await walkToArchived(cs, fixingSpec.id, store);
     store.close();
 
     const siblingBefore = snapshotDocRow(dir, sibling.id);

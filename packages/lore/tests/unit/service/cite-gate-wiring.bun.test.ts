@@ -49,7 +49,7 @@ async function seed(app: App): Promise<{ specId: string; prdId: string }> {
     await rulesOf(app).addRule(leaf.id, { statement: "Config reaches the gate", confidence: "established", enforced_by: "guaranteed", examples: ["e"] }, { by: "agent:seed" }),
     "rule",
   );
-  const spec = await must(await cs.create({ type: "spec", title: "Wiring spec", content: SKELETON, parent_id: prd.id } as CreateDocInput), "spec");
+  const spec = await must(await cs.create({ type: "spec", title: "Wiring spec", content: SKELETON} as CreateDocInput), "spec");
   return { specId: spec.id, prdId: prd.id };
 }
 
@@ -110,7 +110,7 @@ describe("the configured gate reaches the services through createApp (AC-BLS2-2)
     const a = open(configWithGate({ mode: "enforce", armed_branches: ["baseline-wiring"] }));
     const { prdId } = await seed(a);
     const created = await a.corpusService.create({
-      type: "spec", title: "Born uncited", content: SKELETON, parent_id: prdId,
+      type: "spec", title: "Born uncited", content: SKELETON,
       extra: { acceptance_criteria: [AC("AC-N-1")] },
     } as CreateDocInput);
     expect(!created.ok && created.error.code).toBe("AC_CITE_REQUIRED");

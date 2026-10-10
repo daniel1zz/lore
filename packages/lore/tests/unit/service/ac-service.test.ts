@@ -62,7 +62,6 @@ async function createSpec(cs: CorpusService, parentId: string, title = "Test Spe
   const result = await cs.create({
     type: "spec",
     title,
-    parent_id: parentId,
     content: "spec body",
   } as CreateDocInput);
   if (!result.ok) throw new Error(`Failed to create spec: ${JSON.stringify(result.error)}`);

@@ -107,7 +107,7 @@ async function seed(dir: string): Promise<Fixture> {
   const specIds: string[] = [];
   for (let i = 0; i < WRITERS; i += 1) {
     const spec = await must(
-      await cs.create({ type: "spec", title: `Race spec ${i}`, content: `spec ${i}`, parent_id: prd.id } as CreateDocInput),
+      await cs.create({ type: "spec", title: `Race spec ${i}`, content: `spec ${i}`} as CreateDocInput),
       `spec ${i}`,
     );
     await must(

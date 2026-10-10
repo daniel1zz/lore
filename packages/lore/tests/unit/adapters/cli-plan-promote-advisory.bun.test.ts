@@ -41,6 +41,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
 import { saveConfig } from "@lore/core/node";
+import { citeSpecViaCli, loreRunnerFor } from "../../helpers/cli-live-rule.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -154,8 +155,6 @@ describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)",
         "spec",
         "--title",
         "Reachable Spec",
-        "--parent",
-        prdSlug,
         "--content",
         "## Overview\n\nSpec body for the reachability advisory e2e.\n",
         "--no-ai",
@@ -197,6 +196,7 @@ describe("lore approve <plan-under-reachable-spec> — no advisory (AC-VRW-5b)",
       workflow: { review: { judgment_required_types: [] } },
     } as never);
 
+    citeSpecViaCli(loreRunnerFor(runLore, tmpDir), tmpDir, undefined, specSlug, "AC-REACH-1"); // BR-1007: approvable only when a criterion cites a live rule
     const specApprove = runLore(["approve", specSlug], tmpDir);
     expect(specApprove.exitCode).toBe(0);
 

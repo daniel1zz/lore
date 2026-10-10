@@ -37,6 +37,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { saveConfig } from "@lore/core/node";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -152,8 +153,6 @@ function createSpec(tmpDir: string, parentSlug: string, title: string): string {
       "spec",
       "--title",
       title,
-      "--parent",
-      parentSlug,
       "--kind",
       "tech",
       "--content",
@@ -238,24 +237,24 @@ describe("hooks/g1-spec-create.sh", () => {
 
   afterAll(() => cleanupDir(tmpDir));
 
-  // NEGATIVE — non-compliant Bash spec-create (no parent) → deny with feeding pack.
+  // NEGATIVE — non-compliant Bash spec-create (names a parent: BR-2 refuses ANY spec parent) → deny with feeding pack.
   it("denies a non-compliant `lore create spec` Bash command, reason carries [source:", () => {
     const result = runShim(G1_SHIM, {
       tool_name: "Bash",
-      tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec"` },
+      tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec" --parent ${prdSlug}` },
       cwd: tmpDir,
     });
     expect(result.exitCode).toBe(0); // the shim itself always exits 0 — verdict is in the JSON
     const hook = parseHookOutput(result.stdout);
     expect(hook.permissionDecision).toBe("deny");
     expect(hook.permissionDecisionReason ?? "").toContain("[source:");
-    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(hook.permissionDecisionReason ?? "").toContain("a spec takes no parent");
   });
 
-  // HAPPY — fully compliant Bash spec-create → allow.
+  // HAPPY — fully compliant Bash spec-create (no parent, BR-1) → allow.
   it("allows a compliant `lore create spec` Bash command", () => {
     const command =
-      `${LORE_BIN} create spec --title "Good Spec" --parent ${prdSlug} --kind tech ` +
+      `${LORE_BIN} create spec --title "Good Spec" --kind tech ` +
       `--content "${COMPLIANT_CONTENT.replace(/\n/g, "\\n")}"`;
     const result = runShim(G1_SHIM, {
       tool_name: "Bash",
@@ -361,7 +360,7 @@ describe("hooks/g1-spec-create.sh", () => {
     runShim(G1_SHIM, {
       tool_name: "Bash",
       tool_input: {
-        command: `${LORE_BIN} create spec --title "Good Spec 2" --parent ${prdSlug} --kind tech --content "${COMPLIANT_CONTENT.replace(/\n/g, "\\n")}"`,
+        command: `${LORE_BIN} create spec --title "Good Spec 2" --kind tech --content "${COMPLIANT_CONTENT.replace(/\n/g, "\\n")}"`,
       },
       cwd: tmpDir,
     });
@@ -649,6 +648,7 @@ describe("hooks/g3-plan-promote.sh", () => {
   // describe block runs against the now-approved spec.
   it("MCP: allows lore_approve on the plan once its ancestor spec is approved with ≥1 AC", () => {
     addAcceptanceCriterion(tmpDir, specSlug, "AC-G3-1");
+    citeSpecViaCli(loreRunnerFor(runLore, tmpDir), tmpDir, undefined, specSlug, "AC-G3-1"); // BR-1007
     approveViaCli(tmpDir, specSlug);
 
     const result = runShim(G3_SHIM, {
@@ -836,7 +836,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
   // are what make AC-1 meaningful, and for the asset copy they double as the
   // liveness control (an allow-deferring environment would fail HERE).
 
-  it("AC-2 NEGATIVE/CONTROL: vendored copy still denies a real `lore create spec` with no parent", () => {
+  it("AC-2 NEGATIVE/CONTROL: vendored copy still denies a real `lore create spec` with no skeleton content", () => {
     const result = runShim(G1_SHIM, {
       tool_name: "Bash",
       tool_input: { command: `${LORE_BIN} create spec --title "Bad Spec"` },
@@ -844,10 +844,10 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
     });
     const hook = parseHookOutput(result.stdout);
     expect(hook.permissionDecision).toBe("deny");
-    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(hook.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
   });
 
-  it("AC-2 NEGATIVE/CONTROL: shipped asset copy still denies a real `lore create spec` with no parent", () => {
+  it("AC-2 NEGATIVE/CONTROL: shipped asset copy still denies a real `lore create spec` with no skeleton content", () => {
     const result = runAssetShim({
       tool_name: "Bash",
       tool_input: { command: `lore create spec --title "Bad Spec"` },
@@ -855,7 +855,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
     });
     const hook = parseHookOutput(result.stdout);
     expect(hook.permissionDecision).toBe("deny");
-    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(hook.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
   });
 
   // ── AC-3 BOUNDARY — a help SPELLING that is not a help FLAG ──────────────
@@ -872,7 +872,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
       }).stdout,
     );
     expect(vendored.permissionDecision).toBe("deny");
-    expect(vendored.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(vendored.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
 
     const asset = parseHookOutput(
       runAssetShim({
@@ -882,7 +882,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
       }).stdout,
     );
     expect(asset.permissionDecision).toBe("deny");
-    expect(asset.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(asset.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
   });
 
   it("AC-3 BOUNDARY: `--content \"-h\"` is a flag VALUE, not a help flag — still denied on both copies", () => {
@@ -916,7 +916,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
     });
     const hook = parseHookOutput(result.stdout);
     expect(hook.permissionDecision).toBe("deny");
-    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(hook.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
   });
 
   it("AC-3 BOUNDARY: a help flag in a DIFFERENT chain segment does not disarm the create segment", () => {
@@ -930,7 +930,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
       }).stdout,
     );
     expect(trailing.permissionDecision).toBe("deny");
-    expect(trailing.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(trailing.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
 
     // …and the mirror image: the create segment comes first, a later segment
     // carries the help flag.
@@ -942,7 +942,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
       }).stdout,
     );
     expect(leading.permissionDecision).toBe("deny");
-    expect(leading.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(leading.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
   });
 
   it("AC-3 BOUNDARY: `--helpful` / `-hh` are not help flags — still denied (token boundary, not prefix)", () => {
@@ -953,7 +953,7 @@ describe("g1 spec-create hook — read-only `--help` invocation", () => {
     });
     const hook = parseHookOutput(result.stdout);
     expect(hook.permissionDecision).toBe("deny");
-    expect(hook.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(hook.permissionDecisionReason ?? "").toContain("MISSING_SKELETON");
   });
 
   // ── ERROR — the fail-open contract is untouched ──────────────────────────

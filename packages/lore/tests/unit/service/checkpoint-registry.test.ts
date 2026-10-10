@@ -42,7 +42,7 @@ describe("checkpointRegistry", () => {
 
     // HAPPY
     it("check() returns an array of PredicateResult for a fully valid candidate", () => {
-      const ctx: GateContext = { parentType: "prd", specKind: "tech", content: "## Overview\nx" };
+      const ctx: GateContext = { parentType: null, specKind: "tech", content: "## Overview\nx" };
       const results = checkpoint.check(ctx);
       expect(Array.isArray(results)).toBe(true);
       expect(results.length).toBeGreaterThan(0);
@@ -61,45 +61,45 @@ describe("checkpointRegistry", () => {
     });
 
     // NEGATIVE
-    it("check() reports a failure when parent is missing", () => {
-      const ctx: GateContext = { parentType: null, specKind: "tech", content: "## Overview\nx" };
+    it("check() reports a failure when a parent is supplied (BR-2), naming criterion citations", () => {
+      const ctx: GateContext = { parentType: "prd", specKind: "tech", content: "## Overview\nx" };
       const results = checkpoint.check(ctx);
       expect(isCheckpointBlocked(results)).toBe(true);
       const failures = selectFailures(results);
-      expect(failures.some((f) => f.reason === "PARENT_REQUIRED")).toBe(true);
+      expect(failures.some((f) => f.reason.includes("lore ac cite"))).toBe(true);
     });
 
     // NEGATIVE
-    it("check() reports a failure for an invalid parent type", () => {
+    it("check() refuses any parent type, not only prd (BR-2)", () => {
       const ctx: GateContext = { parentType: "task", specKind: "tech", content: "## Overview\nx" };
       const results = checkpoint.check(ctx);
-      expect(selectFailures(results).some((f) => f.reason === "INVALID_PARENT_TYPE")).toBe(true);
+      expect(selectFailures(results).some((f) => f.field === "parent")).toBe(true);
     });
 
     // NEGATIVE
     it("check() reports a failure for an invalid spec_kind", () => {
-      const ctx: GateContext = { parentType: "prd", specKind: "bogus", content: "## Overview\nx" };
+      const ctx: GateContext = { parentType: null, specKind: "bogus", content: "## Overview\nx" };
       const results = checkpoint.check(ctx);
       expect(selectFailures(results).some((f) => f.reason === "INVALID_SPEC_KIND")).toBe(true);
     });
 
     // NEGATIVE
     it("check() reports a failure when content has no skeleton heading", () => {
-      const ctx: GateContext = { parentType: "prd", specKind: "tech", content: "no heading" };
+      const ctx: GateContext = { parentType: null, specKind: "tech", content: "no heading" };
       const results = checkpoint.check(ctx);
       expect(selectFailures(results).some((f) => f.reason === "MISSING_SKELETON")).toBe(true);
     });
 
     // BOUNDARY — specKind undefined must not block (defaults to "feature" at create time)
     it("check() passes when specKind is undefined", () => {
-      const ctx: GateContext = { parentType: "prd", content: "## Overview\nx" };
+      const ctx: GateContext = { parentType: null, content: "## Overview\nx" };
       const results = checkpoint.check(ctx);
       expect(isCheckpointBlocked(results)).toBe(false);
     });
 
     // ERROR / BOUNDARY — content omitted entirely defaults to "" (no skeleton)
     it("check() treats an omitted content field as empty (fails MISSING_SKELETON)", () => {
-      const ctx: GateContext = { parentType: "prd", specKind: "tech" };
+      const ctx: GateContext = { parentType: null, specKind: "tech" };
       const results = checkpoint.check(ctx);
       expect(selectFailures(results).some((f) => f.reason === "MISSING_SKELETON")).toBe(true);
     });
@@ -116,7 +116,7 @@ describe("checkpointRegistry", () => {
 
     // HAPPY — feed() renders the feeding-pack text, sourced from ctx
     it("feed() renders a feeding-pack block carrying the rule source, missing reasons, and slices", () => {
-      const ctx: GateContext = { parentType: null, specKind: "tech", content: "no heading" };
+      const ctx: GateContext = { parentType: "prd", specKind: "tech", content: "no heading" };
       const results = checkpoint.check(ctx);
       const failures = selectFailures(results);
       const feedCtx: GateContext = {
@@ -126,7 +126,7 @@ describe("checkpointRegistry", () => {
       };
       const text = checkpoint.feed(feedCtx, failures);
       expect(text).toContain("[source: knowledge-write-spec-rules, trust: team-authored]");
-      expect(text).toContain("- PARENT_REQUIRED");
+      expect(text).toContain("- a spec takes no parent");
       expect(text).toContain("- MISSING_SKELETON");
       expect(text).toContain("Every spec needs a legal parent.");
     });

@@ -84,7 +84,7 @@ describe("CorpusService.get — BOUNDARY: batched findByIds call count for relat
     const service = new CorpusService(store);
 
     const parent = await mustCreate(service, prdInput("Parent"));
-    const child = await mustCreate(service, { type: "spec", title: "Child", parent_id: parent.id });
+    const child = await mustCreate(service, { type: "spec", title: "Child"});
 
     store.findByIdsCallCount = 0;
     const result = await service.get(child.slug);
@@ -135,7 +135,7 @@ describe("CorpusService.get — BOUNDARY: batched findByIds call count for relat
     const service = new CorpusService(store);
 
     const parent = await mustCreate(service, prdInput("Parent"));
-    const child = await mustCreate(service, { type: "spec", title: "Child", parent_id: parent.id });
+    const child = await mustCreate(service, { type: "spec", title: "Child"});
     const other = await mustCreate(service, prdInput("Other"));
     await service.link(child.id, other.id, "relates-to");
 

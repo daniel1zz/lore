@@ -48,6 +48,7 @@ import { tmpdir } from "os";
 import yaml from "yaml";
 import { BOOTSTRAP_INJECTION_KNOWN_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
+import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -150,8 +151,6 @@ function createFullChain(dir: string): {
       "spec",
       "--title",
       "T1 E2E Spec",
-      "--parent",
-      prdSlug,
       "--content",
       "## Overview\n\nSpec body for the task-start e2e.\n",
       "--no-ai",
@@ -190,6 +189,7 @@ function createFullChain(dir: string): {
   // precedent.
   appendWorkflowConfig(dir, "\nworkflow:\n  review:\n    judgment_required_types: []\n");
 
+  citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, "AC-T1-1"); // BR-1007: approvable only when a criterion cites a live rule
   const approveResult = runLore(["approve", specSlug], dir);
   expect(approveResult.exitCode).toBe(0);
 

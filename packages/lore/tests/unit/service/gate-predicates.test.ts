@@ -68,34 +68,28 @@ const SCOPE_DECLARED_UNATTESTED: DeclaredScopeCoverage = {
 
 describe("gate-predicates", () => {
   describe("parentLegal", () => {
-    // HAPPY
-    it("passes when parent.type is the legal parent type for spec (prd)", () => {
-      expect(parentLegal({ type: "prd" })).toEqual({ ok: true });
-    });
-
-    // NEGATIVE
-    it("fails with PARENT_REQUIRED when parent is null", () => {
-      expect(parentLegal(null)).toEqual({ ok: false, reason: "PARENT_REQUIRED" });
+    // HAPPY (BR-1: a spec takes no parent)
+    it("passes when no parent is supplied (null)", () => {
+      expect(parentLegal(null)).toEqual({ ok: true });
     });
 
     // BOUNDARY
-    it("fails with PARENT_REQUIRED when parent is undefined", () => {
-      expect(parentLegal(undefined)).toEqual({ ok: false, reason: "PARENT_REQUIRED" });
+    it("passes when parent is undefined", () => {
+      expect(parentLegal(undefined)).toEqual({ ok: true });
+    });
+
+    // NEGATIVE (BR-2: a parent is refused and the reason names criterion citations)
+    it("refuses a prd parent, naming `lore ac cite`, on field 'parent'", () => {
+      expect(parentLegal({ type: "prd" })).toEqual({
+        ok: false,
+        reason: expect.stringContaining("lore ac cite"),
+        field: "parent",
+      });
     });
 
     // ERROR
-    it("fails with INVALID_PARENT_TYPE when parent.type is not a legal parent type for spec", () => {
-      expect(parentLegal({ type: "task" })).toEqual({
-        ok: false,
-        reason: "INVALID_PARENT_TYPE",
-      });
-    });
-
-    it("fails with INVALID_PARENT_TYPE for another illegal parent type (plan)", () => {
-      expect(parentLegal({ type: "plan" })).toEqual({
-        ok: false,
-        reason: "INVALID_PARENT_TYPE",
-      });
+    it.each(["task", "plan", "spec", "adr", "knowledge"])("refuses a %s parent too", (type) => {
+      expect(parentLegal({ type })).toMatchObject({ ok: false, field: "parent" });
     });
   });
 

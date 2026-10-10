@@ -65,13 +65,13 @@ interface Fixture {
   clearFaults: () => Promise<void>;
 }
 
-/** prd A is the spec's create-time parent; the link under test re-parents the spec to prd B. */
+/** prd A is the plan's create-time parent; the link under test re-parents the plan to prd B (a spec takes no parent, BR-2). */
 async function seed(store: StoreInterface): Promise<{ cs: CorpusService; specId: string; prdBId: string }> {
   const cs = new CorpusService(store);
   const prdA = await must(await cs.create({ type: "prd", title: "Link atomic A", content: "a" } as CreateDocInput), "prdA");
   const prdB = await must(await cs.create({ type: "prd", title: "Link atomic B", content: "b" } as CreateDocInput), "prdB");
   const spec = await must(
-    await cs.create({ type: "spec", title: "Link atomic spec", content: "s", parent_id: prdA.id } as CreateDocInput),
+    await cs.create({ type: "plan", title: "Link atomic plan", content: "s", parent_id: prdA.id } as CreateDocInput),
     "spec",
   );
   return { cs, specId: spec.id, prdBId: prdB.id };

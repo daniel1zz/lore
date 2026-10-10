@@ -143,8 +143,8 @@ describe("HAPPY — create() records a telemetry event", () => {
 describe("ERROR — failed service calls still record telemetry events", () => {
   it("create() with validation failure → event with ok=false and error_code", async () => {
     const { service, telemetry } = makeServiceWithCapture();
-    // spec requires parent_id — omitting it causes PARENT_REQUIRED error
-    const result = await service.create({ type: "spec", title: "Orphan Spec" });
+    // task requires parent_id — omitting it causes PARENT_REQUIRED error
+    const result = await service.create({ type: "task", title: "Orphan Task", extra: { plan_id: "p" } });
     expect(result.ok).toBe(false);
 
     expect(telemetry.events).toHaveLength(1);

@@ -129,7 +129,7 @@ function createPrd(tmpDir: string, title: string): string {
  * Seed a spec document linked to a parent, return its slug.
  */
 function createSpec(tmpDir: string, title: string, parentSlug: string): string {
-  const result = runLore(["create", "spec", "--title", title, "--parent", parentSlug, "--no-ai"], tmpDir);
+  const result = runLore(["create", "spec", "--title", title,"--no-ai"], tmpDir);
   const match = result.stdout.match(/Slug:\s+(\S+)/);
   return match?.[1] ?? "";
 }

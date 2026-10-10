@@ -125,7 +125,6 @@ async function makeFixture(command: string = MARKER_PRESENT_COMMAND): Promise<Fi
   const specId = await createDoc(corpusService, {
     type: "spec",
     title: "Oracle Generation Spec",
-    parent_id: prdId,
     content: "spec body",
   } as CreateDocInput);
   const planId = await createDoc(corpusService, {

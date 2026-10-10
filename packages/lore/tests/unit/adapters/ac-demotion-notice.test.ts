@@ -51,6 +51,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
+import { citeSpecViaCli } from "../../helpers/cli-live-rule.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -119,7 +120,7 @@ function createPrd(dir: string, title: string): string {
 
 function createSpec(dir: string, parentSlug: string, title: string): string {
   const r = runLore(
-    ["create", "spec", "--title", title, "--parent", parentSlug, "--content", "## Overview\n\nBody.", "--no-ai"],
+    ["create", "spec", "--title", title,"--content", "## Overview\n\nBody.", "--no-ai"],
     dir,
   );
   if (r.exitCode !== 0) throw new Error(`create spec failed: ${r.stderr}`);
@@ -132,6 +133,18 @@ function addHumanAc(dir: string, specSlug: string, id: string, statement: string
 }
 
 function approveDoc(dir: string, slug: string): void {
+  // BR-1007: the spec's criterion AC-1 cites the corpus's live fixture rule, so the approval is accepted.
+  citeSpecViaCli(
+    (args) => {
+      const c = runLore(args, dir);
+      if (c.exitCode !== 0) throw new Error(`${args.join(" ")}: ${c.stderr}`);
+      return c.stdout;
+    },
+    dir,
+    undefined,
+    slug,
+    "AC-1",
+  );
   const r = runLore(["approve", slug], dir);
   if (r.exitCode !== 0) throw new Error(`approve ${slug} failed (setup): ${r.stderr}`);
 }

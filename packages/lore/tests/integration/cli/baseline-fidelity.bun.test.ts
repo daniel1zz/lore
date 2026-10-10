@@ -99,7 +99,7 @@ beforeAll(() => {
   const branch = slugOf(mustRun(["baseline", "add", root, "--node", "branch", "--label", "br", "--title", "Fid Branch"]).stdout);
   const leaf = slugOf(mustRun(["baseline", "add", branch, "--node", "leaf", "--label", "lf", "--title", "Fid Leaf"]).stdout);
   mustRun(["rule", "add", leaf, "--statement", "an AC id is unique within its spec", "--confidence", "established", "--enforced-by", "guaranteed", "--example", "duplicate id refused"]);
-  const spec = slugOf(mustRun(["create", "spec", "--title", "Fid Spec", "--parent", prd, "--content", "## Overview/Goal\nx\n\n## Scope\nx\n\n## Acceptance Criteria\nx", "--no-ai"]).stdout);
+  const spec = slugOf(mustRun(["create", "spec", "--title", "Fid Spec", "--content", "## Overview/Goal\nx\n\n## Scope\nx\n\n## Acceptance Criteria\nx", "--no-ai"]).stdout);
   specSlug = spec;
   mustRun(["ac", "add", spec, "AC-FID-1", "--statement", "a duplicate criterion id is refused", "--mode", "human", "--cite", "BR-1"]);
 });

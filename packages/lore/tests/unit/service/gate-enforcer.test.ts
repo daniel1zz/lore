@@ -24,7 +24,7 @@ describe("GateEnforcer", () => {
     it("spec-create: returns ok(undefined) when every predicate passes", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
-        parentType: "prd",
+        parentType: null,
         specKind: "feature",
         content: "## Overview\n\nBody.",
       });
@@ -35,7 +35,7 @@ describe("GateEnforcer", () => {
     it("spec-create: returns err(VALIDATION_ERROR) with a joined-reasons message when blocked", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
-        parentType: "prd",
+        parentType: null,
         specKind: "feature",
         content: "no heading here",
       });
@@ -58,14 +58,14 @@ describe("GateEnforcer", () => {
     it("spec-create: joins MULTIPLE failing reasons with a comma", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
-        parentType: "task", // illegal parent type for spec
+        parentType: "task", // any parent is refused for a spec (BR-2)
         specKind: "bogus", // invalid spec_kind
         content: "no heading",
       });
       expect(result.ok).toBe(false);
       if (!result.ok) {
         const message = (result.error as { message?: string }).message ?? "";
-        expect(message).toContain("INVALID_PARENT_TYPE");
+        expect(message).toContain("a spec takes no parent");
         expect(message).toContain("INVALID_SPEC_KIND");
         expect(message).toContain("MISSING_SKELETON");
       }
@@ -184,7 +184,7 @@ describe("GateEnforcer", () => {
     it("spec-create: message carries the pack's [source: ...] provenance header and missing list", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
-        parentType: "prd",
+        parentType: null,
         specKind: "feature",
         content: "no heading here",
         ruleSource: "knowledge-write-spec-rules",
@@ -370,7 +370,7 @@ describe("GateEnforcer", () => {
     it("variable unset: blocked message is unchanged, no note appended", () => {
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
-        parentType: "prd",
+        parentType: null,
         specKind: "feature",
         content: "no heading here",
       });
@@ -388,7 +388,7 @@ describe("GateEnforcer", () => {
       process.env[ENV_VAR] = "1";
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
-        parentType: "prd",
+        parentType: null,
         specKind: "feature",
         content: "no heading here",
       });
@@ -410,7 +410,7 @@ describe("GateEnforcer", () => {
       process.env[ENV_VAR] = "1";
       const enforcer = new GateEnforcer(undefined);
       const result = enforcer.enforce("spec-create", {
-        parentType: "prd",
+        parentType: null,
         specKind: "feature",
         content: "## Overview\n\nBody.",
       });

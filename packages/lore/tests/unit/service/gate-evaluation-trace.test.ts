@@ -72,6 +72,7 @@ import { saveConfig } from "@lore/core/node";
 import type { LoreConfig } from "@lore/core";
 
 import { checkpointRegistry } from "../../../src/service/checkpoint-registry.js";
+import { citeSpecViaCli } from "../../helpers/cli-live-rule.js";
 
 // tests/unit/service/ -> tests/unit/ -> tests/ -> packages/lore/
 const PACKAGE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -237,8 +238,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const prd = parseSlug(runLoreOk(["create", "prd", "--title", "GET-1 PRD", "--content", "## Overview\n\nbody", "--no-ai"], tmpDir, "create prd").stdout);
         const specResult = runLoreOk(
           [
-            "create", "spec", "--title", "GET-1 spec-create target",
-            "--parent", prd, "--kind", "tech", "--no-ai",
+            "create", "spec", "--title", "GET-1 spec-create target","--kind", "tech", "--no-ai",
             "--content", "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx",
           ],
           tmpDir,
@@ -281,8 +281,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const spec = parseSlug(
           runLoreOk(
             [
-              "create", "spec", "--title", "GET-3 spec-promote target",
-              "--parent", prd, "--kind", "tech", "--no-ai",
+              "create", "spec", "--title", "GET-3 spec-promote target","--kind", "tech", "--no-ai",
               "--content", "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx",
             ],
             tmpDir,
@@ -294,6 +293,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
           tmpDir,
           "ac add",
         );
+        citeSpecViaCli((args) => runLoreOk(args, tmpDir, args.join(" ")).stdout, tmpDir, prd, spec, "AC-GET3-1");
         runLoreOk(["set", spec, "--status", "approved"], tmpDir, "set --status approved (spec-promote)");
 
         const entries = queryAudit(spec, tmpDir);
@@ -311,8 +311,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const spec = parseSlug(
           runLoreOk(
             [
-              "create", "spec", "--title", "GET-4 plan-promote's ancestor spec",
-              "--parent", prd, "--kind", "tech", "--no-ai",
+              "create", "spec", "--title", "GET-4 plan-promote's ancestor spec","--kind", "tech", "--no-ai",
               "--content", "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx",
             ],
             tmpDir,
@@ -324,6 +323,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
           tmpDir,
           "ac add",
         );
+        citeSpecViaCli((args) => runLoreOk(args, tmpDir, args.join(" ")).stdout, tmpDir, prd, spec, "AC-GET4-1");
         runLoreOk(["set", spec, "--status", "approved"], tmpDir, "approve ancestor spec");
 
         const plan = parseSlug(
@@ -484,17 +484,22 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const spec = parseSlug(
           runLoreOk(
             [
-              "create", "spec", "--title", "Disabled spec-promote target",
-              "--parent", prd, "--kind", "tech", "--no-ai",
+              "create", "spec", "--title", "Disabled spec-promote target","--kind", "tech", "--no-ai",
               "--content", "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx",
             ],
             tmpDir,
             "create spec",
           ).stdout,
         );
-        // Deliberately NO `lore ac add` — with the checkpoint disabled, the
-        // floor never runs at all, so this would otherwise-block promotion
-        // proceeds unblocked (proves the config knob, not a lucky pass).
+        // BR-1007 holds regardless of the checkpoint's config switch, so the spec still carries one
+        // cited criterion; the config knob under test is the spec-promote checkpoint itself, whose
+        // skip is what the gate_skipped row below proves.
+        runLoreOk(
+          ["ac", "add", spec, "AC-GETD-1", "--statement", "A human reviewer confirms the exported CSV contains exactly 10 rows", "--mode", "human"],
+          tmpDir,
+          "ac add",
+        );
+        citeSpecViaCli((args) => runLoreOk(args, tmpDir, args.join(" ")).stdout, tmpDir, prd, spec, "AC-GETD-1");
         runLoreOk(["set", spec, "--status", "approved"], tmpDir, "set --status approved (spec-promote disabled)");
 
         const entries = queryAudit(spec, tmpDir);
