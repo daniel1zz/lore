@@ -2,7 +2,8 @@
  * lore requirement — SPEC-055 structured PRD requirement inventory surface.
  *
  * Subcommands (mirror `lore ac`, one tier up — target is a PRD, not a spec):
- *   add  <prd> <id> --statement <s> --priority <P0|P1|P2>
+ *   add  <prd> <id> --statement <s> --priority <P0|P1|P2> [--migrated-to BR-n]
+ *   migrate <prd> <id> <BR-n>   (coverage then derives from the rule's live script citations, BR-983)
  *   list <prd>
  *   rm   <prd> <id> [--force]
  *
@@ -36,6 +37,7 @@ export default defineCommand({
         id: { type: "positional", description: "Requirement id, e.g. R-1 or R-NEG-2", required: true },
         statement: { type: "string", description: "What the requirement asserts", required: true },
         priority: { type: "string", description: "P0 | P1 | P2", required: true },
+        "migrated-to": { type: "string", description: "Baseline rule id (BR-n, must be live) this requirement is migrated to" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run({ args }) {
@@ -43,11 +45,17 @@ export default defineCommand({
         try {
           const svc = requireRequirementService(app);
           if (svc === undefined) return;
-          const result = await svc.addRequirement(args.prd as string, {
-            id: args.id as string,
-            statement: args.statement as string,
-            priority: args.priority as string,
-          });
+          const migratedTo = args["migrated-to"] as string | undefined;
+          const result = await svc.addRequirement(
+            args.prd as string,
+            {
+              id: args.id as string,
+              statement: args.statement as string,
+              priority: args.priority as string,
+              ...(migratedTo !== undefined ? { migrated_to: migratedTo } : {}),
+            },
+            { requireLiveRule: true },
+          );
           if (!result.ok) {
             if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
             else process.stderr.write(formatError(result.error));
@@ -56,6 +64,33 @@ export default defineCommand({
           }
           if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
           else console.log(`Added requirement ${args.id} (${result.value.length} total).`);
+        } finally {
+          app.close();
+        }
+      },
+    }),
+    migrate: defineCommand({
+      meta: { name: "migrate", description: "Mark a requirement as migrated to a live baseline rule (coverage then derives from citations)" },
+      args: {
+        prd: { type: "positional", description: "PRD document ID or slug", required: true },
+        id: { type: "positional", description: "Requirement id to migrate", required: true },
+        rule: { type: "positional", description: "Baseline rule id, e.g. BR-12 (must be live)", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const { app } = loadLoreApp();
+        try {
+          const svc = requireRequirementService(app);
+          if (svc === undefined) return;
+          const result = await svc.migrateRequirement(args.prd as string, args.id as string, args.rule as string);
+          if (!result.ok) {
+            if (args.json) console.log(JSON.stringify({ ok: false, error: result.error }, null, 2));
+            else process.stderr.write(formatError(result.error));
+            process.exitCode = exitCode(result.error);
+            return;
+          }
+          if (args.json) console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          else console.log(`Migrated requirement ${args.id} to ${args.rule}.`);
         } finally {
           app.close();
         }
@@ -84,7 +119,7 @@ export default defineCommand({
           } else if (result.value.length === 0) {
             console.log("No requirements declared on this PRD.");
           } else {
-            for (const r of result.value) console.log(`  [${r.priority}] ${r.id} — ${r.statement}`);
+            for (const r of result.value) console.log(`  [${r.priority}] ${r.id}${r.migrated_to !== undefined ? ` -> ${r.migrated_to}` : ""} — ${r.statement}`);
           }
         } finally {
           app.close();

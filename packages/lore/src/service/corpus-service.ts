@@ -104,6 +104,7 @@ import { attestationExemptKindValid } from "./gate-predicates.js";
 import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import { resolveDoc, ULID_REGEX } from "./resolve.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
+import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import { isPlanMember } from "./plan-membership.js";
@@ -4047,7 +4048,17 @@ export class CorpusService {
       }
     }
 
-    return ok(computeRequirementCoverage(requirements, refs));
+    // reason: BR-983 — a migrated requirement is covered by citations, looked up CORPUS-WIDE
+    // (slice 3b re-parents specs under baseline leaves, so the PRD's own children are not the
+    // universe). Liveness of the rule is enforced only once the corpus holds baseline docs.
+    const allSpecsResult = await this.store.findMany({ type: "spec" });
+    if (!allSpecsResult.ok) return allSpecsResult;
+    const leavesResult = await this.store.findMany({ type: "baseline" });
+    if (!leavesResult.ok) return leavesResult;
+    const ruleIndex = leavesResult.value.length > 0 ? buildRuleIndex(leavesResult.value) : undefined;
+    const citedRuleIds = collectLiveScriptCitedRuleIds(allSpecsResult.value, ruleIndex);
+
+    return ok(computeRequirementCoverage(requirements, refs, citedRuleIds));
   }
 
   // ── Declared AC Ids (SPEC-038 §4, §7 D4) ────────────────────────────────

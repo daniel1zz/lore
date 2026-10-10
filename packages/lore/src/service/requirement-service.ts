@@ -11,6 +11,7 @@
  *   addRequirement(prdIdOrSlug, requirement)          → Requirement[] (updated inventory)
  *   listRequirements(prdIdOrSlug)                     → Requirement[]
  *   removeRequirement(prdIdOrSlug, reqId, opts?)      → Requirement[] (updated inventory)
+ *   migrateRequirement(prdIdOrSlug, reqId, ruleId)    → Requirement[] (sets `migrated_to`, BR-983)
  *
  * @invariant All methods return Promise<Result<T, LoreError>> — no thrown exceptions.
  * @invariant `addRequirement` validates the FULL candidate array (existing + new) via
@@ -31,6 +32,9 @@
  * @invariant `removeRequirement` fails loud when a descendant spec AC still lists the id in
  *   its `requirement_refs`, UNLESS `opts.force` — a forced removal leaves those refs dangling
  *   (they simply cover nothing) rather than silently rewriting AC declarations.
+ * @invariant `migrateRequirement` (and `addRequirement` with `opts.requireLiveRule`) refuse a
+ *   `migrated_to` rule that is not `live` in a baseline leaf (absent, deprecated or retired) with
+ *   VALIDATION_ERROR — a migrated requirement could never be covered by such a rule (BR-983).
  * @invariant Writes are CAS-guarded and produce exactly one insertVersion + one audit entry.
  *
  * Side-effect class: IO (reads and writes via StoreInterface).
@@ -51,6 +55,13 @@ import {
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
+import { buildRuleIndex } from "./ac-citations.js";
+
+/** Options for {@link RequirementService.addRequirement}. */
+export interface AddRequirementOpts {
+  /** Refuse a `migrated_to` rule that is not `live` in a baseline leaf (CLI surfaces set this). */
+  requireLiveRule?: boolean;
+}
 
 /** Options for {@link RequirementService.removeRequirement}. */
 export interface RemoveRequirementOpts {
@@ -81,11 +92,13 @@ export class RequirementService {
    *
    * @param prdIdOrSlug - PRD document ULID or slug
    * @param requirement - Untrusted candidate (validated here, not by the caller)
+   * @param opts - `{ requireLiveRule? }` — see {@link AddRequirementOpts}
    * @returns Updated requirement inventory after appending
    */
   async addRequirement(
     prdIdOrSlug: string,
     requirement: unknown,
+    opts: AddRequirementOpts = {},
   ): Promise<Result<Requirement[], LoreError>> {
     const prdResult = await this.resolvePrd(prdIdOrSlug);
     if (!prdResult.ok) return prdResult;
@@ -132,7 +145,62 @@ export class RequirementService {
       }
     }
 
+    const addedRule = parsed.data[parsed.data.length - 1]?.migrated_to;
+    if (opts.requireLiveRule === true && addedRule !== undefined) {
+      const live = await this.requireLiveRule(addedRule);
+      if (!live.ok) return live;
+    }
+
     const writeResult = await this.writeRequirements(prd, parsed.data, "add");
+    if (!writeResult.ok) return writeResult;
+    return ok(parsed.data);
+  }
+
+  // ── migrateRequirement ────────────────────────────────────────────────────────
+
+  /**
+   * Mark an existing requirement as migrated to baseline rule `ruleId` (BR-983): from now on
+   * its coverage is "the rule has a live script-mode citing criterion". Re-migrating to a
+   * different rule replaces `migrated_to`. Refuses a non-live rule.
+   *
+   * @param prdIdOrSlug - PRD document ULID or slug
+   * @param reqId - Existing requirement id
+   * @param ruleId - Baseline rule id (`BR-<n>`)
+   * @returns Updated requirement inventory
+   */
+  async migrateRequirement(
+    prdIdOrSlug: string,
+    reqId: string,
+    ruleId: string,
+  ): Promise<Result<Requirement[], LoreError>> {
+    const prdResult = await this.resolvePrd(prdIdOrSlug);
+    if (!prdResult.ok) return prdResult;
+    const prd = prdResult.value;
+
+    const existing = extractRequirements(prd);
+    if (!existing.some((r) => r.id === reqId)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "requirements[].id",
+        message: `Requirement "${reqId}" does not exist on this PRD`,
+        value: reqId,
+      });
+    }
+    const candidate = existing.map((r) => (r.id === reqId ? { ...r, migrated_to: ruleId } : r));
+    const parsed = prdRequirementsSchema.safeParse(candidate);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return err({
+        code: "VALIDATION_ERROR",
+        field: issue !== undefined ? `requirements.${issue.path.join(".")}` : "requirements",
+        message: issue !== undefined ? issue.message : "Invalid migrated_to",
+        value: ruleId,
+      });
+    }
+    const live = await this.requireLiveRule(ruleId);
+    if (!live.ok) return live;
+
+    const writeResult = await this.writeRequirements(prd, parsed.data, "migrate");
     if (!writeResult.ok) return writeResult;
     return ok(parsed.data);
   }
@@ -204,6 +272,30 @@ export class RequirementService {
 
   // ── Private Helpers ───────────────────────────────────────────────────────────
 
+  /** VALIDATION_ERROR unless `ruleId` is `live` in some baseline leaf (absent/deprecated/retired are refused). */
+  private async requireLiveRule(ruleId: string): Promise<Result<true, LoreError>> {
+    const leaves = await this.store.findMany({ type: "baseline" });
+    if (!leaves.ok) return leaves;
+    const rule = buildRuleIndex(leaves.value).get(ruleId);
+    if (rule === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "migrated_to",
+        message: `Rule "${ruleId}" is not in any baseline leaf — a requirement cannot migrate to a rule that does not exist`,
+        value: ruleId,
+      });
+    }
+    if (rule.lifecycle !== "live") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "migrated_to",
+        message: `Rule "${ruleId}" is ${rule.lifecycle}, not live — a requirement cannot migrate to an inactive rule`,
+        value: ruleId,
+      });
+    }
+    return ok(true);
+  }
+
   /** Resolves idOrSlug and validates it is a PRD document. */
   private async resolvePrd(idOrSlug: string): Promise<Result<DocRecord, LoreError>> {
     const docResult = await resolveDoc(this.store, idOrSlug);
@@ -243,7 +335,7 @@ export class RequirementService {
   private async writeRequirements(
     prd: DocRecord,
     requirements: Requirement[],
-    operation: "add" | "remove",
+    operation: "add" | "remove" | "migrate",
   ): Promise<Result<DocRecord, LoreError>> {
     const now = new Date().toISOString();
     const newVersion = prd.version + 1;
@@ -266,7 +358,7 @@ export class RequirementService {
       action: "update",
       created_at: now,
       created_by: "system",
-      change_summary: `Requirements ${operation === "add" ? "updated" : "updated (removal)"} — ${requirements.length} entries`,
+      change_summary: `Requirements ${operation === "remove" ? "updated (removal)" : operation === "migrate" ? "updated (migration)" : "updated"} — ${requirements.length} entries`,
       // SPEC-072 D1/D2 — this write path only touches `extra`; carry the
       // current (unchanged) slug.
       slug: updateResult.value.slug,

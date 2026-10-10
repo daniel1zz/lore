@@ -98,7 +98,7 @@ describe("SPEC-055 AC-055-3 — computeRequirementCoverage", () => {
 
   it("BOUNDARY: an empty requirements array → all-empty (vacuous)", () => {
     const c = computeRequirementCoverage([], []);
-    expect(c).toEqual({ total: 0, covered: [], uncovered: [], uncovered_p0: [] });
+    expect(c).toEqual({ total: 0, covered: [], uncovered: [], uncovered_p0: [], migrated: [], unmigrated: [] });
   });
 });
 

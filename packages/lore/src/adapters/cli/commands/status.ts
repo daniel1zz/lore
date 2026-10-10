@@ -1378,7 +1378,7 @@ export default defineCommand({
         // drives exit 3 (same CI-gate posture as a code drift), folded into the pinned
         // precedence below. Store-only, zero-LLM, zero fs probing.
         let requirementsPayload:
-          | { checked: number; consistent: boolean; prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[] }> }
+          | { checked: number; consistent: boolean; prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[]; migrated: string[]; unmigrated: string[] }> }
           | undefined;
         let requirementsInconsistent = false;
         if (checkRequirementsRequested) {
@@ -1388,7 +1388,7 @@ export default defineCommand({
             process.exitCode = exitCode(prdsResult.error);
             return;
           }
-          const prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[] }> = [];
+          const prds: Array<{ slug: string; total: number; uncovered: string[]; uncovered_p0: string[]; migrated: string[]; unmigrated: string[] }> = [];
           for (const prd of prdsResult.value.docs) {
             const covResult = await app.corpusService.computeRequirementCoverageForPrd(prd.id);
             if (!covResult.ok) {
@@ -1397,7 +1397,7 @@ export default defineCommand({
               return;
             }
             const cov = covResult.value;
-            prds.push({ slug: prd.slug, total: cov.total, uncovered: cov.uncovered, uncovered_p0: cov.uncovered_p0 });
+            prds.push({ slug: prd.slug, total: cov.total, uncovered: cov.uncovered, uncovered_p0: cov.uncovered_p0, migrated: cov.migrated, unmigrated: cov.unmigrated });
             if (cov.uncovered_p0.length > 0) requirementsInconsistent = true;
           }
           requirementsPayload = {
@@ -1582,7 +1582,12 @@ export default defineCommand({
         if (args.json) {
           const data: Record<string, unknown> = { ...treeData };
           if (driftPayload !== undefined) data["code_drift"] = driftPayload;
-          if (requirementsPayload !== undefined) data["requirement_coverage"] = requirementsPayload;
+          if (requirementsPayload !== undefined) {
+            data["requirement_coverage"] = requirementsPayload;
+            // reason: task-red-c's contract (C5) reads the same payload at `data.requirements`;
+            // the established `requirement_coverage` key is kept so existing consumers do not break.
+            data["requirements"] = requirementsPayload;
+          }
           if (prdBudgetPayload !== undefined) data["prd_budget"] = prdBudgetPayload;
           if (issuesPayload !== undefined) data["issues"] = issuesPayload;
           if (memoryPointersPayload !== undefined) data["memory_pointers"] = memoryPointersPayload;
@@ -1592,13 +1597,18 @@ export default defineCommand({
           for (const line of treeRenderLines) console.log(line);
           if (driftPayload !== undefined) renderDriftSection(driftPayload);
           if (requirementsPayload !== undefined) {
+            for (const prd of requirementsPayload.prds) {
+              if (prd.migrated.length > 0) {
+                console.log(`  ${prd.slug}: migrated [${prd.migrated.join(", ")}] (covered by citations); unmigrated [${prd.unmigrated.join(", ")}]`);
+              }
+            }
             if (requirementsPayload.consistent) {
               console.log(`Requirement coverage: all P0 requirements covered (${requirementsPayload.checked} PRD(s) checked).`);
             } else {
               console.log(`Requirement coverage: UNCOVERED P0 requirements (${requirementsPayload.checked} PRD(s) checked):`);
               for (const prd of requirementsPayload.prds) {
                 if (prd.uncovered_p0.length > 0) {
-                  console.log(`  - ${prd.slug}: ${prd.uncovered_p0.join(", ")} (fix: add a spec AC with --covers <R-id>)`);
+                  console.log(`  - ${prd.slug}: ${prd.uncovered_p0.join(", ")} (fix: unmigrated -> add a spec AC with --covers <R-id>; migrated -> add a script AC with --cite <BR-n>)`);
                 }
               }
             }
