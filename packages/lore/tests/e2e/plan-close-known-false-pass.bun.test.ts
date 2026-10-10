@@ -39,7 +39,7 @@
  *   - REGRESSION: both pre-existing attestation-floor known_false_pass
  *     entries and its known_false_block survive byte-identical; the three
  *     untouched empty-delta fields keep their exact "(none recorded)" shape;
- *     prd-outline-synced's own unrelated entry is untouched.
+ *     cited-rule-state's own unrelated entries are untouched (the field replaced prd-outline-synced, BR-984).
  *
  * Freshness guard (repo CLAUDE.md false-oracle vector #4): `beforeAll` calls
  * `assertFreshBinary`. Run `bun run build` (repo root) before this suite.
@@ -175,7 +175,7 @@ describe("AC-VS-8: plan-close predicate contract table records the coverage pred
     const block = extractFieldBlock(explainStdout, COVERAGE_FIELD);
     expect(extractKnownFalseBlock(block)).not.toContain(LITERAL);
 
-    for (const field of ["uat", "attestation-exempt-kind", "prd-outline-synced", "assessment-freshness"]) {
+    for (const field of ["uat", "attestation-exempt-kind", "cited-rule-state", "assessment-freshness"]) {
       expect(extractFieldBlock(explainStdout, field)).not.toContain(LITERAL);
     }
   });
@@ -205,10 +205,13 @@ describe("AC-VS-8: plan-close predicate contract table records the coverage pred
     for (const field of ["uat", "attestation-exempt-kind", "assessment-freshness"]) {
       expect(extractKnownFalsePass(extractFieldBlock(explainStdout, field))).toBe("(none recorded)");
     }
-    // prd-outline-synced keeps its own unrelated pre-existing entry, untouched.
-    expect(extractKnownFalsePass(extractFieldBlock(explainStdout, "prd-outline-synced"))).toBe(
-      "spec-level attribution cannot discriminate between sibling plans under the same " +
-        "governing spec",
+    // cited-rule-state (which replaced prd-outline-synced in slice 3a, BR-984) keeps its own two entries, untouched.
+    expect(extractKnownFalsePass(extractFieldBlock(explainStdout, "cited-rule-state"))).toBe(
+      "a rule whose state is unknown (git unavailable, dirty run, no code anchors) or unverified " +
+        "(no attested run at all) is not refused even though nothing proves it holds | " +
+        "a fresh attested pass recorded by ANOTHER plan on the same spec makes the rule verified for " +
+        "this plan too — rule state is a function of the latest run per (spec, criterion), not of the " +
+        "closing plan's own tasks",
     );
   });
 });

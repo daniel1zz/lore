@@ -20,28 +20,18 @@
  * `approve.ts` explicitly forbids (D1: advisory never changes the outcome —
  * exit code stays 0 whether or not it prints).
  *
- * `ApproveResult.prd_sync_advisories` is populated by `ReviewService.approve`
- * exactly when `workflow.gates."plan-close".prd_sync.enabled: true` AND the
- * approved plan's DIRECT parent is a spec AND that spec resolves no domain doc
- * (no `implements` edge) — mirrors `plan-promote-prd-sync-advisory.test.ts`
- * (T1)'s own harness recipe, replayed here end-to-end through the real CLI
- * process instead of a bare service-layer harness.
+ * UPDATED for slice 3a (BR-984): the `prd_sync_advisories` channel (the plan-promote early warning that
+ * plan-close's domain-document-edit predicate would find no domain doc) is RETIRED together with that
+ * predicate, so `lore approve` no longer renders it. The same scenarios (unlinked spec, both-advisory,
+ * linked spec, knob off) now pin the new behaviour through the real CLI process: no prd-sync line ever
+ * reaches either channel, and the sibling `reachability_advisories` channel still renders on stderr alone.
  *
  * Coverage:
- *   HAPPY:      a prd_sync_advisories entry prints to stderr, NEVER stdout,
- *               and the exit code stays 0 (AC-PCI-16 core scenario).
- *   REGRESSION: both reachability_advisories AND prd_sync_advisories fire
- *               together, in the code's declared render order (reachability
- *               line(s) before the prd_sync line, per approve.ts's comment:
- *               "immediately after the existing reachability_advisories
- *               loop") — proves the two arrays stay in DISTINCT loops, never
- *               concatenated into one merged list (AC-PCI-16 "both present").
- *   BOUNDARY:   a resolvable domain doc (an `implements` edge wired) means
- *               NEITHER field populates — approve prints nothing extra
- *               (AC-PCI-16 "both absent").
- *   NEGATIVE:   the prd_sync gate knob OFF (the default) suppresses the
- *               advisory even with no domain doc at all (AC-PCI-16 "both
- *               absent", second route to the same empty-stderr outcome).
+ *   HAPPY:      an unlinked ancestor spec with the knob ON prints NO prd-sync advisory (stderr empty,
+ *               stdout free of ADVISORY), exit 0 — the case that used to print it.
+ *   REGRESSION: a human-mode-only spec prints exactly ONE advisory line, the reachability one, on stderr.
+ *   BOUNDARY:   a resolvable domain doc (an `implements` edge wired) prints nothing extra.
+ *   NEGATIVE:   the prd_sync knob OFF (the default) prints nothing extra.
  *
  * @spec_ref spec-plan-close-predicates-measure-invariants-an-applicability §D2
  *   Acceptance Criteria AC-PCI-16
@@ -199,8 +189,8 @@ function createPlan(dir: string, parentSlug: string, title: string): string {
   return parseSlug(r.stdout);
 }
 
-describe("lore approve — prd_sync_advisories advisory render (AC-PCI-16)", () => {
-  it("HAPPY: an unlinked ancestor spec prints the prd_sync advisory to stderr, NEVER stdout, exit 0", () => {
+describe("lore approve — the prd_sync advisory channel is retired (AC-PCI-16, BR-984)", () => {
+  it("HAPPY: an unlinked ancestor spec with the knob ON prints no prd-sync advisory on either channel, exit 0", () => {
     writeConfig(tmpDir, true);
     const prdSlug = createPrd(tmpDir, "T7 Unlinked PRD");
     const specSlug = createSpec(tmpDir, prdSlug, "T7 Unlinked Spec");
@@ -212,23 +202,13 @@ describe("lore approve — prd_sync_advisories advisory render (AC-PCI-16)", () 
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("approved");
-
-    const prdSyncLines = result.stderr
-      .split("\n")
-      .filter((line) => line.includes("prd-sync predicate") && line.includes(specSlug));
-    expect(prdSyncLines.length).toBe(1);
-    expect(result.stderr).toContain(`lore link ${specSlug}`);
-    expect(result.stderr).toContain("--type implements");
-
-    // ⛔ CHANNEL assertion, not just "the text appears somewhere": a leak to
-    // stdout would still pass a bare `.toContain` check run against merged
-    // output — asserting stdout's ABSENCE is what actually proves the advisory
-    // landed on stderr and only stderr.
-    expect(result.stdout).not.toContain("prd-sync predicate");
+    expect(result.stderr).not.toContain("prd-sync predicate");
+    expect(result.stderr).not.toContain("--type implements");
+    expect(result.stderr).toBe("");
     expect(result.stdout).not.toContain("ADVISORY");
   });
 
-  it("REGRESSION: reachability_advisories and prd_sync_advisories BOTH fire, in the code's declared render order", () => {
+  it("REGRESSION: a human-mode-only spec prints exactly one advisory (reachability) on stderr, never stdout", () => {
     writeConfig(tmpDir, true);
     const prdSlug = createPrd(tmpDir, "T7 Both-Advisory PRD");
     const specSlug = createSpec(tmpDir, prdSlug, "T7 Both-Advisory Spec");
@@ -239,14 +219,10 @@ describe("lore approve — prd_sync_advisories advisory render (AC-PCI-16)", () 
     const result = runLore(["approve", planSlug], tmpDir);
 
     expect(result.exitCode).toBe(0);
-    const reachabilityIdx = result.stderr.indexOf("lore verify` will be structurally");
-    const prdSyncIdx = result.stderr.indexOf("prd-sync predicate");
-    expect(reachabilityIdx).toBeGreaterThanOrEqual(0);
-    expect(prdSyncIdx).toBeGreaterThan(reachabilityIdx);
-    // Two DISTINCT advisory lines, never concatenated into one merged loop —
-    // exactly two "ADVISORY" occurrences, one per class.
+    expect(result.stderr.indexOf("lore verify` will be structurally")).toBeGreaterThanOrEqual(0);
+    expect(result.stderr).not.toContain("prd-sync predicate");
     const advisoryLines = result.stderr.split("\n").filter((l) => l.includes("ADVISORY"));
-    expect(advisoryLines.length).toBe(2);
+    expect(advisoryLines.length).toBe(1);
     expect(result.stdout).not.toContain("ADVISORY");
   });
 

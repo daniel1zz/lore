@@ -3,9 +3,15 @@
  * type-both) for spec-plan-close-predicates-measure-invariants-an-applicability
  * §Design Decisions D1/D2 — "my referent is absent, so I do not apply" as a
  * VALUE a predicate returns (`PredicateNotApplicable`/`ApplicablePredicateResult`,
- * `gate-predicates.ts`), wired into BOTH `plan-close` predicates that need it
- * (`prdOutlineSynced`, `attestationFloor`) and into `GateEnforcer.enforce`'s
- * partition (`checkpoint-registry.ts` / `gate-enforcer.ts`).
+ * `gate-predicates.ts`), wired into `attestationFloor` (and the `planClaimedAcCoverage`
+ * companion verdict) and into `GateEnforcer.enforce`'s partition (`checkpoint-registry.ts` /
+ * `gate-enforcer.ts`).
+ *
+ * UPDATED for slice 3a (BR-984): the second original producer, `prdOutlineSynced` (an absent
+ * domain doc => `notApplicable`), is retired; the cited-rule-state predicate that replaces it
+ * (`citedRuleStateClean`) is two-valued — it measured something or it is not pushed at all — so
+ * the AC-PCI-1/-2 blocks now pin that it NEVER returns a not-applicable verdict, and the
+ * AC-PCI-3/T8 blocks drive the audit path through the producers that remain.
  *
  * Pure functions + constructed `GateContext` fixtures + an injected
  * `RecordGateSkip` fake only — no store, no IO, no `bun:sqlite` — hence vitest.
@@ -21,12 +27,12 @@ import { describe, it, expect, vi } from "vitest";
 import { ok, UNRESOLVED_DECLARED_SCOPE } from "@lore/core";
 import type { LoreConfig, AcCoverageFact, DeclaredScopeCoverage } from "@lore/core";
 import {
-  prdOutlineSynced,
+  citedRuleStateClean,
   attestationFloor,
   isNotApplicable,
   noAnchorOverlap,
-  PRD_SYNC_FIELD,
-  PRD_SYNC_NOT_SYNCED_REASON,
+  CITED_RULE_STATE_FIELD,
+  CITED_RULE_STATE_REASON,
   ATTESTATION_FLOOR_FIELD,
   ATTESTATION_FLOOR_REASON,
   type PredicateResult,
@@ -79,26 +85,17 @@ if (planClose === undefined) {
 // ─── AC-PCI-1: notApplicable shape ─────────────────────────────────────────
 
 describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
-  // HAPPY — the pinned contract: notApplicable===true, reason==="referent-absent",
-  // a non-empty referent, and NO "ok" property (asserted via "ok" in result === false).
-  it("HAPPY: prdOutlineSynced(null, referent) returns a notApplicable value with no ok property", () => {
-    const result = prdOutlineSynced(null, "spec-x");
-    expect(result).toEqual({ notApplicable: true, reason: "referent-absent", referent: "spec-x" });
-    expect("ok" in result).toBe(false);
-    expect((result as { referent: string }).referent.length).toBeGreaterThan(0);
-  });
-
-  // NEGATIVE — a real pass is a plain PredicateResult, never notApplicable.
-  it("NEGATIVE: prdOutlineSynced(true, referent) is a plain pass, never notApplicable", () => {
-    const result = prdOutlineSynced(true, "spec-x");
+  // HAPPY — the cited-rule-state predicate with nothing to refuse is a plain pass.
+  it("HAPPY: citedRuleStateClean([]) is a plain pass, never notApplicable", () => {
+    const result = citedRuleStateClean([]);
     expect(result).toEqual({ ok: true });
     expect("notApplicable" in result).toBe(false);
   });
 
-  // NEGATIVE — a real fail keeps its existing reason/field, never notApplicable.
-  it("NEGATIVE: prdOutlineSynced(false, referent) is a plain fail carrying the existing reason/field", () => {
-    const result = prdOutlineSynced(false, "spec-x");
-    expect(result).toEqual({ ok: false, reason: PRD_SYNC_NOT_SYNCED_REASON, field: PRD_SYNC_FIELD });
+  // NEGATIVE — a refusing rule is a plain fail carrying the predicate's reason/field.
+  it("NEGATIVE: citedRuleStateClean with a refusing rule is a plain fail carrying its reason/field", () => {
+    const result = citedRuleStateClean([{ rule_id: "BR-5", state: "contradicted" }]);
+    expect(result).toEqual({ ok: false, reason: CITED_RULE_STATE_REASON, field: CITED_RULE_STATE_FIELD });
     expect("notApplicable" in result).toBe(false);
   });
 
@@ -157,123 +154,78 @@ describe("PredicateNotApplicable — notApplicable shape (AC-PCI-1)", () => {
 
 // ─── AC-PCI-2: never a fail ────────────────────────────────────────────────
 
-describe("checkPlanClose — never a fail on an absent domain doc (AC-PCI-2)", () => {
+describe("checkPlanClose — cited-rule-state pushes a verdict only when it measured something (AC-PCI-2, BR-984)", () => {
   function baseCtx(overrides: Partial<GateContext>): GateContext {
     return {
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       // reason: real, attested, floor-meeting evidence — isolates THIS group's
-      // assertions to the prd-sync predicate's own contribution, mirroring
-      // attestation-exempt-kind.test.ts's isolation-via-fixture precedent.
+      // assertions to the cited-rule-state predicate's own contribution.
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
-      // reason: Amendment A (task-t3, §D3) — this group's fixtures pre-date the
-      // per-claimed-AC coverage conjunct and never meant to say anything about
-      // it; an explicit `NO_DECLARED_ACS` makes that intent visible instead of
-      // silently omitting the field, which — post-Amendment-A — pushes its OWN
-      // companion `notApplicable` verdict (referent "planClaimedAcCoverage")
-      // that these prd-sync-focused assertions never anticipated.
+      // reason: Amendment A — an explicit `NO_DECLARED_ACS` keeps the per-claimed-AC coverage
+      // companion `notApplicable` verdict out of these assertions.
       planClaimedAcCoverage: NO_DECLARED_ACS,
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
-      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
-      // this group's fixtures never populate newestAssessmentAt/
-      // newestTaskActivityAt, and now that the vacuous case pushes its own
-      // notApplicable("no-evidence") entry (mirrors this file's own
-      // Amendment-A/NO_DECLARED_ACS isolation precedent above), an
-      // unexempted fixture here would trip a THIRD conjunct these
-      // prd-sync-focused assertions never anticipated.
+      // reason: keeps assessment-freshness's own vacuous `notApplicable` entry out of these assertions.
       assessmentFreshnessExempt: true,
       ...overrides,
     };
   }
 
-  // HAPPY — the pinned contract: an absent domain doc (prdSyncSynced: null)
-  // produces NO entry with field "prd-outline-synced" and no ok:false entry
-  // attributable to prd_sync; the not-applicable verdict rides its own channel;
-  // the checkpoint overall is NOT blocked by it.
-  it("HAPPY: an absent domain doc renders no prd-outline-synced failure and does not block the checkpoint", () => {
-    const ctx = baseCtx({ prdSyncSynced: null });
-    const results = planClose.check(ctx);
+  // HAPPY — every cited rule fine: a measured plain pass, no notApplicable member anywhere.
+  it("HAPPY: an empty violation list is a plain pass — no cited-rule-state failure, no notApplicable, not blocked", () => {
+    const results = planClose.check(baseCtx({ citedRuleViolations: [] }));
 
-    const failures = selectFailures(results);
-    expect(failures.some((f) => f.field === PRD_SYNC_FIELD)).toBe(false);
-    expect(
-      results.some((r) => "notApplicable" in r && r.reason === "referent-absent" && r.referent === "spec-x"),
-    ).toBe(true);
+    expect(selectFailures(results).some((f) => f.field === CITED_RULE_STATE_FIELD)).toBe(false);
+    expect(results.some((r) => "notApplicable" in r)).toBe(false);
     expect(isCheckpointBlocked(results)).toBe(false);
   });
 
-  // NEGATIVE — contrast case: a domain doc that DOES resolve but isn't
-  // in-window-synced (prdSyncSynced: false) DOES produce a real ok:false entry —
-  // proving the mechanism differentiates "absent" from "present but violating".
-  it("NEGATIVE: a resolved-but-unsynced domain doc still produces a real prd-outline-synced failure", () => {
-    const ctx = baseCtx({ prdSyncSynced: false });
-    const results = planClose.check(ctx);
+  // NEGATIVE — a contradicted/stale cited rule is a real failure that blocks the checkpoint.
+  it("NEGATIVE: a refusing cited rule produces a real cited-rule-state failure and blocks the checkpoint", () => {
+    const results = planClose.check(baseCtx({ citedRuleViolations: [{ rule_id: "BR-5", state: "stale" }] }));
 
-    const failures = selectFailures(results);
-    expect(failures.some((f) => f.field === PRD_SYNC_FIELD)).toBe(true);
+    expect(selectFailures(results).some((f) => f.field === CITED_RULE_STATE_FIELD)).toBe(true);
     expect(results.some((r) => "notApplicable" in r)).toBe(false);
     expect(isCheckpointBlocked(results)).toBe(true);
   });
 
-  // BOUNDARY — a domain doc that resolves AND is in-window-synced produces a
-  // plain pass, no notApplicable member anywhere.
-  it("BOUNDARY: a resolved and synced domain doc produces a plain pass, never notApplicable", () => {
-    const ctx = baseCtx({ prdSyncSynced: true });
-    const results = planClose.check(ctx);
-
-    expect(results.some((r) => "notApplicable" in r)).toBe(false);
-    expect(isCheckpointBlocked(results)).toBe(false);
-  });
-
-  // STATE — when the plan has NO spec-tier ancestor at all, `prdSyncSynced` is
-  // never populated (`undefined`, not `null`) — a DIFFERENT state from
-  // referent-absent: the predicate does not even PUSH an entry (checkpoint-level
-  // vacuous pass), vs. pushing a notApplicable entry.
-  it("STATE: no spec-tier ancestor at all (prdSyncSynced undefined) pushes no prd-sync entry whatsoever", () => {
-    // reason: built directly (not via `baseCtx`'s override spread) — under
-    // `exactOptionalPropertyTypes`, explicitly assigning `undefined` to an
-    // optional `GateContext` field to "clear" a default is a type error; the
-    // point of THIS scenario is that `prdSyncSynced`/`parentSpecPointer` are
-    // simply ABSENT, never populated at all.
+  // STATE — `citedRuleViolations` never populated (no rule state consulted / no spec ancestor):
+  // the predicate pushes NOTHING (checkpoint-level vacuous), it does not invent a verdict.
+  it("STATE: no rule state consulted (citedRuleViolations undefined) pushes no cited-rule-state entry whatsoever", () => {
+    // reason: built directly — under `exactOptionalPropertyTypes`, assigning `undefined` to clear
+    // an optional field is a type error; the point is that the field is simply ABSENT.
     const ctx: GateContext = {
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
-      // reason: Amendment A — see `baseCtx`'s identical comment above; this
-      // fixture is built directly (not via `baseCtx`) but carries the same
-      // "no declared ACs" intent explicitly.
       planClaimedAcCoverage: NO_DECLARED_ACS,
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
       prdSyncEnabled: true,
-      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
-      // see `baseCtx`'s identical comment above; this fixture is built
-      // directly but carries the same isolation intent explicitly.
       assessmentFreshnessExempt: true,
     };
     const results = planClose.check(ctx);
 
     expect(results.some((r) => "notApplicable" in r)).toBe(false);
-    expect(selectFailures(results).some((f) => f.field === PRD_SYNC_FIELD)).toBe(false);
+    expect(selectFailures(results).some((f) => f.field === CITED_RULE_STATE_FIELD)).toBe(false);
     expect(isCheckpointBlocked(results)).toBe(false);
   });
 
-  // ERROR (config-shaped) — the prd_sync knob disabled entirely means the
-  // predicate never runs regardless of `prdSyncSynced`, even when it's `null`.
-  it("ERROR: prd_sync disabled by config means the predicate never runs even with a null referent", () => {
-    const ctx = baseCtx({ prdSyncEnabled: false, prdSyncSynced: null });
-    const results = planClose.check(ctx);
+  // ERROR (config-shaped) — the prd_sync knob disabled means the predicate never runs, violations or not.
+  it("ERROR: prd_sync disabled by config means the predicate never runs even with violations supplied", () => {
+    const results = planClose.check(
+      baseCtx({ prdSyncEnabled: false, citedRuleViolations: [{ rule_id: "BR-5", state: "contradicted" }] }),
+    );
 
-    expect(results.some((r) => "notApplicable" in r)).toBe(false);
-    expect(selectFailures(results).some((f) => f.field === PRD_SYNC_FIELD)).toBe(false);
+    expect(selectFailures(results).some((f) => f.field === CITED_RULE_STATE_FIELD)).toBe(false);
+    expect(isCheckpointBlocked(results)).toBe(false);
   });
 
-  // REGRESSION — an absent domain doc leaves every OTHER plan-close predicate's
-  // verdict untouched (attestationFloor here still passes on its own merits).
-  it("REGRESSION: an absent domain doc does not perturb attestationFloor's own passing verdict", () => {
-    const ctx = baseCtx({ prdSyncSynced: null });
-    const results = planClose.check(ctx);
+  // REGRESSION — a cited-rule failure leaves every OTHER plan-close predicate's verdict untouched.
+  it("REGRESSION: a cited-rule-state failure does not perturb attestationFloor's own passing verdict", () => {
+    const results = planClose.check(baseCtx({ citedRuleViolations: [{ rule_id: "BR-5", state: "stale" }] }));
 
     expect(selectFailures(results).some((f) => f.field === ATTESTATION_FLOOR_FIELD)).toBe(false);
     expect(results.some((r) => "notApplicable" in r && r.reason === "no-evidence")).toBe(false);
@@ -294,15 +246,12 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
       // intent visible (see `baseCtx`'s identical comment in the AC-PCI-2
       // describe block above) instead of also tripping the coverage
       // companion `notApplicable` verdict this describe block isn't testing.
-      planClaimedAcCoverage: NO_DECLARED_ACS,
+      // reason: `planClaimedAcCoverage` is deliberately OMITTED — that omission IS the Amendment A
+      // companion-push trigger (`referent: "planClaimedAcCoverage"`), the not-applicable producer
+      // this describe block drives now that the domain-doc predicate is retired (BR-984).
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
-      prdSyncEnabled: true,
-      prdSyncSynced: null,
-      parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
-      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
-      // this describe block counts audit rows for the prd-sync not-applicable
-      // path specifically; an unexempted fixture would also trip the newly
-      // visible assessment-freshness notApplicable("no-evidence") entry.
+      // reason: counts audit rows for the one not-applicable path above; an unexempted fixture would
+      // also trip assessment-freshness's own notApplicable("no-evidence") entry.
       assessmentFreshnessExempt: true,
     };
   }
@@ -322,8 +271,8 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
     expect(entry.action).toBe("gate_not_applicable");
     expect(entry.details).toMatchObject({
       checkpoint: "plan-close",
-      kind: "prd-sync-domain-doc",
-      referent: "spec-x",
+      kind: "attestation-not-applicable",
+      referent: "planClaimedAcCoverage",
     });
     const passEntry = recordGateSkip.mock.calls[1]![0];
     expect(passEntry.action).toBe("gate_passed");
@@ -358,7 +307,7 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
 
   // BOUNDARY — attestationFloor's OWN not-applicable case (zero evidence) is
   // ALSO audited, tagged with the DIFFERENT "attestation-not-applicable" kind —
-  // proving the reason -> kind mapping covers both producers, not just prd-sync.
+  // proving the reason -> kind mapping covers both attestation producers.
   it("BOUNDARY: a zero-evidence plan is audited with the attestation-not-applicable kind", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(undefined, recordGateSkip);
@@ -494,62 +443,37 @@ describe("GateEnforcer.enforce — enforce advisory on plan-close not-applicable
   });
 });
 
-// ─── T8 Part 2: notApplicableAdvisoryKind is keyed per-referent ───────────
+// ─── T8 Part 2: notApplicableAdvisoryKind after the domain-doc predicate's retirement ──
 //
-// Task-level oracle (task-t8-repair-the-t3-t4-integration-regression-6-under,
-// not a new spec AC) — spec-plan-close-predicates-measure-invariants-an-
-// applicability §D2 says an inapplicable verdict's advisory kind must never
-// mislabel its subject. `gate-enforcer.ts`'s `notApplicableAdvisoryKind` used
-// to map EVERY `reason: "referent-absent"` to `"prd-sync-domain-doc"` — true
-// only while `prdOutlineSynced` was the sole producer of that reason. T4's
-// Amendment A companion push (`checkPlanClose`, checkpoint-registry.ts) now
-// ALSO produces `reason: "referent-absent"`, with `referent:
-// "planClaimedAcCoverage"` — a fixed sentinel, never a real spec slug — so
-// keying on `reason` alone conflates two unrelated audit subjects.
+// `reason: "referent-absent"` used to have TWO producers (the domain-doc predicate and the
+// Amendment A `planClaimedAcCoverage` companion push), which is why the advisory kind was keyed
+// per-referent. BR-984 retired the first; every remaining `referent-absent` verdict is an
+// attestation concern, and the `"prd-sync-domain-doc"` kind no longer exists anywhere.
 describe("GateEnforcer.enforce — notApplicableAdvisoryKind is keyed per-referent (T8 Part 2)", () => {
-  // HAPPY — a SINGLE ctx that trips BOTH producers of `reason: "referent-
-  // absent"` simultaneously (an absent domain doc AND an unresolved
-  // planClaimedAcCoverage caller-contract violation) must record two audit
-  // rows carrying their OWN distinct kind — proving the mapping is per-
-  // referent, not per-reason, and that neither producer's kind leaks onto
-  // the other's row.
-  it("HAPPY: a domain-doc referent and a planClaimedAcCoverage referent map to distinct kinds on the SAME enforce() call", () => {
+  // HAPPY — the surviving `referent-absent` producer maps to attestation-not-applicable, and no
+  // row anywhere carries the retired "prd-sync-domain-doc" kind.
+  it("HAPPY: the planClaimedAcCoverage referent maps to attestation-not-applicable and the retired prd-sync-domain-doc kind never appears", () => {
     const recordGateSkip = vi.fn<RecordGateSkip>().mockResolvedValue(ok(undefined));
     const enforcer = new GateEnforcer(undefined, recordGateSkip);
-    // reason: `planClaimedAcCoverage` is deliberately OMITTED (not `NO_DECLARED_ACS`)
-    // — that omission IS the Amendment A companion-push trigger under test,
-    // paired with a real absent domain doc (`prdSyncSynced: null`) so both
-    // "referent-absent" producers fire on the SAME `checkPlanClose` call.
-    // `planDeclaredScopeCoverage` IS supplied (resolved, claiming nothing): this
-    // test counts audit rows, and an unresolved declared scope would add a THIRD
-    // row (reason `scope-undeclared`) belonging to a different concern.
+    // reason: `planClaimedAcCoverage` is deliberately OMITTED — the Amendment A companion-push
+    // trigger. `planDeclaredScopeCoverage` IS supplied (an unresolved declared scope would add a
+    // second row, reason `scope-undeclared`, belonging to a different concern).
     const ctx: GateContext = {
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
       planDeclaredScopeCoverage: SCOPE_RESOLVED_CLAIMING_NOTHING,
-      prdSyncEnabled: true,
-      prdSyncSynced: null,
-      parentSpecPointer: { slug: "spec-y", title: "Spec Y", status: "approved" },
-      // reason: task-report-why-each-plan-close-predicate-passed-so-a-vacuous —
-      // this test counts audit rows for the TWO "referent-absent" producers
-      // specifically; assessmentFreshnessExempt keeps the newly-visible
-      // assessment-freshness "no-evidence" entry from adding a third row.
       assessmentFreshnessExempt: true,
     };
 
     const result = enforcer.enforce("plan-close", ctx);
 
     expect(result).toEqual({ ok: true, value: undefined });
-    // reason: AC-FR-8/D7 — 2 gate_not_applicable rows PLUS 1 gate_passed row.
-    expect(recordGateSkip).toHaveBeenCalledTimes(3);
-    const details = recordGateSkip.mock.calls.map(
-      (call) => call[0]!.details as { kind: string; referent: string },
-    );
-    const coverageEntry = details.find((d) => d.referent === "planClaimedAcCoverage");
-    const domainDocEntry = details.find((d) => d.referent === "spec-y");
-    expect(coverageEntry?.kind).toBe("attestation-not-applicable");
-    expect(domainDocEntry?.kind).toBe("prd-sync-domain-doc");
+    // reason: AC-FR-8/D7 — 1 gate_not_applicable row PLUS 1 gate_passed row.
+    expect(recordGateSkip).toHaveBeenCalledTimes(2);
+    const details = recordGateSkip.mock.calls.map((call) => call[0]!.details as { kind?: string; referent?: string });
+    expect(details.find((d) => d.referent === "planClaimedAcCoverage")?.kind).toBe("attestation-not-applicable");
+    expect(details.some((d) => d.kind === "prd-sync-domain-doc")).toBe(false);
   });
 
   // BOUNDARY (spec-declared-scope-attestation-contract-task-owned-ac-scope

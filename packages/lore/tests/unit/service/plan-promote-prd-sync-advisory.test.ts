@@ -1,24 +1,20 @@
 /**
- * RED suite (paired-impl task-t1-applicability-verdict-in-the-predicate-s-own-
- * type-both, item 9) for spec-plan-close-predicates-measure-invariants-an-
- * applicability §Design Decisions D2 — `plan-promote` gains a domain-doc
- * EARLY-WARNING advisory (mirroring `planPromoteReachabilityAdvisory`'s exact
- * shape): fires when `prd_sync` is enabled AND the plan's ancestor spec
- * resolves no domain doc; names the spec slug and the `lore link ... --type
- * implements` wiring command; silent when a domain doc resolves. Surfaced on
- * `ReviewService.approve`'s `ApproveResult.prd_sync_advisories` — a key
- * DISTINCT from the pre-existing `reachability_advisories`, which keeps
- * carrying ONLY the verify-reachability class.
+ * plan-promote's domain-doc EARLY-WARNING advisory is RETIRED (slice 3a, BR-984).
  *
- * Harness mirrors `requires-uat-gate.test.ts` / `plan-close-prd-sync.test.ts`:
- * real InMemoryStore + GateEnforcer + CorpusService + ReviewService, no
- * bare-predicate-only shortcuts — so the plan-promote gate WIRING itself is
- * exercised end-to-end via `reviewService.approve(plan.id)`.
+ * It existed (spec-plan-close-predicates-measure-invariants-an-applicability §D2, AC-PCI-4) to warn at
+ * `lore approve <plan>` time that plan-close's domain-document-edit predicate (`prdOutlineSynced`) would
+ * later find its referent absent. That predicate is gone — plan-close now reads cited rule state — so the
+ * warning described a gate that no longer exists. This suite keeps the same harness and scenarios and pins
+ * the new behaviour: `ReviewService.approve` NEVER produces a `prd_sync_advisories` key, whatever the
+ * knob, the domain-doc linkage or the spec's criteria; the sibling `reachability_advisories` channel is
+ * untouched (a human-mode-only spec still warns on its own key).
+ *
+ * Harness: real InMemoryStore + GateEnforcer + CorpusService + ReviewService, through
+ * `reviewService.approve(plan.id)`.
  *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  *
- * @spec_ref spec-plan-close-predicates-measure-invariants-an-applicability
- *   §Design Decisions D2, §Acceptance Criteria AC-PCI-4
+ * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root BR-984
  */
 
 import { describe, it, expect } from "vitest";
@@ -27,8 +23,6 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import type { CreateDocInput, DocRecord, LoreConfig } from "@lore/core";
-
-// ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const SCRIPT_AC = {
   id: "AC-1",
@@ -42,9 +36,7 @@ const HUMAN_AC = {
   verify: { mode: "human" as const },
 };
 
-/** knob ON: `workflow.gates."plan-close".prd_sync.enabled: true` — the SAME knob
- *  `resolvePrdSyncGateEnabled` reads for BOTH the plan-close predicate and this
- *  plan-promote early-warning advisory (`GateEnforcer.isPrdSyncEnabled()`). */
+/** knob ON: the SAME `workflow.gates."plan-close".prd_sync.enabled` the retired advisory read. */
 function prdSyncConfig(overrides?: Record<string, unknown>): LoreConfig {
   return {
     project: { name: "t", author: "t" },
@@ -71,8 +63,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
   return result.value;
 }
 
-/** Creates a PRD -> spec (parented DIRECTLY under the PRD, no domain-doc link at
- *  all) declaring `criteria`. Draft (not yet approved). */
+/** PRD -> spec parented DIRECTLY under the PRD (no domain-doc link at all), approved. */
 async function createUnlinkedSpec(cs: CorpusService, criteria: unknown[]): Promise<DocRecord> {
   const prd = await mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
   const spec = await mustCreate(cs, {
@@ -87,8 +78,7 @@ async function createUnlinkedSpec(cs: CorpusService, criteria: unknown[]): Promi
   return approved.value;
 }
 
-/** Creates a PRD -> {domainDoc, featureSpec} with featureSpec --implements-->
- *  domainDoc (a resolvable domain doc). featureSpec is approved. */
+/** PRD -> {domainDoc, featureSpec} with featureSpec --implements--> domainDoc, approved. */
 async function createLinkedSpec(cs: CorpusService, criteria: unknown[]): Promise<DocRecord> {
   const prd = await mustCreate(cs, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
   const domainDoc = await mustCreate(cs, {
@@ -120,15 +110,9 @@ async function createPlan(cs: CorpusService, parentId: string): Promise<DocRecor
   } as CreateDocInput);
 }
 
-// ─── AC-PCI-4: promote advisory ─────────────────────────────────────────────
-
-describe("plan-promote prd-sync domain-doc promote advisory (AC-PCI-4)", () => {
-  // HAPPY — prd_sync enabled, ancestor spec resolves NO domain doc: approve()
-  // still succeeds (advisory never blocks), and prd_sync_advisories names the
-  // spec's slug and the `lore link ... --type implements` wiring command, on a
-  // key DISTINCT from reachability_advisories (absent here — the spec declares
-  // a script-mode AC, so `lore verify` IS reachable).
-  it("HAPPY: an ancestor spec with no domain doc yields prd_sync_advisories naming the spec + wiring command", async () => {
+describe("plan-promote no longer produces a prd-sync domain-doc advisory (BR-984)", () => {
+  // HAPPY (inverted) — the scenario that USED to yield the advisory (knob on, no domain doc) now yields none.
+  it("HAPPY: an ancestor spec with no domain doc approves with NO prd_sync_advisories and no domain-doc wording anywhere", async () => {
     const { corpusService, reviewService } = makeHarness(prdSyncConfig());
     const spec = await createUnlinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
@@ -137,16 +121,14 @@ describe("plan-promote prd-sync domain-doc promote advisory (AC-PCI-4)", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.prd_sync_advisories).toBeDefined();
-      expect(result.value.prd_sync_advisories?.some((a) => a.includes(spec.slug))).toBe(true);
-      expect(result.value.prd_sync_advisories?.some((a) => a.includes("--type implements"))).toBe(true);
+      expect("prd_sync_advisories" in result.value).toBe(false);
+      expect(JSON.stringify(result.value)).not.toContain("--type implements");
       expect(result.value.reachability_advisories).toBeUndefined();
     }
   });
 
-  // NEGATIVE — the same plan/config, but the ancestor spec DOES resolve a
-  // domain doc (via `implements`): approve() succeeds with NO prd_sync_advisories.
-  it("NEGATIVE: a resolvable domain doc yields no prd_sync_advisories at all", async () => {
+  // NEGATIVE — a resolvable domain doc is equally silent (the linkage no longer matters at all).
+  it("NEGATIVE: a resolvable domain doc yields no prd_sync_advisories", async () => {
     const { corpusService, reviewService } = makeHarness(prdSyncConfig());
     const spec = await createLinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
@@ -154,47 +136,34 @@ describe("plan-promote prd-sync domain-doc promote advisory (AC-PCI-4)", () => {
     const result = await reviewService.approve(plan.id);
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.prd_sync_advisories).toBeUndefined();
-    }
+    if (result.ok) expect("prd_sync_advisories" in result.value).toBe(false);
   });
 
-  // BOUNDARY — prd_sync knob OFF (the default): even with NO domain doc
-  // resolvable, no advisory fires — the knob gates this early-warning too.
-  it("BOUNDARY: prd_sync disabled (default) suppresses the advisory even with no domain doc", async () => {
-    const { corpusService, reviewService } = makeHarness(); // no config at all — prd_sync default OFF
+  // BOUNDARY — knob OFF (default) behaves identically.
+  it("BOUNDARY: prd_sync disabled (default) yields no prd_sync_advisories either", async () => {
+    const { corpusService, reviewService } = makeHarness();
     const spec = await createUnlinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
     const result = await reviewService.approve(plan.id);
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.prd_sync_advisories).toBeUndefined();
-    }
+    if (result.ok) expect("prd_sync_advisories" in result.value).toBe(false);
   });
 
-  // ERROR (config-shaped) — the WHOLE plan-promote checkpoint disabled
-  // suppresses the advisory too, mirroring `reachability_advisories`'s own
-  // "disabled checkpoint ⇒ no advisory" shape exactly.
-  it("ERROR: plan-promote checkpoint disabled by config suppresses the advisory too", async () => {
-    const { corpusService, reviewService } = makeHarness(
-      prdSyncConfig({ "plan-promote": { enabled: false } }),
-    );
+  // ERROR (config-shaped) — the whole plan-promote checkpoint disabled: still no key.
+  it("ERROR: plan-promote checkpoint disabled by config still yields no prd_sync_advisories", async () => {
+    const { corpusService, reviewService } = makeHarness(prdSyncConfig({ "plan-promote": { enabled: false } }));
     const spec = await createUnlinkedSpec(corpusService, [SCRIPT_AC]);
     const plan = await createPlan(corpusService, spec.id);
 
     const result = await reviewService.approve(plan.id);
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.prd_sync_advisories).toBeUndefined();
-    }
+    if (result.ok) expect("prd_sync_advisories" in result.value).toBe(false);
   });
 
-  // STATE — a `spec`-type doc's own approve() never computes a prd_sync
-  // advisory at all (it has no ancestor of its own to resolve a domain doc
-  // from) — regardless of the prd_sync knob.
+  // STATE — approving a spec doc itself never produced one and still does not.
   it("STATE: approving a spec doc itself never produces a prd_sync_advisories key", async () => {
     const { corpusService, reviewService } = makeHarness(prdSyncConfig());
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
@@ -209,16 +178,12 @@ describe("plan-promote prd-sync domain-doc promote advisory (AC-PCI-4)", () => {
     const result = await reviewService.approve(spec.id);
 
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.prd_sync_advisories).toBeUndefined();
-    }
+    if (result.ok) expect("prd_sync_advisories" in result.value).toBe(false);
   });
 
-  // REGRESSION — both advisory classes can fire SIMULTANEOUSLY, on separate
-  // keys, without colliding: an ancestor spec with a HUMAN-mode-only AC (so
-  // `lore verify` is unreachable — zero script-mode ACs) AND no domain doc at
-  // all yields BOTH reachability_advisories and prd_sync_advisories.
-  it("REGRESSION: reachability_advisories and prd_sync_advisories coexist on separate keys without collision", async () => {
+  // REGRESSION — the sibling reachability channel is untouched: a human-mode-only spec (no script AC, so
+  // `lore verify` is unreachable) still warns on `reachability_advisories`, and only there.
+  it("REGRESSION: reachability_advisories still fires on its own key, with no prd_sync_advisories beside it", async () => {
     const { corpusService, reviewService } = makeHarness(prdSyncConfig());
     const spec = await createUnlinkedSpec(corpusService, [HUMAN_AC]);
     const plan = await createPlan(corpusService, spec.id);
@@ -228,8 +193,7 @@ describe("plan-promote prd-sync domain-doc promote advisory (AC-PCI-4)", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.reachability_advisories).toBeDefined();
-      expect(result.value.prd_sync_advisories).toBeDefined();
-      expect(result.value.reachability_advisories).not.toEqual(result.value.prd_sync_advisories);
+      expect("prd_sync_advisories" in result.value).toBe(false);
     }
   });
 });

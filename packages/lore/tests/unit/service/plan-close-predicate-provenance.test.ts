@@ -5,7 +5,7 @@
  * VACUOUS pass (no applicable data to measure) and a SATISFIED pass (data was
  * present and the invariant genuinely held) must carry a DISTINCT machine-readable
  * discriminator on `checkPlanClose`'s emitted results, never merely different
- * prose. `attestationFloor`/`prdOutlineSynced` already carry this discriminator
+ * prose. `attestationFloor` already carries this discriminator
  * (`PredicateNotApplicable` vs. a bare `{ok: true}`) — `assessmentFreshness` was
  * the one flagged holdout: `describeCheckpointVacuity`'s own "Known limit" JSDoc
  * (checkpoint-registry.ts) named it BY NAME as returning a bare `{ok: true}` for
@@ -17,7 +17,7 @@
  *
  * Every fixture below declares a VALID `attestation_exempt` (mirrors
  * `assessment-freshness.test.ts`'s `ATTESTATION_EXEMPT_EXTRA` precedent) and
- * opts out of `requires_uat`/`prd_sync` by omission, so `checkPlanClose`'s
+ * opts out of `requires_uat`/`prd_sync` (the cited-rule-state predicate) by omission, so `checkPlanClose`'s
  * results array contains EXACTLY the assessment-freshness conjunct's own
  * verdict — no ambiguity about which predicate produced which entry.
  *

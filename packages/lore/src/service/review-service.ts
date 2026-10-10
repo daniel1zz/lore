@@ -38,7 +38,6 @@ import {
   isJudgmentEscalatedDenial,
   type GateContext,
 } from "./checkpoint-registry.js";
-import { resolvePrdSyncDomainDoc } from "./prd-sync-domain-doc.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import type { JudgmentService } from "./judgment-service.js";
 
@@ -161,17 +160,9 @@ export interface ApproveOpts {
  *   `gate` dependency wired, `plan-promote` disabled by config) OMITS the field
  *   entirely rather than writing an empty array, so `"reachability_advisories"
  *   in result` doubles as the "was there anything to warn about" check.
- * @invariant `prd_sync_advisories` (spec-plan-close-predicates-measure-
- *   invariants-an-applicability, task T1 item 9) mirrors
- *   `reachability_advisories`'s EXACT invariant shape on a SEPARATE key — never
- *   changes the outcome, populated ONLY for a just-approved `plan` doc whose
- *   `prd_sync` gate is enabled AND whose ancestor spec resolves no domain doc
- *   at all, omitted (never `[]`) otherwise. `reachability_advisories` keeps
- *   carrying ONLY the verify-reachability class — this field never widens it.
  */
 export interface ApproveResult extends DocRecord {
   reachability_advisories?: string[];
-  prd_sync_advisories?: string[];
 }
 
 export interface RejectOpts {
@@ -247,17 +238,14 @@ export class ReviewService {
    *   structurally unreachable for it. Computed via `GateEnforcer.
    *   planPromoteReachabilityAdvisories`, a SEPARATE call from `enforce()` right
    *   below it — the advisory can never influence whether this method returns
-   *   `ok`/`err` (D1). ALSO returns `prdSyncAdvisories` (spec-plan-close-
-   *   predicates-measure-invariants-an-applicability, task T1 item 9), the SAME
-   *   shape on a separate field — `[]` except for a `plan` doc whose `prd_sync`
-   *   gate is enabled and whose ancestor spec resolves no domain doc.
+   *   `ok`/`err` (D1).
    */
   private async enforceApprovalGate(
     doc: DocRecord,
     opts?: { skipJudgmentGate?: boolean },
   ): Promise<Result<ApprovalGateOutcome, LoreError>> {
     if (this.gate === undefined) {
-      return ok({ reachabilityAdvisories: [], prdSyncAdvisories: [] });
+      return ok({ reachabilityAdvisories: [] });
     }
 
     // SPEC-103 §Mechanisms M2 — runs BEFORE the type-specific branches below (and
@@ -300,9 +288,7 @@ export class ReviewService {
       // reason: M1's early-warning advisory is a `plan-promote`-only signal
       // (spec-verify-reachability-plan-promote-early-warning §Scope) — a spec
       // approval has no plan-close attestation floor of its own to warn about.
-      // The prd-sync domain-doc advisory is likewise `plan-promote`-only
-      // (task T1 item 9) — a spec has no ancestor of its own to resolve one from.
-      return ok({ reachabilityAdvisories: [], prdSyncAdvisories: [] });
+      return ok({ reachabilityAdvisories: [] });
     }
 
     if (doc.type === "plan") {
@@ -314,7 +300,7 @@ export class ReviewService {
       // never surfaces the reachability advisory — mirrors `enforce()`'s own
       // config-disabled early return never running `checkpointDef.check`.
       if (!this.gate.enforcer.isEnabled("plan-promote")) {
-        return ok({ reachabilityAdvisories: [], prdSyncAdvisories: [] });
+        return ok({ reachabilityAdvisories: [] });
       }
 
       const bundleResult = await this.gate.getPlanBundle(doc.id);
@@ -331,20 +317,6 @@ export class ReviewService {
           ? this.gate.enforcer.resolveVerificationProfile(resolveSpecKindOrDefault(parentSpec.extra["spec_kind"]))
           : null;
       const planRequiresUat = doc.extra["requires_uat"] === true;
-      // reason: spec-plan-close-predicates-measure-invariants-an-applicability,
-      // task T1 item 9 — `prdSyncDomainDocResolved` is the EARLY-WARNING
-      // counterpart of `plan-close`'s own domain-doc resolution (`CorpusService
-      // .set`'s `resolvePrdSyncDomainDoc` call). Resolved HERE, paying the extra
-      // store IO ONLY when `prd_sync` is enabled AND an ancestor spec exists —
-      // mirrors `CorpusService.set`'s own "opt-out ⇒ no extra IO" cost
-      // philosophy for this same default-OFF knob.
-      const prdSyncEnabled = this.gate.enforcer.isPrdSyncEnabled();
-      let prdSyncDomainDocResolved: boolean | undefined;
-      if (prdSyncEnabled && parentSpec !== undefined) {
-        const domainDocResult = await resolvePrdSyncDomainDoc(this.store, parentSpec);
-        if (!domainDocResult.ok) return domainDocResult;
-        prdSyncDomainDocResolved = domainDocResult.value !== null;
-      }
       // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
       // `parentSpecScriptAcCount` is computed HERE (not folded into
       // `buildUpstreamSpecContext`, whose exact-shape output is byte-pinned by
@@ -360,8 +332,6 @@ export class ReviewService {
         verificationProfile,
         planRequiresUat,
         requiresUatEnabled: this.gate.enforcer.isRequiresUatEnabled(),
-        prdSyncEnabled,
-        ...(prdSyncDomainDocResolved !== undefined ? { prdSyncDomainDocResolved } : {}),
         // reason: AC-FR-8/D7 — see this file's spec-promote gate block's identical
         // note; `doc.id` is the RESOLVED plan's real id, never its slug.
         targetDocId: doc.id,
@@ -370,11 +340,10 @@ export class ReviewService {
       if (!enforceResult.ok) return enforceResult;
       return ok({
         reachabilityAdvisories: [...this.gate.enforcer.planPromoteReachabilityAdvisories(planPromoteCtx)],
-        prdSyncAdvisories: [...this.gate.enforcer.planPromotePrdSyncAdvisories(planPromoteCtx)],
       });
     }
 
-    return ok({ reachabilityAdvisories: [], prdSyncAdvisories: [] });
+    return ok({ reachabilityAdvisories: [] });
   }
 
   /**
@@ -767,10 +736,6 @@ export class ReviewService {
     // just-committed doc, since that IS the authoritative final state a caller
     // observes. Neither read ever influences whether this method returns ok/err.
     let reachabilityAdvisories = gateResult.value.reachabilityAdvisories;
-    // reason: spec-plan-close-predicates-measure-invariants-an-applicability,
-    // task T1 item 9 — mirrors `reachabilityAdvisories`'s identical pre/post-write
-    // threading shape one line up, on its own field.
-    let prdSyncAdvisories = gateResult.value.prdSyncAdvisories;
 
     const reviewer = opts?.reviewer ?? "system";
     const now = new Date().toISOString();
@@ -854,19 +819,16 @@ export class ReviewService {
         return postGateResult;
       }
       reachabilityAdvisories = postGateResult.value.reachabilityAdvisories;
-      prdSyncAdvisories = postGateResult.value.prdSyncAdvisories;
     }
 
     // reason: spec-verify-reachability-plan-promote-early-warning §Scope M1 —
     // `reachability_advisories` is OMITTED (never an empty array) when there is
     // nothing to warn about, so `"reachability_advisories" in result` doubles as
     // the "was there anything to warn about" check for a caller (see
-    // `ApproveResult`'s own JSDoc). `prd_sync_advisories` (task T1 item 9)
-    // mirrors that OMIT-when-empty shape on its own, separate key.
+    // `ApproveResult`'s own JSDoc).
     return ok({
       ...updatedDoc,
       ...(reachabilityAdvisories.length > 0 ? { reachability_advisories: reachabilityAdvisories } : {}),
-      ...(prdSyncAdvisories.length > 0 ? { prd_sync_advisories: prdSyncAdvisories } : {}),
     });
   }
 
@@ -1059,8 +1021,7 @@ function isLedgerOrTaskDoc(doc: DocRecord): boolean {
 /**
  * `enforceApprovalGate`'s private return shape — the `plan-promote` reachability
  * advisory lines (spec-verify-reachability-plan-promote-early-warning §Scope M1)
- * PLUS the prd-sync domain-doc advisory lines (spec-plan-close-predicates-
- * measure-invariants-an-applicability, task T1 item 9), both computed ALONGSIDE
+ * computed ALONGSIDE
  * the gate verdict, never folded into it. Not exported — an implementation
  * detail of how `approve()` threads advisories from `enforceApprovalGate`'s
  * pre-write AND post-write (ASYNC2-002) calls out to its own `ApproveResult`
@@ -1068,7 +1029,6 @@ function isLedgerOrTaskDoc(doc: DocRecord): boolean {
  */
 interface ApprovalGateOutcome {
   readonly reachabilityAdvisories: string[];
-  readonly prdSyncAdvisories: string[];
 }
 
 // reason: `countScriptModeAcceptanceCriteria` RELOCATED to `checkpoint-

@@ -41,7 +41,7 @@ import {
   ATTESTATION_FLOOR_FIELD,
   ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
-  PRD_SYNC_FIELD,
+  CITED_RULE_STATE_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
 } from "./gate-predicates.js";
 
@@ -73,7 +73,7 @@ export const PLAN_CLOSE_FIELDS = [
   ATTESTATION_FLOOR_FIELD,
   ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
-  PRD_SYNC_FIELD,
+  CITED_RULE_STATE_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
 ] as const;
 
@@ -166,23 +166,25 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
     known_false_pass: [],
     known_false_block: [],
   },
-  [PRD_SYNC_FIELD]: {
+  [CITED_RULE_STATE_FIELD]: {
     invariant:
-      "The plan's linked domain doc must carry at least one version whose content differs " +
-      "from its predecessor within the plan's execution window, ATTRIBUTABLE to the closing " +
-      "plan (not merely coincidentally edited by a concurrent session).",
+      "A plan must not close over a baseline rule its spec's criteria cite while that rule is " +
+      "contradicted by a failing attested run, or stale (its code anchors changed since the last " +
+      "attested pass) with no attested pass recorded since.",
     measured:
-      "A single caller-precomputed boolean/null (prdOutlineSynced): true when >= 1 domain-doc " +
-      "version's content differs from its predecessor within [earliest task-claim, close-write " +
-      "now), OR a valid extra.prd_sync_exempt is present; null (not-applicable) when the " +
-      "ancestor spec resolves no domain doc at all.",
+      "citedRuleStateClean over the offending list the caller derives from RuleStateService.full(): " +
+      "the rules cited by spec.extra.acceptance_criteria[].cites of the plan's resolved ancestor spec, " +
+      "filtered to state contradicted or stale. verified, unverified and unknown never refuse.",
     known_false_pass: [
-      "spec-level attribution cannot discriminate between sibling plans under the same " +
-        "governing spec",
+      "a rule whose state is unknown (git unavailable, dirty run, no code anchors) or unverified " +
+        "(no attested run at all) is not refused even though nothing proves it holds",
+      "a fresh attested pass recorded by ANOTHER plan on the same spec makes the rule verified for " +
+        "this plan too — rule state is a function of the latest run per (spec, criterion), not of the " +
+        "closing plan's own tasks",
     ],
     known_false_block: [
-      "a plan that introduces no domain-level capability has nothing to write (the deferred " +
-        "plan-promote domain-affecting declaration would close this)",
+      "a rule that is stale only because an unrelated edit touched a shared code anchor path is " +
+        "refused although the behaviour it states still holds; the recovery is a fresh attested run",
     ],
   },
   [ASSESSMENT_FRESHNESS_FIELD]: {

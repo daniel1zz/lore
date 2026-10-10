@@ -32,7 +32,7 @@ import {
   ATTESTATION_FLOOR_FIELD,
   ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
-  PRD_SYNC_FIELD,
+  CITED_RULE_STATE_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
 } from "../../../src/service/gate-predicates.js";
 import {
@@ -63,7 +63,7 @@ const EMITTED_PLAN_CLOSE_FIELDS: readonly PlanCloseField[] = [
   // contract table owes it an entry.
   ATTESTATION_SCOPE_UNDECLARED_FIELD,
   ATTESTATION_EXEMPT_KIND_FIELD,
-  PRD_SYNC_FIELD,
+  CITED_RULE_STATE_FIELD,
   ASSESSMENT_FRESHNESS_FIELD,
 ];
 
@@ -92,7 +92,7 @@ describe("PREDICATE_CONTRACTS — contract table exhaustiveness (AC-PCI-11)", ()
   // BOUNDARY — the two predicates the task body names explicit known deltas
   // for carry them; the other three (no deltas recorded in the task body)
   // carry EMPTY arrays, meaning "none recorded", never "none exist".
-  it("BOUNDARY: attestation-floor and prd-outline-synced carry their documented known deltas — contract table", () => {
+  it("BOUNDARY: attestation-floor and cited-rule-state carry their documented known deltas — contract table", () => {
     const floor = PREDICATE_CONTRACTS[ATTESTATION_FLOOR_FIELD];
     expect(floor.known_false_block.some((d) => d.includes("min_ratio"))).toBe(true);
     expect(
@@ -100,9 +100,10 @@ describe("PREDICATE_CONTRACTS — contract table exhaustiveness (AC-PCI-11)", ()
     ).toBe(true);
     expect(floor.known_false_pass.some((d) => d.includes("planClaimedAcCoverage"))).toBe(true);
 
-    const prdSync = PREDICATE_CONTRACTS[PRD_SYNC_FIELD];
-    expect(prdSync.known_false_pass.some((d) => d.includes("sibling plan"))).toBe(true);
-    expect(prdSync.known_false_block.some((d) => d.includes("domain-level capability"))).toBe(true);
+    const citedRule = PREDICATE_CONTRACTS[CITED_RULE_STATE_FIELD];
+    expect(citedRule.known_false_pass.some((d) => d.includes("ANOTHER plan"))).toBe(true);
+    expect(citedRule.known_false_pass.some((d) => d.includes("unknown"))).toBe(true);
+    expect(citedRule.known_false_block.some((d) => d.includes("shared code anchor"))).toBe(true);
 
     for (const field of [PLAN_CLOSE_FIELD, ATTESTATION_EXEMPT_KIND_FIELD, ASSESSMENT_FRESHNESS_FIELD] as const) {
       expect(PREDICATE_CONTRACTS[field].known_false_pass).toEqual([]);
@@ -133,24 +134,29 @@ describe("PREDICATE_CONTRACTS — contract table exhaustiveness (AC-PCI-11)", ()
     expect(text).toContain("(none recorded)");
   });
 
-  // REGRESSION — the feeding pack for a prd-outline-synced denial quotes a
+  // REGRESSION — the feeding pack for a cited-rule-state denial quotes a
   // pointer-sized slice of its own contract (field + invariant + measured,
   // never the full delta lists) — Deliver item 4, D7.
-  it("REGRESSION: the prd-outline-synced feeding pack quotes its own contract pointer — contract table", () => {
+  it("REGRESSION: the cited-rule-state feeding pack quotes its own contract pointer and names each offending rule — contract table", () => {
     const ctx: GateContext = {
       targetIdOrSlug: "plan-x",
       attestationMinRatio: 0.5,
       planTasksAttestation: [{ slug: "task-1", title: "T1", evidenceCount: 1, attestedCount: 1 }],
       planClaimedAcCoverage: [],
       prdSyncEnabled: true,
-      prdSyncSynced: false,
+      citedRuleViolations: [
+        { rule_id: "BR-5", state: "stale" },
+        { rule_id: "BR-9", state: "contradicted" },
+      ],
       parentSpecPointer: { slug: "spec-x", title: "Spec X", status: "approved" },
     };
     const failures = selectFailures(planClose.check(ctx));
     const text = planClose.feed(ctx, failures);
-    const contract = PREDICATE_CONTRACTS[PRD_SYNC_FIELD];
+    const contract = PREDICATE_CONTRACTS[CITED_RULE_STATE_FIELD];
     expect(text).toContain(contract.invariant);
     expect(text).toContain(contract.measured);
+    expect(text).toContain("BR-5 (stale)");
+    expect(text).toContain("BR-9 (contradicted)");
     // Pointer-sized — the full delta lists are NOT quoted into the pack.
     for (const delta of [...contract.known_false_pass, ...contract.known_false_block]) {
       expect(text).not.toContain(delta);

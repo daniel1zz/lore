@@ -1,61 +1,24 @@
 /**
- * RED-phase spec-driven tests for SPEC-080 C1 (structured outline dedicated-writer
- * contract) — pinned BEFORE `PrdOutlineService` exists. Paired-Impl: T2
- * (`packages/lore/src/service/prd-outline-service.ts`).
+ * Outline writers RETIRED (slice 3a, BR-985) — what survives of SPEC-080 C1's dedicated-writer contract.
  *
- * Assumed interface (derived from SPEC-080 §C1/§C4/§Downstream-Handoff — this file
- * is the executable contract T2 must satisfy, not a description of existing code):
- *
- *   class PrdOutlineService {
- *     constructor(store: StoreInterface)
- *     // Single-entry CAS patch keyed by `section`. Unknown section + no
- *     // `opts.create` → VALIDATION_ERROR listing the declared keys. Only legal
- *     // on a `type: "prd"` doc.
- *     outlineSet(
- *       prdIdOrSlug: string,
- *       entry: OutlineEntryInput,
- *       opts?: { create?: boolean },
- *     ): Promise<Result<OutlineEntry[], LoreError>>
- *
- *     // Writes plan.extra.prd_sync_exempt = {reason, by, at}. Missing/blank
- *     // reason → VALIDATION_ERROR naming "reason".
- *     exempt(
- *       planIdOrSlug: string,
- *       opts: { reason: string; by: string },
- *     ): Promise<Result<{ reason: string; by: string; at: string }, LoreError>>
- *   }
- *
- *   // @lore/core, pure, deterministic — same render-projection convention as
- *   // renderHandoffContent / renderAssessmentContent.
- *   function renderOutlineContent(outline: OutlineEntry[]): string
- *
- * `CorpusService.set` gains two dedicated-writer guards (no new class — same file,
- * same pattern as the existing extra.validity / extra.phases guards):
- *   - ANY direct patch whose `extra` contains an `outline` key is rejected outright
- *     (stronger than the phases/verification_evidence "drop-only" guard — SPEC-080
- *     C1 says direct `extra.outline` writes are never legal, full stop; only
- *     `lore outline set` may touch it).
- *   - A patch that DROPS `plan.extra.prd_sync_exempt` (present before, absent after)
- *     is rejected — this one mirrors the phases/verification_evidence drop-only shape
- *     (SPEC-076 precedent): restating the same value, or a plan that never had an
- *     exemption, is unaffected.
- *
- * RED-first discipline: `PrdOutlineService`/`renderOutlineContent` do not exist yet,
- * so every test below is expected to fail via module-resolution error (or, for the
- * two `CorpusService.set` guard scenarios that don't need those imports, via an
- * assertion failure proving the guard doesn't exist yet) — never a test-authoring bug.
+ * `PrdOutlineService` no longer has `outlineSet`, `outlineRm` or `exempt` (the CLI refuses the matching
+ * verbs with exit 4; see tests/integration/cli/outline-retired.bun.test.ts). This file used to pin those
+ * writers (single-entry CAS patch, unknown-section rejection, blank-reason rejection); it now pins:
+ *   - the service surface: only `outlineList` remains, and it still reads stored entries / rejects a
+ *     non-prd target
+ *   - the `CorpusService.set` guards that keep stored outline / `prd_sync_exempt` data from being
+ *     silently rewritten through `lore set`, now naming the retirement instead of a dead verb
+ *   - `renderOutlineContent` (@lore/core, read projection) is unchanged
  *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  *
- * @spec_ref AC-080-2
+ * @spec_ref AC-BLS3-6
  */
 
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
-// Intentional RED: this module does not exist yet — T2 paired implementation.
 import { PrdOutlineService } from "../../../src/service/prd-outline-service.js";
-// Intentional RED: this export does not exist yet — T2 paired implementation.
 import { renderOutlineContent } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
 
@@ -132,119 +95,61 @@ async function createPlan(
   return result.value.id;
 }
 
-// ═══ HAPPY/STATE — outlineSet single-entry CAS patch (AC-080-2) ══════════════
+// ═══ the service surface: read-only ═════════════════════════════════════════
 
-describe("HAPPY/STATE — PrdOutlineService.outlineSet single-entry CAS patch (AC-080-2)", () => {
-  it("patches exactly the targeted section; sibling entries stay byte-identical; version bumps exactly once", async () => {
+describe("PrdOutlineService is read-only after the retirement (BR-985)", () => {
+  it("REGRESSION: outlineSet, outlineRm and exempt no longer exist on the service", () => {
+    const { prdOutlineService } = makeServices();
+    const surface = prdOutlineService as unknown as Record<string, unknown>;
+    expect(surface["outlineSet"]).toBeUndefined();
+    expect(surface["outlineRm"]).toBeUndefined();
+    expect(surface["exempt"]).toBeUndefined();
+    expect(typeof surface["outlineList"]).toBe("function");
+  });
+
+  it("HAPPY/STATE: outlineList returns the stored entries in declaration order and never changes the doc version", async () => {
     const { store, corpusService, prdOutlineService } = makeServices();
-
-    const entryA = outlineEntry({ section: "distribution", title: "Distribution Model" });
-    const entryB = outlineEntry({ section: "sync", title: "Sync Predicate (old)" });
-    const entryC = outlineEntry({ section: "budgets", title: "Budget Oracle" });
-    const prdId = await createPrd(corpusService, { outline: [entryA, entryB, entryC] });
-
+    const prdId = await createPrd(corpusService, {
+      outline: [outlineEntry({ section: "distribution" }), outlineEntry({ section: "sync" })],
+    });
     const before = await store.find(prdId);
     if (!before.ok || before.value === null) throw new Error("prd fetch failed");
-    const versionBefore = before.value.version;
-    // Deep-clone the sibling entries as they existed pre-patch, from the doc's
-    // OWN stored state (not the fixture objects) — proves round-trip fidelity.
-    const storedOutlineBefore = before.value.extra["outline"] as OutlineEntryFixture[];
-    const entryASnapshot = JSON.parse(JSON.stringify(storedOutlineBefore.find((e) => e.section === "distribution")));
-    const entryCSnapshot = JSON.parse(JSON.stringify(storedOutlineBefore.find((e) => e.section === "budgets")));
 
-    const patched = outlineEntry({
-      section: "sync",
-      title: "Sync Predicate (revised)",
-      direction: "Revised bounded summary.",
-    });
-    const result = await prdOutlineService.outlineSet(prdId, patched);
+    const result = await prdOutlineService.outlineList(prdId);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value).toHaveLength(3);
-
+    expect(result.value.map((e) => e.section)).toEqual(["distribution", "sync"]);
     const after = await store.find(prdId);
-    if (!after.ok || after.value === null) throw new Error("prd re-fetch failed");
-    const storedOutlineAfter = after.value.extra["outline"] as OutlineEntryFixture[];
-
-    const afterA = storedOutlineAfter.find((e) => e.section === "distribution");
-    const afterC = storedOutlineAfter.find((e) => e.section === "budgets");
-    expect(afterA).toEqual(entryASnapshot);
-    expect(afterC).toEqual(entryCSnapshot);
-
-    const afterB = storedOutlineAfter.find((e) => e.section === "sync");
-    expect(afterB?.title).toBe("Sync Predicate (revised)");
-    expect(afterB?.direction).toBe("Revised bounded summary.");
-
-    expect(after.value.version).toBe(versionBefore + 1);
+    expect(after.ok && after.value?.version).toBe(before.value.version);
   });
-});
 
-// ═══ NEGATIVE — outlineSet on a non-prd doc (AC-080-2 error scenario) ════════
+  it("BOUNDARY: a PRD with no outline lists as an empty array", async () => {
+    const { corpusService, prdOutlineService } = makeServices();
+    const prdId = await createPrd(corpusService);
 
-describe("NEGATIVE — PrdOutlineService.outlineSet on a non-prd doc", () => {
-  it("rejects with VALIDATION_ERROR naming the allowed type when the target is a spec, not a prd", async () => {
+    const result = await prdOutlineService.outlineList(prdId);
+
+    expect(result.ok && result.value).toEqual([]);
+  });
+
+  it("NEGATIVE: outlineList on a non-prd doc rejects with VALIDATION_ERROR naming prd", async () => {
     const { corpusService, prdOutlineService } = makeServices();
     const prdId = await createPrd(corpusService, { outline: [outlineEntry({ section: "sync" })] });
     const specId = await createSpec(corpusService, prdId);
 
-    const result = await prdOutlineService.outlineSet(specId, outlineEntry({ section: "sync" }));
+    const result = await prdOutlineService.outlineList(specId);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
-    const message = (result.error as { message?: string }).message ?? "";
-    expect(message.toLowerCase()).toContain("prd");
-  });
-});
-
-// ═══ ERROR — outlineSet on an unknown section key, no create intent ══════════
-
-describe("ERROR — PrdOutlineService.outlineSet on an unknown section key", () => {
-  it("rejects with VALIDATION_ERROR listing the declared section keys when opts.create is omitted", async () => {
-    const { corpusService, prdOutlineService } = makeServices();
-    const entryAlpha = outlineEntry({ section: "alpha", title: "Alpha Domain" });
-    const entryBeta = outlineEntry({ section: "beta", title: "Beta Domain" });
-    const prdId = await createPrd(corpusService, { outline: [entryAlpha, entryBeta] });
-
-    const result = await prdOutlineService.outlineSet(prdId, outlineEntry({ section: "gamma-unknown" }));
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    const message = (result.error as { message?: string }).message ?? "";
-    expect(message).toContain("alpha");
-    expect(message).toContain("beta");
-
-    // Prove no phantom entry was appended by the rejected call.
-    const after = await corpusService.get(prdId);
-    expect(after.ok).toBe(true);
-    if (!after.ok) return;
-    expect((after.value.doc.extra["outline"] as OutlineEntryFixture[]).map((e) => e.section)).toEqual([
-      "alpha",
-      "beta",
-    ]);
-  });
-
-  it("BOUNDARY: the SAME unknown section key succeeds when opts.create explicitly opts in", async () => {
-    const { corpusService, prdOutlineService } = makeServices();
-    const prdId = await createPrd(corpusService, { outline: [outlineEntry({ section: "alpha" })] });
-
-    const result = await prdOutlineService.outlineSet(
-      prdId,
-      outlineEntry({ section: "gamma-new", title: "Gamma Domain" }),
-      { create: true },
-    );
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.map((e) => e.section).sort()).toEqual(["alpha", "gamma-new"]);
+    expect(((result.error as { message?: string }).message ?? "").toLowerCase()).toContain("prd");
   });
 });
 
 // ═══ NEGATIVE — CorpusService.set: direct extra.outline patch (AC-080-2) ═════
 
-describe("NEGATIVE — CorpusService.set rejects a direct extra.outline patch, naming `lore outline`", () => {
+describe("NEGATIVE — CorpusService.set rejects a direct extra.outline patch, naming the retirement and `lore baseline add`", () => {
   it("a wholesale-replace patch touching extra.outline is rejected outright, leaving the stored outline untouched", async () => {
     const { corpusService } = makeServices();
     const originalEntry = outlineEntry({ section: "sync", title: "Sync Predicate" });
@@ -257,7 +162,8 @@ describe("NEGATIVE — CorpusService.set rejects a direct extra.outline patch, n
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
     const message = (result.error as { message?: string }).message ?? "";
-    expect(message).toContain("lore outline");
+    expect(message).toContain("retired");
+    expect(message).toContain("lore baseline add");
 
     const after = await corpusService.get(prdId);
     expect(after.ok).toBe(true);
@@ -268,7 +174,7 @@ describe("NEGATIVE — CorpusService.set rejects a direct extra.outline patch, n
   it("REGRESSION: restating the identical outline array via direct set is STILL rejected — no value-equality escape hatch", async () => {
     // Deliberately stronger than the extra.validity guard (which tolerates a
     // same-value restate) — SPEC-080 C1 says direct extra.outline writes are
-    // NEVER legal, only `lore outline set`'s dedicated single-entry CAS path.
+    // NEVER legal; since BR-985 no verb writes the outline at all.
     const { corpusService } = makeServices();
     const originalEntry = outlineEntry({ section: "sync", title: "Sync Predicate" });
     const prdId = await createPrd(corpusService, { outline: [originalEntry] });
@@ -285,7 +191,7 @@ describe("NEGATIVE — CorpusService.set rejects a direct extra.outline patch, n
 // ═══ NEGATIVE/BOUNDARY/HAPPY — CorpusService.set: prd_sync_exempt drop guard ═
 
 describe("CorpusService.set — plan.extra.prd_sync_exempt wholesale-drop guard", () => {
-  it("NEGATIVE: rejects a patch that DROPS an existing exemption (present before, absent after), naming the dedicated writer", async () => {
+  it("NEGATIVE: rejects a patch that DROPS an existing exemption (present before, absent after), naming the retirement", async () => {
     const { corpusService } = makeServices();
     const exemption = { reason: "domain doc rewrite scheduled next plan", by: "agent:alice", at: "2026-07-26T00:00:00.000Z" };
     const planId = await createPlan(corpusService, { prdSyncExempt: exemption });
@@ -296,7 +202,7 @@ describe("CorpusService.set — plan.extra.prd_sync_exempt wholesale-drop guard"
     if (result.ok) return;
     expect(result.error.code).toBe("VALIDATION_ERROR");
     const message = (result.error as { message?: string }).message ?? "";
-    expect(message).toContain("lore outline exempt");
+    expect(message).toContain("retired");
 
     const after = await corpusService.get(planId);
     expect(after.ok).toBe(true);
@@ -325,58 +231,6 @@ describe("CorpusService.set — plan.extra.prd_sync_exempt wholesale-drop guard"
 
     const result = await corpusService.set(planId, { extra: { some_unrelated_field: true } });
     expect(result.ok).toBe(true);
-  });
-});
-
-// ═══ ERROR — PrdOutlineService.exempt without a reason ═══════════════════════
-
-describe("ERROR — PrdOutlineService.exempt without a reason", () => {
-  it("rejects with VALIDATION_ERROR naming `reason` when the reason is omitted", async () => {
-    const { corpusService, prdOutlineService } = makeServices();
-    const planId = await createPlan(corpusService, {});
-
-    const badOpts = { by: "agent:alice" } as unknown as { reason: string; by: string };
-    const result = await prdOutlineService.exempt(planId, badOpts);
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    const message = (result.error as { message?: string }).message ?? "";
-    expect(message.toLowerCase()).toContain("reason");
-  });
-
-  it("BOUNDARY: rejects a blank-string reason the same way as an omitted one", async () => {
-    const { corpusService, prdOutlineService } = makeServices();
-    const planId = await createPlan(corpusService, {});
-
-    const result = await prdOutlineService.exempt(planId, { reason: "   ", by: "agent:alice" });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("VALIDATION_ERROR");
-    const message = (result.error as { message?: string }).message ?? "";
-    expect(message.toLowerCase()).toContain("reason");
-  });
-
-  it("HAPPY: a non-blank reason succeeds and is persisted onto the plan", async () => {
-    const { corpusService, prdOutlineService } = makeServices();
-    const planId = await createPlan(corpusService, {});
-
-    const result = await prdOutlineService.exempt(planId, {
-      reason: "domain doc rewrite scheduled next plan",
-      by: "agent:alice",
-    });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.reason).toBe("domain doc rewrite scheduled next plan");
-    expect(result.value.by).toBe("agent:alice");
-    expect(typeof result.value.at).toBe("string");
-
-    const after = await corpusService.get(planId);
-    expect(after.ok).toBe(true);
-    if (!after.ok) return;
-    expect(after.value.doc.extra["prd_sync_exempt"]).toEqual(result.value);
   });
 });
 

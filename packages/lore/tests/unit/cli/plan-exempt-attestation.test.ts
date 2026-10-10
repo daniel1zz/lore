@@ -575,7 +575,8 @@ function extractHelperReadIdentifiers(region: string): string[] {
  * gate-read field from hiding behind an accessor.
  */
 const HELPER_READS: Readonly<Record<string, string>> = {
-  extractPrdSyncExempt: "prd_sync_exempt",
+  // (empty after slice 3a: the plan-close gate no longer reads `prd_sync_exempt` — BR-984 replaced that
+  // predicate with a cited-rule-state read, and its writer `lore outline exempt` was retired, BR-985.)
 };
 
 interface AuthoringSurface {
@@ -601,12 +602,6 @@ const AUTHORING_SURFACES: Readonly<Record<string, AuthoringSurface>> = {
     group: "create",
     module: "cli/commands/create.ts",
     witness: "requires_uat: true",
-  },
-  prd_sync_exempt: {
-    verb: "lore outline exempt",
-    group: "outline",
-    module: "cli/commands/outline.ts",
-    witness: "requireOutlineService(app).exempt(",
   },
   attestation_exempt: {
     verb: "lore plan exempt-attestation",
@@ -705,8 +700,8 @@ describe("AC-069-12 — every plan-close gate-read extra field has an authoring 
       (id) => HELPER_READS[id] === undefined,
     );
     expect(unregisteredHelpers).toEqual([]);
-    // …and the registration is live, not decorative:
-    expect(extractHelperReadIdentifiers(region())).toContain("extractPrdSyncExempt");
+    // …and the retired read is really gone from the gate region (nothing left hiding behind that accessor):
+    expect(extractHelperReadIdentifiers(region())).not.toContain("extractPrdSyncExempt");
   });
 
   // ── The class invariant itself ──────────────────────────────────────────
@@ -772,10 +767,10 @@ describe("AC-069-12 — every plan-close gate-read extra field has an authoring 
   });
 
   it("AC-069-12 CONTROL: the witness check reports FALSE for a witness no module contains", () => {
-    expect(witnessPresent("cli/commands/outline.ts", "zzzNoSuchWitnessEverExisted(")).toBe(false);
+    expect(witnessPresent("cli/commands/plan.ts", "zzzNoSuchWitnessEverExisted(")).toBe(false);
     expect(witnessPresent("cli/commands/does-not-exist.ts", "anything")).toBe(false);
     // …and TRUE for one that is really there (proves it is not always false).
-    expect(witnessPresent("cli/commands/outline.ts", "requireOutlineService(app).exempt(")).toBe(true);
+    expect(witnessPresent("cli/commands/plan.ts", "exemptAttestation(")).toBe(true);
   });
 
   it("AC-069-12 CONTROL: the direct-read extractor returns nothing for a region with no extra reads", () => {

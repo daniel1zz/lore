@@ -53,20 +53,14 @@
  * human edit); it only ever performs a fresh, from-scratch migration when no
  * child doc exists yet.
  *
- * Also exports {@link renderLinkOnlyOutlineForBootstrap} — a pure,
- * store-free `(prd: DocRecord) => string` projection co-located here per this
- * task's boundary (SPEC-080 AC-080-8). It renders ONLY `extra.outline[]`
- * pointers (title + detail-link slug), never a linked child doc's body — the
- * function structurally cannot inline child-doc prose because it never
- * receives a store to fetch one. Wiring this into the real `lore bootstrap` /
- * `lore feed session-resume` commands is a follow-up task's scope (see this
- * function's own JSDoc).
+ * (The former link-only bootstrap projection `renderLinkOnlyOutlineForBootstrap` was never wired
+ * into a command and was deleted by slice 3a, BR-985.)
  *
  * Side-effect class: IO (StoreInterface reads/writes; no filesystem, no AI)
  *
  * Source: spec-080-prd-as-outline-contract-structured-outline-domain
  *   §C1, §Migration Plan Phase 1, §Risk Registry, §Acceptance Criteria
- *   AC-080-7, AC-080-8.
+ *   AC-080-7.
  */
 
 import { ulid } from "ulidx";
@@ -558,50 +552,4 @@ export class OutlineMigrationService {
     // "did the corpus state change" signal callers care about.
     return ok({ childId, writesPerformed: 3 });
   }
-}
-
-// ─── Bootstrap payload projection (AC-080-8) ───────────────────────────────
-
-/**
- * Renders a migrated PRD's `extra.outline[]` as a bounded, link-only payload
- * for session bootstrap/feed injection (SPEC-080 §Data Flow "Read (agent)",
- * §Trade-off Decisions T7, AC-080-8). Pure — takes an already-fetched
- * `DocRecord`, touches no store, resolves no child-doc bodies. This
- * signature is itself the "link-only, never resolved MDX" enforcement
- * mechanism: a function that never receives a store or child-doc content
- * structurally cannot inline it.
- *
- * Degrades gracefully (never throws) on a legacy/hand-edited PRD whose
- * `extra.outline` is missing, empty, or malformed (not an array of valid
- * entries) — such a PRD renders a well-formed payload naming just the root
- * pointer, mirroring the Downstream Handoff note "budget check on legacy PRD
- * without outline[] … never crash".
- *
- * Wiring this into the real `lore bootstrap` / `lore feed session-resume`
- * commands (`SessionService.bootstrap` currently only carries a
- * `{slug, title}` root pointer, see `adapters/cli/commands/bootstrap.ts`) is
- * a follow-up task's responsibility — out of this task's two-file boundary.
- *
- * @param prd - A migrated (or unmigrated) root PRD `DocRecord`.
- * @returns A payload string, always < 32000 chars on the migrated corpus
- *   (AC-080-8's regression pin) — link pointers only, never a linked child
- *   doc's prose.
- */
-export function renderLinkOnlyOutlineForBootstrap(prd: DocRecord): string {
-  const parsedOutline = z.array(outlineEntrySchema).safeParse((prd.extra as { outline?: unknown }).outline);
-  const outline = parsedOutline.success ? parsedOutline.data : [];
-
-  const lines: string[] = [`PRD outline: ${prd.title} (${prd.slug})`];
-  if (outline.length === 0) {
-    lines.push("(no outline entries — narrative core not yet migrated, or extra.outline is absent/malformed)");
-    return lines.join("\n");
-  }
-
-  for (const entry of outline) {
-    lines.push(`- [${entry.section}] ${entry.title}: ${entry.direction}`);
-    for (const link of entry.links) {
-      lines.push(`    ${link.rel} -> ${link.slug}`);
-    }
-  }
-  return lines.join("\n");
 }
