@@ -208,7 +208,7 @@ The PRD keeps strategy only (why, for whom, non-goals). What the product does NO
 
 1. **Product behaviour** → a baseline branch/leaf, never the PRD: `lore baseline add <parent> --node branch|leaf ...`, then `lore rule add <leaf> --statement ... --confidence ... --enforced-by ... --example ...`.
 2. **Product requirements** (`R-##`) → declare with `lore requirement add`; once a baseline rule states the behaviour, `lore requirement migrate <prd> <R-id> <BR-n>` — coverage then comes from criteria citing that rule.
-3. **Landing-spec chain unchanged** — feature/tech/design specs parent to the PRD (until the spec parent contract moves) and their criteria cite the rules they implement (`lore ac add ... --cite BR-n`).
+3. **Landing-spec chain unchanged** — feature/tech/design specs take no parent (BR-2) and their criteria cite the rules they implement (`lore ac add ... --cite BR-n`).
 
 ⛔ **Never edit the root PRD body wholesale** via `lore set <prd> --content …` — strategy edits are small and reviewed; behaviour belongs in the baseline tree.
 

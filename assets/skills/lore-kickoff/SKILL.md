@@ -75,25 +75,36 @@ root:
     - { type: knowledge, min: 0 }
 ```
 
-### 2d. First spec (gated — feed before produce)
+### 2d. First baseline leaf and rule (before any spec)
+
+A spec takes no parent and cannot be approved without a criterion that cites a rule (BR-1007), so the project's first rule must exist before its first spec. Build the business baseline under the root PRD (the `lore-baseline` skill covers the full tree):
+
+```bash
+lore baseline add <prd-slug> --node root --label "<product>" --title "<product> baseline"      # business root; its parent is the PRD
+lore baseline add <root-slug> --node branch --label "<area>" --title "<area>"                  # one branch per product area
+lore baseline add <branch-slug> --node leaf --label "<capability>" --title "<capability>"      # a leaf holds rules, never code detail
+lore rule add <leaf-slug> --statement "<one observable behaviour>" --confidence established --enforced-by guaranteed --example "<concrete case>"   # prints BR-<n>
+```
+
+### 2e. First spec (gated — feed before produce)
 
 ```bash
 lore feed spec-create    # read the feeding pack FIRST
 lore create spec --title "..." --kind feature|tech   # a spec takes no parent: it relates to the trees by citing rules
-lore ac add <spec-slug> AC-1 --statement "..." --mode script|ai|human [--oracle test --command "..."] --cite BR-<n>   # or later: lore ac cite <spec-slug> AC-1 BR-<n>; no approval without a citing criterion (BR-1007)
+lore ac add <spec-slug> AC-1 --statement "..." --mode script|ai|human [--oracle test --command "..."] --cite BR-<n>   # cite the rule from 2d; or later: lore ac cite <spec-slug> AC-1 BR-<n>
 ```
 
-Every spec needs a parent and should declare acceptance criteria up front — `lore verify` / `lore assess` judge against them later.
+The spec step cites the rule created in 2d; there is no approval without a citing criterion (BR-1007). Declare acceptance criteria up front — `lore verify` / `lore assess` judge against them later.
 
-### 2e. Layered CLAUDE.md context
+### 2f. Layered CLAUDE.md context
 
 Invoke the `zz-init-context` skill for root + per-module CLAUDE.md files — it replaced the retired MCP doc-system's init_* module tools with zero-dependency file-based context.
 
-### 2f. Verify
+### 2g. Verify
 
 ```bash
 lore status        # corpus health; add --check-tree if 2c done
-lore tree          # confirm prd → spec hierarchy
+lore tree          # confirm the PRD tree; `lore baseline tree` shows the baseline from 2d
 ```
 
 Output:
