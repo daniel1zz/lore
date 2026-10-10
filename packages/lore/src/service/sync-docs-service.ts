@@ -13,6 +13,9 @@
  *   - aiProviderService is NEVER called from this service (no-AI boundary).
  *     reason: sync-docs is a structural reconciler; AI generation is orthogonal.
  *     AC-SD-15 enforces this at test time via grep.
+ *   - Created specs take NO parent (BR-789, BR-2): a spec relates to the product trees through its
+ *     criteria's citations, never through a PRD parent. A frontmatter `parent:` is ignored, with one
+ *     stderr note per run — it is never resolved, never an error.
  *   - Body comparison uses canonicaliseBody from @lore/core (shared with ExportDocsService).
  *     reason: SPEC-021 §4 requires both services to normalise identically for roundtrip parity.
  *
@@ -27,7 +30,7 @@ import { parse as parseYaml } from "yaml";
 import { diffChars } from "diff";
 import { err, ok, canonicaliseBody } from "@lore/core";
 import type { LoreError, Priority, Result } from "@lore/core";
-import type { DocId, DocSummary } from "@lore/core";
+import type { DocSummary } from "@lore/core";
 import { prioritySchema } from "@lore/core";
 import type { CorpusService } from "./corpus-service.js";
 
@@ -62,7 +65,7 @@ export interface SyncReport {
   matched_clean: Array<{ file: string; slug: string }>;
   /** Specs found in corpus but whose body differs from the file. */
   matched_drift: Array<{ file: string; slug: string; diff_chars: number }>;
-  /** Per-file parse/parent-resolution errors. Other files still processed. */
+  /** Per-file parse/create errors. Other files still processed. */
   errors: Array<{ file: string; error: string }>;
 }
 
@@ -77,10 +80,10 @@ interface ParsedSpec {
   /** Frontmatter-stripped body (leading whitespace trimmed). */
   body: string;
   /**
-   * Frontmatter `parent:` string, used for PRD lookup in multi-PRD corpora.
-   * Undefined when the frontmatter has no `parent` key.
+   * Frontmatter `parent:` string. Carried only so the run can say it was ignored (a spec takes no
+   * parent, BR-2); never used to resolve anything. Undefined when the frontmatter has no `parent` key.
    */
-  parent_title_hint: string | undefined;
+  ignored_parent_hint: string | undefined;
   /** Validated priority; falls back to "medium" if unknown. */
   priority: Priority;
   /** Frontmatter tags array; falls back to [] if absent. */
@@ -113,10 +116,10 @@ export class SyncDocsService {
    * Algorithm:
    *   1. Collect *.md files from opts.fromDir (non-recursive).
    *   2. Parse frontmatter for each file → accumulate ParsedSpec[] and parse errors.
-   *   3. Fetch all specs and PRDs from corpus once (pre-caching).
+   *   3. Fetch all specs from corpus once (pre-caching).
    *   4. For each ParsedSpec: match by title.
    *      If matched → fetch full doc for content → compare body (drift check).
-   *      If unmatched → resolve parent → create (unless dryRun).
+   *      If unmatched → create with no parent (unless dryRun) — BR-789.
    *   5. Return SyncReport.
    *
    * @param opts - Directory to scan and dry-run flag.
@@ -139,22 +142,14 @@ export class SyncDocsService {
       }
     }
 
-    // ── Step 2: Fetch corpus once — cache PRD + spec lists ───────────────────
+    // ── Step 2: Fetch corpus once — cache the spec list ──────────────────────
     const specListResult = await this.corpus.list({ type: "spec" });
     if (!specListResult.ok) return specListResult;
-
-    const prdListResult = await this.corpus.list({ type: "prd" });
-    if (!prdListResult.ok) return prdListResult;
 
     // Build lookup map: title → corpus DocSummary
     // reason: title-match dedup is the v1 identity strategy per SPEC-018 §3.1.
     const titleToCorpusSpec = buildTitleMap(specListResult.value.docs);
-    const prds = prdListResult.value.docs;
-
-    // ── Step 3: Resolve parent PRD once if there's exactly one ───────────────
-    // reason: cache single-PRD case to avoid re-querying per file (spec §3.4 branch 2).
-    const singlePrd: DocSummary | undefined = prds.length === 1 ? prds[0] : undefined;
-    let singlePrdWarnedOnce = false;
+    let ignoredParentNoted = false;
 
     // ── Step 4: Process each parsed spec ─────────────────────────────────────
     const created: Array<{ file: string; slug: string }> = [];
@@ -191,21 +186,14 @@ export class SyncDocsService {
         continue;
       }
 
-      // No title match — this spec needs to be created.
-      // Resolve parent PRD.
-      const parentResult = resolveParentId(spec, prds, singlePrd);
-      if (!parentResult.ok) {
-        const parentErrMsg = "message" in parentResult.error ? parentResult.error.message : parentResult.error.code;
-        fileErrors.push({ file: spec.path, error: parentErrMsg });
-        continue;
-      }
-
-      // Warn once about frontmatter parent being ignored (single-PRD corpus, AC-SD-7)
-      if (singlePrd !== undefined && !singlePrdWarnedOnce && spec.parent_title_hint !== undefined) {
+      // No title match — this spec needs to be created, with NO parent (BR-789, BR-2).
+      // A frontmatter `parent:` is a leftover of the retired PRD-parent model: say so once, then ignore it.
+      if (!ignoredParentNoted && spec.ignored_parent_hint !== undefined) {
         process.stderr.write(
-          `note: ignoring frontmatter parent for single-PRD corpus — using "${singlePrd.title}"\n`,
+          `note: ignoring frontmatter parent "${spec.ignored_parent_hint}" — a spec takes no parent; ` +
+            "it belongs to the product trees through its criteria's citations (`lore ac cite`)\n",
         );
-        singlePrdWarnedOnce = true;
+        ignoredParentNoted = true;
       }
 
       if (opts.dryRun) {
@@ -218,7 +206,6 @@ export class SyncDocsService {
         type: "spec",
         title: spec.title,
         content: spec.body,
-        parent_id: parentResult.value,
         priority: spec.priority,
         tags: spec.tags,
       });
@@ -365,70 +352,16 @@ function parseSpecFile(absPath: string): Result<ParsedSpec, LoreError> {
     ? record["tags"].filter((v): v is string => typeof v === "string")
     : [];
 
-  const parent_title_hint: string | undefined =
+  const ignored_parent_hint: string | undefined =
     typeof record["parent"] === "string" ? record["parent"] : undefined;
 
   return ok({
     path: absPath,
     title,
     body: bodyRaw.trimStart(),
-    parent_title_hint,
+    ignored_parent_hint,
     priority,
     tags,
-  });
-}
-
-// ─── Parent Resolution ───────────────────────────────────────────────────────
-
-/**
- * Resolve the parent PRD DocId for a spec being synced.
- *
- * Resolution rules (SPEC-018 §3.4):
- *   0 PRDs → VALIDATION_ERROR
- *   1 PRD  → always use it (frontmatter `parent` ignored, warned once by caller)
- *   ≥2 PRDs, frontmatter.parent matches one PRD title → use that PRD
- *   ≥2 PRDs, no match → VALIDATION_ERROR
- *
- * @param spec - Parsed spec (may carry parent_title_hint from frontmatter).
- * @param prds - All PRD DocSummary records in the corpus.
- * @param singlePrd - Pre-resolved single PRD when prds.length === 1, else undefined.
- * @returns ok(DocId) or err(VALIDATION_ERROR).
- */
-function resolveParentId(
-  spec: ParsedSpec,
-  prds: DocSummary[],
-  singlePrd: DocSummary | undefined,
-): Result<DocId, LoreError> {
-  // Branch 1: 0 PRDs → fail loud (AC-SD-10)
-  if (prds.length === 0) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "parent_id",
-      message:
-        `${spec.path}: no PRD in corpus — create one first or use \`lore create spec --parent <slug>\``,
-    });
-  }
-
-  // Branch 2: exactly 1 PRD → use it unconditionally (AC-SD-7)
-  if (singlePrd !== undefined) {
-    return ok(singlePrd.id);
-  }
-
-  // Branch 3 / 4: ≥2 PRDs — look up by frontmatter parent_title_hint
-  if (spec.parent_title_hint !== undefined) {
-    const matched = prds.filter((p) => p.title === spec.parent_title_hint);
-    if (matched.length === 1 && matched[0] !== undefined) {
-      return ok(matched[0].id);
-    }
-  }
-
-  // Branch 4: no match → VALIDATION_ERROR (AC-SD-9)
-  return err({
-    code: "VALIDATION_ERROR",
-    field: "parent_id",
-    message:
-      `${spec.path}: multiple PRDs in corpus and frontmatter 'parent: ${spec.parent_title_hint ?? "(none)"}' ` +
-      `does not match any PRD title — disambiguate with \`lore create spec --parent <slug>\``,
   });
 }
 

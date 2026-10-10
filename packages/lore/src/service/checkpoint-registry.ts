@@ -134,6 +134,8 @@ import {
   NO_ACCEPTANCE_CRITERIA_REASON,
   DEFAULT_MIN_ACS,
   ORACLE_COVERAGE_FIELD,
+  SPEC_CITATION_FIELD,
+  specCitesLiveRulePredicate,
   REQUIRES_UAT_FIELD,
   PLAN_CLOSE_FIELD,
   ATTESTATION_FLOOR_FIELD,
@@ -150,6 +152,7 @@ import {
 } from "./gate-predicates.js";
 import { buildFeedingPack, renderFeedingPack } from "./gate-feeding.js";
 import { PREDICATE_CONTRACTS } from "./predicate-contracts.js";
+import { uncitedSpecMessage } from "./spec-approval-citation.js";
 
 /**
  * The five gate checkpoints (four IoC vertical-slice tech-spec §5.1 + plan-close, SPEC-054). Not every member has
@@ -235,6 +238,14 @@ export interface GateContext {
   readonly acceptanceCriteriaCount?: number;
   /** Target spec's id/slug, as the caller supplied it — used only in `feed()`'s message. */
   readonly specIdOrSlug?: string;
+
+  /**
+   * Whether the target spec has at least one criterion citing a LIVE BR/AS rule (BR-1007), measured by
+   * the CALLER with `specCitesLiveRuleInCorpus`. `false` fails `spec-promote` (the gate then agrees with
+   * the approval that would refuse the same spec); `undefined` means the caller did not measure it —
+   * the service paths enforce BR-1007 themselves, so the predicate is not evaluated (never read as "cites").
+   */
+  readonly specCitesLiveRule?: boolean;
 
   // -- spec-create / spec-promote: check() + feed() (AC-Quantifiability Gate spec) --
   /**
@@ -909,6 +920,10 @@ function checkSpecPromote(ctx: GateContext): PredicateResult[] {
   if (ctx.oracleCoverageEnabled !== false) {
     results.push(oracleCoverage(ctx.acceptanceCriteria, ctx.verificationProfile));
   }
+  // BR-1007 — pre-flight parity with `approve` (issue #137). Pushed only when the caller measured it.
+  if (ctx.specCitesLiveRule !== undefined) {
+    results.push(specCitesLiveRulePredicate(ctx.specCitesLiveRule));
+  }
   return results;
 }
 
@@ -927,6 +942,13 @@ function checkSpecPromote(ctx: GateContext): PredicateResult[] {
  * id, its abstract word, and the fix.
  */
 function feedSpecPromote(ctx: GateContext, failures: PredicateResult[]): string {
+  // BR-1007 — an uncited spec: render every OTHER failure exactly as before, then name the citation
+  // refusal (same wording `approve` prints, `uncitedSpecMessage`).
+  if (failures.some((f) => !f.ok && f.field === SPEC_CITATION_FIELD)) {
+    const others = failures.filter((f) => f.ok || f.field !== SPEC_CITATION_FIELD);
+    const citation = `Error: ${uncitedSpecMessage(ctx.specIdOrSlug ?? "unknown")}\n`;
+    return others.length === 0 ? citation : feedSpecPromote(ctx, others) + citation;
+  }
   const floor = ctx.verificationProfile?.min_acs ?? DEFAULT_MIN_ACS;
   const kind = ctx.specKind ?? "unknown";
   const base = `Error: spec "${ctx.specIdOrSlug ?? "unknown"}" has no structured acceptance criteria (needs >= ${floor} for spec_kind "${kind}") — add via \`lore ac add\`.\n`;

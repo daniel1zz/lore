@@ -373,19 +373,13 @@ GATE_EXIT=$?
 case "$GATE_EXIT" in
   0) allow ;;
   4)
-    # SPEC-050 D2: a declared parent the gate could not RESOLVE in
-    # TARGET_CWD's corpus is a lookup anomaly, not a confirmed violation —
-    # the command may be running against a DIFFERENT corpus than this shim
-    # resolved (wrong TARGET_CWD, or a transient read). Fail open; the
-    # service-layer GateEnforcer re-runs the SAME predicate against the REAL
-    # resolved corpus at write time, so nothing goes ungated. A command that
-    # declared NO parent at all keeps the deny — that PARENT_REQUIRED is a
-    # real violation, resolvable without any corpus read.
-    DECLARED_PARENT="$(printf '%s' "$PAYLOAD" | jq -r '.parent_id // empty' 2>/dev/null)"
-    if [ -n "$DECLARED_PARENT" ] && printf '%s' "$GATE_OUTPUT" | grep -q 'PARENT_REQUIRED'; then
-      log "UNRESOLVED_PARENT: declared parent '$DECLARED_PARENT' did not resolve against $TARGET_CWD's corpus — failing open; service-layer GateEnforcer still gates the real write"
-      allow
-    fi
+    # BR-2 (baseline-slice-3b): a spec takes NO parent, so the gate no longer
+    # reports PARENT_REQUIRED and there is no "declared parent the gate could not
+    # resolve" lookup anomaly to fail open on (the former SPEC-050 D2 branch is
+    # gone with the rule it served). A gate verdict of 4 is always a real
+    # violation — including a declared --parent, which the gate refuses with the
+    # citation-model message — so it is denied; the service-layer GateEnforcer
+    # still re-runs the same predicates on the real write.
     CHAIN_BANNER=""
     [ -n "$CHAIN_MATCH_PATTERN" ] && CHAIN_BANNER="$(build_chain_block_banner "$CHAIN_COMMAND" "$CHAIN_MATCH_PATTERN")"
     if [ -n "$CHAIN_BANNER" ]; then

@@ -51,7 +51,7 @@
  */
 
 import type { DocRecord, DocSummary } from "@lore/core";
-import { ok, err, type Result } from "@lore/core";
+import { ok, err, isParentlessType, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import {
   specAcceptanceCriteriaSchema,
@@ -696,7 +696,8 @@ async function resolveHealthStats(
     if (doc.updated_at < thirtyDaysAgo) {
       stale += 1;
     }
-    if (doc.parent_id === null && doc.type !== "prd") {
+    // reason: BR-2 — a spec takes no parent, so a parentless spec is not an orphan.
+    if (doc.parent_id === null && doc.type !== "prd" && !isParentlessType(doc.type)) {
       orphans += 1;
     }
   }

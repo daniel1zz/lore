@@ -27,7 +27,9 @@
  *   3. actually create that spec via CorpusService.create  → specId obtained.
  *   4. gate spec-promote on the fresh spec (0 AC)          → exit 4.
  *   5. add one structured AC via AcService.addCriterion.
- *   6. gate spec-promote again (1 AC)                      → exit 0.
+ *   5b. gate spec-promote again (1 AC, uncited)             → exit 4 naming `lore ac cite` (BR-1007,
+ *       issue #137: the gate agrees with the approval that would refuse it), then `lore ac cite`.
+ *   6. gate spec-promote again (1 AC, cited)               → exit 0.
  *
  * Coverage dimensions: HAPPY (steps 2/3/5/6, the compliant path) / NEGATIVE (steps 1/4,
  * two independent blocks) / BOUNDARY (step 6 — exactly one AC is enough) / ERROR (no
@@ -44,6 +46,7 @@ import { execSync } from "child_process";
 import { createApp, type App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
 import { checkRepoPollution } from "../../src/repo-pollution-guard.js";
+import { citeSpecViaCli, type LoreRunner } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput } from "@lore/core";
 
 /**
@@ -266,6 +269,25 @@ async function createSpec(parentSlug: string): Promise<{ specId: string; specSlu
   }
 }
 
+/**
+ * Cites the criterion at a live rule through the real CLI (BR-1007) — shared fixture, see
+ * helpers/cli-live-rule.ts. Runs as subprocesses against this test's throwaway corpus, after the
+ * in-process apps have released the database.
+ */
+function citeLiveRule(prdSlug: string, specId: string, acId: string): void {
+  const entry = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "index.ts");
+  const env: Record<string, string | undefined> = { ...process.env, HOME: tmpDir, CLAUDECODE: "1", LORE_ACTOR: "agent:spec-loop-e2e-test" };
+  delete env["LORE_GATE_BYPASS"];
+  const lore: LoreRunner = (args) => {
+    const proc = Bun.spawnSync(["bun", "run", entry, ...args], { cwd: tmpDir, env });
+    if ((proc.exitCode ?? 1) !== 0) {
+      throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${proc.exitCode}): ${proc.stderr.toString()}${proc.stdout.toString()}`);
+    }
+    return proc.stdout.toString();
+  };
+  citeSpecViaCli(lore, tmpDir, prdSlug, specId, acId);
+}
+
 async function addAcceptanceCriterion(specId: string): Promise<void> {
   const app = createApp(dbPath);
   try {
@@ -351,7 +373,13 @@ describe("spec-production IoC closed loop (tech-spec §9 AC6)", () => {
     // ── step 5: add exactly one structured AC (BOUNDARY setup — one is the minimum) ──
     await addAcceptanceCriterion(specId);
 
-    // ── step 6 (HAPPY / BOUNDARY): one AC is enough to flip the promotion gate to pass ──
+    // ── step 5b (NEGATIVE, BR-1007): one declared AC is not enough — it must cite a live rule ──
+    const step5b = await runGateSpecPromote(specSlug);
+    expect(step5b.exitCode).toBe(4);
+    expect(step5b.stderr).toContain("lore ac cite");
+    citeLiveRule(prdSlug, specId, "AC-LOOP-1");
+
+    // ── step 6 (HAPPY / BOUNDARY): one cited AC is enough to flip the promotion gate to pass ──
     const step6 = await runGateSpecPromote(specSlug);
     expect(step6.exitCode).toBe(0);
     expect(step6.stdout).toContain("gate: pass");

@@ -27,7 +27,7 @@
 # Drift kinds reported:
 #   missing   — fewer docs of a type than `min` requires
 #   extra     — more docs of a type than `max` allows
-#   orphan    — doc has no parent but its type is not a root type (prd)
+#   orphan    — doc has no parent but its type is not a root type (prd) or a parentless type (spec)
 #   misplaced — doc's parent type violates the parent-type contract
 #   cycle     — circular parent reference (A → B → A)
 

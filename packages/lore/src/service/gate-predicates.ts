@@ -995,6 +995,37 @@ export function oracleCoverage(
   return { ok: false, reason: ORACLE_COVERAGE_REASON, field: ORACLE_COVERAGE_FIELD };
 }
 
+/** `specCitesLiveRulePredicate`'s single machine-readable failure reason. */
+export const SPEC_CITES_NO_LIVE_RULE_REASON = "SPEC_CITES_NO_LIVE_RULE";
+
+/** The `PredicateResult.field` value `specCitesLiveRulePredicate`'s failure carries. */
+export const SPEC_CITATION_FIELD = "acceptance-criteria-cites";
+
+/**
+ * `spec-promote`'s BR-1007 predicate — a spec none of whose criteria cites a LIVE business (BR) or
+ * architecture (AS) rule is not approvable, so the pre-flight gate must say so too (issue #137: the gate
+ * reported pass for a spec `approve` then refused).
+ *
+ * Pure: the caller measures the fact (`specCitesLiveRuleInCorpus`, spec-approval-citation.ts — the SAME
+ * measure `approve` and `set` use) and hands over the boolean; this module does no IO.
+ *
+ * @param cites - `true`/`false` when the caller measured it; `undefined` when it did NOT (the service
+ *   paths `CorpusService.set` / `ReviewService.approve` enforce BR-1007 themselves, unconditionally,
+ *   right after this checkpoint — they leave it absent rather than measure twice). `undefined` is
+ *   "not evaluated", never "cites", and is the only way this predicate passes without a citation.
+ * @returns `{ok: false, reason: "SPEC_CITES_NO_LIVE_RULE", field: "acceptance-criteria-cites"}` iff `cites === false`
+ * @example
+ * specCitesLiveRulePredicate(true);      // => { ok: true }
+ * specCitesLiveRulePredicate(false);     // => { ok: false, reason: "SPEC_CITES_NO_LIVE_RULE", field: "acceptance-criteria-cites" }
+ * specCitesLiveRulePredicate(undefined); // => { ok: true } — not evaluated by this caller
+ */
+export function specCitesLiveRulePredicate(cites: boolean | undefined): PredicateResult {
+  if (cites === false) {
+    return { ok: false, reason: SPEC_CITES_NO_LIVE_RULE_REASON, field: SPEC_CITATION_FIELD };
+  }
+  return { ok: true };
+}
+
 /**
  * `acCountMeetsFloor`'s single machine-readable failure reason — the SAME literal
  * `checkSpecPromote` used before this predicate existed (`NO_ACCEPTANCE_CRITERIA`),

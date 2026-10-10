@@ -387,6 +387,9 @@ describe("hooks/g2-spec-promote.sh", () => {
     noAcSpecSlug = createSpec(tmpDir, prdSlug, "No AC Spec");
     withAcSpecSlug = createSpec(tmpDir, prdSlug, "With AC Spec");
     addAcceptanceCriterion(tmpDir, withAcSpecSlug, "AC-1");
+    // BR-1007 / issue #137: `lore gate spec-promote` also refuses an uncited spec, so the spec the
+    // shim must ALLOW to be approved cites a live rule (the no-AC spec below stays a deny).
+    citeSpecViaCli(loreRunnerFor(runLore, tmpDir), tmpDir, prdSlug, withAcSpecSlug, "AC-1");
   });
 
   afterAll(() => cleanupDir(tmpDir));

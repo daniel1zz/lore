@@ -82,6 +82,23 @@ function prdSpecBlueprint(min = 1, max: number | null = null): TreeBlueprint {
   };
 }
 
+/**
+ * Blueprint: prd root, with an adr child slot. re-baseline (BR-2): the `fix()` mechanics tests used a
+ * parentless-by-contract `spec` as their orphan; a spec is no longer an orphan, so they use an adr — a
+ * type that still takes exactly the parents the blueprint declares.
+ */
+function prdAdrBlueprint(min = 0, max: number | null = null): TreeBlueprint {
+  return {
+    version: 1,
+    root: {
+      type: "prd",
+      min: 1,
+      max: null,
+      children: [{ type: "adr", min, max, children: [] }],
+    },
+  };
+}
+
 /** Blueprint: prd root, with spec child and plan child */
 function prdSpecPlanBlueprint(): TreeBlueprint {
   return {
@@ -121,14 +138,15 @@ describe("TreeCheckService.checkTree — HAPPY", () => {
     expect(result.value.drifts).toHaveLength(0);
   });
 
-  it("AC-TREE-HAPPY-02: prd root + spec child matches blueprint → consistent", async () => {
+  it("AC-TREE-HAPPY-02: prd root + a PARENTLESS spec matches the blueprint's spec slot → consistent (BR-2, BR-400)", async () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
 
     const prdId = makeId("PRD001");
     const specId = makeId("SPC001");
     await seedDoc(store, { id: prdId, type: "prd" });
-    await seedDoc(store, { id: specId, type: "spec", parent_id: prdId });
+    // re-baseline: a spec takes no parent — the slot is "no parent", not "under the prd"
+    await seedDoc(store, { id: specId, type: "spec" });
 
     const result = await svc.checkTree(prdSpecBlueprint(1, null));
     expect(result.ok).toBe(true);
@@ -150,9 +168,8 @@ describe("TreeCheckService.checkTree — HAPPY", () => {
 
     const store2 = new InMemoryStore();
     const svc2 = new TreeCheckService(store2);
-    const prdId = makeId("PRD002");
-    await seedDoc(store2, { id: prdId, type: "prd" });
-    await seedDoc(store2, { id: makeId("SPC002"), type: "spec", parent_id: prdId });
+    await seedDoc(store2, { id: makeId("PRD002"), type: "prd" });
+    await seedDoc(store2, { id: makeId("SPC002"), type: "spec" });
     const r2 = await svc2.checkTree(prdSpecBlueprint(1, null));
     expect(r2.ok).toBe(true);
     if (!r2.ok) return;
@@ -228,10 +245,11 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
   });
 
   it("AC-TREE-NEG-03: root-level doc that is not a ROOT_TYPE → orphan drift", async () => {
-    // A spec with parent_id=null is orphaned (not a root type)
+    // re-baseline (BR-2): this used a spec; a parentless spec is legal now, so the control is a
+    // knowledge doc with parent_id=null (not a root type, not a parentless type) — still an orphan.
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
-    await seedDoc(store, { id: makeId("SPC001"), type: "spec", parent_id: null });
+    await seedDoc(store, { id: makeId("KNW001"), type: "knowledge", parent_id: null });
 
     const result = await svc.checkTree(prdSpecBlueprint(0, null));
     expect(result.ok).toBe(true);
@@ -239,6 +257,47 @@ describe("TreeCheckService.checkTree — NEGATIVE", () => {
     expect(result.value.consistent).toBe(false);
     const orphanDrifts = result.value.drifts.filter((d) => d.kind === "orphan");
     expect(orphanDrifts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("AC-TREE-NEG-03b: a parentless spec is neither orphan nor misplaced; a parentless knowledge doc beside it still is an orphan (BR-400)", async () => {
+    const store = new InMemoryStore();
+    const svc = new TreeCheckService(store);
+    const specId = makeId("SPC001");
+    const knowledgeId = makeId("KNW001");
+    await seedDoc(store, { id: makeId("PRD001"), type: "prd" });
+    await seedDoc(store, { id: specId, type: "spec" });
+    await seedDoc(store, { id: knowledgeId, type: "knowledge" });
+
+    const result = await svc.checkTree(prdSpecBlueprint(1, null));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const flagged = (kind: string): string[] =>
+      result.value.drifts.filter((d) => d.kind === kind).map((d) => d.actual?.id ?? "");
+    expect(flagged("orphan")).toEqual([knowledgeId]);
+    expect(flagged("misplaced")).toEqual([]);
+    expect(flagged("missing")).toEqual([]);
+  });
+
+  it("AC-TREE-NEG-03c: a spec that still HAS a parent is misplaced, and fix() never re-parents it (BR-2)", async () => {
+    const store = new InMemoryStore();
+    const svc = new TreeCheckService(store);
+    const prdId = makeId("PRD001");
+    const specId = makeId("SPC001");
+    await seedDoc(store, { id: prdId, type: "prd" });
+    await seedDoc(store, { id: specId, type: "spec", parent_id: prdId });
+
+    const checked = await svc.checkTree(prdSpecBlueprint(0, null));
+    expect(checked.ok).toBe(true);
+    if (!checked.ok) return;
+    expect(checked.value.drifts.filter((d) => d.kind === "misplaced").map((d) => d.actual?.id)).toEqual([specId]);
+
+    const fixed = await svc.fix(prdSpecBlueprint(0, null));
+    expect(fixed.ok).toBe(true);
+    if (!fixed.ok) return;
+    expect(fixed.value.fixed).toHaveLength(0);
+    expect(fixed.value.skipped.find((x) => x.id === specId)?.reason).toBe("0-or-many candidates");
+    const after = await store.find(specId);
+    expect(after.ok && after.value?.parent_id).toBe(prdId);
   });
 
   it("AC-TREE-NEG-04: SPEC-069 ad-hoc task (extra.adhoc=true) parented to root prd → NOT misplaced", async () => {
@@ -380,9 +439,9 @@ describe("TreeCheckService.checkTree — BOUNDARY", () => {
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     await seedDoc(store, { id: prdId, type: "prd" });
-    // 5 specs under prd, max=null (unlimited)
+    // 5 parentless specs, max=null (unlimited)
     for (let i = 0; i < 5; i++) {
-      await seedDoc(store, { id: makeId(`SPC00${i}`), type: "spec", parent_id: prdId });
+      await seedDoc(store, { id: makeId(`SPC00${i}`), type: "spec" });
     }
 
     const result = await svc.checkTree(prdSpecBlueprint(0, null));
@@ -397,8 +456,8 @@ describe("TreeCheckService.checkTree — BOUNDARY", () => {
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     await seedDoc(store, { id: prdId, type: "prd" });
-    await seedDoc(store, { id: makeId("SPC001"), type: "spec", parent_id: prdId });
-    await seedDoc(store, { id: makeId("SPC002"), type: "spec", parent_id: prdId });
+    await seedDoc(store, { id: makeId("SPC001"), type: "spec" });
+    await seedDoc(store, { id: makeId("SPC002"), type: "spec" });
 
     const result = await svc.checkTree(prdSpecBlueprint(0, 2));
     expect(result.ok).toBe(true);
@@ -412,9 +471,9 @@ describe("TreeCheckService.checkTree — BOUNDARY", () => {
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
     await seedDoc(store, { id: prdId, type: "prd" });
-    await seedDoc(store, { id: makeId("SPC001"), type: "spec", parent_id: prdId });
-    await seedDoc(store, { id: makeId("SPC002"), type: "spec", parent_id: prdId });
-    await seedDoc(store, { id: makeId("SPC003"), type: "spec", parent_id: prdId });
+    await seedDoc(store, { id: makeId("SPC001"), type: "spec" });
+    await seedDoc(store, { id: makeId("SPC002"), type: "spec" });
+    await seedDoc(store, { id: makeId("SPC003"), type: "spec" });
 
     const result = await svc.checkTree(prdSpecBlueprint(0, 2));
     expect(result.ok).toBe(true);
@@ -504,14 +563,14 @@ describe("TreeCheckService.fix — STATE", () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
-    const specId = makeId("SPC001");
+    const specId = makeId("ADR001");
 
     await seedDoc(store, { id: prdId, type: "prd" });
-    // spec with no parent (orphaned root-level spec)
-    await seedDoc(store, { id: specId, type: "spec", parent_id: null, version: 1 });
+    // adr with no parent (orphaned root-level adr)
+    await seedDoc(store, { id: specId, type: "adr", parent_id: null, version: 1 });
 
-    // Blueprint with prd containing spec slot
-    const blueprint = prdSpecBlueprint(0, null);
+    // Blueprint with prd containing adr slot
+    const blueprint = prdAdrBlueprint(0, null);
 
     const result = await svc.fix(blueprint);
     expect(result.ok).toBe(true);
@@ -530,12 +589,12 @@ describe("TreeCheckService.fix — STATE", () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
     const prdId = makeId("PRD001");
-    const specId = makeId("SPC001");
+    const specId = makeId("ADR001");
 
     await seedDoc(store, { id: prdId, type: "prd" });
-    await seedDoc(store, { id: specId, type: "spec", parent_id: null, version: 1 });
+    await seedDoc(store, { id: specId, type: "adr", parent_id: null, version: 1 });
 
-    const blueprint = prdSpecBlueprint(0, null);
+    const blueprint = prdAdrBlueprint(0, null);
 
     // First fix
     const first = await svc.fix(blueprint);
@@ -633,13 +692,13 @@ describe("TreeCheckService.fix — STATE", () => {
   it("AC-TREE-STATE-04: orphan with zero legal parent candidates → SKIPPED reason=0-or-many candidates", async () => {
     const store = new InMemoryStore();
     const svc = new TreeCheckService(store);
-    const specId = makeId("SPC001");
-    // spec with no parent, blueprint has no spec slot → 0 candidates
-    await seedDoc(store, { id: specId, type: "spec", parent_id: null });
+    const specId = makeId("ADR001");
+    // adr with no parent, blueprint has no adr slot → 0 candidates
+    await seedDoc(store, { id: specId, type: "adr", parent_id: null });
 
     const blueprint: TreeBlueprint = {
       version: 1,
-      root: { type: "prd", min: 0, max: null, children: [] }, // no spec slot
+      root: { type: "prd", min: 0, max: null, children: [] }, // no adr slot
     };
 
     const result = await svc.fix(blueprint);
@@ -655,15 +714,15 @@ describe("TreeCheckService.fix — STATE", () => {
     const svc = new TreeCheckService(store);
     const prdId1 = makeId("PRD001");
     const prdId2 = makeId("PRD002");
-    const specId = makeId("SPC001");
+    const specId = makeId("ADR001");
 
-    // Two prd docs — both are legal parents for a spec
+    // Two prd docs — both are legal parents for an adr
     await seedDoc(store, { id: prdId1, type: "prd" });
     await seedDoc(store, { id: prdId2, type: "prd" });
-    // spec orphaned (parent_id=null)
-    await seedDoc(store, { id: specId, type: "spec", parent_id: null });
+    // adr orphaned (parent_id=null)
+    await seedDoc(store, { id: specId, type: "adr", parent_id: null });
 
-    const blueprint = prdSpecBlueprint(0, null);
+    const blueprint = prdAdrBlueprint(0, null);
 
     const result = await svc.fix(blueprint);
     expect(result.ok).toBe(true);

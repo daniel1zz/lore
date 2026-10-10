@@ -2945,7 +2945,7 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   registerToolWithArgs(
     server,
     "lore_requirement_add",
-    "Add a numbered requirement to a PRD's structured inventory (SPEC-055) — the sole MCP write path; `lore status --check-requirements` audits coverage against descendant spec ACs",
+    "Add a numbered requirement to a PRD's structured inventory (SPEC-055) — the sole MCP write path; `lore status --check-requirements` audits coverage against the ACs of every spec",
     LoreRequirementAddSchema,
     async (args) => {
       if (app.requirementService === undefined) {

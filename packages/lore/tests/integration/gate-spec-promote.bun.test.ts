@@ -28,6 +28,12 @@
  * `GateEnforcer` already lints on a draft→approved transition (`CorpusService.set` /
  * `ReviewService.approve`) — see "AC-Quantifiability Gate CLI parity" below.
  *
+ * BR-1007 / issue #137 (re-baseline): the pre-flight also refuses a spec none of whose criteria
+ * cites a LIVE business or architecture rule — the same refusal `approve` gives. Every scenario
+ * that must PASS therefore cites a live rule (`seedLiveRule`, real CLI subprocess against this
+ * file's throwaway corpus); the "pass" fixtures are otherwise unchanged. See the BR-1007 suite
+ * at the end of this file for the parity assertions themselves.
+ *
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION.
  */
 
@@ -39,6 +45,8 @@ import { createApp } from "../../src/app.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { App } from "../../src/app.js";
 import { saveConfig } from "@lore/core/node";
+import { execFileSync } from "node:child_process";
+import { ensureLiveRuleViaCli } from "../helpers/cli-live-rule.js";
 import type { CreateDocInput, DocId, LoreConfig } from "@lore/core";
 
 // ─── Command type (mirrors assess-ai.bun.test.ts) ────────────────────────────
@@ -84,8 +92,33 @@ function captureOutput() {
 let tmpDir: string;
 let originalCwd: string;
 let originalEnv: string | undefined;
+/** The live rule seeded into this test's corpus by {@link seedLiveRule}; reset per test. */
+let seededRuleId: string | undefined;
+
+const LORE_ENTRY = resolve(import.meta.dir, "..", "..", "src", "index.ts");
+
+/** Runs the real `lore` CLI against this test's throwaway corpus; throws on a non-zero exit. */
+function loreCli(args: string[]): string {
+  const env: Record<string, string | undefined> = { ...process.env, HOME: tmpDir, CLAUDECODE: "1", LORE_ACTOR: "agent:gate-spec-promote-test" };
+  delete env["LORE_GATE_BYPASS"];
+  const proc = Bun.spawnSync(["bun", "run", LORE_ENTRY, ...args], { cwd: tmpDir, env });
+  if ((proc.exitCode ?? 1) !== 0) {
+    throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${proc.exitCode}): ${proc.stderr.toString()}${proc.stdout.toString()}`);
+  }
+  return proc.stdout.toString();
+}
+
+/** Seeds (once per test) one live rule in this test's corpus — shared fixture, see helpers/cli-live-rule.ts. */
+function seedLiveRule(): string {
+  if (seededRuleId === undefined) {
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: tmpDir });
+    seededRuleId = ensureLiveRuleViaCli(loreCli, tmpDir);
+  }
+  return seededRuleId;
+}
 
 beforeEach(() => {
+  seededRuleId = undefined;
   process.exitCode = 0;
   originalEnv = process.env["LORE_GATE_BYPASS"];
   delete process.env["LORE_GATE_BYPASS"];
@@ -185,7 +218,7 @@ async function createSpecWithKind(kind: string): Promise<{ specId: string; specS
 }
 
 /** Add one structured acceptance criterion (verify.mode=human — simplest valid shape). */
-async function addAcceptanceCriterion(specId: string, id = "AC-PROMO-1"): Promise<void> {
+async function addAcceptanceCriterion(specId: string, id = "AC-PROMO-1", cite = true): Promise<void> {
   const app = createApp(join(tmpDir, ".lore", "lore.db"));
   try {
     if (app.acService === undefined) throw new Error("AcService not wired");
@@ -198,6 +231,9 @@ async function addAcceptanceCriterion(specId: string, id = "AC-PROMO-1"): Promis
   } finally {
     app.close();
   }
+  // BR-1007 — a spec that is to PASS the pre-flight must cite a live rule; the criterion is cited
+  // through the real `lore ac cite` after the in-process add has released the database.
+  if (cite) loreCli(["ac", "cite", specId, id, seedLiveRule()]);
 }
 
 /** Write a fake "AI provider" shell script emitting a FIXED valid review-judgment JSON. */
@@ -538,7 +574,7 @@ describe("lore gate spec-promote — AC-Quantifiability Gate CLI parity", () => 
   // an unquantified-AC spec approve.
   it("STATE: workflow.gates.spec-promote.ac_quantifiable.enabled=false lets an unquantified-AC spec pass", async () => {
     const { specSlug, specId } = await createSpec();
-    await setAcceptanceCriteriaDirectly(specId, [UNQUANTIFIED_AC]);
+    await setAcceptanceCriteriaDirectly(specId, [{ ...UNQUANTIFIED_AC, cites: [seedLiveRule()] }]);
     writeAcQuantifiableDisabledConfig();
 
     const cmd = await importGateSpecPromoteCommand();
@@ -650,7 +686,7 @@ describe("lore gate spec-promote — STATE: LORE_GATE_BYPASS=1", () => {
 // identical spec/config — proving they now agree.
 
 describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + verificationProfile", () => {
-  it("HAPPY: domain-overview spec with 0 ACs + min_acs:0 profile passes the CLI gate, matching the service layer", async () => {
+  it("HAPPY: domain-overview spec with 0 ACs + min_acs:0 profile clears the AC-count floor on the CLI; only BR-1007 (nothing to cite) refuses it — the same refusal as the service layer", async () => {
     const { specId, specSlug } = await createSpecWithKind("domain-overview");
     writeDomainOverviewProfileConfig();
 
@@ -662,8 +698,13 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
       output.restore();
     }
 
-    expect(process.exitCode).toBe(0);
-    expect(output.stdout.join("\n")).toContain("gate: pass");
+    // re-baseline (BR-1007, issue #137): this used to pass — the CLI never measured citations, so it said
+    // "pass" for a spec the approval then refused. The waived floor is still honoured (no "needs >= N"
+    // text); the refusal is the citation one, naming `lore ac cite`.
+    expect(process.exitCode).toBe(4);
+    const refusal = output.stderr.join("");
+    expect(refusal).not.toContain("needs >=");
+    expect(refusal).toContain("lore ac cite");
 
     // ── Service-layer parity: the SAME draft→approved transition through
     // CorpusService.set (the sibling gated write path ReviewService.approve also
@@ -747,5 +788,91 @@ describe("lore gate spec-promote — AC2 (parity fix): CLI resolves specKind + v
     const stderrText = output.stderr.join("");
     expect(stderrText).toContain("no structured acceptance criteria");
     expect(stderrText).toContain('spec_kind "feature"');
+  });
+});
+
+// ─── BR-1007 parity (issue #137): the pre-flight and `approve` reach the same verdict ──────────────
+
+describe("lore gate spec-promote — BR-1007 parity with `lore approve` (issue #137)", () => {
+  it("NEGATIVE: a spec with a quantified criterion but no citation is refused by the gate (exit 4, naming `lore ac cite`) exactly as approve refuses it", async () => {
+    const { specSlug, specId } = await createSpec();
+    await addAcceptanceCriterion(specId, "AC-PARITY-1", false); // declared, NOT cited
+    writeAiConfig("ghost-ai-binary-not-installed-xyz");
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(4);
+    const gateRefusal = output.stderr.join("");
+    expect(gateRefusal).toContain("lore ac cite");
+    expect(gateRefusal).toContain(specSlug);
+    expect(output.stdout.join("\n")).not.toContain("gate: pass");
+
+    // The approval the gate is a pre-flight for refuses the SAME spec with the SAME wording.
+    const env: Record<string, string | undefined> = { ...process.env, HOME: tmpDir, CLAUDECODE: "1", LORE_ACTOR: "agent:gate-spec-promote-test" };
+    delete env["LORE_GATE_BYPASS"];
+    const approve = Bun.spawnSync(["bun", "run", LORE_ENTRY, "approve", specSlug, "--override-no-judgment"], { cwd: tmpDir, env });
+    expect(approve.exitCode).toBe(4);
+    expect(`${approve.stderr.toString()}${approve.stdout.toString()}`).toContain("cites no live business or architecture rule");
+    expect(gateRefusal).toContain("cites no live business or architecture rule");
+  });
+
+  it("HAPPY: after `lore ac cite` the gate passes and the same approve succeeds", async () => {
+    const { specSlug, specId } = await createSpec();
+    await addAcceptanceCriterion(specId, "AC-PARITY-2", false);
+    loreCli(["ac", "cite", specId, "AC-PARITY-2", seedLiveRule()]);
+    writeAiConfig("ghost-ai-binary-not-installed-xyz");
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(0);
+    expect(output.stdout.join("\n")).toContain("gate: pass");
+    expect(loreCli(["approve", specSlug, "--override-no-judgment"])).toContain("approved");
+  });
+
+  it("NEGATIVE: a criterion citing only a RETIRED rule does not satisfy the gate either (same measure as approve)", async () => {
+    const { specSlug, specId } = await createSpec();
+    await addAcceptanceCriterion(specId, "AC-PARITY-3", false);
+    const rule = seedLiveRule();
+    loreCli(["ac", "cite", specId, "AC-PARITY-3", rule]);
+    loreCli(["rule", "set", rule, "--lifecycle", "retired", "--note", "superseded for the test"]);
+    writeAiConfig("ghost-ai-binary-not-installed-xyz");
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(4);
+    expect(output.stderr.join("")).toContain("lore ac cite");
+  });
+
+  it("REGRESSION: with an unquantified AND uncited criterion the gate names BOTH the AC id and the citation refusal", async () => {
+    const { specSlug, specId } = await createSpec();
+    await setAcceptanceCriteriaDirectly(specId, [UNQUANTIFIED_AC]);
+    writeAiConfig("ghost-ai-binary-not-installed-xyz");
+
+    const cmd = await importGateSpecPromoteCommand();
+    const output = captureOutput();
+    try {
+      await cmd.run({ args: { spec: specSlug } });
+    } finally {
+      output.restore();
+    }
+    expect(process.exitCode).toBe(4);
+    const text = output.stderr.join("");
+    expect(text).toContain("AC-BAD-1");
+    expect(text).toContain("lore ac cite");
   });
 });

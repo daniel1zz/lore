@@ -8,10 +8,11 @@
  *        follows a resolvable leading `cd` (bare/quoted/env-assignment-
  *        prefixed forms), and a `$`-bearing path token disqualifies the
  *        match (falls back to the pre-existing HOOK_CWD derivation).
- *   D2 — g1's PARENT_REQUIRED lookup-anomaly fail-open: a command that
- *        declared a non-empty --parent but still gets PARENT_REQUIRED back
- *        fails open (logs UNRESOLVED_PARENT); a command with NO declared
- *        parent keeps the deny.
+ *   D2 — RETIRED by BR-2 (baseline-slice-3b): g1 used to fail open (log
+ *        UNRESOLVED_PARENT) when a declared --parent still came back
+ *        PARENT_REQUIRED. A spec takes no parent now, so that lookup anomaly
+ *        no longer exists; every gate verdict of 4 is denied, with or without
+ *        a --parent. The D2 block below pins the NEW behaviour.
  *   D4 — command-position trigger matching: the trigger phrase must sit at
  *        a command position (start of string, or right after &&/||/;/|/$(/
  *        backtick) — a mention of the phrase inside a quoted argument value
@@ -277,8 +278,8 @@ describe("SPEC-050 D1 — g1-spec-create.sh cd-prefix TARGET_CWD", () => {
 
 // ─── D2 — g1 PARENT_REQUIRED lookup-anomaly fail-open ─────────────────────────
 
-describe("SPEC-050 D2 — g1-spec-create.sh lookup-anomaly fail-open", () => {
-  it("STATE: a declared --parent that still resolves to PARENT_REQUIRED fails open (allow) and logs UNRESOLVED_PARENT", () => {
+describe("SPEC-050 D2 (retired by BR-2) — g1-spec-create.sh denies every gate verdict of 4", () => {
+  it("STATE: a declared --parent the gate refuses is DENIED — no lookup-anomaly fail-open, UNRESOLVED_PARENT is never logged", () => {
     const scratch = mkScratchDir("d2-anomaly-");
     const logPath = join(scratch, "log.txt");
     writeStubLore(scratch, logPath, { gateSpecCreateBehavior: "always-parent-required" });
@@ -295,13 +296,15 @@ describe("SPEC-050 D2 — g1-spec-create.sh lookup-anomaly fail-open", () => {
       scratch,
     );
 
+    // re-baseline (BR-2): this used to assert allow + UNRESOLVED_PARENT. A spec takes no parent, so a
+    // declared --parent is itself the violation the gate reports; the shim relays that deny.
     const decision = parseDecision(result.stdout);
-    expect(decision.permissionDecision).toBe("allow");
-    expect(result.stderr).toContain("UNRESOLVED_PARENT");
-    expect(result.stderr).toContain("cross-corpus-parent");
+    expect(decision.permissionDecision).toBe("deny");
+    expect(decision.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
+    expect(result.stderr).not.toContain("UNRESOLVED_PARENT");
   });
 
-  it("NEGATIVE: NO declared --parent keeps the deny even though the gate says PARENT_REQUIRED", () => {
+  it("NEGATIVE: NO declared --parent is denied too when the gate says 4", () => {
     const scratch = mkScratchDir("d2-noparent-");
     const logPath = join(scratch, "log.txt");
     writeStubLore(scratch, logPath, { gateSpecCreateBehavior: "always-parent-required" });
@@ -321,7 +324,7 @@ describe("SPEC-050 D2 — g1-spec-create.sh lookup-anomaly fail-open", () => {
     expect(decision.permissionDecisionReason ?? "").toContain("PARENT_REQUIRED");
   });
 
-  it("REGRESSION: a declared --parent that DOES resolve (not PARENT_REQUIRED) still allows normally", () => {
+  it("REGRESSION: when the gate passes (exit 0) the call is allowed normally, with or without a --parent", () => {
     const scratch = mkScratchDir("d2-happy-");
     const logPath = join(scratch, "log.txt");
     writeStubLore(scratch, logPath, { gateSpecCreateBehavior: "parent-required" });

@@ -78,7 +78,7 @@ import {
   type LinkRecord,
   type LinkType,
 } from "@lore/core";
-import { requireSpecCitesLiveRule } from "./spec-approval-citation.js";
+import { requireSpecCitesLiveRule, specCitesLiveRuleInCorpus } from "./spec-approval-citation.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
   SearchHit,
@@ -3824,11 +3824,24 @@ export class CorpusService {
   }
 
   /**
+   * BR-1007 measure for a read-only caller (the `lore gate spec-promote` pre-flight): does at least one
+   * criterion cite a live BR/AS rule? The SAME measure `approve` and `set` refuse on
+   * (`specCitesLiveRuleInCorpus`) — exposed here because adapters hold no store.
+   *
+   * @param rawAcceptanceCriteria - the spec's `extra.acceptance_criteria` as stored
+   * @returns `ok(true | false)`; a store read failure is returned as itself (never read as "cites nothing")
+   */
+  async specCitesLiveRule(rawAcceptanceCriteria: unknown): Promise<Result<boolean, LoreError>> {
+    return specCitesLiveRuleInCorpus(this.store, rawAcceptanceCriteria);
+  }
+
+  /**
    * Computes requirement→AC coverage for a PRD (SPEC-055) — the read behind
    * `lore status --check-requirements`. Resolves the PRD, reads its declared requirement
-   * inventory, gathers every `requirement_refs` id across its descendant specs' acceptance
-   * criteria, and partitions the inventory via the pure `computeRequirementCoverage`
-   * (`@lore/core`) — a requirement covered IFF some descendant AC references its id.
+   * inventory, gathers every `requirement_refs` id across the acceptance criteria of EVERY spec
+   * that is not deleted (BR-418, BR-420: a spec has no parent, so no PRD owns a subset of them),
+   * and partitions the inventory via the pure `computeRequirementCoverage` (`@lore/core`) — a
+   * requirement covered IFF some such spec's AC references its id.
    *
    * @param prdIdOrSlug - The PRD whose requirement coverage to compute.
    * @returns `ok(RequirementCoverage)` — all-empty for a PRD with no declared requirements
@@ -3858,10 +3871,13 @@ export class CorpusService {
     const parsedReqs = prdRequirementsSchema.safeParse(prd.extra["requirements"]);
     const requirements = parsedReqs.success ? parsedReqs.data : [];
 
-    const specsResult = await this.store.findMany({ parent_id: prd.id, type: "spec" });
-    if (!specsResult.ok) return specsResult;
+    // reason: BR-420 / BR-692 — coverage counts the criteria of every spec that is not deleted,
+    // whatever its status and wherever it is filed. Specs take no parent (BR-2), so the PRD's
+    // children are never the universe; one corpus-wide read serves both the AC refs and the cites.
+    const allSpecsResult = await this.store.findMany({ type: "spec" });
+    if (!allSpecsResult.ok) return allSpecsResult;
     const refs: string[] = [];
-    for (const spec of specsResult.value) {
+    for (const spec of allSpecsResult.value) {
       const parsedAcs = specAcceptanceCriteriaSchema.safeParse(spec.extra["acceptance_criteria"]);
       if (!parsedAcs.success) continue;
       for (const ac of parsedAcs.data) {
@@ -3869,11 +3885,10 @@ export class CorpusService {
       }
     }
 
-    // reason: BR-983 — a migrated requirement is covered by citations, looked up CORPUS-WIDE
-    // (slice 3b re-parents specs under baseline leaves, so the PRD's own children are not the
-    // universe). Liveness of the rule is enforced only once the corpus holds baseline docs.
-    const allSpecsResult = await this.store.findMany({ type: "spec" });
-    if (!allSpecsResult.ok) return allSpecsResult;
+    // reason: BR-983 — a migrated requirement is covered by citations, looked up over the same
+    // corpus-wide spec set (a spec belongs to the trees through its criteria's citations, never
+    // through a parent — ADR decision 5). Liveness of the rule is enforced only once the corpus
+    // holds baseline docs.
     const leavesResult = await this.store.findMany({ type: "baseline" });
     if (!leavesResult.ok) return leavesResult;
     const ruleIndex = leavesResult.value.length > 0 ? buildRuleIndex(leavesResult.value) : undefined;

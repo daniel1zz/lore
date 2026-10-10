@@ -357,7 +357,7 @@ export default defineCommand({
       meta: {
         name: "spec-create",
         description:
-          "Deterministic pre-flight gate for spec creation: legal parent, valid spec_kind, required skeleton",
+          "Deterministic pre-flight gate for spec creation: no parent (BR-2), valid spec_kind, required skeleton",
       },
       args: {
         "input-json": {
@@ -1170,7 +1170,8 @@ async function runPhaseClaimGate(
 /**
  * Runs the `spec-promote` deterministic zone (a `spec_kind`-resolved AC-count floor —
  * SPEC-058 min_acs, default 1 — AND every declared criterion must pass `acQuantifiable`
- * AND, when a verification profile declares `required_oracles`, `oracleCoverage`)
+ * AND, when a verification profile declares `required_oracles`, `oracleCoverage`, AND at least one
+ * criterion must cite a live BR/AS rule — BR-1007, the same refusal `approve` gives)
  * against an already-created spec, then makes a best-effort, exit-code-inert judge
  * advisory attempt (module header, INV2). The deterministic outcome is settled and
  * printed BEFORE the advisory attempt runs, so a slow/unreachable AI provider can never
@@ -1235,9 +1236,21 @@ async function runSpecPromoteGate(
       : "feature";
   const verificationProfile = resolveVerificationProfile(config, specKind);
 
+  // reason: BR-1007 / issue #137 — `approve` refuses a spec none of whose criteria cites a live BR/AS
+  // rule; this pre-flight must say the same. Measured with the SAME function approve uses (through
+  // CorpusService), so the gate and the approval cannot disagree; a read failure is surfaced, never
+  // read as "cites".
+  const citesResult = await app.corpusService.specCitesLiveRule(specResult.value.doc.extra["acceptance_criteria"]);
+  if (!citesResult.ok) {
+    process.stderr.write(formatError(citesResult.error) + "\n");
+    process.exitCode = exitCode(citesResult.error);
+    return;
+  }
+
   const { criteria } = listResult.value;
   const checkpoint = requireCheckpoint("spec-promote");
   const ctx: GateContext = {
+    specCitesLiveRule: citesResult.value,
     acceptanceCriteriaCount: criteria.length,
     specIdOrSlug,
     specKind,
