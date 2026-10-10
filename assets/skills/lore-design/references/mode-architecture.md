@@ -182,5 +182,5 @@ Each Architecture Decision Record MUST include:
 ```
 
 ## Persist
-- Create via `lore create spec --title ... --parent <prd> --kind design --content ...` or `lore create adr --title ... --decision-status proposed --content ...`
+- Create via `lore create spec --title ... --kind design --content ...` or `lore create adr --title ... --decision-status proposed --content ...`
 - Link to upstream PRD (`implements`) and related ADRs (`relates`) via `lore link <from> <to> --type=<type>`

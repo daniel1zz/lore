@@ -171,6 +171,6 @@ The Vite dev server auto-replaces previous instances. To stop manually: `kill $(
 
 - ⛔ **Prototype HTML persistence (HARD — NOT optional)**: after Stage-2 approval, ALL prototype screens + the selected variant MUST be copied into the project at `docs/design-system/prototype/<screen>.html` and committed. `/tmp` is volatile AND shared across sessions (collision-prone) — it is scratch space for preview only, never the artifact home. The design-spec MUST reference these project paths as the pixel-level implementation reference.
 - ⛔ **/tmp collision safety**: all scratch paths MUST be project-prefixed (`/tmp/<project>-proto-*.html`, `/tmp/<project>-design-preview.md`) — bare `/tmp/option-a.html` / `/tmp/design-preview.md` collide with concurrent sessions.
-- Create design output via `lore create spec --title ... --parent <prd> --kind design --content ...`
+- Create design output via `lore create spec --title ... --kind design --content ...`
 - Link to upstream PRD via `lore link <spec> <prd> --type=implements`
 - UI design decisions are logged in `decisions/` (see `decisions/` log — maintained by this skill to prevent style drift)

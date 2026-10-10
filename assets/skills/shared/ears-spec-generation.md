@@ -57,5 +57,5 @@ Scenario naming convention: `[{Path}/{Step N}] {description}`
    | Error/1 | Unwanted | [Error/Step 1] ... | must |
    ```
 5. Define boundaries (comprehensive only): always / ask_first / never
-6. Save: `lore create spec --kind feature --title '<title>' --parent <prd> --content '...'` (run `lore feed spec-create --parent <prd>` first) → output `[SPEC_GENERATED]`
+6. Save: `lore create spec --kind feature --title '<title>' --content '...'` (run `lore feed spec-create` first) → output `[SPEC_GENERATED]`
 7. Link upstream: `lore link <spec> <prd> --type=implements` if PRD found

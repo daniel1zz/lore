@@ -112,7 +112,6 @@ describe("NewDocModal", () => {
 
       await selectType(user, "spec");
       await user.type(screen.getByLabelText(/Title/), "A spec, blocked");
-      await user.type(screen.getByLabelText(/Parent ID/), "01HPARENT000000000000000001");
 
       // Create is disabled (asserted separately in the "state" block below);
       // bypass it the same way the ASYNC2D-002 tests bypass isPending, to

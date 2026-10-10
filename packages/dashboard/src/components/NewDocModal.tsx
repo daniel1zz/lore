@@ -95,7 +95,15 @@ export interface NewDocModalProps {
 
 const DOC_TYPES: DocType[] = ["prd", "spec", "adr", "plan", "knowledge", "task"];
 
-const TYPES_REQUIRING_PARENT: DocType[] = ["spec", "task"];
+const TYPES_REQUIRING_PARENT: DocType[] = ["task"];
+
+/**
+ * Doc types that never take a parent (BR-1, BR-2, AS-18 of the product baseline):
+ * a spec relates to the trees by citing rules (`lore ac cite`), not through a
+ * parent link. The form hides the parent field for these and never sends one,
+ * even if a parent was typed while another type was selected.
+ */
+const TYPES_TAKING_NO_PARENT: DocType[] = ["spec"];
 
 /**
  * Doc types this quick-create form must never submit, because the service-layer
@@ -245,7 +253,7 @@ export function NewDocModal({
     const base: CreateDocPayload = {
       type: docType,
       title: title.trim(),
-      ...(parentId.trim() !== "" ? { parent_id: parentId.trim() } : {}),
+      ...(parentId.trim() !== "" && !TYPES_TAKING_NO_PARENT.includes(docType) ? { parent_id: parentId.trim() } : {}),
     };
 
     if (docType === "adr") {
@@ -332,7 +340,8 @@ export function NewDocModal({
         {isCreateBlockedType(docType) && (
           <p role="status" className="text-xs text-muted-foreground bg-muted rounded p-3">
             Specs need a gate-conformant skeleton and structured, verifiable
-            acceptance criteria (<code>lore ac add</code>) that this quick-create
+            acceptance criteria (<code>lore ac add</code>), each citing the rules it
+            implements (<code>lore ac cite</code>), that this quick-create
             form can&rsquo;t collect. Create specs with{" "}
             <code>lore create spec</code> on the CLI, or the{" "}
             <code>/lore-design</code> skill.
@@ -361,7 +370,7 @@ export function NewDocModal({
             the listbox below is a pure convenience overlay. See the module
             doc comment for the datalist-vs-custom-combobox design choice and
             the full ARIA contract. */}
-        {(TYPES_REQUIRING_PARENT.includes(docType) || parentId !== "") && (
+        {!TYPES_TAKING_NO_PARENT.includes(docType) && (TYPES_REQUIRING_PARENT.includes(docType) || parentId !== "") && (
           <div className="space-y-1 relative">
             <label className="text-sm font-medium" htmlFor="parent-id">
               Parent ID

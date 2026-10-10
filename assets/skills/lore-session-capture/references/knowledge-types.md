@@ -16,8 +16,8 @@ Session knowledge → lore CLI
 ├─ Research finding / benchmark / comparison      → lore create knowledge --sub-type research
 ├─ SDK gotcha / playbook / reusable reference     → lore create knowledge --sub-type reference
 ├─ Raw idea, not yet decided                      → lore create knowledge --sub-type ideation
-├─ Feature requirements (structured, with ACs)    → lore feed spec-create --parent <prd>
-│                                                   then lore create spec --parent <prd> --kind feature + lore ac add
+├─ Feature requirements (structured, with ACs)    → lore feed spec-create
+│                                                   then lore create spec --kind feature + lore ac add
 ├─ API contract / data model / UI standard        → belongs on the governing spec: lore set <spec> (or create
 │                                                   a tech/design spec: --kind tech|design); one-off observation
 │                                                   with no spec home → knowledge --sub-type reference
@@ -114,8 +114,9 @@ acceptance criteria in Given/When/Then, scope boundaries agreed.
 
 **Persist** — this is a real spec, gated:
 ```bash
-lore feed spec-create --parent <prd>        # read the feeding pack FIRST
-lore create spec --title "..." --parent <prd> --kind feature
+lore feed spec-create        # read the feeding pack FIRST
+lore create spec --title "..." --kind feature   # a spec takes no parent; cite rules per criterion:
+lore ac add <spec> ... --cite BR-<n>             # or: lore ac cite <spec> <AC> BR-<n> (BR-1007: no approval without a citation)
 lore ac add <spec> AC-1 --statement "..." --mode script|ai|human [--oracle test --command "..."]
 ```
 

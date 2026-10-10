@@ -18,7 +18,7 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 | `search` | `lore search "<q>" [--type t] --json` |
 | `get_doc` / `get_topic_context` | `lore get <id-or-slug>` (+ `--resolve-mdx`); `lore tree [<plan>]` |
 | `create_intent` | `lore create prd --title ... --content ...` |
-| `create_spec` | `lore feed spec-create --parent <prd>` FIRST, then `lore create spec --title ... --parent <prd> [--kind feature\|tech\|design]`; ACs via `lore ac add <spec> ...` |
+| `create_spec` | `lore feed spec-create` FIRST, then `lore create spec --title ... [--kind feature\|tech\|design]`; ACs via `lore ac add <spec> ... --cite BR-<n>` (a spec takes no parent; cite rules with `lore ac cite <spec> <AC> BR-<n>`; no approval without a citing criterion, BR-1007) |
 | `create_decision` | `lore create adr --title ... --decision-status proposed` |
 | `create_knowledge` | `lore create knowledge --sub-type ideation\|retro\|research\|reference\|assessment\|prompt\|skill\|handoff` |
 | `create_architecture` / `init_*` / `get_module` / `update_module` | RETIRED — module context lives in layered CLAUDE.md files (`zz-init-context` skill) |
