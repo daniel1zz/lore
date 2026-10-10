@@ -21,7 +21,8 @@
  */
 import { SQLiteStore } from "../../../lore/src/store/sqlite-store.js";
 import { CorpusService } from "../../../lore/src/service/corpus-service.js";
-import type { CreateDocInput, LoreError, Result } from "@lore/core";
+import { formatJudgeActor, type CreateDocInput, type LoreError, type Result, type ReviewJudgment } from "@lore/core";
+import { ulid } from "ulidx";
 
 async function unwrap<T>(promise: Promise<Result<T, LoreError>>, label: string): Promise<T> {
   const result = await promise;
@@ -131,6 +132,37 @@ async function main(): Promise<void> {
     } as CreateDocInput),
     "create draft spec A",
   );
+
+  // BR-281: approving a spec requires an independent approve-judgment pinned to the
+  // spec's CURRENT version (gate `review-judgment`). The dashboard has no UI that
+  // produces one (`lore review` is CLI/MCP-only), so the fixture seeds it exactly as
+  // `seed-judgment.ts` does for the single-project adjudication suite. Without it the
+  // real server correctly answers 422 NO_JUDGMENT — a single project would too.
+  const judge = { provider: "e2e", model: "e2e", prompt_version: "v1" };
+  const judgment: ReviewJudgment = {
+    id: ulid(),
+    doc_id: draftSpec.id,
+    doc_version: draftSpec.version,
+    decision: "approve",
+    confidence: 0.9,
+    reasons: [{ dimension: "completeness", finding: "e2e-seeded judgment" }],
+    checks: [{ check: "schema", outcome: "pass" }],
+    blocking_questions: [],
+    judge,
+    created_at: new Date().toISOString(),
+    created_by: formatJudgeActor(judge),
+  };
+  const inserted = await storeA.insertJudgment(judgment);
+  if (!inserted.ok) throw new Error(`insertJudgment failed: ${JSON.stringify(inserted.error)}`);
+  const audited = await storeA.appendAuditEntry({
+    timestamp: judgment.created_at,
+    actor: judgment.created_by,
+    session_id: `judge-${judgment.doc_id}`,
+    action: "judge",
+    doc_id: judgment.doc_id,
+    details: { judgment_ref: judgment.id, version: judgment.doc_version },
+  });
+  if (!audited.ok) throw new Error(`appendAuditEntry failed: ${JSON.stringify(audited.error)}`);
 
   const seedAFull: ProjectASeed = {
     ...seedA,
