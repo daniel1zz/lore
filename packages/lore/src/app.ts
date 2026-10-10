@@ -91,6 +91,7 @@ import { ValidityService } from "./service/validity-service.js";
 import { DriftCheckService } from "./service/drift-check-service.js";
 import { OutlineMigrationService } from "./service/outline-migration-service.js";
 import { OrdinalMigrationService } from "./service/ordinal-migration-service.js";
+import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
 import { ConfigService } from "./service/config-service.js";
@@ -373,6 +374,12 @@ export interface App {
    * Source: SPEC-084 §One-shot repair migration, §Acceptance Criteria AC-084-4.
    */
   ordinalMigrationService?: OrdinalMigrationService;
+  /**
+   * SpecParentMigrationService — `lore migrate spec-parents [--apply | --revert]` (BR-1009, AC-BLS3B-7).
+   * Store-only, no telemetry, no gate; optional for the same hand-built-App-stub reason as
+   * `ordinalMigrationService`; always present in production; the CLI guards `=== undefined`.
+   */
+  specParentMigrationService?: SpecParentMigrationService;
   /**
    * UatService — the sole write orchestrator for a structured UAT verdict
    * (`lore uat record`, SPEC-054). Narrow injected ports (`corpusService.createUatDoc` /
@@ -795,6 +802,7 @@ function buildAppFromSqlite(
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store),
+    specParentMigrationService: new SpecParentMigrationService(store),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to
@@ -1156,6 +1164,7 @@ function buildAppFromTurso(
     // no AI, no telemetry, same shape as OutlineMigrationService/PhaseMigrationService.
     // SPEC-084 §One-shot repair migration.
     ordinalMigrationService: new OrdinalMigrationService(store),
+    specParentMigrationService: new SpecParentMigrationService(store),
     // reason: SeatService (SPEC-057) — real GitPort over the SAME repoRoot
     // VerifyRunnerService already receives (captured at composition time, never a
     // second `process.cwd()` read); getReadyReport is bound to

@@ -1409,6 +1409,45 @@ export class SQLiteStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.setDocParentWithProvenance
+   */
+  async setDocParentWithProvenance(
+    id: DocId,
+    parentId: DocId | null,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    try {
+      this.db.run("BEGIN IMMEDIATE");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+    try {
+      const updateResult = this.updateDocSync(id, { parent_id: parentId, updated_at: audit.timestamp });
+      if (!updateResult.ok) {
+        this.db.run("ROLLBACK");
+        return updateResult;
+      }
+      if (parentId === null) {
+        this.db.prepare("DELETE FROM links WHERE from_id = ? AND link_type = 'parent'").run(id);
+      }
+      const auditResult = this.appendAuditEntrySync(audit);
+      if (!auditResult.ok) {
+        this.db.run("ROLLBACK");
+        return auditResult;
+      }
+      this.db.run("COMMIT");
+      return updateResult;
+    } catch (e) {
+      try {
+        this.db.run("ROLLBACK");
+      } catch {
+        // reason: same as addLinkWithProvenance — ROLLBACK throws only when the transaction is already gone.
+      }
+      return wrapStoreError(e);
+    }
+  }
+
+  /**
    * Detect whether adding a parent link from_id → to_id would create a cycle.
    * Delegates to {@link detectParentCycleViaAncestry} (store-shared.ts) for the
    * walk/depth-cap/self-link logic; this store's per-hop lookup resolves each

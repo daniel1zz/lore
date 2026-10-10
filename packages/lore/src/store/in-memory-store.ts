@@ -890,6 +890,33 @@ export class InMemoryStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.setDocParentWithProvenance — manual undo of the doc/link steps when the audit
+   * append fails (see this file's "Provenance-atomic composite writes" header).
+   */
+  async setDocParentWithProvenance(
+    id: DocId,
+    parentId: DocId | null,
+    audit: AuditEntry,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const before = this.docs.get(id);
+    const linksBefore = this.links;
+    const updateResult = await this.update(id, { parent_id: parentId, updated_at: audit.timestamp });
+    if (!updateResult.ok) return updateResult;
+    if (parentId === null) {
+      this.links = this.links.filter((l) => !(l.from_id === id && l.link_type === "parent"));
+    }
+    const chainLength = this.auditChain.length;
+    const auditResult = await this.appendAuditEntry(audit);
+    if (!auditResult.ok) {
+      this.restoreDocSnapshot(id, before);
+      this.links = linksBefore;
+      this.auditChain.length = chainLength;
+      return auditResult;
+    }
+    return updateResult;
+  }
+
+  /**
    * Detect whether adding a parent link from_id → to_id would create a cycle.
    * Mirrors SQLiteStore.detectParentCycle — iterative walk up the parent chain.
    * A self-link (from_id === to_id) is always a cycle.
