@@ -87,6 +87,7 @@ import {
 // no lazy-import indirection is needed here (contrast the MCP tools.ts precedent,
 // which DOES need one because that file is NOT already bun-only).
 import { buildReportIssueHint } from "./report-issue-hint.js";
+import { setProcessAuditSurface } from "../../store/audit-surface.js";
 import { resolveFeedbackUpstreamCfg } from "./report-issue-wiring.js";
 
 /**
@@ -475,6 +476,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // for the entire CLI invocation. MCP sets "mcp" in adapters/mcp/index.ts; HTTP
   // resolves per-request in ActorContext — see SPEC-024 §9.2.
   app.callerSurface = detectCliSurface();
+  setProcessAuditSurface(app.callerSurface);
 
   // spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5 — the
   // foreign-corpus-write guard's ambient context, resolved ONCE here (neither

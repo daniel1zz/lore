@@ -63,6 +63,7 @@ import {
   buildNonLiveRuleRefusal,
   computeAuditEntryHash,
 } from "./store-shared.js";
+import { stampAuditSurface } from "./audit-surface.js";
 import type { RuleIdPrefix } from "@lore/core";
 import { deriveAcCites, deriveRuleDepends, listedRuleLifecycle } from "./index-rows.js";
 
@@ -1077,7 +1078,8 @@ export class InMemoryStore implements StoreInterface {
    * which need an explicit transaction to guard against a concurrent
    * PROCESS — there is no real concurrency window here for the chain to fork.
    */
-  async appendAuditEntry(entry: AuditEntry): Promise<Result<void, LoreError>> {
+  async appendAuditEntry(rawEntry: AuditEntry): Promise<Result<void, LoreError>> {
+    const entry = stampAuditSurface(rawEntry);
     const head = this.auditChain[this.auditChain.length - 1];
     const prevHash = head?.entry_hash ?? "";
     const entryHash = computeAuditEntryHash(entry, prevHash);

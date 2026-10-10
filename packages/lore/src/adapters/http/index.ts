@@ -18,6 +18,23 @@ import { createDashboardHandler, type DashboardServingConfig } from "./static-se
 // contract (`../../mount/types.js`, T3), never constructs a registry itself. The production
 // registry is built once (`lore dashboard`, T8 deliverable 3) and injected via `HttpConfig`.
 import type { MountEntry, MountRegistry } from "../../mount/types.js";
+import { runWithAuditSurface } from "../../store/audit-surface.js";
+
+/**
+ * Run an authenticated request's route dispatch with its audit surface declared
+ * (AC-BLC-1): `http_cookie` vs `http_token` is per-REQUEST, so it is carried by
+ * AsyncLocalStorage, not process state. A missing `callerSurface` on an
+ * authenticated actor is a wiring bug - fail loud, never default.
+ */
+function dispatchWithAuditSurface(
+  actor: { readonly callerSurface?: "http_cookie" | "http_token" },
+  dispatch: () => Promise<Response | null>,
+): Promise<Response | null> {
+  if (actor.callerSurface === undefined) {
+    throw new Error("authenticated actor has no callerSurface - cannot attribute the audit surface");
+  }
+  return runWithAuditSurface(actor.callerSurface, dispatch);
+}
 
 export interface HttpConfig {
   port?: number;
@@ -213,7 +230,10 @@ async function dispatchProjectRequest(
     const strippedUrl = new URL(url.toString());
     strippedUrl.pathname = rest;
 
-    const response = await handleApiRoute(req, strippedUrl, entry.app, actor, getMachineAuth, allowedOrigins);
+    const mountedApp = entry.app;
+    const response = await dispatchWithAuditSurface(actor, () =>
+      handleApiRoute(req, strippedUrl, mountedApp, actor, getMachineAuth, allowedOrigins),
+    );
     if (response === null) {
       return jsonError(
         { code: "NOT_FOUND", message: `Route not found: ${req.method} ${strippedUrl.pathname}` },
@@ -383,7 +403,9 @@ export function startHttpServer(app: App, config: HttpConfig = {}): ReturnType<t
           );
         }
 
-        const response = await handleApiRoute(req, url, app, actor, getMachineAuth, allowedOrigins);
+        const response = await dispatchWithAuditSurface(actor, () =>
+          handleApiRoute(req, url, app, actor, getMachineAuth, allowedOrigins),
+        );
 
         if (response === null) {
           return applyCorsOrigin(

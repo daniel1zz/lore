@@ -10,6 +10,7 @@ import type { App } from "../../app.js";
 import type { LoreConfig } from "@lore/core";
 import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
+import { setProcessAuditSurface } from "../../store/audit-surface.js";
 
 /**
  * Start the MCP server in stdio mode.
@@ -34,6 +35,7 @@ export async function startMcpServer(app: App, getConfig?: () => LoreConfig | un
   // the env var before the handlers read it. Setting the in-process flag here (before
   // registerTools) guarantees all tool handlers see callerSurface="mcp" at call time.
   app.callerSurface = "mcp";
+  setProcessAuditSurface("mcp");
 
   const server = new McpServer({
     name: "lore",
