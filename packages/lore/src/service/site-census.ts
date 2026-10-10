@@ -56,12 +56,13 @@
  *     made from such a symbol is plumbing too and is not recorded.
  * Side-effect class: IO (reads source files via the compiler host); no writes.
  *
- * `typescript` is a devDependency: it is loaded lazily with a non-literal specifier so the
- * compiled binary does not embed it, and its absence is a loud {@link SiteCensusError}.
+ * `typescript` is loaded lazily through a literal `require`: `bun build --compile` embeds it (evaluated only
+ * when a census verb first runs, so no other command pays for it), and a load failure is a loud
+ * {@link SiteCensusError}.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { createRequire, isBuiltin } from "node:module";
+import { isBuiltin } from "node:module";
 import path from "node:path";
 import type * as TS from "typescript";
 import { NON_BUSINESS_SYMBOLS } from "./site-census-nonbusiness.js";
@@ -139,9 +140,10 @@ let cachedTs: typeof TS | undefined;
 
 function loadTypeScript(): typeof TS {
   if (cachedTs !== undefined) return cachedTs;
-  const specifier = "typescript"; // reason: non-literal so `bun build --compile` does not embed the compiler.
   try {
-    cachedTs = createRequire(import.meta.url)(specifier) as typeof TS;
+    // reason: a LITERAL specifier on purpose — `bun build --compile` then embeds the compiler as a lazily
+    // evaluated CommonJS module (issue #58), so the compiled binary needs no `typescript` on disk.
+    cachedTs = require("typescript") as typeof TS;
   } catch (cause) {
     throw new SiteCensusError("typescript-unavailable", { cause: String(cause) });
   }
