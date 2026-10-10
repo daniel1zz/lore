@@ -204,7 +204,7 @@ Merge all action items from subagents, deduplicate, and rank by:
 |-------------|-------------|---------|
 | Uncovered scenario / underserved user segment | **Opportunity candidate** (a need, not a feature) | `/lore-product opportunity` — feeds Level 2 of the OST |
 | Missing capability vs competitors | Verify first — competitor claims in a review are E6 unless sourced | `lore-product-benchmark` to confirm, then opportunity |
-| Positioning / messaging gap | PRD outline section update | `lore outline set <prd> --section positioning ...` |
+| Positioning / messaging gap | PRD strategy update (why / for whom) | `lore set <prd> --content-file ...` (small, reviewed edit; behaviour goes to the baseline tree via `lore rule add`) |
 | Contradiction between stated strategy and shipped product | **ADR** — one of the two must change | `lore create adr` |
 | Assumption the review proved wrong | Invalidate the doc that asserted it | `lore invalidate <doc> --superseded-by <report> --reason "..."` |
 | Confirmed defect / UX breakage | Task on the active plan | `lore create task --anchor <path>` |

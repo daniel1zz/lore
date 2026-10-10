@@ -202,17 +202,15 @@ lore-product-benchmark → ideation → discovery → opportunity → validate �
 | `lore-product-lens` | Downstream audit — 6-dimension review of a built/in-flight product; its findings re-enter as opportunities |
 | `lore-product-to-prd` | Shortcut — synthesizes an existing conversation into a PRD + issue tracker entries. ⛔ Bypasses this chain by construction, so its output inherits `⚠️ unvalidated` on every requirement |
 
-## PRD Update Flow (SPEC-080 — outline authoring, product round)
+## PRD Update Flow (product round)
 
-Updating the living root PRD is `prd` mode ("PRD UPDATE" in `references/mode-prd.md`) — it is NEVER a wholesale `lore set` content edit. Since SPEC-080, the PRD body is a rendered projection of `extra.outline[]`; hand-editing the body section-by-section is retired.
+The PRD keeps strategy only (why, for whom, non-goals). What the product does NOW lives in the baseline tree (business) and the architecture tree (technical) — see the `lore-baseline` skill. The outline write verbs (`lore outline set|rm|exempt`) are retired and refuse with exit 4; `lore outline list` stays read-only for existing entries.
 
-1. **Domain detail first** — the full narrative lives in a linked spec, not in the PRD body:
-   - New domain → `lore create spec --kind domain-overview --parent <prd>` (full review lifecycle: draft → in-review → approved; fast-track disallowed for this kind).
-   - Existing domain → `lore set <domain-doc>` (normal CAS update, targeting the domain spec, never the PRD body).
-2. **Bounded outline entry** — `lore outline set <prd> --section <key> --title … --direction … --decision-pointers <adr-slugs> --constraints … --links <domain-doc-slug>:detail …` records the summary + the `rel="detail"` link back to the domain doc. This is the sole dedicated writer for `prd.extra.outline[]`; a direct `lore set` patch touching `extra.outline` is rejected (VALIDATION_ERROR naming `lore outline`).
-3. **Landing-spec chain unchanged** — feature/tech/design specs still parent to the PRD and flow into plan/task exactly as before.
+1. **Product behaviour** → a baseline branch/leaf, never the PRD: `lore baseline add <parent> --node branch|leaf ...`, then `lore rule add <leaf> --statement ... --confidence ... --enforced-by ... --example ...`.
+2. **Product requirements** (`R-##`) → declare with `lore requirement add`; once a baseline rule states the behaviour, `lore requirement migrate <prd> <R-id> <BR-n>` — coverage then comes from criteria citing that rule.
+3. **Landing-spec chain unchanged** — feature/tech/design specs parent to the PRD (until the spec parent contract moves) and their criteria cite the rules they implement (`lore ac add ... --cite BR-n`).
 
-⛔ **Never edit the root PRD body wholesale** via `lore set <prd> --content …` — that clobbers the rendered outline projection and reintroduces the 100KB-append-per-round failure mode SPEC-080 retired. Detail belongs in the domain doc; the PRD carries only the bounded outline entry + links.
+⛔ **Never edit the root PRD body wholesale** via `lore set <prd> --content …` — strategy edits are small and reviewed; behaviour belongs in the baseline tree.
 
 ## Exit Criteria (all modes)
 

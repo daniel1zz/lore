@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "8c0b07ae40f4cae5dfb0a9d931d5226cd200200b4708a147565953123033a726",
+  tree_digest: "007b3e1732cbd980f32df50d15587f2063be42a7705d91d1b66811958430e6e0",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "e7b1610edfb25cae9d0bfcc3ffe6bcdf62940c1c37e8a5528508ea0a057429e1" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "fa900b3d95d996ba73a46dd6d7484f7d37ee945d6d51e1588c49e7cbae88c7aa" },
@@ -227,7 +227,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-plan/references/workflow-examples.md", kind: "skill", ownership: "managed", sha256: "dd8977bd84394f2d817ecc52a6fb7c43dbf5a22e463a1958f4135dff875d2dcb" },
   { path: "skills/lore-product-benchmark/SKILL.md", kind: "skill", ownership: "managed", sha256: "ae3757990dfc2aedb66bc62d01512844cdb91bc269839e41fa228540f1d7dd95" },
   { path: "skills/lore-product-benchmark/references/example-feature-matrix.md", kind: "skill", ownership: "managed", sha256: "fe6174eff82d8227a9f5d14dc9f87f6e0ad37aa3b7248a849022307c1c2f978a" },
-  { path: "skills/lore-product-lens/SKILL.md", kind: "skill", ownership: "managed", sha256: "f194dfad3935c156caa0e7ae3819283782e0aedfbd55ad9dd37703b60a1d5774" },
+  { path: "skills/lore-product-lens/SKILL.md", kind: "skill", ownership: "managed", sha256: "b485cb0ae88575bc62987308d3ce680a12c61a59f7be1f76e88e63fd53f7f834" },
   { path: "skills/lore-product-lens/references/business-lens.md", kind: "skill", ownership: "managed", sha256: "7436d366edafc78c16c357d2d9a2033eaa4a9bd79c043597e0310ac937a46c8e" },
   { path: "skills/lore-product-lens/references/competitive-lens.md", kind: "skill", ownership: "managed", sha256: "0e07f5cdcd12758d5fdf1c8919d879636efcf3bdc1fea34f13f4b670cf088e76" },
   { path: "skills/lore-product-lens/references/feature-lens.md", kind: "skill", ownership: "managed", sha256: "728f08338e8934087e3ad8b7e3dcaf175839831e524660537087ccdeb4b13491" },
@@ -235,7 +235,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-product-lens/references/scenario-lens.md", kind: "skill", ownership: "managed", sha256: "34d7957de041e7625c8bd30846827e57a8819cf0278b980de2ca8722bfc9b20c" },
   { path: "skills/lore-product-lens/references/user-group-lens.md", kind: "skill", ownership: "managed", sha256: "386dde29e4c9fe6baa36987536b47f8afa11e5de106bafa3a3ff05d59ac5c838" },
   { path: "skills/lore-product-to-prd/SKILL.md", kind: "skill", ownership: "managed", sha256: "6c73683ec1bc6934a04d09069d40b9d39375fe762fda32f8d0f65b55fe9b3b02" },
-  { path: "skills/lore-product/SKILL.md", kind: "skill", ownership: "managed", sha256: "316ab0cb8de4ae65c54fcae97d7e2d839d3b4d88a5dcebe2583c6e61a01b124f" },
+  { path: "skills/lore-product/SKILL.md", kind: "skill", ownership: "managed", sha256: "18d8fe923d9c84c7ddd9a09a1e1ba19bff15668c0fefc4846ecf34c618167eea" },
   { path: "skills/lore-product/references/cross-cutting-concerns.md", kind: "skill", ownership: "managed", sha256: "2ce5df794538dae19f9f343c636cb873a35737a88d362aeab6979b6964b788d0" },
   { path: "skills/lore-product/references/example-ost.md", kind: "skill", ownership: "managed", sha256: "260d8b14b8a28e926e51308a6c45c2e769cdceeedd06470f89ebc133f85ef526" },
   { path: "skills/lore-product/references/example-validation-ledger.md", kind: "skill", ownership: "managed", sha256: "cc9b961bab18331aad23480027b47e8a81a09850dafe81e2ebfbde3951e87c67" },
