@@ -150,6 +150,9 @@ export const glossaryEntrySchema = z.object({
 });
 export type GlossaryEntry = z.infer<typeof glossaryEntrySchema>;
 
+/** A node label: non-empty after trimming (BR-613) — the one definition both write paths use. */
+export const baselineLabelSchema = z.string().refine((label) => label.trim() !== "", { message: "label must not be empty" });
+
 /**
  * `extra` of a `baseline` doc.
  * @invariant `rules`, `site_map`, `commands` present only when `node === "leaf"`; `glossary` only on root|branch;
@@ -160,7 +163,7 @@ export const baselineExtraSchema = z
     /** Which tree this node belongs to; ABSENT means business (every pre-existing doc stays valid). */
     tree: baselineTreeSchema.optional(),
     node: baselineNodeSchema,
-    label: z.string().min(1).optional(),
+    label: baselineLabelSchema.optional(),
     rules: z.array(baselineRuleSchema).optional(),
     depends_on: z.array(z.string().min(1)).optional(),
     glossary: z.array(glossaryEntrySchema).optional(),

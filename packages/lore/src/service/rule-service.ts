@@ -46,8 +46,10 @@ import {
   ANY_RULE_ID_PATTERN,
   BASELINE_RULE_ID_PATTERN,
   baselineExtraSchema,
+  baselineLabelSchema,
   baselineNodeSchema,
   baselineRuleSchema,
+  baselineTreeSchema,
   glossaryEntrySchema,
   isLawfulRuleLifecycleTransition,
   isNodeOfTree,
@@ -454,10 +456,16 @@ export class RuleService {
     if (!node.success) {
       return err(validationError("node", `node must be one of ${baselineNodeSchema.options.join("|")} (got '${String(input.node)}')`, input.node));
     }
+    if (input.tree !== undefined) {
+      const tree = baselineTreeSchema.safeParse(input.tree);
+      if (!tree.success) {
+        return err(validationError("tree", `tree must be one of ${baselineTreeSchema.options.join("|")} (got '${String(input.tree)}')`, input.tree));
+      }
+    }
     if (!isNodeOfTree(input.tree, node.data)) {
       return err(validationError("node", `node=${node.data} does not belong to tree=${input.tree ?? "business"}`, input.node));
     }
-    if (input.label.trim() === "") return err(validationError("label", "label must not be empty"));
+    if (!baselineLabelSchema.safeParse(input.label).success) return err(validationError("label", "label must not be empty"));
     const parentDoc = await resolveDoc(this.store, parent);
     if (!parentDoc.ok) return parentDoc;
     const parentNode = parentDoc.value.type === "baseline" ? parentDoc.value.extra["node"] : undefined;
