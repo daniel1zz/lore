@@ -139,6 +139,19 @@ describe("AC-BLC-8: the fidelity judge sees the cited test code", () => {
     expect(ai.prompts).toHaveLength(0);
   });
 
+  it("STATE: with two judges an unseen item reaches neither judge nor the adjudicator and stays not_seen", async () => {
+    const store = await world([`bunx vitest run ${SEEN_PATH}`, `bunx vitest run ${MISSING_PATH}`]);
+    const ai = fakeJudge();
+    const r = await runFidelity({ store, ai, size: 2, seed: 1, judges: 2, exclusions: false, nonce: "N0NCE", repoRoot });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(ai.prompts).toHaveLength(2); // judge A + judge B agree, so no adjudicator
+    for (const prompt of ai.prompts) expect(prompt).not.toContain(MISSING_PATH);
+    expect(r.value.verdicts.map((v) => v.verdict).sort()).toEqual(["faithful", "not_seen"]);
+    expect(r.value.not_seen).toBe(1);
+    expect(r.value.disagreements).toEqual([]);
+  });
+
   it("BOUNDARY: a file over the cap is cut with a counted truncation note", async () => {
     const store = await world([`bunx vitest run ${BIG_PATH}`]);
     const ai = fakeJudge();

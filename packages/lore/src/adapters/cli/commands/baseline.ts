@@ -294,6 +294,8 @@ function renderFidelityContent(record: FidelityRecord): string {
     `# Baseline fidelity sample (${record.mode}, seed ${String(record.seed)})`,
     "",
     `${headline} (pool ${record.pool}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`,
+    "",
+    `not_seen: ${record.not_seen} (sampled items never judged because a cited test file could not be read; not counted as faithful or wrong)`,
     ...(record.catch_all.length > 0 ? ["", `## Catch-all rules (> ${record.threshold_share * 100}% of citing criteria)`, catchAll] : []),
     "",
     "## Record",
@@ -342,7 +344,7 @@ async function runFidelityCommand(args: Record<string, unknown>): Promise<void> 
     const provider: AIProvider | undefined = registry.value.providers.get(registry.value.active);
     if (provider === undefined) return fail("ai", `active AI provider '${registry.value.active}' is not registered`);
 
-    const result = await runFidelity({ store, ai: provider, size, seed, judges, exclusions: args.exclusions === true });
+    const result = await runFidelity({ store, ai: provider, size, seed, judges, exclusions: args.exclusions === true, repoRoot: process.cwd() });
     if (!result.ok) return reportFidelityFailure(result.error, json);
     const record = result.value;
     const share = record.mode === "exclusions" ? `${((record.wrong_share ?? 0) * 100).toFixed(1)}% wrong` : `${(record.faithful_share * 100).toFixed(1)}% faithful`;
@@ -358,7 +360,11 @@ async function runFidelityCommand(args: Record<string, unknown>): Promise<void> 
       return;
     }
     console.log(`Stored ${created.value.slug}: ${share} of ${record.size} sampled (pool ${record.pool}, seed ${String(record.seed)}, ${record.judges} judge(s), ${record.disagreements.length} disagreement(s)).`);
-    for (const v of record.verdicts) console.log(`  ${v.n}. ${v.verdict === "faithful" ? "ok " : "BAD"} ${v.key} - ${v.reason}`);
+    console.log(`not_seen: ${record.not_seen}`);
+    for (const v of record.verdicts) {
+      if (v.verdict === "not_seen") console.log(`  ${v.n}. NOT SEEN ${(v.unseen_paths ?? []).join(", ")} - ${v.key} - ${v.reason}`);
+      else console.log(`  ${v.n}. ${v.verdict === "faithful" ? "ok " : "BAD"} ${v.key} - ${v.reason}`);
+    }
     for (const c of record.catch_all) console.log(`  catch-all ${c.rule_id}: cited by ${c.citing_criteria.length} criteria`);
   } finally {
     store.close();
