@@ -692,6 +692,7 @@ describe("OutlineService.resolve", () => {
           store.updateWithProvenance(id, patch, opts, version, audit),
         softDeleteWithProvenance: (id, version, audit) => store.softDeleteWithProvenance(id, version, audit),
         addLink: (link) => store.addLink(link),
+        addLinkWithProvenance: (link, audit) => store.addLinkWithProvenance(link, audit),
         removeLink: (from, to, type) => store.removeLink(from, to, type),
         findLinks: (id, dir) => store.findLinks(id, dir),
         // reason: SPEC-025 §3 D7 — new required StoreInterface method; mechanical

@@ -791,6 +791,29 @@ export interface StoreInterface {
    */
   addLink(link: LinkRecord): Promise<Result<LinkRecord, LoreError>>;
 
+  /**
+   * Atomically add a directed link, apply the link's `docs.parent_id` side effect, and append its
+   * {@link AuditEntry} — all-or-none (#123 / debt AD-13; `CorpusService._linkImpl`'s write).
+   *
+   * Replaces the pre-existing three-independent-`await` sequence (`addLink` → `update` →
+   * `appendAuditEntry`): a failure on step 2 or 3 left the link row (and `parent_id`) persisted while
+   * the command reported an error. On ANY failure nothing is observable afterward — the link table,
+   * the from-doc's `parent_id`/`updated_at` and the audit log are exactly as before, and the SAME error
+   * the individual writes return comes back (`LINK_CYCLE`, `DUPLICATE_LINK`, `DOC_NOT_FOUND`,
+   * `STORE_ERROR`) — never a new error shape.
+   *
+   * For `link_type === "parent"` the from-doc's `parent_id` becomes `link.to_id` and its `updated_at`
+   * becomes `link.created_at` (the same patch the service wrote itself before); for every other link
+   * type only the link row and the audit entry are written. A link is audit-only — no `versions` row.
+   * {@link addLink} stays independently callable (unchanged contract) for `TreeCheckService`'s
+   * reconciliation.
+   *
+   * @param link - The link to add (same contract as {@link addLink})
+   * @param audit - The `action: "link"` audit entry (same contract as {@link appendAuditEntry})
+   * @returns `ok(link)` on success
+   */
+  addLinkWithProvenance(link: LinkRecord, audit: AuditEntry): Promise<Result<LinkRecord, LoreError>>;
+
   /** Remove a specific directed link by composite key. */
   removeLink(
     fromId: DocId,

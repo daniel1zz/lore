@@ -847,6 +847,49 @@ export class InMemoryStore implements StoreInterface {
   }
 
   /**
+   * @see StoreInterface.addLinkWithProvenance — manual undo of every applied step when a later one
+   * fails (see this file's "Provenance-atomic composite writes" header). Calls through `this.<method>`
+   * so a subclass double that fails `update` / `appendAuditEntry` is honored.
+   */
+  async addLinkWithProvenance(
+    link: LinkRecord,
+    audit: AuditEntry,
+  ): Promise<Result<LinkRecord, LoreError>> {
+    const addResult = await this.addLink(link);
+    if (!addResult.ok) return addResult;
+
+    const undoLink = (): void => {
+      this.links = this.links.filter(
+        (l) =>
+          !(l.from_id === link.from_id && l.to_id === link.to_id && l.link_type === link.link_type),
+      );
+    };
+
+    const before = this.docs.get(link.from_id);
+    if (link.link_type === "parent") {
+      const updateResult = await this.update(link.from_id, {
+        parent_id: link.to_id,
+        updated_at: link.created_at,
+      });
+      if (!updateResult.ok) {
+        undoLink();
+        return updateResult;
+      }
+    }
+
+    const chainLength = this.auditChain.length;
+    const auditResult = await this.appendAuditEntry(audit);
+    if (!auditResult.ok) {
+      undoLink();
+      this.restoreDocSnapshot(link.from_id, before);
+      this.auditChain.length = chainLength;
+      return auditResult;
+    }
+
+    return ok(link);
+  }
+
+  /**
    * Detect whether adding a parent link from_id → to_id would create a cycle.
    * Mirrors SQLiteStore.detectParentCycle — iterative walk up the parent chain.
    * A self-link (from_id === to_id) is always a cycle.

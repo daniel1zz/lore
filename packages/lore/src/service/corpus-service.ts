@@ -4530,25 +4530,16 @@ export class CorpusService {
       created_by: resolvedActor,
     };
 
-    const addResult = await this.store.addLink(linkRecord);
-    if (!addResult.ok) return addResult;
-
-    // For parent links, update docs.parent_id on the from doc
-    if (type === "parent") {
-      const updateResult = await this.store.update(fromResult.value, {
-        parent_id: toResult.value,
-        updated_at: now,
-      });
-      if (!updateResult.ok) return updateResult;
-    }
-
+    // #123 / AD-13 — the link row, (for type=parent) the from doc's parent_id, and the audit entry
+    // commit or roll back TOGETHER in one store transaction; a failure leaves no partial state.
+    //
     // SPEC-079 G1 — relationship provenance: one audit entry per successful
     // link(), audit-only (no versions row — a link is not a doc-content
     // snapshot, so it deliberately joins no VERSION_ACTION_AUDIT_FAMILY member,
     // audit-service.ts). session_id follows the pre-existing doc-id-valued
     // convention (unchanged by this spec, out of scope) — keyed on the FROM doc,
     // same as doc_id.
-    const auditResult = await this.store.appendAuditEntry({
+    return this.store.addLinkWithProvenance(linkRecord, {
       timestamp: now,
       actor: resolvedActor,
       session_id: fromResult.value,
@@ -4556,9 +4547,6 @@ export class CorpusService {
       doc_id: fromResult.value,
       details: { to_id: toResult.value, link_type: type },
     });
-    if (!auditResult.ok) return auditResult;
-
-    return ok(addResult.value);
   }
 
   // ── Unlink ───────────────────────────────────────────────────────────────
