@@ -38,6 +38,9 @@ const EXPECTED_FILES = [
   "subagent-context.mjs",
   "subagent-stop-commit-guard.mjs",
   "claude-md-guard.sh",
+  // Run identity slice 1 (BR-1044): attribute a fresh install's first write to a run.
+  "run-register.mjs",
+  "pre-tool-harness-run.mjs",
 ];
 
 describe("HAPPY: buildHookSettingsEntries", () => {
@@ -84,14 +87,14 @@ describe("HAPPY: buildHookSettingsEntries", () => {
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 13 core-governance-and-security hook files", () => {
+  it("declares exactly the 15 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 20 entries (13 hooks; per-matcher expansion for the 4 gate hooks and the 2 session-start-fragments registrations)", () => {
-    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start-resume: 1, session-start-fragments: 2 (startup/resume + compact), session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1 = 20
-    expect(HOOK_REGISTRATIONS).toHaveLength(20);
+  it("expands to exactly 24 entries (15 hooks; per-matcher expansion for the 4 gate hooks and the 2 session-start-fragments registrations)", () => {
+    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start-resume: 1, session-start-fragments: 2 (startup/resume + compact), session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*) = 24
+    expect(HOOK_REGISTRATIONS).toHaveLength(24);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {
