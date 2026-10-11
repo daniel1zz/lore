@@ -208,7 +208,7 @@ import { resolveCiteGateRaw } from "@lore/core";
 import { resolveCiteGateFor } from "../../../service/ac-write-chokepoint.js";
 import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
 import { decideAcCiteStatus, ENFORCE_REFUSES_NOTHING_WARNING, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
-import { AttributionReport, type AttributionShare } from "../../../service/attribution-report.js";
+import { AttributionReport, type AttributionShare, type IdentitySourceCounts, type OrphanedDirtySummary } from "../../../service/attribution-report.js";
 import type { AcCiteStatus } from "../../../service/ac-cite-status.js";
 import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
 import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
@@ -1795,6 +1795,8 @@ export default defineCommand({
       // neither prints exactly what slice 1 printed), so it stays null when neither holds.
       let acCiteStatus: AcCiteStatus | null = null;
       let attributionShare: AttributionShare;
+      let identitySources: IdentitySourceCounts;
+      let orphanedDirty: OrphanedDirtySummary;
       let specCitationCensus: SpecCitationCensus | null = null;
       try {
         const repoRoot = resolveGitRoot(process.cwd());
@@ -1820,6 +1822,23 @@ export default defineCommand({
           return;
         }
         attributionShare = shareResult.value;
+
+        // Scope 8 — writes in the window per identity source, and the claims `lore run end` kept for dirty worktrees.
+        const attributionReport = new AttributionReport(baselineStore);
+        const sourcesResult = await attributionReport.identitySources(ATTRIBUTION_WINDOW_DAYS, () => new Date());
+        if (!sourcesResult.ok) {
+          process.stderr.write(formatError(sourcesResult.error) + "\n");
+          process.exitCode = exitCode(sourcesResult.error);
+          return;
+        }
+        identitySources = sourcesResult.value;
+        const orphanedResult = await attributionReport.orphanedDirty(() => new Date());
+        if (!orphanedResult.ok) {
+          process.stderr.write(formatError(orphanedResult.error) + "\n");
+          process.exitCode = exitCode(orphanedResult.error);
+          return;
+        }
+        orphanedDirty = orphanedResult.value;
 
         const censusBaseline = await baselineStore.findMany({ type: "baseline" });
         if (!censusBaseline.ok) {
@@ -1889,6 +1908,8 @@ export default defineCommand({
                 // "absent" as "this binary is fine".
                 binary_provenance: provenanceOrNull(embeddedProvenance),
                 harness_run_attribution: attributionShare,
+                identity_sources: identitySources,
+                orphaned_dirty: orphanedDirty,
                 ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
                 ...(acCiteStatus !== null ? { ac_cite: acCiteStatus } : {}),
                 ...(specCitationCensus !== null ? specCitationCensus : {}),
@@ -2019,6 +2040,14 @@ export default defineCommand({
       console.log(
         `Attribution (last ${attributionShare.window_days} days): ${attributionShare.attested} of ${attributionShare.total} ` +
           `claims/evidence/handoffs carry an attested run (share ${attributionShare.share})`,
+      );
+      console.log(
+        `Identity sources (last ${identitySources.window_days} days): run ${identitySources.run}, session ${identitySources.session}, ` +
+          `worktree ${identitySources.worktree}, os ${identitySources.os}, other ${identitySources.other}`,
+      );
+      console.log(
+        `Orphaned-dirty claims: ${orphanedDirty.count}` +
+          (orphanedDirty.oldest_age_minutes === null ? "" : ` (oldest ${orphanedDirty.oldest_age_minutes} min)`),
       );
 
       // BR-670 / AC-FIP-4 — rule totals over BOTH trees, one line, only when the baseline block exists
