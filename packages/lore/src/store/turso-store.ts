@@ -40,6 +40,7 @@ import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
+import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import type { RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
@@ -54,6 +55,8 @@ import type {
   OrdinalDocType,
   ReviewJudgment,
   ReviewJudgmentKind,
+  RunId,
+  RunRecord,
   Slug,
   VersionRecord,
 } from "@lore/core";
@@ -80,6 +83,7 @@ import type {
   AcExemptionRow,
   AcExemptionCap,
   StoreFilters,
+  AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
   TraceEventInput,
@@ -117,6 +121,12 @@ import {
   type JudgmentRow,
   type LinkRow,
   type VersionRow,
+  INSERT_RUN_SQL,
+  type RunRow,
+  countAttributedWritesSql,
+  emptyKindsError,
+  rowToRunRecord,
+  runRecordToParams,
   buildAcExemptionAlreadyActiveError,
   buildAcExemptionCapError,
   buildNonLiveRuleRefusal,
@@ -357,6 +367,7 @@ function libsqlRowToVersionRow(row: Row): VersionRow {
     created_by: rowStr(row, "created_by"),
     change_summary: rowStrOrNull(row, "change_summary"),
     slug: rowStrOrNull(row, "slug"),
+    harness_run: rowStrOrNull(row, "harness_run"),
   };
 }
 
@@ -368,6 +379,7 @@ function libsqlRowToAuditRow(row: Row): AuditRow {
     action: rowStr(row, "action"),
     doc_id: rowStrOrNull(row, "doc_id"),
     details: rowStr(row, "details") || "{}",
+    harness_run: rowStrOrNull(row, "harness_run"),
   };
 }
 
@@ -684,6 +696,17 @@ export class TursoStore implements StoreInterface {
         // reason: migration-015 (rule_registry prefix + UNIQUE(prefix, n), triggers re-created) is one
         // BEGIN/COMMIT string rebuilt via rule_registry_new — `executeMultiple`, same as 012-014.
         await this.client.executeMultiple(MIGRATION_015_SQL);
+      }
+
+      if (currentVersion < 16) {
+        // reason: migration-016 is two-phase (see migration-016.ts's module JSDoc): the nullable
+        // `harness_run` columns are added only where `PRAGMA table_info` lacks them, then one
+        // BEGIN/COMMIT string creates `runs` and bumps user_version — same SQL block as SQLiteStore.
+        for (const { table, column, ddl } of MIGRATION_016_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_016_SQL);
       }
     })();
 
@@ -1456,8 +1479,8 @@ export class TursoStore implements StoreInterface {
     const entryHash = computeAuditEntryHash(entry, prevHash);
     await tx.execute({
       sql: `INSERT INTO audit
-             (timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash, harness_run)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         entry.timestamp,
         entry.actor,
@@ -1467,6 +1490,7 @@ export class TursoStore implements StoreInterface {
         JSON.stringify(entry.details ?? {}),
         prevHash,
         entryHash,
+        entry.harness_run ?? null,
       ] as InValue[],
     });
   }
@@ -1533,8 +1557,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -1547,6 +1571,7 @@ export class TursoStore implements StoreInterface {
           version.created_by,
           version.change_summary ?? null,
           version.slug ?? null,
+          version.harness_run ?? null,
         ] as InValue[],
       });
 
@@ -1664,8 +1689,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -1678,6 +1703,7 @@ export class TursoStore implements StoreInterface {
           version.created_by,
           version.change_summary ?? null,
           version.slug ?? null,
+          version.harness_run ?? null,
         ] as InValue[],
       });
 
@@ -1841,8 +1867,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -1855,6 +1881,7 @@ export class TursoStore implements StoreInterface {
           version.created_by,
           version.change_summary ?? null,
           version.slug ?? null,
+          version.harness_run ?? null,
         ] as InValue[],
       });
 
@@ -1907,8 +1934,8 @@ export class TursoStore implements StoreInterface {
       await tx.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -1921,6 +1948,7 @@ export class TursoStore implements StoreInterface {
           version.created_by,
           version.change_summary ?? null,
           version.slug ?? null,
+          version.harness_run ?? null,
         ] as InValue[],
       });
 
@@ -2346,8 +2374,8 @@ export class TursoStore implements StoreInterface {
       await this.client.execute({
         sql: `INSERT INTO versions
                (doc_id, version, content, extra, status, title,
-                action, created_at, created_by, change_summary, slug)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                action, created_at, created_by, change_summary, slug, harness_run)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           version.doc_id,
           version.version,
@@ -2360,6 +2388,7 @@ export class TursoStore implements StoreInterface {
           version.created_by,
           version.change_summary ?? null,
           version.slug ?? null,
+          version.harness_run ?? null,
         ] as InValue[],
       });
       return ok(version);
@@ -3112,6 +3141,62 @@ export class TursoStore implements StoreInterface {
         args: [cutoffIso, batchSize],
       });
       return ok(Number(rs.rowsAffected));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Runs (migration-016) ────────────────────────────────────────────────
+
+  async insertRun(run: RunRecord): Promise<Result<void, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: INSERT OR IGNORE makes registration idempotent and first-wins (the id is the PK).
+      await this.client.execute({ sql: INSERT_RUN_SQL, args: runRecordToParams(run) as InValue[] });
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getRun(id: RunId): Promise<Result<RunRecord | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "SELECT * FROM runs WHERE id = ?", args: [id] });
+      const row = rs.rows[0];
+      if (!row) return ok(null);
+      return ok(
+        rowToRunRecord({
+          id: rowStr(row, "id"),
+          kind: rowStr(row, "kind"),
+          harness: rowStr(row, "harness"),
+          session_ref: rowStr(row, "session_ref"),
+          agent_ref: rowStrOrNull(row, "agent_ref"),
+          agent_type: rowStrOrNull(row, "agent_type"),
+          parent_run_id: rowStrOrNull(row, "parent_run_id"),
+          branch: rowStrOrNull(row, "branch"),
+          composition: rowStr(row, "composition"),
+          registered_at: rowStr(row, "registered_at"),
+        } satisfies RunRow),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countAttributedWrites(
+    windowStart: string,
+    kinds: readonly string[],
+  ): Promise<Result<AttributedWriteCount, LoreError>> {
+    if (kinds.length === 0) return emptyKindsError();
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: countAttributedWritesSql(kinds.length),
+        args: [windowStart, ...kinds] as InValue[],
+      });
+      const row = rs.rows[0];
+      return ok({ total: row ? rowNum(row, "total") : 0, attested: row ? rowNum(row, "attested") : 0 });
     } catch (e) {
       return wrapStoreError(e);
     }

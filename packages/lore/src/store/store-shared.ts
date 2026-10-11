@@ -27,6 +27,8 @@ import type {
   ReviewJudgment,
   ReviewJudgmentKind,
   ReviewReason,
+  RunId,
+  RunRecord,
   SearchHit,
   SupersededCandidate,
   VersionRecord,
@@ -42,6 +44,84 @@ import {
 } from "@lore/core";
 
 // ─── Raw DB row types ──────────────────────────────────────────────────────
+
+/** Raw `runs` row (migration-016). `composition` is the JSON-serialised CompositionRecord. */
+export interface RunRow {
+  id: string;
+  kind: string;
+  harness: string;
+  session_ref: string;
+  agent_ref: string | null;
+  agent_type: string | null;
+  parent_run_id: string | null;
+  branch: string | null;
+  composition: string;
+  registered_at: string;
+}
+
+/** `runs` row → {@link RunRecord}. Throws on malformed `composition` JSON (surfaced by the caller as STORE_ERROR). */
+export function rowToRunRecord(row: RunRow): RunRecord {
+  return {
+    id: row.id as RunId,
+    kind: row.kind as RunRecord["kind"],
+    harness: row.harness,
+    sessionRef: row.session_ref,
+    agentRef: row.agent_ref,
+    agentType: row.agent_type,
+    parentRunId: row.parent_run_id as RunId | null,
+    branch: row.branch,
+    composition: JSON.parse(row.composition) as RunRecord["composition"],
+    registeredAt: row.registered_at,
+  };
+}
+
+/** Positional bind values for `INSERT OR IGNORE INTO runs (id, kind, ... registered_at)` (column order of {@link RunRow}). */
+export function runRecordToParams(run: RunRecord): (string | null)[] {
+  return [
+    run.id,
+    run.kind,
+    run.harness,
+    run.sessionRef,
+    run.agentRef,
+    run.agentType,
+    run.parentRunId,
+    run.branch,
+    JSON.stringify(run.composition),
+    run.registeredAt,
+  ];
+}
+
+export const INSERT_RUN_SQL = `INSERT OR IGNORE INTO runs
+  (id, kind, harness, session_ref, agent_ref, agent_type, parent_run_id, branch, composition, registered_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+/**
+ * Drop an explicit `harness_run: null` so InMemoryStore reads back the same shape the SQL stores'
+ * row mappers produce (an unattested / pre-016 row omits the key). Returns its argument, mutated.
+ */
+export function withoutNullHarnessRun<T extends { harness_run?: string | null }>(record: T): T {
+  if (record.harness_run == null) delete record.harness_run;
+  return record;
+}
+
+/** The refusal every store returns for `countAttributedWrites(_, [])` — one definition, three stores. */
+export function emptyKindsError(): Result<never, LoreError> {
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "kinds",
+    message: "countAttributedWrites needs at least one action kind",
+  });
+}
+
+/**
+ * SQL for {@link StoreInterface.countAttributedWrites}: `kinds.length` placeholders after the window start.
+ * Window start is INCLUSIVE; an empty `kinds` list is rejected by the callers before any SQL runs.
+ */
+export function countAttributedWritesSql(kindCount: number): string {
+  const marks = Array.from({ length: kindCount }, () => "?").join(", ");
+  return `SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN harness_run IS NOT NULL THEN 1 ELSE 0 END), 0) AS attested
+          FROM audit WHERE timestamp >= ? AND action IN (${marks})`;
+}
 
 /**
  * Raw row from the `docs` table.
@@ -95,6 +175,8 @@ export interface VersionRow {
   change_summary: string | null;
   /** SPEC-072 D2 — nullable; NULL on legacy pre-migration-007 rows. */
   slug: string | null;
+  /** migration-016 — which harness run vouched for the write; NULL = unattested / pre-016 row. */
+  harness_run: string | null;
 }
 
 export interface AuditRow {
@@ -104,6 +186,8 @@ export interface AuditRow {
   action: string;
   doc_id: string | null;
   details: string;
+  /** migration-016 — which harness run vouched for the write; NULL = unattested / pre-016 row. */
+  harness_run: string | null;
 }
 
 /**
@@ -397,6 +481,8 @@ export function rowToVersionRecord(row: VersionRow): VersionRecord {
     // deliberately slug-less sentinel like the delete version-0 row) never
     // becomes a placeholder string; the key is omitted entirely.
     ...(row.slug !== null ? { slug: row.slug } : {}),
+    // reason: migration-016 — same absence-tolerant shape as `slug`: an unattested / pre-016 row omits the key.
+    ...(row.harness_run != null ? { harness_run: row.harness_run } : {}),
   };
 }
 
@@ -408,6 +494,7 @@ export function rowToAuditEntry(row: AuditRow): AuditEntry {
     action: row.action,
     ...(row.doc_id !== null ? { doc_id: row.doc_id } : {}),
     details: parseJson(row.details, {}),
+    ...(row.harness_run != null ? { harness_run: row.harness_run } : {}),
   };
 }
 

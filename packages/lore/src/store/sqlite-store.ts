@@ -26,6 +26,7 @@ import { MIGRATION_011_SQL } from "./migrations/migration-011.js";
 import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
+import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 // Re-exported here (beside the migration chain it describes) from a
 // bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
@@ -47,6 +48,8 @@ import type {
   OrdinalDocType,
   ReviewJudgment,
   ReviewJudgmentKind,
+  RunId,
+  RunRecord,
   Slug,
   VersionRecord,
 } from "@lore/core";
@@ -76,6 +79,7 @@ import type {
   AcExemptionRow,
   AcExemptionCap,
   StoreFilters,
+  AttributedWriteCount,
   StoreInterface,
   TraceDenyByCheckpoint,
   TraceEventInput,
@@ -96,6 +100,12 @@ import {
   type JudgmentRow,
   type LinkRow,
   type VersionRow,
+  INSERT_RUN_SQL,
+  type RunRow,
+  countAttributedWritesSql,
+  emptyKindsError,
+  rowToRunRecord,
+  runRecordToParams,
   allocateWithBoundedRetry,
   computeAuditEntryHash,
   computeFtsShadowValues,
@@ -564,6 +574,26 @@ export class SQLiteStore implements StoreInterface {
       // re-created) is one BEGIN/COMMIT with no PRAGMA toggles — a failure only needs ROLLBACK.
       try {
         this.db.exec(MIGRATION_015_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 16) {
+      // reason: migration-016 is two-phase (see migration-016.ts's module JSDoc): the nullable
+      // `harness_run` columns are added only where `PRAGMA table_info` lacks them (SQLite has no
+      // ADD COLUMN IF NOT EXISTS), then one BEGIN/COMMIT string creates `runs` and bumps user_version.
+      try {
+        for (const { table, column, ddl } of MIGRATION_016_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_016_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -1704,8 +1734,8 @@ export class SQLiteStore implements StoreInterface {
         .prepare(
           `INSERT INTO versions
              (doc_id, version, content, extra, status, title,
-              action, created_at, created_by, change_summary, slug)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              action, created_at, created_by, change_summary, slug, harness_run)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           version.doc_id,
@@ -1719,6 +1749,7 @@ export class SQLiteStore implements StoreInterface {
           version.created_by,
           version.change_summary ?? null,
           version.slug ?? null,
+          version.harness_run ?? null,
         );
       return ok(version);
     } catch (e) {
@@ -1798,8 +1829,8 @@ export class SQLiteStore implements StoreInterface {
       this.db
         .prepare(
           `INSERT INTO audit
-             (timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (timestamp, actor, session_id, action, doc_id, details, prev_hash, entry_hash, harness_run)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           entry.timestamp,
@@ -1810,6 +1841,7 @@ export class SQLiteStore implements StoreInterface {
           JSON.stringify(entry.details ?? {}),
           prevHash,
           entryHash,
+          entry.harness_run ?? null,
         );
       return ok(undefined);
     } catch (e) {
@@ -2820,6 +2852,42 @@ export class SQLiteStore implements StoreInterface {
         [cutoffIso, batchSize],
       );
       return ok(result.changes);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  // ── Runs (migration-016) ──────────────────────────────────────────────────
+
+  async insertRun(run: RunRecord): Promise<Result<void, LoreError>> {
+    try {
+      // reason: INSERT OR IGNORE makes registration idempotent and first-wins (the id is the PK).
+      this.db.prepare(INSERT_RUN_SQL).run(...runRecordToParams(run));
+      return ok(undefined);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getRun(id: RunId): Promise<Result<RunRecord | null, LoreError>> {
+    try {
+      const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as RunRow | null;
+      return ok(row === null ? null : rowToRunRecord(row));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async countAttributedWrites(
+    windowStart: string,
+    kinds: readonly string[],
+  ): Promise<Result<AttributedWriteCount, LoreError>> {
+    if (kinds.length === 0) return emptyKindsError();
+    try {
+      const row = this.db
+        .prepare(countAttributedWritesSql(kinds.length))
+        .get(windowStart, ...kinds) as { total: number | bigint; attested: number | bigint };
+      return ok({ total: Number(row.total), attested: Number(row.attested) });
     } catch (e) {
       return wrapStoreError(e);
     }
