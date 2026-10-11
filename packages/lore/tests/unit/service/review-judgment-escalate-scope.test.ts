@@ -68,8 +68,7 @@ async function makeApp(opts: { judgmentRequiredTypes?: readonly string[] } = {})
   const enforcer = new GateEnforcer(undefined);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry, undefined, enforcer, undefined, true);
   const judgmentService = new JudgmentService(store, telemetry);
-  const reviewService = new ReviewService(
-    store,
+  const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)),
     undefined,
     { enforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     judgmentService,

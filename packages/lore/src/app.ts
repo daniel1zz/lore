@@ -791,6 +791,7 @@ function buildAppFromSqlite(
     // gateEnforcer resolved-value DI shape every other optional dependency here uses.
     reviewService: new ReviewService(
       store,
+      recordLockService,
       claimTtlMinutes,
       { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
       judgmentService,
@@ -1161,6 +1162,7 @@ function buildAppFromTurso(
     // gateEnforcer resolved-value DI shape every other optional dependency here uses.
     reviewService: new ReviewService(
       store,
+      recordLockService,
       claimTtlMinutes,
       { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
       judgmentService,

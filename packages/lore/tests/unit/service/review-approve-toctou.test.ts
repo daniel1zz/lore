@@ -136,7 +136,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
     const { store, corpusService, enforcer, spec, plan } = await setupApprovedSpecAndDraftPlan();
 
     const racingStore = makeRacingStore(store, plan.id, spec.id);
-    const reviewService = new ReviewService(racingStore, undefined, {
+    const reviewService = new ReviewService(racingStore, new RecordLockService(racingStore, new GateEnforcer(undefined)), undefined, {
       enforcer,
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
     });
@@ -163,7 +163,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
     const { store, corpusService, enforcer, spec, plan } = await setupApprovedSpecAndDraftPlan();
 
     const racingStore = makeRacingStore(store, plan.id, spec.id);
-    const reviewService = new ReviewService(racingStore, undefined, {
+    const reviewService = new ReviewService(racingStore, new RecordLockService(racingStore, new GateEnforcer(undefined)), undefined, {
       enforcer,
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
     });
@@ -190,7 +190,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
   it("matched pair: the SAME setup with no concurrent edit approves normally (no rollback, no extra rows)", async () => {
     const { store, corpusService, enforcer, plan } = await setupApprovedSpecAndDraftPlan();
 
-    const reviewService = new ReviewService(store, undefined, {
+    const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {
       enforcer,
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
     });
@@ -230,7 +230,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
     } as CreateDocInput);
 
     let getPlanBundleCalls = 0;
-    const reviewService = new ReviewService(store, undefined, {
+    const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {
       enforcer,
       getPlanBundle: async (id: string) => {
         getPlanBundleCalls += 1;

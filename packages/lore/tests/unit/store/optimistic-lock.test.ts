@@ -552,7 +552,7 @@ describe("ReviewService.approve — service-dimension CAS (SVC-CAS-02)", () => {
     // When the store rejects due to stale version, approve() must return STALE_VERSION.
     const store = new InMemoryStore();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
-    const reviewService = new ReviewService(store);
+    const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     // Create and leave as draft
     const createResult = await corpusService.create({ type: "prd", title: "Review CAS Test" });

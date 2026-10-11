@@ -84,7 +84,7 @@ async function makeHarness(config?: LoreConfig) {
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
   const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
-  const reviewService = new ReviewService(store, undefined, {
+  const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {
     enforcer,
     getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
   });

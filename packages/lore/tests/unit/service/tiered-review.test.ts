@@ -50,6 +50,7 @@ import type {
   TelemetryEvent,
 } from "@lore/core";
 import { ok } from "@lore/core";
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 
 /**
  * task-t3-hardening-reachable-override-escape-real-ai-provenance — a minimal AIProvider
@@ -136,8 +137,7 @@ async function makeApp(
     opts.ledgerAutoApprove ?? true,
   );
   const judgmentService = new JudgmentService(store, telemetry);
-  const reviewService = new ReviewService(
-    store,
+  const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)),
     undefined,
     { enforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
     judgmentService,

@@ -156,7 +156,7 @@ describe("record-edit gate on CorpusService.set (AC-DR-2)", () => {
       expect(await versionCount(store, retro.id)).toBe(before);
     });
 
-    it("names the sanctioned change paths and never advertises lore reopen (D18)", async () => {
+    it("names the sanctioned change paths and advertises the reopen exit for a spec (D5/D18)", async () => {
       const { store, service } = makeFixture();
       const spec = await approvedSpec(store, service);
 
@@ -166,7 +166,8 @@ describe("record-edit gate on CorpusService.set (AC-DR-2)", () => {
       if (result.ok || result.error.code !== "VALIDATION_ERROR") return;
       expect(result.error.message).toContain("--correction");
       expect(result.error.message).toContain("relates-to");
-      expect(result.error.message).not.toContain("lore reopen");
+      expect(result.error.message).toContain("lore reopen");
+      expect(result.error.message).toContain("when it has no evidence");
     });
 
     it("refuses an edit on an archived plan", async () => {

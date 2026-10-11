@@ -92,7 +92,7 @@ async function makeTestServer(allowedOrigins?: readonly string[]): Promise<TestC
 
   const app: App = {
     corpusService: new CorpusService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
-    reviewService: new ReviewService(docStore),
+    reviewService: new ReviewService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     versionService: new VersionService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     outlineService: new OutlineService(docStore),
     migrationService: new MigrationService(docStore),

@@ -39,7 +39,7 @@ function makeApp(): App {
   const store = new InMemoryStore();
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
-    reviewService: new ReviewService(store),
+    reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
@@ -970,8 +970,9 @@ describe("tool registration completeness", () => {
   // SPEC-072 T5 adds lore_report_issue (33 to 34).
   // baseline slice 1 §C3 adds the 7 baseline write tools (34 to 41): lore_rule_add/_set,
   // lore_baseline_add/_set_label/_depends/_glossary_add/_glossary_rm.
+  // lore_reopen (spec-documents-are-living-or-records D5) brings the total from 44 to 45.
   // baseline slice 2 C6 adds the 3 rule read tools (41 to 44): lore_rule_show/_find/_impact.
-  it("registers all 44 expected tools", () => {
+  it("registers all 45 expected tools", () => {
     const expectedTools = [
       "lore_create",
       "lore_get",
@@ -985,6 +986,7 @@ describe("tool registration completeness", () => {
       "lore_diff",
       "lore_pending",
       "lore_approve",
+      "lore_reopen",
       "lore_schema",
       "lore_context_bundle",
       "lore_batch",
@@ -1023,6 +1025,6 @@ describe("tool registration completeness", () => {
     for (const name of expectedTools) {
       expect(internal._registeredTools[name]).toBeDefined();
     }
-    expect(Object.keys(internal._registeredTools)).toHaveLength(44);
+    expect(Object.keys(internal._registeredTools)).toHaveLength(45);
   });
 });

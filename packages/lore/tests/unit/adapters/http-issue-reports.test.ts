@@ -81,7 +81,7 @@ function makeApp(store: InMemoryStore): App {
     // other unused services below) — the AC-074-3 exclusion this route now
     // implements reads real "reject"/"approve" audit entries, which only
     // ReviewService.reject/approve actually write.
-    reviewService: new ReviewService(store),
+    reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: null as unknown as App["versionService"],
     outlineService: null as unknown as App["outlineService"],
     migrationService: null as unknown as App["migrationService"],

@@ -577,6 +577,14 @@ export const LoreApproveSchema = z.object({
   calibration_note: z.string().optional(),
 });
 
+/** Input schema for lore_reopen (spec-documents-are-living-or-records D5). `reason` is required and non-blank (service-enforced). */
+export const LoreReopenSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
+  id_or_slug: z.string(),
+  reason: z.string(),
+  reviewer: z.string().optional(),
+});
+
 /** Input schema for lore_context_bundle. */
 export const LoreContextBundleSchema = z.object({
   id_or_slug: z.string(),
@@ -2050,6 +2058,21 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
 
     return textContent({ doc: result.value });
   });
+
+  // lore_reopen
+  registerToolWithArgs(
+    server,
+    "lore_reopen",
+    "Reopen an approved spec that has no evidence yet, moving it back to draft so it can be edited (refused when any task holds evidence for it)",
+    LoreReopenSchema,
+    async (args) => {
+      // reason: exactOptionalPropertyTypes - only pass reviewer when defined
+      const opts = args.reviewer !== undefined ? { reviewer: args.reviewer } : {};
+      const result = await reviewService.reopen(args.id_or_slug, args.reason, opts);
+      if (!result.ok) return errorContent(result.error);
+      return textContent({ doc: result.value });
+    },
+  );
 
   // lore_schema — no input parameters; 3-arg form (correct for 0-arg tools)
   // reason: static info tool, no arguments needed
