@@ -594,11 +594,14 @@ describe("AC-PHASEVER-4 — lore audit --verify stays clean across phase add, re
     }
   });
 
-  it("BOUNDARY: each phase write moves data.chain.checked by EXACTLY 1 audit entry, never merely '>= 1'", () => {
+  it("BOUNDARY: each phase write moves data.chain.checked by EXACTLY 2 audit entries — its own update row plus the record-edit gate_passed trace — never merely '>= 2'", () => {
+    // reason: spec-documents-are-living-or-records D16 — a phase write on an open plan now passes the
+    // record-edit gate, and the enforcer leaves one `gate_passed` audit row for that evaluation (AC-FR-8/D7)
+    // next to the write's own `update` row. Exactly two, per write: an unpaired extra row would show here.
     expect(steps.map((s) => s.verify.chain.checked)).toEqual([
-      baseline.chain.checked + 1,
       baseline.chain.checked + 2,
-      baseline.chain.checked + 3,
+      baseline.chain.checked + 4,
+      baseline.chain.checked + 6,
     ]);
   });
 
