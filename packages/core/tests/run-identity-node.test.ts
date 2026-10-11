@@ -7,12 +7,11 @@
  * spec gap): returns `{ identity: InvocationIdentity, argv: string[] }` where
  * `argv` is the input with `--harness-run <id>` removed.
  *
- * Name precedence (D11): --by > $LORE_ACTOR > session > working copy > OS user.
+ * Name precedence (D11, BR-1055): --by > session > working copy > OS user; $LORE_ACTOR is never read.
  * `claimed` is ALWAYS a non-empty string; harnessRun comes ONLY from --harness-run.
  *
  * Every test injects argv/env/warn explicitly; the real process env is never read.
- * The once-per-process warning latch is module state, so each test gets a fresh
- * module instance via vi.resetModules() to stay order-independent.
+ * Each test gets a fresh module instance via vi.resetModules() to stay order-independent.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,10 +80,12 @@ describe("resolveInvocationIdentity", () => {
       expect(out.identity.claimed).toBe("agent:other");
     });
 
-    it("LORE_ACTOR=Y gives claimed Y with source env", async () => {
+    it("LORE_ACTOR=Y is ignored: claimed is not Y and the source is never env", async () => {
       const resolve = await load();
       const out = resolve(["claim", "t"], { LORE_ACTOR: "agent:y" }, vi.fn());
-      expect([out.identity.claimed, out.identity.claimedSource]).toEqual(["agent:y", "env"]);
+      expect(out.identity.claimed).not.toBe("agent:y");
+      expect(out.identity.claimedSource).not.toBe("env");
+      expect(["worktree", "os"]).toContain(out.identity.claimedSource);
     });
 
     it("--by and LORE_ACTOR both set: the flag value wins", async () => {
@@ -107,10 +108,10 @@ describe("resolveInvocationIdentity", () => {
       expect(a.identity.claimed).not.toBe(b.identity.claimed);
     });
 
-    it("LORE_ACTOR beats the session tier", async () => {
+    it("the session tier wins when LORE_ACTOR is also set", async () => {
       const resolve = await load();
       const out = resolve(["x"], { LORE_ACTOR: "agent:y", CLAUDE_CODE_SESSION_ID: "3de02220-aaaa" }, vi.fn());
-      expect([out.identity.claimed, out.identity.claimedSource]).toEqual(["agent:y", "env"]);
+      expect([out.identity.claimed, out.identity.claimedSource]).toEqual(["agent:session-3de02220", "session"]);
     });
 
     it("with nothing supplied, claimed is a non-empty string (never null) from the working-copy or OS tier", async () => {
@@ -154,21 +155,25 @@ describe("resolveInvocationIdentity", () => {
     });
   });
 
-  describe("deprecation warning (D8)", () => {
-    it("three resolutions with LORE_ACTOR set in one process call warn exactly once", async () => {
+  describe("no LORE_ACTOR warning (BR-1055)", () => {
+    it("LORE_ACTOR set across three resolutions emits no warning", async () => {
       const resolve = await load();
       const warn = vi.fn();
       resolve(["a"], { LORE_ACTOR: "agent:y" }, warn);
       resolve(["b"], { LORE_ACTOR: "agent:y" }, warn);
       resolve(["c"], { LORE_ACTOR: "agent:y" }, warn);
-      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
     });
 
-    it("the warning line mentions LORE_ACTOR", async () => {
+    it("LORE_ACTOR set produces no stderr line from the default sink either", async () => {
       const resolve = await load();
-      const warn = vi.fn();
-      resolve(["a"], { LORE_ACTOR: "agent:y" }, warn);
-      expect(String(warn.mock.calls[0]?.[0])).toContain("LORE_ACTOR");
+      const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      try {
+        (resolve as unknown as (a: string[], e: Record<string, string>) => unknown)(["a"], { LORE_ACTOR: "agent:y" });
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it("does not warn when only --by is given", async () => {
@@ -184,16 +189,6 @@ describe("resolveInvocationIdentity", () => {
       resolve(["a"], { CLAUDE_CODE_SESSION_ID: "3de02220-aaaa" }, warn);
       resolve(["a"], {}, warn);
       expect(warn).not.toHaveBeenCalled();
-    });
-
-    it("a fresh process (fresh module) warns again", async () => {
-      const first = await load();
-      const w1 = vi.fn();
-      first(["a"], { LORE_ACTOR: "agent:y" }, w1);
-      const second = await load();
-      const w2 = vi.fn();
-      second(["a"], { LORE_ACTOR: "agent:y" }, w2);
-      expect([w1.mock.calls.length, w2.mock.calls.length]).toEqual([1, 1]);
     });
   });
 });
