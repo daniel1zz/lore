@@ -53,6 +53,8 @@ interface RunResult {
 
 function lore(args: string[], cwd: string, actorEnv: string | null): RunResult {
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDECODE: "1", HOME: cwd };
+  delete env["CLAUDE_CODE_SESSION_ID"];
+  delete env["CLAUDE_SESSION_ID"];
   if (actorEnv === null) delete env["LORE_ACTOR"];
   else env["LORE_ACTOR"] = actorEnv;
   const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env });
