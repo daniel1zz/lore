@@ -2,8 +2,10 @@
  * Actor-resolution precedence chain (SPEC-069 F1 session tier; relocated here
  * verbatim by SPEC-079 G2 for service-layer reuse) — the SAME first-non-empty-
  * wins order every corpus write surface uses to attribute an actor identity:
- * explicit `--by`/`opts.by` > `$LORE_ACTOR` > session tier
- * (`CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID`) > OS username.
+ * explicit `--by`/`opts.by` > session tier
+ * (`CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID`) > OS username. The environment
+ * never supplies a name (BR-1055); the CLI adapter inserts a worktree-derived
+ * tier between session and OS username.
  *
  * Lives under the Node-only `@lore/core/node` subpath (NOT the default
  * browser-safe barrel) because its OS-fallback tier calls `os.userInfo()` —
@@ -27,7 +29,8 @@
  *
  * Public surface:
  *   - ActorSource — which precedence tier won
- *     ("explicit" | "env" | "session" | "os-fallback")
+ *     ("explicit" | "session" | "os-fallback"; "env" is kept in the
+ *     type for dependents but is never produced)
  *   - ResolvedActor — {actor, source}
  *   - resolveActorWithSource(explicit?, env?) — the pure resolution function
  *
@@ -53,10 +56,12 @@ import { sessionActorFromId } from "./session-actor.js";
 
 /**
  * Which resolution tier produced the actor identity {@link resolveActorWithSource}
- * returned — `"explicit"` (`--by`/`opts.by`), `"env"` (`$LORE_ACTOR`),
- * `"session"` (`$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`), or
+ * returned — `"explicit"` (`--by`/`opts.by`), `"session"` (`$CLAUDE_CODE_SESSION_ID`/`$CLAUDE_SESSION_ID`), or
  * `"os-fallback"` (`os.userInfo().username`, the untraceable default).
  */
+// reason: "env" is never produced (BR-1055, spec-run-only-write-identity-and-run-end-claim-release);
+// the member stays only because run-identity-node.ts and issue-front-matter.ts
+// (outside this task's anchors) still reference it.
 export type ActorSource = "explicit" | "env" | "session" | "os-fallback";
 
 /** Result of {@link resolveActorWithSource} — the resolved identity plus which tier won. */
@@ -68,12 +73,12 @@ export interface ResolvedActor {
 /**
  * Pure actor-resolution core shared by every corpus write surface (the CLI's
  * `resolveActor` wrapper, and — since SPEC-079 — `CorpusService`'s own
- * `opts.by` fallback). First non-empty tier wins: explicit > `$LORE_ACTOR` >
- * session tier > OS username. No IO beyond `os.userInfo()`; never writes to
+ * `opts.by` fallback). First non-empty tier wins: explicit > session tier >
+ * OS username. No IO beyond `os.userInfo()`; never writes to
  * stderr (side-effecting advisories are the CALLER's job).
  *
  * @param explicit - Explicit actor value (CLI `--by` / service `opts.by`), if supplied
- * @param env - Environment map to resolve `$LORE_ACTOR`/session-id vars from;
+ * @param env - Environment map to resolve session-id vars from;
  *   defaults to `process.env`. Tests pass a literal object here instead of
  *   mutating `process.env`.
  * @returns `{actor, source}` — `actor` is never empty (OS username is always available)
@@ -84,7 +89,6 @@ export interface ResolvedActor {
  *   // => {actor: "agent:session-3de02220", source: "session"}
  * @example
  *   resolveActorWithSource(undefined) // => {actor: "<OS username>", source: "os-fallback"}
- *   //   (or {source: "env"} when $LORE_ACTOR is set)
  */
 export function resolveActorWithSource(
   explicit?: string,
@@ -92,10 +96,6 @@ export function resolveActorWithSource(
 ): ResolvedActor {
   if (explicit !== undefined && explicit.trim() !== "") {
     return { actor: explicit, source: "explicit" };
-  }
-  const envActor = env["LORE_ACTOR"];
-  if (envActor !== undefined && envActor.trim() !== "") {
-    return { actor: envActor, source: "env" };
   }
   const sessionId = env["CLAUDE_CODE_SESSION_ID"] ?? env["CLAUDE_SESSION_ID"];
   if (sessionId !== undefined && sessionId.trim() !== "") {
