@@ -23,7 +23,7 @@
    ```
    lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual|other> \
      --command "<exact command>" --result <pass|fail> \
-     [--ac <spec-AC-id>] [--output-tail-file <path>] --by $LORE_ACTOR
+     [--ac <spec-AC-id>] [--output-tail-file <path>]
    ```
    - A failing oracle is recorded as `--result fail`, then fixed, then re-recorded — the trail is the point
    - Script-mode spec ACs: prefer `lore verify <plan> --task <task>` — the trusted runner
@@ -32,12 +32,12 @@
      `NEEDS_APPROVAL` otherwise — approve deliberately, don't reflex-flag).
 4. **Release + archive** (all AC pass):
    ```
-   lore release <task> --by $LORE_ACTOR
+   lore release <task>
    lore set <task> --status approved      # draft → approved (fast-track)
    lore set <task> --status archived      # approved → archived = DONE; unblocks dependents
    ```
    Archiving is what makes `lore ready` mark dependent tasks ready — evidence alone does not.
-5. If AC fail and can't be fixed this session: `lore release <task> --by $LORE_ACTOR --reason "AC not met: {detail}"` — the task stays unarchived (still blocking dependents), the reason lands in version history
+5. If AC fail and can't be fixed this session: `lore release <task> --reason "AC not met: {detail}"` — the task stays unarchived (still blocking dependents), the reason lands in version history
 6. **Estimation tracking**: compare actual effort vs. estimate
    - Output: `**[ESTIMATE_ACTUAL]** task-xxx: estimated {S|M|L} actual {S|M|L}`
    - If actual > estimated by ≥1 size → flag for Reference Class Forecasting adjustment on similar remaining tasks
@@ -108,7 +108,7 @@ Carry-forward context is a HANDOFF doc, not an edit to the plan (keeps the appro
 stable; `lore feed session-resume` consumes it next session):
 
 ```
-lore handoff --plan <plan> --by $LORE_ACTOR \
+lore handoff --plan <plan> \
   --file <modified-path> [--file ...] \
   --decision "<judgment>[@<confidence 0-100>]" [--decision ...] \
   --next "<next step>" [--next ...] \

@@ -81,7 +81,7 @@ executing anything (fix mode included):
 | Invalidated feeding source | Author a replacement skill doc (`lore create knowledge ... --supersedes <old>`) or `lore invalidate <old> --undo` if the invalidation was wrong |
 | Orphan doc | `lore link <parent> <orphan> --type=<relates|governs|implements>` per blueprint, then `lore status --check-tree --fix` reconciles parent_id ↔ link table; never delete |
 | Stuck draft | Triage: `lore review <doc>` (AI judgment) then human `lore approve <doc>` / `lore reject <doc>` — doctor NEVER auto-approves |
-| Stale claim lease | `lore release <task> --by <holder> --force --reason "doctor: stale lease"` — ONLY when the lease is computed stale AND no session is actually working (check `sessions[]` first) |
+| Stale claim lease | `lore release <task> --force --reason "doctor: stale lease"` — ONLY when the lease is computed stale AND no session is actually working (check `sessions[]` first) |
 | Task without evidence | Flag to owner; optionally `lore verify <plan> --task <task>` if the spec declares script-mode ACs (attested evidence) |
 
 Deeper staleness sweep (optional, AI spend): `lore review --staleness --limit 5` — bounded

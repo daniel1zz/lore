@@ -1,8 +1,8 @@
-<!-- lore:managed fragment=corpus-workflow-execute hash=6248a242 -->
+<!-- lore:managed fragment=corpus-workflow-execute hash=acf9e945 -->
 ## EXECUTE — claim before you work, evidence over assertion
 
 - `lore ready <plan> --json` to see readiness / sessions / anchor_conflicts, then pick a ready task.
-- `lore claim <task> --by <actor>`. For concurrent worktree dispatch, give every agent a distinct identity (`LORE_ACTOR=agent:<branch-or-slug>`) and have each implementer claim from inside its own worktree (`--worktree` declared explicitly).
+- `lore claim <task>`. For concurrent worktree dispatch, identity is assigned by the agent integration (each run is registered and attested, no export needed) and have each implementer claim from inside its own worktree (`--worktree` declared explicitly).
 - External oracles only (tsc / test / browser, etc.) — never let an LLM self-grade its own work.
 - Shared mutable state must be re-evidenced in the turn you assert it: claims, readiness, sessions, and sibling-plan progress drift under concurrent sessions — an earlier-in-context query result is a snapshot ("as of then"), never current state. Re-query before any progressive-tense claim ("still open", "currently claimed").
 - Never discard lore's own output. `lore set|approve|reject|claim|release|evidence|invalidate|archive` print state transitions and gate preconditions on stdout — most critically, editing an approved doc's content demotes it back to `draft`, which silently freezes every downstream `task-claim` until you re-review and re-approve. Writing `lore set ... >/dev/null 2>&1` for terser logs discards the one signal that predicts the next gate denial, and you will misread the resulting `UPSTREAM_NOT_APPROVED` as a tool defect rather than your own muted warning. Need less noise? Pipe through `| tail -3` — never redirect the stream away.

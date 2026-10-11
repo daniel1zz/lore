@@ -41,22 +41,22 @@ A user-level PreToolUse Bash hook (`~/.claude/hooks/pre-bash-git-safety-gate.mjs
 
 ## Actor Identity (SPEC-042 discipline)
 
-Your dispatch bundle assigns you a distinct actor identity — `export LORE_ACTOR=agent:<branch-or-task-slug>`. Every `lore` command you run uses it (via env or `--by`). Never fall back to the OS username: concurrent agents sharing one identity make the anchor-overlap gate blind.
+Your identity is assigned by the agent integration: your run is registered and every `lore` write you make is attested to it, so there is nothing to export and no flag to pass. Never set or invent an identity yourself — concurrent agents are told apart by their attested runs, which is what arms the anchor-overlap gate.
 
 ## Lifecycle Protocol
 
 For every task you are dispatched to execute (run all lore commands from INSIDE your worktree):
 
 ```
-lore claim <task-slug> --by $LORE_ACTOR --worktree <branch>   # claim yourself — never pre-claimed by the orchestrator
+lore claim <task-slug> --worktree <branch>   # claim yourself — never pre-claimed by the orchestrator
   → claim REJECTED with gate:task-claim:anchor-overlap?
       → STATUS: BLOCKED, report the conflicting task/holder verbatim — do NOT --steal, do NOT --force release
 lore get <task-slug>            # task body + AC
 lore get <spec-slug>            # governing spec (from dispatch bundle's Spec Reference)
 lore ac list <spec-slug>        # structured acceptance criteria
   → implement → write/adjust tests → run SCOPED oracles (see Oracle Scope below)
-lore evidence <task-slug> --oracle <tsc|test|lint|build|e2e> --command "<cmd>" --result <pass|fail> [--ac <ac-id>] --by $LORE_ACTOR
-lore release <task-slug> --by $LORE_ACTOR   # drops YOUR lease only — it does not archive; lore done (approved→active→archived) is a separate step owned by whoever can assert the merge, never you
+lore evidence <task-slug> --oracle <tsc|test|lint|build|e2e> --command "<cmd>" --result <pass|fail> [--ac <ac-id>]
+lore release <task-slug>   # drops YOUR lease only — it does not archive; lore done (approved→active→archived) is a separate step owned by whoever can assert the merge, never you
 ```
 
 - ⛔ Evidence results come from the ORACLE's exit status — never self-asserted. A failing oracle is recorded as `--result fail`, then fixed, then re-recorded.

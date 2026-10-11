@@ -7,8 +7,7 @@ This session opened inside a linked git worktree of a lore-governed repo. The co
 
 ## Identity
 
-- `export LORE_ACTOR={{ACTOR}}`
-- Every `lore` write in this session carries `--by {{ACTOR}}` (or the env var above). Never fall back to an OS username — concurrent seats sharing one identity make the anchor-overlap gate blind.
+- Your seat's claimed label is `{{ACTOR}}`. It is a label only: identity is assigned by the agent integration, which registers this run and attests every `lore` write. Do not export an identity variable and do not pass an identity flag on writes — concurrent seats are told apart by their attested runs.
 - Your branch: `{{BRANCH}}`. Your worktree's corpus commands run against `{{MAIN_CHECKOUT}}` (worktrees carry no `.lore/` of their own).
 
 ## Focus
@@ -18,7 +17,7 @@ This session opened inside a linked git worktree of a lore-governed repo. The co
 ## Before you claim
 
 - `cd {{MAIN_CHECKOUT}} && lore ready <plan> --json` — check `sessions[]` and `anchor_conflicts[]` before claiming anything.
-- Claim with your seat's coordinates explicit: `lore claim <task> --by {{ACTOR}} --worktree "$(pwd)" --branch {{BRANCH}}`.
+- Claim with your seat's coordinates explicit: `lore claim <task> --worktree "$(pwd)" --branch {{BRANCH}}`.
 - Anchor-gate deny (`gate:task-claim:anchor-overlap`) → follow the feeding pack's recovery command. Never `--steal`, never `LORE_GATE_BYPASS=1` — those decisions are the corpus owner's, not this session's.
 
 ## Commit + merge discipline
@@ -28,11 +27,11 @@ This session opened inside a linked git worktree of a lore-governed repo. The co
 
 ## On exit or interruption
 
-- Open work not yet landed → `lore handoff --by {{ACTOR}} [--plan <plan>] --decision "<judgment>[@confidence]" --next "<next step>"` before the seat closes — the writer-identity guard rejects any `lore create knowledge` attempt at this doc type, naming `lore handoff` as the sole writer.
+- Open work not yet landed → `lore handoff [--plan <plan>] --decision "<judgment>[@confidence]" --next "<next step>"` before the seat closes — the writer-identity guard rejects any `lore create knowledge` attempt at this doc type, naming `lore handoff` as the sole writer.
 - After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the paste-ready resume command `lore feed session-resume --handoff <slug>`.
 
 ## Opening move
 
-- Start every turn in this seat with `lore feed session-resume --by {{ACTOR}}` — it pulls your prior handoffs and the plan's current state instead of relying on conversation memory.
+- Start every turn in this seat with `lore feed session-resume` — it pulls your prior handoffs and the plan's current state instead of relying on conversation memory.
 
 </session-seat>

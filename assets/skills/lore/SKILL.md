@@ -64,14 +64,14 @@ lore tree <plan>                               # tasks grouped under phase heade
 Advisory lease + append-only oracle evidence, for agents executing plan tasks:
 
 ```bash
-lore claim <task> [--by <actor>] [--branch <b>] [--steal]   # acquire/refresh lease; fresh claim held by someone else → exit 5 unless --steal
+lore claim <task> [--branch <b>] [--steal]   # acquire/refresh lease; fresh claim held by someone else → exit 5 unless --steal
 lore evidence <task> --oracle tsc|test|lint|build|e2e|manual|other \
   --command "<cmd>" --result pass|fail [--output-tail "..." | --output-tail-file <path>]
-lore release <task> [--by <actor>] [--reason "why"] [--force]   # non-holder needs --force
+lore release <task> [--reason "why"] [--force]   # non-holder needs --force
 lore ready <plan> [--json]     # computed readiness over blocks links — never stored
 ```
 
-Actor identity: `--by` > `$LORE_ACTOR` > OS username. Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
+Identity: writes are attested by the agent integration's registered run; `LORE_ACTOR is deprecated` as an identity source (it survives only as an unattested claimed label, with a one-line warning). Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
 
 ## Review workflow
 
