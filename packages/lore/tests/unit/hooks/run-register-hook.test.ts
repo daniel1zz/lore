@@ -65,6 +65,7 @@ function scratch(prefix: string): string {
 interface Stub {
   dir: string; // on PATH
   calls(): { argv: string[]; stdin: string }[];
+  first(): { argv: string[]; stdin: string };
 }
 
 /** Stub `lore`: records argv + stdin, optionally prints to stderr, exits with `exit`. */
@@ -82,16 +83,21 @@ exit ${opts.exit ?? 0}
 `,
   );
   chmodSync(join(dir, "lore"), 0o755);
+  const calls = (): { argv: string[]; stdin: string }[] =>
+    readdirSync(logDir)
+      .filter((n) => !n.endsWith(".stdin"))
+      .sort()
+      .map((n) => ({
+        argv: readFileSync(join(logDir, n), "utf8").split("\n").slice(0, -1),
+        stdin: readFileSync(join(logDir, `${n}.stdin`), "utf8"),
+      }));
   return {
     dir,
-    calls() {
-      return readdirSync(logDir)
-        .filter((n) => !n.endsWith(".stdin"))
-        .sort()
-        .map((n) => ({
-          argv: readFileSync(join(logDir, n), "utf8").split("\n").slice(0, -1),
-          stdin: readFileSync(join(logDir, `${n}.stdin`), "utf8"),
-        }));
+    calls,
+    first() {
+      const all = calls();
+      if (all[0] === undefined) throw new Error("expected lore stub to have been invoked, but it was not");
+      return all[0];
     },
   };
 }
@@ -132,7 +138,7 @@ function expectOneContextLine(run: HookRun): string {
   expect(run.status).toBe(0);
   const lines = run.stdout.split("\n").filter((l) => l !== "");
   expect(lines).toHaveLength(1);
-  const parsed = JSON.parse(lines[0]);
+  const parsed = JSON.parse(lines[0] ?? "");
   const text = parsed.hookSpecificOutput?.additionalContext;
   expect(typeof text).toBe("string");
   expect(text).not.toContain("\n");
@@ -153,13 +159,13 @@ describe("run-register.mjs — happy path spawns lore run register", () => {
   it("a different session id yields a different --session value (not hardcoded)", () => {
     const stub = makeStub();
     runHook(sessionStart("sess-bbb-2"), stub.dir);
-    expect(stub.calls()[0].argv.slice(-2)).toEqual(["--session", "sess-bbb-2"]);
+    expect(stub.first().argv.slice(-2)).toEqual(["--session", "sess-bbb-2"]);
   });
 
   it("SessionStart does not pass --agent-id or --agent-type (main run)", () => {
     const stub = makeStub();
     runHook(sessionStart("sess-ccc"), stub.dir);
-    const argv = stub.calls()[0].argv;
+    const argv = stub.first().argv;
     expect(argv).not.toContain("--agent-id");
     expect(argv).not.toContain("--agent-type");
   });
