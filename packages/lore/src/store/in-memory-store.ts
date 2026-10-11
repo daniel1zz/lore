@@ -30,7 +30,9 @@ import {
   type LoreError,
   type Result,
 } from "@lore/core";
+import type { RunId, RunRecord } from "@lore/core";
 import type {
+  AttributedWriteCount,
   AuditChainEntry,
   AuditFilters,
   CalibrationRecordWithPromptVersion,
@@ -62,6 +64,8 @@ import {
   buildAcExemptionCapError,
   buildNonLiveRuleRefusal,
   computeAuditEntryHash,
+  emptyKindsError,
+  withoutNullHarnessRun,
 } from "./store-shared.js";
 import { stampAuditSurface } from "./audit-surface.js";
 import type { RuleIdPrefix } from "@lore/core";
@@ -106,6 +110,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly calibrationRecords: CalibrationRecord[] = [];
   /** SPEC-102 — mirrors `trace_events`; never hash-chained, id is a plain 1-based sequence (insertion order). */
   private readonly traceEvents: TraceEventRecord[] = [];
+  /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
+  private readonly runs = new Map<string, RunRecord>();
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
@@ -1097,7 +1103,7 @@ export class InMemoryStore implements StoreInterface {
   // ── Versions ──────────────────────────────────────────────────────────────
 
   async insertVersion(version: VersionRecord): Promise<Result<VersionRecord, LoreError>> {
-    this.versions.push({ ...version });
+    this.versions.push(withoutNullHarnessRun({ ...version }));
     return ok(version);
   }
 
@@ -1154,7 +1160,7 @@ export class InMemoryStore implements StoreInterface {
     const prevHash = head?.entry_hash ?? "";
     const entryHash = computeAuditEntryHash(entry, prevHash);
     this.auditChain.push({
-      ...entry,
+      ...withoutNullHarnessRun({ ...entry }),
       id: this.auditChain.length + 1,
       prev_hash: prevHash,
       entry_hash: entryHash,
@@ -1427,6 +1433,34 @@ export class InMemoryStore implements StoreInterface {
       }
     }
     return ok(deleted);
+  }
+
+  // ── Runs (migration-016) ──────────────────────────────────────────────────
+
+  async insertRun(run: RunRecord): Promise<Result<void, LoreError>> {
+    // reason: first registration wins — mirrors SQLite's INSERT OR IGNORE on the PK.
+    if (!this.runs.has(run.id)) this.runs.set(run.id, structuredClone(run));
+    return ok(undefined);
+  }
+
+  async getRun(id: RunId): Promise<Result<RunRecord | null, LoreError>> {
+    const run = this.runs.get(id);
+    return ok(run === undefined ? null : structuredClone(run));
+  }
+
+  async countAttributedWrites(
+    windowStart: string,
+    kinds: readonly string[],
+  ): Promise<Result<AttributedWriteCount, LoreError>> {
+    if (kinds.length === 0) return emptyKindsError();
+    let total = 0;
+    let attested = 0;
+    for (const e of this.auditChain) {
+      if (e.timestamp < windowStart || !kinds.includes(e.action)) continue;
+      total++;
+      if (e.harness_run != null) attested++;
+    }
+    return ok({ total, attested });
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────

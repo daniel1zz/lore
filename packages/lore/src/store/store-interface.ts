@@ -19,6 +19,8 @@ import type {
   ReviewJudgmentKind,
   RuleIdPrefix,
   RuleLifecycle,
+  RunId,
+  RunRecord,
   SearchHit,
   Slug,
   VersionRecord,
@@ -63,6 +65,12 @@ export type { AuditChainEntry };
 export interface UpdateOpts {
   /** Guard version. When set, update is conditional on this matching the stored value. */
   expected_version?: number;
+}
+
+/** Result of {@link StoreInterface.countAttributedWrites}. */
+export interface AttributedWriteCount {
+  total: number;
+  attested: number;
 }
 
 /**
@@ -1126,6 +1134,29 @@ export interface StoreInterface {
    *   nothing left to prune, the caller's loop-termination signal).
    */
   pruneTraceEvents(cutoffIso: string, batchSize?: number): Promise<Result<number, LoreError>>;
+
+  // ── Runs (migration-016, spec-run-identity-slice-1 D3/D4) ───────────────
+
+  /**
+   * Register a harness run. IDEMPOTENT and FIRST-WINS: a second call with the same `run.id` returns
+   * `ok` and changes nothing — every column keeps the first call's value (a re-registration with a
+   * different parent or branch must never rewrite history).
+   */
+  insertRun(run: RunRecord): Promise<Result<void, LoreError>>;
+
+  /** The registered run, or `ok(null)` for an unknown id (same shape as `find`; never a fabricated record). */
+  getRun(id: RunId): Promise<Result<RunRecord | null, LoreError>>;
+
+  /**
+   * Count audit rows with `timestamp >= windowStart` (INCLUSIVE, ISO 8601) whose `action` is one of
+   * `kinds`, split into `total` and `attested` (`harness_run IS NOT NULL`). Consumed by the attribution
+   * share in `lore status` (AC-RID-11). Empty `kinds` → `VALIDATION_ERROR` (a count over nothing is a
+   * caller bug, never a silent zero).
+   */
+  countAttributedWrites(
+    windowStart: string,
+    kinds: readonly string[],
+  ): Promise<Result<AttributedWriteCount, LoreError>>;
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 

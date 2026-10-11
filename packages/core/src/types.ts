@@ -150,6 +150,8 @@ export interface VersionRecord {
   change_summary?: string;
   /** Doc's slug as of this version (SPEC-072 D1) — absent on legacy rows */
   slug?: string;
+  /** The harness run that vouched for this write (migration-016); null/absent = unattested or pre-016 row */
+  harness_run?: string | null;
 }
 
 /** Append-only audit log entry. */
@@ -164,6 +166,8 @@ export interface AuditEntry {
   doc_id?: DocId;
   /** Structured change details */
   details?: Record<string, unknown>;
+  /** The harness run that vouched for this write (migration-016); null/absent = unattested or pre-016 row */
+  harness_run?: string | null;
 }
 
 // ─── Type-specific Extra Fields (stored in extra JSON column) ──────────────

@@ -108,7 +108,7 @@ describe("migration-004 (widen links.link_type CHECK to accept 'governs') — at
     // user_version is 12, not 4.
     // migration-004's own concern (the widened links.link_type CHECK) is
     // asserted below via the 'governs' insert, unaffected.
-    expect(userVersion(db)).toBe(15);
+    expect(userVersion(db)).toBe(16);
 
     insertDoc(db, "01HGOVERNSSKILL00000001", "skill-doc");
     insertDoc(db, "01HGOVERNSARTIFACT00001", "artifact-doc");
