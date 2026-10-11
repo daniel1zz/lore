@@ -107,7 +107,7 @@ function runLore(args: string[], cwd: string, homeOverride = true): RunResult {
       ...process.env,
       ...(homeOverride ? { HOME: cwd } : {}),
       CLAUDECODE: "1",
-      LORE_ACTOR: "agent:report-issue-single-remedy-probe",
+      CLAUDE_CODE_SESSION_ID: "report-issue-single-remedy-probe-session",
     },
   });
   return {

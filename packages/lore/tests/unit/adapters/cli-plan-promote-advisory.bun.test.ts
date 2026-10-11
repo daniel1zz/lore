@@ -60,7 +60,7 @@ function runLore(args: string[], cwd: string): RunResult {
     // (e.g. `lore verify`'s env allowlist) fall to the OS username and emit an
     // unrelated actor-traceability warning on stderr, breaking the exact
     // empty-stderr assertion below.
-    env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:e2e-advisory-probe" },
+    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDE_CODE_SESSION_ID: "e2e-advisory-probe-session" },
   });
   return {
     stdout: proc.stdout.toString(),

@@ -81,7 +81,7 @@ interface RunResult {
  * `CLAUDECODE: "1"` resolves the CLI's "agent" caller surface (SPEC-024) so no
  * gate-feeding AI call is ever attempted; `HOME` is redirected into the throwaway
  * dir so no ambient `~/.config/lore/config.yaml` on the host machine leaks in.
- * `LORE_ACTOR` is pinned so actor resolution never falls back to the OS username —
+ * `CLAUDE_CODE_SESSION_ID` is pinned (LORE_ACTOR is deprecated and warns on stderr) so actor resolution never falls back to the OS username —
  * that fallback emits a SPEC-035 advisory line to stderr (`DEFAULT_VERIFY_ENV_ALLOWLIST`
  * in `verify-spawn.ts` does not pass `LORE_ACTOR` through, so `lore verify` runs this
  * suite in an environment where the ambient var is absent regardless of the invoking
@@ -90,7 +90,7 @@ interface RunResult {
 function runLore(args: string[], cwd: string): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1", LORE_ACTOR: "agent:report-issue-hint-test" },
+    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "report-issue-hint-test-session" },
   });
   return {
     stdout: proc.stdout.toString(),
