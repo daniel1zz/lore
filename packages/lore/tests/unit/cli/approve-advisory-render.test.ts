@@ -58,12 +58,17 @@ interface RunResult {
 
 /** Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir and a
  *  fixed actor identity (mirrors `cli-plan-promote-advisory.bun.test.ts` — a
- *  stable `LORE_ACTOR` keeps stderr free of an unrelated actor-traceability
+ *  stable identity keeps stderr free of an unrelated actor-traceability
  *  warning that would otherwise pollute the exact stderr assertions below). */
 function runLore(args: string[], cwd: string): RunResult {
+  // reason: a stable identity WITHOUT `$LORE_ACTOR` — that variable now draws a one-line deprecation warning on
+  // stderr (spec-run-identity-slice-1 D8), which would pollute the exact stderr assertions below. The session
+  // tier names the writer and prints nothing.
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: cwd, EDITOR: "true", CLAUDE_CODE_SESSION_ID: "stable-probe-session" };
+  delete env["LORE_ACTOR"];
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", LORE_ACTOR: "agent:t7-e2e-probe" },
+    env,
     encoding: "utf8",
   });
   return {
