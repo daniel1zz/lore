@@ -478,7 +478,7 @@ const CORPUS_WORKFLOW_FRAGMENT_RELS = [
 const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)[number], string> = {
   "context/corpus-workflow-0-overview.md": "31bec6c00584c31708413d8c34e0494bbfe758b9d3d43c6bc3d1e8780c0b070f",
   "context/corpus-workflow-1-feed.md": "c855096f19fc2fa7b727112789303c542dbe91c2d6df56ff7edffd145c3eaa30",
-  "context/corpus-workflow-2-produce.md": "cc4ed9f31e30468f2fddea7f4d296620ec81399c62a1b835b4d1388465f4def2",
+  "context/corpus-workflow-2-produce.md": "a1ee4ce624b693670881c3204190371194bef25c77a138ca845dae476cc8ab1c",
   "context/corpus-workflow-3-execute.md": "acf9e945bef3b056c200d06e0f7714b4711f54cd9bd59d0d6a824545937ae944",
   "context/corpus-workflow-4-close.md": "2d733c70f38923594543a8981cc913320c76433fe56bed2b7d3f5e02b41ce713",
 };

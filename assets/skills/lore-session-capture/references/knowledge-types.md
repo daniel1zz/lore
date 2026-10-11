@@ -18,9 +18,12 @@ Session knowledge → lore CLI
 ├─ Raw idea, not yet decided                      → lore create knowledge --sub-type ideation
 ├─ Feature requirements (structured, with ACs)    → lore feed spec-create
 │                                                   then lore create spec --kind feature + lore ac add
-├─ API contract / data model / UI standard        → belongs on the governing spec: lore set <spec> (or create
-│                                                   a tech/design spec: --kind tech|design); one-off observation
-│                                                   with no spec home → knowledge --sub-type reference
+├─ API contract / data model / UI standard        → belongs on the governing spec. Read its Standing in `lore get`:
+│                                                   not locked → lore set <spec>; locked, no evidence →
+│                                                   lore reopen <spec> --reason, then edit; locked with evidence →
+│                                                   new spec + lore link <new> <old> --type relates-to
+│                                                   (typo only: lore set --correction "<reason>"). No spec home →
+│                                                   knowledge --sub-type reference (living: edited in place)
 ├─ Unfinished-work handoff                        → lore handoff --decision "..." --next "..."
 │                                                   (⛔ NOT create --sub-type handoff — rejected; SPEC-041)
 └─ Knowledge proven WRONG                          → lore invalidate <old> [--superseded-by <new>] --reason "..."

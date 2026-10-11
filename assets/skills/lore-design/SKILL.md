@@ -30,7 +30,7 @@ UI/UX design is NOT a mode of this skill — there is no `references/mode-ui.md`
    ```
    lore search "<topic>" --type spec --json / lore get <prd-slug> -> look for spec (--kind feature), PRD
    ```
-2. **Existing design check**: `lore search "<topic>" --type spec --json` for an existing spec on same topic -> update or extend
+2. **Existing design check**: `lore search "<topic>" --type spec --json` for an existing spec on same topic, then decide by its `Standing:` line in `lore get <spec>` (a spec is a record, locked once approved): not locked -> edit it in place; locked, no criterion has evidence -> `lore reopen <spec> --reason "..."` then edit; locked with evidence -> create a NEW spec and `lore link <new> <old> --type relates-to` (a genuine typo/factual fix: `lore set <spec> --correction "<reason>"`). Living docs (baseline, prd, reference/skill/prompt knowledge, open plans) are edited in place
 3. **Benchmark study**: Identify top 1-3 benchmark products in the same domain/scenario -> study their design patterns, interaction flows, and feature implementations -> borrow proven designs as baseline. Never design from scratch when market-validated references exist.
 4. **Analyze existing system**: Use Serena for codebase understanding before designing
 
