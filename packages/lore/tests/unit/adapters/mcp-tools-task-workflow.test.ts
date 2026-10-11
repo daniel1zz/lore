@@ -291,7 +291,6 @@ describe("lore_evidence_add", () => {
         oracle: "manual",
         command: "bun run typecheck",
         result: "pass",
-        recorded_by: "alice",
         output_tail: "ok",
       });
       expect(result.isError).toBeFalsy();
@@ -314,7 +313,6 @@ describe("lore_evidence_add", () => {
         oracle: "manual",
         command: "cmd",
         result: "pass",
-        recorded_by: "alice",
         output_tail: "ok",
       });
       expect(result.isError).toBe(true);
@@ -362,7 +360,6 @@ describe("lore_evidence_add", () => {
           oracle: "manual",
           command: "bun run typecheck",
           result: "pass",
-          recorded_by: "alice",
           ac_ref: "AC-ACODE-8",
           output_tail: "ok",
         });
@@ -386,7 +383,6 @@ describe("lore_evidence_add", () => {
           oracle: "manual",
           command: "cmd",
           result: "pass",
-          recorded_by: "alice",
           output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
@@ -463,7 +459,6 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           oracle: "test",
           command: `bunx vitest run ${EXISTING_TEST_FILE}`,
           result: "pass",
-          recorded_by: "alice",
           output_tail: "ok",
         });
         expect(result.isError).toBe(true);
@@ -490,7 +485,6 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           oracle: "test",
           command: `bunx vitest run ${MISSING_TEST_FILE}`,
           result: "pass",
-          recorded_by: "alice",
           output_tail: "ok",
         });
         expect(result.isError).toBe(true);
@@ -524,7 +518,6 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           oracle: "e2e",
           command: `bunx playwright test ${MISSING_TEST_FILE}`,
           result: "pass",
-          recorded_by: "alice",
           output_tail: "ok",
         });
         expect(result.isError).toBe(true);
@@ -549,7 +542,6 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           oracle: "manual",
           command: `bunx vitest run ${MISSING_TEST_FILE}`,
           result: "pass",
-          recorded_by: "alice",
           output_tail: "ok",
         });
         expect(result.isError).toBeFalsy();
@@ -570,7 +562,6 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           oracle: "test",
           command: `bunx vitest run ${MISSING_TEST_FILE}`,
           result: "fail",
-          recorded_by: "alice",
           output_tail: "AssertionError: expected 1 to equal 2",
         });
         expect(result.isError).toBeFalsy();
@@ -597,7 +588,6 @@ describe("lore_evidence_add — missing-oracle-file precheck", () => {
           oracle: "tsc",
           command: "bun run typecheck",
           result: "pass",
-          recorded_by: "alice",
           output_tail: "ok",
         });
         expect(result.isError).toBe(true);
@@ -667,7 +657,6 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           oracle: "test",
           command: `bunx vitest run ${RELATIVE_TO_PACKAGE_DIR}`,
           result: "pass",
-          recorded_by: "alice",
           caller_cwd: CALLER_CWD,
           output_tail: "ok",
         });
@@ -695,7 +684,6 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           oracle: "test",
           command: `bunx vitest run ${RELATIVE_TO_PACKAGE_DIR}`,
           result: "pass",
-          recorded_by: "alice",
           // caller_cwd omitted — pre-fix behavior.
         });
         expect(result.isError).toBe(true);
@@ -720,7 +708,6 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           oracle: "test",
           command: `bunx vitest run ${GHOST}`,
           result: "pass",
-          recorded_by: "alice",
           caller_cwd: CALLER_CWD,
         });
         expect(result.isError).toBe(true);
@@ -756,7 +743,6 @@ describe("lore_evidence_add — caller_cwd escape hatch (task-lore-evidence-s-or
           oracle: "test",
           command: `bunx vitest run ${EXISTING_FROM_REPO_ROOT}`,
           result: "pass",
-          recorded_by: "alice",
           output_tail: "ok",
         });
         expect(result.isError).toBe(true);

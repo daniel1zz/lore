@@ -512,6 +512,11 @@ export interface SiblingClaimInfo {
   worktree?: string;
   machine?: string;
   session_id?: string;
+  /**
+   * The holding RUN (BR-1056): a string = attested run, `null` = unattested, absent = the claim predates run
+   * capture. Absent and `null` both mean "no run" for {@link findAnchorOverlapConflict}.
+   */
+  harness_run?: string | null;
 }
 
 /** `noAnchorOverlap`'s machine-readable failure reason for a MEASURED conflict (foreign actor, or a proven different session). */
@@ -584,7 +589,7 @@ export function compareClaimSessions(
  * - `"session-not-measured"`: same `by`, session instance unmeasurable on at
  *   least one side (§Required fix 4).
  */
-export type AnchorOverlapConflictKind = "foreign-actor" | "foreign-session" | "session-not-measured";
+export type AnchorOverlapConflictKind = "foreign-actor" | "foreign-session" | "session-not-measured" | "foreign-run";
 
 /** One offending sibling claim, with the overlapping path pairs and WHY it conflicts. */
 export interface AnchorOverlapConflict {
@@ -614,6 +619,10 @@ export interface AnchorOverlapConflict {
  *   stale — staleness is filtered HERE, not by the caller).
  * @param candidateSessionId - The claiming session's captured
  *   `TaskClaim.session_id`, when the caller measured one.
+ * @param candidateRun - The claimant's attested run (BR-1056), `null`/absent = unattested. When EITHER side
+ *   carries a run the RUN decides: equal runs are one holder (skipped), anything else is a `foreign-run`
+ *   conflict — two runs sharing a derived name, or exactly one side attested, are two holders. When NEITHER
+ *   carries a run the name-plus-session comparison below applies unchanged.
  * @returns The FIRST conflicting sibling in `siblingClaims` order, or
  *   `undefined` when none conflicts.
  * @example
@@ -628,14 +637,24 @@ export function findAnchorOverlapConflict(
   candidateAnchors: string[] | undefined,
   siblingClaims: readonly SiblingClaimInfo[] | undefined,
   candidateSessionId?: string,
+  candidateRun?: string | null,
 ): AnchorOverlapConflict | undefined {
   const anchors = candidateAnchors ?? [];
+  const claimantRun = candidateRun ?? null;
   if (anchors.length === 0) return undefined;
   for (const sibling of siblingClaims ?? []) {
     if (sibling.stale) continue;
     if (sibling.anchors.length === 0) continue;
     const overlap = anchorsOverlap(anchors, sibling.anchors);
     if (!overlap.overlaps) continue;
+    // reason: BR-1056 — the holder is a RUN. Two runs deriving one name must not pass for one writer, and
+    // exactly one attested side is a different holder. Only when neither side carries a run does the legacy
+    // name-plus-session comparison below decide.
+    const holderRun = sibling.harness_run ?? null;
+    if (claimantRun !== null || holderRun !== null) {
+      if (claimantRun === holderRun) continue;
+      return { sibling, pairs: overlap.pairs, kind: "foreign-run" };
+    }
     if (sibling.by !== candidateBy) {
       return { sibling, pairs: overlap.pairs, kind: "foreign-actor" };
     }
@@ -701,6 +720,7 @@ export function findAnchorOverlapConflict(
  * @param candidateSessionId - The claiming session's captured
  *   `TaskClaim.session_id`. Omitted ⇒ this side was never measured, which makes
  *   every same-actor overlap `not-measured` (a refusal), never a permit.
+ * @param candidateRun - The claimant's attested run; see {@link findAnchorOverlapConflict}.
  * @returns `{ok: true}` when no conflicting sibling exists;
  *   `{ok: false, reason: "ANCHOR_OVERLAP", field: "anchor-overlap"}` for a
  *   MEASURED conflict (foreign actor, or proven foreign session);
@@ -727,12 +747,14 @@ export function noAnchorOverlap(
   candidateAnchors: string[] | undefined,
   siblingClaims: readonly SiblingClaimInfo[] | undefined,
   candidateSessionId?: string,
+  candidateRun?: string | null,
 ): PredicateResult {
   const conflict = findAnchorOverlapConflict(
     candidateBy,
     candidateAnchors,
     siblingClaims,
     candidateSessionId,
+    candidateRun,
   );
   if (conflict === undefined) return { ok: true };
   return {

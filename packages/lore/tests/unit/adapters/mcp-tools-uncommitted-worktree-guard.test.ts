@@ -245,7 +245,6 @@ describe("HAPPY — a clean recorded worktree is unaffected via MCP", () => {
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
     });
     expect(result.isError).toBeFalsy();
@@ -280,7 +279,6 @@ describe("NEGATIVE — a no-worktree claim with NO caller_cwd declared is unaffe
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       // caller_cwd omitted
     });
@@ -316,7 +314,6 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       caller_cwd: realRepoCwd,
     });
@@ -360,7 +357,6 @@ describe("BOUNDARY — the Q3 mismatch: no recorded worktree + a REAL caller_cwd
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       caller_cwd: nonRepoCwd,
     });
@@ -400,7 +396,6 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
     });
     expect(result.isError).toBeFalsy();
@@ -442,7 +437,6 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       caller_cwd: makeCleanRepo(),
     });
@@ -464,7 +458,6 @@ describe("ERROR — AC-7 control: absence of a claim is NEVER widened by this fi
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       caller_cwd: makeDirtyRepo(),
     });
@@ -525,7 +518,6 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
       oracle: "manual",
       command: `bunx vitest run ${EXISTING_TEST_FILE_FROM_PACKAGE_DIR}`,
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       caller_cwd: CALLER_CWD_AS_PACKAGE_DIR,
     });
@@ -552,7 +544,6 @@ describe("STATE — caller_cwd serves BOTH the pre-existing precheck AND the new
       oracle: "manual",
       command: `bunx vitest run ${EXISTING_TEST_FILE_FROM_PACKAGE_DIR}`,
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       caller_cwd: CALLER_CWD_AS_PACKAGE_DIR,
     });
@@ -582,7 +573,6 @@ describe("REGRESSION — control: the primary predicate is completely independen
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
       // caller_cwd deliberately omitted — proves this refusal does NOT depend on it.
     });

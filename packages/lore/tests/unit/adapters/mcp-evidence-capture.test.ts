@@ -222,7 +222,6 @@ describe("HAPPY — an MCP caller can produce a runner-captured evidence row", (
       oracle: "tsc",
       command: "cat marker.txt",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: cwd,
     });
@@ -247,7 +246,6 @@ describe("HAPPY — an MCP caller can produce a runner-captured evidence row", (
       oracle: "test",
       command: "cat marker.txt",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: cwd,
     });
@@ -279,7 +277,6 @@ describe("NEGATIVE — the refusals that keep the \"runner\" label honest", () =
       oracle: "tsc",
       command: "true",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
     });
 
@@ -301,7 +298,6 @@ describe("NEGATIVE — the refusals that keep the \"runner\" label honest", () =
       oracle: "tsc",
       command: "true",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: makeMarkerDir("x"),
       output_tail: "I promise this passed",
@@ -323,7 +319,6 @@ describe("NEGATIVE — the refusals that keep the \"runner\" label honest", () =
       oracle: "manual",
       command: "eyeball the dashboard",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: makeMarkerDir("x"),
     });
@@ -345,7 +340,6 @@ describe("NEGATIVE — the refusals that keep the \"runner\" label honest", () =
       oracle: "tsc",
       command: "true",
       result: "pass",
-      recorded_by: "alice",
       capture_source: "runner",
     });
     expect(parsed.success).toBe(true);
@@ -367,7 +361,6 @@ describe("BOUNDARY — the declared-vs-observed exit-code cross-check, both dire
       oracle: "tsc",
       command: "exit 7",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: makeMarkerDir("x"),
     });
@@ -389,7 +382,6 @@ describe("BOUNDARY — the declared-vs-observed exit-code cross-check, both dire
       oracle: "tsc",
       command: "echo BOOM-3311 >&2; exit 3",
       result: "fail",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: cwd,
     });
@@ -410,7 +402,6 @@ describe("BOUNDARY — the declared-vs-observed exit-code cross-check, both dire
       oracle: "tsc",
       command: "true",
       result: "fail",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: makeMarkerDir("x"),
     });
@@ -435,7 +426,6 @@ describe("ERROR — an unspawnable capture is refused, never downgraded", () => 
       oracle: "tsc",
       command: "true",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: join(tmpdir(), "definitely-not-a-real-dir-a71fe3", "nested"),
     });
@@ -483,7 +473,6 @@ describe("STATE — capture_source is stamped on EVERY MCP write, not only captu
       oracle: "tsc",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "hand-written summary",
     });
 
@@ -501,7 +490,6 @@ describe("STATE — capture_source is stamped on EVERY MCP write, not only captu
       oracle: "manual",
       command: "checked the login page by hand",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "hand-written summary",
     });
 
@@ -521,7 +509,6 @@ describe("STATE — capture_source is stamped on EVERY MCP write, not only captu
       oracle: "manual",
       command: "visual check of the panel",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "panel renders as designed",
     });
     await getToolHandler(server, "lore_evidence_add")({
@@ -529,7 +516,6 @@ describe("STATE — capture_source is stamped on EVERY MCP write, not only captu
       oracle: "tsc",
       command: "cat marker.txt",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: cwd,
     });
@@ -550,8 +536,8 @@ describe("REGRESSION — legacy rows and the attestation override are untouched"
       oracle: "tsc",
       command: "bun run typecheck",
       result: "pass",
-      recorded_at: "2026-07-01T00:00:00.000Z",
       recorded_by: "alice",
+      recorded_at: "2026-07-01T00:00:00.000Z",
       output_tail: "legacy row",
     });
     expect(parsed.success).toBe(true);
@@ -602,7 +588,6 @@ describe("REGRESSION — legacy rows and the attestation override are untouched"
       oracle: "tsc",
       command: "bun run typecheck",
       result: "fail",
-      recorded_by: "alice",
       output_tail: "error TS2554: Expected 1 arguments, but got 0.",
     });
 
@@ -674,7 +659,6 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
       oracle: "test",
       command: ONE_SECOND_COMMAND,
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: makeMarkerDir("CAPMCP-N1"),
     });
@@ -711,7 +695,6 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
       oracle: "test",
       command: ONE_SECOND_COMMAND,
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: cwd,
     });
@@ -726,7 +709,6 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
       oracle: "test",
       command: ONE_SECOND_COMMAND,
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: cwd,
     });
@@ -749,7 +731,6 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
       oracle: "test",
       command: ONE_SECOND_COMMAND,
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: makeMarkerDir("CAPMCP-S1"),
     });
@@ -774,7 +755,6 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
       oracle: "test",
       command: "true",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: makeMarkerDir("CAPMCP-E1"),
     });
@@ -795,7 +775,6 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
       oracle: "tsc",
       command: "cat marker.txt",
       result: "pass",
-      recorded_by: "alice",
       capture: true,
       caller_cwd: cwd,
     });

@@ -382,7 +382,6 @@ describe("lore_evidence_add — forged attestation is inert (AC-VRF-2 adapter ha
       oracle: "tsc",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
     };
 
@@ -420,7 +419,6 @@ describe("lore_evidence_add — forged attestation is inert (AC-VRF-2 adapter ha
         oracle: "manual",
         command: "bun run typecheck",
         result: "pass",
-        recorded_by: "alice",
         output_tail: "ok",
         // reason: forged past the type system — the SDK's real runtime schema
         // validation would strip this before the handler ever ran; calling the

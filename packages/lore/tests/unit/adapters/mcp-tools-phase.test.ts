@@ -277,7 +277,6 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
       oracle: "manual",
       command: "bun test",
       result: "pass",
-      recorded_by: "alice",
       checklist_ref: "CHK-1",
       output_tail: "ok",
     });
@@ -301,7 +300,6 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
       oracle: "manual",
       command: "bun test",
       result: "pass",
-      recorded_by: "alice",
       checklist_ref: "CHK-UNKNOWN",
       output_tail: "ok",
     });
@@ -325,7 +323,6 @@ describe("lore_evidence_add — SPEC-056 target-type dispatch", () => {
       oracle: "manual",
       command: "bun run typecheck",
       result: "pass",
-      recorded_by: "alice",
       output_tail: "ok",
     });
     expect(result.isError).toBeFalsy();
@@ -375,7 +372,6 @@ describe("lore_evidence_add — missing-oracle-file precheck gates the phase bra
         oracle: "test",
         command: `bunx vitest run ${MISSING_TEST_FILE}`,
         result: "pass",
-        recorded_by: "alice",
         checklist_ref: "CHK-1",
       });
       expect(result.isError).toBe(true);

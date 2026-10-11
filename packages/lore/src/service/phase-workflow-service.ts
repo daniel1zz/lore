@@ -889,7 +889,7 @@ export class PhaseWorkflowService {
     // existing-claim staleness check below share the exact same "now".
     const nowIso = now();
 
-    const gateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId);
+    const gateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId, opts.harnessRun ?? null);
     if (!gateResult.ok) return gateResult;
 
     const existingClaim = readClaim(phase);
@@ -962,7 +962,7 @@ export class PhaseWorkflowService {
     // serialization ⇒ the LATER committer's post-write re-check always observes the
     // earlier committer's already-persisted claim ⇒ at least one side always
     // self-rolls-back; both may roll back on close timing — accepted, loud, retriable).
-    const postWriteGateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId);
+    const postWriteGateResult = await this.enforceClaimGate(phase, opts.by, nowIso, sessionId, opts.harnessRun ?? null);
     if (!postWriteGateResult.ok) {
       const rollbackResult = await this.rollbackClaim(writeResult.value, existingClaim, opts.by, now);
       if (!rollbackResult.ok) {
@@ -1685,6 +1685,7 @@ export class PhaseWorkflowService {
     by: string,
     nowIso: string,
     sessionId?: string,
+    candidateRun: string | null = null,
   ): Promise<Result<void, LoreError>> {
     if (this.gate === undefined) {
       return ok(undefined);
@@ -1724,6 +1725,8 @@ export class PhaseWorkflowService {
     return this.gate.enforcer.enforce("phase-claim", {
       ...ctx,
       targetIdOrSlug: phase.slug,
+      // reason: BR-1056 — same run-based overlap test as the task gate.
+      candidateRun,
       // reason: no phase-claim-specific anchor_overlap sub-knob exists yet (only the
       // WHOLE-checkpoint enabled key got the SPEC-056 D7 alias) — reusing
       // isTaskClaimAnchorOverlapEnabled() here is an interim choice (no RED test/AC
