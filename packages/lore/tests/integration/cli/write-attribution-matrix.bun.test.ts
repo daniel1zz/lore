@@ -498,7 +498,7 @@ function vcs(cwd: string, args: string[]): void {
 
 function cleanEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDECODE: "1", ...extra };
-  if (!("LORE_ACTOR" in extra)) delete env["LORE_ACTOR"];
+  for (const k of ["LORE_ACTOR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) if (!(k in extra)) delete env[k];
   return env;
 }
 
@@ -560,7 +560,7 @@ describe("CLI chokepoint: `lore --harness-run R <write> --by N` stamps the audit
   it("claim with --by N (source flag) leaves an audit row with harness_run R, author N and the source flag", async () => {
     await registerInCorpus(dir, ID_A);
     const since = new Date().toISOString();
-    mustLore(["--harness-run", ID_A.harnessRun, "claim", task, "--by", ID_A.claimed], dir);
+    mustLore(["--harness-run", ID_A.harnessRun, "claim", task, "--by", ID_A.claimed, "--worktree", dir], dir);
     const rows = (await auditSince(dir, since)).filter((r) => r.actor === ID_A.claimed);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
@@ -577,6 +577,11 @@ describe("CLI chokepoint: `lore --harness-run R <write> --by N` stamps the audit
 
   it("an evidence write with --by N and R stamps the row and its version row", async () => {
     await registerInCorpus(dir, ID_A);
+    // The evidence guard refuses a `pass` while the claim's recorded worktree has uncommitted changes: commit the fixture.
+    // Corpus state (.lore/) and the HOME-redirect scratch (Library/) are not source: ignore them, commit the rest.
+    writeFileSync(join(dir, ".gitignore"), ".lore/\nLibrary/\n");
+    vcs(dir, ["add", ".gitignore"]);
+    vcs(dir, ["commit", "-q", "-m", "fixture state"]);
     const since = new Date().toISOString();
     mustLore(
       ["--harness-run", ID_A.harnessRun, "evidence", task, "--oracle", "manual", "--command", "inspect fixture", "--result", "pass", "--output-tail", "1 passed", "--by", ID_A.claimed],

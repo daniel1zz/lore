@@ -55,7 +55,7 @@ interface RunResult {
 
 function env(extra: Record<string, string>, home: string): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { ...process.env, CLAUDECODE: "1", HOME: home, ...extra };
-  if (!("LORE_ACTOR" in extra)) delete e["LORE_ACTOR"];
+  for (const k of ["LORE_ACTOR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) if (!(k in extra)) delete e[k];
   return e;
 }
 
@@ -282,7 +282,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
     mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Authored with a given name", "--content", "body", "--no-ai"], dir, { LORE_ACTOR: NAME });
     const rows = await auditSince(dir, since);
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(row.actor).not.toBe(os);
+    for (const row of rows) expect(`${row.action} by ${row.actor}`).not.toBe(`${row.action} by ${os}`);
     for (const v of await versionsSince(dir, since)) expect(v.created_by).not.toBe(os);
   });
 
