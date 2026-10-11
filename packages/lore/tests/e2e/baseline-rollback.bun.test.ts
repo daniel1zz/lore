@@ -208,7 +208,8 @@ function normaliseListOutput(text: string): { frame: string[]; rows: string[] } 
 /** N3 on the parsed document; everything else is kept verbatim. */
 function normaliseStatus(stdout: string): unknown {
   const doc = JSON.parse(stdout) as { data: Record<string, unknown> };
-  return { ...doc, data: { ...doc.data, last_updated: "<TS>", db_size_bytes: "<BYTES>" } };
+  // identity_sources counts append-only audit history (hash-chained, never erased), which rollback keeps by design; AC-BLS1-8 compares state.
+  return { ...doc, data: { ...doc.data, last_updated: "<TS>", db_size_bytes: "<BYTES>", identity_sources: "<AUDIT-HISTORY>" } };
 }
 
 function normaliseCapture(c: Capture) {
