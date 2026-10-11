@@ -59,6 +59,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 
 // ─── Test Infrastructure (mirrors mcp-session-tools.test.ts) ─────────────────
 
@@ -168,18 +169,19 @@ describe("lore_claim — machine/worktree persisted (SPEC-042 D2, D9)", () => {
     const { task } = await createPlanAndTask();
     const call = getToolHandler(server, "lore_claim");
 
-    const result = await call({
-      id_or_slug: task.slug,
-      by: "agent:t1",
-      branch: "wt-a",
-      machine: "hostA",
-      worktree: "/repo/.worktrees/t1",
-    });
+    const result = await asSessionActor("agent:t1", () =>
+      call({
+        id_or_slug: task.slug,
+        branch: "wt-a",
+        machine: "hostA",
+        worktree: "/repo/.worktrees/t1",
+      }),
+    );
 
     expect(result.isError).toBeFalsy();
     const data = parseResult(result) as { doc: DocRecord };
     expect(data.doc.extra["claim"]).toMatchObject({
-      by: "agent:t1",
+      by: sessionActorFor("agent:t1"),
       branch: "wt-a",
       machine: "hostA",
       worktree: "/repo/.worktrees/t1",
@@ -188,7 +190,7 @@ describe("lore_claim — machine/worktree persisted (SPEC-042 D2, D9)", () => {
 
   it("ERROR: nonexistent task → isError with DOC_NOT_FOUND", async () => {
     const call = getToolHandler(server, "lore_claim");
-    const result = await call({ id_or_slug: "task-does-not-exist", by: "agent:t1" });
+    const result = await call({ id_or_slug: "task-does-not-exist" });
 
     expect(result.isError).toBe(true);
     const error = parseResult(result) as { code: string };
@@ -225,7 +227,7 @@ describe("lore_anchor_set — declarative replace, preserves claim/evidence (SPE
     if (!evidenceResult.ok) throw new Error(JSON.stringify(evidenceResult.error));
 
     const call = getToolHandler(server, "lore_anchor_set");
-    const result = await call({ id_or_slug: task.slug, anchors: ["src/a", "src/b/"], by: "agent:t1" });
+    const result = await call({ id_or_slug: task.slug, anchors: ["src/a", "src/b/"] });
 
     expect(result.isError).toBeFalsy();
     const data = parseResult(result) as { doc: DocRecord };
@@ -240,7 +242,7 @@ describe("lore_anchor_set — declarative replace, preserves claim/evidence (SPE
     if (!setResult.ok) throw new Error(JSON.stringify(setResult.error));
 
     const call = getToolHandler(server, "lore_anchor_set");
-    const result = await call({ id_or_slug: task.slug, anchors: [], by: "agent:t1" });
+    const result = await call({ id_or_slug: task.slug, anchors: [] });
 
     expect(result.isError).toBeFalsy();
     const data = parseResult(result) as { doc: DocRecord };
@@ -253,7 +255,7 @@ describe("lore_anchor_set — declarative replace, preserves claim/evidence (SPE
     if (!setResult.ok) throw new Error(JSON.stringify(setResult.error));
 
     const call = getToolHandler(server, "lore_anchor_set");
-    const result = await call({ id_or_slug: task.slug, anchors: ["/absolute/path"], by: "agent:t1" });
+    const result = await call({ id_or_slug: task.slug, anchors: ["/absolute/path"] });
 
     expect(result.isError).toBe(true);
     const error = parseResult(result) as { code: string };

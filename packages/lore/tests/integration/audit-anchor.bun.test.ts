@@ -178,7 +178,7 @@ afterEach(() => {
 
 function createPrd(title: string): string {
   const r = runLore(
-    ["create", "prd", "--title", title, "--no-ai", "--content", "body", "--by", "test-actor"],
+    ["create", "prd", "--title", title, "--no-ai", "--content", "body"],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);

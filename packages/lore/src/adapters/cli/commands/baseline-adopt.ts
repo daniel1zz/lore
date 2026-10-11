@@ -2,7 +2,7 @@
  * lore baseline adopt — the audited writer of the citation gate's adoption settings
  * (Baseline slice 3a, BL-8, AC-BLS3-8).
  *
- *   lore baseline adopt [--mode report|enforce] [--arm <branch-slug>]... [--disarm <branch-slug>]... [--by <actor>] [--json]
+ *   lore baseline adopt [--mode report|enforce] [--arm <branch-slug>]... [--disarm <branch-slug>]... [--json]
  *
  * Writes `workflow.gates."ac-cite"` in `.lore/config.yaml` and exactly ONE `baseline_adopt` audit row
  * (`details: { old, new }`, both the RAW stored settings: mode null / armed_branches [] when absent).
@@ -189,7 +189,7 @@ async function runAdopt(args: Record<string, unknown>): Promise<void> {
       if (!written.ok) return fail(written.error, json, exitCode(written.error));
     }
 
-    const audited = await appendAdoptAuditRow(store, resolveActor(args.by as string | undefined), old, next);
+    const audited = await appendAdoptAuditRow(store, resolveActor(), old, next);
     if (!audited.ok) {
       return fail(
         {
@@ -223,7 +223,6 @@ export const adoptCommand = defineCommand({
     mode: { type: "string", description: "report | enforce" },
     arm: { type: "string", description: "Arm a baseline branch slug for enforcement (repeatable)" },
     disarm: { type: "string", description: "Disarm a branch slug (repeatable)" },
-    by: { type: "string", description: "Actor identity (default: resolved from $LORE_ACTOR)" },
     json: { type: "boolean", description: "Output result as JSON" },
   },
   async run({ args }) {

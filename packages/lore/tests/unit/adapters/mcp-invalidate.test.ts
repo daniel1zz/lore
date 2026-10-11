@@ -144,11 +144,10 @@ async function createPlan(title: string): Promise<DocRecord> {
 // ─── NEGATIVE: schema-level ──────────────────────────────────────────────────
 
 describe("LoreInvalidateSchema — NEGATIVE", () => {
-  // reason: BR-1034 (AC-RID-7) — `by` is optional (the call's resolved name fills in); an EMPTY `by` is still refused.
-  it("accepts missing `by`, rejects an empty one", () => {
+  // reason: AC-ROI-1 — no MCP write tool takes `by`: the call's own identity (the attested run) writes.
+  it("declares no `by` property; a payload without one is valid", () => {
+    expect(Object.keys(LoreInvalidateSchema.shape)).not.toContain("by");
     expect(LoreInvalidateSchema.safeParse({ id_or_slug: "knowledge-x" }).success).toBe(true);
-    expect(LoreInvalidateSchema.safeParse({ id_or_slug: "knowledge-x", by: "" }).success).toBe(false);
-    expect(LoreInvalidateSchema.safeParse({ id_or_slug: "knowledge-x", by: "alice" }).success).toBe(true);
   });
 });
 

@@ -250,7 +250,7 @@ describe("BOUNDARY — directory-scope anchors resolve against a directory", () 
 describe("STATE — lore ready <plan> --json surfaces it for the dispatcher", () => {
   it("reports the non-resolving anchor of a CLAIMED task, keyed by task_slug, with probed:true", () => {
     const slug = parseSlug(createTask(tmpDir, "Claimed Typo", planSlug, ["src/gone.ts"]).stdout);
-    mustRun(["claim", slug, "--by", "agent:probe-test", "--worktree", tmpDir], tmpDir);
+    mustRun(["claim", slug, "--worktree", tmpDir], tmpDir);
 
     const ready = mustRun(["ready", planSlug, "--json"], tmpDir);
     const payload = (JSON.parse(ready.stdout) as { data: ReadyJson }).data;

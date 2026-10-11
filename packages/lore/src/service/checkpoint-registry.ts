@@ -1296,7 +1296,8 @@ function feedAnchorOverlap(
       `Conflicting task: ${sibling.slug} — "${sibling.title}" — held by ${sibling.by}. ` +
       `Overlapping paths: ${pathsStr}. ` +
       `${renderSessionVerdictLine(kind, ctx.candidateSessionId, sibling.session_id)} ` +
-      `Recovery: \`lore release ${sibling.slug} --by ${sibling.by} --force\``;
+      `Recovery: \`lore release ${sibling.slug} --force\`; sessions register their own run via the ` +
+      `agent integration (\`lore setup\`).`;
   }
   const pack = buildFeedingPack({
     ruleSource: "corpus (sibling task claims)",
@@ -1333,16 +1334,14 @@ function renderSessionVerdictLine(
       return (
         `Same actor, DIFFERENT session instance (this session: ${candidateSessionId ?? "(none)"}, ` +
         `holder's session: ${siblingSessionId ?? "(none)"}) — two concurrent sessions can share one ` +
-        `LORE_ACTOR, so the anchor mutex applies.`
+        `name, so the anchor mutex applies.`
       );
     case "session-not-measured":
       return (
         `Same actor, and the session instance is NOT MEASURED on at least one side (this session: ` +
         `${candidateSessionId ?? "(not measured)"}, holder's session: ` +
-        `${siblingSessionId ?? "(not measured)"}) — that is not evidence of one session, so this ` +
-        `claim is refused rather than waved through. A claim recorded before session capture ` +
-        `existed heals by re-claiming it (\`lore claim <task> --by <actor>\`) from its own session, ` +
-        `or by releasing it.`
+        `${siblingSessionId ?? "(not measured)"}) — not evidence of one session, so this ` +
+        `claim is refused. Re-claim it from its own session, or release it.`
       );
   }
 }
@@ -1351,7 +1350,7 @@ function renderSessionVerdictLine(
  * Renders the actor-identity-collision-specific feeding pack (spec claim-time-
  * actor-identity-guard-zero-evidence-release-advis, AC-IDENTITY-REJECT) —
  * names the conflicting sibling's slug/holder/worktree and the concrete
- * recovery (export a distinct `LORE_ACTOR`, or pass `--by` explicitly).
+ * recovery (install the agent integration, `lore setup`, so each session registers its own run).
  * Mirrors `feedAnchorOverlap`'s "recompute the offending sibling from ctx"
  * shape — pointers only, never sibling body content.
  *
@@ -1370,9 +1369,9 @@ function feedActorIdentity(
     conflictLine =
       `Conflicting task: ${sibling.slug} — "${sibling.title}" — held by the SAME untraceable ` +
       `identity "${sibling.by}" from a different worktree/machine (worktree: ` +
-      `${sibling.worktree ?? "(unknown)"}). Recovery: export a distinct ` +
-      `LORE_ACTOR=agent:<branch-or-slug> for THIS session (or pass --by explicitly) and retry ` +
-      `the claim.`;
+      `${sibling.worktree ?? "(unknown)"}). ` +
+      `Recovery: install the agent integration (\`lore setup\`) so THIS session registers its own run, ` +
+      `then retry the claim.`;
     break;
   }
   const pack = buildFeedingPack({

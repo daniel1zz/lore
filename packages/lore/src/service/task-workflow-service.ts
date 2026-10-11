@@ -179,8 +179,8 @@
  *   HTTP alike, with no flag and no opt-in — and it is the ONLY method that does
  *   (task-two-concurrent-orchestrators-both-resolve-to-agent-main). The capture is
  *   independent of actor resolution and never merged into `by`: `resolveActor`'s session
- *   TIER is suppressed whenever `$LORE_ACTOR` is set, which this project's own standing
- *   discipline requires of every main-checkout run, so two concurrently-live
+ *   TIER is shadowed by an explicit name, which this project's own standing
+ *   discipline gives every main-checkout run, so two concurrently-live
  *   orchestrators legitimately share one actor string. `by` therefore answers "who",
  *   `session_id` answers "which run", and `noAnchorOverlap` needs the second to be a
  *   cross-session mutex at all. Never sourced from `ClaimOpts` — a caller-declarable
@@ -403,7 +403,7 @@ import {
 
 /** Options for {@link TaskWorkflowService.claim}. */
 export interface ClaimOpts {
-  /** Resolved actor identity (CLI: --by > $LORE_ACTOR > OS username). */
+  /** Resolved actor identity (CLI: the invoking identity from `resolveActor`). */
   by: string;
   /**
    * The harness run the invoking agent integration vouched for (spec-run-identity-slice-1 D6, BR-1040),
@@ -437,9 +437,9 @@ export interface ClaimOpts {
   /**
    * How `by` was resolved (spec claim-time-actor-identity-guard-zero-evidence-
    * release-advis, AC-IDENTITY-REJECT) — CLI: `resolveActorWithIdentitySource`'s
-   * `--by` flag > `$LORE_ACTOR` > SPEC-071 session tier > OS-username-fallback
-   * chain (`ActorSource`, `@lore/core/node`); MCP: always `"explicit"` (`by` is
-   * a required, always-explicit tool argument, SPEC-024). `undefined` (a caller
+   * SPEC-071 session tier > worktree tier > OS-username-fallback
+   * chain (`ActorSource`, `@lore/core/node`); MCP: `actorSourceOfName` of the
+   * call's name source (`adapters/mcp/call-scope.ts`). `undefined` (a caller
    * that never resolved/threaded one — e.g. a hand-built test `ClaimOpts`)
    * behaves identically to any non-`"os-fallback"` value: `actorIdentityGuard`
    * (`gate-predicates.ts`) is a vacuous pass. GATE-CONTEXT-ONLY — never
@@ -1355,8 +1355,8 @@ const SESSION_ID_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as c
  * directly-testable function.
  *
  * Why this is NOT actor resolution: `resolveActorWithSource` has a session TIER
- * that is SKIPPED whenever `$LORE_ACTOR` is set, and every main-checkout run in
- * this project is instructed to set it — so the only precedence tier carrying a
+ * that is shadowed by an explicit name, and every main-checkout run in
+ * this project carries one — so the only precedence tier carrying a
  * per-session discriminator is suppressed by the very discipline that fixed the
  * earlier OS-username collapse. Actor identity ("who") and session instance
  * ("which run") are different facts; this captures the second one independently

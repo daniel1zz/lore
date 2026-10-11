@@ -86,7 +86,7 @@ export function readWriteContext(store: StoreInterface): StampingContext | undef
 
 /**
  * The author of a write: the explicit `by` when given, else the claimed name of the store's write context
- * (the invocation identity), else the env chain (`$LORE_ACTOR` → session → OS user) for an unwrapped store.
+ * (the invocation identity), else the env chain (session → OS user) for an unwrapped store.
  * ⛔ Every service that writes an audit row MUST resolve its actor here, never by an independent
  * `resolveActorWithSource` call: a second resolution can disagree with the invocation's name (gate rows once
  * read the OS user next to a `--by` claim).

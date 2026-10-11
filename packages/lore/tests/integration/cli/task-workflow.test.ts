@@ -25,6 +25,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -43,10 +44,14 @@ interface RunResult {
  * Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir.
  * MOCK RISK: none — this calls the real CLI binary path.
  */
-function runLore(args: string[], cwd: string): RunResult {
+/**
+ * `actor` names the writer through the SESSION tier (no write command takes `--by`); `null` leaves the writer
+ * unnamed (OS-user fallback). Ambient identity sources are always stripped.
+ */
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" }, actor) as Record<string, string>,
     encoding: "utf8",
   });
   return {
@@ -203,27 +208,27 @@ function createTask(planSlug: string, title: string): string {
 // ─── HAPPY — lore claim ───────────────────────────────────────────────────────
 
 describe("lore claim — HAPPY", () => {
-  it("AC-WF-3.CLI.H1: exit 0 and confirms the claim, --by wins over $LORE_ACTOR", () => {
+  it("AC-WF-3.CLI.H1: exit 0 and confirms the claim under the session-tier name", () => {
     const planSlug = createPlan("Workflow Plan");
     const taskSlug = createTask(planSlug, "Claimable Task");
 
-    const result = runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+    const result = runLore(["claim", taskSlug], tmpDir, "alice");
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Claimed");
-    expect(result.stdout).toContain("alice");
+    expect(result.stdout).toContain(sessionActorFor("alice"));
   });
 
   it("AC-WF-3.CLI.H2: --json output has doc.extra.claim.by", () => {
     const planSlug = createPlan("Workflow Plan JSON");
     const taskSlug = createTask(planSlug, "Claimable Task JSON");
 
-    const result = runLore(["claim", taskSlug, "--by", "alice", "--json"], tmpDir);
+    const result = runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { ok: boolean; data?: { doc?: { extra?: Record<string, unknown> } } };
     expect(parsed.ok).toBe(true);
-    expect((parsed.data?.doc?.extra?.["claim"] as { by?: string } | undefined)?.by).toBe("alice");
+    expect((parsed.data?.doc?.extra?.["claim"] as { by?: string } | undefined)?.by).toBe(sessionActorFor("alice"));
   });
 });
 
@@ -234,26 +239,26 @@ describe("lore claim — NEGATIVE", () => {
     const planSlug = createPlan("Conflict Plan");
     const taskSlug = createTask(planSlug, "Contested Task");
 
-    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
-    const result = runLore(["claim", taskSlug, "--by", "bob"], tmpDir);
+    runLore(["claim", taskSlug], tmpDir, "alice");
+    const result = runLore(["claim", taskSlug], tmpDir, "bob");
 
     expect(result.exitCode).toBe(5);
-    expect(result.stderr).toContain("alice");
+    expect(result.stderr).toContain(sessionActorFor("alice"));
   });
 
   it("AC-WF-4.CLI.N2: --steal overrides a fresh claim and succeeds (exit 0)", () => {
     const planSlug = createPlan("Steal Plan");
     const taskSlug = createTask(planSlug, "Stealable Task");
 
-    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
-    const result = runLore(["claim", taskSlug, "--by", "bob", "--steal"], tmpDir);
+    runLore(["claim", taskSlug], tmpDir, "alice");
+    const result = runLore(["claim", taskSlug, "--steal"], tmpDir, "bob");
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("bob");
+    expect(result.stdout).toContain(sessionActorFor("bob"));
   });
 
   it("AC-WF-3.CLI.N3: non-existent task slug → exit 3 (DOC_NOT_FOUND)", () => {
-    const result = runLore(["claim", "task-does-not-exist", "--by", "alice"], tmpDir);
+    const result = runLore(["claim", "task-does-not-exist"], tmpDir, "alice");
     expect(result.exitCode).toBe(3);
   });
 });
@@ -265,8 +270,8 @@ describe("lore release", () => {
     const planSlug = createPlan("Release Plan");
     const taskSlug = createTask(planSlug, "Released Task");
 
-    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
-    const result = runLore(["release", taskSlug, "--by", "alice"], tmpDir);
+    runLore(["claim", taskSlug], tmpDir, "alice");
+    const result = runLore(["release", taskSlug], tmpDir, "alice");
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Released");
@@ -276,8 +281,8 @@ describe("lore release", () => {
     const planSlug = createPlan("Release Conflict Plan");
     const taskSlug = createTask(planSlug, "Guarded Task");
 
-    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
-    const result = runLore(["release", taskSlug, "--by", "bob"], tmpDir);
+    runLore(["claim", taskSlug], tmpDir, "alice");
+    const result = runLore(["release", taskSlug], tmpDir, "bob");
 
     expect(result.exitCode).toBe(5);
   });
@@ -286,8 +291,8 @@ describe("lore release", () => {
     const planSlug = createPlan("Release Force Plan");
     const taskSlug = createTask(planSlug, "Forcibly Released Task");
 
-    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
-    const result = runLore(["release", taskSlug, "--by", "bob", "--force"], tmpDir);
+    runLore(["claim", taskSlug], tmpDir, "alice");
+    const result = runLore(["release", taskSlug, "--force"], tmpDir, "bob");
 
     expect(result.exitCode).toBe(0);
   });
@@ -548,11 +553,11 @@ describe("lore tree / lore list — workflow badges (AC-WF-9)", () => {
   it("a claimed task shows a claimed: badge in `lore tree <plan>`", () => {
     const planSlug = createPlan("Badge Plan");
     const taskSlug = createTask(planSlug, "Badged Task");
-    runLore(["claim", taskSlug, "--by", "alice"], tmpDir);
+    runLore(["claim", taskSlug], tmpDir, "alice");
 
     const result = runLore(["tree", planSlug], tmpDir);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("claimed:alice");
+    expect(result.stdout).toContain(`claimed:${sessionActorFor("alice")}`);
   });
 
   it("a task with passing evidence shows a ✔ badge in `lore list --type task`", () => {

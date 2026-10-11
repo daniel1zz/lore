@@ -144,7 +144,7 @@ beforeAll(() => {
     ).stdout,
   );
   handoffSlug = parseSlug(
-    mustRun(["handoff", "--by", "agent:extra-notice", "--decision", "probe decision@0.9", "--next", "probe next step", "--plan", planSlug], tmpDir)
+    mustRun(["handoff", "--decision", "probe decision@0.9", "--next", "probe next step", "--plan", planSlug], tmpDir)
       .stdout,
   );
 
@@ -227,7 +227,7 @@ describe("lore get --json — AC-4 REGRESSION (payload untouched)", () => {
 
 describe("lore get — AC-5 STATE (invalidation banner keeps its place)", () => {
   it("AC-5 the banner still prints, comes FIRST, and the notice does not list validity", () => {
-    mustRun(["invalidate", handoffSlug, "--reason", "probe retraction", "--by", "agent:extra-notice"], tmpDir);
+    mustRun(["invalidate", handoffSlug, "--reason", "probe retraction"], tmpDir);
 
     const { stdout, exitCode } = runLore(["get", handoffSlug], tmpDir);
     expect(exitCode).toBe(0);

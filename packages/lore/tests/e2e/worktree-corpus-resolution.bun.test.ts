@@ -241,7 +241,7 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     expect(getResult.stdout).toContain("WCR E2E Task");
 
     const claimResult = runLore(
-      ["claim", taskSlug, "--by", "agent:wcr-happy", "--worktree", "wcr-happy-feature"],
+      ["claim", taskSlug, "--worktree", "wcr-happy-feature"],
       worktreePath,
     );
     expect(claimResult.exitCode).toBe(0);
@@ -261,8 +261,6 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
         "echo wcr-happy",
         "--result",
         "pass",
-        "--by",
-        "agent:wcr-happy",
         "--output-tail",
         "ok",
       ],
@@ -270,7 +268,7 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     );
     expect(evidenceResult.exitCode).toBe(0);
 
-    const releaseResult = runLore(["release", taskSlug, "--by", "agent:wcr-happy"], worktreePath);
+    const releaseResult = runLore(["release", taskSlug], worktreePath);
     expect(releaseResult.exitCode).toBe(0);
 
     // Confirm the writes landed in the MAIN checkout's corpus (not some
@@ -301,7 +299,7 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     expect(getResult.exitCode).toBe(0);
 
     const claimResult = runLore(
-      ["claim", taskSlug, "--by", "agent:wcr-regression", "--worktree", "main"],
+      ["claim", taskSlug, "--worktree", "main"],
       repoRoot,
     );
     expect(claimResult.exitCode).toBe(0);
@@ -321,8 +319,6 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
         "echo wcr-regression",
         "--result",
         "pass",
-        "--by",
-        "agent:wcr-regression",
         "--output-tail",
         "ok",
       ],
@@ -330,7 +326,7 @@ describe("worktree corpus resolution — git-common-dir fallback (AC-WH-4)", () 
     );
     expect(evidenceResult.exitCode).toBe(0);
 
-    const releaseResult = runLore(["release", taskSlug, "--by", "agent:wcr-regression"], repoRoot);
+    const releaseResult = runLore(["release", taskSlug], repoRoot);
     expect(releaseResult.exitCode).toBe(0);
   }, 30000);
 

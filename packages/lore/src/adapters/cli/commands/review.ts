@@ -1,10 +1,10 @@
 /**
- * lore review <doc> [--by] [--ai|--no-ai] [--json]
- * lore review --pending [--by] [--ai|--no-ai] [--json]
+ * lore review <doc> [--ai|--no-ai] [--json]
+ * lore review --pending [--ai|--no-ai] [--json]
  * lore review --staleness [--limit] [--min-age-days] [--fail-on-candidate] [--json]
  * lore review <doc> --staleness [--fail-on-candidate] [--json]
  * lore review --staleness --list [--json]
- * lore review backfill-ledger [--by] [--json]
+ * lore review backfill-ledger [--json]
  *
  * `backfill-ledger` (SPEC-103 §Mechanisms M2, §Design Decisions D3) is a reserved
  * positional verb, intercepted BEFORE any of the AI-judge/staleness logic below:
@@ -258,10 +258,6 @@ export default defineCommand({
       type: "boolean",
       description: "Read-only: list docs whose latest staleness judgment is a fresh stale_candidate escalate (no AI call)",
     },
-    by: {
-      type: "string",
-      description: "Actor requesting the review/probe (defaults to $LORE_ACTOR / OS username)",
-    },
     ai: {
       type: "boolean",
       description:
@@ -282,7 +278,7 @@ export default defineCommand({
     if (args.doc === "backfill-ledger") {
       const { app } = loadLoreApp();
       try {
-        const actor = resolveActor(typeof args.by === "string" ? args.by : undefined);
+        const actor = resolveActor();
         const result = await app.reviewService.backfillLedger({ actor });
         if (!result.ok) {
           process.stderr.write(formatError(result.error) + "\n");
@@ -360,7 +356,7 @@ export default defineCommand({
         }
       }
 
-      const actor = resolveActor(args.by);
+      const actor = resolveActor();
 
       // ─── SPEC-044: staleness probing branch ─────────────────────────────────
       if (isStaleness) {

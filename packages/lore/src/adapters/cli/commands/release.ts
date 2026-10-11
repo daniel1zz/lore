@@ -1,5 +1,5 @@
 /**
- * lore release <task> [--by <name>] [--reason <text>] [--force] — clear the
+ * lore release <task> [--reason <text>] [--force] — clear the
  * advisory execution lease on a task OR phase document.
  *
  * Target-type dispatch (SPEC-056 task-skill-implement-cli-mcp-surfaces-checklist-ref-
@@ -9,8 +9,7 @@
  * `VALIDATION_ERROR {field: "type", value: "phase"}` does this adapter retry via
  * `PhaseWorkflowService.release` — same dispatch shape `commands/evidence.ts` uses.
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
- * utils.ts::resolveActor.
+ * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`.
  *
  * Release by the current holder always succeeds. Release by a non-holder
  * requires --force. `--reason` (e.g. a failure summary) lands in the version
@@ -62,17 +61,13 @@ export default defineCommand({
       description: "Task document ID or slug",
       required: true,
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-    },
     reason: {
       type: "string",
       description: "Free-text reason (e.g. failure summary), recorded in version history",
     },
     force: {
       type: "boolean",
-      description: "Release even when --by is not the current holder",
+      description: "Release even when the invoking identity is not the current holder",
     },
     json: {
       type: "boolean",
@@ -90,7 +85,7 @@ export default defineCommand({
         process.exit(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const by = resolveActor();
       const releaseOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6/BR-1043 — see commands/claim.ts: the releasing run is explicit.

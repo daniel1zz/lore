@@ -1,7 +1,7 @@
 /**
  * lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual|other>
  *   --command "<cmd>" --result <pass|fail|expected-fail>
- *   [--capture | --output-tail <text> | --output-tail-file <path>] [--by <name>]
+ *   [--capture | --output-tail <text> | --output-tail-file <path>]
  *   [--ac <id>] [--checklist-ref <id>]
  *
  * --capture (task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the) —
@@ -100,8 +100,7 @@
  * field, changing the not-found error text `formatError` renders — see
  * `resolve.ts::resolveDoc` vs `CorpusService.resolve`'s divergent NOT_FOUND shapes).
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
- * utils.ts::resolveActor.
+ * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`.
  *
  * --output-tail and --output-tail-file are mutually exclusive; when
  * --output-tail-file is given, only the last 4000 chars of the file are kept
@@ -352,10 +351,6 @@ export default defineCommand({
         "Spawn --command itself and use ITS OWN captured stdout+stderr as output_tail " +
         "(capture_source: runner); mutually exclusive with --output-tail/--output-tail-file " +
         "and with --oracle manual",
-    },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
     },
     ac: {
       type: "string",
@@ -618,7 +613,7 @@ export default defineCommand({
         return;
       }
 
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const by = resolveActor();
       const evidenceInput = {
         // reason: cast — CLI arg strings are validated by evidenceEntrySchema server-side;
         // an invalid oracle/result value fails loud with VALIDATION_ERROR rather than

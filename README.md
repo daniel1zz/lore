@@ -96,7 +96,7 @@ Disable a checkpoint deliberately via `workflow.gates.<checkpoint>.enabled: fals
 Built for several agents working one repository at once:
 
 - **Anchor mutex** — tasks declaring overlapping file anchors cannot be claimed concurrently
-- **Actor identity** — every agent carries its own `LORE_ACTOR`, so claims are attributable
+- **Actor identity** — every agent writes under its own attested run, so claims are attributable
 - **Ownership surfaces** — `lore territory` partitions worktrees and branches into mine / foreign / unowned; `lore session list` joins corpus claims against probed process liveness
 
 ## Surfaces

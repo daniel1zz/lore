@@ -374,7 +374,6 @@ async function runFidelityCommand(args: Record<string, unknown>): Promise<void> 
 }
 
 const commonArgs = {
-  by: { type: "string", description: "Actor identity (default: resolved from $LORE_ACTOR)" },
   json: { type: "boolean", description: "Output result as JSON" },
 } as const;
 
@@ -421,7 +420,7 @@ export default defineCommand({
             title: args.title as string,
             content,
           };
-          const result = await svc.addNode(args.parent as string, input, { by: resolveActor(args.by as string | undefined) });
+          const result = await svc.addNode(args.parent as string, input, { by: resolveActor() });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) console.log(JSON.stringify({ ok: true, data: { id: result.value.id, slug: result.value.slug, node: input.node, tree } }, null, 2));
           else console.log(`Created baseline ${input.node} ${result.value.slug} (${result.value.id}).`);
@@ -437,7 +436,7 @@ export default defineCommand({
       },
       async run({ args }) {
         await withRuleService(async (svc) => {
-          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor(args.by as string | undefined) });
+          const result = await svc.setLabel(args.node as string, args.label as string, { by: resolveActor() });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, label: args.label } }, null, 2));
           else console.log(`Label of ${result.value.slug} set to '${String(args.label)}'.`);
@@ -457,7 +456,7 @@ export default defineCommand({
           const result = await svc.setDependsOn(
             args.leaf as string,
             { add: repeatable(args.add), remove: repeatable(args.remove) },
-            { by: resolveActor(args.by as string | undefined) },
+            { by: resolveActor() },
           );
           if (!result.ok) return reportFailure(result.error, args.json === true);
           const dependsOn = result.value.extra["depends_on"];
@@ -485,7 +484,7 @@ export default defineCommand({
                 meaning: args.meaning as string,
                 ...(args.note !== undefined ? { note: args.note as string } : {}),
               };
-              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor(args.by as string | undefined) });
+              const result = await svc.glossaryAdd(args.node as string, entry, { by: resolveActor() });
               if (!result.ok) return reportFailure(result.error, args.json === true);
               if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, term: entry.term } }, null, 2));
               else console.log(`Defined '${entry.term}' on ${result.value.slug}.`);
@@ -501,7 +500,7 @@ export default defineCommand({
           },
           async run({ args }) {
             await withRuleService(async (svc) => {
-              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor(args.by as string | undefined) });
+              const result = await svc.glossaryRemove(args.node as string, args.term as string, { by: resolveActor() });
               if (!result.ok) return reportFailure(result.error, args.json === true);
               if (args.json) console.log(JSON.stringify({ ok: true, data: { slug: result.value.slug, term: args.term } }, null, 2));
               else console.log(`Removed '${String(args.term)}' from ${result.value.slug}.`);
@@ -525,7 +524,7 @@ export default defineCommand({
       async run({ args }) {
         await withRuleService(async (svc) => {
           const json = args.json === true;
-          const by = resolveActor(args.by as string | undefined);
+          const by = resolveActor();
           const site = typeof args.site === "string" ? args.site : undefined;
           const rules = repeatable(args.rule);
           const reason = typeof args["non-business"] === "string" ? args["non-business"] : undefined;

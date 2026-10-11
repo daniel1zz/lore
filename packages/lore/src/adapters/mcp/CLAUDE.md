@@ -32,10 +32,10 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
   optional zero-arg GETTER (not a one-time value) so a long-lived server
   observes `.lore/config.yaml` edits made mid-session — threaded straight to
   `registerTools`.
-- **No MCP tool requires `by`/`recorded_by`; every write tool takes an optional
-  `harness_run`** (spec-run-identity-slice-1, BR-1034). A schema that declares
+- **No MCP write tool declares `by`** (AC-ROI-1, BR-1055) — only the read-side filters `lore_feed`/`lore_bootstrap` do (pinned in `adapters/read-side-by-filters.ts`). Every object schema is registered `.strict()` (the one refine-wrapped read tool, `lore_rule_find`, never took `by`), so a caller naming `by` (or `reviewer`) is REFUSED, never stripped. Every write tool takes an optional
+  `harness_run` (spec-run-identity-slice-1). A schema that declares
   `harness_run` is an ATTESTED tool: `call-scope.ts::McpCallScope.run` builds ONE
-  identity per call (`harness_run` + optional `by`, name source `mcp`), opens a
+  identity per call (from `harness_run` alone; the name is the server's session/OS tier), opens a
   call-scoped App via `App.forWriteContext` (store wrapped for that identity,
   run verified once), runs the handler, closes it. Handlers get `by`/`recorded_by`
   FILLED from the call's resolved name and never see `harness_run`; claim/release
@@ -77,7 +77,7 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
 ## Tools (one line each — mechanism/spec detail via `lore search <tool>` or the frozen snapshot)
 
 - `lore_create/get/set/search/list/tree/link/pending/approve` — core CRUD, mirrors CLI. `lore_create` also takes optional `file_anchors`/`supersedes`.
-- `lore_claim/release/evidence_add/ready` (SPEC-025) — task workflow; `by` required. `evidence_add` runs the oracle-file-existence precheck before dispatch, supports `ac_ref`/`checklist_ref`, and takes `capture: boolean` — the MCP peer of the CLI's `lore evidence --capture` (task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no): the server runs `command` itself via the shared `../evidence-capture.ts::captureOracleCommand`, cross-checks the real exit code against `result`, and records the child's real stdout+stderr as `output_tail`. `capture: true` REQUIRES `caller_cwd` (refused when absent — this server's own `process.cwd()` was fixed at startup and is not the caller's directory); mutually exclusive with `output_tail` and `oracle: "manual"` via the CLI's own `findCaptureFlagConflict`. The capture WINDOW comes from `workflow.evidence.capture_timeout_ms` via `resolveCaptureTimeoutMs(getConfig?.())`, called per invocation so a long-lived server observes a mid-session config edit (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed — it previously passed nothing and silently ran at the schema default while the CLI honoured the knob; the loud-timeout half was already shared, which is why only an assertion on the ENFORCED window catches this class).
+- `lore_claim/release/evidence_add/ready` (SPEC-025) — task workflow; the writer is the call's own identity. `evidence_add` runs the oracle-file-existence precheck before dispatch, supports `ac_ref`/`checklist_ref`, and takes `capture: boolean` — the MCP peer of the CLI's `lore evidence --capture` (task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no): the server runs `command` itself via the shared `../evidence-capture.ts::captureOracleCommand`, cross-checks the real exit code against `result`, and records the child's real stdout+stderr as `output_tail`. `capture: true` REQUIRES `caller_cwd` (refused when absent — this server's own `process.cwd()` was fixed at startup and is not the caller's directory); mutually exclusive with `output_tail` and `oracle: "manual"` via the CLI's own `findCaptureFlagConflict`. The capture WINDOW comes from `workflow.evidence.capture_timeout_ms` via `resolveCaptureTimeoutMs(getConfig?.())`, called per invocation so a long-lived server observes a mid-session config edit (task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed — it previously passed nothing and silently ran at the schema default while the CLI honoured the knob; the loud-timeout half was already shared, which is why only an assertion on the ENFORCED window catches this class).
 - `lore_assess` (SPEC-026) — plan-outcome AI judge; no non-AI mode, `summary` Markdown digest via `assess-render.ts`.
 - `lore_audit` (SPEC-035) — filtered audit query; `verify: true` runs the versions⋈audit completeness oracle.
 - `lore_review` (SPEC-034) — single-doc structured review judgment; deterministic pre-checks short-circuit before the AI provider.
@@ -86,7 +86,7 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
 - `lore_bootstrap` / `lore_handoff` (SPEC-041) — session pointer-set (read-only) + sole non-CLI handoff writer.
 - `lore_anchor_set` (SPEC-042/045) — declarative REPLACE of anchors; task vs spec dispatch DIVERGES from the CLI's incremental `anchor add`/`rm`. On a TASK target it (and `lore_create` with `file_anchors`) returns a non-blocking `anchor_resolution` payload field naming each stored anchor that does not resolve on disk — MCP callers read no stderr, so the advisory travels in the payload; never `isError`, never a refusal (`service/anchor-resolution.ts`). ⛔ `lore_ready` deliberately injects NO probe: it reports `{probed:false, reason}` rather than claim a clean scan for a caller whose cwd this process cannot speak for.
 - `lore_invalidate` (SPEC-043) — sole MCP write path for `extra.validity`.
-- `lore_staleness_probe` (SPEC-044) — batch / single-doc / list-only staleness scan; `by` also used as the audit-row actor.
+- `lore_staleness_probe` (SPEC-044) — batch / single-doc / list-only staleness scan; the call's identity is the audit-row actor.
 - `lore_uat_record` (SPEC-054), `lore_requirement_add` (SPEC-055), `lore_phase_status` (SPEC-056) — thin pipes over their respective services, same construction the CLI equivalents use.
 
 ## Files

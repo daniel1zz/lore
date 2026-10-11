@@ -234,8 +234,6 @@ describe("PRODUCTION WIRING — lore evidence --capture must persist a real atte
           "--result",
           "pass",
           "--capture",
-          "--by",
-          "agent:ct-t1-test-attest",
         ],
         tmpDir,
       );
@@ -296,8 +294,6 @@ describe("PRODUCTION WIRING — lore evidence --capture must persist a real atte
             "--result",
             "pass",
             "--capture",
-            "--by",
-            "agent:ct-t1-test-attest",
           ],
           tmpDir,
         );
@@ -359,8 +355,6 @@ describe("PRODUCTION WIRING — lore evidence --capture must persist a real atte
           "--result",
           "fail",
           "--capture",
-          "--by",
-          "agent:ct-t1-test-attest",
         ],
         tmpDir,
       );
@@ -436,8 +430,6 @@ describe("PRODUCTION WIRING — lore evidence --capture must persist a real atte
           "--result",
           "pass",
           "--capture",
-          "--by",
-          "agent:ct-t1-test-attest",
         ],
         tmpDir,
       );

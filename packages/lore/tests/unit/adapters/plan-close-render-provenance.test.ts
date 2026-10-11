@@ -135,7 +135,7 @@ function createTaskWithEmptyScope(dir: string, planSlug: string, title: string):
 }
 
 function claimTask(dir: string, taskSlug: string): void {
-  const r = runLore(["claim", taskSlug, "--by", "agent:plan-close-render-probe"], dir);
+  const r = runLore(["claim", taskSlug], dir);
   if (r.exitCode !== 0) throw new Error(`claim ${taskSlug} failed: ${r.stderr}`);
 }
 

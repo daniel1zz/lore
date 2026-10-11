@@ -275,7 +275,7 @@ describe("GateEnforcer", () => {
 
     // NEGATIVE — the headline scenario SPEC-049 exists to fix: an anchor-overlap
     // denial's message must name the conflicting sibling task's slug, its holder,
-    // and a literal copy-pasteable `lore release <slug> --by <holder> --force`
+    // and a literal copy-pasteable `lore release <slug> --force`
     // recovery command — none of which the pre-SPEC-049 bare discriminator
     // (`Gate "task-claim" blocked: ANCHOR_OVERLAP`) carried.
     it("task-claim (anchor-overlap): message names the conflicting sibling, its holder, and the literal recovery command", () => {
@@ -305,7 +305,7 @@ describe("GateEnforcer", () => {
       expect(message).toContain("task-sibling-in-flight");
       expect(message).toContain("agent:sibling-holder");
       expect(message).toContain(
-        "lore release task-sibling-in-flight --by agent:sibling-holder --force",
+        "lore release task-sibling-in-flight --force",
       );
       expect(message.endsWith("\n")).toBe(false);
     });

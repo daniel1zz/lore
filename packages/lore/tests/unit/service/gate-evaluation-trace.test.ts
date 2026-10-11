@@ -329,7 +329,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const plan = parseSlug(
           runLoreOk(["create", "plan", "--title", "GET-4 plan-promote target", "--parent", spec, "--content", "plan body", "--no-ai"], tmpDir, "create plan").stdout,
         );
-        runLoreOk(["approve", plan, "--by", "agent:trace-test"], tmpDir, "approve plan (plan-promote)");
+        runLoreOk(["approve", plan], tmpDir, "approve plan (plan-promote)");
 
         const entries = queryAudit(plan, tmpDir);
         const rows = gatePassedRows(entries, "plan-promote");
@@ -347,7 +347,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const task = parseSlug(
           runLoreOk(["create", "task", "--title", "GET-5 task-claim target", "--plan-id", plan, "--content", "task body", "--no-ai"], tmpDir, "create task").stdout,
         );
-        runLoreOk(["claim", task, "--by", "agent:trace-test", "--worktree", "trace-test-worktree"], tmpDir, "claim task (task-claim)");
+        runLoreOk(["claim", task, "--worktree", "trace-test-worktree"], tmpDir, "claim task (task-claim)");
 
         const entries = queryAudit(task, tmpDir);
         const rows = gatePassedRows(entries, "task-claim");
@@ -388,7 +388,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const phaseSlug = seedResults[0]?.slug;
         if (phaseSlug === undefined) throw new Error("seedServiceOps did not return a phase slug");
 
-        runLoreOk(["claim", phaseSlug, "--by", "agent:trace-test", "--worktree", "trace-test-worktree"], tmpDir, "claim phase (phase-claim)");
+        runLoreOk(["claim", phaseSlug, "--worktree", "trace-test-worktree"], tmpDir, "claim phase (phase-claim)");
 
         const entries = queryAudit(phaseSlug, tmpDir);
         const rows = gatePassedRows(entries, "phase-claim");
@@ -415,7 +415,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         const dbPath = join(tmpDir, ".lore", "lore.db");
         seedServiceOps(dbPath, tmpDir, [{ kind: "record_judgment", docId: adrId, docVersion: 1 }]);
 
-        runLoreOk(["approve", adrSlug, "--by", "agent:trace-test"], tmpDir, "approve adr (review-judgment)");
+        runLoreOk(["approve", adrSlug], tmpDir, "approve adr (review-judgment)");
 
         const entries = queryAudit(adrSlug, tmpDir);
         const rows = gatePassedRows(entries, "review-judgment");

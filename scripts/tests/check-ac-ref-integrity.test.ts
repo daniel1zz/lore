@@ -933,7 +933,7 @@ function createDoc(
   content: string,
   extraArgs: string[],
 ): { id: string; slug: string } {
-  const result = runLore(["create", type, "--title", title, "--content", content, "--by", ACTOR, "--json", ...extraArgs], cwd);
+  const result = runLore(["create", type, "--title", title, "--content", content, "--json", ...extraArgs], cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture setup: create ${type} failed (exit ${result.exitCode}): ${result.stderr}\n${result.stdout}`);
   }
@@ -991,7 +991,7 @@ function buildFixture(cwd: string, opts: { forceRemove: boolean }): { taskSlug: 
   // successful evidence row referencing FIXTURE_AC_ID, not a specific
   // oracle kind.
   const evidence = runLore(
-    ["evidence", task.id, "--oracle", "manual", "--command", "true", "--result", "pass", "--ac", FIXTURE_AC_ID, "--by", ACTOR, "--output-tail", "ok", "--json"],
+    ["evidence", task.id, "--oracle", "manual", "--command", "true", "--result", "pass", "--ac", FIXTURE_AC_ID, "--output-tail", "ok", "--json"],
     cwd,
   );
   if (evidence.exitCode !== 0) {

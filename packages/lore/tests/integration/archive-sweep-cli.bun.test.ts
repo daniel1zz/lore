@@ -183,7 +183,7 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
     expect(sweepPayload.data.candidates[0]!.rule).toBe("done_plan_straggler");
     expect(sweepPayload.data.candidates[0]!.repair).toBe("lore archive --apply");
 
-    const applyResult = runLore(["archive", "--apply", "--by", "agent:archive-sweep-cli-test"], tmpDir);
+    const applyResult = runLore(["archive", "--apply"], tmpDir);
     expect(applyResult.exitCode).toBe(0);
     expect(applyResult.stdout).toContain(taskSlug);
     expect(applyResult.stdout).toContain("OK");

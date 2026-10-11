@@ -88,7 +88,7 @@ describe("worktree sweep (#106)", () => {
     const branch = `wt-${name}`;
     const slug = newTask(name);
     mustOk(git(repo, "worktree", "add", "-q", "-b", branch, path), `worktree add ${name}`);
-    mustOk(lore(["claim", slug, "--by", ACTOR, "--worktree", path]), `claim ${name}`);
+    mustOk(lore(["claim", slug, "--worktree", path]), `claim ${name}`);
     return { slug, path, branch };
   }
 
@@ -167,7 +167,7 @@ describe("worktree sweep (#106)", () => {
     mkdirSync(plainPath);
     writeFileSync(join(plainPath, "keep-me.txt"), "not a worktree\n");
     const plainSlug = newTask("plain");
-    mustOk(lore(["claim", plainSlug, "--by", ACTOR, "--worktree", plainPath]), "claim plain");
+    mustOk(lore(["claim", plainSlug, "--worktree", plainPath]), "claim plain");
     evidence(plainSlug);
     plainDir = { slug: plainSlug, path: plainPath };
 

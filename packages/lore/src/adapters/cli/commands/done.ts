@@ -1,5 +1,5 @@
 /**
- * lore done <task> [--by <name>] [--override-attestation "<reason>" |
+ * lore done <task> [--override-attestation "<reason>" |
  *   --override-attestation-cite <n>] [--declare-no-new-tests "<reason>"] —
  * evidence-validated, atomic-from-the-caller's-perspective lifecycle walk to
  * `"archived"` for a task OR phase
@@ -17,7 +17,7 @@
  * an `attestation` (adr-lore-done-requires-a-runner-attested-pass-the-sixth-
  * false: a self-reported-only pass, the ONLY shape any `lore evidence` write can
  * produce, is no longer sufficient to archive) — OR a FRESH claim is held by a
- * DIFFERENT actor than `--by` (`"expected-fail"`/`"fail"`/`"inconclusive"` never
+ * DIFFERENT actor than the invoking identity (`"expected-fail"`/`"fail"`/`"inconclusive"` never
  * count as a pass either way — see `TaskWorkflowService.done`'s own JSDoc). An
  * already-terminal target is an idempotent NO-OP (exit 0, unchanged doc) — a
  * second `lore done` after a first succeeded never fails, evaluated BEFORE any
@@ -124,8 +124,7 @@
  * that call fails with its own `VALIDATION_ERROR {field: "type", value: "phase"}` does
  * this adapter retry via `PhaseWorkflowService.done`.
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
- * utils.ts::resolveActor.
+ * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`.
  *
  * Exit codes: 0 = success (incl. idempotent no-op), 2 = CLI usage error
  *   (`--override-attestation`/`--declare-no-new-tests` given with a blank/
@@ -280,10 +279,6 @@ export default defineCommand({
       description: "Task (or phase) document ID or slug",
       required: true,
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-    },
     "override-attestation": {
       type: "string",
       description:
@@ -397,7 +392,7 @@ export default defineCommand({
         citedOverrideReason = citeResult.value;
       }
 
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const by = resolveActor();
       const doneOpts = {
         by,
         source: app.callerSurface,

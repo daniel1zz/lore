@@ -3,7 +3,7 @@
  *
  * Purpose: an MCP server is ONE long-lived process serving many callers, so the identity of a write can never be
  * the server's environment. Each attested tool call builds its own {@link InvocationIdentity} from the call's
- * `harness_run` and optional `by` arguments (name source `mcp`), runs against an App whose store is wrapped for
+ * `harness_run` argument alone, runs against an App whose store is wrapped for
  * exactly that identity (`App.forWriteContext`), and closes that App when the call ends. One call = one identity,
  * so every operation of a `lore_batch` call carries the same run and the same name.
  *
@@ -36,10 +36,9 @@ export interface CallContext {
   readonly identity: InvocationIdentity;
 }
 
-/** The per-call attestation arguments every attested tool accepts. */
+/** The per-call attestation argument every attested tool accepts. The name is never an argument (BR-1055). */
 export interface CallAttestation {
   readonly harness_run?: string | undefined;
-  readonly by?: string | undefined;
 }
 
 function stderrWarn(line: string): void {
@@ -52,26 +51,19 @@ function errorResult(error: LoreError): CallToolResult {
 }
 
 /**
- * Build the invocation identity of one call. `harness_run` is the run the agent integration vouched for; `by`
- * is a claimed name (source `mcp`), never attestation. Without `by` the name falls to the server's own chain
- * ($LORE_ACTOR, session, OS user) exactly as `resolveInvocationIdentity` resolves it — so the name source stays
- * honest (`env`/`session`/`os`), and the working-copy tier is skipped (the server's cwd says nothing about the
- * caller).
+ * Build the invocation identity of one call. `harness_run` is the run the agent integration vouched for. The
+ * name falls to the server's own chain (session, OS user) exactly as `resolveInvocationIdentity` resolves it — so
+ * the name source stays honest (`session`/`os`), and the working-copy tier is skipped (the server's cwd says
+ * nothing about the caller).
  */
-export function buildCallIdentity(
-  input: CallAttestation,
-  warn: (line: string) => void,
-): Result<InvocationIdentity, LoreError> {
-  const argv = [
-    ...(input.harness_run !== undefined ? ["--harness-run", input.harness_run] : []),
-    ...(input.by !== undefined ? ["--by", input.by] : []),
-  ];
+export function buildCallIdentity(input: CallAttestation): Result<InvocationIdentity, LoreError> {
+  const argv = input.harness_run !== undefined ? ["--harness-run", input.harness_run] : [];
   try {
-    const { identity } = resolveInvocationIdentity(argv, process.env, warn);
-    return ok(input.by !== undefined ? { ...identity, claimedSource: "mcp" } : identity);
+    const { identity } = resolveInvocationIdentity(argv, process.env);
+    return ok(identity);
   } catch (e) {
     if (e instanceof RunIdentityArgumentError) {
-      return err({ code: "VALIDATION_ERROR", field: e.message.includes("--by") ? "by" : "harness_run", message: e.message });
+      return err({ code: "VALIDATION_ERROR", field: "harness_run", message: e.message });
     }
     throw e;
   }
@@ -166,7 +158,7 @@ export class McpCallScope {
    * @returns the body's result, or an error result when the identity/App could not be established.
    */
   async run(input: CallAttestation, body: (context: CallContext) => Promise<CallToolResult>): Promise<CallToolResult> {
-    const built = buildCallIdentity(input, this.warn);
+    const built = buildCallIdentity(input);
     if (!built.ok) return errorResult(built.error);
     const identity = built.value;
 

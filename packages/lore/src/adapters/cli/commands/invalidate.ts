@@ -41,10 +41,6 @@ export default defineCommand({
       type: "boolean",
       description: "Undo a prior invalidation (clears invalid_at/invalidated_by/reason)",
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -59,7 +55,7 @@ export default defineCommand({
         return;
       }
 
-      const by = resolveActor(args.by);
+      const by = resolveActor();
       const opts: InvalidateOpts = { by };
       if (args["superseded-by"] !== undefined) opts.supersededBy = args["superseded-by"];
       if (args.reason !== undefined) opts.reason = args.reason;

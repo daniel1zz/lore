@@ -684,8 +684,8 @@ export function tallyEvidenceResults(rows: readonly { result: string }[]): Evide
  * @invariant `session_id` is the SESSION INSTANCE ("which run"), a THIRD captured
  *   execution fact beside `machine`/`worktree` — never a component of `by`
  *   ("who"). It exists because two concurrently-live sessions in ONE checkout
- *   legitimately share an actor string (this project's own discipline instructs
- *   operators to export `LORE_ACTOR=agent:main-orchestrator`), which used to
+ *   legitimately share an actor string (this project's own discipline gives
+ *   every main-checkout run the name `agent:main-orchestrator`), which used to
  *   collapse them into one derived session and disable `noAnchorOverlap`
  *   entirely (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
  *   ABSENT is legal and load-bearing: every claim written before this field

@@ -29,6 +29,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterEach } from "bun:test
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -41,10 +42,11 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
+/** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),
@@ -108,8 +110,6 @@ describe("lore handoff — HAPPY", () => {
     const result = runLore(
       [
         "handoff",
-        "--by",
-        "alice",
         "--plan",
         planSlug,
         "--file",
@@ -121,6 +121,7 @@ describe("lore handoff — HAPPY", () => {
         "--json",
       ],
       tmpDir,
+      "alice",
     );
 
     expect(result.exitCode).toBe(0);
@@ -195,7 +196,7 @@ describe("lore create knowledge --sub-type handoff — NEGATIVE (writer-identity
 
 describe("lore handoff — BOUNDARY: missing --next", () => {
   it("flags path with zero --next flags → exit 2 (a handoff naming no next step is a status report, not a handoff)", () => {
-    const result = runLore(["handoff", "--by", "alice", "--file", "a.ts"], tmpDir);
+    const result = runLore(["handoff", "--file", "a.ts"], tmpDir, "alice");
 
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("next_steps");
@@ -207,8 +208,9 @@ describe("lore handoff — BOUNDARY: missing --next", () => {
 describe("lore handoff — ERROR: flag guards", () => {
   it("--failing-command without --failing-tail-file → exit 2", () => {
     const result = runLore(
-      ["handoff", "--by", "alice", "--next", "step", "--failing-command", "bun test"],
+      ["handoff", "--next", "step", "--failing-command", "bun test"],
       tmpDir,
+      "alice",
     );
 
     expect(result.exitCode).toBe(2);
@@ -221,8 +223,9 @@ describe("lore handoff — ERROR: flag guards", () => {
     writeFileSync(tailFile, "1 test failed", "utf8");
 
     const result = runLore(
-      ["handoff", "--by", "alice", "--next", "step", "--failing-tail-file", tailFile],
+      ["handoff", "--next", "step", "--failing-tail-file", tailFile],
       tmpDir,
+      "alice",
     );
 
     expect(result.exitCode).toBe(2);
@@ -258,8 +261,6 @@ describe("lore handoff — STATE: round trip through the real store", () => {
     const writeResult = runLore(
       [
         "handoff",
-        "--by",
-        "carol",
         "--plan",
         planSlug,
         "--next",
@@ -267,6 +268,7 @@ describe("lore handoff — STATE: round trip through the real store", () => {
         "--json",
       ],
       tmpDir,
+      "carol",
     );
     expect(writeResult.exitCode).toBe(0);
     const written = JSON.parse(writeResult.stdout) as { data: { slug: string } };
@@ -275,7 +277,7 @@ describe("lore handoff — STATE: round trip through the real store", () => {
     expect(getResult.exitCode).toBe(0);
     const got = JSON.parse(getResult.stdout) as { data: { doc: { extra: { sub_type: string; handoff: { by: string; next_steps: string[] } } } } };
     expect(got.data.doc.extra.sub_type).toBe("handoff");
-    expect(got.data.doc.extra.handoff.by).toBe("carol");
+    expect(got.data.doc.extra.handoff.by).toBe(sessionActorFor("carol"));
     expect(got.data.doc.extra.handoff.next_steps).toEqual(["verify the fix"]);
   });
 });

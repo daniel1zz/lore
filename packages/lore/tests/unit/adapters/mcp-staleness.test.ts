@@ -171,22 +171,22 @@ beforeEach(() => {
   registerTools(server, app);
 });
 
-// ─── NEGATIVE: schema requires `by` ──────────────────────────────────────────
+// ─── NEGATIVE: schema declares no `by` ──────────────────────────────────────────
 
-describe("LoreStalenessProbeSchema — NEGATIVE (by is required)", () => {
+describe("LoreStalenessProbeSchema — NEGATIVE (no caller-named identity)", () => {
   // reason: BR-1034 (AC-RID-7) — no MCP tool requires the caller to name itself; the call's resolved name fills in.
   it("accepts a payload missing `by` entirely", () => {
     const result = LoreStalenessProbeSchema.safeParse({ list: true });
     expect(result.success).toBe(true);
   });
 
-  it("rejects an empty-string `by`", () => {
-    const result = LoreStalenessProbeSchema.safeParse({ by: "" });
-    expect(result.success).toBe(false);
+  // reason: AC-ROI-1 — the probe's audit-row actor is the call's own identity; the schema declares no `by`.
+  it("declares no `by` property", () => {
+    expect(Object.keys(LoreStalenessProbeSchema.shape)).not.toContain("by");
   });
 
-  it("accepts a minimal valid payload ({by} alone)", () => {
-    const result = LoreStalenessProbeSchema.safeParse({ by: "agent:x" });
+  it("accepts a minimal valid payload ({} alone)", () => {
+    const result = LoreStalenessProbeSchema.safeParse({});
     expect(result.success).toBe(true);
   });
 });

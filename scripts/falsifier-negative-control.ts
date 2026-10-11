@@ -331,7 +331,7 @@ function assertDefined<T>(value: T | undefined, description: string): asserts va
  */
 function runNegativeControl(repoRoot: string, planSlug: string, taskSlug: string): void {
   const result = runLore(
-    ["verify", planSlug, "--task", taskSlug, "--falsify", NEGATIVE_AC_ID, "--by", "falsifier-negative-control-script"],
+    ["verify", planSlug, "--task", taskSlug, "--falsify", NEGATIVE_AC_ID],
     repoRoot,
   );
   assertExactly(result.exitCode, 4, "NEGATIVE control: lore verify --falsify exit code for an inert falsifier");
@@ -362,7 +362,7 @@ function runNegativeControl(repoRoot: string, planSlug: string, taskSlug: string
  */
 function runPositiveControl(repoRoot: string, planSlug: string, taskSlug: string): void {
   const result = runLore(
-    ["verify", planSlug, "--task", taskSlug, "--falsify", POSITIVE_AC_ID, "--by", "falsifier-negative-control-script"],
+    ["verify", planSlug, "--task", taskSlug, "--falsify", POSITIVE_AC_ID],
     repoRoot,
   );
   assertExactly(

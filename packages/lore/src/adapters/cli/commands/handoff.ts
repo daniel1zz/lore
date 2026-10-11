@@ -8,9 +8,10 @@
  * PRIMARY path: `--json-file <path>` — the file IS the `extra.handoff` SSOT payload
  * (D6: "the JSON IS the extra.handoff SSOT — no fork"). Human convenience path:
  * repeatable `--file` / `--decision "<judgment>[@<conf>]"` / `--next` flags, plus
- * `--failing-command` + `--failing-tail-file` (mutually required). `--plan`/`--by`
- * work with BOTH paths (D6) — passed explicitly, they override the json-file's own
- * `plan_ref`/`by`; omitted, the json-file's own values are left untouched. The two
+ * `--failing-command` + `--failing-tail-file` (mutually required). `--plan`
+ * works with BOTH paths (D6) — passed explicitly, it overrides the json-file's own
+ * `plan_ref`; omitted, the json-file's own value is left untouched. `by` is always the
+ * invoking identity — there is no `--by`, and a payload-supplied `by` is overridden. The two
  * paths are otherwise mutually exclusive: `--json-file` rejects any field flag
  * (`--file`/`--decision`/`--next`/`--failing-command`/`--failing-tail-file`).
  *
@@ -101,7 +102,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { assembleHandoffInput, parseHandoffJsonFile } from "../handoff-input.js";
 
-/** Field flags mutually exclusive with `--json-file` (D6) — `--plan`/`--by` are NOT in this list; they work with both paths. */
+/** Field flags mutually exclusive with `--json-file` (D6) — `--plan` is NOT in this list; it works with both paths. */
 const FIELD_FLAGS = ["file", "decision", "next", "failing-command", "failing-tail-file"] as const;
 
 /** The only recognized `lore handoff` subcommand positional (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the D9). Any other non-empty positional is a usage error (exit 2); omitted entirely, the command runs its default write path unchanged. */
@@ -1029,10 +1030,6 @@ export default defineCommand({
       type: "string",
       description: "Plan doc id/slug this handoff's parent should resolve to (works with both paths)",
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username (works with both paths)",
-    },
     json: {
       type: "boolean",
       description: "Output result as JSON",
@@ -1064,7 +1061,6 @@ export default defineCommand({
       return;
     }
 
-    const explicitBy = typeof args.by === "string" && args.by.trim() !== "" ? args.by : undefined;
     const explicitPlan = typeof args.plan === "string" && args.plan.trim() !== "" ? args.plan : undefined;
 
     let candidate: HandoffExtra;
@@ -1082,7 +1078,8 @@ export default defineCommand({
       }
 
       const parsed = parseHandoffJsonFile(raw, {
-        ...(explicitBy !== undefined ? { by: explicitBy } : {}),
+        // reason: the writer is the invoking run alone — a payload-supplied `by` is overridden, never trusted.
+        by: resolveActor(),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
       });
       if (!parsed.ok) {
@@ -1116,7 +1113,7 @@ export default defineCommand({
       }
 
       const assembled = assembleHandoffInput({
-        by: resolveActor(explicitBy),
+        by: resolveActor(),
         ...(explicitPlan !== undefined ? { plan: explicitPlan } : {}),
         files: normalizeRepeatable(args.file),
         decisions: normalizeRepeatable(args.decision),

@@ -165,7 +165,6 @@ export default defineCommand({
         "current-exception": { type: "string", description: "[architecture standard, repeatable] A live debt entry id (AD-n) that excepts this standard today" },
         "current-exceptions-none": { type: "boolean", description: "[architecture standard] State that the standard has no current exceptions (empty list)" },
         migration: { type: "string", description: "[architecture standard] How the exceptions get closed" },
-        by: { type: "string", description: "Actor identity (default: resolved from $LORE_ACTOR)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run({ args }) {
@@ -182,7 +181,7 @@ export default defineCommand({
             examples: repeatable(args.example) ?? [],
             ...four.parts,
           };
-          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor(args.by as string | undefined) });
+          const result = await svc.addRule(args.leaf as string, input, { by: resolveActor() });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { ruleId: result.value.ruleId, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));
@@ -210,7 +209,6 @@ export default defineCommand({
         lifecycle: { type: "string", description: "deprecated | retired (forward-only; never back to live)" },
         note: { type: "string", description: "Retirement note — required with --lifecycle retired, stored as retired_note" },
         "move-to": { type: "string", description: "Destination baseline leaf (ID or slug); the BR-n id is unchanged" },
-        by: { type: "string", description: "Actor identity (default: resolved from $LORE_ACTOR)" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run({ args }) {
@@ -231,7 +229,7 @@ export default defineCommand({
             ...(args["move-to"] !== undefined ? { moveTo: args["move-to"] as string } : {}),
             ...four.parts,
           };
-          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor(args.by as string | undefined) });
+          const result = await svc.setRule(args.rule as string, patch, { by: resolveActor() });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { rule: result.value.rule, leaf: result.value.doc.slug, version: result.value.doc.version } }, null, 2));

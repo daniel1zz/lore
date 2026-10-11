@@ -256,7 +256,7 @@ export type CreateDocResult = DocRecord & { readonly orphan_advisory?: string };
  * - `by` — explicit actor value threaded from the caller's own resolution (CLI's
  *   `resolveActor`, an MCP tool's required `by` arg, or an HTTP bearer token's
  *   API-key name). `undefined` falls through to `resolveWriteActor`'s env chain
- *   (`resolveActorWithSource`: `$LORE_ACTOR` → session tier → OS username).
+ *   (`resolveActorWithSource`: session tier → OS username).
  * - `attributeCreatedBy` — when `true`, the SAME resolved actor ALSO stamps
  *   `doc.created_by` (create only) and `versionRecord.created_by`
  *   (create/set/delete). RETAINED but inert since spec-run-identity-slice-1 D1: every
@@ -930,7 +930,7 @@ export class CorpusService {
 
   /**
    * Resolve the acting identity for a write (SPEC-079 G2 actor fidelity) —
-   * the SAME `--by`/`$LORE_ACTOR`/session-tier/OS-username precedence chain
+   * the SAME session-tier/OS-username precedence chain
    * the CLI's `resolveActor` already applies (`resolveActorWithSource`,
    * `@lore/core/node`), reused here so a service-layer write (through the
    * CLI, MCP, or HTTP dashboard) is always attributed to a real name when its caller
@@ -1753,8 +1753,8 @@ export class CorpusService {
     };
     const creationAudit: AuditEntry = {
       timestamp: now,
-      // SPEC-079 G2 / spec-run-identity-slice-1 D1 — resolved actor (--by > write-context name >
-      // $LORE_ACTOR > session tier > OS username); `doc.created_by` and the versions row carry the SAME value.
+      // SPEC-079 G2 / spec-run-identity-slice-1 D1 — resolved actor (explicit `by` > write-context name >
+      // session tier > OS username); `doc.created_by` and the versions row carry the SAME value.
       actor: resolvedActor,
       session_id: id,
       action: "create",

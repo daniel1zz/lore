@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { createApp } from "../../../../src/app.js";
 import type { App } from "../../../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
+import { sessionIdOfActor } from "../../../helpers/session-actor";
 
 const PACKAGE_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
@@ -53,19 +54,23 @@ export interface StoredClaim {
 export const R1 = "cc:rid-sess-one";
 export const R2 = "cc:rid-sess-two";
 
-function cleanEnv(dir: string): Record<string, string | undefined> {
+function cleanEnv(dir: string, actor?: string): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env, HOME: dir, CLAUDECODE: "1" };
   // The ambient identity/session of whoever runs this suite must never decide a verdict.
   for (const name of ["LORE_ACTOR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "LORE_GATE_BYPASS"]) {
     delete env[name];
   }
+  // BR-1055: no `--by`; a fixture writer is named through the SESSION tier. `actor` is the RESOLVED name
+  // (`agent:session-<id8>`, as `sessionActorFor` builds it); the session id whose first 8 characters are that
+  // `<id8>` resolves to exactly that name.
+  if (actor !== undefined) env["CLAUDE_CODE_SESSION_ID"] = sessionIdOfActor(actor);
   return env;
 }
 
 /** Spawns the real CLI. `run` is passed as the global `--harness-run <id>` flag (D1), placed before the verb. */
-export function runLore(args: string[], dir: string, run?: string): RunResult {
+export function runLore(args: string[], dir: string, run?: string, actor?: string): RunResult {
   const argv = run === undefined ? args : ["--harness-run", run, ...args];
-  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd: dir, env: cleanEnv(dir) });
+  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...argv], { cwd: dir, env: cleanEnv(dir, actor) });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 
@@ -180,12 +185,13 @@ export async function createCorpus(): Promise<Corpus> {
 
 // ─── CLI verbs ──────────────────────────────────────────────────────────────
 
+/** `by` is the RESOLVED writer name the spawn runs as (`sessionActorFor(...)`), injected through the session tier. */
 export function claim(dir: string, target: string, by: string, opts: { run?: string; steal?: boolean } = {}): RunResult {
-  return runLore(["claim", target, "--by", by, ...(opts.steal === true ? ["--steal"] : [])], dir, opts.run);
+  return runLore(["claim", target, ...(opts.steal === true ? ["--steal"] : [])], dir, opts.run, by);
 }
 
 export function release(dir: string, target: string, by: string, opts: { run?: string; force?: boolean } = {}): RunResult {
-  return runLore(["release", target, "--by", by, ...(opts.force === true ? ["--force"] : [])], dir, opts.run);
+  return runLore(["release", target, ...(opts.force === true ? ["--force"] : [])], dir, opts.run, by);
 }
 
 // ─── Direct corpus access (see header for why) ──────────────────────────────

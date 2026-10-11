@@ -72,8 +72,6 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  *
  * @param argv - Command-line tokens after the program name; not mutated.
  * @param env - Environment to read session ids from (default `process.env`).
- * @param _warn - Ignored; no warning is emitted any more. The slot stays so existing
- *   callers (adapters/mcp/call-scope.ts) keep compiling.
  * @param detectWorktree - Working-copy tier probe `(cwd) => "agent:<branch>" | undefined`.
  *   `detectWorktreeDerivedActor` lives in packages/lore (adapters/cli/utils.ts), which core cannot
  *   import, so the CLI injects it; when omitted that tier is skipped.
@@ -81,13 +79,12 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  * @throws {RunIdentityArgumentError} when `--by` / `--harness-run` has no value or an empty value
  *   (an empty `--by` must not silently fall through to a lower tier).
  * @example
- *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {}, warn)
+ *   resolveInvocationIdentity(["claim", "t", "--harness-run", "cc:S1", "--by", "x"], {})
  *   // => { identity: { harnessRun: "cc:S1", claimed: "x", claimedSource: "flag" }, argv: ["claim", "t", "--by", "x"] }
  */
 export function resolveInvocationIdentity(
   argv: readonly string[],
   env: Record<string, string | undefined> = process.env,
-  _warn?: (line: string) => void,
   detectWorktree?: (cwd: string) => string | undefined,
 ): InvocationResolution {
   const remaining: string[] = [];

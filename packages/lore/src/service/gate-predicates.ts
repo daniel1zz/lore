@@ -640,8 +640,8 @@ export function findAnchorOverlapConflict(
       return { sibling, pairs: overlap.pairs, kind: "foreign-actor" };
     }
     // reason: same `by` is NOT evidence of same session — the project's own
-    // dispatch discipline instructs every main-checkout run to export the
-    // IDENTICAL `LORE_ACTOR=agent:main-orchestrator`, so the pre-fix
+    // dispatch discipline gave every main-checkout run the IDENTICAL name
+    // `agent:main-orchestrator`, so the pre-fix
     // same-actor exemption exempted precisely the population it needed to
     // serialize (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
     // The exemption now requires the captured fact, not the proxy.
@@ -665,8 +665,7 @@ export function findAnchorOverlapConflict(
  *
  * "Different session" — not "different actor". The mutex serializes concurrent
  * WRITERS on source files, and two writers can share an actor string: this repo's
- * standing discipline mandates `LORE_ACTOR=agent:main-orchestrator` for every
- * main-checkout run, so the original same-actor exemption silently disabled the
+ * main-checkout runs all carried the name `agent:main-orchestrator`, so the original same-actor exemption silently disabled the
  * gate for exactly the concurrent-orchestrator case it was built for (measured
  * 2026-08-02; consequence chain realised twice, incl. an orchestrator removing a
  * live agent's worktree).
@@ -680,7 +679,7 @@ export function findAnchorOverlapConflict(
  * ⛔ Three-questions record (adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the):
  *   1. **Proxy** — `(by, session_id)` is still a proxy for "one writer". Concrete
  *      input satisfying the proxy while violating the property: TWO worktrees
- *      driven from ONE Claude Code session under one `LORE_ACTOR` — identical
+ *      driven from ONE Claude Code session under one actor name — identical
  *      `by`, identical `session_id`, different `worktree` — still permits the
  *      overlap. ACCEPTED here and named, not silently ignored: `worktree` is
  *      `actorIdentityGuard`'s dimension (it fires on the os-fallback tier), and
@@ -757,8 +756,8 @@ export const ACTOR_IDENTITY_FIELD = "actor-identity";
  * The identity-resolution tier `actorIdentityGuard` treats as an "untraceable
  * default" — the governing spec's own `os_default` vocabulary, spelled here as
  * the literal `ActorSource` value (`@lore/core/node`, `actor-resolution-node.ts`)
- * `resolveActorWithSource` returns when resolution falls through explicit `--by`
- * / `$LORE_ACTOR` / the SPEC-071 session tier all the way to `os.userInfo()
+ * `resolveActorWithSource` returns when resolution falls through the explicit
+ * and SPEC-071 session tiers all the way to `os.userInfo()
  * .username`. Declared as a plain string literal (not an imported type) so this
  * module keeps its module-header invariant of zero `@lore/core/node` dependency
  * — the Node-only resolution chain lives one layer up, in the CALLER that
@@ -779,7 +778,7 @@ export const OS_DEFAULT_IDENTITY_SOURCE = "os-fallback";
  *
  *   1. The CANDIDATE's own actor must have resolved via the untraceable
  *      OS-username fallback tier ({@link OS_DEFAULT_IDENTITY_SOURCE}) — an
- *      explicit `--by`, `$LORE_ACTOR`, or the SPEC-071 session tier NEVER
+ *      an explicit-name or SPEC-071 session tier NEVER
  *      trips this predicate, regardless of what any sibling holds (AC-
  *      IDENTITY-REJECT's "distinct explicit identities never trip it").
  *   2. AND a FRESH sibling claim in the same plan must hold the byte-IDENTICAL

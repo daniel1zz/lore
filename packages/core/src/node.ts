@@ -18,7 +18,7 @@
  *     ~931KB unpacked, must stay unreachable from the browser bundle), even
  *     though this one performs no filesystem IO of its own.
  *   - resolveActorWithSource / ActorSource / ResolvedActor (actor-resolution-
- *     node.ts, SPEC-079 G2) — the `--by`/`$LORE_ACTOR`/session-tier/OS-username
+ *     node.ts, SPEC-079 G2) — the session-tier/OS-username
  *     precedence chain, relocated here from the CLI adapter so `CorpusService`
  *     can apply the identical fallback when a caller omits `opts.by`. Grouped
  *     here for the SAME reason (its OS-fallback tier calls `os.userInfo()`).

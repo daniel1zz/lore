@@ -49,6 +49,7 @@ import yaml from "yaml";
 import { BOOTSTRAP_INJECTION_KNOWN_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
+import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -82,10 +83,11 @@ const LORE_BIN = join(PROJECT_ROOT, "dist", "lore");
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Runs the compiled `dist/lore` binary directly (real e2e binary, not `bun run src/`). */
-function runLore(args: string[], cwd: string): RunResult {
+/** `actor` names the writer through the session tier (no write command takes `--by`). */
+function runLore(args: string[], cwd: string, actor: string | null = "cli-feed-task-start-test"): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, LORE_ACTOR: "agent:cli-feed-task-start-test" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd }, actor) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),
@@ -256,7 +258,7 @@ function createFullChain(dir: string): {
   expect(passEvidence.exitCode).toBe(0);
 
   const claimResult = runLore(
-    ["claim", taskSlug, "--by", "agent:cli-feed-task-start-test", "--worktree", "/tmp/t1-worktree"],
+    ["claim", taskSlug, "--worktree", "/tmp/t1-worktree"],
     dir,
   );
   expect(claimResult.exitCode).toBe(0);
@@ -283,8 +285,6 @@ function createHandoffChain(dir: string): { planSlug: string; handoffSlug: strin
       "handoff",
       "--plan",
       planSlug,
-      "--by",
-      "alice",
       "--file",
       "a.ts",
       "--decision",
@@ -293,6 +293,7 @@ function createHandoffChain(dir: string): { planSlug: string; handoffSlug: strin
       "confirm the CLI stdout closure",
     ],
     dir,
+    "alice",
   );
   expect(handoffResult.exitCode).toBe(0);
   const handoffSlug = parseSlug(handoffResult.stdout);
@@ -429,7 +430,7 @@ describe("HAPPY — lore feed task-start <task> against a real corpus (AC-070-7)
     expect(result.stdout).toContain("Oracle scope (SCOPED ONLY");
 
     // claim: the fresh claim holder
-    expect(result.stdout).toContain("agent:cli-feed-task-start-test");
+    expect(result.stdout).toContain(sessionActorFor("cli-feed-task-start-test"));
     expect(result.stdout).toContain("(fresh)");
 
     // knowledge_pointers / handoff: nothing linked in this fixture
@@ -463,7 +464,7 @@ describe("HAPPY — lore feed task-start <task> against a real corpus (AC-070-7)
     // (by, worktree) — asserted precisely here (unlike the plain-text HAPPY
     // test above, which cannot isolate this section from the objective
     // header's own slug mention).
-    expect(pack.sections.plan_state).toContain("agent:cli-feed-task-start-test");
+    expect(pack.sections.plan_state).toContain(sessionActorFor("cli-feed-task-start-test"));
     expect(pack.sections.plan_state).toContain(taskSlug);
     expect(pack.sections.plan_state).toContain("no anchor conflicts");
   });

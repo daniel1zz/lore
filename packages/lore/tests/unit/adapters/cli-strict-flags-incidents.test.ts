@@ -14,12 +14,10 @@
  *   REGRESSION (incident a): `lore link A B --kind blocks` (real flag is
  *     --type; --kind was silently swallowed pre-SPEC-051, defaulting to
  *     "relates-to") now exits 2, names --kind, and creates NO link row.
- *   REGRESSION (incident b): `lore approve X --by daniel` (pre-SPEC-051 only
- *     --reviewer existed, so --by silently fell through to $LORE_ACTOR/OS
- *     username) now attributes the resulting version row to "daniel".
- *   HAPPY: the D2 --reviewer alias still works unchanged (REGRESSION guard
- *     for the pre-existing flag).
- *   ERROR: --by and --reviewer given CONFLICTING values on approve exits 2.
+ *   REGRESSION (incident b): `lore approve X --by daniel` once fell through
+ *     silently to the OS username. `--by` (and its `--reviewer` alias) are now
+ *     REMOVED from every write command (AC-ROI-1): both exit 2 naming the flag,
+ *     and an approve is attributed to the invoking session identity.
  *
  * @spec_ref SPEC-051 §Design D3 §Acceptance Criteria AC-051-2 AC-051-4
  */
@@ -29,6 +27,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -41,10 +40,10 @@ interface RunResult {
 }
 
 /** Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir (mirrors phase.test.ts). */
-function runLore(args: string[], cwd: string): RunResult {
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
     encoding: "utf8",
   });
   return {
@@ -110,43 +109,40 @@ describe("D3 incident (a): lore link A B --kind blocks", () => {
   });
 });
 
-describe("D3 incident (b): lore approve X --by daniel", () => {
-  it("REGRESSION: the resulting version row is attributed to 'daniel'", () => {
-    const doc = createKnowledgeDoc("Approve By Alias Doc");
+describe("D3 incident (b): lore approve X --by daniel (the writer flags were later removed — AC-ROI-1)", () => {
+  it("REGRESSION: --by is rejected loudly (exit 2, names the flag) and writes nothing", () => {
+    const doc = createKnowledgeDoc("Approve By Retired Doc");
 
     const approved = runLore(["approve", doc, "--by", "daniel"], tmpDir);
+    expect(approved.exitCode).toBe(2);
+    expect(approved.stderr).toContain("Unknown option: --by");
+    expect(approved.stderr).toContain("lore approve --help");
+
+    const log = runLore(["log", doc, "--json"], tmpDir);
+    const parsed = JSON.parse(log.stdout) as { data: { entries: Array<{ action: string }> } };
+    expect(parsed.data.entries.some((e) => e.action === "approve")).toBe(false);
+  });
+
+  it("REGRESSION: the former --reviewer alias is rejected loudly too (exit 2)", () => {
+    const doc = createKnowledgeDoc("Approve Reviewer Retired Doc");
+
+    const approved = runLore(["approve", doc, "--reviewer", "alice"], tmpDir);
+    expect(approved.exitCode).toBe(2);
+    expect(approved.stderr).toContain("Unknown option: --reviewer");
+  });
+
+  it("HAPPY: an approve is attributed to the invoking session identity", () => {
+    const doc = createKnowledgeDoc("Approve Session Identity Doc");
+
+    const approved = runLore(["approve", doc], tmpDir, "daniel");
     expect(approved.exitCode).toBe(0);
 
     const log = runLore(["log", doc, "--json"], tmpDir);
     expect(log.exitCode).toBe(0);
-    // reason: VersionService.log() returns entries NEWEST-FIRST (verified via a
-    // manual run: [{version:2, action:"approve", created_by:"daniel"},
-    // {version:1, action:"create", created_by:"system"}]) — entries[0] is the
-    // approve row this test is proving attribution for, not entries[length-1].
+    // reason: VersionService.log() returns entries NEWEST-FIRST — entries[0] is the approve row.
     const parsed = JSON.parse(log.stdout) as { data: { entries: Array<{ action: string; created_by: string }> } };
     const approveEntry = parsed.data.entries[0];
     expect(approveEntry?.action).toBe("approve");
-    expect(approveEntry?.created_by).toBe("daniel");
-  });
-
-  it("HAPPY: the pre-existing --reviewer alias still attributes correctly (REGRESSION guard)", () => {
-    const doc = createKnowledgeDoc("Approve Reviewer Alias Doc");
-
-    const approved = runLore(["approve", doc, "--reviewer", "alice"], tmpDir);
-    expect(approved.exitCode).toBe(0);
-
-    const log = runLore(["log", doc, "--json"], tmpDir);
-    const parsed = JSON.parse(log.stdout) as { data: { entries: Array<{ action: string; created_by: string }> } };
-    const approveEntry = parsed.data.entries[0];
-    expect(approveEntry?.action).toBe("approve");
-    expect(approveEntry?.created_by).toBe("alice");
-  });
-
-  it("ERROR: --by and --reviewer with CONFLICTING values exits 2", () => {
-    const doc = createKnowledgeDoc("Approve Conflicting Actor Doc");
-
-    const approved = runLore(["approve", doc, "--by", "daniel", "--reviewer", "alice"], tmpDir);
-    expect(approved.exitCode).toBe(2);
-    expect(approved.stderr).toContain("--by and --reviewer");
+    expect(approveEntry?.created_by).toBe(sessionActorFor("daniel"));
   });
 });

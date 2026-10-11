@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "f5eb1ba0727cdfa5150d76c069b4951ce77da2471cfac430b3ca31994b045707",
+  tree_digest: "39a67aef7d79ecc7a1e6c6a0c1a1604b15a6e191e6043171f08405e19f39692f",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "e7b1610edfb25cae9d0bfcc3ffe6bcdf62940c1c37e8a5528508ea0a057429e1" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "c2cb50556fcce86bfecb5e9136732c9002cfef4268d09edf790a683883c5af36" },
@@ -355,7 +355,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-uat/templates/acceptance-report.md", kind: "skill", ownership: "managed", sha256: "135ed6f2b32146d7e20d119d9c5393dde79d34d1e0258e93a55ad0a549b17bac" },
   { path: "skills/lore-uat/templates/journey.yaml", kind: "skill", ownership: "managed", sha256: "443d43a6f968f8fa8b7df460598f2d05f0e34ff47053b4d0a34d70f9eca0c05a" },
   { path: "skills/lore-write-a-skill/SKILL.md", kind: "skill", ownership: "managed", sha256: "c5ff4dc1d0b8a4801a0066f8e1c79cb62da1ad63461d4b3b2bbf1c69a7598c89" },
-  { path: "skills/lore/SKILL.md", kind: "skill", ownership: "managed", sha256: "4d1476beef4157d90f7d089d374fc77743db26f37b54e47db4adfd2ac56fd6a9" },
+  { path: "skills/lore/SKILL.md", kind: "skill", ownership: "managed", sha256: "e2ac1bc5b6741069e4d0c57846a7ff13b32357cdcfc2a3d278ca1dda0ac3e64a" },
   { path: "skills/shared/batched-governance.md", kind: "skill", ownership: "managed", sha256: "8731ad57f67d0757ceab043432ddfec48b4e07d458c58a9826e08dec1d610595" },
   { path: "skills/shared/docs-lookup-guide.md", kind: "skill", ownership: "managed", sha256: "978aa02e7943ebf0f4afe21bda79da7d5d4551d94a4da2ef7ca90241edd0d99a" },
   { path: "skills/shared/ears-spec-generation.md", kind: "skill", ownership: "managed", sha256: "91532135bd8cf18c8e9dcece25bb33d33df15caef6ee536b41f33333674daf2b" },

@@ -34,7 +34,7 @@
  *     bootstrap-key identity (`actor.name`) / its hardcoded "admin" owner field
  *     (`actor.owner`) are NEVER used as the write actor; the human and `lore serve` share
  *     a machine (SPEC-016), so `CorpusService.resolveWriteActor(undefined)` falls through
- *     to `$LORE_ACTOR` (of the `lore serve` process) → session tier → OS username — the
+ *     to the session tier → OS username (of the `lore serve` process) — the
  *     SAME chain the CLI's `resolveActor` applies. Bearer sessions (`http_token`) are
  *     UNCHANGED: explicit `by: actor.name` (the API key name), `attributeCreatedBy` omitted
  *     (doc/version `created_by` stays the historical literal `"system"`).
@@ -444,8 +444,8 @@ export async function authenticateRequest(
  * - `http_cookie` (dashboard UI, human on the SAME machine as `lore serve` —
  *   SPEC-016's local-bootstrap model): omits `by` entirely and sets
  *   `attributeCreatedBy: true`. `CorpusService.resolveWriteActor(undefined)`
- *   then falls through its full chain (`$LORE_ACTOR` of the `lore serve`
- *   process → session tier → OS username) — the exact `resolveActor`
+ *   then falls through its full chain (session tier → OS username of the
+ *   `lore serve` process) — the exact `resolveActor`
  *   precedence the CLI applies. The static `"dashboard-local"` bootstrap-key
  *   name (`actor.name`) and its hardcoded `"admin"` owner field (`actor.owner`)
  *   are deliberately NEVER used here: neither identifies WHICH human is at the

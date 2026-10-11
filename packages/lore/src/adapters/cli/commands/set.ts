@@ -200,12 +200,6 @@ export default defineCommand({
       type: "boolean",
       description: "Output as JSON",
     },
-    by: {
-      type: "string",
-      description:
-        "Actor identity to attribute this update to (SPEC-079 G2). Defaults to " +
-        "$LORE_ACTOR env var, then session tier, then OS username.",
-    },
     regenerate: {
       type: "boolean",
       description:
@@ -336,7 +330,7 @@ export default defineCommand({
       }
     }
 
-    const resolvedActor = resolveActor(args.by);
+    const resolvedActor = resolveActor();
     const { app, defaults } = loadLoreApp();
     try {
       // ─── Step 2: AI mutation path (SPEC-019) ──────────────────────────────────

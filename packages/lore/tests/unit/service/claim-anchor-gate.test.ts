@@ -161,7 +161,7 @@ describe("checkpointRegistry['task-claim'] — noAnchorOverlap (pure, SPEC-042 D
     expect(feedText).toContain("task-one");
     expect(feedText).toContain("agent:t1");
     expect(feedText).toContain("src/a"); // overlapping path pair mentions both sides
-    expect(feedText).toContain("lore release task-one --by agent:t1 --force");
+    expect(feedText).toContain("lore release task-one --force");
     // pointers only — never task body/content text
     expect(feedText).not.toContain("# Task One");
     expect(feedText).not.toContain("Body.");

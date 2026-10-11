@@ -26,6 +26,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -47,7 +48,7 @@ interface RunResult {
 function runLore(args: string[], cwd: string): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" }, "test-actor") as Record<string, string>,
     encoding: "utf8",
   });
   return {
@@ -82,18 +83,15 @@ afterEach(() => {
   }
 });
 
-// SPEC-079 G2 (actor fidelity) — `--by test-actor` makes the resulting create
-// audit entry's actor DETERMINISTIC regardless of this test process's own
-// ambient env (a real dev/CI shell may have $LORE_ACTOR or
-// $CLAUDE_CODE_SESSION_ID set, which CorpusService's env-chain fallback would
-// otherwise pick up — see corpus-service.ts's resolveWriteActor). Before
-// SPEC-079, every create's audit entry hardcoded the literal "system"; now it
-// carries the resolved actor, so this fixture pins an explicit one.
-const TEST_ACTOR = "test-actor";
+// SPEC-079 G2 (actor fidelity) — every spawn runs under the `test-actor` SESSION identity, which makes the
+// resulting create audit entry's actor DETERMINISTIC regardless of this test process's own ambient env
+// (a real dev/CI shell may have $CLAUDE_CODE_SESSION_ID set; `withSessionIdentity` replaces it). Before
+// SPEC-079, every create's audit entry hardcoded the literal "system"; now it carries the resolved actor.
+const TEST_ACTOR = sessionActorFor("test-actor");
 
 function createPrd(title: string): string {
   const r = runLore(
-    ["create", "prd", "--title", title, "--no-ai", "--content", "body", "--by", TEST_ACTOR],
+    ["create", "prd", "--title", title, "--no-ai", "--content", "body"],
     tmpDir,
   );
   if (r.exitCode !== 0) throw new Error(`create prd failed: ${r.stderr}`);

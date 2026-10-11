@@ -38,12 +38,15 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 
 // tests/integration/ -> tests/ -> packages/lore/ (2 levels up).
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 
-const ACTOR = "agent:memory-file-health-fixture";
+const ACTOR_LABEL = "agent:memory-file-health-fixture";
+/** The name the fixture's session identity resolves to (what `bootstrap --by` filters on). */
+const ACTOR = sessionActorFor(ACTOR_LABEL);
 const TEST_TIMEOUT_MS = 120_000;
 
 /** The five required root H2 sections, in contract order (spec Public Interface). */
@@ -64,7 +67,7 @@ interface RunResult {
 function runLore(args: readonly string[], cwd: string): RunResult {
   const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: ACTOR },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, CLAUDECODE: "1" }, ACTOR_LABEL) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),

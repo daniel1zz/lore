@@ -31,6 +31,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
 
 setDefaultTimeout(180_000);
 
@@ -45,19 +46,20 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function spawnEnv(cwd: string): Record<string, string | undefined> {
-  return { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: undefined };
+/** `actor` is a fixture LABEL: the spawn runs under the session identity `sessionIdFor(actor)` (no `--by`, BR-1055); `undefined` = unnamed. */
+function spawnEnv(cwd: string, actor?: string): Record<string, string | undefined> {
+  return withSessionIdentity({ ...process.env, HOME: cwd, CLAUDECODE: "1" }, actor ?? null);
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env: spawnEnv(cwd) });
+function runLore(args: string[], cwd: string, actor?: string): RunResult {
+  const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env: spawnEnv(cwd, actor) as Record<string, string> });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 
-async function runLoreAsync(args: string[], cwd: string): Promise<RunResult> {
+async function runLoreAsync(args: string[], cwd: string, actor?: string): Promise<RunResult> {
   const proc = Bun.spawn(["bun", "run", ENTRY, ...args], {
     cwd,
-    env: spawnEnv(cwd),
+    env: spawnEnv(cwd, actor) as Record<string, string>,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -69,8 +71,8 @@ async function runLoreAsync(args: string[], cwd: string): Promise<RunResult> {
   return { stdout, stderr, exitCode };
 }
 
-function mustRun(args: string[], cwd: string): RunResult {
-  const r = runLore(args, cwd);
+function mustRun(args: string[], cwd: string, actor?: string): RunResult {
+  const r = runLore(args, cwd, actor);
   if (r.exitCode !== 0) {
     throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${r.exitCode}): ${r.stderr}${r.stdout}`);
   }
@@ -87,7 +89,7 @@ function slugOf(stdout: string): string {
   return m[1];
 }
 
-const RULE_ARGS = (statement: string, by?: string): string[] => [
+const RULE_ARGS = (statement: string): string[] => [
   "--statement",
   statement,
   "--confidence",
@@ -96,7 +98,6 @@ const RULE_ARGS = (statement: string, by?: string): string[] => [
   "guaranteed",
   "--example",
   "example one",
-  ...(by ? ["--by", by] : []),
 ];
 
 interface Fixture {
@@ -218,13 +219,12 @@ function claimFromWorktree(name: string, task: string, actor: string, scope: str
     [
       "claim",
       task,
-      "--by",
-      actor,
       "--worktree",
       wt,
       ...(scope !== undefined ? ["--corpus-scope", scope] : []),
     ],
     wt,
+    actor,
   );
   return { wt, claim };
 }
@@ -240,7 +240,7 @@ afterAll(() => {
 
 describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
   it("CONTROL: a rule add from the main checkout itself succeeds (harness works)", () => {
-    const r = runLore(["rule", "add", fx.leafX1, ...RULE_ARGS("control rule from main checkout", "agent:csl-control")], fx.repo);
+    const r = runLore(["rule", "add", fx.leafX1, ...RULE_ARGS("control rule from main checkout")], fx.repo, "agent:csl-control");
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toMatch(/BR-\d+/);
   });
@@ -259,18 +259,18 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     const actor = "agent:csl-writer-x";
     const { wt, claim } = claimFromWorktree("scoped-x", fx.tasks[1]!, actor, fx.branchX);
     expect(claim.exitCode).toBe(0);
-    const add = runLore(["rule", "add", fx.leafX1, ...RULE_ARGS("scoped worktree rule on X leaf", actor)], wt);
+    const add = runLore(["rule", "add", fx.leafX1, ...RULE_ARGS("scoped worktree rule on X leaf")], wt, actor);
     expect(add.stderr).not.toContain(FOREIGN_TOKEN);
     expect(add.exitCode).toBe(0);
     const log = mustRun(["log", fx.leafX1], fx.repo).stdout;
-    expect(log).toContain(actor);
+    expect(log).toContain(sessionActorFor(actor));
   });
 
   it("NEGATIVE: scoped session writing a leaf of branch Y is refused with the foreign-corpus-write token", () => {
     const actor = "agent:csl-writer-y";
     const { wt, claim } = claimFromWorktree("scoped-y", fx.tasks[2]!, actor, fx.branchX);
     expect(claim.exitCode).toBe(0);
-    const add = runLore(["rule", "add", fx.leafY, ...RULE_ARGS("must not land on Y", actor)], wt);
+    const add = runLore(["rule", "add", fx.leafY, ...RULE_ARGS("must not land on Y")], wt, actor);
     expect(add.exitCode).not.toBe(0);
     expect(add.stderr + add.stdout).toContain(FOREIGN_TOKEN);
   });
@@ -278,7 +278,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
   it("NEGATIVE: scoped session writing a non-baseline doc is refused with the foreign-corpus-write token", () => {
     const actor = "agent:csl-writer-nb";
     const wt = join(fx.worktrees, "scoped-y");
-    const set = runLore(["set", fx.knowledge, "--content", "tampered from scoped worktree", "--by", actor], wt);
+    const set = runLore(["set", fx.knowledge, "--content", "tampered from scoped worktree"], wt, actor);
     expect(set.exitCode).not.toBe(0);
     expect(set.stderr + set.stdout).toContain(FOREIGN_TOKEN);
   });
@@ -293,7 +293,7 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     );
     const { wt, claim } = claimFromWorktree("unscoped", taskSlug, actor, undefined);
     expect(claim.exitCode).toBe(0);
-    const add = runLore(["rule", "add", fx.leafX2, ...RULE_ARGS("unscoped must be refused", actor)], wt);
+    const add = runLore(["rule", "add", fx.leafX2, ...RULE_ARGS("unscoped must be refused")], wt, actor);
     expect(add.exitCode).not.toBe(0);
     expect(add.stderr + add.stdout).toContain(FOREIGN_TOKEN);
   });
@@ -313,20 +313,20 @@ describe("claim-scoped corpus authoring from a worktree (AC-BLS2-8)", () => {
     expect(a.claim.exitCode).toBe(0);
     expect(b.claim.exitCode).toBe(0);
     const [ra, rb] = await Promise.all([
-      runLoreAsync(["rule", "add", fx.leafX1, ...RULE_ARGS("parallel rule A", actorA)], a.wt),
-      runLoreAsync(["rule", "add", fx.leafX2, ...RULE_ARGS("parallel rule B", actorB)], b.wt),
+      runLoreAsync(["rule", "add", fx.leafX1, ...RULE_ARGS("parallel rule A")], a.wt, actorA),
+      runLoreAsync(["rule", "add", fx.leafX2, ...RULE_ARGS("parallel rule B")], b.wt, actorB),
     ]);
     expect(ra.exitCode).toBe(0);
     expect(rb.exitCode).toBe(0);
-    expect(mustRun(["log", fx.leafX1], fx.repo).stdout).toContain(actorA);
-    expect(mustRun(["log", fx.leafX2], fx.repo).stdout).toContain(actorB);
-    expect(mustRun(["log", fx.leafX2], fx.repo).stdout).not.toContain(actorA);
+    expect(mustRun(["log", fx.leafX1], fx.repo).stdout).toContain(sessionActorFor(actorA));
+    expect(mustRun(["log", fx.leafX2], fx.repo).stdout).toContain(sessionActorFor(actorB));
+    expect(mustRun(["log", fx.leafX2], fx.repo).stdout).not.toContain(sessionActorFor(actorA));
   });
 
   it("HAPPY: scoped `lore ac cite` of an in-scope rule is accepted from the worktree", () => {
     const actor = "agent:csl-cite";
     const wt = join(fx.worktrees, "scoped-x");
-    const ruleId = mustRun(["rule", "add", fx.leafX1, ...RULE_ARGS("rule to cite", "agent:csl-main")], fx.repo).stdout.match(
+    const ruleId = mustRun(["rule", "add", fx.leafX1, ...RULE_ARGS("rule to cite")], fx.repo, "agent:csl-main").stdout.match(
       /BR-\d+/,
     )?.[0];
     expect(ruleId).toBeDefined();

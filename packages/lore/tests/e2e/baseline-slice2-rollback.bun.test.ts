@@ -395,7 +395,7 @@ function claimAndResume(c: Corpus, specCitesRule = false): RunResult {
     }
   }
   mustRun(["approve", c.planSlug, "--override-no-judgment"], c.dir);
-  mustRun(["claim", c.taskSlug, "--by", "agent:baseline-slice2-rollback-e2e"], c.dir);
+  mustRun(["claim", c.taskSlug], c.dir);
   return mustRun(["feed", "session-resume", "--plan", c.planSlug], c.dir);
 }
 

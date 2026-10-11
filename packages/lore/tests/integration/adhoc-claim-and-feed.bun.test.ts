@@ -24,7 +24,7 @@
  * null` already gets.
  *
  * Coverage dimensions:
- *   HAPPY      — AC-1: `lore claim <adhoc-task> --by x --worktree y` exits 0.
+ *   HAPPY      — AC-1: `lore claim <adhoc-task> --worktree y` exits 0.
  *                AC-4: `lore feed task-start <adhoc-task>` exits 0 (does not
  *                crash with the pre-fix "Expected a plan document" error).
  *                `lore gate task-claim --task <adhoc-task>` (the CLI pre-flight
@@ -45,6 +45,7 @@ import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
 import type { CreateDocInput } from "@lore/core";
+import { asSessionActor } from "../helpers/session-actor";
 
 // ─── Command import + invocation helpers (mirrors gate-p2-cross-tier.bun.test.ts) ──
 
@@ -190,14 +191,14 @@ async function createPlanParentedTask(): Promise<{ taskId: string; taskSlug: str
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe("SPEC-069 ad-hoc task claim gap fix", () => {
-  it("AC-1 / HAPPY: `lore claim <adhoc-task> --by x --worktree y` exits 0", async () => {
+  it("AC-1 / HAPPY: `lore claim <adhoc-task> --worktree y` exits 0", async () => {
     await createRootPrd();
     const { taskSlug } = await createAdhocTask("Adhoc Task One");
 
     const claimCmd = await importDefaultCommand("../../src/adapters/cli/commands/claim.js");
     const output = captureOutput();
     try {
-      await claimCmd.run({ args: { task: taskSlug, by: "agent:x", worktree: "wt-adhoc-1" } });
+      await asSessionActor("agent:x", () => claimCmd.run({ args: { task: taskSlug, worktree: "wt-adhoc-1" } }));
     } finally {
       output.restore();
     }
@@ -207,14 +208,14 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     expect(output.stderr.join("\n")).toBe("");
   });
 
-  it("HAPPY: `lore gate task-claim --task <adhoc-task> --by x` (CLI pre-flight gate) exits 0", async () => {
+  it("HAPPY: `lore gate task-claim --task <adhoc-task>` (CLI pre-flight gate) exits 0", async () => {
     await createRootPrd();
     const { taskSlug } = await createAdhocTask("Adhoc Task Gate Parity");
 
     const gateCmd = await importGateTaskClaimSubCommand();
     const output = captureOutput();
     try {
-      await gateCmd.run({ args: { task: taskSlug, by: "agent:x" } });
+      await asSessionActor("agent:x", () => gateCmd.run({ args: { task: taskSlug } }));
     } finally {
       output.restore();
     }
@@ -271,7 +272,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     // First claim (agent:one) succeeds — establishes the fresh sibling claim.
     const firstOutput = captureOutput();
     try {
-      await claimCmd.run({ args: { task: taskOneSlug, by: "agent:one", worktree: "wt-one" } });
+      await asSessionActor("agent:one", () => claimCmd.run({ args: { task: taskOneSlug, worktree: "wt-one" } }));
     } finally {
       firstOutput.restore();
     }
@@ -281,7 +282,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     process.exitCode = 0;
     const secondOutput = captureOutput();
     try {
-      await claimCmd.run({ args: { task: taskTwoSlug, by: "agent:two", worktree: "wt-two" } });
+      await asSessionActor("agent:two", () => claimCmd.run({ args: { task: taskTwoSlug, worktree: "wt-two" } }));
     } finally {
       secondOutput.restore();
     }
@@ -296,7 +297,7 @@ describe("SPEC-069 ad-hoc task claim gap fix", () => {
     const claimCmd = await importDefaultCommand("../../src/adapters/cli/commands/claim.js");
     const output = captureOutput();
     try {
-      await claimCmd.run({ args: { task: taskSlug, by: "agent:regression", worktree: "wt-regression" } });
+      await asSessionActor("agent:regression", () => claimCmd.run({ args: { task: taskSlug, worktree: "wt-regression" } }));
     } finally {
       output.restore();
     }

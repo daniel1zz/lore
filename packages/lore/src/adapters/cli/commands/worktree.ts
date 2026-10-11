@@ -48,10 +48,6 @@ export default defineCommand({
           type: "boolean",
           description: "Remove the worktrees decided `remove` (default: report only, nothing changes)",
         },
-        by: {
-          type: "string",
-          description: "Actor identity recorded on the audit row of each removal; defaults to $LORE_ACTOR, then OS username",
-        },
         json: {
           type: "boolean",
           description: "Output { ok, data: { rows } } as JSON",
@@ -60,7 +56,7 @@ export default defineCommand({
       async run({ args }) {
         const { app } = loadLoreApp();
         try {
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           const result = await app.taskWorkflowService.sweepWorktrees({ apply: args.apply === true, by });
           if (!result.ok) {
             process.stderr.write(formatError(result.error) + "\n");

@@ -121,6 +121,7 @@ import { tmpdir } from "node:os";
 
 import { extractEvidence } from "@lore/core";
 import type { DocRecord } from "@lore/core";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 
 // ─── CLI subprocess plumbing (same shape as verify-falsify-green-control.test.ts::runLore) ──
 
@@ -134,10 +135,11 @@ interface RunResult {
 }
 
 /** Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir. */
-function runLore(args: string[], cwd: string): RunResult {
+/** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" }, actor) as Record<string, string>,
     encoding: "utf8",
   });
   return {
@@ -435,8 +437,9 @@ describe("AC-SD-6 — PRODUCTION WIRING: lore verify --falsify materializes depe
       // ⛔ Measured WITHOUT a pipe — `RunResult.exitCode` comes straight from
       // `spawnSync`'s own `.status`.
       const result = runLore(
-        ["verify", planSlug, "--task", taskSlug, "--falsify", acId, "--by", "falsify-oracle-test"],
+        ["verify", planSlug, "--task", taskSlug, "--falsify", acId],
         repoRoot,
+        "falsify-oracle-test",
       );
 
       expect(result.exitCode, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
@@ -454,7 +457,7 @@ describe("AC-SD-6 — PRODUCTION WIRING: lore verify --falsify materializes depe
       expect(row).toBeDefined();
       expect(row?.result).toBe("expected-fail");
       expect(row?.capture_source).toBe("runner");
-      expect(row?.recorded_by).toBe("falsify-oracle-test");
+      expect(row?.recorded_by).toBe(sessionActorFor("falsify-oracle-test"));
       // The declared value is named here on purpose (AC-SD-6's own text) — a
       // reader can determine the expected number without external context.
       expect(row?.attestation).toBeDefined();
@@ -496,8 +499,9 @@ describe("materialization failure surfaces without disarming the green control o
       // must neither crash nor silently proceed as if nothing happened.
 
       const result = runLore(
-        ["verify", planSlug, "--task", taskSlug, "--falsify", acId, "--by", "falsify-oracle-test"],
+        ["verify", planSlug, "--task", taskSlug, "--falsify", acId],
         repoRoot,
+        "falsify-oracle-test",
       );
 
       // AC-FR-11's own exit convention: an inconclusive green control is

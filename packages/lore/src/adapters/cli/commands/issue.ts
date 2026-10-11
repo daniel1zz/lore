@@ -1,7 +1,7 @@
 /**
  * `lore issue` subcommands: `adopt <number>` and `resolve <issue> --state ...`.
  *
- * `lore issue adopt <number> [--by <actor>] [--json]` —
+ * `lore issue adopt <number> [--json]` —
  * (task-skill-implement-lore-issue-adopt-and-the-label-round-trip, AC-GR-3)
  * turns one LISTED GitHub issue into a claimable corpus task: resolves the
  * consumer's configured `feedback.upstream` (must be GitHub-shaped —
@@ -35,7 +35,7 @@
  *
  * `lore issue resolve <issue> --state rejected|wontfix|superseded|duplicate|adopted
  *   --reason <r> [--superseded-by <doc> | --duplicate-of <doc> | --adopted-by <doc>]
- *   [--by <actor>] [--json]`
+ *   [--json]`
  *
  * The five writable states and their pointer requirements are CONSUMED from
  * `service/issue-resolution.js`'s SSOT (`EXPLICIT_RESOLUTIONS` +
@@ -461,10 +461,6 @@ export default defineCommand({
           description: "GitHub issue number to adopt, as printed by `lore issues`",
           required: true,
         },
-        by: {
-          type: "string",
-          description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -540,7 +536,7 @@ export default defineCommand({
             return;
           }
 
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           const createResult = await app.corpusService.create(taskInputResult.value, { by });
 
           if (!createResult.ok) {
@@ -642,10 +638,6 @@ export default defineCommand({
           type: "string",
           description:
             "REQUIRED with --state adopted: the LIVE plan or task (id or slug) that now owns this claim",
-        },
-        by: {
-          type: "string",
-          description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
         },
         json: {
           type: "boolean",
@@ -783,7 +775,7 @@ export default defineCommand({
             resolvedPointer = { [requiredPointer.extraKey]: pointerDoc.id };
           }
 
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           const nowIso = new Date().toISOString();
           const existingIssueReport = issueDoc.extra["issue_report"] as Record<string, unknown>;
           // reason: RMW merge — spread the FULL existing extra first so every

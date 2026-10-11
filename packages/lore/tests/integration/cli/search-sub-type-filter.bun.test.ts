@@ -126,7 +126,7 @@ function createKnowledge(dir: string, parentId: string, title: string, subType: 
 /** `lore handoff` is the SOLE write path for a `knowledge/handoff` doc. */
 function createHandoff(dir: string, actor: string): string {
   const result = runLore(
-    ["handoff", "--by", actor, "--decision", `${QUERY} ${QUERY} pathway holds@high`, "--next", `wire the ${QUERY} adapter`, "--json"],
+    ["handoff", "--decision", `${QUERY} ${QUERY} pathway holds@high`, "--next", `wire the ${QUERY} adapter`, "--json"],
     dir,
   );
   if (result.exitCode !== 0) throw new Error(`lore handoff failed: ${result.stderr}`);

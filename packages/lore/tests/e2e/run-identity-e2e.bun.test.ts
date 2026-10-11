@@ -109,7 +109,7 @@ function preToolPayload(task: string, agentId?: string): Record<string, unknown>
 }
 
 function newTask(title: string): string {
-  const r = mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json", "--by", "agent:e2e-setup"]);
+  const r = mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"]);
   const data = JSON.parse(r.stdout).data as { slug: string; id: string };
   docIds.set(data.slug, data.id);
   return data.slug;
@@ -161,7 +161,7 @@ beforeAll(() => {
   git(["commit", "-q", "-m", "init"]);
 
   mustLore(["init"]);
-  mustLore(["create", "prd", "--title", "E2E Root", "--content", "root", "--no-ai", "--by", "agent:e2e-setup"]);
+  mustLore(["create", "prd", "--title", "E2E Root", "--content", "root", "--no-ai"]);
   tasks.main = newTask("e2e main evidence target");
   tasks.a1 = newTask("e2e agent one evidence target");
   tasks.a2 = newTask("e2e agent two evidence target");

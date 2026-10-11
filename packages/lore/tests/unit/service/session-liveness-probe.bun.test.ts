@@ -367,8 +367,8 @@ describe("`lore session list` command-level oracle (AC-OWN-5's own named surface
       );
 
       // Two REAL claimed sessions, each with its own captured session_id.
-      mustRunLoreCmd(["claim", mineTaskSlug, "--by", "agent:cmd-oracle-mine"], tmpDir, { CLAUDE_CODE_SESSION_ID: MINE_RAW_SESSION_ID });
-      mustRunLoreCmd(["claim", peerTaskSlug, "--by", "agent:cmd-oracle-peer"], tmpDir, { CLAUDE_CODE_SESSION_ID: PEER_RAW_SESSION_ID });
+      mustRunLoreCmd(["claim", mineTaskSlug], tmpDir, { CLAUDE_CODE_SESSION_ID: MINE_RAW_SESSION_ID });
+      mustRunLoreCmd(["claim", peerTaskSlug], tmpDir, { CLAUDE_CODE_SESSION_ID: PEER_RAW_SESSION_ID });
       // ⛔ The peer session NEVER runs `lore session list|show` — no heartbeat
       // is ever recorded for it. This is the precondition itself: liveness is
       // measurable ONLY for a session that has self-registered by running the

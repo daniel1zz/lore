@@ -79,7 +79,7 @@
  *   globally — a coincidental cross-spec id collision must not double-count).
  * @invariant Writes are CAS-guarded (`store.update`'s `expected_version`) and produce
  *   exactly one `insertVersion` snapshot + one `appendAuditEntry` (action "update",
- *   actor = the calling `opts.by`, else the $LORE_ACTOR/session/OS-user chain — never "system") — same shape as `CorpusService.set`'s spec-extra write path, so
+ *   actor = the calling `opts.by`, else the session/OS-user chain — never "system") — same shape as `CorpusService.set`'s spec-extra write path, so
  *   `AuditService.verify`'s versions⋈audit completeness oracle (SPEC-035 §2) is
  *   satisfied without a special case for AC writes.
  * @invariant `setCriterion` applies the SAME approved→draft demotion rule
@@ -269,10 +269,10 @@ export interface DeclarePathOpts {
   pathContext?: OraclePathContext;
   allowMissingPath?: string;
   /**
-   * The calling actor (CLI: resolved `--by`/`$LORE_ACTOR`; MCP/HTTP: their own resolution),
+   * The calling actor (CLI: the invoking identity; MCP/HTTP: their own resolution),
    * written as the version row's `created_by` and the audit row's `actor`. Omitted only by bare
    * service constructions (unit tests, internal callers) — the actor then resolves through the
-   * env chain (`$LORE_ACTOR` → session tier → OS username), exactly as `CorpusService` does.
+   * env chain (session tier → OS username), exactly as `CorpusService` does.
    * Source: spec-baseline-slice-2 §C3 (actor provenance on AC writes).
    */
   by?: string;
@@ -1020,7 +1020,7 @@ export class AcService {
     const gate = applyAcChange("ac-verb", spec.extra, newExtra, spec.id);
     if (!gate.ok) return gate;
     // Same resolution CorpusService.resolveWriteActor applies (SPEC-079 G2): explicit `by`, else
-    // $LORE_ACTOR → session tier → OS username. Never the literal "system" — that was the defect.
+    // session tier → OS username. Never the literal "system" — that was the defect.
     const actor = resolveWriteActorFor(this.store, opts.by);
     if (opts.declaration !== undefined) {
       newExtra["allow_missing_path_declarations"] = upsertAllowMissingPathDeclaration(

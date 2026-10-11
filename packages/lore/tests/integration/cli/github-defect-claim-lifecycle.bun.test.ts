@@ -82,6 +82,7 @@ import { assembleIssueBody, type IssueFrontMatterFields } from "@lore/core";
 
 import { assertFreshBinary } from "../helpers/assert-fresh-binary";
 import { cleanupPayloadGhStubDir, payloadGhStubDir, readRecordedLabelWrites } from "../helpers/payload-gh-stub";
+import { sessionEnvFor } from "../../helpers/session-actor";
 
 // ─── Worktree-anchored dist/lore binary (never the main checkout's) ─────────
 
@@ -116,7 +117,8 @@ function run(args: string[], envOverrides: Record<string, string> = {}): RunResu
       CLAUDECODE: "1",
       LORE_CONFIG_HOME: isolatedConfigHome,
       PATH: ghStubDir,
-      LORE_ACTOR: "agent:ac-gr-9-e2e",
+      // BR-1055: the writer is named through the session tier (no `--by`, no environment variable name).
+      ...sessionEnvFor("agent:ac-gr-9-e2e"),
       ...envOverrides,
     },
   });
@@ -218,7 +220,7 @@ describe("AC-GR-9: filing alone makes the defect claimable", () => {
       // D1's deterministic slug — BOUNDARY: exactly this shape, not merely "some slug".
       const derivedSlug = `task-gh-${STUB_REPO_ID}-${STUB_ISSUE_NUMBER}`;
 
-      const claimResult = run(["claim", derivedSlug, "--by", "agent:ac-gr-9-e2e"]);
+      const claimResult = run(["claim", derivedSlug]);
       expect(
         claimResult.exitCode,
         `claim on the derived slug '${derivedSlug}' failed (exit ${claimResult.exitCode}) — the filed defect was ` +
@@ -282,7 +284,7 @@ function runGr3(args: string[], envOverrides: Record<string, string> = {}): RunR
       CLAUDECODE: "1",
       LORE_CONFIG_HOME: gr3ConfigHome,
       PATH: gr3GhStubDir,
-      LORE_ACTOR: "agent:ac-gr-3-e2e",
+      ...sessionEnvFor("agent:ac-gr-3-e2e"),
       ...envOverrides,
     },
   });
@@ -370,7 +372,7 @@ describe("AC-GR-3: adopt then claim then resolve round-trips the label", () => {
       expect(parsedAdopt.data.doc.slug).toBe(derivedSlug);
       expect(parsedAdopt.data.already_adopted).toBe(false);
 
-      const claimResult = runGr3(["claim", derivedSlug, "--by", "agent:ac-gr-3-e2e"]);
+      const claimResult = runGr3(["claim", derivedSlug]);
       expect(
         claimResult.exitCode,
         `claim failed (exit ${claimResult.exitCode}). stdout: ${claimResult.stdout}\nstderr: ${claimResult.stderr}`,

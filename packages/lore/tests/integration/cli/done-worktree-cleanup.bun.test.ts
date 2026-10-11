@@ -82,7 +82,7 @@ describe("done removes the recorded worktree (#106)", () => {
     const created = mustOk(lore(["create", "task", "--adhoc", "--title", `Cleanup case ${name}`, "--ac-scope", "", "--json"]), `create ${name}`);
     const slug = JSON.parse(created.stdout).data.slug as string;
     mustOk(git(repo, "worktree", "add", "-q", "-b", branch, path), `worktree add ${name}`);
-    mustOk(lore(["claim", slug, "--by", ACTOR, "--worktree", path]), `claim ${name}`);
+    mustOk(lore(["claim", slug, "--worktree", path]), `claim ${name}`);
     return { slug, path, branch };
   }
 

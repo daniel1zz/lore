@@ -173,6 +173,7 @@ import type { App } from "../../src/app.js";
 import { registerTools } from "../../src/adapters/mcp/tools.js";
 import { EMBEDDED_ASSETS_MANIFEST } from "../../src/generated/assets-manifest.js";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
+import { withSessionIdentity } from "../helpers/session-actor";
 
 // ─── Paths ──────────────────────────────────────────────────────────────────
 
@@ -224,10 +225,11 @@ interface RunResult {
 }
 
 /** Spawns the COMPILED `dist/lore` with `cwd`/`HOME` both inside the throwaway corpus. `CLAUDECODE=1` resolves the "agent" caller surface (SPEC-024) so no write path risks a nested AI invocation. */
-function runLore(args: string[], cwd: string): RunResult {
+/** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed (OS user). */
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, CLAUDECODE: "1" }, actor) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),
@@ -300,13 +302,12 @@ const EXPECTED_CARDINALITY_LINE = renderResumeCoverageCardinalityLine(
 );
 
 /** `--decision`/`--next` are repeatable flags; the stored arrays are these values in this order. */
-function handoffArgs(planSlug: string, actor: string): string[] {
+/** The handoff is written under a DISTINCT session identity from the resuming caller: the coverage floor renders for a ticket authored by someone else (SPEC-112 D10 multi-actor). */
+function handoffArgs(planSlug: string): string[] {
   return [
     "handoff",
     "--plan",
     planSlug,
-    "--by",
-    actor,
     ...FIXTURE_DECISIONS.flatMap((d) => ["--decision", d]),
     ...FIXTURE_NEXT_STEPS.flatMap((n) => ["--next", n]),
   ];
@@ -442,7 +443,7 @@ describe("AC-RC-4: the coverage-floor grammar reaches BOTH shipping render surfa
     expect(planResult.exitCode).toBe(0);
     planSlug = parseSlug(planResult.stdout);
 
-    const handoffResult = runLore(handoffArgs(planSlug, "t4-both-surfaces"), dir);
+    const handoffResult = runLore(handoffArgs(planSlug), dir, "t4-both-surfaces");
     expect(handoffResult.exitCode).toBe(0);
     handoffSlug = parseSlug(handoffResult.stdout);
 
@@ -1193,7 +1194,7 @@ describe("AC-RCH-7: the consumer-visible compiled path — the real unmodified S
     );
     expect(planResult.exitCode).toBe(0);
     const planSlug = parseSlug(planResult.stdout);
-    expect(runLore(handoffArgs(planSlug, "rch7-consumer-path"), corpusDir).exitCode).toBe(0);
+    expect(runLore(handoffArgs(planSlug), corpusDir, "rch7-consumer-path").exitCode).toBe(0);
 
     const feedResult = runLore(["feed", "session-resume", "--plan", planSlug], corpusDir);
     expect(feedResult.exitCode).toBe(0);

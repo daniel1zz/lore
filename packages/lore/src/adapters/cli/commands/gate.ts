@@ -64,9 +64,8 @@
  *     module invariant — the predicate is doc-type-agnostic) and the SAME
  *     `workflow.gates."task-claim".anchor_overlap.enabled` knob (no dedicated
  *     phase-claim sub-knob exists yet, mirroring `PhaseWorkflowService.
- *     enforceClaimGate`'s identical interim choice). `--by` (or `$LORE_ACTOR`/OS
- *     username) supplies the candidate actor identity the overlap predicate's
- *     "different actor" test needs; this pre-flight check reaches the IDENTICAL
+ *     enforceClaimGate`'s identical interim choice). The resolved invoking identity supplies the candidate actor identity the overlap
+ *     predicate's "different actor" test needs; this pre-flight check reaches the IDENTICAL
  *     verdict `lore claim`/`PhaseWorkflowService.claim` themselves would for the same
  *     target/actor — `buildAnchorGateContext` (`checkpoint-registry.js`) is the shared
  *     ctx-builder every one of these call sites uses.
@@ -491,13 +490,6 @@ export default defineCommand({
           description: "Task document ID or slug to gate",
           required: true,
         },
-        by: {
-          type: "string",
-          description:
-            "Actor identity attempting the claim (feeds the anchor-overlap 'different " +
-            "actor' test, SPEC-042 D5); defaults to $LORE_ACTOR env var, then OS username " +
-            "— same resolution order as `lore claim`",
-        },
       },
       async run({ args }) {
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
@@ -511,7 +503,7 @@ export default defineCommand({
         const { app, config } = loadLoreApp();
         try {
           if (isGateDisabledByConfig("task-claim", config)) return;
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           await runTaskClaimGate(app, args.task as string, by, config);
         } finally {
           app.close();
@@ -536,13 +528,6 @@ export default defineCommand({
           description: "Phase document ID or slug to gate",
           required: true,
         },
-        by: {
-          type: "string",
-          description:
-            "Actor identity attempting the claim (feeds the anchor-overlap 'different " +
-            "actor' test); defaults to $LORE_ACTOR env var, then OS username — same " +
-            "resolution order as `lore claim`",
-        },
       },
       async run({ args }) {
         // LORE_GATE_BYPASS=1: exit 0 before ANY parsing or checking (module header;
@@ -556,7 +541,7 @@ export default defineCommand({
         const { app, config } = loadLoreApp();
         try {
           if (isGateDisabledByConfig("phase-claim", config)) return;
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           await runPhaseClaimGate(app, args.phase as string, by, config);
         } finally {
           app.close();
@@ -773,7 +758,7 @@ function requireCheckpoint(cp: GateCheckpoint): CheckpointDef {
  *
  * @param actor - Explicit actor when this checkpoint's runner already has one
  *   (`task-claim`/`phase-claim`'s `by` param); `undefined` falls back to
- *   `resolveActor()`'s own `--by`/$LORE_ACTOR/OS-username chain — the SAME
+ *   `resolveActor()`'s own resolution — the SAME
  *   resolution every other actor-needing call in this file already uses.
  */
 function recordHookGateDeny(
@@ -916,8 +901,7 @@ async function runPlanPromoteGate(
  * @param app - Wired `App` (from `loadLoreApp()`).
  * @param taskIdOrSlug - Task document ULID or slug to gate.
  * @param by - The actor attempting the claim (feeds `noAnchorOverlap`'s "different
- *   actor" test) — resolved by the caller via `resolveActor` (--by > $LORE_ACTOR > OS
- *   username), same precedent as `lore claim`.
+ *   actor" test) — resolved by the caller via `resolveActor`, same precedent as `lore claim`.
  * @param config - `loadLoreApp()`'s resolved project config — forwarded to
  *   `resolveAnchorOverlapGateEnabled` so this gate honors the SAME
  *   `workflow.gates."task-claim".anchor_overlap.enabled` sub-key
