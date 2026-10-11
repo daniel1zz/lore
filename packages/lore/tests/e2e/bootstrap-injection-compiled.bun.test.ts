@@ -198,13 +198,13 @@ function seedCorpus(dir: string): SeededCorpus {
   const planCSlug = parseSlug(planCResult.stdout);
 
   const handoffAResult = runLore(
-    ["handoff", "--plan", planASlug, "--by", "t6-tester", "--next", "next step A", "--decision", "decision A@80"],
+    ["handoff", "--plan", planASlug, "--next", "next step A", "--decision", "decision A@80"],
     dir,
   );
   expect(handoffAResult.exitCode).toBe(0);
 
   const handoffBResult = runLore(
-    ["handoff", "--plan", planBSlug, "--by", "t6-tester", "--next", "next step B", "--decision", "decision B@70"],
+    ["handoff", "--plan", planBSlug, "--next", "next step B", "--decision", "decision B@70"],
     dir,
   );
   expect(handoffBResult.exitCode).toBe(0);

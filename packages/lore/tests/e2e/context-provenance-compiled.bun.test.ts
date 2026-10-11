@@ -357,7 +357,7 @@ describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout a
     planSlug = parseSlug(planResult.stdout);
 
     const handoffResult = runLore(
-      ["handoff", "--plan", planSlug, "--by", "t5-scope-closure-tester", "--next", "next step", "--decision", "decision@80"],
+      ["handoff", "--plan", planSlug, "--next", "next step", "--decision", "decision@80"],
       dir,
     );
     expect(handoffResult.exitCode).toBe(0);
@@ -475,7 +475,7 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
     const planSlug = parseSlug(planResult.stdout);
 
     const handoffResult = runLore(
-      ["handoff", "--plan", planSlug, "--by", "t5-fresh-install-tester", "--next", "next step", "--decision", "decision@80"],
+      ["handoff", "--plan", planSlug, "--next", "next step", "--decision", "decision@80"],
       dir,
     );
     expect(handoffResult.exitCode).toBe(0);

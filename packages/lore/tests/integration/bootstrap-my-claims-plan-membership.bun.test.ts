@@ -54,16 +54,23 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { bootstrapReportSchema } from "@lore/core";
+import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 
 // tests/integration/ → tests/ → packages/lore/ (2 levels up).
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 
-const FIXTURE_ACTOR = "agent:my-claims-membership-fixture";
-const DIVERGED_HOLDER = "agent:my-claims-diverged-holder";
-const ADHOC_HOLDER = "agent:my-claims-adhoc-holder";
-const ALIGNED_HOLDER = "agent:my-claims-aligned-holder";
-const BROKEN_REF_HOLDER = "agent:my-claims-broken-ref-holder";
+// BR-1055: a writer is named through the session tier. Each LABEL below is the fixture identity a spawn runs as;
+// the HOLDER constant is the name that identity resolves to (what `my_claims` and `bootstrap --by` see).
+const FIXTURE_LABEL = "agent:my-claims-membership-fixture";
+const DIVERGED_LABEL = "agent:my-claims-diverged-holder";
+const ADHOC_LABEL = "agent:my-claims-adhoc-holder";
+const ALIGNED_LABEL = "agent:my-claims-aligned-holder";
+const BROKEN_REF_LABEL = "agent:my-claims-broken-ref-holder";
+const DIVERGED_HOLDER = sessionActorFor(DIVERGED_LABEL);
+const ADHOC_HOLDER = sessionActorFor(ADHOC_LABEL);
+const ALIGNED_HOLDER = sessionActorFor(ALIGNED_LABEL);
+const BROKEN_REF_HOLDER = sessionActorFor(BROKEN_REF_LABEL);
 
 const TEST_TIMEOUT_MS = 120_000;
 
@@ -73,10 +80,10 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: readonly string[], cwd: string): RunResult {
+function runLore(args: readonly string[], cwd: string, actor: string = FIXTURE_LABEL): RunResult {
   const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: FIXTURE_ACTOR },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, CLAUDECODE: "1" }, actor) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),
@@ -85,8 +92,8 @@ function runLore(args: readonly string[], cwd: string): RunResult {
   };
 }
 
-function runLoreOk(args: readonly string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+function runLoreOk(args: readonly string[], cwd: string, actor: string = FIXTURE_LABEL): RunResult {
+  const result = runLore(args, cwd, actor);
   if (result.exitCode !== 0) {
     throw new Error(
       `fixture step failed (exit ${result.exitCode}): lore ${args.join(" ")}\n` +
@@ -162,7 +169,7 @@ describe("bootstrap my_claims plan_slug: membership contract (site 12)", () => {
         "--plan-id",
         planASlug,
       ]);
-      runLoreOk(["claim", divergedSlug, "--by", DIVERGED_HOLDER, "--worktree", join(dir, "wt-diverged")], dir);
+      runLoreOk(["claim", divergedSlug, "--worktree", join(dir, "wt-diverged")], dir, DIVERGED_LABEL);
 
       const report = readBootstrap(dir, DIVERGED_HOLDER);
       const claim = myClaimFor(report, divergedSlug);
@@ -184,7 +191,7 @@ describe("bootstrap my_claims plan_slug: membership contract (site 12)", () => {
       // reason: --adhoc requires an explicit --ac-scope "" declaration since
       // task-an-ad-hoc-task-can-never-reach-the-attestation-path-that.
       const adhocSlug = createDoc(dir, "task", "Planless Adhoc", ["--adhoc", "--ac-scope", ""]);
-      runLoreOk(["claim", adhocSlug, "--by", ADHOC_HOLDER, "--worktree", join(dir, "wt-adhoc")], dir);
+      runLoreOk(["claim", adhocSlug, "--worktree", join(dir, "wt-adhoc")], dir, ADHOC_LABEL);
 
       const report = readBootstrap(dir, ADHOC_HOLDER);
       const claim = myClaimFor(report, adhocSlug);
@@ -207,7 +214,7 @@ describe("bootstrap my_claims plan_slug: membership contract (site 12)", () => {
       const rootSlug = createDoc(dir, "prd", "My Claims Broken Ref Root", []);
       const planSlug = createDoc(dir, "plan", "Soon Deleted Plan", ["--parent", rootSlug]);
       const taskSlug = createDoc(dir, "task", "Broken Ref Member", ["--parent", planSlug, "--plan-id", planSlug]);
-      runLoreOk(["claim", taskSlug, "--by", BROKEN_REF_HOLDER, "--worktree", join(dir, "wt-broken")], dir);
+      runLoreOk(["claim", taskSlug, "--worktree", join(dir, "wt-broken")], dir, BROKEN_REF_LABEL);
 
       // Soft-delete the DECLARED plan after the claim exists — the task's
       // extra.plan_id now points at a doc `allDocs` no longer resolves.
@@ -231,7 +238,7 @@ describe("bootstrap my_claims plan_slug: membership contract (site 12)", () => {
       const rootSlug = createDoc(dir, "prd", "My Claims State Root", []);
       const planSlug = createDoc(dir, "plan", "State Plan", ["--parent", rootSlug]);
       const taskSlug = createDoc(dir, "task", "State Member", ["--parent", planSlug, "--plan-id", planSlug]);
-      runLoreOk(["claim", taskSlug, "--by", ALIGNED_HOLDER, "--worktree", join(dir, "wt-state")], dir);
+      runLoreOk(["claim", taskSlug, "--worktree", join(dir, "wt-state")], dir, ALIGNED_LABEL);
 
       expect(readBootstrap(dir, ALIGNED_HOLDER)).toEqual(readBootstrap(dir, ALIGNED_HOLDER));
     },
@@ -247,7 +254,7 @@ describe("bootstrap my_claims plan_slug: membership contract (site 12)", () => {
       const rootSlug = createDoc(dir, "prd", "My Claims Aligned Root", []);
       const planSlug = createDoc(dir, "plan", "Aligned Plan", ["--parent", rootSlug]);
       const taskSlug = createDoc(dir, "task", "Aligned Member", ["--parent", planSlug, "--plan-id", planSlug]);
-      runLoreOk(["claim", taskSlug, "--by", ALIGNED_HOLDER, "--worktree", join(dir, "wt-aligned")], dir);
+      runLoreOk(["claim", taskSlug, "--worktree", join(dir, "wt-aligned")], dir, ALIGNED_LABEL);
 
       const report = readBootstrap(dir, ALIGNED_HOLDER);
       const claim = myClaimFor(report, taskSlug);

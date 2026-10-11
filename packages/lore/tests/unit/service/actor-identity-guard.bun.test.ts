@@ -271,7 +271,7 @@ describe("checkpointRegistry['task-claim'] — actorIdentityGuard wiring (pure)"
     const feedText = def.feed(ctx, selectFailures(results));
     expect(feedText).toContain("task-one");
     expect(feedText).toContain("daniel");
-    expect(feedText).toContain("LORE_ACTOR");
+    expect(feedText).toContain("lore setup");
   });
 
   // REGRESSION — when BOTH anchor-overlap AND actor-identity fail (on TWO DIFFERENT

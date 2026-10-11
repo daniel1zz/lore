@@ -77,7 +77,7 @@ try {
 
   // Warm both paths once so first-use costs (module init, page cache) are in neither sample.
   await app.corpusService.get(slug);
-  await scope.run({ harness_run: RUN, by: "agent:bench" }, async (context) => {
+  await scope.run({ harness_run: RUN }, async (context) => {
     await context.app.corpusService.get(slug);
     return { content: [] };
   });
@@ -95,7 +95,7 @@ try {
   for (let i = 0; i < calls; i++) {
     withScope.push(
       await timed(async () => {
-        const result = await scope.run({ harness_run: RUN, by: "agent:bench" }, async (context) => {
+        const result = await scope.run({ harness_run: RUN }, async (context) => {
           const r = await context.app.corpusService.get(slug);
           if (!r.ok) throw new Error(`get failed: ${JSON.stringify(r.error)}`);
           return { content: [] };

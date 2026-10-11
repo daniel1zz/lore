@@ -343,7 +343,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       const taskSlug = seedTask(repoRoot, "cell1");
 
       const claimResult = runLore(
-        ["claim", taskSlug, "--by", "agent:fcwg-cell1", "--worktree", worktreePath],
+        ["claim", taskSlug, "--worktree", worktreePath],
         worktreePath,
       );
       expect(claimResult.exitCode).toBe(0);
@@ -358,8 +358,6 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
           "echo fcwg-cell1",
           "--result",
           "pass",
-          "--by",
-          "agent:fcwg-cell1",
           "--output-tail",
           "ok",
         ],
@@ -401,7 +399,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       const { repoRoot, worktreePath } = createNestedWorktreeFixture("cell2a");
       const taskSlug = seedTask(repoRoot, "cell2a");
 
-      const claimResult = runLore(["claim", taskSlug, "--by", "agent:fcwg-cell2a"], worktreePath);
+      const claimResult = runLore(["claim", taskSlug], worktreePath);
       expectRefused(claimResult, "cell2a-claim");
 
       // The refused claim must not have landed a lease at all.
@@ -423,7 +421,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
       // the guard is inert regardless of --worktree — this legitimately
       // lands a claim lease with NO worktree field, the exact precondition
       // cell (2b) needs.
-      const primaryClaimResult = runLore(["claim", taskSlug, "--by", "agent:fcwg-cell2b"], repoRoot);
+      const primaryClaimResult = runLore(["claim", taskSlug], repoRoot);
       expect(primaryClaimResult.exitCode).toBe(0);
 
       const precondition = runLore(["get", taskSlug, "--json"], repoRoot);
@@ -443,8 +441,6 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
           "echo fcwg-cell2b",
           "--result",
           "pass",
-          "--by",
-          "agent:fcwg-cell2b",
           "--output-tail",
           "ok",
         ],
@@ -517,8 +513,6 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
           planSlug,
           "--next",
           "merge the cell4 fixture branch",
-          "--by",
-          "agent:fcwg-cell4",
           "--json",
         ],
         worktreePath,
@@ -539,7 +533,7 @@ describe("foreign-corpus-write guard — the central 2x2-minus-one (AC-CP-3)", (
         }),
       );
       const uatResult = runLore(
-        ["uat", "record", planSlug, "--json-file", uatPayloadPath, "--by", "agent:fcwg-cell4", "--json"],
+        ["uat", "record", planSlug, "--json-file", uatPayloadPath, "--json"],
         worktreePath,
       );
       expect(uatResult.exitCode).toBe(0);

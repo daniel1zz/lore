@@ -204,7 +204,7 @@ async function runCapture(
   });
   try {
     await cmd.run({
-      args: { task: taskSlug, oracle: "tsc", command, result, by: "alice", capture: true },
+      args: { task: taskSlug, oracle: "tsc", command, result, capture: true },
     });
     return { stderr: stderr.text(), stdout: logLines.join("\n"), exitCode: process.exitCode };
   } finally {
@@ -234,7 +234,6 @@ async function runSelfReport(taskSlug: string): Promise<string> {
         oracle: "manual",
         command: "bun run typecheck",
         result: "pass",
-        by: "alice",
         "output-tail": "0 errors",
       },
     });

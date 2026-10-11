@@ -211,17 +211,17 @@ function createFixingDoc(upstreamRoot: string, title: string, finalStatus: "appr
   );
   const fixId = created.data.id;
 
-  const approveResult = runLore(["approve", fixId, "--by", "e2e-icl9-fixer"], upstreamRoot);
+  const approveResult = runLore(["approve", fixId], upstreamRoot);
   if (approveResult.status !== 0) {
     throw new Error(`Failed to approve fixing doc ${fixId}: ${approveResult.stderr}`);
   }
 
   if (finalStatus === "archived") {
-    const activeResult = runLore(["set", fixId, "--status", "active", "--by", "e2e-icl9-fixer"], upstreamRoot);
+    const activeResult = runLore(["set", fixId, "--status", "active"], upstreamRoot);
     if (activeResult.status !== 0) {
       throw new Error(`Failed to activate fixing doc ${fixId}: ${activeResult.stderr}`);
     }
-    const archivedResult = runLore(["set", fixId, "--status", "archived", "--by", "e2e-icl9-fixer"], upstreamRoot);
+    const archivedResult = runLore(["set", fixId, "--status", "archived"], upstreamRoot);
     if (archivedResult.status !== 0) {
       throw new Error(`Failed to archive fixing doc ${fixId}: ${archivedResult.stderr}`);
     }
@@ -249,7 +249,7 @@ async function createResolvesLink(page: Page, fixId: string, issueId: string): P
 /** Best-effort CLI cleanup — approves a report so it leaves the "open" set, restoring the shared baseline. */
 function cleanupApprove(upstreamRoot: string, docId: string): void {
   try {
-    runLore(["approve", docId, "--by", "e2e-icl9-cleanup"], upstreamRoot);
+    runLore(["approve", docId], upstreamRoot);
   } catch {
     // best-effort — a test's own assertions already reported anything meaningfully wrong
   }

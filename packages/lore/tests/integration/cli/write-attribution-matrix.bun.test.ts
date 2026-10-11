@@ -54,6 +54,7 @@ import { TaskWorkflowService } from "../../../src/service/task-workflow-service.
 import { AcService } from "../../../src/service/ac-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
+import { sessionActorFor, sessionEnvFor } from "../../helpers/session-actor";
 
 setDefaultTimeout(300_000);
 
@@ -524,8 +525,8 @@ function corpusDir(prefix: string): string {
   writeFileSync(join(d, "README.md"), "fixture\n");
   vcs(d, ["add", "."]);
   vcs(d, ["commit", "-q", "-m", "init"]);
-  mustLore(["init"], d, { LORE_ACTOR: "agent:matrix-setup" });
-  mustLore(["create", "prd", "--title", "Matrix Root", "--content", "root", "--no-ai"], d, { LORE_ACTOR: "agent:matrix-setup" });
+  mustLore(["init"], d, sessionEnvFor("agent:matrix-setup"));
+  mustLore(["create", "prd", "--title", "Matrix Root", "--content", "root", "--no-ai"], d, sessionEnvFor("agent:matrix-setup"));
   return d;
 }
 
@@ -547,36 +548,39 @@ async function auditSince(dir: string, since: string): Promise<AuditEntry[]> {
   }
 }
 
-describe("CLI chokepoint: `lore --harness-run R <write> --by N` stamps the audit row at the composition root", () => {
+describe("CLI chokepoint: `lore --harness-run R <write>` (name N from the session tier) stamps the audit row at the composition root", () => {
+  /** The writer name ID_A's fixture session resolves to — the only way a CLI/MCP write is named (BR-1055). */
+  const NAME_A = sessionActorFor(ID_A.claimed);
+
   let dir = "";
   let task = "";
 
   beforeAll(() => {
     dir = corpusDir("attr-matrix-cli-");
     task = JSON.parse(
-      mustLore(["create", "task", "--adhoc", "--title", "Matrix CLI task", "--ac-scope", "", "--json"], dir, { LORE_ACTOR: "agent:matrix-setup" }).stdout,
+      mustLore(["create", "task", "--adhoc", "--title", "Matrix CLI task", "--ac-scope", "", "--json"], dir, sessionEnvFor("agent:matrix-setup")).stdout,
     ).data.slug as string;
   });
 
-  it("claim with --by N (source flag) leaves an audit row with harness_run R, author N and the source flag", async () => {
+  it("claim named through the session tier leaves an audit row with harness_run R, author N and the source session", async () => {
     await registerInCorpus(dir, ID_A);
     const since = new Date().toISOString();
-    mustLore(["--harness-run", ID_A.harnessRun, "claim", task, "--by", ID_A.claimed, "--worktree", dir], dir);
-    const rows = (await auditSince(dir, since)).filter((r) => r.actor === ID_A.claimed);
+    mustLore(["--harness-run", ID_A.harnessRun, "claim", task, "--worktree", dir], dir, sessionEnvFor(ID_A.claimed));
+    const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME_A);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
-      expect(JSON.stringify(row)).toContain("flag");
+      expect(JSON.stringify(row)).toContain("session");
     }
   });
 
   it("the harness-run flag is consumed by the entry: it never reaches the command as an unknown flag", () => {
-    const r = lore(["--harness-run", ID_A.harnessRun, "get", task, "--json"], dir, { LORE_ACTOR: "agent:matrix-reader" });
+    const r = lore(["--harness-run", ID_A.harnessRun, "get", task, "--json"], dir, sessionEnvFor("agent:matrix-reader"));
     expect(r.exitCode).toBe(0);
     expect(r.stderr).not.toContain("Unknown flag");
   });
 
-  it("an evidence write with --by N and R stamps the row and its version row", async () => {
+  it("an evidence write named through the session tier, under R, stamps the row and its version row", async () => {
     await registerInCorpus(dir, ID_A);
     // The evidence guard refuses a `pass` while the claim's recorded worktree has uncommitted changes: commit the fixture.
     // Corpus state (.lore/) and the HOME-redirect scratch (Library/) are not source: ignore them, commit the rest.
@@ -585,15 +589,16 @@ describe("CLI chokepoint: `lore --harness-run R <write> --by N` stamps the audit
     vcs(dir, ["commit", "-q", "-m", "fixture state"]);
     const since = new Date().toISOString();
     mustLore(
-      ["--harness-run", ID_A.harnessRun, "evidence", task, "--oracle", "manual", "--command", "inspect fixture", "--result", "pass", "--output-tail", "1 passed", "--by", ID_A.claimed],
+      ["--harness-run", ID_A.harnessRun, "evidence", task, "--oracle", "manual", "--command", "inspect fixture", "--result", "pass", "--output-tail", "1 passed"],
       dir,
+      sessionEnvFor(ID_A.claimed),
     );
-    const rows = (await auditSince(dir, since)).filter((r) => r.actor === ID_A.claimed);
+    const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME_A);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
     const store = new SQLiteStore(join(dir, ".lore", "lore.db"));
     try {
-      const versions = (await versionRows(store)).filter((v) => v.created_by === ID_A.claimed && v.created_at >= since);
+      const versions = (await versionRows(store)).filter((v) => v.created_by === NAME_A && v.created_at >= since);
       expect(versions.length).toBeGreaterThan(0);
       for (const v of versions) expect(harnessRunOf(v)).toBe(ID_A.harnessRun);
     } finally {
@@ -611,8 +616,9 @@ describe("MCP lore_batch: three operations in one call carry the same R and the 
     dir = corpusDir("attr-matrix-mcp-");
   });
 
-  async function withClient<T>(fn: (c: Client) => Promise<T>): Promise<T> {
-    const env = Object.fromEntries(Object.entries(cleanEnv({ HOME: dir })).filter(([, v]) => typeof v === "string")) as Record<string, string>;
+  /** The server process runs under `actor`'s session identity — MCP calls carry no name argument (BR-1055). */
+  async function withClient<T>(actor: string, fn: (c: Client) => Promise<T>): Promise<T> {
+    const env = Object.fromEntries(Object.entries(cleanEnv({ HOME: dir, ...sessionEnvFor(actor) })).filter(([, v]) => typeof v === "string")) as Record<string, string>;
     const transport = new StdioClientTransport({ command: "bun", args: ["run", ENTRY, "--mcp-server"], cwd: dir, env });
     const client = new Client({ name: "attribution-matrix", version: "0.0.0" });
     await client.connect(transport);
@@ -626,8 +632,9 @@ describe("MCP lore_batch: three operations in one call carry the same R and the 
   it("create, create and link in ONE batch call -> all audit rows share harness_run R and author N", async () => {
     await registerInCorpus(dir, ID_A);
     const since = new Date().toISOString();
-    const create = (title: string) => ({ op: "create", args: { type: "knowledge", title, content: "body", extra: { sub_type: "reference" }, by: ID_A.claimed } });
-    const result = await withClient((c) =>
+    const NAME_A = sessionActorFor(ID_A.claimed);
+    const create = (title: string) => ({ op: "create", args: { type: "knowledge", title, content: "body", extra: { sub_type: "reference" } } });
+    const result = await withClient(ID_A.claimed, (c) =>
       c.callTool({
         name: "lore_batch",
         arguments: {
@@ -635,33 +642,33 @@ describe("MCP lore_batch: three operations in one call carry the same R and the 
           operations: [
             create("Batch one"),
             create("Batch two"),
-            { op: "link", args: { from: "knowledge-batch-one", to: "knowledge-batch-two", type: "relates-to", by: ID_A.claimed } },
+            { op: "link", args: { from: "knowledge-batch-one", to: "knowledge-batch-two", type: "relates-to" } },
           ],
         },
       }),
     );
     expect(result.isError ?? false).toBe(false);
-    const rows = (await auditSince(dir, since)).filter((r) => r.actor === ID_A.claimed);
+    const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME_A);
     // two creates + one link = at least three audit rows, every one of them attested the same way.
     expect(rows.length).toBeGreaterThanOrEqual(3);
     for (const row of rows) {
       expect(harnessRunOf(row)).toBe(ID_A.harnessRun);
-      expect(JSON.stringify(row)).toContain("mcp");
+      expect(JSON.stringify(row)).toContain("session");
     }
     expect(new Set(rows.map((r) => r.actor)).size).toBe(1);
   });
 
   it("a batch with no harness_run stamps none of its operations (no run is guessed)", async () => {
     const since = new Date().toISOString();
-    await withClient((c) =>
+    await withClient("agent:matrix-unattested", (c) =>
       c.callTool({
         name: "lore_batch",
         arguments: {
-          operations: [{ op: "create", args: { type: "knowledge", title: "Unattested batch", content: "body", extra: { sub_type: "reference" }, by: "agent:matrix-unattested" } }],
+          operations: [{ op: "create", args: { type: "knowledge", title: "Unattested batch", content: "body", extra: { sub_type: "reference" } } }],
         },
       }),
     );
-    const rows = (await auditSince(dir, since)).filter((r) => r.actor === "agent:matrix-unattested");
+    const rows = (await auditSince(dir, since)).filter((r) => r.actor === sessionActorFor("agent:matrix-unattested"));
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect(harnessRunOf(row) ?? null).toBeNull();
   });

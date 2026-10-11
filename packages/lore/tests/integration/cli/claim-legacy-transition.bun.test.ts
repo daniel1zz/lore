@@ -23,6 +23,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { sessionActorFor } from "../../helpers/session-actor";
 import {
   CLAIM_CONFLICT_EXIT,
   KINDS,
@@ -41,8 +42,8 @@ import {
 
 setDefaultTimeout(180_000);
 
-const LEGACY_NAME = "agent:rid-legacy-holder";
-const OTHER_NAME = "agent:rid-someone-else";
+const LEGACY_NAME = sessionActorFor("agent:rid-legacy-holder");
+const OTHER_NAME = sessionActorFor("agent:rid-someone-else");
 
 let corpus: Corpus;
 

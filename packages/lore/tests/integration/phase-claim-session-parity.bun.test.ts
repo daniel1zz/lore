@@ -49,8 +49,16 @@ import { tmpdir } from "os";
 import { createApp } from "../../src/app.js";
 import type { App } from "../../src/app.js";
 import type { CreateDocInput, DocRecord, TaskClaim } from "@lore/core";
+import { resolveActor } from "../../src/adapters/cli/utils.js";
 
-const ACTOR = "agent:main-orchestrator";
+/**
+ * The name the CURRENT process environment resolves to (session tier, else the fallback tiers). No surface takes a
+ * `--by`, so the claim holder and the pre-flight candidate must both be this resolved name — evaluated AFTER each
+ * test sets its session env, never captured at module load.
+ */
+function currentActor(): string {
+  return resolveActor();
+}
 const SHARED_ANCHOR = "packages/core/src/session.ts";
 const SESSION_ENV_VARS = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"] as const;
 
@@ -188,13 +196,13 @@ function captureOutput() {
   };
 }
 
-/** Runs `lore gate phase-claim <phase> --by <actor>`, returning its exit code + stdout. */
-async function runPreflight(phaseSlug: string, by: string): Promise<{ exitCode: number; stdout: string }> {
+/** Runs `lore gate phase-claim <phase>` as the current environment's identity, returning its exit code + stdout. */
+async function runPreflight(phaseSlug: string): Promise<{ exitCode: number; stdout: string }> {
   const cmd = await importPhaseClaimGate();
   const output = captureOutput();
   process.exitCode = 0;
   try {
-    await cmd.run({ args: { phase: phaseSlug, by } });
+    await cmd.run({ args: { phase: phaseSlug } });
   } finally {
     output.restore();
   }
@@ -210,19 +218,19 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const { phaseSlugs } = await createPlanWithPhases([[SHARED_ANCHOR]]);
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3DE02220-5d69-4b5a-ac23-d66e14c0261b");
 
-    const preflight = await runPreflight(phaseSlugs[0]!, ACTOR);
+    const preflight = await runPreflight(phaseSlugs[0]!);
     expect(preflight.exitCode).toBe(0);
     expect(preflight.stdout).toContain("gate: pass");
 
     const claimed = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: ACTOR });
+      return service.claim(phaseSlugs[0]!, { by: currentActor() });
     });
     expect(claimed.ok).toBe(true);
 
     const claim = readClaim(await fetchDoc(phaseSlugs[0]!));
-    expect(claim?.by).toBe(ACTOR);
+    expect(claim?.by).toBe(currentActor());
     expect(claim?.session_id).toBe("3de02220");
   });
 
@@ -233,7 +241,7 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const claimed = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: ACTOR });
+      return service.claim(phaseSlugs[0]!, { by: currentActor() });
     });
     expect(claimed.ok).toBe(true);
     expect(readClaim(await fetchDoc(phaseSlugs[0]!))?.session_id).toBe("7ab19c04");
@@ -246,19 +254,19 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const first = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: ACTOR });
+      return service.claim(phaseSlugs[0]!, { by: currentActor() });
     });
     expect(first.ok).toBe(true);
 
     // PRE-FLIGHT first, on the exact state the real claim is about to see.
-    const preflight = await runPreflight(phaseSlugs[1]!, ACTOR);
+    const preflight = await runPreflight(phaseSlugs[1]!);
     expect(preflight.exitCode).toBe(0);
     expect(preflight.stdout).toContain("gate: pass");
 
     const second = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[1]!, { by: ACTOR });
+      return service.claim(phaseSlugs[1]!, { by: currentActor() });
     });
     expect(second.ok).toBe(true);
     expect(readClaim(await fetchDoc(phaseSlugs[1]!))?.session_id).toBe("3de02220");
@@ -271,14 +279,14 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const first = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: ACTOR });
+      return service.claim(phaseSlugs[0]!, { by: currentActor() });
     });
     expect(first.ok).toBe(true);
 
     // A SECOND live orchestrator: identical actor string, identical checkout, its own
     // session id — the exact topology the anchor mutex must still refuse.
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "7ab19c04-second");
-    const preflight = await runPreflight(phaseSlugs[1]!, ACTOR);
+    const preflight = await runPreflight(phaseSlugs[1]!);
     expect(preflight.exitCode).toBe(4);
     expect(preflight.stdout).toContain("ANCHOR_OVERLAP");
     expect(preflight.stdout).not.toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
@@ -286,7 +294,7 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const second = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[1]!, { by: ACTOR });
+      return service.claim(phaseSlugs[1]!, { by: currentActor() });
     });
     expect(second.ok).toBe(false);
     if (!second.ok) {
@@ -303,19 +311,19 @@ describe("phase claim session capture — createApp wiring + `lore gate phase-cl
     const first = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[0]!, { by: ACTOR });
+      return service.claim(phaseSlugs[0]!, { by: currentActor() });
     });
     expect(first.ok).toBe(true);
     expect(readClaim(await fetchDoc(phaseSlugs[0]!))?.session_id).toBeUndefined();
 
-    const preflight = await runPreflight(phaseSlugs[1]!, ACTOR);
+    const preflight = await runPreflight(phaseSlugs[1]!);
     expect(preflight.exitCode).toBe(4);
     expect(preflight.stdout).toContain("ANCHOR_OVERLAP_SESSION_UNMEASURED");
 
     const second = await withApp(async (app) => {
       const service = app.phaseWorkflowService;
       if (service === undefined) throw new Error("phaseWorkflowService not wired on App");
-      return service.claim(phaseSlugs[1]!, { by: ACTOR });
+      return service.claim(phaseSlugs[1]!, { by: currentActor() });
     });
     expect(second.ok).toBe(false);
     if (!second.ok) {

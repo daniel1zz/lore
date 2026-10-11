@@ -95,18 +95,25 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { z } from "zod";
 import { bootstrapReportSchema } from "@lore/core";
+import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
 
 // tests/integration/ → tests/ → packages/lore/ (2 levels up).
 const PROJECT_ROOT = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PROJECT_ROOT, "src", "index.ts");
 
 /** Every fixture claim passes `--by` explicitly, so these are the exact `active_sessions`/`my_claims` keys asserted below. */
-const DIVERGED_HOLDER = "agent:diverged-holder";
-const ADHOC_HOLDER = "agent:adhoc-holder";
-const DEPRECATED_PLAN_HOLDER = "agent:deprecated-plan-holder";
+// BR-1055: a writer is named through the session tier. Each LABEL is the fixture identity a spawn runs as; the
+// HOLDER/ACTOR constant is the name that identity resolves to (what `my_claims` and `bootstrap --by` see).
+const DIVERGED_LABEL = "agent:diverged-holder";
+const ADHOC_LABEL = "agent:adhoc-holder";
+const DEPRECATED_PLAN_LABEL = "agent:deprecated-plan-holder";
+const DIVERGED_HOLDER = sessionActorFor(DIVERGED_LABEL);
+const ADHOC_HOLDER = sessionActorFor(ADHOC_LABEL);
+const DEPRECATED_PLAN_HOLDER = sessionActorFor(DEPRECATED_PLAN_LABEL);
 
 /** Actor for the fixture's non-claim writes — never the OS username, so audit rows stay attributable. */
-const FIXTURE_ACTOR = "agent:bootstrap-membership-fixture";
+const FIXTURE_LABEL = "agent:bootstrap-membership-fixture";
+const FIXTURE_ACTOR = sessionActorFor(FIXTURE_LABEL);
 
 /** Generous per-test budget: each test drives real `bun run src/index.ts` subprocesses (`check:test-budgets` D2 — never rely on the 5000ms default). */
 const TEST_TIMEOUT_MS = 120_000;
@@ -138,10 +145,10 @@ const bootstrapEnvelopeSchema = z.object({ ok: z.literal(true), data: bootstrapR
 type BootstrapReportPayload = z.infer<typeof bootstrapEnvelopeSchema>["data"];
 
 /** Runs `bun run src/index.ts ...args` in `cwd`. `HOME` is redirected into the fixture so no global lore config leaks in. */
-function runLore(args: readonly string[], cwd: string): RunResult {
+function runLore(args: readonly string[], cwd: string, actor: string = FIXTURE_LABEL): RunResult {
   const proc = Bun.spawnSync(["bun", "run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: FIXTURE_ACTOR },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, CLAUDECODE: "1" }, actor) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),
@@ -155,8 +162,8 @@ function runLore(args: readonly string[], cwd: string): RunResult {
  * silently-failed arrange step would leave a SMALLER corpus, which is exactly
  * the shape the defect under test produces — the two must never be confusable.
  */
-function runLoreOk(args: readonly string[], cwd: string): RunResult {
-  const result = runLore(args, cwd);
+function runLoreOk(args: readonly string[], cwd: string, actor: string = FIXTURE_LABEL): RunResult {
+  const result = runLore(args, cwd, actor);
   if (result.exitCode !== 0) {
     throw new Error(
       `fixture step failed (exit ${result.exitCode}): lore ${args.join(" ")}\n` +
@@ -278,27 +285,28 @@ function getDivergedFixture(): DivergedFixture {
 
   // draft → approved → deprecated: the ONLY non-terminal→non-active path a plan
   // can walk without the plan-close gate (VALID_TRANSITIONS, schemas.ts).
-  runLoreOk(["approve", deprecatedPlanSlug, "--by", FIXTURE_ACTOR], dir);
+  runLoreOk(["approve", deprecatedPlanSlug], dir);
   runLoreOk(["set", deprecatedPlanSlug, "--status", "deprecated"], dir);
 
   runLoreOk(
-    ["claim", adhocTaskSlug, "--by", ADHOC_HOLDER, "--worktree", join(dir, "wt-adhoc")],
+    ["claim", adhocTaskSlug, "--worktree", join(dir, "wt-adhoc")],
     dir,
+    ADHOC_LABEL,
   );
   runLoreOk(
     [
       "claim",
       deprecatedPlanMemberTaskSlug,
-      "--by",
-      DEPRECATED_PLAN_HOLDER,
       "--worktree",
       join(dir, "wt-retired"),
     ],
     dir,
+    DEPRECATED_PLAN_LABEL,
   );
   runLoreOk(
-    ["claim", divergedTaskSlug, "--by", DIVERGED_HOLDER, "--worktree", join(dir, "wt-diverged")],
+    ["claim", divergedTaskSlug, "--worktree", join(dir, "wt-diverged")],
     dir,
+    DIVERGED_LABEL,
   );
 
   const activePlan = readDoc(dir, activePlanSlug);

@@ -7,7 +7,8 @@
  * writers. The mapping is deterministic, so the same label names the same writer across spawns and an
  * assertion can compute the expected audit/claim name with {@link sessionActorFor}.
  *
- * Public surface: {@link sessionIdFor}, {@link sessionActorFor}, {@link withSessionIdentity}.
+ * Public surface: {@link sessionIdFor}, {@link sessionActorFor}, {@link sessionEnvFor}, {@link withSessionIdentity},
+ * {@link asSessionActor}.
  *
  * Invariants:
  *   - `sessionActorFor(label)` is exactly what `resolveActor()` returns for `CLAUDE_CODE_SESSION_ID =
@@ -36,6 +37,21 @@ export function sessionIdFor(label: string): string {
 /** The writer name the session tier resolves to for `label`. */
 export function sessionActorFor(label: string): string {
   return `agent:session-${idEightFor(label)}`;
+}
+
+/**
+ * The session id that resolves to the already-resolved writer name `actor` (`agent:session-<id8>`).
+ * @throws when `actor` is not in session-tier form — a fixture cannot name any other shape of writer.
+ */
+export function sessionIdOfActor(actor: string): string {
+  const match = /^agent:session-([0-9a-f]{8})$/.exec(actor);
+  if (match === null) throw new Error(`fixture writer must be a session-tier name (agent:session-<8 hex>), got: ${actor}`);
+  return `${match[1]}-aaaa-4bbb-8ccc-000000000000`;
+}
+
+/** Env overrides that name the writer `label` through the session tier (merge into a spawn's env). */
+export function sessionEnvFor(label: string): Record<string, string> {
+  return { CLAUDE_CODE_SESSION_ID: sessionIdFor(label) };
 }
 
 /**

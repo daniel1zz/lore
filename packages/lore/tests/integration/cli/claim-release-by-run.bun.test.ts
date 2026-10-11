@@ -16,6 +16,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
+import { sessionActorFor } from "../../helpers/session-actor";
 import {
   CLAIM_CONFLICT_EXIT,
   KINDS,
@@ -35,8 +36,8 @@ import {
 
 setDefaultTimeout(180_000);
 
-const NAME = "agent:rid-shared-name";
-const OTHER_NAME = "agent:rid-other-name";
+const NAME = sessionActorFor("agent:rid-shared-name");
+const OTHER_NAME = sessionActorFor("agent:rid-other-name");
 const AGE = /\b\d+\s*(m|min|mins|minute|minutes)\b/;
 
 let corpus: Corpus;

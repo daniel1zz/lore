@@ -5,7 +5,7 @@
  * Expected behaviour (from the spec, before the implementation was read):
  *   - A write whose `--harness-run` names an id with no registered run SUCCEEDS (exit 0), stores
  *     `harness_run` NULL on its audit row and version row(s), keeps the name lore resolved for it
- *     (`--by N` -> N with source "flag"; a session id -> `agent:session-<id8>` with source "session"; `$LORE_ACTOR` is never read, BR-1055), and prints EXACTLY ONE
+ *     (a session id -> `agent:session-<id8>` with source "session"; `$LORE_ACTOR` is never read, BR-1055), and prints EXACTLY ONE
  *     stderr line that names the unknown id (D7: "one stderr warning naming the id"), even when the
  *     command writes several rows (`lore done` walks several lifecycle steps).
  *   - A write with no `--harness-run` succeeds with `harness_run` NULL and prints NO run warning.
@@ -45,7 +45,11 @@ const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 const GHOST_A = "cc:ghost-session-aaaa";
 const GHOST_B = "cc:ghost-session-bbbb:agent-zz";
 const REGISTERED = "cc:registered-session-1";
-const NAME = "agent:unattested-writer";
+// BR-1055: no `--by` — every writer is named through the session tier. NAME is the writer the NAME_ENV session
+// resolves to; SESSION_NAME (below) is a SECOND, distinct session-tier writer used to tell the two apart.
+const NAME_SESSION_ID = "0a3e0001-aaaa-bbbb-cccc-111111111111";
+const NAME = "agent:session-0a3e0001";
+const NAME_ENV = { CLAUDE_CODE_SESSION_ID: NAME_SESSION_ID };
 // BR-1055: LORE_ACTOR is ignored; a writer without --by is named through the session tier.
 const SESSION_ID = "5e55100a-aaaa-bbbb-cccc-111111111111";
 const SESSION_NAME = "agent:session-5e55100a";
@@ -157,26 +161,26 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
   });
 
   it("a claim succeeds (exit 0): an unknown run id never refuses a write", () => {
-    const r = lore(["--harness-run", GHOST_A, "claim", task, "--by", NAME], dir);
+    const r = lore(["--harness-run", GHOST_A, "claim", task], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
   });
 
   it("the claim's audit row stores harness_run NULL, keeps name N, and records the name's source (flag)", async () => {
     const t2 = newTask(dir, "Unattested claim two");
     const since = new Date().toISOString();
-    mustLore(["--harness-run", GHOST_A, "claim", t2, "--by", NAME], dir);
+    mustLore(["--harness-run", GHOST_A, "claim", t2], dir, NAME_ENV);
     const rows = (await auditSince(dir, since)).filter((r) => r.actor === NAME);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(harnessRunOf(row) ?? null).toBeNull();
-      expect(JSON.stringify(row)).toContain("flag");
+      expect(JSON.stringify(row)).toContain("session");
     }
   });
 
   it("the claim's version rows also store harness_run NULL (no run is invented for the version history)", async () => {
     const t3 = newTask(dir, "Unattested claim three");
     const since = new Date().toISOString();
-    mustLore(["--harness-run", GHOST_A, "claim", t3, "--by", NAME], dir);
+    mustLore(["--harness-run", GHOST_A, "claim", t3], dir, NAME_ENV);
     const versions = (await versionsSince(dir, since)).filter((v) => v.created_by === NAME);
     expect(versions.length).toBeGreaterThan(0);
     for (const v of versions) expect(harnessRunOf(v) ?? null).toBeNull();
@@ -184,14 +188,14 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
 
   it("stderr carries exactly ONE line naming the unknown id", () => {
     const t4 = newTask(dir, "Unattested claim four");
-    const r = lore(["--harness-run", GHOST_A, "claim", t4, "--by", NAME], dir);
+    const r = lore(["--harness-run", GHOST_A, "claim", t4], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     expect(warningLinesNaming(r.stderr, GHOST_A)).toHaveLength(1);
   });
 
   it("a different unknown id is named in its own warning (the message is not a hardcoded id)", () => {
     const t5 = newTask(dir, "Unattested claim five");
-    const r = lore(["--harness-run", GHOST_B, "claim", t5, "--by", NAME], dir);
+    const r = lore(["--harness-run", GHOST_B, "claim", t5], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     expect(warningLinesNaming(r.stderr, GHOST_B)).toHaveLength(1);
     expect(r.stderr).not.toContain(GHOST_A);
@@ -212,9 +216,9 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
 
   it("a write that produces several rows (lore done walks several lifecycle steps) still prints exactly one warning", () => {
     const t6 = newTask(dir, "Unattested multi-row done");
-    mustLore(["claim", t6, "--by", NAME], dir);
-    mustLore(["evidence", t6, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row", "--by", NAME], dir);
-    const r = lore(["--harness-run", GHOST_A, "done", t6, "--by", NAME, "--override-attestation", "unattested fixture: no runner-attested pass exists for this throwaway task"], dir);
+    mustLore(["claim", t6], dir, NAME_ENV);
+    mustLore(["evidence", t6, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row"], dir, NAME_ENV);
+    const r = lore(["--harness-run", GHOST_A, "done", t6, "--override-attestation", "unattested fixture: no runner-attested pass exists for this throwaway task"], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     expect(warningLinesNaming(r.stderr, GHOST_A)).toHaveLength(1);
   });
@@ -223,7 +227,7 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
     await registerRun(dir, REGISTERED);
     const t7 = newTask(dir, "Registered control");
     const since = new Date().toISOString();
-    const r = lore(["--harness-run", REGISTERED, "claim", t7, "--by", NAME], dir);
+    const r = lore(["--harness-run", REGISTERED, "claim", t7], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     expect(warningLinesNaming(r.stderr, REGISTERED)).toHaveLength(0);
     const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
@@ -244,7 +248,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
   it("a write with no flag succeeds and stores harness_run NULL with the resolved name", async () => {
     const t = newTask(dir, "No flag target");
     const since = new Date().toISOString();
-    const r = lore(["claim", t, "--by", NAME], dir);
+    const r = lore(["claim", t], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
     expect(rows.length).toBeGreaterThan(0);
@@ -253,7 +257,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
 
   it("prints no run warning when no run was named", () => {
     const t = newTask(dir, "No flag quiet target");
-    const r = lore(["claim", t, "--by", NAME], dir);
+    const r = lore(["claim", t], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     expect(runWarningLines(r.stderr)).toEqual([]);
   });
@@ -261,7 +265,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
   it("the version rows of an unflagged write store harness_run NULL", async () => {
     const t = newTask(dir, "No flag version target");
     const since = new Date().toISOString();
-    mustLore(["claim", t, "--by", NAME], dir);
+    mustLore(["claim", t], dir, NAME_ENV);
     const versions = (await versionsSince(dir, since)).filter((v) => v.created_by === NAME);
     expect(versions.length).toBeGreaterThan(0);
     for (const v of versions) expect(harnessRunOf(v) ?? null).toBeNull();
@@ -271,7 +275,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
     await registerRun(dir, REGISTERED);
     const t = newTask(dir, "Registered but not named");
     const since = new Date().toISOString();
-    const r = lore(["claim", t, "--by", NAME], dir);
+    const r = lore(["claim", t], dir, NAME_ENV);
     expect(r.exitCode).toBe(0);
     const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
     expect(rows.length).toBeGreaterThan(0);
@@ -285,7 +289,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
     expect(os).not.toBe(NAME);
     const t = newTask(dir, "No flag author target");
     const since = new Date().toISOString();
-    mustLore(["claim", t, "--by", NAME], dir);
+    mustLore(["claim", t], dir, NAME_ENV);
     mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Authored with a given name", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
     const rows = await auditSince(dir, since);
     expect(rows.length).toBeGreaterThan(0);
@@ -296,7 +300,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
   it("an empty --harness-run value is not accepted as a run id and never stamps a blank run", async () => {
     const t = newTask(dir, "Empty flag target");
     const since = new Date().toISOString();
-    lore(["--harness-run", "", "claim", t, "--by", NAME], dir);
+    lore(["--harness-run", "", "claim", t], dir, NAME_ENV);
     for (const row of await auditSince(dir, since)) {
       expect(harnessRunOf(row) ?? null).toBeNull();
     }
@@ -316,11 +320,11 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
     dir = corpusDir("unattested-gate-actor-");
   });
 
-  it("claim --by N: every audit row since the start (gate_passed included) has actor N, none the OS user", async () => {
+  it("claim named through the session tier: every audit row since the start (gate_passed included) has actor N, none the OS user", async () => {
     const os = userInfo().username;
     const task = newTask(dir, "Gate actor target");
     const since = new Date().toISOString();
-    mustLore(["claim", task, "--by", NAME], dir);
+    mustLore(["claim", task], dir, NAME_ENV);
     const rows = await auditSince(dir, since);
     expect(rows.some((r) => r.action === "gate_passed")).toBe(true);
     for (const row of rows) {
@@ -353,7 +357,7 @@ describe("AC-RID-8 regression: claim by an unregistered --harness-run is decided
 
   it("stores claim.harness_run null, warns exactly once, and a same-name unattested claim refreshes (BR-1040)", () => {
     const task = newTask(dir, "Unregistered run claim");
-    const first = lore(["--harness-run", GHOST_A, "claim", task, "--by", NAME], dir);
+    const first = lore(["--harness-run", GHOST_A, "claim", task], dir, NAME_ENV);
     expect(first.exitCode).toBe(0);
     expect(warningLinesNaming(first.stderr, GHOST_A)).toHaveLength(1);
     const got = (JSON.parse(mustLore(["get", task, "--json"], dir).stdout) as { data: { doc?: { extra?: { claim?: Record<string, unknown> } }; extra?: { claim?: Record<string, unknown> } } }).data;
@@ -362,7 +366,7 @@ describe("AC-RID-8 regression: claim by an unregistered --harness-run is decided
     expect(claim["harness_run"] ?? null).toBeNull();
     expect(JSON.stringify(claim)).not.toContain(GHOST_A);
     // two unattested parties with the same name compare by name: the second claim refreshes the lease
-    const second = lore(["claim", task, "--by", NAME], dir);
+    const second = lore(["claim", task], dir, NAME_ENV);
     expect(second.exitCode).toBe(0);
     expect(second.stderr).not.toContain("CLAIM_CONFLICT");
   });

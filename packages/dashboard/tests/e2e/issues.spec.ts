@@ -204,7 +204,7 @@ function fileReport(
 /** Best-effort CLI cleanup — approves a report so it leaves the "open" set, restoring the shared baseline. */
 function cleanupApprove(upstreamRoot: string, docId: string): void {
   try {
-    runLore(["approve", docId, "--by", "e2e-cleanup"], upstreamRoot);
+    runLore(["approve", docId], upstreamRoot);
   } catch {
     // best-effort — a test's own assertions already reported anything meaningfully wrong
   }

@@ -7,7 +7,7 @@
  *     (no deprecation warning either - a retired mechanism is not named).
  *   - That holds per process however many writes the process performs (`lore done` walks several steps),
  *     for two separate processes, and `--json` stdout stays machine-parseable and silent about it.
- *   - A process naming itself with `--by` and no `$LORE_ACTOR` also prints nothing about it.
+ *   - A process naming itself through the session tier and no `$LORE_ACTOR` also prints nothing about it.
  *
  * Dimensions: HAPPY (single write -> no mention), BOUNDARY (multi-write process; two processes), NEGATIVE (no
  * env var -> none), STATE (stdout untouched), REGRESSION (the env name is NOT recorded as the author).
@@ -24,6 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { sessionActorFor, sessionIdFor } from "../../helpers/session-actor";
 
 setDefaultTimeout(300_000);
 
@@ -33,6 +34,8 @@ const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
 const ACTOR_Y = "agent:deprecation-writer-y";
 const ACTOR_Z = "agent:deprecation-writer-z";
 const SETUP = "agent:deprecation-setup";
+/** The name the session tier resolves to for writer Y's fixture session (what an audit row carries). */
+const ACTOR_Y_SESSION = sessionActorFor(ACTOR_Y);
 
 interface RunResult {
   readonly stdout: string;
@@ -40,18 +43,20 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function lore(args: string[], cwd: string, actorEnv: string | null): RunResult {
+/** `actorEnv` is the (ignored) retired variable's value; `sessionLabel` names the writer through the session tier. */
+function lore(args: string[], cwd: string, actorEnv: string | null, sessionLabel: string | null = null): RunResult {
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDECODE: "1", HOME: cwd };
   delete env["CLAUDE_CODE_SESSION_ID"];
   delete env["CLAUDE_SESSION_ID"];
+  if (sessionLabel !== null) env["CLAUDE_CODE_SESSION_ID"] = sessionIdFor(sessionLabel);
   if (actorEnv === null) delete env["LORE_ACTOR"];
   else env["LORE_ACTOR"] = actorEnv;
   const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 
-function mustLore(args: string[], cwd: string, actorEnv: string | null): RunResult {
-  const r = lore(args, cwd, actorEnv);
+function mustLore(args: string[], cwd: string, actorEnv: string | null, sessionLabel: string | null = null): RunResult {
+  const r = lore(args, cwd, actorEnv, sessionLabel);
   if (r.exitCode !== 0) throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${r.exitCode}): ${r.stderr}${r.stdout}`);
   return r;
 }
@@ -105,15 +110,15 @@ describe("AC-ROI-2 (CLI): $LORE_ACTOR is ignored and never named", () => {
 
   it("ONE process that performs several writes (lore done) prints no line naming it", async () => {
     const task = newTask("Retired multi write");
-    mustLore(["claim", task, "--by", ACTOR_Y], dir, null);
-    mustLore(["evidence", task, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row", "--by", ACTOR_Y], dir, null);
+    mustLore(["claim", task], dir, null, ACTOR_Y);
+    mustLore(["evidence", task, "--oracle", "test", "--command", "echo red fixture", "--result", "expected-fail", "--output-tail", "red fixture row"], dir, null, ACTOR_Y);
     const since = new Date().toISOString();
-    // --by names the holder explicitly; the decoy env value (Z) must not take part in resolution.
-    const r = lore(["done", task, "--by", ACTOR_Y, "--override-attestation", "retired-variable fixture: no runner-attested pass exists for this throwaway task"], dir, ACTOR_Z);
+    // the session names the holder; the decoy env value (Z) must not take part in resolution.
+    const r = lore(["done", task, "--override-attestation", "retired-variable fixture: no runner-attested pass exists for this throwaway task"], dir, ACTOR_Z, ACTOR_Y);
     expect(r.exitCode).toBe(0);
     const rows = await auditSince(since);
     // the process really did several writes, so "no mention" is not just "one write -> no mention"
-    expect(rows.filter((row) => row.actor === ACTOR_Y).length).toBeGreaterThanOrEqual(3);
+    expect(rows.filter((row) => row.actor === ACTOR_Y_SESSION).length).toBeGreaterThanOrEqual(3);
     expect(rows.filter((row) => row.actor === ACTOR_Z)).toEqual([]);
     expect(loreActorMentions(r.stderr)).toEqual([]);
   });
@@ -146,14 +151,14 @@ describe("AC-ROI-2 (CLI): $LORE_ACTOR is ignored and never named", () => {
 });
 
 describe("AC-ROI-2 (CLI): nothing about $LORE_ACTOR when it is not set", () => {
-  it("naming the writer with --by and no $LORE_ACTOR prints no deprecation line", () => {
-    const task = newTask("Deprecation by flag");
-    const r = lore(["claim", task, "--by", ACTOR_Y], dir, null);
+  it("naming the writer through the session tier and no $LORE_ACTOR prints no deprecation line", () => {
+    const task = newTask("Deprecation by session");
+    const r = lore(["claim", task], dir, null, ACTOR_Y);
     expect(r.exitCode).toBe(0);
     expect(loreActorMentions(r.stderr)).toEqual([]);
   });
 
-  it("a write with neither --by nor $LORE_ACTOR prints no deprecation line", () => {
+  it("a write with neither a session nor $LORE_ACTOR prints no deprecation line", () => {
     const r = lore(["create", "knowledge", "--sub-type", "reference", "--title", "Deprecation none", "--content", "body", "--no-ai"], dir, null);
     expect(loreActorMentions(r.stderr)).toEqual([]);
   });

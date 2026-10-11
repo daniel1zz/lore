@@ -186,7 +186,7 @@ function initFixtureCorpus(prefix: string): string {
 }
 
 function createDoc(cwd: string, type: string, title: string, content: string, extraArgs: string[]): { id: string; slug: string } {
-  const result = runLore(["create", type, "--title", title, "--content", content, "--by", ACTOR, "--json", ...extraArgs], cwd);
+  const result = runLore(["create", type, "--title", title, "--content", content, "--json", ...extraArgs], cwd);
   if (result.exitCode !== 0) {
     throw new Error(`fixture setup: create ${type} failed (exit ${result.exitCode}): ${result.combined}`);
   }

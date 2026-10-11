@@ -37,6 +37,8 @@ import { tmpdir } from "os";
 import { createApp, type App } from "../../src/app.js";
 import { SQLiteStore } from "../../src/store/sqlite-store.js";
 import type { CreateDocInput, LoreConfig } from "@lore/core";
+import { asSessionActor } from "../helpers/session-actor";
+import { resolveActor } from "../../src/adapters/cli/utils.js";
 
 /**
  * Constructs a fixture-only App with ALL FOUR `lore gate` service-layer checkpoints
@@ -803,7 +805,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
     } finally {
       output.restore();
     }
@@ -814,7 +816,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     expect(stdoutText).toContain(taskASlug);
     expect(stdoutText).toContain("agent:a");
     expect(stdoutText).toContain("src/shared.ts");
-    expect(stdoutText).toContain(`lore release ${taskASlug} --by agent:a --force`);
+    expect(stdoutText).toContain(`lore release ${taskASlug} --force`);
   });
 
   it("HAPPY: after releasing the conflicting claim, the SAME gate call passes", async () => {
@@ -833,7 +835,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // -- blocked while task A's claim is live --
     let output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
     } finally {
       output.restore();
     }
@@ -845,7 +847,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // -- the SAME gate call now passes --
     output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
     } finally {
       output.restore();
     }
@@ -878,14 +880,16 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // (`runTaskClaimGate`) read the session id from `process.env` at their own call
     // time — set the SAME value explicitly before each so "one measured session" is a
     // constructed fact, never an inherited ambient one.
+    // The gate resolves its candidate name from that SAME session (`agent:session-<id8>`), so the
+    // holder is recorded under that name: same actor AND same measured session.
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
-    await claimTask(taskAId, "agent:a");
+    await claimTask(taskAId, "agent:session-3de02220");
 
     const cmd = await importGateSubCommand("task-claim");
     setSessionEnv("CLAUDE_CODE_SESSION_ID", "3de02220-same-session");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug, by: "agent:a" } });
+      await cmd.run({ args: { task: taskBSlug } });
     } finally {
       output.restore();
     }
@@ -909,14 +913,16 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     // so the fact under test is visible at the call site, not merely inherited). "Same
     // actor" alone is never evidence of "one session" — without a measured session id
     // on both sides the mutex must refuse, not silently permit.
+    // No session on either side: the name the gate resolves is the fallback tier's (OS user / worktree
+    // name), so the holder is recorded under exactly that name — same actor, nothing measured.
     setSessionEnv(null);
-    await claimTask(taskAId, "agent:a");
+    await claimTask(taskAId, resolveActor());
 
     const cmd = await importGateSubCommand("task-claim");
     setSessionEnv(null);
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug, by: "agent:a" } });
+      await cmd.run({ args: { task: taskBSlug } });
     } finally {
       output.restore();
     }
@@ -939,7 +945,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
     } finally {
       output.restore();
     }
@@ -963,7 +969,7 @@ describe("lore gate task-claim — AC-P2-ANCHOR: anchor-overlap parity with `lor
     const cmd = await importGateSubCommand("task-claim");
     const output = captureOutput();
     try {
-      await cmd.run({ args: { task: taskBSlug, by: "agent:b" } });
+      await asSessionActor("agent:b", () => cmd.run({ args: { task: taskBSlug } }));
     } finally {
       output.restore();
     }
