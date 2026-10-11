@@ -56,6 +56,7 @@
 
 import { hostname } from "os";
 import { defineCommand } from "citty";
+import { taskClaimSchema } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActorWithIdentitySource } from "../utils.js";
@@ -175,6 +176,12 @@ export default defineCommand({
       }
 
       console.log(`Claimed ${result.value.slug} by ${by} (v${result.value.version})`);
+      // reason: D4 — a `--steal` of an orphaned_dirty claim inherits uncommitted work, so the output names that worktree.
+      const writtenClaim = taskClaimSchema.safeParse(result.value.extra["claim"]);
+      const inheritedWorktree = writtenClaim.success ? writtenClaim.data.inherited_dirty_worktree : undefined;
+      if (inheritedWorktree !== undefined) {
+        console.log(`Inherited dirty worktree: ${inheritedWorktree} (uncommitted changes from the ended run's claim)`);
+      }
     } finally {
       app.close();
     }

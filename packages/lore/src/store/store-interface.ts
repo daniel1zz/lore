@@ -67,6 +67,18 @@ export interface UpdateOpts {
   expected_version?: number;
 }
 
+/**
+ * A run's end state (migration-017). `endedAt === null` = the run is open. Kept OFF {@link RunRecord}: a run's
+ * registered identity is frozen (BR-1029), whereas ending / reopening it is a lifecycle fact.
+ */
+export interface RunEndState {
+  readonly endedAt: string | null;
+  readonly endReason: string | null;
+}
+
+/** Outcome of {@link StoreInterface.endRun}: `unknown-run` writes nothing; `already-ended` keeps the FIRST end. */
+export type RunEndOutcome = "ended" | "already-ended" | "unknown-run";
+
 /** Result of {@link StoreInterface.countAttributedWrites}. */
 export interface AttributedWriteCount {
   total: number;
@@ -1155,6 +1167,19 @@ export interface StoreInterface {
 
   /** The registered run, or `ok(null)` for an unknown id (same shape as `find`; never a fabricated record). */
   getRun(id: RunId): Promise<Result<RunRecord | null, LoreError>>;
+
+  /**
+   * Mark a run ended (migration-017). FIRST END WINS: a run already ended keeps its `ended_at` / `end_reason`
+   * (`already-ended`); an unregistered id writes nothing (`unknown-run`, normal for SubagentStop of an
+   * internal agent).
+   */
+  endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>>;
+
+  /** Clear `ended_at` / `end_reason` (a resumed helper registered again). `ok(true)` iff the run WAS ended. */
+  reopenRun(id: RunId): Promise<Result<boolean, LoreError>>;
+
+  /** The run's end state, or `ok(null)` for an unregistered id. */
+  getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>>;
 
   /**
    * Count audit rows with `timestamp >= windowStart` (INCLUSIVE, ISO 8601) whose `action` is one of

@@ -57,6 +57,8 @@ import type {
   TraceZeroHitSearch,
   UpdateOpts,
   ProvenanceWriteExtras,
+  RunEndOutcome,
+  RunEndState,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
@@ -112,6 +114,8 @@ export class InMemoryStore implements StoreInterface {
   private readonly traceEvents: TraceEventRecord[] = [];
   /** Mirrors `runs` (migration-016), keyed by run id; first registration wins. */
   private readonly runs = new Map<string, RunRecord>();
+  /** Mirrors `runs.ended_at` / `runs.end_reason` (migration-017); absent key = open run. */
+  private readonly runEnds = new Map<string, RunEndState>();
 
   // ── Document CRUD ─────────────────────────────────────────────────────────
 
@@ -1448,6 +1452,23 @@ export class InMemoryStore implements StoreInterface {
   async getRun(id: RunId): Promise<Result<RunRecord | null, LoreError>> {
     const run = this.runs.get(id);
     return ok(run === undefined ? null : structuredClone(run));
+  }
+
+  async endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>> {
+    if (!this.runs.has(id)) return ok("unknown-run");
+    // reason: first end wins — mirrors SQLite's `WHERE ended_at IS NULL`.
+    if (this.runEnds.has(id)) return ok("already-ended");
+    this.runEnds.set(id, { endedAt, endReason: reason });
+    return ok("ended");
+  }
+
+  async reopenRun(id: RunId): Promise<Result<boolean, LoreError>> {
+    return ok(this.runEnds.delete(id));
+  }
+
+  async getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>> {
+    if (!this.runs.has(id)) return ok(null);
+    return ok(this.runEnds.get(id) ?? { endedAt: null, endReason: null });
   }
 
   async countAttributedWrites(

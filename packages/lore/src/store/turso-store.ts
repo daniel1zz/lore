@@ -41,6 +41,7 @@ import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
+import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 import type { RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
@@ -94,6 +95,8 @@ import type {
   TraceZeroHitSearch,
   UpdateOpts,
   ProvenanceWriteExtras,
+  RunEndOutcome,
+  RunEndState,
 } from "./store-interface.js";
 import {
   allocateWithBoundedRetry,
@@ -707,6 +710,16 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_016_SQL);
+      }
+
+      if (currentVersion < 17) {
+        // reason: migration-017 is two-phase like 016 (see migration-017.ts's module JSDoc): `runs.ended_at` /
+        // `runs.end_reason` are added only where `PRAGMA table_info` lacks them, then one BEGIN/COMMIT bumps user_version.
+        for (const { table, column, ddl } of MIGRATION_017_ADD_COLUMNS) {
+          const info = await this.client.execute(`PRAGMA table_info(${table})`);
+          if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
+        }
+        await this.client.executeMultiple(MIGRATION_017_SQL);
       }
     })();
 
@@ -3182,6 +3195,47 @@ export class TursoStore implements StoreInterface {
           registered_at: rowStr(row, "registered_at"),
         } satisfies RunRow),
       );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>> {
+    try {
+      await this.ensureReady();
+      // reason: `ended_at IS NULL` in the WHERE makes the FIRST end win and the call idempotent.
+      const updated = await this.client.execute({
+        sql: "UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL",
+        args: [endedAt, reason, id],
+      });
+      if (updated.rowsAffected > 0) return ok("ended");
+      const found = await this.client.execute({ sql: "SELECT id FROM runs WHERE id = ?", args: [id] });
+      return ok(found.rows[0] === undefined ? "unknown-run" : "already-ended");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async reopenRun(id: RunId): Promise<Result<boolean, LoreError>> {
+    try {
+      await this.ensureReady();
+      const updated = await this.client.execute({
+        sql: "UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL",
+        args: [id],
+      });
+      return ok(updated.rowsAffected > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({ sql: "SELECT ended_at, end_reason FROM runs WHERE id = ?", args: [id] });
+      const row = rs.rows[0];
+      if (!row) return ok(null);
+      return ok({ endedAt: rowStrOrNull(row, "ended_at"), endReason: rowStrOrNull(row, "end_reason") });
     } catch (e) {
       return wrapStoreError(e);
     }

@@ -748,6 +748,9 @@ describe("OutlineService.resolve", () => {
         // reason: migration-016 — new required StoreInterface methods; mechanical delegates.
         insertRun: (run) => store.insertRun(run),
         getRun: (id) => store.getRun(id),
+        endRun: (id, endedAt, reason) => store.endRun(id, endedAt, reason),
+        reopenRun: (id) => store.reopenRun(id),
+        getRunEnd: (id) => store.getRunEnd(id),
         countAttributedWrites: (windowStart, kinds) => store.countAttributedWrites(windowStart, kinds),
       };
 
