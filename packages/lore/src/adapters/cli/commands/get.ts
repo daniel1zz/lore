@@ -95,6 +95,8 @@ import {
   type WriteAttribution,
 } from "../../../service/attribution-report.js";
 import { composeWithStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
+import type { LockState } from "@lore/core";
+import type { StoreInterface } from "../../../store/store-interface.js";
 
 /**
  * BR-1008 relation view for `doc`: `implements` for a spec, `implemented_by` for a baseline node
@@ -118,6 +120,55 @@ async function loadSpecRelations(
     return ok({ json: { implemented_by: view }, lines: formatImplementedByLines(view) });
   }
   return ok({ json: {}, lines: [] });
+}
+
+/** Link types through which a newer document changes the meaning of an older one (read-time `Later changed by`). */
+const LATER_CHANGE_LINK_TYPES: ReadonlySet<string> = new Set(["relates-to", "supersedes", "implements"]);
+
+/** One newer document pointing INTO the displayed one. */
+interface LaterChange {
+  readonly slug: string;
+  readonly linkType: string;
+}
+
+/** `Standing:` line (spec documents-are-living-or-records D7): living, or record with its lock verdict. */
+function formatStandingLine(lock: LockState): string {
+  if (lock.standing === "living") return "Standing: living";
+  return lock.locked ? `Standing: record · locked (${lock.reason})` : "Standing: record · not locked";
+}
+
+/**
+ * Number of correction versions of `doc`: audit `update` rows whose `details.correction` is present.
+ * Structural marker written by `CorpusService.set` on a correction (not the `Correction:` change_summary prefix).
+ */
+async function countCorrections(store: StoreInterface, docId: DocRecord["id"]): Promise<Result<number, LoreError>> {
+  const rows = await store.queryAudit({ doc_id: docId, action: "update" });
+  if (!rows.ok) return rows;
+  const count = rows.value.filter((row) => {
+    const details = row.details as Record<string, unknown> | undefined;
+    return details?.["correction"] !== undefined;
+  }).length;
+  return ok(count);
+}
+
+/**
+ * Newer, live documents linked INTO `doc` by relates-to / supersedes / implements, derived at read time
+ * (nothing is stored on the older document), oldest first.
+ */
+async function loadLaterChanges(store: StoreInterface, doc: DocRecord): Promise<Result<LaterChange[], LoreError>> {
+  const links = await store.findLinks(doc.id, "in");
+  if (!links.ok) return links;
+  const out: Array<LaterChange & { createdAt: string }> = [];
+  for (const link of links.value) {
+    if (!LATER_CHANGE_LINK_TYPES.has(link.link_type)) continue;
+    const from = await store.find(link.from_id);
+    if (!from.ok) return from;
+    if (from.value === null || (from.value.deleted_at ?? null) !== null) continue;
+    if (from.value.created_at <= doc.created_at) continue;
+    out.push({ slug: from.value.slug, linkType: link.link_type, createdAt: from.value.created_at });
+  }
+  out.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.slug.localeCompare(b.slug));
+  return ok(out.map(({ slug, linkType }) => ({ slug, linkType })));
 }
 
 export default defineCommand({
@@ -206,6 +257,34 @@ export default defineCommand({
         return;
       }
 
+      // Standing / Corrections / Later changed by — human view only (the --json payload is unchanged). Standing
+      // comes from the ONE lock resolver the write gate uses; the other two are read-time derivations.
+      let humanStanding: string[] = [];
+      if (!args.json) {
+        if (app.recordLockService === undefined) {
+          process.stderr.write("Error: RecordLockService is not wired on App; cannot resolve Standing.\n");
+          process.exitCode = 1;
+          return;
+        }
+        const lock = await app.recordLockService.resolve(doc);
+        const corrections = await countCorrections(attributionStore, doc.id);
+        const later = await loadLaterChanges(attributionStore, doc);
+        const failure = [lock, corrections, later].find((r) => !r.ok);
+        if (failure !== undefined && !failure.ok) {
+          process.stderr.write(formatError(failure.error) + "\n");
+          process.exitCode = exitCode(failure.error);
+          return;
+        }
+        if (lock.ok && corrections.ok && later.ok) {
+          humanStanding = [formatStandingLine(lock.value)];
+          if (corrections.value > 0) humanStanding.push(`Corrections: ${corrections.value}`);
+          if (later.value.length > 0) {
+            humanStanding.push(`Later changed by (${later.value.length}):`);
+            for (const change of later.value) humanStanding.push(`  ${change.slug} (${change.linkType})`);
+          }
+        }
+      }
+
       if (args.json) {
         // reason: ONE wall-clock read, taken here rather than reused from a wider scope —
         // this is the only validity evaluation in this command, and `--raw` must not
@@ -228,6 +307,7 @@ export default defineCommand({
         `Created: ${doc.created_at.slice(0, 10)} by ${doc.created_by} | Updated: ${doc.updated_at.slice(0, 10)}`,
       );
       console.log(`Last write: ${formatAttributionLabels(attribution)}`);
+      for (const line of humanStanding) console.log(line);
       if (doc.tags.length > 0) {
         console.log(`Tags: ${doc.tags.join(", ")}`);
       }

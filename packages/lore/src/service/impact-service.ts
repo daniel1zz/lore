@@ -2,7 +2,8 @@
  * Module: impact-service — "what breaks if this rule changes or retires" (`lore rule impact`).
  *
  * Purpose: load the rule index data from the store and answer `impact` through the pure closure/SCC
- *   in `rule-index-queries.ts` (citing criteria, transitively dependent leaves, depends_on cycles).
+ *   in `rule-index-queries.ts` (citing criteria, transitively dependent leaves, depends_on cycles, plus the
+ *   standing split `living` / `records` of spec documents-are-living-or-records D7).
  * Public surface: {@link ImpactService.impact}.
  * Invariants: reads the migration-014 indexes only (no spec re-parse); unknown rule id is
  *   `DOC_NOT_FOUND`; terminates on cyclic graphs (see `computeImpact`).

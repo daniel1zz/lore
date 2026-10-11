@@ -424,6 +424,12 @@ export interface App {
   ruleReadService?: RuleReadService;
   impactService?: ImpactService;
   /**
+   * RecordLockService — the ONE lock resolver (spec documents-are-living-or-records D17). Exposed so read
+   * surfaces (`lore get` Standing line) ask the same service the write gate asks. Optional like the other
+   * store-only services so bare test stubs stay valid; always wired in production.
+   */
+  recordLockService?: RecordLockService;
+  /**
    * PrdOutlineService — READ-ONLY reader of a PRD's stored outline (`lore outline list`); its writers
    * and the plan-close exemption writer were retired by slice 3a (BR-985). Store-only, same
    * optional-DI shape as `acService`/`requirementService`; always wired in production.
@@ -892,6 +898,7 @@ function buildAppFromSqlite(
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
+    recordLockService,
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),
@@ -1259,6 +1266,7 @@ function buildAppFromTurso(
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
+    recordLockService,
     // reason: PrdOutlineService is store-only, same shape as AcService/
     // RequirementService (SPEC-080 C1, C4).
     prdOutlineService: new PrdOutlineService(store),
