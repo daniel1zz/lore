@@ -14,7 +14,7 @@
  *       slugs). Both are repeatable. Arming an already-armed slug / disarming an unarmed one is not an error and never
  *       duplicates an entry. armed_branches keeps first-arm order.
  *   C3. One adopt call that changes something writes EXACTLY ONE audit row: action `baseline_adopt`, actor = the
- *       resolved actor (LORE_ACTOR), details = { old: { mode, armed_branches }, new: { mode, armed_branches } } where
+ *       resolved actor (session tier), details = { old: { mode, armed_branches }, new: { mode, armed_branches } } where
  *       `old`/`new` are the RAW stored settings (mode is null when the key is absent; armed_branches [] when absent).
  *       Read back through `lore audit --json` (entries[].action / .actor / .details).
  *   C4. Failures write NOTHING (config byte-identical, zero audit rows) and exit: unknown flag value for --mode -> 2;
@@ -45,7 +45,11 @@ setDefaultTimeout(300_000);
 // tests/integration/cli/ -> repo root is 5 levels up.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
-const ACTOR = "agent:adopt-test";
+// BR-1055: LORE_ACTOR is ignored; the writer identity is injected through the session tier.
+const ACTOR_SESSION_ID = "ad0b7e57-aaaa-bbbb-cccc-111111111111";
+const ACTOR = "agent:session-ad0b7e57";
+const SECOND_ACTOR_SESSION_ID = "ad0b7e52-aaaa-bbbb-cccc-111111111111";
+const SECOND_ACTOR = "agent:session-ad0b7e52";
 
 interface RunResult {
   readonly stdout: string;
@@ -53,8 +57,8 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string, actor: string = ACTOR): RunResult {
-  const env = { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: actor };
+function runLore(args: string[], cwd: string, sessionId: string = ACTOR_SESSION_ID): RunResult {
+  const env = { ...process.env, HOME: cwd, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: sessionId };
   const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
@@ -180,12 +184,12 @@ describe("baseline adopt (BL-8)", () => {
   });
 
   it("a second adopt (--arm another branch, no --mode) keeps the mode, appends the branch, and writes one more row whose old is the previous new", () => {
-    const r = runLore(["baseline", "adopt", "--arm", branchB], repo, "agent:adopt-test-2");
+    const r = runLore(["baseline", "adopt", "--arm", branchB], repo, SECOND_ACTOR_SESSION_ID);
     expect(r.exitCode).toBe(0);
     expect(citeOf(repo)).toEqual({ mode: "enforce", armed_branches: [branchA, branchB] });
     const rows = adoptRows(repo);
     expect(rows).toHaveLength(2);
-    const second = rows.find((row) => row.actor === "agent:adopt-test-2");
+    const second = rows.find((row) => row.actor === SECOND_ACTOR);
     expect(second).toBeDefined();
     expect(second!.details.old).toEqual({ mode: "enforce", armed_branches: [branchA] });
     expect(second!.details.new).toEqual({ mode: "enforce", armed_branches: [branchA, branchB] });

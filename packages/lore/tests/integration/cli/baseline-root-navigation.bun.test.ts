@@ -52,7 +52,9 @@ setDefaultTimeout(300_000);
 // tests/integration/cli/ -> repo root is 5 levels up.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
-const ACTOR = "agent:bc-nav-test";
+// BR-1055: LORE_ACTOR is ignored; the writer identity is injected through the session tier.
+const SESSION_ID = "bc4a5e57-aaaa-bbbb-cccc-111111111111";
+const ACTOR = "agent:session-bc4a5e57";
 
 interface RunResult {
   readonly stdout: string;
@@ -61,7 +63,7 @@ interface RunResult {
 }
 
 function runLore(args: string[], cwd: string): RunResult {
-  const env = { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: ACTOR };
+  const env = { ...process.env, HOME: cwd, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: SESSION_ID };
   const proc = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }

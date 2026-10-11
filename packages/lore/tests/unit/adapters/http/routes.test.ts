@@ -392,14 +392,19 @@ describe("POST /api/docs", () => {
   // ─── Author attribution (adr-dashboard-cookie-session-writes-attribute-author-via) ──
   describe("author attribution", () => {
     const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
+    const ORIGINAL_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
 
     beforeEach(() => {
-      process.env["LORE_ACTOR"] = "agent:v1-dashboard-human";
+      process.env["CLAUDE_CODE_SESSION_ID"] = "v1da5b0a-1111-2222-3333-444444444444";
+      // decoy: must be ignored (BR-1055)
+      process.env["LORE_ACTOR"] = "agent:decoy-lore-actor-must-be-ignored";
     });
 
     afterEach(() => {
       if (ORIGINAL_LORE_ACTOR === undefined) delete process.env["LORE_ACTOR"];
       else process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
+      if (ORIGINAL_SESSION_ID === undefined) delete process.env["CLAUDE_CODE_SESSION_ID"];
+      else process.env["CLAUDE_CODE_SESSION_ID"] = ORIGINAL_SESSION_ID;
     });
 
     it("REGRESSION — bearer-token actor is the doc.created_by author, never the literal 'system' (spec-run-identity-slice-1 D1)", async () => {
@@ -418,7 +423,7 @@ describe("POST /api/docs", () => {
       const body = await parseResponse(res!);
       const doc = body.data as Record<string, unknown>;
 
-      expect(doc.created_by).toBe("agent:v1-dashboard-human");
+      expect(doc.created_by).toBe("agent:session-v1da5b0a");
       expect(doc.created_by).not.toBe("system");
       expect(doc.created_by).not.toBe("admin");
       expect(doc.created_by).not.toBe("dashboard-local");

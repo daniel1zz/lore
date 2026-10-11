@@ -5,7 +5,7 @@
  * Expected behaviour (from the spec, before the implementation was read):
  *   - A write whose `--harness-run` names an id with no registered run SUCCEEDS (exit 0), stores
  *     `harness_run` NULL on its audit row and version row(s), keeps the name lore resolved for it
- *     (`--by N` -> N with source "flag"; `$LORE_ACTOR=N` -> N with source "env"), and prints EXACTLY ONE
+ *     (`--by N` -> N with source "flag"; a session id -> `agent:session-<id8>` with source "session"; `$LORE_ACTOR` is never read, BR-1055), and prints EXACTLY ONE
  *     stderr line that names the unknown id (D7: "one stderr warning naming the id"), even when the
  *     command writes several rows (`lore done` walks several lifecycle steps).
  *   - A write with no `--harness-run` succeeds with `harness_run` NULL and prints NO run warning.
@@ -46,6 +46,9 @@ const GHOST_A = "cc:ghost-session-aaaa";
 const GHOST_B = "cc:ghost-session-bbbb:agent-zz";
 const REGISTERED = "cc:registered-session-1";
 const NAME = "agent:unattested-writer";
+// BR-1055: LORE_ACTOR is ignored; a writer without --by is named through the session tier.
+const SESSION_ID = "5e55100a-aaaa-bbbb-cccc-111111111111";
+const SESSION_NAME = "agent:session-5e55100a";
 
 interface RunResult {
   readonly stdout: string;
@@ -86,8 +89,8 @@ function corpusDir(prefix: string): string {
   writeFileSync(join(d, "README.md"), "fixture\n");
   git(["add", "."]);
   git(["commit", "-q", "-m", "init"]);
-  mustLore(["init"], d, { LORE_ACTOR: "agent:unattested-setup" });
-  mustLore(["create", "prd", "--title", "Unattested Root", "--content", "root", "--no-ai"], d, { LORE_ACTOR: "agent:unattested-setup" });
+  mustLore(["init"], d, { CLAUDE_CODE_SESSION_ID: "5e7a0000-aaaa-bbbb-cccc-111111111111" });
+  mustLore(["create", "prd", "--title", "Unattested Root", "--content", "root", "--no-ai"], d, { CLAUDE_CODE_SESSION_ID: "5e7a0000-aaaa-bbbb-cccc-111111111111" });
   return d;
 }
 
@@ -139,7 +142,7 @@ const warningLinesNaming = (stderr: string, id: string): string[] => stderr.spli
 const runWarningLines = (stderr: string): string[] => stderr.split("\n").filter((l) => /harness[- _]?run|unattested|not registered|unknown run/i.test(l));
 
 function newTask(dir: string, title: string): string {
-  return JSON.parse(mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, { LORE_ACTOR: "agent:unattested-setup" }).stdout).data.slug as string;
+  return JSON.parse(mustLore(["create", "task", "--adhoc", "--title", title, "--ac-scope", "", "--json"], dir, { CLAUDE_CODE_SESSION_ID: "5e7a0000-aaaa-bbbb-cccc-111111111111" }).stdout).data.slug as string;
 }
 
 // ─── Unknown run id: write succeeds, stored unattested, one warning naming the id ───
@@ -194,15 +197,16 @@ describe("AC-RID-8: --harness-run naming an unregistered run id", () => {
     expect(r.stderr).not.toContain(GHOST_A);
   });
 
-  it("a doc create with the name from $LORE_ACTOR keeps the name with source env and stores NULL", async () => {
+  it("a doc create names the writer from the session tier (a set $LORE_ACTOR is ignored) and stores NULL", async () => {
     const since = new Date().toISOString();
-    const r = lore(["--harness-run", GHOST_A, "create", "knowledge", "--sub-type", "reference", "--title", "Unattested via env", "--content", "body", "--no-ai"], dir, { LORE_ACTOR: NAME });
+    const r = lore(["--harness-run", GHOST_A, "create", "knowledge", "--sub-type", "reference", "--title", "Unattested via session", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID, LORE_ACTOR: NAME });
     expect(r.exitCode).toBe(0);
-    const rows = (await auditSince(dir, since)).filter((row) => row.actor === NAME);
+    const all = await auditSince(dir, since);
+    expect(all.filter((row) => row.actor === NAME)).toEqual([]);
+    const rows = all.filter((row) => row.actor === SESSION_NAME);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(harnessRunOf(row) ?? null).toBeNull();
-      expect(JSON.stringify(row)).toContain("env");
     }
   });
 
@@ -282,7 +286,7 @@ describe("AC-RID-8: no --harness-run at all", () => {
     const t = newTask(dir, "No flag author target");
     const since = new Date().toISOString();
     mustLore(["claim", t, "--by", NAME], dir);
-    mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Authored with a given name", "--content", "body", "--no-ai"], dir, { LORE_ACTOR: NAME });
+    mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Authored with a given name", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
     const rows = await auditSince(dir, since);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) expect(`${row.action} by ${row.actor}`).not.toBe(`${row.action} by ${os}`);
@@ -325,13 +329,16 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
     }
   });
 
-  it("a gated create under $LORE_ACTOR=N: gate rows also carry N", async () => {
+  it("a gated create under a session id: gate rows also carry the session name", async () => {
     const os = userInfo().username;
     const since = new Date().toISOString();
-    mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Gate actor create", "--content", "body", "--no-ai"], dir, { LORE_ACTOR: NAME });
+    mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Gate actor create", "--content", "body", "--no-ai"], dir, { CLAUDE_CODE_SESSION_ID: SESSION_ID });
     const rows = await auditSince(dir, since);
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) expect(row.actor).not.toBe(os);
+    for (const row of rows) {
+      expect(row.actor).not.toBe(os);
+      expect(row.actor).toBe(SESSION_NAME);
+    }
   });
 });
 

@@ -62,7 +62,7 @@ const EXEMPT_KIND = "red-tdd";
 function runLore(args: string[], cwd: string): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, LORE_ACTOR: "agent:attestation-exempt-writer" },
+    env: { ...process.env, HOME: cwd, CLAUDE_CODE_SESSION_ID: "a77e57e1-aaaa-bbbb-cccc-111111111111" },
   });
   return {
     stdout: proc.stdout.toString(),
@@ -363,7 +363,7 @@ describe("AC-069-13 — the exemption is what changes the plan-close verdict", (
     const audit = runLore(["audit", "--json"], tmpDir);
     expect(audit.exitCode).toBe(0);
     expect(audit.stdout).toContain("exempt-attestation");
-    expect(audit.stdout).toContain("agent:attestation-exempt-writer");
+    expect(audit.stdout).toContain("agent:session-a77e57e1");
     expect(audit.stdout).toContain(EXEMPT_REASON);
   });
 
