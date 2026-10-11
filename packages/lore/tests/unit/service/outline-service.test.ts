@@ -745,6 +745,10 @@ describe("OutlineService.resolve", () => {
         close: () => store.close(),
         dbSizeBytes: () => store.dbSizeBytes(),
         maxDocVersion: () => store.maxDocVersion(),
+        // reason: migration-016 — new required StoreInterface methods; mechanical delegates.
+        insertRun: (run) => store.insertRun(run),
+        getRun: (id) => store.getRun(id),
+        countAttributedWrites: (windowStart, kinds) => store.countAttributedWrites(windowStart, kinds),
       };
 
       const brokenService = new OutlineService(brokenStore);
