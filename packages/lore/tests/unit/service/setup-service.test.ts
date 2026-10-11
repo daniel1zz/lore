@@ -737,7 +737,7 @@ function buildPlaceholderHookPayload(): AssetPayload {
 }
 
 describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
-  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 15 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 17 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
     const fs = new MapFs();
     fs.seed(
       path.join(TARGET_DIR, "settings.json"),
@@ -774,7 +774,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
       );
     }
 
-    // All 15 distinct hook files are present in the merged command set.
+    // All 17 distinct hook files are present in the merged command set.
     // Hardcoded on purpose (same tripwire as assets-ssot.test.ts's roster): a
     // newly declared HOOK_REGISTRATIONS row must be answered by DECLARING it
     // here, never by deriving this list from the registry under test.
@@ -791,6 +791,9 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
         "session-start-fragments.mjs", // task-skill-implement-hooks-new-session-start-fragments-thin
         "session-start-marker.mjs",
         "stop-doc-sync.mjs",
+        // stop-doc-sync turn-state producers (issue #156).
+        "user-prompt-turn-start.mjs",
+        "post-edit-mark.mjs",
         // Stop-time resume-ticket coverage floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31).
         "stop-handoff-coverage.mjs",
         "subagent-context.mjs",
