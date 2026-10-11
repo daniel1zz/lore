@@ -423,30 +423,20 @@ export function currentRetryCommandLine(): string {
 
 /**
  * `@lore/core/node`'s `resolveActorWithSource` (SPEC-079 G2 relocation) covers
- * four precedence tiers: explicit `--by` > `$LORE_ACTOR` > SPEC-071 session
- * tier > OS username. SPEC-104 adds a FIFTH, CLI-adapter-ONLY tier between
- * session and OS username: when every named tier is exhausted (core falls all
- * the way to its own `"os-fallback"` result) AND the caller's `cwd` sits
- * inside a LINKED git worktree with a resolvable branch HEAD, the actor
- * derives deterministically as `agent:<branch>` (source `"worktree-derived"`)
- * instead of the untraceable OS username — closing the "every dispatch
- * forgets `$LORE_ACTOR` → every claim collapses onto one OS username →
- * `noAnchorOverlap` can never fire" failure class (SPEC-104 §Overview).
+ * three precedence tiers: explicit `--by` > SPEC-071 session tier > OS
+ * username. The environment never supplies a name (BR-1055). SPEC-104 adds a
+ * CLI-adapter-ONLY tier between session and OS username: when every named
+ * tier is exhausted (core falls all the way to its own `"os-fallback"`
+ * result) AND the caller's `cwd` sits inside a LINKED worktree with a
+ * resolvable branch HEAD, the actor derives deterministically as
+ * `agent:<branch>` (source `"worktree-derived"`) instead of the untraceable
+ * OS username.
  *
- * ⛔ **Actor resolution does NOT carry session distinctness, and no tier ordering
- * here can give it one** (task-two-concurrent-orchestrators-both-resolve-to-agent-main).
- * The session tier is the only tier with a per-session discriminator, and it is
- * SKIPPED whenever `$LORE_ACTOR` is set — which this project's own standing
- * discipline requires of every main-checkout run. Two concurrently-live sessions
- * therefore resolve to one BYTE-IDENTICAL actor string by design, and that is
- * legitimate: a constant literal is no more session-distinguishing than the
- * constant OS username the SPEC-104 tier was added to escape. The session
- * INSTANCE is consequently captured as its own claim field
- * (`TaskClaim.session_id`, `TaskWorkflowService.claim` →
- * `resolveClaimSessionId`), never smuggled into the identity string. Do NOT
- * "fix" a session-collapse report by reordering these tiers or by prescribing a
- * more unique `$LORE_ACTOR`: `by` answers WHO, `session_id` answers WHICH RUN,
- * and `noAnchorOverlap`/`deriveSessions` read the second for exactly that reason.
+ * ⛔ Actor resolution answers WHO, never WHICH RUN: the session INSTANCE is
+ * captured as its own claim field (`TaskClaim.session_id`,
+ * `TaskWorkflowService.claim` → `resolveClaimSessionId`), never smuggled into
+ * the identity string. Do NOT "fix" a session-collapse report by reordering
+ * these tiers.
  *
  * This module now defines its OWN `resolveActorWithSource` (shadowing, not
  * re-exporting, `@lore/core/node`'s function of the same name) plus its OWN
@@ -602,24 +592,22 @@ export function resetActorFallbackWarningForTests(): void {
  * Resolve the acting user identity for `claim` / `release` / `evidence` commands.
  * Resolution order (first non-empty wins):
  *   1. --by flag (explicit, always wins)
- *   2. $LORE_ACTOR environment variable
- *   3. session tier (`$CLAUDE_CODE_SESSION_ID` / `$CLAUDE_SESSION_ID` — SPEC-069
+ *   2. session tier (`$CLAUDE_CODE_SESSION_ID` / `$CLAUDE_SESSION_ID` — SPEC-069
  *      F1 — mapped to `agent:session-<8-char sanitized id prefix>`; a value
  *      that sanitizes to empty falls through to the OS-username tier instead
  *      of throwing, see the try/catch in `resolveActorWithSource` above.
- *      ⛔ SUPPRESSED by tier 2 — so this is NOT where session distinctness
- *      comes from; see the module-level note above `ActorSource` and
+ *      session distinctness is also captured separately as
  *      `TaskClaim.session_id`)
- *   4. worktree-derived `agent:<branch>` (SPEC-104 — see
+ *   3. worktree-derived `agent:<branch>` (SPEC-104 — see
  *      `detectWorktreeDerivedActor`'s doc above)
- *   5. OS username (os.userInfo().username)
+ *   4. OS username (os.userInfo().username)
  *
- * When resolution falls all the way to the OS-username tier — no --by, no
- * $LORE_ACTOR, no session id, and cwd is NOT inside a linked worktree with a
+ * When resolution falls all the way to the OS-username tier — no --by,
+ * no session id, and cwd is NOT inside a linked worktree with a
  * resolvable branch HEAD — emits a ONCE-PER-PROCESS non-blocking advisory to
  * stderr naming the fix (retro `knowledge-session-process-review-2026-07-22-spec-062-064-continu`:
  * OS-username actors were landing silently in the corpus audit trail, untraceable
- * to any agent). Deliberately does NOT fire on an explicit --by, $LORE_ACTOR,
+ * to any agent). Deliberately does NOT fire on an explicit --by,
  * or worktree-derived value — those are traceable identities, not the
  * untraceable default this advisory targets (SPEC-104 AC-ACTOR-1). The
  * advisory is a pure side effect; the returned string and every caller's exit
@@ -628,7 +616,7 @@ export function resetActorFallbackWarningForTests(): void {
  * @param explicit - Value of the --by flag, if the user passed one
  * @returns Resolved actor identity string (never empty — OS username is always available)
  * @example
- *   resolveActor(undefined) // => "$LORE_ACTOR", worktree-derived agent:<branch>, or OS username
+ *   resolveActor(undefined) // => session actor, worktree-derived agent:<branch>, or OS username
  *   resolveActor("alice")   // => "alice" (never warns)
  */
 export function resolveActor(explicit?: string): string {
@@ -665,8 +653,8 @@ export function resolveActorWithIdentitySource(
     warnedActorFallback = true;
     process.stderr.write(
       `⚠ actor resolved to OS username "${resolved.actor}" — corpus writes under this identity ` +
-        "aren't traceable to an agent. Pass --by <id> or export LORE_ACTOR=agent:<slug> " +
-        "(or ai:<...>) for a traceable actor.\n",
+        "aren't traceable to an agent. Install the agent integration (`lore setup`) so writes " +
+        "carry an attested run.\n",
     );
   }
   return resolved;

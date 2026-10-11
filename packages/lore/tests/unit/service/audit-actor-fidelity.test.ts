@@ -152,14 +152,14 @@ describe("HAPPY — explicit opts.by carries through to the resolved actor", () 
 // ─── NEGATIVE ─────────────────────────────────────────────────────────────────
 
 describe("NEGATIVE — omitted opts.by falls back through the real env chain", () => {
-  it("falls back to $LORE_ACTOR when opts.by is omitted", async () => {
+  it("never falls back to $LORE_ACTOR when opts.by is omitted (BR-1055)", async () => {
     process.env["LORE_ACTOR"] = "agent:env-actor";
     const store = makeStore();
     const cs = new CorpusService(store, new RecordLockService(store));
     const doc = await createPlan(cs, "Env Fallback Create");
 
     const entries = await auditFor(store, doc.id, "create");
-    expect(entries[0]?.actor).toBe("agent:env-actor");
+    expect(entries[0]?.actor).toBe(OS_USERNAME);
   });
 
   it("falls back to the session tier when opts.by and $LORE_ACTOR are both absent", async () => {
@@ -187,14 +187,14 @@ describe("NEGATIVE — omitted opts.by falls back through the real env chain", (
 // ─── BOUNDARY ─────────────────────────────────────────────────────────────────
 
 describe("BOUNDARY — a whitespace-only opts.by is treated as absent", () => {
-  it("falls through to $LORE_ACTOR rather than persisting whitespace as the actor", async () => {
+  it("falls through to the OS username (not $LORE_ACTOR) rather than persisting whitespace as the actor", async () => {
     process.env["LORE_ACTOR"] = "agent:carol";
     const store = makeStore();
     const cs = new CorpusService(store, new RecordLockService(store));
     const doc = await createPlan(cs, "Whitespace By Create", { by: "   " });
 
     const entries = await auditFor(store, doc.id, "create");
-    expect(entries[0]?.actor).toBe("agent:carol");
+    expect(entries[0]?.actor).toBe(OS_USERNAME);
   });
 });
 

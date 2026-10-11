@@ -8,16 +8,13 @@
  * Public surface: {@link resolveInvocationIdentity}, {@link RunIdentityArgumentError},
  * {@link InvocationResolution}.
  *
- * @invariant `harnessRun` comes ONLY from the `--harness-run` flag; `--by` and
- *   `$LORE_ACTOR` never produce attestation (names are not attestation, BR-1033).
- * @invariant `claimed` is never null/empty: tiers are --by > $LORE_ACTOR >
- *   session > working copy > OS user (D11), the first four reusing
- *   {@link resolveActorWithSource}.
- * @invariant The `$LORE_ACTOR` deprecation line is written at most once per
- *   process (module-level latch `loreActorDeprecationWarned`); the sink is injected.
+ * @invariant `harnessRun` comes ONLY from the `--harness-run` flag; `--by`
+ *   never produces attestation (names are not attestation, BR-1033).
+ * @invariant `claimed` is never null/empty: tiers are --by > session >
+ *   working copy > OS user (D11), reusing {@link resolveActorWithSource}. The
+ *   environment never supplies a name (BR-1055).
  *
- * Side-effect class: stateful (module latch) + IO (`os.userInfo()` via the
- * shared tier chain; default warn sink writes stderr). Lives under
+ * Side-effect class: IO (`os.userInfo()` via the shared tier chain). Lives under
  * `@lore/core/node` for the same barrel-isolation reason as actor-resolution-node.ts.
  */
 
@@ -48,12 +45,8 @@ export interface InvocationResolution {
   readonly argv: string[];
 }
 
-/** Once-per-process latch for the `$LORE_ACTOR` deprecation line (D8); tests reset via `vi.resetModules()`. */
-let loreActorDeprecationWarned = false;
-
-const LORE_ACTOR_DEPRECATION_LINE =
-  "warning: $LORE_ACTOR is deprecated as an identity source; pass --by, or let the agent integration supply --harness-run";
-
+// reason: total over ActorSource (minus os-fallback) so a new member fails compilation; `env` stays
+// mapped only because the type member remains — nothing produces it (BR-1055).
 const NAME_SOURCE_BY_ACTOR_SOURCE: Record<Exclude<ActorSource, "os-fallback">, NameSource> = {
   explicit: "flag",
   env: "env",
@@ -78,9 +71,9 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
  * Resolve the identity of one lore invocation.
  *
  * @param argv - Command-line tokens after the program name; not mutated.
- * @param env - Environment to read `$LORE_ACTOR` / session ids from (default `process.env`).
- * @param warn - Sink for the one-per-process `$LORE_ACTOR` deprecation line
- *   (default: one line on stderr — CLI surface).
+ * @param env - Environment to read session ids from (default `process.env`).
+ * @param _warn - Ignored; no warning is emitted any more. The slot stays so existing
+ *   callers (adapters/mcp/call-scope.ts) keep compiling.
  * @param detectWorktree - Working-copy tier probe `(cwd) => "agent:<branch>" | undefined`.
  *   `detectWorktreeDerivedActor` lives in packages/lore (adapters/cli/utils.ts), which core cannot
  *   import, so the CLI injects it; when omitted that tier is skipped.
@@ -94,9 +87,7 @@ function readFlagAt(argv: readonly string[], index: number, flag: string): { val
 export function resolveInvocationIdentity(
   argv: readonly string[],
   env: Record<string, string | undefined> = process.env,
-  warn: (line: string) => void = (line) => {
-    process.stderr.write(`${line}\n`); // CLI surface
-  },
+  _warn?: (line: string) => void,
   detectWorktree?: (cwd: string) => string | undefined,
 ): InvocationResolution {
   const remaining: string[] = [];
@@ -134,11 +125,6 @@ export function resolveInvocationIdentity(
     }
   } else {
     claimedSource = NAME_SOURCE_BY_ACTOR_SOURCE[resolved.source];
-  }
-
-  if (claimedSource === "env" && !loreActorDeprecationWarned) {
-    loreActorDeprecationWarned = true;
-    warn(LORE_ACTOR_DEPRECATION_LINE);
   }
 
   return {
