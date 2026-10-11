@@ -17,7 +17,7 @@ if (frozen) {
       if (args.length === 0) super(frozenMs);
       else super(...(args as [number]));
     }
-    static now(): number {
+    static override now(): number {
       return frozenMs;
     }
   }
