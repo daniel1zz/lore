@@ -336,9 +336,10 @@ describe("setup-governance-retirement — STATE (seat-briefing.md SSOT content, 
     expect(occurrences).toBe(0);
   });
 
-  it("assets/governance/seat-briefing.md instructs 'lore handoff --by' as the exit-path verb", () => {
+  it("assets/governance/seat-briefing.md instructs 'lore handoff' (no identity flag — AC-RID-17) as the exit-path verb", () => {
     const content = readFileSync(SEAT_BRIEFING_SSOT_PATH, "utf8");
-    expect(content).toContain("lore handoff --by");
+    expect(content).toContain("lore handoff [--plan");
+    expect(content).not.toContain("--by");
   });
 
   it("REGRESSION control: the occurrence-count assertion is not vacuously true — a synthetic fixture carrying the marker IS flagged", () => {
