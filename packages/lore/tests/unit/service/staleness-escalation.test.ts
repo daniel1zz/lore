@@ -21,6 +21,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "@lore/core";
 import type { LoreError, NewReviewJudgment, Result, StalenessBundle, Telemetry } from "@lore/core";
@@ -57,7 +58,7 @@ function buildTestFlowDeps(corpusService: CorpusService, judgmentService: Judgme
 async function setup() {
   const store = new InMemoryStore();
   const telemetry = makeNoOpTelemetry();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const judgmentService = new JudgmentService(store, telemetry);
   return { store, corpusService, judgmentService };
 }

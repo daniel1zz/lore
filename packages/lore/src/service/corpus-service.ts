@@ -946,6 +946,24 @@ export class CorpusService {
     return resolveWriteActorFor(this.store, by);
   }
 
+  /**
+   * Pre-flight for an AI body rewrite (`lore set --regenerate|--refine`): refuse BEFORE the paid AI call
+   * when `doc` is a locked record (spec D4/D15). Reads the lock verdict through the SAME
+   * {@link RecordLockService} `set` uses — no second lock implementation — and only when it is locked asks
+   * the gate for the real refusal, so a passing (living / unlocked) doc leaves no extra `gate_passed` row
+   * (the write's own gate evaluation records that).
+   *
+   * @param doc - The stored document the AI would rewrite.
+   * @returns `ok` when the rewrite may proceed to the AI call; otherwise the `gate:record-edit`
+   *   `VALIDATION_ERROR` (exit 4), or the store/validation error the lock facts produced.
+   */
+  async assertAiRewriteAllowed(doc: DocRecord): Promise<Result<void, LoreError>> {
+    const lock = await this.recordLock.resolve(doc);
+    if (!lock.ok) return lock;
+    if (!(lock.value.standing === "record" && lock.value.locked)) return ok(undefined);
+    return this.recordLock.assertEditable(doc, "ai-rewrite");
+  }
+
   // ── Resolve ──────────────────────────────────────────────────────────────
 
   /**
@@ -2146,6 +2164,17 @@ export class CorpusService {
       const lockResult = await this.recordLock.resolve(existing);
       if (!lockResult.ok) return lockResult;
       correctionApplies = lockResult.value.standing === "record" && lockResult.value.locked;
+      // reason: D13 — an `extra.sub_type` change on a locked knowledge record is a KIND change (retro→reference
+      // would flip it to living and unlock it), never a text fix. A correction may not carry one, so the kind
+      // check runs here too and a refusal is the same gate:record-edit error (exit 4) a plain set gets.
+      if (correctionApplies) {
+        const kindGate = await this.recordLock.assertEditable(
+          existing,
+          "kind",
+          parsedPatch.data.extra !== undefined ? { extra: parsedPatch.data.extra } : {},
+        );
+        if (!kindGate.ok) return kindGate;
+      }
     } else {
       const contentGate = await this.recordLock.assertEditable(existing, "content", {
         ...(parsedPatch.data.content !== undefined ? { content: parsedPatch.data.content } : {}),
@@ -2247,7 +2276,9 @@ export class CorpusService {
     // reason: canonicalise content at write time (same invariant as _createImpl).
     // Ensures corpus always stores normalised body; sync-docs roundtrip is then lossless.
     // Source: SPEC-021 §4; empty content stays "".
-    if (parsedPatch.data.content !== undefined) {
+    // reason: a resend whose canonical form equals the stored body is not an edit (D14) — writing it would put a
+    // whitespace-normalised body version on a locked record the gate just judged unchanged. Keep stored bytes.
+    if (parsedPatch.data.content !== undefined && bodyDiffers(existing.content, parsedPatch.data.content)) {
       const raw = parsedPatch.data.content;
       docPatch.content = raw !== "" ? canonicaliseBody(raw) : raw;
     }

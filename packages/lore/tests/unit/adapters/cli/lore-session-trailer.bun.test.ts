@@ -81,6 +81,7 @@
  */
 
 import { RecordLockService } from "../../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../../src/service/gate-enforcer.js";
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -163,7 +164,7 @@ function configureTrackedHooksPathOutsideGitDir(repoRoot: string, relativeDir: s
 
 function makeServices(processEnv: Record<string, string | undefined> = {}) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(
     store,
     undefined,
@@ -259,7 +260,7 @@ describe("commits made under a claim carry the Lore-Session git trailer (AC-OWN-
   it("STATE: re-claiming under a NEW session overwrites the marker — a later commit carries the NEW id", async () => {
     const { repoRoot } = makeRepo();
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const { taskId } = await createPlanAndTask(corpusService);
 
     const serviceFirst = new TaskWorkflowService(

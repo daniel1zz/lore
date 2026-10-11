@@ -55,7 +55,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 function makeServices(config?: LoreConfig) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const enforcer = new GateEnforcer(config);
   const taskWorkflowService = new TaskWorkflowService(
     store,

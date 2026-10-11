@@ -67,6 +67,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { NoOpTelemetry, ok } from "@lore/core";
@@ -244,11 +245,11 @@ let corpusService: CorpusService;
 /** Mirrors `evidence-completeness-guard.test.ts`'s fixture App verbatim. */
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store, new RecordLockService(store));
+  corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

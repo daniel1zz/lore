@@ -10,11 +10,13 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 async function must<T>(r: { ok: boolean; value?: T; error?: unknown }, what: string): Promise<T> {
   if (!r.ok) throw new Error(`fixture ${what} failed: ${JSON.stringify(r.error)}`);
@@ -33,8 +35,8 @@ interface World {
 
 async function world(): Promise<World> {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const rules = new RuleService(store);
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const rules = makeRuleService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");
   const mk = async (title: string, parent: DocRecord, node: string): Promise<DocRecord> =>
     must(await cs.create({ type: "baseline", title, content: `${title} body`, parent_id: parent.id, extra: { label: title, node } } as CreateDocInput), title);

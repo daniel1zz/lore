@@ -35,6 +35,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -47,8 +48,8 @@ function makeServices() {
   const store = new InMemoryStore();
   return {
     store,
-    corpusService: new CorpusService(store, new RecordLockService(store)),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
   };
 }
 
@@ -183,7 +184,7 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
 
     it("AC-072-1: TaskWorkflowService.addEvidence's version row carries the task's slug (non-corpus-service write path)", async () => {
       const store = new InMemoryStore();
-      const corpusService = new CorpusService(store, new RecordLockService(store));
+      const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
 
       const plan = await corpusService.create({ type: "plan", title: "Evidence Slug Plan", content: "body" } as CreateDocInput);

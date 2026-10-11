@@ -22,6 +22,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +31,7 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 const WORKERS = 8;
 const ROUNDS = 3;
@@ -54,7 +56,7 @@ interface Targets {
 
 /** 8 round-robin targets: BR, AS, AD, BR, AS, AD, BR, AS (slugs). */
 async function seed(store: SQLiteStore): Promise<Targets> {
-  const cs = new CorpusService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prd = await must(await cs.create({ type: "prd", title: "Race product", content: "root" } as CreateDocInput), "prd");
   const bizRoot = await node(cs, "Business root", prd, { node: "root" });
   const branch = await node(cs, "Race branch", bizRoot, { node: "branch" });
@@ -112,14 +114,14 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (AC-BL
   }
 
   it("a single standard add returns an AS-n id and a single debt add an AD-n id (sequential baseline)", async () => {
-    const rules = new RuleService(s1);
+    const rules = makeRuleService(s1);
     const as = await must(await rules.addRule(targets.standards[0] as string, rule("a"), { by: "agent:t" }), "as");
     const ad = await must(await rules.addRule(targets.debts[0] as string, rule("d"), { by: "agent:t" }), "ad");
     expect([prefixOf((as as { ruleId: string }).ruleId), prefixOf((ad as { ruleId: string }).ruleId)]).toEqual(["AS", "AD"]);
   });
 
   it("8 concurrent adds on one connection: 8 successes, 8 distinct ids, each with the prefix of its node", async () => {
-    const rules = new RuleService(s1);
+    const rules = makeRuleService(s1);
     const results = await Promise.all(eight().map((slug, i) => rules.addRule(slug, rule(`c${i}`), { by: `agent:r${i}` })));
     const ids = results.map((r) => (r.ok ? r.value.ruleId : `ERR:${r.error.code}`));
     expect({ prefixes: ids.map(prefixOf), distinct: new Set(ids).size }).toEqual({
@@ -129,7 +131,7 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (AC-BL
   });
 
   it("8 concurrent adds: rule_registry holds exactly those 8 ids and no (prefix, n) pair twice", async () => {
-    const rules = new RuleService(s1);
+    const rules = makeRuleService(s1);
     const results = await Promise.all(eight().map((slug, i) => rules.addRule(slug, rule(`c${i}`), { by: `agent:r${i}` })));
     const ids = results.map((r) => (r.ok ? r.value.ruleId : `ERR:${r.error.code}`));
     const rows = await registry(s1);
@@ -138,8 +140,8 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (AC-BL
   });
 
   it("8 concurrent adds split across TWO connections on one file: 0 duplicate ids, registry == successes", async () => {
-    const a = new RuleService(s1);
-    const b = new RuleService(s2);
+    const a = makeRuleService(s1);
+    const b = makeRuleService(s2);
     const results = await Promise.all(eight().map((slug, i) => (i % 2 === 0 ? a : b).addRule(slug, rule(`c${i}`), { by: `agent:r${i}` })));
     const okIds = results.filter((r) => r.ok).map((r) => (r.ok ? r.value.ruleId : ""));
     const rows = await registry(s2);
@@ -149,7 +151,7 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (AC-BL
   });
 
   it("3 rounds x 8 concurrent adds: 24 distinct ids, and each family's numbers strictly increase round over round", async () => {
-    const rules = new RuleService(s1);
+    const rules = makeRuleService(s1);
     const all: string[] = [];
     for (let round = 0; round < ROUNDS; round += 1) {
       const results = await Promise.all(eight().map((slug, i) => rules.addRule(slug, rule(`r${round}-${i}`), { by: `agent:r${i}` })));
@@ -164,7 +166,7 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (AC-BL
   });
 
   it("a retired AS id is never reissued: the next concurrent wave gets only fresh ids, the row stays", async () => {
-    const rules = new RuleService(s1);
+    const rules = makeRuleService(s1);
     const first = (await must(await rules.addRule(targets.standards[0] as string, rule("first"), { by: "agent:t" }), "first") as { ruleId: string }).ruleId;
     await must(await rules.setRule(first, { lifecycle: "retired", note: "retired by the race test" }, { by: "agent:t" }), "retire");
     const results = await Promise.all(eight().map((slug, i) => rules.addRule(slug, rule(`w${i}`), { by: `agent:r${i}` })));
@@ -176,12 +178,12 @@ describe("rule registry — BR / AS / AD from one registry on real SQLite (AC-BL
   });
 
   it("the ids survive a reopen of the file: a fresh connection keeps issuing larger numbers per family", async () => {
-    const rules = new RuleService(s1);
+    const rules = makeRuleService(s1);
     const before = (await must(await rules.addRule(targets.standards[0] as string, rule("one"), { by: "agent:t" }), "one") as { ruleId: string }).ruleId;
     s2.close();
     const reopened = new SQLiteStore(dbPath);
     try {
-      const after = await must(await new RuleService(reopened).addRule(targets.standards[1] as string, rule("two"), { by: "agent:t" }), "two");
+      const after = await must(await makeRuleService(reopened).addRule(targets.standards[1] as string, rule("two"), { by: "agent:t" }), "two");
       expect(numberOf((after as { ruleId: string }).ruleId) > numberOf(before)).toBe(true);
     } finally {
       reopened.close();
@@ -195,13 +197,13 @@ describe("rule registry — business-only control on real SQLite (green on main)
     const dir = mkdtempSync(join(tmpdir(), "lore-prefix-control-"));
     const store = new SQLiteStore(join(dir, "corpus.db"));
     try {
-      const cs = new CorpusService(store, new RecordLockService(store));
+      const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       const prd = await must(await cs.create({ type: "prd", title: "Control product", content: "root" } as CreateDocInput), "prd");
       const root = await node(cs, "Business root", prd, { node: "root" });
       const branch = await node(cs, "Control branch", root, { node: "branch" });
       const slugs: string[] = [];
       for (let i = 0; i < WORKERS; i += 1) slugs.push((await node(cs, `Control leaf ${i}`, branch, { node: "leaf" })).slug);
-      const rules = new RuleService(store);
+      const rules = makeRuleService(store);
       const results = await Promise.all(slugs.map((slug, i) => rules.addRule(slug, rule(`k${i}`), { by: `agent:r${i}` })));
       const ids = results.map((r) => (r.ok ? r.value.ruleId : `ERR:${r.error.code}`));
       expect([...ids].sort((a, b) => numberOf(a) - numberOf(b))).toEqual(Array.from({ length: WORKERS }, (_, i) => `BR-${i + 1}`));

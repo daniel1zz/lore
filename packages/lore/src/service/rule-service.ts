@@ -68,8 +68,7 @@ import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
 import { resolveDoc } from "./resolve.js";
-import { CorpusService, type CreateDocResult, type WriteActorOpts } from "./corpus-service.js";
-import { RecordLockService } from "./record-lock-service.js";
+import type { CreateDocResult, WriteActorOpts } from "./corpus-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { collectLeafRules } from "./rule-index-queries.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
@@ -184,30 +183,24 @@ export class RuleService {
   private readonly createDoc: CreateBaselineDocPort;
   /**
    * Claim-scoped corpus authoring (spec-baseline-slice-2 §C8, AC-BLS2-8): set post-construction by
-   * `adapters/cli/loader.ts` — never via the constructor, so every bare `new RuleService(store)`
+   * `adapters/cli/loader.ts` — never via the constructor, so every bare `new RuleService(store, createDoc)`
    * stays byte-identical (absent ⇒ every write is ungated, exactly as before the guard existed).
    */
   private writeAuthority: CorpusWriteAuthority | undefined;
 
   /**
    * @param store - Storage abstraction.
-   * @param createDoc - Node-creation port. Production (`app.ts`) injects the wired
-   *   `corpusService.create`. reason: absent → a bare `CorpusService(store)`, which is what
-   *   every unit test and tool that builds `new RuleService(store)` expects; it is a
-   *   construction default, not a runtime fallback (the port is resolved once, here).
+   * @param createDoc - Node-creation port. REQUIRED: production (`app.ts`) injects the wired
+   *   `corpusService.create`, so node creation runs through the one CorpusService that holds the
+   *   config-wired record-edit enforcer (spec-documents-are-living-or-records D17). There is no
+   *   self-built default — a RuleService that made its own CorpusService would carry its own lock
+   *   enforcer and ignore the operator's `workflow.gates."record-edit"` knob.
    */
   constructor(
     private readonly store: StoreInterface,
-    createDoc?: CreateBaselineDocPort,
+    createDoc: CreateBaselineDocPort,
   ) {
-    if (createDoc !== undefined) {
-      this.createDoc = createDoc;
-    } else {
-      // reason: spec-documents-are-living-or-records D17 — CorpusService requires a RecordLockService; this fallback
-      // only ever calls `create`, which is not a rewrite path, but the dependency is required regardless.
-      const corpus = new CorpusService(store, new RecordLockService(store));
-      this.createDoc = corpus.create.bind(corpus);
-    }
+    this.createDoc = createDoc;
   }
 
   /**

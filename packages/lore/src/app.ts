@@ -887,7 +887,7 @@ function buildAppFromSqlite(
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
-    // node creation); its one-arg `new RuleService(store)` default exists only for bare unit tests.
+    // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
@@ -1253,7 +1253,7 @@ function buildAppFromTurso(
     // at createApp), mirroring claimTtlMinutes's identical "resolve once, thread down" shape.
     requirementService: new RequirementService(store, requirementQuantifiableEnabled),
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
-    // node creation); its one-arg `new RuleService(store)` default exists only for bare unit tests.
+    // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),

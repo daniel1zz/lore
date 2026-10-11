@@ -27,7 +27,7 @@ const PAST_CLAIM_AT = "2020-01-01T00:00:00.000Z";
 
 function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, new GateEnforcer(config));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(config));
   return { store, corpusService };
 }
 

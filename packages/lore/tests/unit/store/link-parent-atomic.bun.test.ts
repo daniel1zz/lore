@@ -15,6 +15,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -68,7 +69,7 @@ interface Fixture {
 
 /** prd A is the plan's create-time parent; the link under test re-parents the plan to prd B (a spec takes no parent, BR-2). */
 async function seed(store: StoreInterface): Promise<{ cs: CorpusService; specId: string; prdBId: string }> {
-  const cs = new CorpusService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prdA = await must(await cs.create({ type: "prd", title: "Link atomic A", content: "a" } as CreateDocInput), "prdA");
   const prdB = await must(await cs.create({ type: "prd", title: "Link atomic B", content: "b" } as CreateDocInput), "prdB");
   const spec = await must(

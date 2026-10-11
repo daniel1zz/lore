@@ -32,12 +32,14 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 interface RuleChange { rule_id: string; kind: "statement" | "confidence" | "lifecycle"; old: string; new: string }
 interface RuleDiff { claimed_at: string; changes: RuleChange[]; retired: string[] }
@@ -149,8 +151,8 @@ async function diffOf(task: DocRecord): Promise<RuleDiff> {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   store = new InMemoryStore();
-  corpus = new CorpusService(store, new RecordLockService(store));
-  rules = new RuleService(store);
+  corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  rules = makeRuleService(store);
   workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
 });
 

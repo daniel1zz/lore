@@ -59,7 +59,7 @@ async function makeCorpusService(config?: LoreConfig) {
   const store = new InMemoryStore();
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
   return { store, corpusService, enforcer };
 }
 
@@ -195,7 +195,7 @@ describe("acQuantifiable — spec-create (CorpusService.create)", () => {
   it("does not block when the service was constructed with NO GateEnforcer (bare unit-test shape)", async () => {
     const store = new InMemoryStore();
     await seedLiveRule(store);
-    const bareCorpusService = new CorpusService(store, new RecordLockService(store));
+    const bareCorpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await mustCreate(bareCorpusService, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
     const result = await bareCorpusService.create(specInput([BAD_AC], prd.id));
     expect(result.ok).toBe(true);
@@ -208,14 +208,14 @@ describe("acQuantifiable — AcService.addCriterion (immediate-feedback layer)",
   async function makeSpec(): Promise<{ corpusService: CorpusService; spec: DocRecord; acService: AcService }> {
     const store = new InMemoryStore();
     await seedLiveRule(store);
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await mustCreate(corpusService, { type: "prd", title: "PRD", content: "# PRD" } as CreateDocInput);
     const spec = await mustCreate(corpusService, {
       type: "spec",
       title: "AC Service Spec",
       content: "## Overview\n\nBody.",
     } as CreateDocInput);
-    return { corpusService, spec, acService: new AcService(store, new RecordLockService(store)) };
+    return { corpusService, spec, acService: new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))) };
   }
 
   // NEGATIVE
@@ -282,7 +282,7 @@ describe("acQuantifiable — spec-promote (CorpusService.set + ReviewService.app
   it("ReviewService.approve blocks the same unquantified-AC spec via the plan-promote-shaped GateDependencies bundle", async () => {
     const store = new InMemoryStore();
     await seedLiveRule(store);
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(undefined);
     const reviewService = new ReviewService(store, undefined, {
       enforcer,

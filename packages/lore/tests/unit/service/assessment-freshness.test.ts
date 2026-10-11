@@ -83,7 +83,7 @@ describe("assessmentFreshness (pure predicate)", () => {
 function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
   const taskWorkflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflow };
 }

@@ -135,7 +135,7 @@ async function mustInsert(store: InMemoryStore, doc: DocRecord): Promise<DocReco
  */
 function makeStore() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return { store, corpusService };
 }
 

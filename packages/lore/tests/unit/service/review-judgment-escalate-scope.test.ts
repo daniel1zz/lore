@@ -66,7 +66,7 @@ async function makeApp(opts: { judgmentRequiredTypes?: readonly string[] } = {})
   await seedLiveRule(store);
   const telemetry = makeTelemetry();
   const enforcer = new GateEnforcer(undefined);
-  const corpusService = new CorpusService(store, new RecordLockService(store), telemetry, undefined, enforcer, undefined, true);
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry, undefined, enforcer, undefined, true);
   const judgmentService = new JudgmentService(store, telemetry);
   const reviewService = new ReviewService(
     store,

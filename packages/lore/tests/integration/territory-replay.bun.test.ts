@@ -58,6 +58,7 @@
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -182,7 +183,7 @@ function makeHeartbeatFakes(): {
 
 function makeCorpusAndSession() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const heartbeats = makeHeartbeatFakes();
   const sessionService = new SessionService(
     store,

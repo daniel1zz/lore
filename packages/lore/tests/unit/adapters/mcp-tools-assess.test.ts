@@ -36,6 +36,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -79,7 +80,7 @@ function makeApp(opts: {
   resolveAiDefault?: (explicit?: boolean) => { ai: boolean; source: AiDefaultSource };
 } = {}): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store, new RecordLockService(store));
+  corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: VALID_JSON });
   const providers = new Map([["in-memory", aiProvider]]) as unknown as ReadonlyMap<string, import("@lore/core").AIProvider>;
   const aiProviderService = new AIProviderService(
@@ -95,7 +96,7 @@ function makeApp(opts: {
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

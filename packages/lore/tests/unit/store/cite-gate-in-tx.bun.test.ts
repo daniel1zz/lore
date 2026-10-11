@@ -19,6 +19,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +30,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import type { StoreFilters } from "../../../src/store/store-interface.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 const BRANCH_SLUG = "baseline-window-branch";
 const AC_ID = "AC-W-1";
@@ -72,9 +74,9 @@ interface Fixture {
 async function seed(dir: string): Promise<Fixture> {
   const dbPath = join(dir, "corpus.db");
   const store = new SQLiteStore(dbPath);
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const rules = new RuleService(store);
-  const ac = new AcService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const rules = makeRuleService(store);
+  const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prd = await must(await cs.create({ type: "prd", title: "Window product", content: "root" } as CreateDocInput), "prd");
   const root = await must(await rules.addNode(prd.id, { node: "root", label: "Root", title: "Window root", content: "r" }, { by: "agent:seed" }), "root");
   const branch = await must(
@@ -110,14 +112,14 @@ async function seed(dir: string): Promise<Fixture> {
 async function retireOnSecondConnection(dbPath: string): Promise<void> {
   const other = new SQLiteStore(dbPath);
   try {
-    await must(await new RuleService(other).setRule("BR-1", { lifecycle: "retired", note: "retired inside the window" }, { by: "agent:retirer" }), "retire");
+    await must(await makeRuleService(other).setRule("BR-1", { lifecycle: "retired", note: "retired inside the window" }, { by: "agent:retirer" }), "retire");
   } finally {
     other.close();
   }
 }
 
 function gatedService(store: WindowStore, armed: string[]): AcService {
-  return new AcService(store, new RecordLockService(store), { citeGate: { mode: "enforce", armed_branches: armed } });
+  return new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: { mode: "enforce", armed_branches: armed } });
 }
 
 async function spec(dbPath: string, id: string): Promise<{ doc: DocRecord; versions: number; audit: number }> {

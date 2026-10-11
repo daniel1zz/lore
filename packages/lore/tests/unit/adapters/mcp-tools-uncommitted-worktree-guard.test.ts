@@ -69,6 +69,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
@@ -144,11 +145,11 @@ let corpusService: CorpusService;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store, new RecordLockService(store));
+  corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

@@ -24,6 +24,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -31,6 +32,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { InMemoryAIProvider } from "../../../src/ai/in-memory-provider.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 // ─── Module loader (module does not exist yet; keep the file loadable + typecheck at 0) ───────────
 
@@ -101,9 +103,9 @@ async function world(
   acCites: Array<Array<number | string>>,
 ): Promise<World> {
   const store = new InMemoryStore();
-  const corpus = new CorpusService(store, new RecordLockService(store));
-  const rules = new RuleService(store);
-  const ac = new AcService(store, new RecordLockService(store));
+  const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const rules = makeRuleService(store);
+  const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prd = await mustCreate(corpus, { type: "prd", title: "P", content: "root" } as CreateDocInput);
   const root = await mustCreate(corpus, {
     type: "baseline", title: "R", content: "r", parent_id: prd.id, extra: { node: "root", label: "Root" },

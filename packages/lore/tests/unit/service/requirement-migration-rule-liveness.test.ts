@@ -14,6 +14,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
@@ -31,8 +32,8 @@ function harness() {
   const store = new InMemoryStore();
   return {
     store,
-    cs: new CorpusService(store, new RecordLockService(store)),
-    ac: new AcService(store, new RecordLockService(store)),
+    cs: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
+    ac: new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reqs: new RequirementService(store, false),
   };
 }

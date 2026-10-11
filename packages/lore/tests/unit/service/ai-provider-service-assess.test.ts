@@ -32,6 +32,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, vi } from "vitest";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -89,7 +90,7 @@ const VALID_JSON = JSON.stringify({
 
 /** Builds a real PlanBundle via CorpusService.getPlanBundle — same path production uses. */
 async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
   const prdResult = await corpusService.create({
     type: "prd",
@@ -145,7 +146,7 @@ async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
  * `extra.acceptance_criteria` array on the spec's CreateDocInput.
  */
 async function makeStructuredAcBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
   const prdResult = await corpusService.create({
     type: "prd",
@@ -220,7 +221,7 @@ async function makeStructuredAcBundle(store: InMemoryStore): Promise<PlanBundle>
  * the "attested/unattested mix" the task calls for, in one bundle.
  */
 async function makeAttestedStructuredAcBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
   const prdResult = await corpusService.create({
     type: "prd",
@@ -569,7 +570,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
 
   it("a task with NO evidence renders '(no evidence recorded)', not a crash or blank section", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planResult = await corpusService.create({ type: "plan", title: "No-Evidence Plan", content: "x" } as CreateDocInput);
     if (!planResult.ok) throw new Error("plan create failed");
     const taskResult = await corpusService.create({
@@ -596,7 +597,7 @@ describe("assessPlan — prompt content carries the plan bundle's materials (AC-
 describe("assessPlan — budget truncation is recorded in judgment.truncated (AC-ASSESS-7)", () => {
   it("a plan content over budget is truncated and 'plan' appears in judgment.truncated", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const longContent = "x".repeat(500);
     const planResult = await corpusService.create({ type: "plan", title: "Long Plan", content: longContent } as CreateDocInput);
     if (!planResult.ok) throw new Error("plan create failed");
@@ -637,7 +638,7 @@ describe("assessPlan — budget truncation is recorded in judgment.truncated (AC
 
   it("a task content over its own (smaller) budget is truncated and named 'task:<slug>', distinct from the plan budget", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const planResult = await corpusService.create({ type: "plan", title: "Task Budget Plan", content: "short plan" } as CreateDocInput);
     if (!planResult.ok) throw new Error("plan create failed");
     const longTaskContent = "y".repeat(200);
@@ -1148,7 +1149,7 @@ describe("buildAssessPrompt — structured AC table truncation (BOUNDARY, SPEC-0
  * task declares `extra.file_anchors` (or none at all, when `anchors` is `undefined`).
  */
 async function makeBundleWithTaskAnchors(store: InMemoryStore, anchors: string[] | undefined): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
   const prdResult = await corpusService.create({
     type: "prd",

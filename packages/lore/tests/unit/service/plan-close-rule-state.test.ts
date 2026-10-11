@@ -176,7 +176,7 @@ interface World {
  */
 async function world(opts: { enabled: boolean; rules: Record<string, string[]>; specAcs: AcceptanceCriterion[] }): Promise<World> {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store), undefined, undefined, new GateEnforcer(config(opts.enabled)));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, new GateEnforcer(config(opts.enabled)));
   const git = new FakeGit();
   const prd = await put(store, rawDoc("prd", "root-prd", {}, null));
   for (const [leaf, ids] of Object.entries(opts.rules)) {

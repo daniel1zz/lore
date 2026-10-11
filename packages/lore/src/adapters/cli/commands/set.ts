@@ -321,6 +321,19 @@ export default defineCommand({
         process.exit(2);
       }
       correctionOpt = { reason };
+      // reason: BR-1050 — a correction is a hand-written small fix; an AI rewrite is the opposite of that, so the
+      // two flags never combine (argv-decidable → usage error before the app loads or any AI is paid for).
+      const aiFlags = [
+        hasRegenerate ? "--regenerate" : undefined,
+        hasRefine ? "--refine" : undefined,
+        hasRefineStdin ? "--refine-stdin" : undefined,
+      ].filter((flag): flag is string => flag !== undefined);
+      if (aiFlags.length > 0) {
+        process.stderr.write(
+          `Error: --correction cannot be combined with ${aiFlags.join(" / ")} — a correction is a hand-written small fix, not an AI rewrite.\n`,
+        );
+        process.exit(2);
+      }
     }
 
     const resolvedActor = resolveActor(args.by);
@@ -358,6 +371,15 @@ export default defineCommand({
           return;
         }
         const doc = getResult.value.doc;
+
+        // reason: refuse a locked record BEFORE the paid AI call — otherwise the call is spent and the write's
+        // own gate then refuses its output. A correction cannot reach here (rejected above), so no exit applies.
+        const rewriteGate = await app.corpusService.assertAiRewriteAllowed(doc);
+        if (!rewriteGate.ok) {
+          process.stderr.write(formatError(rewriteGate.error) + "\n");
+          process.exitCode = exitCode(rewriteGate.error);
+          return;
+        }
 
         const showSpinner = process.stderr.isTTY && !args.json;
         const aiService = app.aiProviderService;

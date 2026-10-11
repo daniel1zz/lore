@@ -27,6 +27,7 @@
  */
 
 import { RecordLockService } from "../../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
@@ -76,9 +77,9 @@ async function makeTestServer(): Promise<TestContext> {
   const docStore = new InMemoryStore();
 
   const app: App = {
-    corpusService: new CorpusService(docStore, new RecordLockService(docStore)),
+    corpusService: new CorpusService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     reviewService: new ReviewService(docStore),
-    versionService: new VersionService(docStore, new RecordLockService(docStore)),
+    versionService: new VersionService(docStore, new RecordLockService(docStore, new GateEnforcer(undefined))),
     outlineService: new OutlineService(docStore),
     migrationService: new MigrationService(docStore),
     treeCheckService: new TreeCheckService(docStore),

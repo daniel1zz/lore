@@ -12,6 +12,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
@@ -45,14 +46,14 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 function gated(store: InMemoryStore, cfg: Cfg | undefined): AcService {
-  return new AcService(store, new RecordLockService(store), { citeGate: cfg });
+  return new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: cfg });
 }
 
 /** alpha (BR-1, BR-2 live) + beta (BR-20 live) branches; one spec citing alpha, one citing beta, one citing nothing. */
 async function world() {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const plain = new AcService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const plain = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);
   const alpha = await insertBaseline(store, "baseline-branch-alpha", { node: "branch" }, root);
   const beta = await insertBaseline(store, "baseline-branch-beta", { node: "branch" }, root);
@@ -115,7 +116,7 @@ describe("report mode records would-refuse rows on unarmed branches (AC-BLS2-2, 
 
   it("a revise of an uncited legacy criterion on an unarmed branch records a row", async () => {
     const w = await world();
-    await new AcService(w.store, new RecordLockService(w.store)).addCriterion(w.inBeta, AC("AC-B-LEG"));
+    await new AcService(w.store, new RecordLockService(w.store, new GateEnforcer(undefined))).addCriterion(w.inBeta, AC("AC-B-LEG"));
     await gated(w.store, REPORT_ALPHA).setCriterion(w.inBeta, "AC-B-LEG", { statement: "Reworded legacy" });
     expect(await rows(w.store, w.inBeta)).toHaveLength(1);
   });
@@ -128,7 +129,7 @@ describe("report mode records would-refuse rows on unarmed branches (AC-BLS2-2, 
 
   it("a sibling add never produces a row for the untouched legacy criteria (only the new one)", async () => {
     const w = await world();
-    await new AcService(w.store, new RecordLockService(w.store)).addCriterion(w.inBeta, AC("AC-B-LEG"));
+    await new AcService(w.store, new RecordLockService(w.store, new GateEnforcer(undefined))).addCriterion(w.inBeta, AC("AC-B-LEG"));
     await gated(w.store, REPORT_ALPHA).addCriterion(w.inBeta, AC("AC-B-2"));
     const found = await rows(w.store, w.inBeta);
     expect(found.map((r) => (r.details as Record<string, unknown>)["ac_id"])).toEqual(["AC-B-2"]);

@@ -102,7 +102,7 @@ const TOCTOU_SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-toctou" } as cons
 
 function makeTaskServices(config?: LoreConfig, withGate = true) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const gate: GateDependencies | undefined = withGate
     ? { enforcer: new GateEnforcer(config), getPlanBundle: corpusService.getPlanBundle.bind(corpusService) }
     : undefined;
@@ -383,7 +383,7 @@ function makePhaseServices(
   sessionEnv: Record<string, string | undefined> = { ...TOCTOU_SESSION_ENV },
 ) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const gate: GateDependencies | undefined = withGate
     ? { enforcer: new GateEnforcer(config), getPlanBundle: corpusService.getPlanBundle.bind(corpusService) }
     : undefined;

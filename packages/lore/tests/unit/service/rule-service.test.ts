@@ -102,6 +102,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -142,9 +143,10 @@ async function makeRuleService(store: InMemoryStore): Promise<RuleServiceLike> {
   } catch (cause) {
     throw new Error(`RuleService is not implemented: packages/lore/src/service/rule-service.ts cannot be loaded (${String(cause)})`);
   }
-  const Ctor = mod["RuleService"] as (new (s: InMemoryStore) => RuleServiceLike) | undefined;
+  const Ctor = mod["RuleService"] as (new (s: InMemoryStore, createDoc: CorpusService["create"]) => RuleServiceLike) | undefined;
   if (Ctor === undefined) throw new Error("RuleService is not implemented: rule-service.ts exports no `RuleService` class");
-  return new Ctor(store);
+  const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  return new Ctor(store, corpus.create.bind(corpus));
 }
 
 // ─── Wiring ───────────────────────────────────────────────────────────────────
@@ -158,11 +160,11 @@ let app: App;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store, new RecordLockService(store));
+  corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

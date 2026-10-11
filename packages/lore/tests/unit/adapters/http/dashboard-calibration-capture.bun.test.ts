@@ -29,6 +29,7 @@
  */
 
 import { RecordLockService } from "../../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
@@ -90,9 +91,9 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
   const telemetry = new NoOpTelemetry();
 
   const app: App = {
-    corpusService: new CorpusService(store, new RecordLockService(store), telemetry),
+    corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

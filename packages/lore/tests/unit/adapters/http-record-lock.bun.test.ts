@@ -29,6 +29,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import { VersionService } from "../../../src/service/version-service.js";
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { OutlineService } from "../../../src/service/outline-service.js";
 import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
@@ -56,7 +57,7 @@ async function makeTestServer(): Promise<TestContext> {
   const store = new SQLiteStore(join(loreDir, "lore.db"));
   const db = store.getDatabase();
   const telemetry = new NoOpTelemetry();
-  const recordLock = new RecordLockService(store);
+  const recordLock = new RecordLockService(store, new GateEnforcer(undefined));
 
   const app: App = {
     corpusService: new CorpusService(store, recordLock, telemetry),

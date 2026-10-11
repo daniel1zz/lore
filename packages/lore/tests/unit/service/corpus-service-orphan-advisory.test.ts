@@ -15,6 +15,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -22,7 +23,7 @@ import type { CreateDocInput } from "@lore/core";
 
 function makeService() {
   const store = new InMemoryStore();
-  return { service: new CorpusService(store, new RecordLockService(store)), store };
+  return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), store };
 }
 
 async function createRootPrd(service: CorpusService, title = "Root PRD") {

@@ -37,6 +37,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -129,11 +130,11 @@ function makeStore(kind: StoreKind): StoreHandle {
 // ─── Services over a given store ─────────────────────────────────────────────
 
 function services(store: StoreInterface) {
-  const corpus = new CorpusService(store, new RecordLockService(store));
+  const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return {
     corpus,
     twf: new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 }),
-    ac: new AcService(store, new RecordLockService(store)),
+    ac: new AcService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     rules: new RuleService(store, corpus.create.bind(corpus)),
     session: new SessionService(store, {
       claimTtlMinutes: 120,

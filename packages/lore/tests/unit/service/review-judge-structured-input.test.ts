@@ -21,6 +21,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, vi } from "vitest";
 import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP, runDeterministicChecks } from "@lore/core";
@@ -68,7 +69,7 @@ async function insertDoc(
 
 /** Runs the production review path for `slug` and returns the exact prompt the judge received. */
 async function judgeInputFor(store: InMemoryStore, slug: string): Promise<string> {
-  const bundleResult = await new CorpusService(store, new RecordLockService(store)).getReviewBundle(slug);
+  const bundleResult = await new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))).getReviewBundle(slug);
   if (!bundleResult.ok) throw new Error(`getReviewBundle failed: ${JSON.stringify(bundleResult.error)}`);
   const checks = runDeterministicChecks(bundleResult.value);
 

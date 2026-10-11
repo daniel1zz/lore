@@ -10,6 +10,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -23,7 +24,7 @@ import type { CreateDocInput } from "@lore/core";
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpus = new CorpusService(store, new RecordLockService(store));
+  const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const sync = new SyncDocsService(corpus);
   return { store, corpus, sync };
 }
@@ -513,7 +514,7 @@ describe("AC-SD-13 ERROR — malformed YAML frontmatter → error, others still 
 describe("AC-SD-14 BOUNDARY — SyncDocsService accepts only CorpusService", () => {
   it("constructor has exactly one parameter: CorpusService", () => {
     const store = new InMemoryStore();
-    const corpus = new CorpusService(store, new RecordLockService(store));
+    const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     // If this compiles and constructs, the invariant holds
     const service = new SyncDocsService(corpus);
     expect(service).toBeDefined();

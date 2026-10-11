@@ -20,6 +20,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -37,7 +38,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflowService };
 }
@@ -219,7 +220,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
   // REGRESSION — legacy claims without machine/worktree still validate, render, refresh
   it("a legacy claim (no machine/worktree field at all) still validates and refreshes", async () => {
     const { store, taskWorkflowService } = makeServices();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const { taskId } = await createPlanAndTask(corpusService);
 
     // Simulate a pre-SPEC-042 legacy claim written directly to the store (no

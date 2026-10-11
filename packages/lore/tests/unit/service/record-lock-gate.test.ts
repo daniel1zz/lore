@@ -33,7 +33,7 @@ interface Fixture {
 /** `ledgerAutoApprove: true` is the production default — needed so a retro edit would write TWO versions without the correction exit. */
 function makeFixture(gateEnforcer?: GateEnforcer): Fixture {
   const store = new InMemoryStore();
-  const lock = new RecordLockService(store, gateEnforcer);
+  const lock = new RecordLockService(store, gateEnforcer ?? new GateEnforcer(undefined));
   const service = new CorpusService(store, lock, undefined, undefined, undefined, undefined, true);
   return { store, service };
 }

@@ -47,7 +47,7 @@ const REJECT_VERDICT: UatVerdict = {
 function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
   const uatService = new UatService({
     createUatDoc: corpusService.createUatDoc.bind(corpusService),
     resolveTarget: (idOrSlug: string) => resolveDoc(store, idOrSlug),

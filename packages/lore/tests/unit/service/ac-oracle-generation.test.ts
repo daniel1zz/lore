@@ -45,6 +45,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import {
@@ -88,8 +89,8 @@ function makeServices(): {
   taskWorkflowService: TaskWorkflowService;
 } {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
-  const acService = new AcService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const acService = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const taskWorkflowService = new TaskWorkflowService(
     store,
     undefined,
