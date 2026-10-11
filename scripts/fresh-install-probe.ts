@@ -131,9 +131,10 @@ function runHook(command: string, payload: unknown, project: string, env: NodeJS
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
-function firstWriteAttested(bin: string, root: string, project: string, env: NodeJS.ProcessEnv): { exit: number | "-"; verdict: StepVerdict } {
-  const settingsPath = join(project, ".claude", "settings.json");
-  if (!existsSync(settingsPath)) return { exit: "-", verdict: { pass: false, reason: `${settingsPath} missing after lore setup --project` } };
+function firstWriteAttested(bin: string, root: string, project: string, claudeHome: string, env: NodeJS.ProcessEnv): { exit: number | "-"; verdict: StepVerdict } {
+  // `lore setup --claude-dir` registers the hooks in <claude-dir>/settings.json (SPEC-046), not in the project.
+  const settingsPath = join(claudeHome, "settings.json");
+  if (!existsSync(settingsPath)) return { exit: "-", verdict: { pass: false, reason: `${settingsPath} missing after lore setup --claude-dir` } };
   const settings: unknown = JSON.parse(readFileSync(settingsPath, "utf8"));
 
   const missing: string[] = [];
@@ -243,7 +244,7 @@ function main(): number {
     {
       let r: { exit: number | "-"; verdict: StepVerdict };
       try {
-        r = firstWriteAttested(bin, root, project, env);
+        r = firstWriteAttested(bin, root, project, claudeHome, env);
       } catch (e) {
         r = { exit: "-", verdict: { pass: false, reason: e instanceof Error ? e.message : String(e) } };
       }
