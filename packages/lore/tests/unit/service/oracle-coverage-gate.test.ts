@@ -162,7 +162,7 @@ describe("oracleCoverage — spec-promote matched pair (CorpusService.set)", () 
     const store = new InMemoryStore();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(configuredDesignConfig());
-    const reviewService = new ReviewService(store, undefined, {
+    const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {
       enforcer,
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
     });
@@ -256,7 +256,7 @@ describe("acCountMeetsFloor — spec-promote min_acs (CorpusService.set / Review
     const store = new InMemoryStore();
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(domainOverviewConfig());
-    const reviewService = new ReviewService(store, undefined, {
+    const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {
       enforcer,
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
     });

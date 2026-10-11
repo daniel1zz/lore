@@ -63,6 +63,12 @@ export const RECORD_EDIT_CHECKPOINT: GateCheckpoint = "record-edit";
 /** Page size when scanning a doc's version history for an `approved` row. */
 const VERSION_SCAN_PAGE = 200;
 
+/** Audit `action` of the row `ReviewService.reopen` writes (the generic `update` family, so `audit verify` is satisfied). */
+export const REOPEN_AUDIT_ACTION = "update";
+
+/** `details.operation` value that structurally marks a reopen event in the audit log (never matched by prose). */
+export const REOPEN_OPERATION = "reopen";
+
 /** Statuses a document can only hold after having been approved (draft→archived is not a legal edge). */
 const POST_APPROVAL_STATUSES: ReadonlySet<string> = new Set(["approved", "active", "archived"]);
 
@@ -247,18 +253,42 @@ export class RecordLockService {
   }
 
   /**
-   * Ever-approved fact (D1): the version history holds a status `approved` row. A doc whose CURRENT
-   * status can only follow an approval (approved/active/archived) is ever-approved without the scan —
-   * covers rows a fixture or an import inserted without any version rows.
+   * Ever-approved fact (D1, as amended by D5): an approved (or active/archived) state exists AFTER the most
+   * recent reopen event. With no reopen on record this is the original reading — the current status can
+   * only follow an approval, or the version history holds a status `approved` row.
+   *
+   * The reopen event is identified structurally: the audit row `ReviewService.reopen` writes carries
+   * `details.operation === "reopen"` and the `details.version` it produced. A non-reopen `approved -> draft`
+   * demotion (BR-722) leaves no such row, so it never unlocks (D1).
    */
   private async hasEverBeenApproved(doc: DocRecord): Promise<Result<boolean, LoreError>> {
+    const reopenVersion = await this.latestReopenVersion(doc);
+    if (!reopenVersion.ok) return reopenVersion;
+    // reason: a post-approval current status is conclusive in both readings - it covers rows a fixture or an
+    // import inserted without any version rows, and after a reopen it can only be a re-approval.
     if (POST_APPROVAL_STATUSES.has(doc.status)) return ok(true);
+    const afterVersion = reopenVersion.value ?? 0;
     for (let offset = 0; ; offset += VERSION_SCAN_PAGE) {
       const page = await this.store.findVersions(doc.id, { limit: VERSION_SCAN_PAGE, offset });
       if (!page.ok) return page;
-      if (page.value.some((v) => v.status === "approved")) return ok(true);
+      if (page.value.some((v) => v.version > afterVersion && v.status === "approved")) return ok(true);
       if (page.value.length < VERSION_SCAN_PAGE) return ok(false);
     }
+  }
+
+  /** The version number of the doc's most recent reopen (audit `details.operation === "reopen"`), if any. */
+  private async latestReopenVersion(doc: DocRecord): Promise<Result<number | undefined, LoreError>> {
+    const rows = await this.store.queryAudit({ doc_id: doc.id, action: REOPEN_AUDIT_ACTION });
+    if (!rows.ok) return rows;
+    let latest: number | undefined;
+    for (const row of rows.value) {
+      const details = row.details as Record<string, unknown> | undefined;
+      if (details?.["operation"] !== REOPEN_OPERATION) continue;
+      const version = details["version"];
+      if (typeof version !== "number") continue;
+      if (latest === undefined || version > latest) latest = version;
+    }
+    return ok(latest);
   }
 
   /**

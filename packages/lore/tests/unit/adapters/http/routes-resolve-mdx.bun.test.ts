@@ -43,7 +43,7 @@ function makeApp(): App {
   const store = new InMemoryStore();
   return {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
-    reviewService: new ReviewService(store),
+    reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),

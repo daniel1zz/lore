@@ -47,6 +47,7 @@ const main = defineCommand({
     pending: () => import("./commands/pending.js").then(wrapDefault("pending")),
     approve: () => import("./commands/approve.js").then(wrapDefault("approve")),
     reject: () => import("./commands/reject.js").then(wrapDefault("reject")),
+    reopen: () => import("./commands/reopen.js").then(wrapDefault("reopen")),
     log: () => import("./commands/log.js").then(wrapDefault("log")),
     diff: () => import("./commands/diff.js").then(wrapDefault("diff")),
     restore: () => import("./commands/restore.js").then(wrapDefault("restore")),

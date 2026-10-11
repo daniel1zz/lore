@@ -111,8 +111,6 @@ import {
   computeAcCoverage,
   extractEvidence,
   lintAcQuantifiability,
-  extractDeclaredAcScope,
-  resolveGoverningSpecByAcScope,
   resolveStatusAfterContractEdit,
   resolveOracleGeneration,
   findMissingOracleFiles,
@@ -123,8 +121,8 @@ import {
 } from "@lore/core";
 import type { AuditEntry, DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "./spec-evidence-tasks.js";
 import { resolveDoc } from "./resolve.js";
-import { isPlanMember } from "./plan-membership.js";
 import type { RecordLockService } from "./record-lock-service.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 import { admitAcWrite, applyAcChange, decorateCiteRefusal, resolveCiteGateFor } from "./ac-write-chokepoint.js";
@@ -621,20 +619,12 @@ export class AcService {
     const spec = specResult.value;
     const criteria = extractCriteria(spec);
 
-    const plansResult = await this.findChildPlans(spec.id);
-    if (!plansResult.ok) return plansResult;
-    const plans = plansResult.value;
-
-    const planTasksResult = await this.findTasksUnderPlans(plans);
-    if (!planTasksResult.ok) return planTasksResult;
-
-    const adhocTasksResult = await this.findAdhocGovernedTasks(spec);
-    if (!adhocTasksResult.ok) return adhocTasksResult;
-
-    const tasks = [...planTasksResult.value, ...adhocTasksResult.value];
+    const evidenceTasks = await findSpecEvidenceTasks(this.store, spec);
+    if (!evidenceTasks.ok) return evidenceTasks;
+    const { plans, adhocTasks, tasks } = evidenceTasks.value;
 
     const coverage =
-      plans.length > 0 || adhocTasksResult.value.length > 0 ? computeAcCoverage(criteria, tasks) : null;
+      plans.length > 0 || adhocTasks.length > 0 ? computeAcCoverage(criteria, tasks) : null;
 
     const declaredIds = new Set(criteria.map((c) => c.id));
     const danglingSet = new Set<string>();
@@ -688,9 +678,9 @@ export class AcService {
     }
 
     if (opts.force !== true) {
-      const plansResult = await this.findChildPlans(spec.id);
+      const plansResult = await findSpecChildPlans(this.store, spec.id);
       if (!plansResult.ok) return plansResult;
-      const tasksResult = await this.findTasksUnderPlans(plansResult.value);
+      const tasksResult = await findTasksUnderPlans(this.store, plansResult.value);
       if (!tasksResult.ok) return tasksResult;
 
       const referencingTask = tasksResult.value.find((task) =>
@@ -990,87 +980,6 @@ export class AcService {
       });
     }
     return ok(doc);
-  }
-
-  /** Child plans of a spec (direct parent_id match only). */
-  private async findChildPlans(specId: DocId): Promise<Result<DocRecord[], LoreError>> {
-    return this.store.findMany({ parent_id: specId, type: "plan" });
-  }
-
-  /**
-   * All tasks across a set of plans — ONE corpus-wide `type: "task"` findMany
-   * (the store has no `extra.plan_id` filter — same accepted tradeoff
-   * `TaskWorkflowService.ready`/`computePlanNowFullyTerminal` already
-   * establish, task-plan-membership-is-extra-plan-id-but-the-last-task),
-   * membership decided per plan by {@link isPlanMember} — never a bare
-   * `t.parent_id === plan.id` (task-eight-more-plan-member-queries-still-
-   * key-on-parent-id). Segments are pushed in `plans` iteration order and
-   * each segment preserves the store's own `updated_at DESC, id ASC` relative
-   * order (a filter over an already-sorted array never reorders its
-   * survivors) — for the CONTROL case (every task's `parent_id ===
-   * extra.plan_id`) this is byte-identical to the pre-fix per-plan-findMany
-   * result, while now costing ONE store round trip instead of one PER plan.
-   */
-  private async findTasksUnderPlans(plans: DocRecord[]): Promise<Result<DocRecord[], LoreError>> {
-    if (plans.length === 0) return ok([]);
-    const allTasksResult = await this.store.findMany({ type: "task" });
-    if (!allTasksResult.ok) return allTasksResult;
-    const allTasks = allTasksResult.value;
-    const collected: DocRecord[] = [];
-    for (const plan of plans) {
-      collected.push(...allTasks.filter((t) => isPlanMember(t, plan.id)));
-    }
-    return ok(collected);
-  }
-
-  /**
-   * The ad-hoc-task counterpart to {@link findTasksUnderPlans} (task-an-ad-hoc-
-   * task-s-attested-evidence-cannot-carry-ac-ref) — an `--adhoc` task (SPEC-069
-   * D2) has no structural plan/spec link to `spec` to walk via `parent_id`, so
-   * "does this ad-hoc task belong to THIS spec's coverage" is instead answered by
-   * running the SAME `resolveGoverningSpecByAcScope` search
-   * `VerifyRunnerService.verifyAdhocTask` / `CorpusService.
-   * resolveDeclaredAcIdsForAdhocTask` run over the corpus's FULL spec list, and
-   * checking whether the winning match IS `spec`.
-   *
-   * Deliberately NOT a bare string-equality match on `ac_ref` against `spec`'s
-   * declared ids: `AC-*` ids are unique only WITHIN one spec's declared criteria,
-   * never enforced globally (`specAcceptanceCriteriaSchema`) — two unrelated specs
-   * may coincidentally declare the identical id string, and an ad-hoc task's
-   * evidence must never be double-counted (or wrongly counted) against a spec its
-   * `ac_scope` was never actually resolved against at write time. An ad-hoc task
-   * whose scope is absent/empty, or resolves ambiguously/to no spec at all, is
-   * silently excluded here (not an error — `listCriteria` never fails loud over
-   * an unrelated ad-hoc task's own dangling scope; that task's own evidence log
-   * simply contributes to no spec's coverage).
-   *
-   * @param spec - The spec {@link listCriteria} is computing coverage for.
-   * @returns Every `--adhoc` task whose declared `ac_scope` resolves, unambiguously,
-   *   to `spec` — `[]` when none do (never an error for that reason alone).
-   */
-  private async findAdhocGovernedTasks(spec: DocRecord): Promise<Result<DocRecord[], LoreError>> {
-    const allTasksResult = await this.store.findMany({ type: "task" });
-    if (!allTasksResult.ok) return allTasksResult;
-    const adhocTasks = allTasksResult.value.filter((t) => t.extra["adhoc"] === true);
-    if (adhocTasks.length === 0) return ok([]);
-
-    const allSpecsResult = await this.store.findMany({ type: "spec" });
-    if (!allSpecsResult.ok) return allSpecsResult;
-    const allSpecs = allSpecsResult.value;
-
-    const governed: DocRecord[] = [];
-    for (const task of adhocTasks) {
-      const declared = extractDeclaredAcScope(task);
-      if (declared === undefined || declared.length === 0) continue;
-      const resolveResult = resolveGoverningSpecByAcScope(
-        declared,
-        allSpecs,
-        `ad-hoc task "${task.slug}"`,
-      );
-      if (!resolveResult.ok) continue;
-      if (resolveResult.value.spec.id === spec.id) governed.push(task);
-    }
-    return ok(governed);
   }
 
   /**

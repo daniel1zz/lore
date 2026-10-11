@@ -31,7 +31,7 @@ function makeApp(store?: InMemoryStore): App {
   const telemetry = new NoOpTelemetry();
   return {
     corpusService: new CorpusService(s, new RecordLockService(s, new GateEnforcer(undefined)), telemetry),
-    reviewService: new ReviewService(s),
+    reviewService: new ReviewService(s, new RecordLockService(s, new GateEnforcer(undefined))),
     versionService: new VersionService(s, new RecordLockService(s, new GateEnforcer(undefined))),
     outlineService: new OutlineService(s),
     migrationService: new MigrationService(s),

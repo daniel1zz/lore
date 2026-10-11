@@ -61,7 +61,7 @@ async function makeTestServer(): Promise<TestContext> {
 
   const app: App = {
     corpusService: new CorpusService(store, recordLock, telemetry),
-    reviewService: new ReviewService(store),
+    reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, recordLock),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),

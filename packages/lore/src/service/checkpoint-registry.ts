@@ -2407,8 +2407,7 @@ function checkRecordEdit(ctx: GateContext): PredicateResult[] {
  * `record-edit`'s refusal text (D18): `<slug> is a locked record (<reason>).` followed by the change
  * paths that apply to the target's kind and the rewrite path it attempted. Pure over `ctx`.
  *
- * ⛔ Deliberately does NOT name the reopen exit: the task that adds `lore reopen` adds that clause to
- * this function (D18) — advertising a command before it exists would hand the caller a dead end.
+ * A locked SPEC also names the reopen exit (`lore reopen`, D5/D18) - it applies only before any evidence exists.
  */
 function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string {
   const facts = ctx.recordEdit;
@@ -2429,6 +2428,9 @@ function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string 
     case "spec":
       lines.push(correction);
       lines.push(replace("open a new spec (lore create spec)", "`relates-to`"));
+      lines.push(
+        `Or reopen it (lore reopen ${slug} --reason "<reason>") when it has no evidence: it goes back to draft and can be edited, then approved again.`,
+      );
       lines.push("Behaviour change of a living rule: edit the baseline rule in place (lore baseline).");
       break;
     case "adr":

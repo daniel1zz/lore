@@ -21,6 +21,7 @@ import type {
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import {
   getAllowedTransitions,
+  isReopenTransition,
   isValidTransition,
   deriveTypeMeta,
   extractValidity,
@@ -41,6 +42,8 @@ import {
 } from "./checkpoint-registry.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 import type { JudgmentService } from "./judgment-service.js";
+import { REOPEN_AUDIT_ACTION, REOPEN_OPERATION, type RecordLockService } from "./record-lock-service.js";
+import { countEvidenceEntries, findSpecEvidenceTasks } from "./spec-evidence-tasks.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -173,6 +176,16 @@ export interface RejectOpts {
   reason?: string;
 }
 
+export interface ReopenOpts {
+  /** Reviewer identity — defaults to "system" if omitted (same default as approve/reject). */
+  reviewer?: string;
+  /**
+   * Test seam (BR-1054): runs after the status write has landed and before the post-write evidence
+   * recount. Production callers never pass it.
+   */
+  afterStatusWrite?: () => Promise<void>;
+}
+
 // ─── ReviewService ─────────────────────────────────────────────────────────
 
 /**
@@ -182,6 +195,8 @@ export interface RejectOpts {
 export class ReviewService {
   /**
    * @param store - Storage abstraction (SQLiteStore, TursoStore, or InMemoryStore)
+   * @param recordLock - REQUIRED lock-fact source (spec D17): `reopen` asks it for the spec's lock verdict
+   *   so only a locked record is reopened. No default - a service built without one does not compile.
    * @param claimTtlMinutes - Task claim lease TTL in minutes, forwarded to
    *   `deriveTypeMeta` for `PendingDoc.meta`'s `task.claim_stale` computation
    *   (SPEC-036 §2 D3, pending-queue extension). Same DI shape as
@@ -215,6 +230,7 @@ export class ReviewService {
    */
   constructor(
     private readonly store: StoreInterface,
+    private readonly recordLock: RecordLockService,
     private readonly claimTtlMinutes?: number,
     private readonly gate?: GateDependencies,
     private readonly judgmentService?: JudgmentService,
@@ -993,6 +1009,148 @@ export class ReviewService {
     if (!auditResult.ok) return auditResult;
 
     return ok(updatedDoc);
+  }
+
+  /**
+   * Reopen an approved spec that has no evidence: `approved -> draft`, the ONE sanctioned exit from the
+   * record-edit lock (spec D5, BR-1050). The edge is {@link isReopenTransition}, never `VALID_TRANSITIONS`,
+   * so `lore set --status draft` on an approved spec stays refused.
+   *
+   * Evidence is counted through the same plan-member + ad-hoc-governed task query `AcService` uses for
+   * coverage (`findSpecEvidenceTasks`), BEFORE the write and AGAIN after it (BR-1054): evidence that appears
+   * in between leaves the spec in draft (never written back to approved) and errs naming it.
+   *
+   * @param id - Spec id, prefix or slug.
+   * @param reason - Required, non-blank; recorded in the audit row's `details.reason` and the version's change_summary.
+   * @param opts - Reviewer identity and the test seam.
+   * @returns The draft spec, or `VALIDATION_ERROR` (non-spec / blank reason / evidence exists),
+   *   `INVALID_TRANSITION` (spec not approved), or a store error.
+   * @example
+   * await reviewService.reopen("spec-x", "scope changed before any work started");
+   */
+  async reopen(
+    id: string,
+    reason: string,
+    opts?: ReopenOpts,
+  ): Promise<Result<DocRecord, LoreError>> {
+    const findResult = await this.resolveDoc(id);
+    if (!findResult.ok) return findResult;
+    const doc = findResult.value;
+
+    if (doc.type !== "spec") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "type",
+        message: `Only a spec can be reopened; ${doc.slug} is a ${doc.type}`,
+        value: doc.type,
+      });
+    }
+    const trimmedReason = reason.trim();
+    if (trimmedReason === "") {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "reason",
+        message: `Reopening ${doc.slug} requires a non-empty --reason`,
+        value: reason,
+      });
+    }
+    if (!isReopenTransition(doc.type, doc.status, "draft")) {
+      return err({
+        code: "INVALID_TRANSITION",
+        from: doc.status,
+        to: "draft",
+        allowed: getAllowedTransitions(doc.status),
+      });
+    }
+
+    const lock = await this.recordLock.resolve(doc);
+    if (!lock.ok) return lock;
+    if (lock.value.standing !== "record" || !lock.value.locked) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "status",
+        message: `${doc.slug} is not a locked record, so there is nothing to reopen - edit it directly`,
+        value: doc.status,
+      });
+    }
+
+    const before = await this.countSpecEvidence(doc);
+    if (!before.ok) return before;
+    if (before.value > 0) return err(this.reopenRefusal(doc, before.value, false));
+
+    const reviewer = opts?.reviewer ?? "system";
+    const now = new Date().toISOString();
+    const newVersion = doc.version + 1;
+    const updateResult = await this.store.update(
+      doc.id,
+      { status: "draft", version: newVersion, updated_at: now },
+      { expected_version: doc.version },
+    );
+    if (!updateResult.ok) return updateResult;
+    const reopened = updateResult.value;
+
+    const versionResult = await this.store.insertVersion({
+      doc_id: doc.id,
+      version: newVersion,
+      content: reopened.content,
+      extra: reopened.extra,
+      status: "draft",
+      title: reopened.title,
+      action: "update",
+      created_at: now,
+      created_by: reviewer,
+      slug: reopened.slug,
+      change_summary: `Reopened to draft: ${trimmedReason}`,
+    });
+    if (!versionResult.ok) return versionResult;
+
+    // reason: `details.operation` is the structural reopen marker RecordLockService reads (a BR-722
+    // demotion has none); action "update" keeps the row inside the versions-row audit family.
+    const auditResult = await this.store.appendAuditEntry({
+      timestamp: now,
+      actor: reviewer,
+      session_id: `review-${doc.id}`,
+      action: REOPEN_AUDIT_ACTION,
+      doc_id: doc.id,
+      details: {
+        operation: REOPEN_OPERATION,
+        reviewer,
+        reason: trimmedReason,
+        from_status: "approved",
+        to_status: "draft",
+        version: newVersion,
+      },
+    });
+    if (!auditResult.ok) return auditResult;
+
+    if (opts?.afterStatusWrite !== undefined) await opts.afterStatusWrite();
+
+    const after = await this.countSpecEvidence(doc);
+    if (!after.ok) return after;
+    // BR-1054: the spec stays draft - approved is never written back.
+    if (after.value > 0) return err(this.reopenRefusal(doc, after.value, true));
+
+    return ok(reopened);
+  }
+
+  /** Evidence rows recorded against `spec`, through the shared AC-coverage task query. */
+  private async countSpecEvidence(spec: DocRecord): Promise<Result<number, LoreError>> {
+    const tasks = await findSpecEvidenceTasks(this.store, spec);
+    if (!tasks.ok) return tasks;
+    return ok(countEvidenceEntries(tasks.value.tasks));
+  }
+
+  private reopenRefusal(spec: DocRecord, count: number, raced: boolean): LoreError {
+    const noun = count === 1 ? "row" : "rows";
+    const tail = raced
+      ? `${count} evidence ${noun} appeared while it was being reopened, so it stays in draft (it is not written back to approved). Review the evidence, then approve it again or supersede it with a new spec.`
+      : `${count} evidence ${noun} already ${count === 1 ? "exists" : "exist"} against it. A spec with evidence cannot be reopened - supersede it with a new spec instead.`;
+    return {
+      code: "VALIDATION_ERROR",
+      field: "gate:reopen",
+      message: `Cannot reopen ${spec.slug}: ${tail}`,
+      value: count,
+    };
   }
 }
 

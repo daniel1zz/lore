@@ -92,7 +92,7 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
 
   const app: App = {
     corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),
-    reviewService: new ReviewService(store),
+    reviewService: new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),

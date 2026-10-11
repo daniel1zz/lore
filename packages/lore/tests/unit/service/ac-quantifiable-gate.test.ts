@@ -284,7 +284,7 @@ describe("acQuantifiable — spec-promote (CorpusService.set + ReviewService.app
     await seedLiveRule(store);
     const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(undefined);
-    const reviewService = new ReviewService(store, undefined, {
+    const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, {
       enforcer,
       getPlanBundle: corpusService.getPlanBundle.bind(corpusService),
     });

@@ -143,7 +143,7 @@ describe("VersionRecord.slug capture (SPEC-072)", () => {
     // commonly exercised of those services.
     it("AC-072-1: ReviewService.approve's version row carries the doc's slug (non-corpus-service write path)", async () => {
       const store = new InMemoryStore();
-      const reviewService = new ReviewService(store);
+      const reviewService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)));
       // reason: `ReviewService.approve` resolves via `resolveDoc`'s ULID_REGEX
       // (`^[0-9A-HJKMNP-TV-Z]{26}$/i` — Crockford Base32, excludes I/L/O/U), so
       // a hand-picked id must avoid those 4 letters or the lookup silently

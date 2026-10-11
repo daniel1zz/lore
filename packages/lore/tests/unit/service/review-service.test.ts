@@ -37,6 +37,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { ReviewService } from "../../../src/service/review-service.js";
 import type { DocRecord } from "@lore/core";
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 
@@ -79,7 +81,7 @@ describe("ReviewService", () => {
   beforeEach(() => {
     _seq = 0;
     store = new InMemoryStore();
-    service = new ReviewService(store);
+    service = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   });
 
   // ── pending ───────────────────────────────────────────────────────────────
@@ -441,7 +443,7 @@ describe("ReviewService", () => {
         });
 
         it("task claim_stale key is entirely absent when ReviewService is constructed WITHOUT claimTtlMinutes, even though the doc carries a fresh claim", async () => {
-          // `service` (beforeEach) is `new ReviewService(store)` — no claimTtlMinutes.
+          // `service` (beforeEach) is `new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)))` — no claimTtlMinutes.
           const doc = makeDoc({
             status: "draft",
             type: "task",
@@ -464,7 +466,7 @@ describe("ReviewService", () => {
 
         it("task claim_stale is computed false for a fresh claim and true for a stale claim once ReviewService IS constructed with claimTtlMinutes", async () => {
           const ttlMinutes = 60;
-          const ttlService = new ReviewService(store, ttlMinutes);
+          const ttlService = new ReviewService(store, new RecordLockService(store, new GateEnforcer(undefined)), ttlMinutes);
 
           const freshDoc = makeDoc({
             slug: "task-fresh-claim",
