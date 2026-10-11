@@ -45,6 +45,22 @@ export interface ImpactReport {
   dependentLeaves: string[];
   /** Each depends_on cycle reachable from the origin leaf, as its sorted member leaf slugs. */
   cycles: string[][];
+  /**
+   * Documents a change to the rule edits IN PLACE (spec D7): the origin leaf first, then every transitively
+   * dependent leaf (sorted). Baseline leaves are living, so this group is what the change touches directly.
+   */
+  living: string[];
+  /**
+   * Documents a change to the rule can NOT rewrite once approved (spec D7): each citing spec criterion as
+   * `{slug, acId}`, sorted by slug then criterion id. Same facts as `citingCriteria`, named for the standing split.
+   */
+  records: ImpactRecord[];
+}
+
+/** One locked-record criterion citing the rule. */
+export interface ImpactRecord {
+  slug: string;
+  acId: string;
 }
 
 /** Everything the queries need, already loaded. */
@@ -256,9 +272,15 @@ export function computeImpact(ruleId: string, data: RuleIndexData): ImpactReport
   const origin = owner.leaf.id as string;
   const reachable = closure(origin, dependents);
   const slugOf = (id: string): string => slugById.get(id) ?? id;
+  const citing = citingCriteriaOf(ruleId, data);
+  const dependentLeaves = [...reachable].filter((id) => id !== origin).map(slugOf).sort();
   return {
-    citingCriteria: citingCriteriaOf(ruleId, data),
-    dependentLeaves: [...reachable].filter((id) => id !== origin).map(slugOf).sort(),
+    citingCriteria: citing,
+    dependentLeaves,
+    living: [owner.leaf.slug, ...dependentLeaves],
+    records: citing
+      .map((c) => ({ slug: c.spec, acId: c.ac }))
+      .sort((a, b) => a.slug.localeCompare(b.slug) || a.acId.localeCompare(b.acId)),
     cycles: cyclicComponents(reachable, dependents)
       .map((members) => members.map(slugOf).sort())
       .sort((a, b) => a.join("\u0000").localeCompare(b.join("\u0000"))),

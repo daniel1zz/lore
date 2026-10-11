@@ -141,6 +141,9 @@ export default defineCommand({
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
           const v = result.value;
+          // Standing split (spec D7): Living (edited in place) before Records (locked once approved).
+          console.log(`Living (${v.living.length}):${v.living.map((l) => `\n  ${l}`).join("")}`);
+          console.log(`Records (${v.records.length}):${v.records.map((r) => `\n  ${r.slug} ${r.acId}`).join("")}`);
           console.log(`Citing criteria (${v.citingCriteria.length}):${v.citingCriteria.map((c) => `\n  ${c.spec} ${c.ac}`).join("")}`);
           console.log(`Dependent leaves (${v.dependentLeaves.length}):${v.dependentLeaves.map((l) => `\n  ${l}`).join("")}`);
           console.log(`Cycles (${v.cycles.length}):${v.cycles.map((c) => `\n  ${c.join(" <-> ")}`).join("")}`);
