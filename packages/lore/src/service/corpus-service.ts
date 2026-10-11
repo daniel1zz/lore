@@ -274,6 +274,21 @@ export interface WriteActorOpts {
 }
 
 /**
+ * Options of {@link CorpusService.set}.
+ *
+ * `correction` is the audited exit from the record-edit gate (spec-documents-are-living-or-records
+ * D4/D15, BR-1049): a typo-level fix of a LOCKED record that writes EXACTLY ONE version, keeps the
+ * record's status (no BR-722 demotion, no ledger re-approve second write) and carries `reason` in the
+ * version's `change_summary` and the audit row. `reason` must be non-blank; it cannot ride along with
+ * a status change. On a doc that is not a locked record it records the reason and otherwise behaves
+ * like a normal edit — the exit never becomes a way around BR-722 for an unlocked doc.
+ */
+export interface SetOptions extends WriteActorOpts {
+  readonly expectedVersion?: number;
+  readonly correction?: { readonly reason: string };
+}
+
+/**
  * Names a structured `extra` field that a `lore set` / HTTP PATCH / MCP `lore_set`
  * patch would silently DROP, plus the dedicated writer that should be used instead.
  * `null` means no drop detected — the common case.
@@ -2073,7 +2088,7 @@ export class CorpusService {
   async set(
     idOrSlug: string,
     patch: DocPatch,
-    opts?: WriteActorOpts & { expectedVersion?: number },
+    opts?: SetOptions,
   ): Promise<Result<DocRecord & { cascade?: PlanCloseCascadeResult }, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
@@ -2103,10 +2118,56 @@ export class CorpusService {
     const existing = findResult.value;
     const now = new Date().toISOString();
 
+    // record-edit gate (spec-documents-are-living-or-records D4/D6/D13/D14) — BEFORE any write and before
+    // the rest of this method's validation, so a locked record's refusal is never masked by an unrelated
+    // complaint. The trigger is a DIFFERENCE from the stored doc (body/title, extra.sub_type), never mere
+    // presence: the dashboard and MCP resend content on a tag save. A correction bypasses the gate.
+    const correction = opts?.correction;
+    let correctionApplies = false;
+    if (correction !== undefined) {
+      if (correction.reason.trim().length === 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "correction.reason",
+          message: "a correction needs a non-empty reason (--correction \"<why this is a fix, not a change>\")",
+          value: correction.reason,
+        });
+      }
+      if (parsedPatch.data.status !== undefined && parsedPatch.data.status !== existing.status) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "correction",
+          message:
+            "a correction fixes text and keeps the record's status; it cannot be combined with a status change — " +
+            "make the status change in a separate `lore set --status`",
+          value: parsedPatch.data.status,
+        });
+      }
+      const lockResult = await this.recordLock.resolve(existing);
+      if (!lockResult.ok) return lockResult;
+      correctionApplies = lockResult.value.standing === "record" && lockResult.value.locked;
+    } else {
+      const contentGate = await this.recordLock.assertEditable(existing, "content", {
+        ...(parsedPatch.data.content !== undefined ? { content: parsedPatch.data.content } : {}),
+        ...(parsedPatch.data.title !== undefined ? { title: parsedPatch.data.title } : {}),
+      });
+      if (!contentGate.ok) return contentGate;
+      const kindGate = await this.recordLock.assertEditable(
+        existing,
+        "kind",
+        parsedPatch.data.extra !== undefined ? { extra: parsedPatch.data.extra } : {},
+      );
+      if (!kindGate.ok) return kindGate;
+    }
+
     // Reset to draft if content/title changed on approved doc
     let newStatus = parsedPatch.data.status ?? existing.status;
+    // reason: spec D14 — the demotion trigger is a DIFFERENCE too. A resend of the stored text (a tag save
+    // from the dashboard) is not an edit, and demoting a locked record on it would reopen it by the back
+    // door. `bodyDiffers` compares canonicalised text, so a re-save of the same body reads as unchanged.
     const contentOrTitleChanged =
-      parsedPatch.data.content !== undefined || parsedPatch.data.title !== undefined;
+      (parsedPatch.data.content !== undefined && bodyDiffers(existing.content, parsedPatch.data.content)) ||
+      (parsedPatch.data.title !== undefined && parsedPatch.data.title !== existing.title);
     // reason: this is an INTERNAL lifecycle invariant (SPEC-002 §3), not a
     // user-requested transition — approved→draft is deliberately absent from
     // VALID_TRANSITIONS (only active/archived/deprecated follow "approved"),
@@ -2124,7 +2185,11 @@ export class CorpusService {
     // cross-referencing comments were the only thing holding them together —
     // `tests/unit/service/demotion-rule-ssot.test.ts` now stubs the shared function
     // and fails if EITHER call site stops following it.
-    const demotedStatus = resolveStatusAfterContractEdit(existing.status, contentOrTitleChanged);
+    // reason: a correction on a locked record writes ONE version and keeps its status (D15) — it skips this
+    // demotion, and `isApprovedAutoResetToDraft` staying false also skips the ledger re-approve second write.
+    const demotedStatus = correctionApplies
+      ? existing.status
+      : resolveStatusAfterContractEdit(existing.status, contentOrTitleChanged);
     const isApprovedAutoResetToDraft = demotedStatus !== existing.status;
     if (isApprovedAutoResetToDraft) {
       newStatus = demotedStatus;
@@ -2809,6 +2874,7 @@ export class CorpusService {
       // slug at any historical version" (the spec's stated problem) without
       // this row needing a special before/after carve-out.
       slug: docPatch.slug ?? existing.slug,
+      ...(correction !== undefined ? { change_summary: `Correction: ${correction.reason.trim()}` } : {}),
     };
 
     // SPEC-084 §Changed semantics "Kind-flip semantics" — a spec_kind
@@ -2861,7 +2927,12 @@ export class CorpusService {
         // reason: SPEC-035 §2 — `version` (not just the pre-existing `new_version`
         // alias) is the join key AuditService.verify matches against the versions
         // row's own `version` field.
-        details: { patch: parsedPatch.data, new_version: newVersion, version: newVersion },
+        details: {
+          patch: parsedPatch.data,
+          new_version: newVersion,
+          version: newVersion,
+          ...(correction !== undefined ? { correction: { reason: correction.reason.trim() } } : {}),
+        },
       },
     );
     if (!updateResult.ok) return updateResult;

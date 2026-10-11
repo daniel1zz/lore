@@ -155,6 +155,10 @@ export class PhaseService {
       });
     }
 
+    // record-edit gate (spec-documents-are-living-or-records D16): a closed plan's phase list is a record.
+    const gate = await this.recordLock.assertEditable(plan, "phase-structure");
+    if (!gate.ok) return gate;
+
     const existing = extractPhases(plan);
     if (existing.some((p) => p.name === trimmedName)) {
       return err({
@@ -209,6 +213,10 @@ export class PhaseService {
         value: plan.type,
       });
     }
+
+    // record-edit gate (spec-documents-are-living-or-records D16) - BEFORE any write.
+    const gate = await this.recordLock.assertEditable(plan, "phase-structure");
+    if (!gate.ok) return gate;
 
     const existing = extractPhases(plan);
     if (!existing.some((p) => p.name === name)) {
@@ -292,6 +300,11 @@ export class PhaseService {
         value: plan.type,
       });
     }
+
+    // record-edit gate (spec-documents-are-living-or-records D16) - BEFORE any write, including the
+    // child-task phase-name rewrite that follows the plan write.
+    const gate = await this.recordLock.assertEditable(plan, "phase-structure");
+    if (!gate.ok) return gate;
 
     const existing = extractPhases(plan);
     if (!existing.some((p) => p.name === oldName)) {

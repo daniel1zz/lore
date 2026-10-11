@@ -414,6 +414,11 @@ export class AcService {
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
 
+    // record-edit gate (spec-documents-are-living-or-records D6/D12): an added criterion changes what was
+    // accepted, so it is refused on a locked spec - BEFORE any validation or write.
+    const gate = await this.recordLock.assertEditable(spec, "criteria");
+    if (!gate.ok) return gate;
+
     const existing = extractCriteria(spec);
     const candidate = [...existing, criterion];
     const parsed = specAcceptanceCriteriaSchema.safeParse(candidate);
@@ -660,6 +665,10 @@ export class AcService {
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
 
+    // record-edit gate (spec-documents-are-living-or-records D6) - BEFORE any write.
+    const gate = await this.recordLock.assertEditable(spec, "criteria");
+    if (!gate.ok) return gate;
+
     const existing = extractCriteria(spec);
     if (!existing.some((c) => c.id === acId)) {
       return err({
@@ -757,6 +766,11 @@ export class AcService {
     const specResult = await this.resolveSpec(specIdOrSlug);
     if (!specResult.ok) return specResult;
     const spec = specResult.value;
+
+    // record-edit gate (spec-documents-are-living-or-records D6) - BEFORE any write. For a locked spec the
+    // edit is refused instead of demoting the spec (the demotion below now only serves an unlocked spec).
+    const gate = await this.recordLock.assertEditable(spec, "criteria");
+    if (!gate.ok) return gate;
 
     const existing = extractCriteria(spec);
     const index = existing.findIndex((c) => c.id === acId);

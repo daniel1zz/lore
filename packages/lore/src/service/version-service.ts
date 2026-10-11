@@ -232,6 +232,13 @@ export class VersionService {
     }
 
     const currentDoc = docResult.value;
+
+    // record-edit gate (spec-documents-are-living-or-records D6, BR-772): a restore rewrites the record's
+    // text and criteria wholesale, so it is refused on a locked record exactly like a `set` - BEFORE any
+    // write below. The sanctioned way to put old text back is `lore set --correction`.
+    const gate = await this.recordLock.assertEditable(currentDoc, "restore");
+    if (!gate.ok) return gate;
+
     const nextVersion = currentDoc.version + 1;
     const now = new Date().toISOString();
 
