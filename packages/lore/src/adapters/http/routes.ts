@@ -20,7 +20,7 @@ import { ALLOWED_ORIGINS, resolveDocWriteOpts } from "./auth.js";
 // here, only its return type. Production always supplies a real `getMachineAuth`
 // accessor (`index.ts`); this module never constructs one itself.
 import type { MachineAuthStores } from "./machine-auth.js";
-import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, corsHeaders } from "./middleware.js";
+import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, splitDocPatchBody, corsHeaders } from "./middleware.js";
 import { handleDashboardRoute } from "./dashboard-routes.js";
 import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
 import { handleGetIssueReports } from "./issue-reports-routes.js";
@@ -797,7 +797,13 @@ async function handleSingleDoc(
     }
     // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
     // (see auth.ts) is the single cookie-vs-bearer attribution policy seam.
-    const result = await app.corpusService.set(idOrSlug, body as DocPatch, resolveDocWriteOpts(actor));
+    // spec-documents-are-living-or-records D15: `correction` is a write option, split out of the patch.
+    const split = splitDocPatchBody(body);
+    if (!split.ok) return loreErrorResponse(split.error);
+    const result = await app.corpusService.set(idOrSlug, split.value.patch, {
+      ...resolveDocWriteOpts(actor),
+      ...(split.value.correction !== undefined ? { correction: split.value.correction } : {}),
+    });
     if (!result.ok) return loreErrorResponse(result.error);
     return jsonOk(result.value);
   }

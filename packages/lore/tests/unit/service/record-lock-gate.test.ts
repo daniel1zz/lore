@@ -34,7 +34,7 @@ interface Fixture {
 function makeFixture(gateEnforcer?: GateEnforcer): Fixture {
   const store = new InMemoryStore();
   const lock = new RecordLockService(store, gateEnforcer);
-  const service = new CorpusService(store, lock, undefined, undefined, undefined, true);
+  const service = new CorpusService(store, lock, undefined, undefined, undefined, undefined, true);
   return { store, service };
 }
 

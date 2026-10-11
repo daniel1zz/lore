@@ -436,6 +436,13 @@ export const LoreSetSchema = z.object({
   extra: z.record(z.unknown()).optional(),
   slug: z.string().optional(),
   by: z.string().min(1).optional(),
+  /**
+   * The audited exit from the record-edit gate (spec-documents-are-living-or-records D4/D15, BR-1049):
+   * a typo-level fix of a LOCKED record that writes exactly one version, keeps the status and records
+   * `reason`. NOT a doc field — handlers destructure it out of the patch next to `by` and pass it as a
+   * `SetOptions.correction`, because docPatchSchema would silently strip it.
+   */
+  correction: z.object({ reason: z.string().min(1) }).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -1800,8 +1807,10 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     // reason: `by` (SPEC-079 G2) is destructured OUT of the patch — it's an actor
     // identity for the audit entry, not a doc field; docPatchSchema doesn't declare
     // it, so leaving it inside `patch` would just be silently stripped there instead.
-    const { id_or_slug, by, ...patch } = args;
-    const result = await corpusService.set(id_or_slug, patch, by !== undefined ? { by } : undefined);
+    // `correction` is destructured out for the same reason (spec-documents-are-living-or-records D15): it is
+    // a write option, and docPatchSchema would silently strip it from the patch.
+    const { id_or_slug, by, correction, ...patch } = args;
+    const result = await corpusService.set(id_or_slug, patch, setOptionsFrom(by, correction));
     if (!result.ok) return errorContent(result.error);
     return textContent({ doc: result.value, version: result.value.version });
   });
@@ -3452,6 +3461,22 @@ function zodIssueToLoreError(error: z.ZodError, opName: string): LoreError {
 }
 
 /**
+ * Builds the `CorpusService.set` options shared by `lore_set` and the `lore_batch` `set` op, so the two
+ * entry points cannot drift on how `by` / `correction` reach the service (spec-documents-are-living-or-
+ * records D15). `undefined` when neither is given — byte-identical to the pre-correction call.
+ */
+function setOptionsFrom(
+  by: string | undefined,
+  correction: { reason: string } | undefined,
+): { by?: string; correction?: { reason: string } } | undefined {
+  if (by === undefined && correction === undefined) return undefined;
+  return {
+    ...(by !== undefined ? { by } : {}),
+    ...(correction !== undefined ? { correction } : {}),
+  };
+}
+
+/**
  * Executes a single named operation within a lore_batch call.
  * Returns a structured `{ ok, value }` or `{ ok, error }` result object.
  *
@@ -3527,9 +3552,9 @@ async function executeBatchOp(
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "set") };
       // reason: `by` (SPEC-079 G2) is destructured out of the patch — same reason as
       // the single-op lore_set handler above.
-      const { id_or_slug: idOrSlug, by, harness_run: _harnessRun, ...patch } = parsed.data;
+      const { id_or_slug: idOrSlug, by, correction, harness_run: _harnessRun, ...patch } = parsed.data;
       void _harnessRun;
-      const r = await corpusService.set(idOrSlug, patch, by !== undefined ? { by } : undefined);
+      const r = await corpusService.set(idOrSlug, patch, setOptionsFrom(by, correction));
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "delete": {

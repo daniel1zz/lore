@@ -2,7 +2,7 @@
  * HTTP middleware utilities — JSON helpers, CORS, error formatting.
  * Public surface: jsonOk, jsonError, loreErrorToStatus, loreErrorResponse, corsHeaders,
  *   isOriginAllowed, corsPreflightResponse, applyCorsOrigin, parseJsonBody,
- *   emitDashboardTelemetry.
+ *   splitDocPatchBody, emitDashboardTelemetry.
  * Invariants:
  *   - corsHeaders() never returns an Access-Control-Allow-Origin value — origin echoing is
  *     request-scoped and applied exactly once, at the outermost Bun.serve fetch boundary
@@ -23,7 +23,7 @@
  * Side-effect class: pure (all functions).
  */
 
-import type { LoreError } from "@lore/core";
+import type { DocPatch, LoreError } from "@lore/core";
 import { ALLOWED_ORIGINS } from "./auth.js";
 import type { App } from "../../app.js";
 
@@ -209,6 +209,41 @@ export async function parseJsonBody(req: Request): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Splits an update request body into the doc patch and the optional record-edit `correction`
+ * (spec-documents-are-living-or-records D4/D15, BR-1049). `correction` is a WRITE OPTION, not a doc
+ * field: `docPatchSchema` strips unknown keys silently, so leaving it inside the patch would make the
+ * correction request look like an ordinary edit and be refused by the gate. Shared by `routes.ts`'
+ * update route and `dashboard-routes.ts`' PATCH so the two cannot drift.
+ *
+ * @param body - The parsed JSON object (already checked non-null / object by the caller).
+ * @returns `ok` with the patch (body minus `correction`) and the validated correction when present;
+ *   `err` (`VALIDATION_ERROR`, field `correction`) when it is present but not `{ reason: <non-blank string> }`.
+ * @example
+ * splitDocPatchBody({ content: "x", correction: { reason: "typo" } });
+ * // => { ok: true, value: { patch: { content: "x" }, correction: { reason: "typo" } } }
+ */
+export function splitDocPatchBody(
+  body: object,
+): { ok: true; value: { patch: DocPatch; correction?: { reason: string } } } | { ok: false; error: LoreError } {
+  const { correction, ...patch } = body as Record<string, unknown>;
+  if (correction === undefined) return { ok: true, value: { patch: patch as DocPatch } };
+  const reason =
+    typeof correction === "object" && correction !== null ? (correction as Record<string, unknown>)["reason"] : undefined;
+  if (typeof reason !== "string" || reason.trim().length === 0) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        field: "correction",
+        message: "correction must be an object with a non-empty string 'reason'",
+        value: correction,
+      },
+    };
+  }
+  return { ok: true, value: { patch: patch as DocPatch, correction: { reason: reason.trim() } } };
 }
 
 // ─── Dashboard telemetry ────────────────────────────────────────────────────

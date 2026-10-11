@@ -99,9 +99,12 @@
  *                                   exits 2 (D3), never a silent no-op. `--statement`/
  *                                   `--covers` are mode-agnostic; `--oracle`/`--command`
  *                                   (script) / `--rubric` (ai) / `--note` (human) exit 4
- *                                   against a criterion of a different mode (D5). On an
- *                                   `approved` spec this demotes it to `draft`, exactly
- *                                   like a content/title edit (D2). `--covers` REPLACES
+ *                                   against a criterion of a different mode (D5). On a
+ *                                   LOCKED spec (ever approved) it is refused, exit 4,
+ *                                   `gate:record-edit` (spec-documents-are-living-or-records
+ *                                   D6/D12); on an unlocked spec that is `approved` it
+ *                                   demotes it to `draft`, like a content/title edit (D2).
+ *                                   `--covers` REPLACES
  *                                   `requirement_refs` wholesale across repeated flags in
  *                                   one call; `--covers ""` clears it to `[]`.
  *                                   `--allow-missing-path` is the SAME D8 escape `add`
@@ -124,6 +127,12 @@
  *                                   why a field-level merge onto a stale value was
  *                                   rejected); exits 4 against a non-script-mode criterion
  *                                   (D5, same shape as `--oracle`/`--command`).
+ *
+ * `add`/`rm`/`set` on a LOCKED spec (one that has ever been approved) are REFUSED with exit 4,
+ * `gate:record-edit` (spec-documents-are-living-or-records D6/D12): an added, removed or edited
+ * criterion changes what was accepted, so it belongs to a new spec. `cite` is NOT a rewrite and is
+ * not refused. The approved->draft demotion below therefore only ever fires for a spec the lock
+ * does not cover (the gate disabled via `workflow.gates."record-edit".enabled: false`).
  *
  * `add`/`set` additionally print the approved->draft demotion an edit MAY trigger
  * (spec-governance-visibility-an-armed-gate-that-vacuously-passes §B2, AC-GV-4) —
@@ -988,7 +997,9 @@ async function fetchSpecStatus(app: App, specIdOrSlug: string): Promise<string |
 /**
  * Prints the approved->draft demotion `ac add`/`ac set` may cause, plus a count
  * of descendant task docs whose future `claim` this demotion now blocks
- * (AC-GV-4). Fires ONLY when the OBSERVED status actually moved from
+ * (AC-GV-4). On a locked spec `ac add`/`ac set`/`ac rm` are refused before any write
+ * (`gate:record-edit`), so this notice only ever appears for an UNLOCKED approved spec
+ * (the gate switched off by config). Fires ONLY when the OBSERVED status actually moved from
  * `"approved"` (captured by {@link fetchSpecStatus} BEFORE the write) to
  * `"draft"` (re-read AFTER the write succeeds) — never inferred from which
  * subcommand ran. This is deliberate: `AcService.writeCriteria` only ever

@@ -60,7 +60,7 @@ import type { App } from "../../app.js";
 import type { ActorContext } from "./auth.js";
 import type { DocPatch, LinkType, Telemetry } from "@lore/core";
 import { createDocInputSchema, docTypeSchema } from "@lore/core";
-import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, isOriginAllowed, emitDashboardTelemetry } from "./middleware.js";
+import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, splitDocPatchBody, isOriginAllowed, emitDashboardTelemetry } from "./middleware.js";
 import { ALLOWED_ORIGINS, resolveDocWriteOpts } from "./auth.js";
 import { checkConcurrency, resolveExpectedVersion, buildConflictPayload } from "./concurrency.js";
 import { runCalibrationHook } from "../../flows/calibration-hook.js";
@@ -293,7 +293,10 @@ async function handleDashboardPatch(
     return jsonError({ code: "VALIDATION_ERROR", field: "body", message: "Request body must be JSON" }, 422);
   }
 
-  const patch = body as DocPatch;
+  // spec-documents-are-living-or-records D15: `correction` is a write option, split out of the patch.
+  const split = splitDocPatchBody(body);
+  if (!split.ok) return loreErrorResponse(split.error);
+  const { patch, correction } = split.value;
 
   // Load current document to check version and enable diff on conflict.
   const currentResult = await app.corpusService.get(id);
@@ -317,6 +320,7 @@ async function handleDashboardPatch(
   const result = await app.corpusService.set(id, patch, {
     ...(expectedVersion !== undefined ? { expectedVersion } : {}),
     ...resolveDocWriteOpts(actor),
+    ...(correction !== undefined ? { correction } : {}),
   });
   if (!result.ok) {
     if (result.error.code === "STALE_VERSION") {

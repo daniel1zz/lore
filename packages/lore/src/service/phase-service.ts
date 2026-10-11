@@ -11,8 +11,13 @@
  * model intact. The three phase-set writers below (`addPhase`, `removePhase`,
  * `renamePhase`) each LOG exactly one version row, so a phase-set mutation is visible
  * in `lore log`/`lore diff`; and each leaves the plan's `status` UNTOUCHED — adding a
- * phase to an `approved` plan keeps it `approved`. This is the shape `lore ac add`
- * already has (see `ac-service.ts`'s own header for the sibling contract).
+ * phase to an `approved` plan keeps it `approved`.
+ *
+ * ⛔ RECORD LOCK (spec-documents-are-living-or-records D16): all three writers are REFUSED
+ * (`gate:record-edit`, exit 4) once the plan is closed (archived or deprecated) — a closed plan's
+ * phase list is a record (BR-1046). An open plan, including an approved one, still takes phase
+ * edits. `ac-service.ts`'s header states the sibling contract: `lore ac add|set|rm` are refused on
+ * a locked spec (it used to log without demoting; that reversed in the same spec, D12).
  *
  * ⛔ The demotion half is explicitly OUT. The status-after-contract-edit helper that
  * `lore ac set` calls — exported from `@lore/core`'s schemas.ts, consumed by
@@ -438,7 +443,8 @@ export class PhaseService {
    * `adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan`.
    *
    * ⛔ `status` is passed through UNCHANGED and is never computed here. reason: the
-   * ADR decided the `lore ac add` shape — log, do NOT demote — and explicitly ruled the
+   * ADR decided on a log-but-do-NOT-demote write (the shape `lore ac add` had before the record
+   * lock refused it on a locked spec, spec-documents-are-living-or-records D12) — and explicitly ruled the
    * demotion half out (this file's header explains why the helper's identifier is absent
    * here rather than merely uncalled). An `approved` plan is still `approved` after a
    * phase write. Reintroducing a demotion would force re-approval on every phase edit,

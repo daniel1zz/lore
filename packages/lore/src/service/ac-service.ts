@@ -8,13 +8,20 @@
  * spec's own version log, because AC declarations are judge-consumed data
  * (SPEC-026/038) and history is what makes a retired oracle auditable.
  *
- * `PhaseService` is NO LONGER the contrast this header used to draw against it. Its
- * three phase-set writers now log a version row too, and do not demote — see
- * `adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan`, which adopted
- * `lore ac add`'s shape by name. ⛔ The remaining asymmetry is INSIDE this file and is
- * the one to keep straight: `addCriterion`/`removeCriterion` log WITHOUT demoting,
- * while `setCriterion` logs AND demotes an `approved` spec to `draft` (D2 below). Do
- * not generalise either half into "how `extra` writers behave".
+ * ⛔ RECORD LOCK (spec-documents-are-living-or-records-a-locked-record-is-never D6/D12, BR-1048):
+ * `addCriterion`, `removeCriterion` and `setCriterion` are REFUSED (`VALIDATION_ERROR`,
+ * `field: "gate:record-edit"`, exit 4) on a spec that has ever been approved — an added, removed or
+ * edited criterion changes what was accepted, so it belongs to a new spec. `citeCriterion` is NOT
+ * a rewrite and stays open. The check is `RecordLockService.assertEditable(spec, "criteria")`,
+ * run BEFORE any validation or write; `RecordLockService` is a REQUIRED constructor argument so a
+ * service composed without it does not compile (D17). This REVERSES the older shape
+ * "`lore ac add` logs a version and does not demote": on a locked spec it now refuses.
+ *
+ * The approved->draft demotion (D2 below) therefore only serves a spec the lock does not cover —
+ * in practice a spec whose `record-edit` gate is switched off by
+ * `workflow.gates."record-edit".enabled: false` (BR-1053). `PhaseService`'s three phase-set
+ * writers log a version row and never demote (`adr-phase-writes-log-a-version-row-and-do-not-
+ * demote-the-plan`), and are gated the same way on a closed plan (D16).
  *
  * Public surface:
  *   addCriterion(specIdOrSlug, criterion)          → AcceptanceCriterion[] (updated list)

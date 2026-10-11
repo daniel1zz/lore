@@ -189,6 +189,13 @@ export default defineCommand({
         `command is '${ACCEPTED_DECISION_STATUS_VALUE}'; 'deprecated'/'superseded' are owned ` +
         `by 'lore invalidate'. Source: spec-adr-decision-status-has-a-create-surface-and-no-cli-update`,
     },
+    correction: {
+      type: "string",
+      description:
+        "Reason for a typo-level fix of a LOCKED record (an approved spec/adr/knowledge record, a claimed " +
+        "task, a closed plan). Bypasses the record-edit gate, writes exactly one version and keeps the " +
+        "status; the reason is stored in the version and the audit trail. Must be non-empty.",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -302,6 +309,18 @@ export default defineCommand({
         process.stderr.write("Error: --refine-stdin requires non-empty stdin input.\n");
         process.exit(2);
       }
+    }
+
+    // --correction needs a non-empty reason: argv-decidable, so a usage error (exit 2) BEFORE the app loads
+    // or anything is written (spec-documents-are-living-or-records D4, BR-1049).
+    let correctionOpt: { reason: string } | undefined;
+    if (args.correction !== undefined) {
+      const reason = typeof args.correction === "string" ? args.correction.trim() : "";
+      if (reason === "") {
+        process.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
+        process.exit(2);
+      }
+      correctionOpt = { reason };
     }
 
     const resolvedActor = resolveActor(args.by);
@@ -420,7 +439,7 @@ export default defineCommand({
         const setResult = await app.corpusService.set(
           args.id,
           { content: newContent },
-          { by: resolvedActor },
+          { by: resolvedActor, ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}) },
         );
 
         if (!setResult.ok) {
@@ -635,7 +654,10 @@ export default defineCommand({
         priorStatusForDemotionAdvisory = getForDemotion.value.doc.status;
       }
 
-      const result = await app.corpusService.set(args.id, patch, { by: resolvedActor });
+      const result = await app.corpusService.set(args.id, patch, {
+        by: resolvedActor,
+        ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
+      });
 
       if (!result.ok) {
         process.stderr.write(formatError(result.error) + "\n");
@@ -650,6 +672,9 @@ export default defineCommand({
         console.log(`Updated ${doc.slug} → v${doc.version}`);
         if (priorStatusForDemotionAdvisory === "approved" && doc.status === "draft") {
           console.log(APPROVED_DEMOTION_ADVISORY);
+        }
+        if (correctionOpt !== undefined) {
+          console.log(`  (correction recorded: ${correctionOpt.reason})`);
         }
         // reason: SPEC-068 D5 — when --slug renamed the doc, the old slug stops
         // resolving immediately, but any FREE-TEXT reference to it inside other
