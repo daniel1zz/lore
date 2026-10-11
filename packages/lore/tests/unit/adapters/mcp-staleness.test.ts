@@ -172,9 +172,10 @@ beforeEach(() => {
 // ─── NEGATIVE: schema requires `by` ──────────────────────────────────────────
 
 describe("LoreStalenessProbeSchema — NEGATIVE (by is required)", () => {
-  it("rejects a payload missing `by` entirely", () => {
+  // reason: BR-1034 (AC-RID-7) — no MCP tool requires the caller to name itself; the call's resolved name fills in.
+  it("accepts a payload missing `by` entirely", () => {
     const result = LoreStalenessProbeSchema.safeParse({ list: true });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("rejects an empty-string `by`", () => {

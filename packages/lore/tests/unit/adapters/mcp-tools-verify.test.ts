@@ -192,9 +192,10 @@ describe("LoreVerifySchema — roundtrip", () => {
     }
   });
 
-  it("NEGATIVE: missing by → fails", () => {
+  // reason: BR-1034 (AC-RID-7) — no MCP tool requires the caller to name itself.
+  it("BOUNDARY: missing by → accepted (the call's resolved name fills in)", () => {
     const parsed = LoreVerifySchema.safeParse({ plan: "plan-1" });
-    expect(parsed.success).toBe(false);
+    expect(parsed.success).toBe(true);
   });
 
   it("NEGATIVE: empty by → fails (min(1))", () => {

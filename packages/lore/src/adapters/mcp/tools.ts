@@ -899,8 +899,9 @@ export const LoreFeedSchema = z.object({
   parent_id_or_slug: z.string().optional(),
   plan: z.string().optional(),
   handoff: z.string().optional(),
-  by: z.string().min(1).optional(),
-  harness_run: HARNESS_RUN_FIELD,
+  // reason: `by` here is a session-resume FILTER (whose handoff), not an author — a read tool is never attested, so
+  // an omitted `by` stays omitted instead of being filled with the server's own name.
+  by: z.string().optional(),
   phase: z.string().optional(),
   task: z.string().optional(),
 });

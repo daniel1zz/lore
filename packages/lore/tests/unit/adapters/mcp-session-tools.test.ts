@@ -61,7 +61,7 @@ import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
-import { BOOTSTRAP_INJECTION_KNOWN_KEYS, NoOpTelemetry, ok, RESUME_SCOPE_CLOSURE } from "@lore/core";
+import { BOOTSTRAP_INJECTION_KNOWN_KEYS, handoffExtraSchema, NoOpTelemetry, ok, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import type { BootstrapReport, DocRecord, HandoffExtra } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
@@ -163,15 +163,19 @@ const VALID_HANDOFF: HandoffExtra = {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("LoreBootstrapSchema / LoreHandoffSchema — schema-level", () => {
-  it("LoreBootstrapSchema rejects missing `by`", () => {
-    expect(LoreBootstrapSchema.safeParse({}).success).toBe(false);
+  // reason: BR-1034 (AC-RID-7) — `by` is optional (the call's resolved name fills in); an EMPTY `by` is still refused.
+  it("LoreBootstrapSchema accepts missing `by`, rejects an empty one", () => {
+    expect(LoreBootstrapSchema.safeParse({}).success).toBe(true);
     expect(LoreBootstrapSchema.safeParse({ by: "" }).success).toBe(false);
     expect(LoreBootstrapSchema.safeParse({ by: "alice" }).success).toBe(true);
   });
 
-  it("LoreHandoffSchema rejects missing `by` (reuses handoffExtraSchema verbatim)", () => {
+  // reason: BR-1034 (AC-RID-7) — the MCP schema relaxes ONLY `by` (the handler fills it from the call's resolved
+  // name); the CLI contract `handoffExtraSchema` still requires it.
+  it("LoreHandoffSchema accepts missing `by`; handoffExtraSchema (CLI contract) still rejects it", () => {
     const { by: _by, ...withoutBy } = VALID_HANDOFF;
-    expect(LoreHandoffSchema.safeParse(withoutBy).success).toBe(false);
+    expect(LoreHandoffSchema.safeParse(withoutBy).success).toBe(true);
+    expect(handoffExtraSchema.safeParse(withoutBy).success).toBe(false);
     expect(LoreHandoffSchema.safeParse(VALID_HANDOFF).success).toBe(true);
   });
 

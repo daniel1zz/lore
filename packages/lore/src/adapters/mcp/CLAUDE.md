@@ -32,9 +32,16 @@ Registers the `lore_*` tools (count pinned by `tests/unit/adapters/mcp-tools.tes
   optional zero-arg GETTER (not a one-time value) so a long-lived server
   observes `.lore/config.yaml` edits made mid-session — threaded straight to
   `registerTools`.
-- **MCP callers pass actor identity (`by`) explicitly** on every write tool
-  that needs one — no `$LORE_ACTOR`/OS-username fallback like the CLI (MCP
-  callers are always agents).
+- **No MCP tool requires `by`/`recorded_by`; every write tool takes an optional
+  `harness_run`** (spec-run-identity-slice-1, BR-1034). A schema that declares
+  `harness_run` is an ATTESTED tool: `call-scope.ts::McpCallScope.run` builds ONE
+  identity per call (`harness_run` + optional `by`, name source `mcp`), opens a
+  call-scoped App via `App.forWriteContext` (store wrapped for that identity,
+  run verified once), runs the handler, closes it. Handlers get `by`/`recorded_by`
+  FILLED from the call's resolved name and never see `harness_run`; claim/release
+  read the verified run from `requireCallIdentity`. One call = one identity, so a
+  `lore_batch` stamps every operation alike. The long-lived server's env is never
+  the identity. Read tools are not attested (no second connection per call).
 - **`attestation` is never an accepted field on `lore_evidence_add`'s
   schema** — `lore_verify` is the only MCP-reachable path to attested
   evidence. `capture: true` does NOT change this: it yields
