@@ -30,7 +30,9 @@
  * Side-effect class: pure wrapper (no I/O of its own).
  */
 
+import { ok, type LoreError, type Result } from "@lore/core";
 import { resolveActorWithSource } from "@lore/core/node";
+import { verifyInvocationIdentity } from "../service/run-identity-verify.js";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
 /**
@@ -141,35 +143,43 @@ export function withWriteContext(store: StoreInterface, ctx: StampingContext): S
 /** Sink for the one-per-write-context warning about an unregistered `--harness-run` id (CLI: stderr). */
 export type UnknownRunWarn = (line: string) => void;
 
-type RunCheck = { readonly ok: true } | { readonly ok: false; readonly error: unknown };
+/** Per wrapped store: resolves (once) to the VERIFIED identity — same object the stamps are read from. */
+const VERIFIERS = new WeakMap<object, () => Promise<Result<InvocationIdentity, LoreError>>>();
 
 /**
- * {@link withWriteContext} plus the D7 run check: before the FIRST stamped write the claimed run is looked up
- * with `store.getRun`; an id with no registered run is downgraded to unattested (`harness_run` NULL — never
- * refused, never guessed) and ONE warning naming the id goes to `warn`. An identity with no run costs no
- * lookup. The name and its source are kept either way. A failing lookup is returned as the write's own error
- * (no silent downgrade). Non-stamped methods are not delayed.
+ * The verified invocation identity of a store wrapped by {@link withVerifiedWriteContext}: runs the one-time
+ * run lookup if it has not happened yet (no second warning) and returns the identity the store stamps rows
+ * with — `harnessRun` null when the claimed run is unregistered. `ok(undefined)` for an unwrapped store.
+ */
+export function ensureVerifiedIdentity(store: StoreInterface): Promise<Result<InvocationIdentity | undefined, LoreError>> {
+  const verifier = VERIFIERS.get(store);
+  return verifier === undefined ? Promise.resolve(ok(undefined)) : verifier();
+}
+
+/**
+ * {@link withWriteContext} plus the D7 run check via {@link verifyInvocationIdentity}: the claimed run is
+ * verified ONCE (first stamped write, or an explicit {@link ensureVerifiedIdentity}), and the stamps are read
+ * from the verified value. An unregistered id → `harness_run` NULL, name and source kept, one `warn` line. A
+ * failing lookup is returned as the write's own error (no silent downgrade). Non-stamped methods are not delayed.
+ *
+ * @param onVerified - Called once with the verified identity (the CLI uses it to replace its process slot).
  */
 export function withVerifiedWriteContext(
   store: StoreInterface,
   identity: InvocationIdentity,
   warn: UnknownRunWarn,
+  onVerified?: (verified: InvocationIdentity) => void,
 ): StoreInterface {
   const live: { identity: InvocationIdentity } = { identity };
   const inner = withWriteContext(store, live);
-  const claimedRun = identity.harnessRun;
-  if (claimedRun === null) return inner;
-  let verified: Promise<RunCheck> | undefined;
-  const verifyOnce = (): Promise<RunCheck> => {
-    verified ??= store.getRun(claimedRun).then((found): RunCheck => {
-      if (!found.ok) return { ok: false, error: found.error };
-      if (found.value === null) {
-        live.identity = { ...identity, harnessRun: null };
-        warn(
-          `warning: --harness-run ${claimedRun} is not a registered run; this write is recorded unattested (register it with \`lore run register\`)`,
-        );
+  let verified: Promise<Result<InvocationIdentity, LoreError>> | undefined;
+  const verifyOnce = (): Promise<Result<InvocationIdentity, LoreError>> => {
+    verified ??= verifyInvocationIdentity(store, identity, warn).then((result) => {
+      if (result.ok) {
+        live.identity = result.value;
+        onVerified?.(result.value);
       }
-      return { ok: true };
+      return result;
     });
     return verified;
   };
@@ -179,11 +189,12 @@ export function withVerifiedWriteContext(
       if (typeof value !== "function" || typeof prop !== "string" || STAMPED[prop] === undefined) return value;
       return async (...args: unknown[]) => {
         const check = await verifyOnce();
-        if (!check.ok) return { ok: false, error: check.error };
+        if (!check.ok) return check;
         return (value as (...a: unknown[]) => unknown)(...args);
       };
     },
   });
   CONTEXT_BY_STORE.set(outer, live);
+  VERIFIERS.set(outer, verifyOnce);
   return outer;
 }

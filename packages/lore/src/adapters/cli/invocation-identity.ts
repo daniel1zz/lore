@@ -29,7 +29,16 @@ export function setInvocationIdentity(identity: InvocationIdentity): void {
   current = identity;
 }
 
-/** The identity the CLI entry recorded, or `undefined` outside a CLI invocation (MCP, HTTP, tests). */
+/**
+ * Replace the recorded identity with its run-VERIFIED value (unregistered run -> `harnessRun` null). Called once,
+ * by the store wrapper's `onVerified`, so {@link getInvocationIdentity} reads the verified identity from then on.
+ */
+export function replaceInvocationIdentity(verified: InvocationIdentity): void {
+  if (current === undefined) throw new Error("no invocation identity to replace");
+  current = verified;
+}
+
+/** The identity the CLI entry recorded (run verified once a write or claim/release has verified it), or `undefined` outside a CLI invocation (MCP, HTTP, tests). */
 export function getInvocationIdentity(): InvocationIdentity | undefined {
   return current;
 }

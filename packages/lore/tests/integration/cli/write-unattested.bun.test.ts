@@ -334,3 +334,30 @@ describe("AC-RID-8 regression: no audit row of a named write is authored by the 
     for (const row of rows) expect(row.actor).not.toBe(os);
   });
 });
+
+// ─── Regression: an unregistered run decides a claim as UNATTESTED, one answer for the whole operation ───
+
+describe("AC-RID-8 regression: claim by an unregistered --harness-run is decided and stored unattested", () => {
+  let dir = "";
+
+  beforeAll(() => {
+    dir = corpusDir("unattested-claim-decision-");
+  });
+
+  it("stores claim.harness_run null, warns exactly once, and a same-name unattested claim refreshes (BR-1040)", () => {
+    const task = newTask(dir, "Unregistered run claim");
+    const first = lore(["--harness-run", GHOST_A, "claim", task, "--by", NAME], dir);
+    expect(first.exitCode).toBe(0);
+    expect(warningLinesNaming(first.stderr, GHOST_A)).toHaveLength(1);
+    const got = (JSON.parse(mustLore(["get", task, "--json"], dir).stdout) as { data: { doc?: { extra?: { claim?: Record<string, unknown> } }; extra?: { claim?: Record<string, unknown> } } }).data;
+    const claim = got.doc?.extra?.claim ?? got.extra?.claim;
+    if (claim === undefined) throw new Error("claimed task has no extra.claim in `lore get --json`");
+    expect(claim["harness_run"] ?? null).toBeNull();
+    expect(JSON.stringify(claim)).not.toContain(GHOST_A);
+    // two unattested parties with the same name compare by name: the second claim refreshes the lease
+    const second = lore(["claim", task, "--by", NAME], dir);
+    expect(second.exitCode).toBe(0);
+    expect(second.stderr).not.toContain("CLAIM_CONFLICT");
+  });
+});
+

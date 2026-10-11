@@ -49,7 +49,6 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
-import { getInvocationIdentity } from "../invocation-identity.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../service/task-workflow-service.js";
 
 export default defineCommand({
@@ -83,11 +82,19 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
+      // reason: the run is verified ONCE against the registry (unregistered -> null + one warning); the decision
+      // below and the stamped rows then agree (BR-1035, spec-run-identity-slice-1 D7).
+      const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+      if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+        console.error(formatError(verifiedIdentity.error)); // CLI surface
+        process.exit(exitCode(verifiedIdentity.error));
+      }
+      const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
       const releaseOpts = {
         by,
         // reason: spec-run-identity-slice-1 D6/BR-1043 — see commands/claim.ts: the releasing run is explicit.
-        harnessRun: getInvocationIdentity()?.harnessRun ?? null,
+        harnessRun: verifiedRun,
         ...(typeof args.reason === "string" ? { reason: args.reason } : {}),
         force: args.force === true,
         source: app.callerSurface,
