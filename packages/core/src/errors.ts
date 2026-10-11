@@ -49,6 +49,11 @@ export type LoreError =
       holder: string;
       /** Current claim age in minutes at the time of the conflicting request */
       age_minutes: number;
+      /**
+       * The run holding the lease (spec-run-identity-slice-1 D6, BR-1040/BR-1043). Absent on a legacy
+       * claim (no `harness_run` key); `null` on a claim by an unattested caller.
+       */
+      holder_run?: string | null;
     }
   /**
    * `lore verify` refused to execute a script-mode AC's command because it is NEW or

@@ -112,7 +112,7 @@
  */
 
 import { z } from "zod";
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, hasClaimConflict, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
@@ -201,6 +201,13 @@ import {
   // SSOT-export precedent `rejectBlankClaimWorktree`/`computeArchiveWalk`
   // above already set for this file.
   resolveClaimSessionId,
+  // reason: spec-run-identity-slice-1 D6 / invariant I2 — holder/claimant/error/wording helpers are SHARED with
+  // the task path (the conflict predicate itself is core's `hasClaimConflict`, called below); a second copy
+  // is how the two claim paths drifted apart in the 2026-08-03 incident.
+  buildClaimHolder,
+  buildClaimParty,
+  buildClaimConflictError,
+  describeClaimRun,
 } from "./task-workflow-service.js";
 
 /**
@@ -881,20 +888,17 @@ export class PhaseWorkflowService {
     if (!gateResult.ok) return gateResult;
 
     const existingClaim = readClaim(phase);
+    const claimant = buildClaimParty(opts);
     let carryForward = false;
 
     if (existingClaim !== undefined) {
       const stale = isClaimStale(existingClaim, nowIso, this.claimTtlMinutes);
-      const sameHolder = existingClaim.by === opts.by;
-      if (!stale && !sameHolder && opts.steal !== true) {
-        return err({
-          code: "CLAIM_CONFLICT",
-          id: phase.id,
-          holder: existingClaim.by,
-          age_minutes: ageMinutesBetween(nowIso, existingClaim.at),
-        });
+      const holder = buildClaimHolder(phase, existingClaim, stale);
+      const decision = hasClaimConflict(holder, claimant);
+      if (decision.kind === "conflict" && opts.steal !== true) {
+        return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
       }
-      carryForward = !stale && sameHolder;
+      carryForward = decision.kind === "refresh";
     }
 
     const newClaim: TaskClaim = buildTaskClaim(
@@ -914,20 +918,29 @@ export class PhaseWorkflowService {
         // forward on a refresh — inheriting it would fabricate same-session
         // evidence for a run that never measured one.
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
+        // reason: BR-1040/BR-1042 — a new claim ALWAYS stores the key (null when unattested).
+        harness_run: claimant.harnessRun,
       },
       carryForward,
     );
     const newExtra: Record<string, unknown> = { ...phase.extra, claim: newClaim };
 
-    const summary =
-      existingClaim !== undefined && existingClaim.by !== opts.by
-        ? `Claimed by ${opts.by} (previous holder: ${existingClaim.by})`
-        : `Claimed by ${opts.by}`;
+    const previousHolderRun = existingClaim === undefined ? undefined : existingClaim.harness_run;
+    const takeoverNote =
+      existingClaim !== undefined &&
+      (existingClaim.by !== opts.by || (previousHolderRun !== undefined && (previousHolderRun ?? null) !== claimant.harnessRun))
+        ? ` (previous holder: ${existingClaim.by}${previousHolderRun === undefined ? "" : `, run ${describeClaimRun(previousHolderRun)}`}; claiming run ${describeClaimRun(claimant.harnessRun)})`
+        : claimant.harnessRun !== null
+          ? ` (run ${claimant.harnessRun})`
+          : "";
+    const summary = `Claimed by ${opts.by}${takeoverNote}`;
 
     const writeResult = await this.writePhaseExtra(phase, newExtra, nowIso, opts.by, summary, "claim", {
       by: opts.by,
       steal: opts.steal === true,
       ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
+      ...(previousHolderRun !== undefined ? { previous_run: previousHolderRun } : {}),
+      harness_run: claimant.harnessRun,
     });
     if (!writeResult.ok) return writeResult;
 
@@ -1037,27 +1050,31 @@ export class PhaseWorkflowService {
     }
 
     const nowIso = now();
-    const isHolder = existingClaim.by === opts.by;
+    const releaser = buildClaimParty(opts);
+    // reason: BR-1043 — see TaskWorkflowService._releaseImpl; stale=false so a stale holder still releases itself.
+    const holder = buildClaimHolder(phase, existingClaim, false);
+    const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     if (!isHolder && opts.force !== true) {
-      return err({
-        code: "CLAIM_CONFLICT",
-        id: phase.id,
-        holder: existingClaim.by,
-        age_minutes: ageMinutesBetween(nowIso, existingClaim.at),
-      });
+      return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
     }
 
     const newExtra: Record<string, unknown> = { ...phase.extra };
     delete newExtra["claim"];
 
-    const forcedNote = !isHolder ? ` (forced, previous holder: ${existingClaim.by})` : "";
+    const heldRunNote = holder.legacy ? "" : `, run ${describeClaimRun(holder.harnessRun)}`;
+    const forcedNote = !isHolder
+      ? ` (forced, previous holder: ${existingClaim.by}${heldRunNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`
+      : "";
+    const runNote = isHolder && releaser.harnessRun !== null ? ` (run ${releaser.harnessRun})` : "";
     const reasonNote = opts.reason !== undefined ? `: ${opts.reason}` : "";
-    const summary = `Released by ${opts.by}${forcedNote}${reasonNote}`;
+    const summary = `Released by ${opts.by}${runNote}${forcedNote}${reasonNote}`;
 
     return this.writePhaseExtra(phase, newExtra, nowIso, opts.by, summary, "release", {
       by: opts.by,
       force: opts.force === true,
       previous_holder: existingClaim.by,
+      ...(holder.legacy ? {} : { previous_run: holder.harnessRun }),
+      harness_run: releaser.harnessRun,
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
   }

@@ -300,7 +300,9 @@ export function formatError(error: LoreError, opts?: { aiHasNoFallback?: boolean
       });
     case "CLAIM_CONFLICT":
       return (
-        `Error: Task ${error.id} is claimed by '${error.holder}' (claimed ${error.age_minutes}m ago).\n` +
+        `Error: Task ${error.id} is claimed by '${error.holder}'` +
+        (typeof error.holder_run === "string" ? ` (run ${error.holder_run})` : "") +
+        ` (claimed ${error.age_minutes}m ago).\n` +
         "  Pass --steal (claim) or --force (release) to override, or wait for the lease to expire."
       );
     case "NEEDS_APPROVAL":
