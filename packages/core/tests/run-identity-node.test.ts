@@ -129,7 +129,8 @@ describe("resolveInvocationIdentity", () => {
 
     it("an empty --by value is rejected loudly instead of silently falling through", async () => {
       const resolve = await load();
-      expect(() => resolve(["claim", "t", "--by", ""], { LORE_ACTOR: "agent:y" }, vi.fn())).toThrow();
+      expect(typeof resolve).toBe("function"); // a missing export must not satisfy toThrow via TypeError
+      expect(() => resolve(["claim", "t", "--by", ""], { LORE_ACTOR: "agent:y" }, vi.fn())).toThrow(/--by/);
     });
   });
 
