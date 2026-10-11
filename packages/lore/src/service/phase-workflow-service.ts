@@ -112,7 +112,7 @@
  */
 
 import { z } from "zod";
-import { err, ok, hasClaimConflict, type Result } from "@lore/core";
+import { err, ok, hasClaimConflict, type Result, type RunId } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import {
   evidenceEntrySchema,
@@ -208,6 +208,11 @@ import {
   buildClaimParty,
   buildClaimConflictError,
   describeClaimRun,
+  // reason: BR-1058 / ADR decision 5 — phases judge claim staleness with the SAME run-aware functions
+  // the task path uses (an orphaned_dirty claim never ages out, a clean ended-run claim does not block).
+  resolveEffectiveClaimStaleness,
+  resolveEffectiveStalenessByDoc,
+  applyEffectiveSiblingStaleness,
 } from "./task-workflow-service.js";
 
 /**
@@ -892,8 +897,15 @@ export class PhaseWorkflowService {
     let carryForward = false;
 
     if (existingClaim !== undefined) {
-      const stale = isClaimStale(existingClaim, nowIso, this.claimTtlMinutes);
-      const holder = buildClaimHolder(phase, existingClaim, stale);
+      const staleResult = await resolveEffectiveClaimStaleness(
+        this.store,
+        existingClaim,
+        nowIso,
+        this.claimTtlMinutes,
+        new Map(),
+      );
+      if (!staleResult.ok) return staleResult;
+      const holder = buildClaimHolder(phase, existingClaim, staleResult.value);
       const decision = hasClaimConflict(holder, claimant);
       if (decision.kind === "conflict" && opts.steal !== true) {
         return err(buildClaimConflictError(phase.id, existingClaim, holder, nowIso));
@@ -1140,15 +1152,28 @@ export class PhaseWorkflowService {
 
     const nowIso = now();
     const claim = readClaim(phase);
-    if (claim !== undefined && claim.by !== opts.by && !isClaimStale(claim, nowIso, this.claimTtlMinutes)) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "extra.claim",
-        message:
-          `Phase "${phase.slug}" is held by a fresh claim from "${claim.by}" — lore done ` +
-          `refuses to archive a phase out from under an active session`,
-        value: claim.by,
-      });
+    if (claim !== undefined) {
+      // reason: BR-1056/BR-1058 — same run-based holder check and run-aware staleness as the task path.
+      const staleResult = await resolveEffectiveClaimStaleness(
+        this.store,
+        claim,
+        nowIso,
+        this.claimTtlMinutes,
+        new Map(),
+      );
+      if (!staleResult.ok) return staleResult;
+      const holder = buildClaimHolder(phase, claim, staleResult.value);
+      if (hasClaimConflict(holder, buildClaimParty(opts)).kind === "conflict") {
+        const runNote = holder.legacy ? "" : ` (run ${describeClaimRun(holder.harnessRun)})`;
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.claim",
+          message:
+            `Phase "${phase.slug}" is held by a fresh claim from "${claim.by}"${runNote} — lore done ` +
+            `refuses to archive a phase out from under an active session`,
+          value: claim.by,
+        });
+      }
     }
 
     const walk = computeArchiveWalk(phase.status);
@@ -1341,11 +1366,13 @@ export class PhaseWorkflowService {
       parentSpecStatus,
     );
 
-    const { anchorConflicts } = this.computeAnchorAdvisories(children, nowIso);
+    const staleByDoc = await resolveEffectiveStalenessByDoc(this.store, children, nowIso, this.claimTtlMinutes);
+    if (!staleByDoc.ok) return staleByDoc;
+    const { anchorConflicts } = this.computeAnchorAdvisories(children, nowIso, staleByDoc.value);
 
     return ok({
       records,
-      sessions: deriveSessions(children, nowIso, this.claimTtlMinutes),
+      sessions: deriveSessions(children, nowIso, this.claimTtlMinutes, staleByDoc.value),
       anchor_conflicts: anchorConflicts,
       // reason: task-a-mistyped-task-file-anchor-is-stored-and-consulted — the
       // PHASE tier does not (yet) probe its `extra.file_anchors` against the
@@ -1572,6 +1599,7 @@ export class PhaseWorkflowService {
   private computeAnchorAdvisories(
     docs: DocRecord[],
     nowIso: string,
+    staleByDoc: ReadonlyMap<DocId, boolean>,
   ): { anchorConflicts: AnchorConflict[] } {
     const anchorConflicts: AnchorConflict[] = [];
 
@@ -1584,8 +1612,17 @@ export class PhaseWorkflowService {
         if (other.id === doc.id) continue;
         const otherClaim = readClaim(other);
         if (otherClaim === undefined) continue;
-        if (isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
-        if (docClaim !== undefined && docClaim.by === otherClaim.by) continue;
+        if (staleByDoc.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
+        // reason: BR-1056 — same holder means same RUN; a shared derived name alone is two holders.
+        if (
+          docClaim !== undefined &&
+          hasClaimConflict(
+            buildClaimHolder(other, otherClaim, false),
+            buildClaimParty({ by: docClaim.by, harnessRun: (docClaim.harness_run ?? null) as RunId | null }),
+          ).kind === "refresh"
+        ) {
+          continue;
+        }
         const otherAnchors = extractFileAnchors(other);
         if (otherAnchors.length === 0) continue;
         const overlap = anchorsOverlap(docAnchors, otherAnchors);
@@ -1673,15 +1710,15 @@ export class PhaseWorkflowService {
     } else {
       const bundleResult = await this.gate.getPlanBundle(phase.parent_id);
       if (!bundleResult.ok) return bundleResult;
-      const anchorCtx = buildAnchorGateContext(
-        by,
-        phase,
+      const anchorCtx = await applyEffectiveSiblingStaleness(
+        this.store,
+        buildAnchorGateContext(by, phase, bundleResult.value.tasks, nowIso, this.claimTtlMinutes, sessionId),
         bundleResult.value.tasks,
         nowIso,
         this.claimTtlMinutes,
-        sessionId,
       );
-      ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx };
+      if (!anchorCtx.ok) return anchorCtx;
+      ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
     }
 
     return this.gate.enforcer.enforce("phase-claim", {
