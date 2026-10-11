@@ -39,6 +39,7 @@
  * @spec_ref AC-VRF-10 AC-VRF-2; SPEC-039 §M2
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -79,7 +80,7 @@ function makeApp(opts: {
   omitVerifyRunnerService?: boolean;
 } = {}): { app: App; calls: VerifyPlanCall[] } {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store);
+  corpusService = new CorpusService(store, new RecordLockService(store));
   const calls: VerifyPlanCall[] = [];
 
   const defaultResult: VerifyPlanResult = {
@@ -100,7 +101,7 @@ function makeApp(opts: {
   const app: App = {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

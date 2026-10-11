@@ -30,6 +30,7 @@
  * @spec_ref spec-multi-session-concurrency-queryable-ownership-checkout AC-OWN-2
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -92,7 +93,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflowService };
 }

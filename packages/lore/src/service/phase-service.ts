@@ -55,6 +55,7 @@ import type { DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
+import type { RecordLockService } from "./record-lock-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -76,8 +77,13 @@ export interface PhaseMigrationReport {
 export class PhaseService {
   /**
    * @param store - Storage abstraction (same instance passed to CorpusService)
+   * @param recordLock - REQUIRED (spec-documents-are-living-or-records D17): add/rm/rename on a
+   *   closed plan's phase list is a rewrite of a record (D16), so each asks this before it writes.
    */
-  constructor(private readonly store: StoreInterface) {}
+  constructor(
+    private readonly store: StoreInterface,
+    private readonly recordLock: RecordLockService,
+  ) {}
 
   // ── listPhases ────────────────────────────────────────────────────────────
 

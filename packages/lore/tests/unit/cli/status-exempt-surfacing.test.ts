@@ -47,6 +47,7 @@
  *   structural precedent this suite extends.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -81,7 +82,7 @@ async function makePlan(
 describe("CorpusService.status().exempt_plans — HAPPY: surfaces a plan carrying a valid prd_sync_exempt", () => {
   it("lists exactly the exempt plan's slug when one plan is exempt and one is not", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const exemptPlan = await makePlan(corpusService, "Exempt plan", {
       prd_sync_exempt: {
         reason: "pure refactor, no domain narrative impact",
@@ -103,7 +104,7 @@ describe("CorpusService.status().exempt_plans — HAPPY: surfaces a plan carryin
 
   it("counts multiple exempt plans (count, not just presence)", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const exemptExtra = {
       prd_sync_exempt: { reason: "narrow scope, no narrative change", by: "agent:t5r", at: "2026-07-26T00:00:00.000Z" },
     };
@@ -128,7 +129,7 @@ describe("CorpusService.status().exempt_plans — HAPPY: surfaces a plan carryin
 describe("CorpusService.status().exempt_plans — REGRESSION: zero exemptions is an empty array, not an absent field", () => {
   it("returns an empty exempt_plans array when no plan declares prd_sync_exempt", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     await makePlan(corpusService, "Never-exempt plan");
 
     const statusResult = await corpusService.status();
@@ -141,7 +142,7 @@ describe("CorpusService.status().exempt_plans — REGRESSION: zero exemptions is
 
   it("returns an empty exempt_plans array on a totally empty corpus", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
 
     const statusResult = await corpusService.status();
 

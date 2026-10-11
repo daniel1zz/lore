@@ -12,6 +12,7 @@
  * @spec_ref AC-ADF-4
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import {
   AIProviderService,
@@ -35,7 +36,7 @@ function makeAssessService(provider: InMemoryAIProvider) {
 }
 
 async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const planResult = await corpusService.create({
     type: "plan",
     title: "Grounding Test Plan",

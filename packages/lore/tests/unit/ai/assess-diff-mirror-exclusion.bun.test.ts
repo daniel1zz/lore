@@ -35,6 +35,7 @@
  * @spec_ref AC-JV-2
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "fs";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
@@ -64,7 +65,7 @@ function makeAssessService(provider: InMemoryAIProvider): AIProviderService {
 }
 
 async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const planResult = await corpusService.create({
     type: "plan",
     title: "Mirror Exclusion Plan",

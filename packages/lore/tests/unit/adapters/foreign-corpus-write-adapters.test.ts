@@ -60,6 +60,7 @@
  * repo's own `.lore/` corpus is never touched (root CLAUDE.md).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import {
@@ -122,9 +123,9 @@ const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(store: InMemoryStore): App {
   return {
-    corpusService: new CorpusService(store),
+    corpusService: new CorpusService(store, new RecordLockService(store)),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
@@ -370,7 +371,7 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
     // by `loader-foreign-write-surface.bun.test.ts` (behaviour) and by the
     // production-wiring census at the bottom of this file (call sites).
     const httpStore = new InMemoryStore();
-    const httpCorpusService = new CorpusService(httpStore);
+    const httpCorpusService = new CorpusService(httpStore, new RecordLockService(httpStore));
 
     const actor: ActorContext = {
       name: "agent-http-key",
@@ -402,7 +403,7 @@ describe("AC-CP-5(c) HTTP EXEMPTION — observed at the predicate boundary via a
 
   it("CONTROL — provenance:null is NOT indistinguishable from never-called: CorpusService.createHandoffDoc (a REAL write that deliberately bypasses this guard) succeeds while invoking the predicate ZERO times", async () => {
     const controlStore = new InMemoryStore();
-    const controlCorpusService = new CorpusService(controlStore);
+    const controlCorpusService = new CorpusService(controlStore, new RecordLockService(controlStore));
 
     guardSpy.mockClear();
     const result = await controlCorpusService.createHandoffDoc({ type: "prd", title: "AC-CP-5c bypass control" });

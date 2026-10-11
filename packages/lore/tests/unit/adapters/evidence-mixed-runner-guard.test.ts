@@ -66,6 +66,7 @@
  * @spec_ref task-vitest-run-silently-drops-a-bun-test-ts-named-alongside-a
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { NoOpTelemetry, ok } from "@lore/core";
@@ -243,11 +244,11 @@ let corpusService: CorpusService;
 /** Mirrors `evidence-completeness-guard.test.ts`'s fixture App verbatim. */
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store);
+  corpusService = new CorpusService(store, new RecordLockService(store));
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

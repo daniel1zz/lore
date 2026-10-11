@@ -82,6 +82,7 @@
  *   AC "Both named test files exist and are RED for missing-implementation reasons only".
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { ulid } from "ulidx";
 import type { ChecklistItem, DocId, DocRecord, LoreError, Result, TrackItem } from "@lore/core";
@@ -159,7 +160,7 @@ function scriptItem(id: string, overrides: Record<string, unknown> = {}): Record
 
 async function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const phaseChecklistService = new PhaseChecklistService(store);
   return { store, corpusService, phaseChecklistService };
 }

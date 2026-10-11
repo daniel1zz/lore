@@ -117,6 +117,7 @@ import type { AuditEntry, DocId, DocRecord } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { isPlanMember } from "./plan-membership.js";
+import type { RecordLockService } from "./record-lock-service.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 import { admitAcWrite, applyAcChange, decorateCiteRefusal, resolveCiteGateFor } from "./ac-write-chokepoint.js";
 import type { CiteGateConfig } from "./ac-cite-gate.js";
@@ -319,6 +320,11 @@ export class AcService {
    */
   constructor(
     private readonly store: StoreInterface,
+    /**
+     * REQUIRED (spec-documents-are-living-or-records D17): add/set/remove ask this before they write.
+     * Never optional — an unwired service must fail to construct.
+     */
+    private readonly recordLock: RecordLockService,
     options?: AcServiceOptions,
   ) {
     this.citeGate = options === undefined ? undefined : { raw: options.citeGate };

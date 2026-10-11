@@ -36,6 +36,7 @@
  * Fixture docs are raw store inserts (the idiom of rule-state-service.test.ts).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -175,7 +176,7 @@ interface World {
  */
 async function world(opts: { enabled: boolean; rules: Record<string, string[]>; specAcs: AcceptanceCriterion[] }): Promise<World> {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, undefined, undefined, new GateEnforcer(config(opts.enabled)));
+  const cs = new CorpusService(store, new RecordLockService(store), undefined, undefined, new GateEnforcer(config(opts.enabled)));
   const git = new FakeGit();
   const prd = await put(store, rawDoc("prd", "root-prd", {}, null));
   for (const [leaf, ids] of Object.entries(opts.rules)) {

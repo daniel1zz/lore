@@ -97,6 +97,7 @@
  *   §Public Interface, §Design Decisions D1, D2, D5; §Acceptance Criteria AC-P-3.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
@@ -501,7 +502,7 @@ describe("PhaseWorkflowService — plan membership: legacy task extra.plan_id vs
 describe("PhaseWorkflowService — REGRESSION §5: anchor-overlap gate field 'gate:phase-claim:anchor-overlap'", () => {
   it("a distinct-actor overlapping claim on phase docs is blocked with the renamed field", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const enforcer = new GateEnforcer(undefined);
     const service = new mod.PhaseWorkflowService(
       store,

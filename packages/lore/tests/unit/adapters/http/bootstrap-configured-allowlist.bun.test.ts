@@ -44,6 +44,7 @@
  * @spec_ref task-dashboard-bootstrap-origin-allowlist-hardcodes-port-5173 AC-1, AC-2
  */
 
+import { RecordLockService } from "../../../../src/service/record-lock-service.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -89,9 +90,9 @@ async function makeTestServer(allowedOrigins?: readonly string[]): Promise<TestC
   const machineAuth = createMachineAuthStores({ baseDir: machineAuthTmpDir });
 
   const app: App = {
-    corpusService: new CorpusService(docStore),
+    corpusService: new CorpusService(docStore, new RecordLockService(docStore)),
     reviewService: new ReviewService(docStore),
-    versionService: new VersionService(docStore),
+    versionService: new VersionService(docStore, new RecordLockService(docStore)),
     outlineService: new OutlineService(docStore),
     migrationService: new MigrationService(docStore),
     treeCheckService: new TreeCheckService(docStore),

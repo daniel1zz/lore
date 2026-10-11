@@ -21,6 +21,7 @@
  * The cross-PROCESS race for the citation gate lives in cite-retire-race.bun.test.ts.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,7 +54,7 @@ interface Targets {
 
 /** 8 round-robin targets: BR, AS, AD, BR, AS, AD, BR, AS (slugs). */
 async function seed(store: SQLiteStore): Promise<Targets> {
-  const cs = new CorpusService(store);
+  const cs = new CorpusService(store, new RecordLockService(store));
   const prd = await must(await cs.create({ type: "prd", title: "Race product", content: "root" } as CreateDocInput), "prd");
   const bizRoot = await node(cs, "Business root", prd, { node: "root" });
   const branch = await node(cs, "Race branch", bizRoot, { node: "branch" });
@@ -194,7 +195,7 @@ describe("rule registry — business-only control on real SQLite (green on main)
     const dir = mkdtempSync(join(tmpdir(), "lore-prefix-control-"));
     const store = new SQLiteStore(join(dir, "corpus.db"));
     try {
-      const cs = new CorpusService(store);
+      const cs = new CorpusService(store, new RecordLockService(store));
       const prd = await must(await cs.create({ type: "prd", title: "Control product", content: "root" } as CreateDocInput), "prd");
       const root = await node(cs, "Business root", prd, { node: "root" });
       const branch = await node(cs, "Control branch", root, { node: "branch" });

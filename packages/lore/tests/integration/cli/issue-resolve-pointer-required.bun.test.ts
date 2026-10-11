@@ -56,6 +56,7 @@
  * ever read them for anything but seeding.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -168,7 +169,7 @@ function makeFixture(prefix: string): Fixture {
  */
 async function fileReport(fixture: Fixture, title: string): Promise<string> {
   const store = new SQLiteStore(join(fixture.upstreamRoot, ".lore", "lore.db"));
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   try {
     const result = await corpusService.create({
       type: "task",

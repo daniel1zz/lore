@@ -23,6 +23,7 @@
  *  - Read-only: rules, citations, confidence, site_map unchanged.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -100,9 +101,9 @@ async function world(
   acCites: Array<Array<number | string>>,
 ): Promise<World> {
   const store = new InMemoryStore();
-  const corpus = new CorpusService(store);
+  const corpus = new CorpusService(store, new RecordLockService(store));
   const rules = new RuleService(store);
-  const ac = new AcService(store);
+  const ac = new AcService(store, new RecordLockService(store));
   const prd = await mustCreate(corpus, { type: "prd", title: "P", content: "root" } as CreateDocInput);
   const root = await mustCreate(corpus, {
     type: "baseline", title: "R", content: "r", parent_id: prd.id, extra: { node: "root", label: "Root" },

@@ -46,6 +46,7 @@
  * @spec_ref SPEC-061 §Scope D2, D3, D5; §Acceptance Criteria AC-061-4, AC-061-5, AC-061-6
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { ok, err } from "@lore/core";
 import type { AcceptanceCriterion, DocRecord, LoreError, PlanBundle, Result } from "@lore/core";
@@ -392,7 +393,7 @@ async function createTaskDoc(cs: CorpusService, planId: string, title = "Test Ta
 describe("REGRESSION — caller-supplied inconclusive result via addEvidence is rejected (SPEC-061 §Scope D2, mirrors the attestation guard)", () => {
   it("VALIDATION_ERROR field result, doc unchanged, exit code 4 (same mapping as the pre-existing attestation-smuggling guard)", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
     const planId = await createPlanDoc(corpusService);
     const taskId = await createTaskDoc(corpusService, planId);
@@ -424,7 +425,7 @@ describe("REGRESSION — caller-supplied inconclusive result via addEvidence is 
 
   it("a legitimate pass/fail addEvidence call is UNAFFECTED by the new guard (REGRESSION)", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
     const planId = await createPlanDoc(corpusService);
     const taskId = await createTaskDoc(corpusService, planId);

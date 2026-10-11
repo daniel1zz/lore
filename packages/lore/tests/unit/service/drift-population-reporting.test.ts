@@ -31,6 +31,7 @@
  * @spec_ref spec-a-write-side-fact-with-no-read-side-address-counts-with-no §M2, AC-RR-8
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { readFileSync, readdirSync } from "fs";
 import { join, relative, sep } from "path";
 import { describe, expect, it } from "vitest";
@@ -44,7 +45,7 @@ import { disabledCodeDriftPayload, runDrift } from "../../../src/flows/drift-flo
 
 function makeServices() {
   const store = new InMemoryStore();
-  return { store, corpusService: new CorpusService(store), driftCheckService: new DriftCheckService(store) };
+  return { store, corpusService: new CorpusService(store, new RecordLockService(store)), driftCheckService: new DriftCheckService(store) };
 }
 
 async function createDoc(corpusService: CorpusService, input: CreateDocInput): Promise<string> {

@@ -35,6 +35,7 @@
  * @spec_ref SPEC-079 §Acceptance Criteria AC-079-1
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -109,7 +110,7 @@ function prdPlanBlueprint(): TreeBlueprint {
 describe("HAPPY — link/unlink/fix each write exactly one well-shaped audit entry", () => {
   it("link() writes one action:'link' entry, doc_id=from, details={to_id, link_type}", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const a = await createPrd(cs, "Provenance A");
     const b = await createPrd(cs, "Provenance B");
 
@@ -124,7 +125,7 @@ describe("HAPPY — link/unlink/fix each write exactly one well-shaped audit ent
 
   it("unlink() writes one action:'unlink' entry, details.link_type is the removed-type array", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const a = await createPrd(cs, "Unlink A");
     const b = await createPrd(cs, "Unlink B");
     await cs.link(a.id, b.id, "relates-to");
@@ -166,7 +167,7 @@ describe("HAPPY — link/unlink/fix each write exactly one well-shaped audit ent
 describe("NEGATIVE — no state change means no audit entry", () => {
   it("unlink() with no matching link between the pair writes zero audit entries", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const a = await createPrd(cs, "No-op A");
     const b = await createPrd(cs, "No-op B");
     // never linked
@@ -180,7 +181,7 @@ describe("NEGATIVE — no state change means no audit entry", () => {
 
   it("a rejected link() (INVALID_PARENT_TYPE) writes zero audit entries", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await insertRawDoc(store, "prd", "Root", null);
     const spec = await insertRawDoc(store, "spec", "A Spec", prd.id);
     const plan = await insertRawDoc(store, "plan", "A Plan", prd.id);
@@ -202,7 +203,7 @@ describe("NEGATIVE — no state change means no audit entry", () => {
 describe("BOUNDARY — multi-type unlink collapses to one entry; zero fixable drifts write nothing", () => {
   it("unlink() removing TWO link types between the same pair writes ONE entry with both types", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const a = await createPrd(cs, "Multi A");
     const b = await createPrd(cs, "Multi B");
     await cs.link(a.id, b.id, "relates-to");
@@ -243,7 +244,7 @@ describe("ERROR — a failed store write never reaches the audit write", () => {
       }
     }
     const store = new FailingLinkStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const a = await createPrd(cs, "Fail A");
     const b = await createPrd(cs, "Fail B");
 
@@ -283,7 +284,7 @@ describe("ERROR — a failed store write never reaches the audit write", () => {
 describe("STATE — link/unlink/link accumulates the correct per-action entry counts", () => {
   it("link → unlink → link on the same pair yields 2 'link' entries and 1 'unlink' entry", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const a = await createPrd(cs, "Sequence A");
     const b = await createPrd(cs, "Sequence B");
 
@@ -303,7 +304,7 @@ describe("STATE — link/unlink/link accumulates the correct per-action entry co
 describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMILY member", () => {
   it("AuditService.verify() stays clean after create + link + unlink + a REAL applied fix", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const tcs = new TreeCheckService(store);
     const auditService = new AuditService(store, { verifySince: FAR_PAST });
 
@@ -345,7 +346,7 @@ describe("REGRESSION — link/unlink/tree-fix join no VERSION_ACTION_AUDIT_FAMIL
 
   it("link()/unlink()/fix() write no versions row — only the audit entry", async () => {
     const store = makeStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const a = await createPrd(cs, "NoVersion A");
     const b = await createPrd(cs, "NoVersion B");
     const versionsBefore = await store.findVersions(a.id);

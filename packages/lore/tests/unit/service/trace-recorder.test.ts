@@ -14,7 +14,7 @@
  *               (Zod-guarded internally, see BOUNDARY below).
  *   BOUNDARY:   a malformed candidate event (empty actor) is swallowed by the
  *               Zod guard, never thrown, never inserted.
- *   STATE:      bare `new CorpusService(store)` / `new GateEnforcer(config)`
+ *   STATE:      bare `new CorpusService(store, new RecordLockService(store))` / `new GateEnforcer(config)`
  *               (no traceRecorder wired) insert ZERO trace rows.
  *   ERROR:      a recorder whose `insert` port THROWS SYNCHRONOUSLY does not
  *               alter the traced operation's own Result (AC-TRACE-3's explicit
@@ -27,6 +27,7 @@
  * @spec_ref SPEC-102 §Acceptance Criteria AC-TRACE-2, AC-TRACE-3
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -72,7 +73,7 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
   it("HAPPY: CorpusService.get with a wired recorder inserts a kind=get row with correct actor/surface/doc_id", async () => {
     const store = makeStore();
     const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
-    const service = new CorpusService(store, undefined, undefined, undefined, recorder);
+    const service = new CorpusService(store, new RecordLockService(store), undefined, undefined, undefined, recorder);
 
     const createResult = await service.create({ type: "prd", title: "Trace Me" });
     expect(createResult.ok).toBe(true);
@@ -96,7 +97,7 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
   it("HAPPY: CorpusService.search with a wired recorder inserts a kind=search row with correct hit_count (post SPEC-043 filtering)", async () => {
     const store = makeStore();
     const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "cli");
-    const service = new CorpusService(store, undefined, undefined, undefined, recorder);
+    const service = new CorpusService(store, new RecordLockService(store), undefined, undefined, undefined, recorder);
 
     await service.create({ type: "prd", title: "Searchable Widget Factory" });
 
@@ -119,7 +120,7 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
 
   it("STATE: bare CorpusService construction (no traceRecorder wired) inserts ZERO trace rows on get/search", async () => {
     const store = makeStore();
-    const service = new CorpusService(store); // no traceRecorder — mirrors every pre-existing unit test construction
+    const service = new CorpusService(store, new RecordLockService(store)); // no traceRecorder — mirrors every pre-existing unit test construction
 
     const createResult = await service.create({ type: "prd", title: "Untraced" });
     expect(createResult.ok).toBe(true);
@@ -137,7 +138,7 @@ describe("TraceRecorder — read instrumentation (AC-TRACE-2)", () => {
   it("HAPPY: CorpusService.get does NOT trace a failed lookup (DOC_NOT_FOUND)", async () => {
     const store = makeStore();
     const recorder = new TraceRecorder(store.insertTraceEvent.bind(store), () => "agent");
-    const service = new CorpusService(store, undefined, undefined, undefined, recorder);
+    const service = new CorpusService(store, new RecordLockService(store), undefined, undefined, undefined, recorder);
 
     const getResult = await service.get("01NONEXISTENT00000000001");
     expect(getResult.ok).toBe(false);
@@ -253,7 +254,7 @@ describe("TraceRecorder — deny instrumentation + isolation (AC-TRACE-3)", () =
       throw new Error("simulated synchronous port failure");
     };
     const recorder = new TraceRecorder(throwingInsert, () => "agent");
-    const service = new CorpusService(store, undefined, undefined, undefined, recorder);
+    const service = new CorpusService(store, new RecordLockService(store), undefined, undefined, undefined, recorder);
 
     const createResult = await service.create({ type: "prd", title: "Untouched By Failure" });
     expect(createResult.ok).toBe(true);

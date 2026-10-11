@@ -21,7 +21,7 @@
  * and its continued success is itself part of what this suite proves.
  *
  * Fixtures mirror `issue-closure.bun.test.ts`'s established hybrid idiom:
- * direct `SQLiteStore`/`CorpusService` seeding (bare `new CorpusService(store)`
+ * direct `SQLiteStore`/`CorpusService` seeding (bare `new CorpusService(store, new RecordLockService(store))`
  * — ungated, no `GateEnforcer`) for doc creation and lifecycle-status walks
  * (`lore create task` has no CLI path to write `extra.issue_report`; walking a
  * spec/plan through `approved`/`active`/`archived` via the CLI would engage
@@ -73,6 +73,7 @@
  *   task-p3-e2e-closure-proof-live-backlog-closure.
  */
 
+import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "fs";
@@ -302,7 +303,7 @@ describe("AC-ICL-8: filed issue + archived spec resolves-edge computes fixed", (
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (happy)");
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 Fixing Spec");
@@ -340,7 +341,7 @@ describe("AC-ICL-8: --check-issues flags the unclosed escalation exactly while t
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (state)");
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 State Fixing Spec");
@@ -397,7 +398,7 @@ describe("AC-ICL-8: a resolves edge whose source is not yet terminal never false
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (negative)");
     // Deliberately left at `draft` — no walkToActive/walkToArchived call.
@@ -435,7 +436,7 @@ describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not ju
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (boundary)");
     const fixingPlan = await seedFixingPlan(cs, prd.id, "AC-ICL-8 Boundary Fixing Plan");
@@ -471,7 +472,7 @@ describe("AC-ICL-8: the hand-set anti-pattern is rejected even inside a genuinel
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (error)");
     const fixingSpec = await seedFixingSpec(cs, prd.id, "AC-ICL-8 Error Fixing Spec");
@@ -515,7 +516,7 @@ describe("AC-ICL-8: archived-with-a-fixed-edge never regresses to closed; an unr
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "AC-ICL-8 filed defect (regression, fixed)");
     // A completely unrelated, never-touched issue report living in the SAME

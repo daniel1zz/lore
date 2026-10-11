@@ -13,6 +13,7 @@
  * @spec_ref AC-BLS3-4
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
@@ -30,8 +31,8 @@ function harness() {
   const store = new InMemoryStore();
   return {
     store,
-    cs: new CorpusService(store),
-    ac: new AcService(store),
+    cs: new CorpusService(store, new RecordLockService(store)),
+    ac: new AcService(store, new RecordLockService(store)),
     reqs: new RequirementService(store, false),
   };
 }

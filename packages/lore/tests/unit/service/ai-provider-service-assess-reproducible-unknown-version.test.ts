@@ -33,6 +33,7 @@
  * @spec_ref task-getassesstemplatereproducibility-has-zero-production-callers
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, vi } from "vitest";
 
 const SENTINEL_MESSAGE = "MOCKED_UNREGISTERED_REPRODUCIBILITY_SENTINEL_7f3a9c";
@@ -82,7 +83,7 @@ function makeAssessService(provider: InMemoryAIProvider) {
 }
 
 async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
 
   const prdResult = await corpusService.create({
     type: "prd",

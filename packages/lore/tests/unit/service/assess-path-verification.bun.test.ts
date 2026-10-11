@@ -49,6 +49,7 @@
  * @spec_ref AC-JV-1
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, unlinkSync, rmSync } from "fs";
 import { join } from "path";
@@ -69,7 +70,7 @@ function makeAssessService(provider: InMemoryAIProvider): AIProviderService {
 }
 
 async function makeBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const planResult = await corpusService.create({
     type: "plan",
     title: "Path Verification Plan",

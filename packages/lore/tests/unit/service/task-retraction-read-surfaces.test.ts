@@ -30,6 +30,7 @@
  *   Requirement 2 ("MUST affect lore list, lore ready and lore search")
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -42,7 +43,7 @@ import type { CreateDocInput } from "@lore/core";
 
 function makeServices(ttl = 120) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const validityService = new ValidityService(store);
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
   return { store, corpusService, validityService, taskWorkflowService };
@@ -124,7 +125,7 @@ describe("HAPPY — a retracted task disappears from list/search/ready by defaul
 describe("STATE — readyAdhoc() excludes a retracted ad-hoc task the same way", () => {
   it("an --adhoc task retracted via invalidate is absent from readyAdhoc()", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const validityService = new ValidityService(store);
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
 

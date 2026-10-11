@@ -39,6 +39,7 @@
  * cited-fill-cap pushes file rule out) / REGRESSION (byte-identical absent case).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -69,7 +70,7 @@ let app: App;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpus = new CorpusService(store);
+  corpus = new CorpusService(store, new RecordLockService(store));
   rules = new RuleService(store);
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
@@ -79,7 +80,7 @@ function makeApp(): App {
   return {
     corpusService: corpus,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

@@ -10,6 +10,7 @@
  * task -> no block; found-path ordering keeps the scope closure last) / ERROR (unknown plan fails).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -95,7 +96,7 @@ async function feedFor(plan: DocRecord): Promise<string> {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   store = new InMemoryStore();
-  corpus = new CorpusService(store);
+  corpus = new CorpusService(store, new RecordLockService(store));
   rules = new RuleService(store);
   workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const sessionService = new SessionService(store, {

@@ -45,6 +45,7 @@
  * @spec_ref spec-a-write-side-fact-with-no-read-side-address-counts-with-no §M2, AC-RR-9
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -78,7 +79,7 @@ let app: App;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store);
+  corpusService = new CorpusService(store, new RecordLockService(store));
   const judgmentService = new JudgmentService(store, new NoOpTelemetry());
   const aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: "{}" });
   const providers = new Map([["in-memory", aiProvider]]) as unknown as ReadonlyMap<
@@ -100,7 +101,7 @@ function makeApp(): App {
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

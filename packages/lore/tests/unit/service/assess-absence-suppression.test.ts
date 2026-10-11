@@ -44,6 +44,7 @@
  * @spec_ref AC-AEP-5, AC-AEP-6, AC-AEP-7, AC-AEP-8, AC-AEP-11, AC-AEP-12
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -75,7 +76,7 @@ function makeAssessService(provider: InMemoryAIProvider, budgets = DEFAULT_BUDGE
 /** Creates a plan with one task per `{title, content}` entry, in order. */
 async function makeBundleWithTasks(tasks: { title: string; content: string }[]): Promise<PlanBundle> {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const planResult = await corpusService.create({
     type: "plan",
     title: "Absence Suppression Test Plan",

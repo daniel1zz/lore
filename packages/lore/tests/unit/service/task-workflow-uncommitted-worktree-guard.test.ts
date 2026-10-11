@@ -49,6 +49,7 @@
  * @spec_ref task-the-uncommitted-worktree-guard-treats-no-claim-at-all-as-a
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
@@ -113,7 +114,7 @@ afterEach(() => {
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflowService };
 }

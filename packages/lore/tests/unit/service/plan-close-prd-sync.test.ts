@@ -16,6 +16,7 @@
  * Coverage dimensions: HAPPY / NEGATIVE / BOUNDARY / STATE / REGRESSION.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -26,7 +27,7 @@ const PAST_CLAIM_AT = "2020-01-01T00:00:00.000Z";
 
 function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, undefined, undefined, new GateEnforcer(config));
+  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, new GateEnforcer(config));
   return { store, corpusService };
 }
 

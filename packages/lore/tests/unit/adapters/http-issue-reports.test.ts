@@ -38,6 +38,7 @@
  *   spec-issue-closure-loop-computed-resolution-agent-reachable §D7, AC-ICL-9.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
@@ -74,7 +75,7 @@ const stubApiKeyStore = {} as ApiKeyStore;
 
 function makeApp(store: InMemoryStore): App {
   return {
-    corpusService: new CorpusService(store),
+    corpusService: new CorpusService(store, new RecordLockService(store)),
     // reason: real ReviewService/AuditService (not null-cast, unlike the
     // other unused services below) — the AC-074-3 exclusion this route now
     // implements reads real "reject"/"approve" audit entries, which only

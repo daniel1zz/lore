@@ -8,6 +8,7 @@
  * Source: SPEC-055 §Acceptance Criteria AC-055-5, AC-055-6, AC-055-7.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -17,9 +18,9 @@ import type { CreateDocInput, DocRecord } from "@lore/core";
 
 function harness(requirementQuantifiableEnabled = true) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const requirementService = new RequirementService(store, requirementQuantifiableEnabled);
-  const acService = new AcService(store);
+  const acService = new AcService(store, new RecordLockService(store));
   return { store, corpusService, requirementService, acService };
 }
 

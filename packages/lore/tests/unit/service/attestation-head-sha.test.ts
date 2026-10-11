@@ -26,6 +26,7 @@
  *      shape the sibling guard for `ac_oracle_generation` uses — and writes no row.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -241,7 +242,7 @@ describe("runner attestation head_sha / worktree_dirty (C5)", () => {
 describe("self-reported evidence never carries head_sha / worktree_dirty (C5)", () => {
   async function makeTask(): Promise<{ svc: TaskWorkflowService; store: InMemoryStore; taskId: string }> {
     const store = new InMemoryStore();
-    const corpus = new CorpusService(store);
+    const corpus = new CorpusService(store, new RecordLockService(store));
     const svc = new TaskWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
     const plan = await corpus.create({ type: "plan", title: "P", content: "b" } as CreateDocInput);
     if (!plan.ok) throw new Error(`plan create failed: ${JSON.stringify(plan.error)}`);

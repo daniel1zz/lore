@@ -43,6 +43,7 @@
  *               path left the pre-existing generated-slug behavior untouched.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,7 +86,7 @@ async function waitFor(path, timeoutMs) {
 }
 
 const store = new SQLiteStore(dbPath);
-const corpusService = new CorpusService(store);
+const corpusService = new CorpusService(store, new RecordLockService(store));
 
 // Signal "open and about to wait" BEFORE polling the barrier, so the parent
 // can confirm both workers are truly poised before releasing either.
@@ -234,7 +235,7 @@ describe("CorpusService.create verbatim slug is the sole identity arbiter (D2, A
 
   it("REGRESSION: create() with NO slug still generates a collision-suffixed '-2' slug on a genuine title collision — the verbatim path left this behavior byte-identical", async () => {
     const store = new SQLiteStore(dbPath);
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
 
     const title = "Verbatim Slug Regression Probe";
 

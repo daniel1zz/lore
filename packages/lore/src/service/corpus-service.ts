@@ -109,6 +109,7 @@ import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
 import { isPlanMember } from "./plan-membership.js";
+import { bodyDiffers, type RecordLockService } from "./record-lock-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
 // reason: NOT a cross-service import — `service/CLAUDE.md`'s "no cross-service imports"
 // rule scopes "service" to a store-holding class composed in `app.ts`. These four are
@@ -783,6 +784,12 @@ export class CorpusService {
    */
   constructor(
     private readonly store: StoreInterface,
+    /**
+     * REQUIRED (spec-documents-are-living-or-records D17): every rewrite path in `set()` asks this
+     * before it writes. Never optional — an unwired service must fail to construct, not silently
+     * leave the record-edit gate off.
+     */
+    private readonly recordLock: RecordLockService,
     telemetry: Telemetry = new NoOpTelemetry(),
     private readonly claimTtlMinutes?: number,
     private readonly gateEnforcer?: GateEnforcer,

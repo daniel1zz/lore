@@ -84,6 +84,7 @@ import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
 import { executeVerifySpawnSpec } from "./service/verify-executor.js";
 import { GateEnforcer } from "./service/gate-enforcer.js";
+import { RecordLockService } from "./service/record-lock-service.js";
 import { TraceRecorder } from "./service/trace-recorder.js";
 import { TraceStatsService } from "./service/trace-stats-service.js";
 import { pruneTraceEventsOpportunistically } from "./service/trace-retention.js";
@@ -698,8 +699,13 @@ function buildAppFromSqlite(
   // CorpusService gates spec-create (_createImpl) and spec-promote reached via `set`.
   // 5th arg wires SPEC-102's OPTIONAL TraceRecorder (undefined when trace.enabled
   // resolves false) — CorpusService.get/search fire a fire-and-forget trace row.
+  // reason: spec-documents-are-living-or-records D17 — ONE RecordLockService (store + the config-/audit-wired
+  // gate enforcer) is the REQUIRED constructor argument of the four rewrite-path services below, so no write
+  // path can be composed ungated.
+  const recordLockService = new RecordLockService(store, gateEnforcer);
   const corpusService = new CorpusService(
     store,
+    recordLockService,
     telemetry,
     claimTtlMinutes,
     gateEnforcer,
@@ -790,7 +796,7 @@ function buildAppFromSqlite(
       judgmentService,
       judgmentRequiredTypes,
     ),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, recordLockService),
     outlineService,
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
@@ -810,7 +816,7 @@ function buildAppFromSqlite(
       return ok(renderResolvedToMarkdown(resolved.value));
     }),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
-    phaseService: new PhaseService(store),
+    phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store),
@@ -874,7 +880,7 @@ function buildAppFromSqlite(
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, { citeGate: citeGateRaw }),
+    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled
@@ -1081,8 +1087,13 @@ function buildAppFromTurso(
   // reason: 4th arg wires GateEnforcer (retro follow-up item 8) — see buildAppFromSqlite's
   // identical comment. 5th arg wires SPEC-102's OPTIONAL TraceRecorder — see
   // buildAppFromSqlite's identical comment.
+  // reason: spec-documents-are-living-or-records D17 — ONE RecordLockService (store + the config-/audit-wired
+  // gate enforcer) is the REQUIRED constructor argument of the four rewrite-path services below, so no write
+  // path can be composed ungated.
+  const recordLockService = new RecordLockService(store, gateEnforcer);
   const corpusService = new CorpusService(
     store,
+    recordLockService,
     telemetry,
     claimTtlMinutes,
     gateEnforcer,
@@ -1155,7 +1166,7 @@ function buildAppFromTurso(
       judgmentService,
       judgmentRequiredTypes,
     ),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, recordLockService),
     outlineService,
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
@@ -1176,7 +1187,7 @@ function buildAppFromTurso(
       return ok(renderResolvedToMarkdown(resolved.value));
     }),
     // reason: PhaseService depends only on StoreInterface — stateless, no AI, no telemetry. SPEC-023 §9.1.
-    phaseService: new PhaseService(store),
+    phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
     runService: new RunService(store),
@@ -1235,7 +1246,7 @@ function buildAppFromTurso(
     auditService: new AuditService(store, { verifySince: auditVerifySince }),
     // reason: AcService depends only on StoreInterface — stateless, no AI, no telemetry,
     // same shape as PhaseService. SPEC-038 §4, §6, §9.1.
-    acService: new AcService(store, { citeGate: citeGateRaw }),
+    acService: new AcService(store, recordLockService, { citeGate: citeGateRaw }),
     // reason: RequirementService is store-only, same shape as AcService (SPEC-055).
     // 2nd arg wires the resolved workflow.requirement_quantifiable.enabled config
     // brake (SPEC-059 §Scope) — one resolution path (resolveRequirementQuantifiableEnabled

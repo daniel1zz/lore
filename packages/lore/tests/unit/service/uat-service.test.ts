@@ -19,6 +19,7 @@
  *   task-lore-uat-record-bu-jiao-yan-mu-biao-doc-lei-xing-verdict AC-1..AC-8.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -46,7 +47,7 @@ const REJECT_VERDICT: UatVerdict = {
 function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
   const uatService = new UatService({
     createUatDoc: corpusService.createUatDoc.bind(corpusService),
     resolveTarget: (idOrSlug: string) => resolveDoc(store, idOrSlug),

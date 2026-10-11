@@ -30,6 +30,7 @@
  * @spec_ref spec-plan-closure-must-be-loud-terminality-divergence-silent DD-2 / AC-CLOSURE-3
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -43,7 +44,7 @@ import type { CreateDocInput, DocRecord, Result, LoreError } from "@lore/core";
 
 function makeServices(ttl = 120) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
   return { store, corpusService, taskWorkflowService };
 }

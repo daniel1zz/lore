@@ -22,6 +22,7 @@
  *   §Acceptance Criteria AC-PCI-7, AC-PCI-8.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -73,7 +74,7 @@ function attestedEntry(command: string, opts: Partial<EvidenceEntry> = {}): Evid
 function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
   return { store, corpusService };
 }
 

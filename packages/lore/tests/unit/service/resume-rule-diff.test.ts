@@ -31,6 +31,7 @@
  * inputs -> different outputs, so a fixed stub cannot pass).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -148,7 +149,7 @@ async function diffOf(task: DocRecord): Promise<RuleDiff> {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   store = new InMemoryStore();
-  corpus = new CorpusService(store);
+  corpus = new CorpusService(store, new RecordLockService(store));
   rules = new RuleService(store);
   workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
 });

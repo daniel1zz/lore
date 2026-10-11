@@ -6,6 +6,7 @@
  * @spec_ref AC-BLC-8
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,9 +43,9 @@ async function mustCreate(corpus: CorpusService, input: CreateDocInput): Promise
 /** One live rule, one criterion per command (AC-F-<i+1>), each citing the rule. */
 async function world(commands: string[]): Promise<InMemoryStore> {
   const store = new InMemoryStore();
-  const corpus = new CorpusService(store);
+  const corpus = new CorpusService(store, new RecordLockService(store));
   const rules = new RuleService(store);
-  const ac = new AcService(store);
+  const ac = new AcService(store, new RecordLockService(store));
   const prd = await mustCreate(corpus, { type: "prd", title: "P", content: "root" } as CreateDocInput);
   const root = await mustCreate(corpus, { type: "baseline", title: "R", content: "r", parent_id: prd.id, extra: { node: "root", label: "Root" } } as CreateDocInput);
   const branch = await mustCreate(corpus, { type: "baseline", title: "B", content: "b", parent_id: root.id, extra: { node: "branch", label: "Branch" } } as CreateDocInput);

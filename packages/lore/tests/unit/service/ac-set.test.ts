@@ -44,6 +44,7 @@
  * @spec_ref AC-ACS-1 AC-ACS-2 AC-ACS-4 AC-ACS-5 AC-ACS-6 AC-ACS-8 AC-ACS-9 AC-ACS-10 AC-ACS-11 AC-ACS-12
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
@@ -55,8 +56,8 @@ import type { CreateDocInput } from "@lore/core";
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
-  const acService = new AcService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const acService = new AcService(store, new RecordLockService(store));
   return { store, corpusService, acService };
 }
 

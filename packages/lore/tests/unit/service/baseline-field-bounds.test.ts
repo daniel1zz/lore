@@ -9,6 +9,7 @@
  * Driven through RuleService / CorpusService (the real write paths) on an InMemoryStore.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -32,7 +33,7 @@ interface World {
 
 async function world(): Promise<World> {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store);
+  const cs = new CorpusService(store, new RecordLockService(store));
   const rules = new RuleService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");
   const mk = async (title: string, parent: DocRecord, node: string): Promise<DocRecord> =>

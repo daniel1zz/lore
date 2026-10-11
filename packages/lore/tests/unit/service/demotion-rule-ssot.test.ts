@@ -54,6 +54,7 @@
  *   task-the-approved-to-draft-demotion-rule-is-mirrored-in-ac.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { CreateDocInput, DocStatus } from "@lore/core";
 
@@ -111,7 +112,7 @@ type Services = {
 
 function makeServices(): Services {
   const store = new InMemoryStore();
-  return { store, corpusService: new CorpusService(store), acService: new AcService(store) };
+  return { store, corpusService: new CorpusService(store, new RecordLockService(store)), acService: new AcService(store, new RecordLockService(store)) };
 }
 
 /** An APPROVED spec carrying one script-mode criterion (`AC-X-1`). */

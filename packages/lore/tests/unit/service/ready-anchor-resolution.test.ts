@@ -31,6 +31,7 @@
  * @spec_ref task-a-mistyped-task-file-anchor-is-stored-and-consulted
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -45,7 +46,7 @@ const NOW = "2026-08-06T12:00:00.000Z";
 function makeServices(store: StoreInterface = new InMemoryStore()) {
   return {
     store,
-    corpusService: new CorpusService(store),
+    corpusService: new CorpusService(store, new RecordLockService(store)),
     taskWorkflowService: new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 }),
   };
 }

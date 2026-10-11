@@ -27,6 +27,7 @@
  * @spec_ref SPEC-044 §Design Decisions D1, D2, D4, D9, D13; AC-SP-3
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "@lore/core";
 import type {
@@ -115,7 +116,7 @@ describe("HAPPY — probeBatch records one judgment + one audit row per candidat
   it("action='staleness_probe', actor=commissioning by, details.version present; candidate order matches the pure layer's sort", async () => {
     const store = new CountingStore();
     const telemetry = makeNoOpTelemetry();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const judgmentService = new JudgmentService(store, telemetry);
 
     const low = await createAndBackdate(corpusService, store, "knowledge", "Low priority K", 20);
@@ -173,7 +174,7 @@ describe("BOUNDARY — assembly issues EXACTLY ONE countLinksByToIds + ONE lates
   it("regardless of candidate count (3 candidates -> still exactly 1 + 1 calls)", async () => {
     const store = new CountingStore();
     const telemetry = makeNoOpTelemetry();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const judgmentService = new JudgmentService(store, telemetry);
 
     await createAndBackdate(corpusService, store, "knowledge", "K1", 20);
@@ -197,7 +198,7 @@ describe("ERROR — a per-candidate probeStaleness failure is collected, never a
   it("a failing candidate's outcome carries the error; a SUBSEQUENT candidate still gets probed and recorded", async () => {
     const store = new CountingStore();
     const telemetry = makeNoOpTelemetry();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const judgmentService = new JudgmentService(store, telemetry);
 
     const willFail = await createAndBackdate(corpusService, store, "knowledge", "Will fail K", 20);
@@ -226,7 +227,7 @@ describe("STATE — D13: the probed doc's version AND updated_at are byte-identi
   it("no version bump, no extra mutation, no status transition", async () => {
     const store = new CountingStore();
     const telemetry = makeNoOpTelemetry();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const judgmentService = new JudgmentService(store, telemetry);
 
     const doc = await createAndBackdate(corpusService, store, "knowledge", "Immutable K", 20);
@@ -254,7 +255,7 @@ describe("REGRESSION — staleness_probe audit action is excluded from VERSION_A
   it("AuditService.verify() stays clean despite a staleness_probe entry sharing (doc_id, version) with a real create versions row", async () => {
     const store = new CountingStore();
     const telemetry = makeNoOpTelemetry();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const judgmentService = new JudgmentService(store, telemetry);
     const auditService = new AuditService(store, { verifySince: "2000-01-01T00:00:00Z" });
 

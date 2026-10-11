@@ -69,6 +69,7 @@
  * carrying task/phase).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -106,7 +107,7 @@ let corpusService: CorpusService;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store);
+  corpusService = new CorpusService(store, new RecordLockService(store));
   const gateEnforcer = new GateEnforcer(undefined);
   const phaseServices = buildPhaseServices(store, new NoOpTelemetry(), 120, gateEnforcer, corpusService);
   const sessionService = new SessionService(store, {
@@ -119,7 +120,7 @@ function makeApp(): App {
     corpusService,
     ...phaseServices,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

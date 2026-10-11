@@ -15,7 +15,7 @@
  * connection would never contend.
  *
  * ── PINNED CONTRACT (the implementation builds to exactly this) ─────────────────────────
- *   - `new AcService(store, { citeGate: { mode: "off"|"report"|"enforce", armed_branches: string[] } })`
+ *   - `new AcService(store, new RecordLockService(store), { citeGate: { mode: "off"|"report"|"enforce", armed_branches: string[] } })`
  *     `armed_branches` holds baseline BRANCH SLUGS. A spec is in the branch of the leaf its ACs
  *     cite (C4). `citeCriterion` consults the gate for the ids it ADDS.
  *   - enforce + armed branch + cited rule not live => `citeCriterion` returns `ok:false` with a
@@ -37,6 +37,7 @@
  * land after the retire committed while the gate was armed.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -79,9 +80,9 @@ async function must<T>(r: { ok: boolean; value?: T; error?: unknown }, what: str
 async function seed(dir: string): Promise<Fixture> {
   const dbPath = join(dir, "corpus.db");
   const store = new SQLiteStore(dbPath);
-  const cs = new CorpusService(store);
+  const cs = new CorpusService(store, new RecordLockService(store));
   const rules = new RuleService(store);
-  const ac = new AcService(store);
+  const ac = new AcService(store, new RecordLockService(store));
 
   const prd = await must(await cs.create({ type: "prd", title: "Race product", content: "root" } as CreateDocInput), "prd");
   const root = await must(await rules.addNode(prd.id, { node: "root", label: "Root", title: "Race root", content: "r" }, { by: "agent:seed" }), "root");

@@ -47,6 +47,7 @@
  * @spec_ref task-the-judge-truncation-notice-says-content-was-cut-but-never
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { REVIEW_TEMPLATES } from "../../../src/ai/review-template.js";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
@@ -290,7 +291,7 @@ describe("AIProviderService.judgeDoc — REGRESSION end-to-end: truncated:true s
   });
 
   async function makeReviewBundle(store: InMemoryStore, content: string) {
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const prdResult = await corpusService.create({
       type: "prd",
       title: "Truncation Headings Test PRD",

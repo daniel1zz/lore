@@ -11,6 +11,7 @@
  * @spec_ref AC-CORPUS-CANONICALISE-001
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -18,7 +19,7 @@ import { canonicaliseBody } from "@lore/core";
 
 function makeService() {
   const store = new InMemoryStore();
-  const service = new CorpusService(store);
+  const service = new CorpusService(store, new RecordLockService(store));
   return { service, store };
 }
 

@@ -31,6 +31,7 @@
  *           AC-WF-11 AC-WF-12, SPEC-032 §3.4 AC-6
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
@@ -78,7 +79,7 @@ class CapturingTelemetry implements Telemetry {
 
 function makeServices(ttl = 120) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const telemetry = new CapturingTelemetry();
   const taskWorkflowService = new TaskWorkflowService(store, telemetry, { claimTtlMinutes: ttl });
   return { store, corpusService, taskWorkflowService, telemetry };
@@ -96,7 +97,7 @@ function makeServicesWithAcPort(
   ttl = 120,
 ) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const telemetry = new CapturingTelemetry();
   let callCount = 0;
   const spiedPort = async (planId: string): Promise<Result<Set<string> | null, LoreError>> => {
@@ -897,7 +898,7 @@ describe("REGRESSION — legacy task_status doc still validates (AC-WF-12, D6)",
 describe("REGRESSION — existing phase validation untouched by claim/evidence writes", () => {
   it("claim() preserves an existing extra.phase value (spread must not drop unrelated keys)", async () => {
     const { store, corpusService, taskWorkflowService } = makeServices();
-    const phaseService = new PhaseService(store);
+    const phaseService = new PhaseService(store, new RecordLockService(store));
     const planId = await createPlan(corpusService);
     await phaseService.addPhase(planId, "Foundation");
     const taskId = await createTask(corpusService, planId, "Phased Task", { phase: "Foundation" });
@@ -910,7 +911,7 @@ describe("REGRESSION — existing phase validation untouched by claim/evidence w
 
   it("addEvidence preserves an existing extra.phase value", async () => {
     const { store, corpusService, taskWorkflowService } = makeServices();
-    const phaseService = new PhaseService(store);
+    const phaseService = new PhaseService(store, new RecordLockService(store));
     const planId = await createPlan(corpusService);
     await phaseService.addPhase(planId, "Build");
     const taskId = await createTask(corpusService, planId, "Phased Task", { phase: "Build" });
@@ -1116,8 +1117,8 @@ describe("STATE / REGRESSION — evidence without ac_ref never invokes the port 
 
 function makeServicesWithRealAcPorts(ttl = 120) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
-  const acService = new AcService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const acService = new AcService(store, new RecordLockService(store));
   const telemetry = new CapturingTelemetry();
   const taskWorkflowService = new TaskWorkflowService(
     store,

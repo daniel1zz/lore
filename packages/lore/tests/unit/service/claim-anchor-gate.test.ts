@@ -27,6 +27,7 @@
  * @spec_ref SPEC-042 §Design Decisions D5; AC-S3-2, AC-S3-3, AC-S3-11
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { approveCitedSpec } from "../../helpers/live-rule-fixture.js";
@@ -54,7 +55,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 function makeServices(config?: LoreConfig) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const enforcer = new GateEnforcer(config);
   const taskWorkflowService = new TaskWorkflowService(
     store,

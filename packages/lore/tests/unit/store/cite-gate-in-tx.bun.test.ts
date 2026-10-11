@@ -18,6 +18,7 @@
  * `AcService.writeCriteria`, the two refusal tests below go red (2 fail / 2 pass); restored, 4 pass.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,9 +72,9 @@ interface Fixture {
 async function seed(dir: string): Promise<Fixture> {
   const dbPath = join(dir, "corpus.db");
   const store = new SQLiteStore(dbPath);
-  const cs = new CorpusService(store);
+  const cs = new CorpusService(store, new RecordLockService(store));
   const rules = new RuleService(store);
-  const ac = new AcService(store);
+  const ac = new AcService(store, new RecordLockService(store));
   const prd = await must(await cs.create({ type: "prd", title: "Window product", content: "root" } as CreateDocInput), "prd");
   const root = await must(await rules.addNode(prd.id, { node: "root", label: "Root", title: "Window root", content: "r" }, { by: "agent:seed" }), "root");
   const branch = await must(
@@ -116,7 +117,7 @@ async function retireOnSecondConnection(dbPath: string): Promise<void> {
 }
 
 function gatedService(store: WindowStore, armed: string[]): AcService {
-  return new AcService(store, { citeGate: { mode: "enforce", armed_branches: armed } });
+  return new AcService(store, new RecordLockService(store), { citeGate: { mode: "enforce", armed_branches: armed } });
 }
 
 async function spec(dbPath: string, id: string): Promise<{ doc: DocRecord; versions: number; audit: number }> {

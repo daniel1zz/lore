@@ -37,6 +37,7 @@
  * Usage: bun seed-execution-fixture.ts <dbPath> <runId>
  * Prints one JSON line with every id/slug/title the test needs to reference.
  */
+import { RecordLockService } from "../../../lore/src/service/record-lock-service.js";
 import { SQLiteStore } from "../../../lore/src/store/sqlite-store.js";
 import { CorpusService } from "../../../lore/src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../lore/src/service/task-workflow-service.js";
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
   }
 
   const store = new SQLiteStore(dbPath);
-  const corpus = new CorpusService(store);
+  const corpus = new CorpusService(store, new RecordLockService(store));
   const taskWorkflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
 
   const planTitle = `E2E Execution Plan ${runId}`;

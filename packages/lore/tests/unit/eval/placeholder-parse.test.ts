@@ -5,6 +5,7 @@
  * @spec_ref SPEC-013 §9
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -28,9 +29,9 @@ function makeApp(store?: InMemoryStore): App {
   const s = store ?? new InMemoryStore();
   const telemetry = new NoOpTelemetry();
   return {
-    corpusService: new CorpusService(s, telemetry),
+    corpusService: new CorpusService(s, new RecordLockService(s), telemetry),
     reviewService: new ReviewService(s),
-    versionService: new VersionService(s),
+    versionService: new VersionService(s, new RecordLockService(s)),
     outlineService: new OutlineService(s),
     migrationService: new MigrationService(s),
     treeCheckService: new TreeCheckService(s),
