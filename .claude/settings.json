@@ -52,13 +52,6 @@
           { "type": "command", "command": "node $CLAUDE_PROJECT_DIR/assets/hooks/pre-dispatch-isolation-gate.mjs" }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "node $CLAUDE_PROJECT_DIR/assets/hooks/stop-handoff-coverage.mjs" }
-        ]
-      }
     ]
   }
 }
