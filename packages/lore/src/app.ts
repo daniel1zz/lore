@@ -78,7 +78,7 @@ import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { RuleStateService } from "./service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
 import { RunService } from "./service/run-service.js";
-import { resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
+import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
@@ -301,6 +301,12 @@ export interface App {
    * so hand-built App test stubs stay valid; always present from `createApp`.
    */
   runService?: RunService;
+  /**
+   * The invocation identity with its run VERIFIED against the registry (once; unregistered → `harnessRun`
+   * null + one warning); `ok(undefined)` when this App was built without a write context (MCP/HTTP/tests).
+   * Services' callers that DECIDE on the run (claim/release) must pass this, never the raw flag value.
+   */
+  verifiedInvocationIdentity?: () => Promise<Result<InvocationIdentity | undefined, LoreError>>;
   /**
    * ValidityService — the SOLE write path for `knowledge`/`adr` bi-temporal validity
    * metadata (`extra.validity`, `lore invalidate`). Store + own telemetry wiring, same
@@ -580,6 +586,8 @@ export interface App {
 export interface AppWriteContext {
   readonly identity: InvocationIdentity;
   readonly warn?: (line: string) => void;
+  /** Called once with the identity after its run was verified against the registry (unknown run → null). */
+  readonly onVerified?: (verified: InvocationIdentity) => void;
 }
 
 function warnOnStderr(line: string): void {
@@ -799,6 +807,7 @@ function buildAppFromSqlite(
     taskWorkflowService,
     sessionService,
     runService: new RunService(store),
+    verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
     // SPEC-043 §Design Decisions D2. 3rd arg wires the SPEC-044 D12 OPTIONAL calibration
@@ -1164,6 +1173,7 @@ function buildAppFromTurso(
     taskWorkflowService,
     sessionService,
     runService: new RunService(store),
+    verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
     // SPEC-043 §Design Decisions D2. 3rd arg wires the SPEC-044 D12 OPTIONAL calibration
@@ -1488,7 +1498,7 @@ export function createApp(
     const sqliteStore =
       writeContext === undefined
         ? baseSqliteStore
-        : (withVerifiedWriteContext(baseSqliteStore, writeContext.identity, writeContext.warn ?? warnOnStderr) as SQLiteStore);
+        : (withVerifiedWriteContext(baseSqliteStore, writeContext.identity, writeContext.warn ?? warnOnStderr, writeContext.onVerified) as SQLiteStore);
     // reason: SPEC-102 — local-only mode has no separate replica file; trace
     // writes route through the SAME sqliteStore every other corpus write
     // uses. `undefined` when trace.enabled resolves false — every
@@ -1602,7 +1612,7 @@ export function createApp(
     const store =
       writeContext === undefined
         ? baseTursoStore
-        : (withVerifiedWriteContext(baseTursoStore, writeContext.identity, writeContext.warn ?? warnOnStderr) as TursoStore);
+        : (withVerifiedWriteContext(baseTursoStore, writeContext.identity, writeContext.warn ?? warnOnStderr, writeContext.onVerified) as TursoStore);
     // reason: SPEC-102 D3 — trace writes in Turso mode go through a SEPARATE
     // local `bun:sqlite` handle on the SAME replica file `apiKeyDb`/
     // `sessionStore` already open (`buildAppFromTurso`'s identical

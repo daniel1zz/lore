@@ -73,7 +73,7 @@ import {
 } from "@lore/core/node";
 import { createApp, type App } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
-import { getInvocationIdentity } from "./invocation-identity.js";
+import { getInvocationIdentity, replaceInvocationIdentity } from "./invocation-identity.js";
 import { resolveCorpus } from "./corpus-resolution.js";
 import {
   guardTaskLifecycleWrites,
@@ -456,7 +456,9 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     appOrResult = createApp(
       dbPath,
       telemetryOnlyConfig,
-      invocationIdentity === undefined ? undefined : { identity: invocationIdentity },
+      invocationIdentity === undefined
+        ? undefined
+        : { identity: invocationIdentity, onVerified: replaceInvocationIdentity },
     );
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
