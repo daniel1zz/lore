@@ -692,7 +692,6 @@ export const LoreEvidenceAddSchema = z.object({
   command: z.string().min(1),
   result: EVIDENCE_RESULT_ENUM,
   output_tail: z.string().max(4000).optional(),
-  recorded_by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   ac_ref: z.string().optional(),
   checklist_ref: z.string().optional(),
@@ -1435,12 +1434,11 @@ type McpToolRegistry = {
 /**
  * The args an attested tool's handler receives: `harness_run` removed, `by` ALWAYS present as the call's
  * resolved name (no tool schema declares it — the wrapper supplies it, so a handler can hand the writer name to a
- * service without a second resolution), and `recorded_by` (when the schema has it) filled the same way.
+ * service without a second resolution). A recorder field is NOT a schema key either: the handler records `by`.
  * A schema without `harness_run` is unchanged.
  */
 type ResolvedArgs<T> = "harness_run" extends keyof T
-  ? Omit<T, "harness_run" | "by" | "recorded_by"> & { by: string } &
-      ("recorded_by" extends keyof T ? { recorded_by: string } : unknown)
+  ? Omit<T, "harness_run" | "by"> & { by: string }
   : T;
 
 function registerToolImpl<T>(
@@ -1453,7 +1451,7 @@ function registerToolImpl<T>(
 ): void {
   // reason: spec-run-identity-slice-1 D3 — a schema that declares `harness_run` is an ATTESTED tool: every call
   // runs in its own call scope (identity from harness_run alone, store wrapped for that call). The handler then gets
-  // `by`/`recorded_by` FILLED from the call's resolved name (no MCP caller names itself — BR-1055) and
+  // `by` FILLED from the call's resolved name (no MCP caller names itself — BR-1055) and
   // never sees `harness_run` (it would otherwise leak into `...patch` spreads).
   const shape = schema instanceof z.ZodObject ? (schema.shape as Record<string, unknown>) : {};
   const attested = "harness_run" in shape;
@@ -1470,7 +1468,6 @@ function registerToolImpl<T>(
         // reason: a schema that still declares `by` is a read-side FILTER (lore_bootstrap, pinned in
         // read-side-by-filters.ts); it keeps the caller's value and defaults to the call's own name.
         resolved["by"] = "by" in shape && typeof rest["by"] === "string" ? rest["by"] : context.identity.claimed;
-        if ("recorded_by" in shape) resolved["recorded_by"] = rest["recorded_by"] ?? context.identity.claimed;
         return handler(resolved as ResolvedArgs<T>);
       });
     });
@@ -2414,7 +2411,8 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       oracle: args.oracle,
       command: args.command,
       result: args.result,
-      recorded_by: args.recorded_by,
+      // reason: BR-1055 — the recorder is the call's own resolved name; no caller names the recorder.
+      recorded_by: args.by,
       source: "mcp",
       ...(effectiveOutputTail !== undefined ? { output_tail: effectiveOutputTail } : {}),
       // reason: task-mcp-lore-evidence-add-cannot-set-capture-source-and-has-no

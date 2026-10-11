@@ -4673,6 +4673,8 @@ export class TaskWorkflowService {
       // omitted `opts.*` field must omit the ctx key entirely rather than
       // assign it `undefined` (mirrors this codebase's established
       // `...(x !== undefined ? {y: x} : {})` pattern elsewhere).
+      // reason: BR-1056 — the gate's overlap test compares holders by RUN; passed explicitly, never ambient.
+      candidateRun: opts.harnessRun ?? null,
       ...(opts.identitySource !== undefined ? { candidateIdentitySource: opts.identitySource } : {}),
       ...(opts.worktree !== undefined ? { candidateWorktree: opts.worktree } : {}),
       ...(opts.machine !== undefined ? { candidateMachine: opts.machine } : {}),

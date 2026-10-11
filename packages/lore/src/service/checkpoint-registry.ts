@@ -427,6 +427,11 @@ export interface GateContext {
    */
   readonly candidateSessionId?: string;
   /**
+   * The claimant's attested run (BR-1056), `null`/absent = unattested. `noAnchorOverlap` compares holders by
+   * run whenever either side carries one. Populated by the claim services and `lore gate task-claim`.
+   */
+  readonly candidateRun?: string | null;
+  /**
    * `workflow.gates."task-claim".actor_identity.enabled` resolved by the
    * CALLER (AC-IDENTITY-ESCAPE) — `false` skips `actorIdentityGuard` entirely,
    * leaving `noAnchorOverlap`/`upstreamApproved` untouched. Absent means
@@ -1152,7 +1157,13 @@ function checkTaskClaim(ctx: GateContext): PredicateResult[] {
   const results: PredicateResult[] = [];
   if (ctx.anchorOverlapEnabled !== false) {
     results.push(
-      noAnchorOverlap(ctx.candidateBy, ctx.candidateAnchors, ctx.siblingClaims, ctx.candidateSessionId),
+      noAnchorOverlap(
+        ctx.candidateBy,
+        ctx.candidateAnchors,
+        ctx.siblingClaims,
+        ctx.candidateSessionId,
+        ctx.candidateRun,
+      ),
     );
   }
   if (ctx.actorIdentityEnabled !== false) {
@@ -1287,6 +1298,7 @@ function feedAnchorOverlap(
     ctx.candidateAnchors,
     ctx.siblingClaims,
     ctx.candidateSessionId,
+    ctx.candidateRun,
   );
   let conflictLine = "(no specific conflicting sibling could be identified)";
   if (conflict !== undefined) {
@@ -1295,7 +1307,7 @@ function feedAnchorOverlap(
     conflictLine =
       `Conflicting task: ${sibling.slug} — "${sibling.title}" — held by ${sibling.by}. ` +
       `Overlapping paths: ${pathsStr}. ` +
-      `${renderSessionVerdictLine(kind, ctx.candidateSessionId, sibling.session_id)} ` +
+      `${renderSessionVerdictLine(kind, ctx.candidateSessionId, sibling.session_id, ctx.candidateRun, sibling.harness_run)} ` +
       `Recovery: \`lore release ${sibling.slug} --force\`; sessions register their own run via the ` +
       `agent integration (\`lore setup\`).`;
   }
@@ -1326,8 +1338,15 @@ function renderSessionVerdictLine(
   kind: AnchorOverlapConflictKind,
   candidateSessionId: string | undefined,
   siblingSessionId: string | undefined,
+  candidateRun?: string | null,
+  siblingRun?: string | null,
 ): string {
   switch (kind) {
+    case "foreign-run":
+      return (
+        `Held by a DIFFERENT run (this run: ${candidateRun ?? "(unattested)"}, holder's run: ` +
+        `${siblingRun ?? "(unattested)"}) — a shared name does not make two runs one holder.`
+      );
     case "foreign-actor":
       return "Held by a DIFFERENT actor.";
     case "foreign-session":
@@ -2589,6 +2608,8 @@ export function buildAnchorGateContext(
       // sibling's claim predates session capture; `compareClaimSessions` then
       // reaches "not-measured", which REFUSES rather than permits.
       ...(claim.session_id !== undefined ? { session_id: claim.session_id } : {}),
+      // reason: BR-1056 — `noAnchorOverlap` compares holders by RUN; absent key (legacy) stays absent.
+      ...(claim.harness_run !== undefined ? { harness_run: claim.harness_run } : {}),
     });
   }
   return {

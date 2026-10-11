@@ -392,9 +392,18 @@ export default defineCommand({
         citedOverrideReason = citeResult.value;
       }
 
+      // reason: BR-1056 — the holder check compares RUNS, so the caller's run is the invocation's VERIFIED run
+      // (unregistered -> null + one warning), resolved once and passed EXPLICITLY like `claim`/`release` do.
+      const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+      if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+        process.stderr.write(formatError(verifiedIdentity.error) + "\n");
+        process.exitCode = exitCode(verifiedIdentity.error);
+        return;
+      }
       const by = resolveActor();
       const doneOpts = {
         by,
+        harnessRun: verifiedIdentity?.value?.harnessRun ?? null,
         source: app.callerSurface,
         ...(hasOverrideAttestation ? { overrideReason: overrideAttestationRaw } : {}),
         ...(citedOverrideReason !== undefined ? { overrideReason: citedOverrideReason } : {}),

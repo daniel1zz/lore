@@ -118,12 +118,12 @@ export function registerRun(dir: string, runId: string): void {
 
 export interface Corpus {
   readonly dir: string;
-  /** Creates a fresh, unclaimed task or phase and returns its slug. */
-  newTarget(kind: Kind): Promise<string>;
+  /** Creates a fresh, unclaimed task or phase and returns its slug. `anchors` (task only) declares `file_anchors`. */
+  newTarget(kind: Kind, anchors?: readonly string[]): Promise<string>;
   cleanup(): void;
 }
 
-export async function createCorpus(): Promise<Corpus> {
+export async function createCorpus(opts: { claimGates?: "enabled" | "disabled" } = {}): Promise<Corpus> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "rid-claim-")));
   // Deliberately NOT a git repository: `lore release` on a task whose claim recorded no
   // --worktree is refused from inside a git repo (uncommitted-worktree guard, unrelated to
@@ -131,10 +131,13 @@ export async function createCorpus(): Promise<Corpus> {
   mustRun(["init"], dir);
   // Pre-flight gates (anchor overlap, actor-identity guard on os-fallback names) are not under
   // test: disable the two claim gates so ONLY the claim-conflict decision can refuse a claim.
-  appendFileSync(
-    join(dir, ".lore", "config.yaml"),
-    ["workflow:", "  gates:", "    task-claim:", "      enabled: false", "    phase-claim:", "      enabled: false", ""].join("\n"),
-  );
+  // `claimGates: "enabled"` keeps them ON for suites whose subject IS the claim gate (BR-1056 overlap by run).
+  if (opts.claimGates !== "enabled") {
+    appendFileSync(
+      join(dir, ".lore", "config.yaml"),
+      ["workflow:", "  gates:", "    task-claim:", "      enabled: false", "    phase-claim:", "      enabled: false", ""].join("\n"),
+    );
+  }
 
   const prd = slugOf(mustRun(["create", "prd", "--title", "RID PRD", "--content", "root", "--no-ai"], dir).stdout);
   const plan = slugOf(
@@ -153,12 +156,12 @@ export async function createCorpus(): Promise<Corpus> {
 
   return {
     dir,
-    async newTarget(kind: Kind): Promise<string> {
+    async newTarget(kind: Kind, anchors: readonly string[] = []): Promise<string> {
       counter += 1;
       if (kind === "task") {
         return slugOf(
           mustRun(
-            ["create", "task", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
+            ["create", "task", "--title", `RID Task ${counter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai", ...anchors.flatMap((a) => ["--anchor", a])],
             dir,
           ).stdout,
         );

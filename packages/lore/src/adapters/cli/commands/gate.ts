@@ -955,6 +955,16 @@ async function runTaskClaimGate(
   }
   const candidateSessionId = sessionIdResult.value;
 
+  // reason: BR-1056 — parity with the real claim: its overlap test compares holders by the claimant's VERIFIED
+  // run, so the dry-run reads the same invocation identity (unregistered -> null + one warning).
+  const verifiedIdentity = await app.verifiedInvocationIdentity?.();
+  if (verifiedIdentity !== undefined && !verifiedIdentity.ok) {
+    process.stderr.write(formatError(verifiedIdentity.error) + "\n");
+    process.exitCode = exitCode(verifiedIdentity.error);
+    return;
+  }
+  const candidateRun = verifiedIdentity?.value?.harnessRun ?? null;
+
   // reason: a task's parent_id is schema-required to be its plan (createDocInputSchema
   // superRefine, @lore/core/schemas.ts) — a null parent_id here can only happen on a
   // legacy/corrupted row. Routed through the SAME checkpoint as every other task, via
@@ -974,6 +984,7 @@ async function runTaskClaimGate(
       ...buildUpstreamSpecContext(undefined),
       ...buildAnchorGateContext(by, task, [], nowIso, ttlMinutes, candidateSessionId),
       targetIdOrSlug: taskIdOrSlug,
+      candidateRun,
       anchorOverlapEnabled,
     };
   } else {
@@ -1008,6 +1019,7 @@ async function runTaskClaimGate(
         ...buildUpstreamSpecContext(undefined),
         ...buildAnchorGateContext(by, task, siblingsResult.value, nowIso, ttlMinutes, candidateSessionId),
         targetIdOrSlug: taskIdOrSlug,
+        candidateRun,
         anchorOverlapEnabled,
       };
     } else {
@@ -1015,6 +1027,7 @@ async function runTaskClaimGate(
         ...buildUpstreamSpecContext(bundleResult.value.spec),
         ...buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, ttlMinutes, candidateSessionId),
         targetIdOrSlug: taskIdOrSlug,
+        candidateRun,
         anchorOverlapEnabled,
       };
     }
