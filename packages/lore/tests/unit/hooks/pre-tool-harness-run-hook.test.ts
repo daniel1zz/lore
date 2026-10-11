@@ -58,6 +58,7 @@ function scratch(prefix: string): string {
 interface Stub {
   dir: string;
   calls(): { argv: string[]; stdin: string }[];
+  first(): { argv: string[]; stdin: string };
 }
 
 /** Stub `lore`: records argv + stdin, prints `stdout` byte-exact, exits with `exit`. */
@@ -76,16 +77,21 @@ exit ${opts.exit ?? 0}
 `,
   );
   chmodSync(join(dir, "lore"), 0o755);
+  const calls = (): { argv: string[]; stdin: string }[] =>
+    readdirSync(logDir)
+      .filter((n) => !n.endsWith(".stdin"))
+      .sort()
+      .map((n) => ({
+        argv: readFileSync(join(logDir, n), "utf8").split("\n").slice(0, -1),
+        stdin: readFileSync(join(logDir, `${n}.stdin`), "utf8"),
+      }));
   return {
     dir,
-    calls() {
-      return readdirSync(logDir)
-        .filter((n) => !n.endsWith(".stdin"))
-        .sort()
-        .map((n) => ({
-          argv: readFileSync(join(logDir, n), "utf8").split("\n").slice(0, -1),
-          stdin: readFileSync(join(logDir, `${n}.stdin`), "utf8"),
-        }));
+    calls,
+    first() {
+      const all = calls();
+      if (all[0] === undefined) throw new Error("expected lore stub to have been invoked, but it was not");
+      return all[0];
     },
   };
 }
@@ -185,7 +191,7 @@ describe("pre-tool-harness-run.mjs — lore call: blind pipe + verbatim relay (D
     const stub = makeStub({ stdout: REWRITTEN_A });
     const payload = bashPayload("lore claim t");
     runHook(payload, stub.dir);
-    expect(stub.calls()[0].stdin).toBe(payload);
+    expect(stub.first().stdin).toBe(payload);
   });
 
   it("relays the child's stdout byte-identical and exits 0", () => {
@@ -224,7 +230,7 @@ describe("pre-tool-harness-run.mjs — lore call: blind pipe + verbatim relay (D
     const run = runHook(payload, stub.dir);
     expect(run.stdout).toBe(REWRITTEN_B);
     expect(stub.calls().map((c) => c.argv)).toEqual([["run", "attest-input"]]);
-    expect(stub.calls()[0].stdin).toBe(payload);
+    expect(stub.first().stdin).toBe(payload);
   });
 });
 
