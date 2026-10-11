@@ -200,6 +200,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
 import { runWithAuditSurface } from "../../store/audit-surface.js";
+import { McpCallScope, actorSourceOfName, requireCallIdentity } from "./call-scope.js";
 import type { LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
 import { renderAssessmentContent } from "@lore/core";
@@ -324,6 +325,18 @@ const DOC_STATUS_ENUM = z.enum([
  */
 const MCP_LIST_DEFAULT_LIMIT = 100;
 
+/**
+ * The optional run attestation every write tool accepts (spec-run-identity-slice-1 D1/D3, BR-1034).
+ * The agent integration's pre-tool hook sets it (`lore run attest-input`); a caller never needs to. A schema
+ * that declares this field is an ATTESTED tool: {@link registerToolImpl} builds one invocation identity per call
+ * from it and runs the handler against a store wrapped for that call. Absent or unregistered -> unattested.
+ */
+export const HARNESS_RUN_FIELD = z
+  .string()
+  .min(1)
+  .optional()
+  .describe("Harness-vouched run id; set by the agent integration, normally not by the caller");
+
 /** Input schema for lore_create. */
 export const LoreCreateSchema = z.object({
   type: DOC_TYPE_ENUM,
@@ -382,7 +395,8 @@ export const LoreCreateSchema = z.object({
    * precedent as `lore_claim`/`lore_release`/`lore_evidence_add`. Meaningless
    * (ignored) when `supersedes` is omitted.
    */
-  by: z.string().optional(),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   /**
    * The calling agent's OWN current working directory — same rationale as
    * `lore_evidence_add`/`lore_release`'s pre-existing `caller_cwd` field
@@ -421,14 +435,16 @@ export const LoreSetSchema = z.object({
   tags: z.array(z.string()).optional(),
   extra: z.record(z.unknown()).optional(),
   slug: z.string().optional(),
-  by: z.string().optional(),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /** Input schema for lore_delete. `by` — see {@link LoreSetSchema.by}'s SPEC-079 G2 note. */
 export const LoreDeleteSchema = z.object({
   id_or_slug: z.string(),
   confirm: z.literal(true),
-  by: z.string().optional(),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
@@ -513,7 +529,8 @@ export const LoreLinkSchema = z.object({
     ])
     .optional()
     .default("relates-to"),
-  by: z.string().optional(),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /** Input schema for lore_log. */
@@ -547,6 +564,7 @@ export const LorePendingSchema = z.object({
  * persisted calibration row) — same field the CLI's `--calibration-note` flag feeds.
  */
 export const LoreApproveSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
   reviewer: z.string().optional(),
   calibration_note: z.string().optional(),
@@ -573,6 +591,8 @@ export const LoreStatusSchema = z.object({
 
 /** Input schema for lore_batch. */
 export const LoreBatchSchema = z.object({
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   // reason: op uses z.string() (not enum) so unknown ops reach executeBatchOp's default
   // case and return { ok: false } in results instead of failing the entire batch request.
   operations: z.array(
@@ -614,7 +634,8 @@ const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail", "expected-fail"]);
  */
 export const LoreClaimSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   branch: z.string().optional(),
   machine: z.string().optional(),
   worktree: z.string().optional(),
@@ -645,7 +666,8 @@ export const LoreClaimSchema = z.object({
  */
 export const LoreReleaseSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   reason: z.string().optional(),
   force: z.boolean().optional(),
   caller_cwd: z.string().optional(),
@@ -669,7 +691,8 @@ export const LoreEvidenceAddSchema = z.object({
   command: z.string().min(1),
   result: EVIDENCE_RESULT_ENUM,
   output_tail: z.string().max(4000).optional(),
-  recorded_by: z.string().min(1),
+  recorded_by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   ac_ref: z.string().optional(),
   checklist_ref: z.string().optional(),
   /**
@@ -758,7 +781,8 @@ export const LoreReadySchema = z.object({
 export const LoreAnchorSetSchema = z.object({
   id_or_slug: z.string(),
   anchors: z.array(z.string()),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
@@ -773,6 +797,7 @@ export const LoreAnchorSetSchema = z.object({
  * Passing `ai: false` is a contradiction (mirrors CLI `--no-ai` → exit 2) and always errors.
  */
 export const LoreAssessSchema = z.object({
+  harness_run: HARNESS_RUN_FIELD,
   plan_id_or_slug: z.string(),
   diff_text: z.string().optional(),
   ai: z.boolean().optional(),
@@ -806,7 +831,8 @@ export const LoreAuditSchema = z.object({
  */
 export const LoreReviewSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
@@ -824,7 +850,8 @@ export const LoreStalenessProbeSchema = z.object({
   min_age_days: z.number().int().nonnegative().optional(),
   id_or_slug: z.string().optional(),
   list: z.boolean().optional(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
@@ -845,7 +872,8 @@ export const LoreVerifySchema = z.object({
   plan: z.string(),
   ac: z.array(z.string()).optional(),
   task: z.string().optional(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   allow_new_commands: z.boolean().optional(),
 });
 
@@ -871,6 +899,8 @@ export const LoreFeedSchema = z.object({
   parent_id_or_slug: z.string().optional(),
   plan: z.string().optional(),
   handoff: z.string().optional(),
+  // reason: `by` here is a session-resume FILTER (whose handoff), not an author — a read tool is never attested, so
+  // an omitted `by` stays omitted instead of being filled with the server's own name.
   by: z.string().optional(),
   phase: z.string().optional(),
   task: z.string().optional(),
@@ -885,7 +915,8 @@ export const LoreFeedSchema = z.object({
  * is corpus-wide regardless of `by`.
  */
 export const LoreBootstrapSchema = z.object({
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
@@ -901,7 +932,8 @@ export const LoreBootstrapSchema = z.object({
  */
 export const LoreInvalidateSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   superseded_by: z.string().optional(),
   reason: z.string().max(500).optional(),
   undo: z.boolean().optional(),
@@ -914,7 +946,12 @@ export const LoreInvalidateSchema = z.object({
  * directly"). `by` is already required by `handoffExtraSchema` (`min(1)`), same
  * MCP actor-identity precedent as the other task-workflow/session tools.
  */
-export const LoreHandoffSchema = handoffExtraSchema;
+export const LoreHandoffSchema = handoffExtraSchema.extend({
+  // reason: BR-1034 — no MCP tool requires the caller to name itself. The stored handoff author stays non-empty
+  // because the wrapper fills `by` from the call's resolved name; `handoffExtraSchema` (the CLI contract) is untouched.
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
+});
 
 /**
  * Input schema for lore_uat_record (SPEC-054) — the SOLE MCP write path for a structured
@@ -924,7 +961,8 @@ export const LoreHandoffSchema = handoffExtraSchema;
  */
 export const LoreUatRecordSchema = z.object({
   plan: z.string().min(1),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   verdict: uatVerdictSchema,
 });
 
@@ -967,7 +1005,8 @@ export const LoreRuleAddSchema = z.object({
   enforced_by: z.enum(RULE_ENFORCEMENTS),
   examples: z.array(z.string()).min(1),
   ...FOUR_PART_STANDARD_SHAPE,
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreRuleSetSchema = z.object({
@@ -980,7 +1019,8 @@ export const LoreRuleSetSchema = z.object({
   note: z.string().min(1).optional(),
   move_to: z.string().min(1).optional(),
   ...FOUR_PART_STANDARD_SHAPE,
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreRuleShowSchema = z.object({
@@ -1008,20 +1048,23 @@ export const LoreBaselineAddSchema = z.object({
   label: z.string().min(1),
   title: z.string().min(1),
   content: z.string().optional(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreBaselineSetLabelSchema = z.object({
   node: z.string().min(1),
   label: z.string().min(1),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreBaselineDependsSchema = z.object({
   leaf: z.string().min(1),
   add: z.array(z.string().min(1)).optional(),
   remove: z.array(z.string().min(1)).optional(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreBaselineGlossaryAddSchema = z.object({
@@ -1029,13 +1072,15 @@ export const LoreBaselineGlossaryAddSchema = z.object({
   term: z.string().min(1),
   meaning: z.string().min(1),
   note: z.string().optional(),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreBaselineGlossaryRmSchema = z.object({
   node: z.string().min(1),
   term: z.string().min(1),
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
@@ -1061,7 +1106,8 @@ export const LoreBaselineGlossaryRmSchema = z.object({
  * decision on this surface either.
  */
 export const LoreReportIssueSchema = z.object({
-  by: z.string().min(1),
+  by: z.string().min(1).optional(),
+  harness_run: HARNESS_RUN_FIELD,
   title: z.string().min(1),
   description: z.string().min(1),
   expected: z.string().min(1),
@@ -1412,18 +1458,46 @@ type McpToolRegistry = {
  *   loosens the constraint — every pre-existing call site (Input === Output) still
  *   satisfies it trivially, and `T` inference (driven by the Output position) is unaffected.
  */
-function registerToolWithArgs<T>(
+/**
+ * The args an attested tool's handler receives: `harness_run` removed, `by`/`recorded_by` (when the schema has
+ * them) filled with the call's resolved name, hence plain `string`. A schema without `harness_run` is unchanged.
+ */
+type ResolvedArgs<T> = "harness_run" extends keyof T
+  ? Omit<T, "harness_run" | "by" | "recorded_by"> &
+      ("by" extends keyof T ? { by: string } : unknown) &
+      ("recorded_by" extends keyof T ? { recorded_by: string } : unknown)
+  : T;
+
+function registerToolImpl<T>(
   server: McpServer,
+  scope: McpCallScope,
   name: string,
   desc: string,
   schema: z.ZodType<T, z.ZodTypeDef, unknown>,
-  handler: (args: T) => Promise<CallToolResult>,
+  handler: (args: ResolvedArgs<T>) => Promise<CallToolResult>,
 ): void {
+  // reason: spec-run-identity-slice-1 D3 — a schema that declares `harness_run` is an ATTESTED tool: every call
+  // runs in its own call scope (identity from harness_run/by, store wrapped for that call). The handler then gets
+  // `by`/`recorded_by` FILLED from the call's resolved name (no MCP tool requires the caller to name itself) and
+  // never sees `harness_run` (it would otherwise leak into `...patch` spreads).
+  const shape = schema instanceof z.ZodObject ? (schema.shape as Record<string, unknown>) : {};
+  const attested = "harness_run" in shape;
   // Step 1: 3-arg registration — avoids ZodRawShapeCompat inference entirely
   // The handler is cast to () => Promise<CallToolResult> so TypeScript resolves
   // it as ToolCallback<undefined> (no ShapeOutput computation).
   // reason: AC-BLC-1 — each MCP tool call declares its audit surface explicitly (per call, not process state).
-  const surfaced = (args: T): Promise<CallToolResult> => runWithAuditSurface("mcp", () => handler(args));
+  const surfaced = (args: T): Promise<CallToolResult> =>
+    runWithAuditSurface("mcp", () => {
+      if (!attested) return handler(args as unknown as ResolvedArgs<T>);
+      const { harness_run: harnessRun, ...rest } = args as unknown as Record<string, unknown> & { harness_run?: string };
+      const by = typeof rest["by"] === "string" ? rest["by"] : undefined;
+      return scope.run({ harness_run: harnessRun, by }, (context) => {
+        const resolved: Record<string, unknown> = { ...rest };
+        if ("by" in shape) resolved["by"] = by ?? context.identity.claimed;
+        if ("recorded_by" in shape) resolved["recorded_by"] = rest["recorded_by"] ?? context.identity.claimed;
+        return handler(resolved as ResolvedArgs<T>);
+      });
+    });
   server.tool(name, desc, surfaced as unknown as () => Promise<CallToolResult>);
 
   // Step 2: Post-registration inputSchema patch — restores correct runtime routing.
@@ -1546,8 +1620,27 @@ async function reviewDocViaMcp(
  *   PER "task-start" `lore_feed` invocation rather than read from a closed-over
  *   snapshot — see this function's own JSDoc above for why a getter, not a value.
  */
-export function registerTools(server: McpServer, app: App, getConfig?: () => LoreConfig | undefined): void {
-  const { corpusService, versionService, reviewService, outlineService, taskWorkflowService, auditService, judgmentService } = app;
+export function registerTools(server: McpServer, baseApp: App, getConfig?: () => LoreConfig | undefined): void {
+  // reason: spec-run-identity-slice-1 D3 — handlers are registered ONCE but each attested call runs against its own
+  // call-scoped App (see call-scope.ts). `app` and the service names below are live views that resolve to the
+  // current call's App, so handler bodies stay unchanged.
+  const scope = new McpCallScope(baseApp);
+  const app = scope.app;
+  const corpusService = scope.service("corpusService");
+  const versionService = scope.service("versionService");
+  const reviewService = scope.service("reviewService");
+  const outlineService = scope.service("outlineService");
+  const taskWorkflowService = scope.service("taskWorkflowService");
+  const auditService = scope.service("auditService");
+  const judgmentService = scope.service("judgmentService");
+  // reason: shadows the module-level registrar so every one of the call sites below binds this server's call scope.
+  const registerToolWithArgs = <T,>(
+    srv: McpServer,
+    name: string,
+    desc: string,
+    schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+    handler: (args: ResolvedArgs<T>) => Promise<CallToolResult>,
+  ): void => registerToolImpl(srv, scope, name, desc, schema, handler);
 
   // lore_create
   registerToolWithArgs(server, "lore_create", "Create a new document in the Lore corpus", LoreCreateSchema, async (args) => {
@@ -2035,19 +2128,22 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
 
   // lore_claim
   registerToolWithArgs(server, "lore_claim", "Acquire an advisory execution lease on a task", LoreClaimSchema, async (args) => {
+    // reason: spec-run-identity-slice-1 D6 — the claimant's run is the call's VERIFIED run, passed EXPLICITLY
+    // (services that decide on identity never read ambient state); `scope.run` verified it once for this call.
+    const callIdentity = requireCallIdentity(scope);
     const result = await taskWorkflowService.claim(args.id_or_slug, {
       by: args.by,
+      harnessRun: callIdentity.harnessRun,
       ...(args.branch !== undefined ? { branch: args.branch } : {}),
       ...(args.machine !== undefined ? { machine: args.machine } : {}),
       ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
       ...(args.corpus_scope !== undefined ? { corpusScope: args.corpus_scope } : {}),
       // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
-      // AC-IDENTITY-REJECT — MCP's `by` is a REQUIRED, always-explicit tool
-      // argument (no $LORE_ACTOR/OS-username fallback chain like the CLI, per
-      // this module's own "MCP callers pass actor identity explicitly"
-      // invariant), so its identity source is always "explicit" — never the
+      // AC-IDENTITY-REJECT — the real source of the name: "explicit" when the caller
+      // passed `by`, else the tier the server's own name chain resolved it from
+      // (BR-1034 made `by` optional) — so an OS-user fallback name is still the
       // "os-fallback" tier `actorIdentityGuard` reacts to.
-      identitySource: "explicit",
+      identitySource: actorSourceOfName(callIdentity.claimedSource),
       steal: args.steal === true,
       // reason: MCP callers are always agents (SPEC-024) — the caller-surface discriminator
       // for AC-WF-11 telemetry is hardcoded here rather than threaded through args.
@@ -2061,6 +2157,8 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
   registerToolWithArgs(server, "lore_release", "Clear the advisory execution lease on a task", LoreReleaseSchema, async (args) => {
     const result = await taskWorkflowService.release(args.id_or_slug, {
       by: args.by,
+      // reason: spec-run-identity-slice-1 D6/BR-1043 — only the holding run releases without force.
+      harnessRun: requireCallIdentity(scope).harnessRun,
       ...(args.reason !== undefined ? { reason: args.reason } : {}),
       force: args.force === true,
       source: "mcp",
@@ -3244,13 +3342,15 @@ export function registerTools(server: McpServer, app: App, getConfig?: () => Lor
           });
         }
 
-        // MCP requires `by` explicitly (SPEC-025 precedent; `LoreReportIssueSchema`
-        // rejects an empty one) — `resolveActorWithSource` always resolves this
-        // to the `"explicit"` tier, mirroring how the CLI resolves its own
+        // The actor is the call's resolved name (`by` when the caller gave one, else the
+        // call identity's name — BR-1034: no MCP tool requires the caller to name itself) and
+        // its source is that name's REAL source, mirroring how the CLI resolves its own
         // `actorSource` before threading it through `GithubFilingContext.actor`.
         // This module does NO actor resolution of its own (report-issue-
         // wiring.ts's own header) — never build the actor from anything else here.
-        const { actor, source: actorSource } = resolveActorWithSource(args.by);
+        const callIdentity = requireCallIdentity(scope);
+        const actor = args.by;
+        const actorSource = actorSourceOfName(callIdentity.claimedSource);
 
         const fileResult = await fileGithubIssue(
           {
@@ -3394,8 +3494,11 @@ async function executeBatchOp(
         requires_uat: requiresUat,
         supersedes: _supersedes,
         by,
+        // reason: BR-1036 — one call = one identity; an operation's own harness_run is ignored, never forwarded.
+        harness_run: _harnessRun,
         ...createInput
       } = parsed.data;
+      void _harnessRun;
       void _ai;
       void _supersedes;
       let mergedExtra = createInput.extra;
@@ -3424,7 +3527,8 @@ async function executeBatchOp(
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "set") };
       // reason: `by` (SPEC-079 G2) is destructured out of the patch — same reason as
       // the single-op lore_set handler above.
-      const { id_or_slug: idOrSlug, by, ...patch } = parsed.data;
+      const { id_or_slug: idOrSlug, by, harness_run: _harnessRun, ...patch } = parsed.data;
+      void _harnessRun;
       const r = await corpusService.set(idOrSlug, patch, by !== undefined ? { by } : undefined);
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }

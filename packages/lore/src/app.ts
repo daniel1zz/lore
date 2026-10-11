@@ -576,6 +576,13 @@ export interface App {
    * Source: SPEC-024 §9.3
    */
   resolveAiDefault(explicit: boolean | undefined): { ai: boolean; source: AiDefaultSource };
+  /**
+   * Build a sibling App over the same corpus whose store is wrapped for ONE invocation identity
+   * (spec-run-identity-slice-1 D3). For adapters that serve many callers from one process (MCP): the caller
+   * runs one call against the returned App and `close()`s it. Present on every App `createApp` returns; absent on
+   * hand-built test stubs, which an adapter must then treat as "cannot attest" rather than guess.
+   */
+  forWriteContext?: (writeContext: AppWriteContext) => Result<App, LoreError>;
   close(): void;
 }
 
@@ -1367,6 +1374,24 @@ export function createApp(
   writeContext?: AppWriteContext,
 ): App | Result<App, LoreError>;
 export function createApp(
+  dbPath: string,
+  config?: LoreConfig,
+  writeContext?: AppWriteContext,
+): App | Result<App, LoreError> {
+  const built = createAppUnscoped(dbPath, config, writeContext);
+  const app = "corpusService" in built ? built : built.ok ? built.value : undefined;
+  if (app === undefined) return built;
+  // reason: spec-run-identity-slice-1 D3 — an MCP server is one long-lived App serving many callers, each call
+  // carrying its own identity. The call-scoped App is built by the SAME composition path (same store selection,
+  // same wrapping chokepoint) over the same corpus file, so no service can write outside the call's context.
+  app.forWriteContext = (callContext) => {
+    const scoped = createApp(dbPath, config, callContext);
+    return "corpusService" in scoped ? ok(scoped) : scoped;
+  };
+  return built;
+}
+
+function createAppUnscoped(
   dbPath: string,
   config?: LoreConfig,
   writeContext?: AppWriteContext,

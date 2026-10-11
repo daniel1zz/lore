@@ -142,8 +142,9 @@ async function createPlan(title: string): Promise<DocRecord> {
 // ─── NEGATIVE: schema-level ──────────────────────────────────────────────────
 
 describe("LoreInvalidateSchema — NEGATIVE", () => {
-  it("rejects missing `by`", () => {
-    expect(LoreInvalidateSchema.safeParse({ id_or_slug: "knowledge-x" }).success).toBe(false);
+  // reason: BR-1034 (AC-RID-7) — `by` is optional (the call's resolved name fills in); an EMPTY `by` is still refused.
+  it("accepts missing `by`, rejects an empty one", () => {
+    expect(LoreInvalidateSchema.safeParse({ id_or_slug: "knowledge-x" }).success).toBe(true);
     expect(LoreInvalidateSchema.safeParse({ id_or_slug: "knowledge-x", by: "" }).success).toBe(false);
     expect(LoreInvalidateSchema.safeParse({ id_or_slug: "knowledge-x", by: "alice" }).success).toBe(true);
   });
