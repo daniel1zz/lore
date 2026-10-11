@@ -13,7 +13,7 @@ import type { LoreError } from "@lore/core";
 // invariant (packages/core/src/CLAUDE.md) — this service file is always
 // server-side, same precedent config-service.ts/global-config-service.ts
 // already set for direct `@lore/core/node` imports.
-import { containsCjk, getTransliterateCjk, resolveActorWithSource } from "@lore/core/node";
+import { containsCjk, getTransliterateCjk } from "@lore/core/node";
 import {
   adrExtraSchema,
   canonicaliseBody,
@@ -88,7 +88,7 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
-import { readWriteContext } from "../store/write-context-store.js";
+import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
@@ -921,8 +921,7 @@ export class CorpusService {
    * @returns The resolved actor string — never empty.
    */
   private resolveWriteActor(by?: string): string {
-    if (by !== undefined) return resolveActorWithSource(by, process.env).actor;
-    return readWriteContext(this.store)?.identity.claimed ?? resolveActorWithSource(undefined, process.env).actor;
+    return resolveWriteActorFor(this.store, by);
   }
 
   // ── Resolve ──────────────────────────────────────────────────────────────

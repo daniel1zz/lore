@@ -37,6 +37,7 @@
  */
 
 import { resolveActorWithSource } from "@lore/core/node";
+import { getInvocationIdentity } from "./invocation-identity.js";
 import {
   buildGateSkipAuditEntry,
   describeLoreError,
@@ -99,7 +100,8 @@ export async function runGateEnvBypassAudit(
   }
 
   const nowIso = new Date().toISOString();
-  const actor = resolveActorWithSource(undefined, process.env).actor;
+  // reason: the invocation's claimed name (resolved once at the entry) — never an independent resolution.
+  const actor = getInvocationIdentity()?.claimed ?? resolveActorWithSource(undefined, process.env).actor;
   const entry = buildGateSkipAuditEntry(checkpoint, "env_bypass", nowIso, actor);
 
   try {

@@ -96,7 +96,7 @@
  */
 
 import { err, ok, type Result } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
+import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { LoreError } from "@lore/core";
 import {
   specAcceptanceCriteriaSchema,
@@ -368,7 +368,7 @@ export class AcService {
     // (CorpusWriteAuthority.findCoveringGrant), so a foreign crossing refuses while an own-corpus
     // write stays inert.
     const targets = allCarried ? [...new Set(known as DocRecord[])] : [];
-    const actor = resolveActorWithSource(by, process.env).actor;
+    const actor = resolveWriteActorFor(this.store, by);
     const verdict = await this.writeAuthority.authorize(targets, "ac-cite", actor);
     if (!verdict.ok) return verdict;
     return ok(undefined);
@@ -1084,7 +1084,7 @@ export class AcService {
     if (!gate.ok) return gate;
     // Same resolution CorpusService.resolveWriteActor applies (SPEC-079 G2): explicit `by`, else
     // $LORE_ACTOR → session tier → OS username. Never the literal "system" — that was the defect.
-    const actor = resolveActorWithSource(opts.by, process.env).actor;
+    const actor = resolveWriteActorFor(this.store, opts.by);
     if (opts.declaration !== undefined) {
       newExtra["allow_missing_path_declarations"] = upsertAllowMissingPathDeclaration(
         extractAllowMissingPathDeclarations(spec),

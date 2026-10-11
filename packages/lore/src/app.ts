@@ -78,7 +78,7 @@ import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { RuleStateService } from "./service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
 import { RunService } from "./service/run-service.js";
-import { withVerifiedWriteContext } from "./store/write-context-store.js";
+import { resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
@@ -1532,6 +1532,7 @@ export function createApp(
       config,
       sqliteStore.appendAuditEntry.bind(sqliteStore),
       traceRecorder,
+      () => resolveWriteActorFor(sqliteStore),
     );
     return buildAppFromSqlite(
       sqliteStore,
@@ -1638,7 +1639,7 @@ export function createApp(
     // TursoStore instance (also implements `StoreInterface.appendAuditEntry`).
     // 3rd arg wires SPEC-102's OPTIONAL TraceRecorder — see the SQLite branch's
     // identical comment.
-    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder);
+    const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store));
     return {
       ok: true,
       value: buildAppFromTurso(

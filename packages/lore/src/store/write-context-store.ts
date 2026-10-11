@@ -30,6 +30,7 @@
  * Side-effect class: pure wrapper (no I/O of its own).
  */
 
+import { resolveActorWithSource } from "@lore/core/node";
 import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
 
 /**
@@ -79,6 +80,18 @@ const CONTEXT_BY_STORE = new WeakMap<object, StampingContext>();
 /** The {@link StampingContext} a store was wrapped with, or `undefined` for an unwrapped store. */
 export function readWriteContext(store: StoreInterface): StampingContext | undefined {
   return CONTEXT_BY_STORE.get(store);
+}
+
+/**
+ * The author of a write: the explicit `by` when given, else the claimed name of the store's write context
+ * (the invocation identity), else the env chain (`$LORE_ACTOR` → session → OS user) for an unwrapped store.
+ * ⛔ Every service that writes an audit row MUST resolve its actor here, never by an independent
+ * `resolveActorWithSource` call: a second resolution can disagree with the invocation's name (gate rows once
+ * read the OS user next to a `--by` claim).
+ */
+export function resolveWriteActorFor(store: StoreInterface, by?: string): string {
+  if (by !== undefined) return resolveActorWithSource(by, process.env).actor;
+  return readWriteContext(store)?.identity.claimed ?? resolveActorWithSource(undefined, process.env).actor;
 }
 
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {

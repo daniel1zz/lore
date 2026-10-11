@@ -55,7 +55,10 @@ interface RunResult {
 
 function env(extra: Record<string, string>, home: string): NodeJS.ProcessEnv {
   const e: NodeJS.ProcessEnv = { ...process.env, CLAUDECODE: "1", HOME: home, ...extra };
-  for (const k of ["LORE_ACTOR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) if (!(k in extra)) delete e[k];
+  if (!("LORE_ACTOR" in extra)) delete e["LORE_ACTOR"];
+  // reason: the session tier would otherwise name gate rows `agent:session-...` and MASK a gate row that
+  // re-resolves its actor instead of using the invocation's name (regression: gate_passed rows read the OS user).
+  for (const key of ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) if (!(key in extra)) delete e[key];
   return e;
 }
 
@@ -298,4 +301,36 @@ describe("AC-RID-8: no --harness-run at all", () => {
 
 afterAll(() => {
   for (const d of scratch) rmSync(d, { recursive: true, force: true });
+});
+
+// ─── Regression: gate audit rows carry the operation's name, never an independent resolution ───
+
+describe("AC-RID-8 regression: no audit row of a named write is authored by the OS user (session env removed)", () => {
+  let dir = "";
+
+  beforeAll(() => {
+    dir = corpusDir("unattested-gate-actor-");
+  });
+
+  it("claim --by N: every audit row since the start (gate_passed included) has actor N, none the OS user", async () => {
+    const os = userInfo().username;
+    const task = newTask(dir, "Gate actor target");
+    const since = new Date().toISOString();
+    mustLore(["claim", task, "--by", NAME], dir);
+    const rows = await auditSince(dir, since);
+    expect(rows.some((r) => r.action === "gate_passed")).toBe(true);
+    for (const row of rows) {
+      expect(row.actor).not.toBe(os);
+      expect(row.actor).toBe(NAME);
+    }
+  });
+
+  it("a gated create under $LORE_ACTOR=N: gate rows also carry N", async () => {
+    const os = userInfo().username;
+    const since = new Date().toISOString();
+    mustLore(["create", "knowledge", "--sub-type", "reference", "--title", "Gate actor create", "--content", "body", "--no-ai"], dir, { LORE_ACTOR: NAME });
+    const rows = await auditSince(dir, since);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.actor).not.toBe(os);
+  });
 });

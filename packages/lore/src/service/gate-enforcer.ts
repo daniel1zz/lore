@@ -555,7 +555,18 @@ export class GateEnforcer {
     private readonly config: LoreConfig | undefined,
     private readonly recordGateSkip?: RecordGateSkip,
     private readonly traceRecorder?: TraceRecorder,
+    /**
+     * Author of the gate's own audit/trace rows. `app.ts` passes the store's invocation-aware resolver so a gate
+     * row carries the SAME name as the operation it gates; absent (bare tests) → the env chain.
+     */
+    private readonly resolveActorPort?: () => string,
   ) {}
+
+  private resolveActor(): string {
+    return this.resolveActorPort !== undefined
+      ? this.resolveActorPort()
+      : resolveActorWithSource(undefined, process.env).actor;
+  }
 
   /**
    * Runs `checkpoint`'s deterministic predicates (`checkpointRegistry[checkpoint].check`)
@@ -673,7 +684,7 @@ export class GateEnforcer {
     // `traceRecorder` absent in every bare test construction (mirrors
     // `recordGateSkip`'s identical optional-DI shape one section up).
     if (this.traceRecorder !== undefined) {
-      const actor = resolveActorWithSource(undefined, process.env).actor;
+      const actor = this.resolveActor();
       this.traceRecorder.recordGateDeny(actor, checkpoint, reasons, ctx.specIdOrSlug ?? ctx.targetIdOrSlug, "service");
     }
     return err({
@@ -754,7 +765,7 @@ export class GateEnforcer {
     if (port === undefined) return;
 
     const nowIso = new Date().toISOString();
-    const actor = resolveActorWithSource(undefined, process.env).actor;
+    const actor = this.resolveActor();
     const entry = buildGateSkipAuditEntry(checkpoint, mechanism, nowIso, actor, ctx.targetDocId);
     this.fireAndForgetAudit(port, entry, (reason) => this.warnAuditWriteFailure(checkpoint, "gate-skip", reason));
   }
@@ -784,7 +795,7 @@ export class GateEnforcer {
     if (port === undefined) return;
 
     const nowIso = new Date().toISOString();
-    const actor = resolveActorWithSource(undefined, process.env).actor;
+    const actor = this.resolveActor();
     const entry = buildGatePassedAuditEntry(checkpoint, nowIso, actor, ctx.targetDocId);
     this.fireAndForgetAudit(port, entry, (reason) => this.warnAuditWriteFailure(checkpoint, "gate-pass", reason));
   }
@@ -822,7 +833,7 @@ export class GateEnforcer {
 
     const target = ctx.targetDocId;
     const nowIso = new Date().toISOString();
-    const actor = resolveActorWithSource(undefined, process.env).actor;
+    const actor = this.resolveActor();
 
     for (const result of notApplicable) {
       const advisory: GateAdvisory = {
