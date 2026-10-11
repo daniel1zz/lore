@@ -59,7 +59,7 @@ Never leave superseded docs standing. For each thing the session proved wrong:
 
 ```bash
 # Replacement doc already created this session:
-lore invalidate <old-slug> --superseded-by <new-slug> --reason "..." [--by <actor>]
+lore invalidate <old-slug> --superseded-by <new-slug> --reason "..."
 
 # Or create + invalidate in ONE command:
 lore create adr --title "..." --decision-status accepted --supersedes <old-slug>
@@ -88,14 +88,14 @@ Valid types: `parent | implements | informs | supersedes | relates-to | blocks |
 Unfinished work → write a handoff knowledge doc via the dedicated command (⛔ NOT `lore create knowledge --sub-type handoff` — create rejects the handoff sub-type; `lore handoff` is the sole authoring surface, SPEC-041):
 
 ```bash
-lore handoff --by <actor> --plan <plan-slug> \
+lore handoff --plan <plan-slug> \
   --decision "<judgment>[@<confidence 0-1>]" --next "<concrete step>" [--file <modified-path>]...
 # or: lore handoff --json-file <payload.json>   # the file IS the extra.handoff payload
 ```
 
 There is no `--content`/`--content-file` — the doc body is a deterministic projection of the structured fields. Repeatable flags carry the substance: `--file` (modified files), `--decision` (key decisions), `--next` (next steps, ≥1 required), plus `--failing-command` + `--failing-tail-file` for a failing oracle. Link it: `lore link <handoff> <plan> --type=informs`.
 
-**Consumption path — state this explicitly in your output**: the NEXT session picks the handoff up via `lore feed session-resume [--by <actor>]` (newest-wins; `--plan <slug>` to scope, `--handoff <slug>` to target directly). Also release stale task leases you hold: `lore release <task> --by <actor>`.
+**Consumption path — state this explicitly in your output**: the NEXT session picks the handoff up via `lore feed session-resume` (newest-wins; `--plan <slug>` to scope, `--handoff <slug>` to target directly). Also release stale task leases you hold: `lore release <task>`.
 
 ### 8. Verify
 

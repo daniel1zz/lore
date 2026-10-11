@@ -43,7 +43,7 @@ Lore's model requires FULL upfront decomposition (mode-create § 5.1) — there 
 3. If any fails the standard — enrich it NOW (`lore set <task> --content-file ...`,
    `lore phase add --description` on recreate), not "next session"
 4. Capture the volatile context before it evaporates:
-   - `lore handoff --plan <plan> --by $LORE_ACTOR --next "decompose Phase N per ..." --decision "..."`
+   - `lore handoff --plan <plan> --next "decompose Phase N per ..." --decision "..."`
    - Durable rationale worth reuse → `lore create knowledge --sub-type research --title
      "Decomposition Context — {Phase}"` + `lore link <knowledge> <plan> --type=informs`
 

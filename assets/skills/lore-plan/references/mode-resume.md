@@ -17,7 +17,7 @@
 - If not specified → lore list --type plan --json → prompt user to select
 
 # 2. Pull session-resume context
-- lore feed session-resume --plan <plan> [--by <actor>]
+- lore feed session-resume --plan <plan>
   → latest handoff for this plan: modified files, decisions, next steps, failing oracles
 - If a direct handoff slug is known: lore feed session-resume --handoff <slug>
 
@@ -51,7 +51,7 @@
 - sessions[] shows who else (which actors/worktrees) currently holds fresh claims —
   do NOT dispatch onto tasks another live session is working
 - anchor_conflicts[] non-empty → resolve before dispatch (serialize or release stale claims:
-  the report names the exact `lore release <slug> --by <holder> --force` recovery command)
+  the report names the exact `lore release <slug> --force` recovery command)
 - Highlight critical path tasks (--priority critical/high) among ready tasks
 ```
 

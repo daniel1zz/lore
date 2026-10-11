@@ -80,16 +80,11 @@ message (parallel). ⛔ **Bundle source of truth (SPEC-070): run `lore feed task
 4. **Context Digest** — key decisions/constraints, ≤15k tokens
 5. **File Anchors** — the task's declared anchors (its write scope)
 
-Plus the actor-identity export (SPEC-042 discipline — one distinct identity per agent, or the
-anchor-overlap gate goes blind):
-
-```
-export LORE_ACTOR=agent:<task-slug>
-```
+Identity needs no export: it comes from the agent integration, which registers each implementer's run and attests its writes (the anchor-overlap gate keys on those runs).
 
 ⛔ **First command inside a fresh worktree: `bun install`** — a fresh worktree has no local `node_modules/@lore/*` workspace symlinks; module resolution silently walks UP into the main checkout's node_modules, so every oracle tests STALE `@lore/core`/`@lore/lore` source (live finding 2026-07-19). Install before claiming, before any oracle.
 
-**The implementer claims from INSIDE its worktree** — `lore claim <task> --by $LORE_ACTOR --worktree <branch>` — never pre-claimed by the orchestrator. It then implements, runs oracles, records `lore evidence` (result from the oracle's exit status, never self-asserted), and `lore release`.
+**The implementer claims from INSIDE its worktree** — `lore claim <task> --worktree <branch>` — never pre-claimed by the orchestrator. It then implements, runs oracles, records `lore evidence` (result from the oracle's exit status, never self-asserted), and `lore release`.
 
 ⛔ **Dispatch bundles MUST scope the implementer's oracles** — AC test files (`-t "AC-…"` with matched-count assertion), `bunx vitest run --changed <merge-base>`, anchor-matching `.bun.test.ts` files, and `bun run typecheck` — NEVER the full suite. The full suite runs ONCE, on main, by the orchestrator after merge (Phase 4 step 2). N worktrees × full suite on one machine starves subprocess-spawning tests into 30s-timeout cascades that present as fake regressions (2026-07-23: load 150, 70+ phantom failures across two agents).
 
@@ -113,7 +108,7 @@ On each implementer return:
 2. **Check evidence** — `lore get <task> --json` → `extra.verification_evidence` must carry passing oracle entries for the task's ACs. Missing/failing evidence → failure loop below.
 3. **Attested verification** — after merging, run the trusted runner on main:
    ```
-   lore verify <plan> --task <task> --allow-new-commands --by autopilot
+   lore verify <plan> --task <task> --allow-new-commands
    ```
    Exit code decides (never self-asserted); exit 7 without the flag = a new command needs approval — the flag is the sanctioned non-interactive path, but eyeball the command it names first (a planted `verify.command` runs with your shell privileges — suspicious command → M2 escalation, do not run).
    FAIL → Fix Loop (D3) on main, then re-run `lore verify`.
@@ -122,13 +117,13 @@ On each implementer return:
 ### Failure loop (per task)
 - **Retry ≤2**: `SendMessage` back to the SAME implementer with the failure output (oracle text, verify attestation, review findings) — it keeps its context.
 - **Both retries exhausted**: discard that worktree, dispatch a FRESH implementer with the failure summary injected as an explicit anti-pattern note ("previous attempt failed because X — do not repeat").
-- **Fresh agent also fails**: `lore release <task> --by <its-actor> --reason "<failure summary>" --force` if the agent left a claim, mark blocked in the report, continue with other ready tasks.
+- **Fresh agent also fails**: `lore release <task> --reason "<failure summary>" --force` if the agent left a claim, mark blocked in the report, continue with other ready tasks.
 
 ## Phase 5 — Plan Closure
 
 When `lore ready <plan>` returns no ready tasks and nothing is in flight:
 
-1. **Full-plan attested run**: `lore verify <plan> --allow-new-commands --by autopilot` (all script-mode ACs). FAIL → Fix Loop.
+1. **Full-plan attested run**: `lore verify <plan> --allow-new-commands` (all script-mode ACs). FAIL → Fix Loop.
 2. **Project oracles** on main: typecheck + full test suite (whatever the repo's CLAUDE.md names). FAIL → Fix Loop.
 3. **LLM-as-judge closure — batched** (`~/.claude/skills/shared/batched-governance.md` § Execution and closure): if other plans of the same initiative still have ready/in-flight tasks, DEFER assess and report it as `deferred to initiative end`. When this is the initiative's LAST plan to drain, run `lore assess <plan> [--diff <merge-base>..HEAD]` for EVERY plan of the initiative in parallel and triage all findings in one pass. Exception: a pilot plan that a pre-registered branch reads as its trigger is assessed as it closes. Exit 6 (AI provider error) → retry once, then report assess as skipped with the error; do not block completion on it.
 4. **Final report**:
@@ -156,6 +151,6 @@ When `lore ready <plan>` returns no ready tasks and nothing is in flight:
 - ⛔ lore is the SSOT — claims/evidence/release happen through lore, by the implementer, from its worktree.
 - ⛔ Evidence comes from oracle exit codes; `lore verify` attests script ACs — never self-report pass.
 - ⛔ Never `--steal`, never `lore release --force` foreign fresh claims, never `LORE_GATE_BYPASS` — user say-so only (M2).
-- ⛔ Overlapping or undeclared anchors → serialize; distinct `LORE_ACTOR=agent:<task-slug>` per concurrent agent.
+- ⛔ Overlapping or undeclared anchors → serialize; each concurrent agent is a separate attested run (identity comes from the agent integration).
 - ⛔ Merge returned branches immediately; clean up merged worktrees; never leave orphans. Sweep every round with `lore territory --json` — act only on `mine`/`unowned`, never `foreign`, escalate `unmeasured` by name.
 - ⛔ Do not stop between tasks; only M1–M5 escalate.

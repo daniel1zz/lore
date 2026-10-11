@@ -27,22 +27,22 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 | `create_plan` | `lore create plan --title ... --parent <spec>` |
 | `create_plan_phases` / `decompose_phase` | `lore phase add <plan> <name>`; `lore create task --parent <plan> --plan-id <plan> --phase <name> --anchor <path>` |
 | `get_next_tasks` / `get_plan_tasks` | `lore ready <plan> --json` (computed readiness + sessions + anchor_conflicts); `lore list --type task --plan-id <plan>` |
-| `claim_plan` / `heartbeat_plan` / `release_plan` | task-level lease: `lore claim <task> --by <actor> [--worktree <br>]` / `lore release <task> --by <actor>` (TTL computed read-side, no heartbeat) |
-| `update_task(in_progress)` | `lore claim <task> --by $LORE_ACTOR` |
+| `claim_plan` / `heartbeat_plan` / `release_plan` | task-level lease: `lore claim <task> [--worktree <br>]` / `lore release <task>` (TTL computed read-side, no heartbeat) |
+| `update_task(in_progress)` | `lore claim <task>` |
 | `update_task(completed)` + `verification_evidence` | `lore evidence <task> --oracle <tsc\|test\|lint\|build\|e2e\|manual> --command "<cmd>" --result pass\|fail [--ac <id>]` then `lore release <task>` |
 | `verify_task_evidence` | `lore verify <plan> [--task <task>]` — trusted runner, attested evidence (exit code decides, never self-asserted) |
 | `validate_plan` | pre-exec: `lore ready <plan> --json` + gates; post-exec: `lore assess <plan>` (LLM-as-judge vs spec ACs) |
 | `assert_doc_chain` | `lore status --check-tree [--fix]` (blueprint `lore.tree.yaml`) + `--check-drift` (code anchors) |
 | review queue / approve | `lore pending [--escalated]`; `lore review <doc>` (AI judgment); `lore approve <doc>` / `lore reject <doc>` |
 | `session_retrospective` | `lore create knowledge --sub-type retro` |
-| `prepare_for_next_session` / handoff | `lore create knowledge --sub-type handoff --title "Handoff — <actor>"`; next session consumes via `lore feed session-resume [--by <actor>]` |
+| `prepare_for_next_session` / handoff | `lore create knowledge --sub-type handoff --title "Handoff — <actor>"`; next session consumes via `lore feed session-resume` |
 | stale/wrong knowledge cleanup | `lore invalidate <doc> [--superseded-by <new>] [--reason "..."]`; probes: `lore review --staleness [--list]` |
 | `reindex` / `think_about_docs` | n/a (FTS5 is automatic; no equivalent needed) |
 | docman-hub cross-project aggregation / telemetry dashboards | RETIRED — no lore equivalent (per-corpus `lore status` only) |
 
 ## Concurrency discipline (SPEC-042)
 
-- Each concurrent agent gets a distinct `LORE_ACTOR=agent:<branch-or-slug>` (exported in the dispatch bundle).
+- Each concurrent agent is a separate attested run — identity comes from the agent integration; the dispatch bundle exports nothing.
 - Claims are made BY the implementer from INSIDE its worktree (`--worktree` explicit) — never pre-claimed by the orchestrator.
 - Tasks declare `--anchor <path>` file anchors; overlapping fresh claims by different actors are REJECTED at `lore claim` (`gate:task-claim:anchor-overlap`). Legacy alias (SPEC-056 D7): the checkpoint that gates a `phase` doc's claim is `phase-claim` (same anchor-overlap predicate) — `task-claim` still gates legacy `task` docs unchanged until migration; a config still keyed under `workflow.gates."task-claim"` is honored for `phase-claim` too (one deprecation warning per process).
 - Before dispatch: `lore ready <plan> --json` → check `sessions[]` / `anchor_conflicts[]`.

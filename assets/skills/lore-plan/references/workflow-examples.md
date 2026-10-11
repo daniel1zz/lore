@@ -154,13 +154,13 @@ Output:
 
 lore evidence task-jwt-middleware --oracle test \
   --command "bunx vitest run src/middleware/jwt.test.ts" --result pass \
-  --ac AC-AUTH-2 --by $LORE_ACTOR
+  --ac AC-AUTH-2
 lore evidence task-jwt-middleware --oracle tsc \
-  --command "bunx tsc --noEmit" --result pass --by $LORE_ACTOR
+  --command "bunx tsc --noEmit" --result pass
 
 **[ESTIMATE_ACTUAL]** task-jwt-middleware: estimated M actual M
 
-lore release task-jwt-middleware --by $LORE_ACTOR
+lore release task-jwt-middleware
 lore set task-jwt-middleware --status approved
 lore set task-jwt-middleware --status archived     # DONE — unblocks dependents
 
@@ -282,12 +282,12 @@ lore ready plan-user-authentication --json
          task-password-hashing (anchors: src/auth/hash.ts)
   anchor_conflicts: []
 
-# Dispatch bundles export DISTINCT actor identities:
-#   agent A: export LORE_ACTOR=agent:jwt-middleware
-#   agent B: export LORE_ACTOR=agent:password-hashing
+# Each agent is its own attested run (identity comes from the agent integration; no export needed):
+#   agent A: implements task-jwt-middleware
+#   agent B: implements task-password-hashing
 # Each implementer claims FROM INSIDE ITS OWN WORKTREE:
-#   lore claim task-jwt-middleware --by $LORE_ACTOR --worktree feat/jwt-middleware
-#   lore claim task-password-hashing --by $LORE_ACTOR --worktree feat/password-hashing
+#   lore claim task-jwt-middleware --worktree feat/jwt-middleware
+#   lore claim task-password-hashing --worktree feat/password-hashing
 
 # If anchors HAD overlapped: the second claim is REJECTED
 # (gate:task-claim:anchor-overlap, exit 5-adjacent gate fail) — the feeding pack names
@@ -325,6 +325,6 @@ lore ready → task-auth-routes newly unblocked (⭐ critical path)
 [PLAN COMPLETE]
 lore verify plan-user-authentication --allow-new-commands   # attested script ACs
 lore assess plan-user-authentication --diff main..HEAD      # LLM-as-judge vs spec ACs — the initiative's single end-of-run assess (one plan here)
-lore handoff --plan plan-user-authentication --by $LORE_ACTOR --next "monitor prod rollout"
+lore handoff --plan plan-user-authentication --next "monitor prod rollout"
 Completed: 8 tasks | Estimate accuracy: 86% | Risks: 1 mitigated, 1 accepted
 ```
