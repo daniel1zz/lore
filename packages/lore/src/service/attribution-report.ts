@@ -15,10 +15,17 @@
  *      an attested run. Claims/evidence are audit actions `claim` / `evidence` (`countAttributedWrites`);
  *      handoffs are `create` audit rows of knowledge docs carrying `extra.handoff` (how `lore handoff` writes
  *      them). Ordinary document writes never enter the count.
+ *   3. {@link AttributionReport.identitySources} — every audit row in the window, counted by identity source
+ *      (spec-run-only-write-identity-and-run-end-claim-release Scope 8, BR-1039): `run` when the row carries an
+ *      attested `harness_run` (it wins over the name's source), else the row's `details.name_source`
+ *      (`session` / `worktree` / `os`); anything else (no recorded source: internal writers, pre-source rows; or
+ *      a retired `flag` / `env` source) is `other`, never dropped, so the buckets sum to the window's rows.
+ *   4. {@link AttributionReport.orphanedDirty} — claims kept by `lore run end` because their worktree was dirty
+ *      (`extra.claim.orphaned_dirty`): how many, and the age in minutes of the oldest.
  */
 
 import type { AuditEntry, DocId, LoreError, Result, VersionRecord } from "@lore/core";
-import { err, ok } from "@lore/core";
+import { err, extractClaim, ok } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
 export const UNATTESTED = "unattested";
@@ -76,7 +83,31 @@ export interface AttributionShare {
   share: number;
 }
 
+export interface IdentitySourceCounts {
+  window_days: number;
+  run: number;
+  session: number;
+  worktree: number;
+  os: number;
+  /** Unattested rows with no recorded source, or a retired one (`flag`, `env`). */
+  other: number;
+}
+
+export interface OrphanedDirtySummary {
+  count: number;
+  /** Whole minutes since the oldest `orphaned_dirty.at`; `null` when there is no such claim (never 0). */
+  oldest_age_minutes: number | null;
+}
+
+const NAMED_SOURCES = ["session", "worktree", "os"] as const;
+type NamedSource = (typeof NAMED_SOURCES)[number];
+
+function isNamedSource(value: unknown): value is NamedSource {
+  return NAMED_SOURCES.some((s) => s === value);
+}
+
 const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
 const AUDIT_KINDS = ["claim", "evidence"] as const;
 
 export class AttributionReport {
@@ -108,5 +139,54 @@ export class AttributionReport {
     }
     const share = total === 0 ? 0 : Math.round((attested / total) * 10_000) / 10_000;
     return ok({ window_days: windowDays, total, attested, share });
+  }
+
+  /** Audit rows with `timestamp >= clock() - windowDays`, bucketed by identity source (see module header, item 3). */
+  async identitySources(windowDays: number, clock: () => Date): Promise<Result<IdentitySourceCounts, LoreError>> {
+    if (!Number.isInteger(windowDays) || windowDays < 1) {
+      return err({ code: "VALIDATION_ERROR", message: `windowDays must be a positive integer, got ${windowDays}` } as LoreError);
+    }
+    const windowStart = new Date(clock().getTime() - windowDays * DAY_MS).toISOString();
+    const rows = await this.store.queryAudit({ since: windowStart });
+    if (!rows.ok) return rows;
+    const counts: IdentitySourceCounts = { window_days: windowDays, run: 0, session: 0, worktree: 0, os: 0, other: 0 };
+    for (const row of rows.value) {
+      if (row.harness_run != null) {
+        counts.run += 1;
+        continue;
+      }
+      const source = row.details?.name_source;
+      if (isNamedSource(source)) counts[source] += 1;
+      else counts.other += 1;
+    }
+    return ok(counts);
+  }
+
+  /** Tasks whose claim is `orphaned_dirty`: the count and the oldest one's age at `clock()`. */
+  async orphanedDirty(clock: () => Date): Promise<Result<OrphanedDirtySummary, LoreError>> {
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    const nowMs = clock().getTime();
+    let count = 0;
+    let oldestMs: number | null = null;
+    for (const task of tasks.value) {
+      const orphan = extractClaim(task)?.orphaned_dirty;
+      if (orphan === undefined) continue;
+      const atMs = Date.parse(orphan.at);
+      if (Number.isNaN(atMs)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "orphaned_dirty.at",
+          message: `task ${task.slug}: orphaned_dirty.at is not a date: ${orphan.at}`,
+          value: orphan.at,
+        } as LoreError);
+      }
+      count += 1;
+      if (oldestMs === null || atMs < oldestMs) oldestMs = atMs;
+    }
+    return ok({
+      count,
+      oldest_age_minutes: oldestMs === null ? null : Math.max(0, Math.floor((nowMs - oldestMs) / MINUTE_MS)),
+    });
   }
 }
