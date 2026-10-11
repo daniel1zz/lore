@@ -118,10 +118,7 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 function gated(store: InMemoryStore, cfg: GateCfg | undefined): AcService {
-  // MOCK RISK: none — only the (not yet existing) 2nd constructor arg is cast past the type system.
-  return new (AcService as unknown as new (s: InMemoryStore, o: unknown) => AcService)(store, {
-    citeGate: cfg,
-  });
+  return new AcService(store, new RecordLockService(store), { citeGate: cfg });
 }
 
 interface World {

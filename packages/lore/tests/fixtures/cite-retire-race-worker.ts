@@ -15,6 +15,7 @@
  * readiness, spins on the barrier file, performs ONE write, and writes
  * `{ ok: true } | { ok: false, code, message }` to resultPath.
  */
+import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { existsSync, writeFileSync } from "node:fs";
 import { AcService } from "../../src/service/ac-service.js";
 import { RuleService } from "../../src/service/rule-service.js";
@@ -28,8 +29,7 @@ if (!dbPath || !role || !target || !readyFile || !barrierFile || !resultPath || 
 const store = new SQLiteStore(dbPath);
 // PINNED CONTRACT (C4/D6): the gate config is handed to AcService as the 2nd constructor
 // argument. Today's AcService ignores it (report-only citing) — that is the RED state.
-const AcServiceCtor = AcService as unknown as new (s: SQLiteStore, opts: Record<string, unknown>) => AcService;
-const ac = new AcServiceCtor(store, {
+const ac = new AcService(store, new RecordLockService(store), {
   citeGate: { mode, armed_branches: armedBranch === "-" ? [] : [armedBranch] },
 });
 const rules = new RuleService(store);

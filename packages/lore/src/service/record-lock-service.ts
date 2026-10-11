@@ -17,9 +17,10 @@
  *   gathers its input facts and renders nothing itself (refusal prose is the checkpoint's `feed()`).
  * - Facts it does NOT gather: evidence. The evidence count for `lore reopen` belongs to
  *   `ReviewService.reopen` through the AC-coverage query (spec §Module Boundary).
- * - `assertEditable` reaches `GateEnforcer.enforce` ONLY for a write that targets a locked record,
- *   so an ordinary edit leaves no `gate_passed` audit noise; a disabled gate
- *   (`workflow.gates."record-edit".enabled: false`) skips with the enforcer's own
+ * - `assertEditable` reaches `GateEnforcer.enforce` for every write that would REWRITE something the
+ *   lock protects (not for a metadata-only save), passing the lock verdict in as a fact; the checkpoint
+ *   blocks exactly when it is a locked record. A pass leaves the enforcer's `gate_passed` trace, and a
+ *   disabled gate (`workflow.gates."record-edit".enabled: false`) skips with the enforcer's own
  *   `config_disabled` audit row (BR-1053).
  *
  * Side-effect class: IO (reads docs, versions and audit rows through `StoreInterface`; never writes
@@ -194,8 +195,12 @@ export class RecordLockService {
 
     const lock = await this.resolve(doc);
     if (!lock.ok) return lock;
-    if (!(lock.value.standing === "record" && lock.value.locked)) return ok(undefined);
 
+    // reason: the enforcer is consulted for EVERY rewrite attempt, not only a locked one — `enforce` is
+    // synchronous over a flat context, so the lock verdict is gathered above and handed in as a fact, and
+    // `checkRecordEdit` blocks exactly when it is a locked record. A passing evaluation therefore leaves the
+    // same `gate_passed` trace every other registered checkpoint leaves (AC-FR-8/D7), and a disabled gate
+    // leaves its `config_disabled` skip row on the rewrites it stopped judging.
     const subType = doc.extra["sub_type"];
     return this.gateEnforcer.enforce(RECORD_EDIT_CHECKPOINT, {
       targetIdOrSlug: doc.slug,
@@ -242,7 +247,7 @@ export class RecordLockService {
   /**
    * Ever-approved fact (D1): the version history holds a status `approved` row. A doc whose CURRENT
    * status can only follow an approval (approved/active/archived) is ever-approved without the scan —
-   * covers rows a fixture or an import inserted with no version history.
+   * covers rows a fixture or an import inserted without any version rows.
    */
   private async hasEverBeenApproved(doc: DocRecord): Promise<Result<boolean, LoreError>> {
     if (POST_APPROVAL_STATUSES.has(doc.status)) return ok(true);

@@ -103,7 +103,11 @@ beforeEach(() => {
   // approve-advisory-render.test.ts's own precedent for the SAME gate.
   const config: LoreConfig = {
     project: { name: "ac-demotion-notice-test", author: "tester" },
-    workflow: { review: { judgment_required_types: [] } },
+    // `record-edit` is switched off through its one config knob: this suite pins the approved->draft
+    // demotion notice, which only an UNLOCKED approved spec can reach now that `ac add|set` on a locked
+    // (ever-approved) spec is refused (spec-documents-are-living-or-records D12). The refusal itself is
+    // pinned in record-lock-ac-restore.test.ts.
+    workflow: { review: { judgment_required_types: [] }, gates: { "record-edit": { enabled: false } } },
   } as unknown as LoreConfig;
   const saveResult = saveConfig(tmpDir, config);
   if (!saveResult.ok) throw new Error(`saveConfig failed: ${JSON.stringify(saveResult.error)}`);

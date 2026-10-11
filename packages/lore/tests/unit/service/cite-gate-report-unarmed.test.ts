@@ -45,7 +45,7 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 function gated(store: InMemoryStore, cfg: Cfg | undefined): AcService {
-  return new (AcService as unknown as new (s: InMemoryStore, o: unknown) => AcService)(store, { citeGate: cfg });
+  return new AcService(store, new RecordLockService(store), { citeGate: cfg });
 }
 
 /** alpha (BR-1, BR-2 live) + beta (BR-20 live) branches; one spec citing alpha, one citing beta, one citing nothing. */

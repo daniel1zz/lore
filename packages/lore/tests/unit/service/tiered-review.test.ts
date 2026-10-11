@@ -26,7 +26,7 @@
  * @spec_ref SPEC-103
  */
 
-import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
 import { describe, it, expect, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
@@ -128,7 +128,7 @@ async function makeApp(
   const telemetry = makeTelemetry();
   const enforcer = new GateEnforcer(undefined);
   const corpusService = new CorpusService(
-    store, new RecordLockService(store),
+    store, recordLockGateOff(store),
     telemetry,
     undefined,
     enforcer,

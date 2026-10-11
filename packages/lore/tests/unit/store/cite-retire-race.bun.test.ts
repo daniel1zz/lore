@@ -286,8 +286,7 @@ describe("enforce mode, armed branch: 8 citers race 1 retirer (QA-2 / D6)", () =
     expect(retired.retire).toEqual({ ok: true });
 
     const store = new SQLiteStore(fx.dbPath);
-    const AcCtor = AcService as unknown as new (s: SQLiteStore, o: Record<string, unknown>) => AcService;
-    const gated = new AcCtor(store, { citeGate: { mode: "enforce", armed_branches: [BRANCH_SLUG] } });
+    const gated = new AcService(store, new RecordLockService(store), { citeGate: { mode: "enforce", armed_branches: [BRANCH_SLUG] } });
     const before = await store.find(fx.specIds[0] as never);
     const res = await gated.citeCriterion(fx.specIds[0] as string, AC_ID, [RULE_ID], {}, { by: "agent:late" });
     const after = await store.find(fx.specIds[0] as never);
@@ -303,8 +302,7 @@ describe("enforce mode, armed branch: 8 citers race 1 retirer (QA-2 / D6)", () =
     const fx = await seed(dir);
     await race(dir, { ...fx, specIds: [] }, "enforce", true, "retire-only");
     const store = new SQLiteStore(fx.dbPath);
-    const AcCtor = AcService as unknown as new (s: SQLiteStore, o: Record<string, unknown>) => AcService;
-    const ungated = new AcCtor(store, { citeGate: { mode: "enforce", armed_branches: ["some-other-branch"] } });
+    const ungated = new AcService(store, new RecordLockService(store), { citeGate: { mode: "enforce", armed_branches: ["some-other-branch"] } });
     const res = await ungated.citeCriterion(fx.specIds[0] as string, AC_ID, [RULE_ID], {}, { by: "agent:late" });
     store.close();
     expect(res.ok).toBe(true);

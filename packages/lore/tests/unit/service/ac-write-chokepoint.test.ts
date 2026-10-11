@@ -27,7 +27,7 @@
  * @spec_ref AC-BLS2-1
  */
 
-import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
 import { describe, it, expect } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -61,8 +61,8 @@ const AC = (id: string, statement = "Does the thing") => ({
 
 async function setup() {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const ac = new AcService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, recordLockGateOff(store));
+  const ac = new AcService(store, recordLockGateOff(store));
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");
   const spec = await cs.create({
@@ -224,7 +224,7 @@ describe("AC write chokepoint — refusals (AC-BLS2-1)", () => {
 
   it("CorpusService.create with a vague human-mode criterion is refused by the spec-create wording check (the gate is live through the chokepoint)", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store, new RecordLockService(store), undefined, undefined, new GateEnforcer(undefined));
+    const cs = new CorpusService(store, recordLockGateOff(store), undefined, undefined, new GateEnforcer(undefined));
     const prd = await cs.create({ type: "prd", title: "P4", content: "root" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd");
     const res = await cs.create({
@@ -377,7 +377,7 @@ describe("AC write chokepoint — restore and import are sanctioned, validated p
       (v) => Array.isArray(v.extra["acceptance_criteria"]) && (v.extra["acceptance_criteria"] as unknown[]).length === 2,
     );
     if (!twoAcs) throw new Error("fixture: no 2-criteria version");
-    const res = await new VersionService(store, new RecordLockService(store)).restore(specId, twoAcs.version);
+    const res = await new VersionService(store, recordLockGateOff(store)).restore(specId, twoAcs.version);
     expect(res.ok).toBe(true);
     expect(((await stored(store, specId)).extra["acceptance_criteria"] as unknown[]).length).toBe(2);
   });
@@ -401,7 +401,7 @@ describe("AC write chokepoint — restore and import are sanctioned, validated p
     });
     if (!ins.ok) throw new Error("insertVersion");
     const before = await fingerprint(store, specId);
-    const res = await new VersionService(store, new RecordLockService(store)).restore(specId, 500);
+    const res = await new VersionService(store, recordLockGateOff(store)).restore(specId, 500);
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error.code).toBe("VALIDATION_ERROR");

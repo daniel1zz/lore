@@ -20,8 +20,9 @@
  * The approved->draft demotion (D2 below) therefore only serves a spec the lock does not cover —
  * in practice a spec whose `record-edit` gate is switched off by
  * `workflow.gates."record-edit".enabled: false` (BR-1053). `PhaseService`'s three phase-set
- * writers log a version row and never demote (`adr-phase-writes-log-a-version-row-and-do-not-
- * demote-the-plan`), and are gated the same way on a closed plan (D16).
+ * writers log a version row and never demote — see
+ * `adr-phase-writes-log-a-version-row-and-do-not-demote-the-plan` — and are gated the same way on a
+ * closed plan (D16).
  *
  * Public surface:
  *   addCriterion(specIdOrSlug, criterion)          → AcceptanceCriterion[] (updated list)

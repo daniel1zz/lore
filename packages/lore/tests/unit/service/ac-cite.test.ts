@@ -38,7 +38,7 @@
  * @spec_ref AC-BLS1-6
  */
 
-import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { recordLockGateOff } from "../../helpers/record-lock-gate-off.js";
 import { describe, it, expect } from "vitest";
 import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
@@ -135,8 +135,8 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 
 async function setup() {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const ac = new AcService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, recordLockGateOff(store));
+  const ac = new AcService(store, recordLockGateOff(store));
   await insertLeaf(store, [rule("BR-1", "live"), rule("BR-2", "deprecated"), rule("BR-3", "retired")]);
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");

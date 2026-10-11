@@ -426,6 +426,29 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
     );
 
     it(
+      'checkpoint "record-edit": rewriting a draft spec via `lore set --content` leaves a gate_passed trace (the lock judged it editable)',
+      () => {
+        const spec = parseSlug(
+          runLoreOk(
+            [
+              "create", "spec", "--title", "GET-9 record-edit target", "--kind", "tech", "--no-ai",
+              "--content", "## Overview/Goal\n\nx\n\n## Scope\n\nx\n\n## Acceptance Criteria\n\nx",
+            ],
+            tmpDir,
+            "create spec (record-edit)",
+          ).stdout,
+        );
+        runLoreOk(["set", spec, "--content", "## Overview/Goal\n\nrewritten\n\n## Scope\n\nx"], tmpDir, "set content (record-edit)");
+
+        const entries = queryAudit(spec, tmpDir);
+        const rows = gatePassedRows(entries, "record-edit");
+        expect(rows.length).toBeGreaterThanOrEqual(1);
+        expect(rows[0]?.details?.verdict).toBe("pass");
+      },
+      60_000,
+    );
+
+    it(
       "REGRESSION: every checkpoint currently in checkpointRegistry was actually exercised above (enumeration, never a hand-listed set)",
       () => {
         // This assertion is the ENUMERATION half of AC-FR-8 — it fails loudly
@@ -433,7 +456,7 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
         // checkpointRegistry without a matching scenario above.
         const exercised = new Set([
           "spec-create", "task-create", "spec-promote", "plan-promote",
-          "task-claim", "plan-close", "phase-claim", "review-judgment",
+          "task-claim", "plan-close", "phase-claim", "review-judgment", "record-edit",
         ]);
         for (const checkpoint of registeredCheckpoints) {
           expect(exercised.has(checkpoint), `checkpoint "${checkpoint}" has no gate_passed scenario above`).toBe(true);

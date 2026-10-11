@@ -444,8 +444,9 @@ describe("lore gate plan-promote — AC-P2-3: ancestor spec approved but 0 accep
 describe("lore gate plan-promote — AC-P2-4: ancestor spec approved with ≥1 acceptance criterion", () => {
   it("exits 0 and prints 'gate: pass'", async () => {
     const { specId, planSlug } = await createSpecParentedPlan();
-    await approveDoc(specId);
+    // The criterion goes in BEFORE the approval: ac add on an approved spec is refused (record-edit gate).
     await addAcceptanceCriterion(specId);
+    await approveDoc(specId);
 
     const cmd = await importGateSubCommand("plan-promote");
     const output = captureOutput();
@@ -638,8 +639,9 @@ describe("lore gate plan-promote / task-claim — STATE: LORE_GATE_BYPASS=1", ()
 describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted ancestor spec", () => {
   it("plan-promote exits 4 (UPSTREAM_DELETED) when the approved+AC ancestor spec was soft-deleted", async () => {
     const { specId, planSlug } = await createSpecParentedPlan();
-    await approveDoc(specId);
+    // The criterion goes in BEFORE the approval: ac add on an approved spec is refused (record-edit gate).
     await addAcceptanceCriterion(specId);
+    await approveDoc(specId);
 
     // Sanity: before the soft-delete, this exact plan would PASS (same fixture
     // shape as AC-P2-4). Confirms the block below is caused by deletion, not by
@@ -670,8 +672,9 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
 
   it("task-claim exits 4 (UPSTREAM_DELETED) when the plan's approved+AC ancestor spec was soft-deleted", async () => {
     const { specId, planId } = await createSpecParentedPlan();
-    await approveDoc(specId);
+    // The criterion goes in BEFORE the approval: ac add on an approved spec is refused (record-edit gate).
     await addAcceptanceCriterion(specId);
+    await approveDoc(specId);
     const { taskSlug } = await createTask(planId);
 
     const preCmd = await importGateSubCommand("task-claim");
@@ -702,8 +705,9 @@ describe("lore gate plan-promote / task-claim — AC-P2-SOFTDEL: soft-deleted an
     // Regression guard for the correct-semantics requirement in the fix task: a
     // soft-deleted upstream must not fall through to AC-P2-6's vacuous-pass path.
     const { specId, planSlug } = await createSpecParentedPlan();
-    await approveDoc(specId);
+    // The criterion goes in BEFORE the approval: ac add on an approved spec is refused (record-edit gate).
     await addAcceptanceCriterion(specId);
+    await approveDoc(specId);
     await softDeleteDoc(specId);
 
     const cmd = await importGateSubCommand("plan-promote");
@@ -747,8 +751,9 @@ describe("lore gate — REGRESSION: plan-promote and task-claim agree on the sam
     expect(process.exitCode).toBe(4);
 
     // -- approve the spec + add AC: plan-promote passes, task-claim passes --
-    await approveDoc(specId);
+    // The criterion goes in BEFORE the approval: ac add on an approved spec is refused (record-edit gate).
     await addAcceptanceCriterion(specId);
+    await approveDoc(specId);
 
     output = captureOutput();
     try {

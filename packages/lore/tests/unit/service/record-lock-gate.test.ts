@@ -428,14 +428,24 @@ describe("record-edit gate on CorpusService.set (AC-DR-2)", () => {
       expect(audit.value[0]?.details).toMatchObject({ checkpoint: "record-edit", mechanism: "config_disabled" });
     });
 
-    it("leaves no gate audit rows for an ordinary edit of an unlocked doc (the gate is consulted only for a locked target)", async () => {
-      const { store, service } = makeFixture();
+    it("a passing evaluation (an unlocked doc rewritten) leaves a gate_passed trace naming the doc, and a metadata-only save leaves none", async () => {
+      const store = new InMemoryStore();
+      const enforcer = new GateEnforcer(undefined, store.appendAuditEntry.bind(store));
+      const service = new CorpusService(store, new RecordLockService(store, enforcer));
       const spec = await mustCreate(service, { type: "spec", title: "Draft", content: "v1" });
 
-      await mustSet(service, spec.slug, { content: "v2" });
+      await mustSet(service, spec.slug, { tags: ["metadata-only"] });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const afterMetadata = await store.queryAudit({ doc_id: spec.id, action: "gate_passed" });
+      expect(afterMetadata.ok && afterMetadata.value).toHaveLength(0);
 
-      const gateRows = await store.queryAudit({ doc_id: spec.id, action: "gate_passed" });
-      expect(gateRows.ok && gateRows.value).toHaveLength(0);
+      await mustSet(service, spec.slug, { content: "v2" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const afterRewrite = await store.queryAudit({ doc_id: spec.id, action: "gate_passed" });
+      expect(afterRewrite.ok).toBe(true);
+      if (!afterRewrite.ok) return;
+      expect(afterRewrite.value).toHaveLength(1);
+      expect(afterRewrite.value[0]?.details).toMatchObject({ checkpoint: "record-edit" });
     });
   });
 });

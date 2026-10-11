@@ -72,6 +72,7 @@ const WORKER_SCRIPT = `
 import { existsSync, writeFileSync } from "node:fs";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 
 const [, , dbPath, readyPath, barrierPath, slug, resultPath] = process.argv;
 
