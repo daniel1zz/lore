@@ -225,11 +225,11 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     raw.close();
   });
 
-  it("STATE: opening a schema-13 file lands on user_version 16 == LATEST_SCHEMA_VERSION (014, 015, then 016: runs + harness_run)", async () => {
+  it("STATE: opening a schema-13 file lands on user_version 17 == LATEST_SCHEMA_VERSION (014, 015, 016, then 017: runs.ended_at)", async () => {
     await seedSchema13();
     const store = new SQLiteStore(path);
-    expect(LATEST_SCHEMA_VERSION).toBe(16);
-    expect(userVersion(store.getDatabase())).toBe(16);
+    expect(LATEST_SCHEMA_VERSION).toBe(17);
+    expect(userVersion(store.getDatabase())).toBe(17);
     store.close();
   });
 

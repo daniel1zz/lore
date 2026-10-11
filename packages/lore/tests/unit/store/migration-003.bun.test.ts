@@ -62,7 +62,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // added migration-012 (links.link_type CHECK widened for "resolves") — a fresh
     // store now runs every migration up to the current head (12), not just through
     // migration-003/004.
-    expect(userVersion).toBe(16);
+    expect(userVersion).toBe(17);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -138,7 +138,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
     // migration-009 (audit hash chain); SPEC-084 added migration-010 (docs.ordinal);
     // SPEC-102 added migration-011; spec-issue-closure-loop-computed-resolution-agent-reachable
     // added migration-012, now the head — see HAPPY test's comment above.
-    expect(postUpgradeVersion).toBe(16);
+    expect(postUpgradeVersion).toBe(17);
 
     const tableNames = db
       .query("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -169,7 +169,7 @@ describe("migration-003 (review_judgments + calibration_records)", () => {
       // chain); SPEC-084 added migration-010 (docs.ordinal); SPEC-102 added migration-011;
       // spec-issue-closure-loop-computed-resolution-agent-reachable added migration-012,
       // now the head — see HAPPY test's comment above.
-      expect(userVersion).toBe(16);
+      expect(userVersion).toBe(17);
       secondOpen.close();
     }).not.toThrow();
   });
