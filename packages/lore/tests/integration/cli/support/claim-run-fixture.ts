@@ -96,15 +96,17 @@ export function registerRun(dir: string, runId: string): void {
   const [prefix, session, agent] = runId.split(":");
   if (prefix !== "cc" || session === undefined) throw new Error(`fixture only knows cc:<session>[:<agent>] ids: ${runId}`);
   const reg = runLore(
-    ["run", "register", "--harness", "claude-code", "--session", session, ...(agent !== undefined ? ["--agent", agent] : [])],
+    ["run", "register", "--harness", "claude-code", "--session", session, ...(agent !== undefined ? ["--agent-id", agent, "--agent-type", "lore-implementer"] : [])],
     dir,
   );
   if (reg.exitCode !== 0) {
     throw new Error(`\`lore run register\` for ${runId} failed (${reg.exitCode}) — run registration is missing: ${reg.stderr}${reg.stdout}`);
   }
-  const show = runLore(["run", "show", runId], dir);
-  if (show.exitCode !== 0) {
-    throw new Error(`run ${runId} is not registered after \`lore run register\` (show exit ${show.exitCode}): ${show.stderr}`);
+  // Contract pinned by run-register.bun.test.ts: `run show --json` => { ok: true, data: <RunRecord> }, camelCase fields.
+  const show = runLore(["run", "show", runId, "--json"], dir);
+  const shown = show.exitCode === 0 ? (JSON.parse(show.stdout) as { ok?: boolean; data?: { id?: string } }) : undefined;
+  if (shown?.ok !== true || shown.data?.id !== runId) {
+    throw new Error(`run ${runId} is not registered after \`lore run register\` (show exit ${show.exitCode}): ${show.stderr}${show.stdout}`);
   }
   registered.add(key);
 }
