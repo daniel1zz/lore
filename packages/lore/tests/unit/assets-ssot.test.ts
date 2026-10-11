@@ -427,6 +427,9 @@ const DECLARED_FILES = [
   "hooks/claude-md-guard.sh",
   // run-register + pre-tool-harness-run (run identity slice 1, BR-1044) — both in HOOK_REGISTRATIONS
   "hooks/run-register.mjs",
+  // run-end + shared run-id helper (SessionEnd/SubagentStop run end, BR-1059)
+  "hooks/run-end.mjs",
+  "hooks/lib/run-id.mjs",
   "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
   // project (4 .sh gates + pre-push + tree.yaml template + verification-profile config template, SPEC-058 D6)

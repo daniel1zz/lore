@@ -737,7 +737,7 @@ function buildPlaceholderHookPayload(): AssetPayload {
 }
 
 describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
-  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 17 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 18 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
     const fs = new MapFs();
     fs.seed(
       path.join(TARGET_DIR, "settings.json"),
@@ -774,7 +774,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
       );
     }
 
-    // All 17 distinct hook files are present in the merged command set.
+    // All 18 distinct hook files are present in the merged command set.
     // Hardcoded on purpose (same tripwire as assets-ssot.test.ts's roster): a
     // newly declared HOOK_REGISTRATIONS row must be answered by DECLARING it
     // here, never by deriving this list from the registry under test.
@@ -801,6 +801,8 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
         "claude-md-guard.sh",
         // Run identity slice 1 (BR-1044).
         "run-register.mjs",
+        // Run end on SessionEnd/SubagentStop (BR-1059).
+        "run-end.mjs",
         "pre-tool-harness-run.mjs",
       ].sort(),
     );
