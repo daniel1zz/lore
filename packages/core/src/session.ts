@@ -222,7 +222,7 @@
 
 import { z } from "zod";
 import { extractClaim, isClaimStale } from "./task-workflow.js";
-import type { DocRecord } from "./types.js";
+import type { DocId, DocRecord } from "./types.js";
 
 // ─── Handoff Extra Schema (S2, SPEC-041 §3 D3) ─────────────────────────────
 
@@ -582,6 +582,9 @@ export type ReadySession = z.infer<typeof readySessionSchema>;
  *   corpus-wide scope).
  * @param nowIso - Caller-supplied current time (D10 — never Date.now() here).
  * @param ttlMinutes - Claim TTL in minutes, forwarded to `isClaimStale`.
+ * @param staleByTask - Optional run-aware staleness the caller already resolved per task id (BR-1058:
+ *   an `orphaned_dirty` claim never ages out, a clean ended-run claim is stale at once). A task with an
+ *   entry uses it; a task without one falls back to TTL-only `isClaimStale`.
  * @returns One `ReadySession` per distinct `(by, machine, worktree, session_id)`
  *   key present among `tasks`' fresh claims, in first-seen order.
  *
@@ -602,7 +605,12 @@ export type ReadySession = z.infer<typeof readySessionSchema>;
  * // => TWO sessions — identical by/machine/(absent)worktree, distinct session
  * //    instance (the observed two-orchestrator case; ONE row before the fix)
  */
-export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: number): ReadySession[] {
+export function deriveSessions(
+  tasks: DocRecord[],
+  nowIso: string,
+  ttlMinutes: number,
+  staleByTask?: ReadonlyMap<DocId, boolean>,
+): ReadySession[] {
   interface MutableGroup {
     by: string;
     machine?: string;
@@ -620,7 +628,7 @@ export function deriveSessions(tasks: DocRecord[], nowIso: string, ttlMinutes: n
   for (const task of tasks) {
     const claim = extractClaim(task);
     if (claim === undefined) continue;
-    if (isClaimStale(claim, nowIso, ttlMinutes)) continue;
+    if (staleByTask?.get(task.id) ?? isClaimStale(claim, nowIso, ttlMinutes)) continue;
 
     // reason: `null` is used as the absent-field placeholder (never a legal
     // machine/worktree/session_id value) so JSON.stringify produces a stable,

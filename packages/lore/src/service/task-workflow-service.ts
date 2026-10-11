@@ -380,7 +380,7 @@ import {
   type WorktreeOutcome,
 } from "./worktree-cleanup.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
-import { compareClaimSessions, type SessionComparison } from "./gate-predicates.js";
+import { compareClaimSessions, type SessionComparison, type SiblingClaimInfo } from "./gate-predicates.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
 import type { GateDependencies } from "./gate-enforcer.js";
 // reason: spec-multi-session-concurrency-queryable-ownership-checkout §Scope
@@ -500,6 +500,11 @@ export interface ReleaseOpts {
 
 /** Options for {@link TaskWorkflowService.done} / {@link PhaseWorkflowService.done}. */
 export interface DoneOpts {
+  /**
+   * The run the caller explicitly carries (null/absent = unattested). Compared with a fresh claim's
+   * `harness_run` to decide whether the caller is the holder (BR-1056); see {@link ClaimOpts.harnessRun}.
+   */
+  harnessRun?: RunId | null;
   /**
    * Resolved actor identity — recorded on EVERY lifecycle step's version history
    * entry and audit row this call produces, and checked against a fresh claim's
@@ -868,6 +873,101 @@ export function buildClaimConflictError(
     age_minutes: ageMinutesBetween(nowIso, claim.at),
     ...(holder.legacy ? {} : { holder_run: holder.harnessRun }),
   };
+}
+
+/**
+ * The claim's effective staleness: TTL age, the holder run's end, and an `orphaned_dirty` mark
+ * (BR-1058), via core's pure {@link isClaimStaleForRun}. The git and run lookups happen only when the
+ * claim could be affected by them (an `orphaned_dirty` mark, or a holder run that has ended).
+ *
+ * Exported so the phase service and the claim gate judge staleness with the SAME function the task
+ * service uses (ADR decision 5: tasks and phases must agree).
+ *
+ * @param store - run-end lookup source (`getRunEnd`).
+ * @param ttlMinutes - claim TTL, the crash/kill fallback.
+ * @param endedRuns - per-call memo of `run id -> ended`, so one `ready()` looks each run up once.
+ * @returns ok(stale); err when the run lookup fails (never a silent "not stale").
+ */
+export async function resolveEffectiveClaimStaleness(
+  store: StoreInterface,
+  claim: TaskClaim,
+  nowIso: string,
+  ttlMinutes: number,
+  endedRuns: Map<string, boolean>,
+): Promise<Result<boolean, LoreError>> {
+  let runEnded = false;
+  const run = claim.harness_run ?? null;
+  if (run !== null) {
+    let known = endedRuns.get(run);
+    if (known === undefined) {
+      const endState = await store.getRunEnd(run as RunId);
+      if (!endState.ok) return endState;
+      known = endState.value !== null && endState.value.endedAt !== null;
+      endedRuns.set(run, known);
+    }
+    runEnded = known;
+  }
+  if (claim.orphaned_dirty === undefined && !runEnded) {
+    return ok(isClaimStale(claim, nowIso, ttlMinutes));
+  }
+  const cleanliness = measureWorktreeCleanliness(claim.orphaned_dirty?.worktree ?? claim.worktree);
+  const liveness: ClaimRunLiveness = {
+    runEnded,
+    // reason: only a MEASURED clean worktree counts as clean — not-measured is `null`, never `true` (BR-1057).
+    worktreeClean:
+      cleanliness.status === "measured-clean" ? true : cleanliness.status === "measured-dirty" ? false : null,
+  };
+  return ok(isClaimStaleForRun(claim, nowIso, ttlMinutes, liveness));
+}
+
+/**
+ * Effective staleness of every claimed doc in `docs`, keyed by doc id (see {@link resolveEffectiveClaimStaleness}).
+ */
+export async function resolveEffectiveStalenessByDoc(
+  store: StoreInterface,
+  docs: readonly DocRecord[],
+  nowIso: string,
+  ttlMinutes: number,
+): Promise<Result<Map<DocId, boolean>, LoreError>> {
+  const staleByDoc = new Map<DocId, boolean>();
+  const endedRuns = new Map<string, boolean>();
+  for (const doc of docs) {
+    const claim = readClaim(doc);
+    if (claim === undefined) continue;
+    const stale = await resolveEffectiveClaimStaleness(store, claim, nowIso, ttlMinutes, endedRuns);
+    if (!stale.ok) return stale;
+    staleByDoc.set(doc.id, stale.value);
+  }
+  return ok(staleByDoc);
+}
+
+/**
+ * Replaces each `siblingClaims[].stale` the registry builder computed from TTL alone with the run-aware
+ * effective staleness (BR-1058): an `orphaned_dirty` claim never ages out, a clean ended-run claim does not
+ * block. Done in the SERVICE layer so `checkpoint-registry.ts` stays untouched; siblings are matched by slug.
+ * Shared by the task and phase claim gates so both agree.
+ */
+export async function applyEffectiveSiblingStaleness<C extends { siblingClaims?: SiblingClaimInfo[] }>(
+  store: StoreInterface,
+  anchorCtx: C,
+  siblings: readonly DocRecord[],
+  nowIso: string,
+  ttlMinutes: number,
+): Promise<Result<C, LoreError>> {
+  const staleByDoc = await resolveEffectiveStalenessByDoc(store, siblings, nowIso, ttlMinutes);
+  if (!staleByDoc.ok) return staleByDoc;
+  const staleBySlug = new Map<string, boolean>();
+  for (const sibling of siblings) {
+    const stale = staleByDoc.value.get(sibling.id);
+    if (stale !== undefined) staleBySlug.set(sibling.slug, stale);
+  }
+  return ok({
+    ...anchorCtx,
+    siblingClaims: (anchorCtx.siblingClaims ?? []).map((claim) => ({
+      ...claim,
+      stale: staleBySlug.get(claim.slug) ?? claim.stale,
+    })),
+  });
 }
 
 /** History wording for the run on a claim/release: the run id, or `unattested`. */
@@ -3018,42 +3118,13 @@ export class TaskWorkflowService {
 
   // ── run end (spec-run-only-write-identity-and-run-end-claim-release D4/D5) ─
 
-  /**
-   * The claim's effective staleness: TTL age, the holder run's end, and an `orphaned_dirty` mark
-   * (BR-1058), via core's pure {@link isClaimStaleForRun}. The git and run lookups happen only when the
-   * claim could be affected by them (an `orphaned_dirty` mark, or a holder run that has ended).
-   *
-   * @param endedRuns - per-call memo of `run id -> ended`, so one `ready()` looks each run up once.
-   * @returns ok(stale); err when the run lookup fails (never a silent "not stale").
-   */
-  private async isClaimEffectivelyStale(
+  /** See {@link resolveEffectiveClaimStaleness}; binds this service's store and TTL. */
+  private isClaimEffectivelyStale(
     claim: TaskClaim,
     nowIso: string,
     endedRuns: Map<string, boolean>,
   ): Promise<Result<boolean, LoreError>> {
-    let runEnded = false;
-    const run = claim.harness_run ?? null;
-    if (run !== null) {
-      let known = endedRuns.get(run);
-      if (known === undefined) {
-        const endState = await this.store.getRunEnd(run as RunId);
-        if (!endState.ok) return endState;
-        known = endState.value !== null && endState.value.endedAt !== null;
-        endedRuns.set(run, known);
-      }
-      runEnded = known;
-    }
-    if (claim.orphaned_dirty === undefined && !runEnded) {
-      return ok(isClaimStale(claim, nowIso, this.claimTtlMinutes));
-    }
-    const cleanliness = measureWorktreeCleanliness(claim.orphaned_dirty?.worktree ?? claim.worktree);
-    const liveness: ClaimRunLiveness = {
-      runEnded,
-      // reason: only a MEASURED clean worktree counts as clean — not-measured is `null`, never `true` (BR-1057).
-      worktreeClean:
-        cleanliness.status === "measured-clean" ? true : cleanliness.status === "measured-dirty" ? false : null,
-    };
-    return ok(isClaimStaleForRun(claim, nowIso, this.claimTtlMinutes, liveness));
+    return resolveEffectiveClaimStaleness(this.store, claim, nowIso, this.claimTtlMinutes, endedRuns);
   }
 
   /** Effective staleness of every claimed task in `tasks`, keyed by task id (see {@link isClaimEffectivelyStale}). */
@@ -3061,16 +3132,7 @@ export class TaskWorkflowService {
     tasks: readonly DocRecord[],
     nowIso: string,
   ): Promise<Result<Map<DocId, boolean>, LoreError>> {
-    const staleByTask = new Map<DocId, boolean>();
-    const endedRuns = new Map<string, boolean>();
-    for (const task of tasks) {
-      const claim = readClaim(task);
-      if (claim === undefined) continue;
-      const stale = await this.isClaimEffectivelyStale(claim, nowIso, endedRuns);
-      if (!stale.ok) return stale;
-      staleByTask.set(task.id, stale.value);
-    }
-    return ok(staleByTask);
+    return resolveEffectiveStalenessByDoc(this.store, tasks, nowIso, this.claimTtlMinutes);
   }
 
   /**
@@ -3416,15 +3478,23 @@ export class TaskWorkflowService {
 
     const nowIso = now();
     const claim = readClaim(task);
-    if (claim !== undefined && claim.by !== opts.by && !isClaimStale(claim, nowIso, this.claimTtlMinutes)) {
-      return err({
-        code: "VALIDATION_ERROR",
-        field: "extra.claim",
-        message:
-          `Task "${task.slug}" is held by a fresh claim from "${claim.by}" — lore done ` +
-          `refuses to archive a task out from under an active session`,
-        value: claim.by,
-      });
+    if (claim !== undefined) {
+      // reason: BR-1056 — the holder is a RUN, not a name: two runs deriving the same name must not pass for
+      // one holder. Staleness is the run-aware BR-1058 form, so an ended run's clean claim does not block.
+      const staleResult = await this.isClaimEffectivelyStale(claim, nowIso, new Map());
+      if (!staleResult.ok) return staleResult;
+      const holder = buildClaimHolder(task, claim, staleResult.value);
+      if (hasClaimConflict(holder, buildClaimParty(opts)).kind === "conflict") {
+        const runNote = holder.legacy ? "" : ` (run ${describeClaimRun(holder.harnessRun)})`;
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "extra.claim",
+          message:
+            `Task "${task.slug}" is held by a fresh claim from "${claim.by}"${runNote} — lore done ` +
+            `refuses to archive a task out from under an active session`,
+          value: claim.by,
+        });
+      }
     }
 
     const walk = computeArchiveWalk(task.status);
@@ -4093,7 +4163,7 @@ export class TaskWorkflowService {
 
     return ok({
       records: recordsWithAnchorless,
-      sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes),
+      sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes, staleByTask.value),
       anchor_conflicts: anchorConflicts,
       anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),
     });
@@ -4289,7 +4359,16 @@ export class TaskWorkflowService {
           const otherClaim = readClaim(other);
           if (otherClaim === undefined) continue;
           if (staleByTask.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
-          const sameActor = taskClaim !== undefined && taskClaim.by === otherClaim.by;
+          // reason: BR-1056 — same holder means same RUN. Two runs that share a derived name are TWO holders and
+          // stay reported; only legacy / both-unattested claims fall back to the name (`hasClaimConflict`).
+          const sameHolder =
+            taskClaim !== undefined &&
+            hasClaimConflict(
+              buildClaimHolder(other, otherClaim, false),
+              buildClaimParty({ by: taskClaim.by, harnessRun: (taskClaim.harness_run ?? null) as RunId | null }),
+            ).kind === "refresh";
+          if (sameHolder && taskClaim !== undefined && (taskClaim.harness_run ?? null) !== null) continue;
+          const sameActor = sameHolder;
           const sessionVerdict = sameActor
             ? compareClaimSessions(taskClaim.session_id, otherClaim.session_id)
             : undefined;
@@ -4562,25 +4641,25 @@ export class TaskWorkflowService {
         if (!isNonPlanParentError(bundleResult.error)) return bundleResult;
         const siblingsResult = await this.findAdhocSiblingTasks();
         if (!siblingsResult.ok) return siblingsResult;
-        const anchorCtx = buildAnchorGateContext(
-          by,
-          task,
+        const anchorCtx = await applyEffectiveSiblingStaleness(
+          this.store,
+          buildAnchorGateContext(by, task, siblingsResult.value, nowIso, this.claimTtlMinutes, candidateSessionId),
           siblingsResult.value,
           nowIso,
           this.claimTtlMinutes,
-          candidateSessionId,
         );
-        ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx };
+        if (!anchorCtx.ok) return anchorCtx;
+        ctx = { ...buildUpstreamSpecContext(undefined), ...anchorCtx.value };
       } else {
-        const anchorCtx = buildAnchorGateContext(
-          by,
-          task,
+        const anchorCtx = await applyEffectiveSiblingStaleness(
+          this.store,
+          buildAnchorGateContext(by, task, bundleResult.value.tasks, nowIso, this.claimTtlMinutes, candidateSessionId),
           bundleResult.value.tasks,
           nowIso,
           this.claimTtlMinutes,
-          candidateSessionId,
         );
-        ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx };
+        if (!anchorCtx.ok) return anchorCtx;
+        ctx = { ...buildUpstreamSpecContext(bundleResult.value.spec), ...anchorCtx.value };
       }
     }
 
