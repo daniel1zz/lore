@@ -204,6 +204,6 @@ describe("run id derivation (D2)", () => {
   });
 
   it("deriveRunId rejects an unknown harness instead of guessing", () => {
-    expect(() => deriveRunId("no-such-harness", { sessionId: "S" })).toThrow();
+    expect(() => deriveRunId("no-such-harness", { sessionId: "S" })).toThrow(/no-such-harness/);
   });
 });
