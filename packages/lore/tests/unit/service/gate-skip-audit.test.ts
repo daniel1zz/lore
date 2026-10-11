@@ -42,9 +42,12 @@ const DISABLED_SPEC_PROMOTE_CONFIG = {
 
 describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", () => {
   const originalLoreActor = process.env["LORE_ACTOR"];
+  const originalSessionId = process.env["CLAUDE_CODE_SESSION_ID"];
 
   beforeEach(() => {
-    process.env["LORE_ACTOR"] = "test-actor-gate-skip";
+    process.env["CLAUDE_CODE_SESSION_ID"] = "9a7e5c1b-1111-2222-3333-444444444444";
+    // decoy: must be ignored (BR-1055)
+    process.env["LORE_ACTOR"] = "decoy-lore-actor-must-be-ignored";
   });
 
   afterEach(() => {
@@ -52,6 +55,11 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
       delete process.env["LORE_ACTOR"];
     } else {
       process.env["LORE_ACTOR"] = originalLoreActor;
+    }
+    if (originalSessionId === undefined) {
+      delete process.env["CLAUDE_CODE_SESSION_ID"];
+    } else {
+      process.env["CLAUDE_CODE_SESSION_ID"] = originalSessionId;
     }
     vi.restoreAllMocks();
   });
@@ -81,7 +89,7 @@ describe("GateEnforcer — SPEC-080 G4 gate-skip audit (recordGateSkip port)", (
 
     const entry = recordGateSkip.mock.calls[0]![0];
     expect(entry.action).toBe("gate_skipped");
-    expect(entry.actor).toBe("test-actor-gate-skip");
+    expect(entry.actor).toBe("agent:session-9a7e5c1b");
     expect(entry.doc_id).toBe("01SPECXREALID");
     expect(entry.details).toEqual({
       checkpoint: "spec-promote",

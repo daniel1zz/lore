@@ -29,7 +29,9 @@ import { join, resolve } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..", "..", "..");
 const LORE_ENTRY = join(REPO_ROOT, "packages", "lore", "src", "index.ts");
-const ACTOR = "agent:tester-106";
+// BR-1055: LORE_ACTOR is ignored; the writer identity is injected through the session tier.
+const SESSION_ID = "7e5d1060-aaaa-bbbb-cccc-111111111111";
+const ACTOR = "agent:session-7e5d1060";
 
 interface Run {
   readonly status: number | null;
@@ -46,7 +48,7 @@ interface SweepRow {
 }
 
 function baseEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, LORE_ACTOR: ACTOR, GIT_TERMINAL_PROMPT: "0" };
+  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_SESSION_ID: SESSION_ID, GIT_TERMINAL_PROMPT: "0" };
   delete env.LORE_WORKTREE_QUIET_MINUTES;
   return { ...env, ...extra };
 }

@@ -29,7 +29,9 @@ setDefaultTimeout(300_000);
 // tests/integration/cli/ -> repo root is 5 levels up.
 const REPO_ROOT = new URL("../../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
-const ACTOR = "agent:compiled-census-test";
+// BR-1055: LORE_ACTOR is ignored; the writer identity is injected through the session tier.
+const SESSION_ID = "c0a7ed05-aaaa-bbbb-cccc-111111111111";
+const ACTOR = "agent:session-c0a7ed05";
 const COMMAND = "ac add";
 
 interface RunResult {
@@ -39,7 +41,7 @@ interface RunResult {
 }
 
 function runLore(args: string[], cwd: string): RunResult {
-  const env = { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: ACTOR };
+  const env = { ...process.env, HOME: cwd, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: SESSION_ID };
   const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }

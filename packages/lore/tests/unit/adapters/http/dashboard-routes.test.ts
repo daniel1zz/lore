@@ -730,9 +730,10 @@ describe("regression — DELETE /api/dashboard/docs/:id without ?confirm=true is
 //
 // Cookie-session writes must attribute `doc.created_by` (and the new version
 // snapshot's `created_by`) via the SAME resolveActor chain the CLI uses
-// ($LORE_ACTOR > session tier > OS username), never the literal "system" and
-// never the static "dashboard-local"/"admin" bootstrap-key identity. `$LORE_ACTOR`
-// is injected/restored around each test for a deterministic assertion — mirrors
+// (session tier > worktree > OS username; `$LORE_ACTOR` is never read, BR-1055), never the literal "system" and
+// never the static "dashboard-local"/"admin" bootstrap-key identity. The session
+// tier (`CLAUDE_CODE_SESSION_ID`) is injected/restored around each test for a deterministic
+// assertion, and a decoy `$LORE_ACTOR` is set to prove it is ignored — mirrors
 // `audit-actor-fidelity.test.ts`'s ambient-env isolation pattern.
 //
 // Six-dimension coverage: HAPPY / REGRESSION (bearer path unaffected — dashboard
@@ -742,17 +743,22 @@ describe("regression — DELETE /api/dashboard/docs/:id without ?confirm=true is
 // reaches for a bearer actor).
 describe("author attribution — cookie-session writes resolve via the actor chain, never 'system'", () => {
   const ORIGINAL_LORE_ACTOR = process.env["LORE_ACTOR"];
+  const ORIGINAL_SESSION_ID = process.env["CLAUDE_CODE_SESSION_ID"];
+  const SESSION_ACTOR = "agent:session-d4a5b0a1";
 
   beforeEach(() => {
-    process.env["LORE_ACTOR"] = "agent:dashboard-human";
+    process.env["CLAUDE_CODE_SESSION_ID"] = "d4a5b0a1-1111-2222-3333-444444444444";
+    process.env["LORE_ACTOR"] = "agent:decoy-lore-actor-must-be-ignored";
   });
 
   afterEach(() => {
     if (ORIGINAL_LORE_ACTOR === undefined) delete process.env["LORE_ACTOR"];
     else process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
+    if (ORIGINAL_SESSION_ID === undefined) delete process.env["CLAUDE_CODE_SESSION_ID"];
+    else process.env["CLAUDE_CODE_SESSION_ID"] = ORIGINAL_SESSION_ID;
   });
 
-  it("POST /api/dashboard/docs records doc.created_by as the resolved $LORE_ACTOR, not 'system'", async () => {
+  it("POST /api/dashboard/docs records doc.created_by as the resolved session actor (never $LORE_ACTOR), not 'system'", async () => {
     const req = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Attributed Doc" });
     const url = makeUrl("/api/dashboard/docs");
     const res = await handleDashboardRoute(req, url, app, COOKIE_ACTOR);
@@ -760,7 +766,7 @@ describe("author attribution — cookie-session writes resolve via the actor cha
     const body = await parseRes(res!);
     const doc = (body.data as Record<string, unknown>).doc as Record<string, unknown>;
 
-    expect(doc.created_by).toBe("agent:dashboard-human");
+    expect(doc.created_by).toBe(SESSION_ACTOR);
     expect(doc.created_by).not.toBe("system");
     // The static bootstrap-key identity must never leak through either.
     expect(doc.created_by).not.toBe("admin");
@@ -776,7 +782,7 @@ describe("author attribution — cookie-session writes resolve via the actor cha
 
     const logResult = await app.versionService.log(doc.id as string);
     if (!logResult.ok) throw new Error(JSON.stringify(logResult.error));
-    expect(logResult.value[0]?.created_by).toBe("agent:dashboard-human");
+    expect(logResult.value[0]?.created_by).toBe(SESSION_ACTOR);
   });
 
   it("PATCH /api/dashboard/docs/:id records the NEW version snapshot's created_by as the resolved actor", async () => {
@@ -791,23 +797,23 @@ describe("author attribution — cookie-session writes resolve via the actor cha
     if (!logResult.ok) throw new Error(JSON.stringify(logResult.error));
     const latestVersion = logResult.value[0]; // newest first
     expect(latestVersion?.action).toBe("update");
-    expect(latestVersion?.created_by).toBe("agent:dashboard-human");
+    expect(latestVersion?.created_by).toBe(SESSION_ACTOR);
     expect(latestVersion?.created_by).not.toBe("system");
   });
 
-  it("two different cookie sessions in sequence each resolve their OWN $LORE_ACTOR value (no caching across writes)", async () => {
+  it("two different cookie sessions in sequence each resolve their OWN session actor (no caching across writes)", async () => {
     const req1 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "First Attributed Doc" });
     const res1 = await handleDashboardRoute(req1, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
     const body1 = await parseRes(res1!);
     const doc1 = (body1.data as Record<string, unknown>).doc as Record<string, unknown>;
-    expect(doc1.created_by).toBe("agent:dashboard-human");
+    expect(doc1.created_by).toBe(SESSION_ACTOR);
 
-    process.env["LORE_ACTOR"] = "agent:second-dashboard-human";
+    process.env["CLAUDE_CODE_SESSION_ID"] = "5ec0ad5e-1111-2222-3333-444444444444";
     const req2 = jsonReq("POST", "/api/dashboard/docs", { type: "prd", title: "Second Attributed Doc" });
     const res2 = await handleDashboardRoute(req2, makeUrl("/api/dashboard/docs"), app, COOKIE_ACTOR);
     const body2 = await parseRes(res2!);
     const doc2 = (body2.data as Record<string, unknown>).doc as Record<string, unknown>;
-    expect(doc2.created_by).toBe("agent:second-dashboard-human");
+    expect(doc2.created_by).toBe("agent:session-5ec0ad5e");
     expect(doc2.created_by).not.toBe(doc1.created_by);
   });
 });

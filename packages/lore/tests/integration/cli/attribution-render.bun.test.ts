@@ -42,14 +42,24 @@ interface Run {
   stderr: string;
   exitCode: number;
 }
-function lore(args: string[], cwd: string, actor: string | null = "agent:render-test"): Run {
+const SESSION_ACTOR_PREFIX = "agent:session-";
+/**
+ * BR-1055: LORE_ACTOR is ignored, so a writer is named through the session tier. `actor` is the
+ * `agent:session-<id8>` name wanted; the matching session id is injected. `null` = no identity at all.
+ */
+function lore(args: string[], cwd: string, actor: string | null = "agent:session-4e17de01"): Run {
   const env: Record<string, string | undefined> = { ...process.env, HOME: cwd, CLAUDECODE: "1" };
-  if (actor === null) delete env.LORE_ACTOR;
-  else env.LORE_ACTOR = actor;
+  delete env.LORE_ACTOR;
+  delete env.CLAUDE_SESSION_ID;
+  if (actor === null) delete env.CLAUDE_CODE_SESSION_ID;
+  else {
+    if (!actor.startsWith(SESSION_ACTOR_PREFIX)) throw new Error(`fixture actor must be ${SESSION_ACTOR_PREFIX}<id8>: ${actor}`);
+    env.CLAUDE_CODE_SESSION_ID = `${actor.slice(SESSION_ACTOR_PREFIX.length)}-aaaa-bbbb-cccc`;
+  }
   const p = Bun.spawnSync(["bun", "run", ENTRY, ...args], { cwd, env: env as Record<string, string> });
   return { stdout: p.stdout.toString(), stderr: p.stderr.toString(), exitCode: p.exitCode ?? 1 };
 }
-function mustLore(args: string[], cwd: string, actor: string | null = "agent:render-test"): Run {
+function mustLore(args: string[], cwd: string, actor: string | null = "agent:session-4e17de01"): Run {
   const r = lore(args, cwd, actor);
   if (r.exitCode !== 0) throw new Error(`fixture \`lore ${args.join(" ")}\` failed (${r.exitCode}): ${r.stderr}${r.stdout}`);
   return r;
@@ -280,20 +290,20 @@ describe("AC-RID-9 CorpusService writes no literal 'system' author (D4)", () => 
     mustLore(["init"], cwd);
   });
 
-  it("HAPPY: create, set and delete under LORE_ACTOR=agent:creator-x record that name on every version, never 'system'", () => {
-    lifecycle(cwd, "agent:creator-x", "knowledge-sys-one", "Sys One");
+  it("HAPPY: create, set and delete under session actor creator-x record that name on every version, never 'system'", () => {
+    lifecycle(cwd, "agent:session-c0ea7e01", "knowledge-sys-one", "Sys One");
     const rows = versionAuthors(cwd, "knowledge-sys-one");
     expect(rows.length).toBeGreaterThanOrEqual(2);
-    expect(rows.map((r) => r.created_by)).toEqual(rows.map(() => "agent:creator-x"));
+    expect(rows.map((r) => r.created_by)).toEqual(rows.map(() => "agent:session-c0ea7e01"));
   });
 
   it("HAPPY: a different actor is recorded as that actor (not a constant)", () => {
-    lifecycle(cwd, "agent:creator-y", "knowledge-sys-two", "Sys Two");
+    lifecycle(cwd, "agent:session-c0ea7e02", "knowledge-sys-two", "Sys Two");
     const rows = versionAuthors(cwd, "knowledge-sys-two");
-    expect(rows.map((r) => r.created_by)).toEqual(rows.map(() => "agent:creator-y"));
+    expect(rows.map((r) => r.created_by)).toEqual(rows.map(() => "agent:session-c0ea7e02"));
   });
 
-  it("NEGATIVE: with no LORE_ACTOR and no --by, the author is the resolved fallback name, never the literal 'system'", () => {
+  it("NEGATIVE: with no session id and no --by, the author is the resolved fallback name, never the literal 'system'", () => {
     mustLore(["create", "knowledge", "--title", "Sys Three", "--sub-type", "reference", "--no-ai", "--content", "body"], cwd, null);
     const rows = versionAuthors(cwd, "knowledge-sys-three");
     expect(rows.length).toBeGreaterThanOrEqual(1);
@@ -304,9 +314,9 @@ describe("AC-RID-9 CorpusService writes no literal 'system' author (D4)", () => 
   });
 
   it("REGRESSION: lore get on a freshly created doc no longer says 'by system'", () => {
-    mustLore(["create", "knowledge", "--title", "Sys Four", "--sub-type", "reference", "--no-ai", "--content", "body"], cwd, "agent:creator-z");
-    const out = mustLore(["get", "knowledge-sys-four"], cwd, "agent:creator-z").stdout;
+    mustLore(["create", "knowledge", "--title", "Sys Four", "--sub-type", "reference", "--no-ai", "--content", "body"], cwd, "agent:session-c0ea7e03");
+    const out = mustLore(["get", "knowledge-sys-four"], cwd, "agent:session-c0ea7e03").stdout;
     expect(out).not.toMatch(/by system\b/);
-    expect(out).toContain("agent:creator-z");
+    expect(out).toContain("agent:session-c0ea7e03");
   });
 });
