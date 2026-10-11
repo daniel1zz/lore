@@ -73,6 +73,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       branch: "b1",
       machine: "A",
       worktree: "/w",
+      harness_run: null,
     });
 
     const refresh = await taskWorkflowService.claim(taskId, { by: "alice" }, () => "2026-07-11T09:30:00.000Z");
@@ -84,6 +85,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       branch: "b1",
       machine: "A",
       worktree: "/w",
+      harness_run: null,
     });
   });
 
@@ -143,7 +145,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     const acquire = await taskWorkflowService.claim(taskId, { by: "bob" }, () => "2026-07-11T09:20:00.000Z");
     expect(acquire.ok).toBe(true);
     if (!acquire.ok) return;
-    expect(acquire.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:20:00.000Z" });
+    expect(acquire.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:20:00.000Z", harness_run: null });
   });
 
   // STATE — --steal starts fresh, no inherited fields from the stolen-from holder
@@ -164,7 +166,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     );
     expect(steal.ok).toBe(true);
     if (!steal.ok) return;
-    expect(steal.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:05:00.000Z" });
+    expect(steal.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-11T09:05:00.000Z", harness_run: null });
   });
 
   // STATE — a stale takeover BY THE SAME ACTOR still starts fresh (staleness breaks
@@ -188,7 +190,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     );
     expect(takeover.ok).toBe(true);
     if (!takeover.ok) return;
-    expect(takeover.value.extra["claim"]).toEqual({ by: "alice", at: "2026-07-08T03:20:00.000Z" });
+    expect(takeover.value.extra["claim"]).toEqual({ by: "alice", at: "2026-07-08T03:20:00.000Z", harness_run: null });
   });
 
   // REGRESSION — a stale takeover by a DIFFERENT actor also starts fresh (the
@@ -210,7 +212,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
     );
     expect(takeover.ok).toBe(true);
     if (!takeover.ok) return;
-    expect(takeover.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-08T03:20:00.000Z" });
+    expect(takeover.value.extra["claim"]).toEqual({ by: "bob", at: "2026-07-08T03:20:00.000Z", harness_run: null });
   });
 
   // REGRESSION — legacy claims without machine/worktree still validate, render, refresh
@@ -238,6 +240,7 @@ describe("TaskWorkflowService.claim — carry-forward refresh (SPEC-042 D2)", ()
       by: "carol",
       at: "2026-07-05T01:00:00.000Z",
       branch: "legacy-branch",
+      harness_run: null,
     });
   });
 });
