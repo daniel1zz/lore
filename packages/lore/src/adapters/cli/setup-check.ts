@@ -133,6 +133,8 @@ import type { EmbeddedAssetEntry } from "../../generated/assets-manifest.js";
 import { RealSetupFsWriter } from "../real-setup-fs.js";
 import { isRetiredFromInstall } from "../real-asset-source.js";
 import { MANIFEST_FILENAME } from "../../service/setup-service.js";
+import { detectDoubleRegistrations } from "./setup-hook-double-registration.js";
+import type { DoubleRegistration } from "./setup-hook-double-registration.js";
 import { exitCode, formatError } from "./utils.js";
 
 // ─── On-disk artifact filenames ─────────────────────────────────────────────
@@ -194,6 +196,13 @@ export interface SetupCheckReport {
   /** The installed manifest's recorded `installed_at`, when present. */
   installed_at?: string;
   files: SetupCheckFiles;
+  /**
+   * Lore-managed hook files registered for one event at BOTH the user layer and the project
+   * layer (each fire runs twice; task-gh-1343388703-157). Present ONLY when non-empty — absence
+   * is "none found", and `summary` is `"stale"` whenever this is present. Not part of the check
+   * cache: the cache tracks asset freshness, which `lore setup` can repair; this cannot be.
+   */
+  double_registrations?: DoubleRegistration[];
 }
 
 // ─── Embedded manifest scoping (see module doc) ────────────────────────────
@@ -422,6 +431,15 @@ function renderSetupCheckReport(report: SetupCheckReport, targetDir: string): st
       }
     }
   }
+  for (const dbl of report.double_registrations ?? []) {
+    lines.push(
+      "",
+      `double registration: ${dbl.file} on ${dbl.event} fires twice`,
+      `  user:    ${dbl.user_settings}`,
+      `  project: ${dbl.project_settings}`,
+      "  repair: remove the project-level registration (lore setup already installs it at user level)",
+    );
+  }
   return lines.join("\n");
 }
 
@@ -467,7 +485,14 @@ export async function computeSetupCheckReport(opts: {
   if (!planResult.ok) return planResult;
   const plan = planResult.value;
 
-  const report: SetupCheckReport = {
+  const doubleResult = detectDoubleRegistrations({
+    claudeDir: opts.targetDir,
+    projectDir: findProjectConfigDir(cwd) ?? cwd,
+  });
+  if (!doubleResult.ok) return doubleResult;
+  const doubleRegistrations = doubleResult.value;
+
+  const assetReport: SetupCheckReport = {
     summary: plan.summary,
     binary_version: LORE_BINARY_VERSION,
     ...(installed?.binary_version !== undefined ? { installed_binary_version: installed.binary_version } : {}),
@@ -480,9 +505,11 @@ export async function computeSetupCheckReport(opts: {
     },
   };
 
-  await writeCheckCache(opts.targetDir, report, now(), resolveCheckReminderEnabled(cwd));
+  // The cache records ASSET freshness only (its `stale` drives the session-start "run lore setup" advisory).
+  await writeCheckCache(opts.targetDir, assetReport, now(), resolveCheckReminderEnabled(cwd));
 
-  return ok(report);
+  if (doubleRegistrations.length === 0) return ok(assetReport);
+  return ok({ ...assetReport, summary: "stale", double_registrations: doubleRegistrations });
 }
 
 /**

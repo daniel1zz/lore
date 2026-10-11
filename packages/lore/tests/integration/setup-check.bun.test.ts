@@ -59,7 +59,7 @@
  */
 
 import { afterAll, afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanupHealthyGhStubDir, healthyGhStubDir } from "./helpers/healthy-gh-stub";
@@ -351,5 +351,114 @@ describe("lore setup --check — REGRESSION", () => {
       "installed_binary_version",
       "summary",
     ]);
+  });
+});
+
+// ─── Double registration (task-gh-1343388703-157) ───────────────────────────
+
+/**
+ * A hook file registered for the same event at BOTH the user layer (`<claude-dir>/settings.json`,
+ * where `lore setup` installs it) and the project layer (`<project>/.claude/settings.json`) fires
+ * twice per event. `--check` must name hook, event and both settings paths, and exit 3 (the
+ * code `--check` already uses for drift). Every dir is a mkdtemp scratch dir.
+ */
+function writeProjectSettings(
+  projectDir: string,
+  hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ type: "command"; command: string }> }>>,
+  filename = "settings.json",
+): string {
+  mkdirSync(join(projectDir, ".claude"), { recursive: true });
+  const path = join(projectDir, ".claude", filename);
+  writeFileSync(path, JSON.stringify({ hooks }, null, 2));
+  return path;
+}
+
+function seedUserAndProject(prefix: string): { scratch: string; userDir: string; projectDir: string } {
+  const scratch = makeScratchDir(prefix);
+  const userDir = join(scratch, "user", ".claude");
+  // realpath: the CLI resolves its project dir from process.cwd(), which is symlink-resolved (macOS /var -> /private/var).
+  mkdirSync(join(scratch, "proj"), { recursive: true });
+  const projectDir = realpathSync(join(scratch, "proj"));
+  mkdirSync(projectDir, { recursive: true });
+  seedConvergedTarget(scratch, userDir);
+  const userSettings = JSON.parse(readFileSync(join(userDir, "settings.json"), "utf8"));
+  const stopCommands = JSON.stringify(userSettings.hooks?.Stop ?? []);
+  if (!stopCommands.includes("stop-handoff-coverage.mjs")) {
+    throw new Error("seedUserAndProject: setup did not register stop-handoff-coverage.mjs on Stop at the user layer");
+  }
+  return { scratch, userDir, projectDir };
+}
+
+describe("lore setup --check — double registration", () => {
+  it("AC1: same hook file + same event at user and project layer => finding naming file, event, both paths; exit 3", () => {
+    const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-ac1-");
+    const projectSettings = writeProjectSettings(projectDir, {
+      Stop: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/assets/hooks/stop-handoff-coverage.mjs" }] }],
+    });
+
+    const check = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
+    expect(check.exitCode).toBe(3);
+    const payload = JSON.parse(check.stdout);
+    expect(payload.data.summary).toBe("stale");
+    expect(payload.data.double_registrations).toEqual([
+      {
+        file: "stop-handoff-coverage.mjs",
+        event: "Stop",
+        user_settings: join(userDir, "settings.json"),
+        project_settings: projectSettings,
+      },
+    ]);
+
+    const human = runSetup(["--check", "--claude-dir", userDir], projectDir, { PATH: healthyGhStubDir() });
+    expect(human.exitCode).toBe(3);
+    expect(human.stdout).toContain("stop-handoff-coverage.mjs");
+    expect(human.stdout).toContain("Stop");
+    expect(human.stdout).toContain(join(userDir, "settings.json"));
+    expect(human.stdout).toContain(projectSettings);
+  });
+
+  it("AC1b: the project layer's settings.local.json is also checked", () => {
+    const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-local-");
+    const local = writeProjectSettings(
+      projectDir,
+      { Stop: [{ hooks: [{ type: "command", command: "bash ./x/stop-handoff-coverage.mjs" }] }] },
+      "settings.local.json",
+    );
+    const check = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
+    expect(check.exitCode).toBe(3);
+    expect(JSON.parse(check.stdout).data.double_registrations[0].project_settings).toBe(local);
+  });
+
+  it("AC2: user-layer-only registration, or a project-only hook outside HOOK_REGISTRATIONS => no finding, exit 0", () => {
+    const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-ac2-");
+    const userOnly = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
+    expect(userOnly.exitCode).toBe(0);
+    expect(JSON.parse(userOnly.stdout).data.double_registrations).toBeUndefined();
+
+    writeProjectSettings(projectDir, {
+      Stop: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/scripts/my-own-stop-hook.mjs" }] }],
+    });
+    const projectOnly = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
+    expect(projectOnly.exitCode).toBe(0);
+    expect(JSON.parse(projectOnly.stdout).data.double_registrations).toBeUndefined();
+  });
+
+  it("AC3: same basename under a different event => no finding, exit 0", () => {
+    const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-ac3-");
+    writeProjectSettings(projectDir, {
+      SessionEnd: [{ hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/assets/hooks/stop-handoff-coverage.mjs" }] }],
+    });
+    const check = runSetup(["--check", "--claude-dir", userDir, "--json"], projectDir, { PATH: healthyGhStubDir() });
+    expect(check.exitCode).toBe(0);
+    expect(JSON.parse(check.stdout).data.double_registrations).toBeUndefined();
+  });
+
+  it("ERROR: a malformed project settings.json fails loud (exit 4), never read as 'no registration'", () => {
+    const { userDir, projectDir } = seedUserAndProject("lore-setup-check-dbl-bad-");
+    mkdirSync(join(projectDir, ".claude"), { recursive: true });
+    writeFileSync(join(projectDir, ".claude", "settings.json"), "{ not json");
+    const check = runSetup(["--check", "--claude-dir", userDir], projectDir, { PATH: healthyGhStubDir() });
+    expect(check.exitCode).toBe(4);
+    expect(check.stderr).toContain("settings.json");
   });
 });
