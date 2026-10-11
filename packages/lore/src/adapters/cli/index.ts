@@ -111,6 +111,9 @@ const main = defineCommand({
     // fragments (spec-context-fragments-config-driven-layered-rule-injection D13) — read-only,
     // hook-facing render/check/pointers; bootstrap-stage, see commands/fragments.ts's module header.
     fragments: () => import("./commands/fragments.js").then(wrapDefault("fragments")),
+    // run (spec-run-identity-slice-1 D2/D5/D10) — `run register|show|attest-input`; see
+    // commands/run.ts's module header.
+    run: () => import("./commands/run.js").then(wrapDefault("run")),
     outline: () => import("./commands/outline.js").then(wrapDefault("outline")),
     seat: () => import("./commands/seat.js").then(wrapDefault("seat")),
     "report-issue": () => import("./commands/report-issue.js").then(wrapDefault("report-issue")),
