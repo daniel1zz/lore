@@ -403,6 +403,9 @@ const DECLARED_FILES = [
   "hooks/session-start-fragments.mjs", // blind pipe to `lore fragments render` (task-skill-implement-hooks-new-session-start-fragments-thin)
   "hooks/session-start-marker.mjs",
   "hooks/stop-doc-sync.mjs",
+  // stop-doc-sync turn-state producers (issue #156) — both in HOOK_REGISTRATIONS
+  "hooks/user-prompt-turn-start.mjs",
+  "hooks/post-edit-mark.mjs",
   // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
   "hooks/stop-handoff-coverage.mjs",
   "hooks/subagent-context.mjs",

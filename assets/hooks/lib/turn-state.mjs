@@ -1,13 +1,21 @@
 /**
- * turn-state.mjs — session/turn path resolution (node port of session-state.sh).
+ * turn-state.mjs — session/turn path resolution shared by the turn-state hooks:
+ *   user-prompt-turn-start.mjs (UserPromptSubmit, writes current-turn.id)
+ *   post-edit-mark.mjs         (PostToolUse, writes edited.flag / edited-files.jsonl)
+ *   stop-doc-sync.mjs          (Stop, reads them)
  *
  * Contract:
- *   - resolveSessionId(): CLAUDE_SESSION_ID env > ppid-$PPID fallback.
- *     ⛔ Never returns "unknown" (fail-loud rule — prevents cross-instance collision).
+ *   - resolveSessionId(payload): the hook stdin payload's `session_id`.
+ *     Claude Code hook input (https://code.claude.com/docs/en/hooks, "Common input fields"
+ *     + UserPromptSubmit / PostToolUse / Stop input): every event carries `session_id`.
+ *     ⛔ No env / ppid fallback: the ppid differs per hook process, so a producer and the
+ *     consumer would resolve DIFFERENT dirs (lore issue #156). Missing id → throws (fail-loud).
  *   - getStateBase(): respects CLAUDE_STATE_BASE_OVERRIDE for testing.
- *   - getSessionDir(): {base}/sessions/{session_id}
- *   - getCurrentTurnId(): reads {session}/current-turn.id, returns null if missing.
- *   - getTurnDir(): {session}/{turn_id} or {session}/pre-turn sentinel.
+ *   - getSessionDir(payload): {base}/sessions/{session_id}
+ *   - getCurrentTurnId(payload): reads {session}/current-turn.id, null if absent/empty.
+ *   - getTurnDir(payload): {session}/{turn_id}; null when no turn has started (never a sentinel
+ *     dir — a missing turn must stay distinguishable from "a turn with no edits").
+ *   - readHookPayload(): parses stdin JSON; throws on malformed/non-object input.
  *
  * @module turn-state
  */
@@ -21,36 +29,36 @@ export function getStateBase() {
     || join(homedir(), '.claude', 'session-state');
 }
 
-export function resolveSessionId() {
-  const envId = process.env.CLAUDE_SESSION_ID;
-  if (envId && envId.length > 0) return envId;
-
-  const ppid = process.ppid;
-  if (!ppid || ppid <= 0) {
-    // Fail-loud: no "unknown" fallback to prevent cross-instance state collision.
-    throw new Error(
-      'Cannot resolve session_id: CLAUDE_SESSION_ID env unset and process.ppid unavailable'
-    );
+export function readHookPayload() {
+  const raw = readFileSync(0, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('hook stdin is not a JSON object');
   }
-  return `ppid-${ppid}`;
+  return parsed;
 }
 
-export function getSessionDir() {
-  return join(getStateBase(), 'sessions', resolveSessionId());
+export function resolveSessionId(payload) {
+  const id = payload?.session_id;
+  if (typeof id !== 'string' || id.length === 0 || /[\\/]/.test(id) || id === '.' || id === '..') {
+    throw new Error('hook payload has no usable string session_id');
+  }
+  return id;
 }
 
-export function getCurrentTurnId() {
-  const turnFile = join(getSessionDir(), 'current-turn.id');
+export function getSessionDir(payload) {
+  return join(getStateBase(), 'sessions', resolveSessionId(payload));
+}
+
+export function getCurrentTurnId(payload) {
+  const turnFile = join(getSessionDir(payload), 'current-turn.id');
   if (!existsSync(turnFile)) return null;
   const content = readFileSync(turnFile, 'utf8').trim();
   return content.length > 0 ? content : null;
 }
 
-export function getTurnDir() {
-  const turnId = getCurrentTurnId();
-  if (!turnId) {
-    // Sentinel dir — not "unknown" (would collide with other broken state).
-    return join(getSessionDir(), 'pre-turn');
-  }
-  return join(getSessionDir(), turnId);
+export function getTurnDir(payload) {
+  const turnId = getCurrentTurnId(payload);
+  if (!turnId) return null;
+  return join(getSessionDir(payload), turnId);
 }

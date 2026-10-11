@@ -176,6 +176,12 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // session-start-marker.mjs — records this session's own start time (tmpdir marker, keyed by session id) so `lore feed session-resume` can tell a just-authored handoff from a genuinely earlier session's.
   { file: "session-start-marker.mjs", runner: "node", event: "SessionStart" },
 
+  // user-prompt-turn-start.mjs — producer of current-turn.id (opens a turn per user message); stop-doc-sync.mjs reads it. Consumer and producers MUST ship together (lore issue #156; pinned by stop-doc-sync-turn-state.test.ts).
+  { file: "user-prompt-turn-start.mjs", runner: "node", event: "UserPromptSubmit" },
+
+  // post-edit-mark.mjs — producer of edited.flag / edited-files.jsonl on every editing tool; stop-doc-sync.mjs reads them.
+  { file: "post-edit-mark.mjs", runner: "node", event: "PostToolUse", matcher: "Edit|Write|MultiEdit|NotebookEdit" },
+
   // stop-doc-sync.mjs — doc-sync reminder gate on turn end.
   { file: "stop-doc-sync.mjs", runner: "node", event: "Stop" },
 

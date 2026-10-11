@@ -7,22 +7,35 @@
  *
  * Flow:
  *   1. stop_hook_active=true → exit 0 silent (loop prevention)
- *   2. no edited.flag this turn → exit 0 silent (no edits → no drift)
+ *   2. turn state (producers: user-prompt-turn-start.mjs → current-turn.id,
+ *      post-edit-mark.mjs → edited.flag / edited-files.jsonl; both shipped + registered):
+ *        measured, no edited.flag → exit 0 silent (no edits → no drift)
+ *        NOT measured (see below)  → exit 0 + ONE stderr line
+ *        edited.flag present       → continue
  *   3. edits present → block once with the inline doc-sync prompt
  *      (+ changed-file list from edited-files.jsonl when available)
+ *
+ * UNMEASURED POLICY (lore issue #156): missing/unreadable turn state (no session_id in the
+ * payload, no current-turn.id, turn dir missing/unreadable, malformed stdin) is NOT "edited".
+ * Choice: exit 0 + one stderr line "turn state not measured: <reason>". Why not block: the
+ * original bug — a block on a turn that made no edits forces a pointless model round-trip, and
+ * a gate whose producers are absent would then block EVERY turn. Why not a silent pass: it
+ * would hide a broken install. stderr is visible in hook debug logs without trapping the turn.
+ *
+ * Session id: the stdin payload `session_id` (Stop input, https://code.claude.com/docs/en/hooks)
+ * — the same source the producers use, so all three resolve the same session dir.
  *
  * Fail-silent by design: a Stop hook that crashes on its own infra
  * faults would trap every session turn — supervisory gates must
  * degrade to "allow stop" (documented exception in US-01KXD1ZZ6N).
  *
- * Env overrides for testing:
+ * Env override for testing:
  *   CLAUDE_STATE_BASE_OVERRIDE — session-state root
- *   CLAUDE_SESSION_ID          — session id
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { getTurnDir, getCurrentTurnId } from './lib/turn-state.mjs';
+import { getTurnDir } from './lib/turn-state.mjs';
 
 const PROMPT = `<stop-gate>
 Doc Sync Check（唯一检查项）：本轮改动是否使相关文档过期？
@@ -34,21 +47,36 @@ Required output（最后一条消息必含一行）:
 **[DOC_SYNC]** updated: [文件列表 | NONE] | reason: [已更新内容摘要，或为何无需更新]
 </stop-gate>`;
 
-// ── stdin parse (fail-silent) ─────────────────────
-let payload = {};
+function notMeasured(reason) {
+  process.stderr.write(`[stop-doc-sync] turn state not measured: ${reason}\n`);
+  process.exit(0);
+}
+
+// ── stdin parse ───────────────────────────────────
+let payload;
 try {
   const raw = readFileSync(0, 'utf8');
-  if (raw.trim().length > 0) payload = JSON.parse(raw);
-} catch {
-  // malformed stdin → proceed with empty payload
+  payload = JSON.parse(raw);
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('stdin is not a JSON object');
+  }
+} catch (err) {
+  notMeasured(`unreadable hook payload (${err.message})`);
 }
 
 // ── 1. passthrough (loop prevention) ──────────────
 if (payload.stop_hook_active === true) process.exit(0);
 
 // ── 2. no edits this turn → nothing to sync ───────
-const turnId = getCurrentTurnId();
-if (turnId && !existsSync(join(getTurnDir(), 'edited.flag'))) process.exit(0);
+let turnDir;
+try {
+  turnDir = getTurnDir(payload);
+  if (!turnDir) notMeasured('no turn started for this session (current-turn.id absent)');
+  if (!statSync(turnDir).isDirectory()) notMeasured(`turn dir ${turnDir} is not a directory`);
+} catch (err) {
+  notMeasured(err.message);
+}
+if (!existsSync(join(turnDir, 'edited.flag'))) process.exit(0);
 
 // ── 2b. already compliant → pass silently ─────────
 // If the turn's final assistant message ALREADY carries the required
@@ -85,8 +113,6 @@ try {
 
 // ── 3. inject the doc-sync check ──────────────────
 function getChangedFiles() {
-  const turnDir = getTurnDir();
-  if (!turnDir) return [];
   const manifestPath = join(turnDir, 'edited-files.jsonl');
   if (!existsSync(manifestPath)) return [];
   try {
