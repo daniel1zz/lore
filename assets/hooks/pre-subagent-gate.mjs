@@ -52,9 +52,10 @@ function countDiffLines(payload) {
   return 999;
 }
 
-function wasFileReadThisTurn(filePath) {
+function wasFileReadThisTurn(filePath, payload) {
   try {
-    const turnDir = getTurnDir();
+    // session id from the PreToolUse stdin payload (see lib/turn-state.mjs); null turn dir → join throws → false.
+    const turnDir = getTurnDir(payload);
     const readLog = join(turnDir, 'read-files.jsonl');
     if (!existsSync(readLog)) return false;
     const lines = readFileSync(readLog, 'utf8').trim().split('\n');
@@ -113,7 +114,7 @@ if (CONFIG_PATTERNS.some(re => re.test(filePath))) {
 
 // Write tool to a new file: always count as > 3 lines (must use subagent)
 const diffLines = countDiffLines(payload);
-const fileRead = wasFileReadThisTurn(filePath);
+const fileRead = wasFileReadThisTurn(filePath, payload);
 
 if (diffLines <= MAX_EXEMPT_LINES && fileRead) {
   process.stderr.write(`[subagent-gate] exempt: ${diffLines} lines, file previously read — ${filePath}\n`);

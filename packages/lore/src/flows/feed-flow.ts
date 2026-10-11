@@ -667,12 +667,11 @@ type UnmeasuredSessionStartReadResult = Exclude<SessionStartReadResult, { kind: 
  * `assets/hooks/session-start-marker.mjs` hook into `os.tmpdir()`. Session
  * identity is read from `CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID` — the
  * SAME precedence `@lore/core/node`'s `resolveActorWithSource` already
- * trusts for cross-process session identity, deliberately NOT
- * `assets/hooks/lib/turn-state.mjs::resolveSessionId()` (documented in
- * `commands/handoff.ts`'s own D8 note to resolve DIFFERENTLY for a Stop-hook
- * child than for a Bash-tool child — exactly the mismatch that would make a
- * SessionStart-hook-written marker invisible to a later `lore feed`
- * invocation).
+ * trusts for cross-process session identity. `CLAUDE_CODE_SESSION_ID` equals the
+ * hook payload's `session_id` for hook AND Bash-tool processes
+ * (code.claude.com/docs/en/env-vars), so the hook-side writer and this reader
+ * agree; `assets/hooks/lib/turn-state.mjs::resolveSessionId(payload)` is the
+ * hook-only (payload-based) resolver and is deliberately not used here.
  *
  * Exported (task-the-session-start-marker-collapses-five-distinct AC 4) so
  * the discrimination is unit-testable directly, without simulating every

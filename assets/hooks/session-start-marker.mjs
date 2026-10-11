@@ -21,12 +21,14 @@
  *
  * Session identity: `CLAUDE_CODE_SESSION_ID`/`CLAUDE_SESSION_ID` — the SAME
  * precedence `@lore/core/node`'s `resolveActorWithSource` already trusts for
- * cross-process session identity. Deliberately NOT
- * `./lib/turn-state.mjs::resolveSessionId()`: that module's PPID-based
- * resolution is documented (`commands/handoff.ts`'s own D8 note) to resolve
- * DIFFERENTLY for a Stop-hook child than for a Bash-tool child — using it
- * here would make this hook's own marker invisible to the `lore feed`
- * invocation that needs to read it back.
+ * cross-process session identity. Docs (code.claude.com/docs/en/env-vars):
+ * `CLAUDE_CODE_SESSION_ID` is set in Bash-tool AND hook subprocesses and "matches
+ * the `session_id` field in the hook JSON input", so this writer and the
+ * `lore feed` reader (a Bash child) resolve the SAME id. Writer and reader MUST
+ * stay on this one env precedence (pinned by stop-doc-sync-turn-state.test.ts).
+ * `./lib/turn-state.mjs::resolveSessionId(payload)` (payload `session_id`, no env
+ * fallback) is the turn-state hooks' resolver; it has no CLI-side equivalent, so
+ * this marker does not use it.
  *
  * Location: `os.tmpdir()`, filename
  * `lore-session-start-<sanitized-session-id>.json` — a DELIBERATE literal

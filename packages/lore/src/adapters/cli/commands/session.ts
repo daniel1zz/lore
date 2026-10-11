@@ -139,8 +139,8 @@ export default defineCommand({
       // the very next probe, moments after reporting "alive" (measured while
       // building this command). `process.ppid` at least outlives one `lore`
       // invocation; still an approximation of "the orchestrator" (SPEC-042's
-      // `resolveActorWithSource` session tier and `turn-state.mjs`'s own PPID
-      // resolution document the same imprecision for a DIFFERENT purpose —
+      // `resolveActorWithSource` session tier documents the same imprecision
+      // for a DIFFERENT purpose (turn-state.mjs no longer uses a PPID) —
       // this task's scope stops at "measurably better than the CLI's own
       // pid", full orchestrator-pid capture is P2's session-lease mechanism,
       // out of this plan).
