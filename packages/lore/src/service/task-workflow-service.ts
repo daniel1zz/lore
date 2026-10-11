@@ -323,6 +323,7 @@ import {
   evidenceEntrySchema,
   taskClaimSchema,
   isClaimStale,
+  isClaimStaleForRun,
   isValidTransition,
   evaluateReadiness,
   buildTaskClaim,
@@ -342,6 +343,7 @@ import {
   resolveOracleGeneration,
   type AcceptanceCriterion,
   type AcScopeEditOp,
+  type ClaimRunLiveness,
   type EvidenceEntry,
   type TaskClaim,
   type ReadyRecord,
@@ -455,6 +457,13 @@ export interface ClaimOpts {
    * can only be satisfied by the caller passing it through explicitly.
    */
   source?: string;
+}
+
+/** One claim handled by {@link TaskWorkflowService.endRunClaims}. `worktree` is the measured path, or `not-measured`. */
+export interface RunEndClaimOutcome {
+  readonly task_slug: string;
+  readonly action: "released" | "orphaned_dirty";
+  readonly worktree: string;
 }
 
 /** Options for {@link TaskWorkflowService.release}. */
@@ -827,6 +836,22 @@ export function buildClaimHolder(doc: DocRecord, claim: TaskClaim, stale: boolea
 /** The acting party of a claim/release: its name and the run it explicitly carries (null = unattested). */
 export function buildClaimParty(opts: { by: string; harnessRun?: RunId | null }): ClaimParty {
   return { by: opts.by, harnessRun: opts.harnessRun ?? null };
+}
+
+/**
+ * Replaces each record's `claim.stale` with the effective staleness resolved for its task (run end /
+ * `orphaned_dirty`, BR-1058); a record whose task has no entry keeps core's TTL-only value.
+ */
+function applyEffectiveClaimStaleness(
+  records: ReadyRecord[],
+  staleByTask: ReadonlyMap<DocId, boolean>,
+): ReadyRecord[] {
+  return records.map((record) => {
+    const stale = staleByTask.get(record.task.id);
+    return record.claim !== undefined && stale !== undefined
+      ? { ...record, claim: { ...record.claim, stale } }
+      : record;
+  });
 }
 
 /** `CLAIM_CONFLICT` naming the holder, the holding run (absent for a legacy claim) and the claim's age (BR-1040/BR-1043). */
@@ -2646,9 +2671,14 @@ export class TaskWorkflowService {
     const existingClaim = readClaim(task);
     const claimant = buildClaimParty(opts);
     let carryForward = false;
+    let inheritedDirtyWorktree: string | undefined;
 
     if (existingClaim !== undefined) {
-      const stale = isClaimStale(existingClaim, nowIso, this.claimTtlMinutes);
+      // reason: BR-1058 — staleness reads the holder run's end and an `orphaned_dirty` mark, measured lazily
+      // HERE (no sweep). A failed lookup fails the claim loud; it never degrades to "not stale".
+      const staleResult = await this.isClaimEffectivelyStale(existingClaim, nowIso, new Map());
+      if (!staleResult.ok) return staleResult;
+      const stale = staleResult.value;
       // reason: spec-run-identity-slice-1 D6 / invariant I2 — the ONE conflict predicate lives in core
       // (`hasClaimConflict`); both claim paths call it, never `existingClaim.by === opts.by`.
       const holder = buildClaimHolder(task, existingClaim, stale);
@@ -2661,6 +2691,8 @@ export class TaskWorkflowService {
       // (first acquire, steal) starts fresh with no inherited branch/machine/
       // worktree — staleness deliberately breaks session continuity.
       carryForward = decision.kind === "refresh";
+      // reason: D4 — a `--steal` of an orphaned_dirty claim inherits uncommitted work; the output must name it.
+      if (decision.kind === "conflict") inheritedDirtyWorktree = existingClaim.orphaned_dirty?.worktree;
     }
 
     // reason: AC-OWN-2 auto-capture (spec-multi-session-concurrency-queryable-
@@ -2683,7 +2715,7 @@ export class TaskWorkflowService {
       }
     }
 
-    const newClaim: TaskClaim = buildTaskClaim(
+    const builtClaim: TaskClaim = buildTaskClaim(
       existingClaim,
       {
         by: opts.by,
@@ -2705,6 +2737,10 @@ export class TaskWorkflowService {
       },
       carryForward,
     );
+    const newClaim: TaskClaim =
+      inheritedDirtyWorktree !== undefined
+        ? { ...builtClaim, inherited_dirty_worktree: inheritedDirtyWorktree }
+        : builtClaim;
     const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
     const previousHolderRun = existingClaim === undefined ? undefined : existingClaim.harness_run;
@@ -2715,7 +2751,8 @@ export class TaskWorkflowService {
         : claimant.harnessRun !== null
           ? ` (run ${claimant.harnessRun})`
           : "";
-    const summary = `Claimed by ${opts.by}${takeoverNote}`;
+    const inheritedNote = inheritedDirtyWorktree !== undefined ? `; inherited dirty worktree ${inheritedDirtyWorktree}` : "";
+    const summary = `Claimed by ${opts.by}${takeoverNote}${inheritedNote}`;
 
     // reason: issue #106 / BR-961 — the worktree HEAD at claim time is the "base" that defines a
     // task's OWN commits (branch commits beyond it). Recorded on the claim AUDIT row (which survives
@@ -2728,6 +2765,7 @@ export class TaskWorkflowService {
       ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
       ...(previousHolderRun !== undefined ? { previous_run: previousHolderRun } : {}),
       harness_run: claimant.harnessRun,
+      ...(inheritedDirtyWorktree !== undefined ? { inherited_dirty_worktree: inheritedDirtyWorktree } : {}),
       ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
       ...(claimBase !== undefined && claimBase.ok ? { base_sha: claimBase.value } : {}),
     });
@@ -2976,6 +3014,145 @@ export class TaskWorkflowService {
     }
 
     return writeResult;
+  }
+
+  // ── run end (spec-run-only-write-identity-and-run-end-claim-release D4/D5) ─
+
+  /**
+   * The claim's effective staleness: TTL age, the holder run's end, and an `orphaned_dirty` mark
+   * (BR-1058), via core's pure {@link isClaimStaleForRun}. The git and run lookups happen only when the
+   * claim could be affected by them (an `orphaned_dirty` mark, or a holder run that has ended).
+   *
+   * @param endedRuns - per-call memo of `run id -> ended`, so one `ready()` looks each run up once.
+   * @returns ok(stale); err when the run lookup fails (never a silent "not stale").
+   */
+  private async isClaimEffectivelyStale(
+    claim: TaskClaim,
+    nowIso: string,
+    endedRuns: Map<string, boolean>,
+  ): Promise<Result<boolean, LoreError>> {
+    let runEnded = false;
+    const run = claim.harness_run ?? null;
+    if (run !== null) {
+      let known = endedRuns.get(run);
+      if (known === undefined) {
+        const endState = await this.store.getRunEnd(run as RunId);
+        if (!endState.ok) return endState;
+        known = endState.value !== null && endState.value.endedAt !== null;
+        endedRuns.set(run, known);
+      }
+      runEnded = known;
+    }
+    if (claim.orphaned_dirty === undefined && !runEnded) {
+      return ok(isClaimStale(claim, nowIso, this.claimTtlMinutes));
+    }
+    const cleanliness = measureWorktreeCleanliness(claim.orphaned_dirty?.worktree ?? claim.worktree);
+    const liveness: ClaimRunLiveness = {
+      runEnded,
+      // reason: only a MEASURED clean worktree counts as clean — not-measured is `null`, never `true` (BR-1057).
+      worktreeClean:
+        cleanliness.status === "measured-clean" ? true : cleanliness.status === "measured-dirty" ? false : null,
+    };
+    return ok(isClaimStaleForRun(claim, nowIso, this.claimTtlMinutes, liveness));
+  }
+
+  /** Effective staleness of every claimed task in `tasks`, keyed by task id (see {@link isClaimEffectivelyStale}). */
+  private async resolveClaimStalenessByTask(
+    tasks: readonly DocRecord[],
+    nowIso: string,
+  ): Promise<Result<Map<DocId, boolean>, LoreError>> {
+    const staleByTask = new Map<DocId, boolean>();
+    const endedRuns = new Map<string, boolean>();
+    for (const task of tasks) {
+      const claim = readClaim(task);
+      if (claim === undefined) continue;
+      const stale = await this.isClaimEffectivelyStale(claim, nowIso, endedRuns);
+      if (!stale.ok) return stale;
+      staleByTask.set(task.id, stale.value);
+    }
+    return ok(staleByTask);
+  }
+
+  /**
+   * Ends every claim held by `runId` (BR-1057): a claim whose recorded worktree is MEASURED clean, or whose
+   * worktree was never recorded / cannot be measured, is released (the audit row records the ENDING run and
+   * `worktree: "not-measured"` when nothing was measured — never "clean"); a claim whose worktree has
+   * uncommitted changes is KEPT and marked `orphaned_dirty`, naming that worktree. Idempotent: a claim
+   * already marked `orphaned_dirty` is left as it is.
+   *
+   * @param runId - The ended run.
+   * @param reason - The end reason, recorded in version history and on the audit row.
+   * @returns One outcome per handled claim, ordered by task slug.
+   */
+  async endRunClaims(
+    runId: RunId,
+    reason: string,
+    now: () => string = defaultNow,
+  ): Promise<Result<RunEndClaimOutcome[], LoreError>> {
+    const tasksResult = await this.store.findMany({ type: "task" });
+    if (!tasksResult.ok) return tasksResult;
+    const outcomes: RunEndClaimOutcome[] = [];
+    const held = tasksResult.value
+      .filter((t) => readClaim(t)?.harness_run === runId)
+      .sort((a, b) => a.slug.localeCompare(b.slug));
+    for (const task of held) {
+      const claim = readClaim(task);
+      if (claim === undefined || claim.orphaned_dirty !== undefined) continue;
+      const nowIso = now();
+      const cleanliness = measureWorktreeCleanliness(claim.worktree);
+      if (cleanliness.status === "measured-dirty" && claim.worktree !== undefined) {
+        const orphaned: TaskClaim = { ...claim, orphaned_dirty: { worktree: claim.worktree, at: nowIso } };
+        const written = await this.writeTaskExtra(
+          task,
+          { ...task.extra, claim: orphaned },
+          nowIso,
+          claim.by,
+          `Claim orphaned_dirty: run ${runId} ended (${reason}) with uncommitted changes in ${claim.worktree}`,
+          "claim",
+          {
+            by: claim.by,
+            orphaned_dirty: true,
+            worktree: claim.worktree,
+            dirty_paths: cleanliness.paths,
+            harness_run: runId,
+            reason,
+          },
+        );
+        if (!written.ok) return written;
+        outcomes.push({ task_slug: task.slug, action: "orphaned_dirty", worktree: claim.worktree });
+        continue;
+      }
+      const measuredWorktree = cleanliness.status === "measured-clean" ? claim.worktree : undefined;
+      const newExtra: Record<string, unknown> = { ...task.extra };
+      delete newExtra["claim"];
+      const worktreeNote = measuredWorktree ?? "not-measured";
+      const written = await this.writeTaskExtra(
+        task,
+        newExtra,
+        nowIso,
+        claim.by,
+        `Released by run end: run ${runId} ended (${reason}); worktree ${worktreeNote}`,
+        "release",
+        {
+          by: claim.by,
+          force: false,
+          run_end: true,
+          previous_holder: claim.by,
+          previous_run: runId,
+          // reason: BR-1043 — a run-end release records the ENDING run, which is the holder itself.
+          harness_run: runId,
+          reason,
+          worktree: worktreeNote,
+          ...(measuredWorktree === undefined ? { worktree_cleanliness: cleanliness.status } : {}),
+        },
+      );
+      if (!written.ok) return written;
+      if (claim.worktree !== undefined && claim.session_id !== undefined) {
+        await this.releaseClaimTrailerBinding(claim.worktree, claim.session_id);
+      }
+      outcomes.push({ task_slug: task.slug, action: "released", worktree: worktreeNote });
+    }
+    return ok(outcomes);
   }
 
   // ── done ─────────────────────────────────────────────────────────────────
@@ -3895,16 +4072,21 @@ export class TaskWorkflowService {
       }
     }
 
-    const records = evaluateReadiness(
-      tasks,
-      blocksLinks,
-      blockerStatuses,
-      nowIso,
-      this.claimTtlMinutes,
-      parentSpecStatus,
+    const staleByTask = await this.resolveClaimStalenessByTask(tasks, nowIso);
+    if (!staleByTask.ok) return staleByTask;
+    const records = applyEffectiveClaimStaleness(
+      evaluateReadiness(
+        tasks,
+        blocksLinks,
+        blockerStatuses,
+        nowIso,
+        this.claimTtlMinutes,
+        parentSpecStatus,
+      ),
+      staleByTask.value,
     );
 
-    const { anchorConflicts, anchorlessSlugs } = this.computeAnchorAdvisories(tasks, nowIso);
+    const { anchorConflicts, anchorlessSlugs } = this.computeAnchorAdvisories(tasks, nowIso, staleByTask.value);
     const recordsWithAnchorless = records.map((r) =>
       anchorlessSlugs.has(r.task.slug) ? { ...r, anchorless: true } : r,
     );
@@ -4047,13 +4229,18 @@ export class TaskWorkflowService {
       }
     }
 
-    const records = evaluateReadiness(
-      openAdhocTasks,
-      blocksLinks,
-      blockerStatuses,
-      nowIso,
-      this.claimTtlMinutes,
-      null,
+    const staleByTask = await this.resolveClaimStalenessByTask(openAdhocTasks, nowIso);
+    if (!staleByTask.ok) return staleByTask;
+    const records = applyEffectiveClaimStaleness(
+      evaluateReadiness(
+        openAdhocTasks,
+        blocksLinks,
+        blockerStatuses,
+        nowIso,
+        this.claimTtlMinutes,
+        null,
+      ),
+      staleByTask.value,
     );
 
     return ok(records);
@@ -4086,6 +4273,7 @@ export class TaskWorkflowService {
   private computeAnchorAdvisories(
     tasks: DocRecord[],
     nowIso: string,
+    staleByTask: ReadonlyMap<DocId, boolean>,
   ): { anchorConflicts: AnchorConflict[]; anchorlessSlugs: Set<string> } {
     const anyoneDeclaresAnchors = tasks.some((t) => extractFileAnchors(t).length > 0);
     const anchorConflicts: AnchorConflict[] = [];
@@ -4100,7 +4288,7 @@ export class TaskWorkflowService {
           if (other.id === task.id) continue;
           const otherClaim = readClaim(other);
           if (otherClaim === undefined) continue;
-          if (isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
+          if (staleByTask.get(other.id) ?? isClaimStale(otherClaim, nowIso, this.claimTtlMinutes)) continue;
           const sameActor = taskClaim !== undefined && taskClaim.by === otherClaim.by;
           const sessionVerdict = sameActor
             ? compareClaimSessions(taskClaim.session_id, otherClaim.session_id)
@@ -4128,7 +4316,7 @@ export class TaskWorkflowService {
         anyoneDeclaresAnchors &&
         taskAnchors.length === 0 &&
         taskClaim !== undefined &&
-        !isClaimStale(taskClaim, nowIso, this.claimTtlMinutes)
+        !(staleByTask.get(task.id) ?? isClaimStale(taskClaim, nowIso, this.claimTtlMinutes))
       ) {
         anchorlessSlugs.add(task.slug);
       }

@@ -99,7 +99,7 @@ describe("migration-001 (initial schema) — crash-safety / idempotency (Blocker
     // "resolves" link-type CHECK widening, migration-012).
     // migration-001's own concern (idempotent CREATEs) is what BOUNDARY below
     // asserts directly; this test just confirms the happy path still lands.
-    expect(userVersion(db)).toBe(16);
+    expect(userVersion(db)).toBe(17);
     expect(tableNames(db)).toEqual(
       expect.arrayContaining(["docs", "links", "versions", "audit", "docs_fts"]),
     );

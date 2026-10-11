@@ -34,6 +34,8 @@
  *     captured SESSION INSTANCE, a peer of machine/worktree and never part of
  *     `by` (task-two-concurrent-orchestrators-both-resolve-to-agent-main)
  *   - isClaimStale(claim, nowIso, ttlMinutes) — pure staleness check
+ *   - isClaimStaleForRun(claim, nowIso, ttlMinutes, liveness) — staleness that also reads the holder's run end
+ *     and an `orphaned_dirty` mark (BR-1057/BR-1058); the caller supplies the measured facts
  *   - resolveTargetTask(tasks, opts) — pure host-task resolution for `lore verify`:
  *     explicit override > sole fresh claim > ambiguity error (SPEC-039 §2 D4)
  *   - isApprovedVerifyCommand(task, command) — pure command-provenance check: has this
@@ -728,6 +730,18 @@ export const taskClaimSchema = z.object({
    * Never carried forward on a refresh — the refreshing claimant's own run is recorded.
    */
   harness_run: z.string().nullable().optional(),
+  /**
+   * Set when the holder's run ENDED while this claim's recorded worktree still had uncommitted changes
+   * (spec-run-only-write-identity-and-run-end-claim-release D4, BR-1057): the claim is kept, not released,
+   * and names the worktree whose work it protects. Exempt from age-based staleness (BR-1058) — it ends
+   * only by `--steal` or when that worktree becomes clean. Never carried forward onto a new claim.
+   */
+  orphaned_dirty: z.object({ worktree: z.string().min(1), at: z.string() }).optional(),
+  /**
+   * Set on the claim written by a `--steal` of an `orphaned_dirty` claim: the dirty worktree the stealer
+   * inherits (D4 — "whose output names the dirty worktree it inherits"). Informational; never decides anything.
+   */
+  inherited_dirty_worktree: z.string().min(1).optional(),
 });
 
 /** Derived TypeScript type for a task claim lease. */
@@ -863,6 +877,40 @@ export function buildTaskClaim(
 export function isClaimStale(claim: TaskClaim, nowIso: string, ttlMinutes: number): boolean {
   const ageMs = new Date(nowIso).getTime() - new Date(claim.at).getTime();
   return ageMs > ttlMinutes * 60_000;
+}
+
+/**
+ * What a caller measured about a claim's holder, for {@link isClaimStaleForRun}. `worktreeClean` is
+ * `true` only for a MEASURED clean worktree; `null` = not measured (no recorded worktree, not a repo,
+ * git unavailable) — never conflated with clean (BR-1057's "never recorded as clean").
+ */
+export interface ClaimRunLiveness {
+  readonly runEnded: boolean;
+  readonly worktreeClean: boolean | null;
+}
+
+/**
+ * Staleness of a claim once the holder's run end is taken into account (BR-1058):
+ *   - an `orphaned_dirty` claim is exempt from age: stale iff its worktree is now MEASURED clean;
+ *   - a claim whose run ended and whose worktree is MEASURED clean is stale at once;
+ *   - anything else (open run, unmeasured worktree, ended run with a dirty worktree) falls back to
+ *     {@link isClaimStale}'s TTL — the crash/kill fallback.
+ *
+ * Pure: the caller does the git and run lookups and passes the facts in (module invariant: no IO).
+ *
+ * @example
+ * isClaimStaleForRun({ by: "a", at: "2026-07-02T10:00:00.000Z" }, "2026-07-02T10:01:00.000Z", 120, { runEnded: true, worktreeClean: true });
+ * // => true (ended run, clean worktree) although only 1 minute old
+ */
+export function isClaimStaleForRun(
+  claim: TaskClaim,
+  nowIso: string,
+  ttlMinutes: number,
+  liveness: ClaimRunLiveness,
+): boolean {
+  if (claim.orphaned_dirty !== undefined) return liveness.worktreeClean === true;
+  if (liveness.runEnded && liveness.worktreeClean === true) return true;
+  return isClaimStale(claim, nowIso, ttlMinutes);
 }
 
 // ─── Evidence-Triggered Claim Renewal (SPEC-069 §Design Decisions D4/D5) ────

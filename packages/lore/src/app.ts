@@ -819,7 +819,7 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store),
+    runService: new RunService(store, undefined, taskWorkflowService),
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
@@ -1190,7 +1190,7 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store),
+    runService: new RunService(store, undefined, taskWorkflowService),
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.

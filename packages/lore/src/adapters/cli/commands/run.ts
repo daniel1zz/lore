@@ -1,5 +1,5 @@
 /**
- * `lore run register | show | attest-input` — harness run identity (spec run-identity-slice-1, D2 / D5 / D10 / D12).
+ * `lore run register | show | end | attest-input` — harness run identity (spec run-identity-slice-1, D2 / D5 / D10 / D12).
  *
  *   register --harness claude-code --session <id> [--agent-id <id> --agent-type <t>] [--parent <run id>]
  *            [--branch <name>] [--json]
@@ -9,6 +9,12 @@
  *       existing fragments flow and hands it to RunService, which only validates and persists (D5).
  *   show <run id> [--json]
  *       Prints a registered run; unknown id exits 3 naming the id.
+ *   end <run id> --reason <r> [--json]
+ *       Ends a run (spec-run-only-write-identity-and-run-end-claim-release D4, BR-1057): stamps `ended_at`, releases
+ *       every claim of the run whose worktree is clean (or was never recorded: the release records
+ *       `worktree: not-measured`), and keeps a claim whose worktree has uncommitted changes, marked `orphaned_dirty`
+ *       naming that worktree. An unknown run id exits 0 and writes nothing (SubagentStop also fires for internal
+ *       agents). Registering an ended run again reopens it.
  *   attest-input
  *       Reads a Claude Code PreToolUse payload on stdin and prints hook JSON carrying `updatedInput` with the
  *       run (derived from `session_id` + `agent_id`) inserted by the core rewrite. ⛔ The output NEVER carries
@@ -39,7 +45,7 @@ import type { RunService } from "../../../service/run-service.js";
 import { runFragmentsRender } from "../../../flows/fragments-flow.js";
 import { buildFlowDeps } from "./fragments.js";
 
-const ACTIONS = ["register", "show", "attest-input"] as const;
+const ACTIONS = ["register", "show", "end", "attest-input"] as const;
 type Action = (typeof ACTIONS)[number];
 
 const USAGE_EXIT = 2;
@@ -157,6 +163,39 @@ async function runShow(args: Record<string, unknown>): Promise<void> {
   });
 }
 
+async function runEnd(args: Record<string, unknown>): Promise<void> {
+  const id = stringArg(args, "id");
+  if (id === undefined) return usageError("lore run end requires a run id");
+  const reason = stringArg(args, "reason");
+  if (reason === undefined) return usageError("lore run end requires --reason <reason>");
+  await withRunService(async (service) => {
+    const result = await service.end(id, reason);
+    if (!result.ok) {
+      process.stderr.write(`${formatError(result.error)}\n`);
+      process.exitCode = exitCode(result.error);
+      return;
+    }
+    const ended = result.value;
+    if (args["json"] === true) {
+      writeAllSync(1, `${JSON.stringify({ ok: true, data: { run: id, ...ended } }, null, 2)}\n`);
+      return;
+    }
+    if (ended.outcome === "unknown-run") {
+      writeAllSync(1, `Run ${id} is not registered: nothing to end\n`);
+      return;
+    }
+    const lines = [
+      `Run ${id} ${ended.outcome === "ended" ? "ended" : "was already ended"} (${reason})`,
+      ...ended.claims.map((c) =>
+        c.action === "released"
+          ? `  released ${c.task_slug} (worktree: ${c.worktree})`
+          : `  kept ${c.task_slug} as orphaned_dirty (uncommitted changes in ${c.worktree})`,
+      ),
+    ];
+    writeAllSync(1, `${lines.join("\n")}\n`);
+  });
+}
+
 const preToolUsePayloadSchema = z.object({
   session_id: z.string().min(1),
   agent_id: z.string().min(1).optional(),
@@ -202,17 +241,18 @@ export default defineCommand({
     name: "run",
     description:
       "Harness run identity: `register --harness claude-code --session <id> [--agent-id <id> --agent-type <t>]`, " +
-      "`show <run id> [--json]`, `attest-input` (PreToolUse payload on stdin -> hook JSON).",
+      "`show <run id> [--json]`, `end <run id> --reason <r>`, `attest-input` (PreToolUse payload on stdin -> hook JSON).",
   },
   args: {
-    action: { type: "positional", description: "register | show | attest-input", required: false },
-    id: { type: "positional", description: "show: run id", required: false },
+    action: { type: "positional", description: "register | show | end | attest-input", required: false },
+    id: { type: "positional", description: "show | end: run id", required: false },
     harness: { type: "string", description: "register: harness name (claude-code)" },
     session: { type: "string", description: "register: harness session id" },
     "agent-id": { type: "string", description: "register: subagent id (makes the run a subagent)" },
     "agent-type": { type: "string", description: "register: subagent type (required with --agent-id)" },
     parent: { type: "string", description: "register: parent run hint (main runs only)" },
     branch: { type: "string", description: "register: branch the run works on" },
+    reason: { type: "string", description: "end: why the run ended (required)" },
     json: { type: "boolean", description: "Output JSON", default: false },
   },
   async run({ args }) {
@@ -224,6 +264,8 @@ export default defineCommand({
         return runRegister(rest);
       case "show":
         return runShow(rest);
+      case "end":
+        return runEnd(rest);
       case "attest-input":
         return runAttestInput();
       default: {

@@ -27,6 +27,7 @@ import { MIGRATION_012_SQL } from "./migrations/migration-012.js";
 import { MIGRATION_013_SQL } from "./migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
+import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
 // Re-exported here (beside the migration chain it describes) from a
 // bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
@@ -90,6 +91,8 @@ import type {
   TraceZeroHitSearch,
   UpdateOpts,
   ProvenanceWriteExtras,
+  RunEndOutcome,
+  RunEndState,
 } from "./store-interface.js";
 import {
   type AuditChainRow,
@@ -594,6 +597,25 @@ export class SQLiteStore implements StoreInterface {
           if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
         }
         this.db.exec(MIGRATION_016_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 17) {
+      // reason: migration-017 is two-phase like 016 (see migration-017.ts's module JSDoc): `runs.ended_at` /
+      // `runs.end_reason` are added only where `PRAGMA table_info` lacks them, then one BEGIN/COMMIT bumps user_version.
+      try {
+        for (const { table, column, ddl } of MIGRATION_017_ADD_COLUMNS) {
+          const cols = this.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
+          if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
+        }
+        this.db.exec(MIGRATION_017_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -2875,6 +2897,42 @@ export class SQLiteStore implements StoreInterface {
     try {
       const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as RunRow | null;
       return ok(row === null ? null : rowToRunRecord(row));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>> {
+    try {
+      // reason: `ended_at IS NULL` in the WHERE makes the FIRST end win and the call idempotent.
+      const updated = this.db
+        .prepare("UPDATE runs SET ended_at = ?, end_reason = ? WHERE id = ? AND ended_at IS NULL")
+        .run(endedAt, reason, id);
+      if (updated.changes > 0) return ok("ended");
+      const row = this.db.prepare("SELECT id FROM runs WHERE id = ?").get(id) as { id: string } | null;
+      return ok(row === null ? "unknown-run" : "already-ended");
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async reopenRun(id: RunId): Promise<Result<boolean, LoreError>> {
+    try {
+      const updated = this.db
+        .prepare("UPDATE runs SET ended_at = NULL, end_reason = NULL WHERE id = ? AND ended_at IS NOT NULL")
+        .run(id);
+      return ok(updated.changes > 0);
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
+  async getRunEnd(id: RunId): Promise<Result<RunEndState | null, LoreError>> {
+    try {
+      const row = this.db.prepare("SELECT ended_at, end_reason FROM runs WHERE id = ?").get(id) as
+        | { ended_at: string | null; end_reason: string | null }
+        | null;
+      return ok(row === null ? null : { endedAt: row.ended_at, endReason: row.end_reason });
     } catch (e) {
       return wrapStoreError(e);
     }
