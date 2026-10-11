@@ -42,6 +42,8 @@ const EXPECTED_FILES = [
   "claude-md-guard.sh",
   // Run identity slice 1 (BR-1044): attribute a fresh install's first write to a run.
   "run-register.mjs",
+  // Run end on SessionEnd/SubagentStop (BR-1059).
+  "run-end.mjs",
   "pre-tool-harness-run.mjs",
 ];
 
@@ -89,14 +91,14 @@ describe("HAPPY: buildHookSettingsEntries", () => {
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 15 core-governance-and-security hook files", () => {
+  it("declares exactly the 16 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 24 entries (15 hooks; per-matcher expansion for the 4 gate hooks and the 2 session-start-fragments registrations)", () => {
-    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start-resume: 1, session-start-fragments: 2 (startup/resume + compact), session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1 = 26
-    expect(HOOK_REGISTRATIONS).toHaveLength(26);
+  it("expands to exactly 28 entries (16 hooks; per-matcher expansion for the 4 gate hooks and the 2 session-start-fragments registrations)", () => {
+    // pre-bash-git-safety-gate: 1, g1: 2, g2: 3, g3: 3, g4: 2, session-start-resume: 1, session-start-fragments: 2 (startup/resume + compact), session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop) = 28
+    expect(HOOK_REGISTRATIONS).toHaveLength(28);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {

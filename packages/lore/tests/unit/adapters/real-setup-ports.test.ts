@@ -413,6 +413,9 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/claude-md-guard.sh",
   // run-register + pre-tool-harness-run (run identity slice 1, BR-1044)
   "hooks/run-register.mjs",
+  // run-end + shared run-id helper (SessionEnd/SubagentStop run end, BR-1059)
+  "hooks/run-end.mjs",
+  "hooks/lib/run-id.mjs",
   "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
   // governance/corpus-workflow.md AND governance/seat-briefing.md are
