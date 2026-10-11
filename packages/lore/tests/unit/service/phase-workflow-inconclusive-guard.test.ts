@@ -41,6 +41,7 @@
  * @spec_ref AC-061-G1
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { NoOpTelemetry } from "@lore/core";
 import type { DocRecord, DocType, CreateDocInput } from "@lore/core";
@@ -203,7 +204,7 @@ describe("PhaseWorkflowService inconclusive guard — STATE (parity with TaskWor
 
     // Task-path rejection (mirrors verify-completeness.test.ts's own fixture)
     const taskStore = new InMemoryStore();
-    const corpusService = new CorpusService(taskStore);
+    const corpusService = new CorpusService(taskStore, new RecordLockService(taskStore));
     const taskWorkflowService = new TaskWorkflowService(taskStore, undefined, { claimTtlMinutes: 120 });
     const planResult = await corpusService.create({
       type: "plan",

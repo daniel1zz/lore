@@ -10,6 +10,7 @@ import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDocId } from "./resolve.js";
 import { applyAcChange } from "./ac-write-chokepoint.js";
+import type { RecordLockService } from "./record-lock-service.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────────
 
@@ -46,7 +47,15 @@ export interface Diff {
 // ─── VersionService ────────────────────────────────────────────────────────────
 
 export class VersionService {
-  constructor(private readonly store: StoreInterface) {}
+  /**
+   * @param store - Storage abstraction.
+   * @param recordLock - REQUIRED (spec-documents-are-living-or-records D17): `restore` rewrites a
+   *   record's text, so it asks this before it writes. Never optional.
+   */
+  constructor(
+    private readonly store: StoreInterface,
+    private readonly recordLock: RecordLockService,
+  ) {}
 
   /**
    * Return version history for a document, newest first.
@@ -223,6 +232,13 @@ export class VersionService {
     }
 
     const currentDoc = docResult.value;
+
+    // record-edit gate (spec-documents-are-living-or-records D6, BR-772): a restore rewrites the record's
+    // text and criteria wholesale, so it is refused on a locked record exactly like a `set` - BEFORE any
+    // write below. The sanctioned way to put old text back is `lore set --correction`.
+    const gate = await this.recordLock.assertEditable(currentDoc, "restore");
+    if (!gate.ok) return gate;
+
     const nextVersion = currentDoc.version + 1;
     const now = new Date().toISOString();
 

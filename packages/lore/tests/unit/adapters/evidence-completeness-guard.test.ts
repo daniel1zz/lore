@@ -50,6 +50,7 @@
  * @spec_ref AC-061-11 AC-061-12 AC-061-13 AC-061-14 AC-061-17
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -348,11 +349,11 @@ let corpusService: CorpusService;
 /** Mirrors `mcp-tools-task-workflow.test.ts`'s fixture App verbatim. */
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store);
+  corpusService = new CorpusService(store, new RecordLockService(store));
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

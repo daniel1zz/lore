@@ -32,6 +32,7 @@
  *   Decisions D1-D5.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { ulid } from "ulidx";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -82,7 +83,7 @@ describe("assessmentFreshness (pure predicate)", () => {
 function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
   const taskWorkflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflow };
 }

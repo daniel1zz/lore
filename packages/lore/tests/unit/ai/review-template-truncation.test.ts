@@ -17,6 +17,7 @@
  * @spec_ref AC-ADF-8
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-template.js";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
@@ -105,7 +106,7 @@ const VALID_REVIEW_JSON = JSON.stringify({
 });
 
 async function makeReviewBundle(store: InMemoryStore, content: string) {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const prdResult = await corpusService.create({
     type: "prd",
     title: "Review Truncation Test PRD",

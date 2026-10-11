@@ -28,6 +28,7 @@
  * @spec_ref AC-069-5, AC-069-6, AC-069-7 — SPEC-069 D2, D3, D4
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -47,7 +48,7 @@ import type { CreateDocInput, PlanBundle } from "@lore/core";
 
 function makeServices(ttl = 120) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: ttl });
   return { store, corpusService, taskWorkflowService };
 }

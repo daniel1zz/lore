@@ -76,6 +76,7 @@
  *   owner; task-skill-test-retire-or-rewrite-ac-dc-17-whose-subject-cap.
  */
 
+import { RecordLockService } from "../../src/service/record-lock-service.js";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -245,7 +246,7 @@ function makeUpstream(): UpstreamFixture {
  */
 async function fileReport(upstream: UpstreamFixture, title: string): Promise<string> {
   const store = new SQLiteStore(join(upstream.root, ".lore", "lore.db"));
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   try {
     const result = await corpusService.create({
       type: "task",

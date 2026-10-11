@@ -57,6 +57,7 @@
  * @spec_ref spec-spec-056-phase-execution-model-phase-doc-type-computed-comp (D6/D6a, P7)
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -164,7 +165,7 @@ async function readDoc(store: InMemoryStore, id: string): Promise<DocRecord> {
 describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, not parent_id", () => {
   it("HAPPY (case H): a diverged member (T6: --parent P4 --plan-id P3) migrates under P3, not P4", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig H");
     const spec = await createSpec(cs, prd.id, "Spec Mig H");
     // reason: BOTH plans declare "core" so `CorpusService.create`'s cross-entity
@@ -209,7 +210,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
 
   it("NEGATIVE: a NON-member merely filed at P3 (T7: --parent P3 --plan-id P4) is never migrated under P3", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig N");
     const spec = await createSpec(cs, prd.id, "Spec Mig N");
     const p3 = await createPlan(cs, spec.id, "P3 Mig N", ["core"]);
@@ -231,7 +232,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
 
   it("REGRESSION: no task is migrated twice — every source task lands in exactly one phase doc", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig Once");
     const spec = await createSpec(cs, prd.id, "Spec Mig Once");
     const p3 = await createPlan(cs, spec.id, "P3 Mig Once", ["core"]);
@@ -254,7 +255,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
 
   it("BOUNDARY + Silence: a task whose extra.plan_id matches no plan is DECLINED and NAMED in warnings", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig Orphan");
     const spec = await createSpec(cs, prd.id, "Spec Mig Orphan");
     const p3 = await createPlan(cs, spec.id, "P3 Mig Orphan", ["core"]);
@@ -301,7 +302,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
 
   it("REGRESSION: an --adhoc task stays excluded and is NOT reported as a declined member", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig Adhoc");
     const spec = await createSpec(cs, prd.id, "Spec Mig Adhoc");
     const plan = await createPlan(cs, spec.id, "Plan Mig Adhoc", ["core"]);
@@ -333,7 +334,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
 
   it("REGRESSION (CONTROL): an undiverged plan migrates with the byte-identical report and zero warnings", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig Control");
     const spec = await createSpec(cs, prd.id, "Spec Mig Control");
     const plan = await createPlan(cs, spec.id, "Plan Mig Control", ["core", "polish"]);
@@ -365,7 +366,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
 
   it("STATE: a second run is a no-op for the diverged member, but the declined-member warning still fires", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig Rerun");
     const spec = await createSpec(cs, prd.id, "Spec Mig Rerun");
     const p3 = await createPlan(cs, spec.id, "P3 Mig Rerun", ["core"]);
@@ -395,7 +396,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
 
   it("STATE: --dry-run yields identical counts AND identical warnings while writing nothing", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig Dry");
     const spec = await createSpec(cs, prd.id, "Spec Mig Dry");
     const p3 = await createPlan(cs, spec.id, "P3 Mig Dry", ["core"]);
@@ -439,7 +440,7 @@ describe("PhaseMigrationService.migrateTasks — membership is extra.plan_id, no
     }
 
     const store = new TaskQueryFailingStore();
-    const cs = new CorpusService(store);
+    const cs = new CorpusService(store, new RecordLockService(store));
     const prd = await createPrd(cs, "PRD Mig Err");
     const spec = await createSpec(cs, prd.id, "Spec Mig Err");
     await createPlan(cs, spec.id, "Plan Mig Err", ["core"]);

@@ -140,7 +140,9 @@ function specDoc(slug: string, title: string): DocRecord {
     type: "spec",
     role: "spec",
     title,
-    status: "approved",
+    // reason: a draft spec — these suites declare criteria on it through AcService after seeding, and
+    // `ac add` on an approved (locked) spec is refused by the record-edit gate. Nothing here reads the status.
+    status: "draft",
     priority: "medium",
     content: "## Overview\nFixture spec.\n## Scope\nFixture.\n## Acceptance Criteria\nSee lore ac list.",
     parent_id: null,

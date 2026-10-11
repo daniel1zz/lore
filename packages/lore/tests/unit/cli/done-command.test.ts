@@ -19,6 +19,7 @@
  * @spec_ref AC-WH-3 — spec-workflow-hardening-evidence-red-vocabulary-claim-worktree §M3
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { formatDoneMessage } from "../../../src/adapters/cli/done-render.js";
 // reason: namespace import (not a named `formatLastTaskAdvisory` import) — that
@@ -217,7 +218,7 @@ describe("lore done — last non-terminal task advisory (AC-CLOSURE-3, DD-2)", (
 
   function makeServices() {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
     return { store, corpusService, taskWorkflowService };
   }

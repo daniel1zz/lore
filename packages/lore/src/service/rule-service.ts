@@ -69,6 +69,7 @@ import type { StoreInterface } from "../store/store-interface.js";
 import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
 import { resolveDoc } from "./resolve.js";
 import { CorpusService, type CreateDocResult, type WriteActorOpts } from "./corpus-service.js";
+import { RecordLockService } from "./record-lock-service.js";
 import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { collectLeafRules } from "./rule-index-queries.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
@@ -202,7 +203,9 @@ export class RuleService {
     if (createDoc !== undefined) {
       this.createDoc = createDoc;
     } else {
-      const corpus = new CorpusService(store);
+      // reason: spec-documents-are-living-or-records D17 — CorpusService requires a RecordLockService; this fallback
+      // only ever calls `create`, which is not a rewrite path, but the dependency is required regardless.
+      const corpus = new CorpusService(store, new RecordLockService(store));
       this.createDoc = corpus.create.bind(corpus);
     }
   }

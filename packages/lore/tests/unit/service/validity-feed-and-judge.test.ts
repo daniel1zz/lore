@@ -27,6 +27,7 @@
  * @spec_ref SPEC-043 AC-MH-12
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -43,7 +44,7 @@ import { REVIEW_TEMPLATES, REVIEW_PROMPT_VERSION } from "../../../src/ai/review-
 
 function makeCorpusServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const validityService = new ValidityService(store);
   const outlineService = new OutlineService(store);
   return { store, corpusService, validityService, outlineService };

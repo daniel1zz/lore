@@ -30,6 +30,7 @@
  * @spec_ref SPEC-045 §Design Decisions D4, D6, D9; AC-DR-2, AC-DR-3, AC-DR-8
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { readFileSync } from "fs";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -42,7 +43,7 @@ import type { CreateDocInput } from "@lore/core";
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const driftCheckService = new DriftCheckService(store);
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, driftCheckService, taskWorkflowService };

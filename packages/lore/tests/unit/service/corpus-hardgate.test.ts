@@ -22,6 +22,7 @@
  * @task_id TASK-01KV4XV263D8VD0PR852C7ME7Z
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -37,7 +38,7 @@ function makeStore() {
 }
 
 function makeService(store = makeStore()) {
-  return { service: new CorpusService(store), store };
+  return { service: new CorpusService(store, new RecordLockService(store)), store };
 }
 
 /** Create a valid PRD (no parent required) */

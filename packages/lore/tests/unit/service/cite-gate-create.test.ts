@@ -10,6 +10,7 @@
  * @spec_ref AC-BLS2-2
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
@@ -39,7 +40,7 @@ async function insertBaseline(store: InMemoryStore, slug: string, extra: Record<
 
 async function world(gate: { mode: "off" | "report" | "enforce"; armed_branches: string[] } | "bare") {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store);
+  const cs = new CorpusService(store, new RecordLockService(store));
   if (gate !== "bare") cs.setCiteGate(gate);
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);
   const alpha = await insertBaseline(store, "baseline-branch-alpha", { node: "branch" }, root);

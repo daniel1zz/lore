@@ -102,6 +102,7 @@ import {
   type VerificationProfile,
   type ReviewDecision,
   specAcceptanceCriteriaSchema,
+  type LockState,
 } from "@lore/core";
 import {
   parentLegal,
@@ -207,7 +208,30 @@ export type GateCheckpoint =
    * two-state `enabled` key whose absence means "enabled". Deliberately NOT in `ALL_GATE_CHECKPOINTS`
    * (same precedent as `"task-create"` / `"review-judgment"`).
    */
-  | "ac-cite";
+  | "ac-cite"
+  /**
+   * spec-documents-are-living-or-records-a-locked-record-is-never (D4/D6/D11) — the record-edit
+   * gate: a rewrite of a LOCKED record (an approved spec/adr/knowledge record, a claimed task, a
+   * closed plan's plan/phase) is refused. Enforced through `GateEnforcer.enforce` by
+   * `RecordLockService.assertEditable`, which every rewrite path calls BEFORE it writes.
+   * `workflow.gates."record-edit".enabled` (default on) is the one knob (BR-1053). Deliberately NOT
+   * in `ALL_GATE_CHECKPOINTS` below — same precedent as `"task-create"` / `"review-judgment"`.
+   */
+  | "record-edit";
+
+/**
+ * What `record-edit` needs to know about the write it is judging. `lock` is the verdict of
+ * `resolveLock` for the target — `check` fails exactly when it is a locked record.
+ */
+export interface RecordEditFacts {
+  readonly slug: string;
+  readonly type: string;
+  /** The rewrite path being attempted — which `RecordEditOp` the caller is on. */
+  readonly op: "content" | "kind" | "restore" | "criteria" | "phase-structure";
+  readonly lock: LockState;
+  /** Knowledge sub-type of the target, when it is a knowledge doc (selects the change path). */
+  readonly subType?: string;
+}
 
 /**
  * Pre-fetched, checkpoint-agnostic input to a `CheckpointDef`'s `check` / `feed`
@@ -629,6 +653,15 @@ export interface GateContext {
   readonly citeRuleStates?: AcCiteRuleStates;
   /** How to satisfy the gate — rendered by `feedAcCite`; computed by the caller (it needs store reads). */
   readonly citeFeedingPack?: AcCiteFeedingPack;
+
+  // -- record-edit: check() + feed() (spec-documents-are-living-or-records D4/D6/D18) --
+  /**
+   * Facts about the record a rewrite targets, gathered by the CALLER
+   * (`RecordLockService.assertEditable`) — never derived here. `undefined` means the caller did not
+   * measure the lock, which `checkRecordEdit` treats as a failure (an unmeasured lock must not read
+   * as "editable").
+   */
+  readonly recordEdit?: RecordEditFacts;
 
   // -- ENFORCER-ONLY (every checkpoint) — never read by check()/feed() --
   /**
@@ -2353,6 +2386,101 @@ function feedTaskCreate(ctx: GateContext, failures: PredicateResult[]): string {
   return renderFeedingPack(pack);
 }
 
+/** `record-edit`'s failure reason when the target is a locked record. */
+export const RECORD_EDIT_LOCKED_REASON = "RECORD_LOCKED";
+/** `record-edit`'s failure reason when the caller supplied no lock facts at all. */
+export const RECORD_EDIT_UNMEASURED_REASON = "RECORD_LOCK_UNMEASURED";
+
+/**
+ * `record-edit`'s ONE check (spec-documents-are-living-or-records D4/D6): blocks iff the target is a
+ * locked record. A ctx without `recordEdit` BLOCKS (an unmeasured lock must never read as editable —
+ * same fail-closed direction as `noAnchorOverlap`'s absent session id).
+ */
+function checkRecordEdit(ctx: GateContext): PredicateResult[] {
+  const facts = ctx.recordEdit;
+  if (facts === undefined) return [{ ok: false, reason: RECORD_EDIT_UNMEASURED_REASON }];
+  const locked = facts.lock.standing === "record" && facts.lock.locked;
+  return [locked ? { ok: false, reason: RECORD_EDIT_LOCKED_REASON } : { ok: true }];
+}
+
+/**
+ * `record-edit`'s refusal text (D18): `<slug> is a locked record (<reason>).` followed by the change
+ * paths that apply to the target's kind and the rewrite path it attempted. Pure over `ctx`.
+ *
+ * ⛔ Deliberately does NOT name the reopen exit: the task that adds `lore reopen` adds that clause to
+ * this function (D18) — advertising a command before it exists would hand the caller a dead end.
+ */
+function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string {
+  const facts = ctx.recordEdit;
+  if (facts === undefined) {
+    return "record-edit: the caller supplied no lock facts, so the edit cannot be judged; this is a bug in the calling service.";
+  }
+  const reason = facts.lock.standing === "record" && facts.lock.locked ? facts.lock.reason : "unlocked";
+  const slug = facts.slug;
+  const lines: string[] = [`${slug} is a locked record (${reason}).`];
+
+  const correction =
+    `Typo-level fix of the stored text: lore set ${slug} --content <fixed text> --correction "<reason>" ` +
+    "(audited, one version, status kept).";
+  const replace = (what: string, link: string): string =>
+    `Substantive change: ${what}, and link it to ${slug} with ${link} so the old record points at its replacement.`;
+
+  switch (facts.type) {
+    case "spec":
+      lines.push(correction);
+      lines.push(replace("open a new spec (lore create spec)", "`relates-to`"));
+      lines.push("Behaviour change of a living rule: edit the baseline rule in place (lore baseline).");
+      break;
+    case "adr":
+      lines.push(correction);
+      lines.push(replace("write a new ADR (lore create adr)", "`supersedes`"));
+      break;
+    case "knowledge":
+      lines.push(correction);
+      lines.push(replace("write a new knowledge doc (lore create knowledge)", "`relates-to`"));
+      lines.push("A claim that stopped being true: lore invalidate (keeps the record, marks it invalid).");
+      break;
+    case "task":
+      lines.push(correction);
+      lines.push(replace("create a new task (lore create task)", "`relates-to`"));
+      break;
+    case "plan":
+    case "phase":
+      lines.push(
+        `The plan is closed (archived or deprecated), so it and its phases are records. ` +
+          replace("open a new plan (lore create plan)", "`relates-to`"),
+      );
+      break;
+    default:
+      lines.push(correction);
+      break;
+  }
+
+  switch (facts.op) {
+    case "restore":
+      lines.push("This attempt was a restore: restoring rewrites the record's text, so it is refused the same way.");
+      break;
+    case "criteria":
+      lines.push(
+        "This attempt changed acceptance criteria (lore ac add|set|rm): a changed criterion changes what was accepted, so it belongs to a new spec. `lore ac cite` is not affected.",
+      );
+      break;
+    case "phase-structure":
+      lines.push("This attempt changed the plan's phase list (lore phase add|rm|rename).");
+      break;
+    case "kind":
+      lines.push("This attempt changed extra.sub_type: flipping a record's kind would unlock it, so it is refused.");
+      break;
+    case "content":
+      break;
+    default: {
+      const unreachable: never = facts.op;
+      throw new Error(`feedRecordEdit: unhandled op ${String(unreachable)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 /**
  * `ac-cite`'s predicate run (spec-baseline-slice-2 §C4): every added/revised criterion in
  * `ctx.citeCandidates` must cite at least one rule and every cited rule must be live in
@@ -2502,6 +2630,10 @@ export const checkpointRegistry: Partial<Record<GateCheckpoint, CheckpointDef>> 
   // bootstrap "armed gates" rendering — widening it is a separate concern this
   // task's anchors don't cover).
   "review-judgment": { id: "review-judgment", check: checkReviewJudgment, feed: feedReviewJudgment },
+  // reason: spec-documents-are-living-or-records D6/D11 — `RecordLockService.assertEditable` enforces
+  // this through `GateEnforcer.enforce` from every rewrite path; NOT in ALL_GATE_CHECKPOINTS (see the
+  // union member's JSDoc, same precedent as "task-create"/"review-judgment" above).
+  "record-edit": { id: "record-edit", check: checkRecordEdit, feed: feedRecordEdit },
   // reason: "ac-cite" (the citation gate, spec-baseline-slice-2 §C4) is DELIBERATELY NOT a member of this
   // map — see `AC_CITE_CHECKPOINT`'s JSDoc above. Registering it here would put it in the dispatch
   // table `GateEnforcer` and `lore gate`/`lore feed` enumerate, and

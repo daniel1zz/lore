@@ -23,6 +23,7 @@
  *   §Acceptance Criteria AC-V-2; SPEC-052's own suite as structural precedent.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -73,7 +74,7 @@ function configuredDesignConfig(overrides?: Record<string, unknown>): LoreConfig
 function makeCorpusService(config?: LoreConfig) {
   const store = new InMemoryStore();
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
   return { store, corpusService, enforcer };
 }
 
@@ -159,7 +160,7 @@ describe("oracleCoverage — spec-promote matched pair (CorpusService.set)", () 
   // NEGATIVE (same blocking scenario, via ReviewService.approve — the OTHER spec-promote write path)
   it("ReviewService.approve blocks the same missing-e2e design spec", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const enforcer = new GateEnforcer(configuredDesignConfig());
     const reviewService = new ReviewService(store, undefined, {
       enforcer,
@@ -253,7 +254,7 @@ describe("acCountMeetsFloor — spec-promote min_acs (CorpusService.set / Review
   // HAPPY — same scenario via ReviewService.approve, the OTHER spec-promote write path
   it("ReviewService.approve refuses the same AC-less domain-overview spec only for citing nothing (BR-1007), not on the floor", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const enforcer = new GateEnforcer(domainOverviewConfig());
     const reviewService = new ReviewService(store, undefined, {
       enforcer,

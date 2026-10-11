@@ -20,6 +20,7 @@
  *   REGRESSION: a HOLDS verdict never produces an escalate judgment / repair command
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "@lore/core";
 import type { LoreError, NewReviewJudgment, Result, StalenessBundle, Telemetry } from "@lore/core";
@@ -56,7 +57,7 @@ function buildTestFlowDeps(corpusService: CorpusService, judgmentService: Judgme
 async function setup() {
   const store = new InMemoryStore();
   const telemetry = makeNoOpTelemetry();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const judgmentService = new JudgmentService(store, telemetry);
   return { store, corpusService, judgmentService };
 }

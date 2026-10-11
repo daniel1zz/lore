@@ -20,6 +20,7 @@
  * Dimensions covered: HAPPY / NEGATIVE / BOUNDARY / ERROR / STATE / REGRESSION
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -311,7 +312,7 @@ describe("CorpusService.set — stale version propagates (CAS-05)", () => {
     // This test asserts FUTURE behaviour — CorpusService.set currently does unconditional
     // version+1, so this will FAIL until service is adapted to pass expected_version to store.update.
     const store = new InMemoryStore();
-    const service = new CorpusService(store);
+    const service = new CorpusService(store, new RecordLockService(store));
 
     // Create a document at v1
     const createResult = await service.create({
@@ -368,7 +369,7 @@ describe("CorpusService.set — stale version propagates (CAS-05)", () => {
 
     // Build a real doc so service.resolve works
     const realStore = new InMemoryStore();
-    const service = new CorpusService(realStore);
+    const service = new CorpusService(realStore, new RecordLockService(realStore));
 
     const createResult = await service.create({ type: "prd", title: "Propagation Test" });
     expect(createResult.ok).toBe(true);
@@ -415,7 +416,7 @@ describe("CorpusService.set — service-dimension CAS (SVC-CAS-01)", () => {
     // Writer B: set() starts, reads v1, then Writer A commits first → v2 in store.
     // Writer B's set() tries store.update with expected_version=1 but actual=2 → STALE_VERSION.
     const store = new InMemoryStore();
-    const service = new CorpusService(store);
+    const service = new CorpusService(store, new RecordLockService(store));
 
     const createResult = await service.create({ type: "prd", title: "SVC CAS Test" });
     expect(createResult.ok).toBe(true);
@@ -501,7 +502,7 @@ describe("CorpusService.set — service-dimension CAS (SVC-CAS-01)", () => {
     //
     // We test propagation by wrapping the real store to inject a CAS conflict:
     const realStore = new InMemoryStore();
-    const service = new CorpusService(realStore);
+    const service = new CorpusService(realStore, new RecordLockService(realStore));
 
     const createResult = await service.create({ type: "prd", title: "Propagation Test SVC" });
     expect(createResult.ok).toBe(true);
@@ -549,7 +550,7 @@ describe("ReviewService.approve — service-dimension CAS (SVC-CAS-02)", () => {
     // STATE: ReviewService.approve reads the doc then writes with expected_version.
     // When the store rejects due to stale version, approve() must return STALE_VERSION.
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const reviewService = new ReviewService(store);
 
     // Create and leave as draft
@@ -573,7 +574,7 @@ describe("ReviewService.approve — service-dimension CAS (SVC-CAS-02)", () => {
   it("SVC-CAS-02b: stale approve — store rejects with STALE_VERSION → service propagates", async () => {
     // ERROR/STATE: confirm that store-level STALE_VERSION surfaces through approve()
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
 
     const createResult = await corpusService.create({ type: "prd", title: "Review Stale Test" });
     expect(createResult.ok).toBe(true);
@@ -604,8 +605,8 @@ describe("VersionService.restore — service-dimension CAS (SVC-CAS-03)", () => 
   it("SVC-CAS-03: restore() reads current doc version and passes expected_version → succeeds", async () => {
     // STATE: restore reads current doc, calls store.update with expected_version = currentDoc.version
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
-    const versionService = new VersionService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const versionService = new VersionService(store, new RecordLockService(store));
 
     // Create doc and set some content
     const createResult = await corpusService.create({ type: "prd", title: "Restore CAS Test" });
@@ -635,7 +636,7 @@ describe("VersionService.restore — service-dimension CAS (SVC-CAS-03)", () => 
   it("SVC-CAS-03b: restore() propagates STALE_VERSION when concurrent writer advanced version mid-restore", async () => {
     // STATE/ERROR: store rejects restore's update with STALE_VERSION → service propagates it
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
 
     const createResult = await corpusService.create({ type: "prd", title: "Restore Stale Test" });
     expect(createResult.ok).toBe(true);

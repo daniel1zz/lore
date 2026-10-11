@@ -35,6 +35,7 @@
  *   AC-2 AC-3 AC-4 AC-5 AC-6
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
@@ -63,7 +64,7 @@ import type { VerifySpawnSpec, VerifyExecutionResult } from "../../../src/servic
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, taskWorkflowService };
 }

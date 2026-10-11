@@ -3,7 +3,7 @@
  * TWO throwaway corpora (project-a, project-b) for the SPEC-078 T11 multi-project e2e
  * suite. Mirrors `seed-execution-fixture.ts`'s pattern: a separate `bun` process opening
  * each SQLite file directly via `CorpusService` (bare constructor — no `GateEnforcer`,
- * per this codebase's "Optional DI: bare `new CorpusService(store)` test constructions
+ * per this codebase's "Optional DI: bare `new CorpusService(store, new RecordLockService(store))` test constructions
  * stay ungated" convention), so seeding never has to satisfy the spec-create gate itself
  * (that gate is exercised for REAL through the running server in
  * `multi-project-writes.spec.ts`, which POSTs through the HTTP layer instead).
@@ -19,6 +19,7 @@
  * Usage: bun seed-multi-project-fixture.ts <dbPathA> <dbPathB> <runId>
  * Prints one JSON line: {a: {...}, b: {...}}.
  */
+import { RecordLockService } from "../../../lore/src/service/record-lock-service.js";
 import { SQLiteStore } from "../../../lore/src/store/sqlite-store.js";
 import { CorpusService } from "../../../lore/src/service/corpus-service.js";
 import { formatJudgeActor, type CreateDocInput, type LoreError, type Result, type ReviewJudgment } from "@lore/core";
@@ -47,7 +48,7 @@ interface ProjectASeed extends ProjectSeed {
 
 async function seedProject(dbPath: string, label: "A" | "B", runId: string): Promise<ProjectSeed> {
   const store = new SQLiteStore(dbPath);
-  const corpus = new CorpusService(store);
+  const corpus = new CorpusService(store, new RecordLockService(store));
 
   const prdTitle = `E2E Multi-Project Root PRD ${label} ${runId}`;
   const prd = await unwrap(
@@ -104,7 +105,7 @@ async function main(): Promise<void> {
   // ungated bare CorpusService construction (see this file's header), so no gate ever
   // runs against it here; it exists purely for the UI-driven approve+edit exercise.
   const storeA = new SQLiteStore(dbPathA);
-  const corpusA = new CorpusService(storeA);
+  const corpusA = new CorpusService(storeA, new RecordLockService(storeA));
   const draftSpecTitle = `E2E Approve Target A ${runId}`;
   const draftSpec = await unwrap(
     corpusA.create({

@@ -20,6 +20,7 @@
  *   §Public Interface, §Design Decisions D5/D7, §Acceptance Criteria AC-S-2, AC-S-7.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -143,7 +144,7 @@ describe("SeatService.enter — sequence order (HAPPY)", () => {
   it("calls isDirty -> rebaseFromMain -> getReadyReport -> worktreeAdd, in that exact order", async () => {
     const SeatService = await loadSeatServiceCtor();
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const plan = await mustCreatePlan(corpusService, "Session Plan");
 
     const gitPort = new FakeGitPort();
@@ -173,7 +174,7 @@ describe("SeatService.enter — sequence order (HAPPY)", () => {
   it("dirty main aborts before rebase/readiness/worktreeAdd, with a typed err", async () => {
     const SeatService = await loadSeatServiceCtor();
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const plan = await mustCreatePlan(corpusService, "Dirty Main Plan");
 
     const gitPort = new FakeGitPort();
@@ -199,7 +200,7 @@ describe("SeatService.enter — mid-sequence failure + retry (NEGATIVE / STATE)"
   it("worktreeAdd failing after a successful rebase errs naming the worktreeAdd step, and a second enter call succeeds", async () => {
     const SeatService = await loadSeatServiceCtor();
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const plan = await mustCreatePlan(corpusService, "Retry Plan");
 
     const gitPort = new FakeGitPort();
@@ -238,7 +239,7 @@ describe("SeatService.remove — unmerged/merged matched pair", () => {
 
   beforeEach(async () => {
     store = new InMemoryStore();
-    corpusService = new CorpusService(store);
+    corpusService = new CorpusService(store, new RecordLockService(store));
     plan = await mustCreatePlan(corpusService, "Remove-Target Plan");
   });
 
@@ -337,7 +338,7 @@ describe("SeatService.resume", () => {
   it("resumes an existing seat worktree by locating it via worktreeList", async () => {
     const SeatService = await loadSeatServiceCtor();
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const plan = await mustCreatePlan(corpusService, "Resume Plan");
 
     const gitPort = new FakeGitPort();
@@ -355,7 +356,7 @@ describe("SeatService.resume", () => {
   it("resuming a plan with no matching seat worktree errs rather than silently creating one", async () => {
     const SeatService = await loadSeatServiceCtor();
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const plan = await mustCreatePlan(corpusService, "No Seat Yet Plan");
 
     const gitPort = new FakeGitPort();

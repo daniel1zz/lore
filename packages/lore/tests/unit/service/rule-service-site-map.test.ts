@@ -14,6 +14,7 @@
  * @spec_ref AC-BLS2-5
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -45,7 +46,7 @@ async function auditRows(docId: string): Promise<number> {
 
 beforeEach(async () => {
   store = new InMemoryStore();
-  corpus = new CorpusService(store);
+  corpus = new CorpusService(store, new RecordLockService(store));
   svc = new RuleService(store);
   const prd = await mustCreate({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   const root = await mustCreate({

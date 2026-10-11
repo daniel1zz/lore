@@ -18,6 +18,7 @@
  * @spec_ref AC-084-3
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +41,7 @@ function makeStore() {
 }
 
 function makeService(store = makeStore()) {
-  return { service: new CorpusService(store), store };
+  return { service: new CorpusService(store, new RecordLockService(store)), store };
 }
 
 function prdInput(title = "My Product"): CreateDocInput {

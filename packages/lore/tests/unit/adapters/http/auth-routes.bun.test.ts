@@ -35,6 +35,7 @@
  * @spec_ref AC-A-B1, AC-A-B2, AC-A-B3, AC-A-B4, AC-A-B5, AC-A-B6, AC-A-B7, AC-A-B8, AC-A-B9
  */
 
+import { RecordLockService } from "../../../../src/service/record-lock-service.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Database } from "bun:sqlite";
 import { mkdtempSync } from "node:fs";
@@ -85,9 +86,9 @@ async function makeTestServer(): Promise<TestContext> {
   const machineAuth = createMachineAuthStores({ baseDir: mkdtempSync(join(tmpdir(), "lore-auth-routes-test-")) });
 
   const app: App = {
-    corpusService: new CorpusService(docStore),
+    corpusService: new CorpusService(docStore, new RecordLockService(docStore)),
     reviewService: new ReviewService(docStore),
-    versionService: new VersionService(docStore),
+    versionService: new VersionService(docStore, new RecordLockService(docStore)),
     outlineService: new OutlineService(docStore),
     migrationService: new MigrationService(docStore),
     treeCheckService: new TreeCheckService(docStore),

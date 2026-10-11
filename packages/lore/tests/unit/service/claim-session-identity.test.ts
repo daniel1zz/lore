@@ -43,6 +43,7 @@
  *   adr-lore-s-mechanisms-validate-a-proxy-for-the-property-not-the (Q1/Q2/Q3).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -129,7 +130,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
  */
 function makeStoreAndCorpus() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   return { store, corpusService };
 }
 

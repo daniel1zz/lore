@@ -17,6 +17,7 @@
  * @spec_ref N+1 batch-method hardening (SessionService.bootstrap, review M5)
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -34,7 +35,7 @@ class CountingStore extends InMemoryStore {
 }
 
 function makeSessionService(store: CountingStore) {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10080,

@@ -202,6 +202,44 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
 };
 
 /**
+ * The `field` value of `record-edit`'s one predicate — the checkpoint id itself, because the gate has
+ * exactly one conjunct and emits no `field` sub-discriminator (its refusal is `gate:record-edit`).
+ */
+export const RECORD_EDIT_FIELD = "record-edit" as const;
+
+/**
+ * The `record-edit` contract (spec-documents-are-living-or-records D4/D6/BR-1048). A SEPARATE table
+ * from {@link PREDICATE_CONTRACTS} on purpose: that one is exhaustive over `checkPlanClose`'s field
+ * union by construction and its test asserts the key set equals that union, so widening it would
+ * break the very exhaustiveness the header above defends. Same record shape, same "empty means not
+ * recorded" convention.
+ */
+export const RECORD_EDIT_CONTRACT: Record<typeof RECORD_EDIT_FIELD, PredicateContract> = {
+  [RECORD_EDIT_FIELD]: {
+    invariant:
+      "A record that has been accepted (an approved spec/adr/knowledge record, a claimed task, a " +
+      "closed plan and its phases) is never rewritten in place; a substantive change is a new " +
+      "document that the old one points to, and a typo-level fix goes through the audited correction.",
+    measured:
+      "RecordLockService.assertEditable resolves resolveLock (@lore/core doc-standing) over facts it " +
+      "gathers: ever-approved from version history, ever-claimed from audit `claim` rows minus claims " +
+      "rolled back by their own failed write, and the member plan's status. It is consulted only when " +
+      "the write would change body/title (compared to the stored values), extra.sub_type, criteria, " +
+      "phase structure, or restores a version.",
+    known_false_pass: [
+      "metadata-only writes (tags, priority, slug, links, anchors, claims, evidence) pass by design, " +
+        "so a locked record can still change meaning through its links",
+      "a phase edit can pass while its plan is being archived on another doc (accepted residual, " +
+        "spec §Concurrency)",
+    ],
+    known_false_block: [
+      "a rewrite that only reformats or fixes a typo is refused unless the caller passes --correction " +
+        "with a reason",
+    ],
+  },
+};
+
+/**
  * Renders `lore gate --explain <checkpoint>`'s output (§D7) — per predicate:
  * field, invariant, measured proxy, and both known-delta lists. Pure string
  * builder; the CLI wiring (`adapters/cli/commands/gate.ts`) writes the result
@@ -224,17 +262,22 @@ export const PREDICATE_CONTRACTS: Record<PlanCloseField, PredicateContract> = {
  *   // => "No predicate contract table is recorded for checkpoint \"spec-create\" yet — ..."
  */
 export function renderPredicateContractsExplain(checkpoint: string): string {
-  if (checkpoint !== "plan-close") {
+  const entries: ReadonlyArray<readonly [string, PredicateContract]> | undefined =
+    checkpoint === "plan-close"
+      ? PLAN_CLOSE_FIELDS.map((field) => [field, PREDICATE_CONTRACTS[field]] as const)
+      : checkpoint === "record-edit"
+        ? [[RECORD_EDIT_FIELD, RECORD_EDIT_CONTRACT[RECORD_EDIT_FIELD]] as const]
+        : undefined;
+  if (entries === undefined) {
     return (
       `No predicate contract table is recorded for checkpoint "${checkpoint}" yet — ` +
-      `PREDICATE_CONTRACTS is deliberately scoped to "plan-close" only ` +
+      `contract tables exist for "plan-close" and "record-edit" only ` +
       `(spec-plan-close-predicates-measure-invariants-an-applicability §Scope). Empty here ` +
       `means "not built yet", never "this checkpoint has no predicates worth explaining".`
     );
   }
-  const lines: string[] = [`Predicate contract table — plan-close:`];
-  for (const field of PLAN_CLOSE_FIELDS) {
-    const contract = PREDICATE_CONTRACTS[field];
+  const lines: string[] = [`Predicate contract table — ${checkpoint}:`];
+  for (const [field, contract] of entries) {
     lines.push("");
     lines.push(`field: ${field}`);
     lines.push(`invariant: ${contract.invariant}`);

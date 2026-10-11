@@ -28,6 +28,7 @@
  * @spec_ref SPEC-035 §3 D3; SPEC-033 F1
  */
 
+import { RecordLockService } from "../../../../src/service/record-lock-service.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
@@ -89,9 +90,9 @@ async function makeTestServer(useFailingStore: boolean): Promise<TestContext> {
   const telemetry = new NoOpTelemetry();
 
   const app: App = {
-    corpusService: new CorpusService(store, telemetry),
+    corpusService: new CorpusService(store, new RecordLockService(store), telemetry),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

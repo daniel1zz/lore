@@ -23,6 +23,7 @@
  * exception), REGRESSION (bare BR rule unchanged).
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { baselineExtraSchema, baselineRuleSchema } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
@@ -120,7 +121,7 @@ const input = (extra: Record<string, unknown> = {}) => ({
 
 async function world() {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store);
+  const cs = new CorpusService(store, new RecordLockService(store));
   const rules = new RuleService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");
   const bizRoot = await node(cs, "Business root", prd, { node: "root" });

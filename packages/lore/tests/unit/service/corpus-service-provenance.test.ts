@@ -43,6 +43,7 @@
  * @spec_ref IoC vertical-slice tech-spec §4.1 P4
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -83,7 +84,7 @@ class FailingLinkStore extends InMemoryStore {
 
 function makeService(store: InMemoryStore = new InMemoryStore()) {
   const telemetry = new CapturingTelemetry();
-  const service = new CorpusService(store, telemetry);
+  const service = new CorpusService(store, new RecordLockService(store), telemetry);
   return { service, store, telemetry };
 }
 

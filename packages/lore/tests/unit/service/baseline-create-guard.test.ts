@@ -10,6 +10,7 @@
  * `--check-baseline` calls.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -21,7 +22,7 @@ let corpus: CorpusService;
 
 beforeEach(() => {
   store = new InMemoryStore();
-  corpus = new CorpusService(store);
+  corpus = new CorpusService(store, new RecordLockService(store));
 });
 
 async function mustCreate(input: CreateDocInput): Promise<DocRecord> {

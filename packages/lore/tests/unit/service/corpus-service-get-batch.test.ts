@@ -20,6 +20,7 @@
  * @spec_ref N+1 batch-method hardening (CorpusService._getImpl, review M6)
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -50,7 +51,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput) {
 describe("CorpusService.get — BOUNDARY: batched findByIds call count for related links", () => {
   it("issues EXACTLY ONE findByIds call for a doc with 3 non-parent links, not 3", async () => {
     const store = new CountingStore();
-    const service = new CorpusService(store);
+    const service = new CorpusService(store, new RecordLockService(store));
 
     const center = await mustCreate(service, prdInput("Center"));
     const a = await mustCreate(service, prdInput("Related A"));
@@ -81,7 +82,7 @@ describe("CorpusService.get — BOUNDARY: batched findByIds call count for relat
 
   it("issues ZERO findByIds calls for a doc with only a parent link (no non-parent links)", async () => {
     const store = new CountingStore();
-    const service = new CorpusService(store);
+    const service = new CorpusService(store, new RecordLockService(store));
 
     const parent = await mustCreate(service, prdInput("Parent"));
     const child = await mustCreate(service, { type: "spec", title: "Child"});
@@ -97,7 +98,7 @@ describe("CorpusService.get — BOUNDARY: batched findByIds call count for relat
 
   it("BOUNDARY: a doc with zero links entirely issues zero findByIds calls", async () => {
     const store = new CountingStore();
-    const service = new CorpusService(store);
+    const service = new CorpusService(store, new RecordLockService(store));
 
     const lonely = await mustCreate(service, prdInput("Lonely"));
 
@@ -112,7 +113,7 @@ describe("CorpusService.get — BOUNDARY: batched findByIds call count for relat
 
   it("NEGATIVE: a link pointing at a since-deleted-from-the-map doc id is silently excluded from related", async () => {
     const store = new CountingStore();
-    const service = new CorpusService(store);
+    const service = new CorpusService(store, new RecordLockService(store));
 
     const center = await mustCreate(service, prdInput("Center"));
     const ghost = await mustCreate(service, prdInput("Ghost"));
@@ -132,7 +133,7 @@ describe("CorpusService.get — BOUNDARY: batched findByIds call count for relat
 
   it("REGRESSION: a parent link never contributes an id to the batched findByIds call", async () => {
     const store = new CountingStore();
-    const service = new CorpusService(store);
+    const service = new CorpusService(store, new RecordLockService(store));
 
     const parent = await mustCreate(service, prdInput("Parent"));
     const child = await mustCreate(service, { type: "spec", title: "Child"});

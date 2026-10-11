@@ -43,6 +43,7 @@
  * @spec_ref BUG-011 (audit finding); SPEC-042 §Design Decisions D5; SPEC-056 D2/D7
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -101,7 +102,7 @@ const TOCTOU_SESSION_ENV = { CLAUDE_CODE_SESSION_ID: "3de02220-toctou" } as cons
 
 function makeTaskServices(config?: LoreConfig, withGate = true) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const gate: GateDependencies | undefined = withGate
     ? { enforcer: new GateEnforcer(config), getPlanBundle: corpusService.getPlanBundle.bind(corpusService) }
     : undefined;
@@ -382,7 +383,7 @@ function makePhaseServices(
   sessionEnv: Record<string, string | undefined> = { ...TOCTOU_SESSION_ENV },
 ) {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const gate: GateDependencies | undefined = withGate
     ? { enforcer: new GateEnforcer(config), getPlanBundle: corpusService.getPlanBundle.bind(corpusService) }
     : undefined;

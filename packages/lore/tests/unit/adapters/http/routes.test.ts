@@ -62,6 +62,7 @@
  *       Only service-layer validation errors are testable here.
  */
 
+import { RecordLockService } from "../../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { InMemoryStore } from "../../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../../src/service/corpus-service.js";
@@ -90,9 +91,9 @@ const stubApiKeyStore = {} as ApiKeyStore;
 function makeApp(): App {
   const store = new InMemoryStore();
   return {
-    corpusService: new CorpusService(store),
+    corpusService: new CorpusService(store, new RecordLockService(store)),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

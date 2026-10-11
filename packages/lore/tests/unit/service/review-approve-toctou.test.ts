@@ -34,6 +34,7 @@
  *   `rollbackClaim` (BUG-011) as the structural precedent.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
@@ -106,7 +107,7 @@ async function setupApprovedSpecAndDraftPlan(): Promise<{
   const store = new InMemoryStore();
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(undefined);
-  const corpusService = new CorpusService(store, undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
 
   const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
   const specDraft = await mustCreate(corpusService, {
@@ -218,7 +219,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
     const store = new InMemoryStore();
     await seedLiveRule(store);
     const enforcer = new GateEnforcer(undefined);
-    const corpusService = new CorpusService(store, undefined, undefined, enforcer);
+    const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
 
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
     const specDraft = await mustCreate(corpusService, {

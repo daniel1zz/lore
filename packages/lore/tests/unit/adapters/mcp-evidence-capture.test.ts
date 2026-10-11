@@ -57,6 +57,7 @@
  * @spec_ref task-the-ac-scope-re-keying-left-the-red-first-floor-unarmed
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -113,7 +114,7 @@ let taskWorkflowService: TaskWorkflowService;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store);
+  corpusService = new CorpusService(store, new RecordLockService(store));
   taskWorkflowService = new TaskWorkflowService(
     store,
     new NoOpTelemetry(),
@@ -123,7 +124,7 @@ function makeApp(): App {
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

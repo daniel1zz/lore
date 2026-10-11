@@ -58,6 +58,7 @@
  * @spec_ref AC-JV-5, spec-judgment-surfaces-must-verify-before-they-certify-machine D6
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -303,7 +304,7 @@ let server: McpServer;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpusService = new CorpusService(store);
+  corpusService = new CorpusService(store, new RecordLockService(store));
   aiProvider = new InMemoryAIProvider("in-memory", { kind: "ok", content: JUDGE_JSON_PRESENT_AND_ABSENT });
   const providers = new Map([["in-memory", aiProvider]]) as unknown as ReadonlyMap<string, import("@lore/core").AIProvider>;
   const aiProviderService = new AIProviderService(
@@ -319,7 +320,7 @@ function makeApp(): App {
   return {
     corpusService,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

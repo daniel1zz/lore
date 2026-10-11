@@ -22,6 +22,7 @@
  *               returns "" — concatenation is a true no-op)
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput, NewReviewJudgment } from "@lore/core";
@@ -48,7 +49,7 @@ function buildTestFlowDeps(corpusService: CorpusService, judgmentService: Judgme
 
 async function setup() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const judgmentService = new JudgmentService(store, new NoOpTelemetry());
   return { store, corpusService, judgmentService };
 }

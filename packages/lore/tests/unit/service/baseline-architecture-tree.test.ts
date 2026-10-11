@@ -40,6 +40,7 @@
  * tests/unit/store/rule-registry-prefix-race.bun.test.ts.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { baselineExtraSchema } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
@@ -97,7 +98,7 @@ async function baseline(cs: CorpusService, title: string, parent: DocRecord, ext
 
 async function world(opts: { architecture: boolean } = { architecture: true }): Promise<World> {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store);
+  const cs = new CorpusService(store, new RecordLockService(store));
   const rules = new RuleService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");
   const bizRoot = await baseline(cs, "Business root", prd, { node: "root" });
@@ -467,7 +468,7 @@ describe("architecture tree (BL-5)", () => {
       await addRuleId(w.rules, w.leaves[1] as DocRecord, "uncited");
       const spec = await must(await w.cs.create({ type: "spec", title: "Spec one", content: "b"} as CreateDocInput), "spec");
       await must(
-        await new AcService(w.store).addCriterion(spec.id, {
+        await new AcService(w.store, new RecordLockService(w.store)).addCriterion(spec.id, {
           id: "AC-C-1", statement: "Does the cited thing",
           verify: { mode: "script", oracle: "test", command: "bun test x" }, cites: [brCited],
         }),
@@ -514,7 +515,7 @@ describe("architecture tree (BL-5)", () => {
       const as = await addRuleId(w.rules, w.standards[0] as DocRecord, "std");
       const spec = await must(await w.cs.create({ type: "spec", title: "Spec two", content: "b"} as CreateDocInput), "spec2");
       await must(
-        await new AcService(w.store).addCriterion(spec.id, {
+        await new AcService(w.store, new RecordLockService(w.store)).addCriterion(spec.id, {
           id: "AC-S-1", statement: "Does the standard thing",
           verify: { mode: "script", oracle: "test", command: "bun test y" }, cites: [as],
         }),
@@ -551,7 +552,7 @@ describe("architecture tree (BL-5)", () => {
 
     it("an architecture-only baseline has zero branches (nothing to arm)", async () => {
       const store = new InMemoryStore();
-      const cs = new CorpusService(store);
+      const cs = new CorpusService(store, new RecordLockService(store));
       const prd = await must(await cs.create({ type: "prd", title: "P", content: "p" } as CreateDocInput), "prd");
       const root = await baseline(cs, "Arch root", prd, { tree: "architecture", node: "root" });
       await baseline(cs, "Arch section", root, { tree: "architecture", node: "section" });

@@ -35,6 +35,7 @@
  *   task-a-task-cannot-be-retracted-supersedes-emits-a-repair
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -46,7 +47,7 @@ import type { CreateDocInput, DocRecord, LinkRecord, LoreError, ReviewJudgment, 
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const validityService = new ValidityService(store);
   return { store, corpusService, validityService };
 }
@@ -485,7 +486,7 @@ describe("BOUNDARY — retracting an already-terminal task / a task claimed by a
 describe("STATE — partial-failure recovery: doc half committed, re-run repairs the missing link", () => {
   it("a forced addLink failure still commits the doc half; re-running the SAME invalidate repairs the link", async () => {
     const store = new FlakyLinkStore(1);
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const validityService = new ValidityService(store);
 
     const a1CreateResult = await corpusService.create({
@@ -690,7 +691,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
 
   it("HAPPY: wired port + latest 'escalate' staleness judgment -> invalidate writes ONE calibration record FK'd to that judgment", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const k1 = await createKnowledge(corpusService, "K1 staleness-flagged");
     const judgment = makeStalenessJudgment({ doc_id: k1.id, doc_version: k1.version });
     const { port, recordCalibrationCalls } = makeFakePort(judgment);
@@ -714,7 +715,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
 
   it("STATE: no prior probe (latestStalenessJudgment returns null) -> recordCalibration is never called", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const k1 = await createKnowledge(corpusService, "K1 never probed");
     const { port, recordCalibrationCalls } = makeFakePort(null);
     const validityService = new ValidityService(store, undefined, port);
@@ -726,7 +727,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
 
   it("STATE: a 'holds' (decision='approve') latest staleness judgment -> recordCalibration is never called (D12 — no observable outcome for holds)", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const k1 = await createKnowledge(corpusService, "K1 holds verdict");
     const holdsJudgment = makeStalenessJudgment({ doc_id: k1.id, doc_version: k1.version, decision: "approve" });
     const { port, recordCalibrationCalls } = makeFakePort(holdsJudgment);
@@ -739,7 +740,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
 
   it("STATE: --undo never triggers a calibration write, even with a wired port + an escalate judgment", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const k1 = await createKnowledge(corpusService, "K1 undo case");
 
     // First invalidate (no port wired) to set up an undo-able state.
@@ -759,7 +760,7 @@ describe("AC-SP-9 — ValidityService optional stalenessCalibration port (SPEC-0
 
   it("REGRESSION: bare `new ValidityService(store)` (no port) writes NONE and does not error", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const k1 = await createKnowledge(corpusService, "K1 bare construction");
     const validityService = new ValidityService(store); // no telemetry, no port — mirrors every pre-SPEC-044 test in this file
 

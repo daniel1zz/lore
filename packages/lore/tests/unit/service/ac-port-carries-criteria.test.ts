@@ -29,6 +29,7 @@
  *
  * @spec_ref AC-DC-13
  */
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -88,7 +89,7 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
   describe("(a) behaviour: the evidence stamp follows the PORT, never a store walk", () => {
     it("plan-owned task: a port criterion whose oracle_generation DIFFERS from the store's wins", async () => {
       const store = new InMemoryStore();
-      const corpusService = new CorpusService(store);
+      const corpusService = new CorpusService(store, new RecordLockService(store));
 
       const prdId = await createDoc(corpusService, {
         type: "prd",
@@ -160,7 +161,7 @@ describe("AC-DC-13 · the injected declared-AC port carries criteria", () => {
 
     it("--adhoc task: a port criterion whose oracle_generation DIFFERS from the store's wins", async () => {
       const store = new InMemoryStore();
-      const corpusService = new CorpusService(store);
+      const corpusService = new CorpusService(store, new RecordLockService(store));
 
       const prdId = await createDoc(corpusService, {
         type: "prd",

@@ -54,6 +54,7 @@
  * @spec_ref task-lore-assess-derives-a-plan-s-commits-by-grepping-task
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -75,7 +76,7 @@ function makeAssessService(provider: InMemoryAIProvider) {
 
 async function makeBundleWithOneTask(): Promise<PlanBundle> {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const planResult = await corpusService.create({
     type: "plan",
     title: "Commit Derivation Unverifiable Test Plan",

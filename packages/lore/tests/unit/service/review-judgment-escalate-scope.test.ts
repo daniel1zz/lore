@@ -30,6 +30,7 @@
  * @spec_ref spec-an-escalate-blocks-approval-for-every-doc-type-and-the
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi } from "vitest";
@@ -65,7 +66,7 @@ async function makeApp(opts: { judgmentRequiredTypes?: readonly string[] } = {})
   await seedLiveRule(store);
   const telemetry = makeTelemetry();
   const enforcer = new GateEnforcer(undefined);
-  const corpusService = new CorpusService(store, telemetry, undefined, enforcer, undefined, true);
+  const corpusService = new CorpusService(store, new RecordLockService(store), telemetry, undefined, enforcer, undefined, true);
   const judgmentService = new JudgmentService(store, telemetry);
   const reviewService = new ReviewService(
     store,

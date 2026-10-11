@@ -50,6 +50,7 @@
  *   SPEC-042 §Design Decisions D1/D5; SPEC-056 D2/D7.
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -134,7 +135,7 @@ async function mustInsert(store: InMemoryStore, doc: DocRecord): Promise<DocReco
  */
 function makeStore() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   return { store, corpusService };
 }
 

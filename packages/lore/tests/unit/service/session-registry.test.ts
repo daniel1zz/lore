@@ -36,6 +36,7 @@
  * @spec_ref task-active-sessions-derives-only-over-active-plans-tasks-with
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -89,7 +90,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 }
 
 function makeServices(store: StoreInterface = new InMemoryStore()) {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,

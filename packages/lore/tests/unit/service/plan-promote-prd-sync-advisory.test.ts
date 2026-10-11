@@ -17,6 +17,7 @@
  * @spec_ref spec-baseline-slice-3a-architecture-tree-baseline-root BR-984
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { LIVE_RULE_ID, seedLiveRule } from "../../helpers/live-rule-fixture.js";
@@ -51,7 +52,7 @@ async function makeHarness(config?: LoreConfig) {
   const store = new InMemoryStore();
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(config);
-  const corpusService = new CorpusService(store, undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
   const reviewService = new ReviewService(store, undefined, {
     enforcer,
     getPlanBundle: corpusService.getPlanBundle.bind(corpusService),

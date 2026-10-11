@@ -32,6 +32,7 @@
  * @spec_ref SPEC-043 §Acceptance Criteria AC-MH-7
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -142,7 +143,7 @@ function extractBody(mdContent: string): string {
 describe("renderDocMarkdown — HAPPY (reason + resolvable successor)", () => {
   it("banner carries both the successor slug and the reason, no dangling separators", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
 
@@ -175,7 +176,7 @@ describe("renderDocMarkdown — HAPPY (reason + resolvable successor)", () => {
 describe("renderDocMarkdown — NEGATIVE (unresolvable successor)", () => {
   it("invalidated_by pointing to a nonexistent doc omits the superseded-by clause, never throws", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
 
@@ -201,7 +202,7 @@ describe("renderDocMarkdown — NEGATIVE (unresolvable successor)", () => {
 describe("renderDocMarkdown — BOUNDARY (bare banner)", () => {
   it("no reason and no successor → bare banner line, no dangling separator", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
 
@@ -229,7 +230,7 @@ describe("renderDocMarkdown — BOUNDARY (bare banner)", () => {
 describe("renderDocMarkdown — ERROR (malformed extra.validity)", () => {
   it("a wrong-typed invalid_at fails schema parsing and degrades to 'not invalidated' — no banner, no throw", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
 
@@ -266,7 +267,7 @@ describe("renderDocMarkdown — ERROR (malformed extra.validity)", () => {
 describe("renderDocMarkdown — STATE (soft-deleted successor)", () => {
   it("a soft-deleted successor still resolves to its slug, with a (deleted) suffix", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
 
@@ -301,7 +302,7 @@ describe("renderDocMarkdown — STATE (soft-deleted successor)", () => {
 describe("renderDocMarkdown — REGRESSION (valid doc)", () => {
   it("a doc with no extra.validity at all renders unchanged, no banner", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
 
@@ -317,7 +318,7 @@ describe("renderDocMarkdown — REGRESSION (valid doc)", () => {
 
   it("a FUTURE valid_at (not yet invalid) still renders unchanged — only invalid_at gates the banner", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const outlineService = new OutlineService(store);
     const app = makeApp(corpusService, outlineService);
 

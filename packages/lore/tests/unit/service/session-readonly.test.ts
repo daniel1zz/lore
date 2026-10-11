@@ -12,6 +12,7 @@
  * @spec_ref SPEC-041 §4 AC-SL-2
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -61,7 +62,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput) {
 }
 
 async function seedCorpus(store: InMemoryStore) {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10080,

@@ -18,6 +18,7 @@
  * @spec_ref AC-ADF-1
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { AIProviderService } from "../../../src/service/ai-provider-service.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -46,7 +47,7 @@ function makeAssessService(provider: InMemoryAIProvider) {
  * verdict "met") is provably false relative to the real facts.
  */
 async function makeIncompleteEvidenceBundle(store: InMemoryStore): Promise<PlanBundle> {
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
 
   const prdResult = await corpusService.create({
     type: "prd",

@@ -5,6 +5,7 @@
  * @spec_ref SPEC-013
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, readdirSync, statSync } from "fs";
 import { join } from "path";
@@ -27,9 +28,9 @@ function makeApp(): App {
   const store = new InMemoryStore();
   const telemetry = new NoOpTelemetry();
   return {
-    corpusService: new CorpusService(store, telemetry),
+    corpusService: new CorpusService(store, new RecordLockService(store), telemetry),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store),
+    versionService: new VersionService(store, new RecordLockService(store)),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

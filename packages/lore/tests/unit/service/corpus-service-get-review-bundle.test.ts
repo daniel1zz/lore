@@ -30,6 +30,7 @@
  * @spec_ref SPEC-034 §1, §4
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -37,7 +38,7 @@ import type { CreateDocInput, TreeBlueprint } from "@lore/core";
 
 function makeService() {
   const store = new InMemoryStore();
-  return { service: new CorpusService(store), store };
+  return { service: new CorpusService(store, new RecordLockService(store)), store };
 }
 
 // ─── HAPPY ─────────────────────────────────────────────────────────────────

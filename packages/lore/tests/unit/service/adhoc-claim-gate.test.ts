@@ -34,6 +34,7 @@
  *   task-fix-spec-069-gap-adhoc-task-claim-structurally-impossible
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -51,7 +52,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   const enforcer = new GateEnforcer(undefined);
   // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main — the 7th
   // ctor arg is the env `claim()` captures `extra.claim.session_id` from, and the

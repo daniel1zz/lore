@@ -22,6 +22,7 @@
  * @spec_ref SPEC-035 §2, §5
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -36,7 +37,7 @@ const FAR_PAST = "2000-01-01T00:00:00.000Z"; // always before any doc created du
 
 function makeStore() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store);
+  const corpusService = new CorpusService(store, new RecordLockService(store));
   return { store, corpusService };
 }
 
@@ -209,7 +210,7 @@ describe("BOUNDARY — exact (doc_id, version) join, not a fuzzy/adjacent match"
 describe("STATE — verify()'s `since` genuinely reads from the constructor default when opts is omitted", () => {
   it("two AuditService instances with different constructor verifySince values disagree on the same store state", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const planId = await createPlan(corpusService);
 
     // A versions row sitting between two candidate watermarks, with no matching audit entry.
@@ -236,7 +237,7 @@ describe("STATE — verify()'s `since` genuinely reads from the constructor defa
 
   it("a per-call opts.since overrides the constructor default", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store);
+    const corpusService = new CorpusService(store, new RecordLockService(store));
     const planId = await createPlan(corpusService);
 
     await store.insertVersion(

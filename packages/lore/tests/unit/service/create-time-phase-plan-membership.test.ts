@@ -25,6 +25,7 @@
  * @spec_ref SPEC-065 D4, SPEC-023 §4 AC-PHASE-3
  */
 
+import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -35,7 +36,7 @@ import type { CreateDocInput, DocPatch } from "@lore/core";
 
 function makeServices() {
   const store = new InMemoryStore();
-  return { store, corpusService: new CorpusService(store), phaseService: new PhaseService(store) };
+  return { store, corpusService: new CorpusService(store, new RecordLockService(store)), phaseService: new PhaseService(store, new RecordLockService(store)) };
 }
 
 /** Create a plan carrying exactly `phaseNames` as its declared phase namespace. */
