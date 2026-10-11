@@ -84,6 +84,8 @@ export interface SettingsHookEntry {
   matcher?: string;
   /** The exact shell command string — this is the identity key for merge/strip. */
   command: string;
+  /** Optional per-hook budget in seconds; emitted as `timeout` on the settings hook object. */
+  timeout?: number;
 }
 
 /** Input to {@link mergeSettings}. Deliberately narrow — never the full setup manifest. */
@@ -124,7 +126,7 @@ export interface MergeSettingsResult {
 /** One Claude Code `hooks[event][]` matcher-group, in its on-disk shape. */
 interface HookGroup {
   matcher?: string;
-  hooks: Array<{ type: "command"; command: string }>;
+  hooks: Array<{ type: "command"; command: string; timeout?: number }>;
 }
 
 /** Narrow runtime type guard — true for non-null, non-array JSON objects. */
@@ -173,7 +175,11 @@ function groupLoreEntries(entries: SettingsHookEntry[]): Record<string, HookGrou
         entry.matcher !== undefined ? { matcher: entry.matcher, hooks: [] } : { hooks: [] },
       );
     }
-    (groups.get(matcherKey) as HookGroup).hooks.push({ type: "command", command: entry.command });
+    (groups.get(matcherKey) as HookGroup).hooks.push({
+      type: "command",
+      command: entry.command,
+      ...(entry.timeout !== undefined ? { timeout: entry.timeout } : {}),
+    });
   }
 
   const result: Record<string, HookGroup[]> = {};

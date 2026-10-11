@@ -132,7 +132,12 @@ export interface HookRegistration {
   readonly event: string;
   /** Optional tool/agent matcher — omitted for events that don't scope by matcher (SessionStart/Stop/SubagentStart here). */
   readonly matcher?: string;
+  /** Optional per-hook budget in seconds, emitted as `timeout` in settings.json. Absent keeps the harness default (SessionEnd's is 1.5 s shared, too short to spawn `lore`). */
+  readonly timeout?: number;
 }
+
+/** run-end.mjs budget in seconds; must stay >= 10 (AC-ROI-7). */
+const RUN_END_HOOK_TIMEOUT_SECONDS = 10;
 
 /**
  * The full declared "core governance + security" hook set (owner decision,
@@ -198,6 +203,10 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   { file: "run-register.mjs", runner: "node", event: "SessionStart" },
   { file: "run-register.mjs", runner: "node", event: "SubagentStart" },
 
+  // run-end.mjs — ends the run on SessionEnd (main) / SubagentStop (helper) via `lore run end`, releasing its claims (BR-1059, spec-run-only-write-identity-and-run-end-claim-release Scope 6). timeout 10 s: SessionEnd's default budget is 1.5 s.
+  { file: "run-end.mjs", runner: "node", event: "SessionEnd", timeout: RUN_END_HOOK_TIMEOUT_SECONDS },
+  { file: "run-end.mjs", runner: "node", event: "SubagentStop", timeout: RUN_END_HOOK_TIMEOUT_SECONDS },
+
   // pre-tool-harness-run.mjs — rewrites each lore call to carry `--harness-run <run>` (updatedInput only, never a permissionDecision — D12); covers raw Bash and every lore MCP tool.
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },
@@ -235,8 +244,11 @@ export function buildHookSettingsEntries(claudeDir: string): SettingsHookEntry[]
   const trimmedDir = stripTrailingSlash(claudeDir);
   return HOOK_REGISTRATIONS.map((reg) => {
     const command = `${reg.runner} ${trimmedDir}/hooks/${reg.file}`;
-    return reg.matcher !== undefined
-      ? { event: reg.event, matcher: reg.matcher, command }
-      : { event: reg.event, command };
+    return {
+      event: reg.event,
+      ...(reg.matcher !== undefined ? { matcher: reg.matcher } : {}),
+      command,
+      ...(reg.timeout !== undefined ? { timeout: reg.timeout } : {}),
+    };
   });
 }
