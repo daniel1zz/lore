@@ -53,6 +53,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterEach } from "bun:test
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { withSessionIdentity } from "../../helpers/session-actor";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -66,10 +67,11 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
+/** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),
@@ -215,8 +217,6 @@ describe("lore create adr --supersedes — HAPPY (SPEC-043 D11)", () => {
         "accepted",
         "--supersedes",
         oldSlug,
-        "--by",
-        "alice",
         "--no-ai",
         "--content",
         "Body.",

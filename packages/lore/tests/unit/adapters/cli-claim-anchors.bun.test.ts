@@ -61,6 +61,7 @@ import { describe, expect, it, beforeAll, beforeEach, afterEach } from "bun:test
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir, hostname } from "os";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor";
 import { assertFreshBinary } from "../../integration/helpers/assert-fresh-binary";
 
 // tests/unit/adapters/ → tests/unit/ → tests/ → packages/lore/ → packages/ → repo root (5 levels up).
@@ -73,10 +74,11 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
+/** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true" }, actor) as Record<string, string>,
   });
   return {
     stdout: proc.stdout.toString(),
@@ -292,7 +294,7 @@ describe("lore anchor rm — STATE (AC-S3-5 regression)", () => {
     const planSlug = createPlan(tmpDir, "Anchor State Plan");
     const taskSlug = createTask(tmpDir, planSlug, "Stateful Task", ["src/a", "src/b"]);
 
-    const claimResult = runLore(["claim", taskSlug, "--by", "alice", "--branch", "wt-x"], tmpDir);
+    const claimResult = runLore(["claim", taskSlug, "--branch", "wt-x"], tmpDir, "alice");
     expect(claimResult.exitCode).toBe(0);
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — "tsc" self-report is now refused regardless of
@@ -313,7 +315,7 @@ describe("lore anchor rm — STATE (AC-S3-5 regression)", () => {
     const got = JSON.parse(getResult.stdout) as {
       data: { doc: { extra: { claim: { by: string; branch: string }; verification_evidence: unknown[]; file_anchors: string[] } } };
     };
-    expect(got.data.doc.extra.claim).toMatchObject({ by: "alice", branch: "wt-x" });
+    expect(got.data.doc.extra.claim).toMatchObject({ by: sessionActorFor("alice"), branch: "wt-x" });
     expect(got.data.doc.extra.verification_evidence).toHaveLength(1);
     expect(got.data.doc.extra.file_anchors).toEqual(["src/b"]);
   });
@@ -326,7 +328,7 @@ describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
     const planSlug = createPlan(tmpDir, "Machine Override Plan");
     const taskSlug = createTask(tmpDir, planSlug, "Machine Override Task");
 
-    const result = runLore(["claim", taskSlug, "--by", "alice", "--machine", "custom-host", "--json"], tmpDir);
+    const result = runLore(["claim", taskSlug, "--machine", "custom-host", "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: { machine: string } } } } };
     expect(parsed.data.doc.extra.claim.machine).toBe("custom-host");
@@ -336,7 +338,7 @@ describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
     const planSlug = createPlan(tmpDir, "Machine Auto Plan");
     const taskSlug = createTask(tmpDir, planSlug, "Machine Auto Task");
 
-    const result = runLore(["claim", taskSlug, "--by", "alice", "--json"], tmpDir);
+    const result = runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: { machine: string } } } } };
     expect(parsed.data.doc.extra.claim.machine).toBe(hostname());
@@ -346,7 +348,7 @@ describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
     const planSlug = createPlan(tmpDir, "Worktree Omitted Plan");
     const taskSlug = createTask(tmpDir, planSlug, "Worktree Omitted Task");
 
-    const result = runLore(["claim", taskSlug, "--by", "alice", "--json"], tmpDir);
+    const result = runLore(["claim", taskSlug, "--json"], tmpDir, "alice");
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: Record<string, unknown> } } } };
     expect("worktree" in parsed.data.doc.extra.claim).toBe(false);
@@ -357,8 +359,9 @@ describe("lore claim --machine/--worktree — HAPPY (SPEC-042 D2)", () => {
     const taskSlug = createTask(tmpDir, planSlug, "Worktree Explicit Task");
 
     const result = runLore(
-      ["claim", taskSlug, "--by", "alice", "--worktree", "/repo/.worktrees/t1", "--json"],
+      ["claim", taskSlug, "--worktree", "/repo/.worktrees/t1", "--json"],
       tmpDir,
+      "alice",
     );
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout) as { data: { doc: { extra: { claim: { worktree: string } } } } };
@@ -374,10 +377,10 @@ describe("lore claim — anchor-overlap gate block (SPEC-042 D5)", () => {
     const taskASlug = createTask(tmpDir, planSlug, "Task A", ["src/shared"]);
     const taskBSlug = createTask(tmpDir, planSlug, "Task B", ["src/shared"]);
 
-    const claimA = runLore(["claim", taskASlug, "--by", "agent:t1"], tmpDir);
+    const claimA = runLore(["claim", taskASlug], tmpDir, "agent:t1");
     expect(claimA.exitCode).toBe(0);
 
-    const claimB = runLore(["claim", taskBSlug, "--by", "agent:t2"], tmpDir);
+    const claimB = runLore(["claim", taskBSlug], tmpDir, "agent:t2");
 
     expect(claimB.exitCode).not.toBe(0);
     expect(claimB.stderr).toContain("ANCHOR_OVERLAP");
@@ -389,8 +392,8 @@ describe("lore claim — anchor-overlap gate block (SPEC-042 D5)", () => {
     const taskASlug = createTask(tmpDir, planSlug, "Steal Task A", ["src/shared"]);
     const taskBSlug = createTask(tmpDir, planSlug, "Steal Task B", ["src/shared"]);
 
-    runLore(["claim", taskASlug, "--by", "agent:t1"], tmpDir);
-    const stealAttempt = runLore(["claim", taskBSlug, "--by", "agent:t2", "--steal"], tmpDir);
+    runLore(["claim", taskASlug], tmpDir, "agent:t1");
+    const stealAttempt = runLore(["claim", taskBSlug, "--steal"], tmpDir, "agent:t2");
 
     expect(stealAttempt.exitCode).not.toBe(0);
     expect(stealAttempt.stderr).toContain("ANCHOR_OVERLAP");

@@ -139,14 +139,12 @@ function invalidate(slug: string, supersededBy?: string): void {
     ...(supersededBy !== undefined ? ["--superseded-by", supersededBy] : []),
     "--reason",
     "retracted by the dispatch-validity oracle",
-    "--by",
-    "agent:dispatch-validity-test",
   ]);
   if (r.exitCode !== 0) throw new Error(`invalidate ${slug} failed: ${r.stderr}${r.stdout}`);
 }
 
 function undoInvalidate(slug: string): void {
-  const r = runLore(["invalidate", slug, "--undo", "--by", "agent:dispatch-validity-test"]);
+  const r = runLore(["invalidate", slug, "--undo"]);
   if (r.exitCode !== 0) throw new Error(`invalidate --undo ${slug} failed: ${r.stderr}${r.stdout}`);
 }
 

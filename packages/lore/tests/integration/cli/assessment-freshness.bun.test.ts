@@ -220,7 +220,7 @@ describe("lore assess — AC-FRESH-4: non-blocking staleness advisory", () => {
     // audit row to land AFTER the first assessment, not a specific oracle
     // kind.
     const evidence = runLore(
-      ["evidence", task.slug, "--oracle", "manual", "--command", "true", "--result", "pass", "--by", "tester", "--output-tail", "ok", "--json"],
+      ["evidence", task.slug, "--oracle", "manual", "--command", "true", "--result", "pass", "--output-tail", "ok", "--json"],
       tmpDir,
     );
     expect(evidence.exitCode).toBe(0);

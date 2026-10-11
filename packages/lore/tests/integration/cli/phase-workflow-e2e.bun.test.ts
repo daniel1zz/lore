@@ -208,7 +208,7 @@ describe("SPEC-056 CLI phase surfaces — ERROR (non-existent target)", () => {
   });
 
   it("lore gate phase-claim --phase <nonexistent> → exit 3 (DOC_NOT_FOUND)", () => {
-    const result = runLore(["gate", "phase-claim", "--phase", "phase-does-not-exist", "--by", "tester"], tmpDir);
+    const result = runLore(["gate", "phase-claim", "--phase", "phase-does-not-exist"], tmpDir);
     expect(result.exitCode).toBe(3);
   });
 
@@ -234,7 +234,7 @@ describe("SPEC-056 CLI phase surfaces — dispatch against an existing wrong-typ
   it("HAPPY: lore gate phase-claim against a PLAN doc returns a real verdict, not 'unknown command'", () => {
     const planSlug = createPlan("Gate Verdict Plan");
 
-    const result = runLore(["gate", "phase-claim", "--phase", planSlug, "--by", "tester"], tmpDir);
+    const result = runLore(["gate", "phase-claim", "--phase", planSlug], tmpDir);
     // reason: a citty "unknown command"/usage error would exit differently and never
     // mention the doc-type validation message below — this proves the phase-claim
     // subcommand is genuinely registered and dispatched, not silently absorbed.
@@ -253,7 +253,7 @@ describe("SPEC-056 CLI phase surfaces — dispatch against an existing wrong-typ
     // raised guard so the call proceeds to resolveTask, which is what
     // actually produces "Expected a task document" here.
     const result = runLore(
-      ["evidence", planSlug, "--oracle", "manual", "--command", "x", "--result", "pass", "--by", "tester", "--output-tail", "ok"],
+      ["evidence", planSlug, "--oracle", "manual", "--command", "x", "--result", "pass", "--output-tail", "ok"],
       tmpDir,
     );
     expect(result.exitCode).toBe(4);
@@ -264,7 +264,7 @@ describe("SPEC-056 CLI phase surfaces — dispatch against an existing wrong-typ
   it("BOUNDARY/REGRESSION: lore claim against a PLAN doc stays 'Expected a task document' (never retries into phase dispatch)", () => {
     const planSlug = createPlan("Claim Regression Plan");
 
-    const result = runLore(["claim", planSlug, "--by", "tester"], tmpDir);
+    const result = runLore(["claim", planSlug], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("Expected a task document");
   });
@@ -272,7 +272,7 @@ describe("SPEC-056 CLI phase surfaces — dispatch against an existing wrong-typ
   it("BOUNDARY/REGRESSION: lore release against a PLAN doc stays 'Expected a task document' (never retries into phase dispatch)", () => {
     const planSlug = createPlan("Release Regression Plan");
 
-    const result = runLore(["release", planSlug, "--by", "tester"], tmpDir);
+    const result = runLore(["release", planSlug], tmpDir);
     expect(result.exitCode).toBe(4);
     expect(result.stderr).toContain("Expected a task document");
   });

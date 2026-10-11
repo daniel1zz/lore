@@ -126,6 +126,7 @@ import { VerifyRunnerService } from "../../../src/service/verify-runner-service.
 import type { VerifySpawnSpec } from "../../../src/service/verify-spawn.js";
 import { NoOpTelemetry, err, extractEvidence } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { sessionActorFor, withSessionIdentity } from "../../helpers/session-actor.js";
 
 // ─── Git identity (local, per-commit — never touches the machine's real git config) ──
 
@@ -145,10 +146,11 @@ interface RunResult {
 }
 
 /** Spawn `bun run <INDEX_TS> ...args` in `cwd` with an isolated HOME dir — same shape `verify.test.ts::runLore` uses. */
-function runLore(args: string[], cwd: string): RunResult {
+/** `actor` names the writer through the session tier (no write command takes `--by`); `null` = unnamed. */
+function runLore(args: string[], cwd: string, actor: string | null = null): RunResult {
   const result = spawnSync("bun", ["run", INDEX_TS, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" },
+    env: withSessionIdentity({ ...process.env, HOME: cwd, EDITOR: "true", CLAUDECODE: "1" }, actor) as Record<string, string>,
     encoding: "utf8",
   });
   return {
@@ -318,8 +320,9 @@ describe("AC-FR-12 — SURFACE + PERSISTENCE: lore verify --falsify green-contro
       // `spawnSync`'s own `.status`, never through a shell pipeline that would report a
       // downstream command's exit status instead of this one's.
       const result = runLore(
-        ["verify", planSlug, "--task", taskSlug, "--falsify", acId, "--by", "falsify-oracle-test"],
+        ["verify", planSlug, "--task", taskSlug, "--falsify", acId],
         tmpDir,
+        "falsify-oracle-test",
       );
 
       // RED (a) — an EXACT equality, not `!== 0` / truthy: a CLI branch hardcoding
@@ -344,7 +347,7 @@ describe("AC-FR-12 — SURFACE + PERSISTENCE: lore verify --falsify green-contro
       expect(row?.result).toBe("inconclusive");
       expect(row?.attestation).toBeUndefined();
       expect(row?.capture_source).toBe("runner");
-      expect(row?.recorded_by).toBe("falsify-oracle-test");
+      expect(row?.recorded_by).toBe(sessionActorFor("falsify-oracle-test"));
     },
   );
 });

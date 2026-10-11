@@ -184,7 +184,7 @@ function seedFixture(cwd: string): void {
   // non-empty self-reported tail succeed. This fixture only needs a
   // successful pass row referencing AC-SC-1, not a specific oracle kind.
   mustRun(
-    ["evidence", "task-migration-source", "--oracle", "manual", "--command", "bun test AC-SC-1", "--result", "pass", "--ac", "AC-SC-1", "--by", "agent:fixture", "--output-tail", "ok"],
+    ["evidence", "task-migration-source", "--oracle", "manual", "--command", "bun test AC-SC-1", "--result", "pass", "--ac", "AC-SC-1", "--output-tail", "ok"],
     cwd,
   );
   mustRun(["migrate", "tasks-to-phases"], cwd);
@@ -222,7 +222,7 @@ function createTask(
     // reason: SUPERSEDED oracle (task-raise-the-evidence-tail-guard-s-
     // predicate-to-its-own) — see seedFixture's identical fix above.
     mustRun(
-      ["evidence", slug, "--oracle", "manual", "--command", `bun test ${opts.evidenceAc}`, "--result", "pass", "--ac", opts.evidenceAc, "--by", "agent:fixture", "--output-tail", "ok"],
+      ["evidence", slug, "--oracle", "manual", "--command", `bun test ${opts.evidenceAc}`, "--result", "pass", "--ac", opts.evidenceAc, "--output-tail", "ok"],
       cwd,
     );
   }
@@ -421,7 +421,7 @@ describe("lore scope list — BOUNDARY", () => {
 describe("lore scope add — STATE", () => {
   it("a scope edit leaves extra.claim and extra.verification_evidence byte-identical", () => {
     const slug = createTask(tmpDir, "Stateful Task", { evidenceAc: "AC-SC-2" });
-    mustRun(["claim", slug, "--by", "alice", "--worktree", "wt-x"], tmpDir);
+    mustRun(["claim", slug, "--worktree", "wt-x"], tmpDir);
     const before = getDoc(slug, tmpDir).extra;
 
     mustRun(["scope", "add", slug, "AC-SC-1"], tmpDir);

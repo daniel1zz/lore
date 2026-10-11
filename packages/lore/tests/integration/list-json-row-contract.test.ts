@@ -485,7 +485,7 @@ function buildFixtureA(): FixtureACaptures {
     // reason: `--output-tail` is REQUIRED for a self-reported (non-runner) result —
     // with no observed exit code the tail is the only evidence the run happened. This
     // is fixture data, not this suite's own evidence.
-    ["evidence", A_TASK, "--oracle", "test", "--command", "fixture probe", "--result", "expected-fail", "--output-tail", "1 failed", "--by", ACTOR],
+    ["evidence", A_TASK, "--oracle", "test", "--command", "fixture probe", "--result", "expected-fail", "--output-tail", "1 failed"],
     dir,
   );
   mustSucceed(

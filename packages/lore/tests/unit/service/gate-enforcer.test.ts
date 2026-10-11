@@ -305,7 +305,7 @@ describe("GateEnforcer", () => {
       expect(message).toContain("task-sibling-in-flight");
       expect(message).toContain("agent:sibling-holder");
       expect(message).toContain(
-        "lore release task-sibling-in-flight --by agent:sibling-holder --force",
+        "lore release task-sibling-in-flight --force",
       );
       expect(message.endsWith("\n")).toBe(false);
     });

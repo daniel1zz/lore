@@ -1462,7 +1462,7 @@ function registerToolImpl<T>(
         const resolved: Record<string, unknown> = { ...rest };
         // reason: a schema that still declares `by` is a read-side FILTER (lore_bootstrap, pinned in
         // read-side-by-filters.ts); it keeps the caller's value and defaults to the call's own name.
-        resolved["by"] = typeof rest["by"] === "string" ? rest["by"] : context.identity.claimed;
+        resolved["by"] = "by" in shape && typeof rest["by"] === "string" ? rest["by"] : context.identity.claimed;
         if ("recorded_by" in shape) resolved["recorded_by"] = rest["recorded_by"] ?? context.identity.claimed;
         return handler(resolved as ResolvedArgs<T>);
       });

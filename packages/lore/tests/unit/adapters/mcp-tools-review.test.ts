@@ -52,6 +52,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AiDefaultSource, CreateDocInput, DocId, LoreError, ReviewJudgment } from "@lore/core";
+import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools-assess.test.ts) ──────────────────
 
@@ -189,11 +190,11 @@ describe("lore_review — HAPPY (AI judge path)", () => {
 
   it("a doc that passes all deterministic checks reaches the AI judge and records its decision", async () => {
     const docId = await createCleanPrd("Clean PRD");
-    const result = await call()({ id_or_slug: docId, by: "alice" });
+    const result = await asSessionActor("alice", () => call()({ id_or_slug: docId }));
     expect(result.isError).toBeFalsy();
 
     const data = parseResult(result) as { requested_by: string; judgment: ReviewJudgment };
-    expect(data.requested_by).toBe("alice");
+    expect(data.requested_by).toBe(sessionActorFor("alice"));
     expect(data.judgment.decision).toBe("approve");
     expect(data.judgment.confidence).toBe(0.88);
     expect(data.judgment.judge.provider).toBe("in-memory");

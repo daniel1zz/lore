@@ -132,7 +132,6 @@ beforeAll(() => {
       "invalidate", deadSlug,
       "--superseded-by", liveSlug,
       "--reason", "retracted by the validity-visibility oracle",
-      "--by", "agent:list-validity-test",
     ]);
     if (inv.exitCode !== 0) throw new Error(`invalidate ${deadSlug} failed: ${inv.stderr}`);
     pairs[type] = { liveSlug, liveId: idOf(liveSlug), deadSlug, deadId: idOf(deadSlug) };

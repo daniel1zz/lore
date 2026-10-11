@@ -174,9 +174,9 @@ beforeAll(() => {
 
   const plan = parseSlug(mustRun(["create", "plan", "--title", "Seam Plan", "--no-ai", "--parent", prdWithExtra, "--content", "Plan body."], tmpDir).stdout);
   retractedSlug = parseSlug(
-    mustRun(["handoff", "--by", "agent:render-seam-loss-notice", "--decision", "seam probe decision@0.9", "--next", "seam probe next", "--plan", plan], tmpDir).stdout,
+    mustRun(["handoff", "--decision", "seam probe decision@0.9", "--next", "seam probe next", "--plan", plan], tmpDir).stdout,
   );
-  mustRun(["invalidate", retractedSlug, "--reason", "seam probe retraction", "--by", "agent:render-seam-loss-notice"], tmpDir);
+  mustRun(["invalidate", retractedSlug, "--reason", "seam probe retraction"], tmpDir);
 
   // ── Fixture verification — read through `--json`, the surface this feature must not touch.
   const withExtra = JSON.parse(mustRun(["get", prdWithExtra, "--json"], tmpDir).stdout).data.doc;

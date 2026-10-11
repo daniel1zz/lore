@@ -59,6 +59,7 @@ import { spawnSync } from "child_process";
 import { mkdirSync, rmSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { sessionIdFor } from "../../helpers/session-actor.js";
 
 // ─── Path setup ───────────────────────────────────────────────────────────────
 
@@ -345,8 +346,8 @@ describe("lore verify — NEGATIVE", () => {
     const taskA = createTask(planSlug, "Task A");
     const taskB = createTask(planSlug, "Task B");
 
-    runLore(["claim", taskA, "--by", "alice"], tmpDir);
-    runLore(["claim", taskB, "--by", "bob"], tmpDir);
+    runLore(["claim", taskA], tmpDir, { CLAUDE_CODE_SESSION_ID: sessionIdFor("alice") });
+    runLore(["claim", taskB], tmpDir, { CLAUDE_CODE_SESSION_ID: sessionIdFor("bob") });
 
     const result = runLore(["verify", planSlug], tmpDir);
 

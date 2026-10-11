@@ -73,6 +73,7 @@ import {
 } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput } from "@lore/core";
+import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools-feed.test.ts) ────────────────────
 
@@ -173,7 +174,8 @@ describe("LoreBootstrapSchema / LoreHandoffSchema — schema-level", () => {
 
   // reason: BR-1034 (AC-RID-7) — the MCP schema relaxes ONLY `by` (the handler fills it from the call's resolved
   // name); the CLI contract `handoffExtraSchema` still requires it.
-  it("LoreHandoffSchema accepts missing `by`; handoffExtraSchema (CLI contract) still rejects it", () => {
+  it("LoreHandoffSchema declares no `by` and accepts a payload without one; handoffExtraSchema (CLI contract) still rejects it", () => {
+    expect(Object.keys(LoreHandoffSchema.shape)).not.toContain("by");
     const { by: _by, ...withoutBy } = VALID_HANDOFF;
     expect(LoreHandoffSchema.safeParse(withoutBy).success).toBe(true);
     expect(handoffExtraSchema.safeParse(withoutBy).success).toBe(false);
@@ -308,10 +310,13 @@ describe("lore_handoff", () => {
   describe("regression", () => {
     it("MCP-written doc's extra.handoff/content/type/status deep-equal a direct sessionService.writeHandoff call (the CLI's underlying seam) for equivalent input", async () => {
       const plan = await createPlan("Plan A");
-      const input: HandoffExtra = { ...VALID_HANDOFF, plan_ref: plan.slug };
+      // reason: AC-ROI-1 — the MCP tool takes no `by`; the stored author is the call's own (session-tier) name,
+      // so the equivalent direct write names that same author.
+      const input: HandoffExtra = { ...VALID_HANDOFF, by: sessionActorFor("claude"), plan_ref: plan.slug };
+      const { by: _author, ...mcpArgs } = input;
 
       const call = getToolHandler(server, "lore_handoff");
-      const mcpResult = await call({ ...input });
+      const mcpResult = await asSessionActor("claude", () => call({ ...mcpArgs }));
       const mcpData = parseResult(mcpResult) as { doc: DocRecord };
 
       // reason: this IS what commands/handoff.ts's `run()` calls after validation —

@@ -1705,7 +1705,7 @@ describe("ERROR — a degraded input never crashes and never fabricates an oblig
 
 describe("REGRESSION — the subcommand positional leaves the write path untouched", () => {
   it("the default write path's flag validation is unchanged (missing --next still exits 2)", () => {
-    const result = runHandoffWrite(["--by", "regression-tester", "--file", "a.ts"]);
+    const result = runHandoffWrite(["--file", "a.ts"]);
 
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("next_steps");

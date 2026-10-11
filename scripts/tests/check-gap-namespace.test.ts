@@ -461,7 +461,7 @@ function initFixtureCorpus(): string {
 
 function createKnowledgeDoc(cwd: string, title: string, content: string): { id: string; slug: string } {
   const result = runLore(
-    ["create", "knowledge", "--title", title, "--content", content, "--sub-type", "reference", "--by", ACTOR, "--json"],
+    ["create", "knowledge", "--title", title, "--content", content, "--sub-type", "reference", "--json"],
     cwd,
   );
   if (result.exitCode !== 0) {

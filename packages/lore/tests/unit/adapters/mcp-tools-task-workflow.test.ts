@@ -54,6 +54,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
+import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools.test.ts) ─────────────────────────
 
@@ -168,10 +169,10 @@ describe("lore_claim", () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
 
-      const result = await call()({ id_or_slug: taskId, by: "alice" });
+      const result = await asSessionActor("alice", () => call()({ id_or_slug: taskId }));
       expect(result.isError).toBeFalsy();
       const data = parseResult(result) as { doc: DocRecord };
-      expect((data.doc.extra["claim"] as { by?: string }).by).toBe("alice");
+      expect((data.doc.extra["claim"] as { by?: string }).by).toBe(sessionActorFor("alice"));
     });
   });
 
@@ -179,30 +180,30 @@ describe("lore_claim", () => {
     it("a fresh claim held by a different actor → isError=true, CLAIM_CONFLICT", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
-      await call()({ id_or_slug: taskId, by: "alice" });
+      await asSessionActor("alice", () => call()({ id_or_slug: taskId }));
 
-      const result = await call()({ id_or_slug: taskId, by: "bob" });
+      const result = await asSessionActor("bob", () => call()({ id_or_slug: taskId }));
       expect(result.isError).toBe(true);
       const error = parseResult(result) as { code: string; holder?: string };
       expect(error.code).toBe("CLAIM_CONFLICT");
-      expect(error.holder).toBe("alice");
+      expect(error.holder).toBe(sessionActorFor("alice"));
     });
 
     it("steal:true overrides a fresh claim held by someone else", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
-      await call()({ id_or_slug: taskId, by: "alice" });
+      await asSessionActor("alice", () => call()({ id_or_slug: taskId }));
 
-      const result = await call()({ id_or_slug: taskId, by: "bob", steal: true });
+      const result = await asSessionActor("bob", () => call()({ id_or_slug: taskId, steal: true }));
       expect(result.isError).toBeFalsy();
       const data = parseResult(result) as { doc: DocRecord };
-      expect((data.doc.extra["claim"] as { by?: string }).by).toBe("bob");
+      expect((data.doc.extra["claim"] as { by?: string }).by).toBe(sessionActorFor("bob"));
     });
   });
 
   describe("error handling", () => {
     it("non-existent task id → isError=true, DOC_NOT_FOUND", async () => {
-      const result = await call()({ id_or_slug: "does-not-exist", by: "alice" });
+      const result = await asSessionActor("alice", () => call()({ id_or_slug: "does-not-exist" }));
       expect(result.isError).toBe(true);
       const error = parseResult(result) as { code: string };
       expect(error.code).toBe("DOC_NOT_FOUND");
@@ -220,9 +221,9 @@ describe("lore_release", () => {
     it("clears the lease and returns { doc } with extra.claim absent", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
-      await callClaim()({ id_or_slug: taskId, by: "alice" });
+      await asSessionActor("alice", () => callClaim()({ id_or_slug: taskId }));
 
-      const result = await callRelease()({ id_or_slug: taskId, by: "alice" });
+      const result = await asSessionActor("alice", () => callRelease()({ id_or_slug: taskId }));
       expect(result.isError).toBeFalsy();
       const data = parseResult(result) as { doc: DocRecord };
       expect(data.doc.extra["claim"]).toBeUndefined();
@@ -233,9 +234,9 @@ describe("lore_release", () => {
     it("release by a non-holder without force → isError=true, CLAIM_CONFLICT", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
-      await callClaim()({ id_or_slug: taskId, by: "alice" });
+      await asSessionActor("alice", () => callClaim()({ id_or_slug: taskId }));
 
-      const result = await callRelease()({ id_or_slug: taskId, by: "bob" });
+      const result = await asSessionActor("bob", () => callRelease()({ id_or_slug: taskId }));
       expect(result.isError).toBe(true);
       const error = parseResult(result) as { code: string };
       expect(error.code).toBe("CLAIM_CONFLICT");
@@ -244,9 +245,9 @@ describe("lore_release", () => {
     it("release by a non-holder WITH force:true succeeds", async () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
-      await callClaim()({ id_or_slug: taskId, by: "alice" });
+      await asSessionActor("alice", () => callClaim()({ id_or_slug: taskId }));
 
-      const result = await callRelease()({ id_or_slug: taskId, by: "bob", force: true });
+      const result = await asSessionActor("bob", () => callRelease()({ id_or_slug: taskId, force: true }));
       expect(result.isError).toBeFalsy();
     });
   });
@@ -257,14 +258,14 @@ describe("lore_release", () => {
       const planId = await createPlan();
       const taskId = await createTask(planId);
 
-      await callClaim()({ id_or_slug: taskId, by: "alice" });
-      const released = await callRelease()({ id_or_slug: taskId, by: "alice" });
+      await asSessionActor("alice", () => callClaim()({ id_or_slug: taskId }));
+      const released = await asSessionActor("alice", () => callRelease()({ id_or_slug: taskId }));
       expect(released.isError).toBeFalsy();
 
-      const reclaimed = await callClaim()({ id_or_slug: taskId, by: "bob" });
+      const reclaimed = await asSessionActor("bob", () => callClaim()({ id_or_slug: taskId }));
       expect(reclaimed.isError).toBeFalsy();
       const data = parseResult(reclaimed) as { doc: DocRecord };
-      expect((data.doc.extra["claim"] as { by?: string }).by).toBe("bob");
+      expect((data.doc.extra["claim"] as { by?: string }).by).toBe(sessionActorFor("bob"));
     });
   });
 });

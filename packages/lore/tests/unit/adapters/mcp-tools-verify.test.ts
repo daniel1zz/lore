@@ -58,6 +58,7 @@ import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
 import { registerTools, LoreVerifySchema, LoreEvidenceAddSchema } from "../../../src/adapters/mcp/tools.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { CreateDocInput, LoreError } from "@lore/core";
+import { asSessionActor, sessionActorFor } from "../../helpers/session-actor.js";
 
 // ─── Test Infrastructure (mirrors mcp-tools-task-workflow.test.ts) ────────────
 
@@ -199,9 +200,8 @@ describe("LoreVerifySchema — roundtrip", () => {
     expect(parsed.success).toBe(true);
   });
 
-  it("NEGATIVE: empty by → fails (min(1))", () => {
-    const parsed = LoreVerifySchema.safeParse({ plan: "plan-1", by: "" });
-    expect(parsed.success).toBe(false);
+  it("NEGATIVE: the schema declares no `by` property (AC-ROI-1: the call's own identity writes)", () => {
+    expect(Object.keys(LoreVerifySchema.shape)).not.toContain("by");
   });
 
   it("HAPPY: allow_new_commands: true parses (SPEC-039 §M2)", () => {
@@ -231,14 +231,14 @@ describe("lore_verify", () => {
       registerTools(server, app);
       const call = getToolHandler(server, "lore_verify");
 
-      const result = await call({ plan: "plan-1", ac: ["AC-1", "AC-2"], task: "task-1", by: "alice" });
+      const result = await asSessionActor("alice", () => call({ plan: "plan-1", ac: ["AC-1", "AC-2"], task: "task-1" }));
 
       expect(result.isError).toBeFalsy();
       expect(calls).toHaveLength(1);
       expect(calls[0]?.planIdOrSlug).toBe("plan-1");
       expect(calls[0]?.opts.acIds).toEqual(["AC-1", "AC-2"]);
       expect(calls[0]?.opts.explicitTaskIdOrSlug).toBe("task-1");
-      expect(calls[0]?.opts.by).toBe("alice");
+      expect(calls[0]?.opts.by).toBe(sessionActorFor("alice"));
       expect(typeof calls[0]?.opts.nowIso).toBe("string");
       expect(Number.isNaN(Date.parse(calls[0]?.opts.nowIso ?? ""))).toBe(false);
 
