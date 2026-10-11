@@ -854,6 +854,25 @@ const VALID_TRANSITIONS: Readonly<Record<DocStatus, ReadonlySet<DocStatus>>> = {
 const DRAFT_TO_ARCHIVED_ALLOWED_TYPES: ReadonlySet<DocType> = new Set<DocType>(["task", "knowledge"]);
 
 /**
+ * Doc types that may take the reopen-only `approved → draft` edge (spec D5, BR-1050).
+ * Deliberately NOT part of {@link VALID_TRANSITIONS}: `lore set --status draft` on an
+ * approved doc stays refused; only `ReviewService.reopen` consults this.
+ */
+export const REOPEN_ALLOWED_TYPES = ["spec"] as const;
+
+/**
+ * True only for the reopen edge: a spec going `approved → draft`.
+ * Never widens {@link isValidTransition} / {@link getAllowedTransitions}.
+ */
+export function isReopenTransition(type: DocType, from: DocStatus, to: DocStatus): boolean {
+  return (
+    (REOPEN_ALLOWED_TYPES as readonly DocType[]).includes(type) &&
+    from === "approved" &&
+    to === "draft"
+  );
+}
+
+/**
  * Returns true if transitioning from -> to is a valid lifecycle step.
  *
  * @param docType - OPTIONAL. When supplied and `from === "draft" && to ===

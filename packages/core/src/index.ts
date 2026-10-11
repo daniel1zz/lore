@@ -30,6 +30,7 @@ export * from "./config.js";
 export * from "./telemetry.js";
 export * from "./graph-utils.js";
 export * from "./doc-type-rules.js";
+export * from "./doc-standing.js";
 export * from "./tree-blueprint.js";
 export * from "./ai.js";
 export * from "./text-normalise.js";
