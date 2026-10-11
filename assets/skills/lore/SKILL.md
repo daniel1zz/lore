@@ -71,7 +71,7 @@ lore release <task> [--reason "why"] [--force]   # non-holder needs --force
 lore ready <plan> [--json]     # computed readiness over blocks links — never stored
 ```
 
-Identity: writes are attested by the agent integration's registered run; `LORE_ACTOR is deprecated` as an identity source (it survives only as an unattested claimed label, with a one-line warning). Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
+Identity: a write is attested by the agent integration's registered run alone — no write command takes `--by`, and no MCP write tool takes `by`. Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
 
 ## Review workflow
 

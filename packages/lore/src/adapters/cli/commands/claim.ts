@@ -1,5 +1,5 @@
 /**
- * lore claim <task> [--by <name>] [--branch <branch>] [--machine <name>]
+ * lore claim <task> [--branch <branch>] [--machine <name>]
  *   [--worktree <path>] [--corpus-scope <baseline-branch>] [--steal] — acquire an advisory execution lease on a task OR
  *   phase document.
  *
@@ -13,8 +13,7 @@
  * `PhaseWorkflowService.claim` (which itself runs the `phase-claim` gate) — same
  * dispatch shape `commands/evidence.ts`/`commands/release.ts` use.
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
- * utils.ts::resolveActor.
+ * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`.
  *
  * Session-field capture (SPEC-042 D2):
  *   - `--machine` overrides auto-capture; when omitted, `machine` is
@@ -73,10 +72,6 @@ export default defineCommand({
       description: "Task document ID or slug",
       required: true,
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-    },
     branch: {
       type: "string",
       description: "Git branch where the work is happening (optional)",
@@ -114,7 +109,7 @@ export default defineCommand({
         process.exit(exitCode(verifiedIdentity.error));
       }
       const verifiedRun = verifiedIdentity?.value?.harnessRun ?? null;
-      const resolvedActor = resolveActorWithIdentitySource(typeof args.by === "string" ? args.by : undefined);
+      const resolvedActor = resolveActorWithIdentitySource();
       const by = resolvedActor.actor;
       const machine = typeof args.machine === "string" ? args.machine : hostname();
       const claimOpts = {

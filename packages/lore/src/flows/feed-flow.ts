@@ -788,7 +788,7 @@ async function buildRuleDiffBlock(
  * (task-verifying-a-handoff-you-just-authored-arms-the-coverage D1): on the
  * single-record, found path, this session's own resolved actor
  * (`resolveActor(opts.by)` — the SAME full precedence chain
- * `--by`/`$LORE_ACTOR`/session-tier/worktree/OS-username every other corpus
+ * session-tier/worktree/OS-username every other corpus
  * write surface uses, computed here PURELY for this side-decision, never
  * forwarded to `SessionService.resume` — `opts` itself is passed through
  * untouched, so the resume/candidate-selection behavior is byte-identical to

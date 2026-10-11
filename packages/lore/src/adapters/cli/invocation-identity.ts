@@ -12,7 +12,7 @@
  *   - Set at most once per process, only by the CLI entry. The MCP server and the HTTP adapter never set it,
  *     so their stores are not wrapped by this path (the MCP surface carries its own per-call identity).
  *   - {@link resolveCliInvocation} injects `detectWorktreeDerivedActor` so the working-copy name tier works
- *     (core cannot import it) and prints the `$LORE_ACTOR` deprecation line at most once per process.
+ *     (core cannot import it).
  *
  * Side-effect class: stateful (module slot) + IO via the injected resolver (env, cwd probe, stderr).
  */
@@ -50,5 +50,5 @@ export function getInvocationIdentity(): InvocationIdentity | undefined {
  * @throws {RunIdentityArgumentError} on an empty or valueless `--by` / `--harness-run`.
  */
 export function resolveCliInvocation(argv: readonly string[]): InvocationResolution {
-  return resolveInvocationIdentity(argv, process.env, undefined, detectWorktreeDerivedActor);
+  return resolveInvocationIdentity(argv, process.env, detectWorktreeDerivedActor);
 }

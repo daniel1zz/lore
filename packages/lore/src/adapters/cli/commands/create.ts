@@ -232,13 +232,6 @@ export default defineCommand({
       description:
         "ID or slug of an existing knowledge/adr doc this new doc supersedes — creates then invalidates the old doc in one command (SPEC-043 D11). The target's type is validated BEFORE any write: a non-knowledge/adr target (e.g. a task) is refused with exit 4 and creates NOTHING (task-a-task-cannot-be-retracted-supersedes-emits-a-repair). Half-failure past that point (create ok, invalidate fails) reports a nonzero exit naming the exact repair command; the new doc is still created.",
     },
-    by: {
-      type: "string",
-      description:
-        "Actor identity to attribute this create to (SPEC-079 G2) — also used " +
-        "for the --supersedes invalidate step, when present. Defaults to " +
-        "$LORE_ACTOR env var, then session tier, then OS username.",
-    },
     ai: {
       type: "boolean",
       // reason: SPEC-024 tri-state AI flag — the ai arg in citty/mri is kept for --help
@@ -564,7 +557,7 @@ export default defineCommand({
       // SPEC-079 G2 — resolved once, reused as the create's own audit actor
       // (both branches below) and, when --supersedes is set, the invalidate
       // step's actor too.
-      const resolvedActor = resolveActor(args.by);
+      const resolvedActor = resolveActor();
 
       if (args.supersedes !== undefined) {
         if (app.validityService === undefined) {

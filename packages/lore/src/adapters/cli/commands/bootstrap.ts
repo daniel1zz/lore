@@ -12,8 +12,8 @@
  * source, and the newest handoffs recorded per plan (plus a corpus-wide resume
  * hint). Thin pipe over `SessionService.bootstrap` — zero store mutations.
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
- * utils.ts::resolveActor. Only filters `my_claims`; every other field is
+ * Actor resolution: `--by` is a read-only FILTER naming whose claims to report; absent, the
+ * invoking identity (utils.ts::resolveActor) is used. Only filters `my_claims`; every other field is
  * corpus-wide regardless of `by`.
  *
  * **`--injection` (SPEC-080(bootstrap-injection) §Module Boundary CLI bullet, D3, D5)** — renders the
@@ -198,7 +198,7 @@ export default defineCommand({
   args: {
     by: {
       type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
+      description: "Actor whose claims to report (read-only filter; defaults to the invoking identity)",
     },
     json: {
       type: "boolean",

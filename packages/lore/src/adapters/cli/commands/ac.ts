@@ -224,10 +224,6 @@ export default defineCommand({
     add: defineCommand({
       meta: { name: "add", description: "Append a new acceptance criterion to a spec" },
       args: {
-        by: {
-          type: "string",
-          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
-        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -395,10 +391,6 @@ export default defineCommand({
           "Exempt one uncited criterion from the citation gate for a bounded time (needs --reason and --expires; active exemptions are capped at 10% of live criteria)",
       },
       args: {
-        by: {
-          type: "string",
-          description: "Actor identity recorded as the grantor; defaults to $LORE_ACTOR, then session/worktree/OS username",
-        },
         spec: { type: "positional", description: "Spec document ID or slug", required: true },
         id: { type: "positional", description: "Criterion id to exempt, e.g. AC-FEATURE-1", required: true },
         reason: { type: "string", description: "Why this criterion cannot cite a rule yet (required, non-blank)" },
@@ -416,7 +408,7 @@ export default defineCommand({
             acId: args.id as string,
             reason: args.reason as string,
             expiresAt: args.expires as string,
-            by: resolveActor(typeof args.by === "string" ? args.by : undefined),
+            by: resolveActor(),
           });
           if (!result.ok) {
             process.stderr.write(formatError(result.error) + "\n");
@@ -443,10 +435,6 @@ export default defineCommand({
           "Cite (or --remove) baseline rule ids on one criterion — report-only, never demotes an approved spec",
       },
       args: {
-        by: {
-          type: "string",
-          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
-        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -482,7 +470,7 @@ export default defineCommand({
             args.id as string,
             ruleIds,
             { remove: args.remove === true },
-            { by: resolveActor(typeof args.by === "string" ? args.by : undefined) },
+            { by: resolveActor() },
           );
 
           if (!result.ok) {
@@ -522,10 +510,6 @@ export default defineCommand({
         description: "Remove a declared acceptance criterion (fails if evidence still references it)",
       },
       args: {
-        by: {
-          type: "string",
-          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
-        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -550,7 +534,7 @@ export default defineCommand({
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
             force: args.force === true,
-            by: resolveActor(typeof args.by === "string" ? args.by : undefined),
+            by: resolveActor(),
           });
 
           if (!result.ok) {
@@ -582,10 +566,6 @@ export default defineCommand({
         description: "Edit one declared acceptance criterion in place (id/mode are NOT editable)",
       },
       args: {
-        by: {
-          type: "string",
-          description: "Actor identity recorded on the audit/version row; defaults to $LORE_ACTOR, then session/worktree/OS username",
-        },
         spec: {
           type: "positional",
           description: "Spec document ID or slug",
@@ -862,7 +842,7 @@ function buildFalsifierCandidate(args: Record<string, unknown>): unknown {
 function buildDeclarePathOpts(args: Record<string, unknown>, dbPath: string): DeclarePathOpts {
   const reason = args["allow-missing-path"];
   return {
-    by: resolveActor(typeof args["by"] === "string" ? args["by"] : undefined),
+    by: resolveActor(),
     pathContext: {
       fileExists: existsSync,
       cwd: process.cwd(),

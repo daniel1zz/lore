@@ -11,7 +11,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor, resolveActorAlias } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 import { runCalibrationHook } from "../../../flows/calibration-hook.js";
 import type { DocId } from "@lore/core";
 
@@ -25,16 +25,6 @@ export default defineCommand({
       type: "positional",
       description: "Document ID",
       required: true,
-    },
-    by: {
-      type: "string",
-      description:
-        "Reviewer identity performing the approval — canonical flag name (SPEC-051 D2). " +
-        "--reviewer is an accepted alias. Defaults to $LORE_ACTOR env var, then OS username.",
-    },
-    reviewer: {
-      type: "string",
-      description: "Alias for --by. Defaults to $LORE_ACTOR env var, then OS username.",
     },
     "calibration-note": {
       type: "string",
@@ -64,15 +54,7 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
-      const aliasResolution = resolveActorAlias(
-        typeof args.by === "string" ? args.by : undefined,
-        typeof args.reviewer === "string" ? args.reviewer : undefined,
-      );
-      if (!aliasResolution.ok) {
-        process.stderr.write(`Error: ${aliasResolution.error}\n`);
-        process.exit(2);
-      }
-      const reviewer = resolveActor(aliasResolution.value);
+      const reviewer = resolveActor();
       const result = await app.reviewService.approve(args.id as DocId, {
         reviewer,
         ...(typeof args["override-judgment"] === "string"

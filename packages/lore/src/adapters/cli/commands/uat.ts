@@ -1,7 +1,7 @@
 /**
  * lore uat — SPEC-054 structured UAT verdict surface.
  *
- * `lore uat record <plan> --json-file <path> [--by] [--json]` — the SOLE write path for a
+ * `lore uat record <plan> --json-file <path> [--json]` — the SOLE write path for a
  * `knowledge`/`uat` doc (mirrors `lore handoff --json-file`): the file IS the
  * `uatVerdictSchema`-valid `extra.uat` payload. Thin pipe over `UatService.record`
  * (validate → guarded create → informs-link to the plan). `lore-uat`'s PERSIST step calls
@@ -34,10 +34,6 @@ const recordCommand = defineCommand({
       description: "Path to a uatVerdictSchema-valid JSON file — the file IS the extra.uat payload",
       required: true,
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-    },
     json: { type: "boolean", description: "Output result as JSON" },
   },
   async run({ args }) {
@@ -56,7 +52,7 @@ const recordCommand = defineCommand({
         process.exitCode = 2;
         return;
       }
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const by = resolveActor();
       const result = await app.uatService.record(String(args.plan), payload, { by });
       if (!result.ok) {
         if (args.json) {

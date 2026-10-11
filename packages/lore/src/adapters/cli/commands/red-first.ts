@@ -20,8 +20,7 @@
  * `lore set --red-first`, exit 2; no bespoke check is needed in
  * `commands/set.ts`).
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
- * utils.ts::resolveActor.
+ * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`.
  *
  * Exit codes per SPEC-003 §5:
  *   0 = success
@@ -47,10 +46,6 @@ export default defineCommand({
       description: "Task document ID or slug",
       required: true,
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-    },
     json: {
       type: "boolean",
       description: "Output result as JSON",
@@ -59,7 +54,7 @@ export default defineCommand({
   async run({ args }) {
     const { app } = loadLoreApp();
     try {
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const by = resolveActor();
       const result = await app.taskWorkflowService.declareRedFirst(args.task as string, {
         by,
         source: app.callerSurface,

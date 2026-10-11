@@ -35,8 +35,8 @@
  *     `session_id` joined the key in
  *     task-two-concurrent-orchestrators-both-resolve-to-agent-main: `by` is a
  *     PROXY for the session instance, and two concurrently-live sessions in one
- *     checkout legitimately share it (this project's own discipline mandates
- *     `LORE_ACTOR=agent:main-orchestrator`), so the pre-fix triple reported ONE
+ *     checkout legitimately share it (this project's own discipline gives every
+ *     main-checkout run the name `agent:main-orchestrator`), so the pre-fix triple reported ONE
  *     session where two existed — and the `noAnchorOverlap` mutex, reading the
  *     same proxy, permitted an overlap it exists to refuse
  *   - deriveLastActivityAt(plan, tasks) — max `updated_at` across a plan and its

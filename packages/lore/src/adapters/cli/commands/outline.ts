@@ -154,7 +154,6 @@ export default defineCommand({
       args: {
         "plan": { type: "positional", description: "(retired — ignored)" },
         "reason": { type: "string", description: "(retired — ignored)" },
-        "by": { type: "string", description: "(retired — ignored)" },
         json: {
           type: "boolean",
           description: "Output result as JSON",

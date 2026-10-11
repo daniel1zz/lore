@@ -3,11 +3,11 @@
  * audited exemptions (SPEC-069 §Design Decisions D1; SPEC-106 §D4).
  *
  * Subcommands:
- *   exempt-attestation <plan> --reason <text> --kind <k> [--by <name>]
+ *   exempt-attestation <plan> --reason <text> --kind <k>
  *       Record an audited, typed exemption from the plan-close ATTESTATION
  *       FLOOR (`extra.attestation_exempt` + `_reason` + `_kind`).
  *       `--kind` ∈ red-tdd | no-oracle | pipeline-unreachable | other.
- *   exempt-assessment-freshness <plan> --reason <text> [--by <name>]
+ *   exempt-assessment-freshness <plan> --reason <text>
  *       Record an audited exemption from the plan-close ASSESSMENT-FRESHNESS
  *       predicate (`extra.assessment_freshness_exempt` + `_reason`).
  *
@@ -16,8 +16,8 @@
  * the service; see its module header), exactly the split `commands/outline.ts`
  * uses over `PrdOutlineService`.
  *
- * Actor resolution: `--by` > `$LORE_ACTOR` > … > OS username, via the SHARED
- * `utils.ts::resolveActor`. This command deliberately reads no env var of its
+ * Actor identity: the invoking run, via the SHARED
+ * `utils.ts::resolveActor` (no `--by` flag). This command deliberately reads no env var of its
  * own — a second precedence chain would silently diverge from every other
  * writer's (AC-069-10).
  *
@@ -97,10 +97,6 @@ const sharedArgs = {
     type: "string" as const,
     description: "Required justification for the exemption (recorded in the audit trail)",
   },
-  by: {
-    type: "string" as const,
-    description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-  },
   json: {
     type: "boolean" as const,
     description: "Output result as JSON",
@@ -136,7 +132,7 @@ export default defineCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp();
         try {
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           const result = await requirePlanExemptionService(app).exemptAttestation(
             args.plan as string,
             { reason: checked.reason, kind: checked.kind, by },
@@ -181,7 +177,7 @@ export default defineCommand({
         const { loadLoreApp } = await import("../loader.js");
         const { app } = loadLoreApp();
         try {
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           const result = await requirePlanExemptionService(app).exemptAssessmentFreshness(
             args.plan as string,
             { reason: checked.reason, by },

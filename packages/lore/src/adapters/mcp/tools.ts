@@ -7,7 +7,7 @@
  * + 1 SPEC-042 tool: lore_anchor_set; lore_claim gains machine/worktree, lore_create
  * gains file_anchors, SPEC-042 §Design Decisions D9
  * + 1 SPEC-043 tool: lore_invalidate; lore_get gains computed validity_state,
- * lore_create gains supersedes/by, lore_search/lore_list gain include_invalid,
+ * lore_create gains supersedes, lore_search/lore_list gain include_invalid,
  * SPEC-043 §Design Decisions D6
  * + 1 SPEC-044 tool: lore_staleness_probe (batch/single-doc/list); lore_status and
  * lore_bootstrap gain computed open_stale_candidates, SPEC-044 §Design Decisions D10, D14
@@ -380,13 +380,12 @@ export const LoreCreateSchema = z.object({
   /**
    * ID or slug of an existing knowledge/adr doc this new doc supersedes
    * (SPEC-043 §Design Decisions D11) — composes `CorpusService.create` THEN
-   * `ValidityService.invalidate(supersedes, {supersededBy: newDoc.id, by})` via
+   * `ValidityService.invalidate(supersedes, {supersededBy: newDoc.id, by})` (the call's own identity) via
    * the shared `createWithSupersedes` orchestration (`flows/supersede-flow.ts`),
    * the SAME function the CLI's `lore create --supersedes` uses. The target's type
    * is validated BEFORE any write, inside that shared orchestration: a non-
    * knowledge/adr target (e.g. a task) returns `isError` and creates NOTHING
-   * (task-mcp-lore-create-supersedes-still-creates-then-fails-the). Requires `by`
-   * (below) — omitting `by` while `supersedes` is set is a VALIDATION_ERROR.
+   * (task-mcp-lore-create-supersedes-still-creates-then-fails-the).
    */
   supersedes: z.string().optional(),
   /**
@@ -395,7 +394,6 @@ export const LoreCreateSchema = z.object({
    * precedent as `lore_claim`/`lore_release`/`lore_evidence_add`. Meaningless
    * (ignored) when `supersedes` is omitted.
    */
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   /**
    * The calling agent's OWN current working directory — same rationale as
@@ -421,11 +419,9 @@ export const LoreGetSchema = z.object({
 });
 
 /**
- * Input schema for lore_set. `by` (SPEC-079 G2, OPTIONAL — mirrors lore_create's
- * pre-existing optional `by`, not the required-`by` shape of task-workflow tools
- * like lore_claim) attributes the resulting audit entry to the caller's actor
- * identity; omitted falls back to CorpusService's own env-chain resolution
- * (`resolveActorWithSource`) rather than the literal "system".
+ * Input schema for lore_set. The resulting audit entry is attributed to the call's own
+ * identity (the attested run's name) — there is no `by` argument; a caller naming one is
+ * refused by the strict schema, never silently attributed elsewhere.
  */
 export const LoreSetSchema = z.object({
   id_or_slug: z.string(),
@@ -435,22 +431,20 @@ export const LoreSetSchema = z.object({
   tags: z.array(z.string()).optional(),
   extra: z.record(z.unknown()).optional(),
   slug: z.string().optional(),
-  by: z.string().min(1).optional(),
   /**
    * The audited exit from the record-edit gate (spec-documents-are-living-or-records D4/D15, BR-1049):
    * a typo-level fix of a LOCKED record that writes exactly one version, keeps the status and records
-   * `reason`. NOT a doc field — handlers destructure it out of the patch next to `by` and pass it as a
+   * `reason`. NOT a doc field — handlers destructure it out of the patch next to the call's resolved actor and pass it as a
    * `SetOptions.correction`, because docPatchSchema would silently strip it.
    */
   correction: z.object({ reason: z.string().min(1) }).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
-/** Input schema for lore_delete. `by` — see {@link LoreSetSchema.by}'s SPEC-079 G2 note. */
+/** Input schema for lore_delete. Attributed to the call's own identity — see {@link LoreSetSchema}. */
 export const LoreDeleteSchema = z.object({
   id_or_slug: z.string(),
   confirm: z.literal(true),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -520,7 +514,7 @@ export const LoreTreeSchema = z.object({
   depth: z.number().int().positive().optional(),
 });
 
-/** Input schema for lore_link. `by` — see {@link LoreSetSchema.by}'s SPEC-079 G2 note. */
+/** Input schema for lore_link. Attributed to the call's own identity — see {@link LoreSetSchema}. */
 export const LoreLinkSchema = z.object({
   from: z.string(),
   to: z.string(),
@@ -536,7 +530,6 @@ export const LoreLinkSchema = z.object({
     ])
     .optional()
     .default("relates-to"),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -573,7 +566,6 @@ export const LorePendingSchema = z.object({
 export const LoreApproveSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
-  reviewer: z.string().optional(),
   calibration_note: z.string().optional(),
 });
 
@@ -598,7 +590,6 @@ export const LoreStatusSchema = z.object({
 
 /** Input schema for lore_batch. */
 export const LoreBatchSchema = z.object({
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   // reason: op uses z.string() (not enum) so unknown ops reach executeBatchOp's default
   // case and return { ok: false } in results instead of failing the entire batch request.
@@ -630,9 +621,7 @@ const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail", "expected-fail"]);
 
 /**
  * Input schema for lore_claim.
- * `by` is required (not defaulted) — MCP callers pass actor identity explicitly
- * (SPEC-025 §8.3 "MCP callers pass `by` explicitly"), unlike the CLI which falls
- * back to $LORE_ACTOR / OS username.
+ * The claimant is the call's own identity (the attested run); there is no `by` argument.
  * `machine`/`worktree` (SPEC-042 §Design Decisions D2, D9) — BOTH explicit-only
  * on this surface (no ambient auto-capture server-side; the server process's own
  * hostname/cwd would describe the MCP server, not the caller's session). The
@@ -641,7 +630,6 @@ const EVIDENCE_RESULT_ENUM = z.enum(["pass", "fail", "expected-fail"]);
  */
 export const LoreClaimSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   branch: z.string().optional(),
   machine: z.string().optional(),
@@ -673,7 +661,6 @@ export const LoreClaimSchema = z.object({
  */
 export const LoreReleaseSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   reason: z.string().optional(),
   force: z.boolean().optional(),
@@ -779,16 +766,14 @@ export const LoreReadySchema = z.object({
  *     — but this DIVERGES from the CLI's `lore anchor add`/`rm`, which are
  *     INCREMENTAL (union/difference). This tool always OVERWRITES the entire
  *     `code_anchors` array with `anchors` — use the CLI for incremental edits.**
- *     `by` is accepted for schema uniformity but NOT consumed on this branch
+ *     The caller's identity is NOT consumed on this branch
  *     (spec anchor writes are attributed to "system", mirroring `AcService`).
  *   - any other type → `VALIDATION_ERROR`, naming "task or spec".
- * `by` is required, same MCP actor-identity precedent as
- * `lore_claim`/`lore_release`/`lore_evidence_add`.
+ * The writer is the call's own identity (no `by` argument).
  */
 export const LoreAnchorSetSchema = z.object({
   id_or_slug: z.string(),
   anchors: z.array(z.string()),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -829,24 +814,20 @@ export const LoreAuditSchema = z.object({
 
 /**
  * Input schema for lore_review (SPEC-034 §6).
- * `by` is required (not defaulted) — same MCP precedent as lore_claim/lore_release/
- * lore_evidence_add/lore_ready: MCP callers pass actor identity explicitly, unlike the
- * CLI's $LORE_ACTOR/OS-username fallback. Same orchestration as the CLI's single-doc
+ * The requesting actor is the call's own identity (no `by` argument). Same orchestration as the CLI's single-doc
  * `lore review <doc>`: deterministic pre-checks first, AI judge only when they all
  * pass/skip. No `ai` override field — the surface-brake check runs unconditionally
  * (mirrors `lore review`'s CLI behavior: a braked surface cannot run review at all).
  */
 export const LoreReviewSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
  * Input schema for lore_staleness_probe (SPEC-044 §Design Decisions D10) — the MCP
- * counterpart to `lore review --staleness`. `by` is required (not defaulted) — same
- * MCP actor-identity precedent as `lore_claim`/`lore_release`/`lore_review`/`lore_verify`;
- * it is ALSO the audit-row actor for every probe this call commissions (D4), load-bearing.
+ * counterpart to `lore review --staleness`. The call's own identity is the
+ * audit-row actor for every probe this call commissions (D4), load-bearing.
  * `list: true` is a pure read (no provider call, D7/D9) — `id_or_slug` set switches to
  * single-doc mode (bypasses candidate selection filters, still refuses an already-
  * invalidated target); otherwise batch mode, `limit`/`min_age_days` overriding
@@ -857,7 +838,6 @@ export const LoreStalenessProbeSchema = z.object({
   min_age_days: z.number().int().nonnegative().optional(),
   id_or_slug: z.string().optional(),
   list: z.boolean().optional(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -866,10 +846,8 @@ export const LoreStalenessProbeSchema = z.object({
  * `ac` — optional subset of declared AC ids to run (omitted = every declared
  * script-mode AC on the plan's parent spec). `task` — optional explicit target
  * task override (wins over claim-based resolution, `resolveTargetTask` in
- * `@lore/core`). `by` is required (not defaulted) — same MCP actor-identity
- * precedent as lore_claim/lore_release/lore_evidence_add/lore_ready: MCP
- * callers pass actor identity explicitly, unlike the CLI's
- * $LORE_ACTOR/OS-username fallback. `allow_new_commands` (SPEC-039 §M2,
+ * `@lore/core`). The runner's actor is the call's own identity
+ * (no `by` argument). `allow_new_commands` (SPEC-039 §M2,
  * default `false`) — approve every new/changed script-AC command for this
  * call without a prompt (MCP is non-interactive by design: unlike the CLI,
  * there is no TTY-confirm fallback here — an unapproved command with
@@ -879,7 +857,6 @@ export const LoreVerifySchema = z.object({
   plan: z.string(),
   ac: z.array(z.string()).optional(),
   task: z.string().optional(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   allow_new_commands: z.boolean().optional(),
 });
@@ -915,11 +892,9 @@ export const LoreFeedSchema = z.object({
 
 /**
  * Input schema for lore_bootstrap (SPEC-041 §3 D2) — the S1 volatile session
- * pointer-set. `by` is required (not defaulted) — same MCP actor-identity
- * precedent as lore_claim/lore_release/lore_evidence_add/lore_ready/lore_review/
- * lore_verify: MCP callers pass actor identity explicitly, unlike the CLI's
- * $LORE_ACTOR/OS-username fallback. Only filters `my_claims`; every other field
- * is corpus-wide regardless of `by`.
+ * pointer-set. `by` is OPTIONAL and read-only — a FILTER naming whose `my_claims` to
+ * report (default: the call's own identity); it never stamps a row (pinned in
+ * `adapters/read-side-by-filters.ts`). Every other field is corpus-wide regardless of `by`.
  */
 export const LoreBootstrapSchema = z.object({
   by: z.string().min(1).optional(),
@@ -930,8 +905,7 @@ export const LoreBootstrapSchema = z.object({
  * Input schema for lore_invalidate (SPEC-043 §Design Decisions D2, D6) — the SOLE MCP
  * write path for a `knowledge`/`adr`/`task` doc's bi-temporal `extra.validity` (`task`
  * added by task-a-task-cannot-be-retracted-supersedes-emits-a-repair, the same
- * retraction mechanism as the CLI). `by` is required (not defaulted) — same MCP
- * actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`.
+ * retraction mechanism as the CLI). The actor is the call's own identity (no `by`).
  * `superseded_by` is resolved and PERSISTED as its ULID (never the raw id-or-slug).
  * `undo` clears a prior invalidation instead of setting one; `decision_status_unchanged`
  * surfaces structurally on the response when an ADR's `decision_status: "superseded"`
@@ -939,7 +913,6 @@ export const LoreBootstrapSchema = z.object({
  */
 export const LoreInvalidateSchema = z.object({
   id_or_slug: z.string(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   superseded_by: z.string().optional(),
   reason: z.string().max(500).optional(),
@@ -950,25 +923,22 @@ export const LoreInvalidateSchema = z.object({
  * Input schema for lore_handoff (SPEC-041 §3 D3, D6) — reuses `handoffExtraSchema`
  * directly (SSOT; no redeclaration) since the MCP tool's typed fields ARE
  * `extra.handoff` verbatim (D6: "MCP lore_handoff takes the typed fields
- * directly"). `by` is already required by `handoffExtraSchema` (`min(1)`), same
- * MCP actor-identity precedent as the other task-workflow/session tools.
+ * directly"). `handoffExtraSchema` requires `by` (`min(1)`), so it is OMITTED here: the stored handoff
+ * author stays non-empty because the wrapper fills `by` from the call's resolved name, while
+ * `handoffExtraSchema` (the CLI contract) is untouched.
  */
-export const LoreHandoffSchema = handoffExtraSchema.extend({
-  // reason: BR-1034 — no MCP tool requires the caller to name itself. The stored handoff author stays non-empty
-  // because the wrapper fills `by` from the call's resolved name; `handoffExtraSchema` (the CLI contract) is untouched.
-  by: z.string().min(1).optional(),
+export const LoreHandoffSchema = handoffExtraSchema.omit({ by: true }).extend({
   harness_run: HARNESS_RUN_FIELD,
 });
 
 /**
  * Input schema for lore_uat_record (SPEC-054) — the SOLE MCP write path for a structured
  * UAT verdict (`knowledge`/`uat`), thin pipe over `UatService.record`. `verdict` REUSES
- * `uatVerdictSchema` directly (SSOT; the tool's payload IS `extra.uat` verbatim). `by` is
- * required — same MCP actor-identity precedent as `lore_handoff`/`lore_invalidate`.
+ * `uatVerdictSchema` directly (SSOT; the tool's payload IS `extra.uat` verbatim). The recorder
+ * is the call's own identity (no `by`).
  */
 export const LoreUatRecordSchema = z.object({
   plan: z.string().min(1),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   verdict: uatVerdictSchema,
 });
@@ -990,8 +960,8 @@ export const LoreRequirementAddSchema = z.object({
  * Input schemas for the baseline write tools (spec-baseline-slice-1-rules-with-permanent-ids-
  * ac-citations §C3) — thin pipes over `RuleService`, the SOLE writer of a baseline doc's
  * verb-owned `extra` keys (`lore_set` refuses them via the CorpusService replace guard).
- * Enum members come from the `@lore/core` baseline SSOT, never re-typed here. `by` is
- * required: MCP callers pass actor identity explicitly (same precedent as `lore_claim`).
+ * Enum members come from the `@lore/core` baseline SSOT, never re-typed here. The writer
+ * is the call's own identity (no `by`).
  * Statement/example length limits are enforced by `baselineRuleSchema` inside the service.
  */
 /**
@@ -1012,7 +982,6 @@ export const LoreRuleAddSchema = z.object({
   enforced_by: z.enum(RULE_ENFORCEMENTS),
   examples: z.array(z.string()).min(1),
   ...FOUR_PART_STANDARD_SHAPE,
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -1026,7 +995,6 @@ export const LoreRuleSetSchema = z.object({
   note: z.string().min(1).optional(),
   move_to: z.string().min(1).optional(),
   ...FOUR_PART_STANDARD_SHAPE,
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -1055,14 +1023,12 @@ export const LoreBaselineAddSchema = z.object({
   label: z.string().min(1),
   title: z.string().min(1),
   content: z.string().optional(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreBaselineSetLabelSchema = z.object({
   node: z.string().min(1),
   label: z.string().min(1),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -1070,7 +1036,6 @@ export const LoreBaselineDependsSchema = z.object({
   leaf: z.string().min(1),
   add: z.array(z.string().min(1)).optional(),
   remove: z.array(z.string().min(1)).optional(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -1079,14 +1044,12 @@ export const LoreBaselineGlossaryAddSchema = z.object({
   term: z.string().min(1),
   meaning: z.string().min(1),
   note: z.string().optional(),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
 export const LoreBaselineGlossaryRmSchema = z.object({
   node: z.string().min(1),
   term: z.string().min(1),
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
 });
 
@@ -1096,10 +1059,8 @@ export const LoreBaselineGlossaryRmSchema = z.object({
  * (`feedback.upstream.repo` in `.lore/config.yaml` — GitHub only, see this
  * tool's own handler for why: `IssueReportService`, which used to speak the
  * legacy SQLite shape, is deleted outright in P4 of spec-the-defect-channel-
- * reaches-no-machine-but-its-own-github). `by` is required — same MCP
- * actor-identity precedent as `lore_claim`/`lore_release`/`lore_evidence_add`/
- * `lore_ready`/`lore_review`/`lore_verify` (MCP callers pass actor identity
- * explicitly; the CLI's `resolveActor` fallback chain does not apply here).
+ * reaches-no-machine-but-its-own-github). The reporter is the call's own
+ * identity (no `by` argument).
  * No `list` field on this surface — the CLI's `--list` (live-status join over
  * the local receipt log) has no MCP counterpart in this task's scope.
  *
@@ -1113,7 +1074,6 @@ export const LoreBaselineGlossaryRmSchema = z.object({
  * decision on this surface either.
  */
 export const LoreReportIssueSchema = z.object({
-  by: z.string().min(1).optional(),
   harness_run: HARNESS_RUN_FIELD,
   title: z.string().min(1),
   description: z.string().min(1),
@@ -1466,12 +1426,13 @@ type McpToolRegistry = {
  *   satisfies it trivially, and `T` inference (driven by the Output position) is unaffected.
  */
 /**
- * The args an attested tool's handler receives: `harness_run` removed, `by`/`recorded_by` (when the schema has
- * them) filled with the call's resolved name, hence plain `string`. A schema without `harness_run` is unchanged.
+ * The args an attested tool's handler receives: `harness_run` removed, `by` ALWAYS present as the call's
+ * resolved name (no tool schema declares it — the wrapper supplies it, so a handler can hand the writer name to a
+ * service without a second resolution), and `recorded_by` (when the schema has it) filled the same way.
+ * A schema without `harness_run` is unchanged.
  */
 type ResolvedArgs<T> = "harness_run" extends keyof T
-  ? Omit<T, "harness_run" | "by" | "recorded_by"> &
-      ("by" extends keyof T ? { by: string } : unknown) &
+  ? Omit<T, "harness_run" | "by" | "recorded_by"> & { by: string } &
       ("recorded_by" extends keyof T ? { recorded_by: string } : unknown)
   : T;
 
@@ -1484,8 +1445,8 @@ function registerToolImpl<T>(
   handler: (args: ResolvedArgs<T>) => Promise<CallToolResult>,
 ): void {
   // reason: spec-run-identity-slice-1 D3 — a schema that declares `harness_run` is an ATTESTED tool: every call
-  // runs in its own call scope (identity from harness_run/by, store wrapped for that call). The handler then gets
-  // `by`/`recorded_by` FILLED from the call's resolved name (no MCP tool requires the caller to name itself) and
+  // runs in its own call scope (identity from harness_run alone, store wrapped for that call). The handler then gets
+  // `by`/`recorded_by` FILLED from the call's resolved name (no MCP caller names itself — BR-1055) and
   // never sees `harness_run` (it would otherwise leak into `...patch` spreads).
   const shape = schema instanceof z.ZodObject ? (schema.shape as Record<string, unknown>) : {};
   const attested = "harness_run" in shape;
@@ -1497,10 +1458,11 @@ function registerToolImpl<T>(
     runWithAuditSurface("mcp", () => {
       if (!attested) return handler(args as unknown as ResolvedArgs<T>);
       const { harness_run: harnessRun, ...rest } = args as unknown as Record<string, unknown> & { harness_run?: string };
-      const by = typeof rest["by"] === "string" ? rest["by"] : undefined;
-      return scope.run({ harness_run: harnessRun, by }, (context) => {
+      return scope.run({ harness_run: harnessRun }, (context) => {
         const resolved: Record<string, unknown> = { ...rest };
-        if ("by" in shape) resolved["by"] = by ?? context.identity.claimed;
+        // reason: a schema that still declares `by` is a read-side FILTER (lore_bootstrap, pinned in
+        // read-side-by-filters.ts); it keeps the caller's value and defaults to the call's own name.
+        resolved["by"] = typeof rest["by"] === "string" ? rest["by"] : context.identity.claimed;
         if ("recorded_by" in shape) resolved["recorded_by"] = rest["recorded_by"] ?? context.identity.claimed;
         return handler(resolved as ResolvedArgs<T>);
       });
@@ -1513,7 +1475,10 @@ function registerToolImpl<T>(
   const registry = server as unknown as McpToolRegistry;
   const registered = registry._registeredTools[name];
   if (registered) {
-    registered.inputSchema = schema;
+    // reason: spec-run-only-write-identity-and-run-end-claim-release AC-ROI-1 — a retired `by` (or any other
+    // undeclared key) must FAIL the call, not be stripped: zod's default object mode silently drops unknown
+    // keys, which would attribute the write to the server's own name while the caller believed it named itself.
+    registered.inputSchema = schema instanceof z.ZodObject ? schema.strict() : schema;
   }
 }
 
@@ -1587,7 +1552,7 @@ async function reviewDocViaMcp(
  * + lore_anchor_set (SPEC-042 §Design Decisions D9) — lore_claim gains machine/
  * worktree, lore_create gains file_anchors
  * + lore_invalidate (SPEC-043 §Design Decisions D6) — lore_get gains computed
- * validity_state, lore_create gains supersedes/by, lore_search/lore_list gain
+ * validity_state, lore_create gains supersedes, lore_search/lore_list gain
  * include_invalid
  * + lore_staleness_probe (SPEC-044 §Design Decisions D10) — lore_status/lore_bootstrap
  * gain computed open_stale_candidates (D14)
@@ -1688,7 +1653,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       });
     }
 
-    // Strip the `ai`/`file_anchors`/`requires_uat`/`supersedes`/`by`/`caller_cwd`
+    // Strip the `ai`/`file_anchors`/`requires_uat`/`supersedes`/`caller_cwd` and the wrapper-supplied `by`
     // fields before passing to corpusService.create — none is a corpus field;
     // file_anchors (SPEC-042 D9) and requires_uat (SPEC-058 hotfix, plan branch
     // only, `true` only) are folded into `extra` here so CorpusService._createImpl's
@@ -1717,14 +1682,6 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     // `corpusService.create` runs, via the injected `get` port below, so this handler
     // never re-implements (or omits) that predicate.
     if (supersedes !== undefined) {
-      if (by === undefined || by.trim() === "") {
-        return errorContent({
-          code: "VALIDATION_ERROR",
-          field: "by",
-          message: "`by` is required when `supersedes` is set.",
-          value: by,
-        });
-      }
       if (app.validityService === undefined) {
         return errorContent({ code: "STORE_ERROR", message: "Internal error: ValidityService not wired on App" });
       }
@@ -1804,7 +1761,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
 
   // lore_set
   registerToolWithArgs(server, "lore_set", "Patch (update) an existing document", LoreSetSchema, async (args) => {
-    // reason: `by` (SPEC-079 G2) is destructured OUT of the patch — it's an actor
+    // reason: the call's `by` (supplied by the attested-call wrapper) is destructured OUT of the patch — it's an actor
     // identity for the audit entry, not a doc field; docPatchSchema doesn't declare
     // it, so leaving it inside `patch` would just be silently stripped there instead.
     // `correction` is destructured out for the same reason (spec-documents-are-living-or-records D15): it is
@@ -2023,20 +1980,18 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
 
   // lore_approve
   registerToolWithArgs(server, "lore_approve", "Approve a document, transitioning it from draft to approved", LoreApproveSchema, async (args) => {
-    // reason: exactOptionalPropertyTypes — only pass reviewer when defined
-    const opts = args.reviewer !== undefined ? { reviewer: args.reviewer } : {};
-    const result = await reviewService.approve(args.id_or_slug, opts);
+    // reason: the approver is the call's own identity (the attested run's name) — there is no `reviewer`
+    // argument, so an approve is never recorded under the literal "system".
+    const reviewer = args.by;
+    const result = await reviewService.approve(args.id_or_slug, { reviewer });
     if (!result.ok) return errorContent(result.error);
 
     // reason: SPEC-033 F1 — MCP's lore_approve is an adjudication tool, same as CLI
     // approve/HTTP dashboard approve; it MUST feed the same calibration loop, not a
-    // second-class copy. Mirrors `reviewer ?? "system"` — the exact default
-    // ReviewService.approve itself falls back to when `opts.reviewer` is omitted
-    // (review-service.ts) — so the hook's `actor` always matches who the approve
-    // was actually recorded under. actedOnVersion = result.value.version - 1 since
+    // second-class copy. The hook's `actor` is the same `reviewer` the approve was
+    // recorded under. actedOnVersion = result.value.version - 1 since
     // approve() bumps the version (identical to CLI approve.ts / HTTP dashboard
     // handleDashboardApprove's computation).
-    const reviewer = args.reviewer ?? "system";
     await runCalibrationHook(
       { judgmentService, telemetry: app.telemetry },
       {
@@ -2085,7 +2040,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
   registerToolWithArgs(server, "lore_batch", "Execute multiple operations in sequence", LoreBatchSchema, async (args) => {
     const results: unknown[] = [];
     for (const operation of args.operations) {
-      const opResult = await executeBatchOp(operation.op, operation.args, app);
+      const opResult = await executeBatchOp(operation.op, operation.args, app, args.by);
       results.push(opResult);
     }
     return textContent({ results });
@@ -2148,9 +2103,8 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       ...(args.worktree !== undefined ? { worktree: args.worktree } : {}),
       ...(args.corpus_scope !== undefined ? { corpusScope: args.corpus_scope } : {}),
       // reason: claim-time-actor-identity-guard-zero-evidence-release-advis
-      // AC-IDENTITY-REJECT — the real source of the name: "explicit" when the caller
-      // passed `by`, else the tier the server's own name chain resolved it from
-      // (BR-1034 made `by` optional) — so an OS-user fallback name is still the
+      // AC-IDENTITY-REJECT — the real source of the name: the tier the server's own name
+      // chain resolved it from — so an OS-user fallback name is still the
       // "os-fallback" tier `actorIdentityGuard` reacts to.
       identitySource: actorSourceOfName(callIdentity.claimedSource),
       steal: args.steal === true,
@@ -3351,8 +3305,8 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
           });
         }
 
-        // The actor is the call's resolved name (`by` when the caller gave one, else the
-        // call identity's name — BR-1034: no MCP tool requires the caller to name itself) and
+        // The actor is the call identity's resolved name (no MCP caller names itself —
+        // BR-1055) and
         // its source is that name's REAL source, mirroring how the CLI resolves its own
         // `actorSource` before threading it through `GithubFilingContext.actor`.
         // This module does NO actor resolution of its own (report-issue-
@@ -3494,20 +3448,33 @@ function setOptionsFrom(
  * @param op - Operation name (create | get | set | delete | list | search | link)
  * @param args - Raw arguments from the batch operation entry
  * @param app - The composition root providing corpus service
+ * @param by - The call's own resolved name: one call = one identity (BR-1036), so every operation of the
+ *   batch is written under it. An operation naming its own `by` is refused, never honored or dropped.
  * @returns A plain-object result suitable for inclusion in the batch results array
  */
 async function executeBatchOp(
   op: string,
   args: Record<string, unknown>,
   app: App,
+  by: string,
 ): Promise<unknown> {
   const { corpusService } = app;
+  if ("by" in args) {
+    return {
+      ok: false,
+      error: {
+        code: "VALIDATION_ERROR",
+        field: "by",
+        message: "`by` is not accepted: every operation of a batch is written under the call's own identity.",
+      },
+    };
+  }
 
   switch (op) {
     case "create": {
       const parsed = LoreCreateSchema.safeParse(args);
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "create") };
-      // reason: strip MCP-schema-only fields (ai/file_anchors/requires_uat/supersedes/by)
+      // reason: strip MCP-schema-only fields (ai/file_anchors/requires_uat/supersedes)
       // — the batch executor never invokes AI generation or the supersedes orchestration
       // (out of scope for lore_batch); file_anchors and requires_uat (SPEC-058 hotfix,
       // plan branch only, `true` only) still fold into extra the same way the single-op
@@ -3518,7 +3485,6 @@ async function executeBatchOp(
         file_anchors: fileAnchors,
         requires_uat: requiresUat,
         supersedes: _supersedes,
-        by,
         // reason: BR-1036 — one call = one identity; an operation's own harness_run is ignored, never forwarded.
         harness_run: _harnessRun,
         ...createInput
@@ -3537,8 +3503,7 @@ async function executeBatchOp(
         ...createInput,
         ...(mergedExtra !== undefined ? { extra: mergedExtra } : {}),
       };
-      // SPEC-079 G2 — thread the caller-supplied actor through to the batch create too.
-      const r = await corpusService.create(resolvedCreateInput, by !== undefined ? { by } : undefined);
+      const r = await corpusService.create(resolvedCreateInput, { by });
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "get": {
@@ -3550,9 +3515,9 @@ async function executeBatchOp(
     case "set": {
       const parsed = LoreSetSchema.safeParse(args);
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "set") };
-      // reason: `by` (SPEC-079 G2) is destructured out of the patch — same reason as
+      // reason: the call's `by` is passed as the write actor, never merged into the patch — same as
       // the single-op lore_set handler above.
-      const { id_or_slug: idOrSlug, by, correction, harness_run: _harnessRun, ...patch } = parsed.data;
+      const { id_or_slug: idOrSlug, correction, harness_run: _harnessRun, ...patch } = parsed.data;
       void _harnessRun;
       const r = await corpusService.set(idOrSlug, patch, setOptionsFrom(by, correction));
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
@@ -3560,8 +3525,7 @@ async function executeBatchOp(
     case "delete": {
       const idOrSlug = args["id_or_slug"];
       if (typeof idOrSlug !== "string") return { ok: false, error: "id_or_slug required" };
-      const by = typeof args["by"] === "string" ? args["by"] : undefined;
-      const r = await corpusService.delete(idOrSlug, args["confirm"] === true, by !== undefined ? { by } : undefined);
+      const r = await corpusService.delete(idOrSlug, args["confirm"] === true, { by });
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }
     case "list": {
@@ -3577,12 +3541,12 @@ async function executeBatchOp(
     case "link": {
       const parsed = LoreLinkSchema.safeParse(args);
       if (!parsed.success) return { ok: false, error: zodIssueToLoreError(parsed.error, "link") };
-      const { from, to, type, by } = parsed.data;
+      const { from, to, type } = parsed.data;
       const r = await corpusService.link(
         from,
         to,
         type as Parameters<typeof corpusService.link>[2],
-        by !== undefined ? { by } : undefined,
+        { by },
       );
       return r.ok ? { ok: true, value: r.value } : { ok: false, error: r.error };
     }

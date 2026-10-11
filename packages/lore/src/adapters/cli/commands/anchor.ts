@@ -50,8 +50,8 @@
  * `lore create task --anchor <path>` / `lore create spec --code-anchor
  * <path[#Symbol]>` (both repeatable) at creation time.
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > OS username) — see
- * utils.ts::resolveActor. `--by` is meaningful only for a task target (spec
+ * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`. The identity is
+ * meaningful only for a task target (spec
  * anchor writes are attributed to "system", mirroring `AcService`'s writes).
  *
  * Exit codes per SPEC-003 §5:
@@ -193,10 +193,6 @@ export default defineCommand({
             "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope). Spec/knowledge: path[#Symbol] (SPEC-045).",
           required: true,
         },
-        by: {
-          type: "string",
-          description: "[task target only] Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -217,7 +213,7 @@ export default defineCommand({
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+            const by = resolveActor();
             const result = await app.taskWorkflowService.addAnchors(targetId, paths, {
               by,
               source: app.callerSurface,
@@ -284,10 +280,6 @@ export default defineCommand({
           description: "[repeatable] Anchor entry to remove — task: path; spec/knowledge: path[#Symbol]",
           required: true,
         },
-        by: {
-          type: "string",
-          description: "[task target only] Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -308,7 +300,7 @@ export default defineCommand({
           const target = targetResult.value;
 
           if (target.type === "task") {
-            const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+            const by = resolveActor();
             const result = await app.taskWorkflowService.removeAnchors(targetId, paths, {
               by,
               source: app.callerSurface,

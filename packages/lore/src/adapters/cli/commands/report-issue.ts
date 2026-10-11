@@ -56,8 +56,8 @@
  * (aggregated into ONE missing-flags message, exit 2) — `--repro-command` is
  * the only optional report field.
  *
- * Actor resolution mirrors `claim.ts`: `resolveActor()` (`$LORE_ACTOR` env var,
- * then session tier, then OS username — no `--by` flag on this command, since
+ * Actor resolution mirrors `claim.ts`: `resolveActor()` (session tier, then
+ * OS username — no `--by` flag on this command, since
  * SPEC-072's task packet declares only the flags in this header).
  *
  * When `feedback.upstream` is unconfigured at all

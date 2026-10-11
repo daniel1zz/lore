@@ -1,5 +1,5 @@
 /**
- * lore verify <plan> [--ac <id> repeatable] [--task <t>] [--json] [--by]
+ * lore verify <plan> [--ac <id> repeatable] [--task <t>] [--json]
  *   [--allow-new-commands|--yes] [--execution-root <path>] [--falsify <AC-ID>]
  *
  * Trusted runner (SPEC-039): actually EXECUTES a plan's declared script-mode
@@ -377,10 +377,6 @@ export default defineCommand({
       type: "string",
       description: "Explicit target task id/slug — overrides claim-based resolution",
     },
-    by: {
-      type: "string",
-      description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-    },
     json: {
       type: "boolean",
       description: "Output result as JSON",
@@ -415,7 +411,7 @@ export default defineCommand({
     const { app } = loadLoreApp();
     try {
       const acIds = normalizeRepeatableFlag(args.ac);
-      const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+      const by = resolveActor();
       const allowNewCommands = args["allow-new-commands"] === true;
 
       // reason: SPEC-039 §M2 trust-hardening advisory — `lore verify` shells out to

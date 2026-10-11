@@ -250,8 +250,8 @@ async function handleDashboardCreate(
   }
 
   // adr-dashboard-cookie-session-writes-attribute-author-via — resolveDocWriteOpts
-  // (auth.ts) resolves the author via the SAME chain the CLI uses ($LORE_ACTOR →
-  // session tier → OS username of the `lore serve` process), NOT the static
+  // (auth.ts) resolves the author via the SAME chain the CLI uses (session
+  // tier → OS username of the `lore serve` process), NOT the static
   // "dashboard-local"/"admin" bootstrap-key identity the reviewer field below
   // still uses (a deliberately separate, out-of-scope concern — see auth.ts).
   const result = await app.corpusService.create(parsed.data, resolveDocWriteOpts(actor));

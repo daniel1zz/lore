@@ -223,7 +223,7 @@ export class TreeCheckService {
    * @param opts.by - Optional explicit actor (no adapter currently threads
    *   one — `lore status --check-tree --fix` is this method's sole
    *   production caller and passes none); omitted falls back to the SAME
-   *   `--by`/`$LORE_ACTOR`/session-tier/OS-username env chain
+   *   session-tier/OS-username env chain
    *   `CorpusService`'s writes use (`resolveActorWithSource`, SPEC-079 G2).
    */
   async fix(

@@ -41,7 +41,7 @@ Always search first — duplicating an existing doc fragments team knowledge. Li
 | Type | Required besides --title |
 |---|---|
 | prd, plan | — |
-| spec | `--parent <id-or-slug>` (+ optional `--kind feature\|tech\|design`, defaults `feature`) |
+| spec | no parent (a spec takes none; it relates to the trees by criteria citing rules, `lore ac add ... --cite BR-<n>`); optional `--kind feature\|tech\|design`, defaults `feature` |
 | task | `--parent <plan>` + `--plan-id <plan>` (+ optional `--phase <name>`, must be declared on the plan) |
 | adr | `--decision-status proposed\|accepted\|deprecated\|superseded` |
 | knowledge | `--sub-type ideation\|retro\|research\|reference\|assessment` |
@@ -64,14 +64,14 @@ lore tree <plan>                               # tasks grouped under phase heade
 Advisory lease + append-only oracle evidence, for agents executing plan tasks:
 
 ```bash
-lore claim <task> [--by <actor>] [--branch <b>] [--steal]   # acquire/refresh lease; fresh claim held by someone else → exit 5 unless --steal
+lore claim <task> [--branch <b>] [--steal]   # acquire/refresh lease; fresh claim held by someone else → exit 5 unless --steal
 lore evidence <task> --oracle tsc|test|lint|build|e2e|manual|other \
   --command "<cmd>" --result pass|fail [--output-tail "..." | --output-tail-file <path>]
-lore release <task> [--by <actor>] [--reason "why"] [--force]   # non-holder needs --force
+lore release <task> [--reason "why"] [--force]   # non-holder needs --force
 lore ready <plan> [--json]     # computed readiness over blocks links — never stored
 ```
 
-Actor identity: `--by` > `$LORE_ACTOR` > OS username. Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
+Identity: a write is attested by the agent integration's registered run alone — no write command takes `--by`, and no MCP write tool takes `by`. Lease expiry is computed read-side (`workflow.claim_ttl_minutes`, default 120) — no daemon. `lore tree` / `lore list --type task` render `[claimed:by (stale) ✔n/✘n]` badges. Record evidence as oracles run, not batched at the end.
 
 ## Review workflow
 

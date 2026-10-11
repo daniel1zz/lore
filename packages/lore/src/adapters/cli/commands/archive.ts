@@ -1,5 +1,5 @@
 /**
- * `lore archive --sweep [--json]` / `lore archive --apply [--by <actor>] [--json]`
+ * `lore archive --sweep [--json]` / `lore archive --apply [--json]`
  * — the deterministic, on-demand half of lifecycle archival (R2-R4 sweep
  * rules; R1's automatic plan-close cascade lives in
  * `CorpusService.cascadeArchiveOnPlanClose`, wired into `lore set`).
@@ -10,7 +10,7 @@
  * + a literal repair command, exit 0 when there are none, exit 3 when there
  * are — CI-composable the same way `--check-drift` is.
  *
- * `--apply [--by <actor>]`: recomputes candidates FRESH (never reuses a
+ * `--apply`: recomputes candidates FRESH (never reuses a
  * stale `--sweep` snapshot — the corpus may have changed between the two
  * invocations) and archives every one of them via
  * `CorpusService.archiveSweepCandidate`, one audited write each
@@ -59,10 +59,6 @@ export default defineCommand({
     apply: {
       type: "boolean",
       description: "Archive every current candidate (one audited write each)",
-    },
-    by: {
-      type: "string",
-      description: "Actor identity for --apply; defaults to $LORE_ACTOR env var, then OS username",
     },
     json: {
       type: "boolean",
@@ -125,7 +121,7 @@ export default defineCommand({
     }
 
     // --apply
-    const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+    const by = resolveActor();
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
     const outcomes: Array<{ slug: string; ok: boolean; detail: string }> = [];
 

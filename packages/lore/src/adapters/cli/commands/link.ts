@@ -68,16 +68,10 @@ export default defineCommand({
       type: "boolean",
       description: "Output as JSON",
     },
-    by: {
-      type: "string",
-      description:
-        "Actor identity to attribute this link to (SPEC-079 G2). Defaults to " +
-        "$LORE_ACTOR env var, then session tier, then OS username.",
-    },
   },
   async run({ args }) {
     const hasInfer = args.infer === true;
-    const resolvedActor = resolveActor(args.by);
+    const resolvedActor = resolveActor();
 
     const { app } = loadLoreApp();
     try {

@@ -37,8 +37,7 @@
  * Declare a scope at creation time with `lore create task --ac-scope <id>`
  * (repeatable).
  *
- * Actor resolution (--by flag > $LORE_ACTOR env var > … > OS username) — see
- * utils.ts::resolveActor.
+ * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`.
  *
  * Exit codes per SPEC-003 §5:
  *   0 = success
@@ -205,10 +204,6 @@ export default defineCommand({
           description: "[repeatable] Acceptance-criterion id declared on the governing spec, e.g. AC-VS-9",
           required: true,
         },
-        by: {
-          type: "string",
-          description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -227,7 +222,7 @@ export default defineCommand({
             return;
           }
 
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           await runScopeMutation(app, targetResult.value, "add", targetId, acIds, by, args.json === true);
         } finally {
           app.close();
@@ -252,10 +247,6 @@ export default defineCommand({
           description: "[repeatable] Acceptance-criterion id to un-declare",
           required: true,
         },
-        by: {
-          type: "string",
-          description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username",
-        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
@@ -274,7 +265,7 @@ export default defineCommand({
             return;
           }
 
-          const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+          const by = resolveActor();
           await runScopeMutation(app, targetResult.value, "rm", targetId, acIds, by, args.json === true);
         } finally {
           app.close();

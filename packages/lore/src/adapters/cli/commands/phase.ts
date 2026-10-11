@@ -14,10 +14,10 @@
  *   status <phase> [--json]                     Computed completion scorecard.
  *   checklist add <phase> <id> --statement <s> --bind <script|manual> [--oracle <k> --command <cmd>]
  *   checklist list <phase> [--json]
- *   checklist drop <phase> <id> --reason <text> [--by <name>]
- *   checklist check <phase> <id> [--by <name>]
+ *   checklist drop <phase> <id> --reason <text>
+ *   checklist check <phase> <id>
  *   checklist edit <phase> <id> --statement <new>
- *   track add <phase> --note <text> [--by <name>]
+ *   track add <phase> --note <text>
  *   track list <phase> [--json]
  *
  * All subcommands accept --json for machine-readable output (SPEC-003 §4).
@@ -386,14 +386,13 @@ export default defineCommand({
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             id: { type: "positional", description: "Checklist item id", required: true },
             reason: { type: "string", description: "Why this item is being dropped (required)", required: true },
-            by: { type: "string", description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username" },
             json: { type: "boolean", description: "Output result as JSON" },
           },
           async run({ args }) {
             const { app } = loadLoreApp();
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+              const by = resolveActor();
               const result = await service.dropChecklistItem(args.phase as string, args.id as string, {
                 by,
                 reason: args.reason as string,
@@ -422,14 +421,13 @@ export default defineCommand({
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             id: { type: "positional", description: "Checklist item id", required: true },
-            by: { type: "string", description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username" },
             json: { type: "boolean", description: "Output result as JSON" },
           },
           async run({ args }) {
             const { app } = loadLoreApp();
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+              const by = resolveActor();
               const result = await service.checkChecklistItem(args.phase as string, args.id as string, { by });
 
               if (!result.ok) {
@@ -501,14 +499,13 @@ export default defineCommand({
           args: {
             phase: { type: "positional", description: "Phase document ID or slug", required: true },
             note: { type: "string", description: "Note text", required: true },
-            by: { type: "string", description: "Actor identity; defaults to $LORE_ACTOR env var, then OS username" },
             json: { type: "boolean", description: "Output result as JSON" },
           },
           async run({ args }) {
             const { app } = loadLoreApp();
             try {
               const service = requirePhaseChecklistService(app);
-              const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
+              const by = resolveActor();
               const result = await service.addTrackNote(args.phase as string, {
                 id: ulid(),
                 note: args.note as string,
