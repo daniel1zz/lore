@@ -48,7 +48,7 @@ import { GateEnforcer } from "./gate-enforcer.js";
 import type { GateCheckpoint } from "./checkpoint-registry.js";
 
 /** The rewrite path a caller is on — selects the change paths the refusal names. */
-export type RecordEditOp = "content" | "kind" | "restore" | "criteria" | "phase-structure";
+export type RecordEditOp = "content" | "kind" | "restore" | "criteria" | "phase-structure" | "ai-rewrite";
 
 /** The slice of a `set` patch {@link RecordLockService.assertEditable} compares against the stored doc. */
 export interface RecordEditPatch {
@@ -84,13 +84,14 @@ export function bodyDiffers(stored: string, incoming: string): boolean {
 export class RecordLockService {
   /**
    * @param store - Storage abstraction (same instance the owning services hold).
-   * @param gateEnforcer - Runs the `record-edit` checkpoint. Defaults to an enforcer with no config
-   *   (gate on, no audit port) — the same default `app.ts`'s composition roots use; production passes
-   *   the config- and audit-wired enforcer so the knob and the skip audit work.
+   * @param gateEnforcer - Runs the `record-edit` checkpoint. REQUIRED: production passes the config- and
+   *   audit-wired enforcer so the `workflow.gates."record-edit"` knob and the skip audit work; a service that
+   *   built its own default would silently ignore the operator's config. A bare unit test passes
+   *   `new GateEnforcer(undefined)` (gate on, no audit port) explicitly.
    */
   constructor(
     private readonly store: StoreInterface,
-    private readonly gateEnforcer: GateEnforcer = new GateEnforcer(undefined),
+    private readonly gateEnforcer: GateEnforcer,
   ) {}
 
   /**
@@ -236,6 +237,7 @@ export class RecordLockService {
       case "restore":
       case "criteria":
       case "phase-structure":
+      case "ai-rewrite":
         return true;
       default: {
         const unreachable: never = op;

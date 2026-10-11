@@ -7,6 +7,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
 import { AcService } from "../../../src/service/ac-service.js";
 import { runFidelity, TEST_SOURCE_MAX_CHARS } from "../../../src/service/fidelity-sample.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 const SEEN_SOURCE = "it('SEEN-MARKER the rule holds', () => { expect(rule()).toBe(true); });";
 const SEEN_PATH = "tests/seen.test.ts";
@@ -43,9 +45,9 @@ async function mustCreate(corpus: CorpusService, input: CreateDocInput): Promise
 /** One live rule, one criterion per command (AC-F-<i+1>), each citing the rule. */
 async function world(commands: string[]): Promise<InMemoryStore> {
   const store = new InMemoryStore();
-  const corpus = new CorpusService(store, new RecordLockService(store));
-  const rules = new RuleService(store);
-  const ac = new AcService(store, new RecordLockService(store));
+  const corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const rules = makeRuleService(store);
+  const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prd = await mustCreate(corpus, { type: "prd", title: "P", content: "root" } as CreateDocInput);
   const root = await mustCreate(corpus, { type: "baseline", title: "R", content: "r", parent_id: prd.id, extra: { node: "root", label: "Root" } } as CreateDocInput);
   const branch = await mustCreate(corpus, { type: "baseline", title: "B", content: "b", parent_id: root.id, extra: { node: "branch", label: "Branch" } } as CreateDocInput);

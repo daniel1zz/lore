@@ -52,7 +52,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const enforcer = new GateEnforcer(undefined);
   // reason: task-two-concurrent-orchestrators-both-resolve-to-agent-main — the 7th
   // ctor arg is the env `claim()` captures `extra.claim.session_id` from, and the

@@ -29,7 +29,7 @@
  *                case pass again — proves config-disable still works at the service
  *                layer, not just in `lore gate`
  *   ERROR:      n/a — VALIDATION_ERROR shape covered by NEGATIVE
- *   REGRESSION: bare `new CorpusService(store, new RecordLockService(store))`-style absence-of-gate behavior is
+ *   REGRESSION: bare `new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)))`-style absence-of-gate behavior is
  *                exhaustively covered at the unit level (corpus-service.test.ts,
  *                review-service.test.ts, task-workflow-service.test.ts — all
  *                untouched by this task); not re-tested here
@@ -47,6 +47,7 @@
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";

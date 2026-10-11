@@ -19,6 +19,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { deriveLastActivityAt, bootstrapReportSchema, type BootstrapReport } from "@lore/core";
 import type { DocRecord, CreateDocInput } from "@lore/core";
@@ -127,7 +128,7 @@ describe("deriveLastActivityAt — BOUNDARY (AC-069-6)", () => {
 describe("SessionService.bootstrap — active_plans[].last_activity_at (HAPPY, AC-069-6)", () => {
   it("every active_plans entry carries last_activity_at equal to the known max of the seeded docs", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const sessionService = new SessionService(store, {
       claimTtlMinutes: 120,
       handoffTtlMinutes: 10080,
@@ -167,7 +168,7 @@ describe("SessionService.bootstrap — active_plans[].last_activity_at (HAPPY, A
 
   it("a plan with zero tasks reports the plan's own updated_at (totality, no tasks in the corpus at all)", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const sessionService = new SessionService(store, {
       claimTtlMinutes: 120,
       handoffTtlMinutes: 10080,

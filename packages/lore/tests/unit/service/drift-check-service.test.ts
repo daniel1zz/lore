@@ -31,6 +31,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { readFileSync } from "fs";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -43,7 +44,7 @@ import type { CreateDocInput } from "@lore/core";
 
 function makeServices() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const driftCheckService = new DriftCheckService(store);
   const taskWorkflowService = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   return { store, corpusService, driftCheckService, taskWorkflowService };

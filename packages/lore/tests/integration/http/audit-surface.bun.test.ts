@@ -24,6 +24,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -69,9 +70,9 @@ function makeRig(): Rig {
   const db = store.getDatabase();
   const telemetry = new NoOpTelemetry();
   const app: App = {
-    corpusService: new CorpusService(store, new RecordLockService(store), telemetry),
+    corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
@@ -276,7 +277,7 @@ describe("AC-BLC-1 audit stamping rules", () => {
 
   it("a write with no adapter-declared surface records NO surface key, never a guessed one", async () => {
     const store = new InMemoryStore();
-    const svc = new CorpusService(store, new RecordLockService(store));
+    const svc = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const created = await svc.create({ type: "prd", title: "No Surface" });
     if (!created.ok) throw new Error("create failed");
     const rows = await auditFor(store, created.value.id);

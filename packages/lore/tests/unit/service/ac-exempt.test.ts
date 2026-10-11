@@ -39,6 +39,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import type { CreateDocInput, DocId } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -109,8 +110,8 @@ const inDays = (n: number) => new Date(Date.now() + n * DAY).toISOString();
 
 async function setup(liveCriteria = 20) {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const ac = new AcService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
   if (!prd.ok) throw new Error("prd");
   const spec = await cs.create({ type: "spec", title: "S",content: "body" } as CreateDocInput);

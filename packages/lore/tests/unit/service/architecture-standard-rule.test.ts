@@ -24,12 +24,14 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { baselineExtraSchema, baselineRuleSchema } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService } from "../../../src/service/rule-service.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 const base = {
   statement: "Every write path goes through the chokepoint",
@@ -121,8 +123,8 @@ const input = (extra: Record<string, unknown> = {}) => ({
 
 async function world() {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const rules = new RuleService(store);
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const rules = makeRuleService(store);
   const prd = await must(await cs.create({ type: "prd", title: "Product", content: "p" } as CreateDocInput), "prd");
   const bizRoot = await node(cs, "Business root", prd, { node: "root" });
   const branch = await node(cs, "Branch", bizRoot, { node: "branch" });

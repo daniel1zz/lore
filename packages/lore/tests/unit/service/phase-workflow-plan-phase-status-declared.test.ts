@@ -38,6 +38,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
@@ -49,7 +50,7 @@ import { CorpusService } from "../../../src/service/corpus-service.js";
 
 async function makeFixture() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store), new NoOpTelemetry());
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), new NoOpTelemetry());
   const service = new PhaseWorkflowService(store, new NoOpTelemetry(), { claimTtlMinutes: 120 });
 
   const prd = await corpusService.create({ type: "prd", title: "Declared Phase Root PRD", content: "root" });

@@ -43,6 +43,7 @@ import { RuleStateService } from "../../../src/service/rule-state-service.js";
 import { computeBaselineStatus } from "../../../src/service/baseline-status.js";
 import { LATEST_SCHEMA_VERSION } from "../../../src/store/schema-version.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 // Variable specifier: migration-014.ts does not exist yet; the file must still load and typecheck.
 const MIGRATION_014_MODULE = "../../../src/store/migrations/migration-014.js";
@@ -347,7 +348,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
   it("STATE: `rule set` lifecycle change updates registry lifecycle + version to match the leaf (two different rules)", async () => {
     await seedSchema13();
     const store = new SQLiteStore(path);
-    const rules = new RuleService(store);
+    const rules = makeRuleService(store);
     const db = store.getDatabase();
 
     const dep = await rules.setRule("BR-1", { lifecycle: "deprecated" }, { by: "agent:test" });
@@ -380,7 +381,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
       `CREATE TRIGGER t_block_registry_update BEFORE UPDATE ON rule_registry
        BEGIN SELECT RAISE(ABORT, 'registry update blocked'); END`,
     );
-    const res = await new RuleService(store).setRule("BR-1", { lifecycle: "deprecated" }, { by: "agent:test" });
+    const res = await makeRuleService(store).setRule("BR-1", { lifecycle: "deprecated" }, { by: "agent:test" });
     expect(res.ok).toBe(false);
     const leafA = (await store.find(LEAF_A)) as { ok: true; value: DocRecord };
     const rules = leafA.value.extra["rules"] as Array<{ id: string; lifecycle: string }>;

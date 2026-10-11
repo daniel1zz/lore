@@ -12,6 +12,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -58,7 +59,7 @@ interface Fixture {
 }
 
 async function seed(store: StoreInterface): Promise<{ prdId: string; specId: string }> {
-  const cs = new CorpusService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const prd = await must(await cs.create({ type: "prd", title: "Set parent prd", content: "p" } as CreateDocInput), "prd");
   // A spec cannot be created with a parent any more (BR-2), so seed the LEGACY state this migration
   // primitive exists to clear: create it parentless, then write parent_id straight through the store.

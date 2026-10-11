@@ -7,7 +7,7 @@
  * (`foreign-corpus-write-adapters.test.ts`):
  *
  *   AC-CP-5(c) already pins "the HTTP predicate sees `provenance: null`" — but
- *   it observes that on a BARE `new CorpusService(store, new RecordLockService(store))`, which carries the
+ *   it observes that on a BARE `new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)))`, which carries the
  *   documented constructor default `{provenance: null, enabled: true}`. A bare
  *   service is null by construction, so that assertion CANNOT go red when the
  *   COMPOSITION ROOT wires something else. It did: `loader.ts` derived the
@@ -56,6 +56,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";

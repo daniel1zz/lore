@@ -40,6 +40,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -58,6 +59,7 @@ import { NoOpTelemetry } from "@lore/core";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 /** Pinned section heading — the implementation must emit exactly this line. */
 const HEADING = "## Governing rules";
@@ -70,8 +72,8 @@ let app: App;
 
 function makeApp(): App {
   store = new InMemoryStore();
-  corpus = new CorpusService(store, new RecordLockService(store));
-  rules = new RuleService(store);
+  corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  rules = makeRuleService(store);
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,
     handoffTtlMinutes: 10_080,
@@ -80,7 +82,7 @@ function makeApp(): App {
   return {
     corpusService: corpus,
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

@@ -32,6 +32,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { readFileSync, readdirSync } from "fs";
 import { join, relative, sep } from "path";
 import { describe, expect, it } from "vitest";
@@ -45,7 +46,7 @@ import { disabledCodeDriftPayload, runDrift } from "../../../src/flows/drift-flo
 
 function makeServices() {
   const store = new InMemoryStore();
-  return { store, corpusService: new CorpusService(store, new RecordLockService(store)), driftCheckService: new DriftCheckService(store) };
+  return { store, corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))), driftCheckService: new DriftCheckService(store) };
 }
 
 async function createDoc(corpusService: CorpusService, input: CreateDocInput): Promise<string> {

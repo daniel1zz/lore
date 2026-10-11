@@ -10,7 +10,7 @@
  * PINNED CONTRACT for C4 (the implementer must satisfy exactly this surface):
  *  1. Config: `workflow.gates["ac-cite"] = { mode: "off"|"report"|"enforce", armed_branches: string[] }`.
  *     `armed_branches` holds the SLUGS of baseline docs with `extra.node === "branch"`. It reaches the
- *     service as `new AcService(store, new RecordLockService(store), { citeGate: <that raw object | undefined> })` (2nd ctor arg).
+ *     service as `new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: <that raw object | undefined> })` (2nd ctor arg).
  *  2. Pure resolver, module `packages/lore/src/service/ac-cite-gate.ts`:
  *       `resolveCiteGateConfig(raw: unknown, hasBaselineDocs: boolean) -> { mode, armed_branches }`
  *     raw undefined -> mode `off` when !hasBaselineDocs, else `report`; armed_branches `[]`.
@@ -41,6 +41,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
@@ -118,7 +119,7 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 function gated(store: InMemoryStore, cfg: GateCfg | undefined): AcService {
-  return new AcService(store, new RecordLockService(store), { citeGate: cfg });
+  return new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: cfg });
 }
 
 interface World {
@@ -138,8 +139,8 @@ interface World {
  */
 async function world(): Promise<World> {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const plain = new AcService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const plain = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);
   const alpha = await insertBaseline(store, "baseline-branch-alpha", { node: "branch" }, root);
   const beta = await insertBaseline(store, "baseline-branch-beta", { node: "branch" }, root);
@@ -554,7 +555,7 @@ describe("cite gate — refusal feeding pack (AC-BLS2-2)", () => {
 describe("cite gate — no baseline docs and no config leaves outputs unchanged (AC-BLS2-2, QA-5)", () => {
   async function run(svcFactory: (s: InMemoryStore) => AcService) {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const prd = await cs.create({ type: "prd", title: "P", content: "root" } as CreateDocInput);
     if (!prd.ok) throw new Error("prd");
     const spec = await cs.create({ type: "spec", title: "S",content: "b" } as CreateDocInput);
@@ -580,7 +581,7 @@ describe("cite gate — no baseline docs and no config leaves outputs unchanged 
   });
 
   it("outputs, audit operations and version are identical to the ungated service", async () => {
-    const today = await run((s) => new AcService(s, new RecordLockService(s)));
+    const today = await run((s) => new AcService(s, new RecordLockService(s, new GateEnforcer(undefined))));
     const configless = await run((s) => gated(s, undefined));
     expect(configless).toEqual(today);
   });
@@ -596,8 +597,8 @@ describe("cite gate — no baseline docs and no config leaves outputs unchanged 
 describe("cite gate — latency on a 1,500-rule corpus (AC-BLS2-2, QA-1)", () => {
   it("p95 added latency of 50 enforce-armed `ac add` calls is <= 50 ms", async () => {
     const store = new InMemoryStore();
-    const cs = new CorpusService(store, new RecordLockService(store));
-    const plain = new AcService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+    const plain = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);
     const alpha = await insertBaseline(store, "baseline-branch-alpha", { node: "branch" }, root);
     for (let l = 0; l < 15; l++) {

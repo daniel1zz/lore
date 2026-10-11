@@ -21,6 +21,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { NoOpTelemetry } from "@lore/core";
 import type { DocRecord, DocType, CreateDocInput } from "@lore/core";
@@ -172,7 +173,7 @@ describe("AC-ETI-6 — phase-tier self-report path rejects a tail-less non-pass 
 
     // Task-path rejection (same fixture pattern as phase-workflow-inconclusive-guard.test.ts)
     const taskStore = new InMemoryStore();
-    const corpusService = new CorpusService(taskStore, new RecordLockService(taskStore));
+    const corpusService = new CorpusService(taskStore, new RecordLockService(taskStore, new GateEnforcer(undefined)));
     const taskWorkflowService = new TaskWorkflowService(taskStore, undefined, { claimTtlMinutes: 120 });
     const planResult = await corpusService.create({
       type: "plan",

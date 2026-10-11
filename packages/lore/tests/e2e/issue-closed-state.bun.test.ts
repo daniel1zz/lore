@@ -10,7 +10,7 @@
  * repo's own `.lore/` corpus (project CLAUDE.md hard rule).
  *
  * Fixtures are seeded via DIRECT `SQLiteStore`/`CorpusService` calls (bare
- * `new CorpusService(store, new RecordLockService(store))` — ungated) for the SAME reason
+ * `new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)))` — ungated) for the SAME reason
  * `issue-closure.bun.test.ts`'s module header documents: `lore create task`
  * has no CLI path to write `extra.issue_report`, and archiving a doc has no
  * dedicated CLI verb either (`CorpusService.set({status: "archived"})` is
@@ -50,6 +50,7 @@
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -230,7 +231,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Fixed four days ago, never linked");
     await archiveDoc(cs, issue.id);
@@ -259,7 +260,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Still draft, never touched");
     store.close();
@@ -280,7 +281,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Archived AND explicitly resolved");
     await archiveDoc(cs, issue.id);
@@ -304,7 +305,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
 
     // Precedence: resolves-edge (fixed) beats archived-doc-status (closed).
@@ -319,7 +320,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
 
     // Precedence: resolves-edge (resolving, non-terminal) ALSO beats closed.
     const store2 = new SQLiteStore(dbPathFor(dir));
-    const cs2 = new CorpusService(store2, new RecordLockService(store2));
+    const cs2 = new CorpusService(store2, new RecordLockService(store2, new GateEnforcer(undefined)));
     const issueWithResolvingEdge = await seedIssueTask(cs2, "Archived, but has a resolving-source edge");
     await archiveDoc(cs2, issueWithResolvingEdge.id);
     const fixerDraft = await seedPlainTask(cs2, "Fixer (still draft)");
@@ -340,7 +341,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     // Draft -> archived transition (no edge/explicit state) moves an issue
     // out of --open and into --resolved as 'closed'.
     const store3 = new SQLiteStore(dbPathFor(dir));
-    const cs3 = new CorpusService(store3, new RecordLockService(store3));
+    const cs3 = new CorpusService(store3, new RecordLockService(store3, new GateEnforcer(undefined)));
     const transitioning = await seedIssueTask(cs3, "Transitioning to closed");
     store3.close();
 
@@ -349,7 +350,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     expect(beforeParsed.data?.reports.some((r) => r.slug === transitioning.slug)).toBe(true);
 
     const store4 = new SQLiteStore(dbPathFor(dir));
-    const cs4 = new CorpusService(store4, new RecordLockService(store4));
+    const cs4 = new CorpusService(store4, new RecordLockService(store4, new GateEnforcer(undefined)));
     await archiveDoc(cs4, transitioning.id);
     store4.close();
 
@@ -368,7 +369,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const plain = await seedPlainTask(cs, "Ordinary archived task, not a report");
     await archiveDoc(cs, plain.id);
@@ -392,7 +393,7 @@ describe("AC-ICL-10: archived issue with no resolves in-edge and no explicit ter
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const openIssue = await seedIssueTask(cs, "Still open");
     const closedIssue = await seedIssueTask(cs, "Long since archived");

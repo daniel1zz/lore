@@ -163,6 +163,7 @@
  */
 
 import { RecordLockService } from "../../packages/lore/src/service/record-lock-service.js";
+import { GateEnforcer } from "../../packages/lore/src/service/gate-enforcer.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import {
@@ -712,9 +713,9 @@ function makeThrowawayApp(): App {
   const store = new InMemoryStore();
   const telemetry = new NoOpTelemetry();
   return {
-    corpusService: new CorpusService(store, new RecordLockService(store), telemetry),
+    corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), telemetry),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

@@ -48,6 +48,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,9 +93,9 @@ const stubApiKeyStore = {} as ApiKeyStore;
 function makeApp(): App {
   const store = new InMemoryStore();
   return {
-    corpusService: new CorpusService(store, new RecordLockService(store)),
+    corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),

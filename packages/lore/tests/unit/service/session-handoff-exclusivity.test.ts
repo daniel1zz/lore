@@ -15,6 +15,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -36,7 +37,7 @@ function validHandoffPayload(): Record<string, unknown> {
 describe("CorpusService — handoff writer-identity guard (AC-SL-4)", () => {
   it("create() rejects type:knowledge + sub_type:handoff with VALIDATION_ERROR mentioning 'lore handoff'", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const result = await corpusService.create({
       type: "knowledge",
@@ -54,7 +55,7 @@ describe("CorpusService — handoff writer-identity guard (AC-SL-4)", () => {
 
   it("createHandoffDoc() succeeds with the identical payload create() rejected", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const result = await corpusService.createHandoffDoc({
       type: "knowledge",
@@ -70,7 +71,7 @@ describe("CorpusService — handoff writer-identity guard (AC-SL-4)", () => {
 
   it("REGRESSION: create() with a non-handoff knowledge sub_type (ideation) still succeeds", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
     const result = await corpusService.create({
       type: "knowledge",

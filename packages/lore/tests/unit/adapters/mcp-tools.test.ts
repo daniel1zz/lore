@@ -10,6 +10,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -37,9 +38,9 @@ const stubApiKeyStore = {} as ApiKeyStore;
 function makeApp(): App {
   const store = new InMemoryStore();
   return {
-    corpusService: new CorpusService(store, new RecordLockService(store)),
+    corpusService: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     reviewService: new ReviewService(store),
-    versionService: new VersionService(store, new RecordLockService(store)),
+    versionService: new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined))),
     outlineService: new OutlineService(store),
     migrationService: new MigrationService(store),
     treeCheckService: new TreeCheckService(store),
@@ -863,7 +864,7 @@ const UAT_ACCEPT_VERDICT: UatVerdict = {
 
 function makeAppWithUatService(): { app: App; store: InMemoryStore } {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const uatService = new UatService({
     createUatDoc: corpusService.createUatDoc.bind(corpusService),
     resolveTarget: (idOrSlug: string) => resolveDoc(store, idOrSlug),

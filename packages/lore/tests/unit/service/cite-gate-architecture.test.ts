@@ -31,6 +31,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect } from "vitest";
 import { ulid } from "ulidx";
 import { DOC_TYPE_ROLE_MAP } from "@lore/core";
@@ -84,7 +85,7 @@ const AC = (id: string, extra: Record<string, unknown> = {}) => ({
 });
 
 function gated(store: InMemoryStore, cfg: GateCfg | undefined): AcService {
-  return new AcService(store, new RecordLockService(store), { citeGate: cfg });
+  return new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: cfg });
 }
 
 interface World {
@@ -103,7 +104,7 @@ interface World {
  */
 async function world(): Promise<World> {
   const store = new InMemoryStore();
-  const cs = new CorpusService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   const root = await insertBaseline(store, "baseline-root", { node: "root" }, null);
   const alpha = await insertBaseline(store, "baseline-branch-alpha", { node: "branch" }, root);
   await insertBaseline(store, "baseline-leaf-alpha", { node: "leaf", rules: [rule("BR-1"), rule("BR-2")] }, alpha);
@@ -125,7 +126,7 @@ async function world(): Promise<World> {
     return s.value.id as string;
   };
   const specId = await mk("Gate Subject");
-  const plain = new AcService(store, new RecordLockService(store));
+  const plain = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   for (const c of [AC("AC-S-1", { cites: ["BR-1"] }), AC("AC-S-2")]) {
     const a = await plain.addCriterion(specId, c);
     if (!a.ok) throw new Error(`seed ${JSON.stringify(a.error)}`);
@@ -283,7 +284,7 @@ describe("cite AS, refuse AD (BL-5)", () => {
     it("the refusal does not depend on the gate: an UNGATED AcService refuses AD-1 on citeCriterion too", async () => {
       const w = await world();
       const before = await fingerprint(w.store, w.specId);
-      const res = await new AcService(w.store, new RecordLockService(w.store)).citeCriterion(w.specId, "AC-S-2", ["AD-1"]);
+      const res = await new AcService(w.store, new RecordLockService(w.store, new GateEnforcer(undefined))).citeCriterion(w.specId, "AC-S-2", ["AD-1"]);
       expect({ code: res.ok ? "ok" : res.error.code, unchanged: (await fingerprint(w.store, w.specId)) === before }).toEqual({
         code: REFUSAL, unchanged: true,
       });

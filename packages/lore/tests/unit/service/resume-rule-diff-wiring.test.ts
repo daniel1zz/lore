@@ -11,6 +11,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
@@ -21,6 +22,7 @@ import { buildResumeFeed, renderResumeFeed } from "../../../src/flows/feed-flow.
 import type { App } from "../../../src/app.js";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { RESUME_SCOPE_CLOSURE } from "@lore/core";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 const T_SETUP = "2026-03-01T08:00:00.000Z";
 const T_CLAIM = "2026-03-01T10:00:00.000Z";
@@ -96,8 +98,8 @@ async function feedFor(plan: DocRecord): Promise<string> {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   store = new InMemoryStore();
-  corpus = new CorpusService(store, new RecordLockService(store));
-  rules = new RuleService(store);
+  corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  rules = makeRuleService(store);
   workflow = new TaskWorkflowService(store, undefined, { claimTtlMinutes: 120 });
   const sessionService = new SessionService(store, {
     claimTtlMinutes: 120,

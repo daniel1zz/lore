@@ -11,18 +11,20 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import type { CreateDocInput, DocRecord } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { RuleService, findUnregisteredRuleIds } from "../../../src/service/rule-service.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 let store: InMemoryStore;
 let corpus: CorpusService;
 
 beforeEach(() => {
   store = new InMemoryStore();
-  corpus = new CorpusService(store, new RecordLockService(store));
+  corpus = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 });
 
 async function mustCreate(input: CreateDocInput): Promise<DocRecord> {
@@ -96,7 +98,7 @@ describe("CorpusService.create — baseline rules guard", () => {
 
   it("accepts depends_on at create time naming a rule allocated through RuleService", async () => {
     const branch = await makeBranch();
-    const rules = new RuleService(store);
+    const rules = makeRuleService(store);
     const leaf = await mustCreate({
       type: "baseline", title: "Leaf A", content: "l", parent_id: branch.id, extra: { node: "leaf", label: "A" },
     } as CreateDocInput);

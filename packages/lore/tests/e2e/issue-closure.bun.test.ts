@@ -11,7 +11,7 @@
  * directory.
  *
  * Fixtures are seeded via DIRECT `SQLiteStore`/`CorpusService` calls against
- * the throwaway corpus's real `.lore/lore.db` (bare `new CorpusService(store, new RecordLockService(store))`
+ * the throwaway corpus's real `.lore/lore.db` (bare `new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)))`
  * — ungated, no GateEnforcer), the SAME hybrid pattern
  * `tests/e2e/migrate-ordinals-compiled.bun.test.ts` uses: direct-store seed,
  * then compiled-binary spawn for the behavior under test. This is required
@@ -59,6 +59,7 @@
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -236,7 +237,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect A");
     store.close();
@@ -261,7 +262,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const plain = await seedPlainTask(cs, "Ordinary task");
     store.close();
@@ -277,7 +278,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect B");
     store.close();
@@ -296,7 +297,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect C");
     store.close();
@@ -312,7 +313,7 @@ describe("AC-ICL-3: lore issue resolve --state fixed is rejected unconditionally
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect D");
     store.close();
@@ -338,7 +339,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect E");
     store.close();
@@ -363,7 +364,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect F");
     store.close();
@@ -386,7 +387,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const plain = await seedPlainTask(cs, "Ordinary task 2");
     store.close();
@@ -408,7 +409,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect G");
     store.close();
@@ -434,7 +435,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Filed defect H");
     const fixer = await seedPlainTask(cs, "Fixer for H");
@@ -463,7 +464,7 @@ describe("AC-ICL-4: lore issue resolve --state rejected|wontfix --reason persist
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(
       cs,
@@ -498,7 +499,7 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
 
     const issueOpen = await seedIssueTask(cs, "Open issue");
@@ -543,7 +544,7 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issueOpen = await seedIssueTask(cs, "Open issue 2");
     const issueResolving = await seedIssueTask(cs, "Resolving issue 2");
@@ -597,7 +598,7 @@ describe("AC-ICL-5: lore issues --json lists exactly issue-report-carrying tasks
     initCorpus(dir);
 
     const store = new SQLiteStore(dbPathFor(dir));
-    const cs = new CorpusService(store, new RecordLockService(store));
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     await seedRootPrd(cs);
     const issue = await seedIssueTask(cs, "Transitioning issue");
     store.close();

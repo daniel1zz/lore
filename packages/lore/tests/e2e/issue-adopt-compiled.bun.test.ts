@@ -77,6 +77,7 @@
  */
 
 import { RecordLockService } from "../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../src/service/gate-enforcer.js";
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -246,7 +247,7 @@ function makeUpstream(): UpstreamFixture {
  */
 async function fileReport(upstream: UpstreamFixture, title: string): Promise<string> {
   const store = new SQLiteStore(join(upstream.root, ".lore", "lore.db"));
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   try {
     const result = await corpusService.create({
       type: "task",

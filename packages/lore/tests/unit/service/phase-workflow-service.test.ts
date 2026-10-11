@@ -502,7 +502,7 @@ describe("PhaseWorkflowService — plan membership: legacy task extra.plan_id vs
 describe("PhaseWorkflowService — REGRESSION §5: anchor-overlap gate field 'gate:phase-claim:anchor-overlap'", () => {
   it("a distinct-actor overlapping claim on phase docs is blocked with the renamed field", async () => {
     const store = new InMemoryStore();
-    const corpusService = new CorpusService(store, new RecordLockService(store));
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
     const enforcer = new GateEnforcer(undefined);
     const service = new mod.PhaseWorkflowService(
       store,

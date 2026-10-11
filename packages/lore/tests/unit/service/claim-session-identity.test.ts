@@ -130,7 +130,7 @@ async function mustCreate(cs: CorpusService, input: CreateDocInput): Promise<Doc
  */
 function makeStoreAndCorpus() {
   const store = new InMemoryStore();
-  const corpusService = new CorpusService(store, new RecordLockService(store));
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
   return { store, corpusService };
 }
 

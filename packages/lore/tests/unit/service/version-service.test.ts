@@ -21,6 +21,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { VersionService } from "../../../src/service/version-service.js";
@@ -85,7 +86,7 @@ let service: VersionService;
 beforeEach(() => {
   _seq = 0;
   store = new InMemoryStore();
-  service = new VersionService(store, new RecordLockService(store));
+  service = new VersionService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 });
 
 // ─── Helper: insert doc + version records to simulate history ─────────────────
@@ -657,7 +658,7 @@ describe("VersionService.restore — atomic CAS write ordering (M4)", () => {
 
   it("ERROR/STATE: concurrent version bump → CAS update fails with STALE_VERSION, NO versions/audit rows written", async () => {
     const staleStore = new StaleOnceStore();
-    const staleService = new VersionService(staleStore, new RecordLockService(staleStore));
+    const staleService = new VersionService(staleStore, new RecordLockService(staleStore, new GateEnforcer(undefined)));
 
     const doc = makeDoc({ version: 2 });
     await staleStore.insert(doc);

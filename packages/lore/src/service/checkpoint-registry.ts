@@ -227,7 +227,7 @@ export interface RecordEditFacts {
   readonly slug: string;
   readonly type: string;
   /** The rewrite path being attempted — which `RecordEditOp` the caller is on. */
-  readonly op: "content" | "kind" | "restore" | "criteria" | "phase-structure";
+  readonly op: "content" | "kind" | "restore" | "criteria" | "phase-structure" | "ai-rewrite";
   readonly lock: LockState;
   /** Knowledge sub-type of the target, when it is a knowledge doc (selects the change path). */
   readonly subType?: string;
@@ -2467,6 +2467,11 @@ function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string 
       break;
     case "phase-structure":
       lines.push("This attempt changed the plan's phase list (lore phase add|rm|rename).");
+      break;
+    case "ai-rewrite":
+      lines.push(
+        "This attempt asked an AI to rewrite the body (lore set --regenerate|--refine): no AI call was made. An AI rewrite is not a correction.",
+      );
       break;
     case "kind":
       lines.push("This attempt changed extra.sub_type: flipping a record's kind would unlock it, so it is refused.");

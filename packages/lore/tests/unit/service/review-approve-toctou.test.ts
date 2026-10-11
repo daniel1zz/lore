@@ -107,7 +107,7 @@ async function setupApprovedSpecAndDraftPlan(): Promise<{
   const store = new InMemoryStore();
   await seedLiveRule(store);
   const enforcer = new GateEnforcer(undefined);
-  const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
+  const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
 
   const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
   const specDraft = await mustCreate(corpusService, {
@@ -219,7 +219,7 @@ describe("ASYNC2-002 — ReviewService.approve plan-promote TOCTOU", () => {
     const store = new InMemoryStore();
     await seedLiveRule(store);
     const enforcer = new GateEnforcer(undefined);
-    const corpusService = new CorpusService(store, new RecordLockService(store), undefined, undefined, enforcer);
+    const corpusService = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, enforcer);
 
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root PRD", content: "# PRD" } as CreateDocInput);
     const specDraft = await mustCreate(corpusService, {

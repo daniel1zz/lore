@@ -15,7 +15,7 @@
  * connection would never contend.
  *
  * ── PINNED CONTRACT (the implementation builds to exactly this) ─────────────────────────
- *   - `new AcService(store, new RecordLockService(store), { citeGate: { mode: "off"|"report"|"enforce", armed_branches: string[] } })`
+ *   - `new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: { mode: "off"|"report"|"enforce", armed_branches: string[] } })`
  *     `armed_branches` holds baseline BRANCH SLUGS. A spec is in the branch of the leaf its ACs
  *     cite (C4). `citeCriterion` consults the gate for the ids it ADDS.
  *   - enforce + armed branch + cited rule not live => `citeCriterion` returns `ok:false` with a
@@ -38,6 +38,7 @@
  */
 
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
+import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -51,6 +52,7 @@ import { RuleService } from "../../../src/service/rule-service.js";
 import type { RuleStateService } from "../../../src/service/rule-state-service.js";
 import { RuleStateService as RuleStateServiceImpl } from "../../../src/service/rule-state-service.js";
 import { SQLiteStore } from "../../../src/store/sqlite-store.js";
+import { makeRuleService } from "../../helpers/make-rule-service.js";
 
 const WORKER = join(import.meta.dir, "..", "..", "fixtures", "cite-retire-race-worker.ts");
 const WRITERS = 8;
@@ -80,9 +82,9 @@ async function must<T>(r: { ok: boolean; value?: T; error?: unknown }, what: str
 async function seed(dir: string): Promise<Fixture> {
   const dbPath = join(dir, "corpus.db");
   const store = new SQLiteStore(dbPath);
-  const cs = new CorpusService(store, new RecordLockService(store));
-  const rules = new RuleService(store);
-  const ac = new AcService(store, new RecordLockService(store));
+  const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+  const rules = makeRuleService(store);
+  const ac = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)));
 
   const prd = await must(await cs.create({ type: "prd", title: "Race product", content: "root" } as CreateDocInput), "prd");
   const root = await must(await rules.addNode(prd.id, { node: "root", label: "Root", title: "Race root", content: "r" }, { by: "agent:seed" }), "root");
@@ -286,7 +288,7 @@ describe("enforce mode, armed branch: 8 citers race 1 retirer (QA-2 / D6)", () =
     expect(retired.retire).toEqual({ ok: true });
 
     const store = new SQLiteStore(fx.dbPath);
-    const gated = new AcService(store, new RecordLockService(store), { citeGate: { mode: "enforce", armed_branches: [BRANCH_SLUG] } });
+    const gated = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: { mode: "enforce", armed_branches: [BRANCH_SLUG] } });
     const before = await store.find(fx.specIds[0] as never);
     const res = await gated.citeCriterion(fx.specIds[0] as string, AC_ID, [RULE_ID], {}, { by: "agent:late" });
     const after = await store.find(fx.specIds[0] as never);
@@ -302,7 +304,7 @@ describe("enforce mode, armed branch: 8 citers race 1 retirer (QA-2 / D6)", () =
     const fx = await seed(dir);
     await race(dir, { ...fx, specIds: [] }, "enforce", true, "retire-only");
     const store = new SQLiteStore(fx.dbPath);
-    const ungated = new AcService(store, new RecordLockService(store), { citeGate: { mode: "enforce", armed_branches: ["some-other-branch"] } });
+    const ungated = new AcService(store, new RecordLockService(store, new GateEnforcer(undefined)), { citeGate: { mode: "enforce", armed_branches: ["some-other-branch"] } });
     const res = await ungated.citeCriterion(fx.specIds[0] as string, AC_ID, [RULE_ID], {}, { by: "agent:late" });
     store.close();
     expect(res.ok).toBe(true);

@@ -160,7 +160,7 @@ function resolveRepoLoreDbPath(fromDir: string): string | null {
 
 function makeGatedService(store: InMemoryStore = new InMemoryStore()) {
   const gateEnforcer = new GateEnforcer(undefined);
-  return { service: new CorpusService(store, new RecordLockService(store), undefined, undefined, gateEnforcer), store };
+  return { service: new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, gateEnforcer), store };
 }
 
 async function createApprovedPrd(service: CorpusService, title: string): Promise<DocRecord> {
@@ -265,7 +265,7 @@ describe("CorpusService spec-create fallback — STATE", () => {
       workflow: { gates: { "spec-create": { enabled: false } } },
     } as unknown as LoreConfig);
     const store = new InMemoryStore();
-    const service = new CorpusService(store, new RecordLockService(store), undefined, undefined, gateEnforcer);
+    const service = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)), undefined, undefined, gateEnforcer);
     const prd = await createApprovedPrd(service, "Root PRD");
 
     const spec = await service.create({
