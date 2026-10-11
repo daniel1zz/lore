@@ -142,9 +142,9 @@ function loadContextLayer(path: string | undefined, schema: z.ZodTypeAny): Layer
   return { ok: true, value: { context: parsed.data as NonNullable<ContextConfigLayer["context"]> } };
 }
 
-type DepsResult = { ok: true; value: FragmentsFlowDeps } | { ok: false; error: FragmentsFlowError };
+export type DepsResult = { ok: true; value: FragmentsFlowDeps } | { ok: false; error: FragmentsFlowError };
 
-function buildFlowDeps(cwd: string): DepsResult {
+export function buildFlowDeps(cwd: string): DepsResult {
   const projectRoot = resolveProjectRoot(cwd);
   const global = loadContextLayer(resolveGlobalConfigPath(), ContextFragmentsSettingsSchema);
   if (!global.ok) return global;

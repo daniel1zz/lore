@@ -255,6 +255,8 @@ export interface ExplainRow {
   readonly id: string;
   readonly layer: Fragment["layer"];
   readonly chars: number;
+  /** Absolute path of the fragment file — `lore run register` hashes these bytes for the run's composition record. */
+  readonly path: string;
 }
 
 export interface FragmentsRenderOptions {
@@ -288,6 +290,7 @@ export async function runFragmentsRender(
     id: fragment.frontmatter.id,
     layer: fragment.layer,
     chars: fragment.body.length,
+    path: fragment.path,
   }));
 
   if (opts.outlet === "hook:subagent-start") {
