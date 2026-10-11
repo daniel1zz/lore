@@ -1,0 +1,120 @@
+#!/usr/bin/env node
+/**
+ * run-register.mjs — SessionStart / SubagentStart hook. A blind pipe: it hands
+ * the payload's identifiers to `lore run register` and never decides anything.
+ *
+ * Purpose: register the run this session (or helper agent) is, so later writes
+ * can be attributed to it (BR-1027, BR-1029).
+ *
+ * Public surface: none. Executable script, no exports.
+ * Side-effect class: IO — reads stdin, spawns one child process, writes at most
+ * one stdout line, always exits 0.
+ *
+ * ## Flow
+ *
+ *   1. stdin must be a JSON object with a string `session_id`, else report
+ *      "malformed" (lore is not spawned: there is no session to register)
+ *   2. spawn `lore run register --harness claude-code --session S`, plus
+ *      `--agent-id A --agent-type T` when the payload carries a string
+ *      `agent_id` (SubagentStart)
+ *   3. success -> print nothing; failure -> print ONE hook-JSON line whose
+ *      additionalContext names the failure
+ *
+ * ## Invariant: fail-open and loud (spec D7, BR-1030)
+ *
+ * Exit status is 0 on every path, so a registration fault can never block a
+ * session or a helper. The fault is not swallowed: the single additionalContext
+ * line tells the session why its writes will be unattested.
+ *
+ * ## Invariant: this file holds no grammar (spec D10)
+ *
+ * Run-id derivation, parent linkage and fragment composition belong to the
+ * `lore run register` verb. This file only forwards the identifiers it was
+ * given.
+ *
+ * @spec_ref spec-run-identity-slice-1-harness-attested-runs-attested D7, D10;
+ *   AC-RID-3
+ */
+
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+/** Resolved from `PATH`: the hook runs in the user's environment, and this is what lets tests substitute a stub. */
+const VERB_BINARY = 'lore';
+
+/** The harness name the verb records; fixed by the claude-code integration this hook belongs to. */
+const HARNESS = 'claude-code';
+
+/** Event name used in the output envelope when the payload does not name one. */
+const DEFAULT_EVENT_NAME = 'SessionStart';
+
+/** Captured child output is only inspected for its status; the ceiling is explicit so an overrun surfaces as `error`, not silent truncation. */
+const CHILD_OUTPUT_BYTE_CEILING = 16 * 1024 * 1024;
+
+/**
+ * Prints the single fail-open line and exits 0. Never returns.
+ *
+ * @param {string} eventName - Hook event name for the envelope.
+ * @param {string} reason - One-line failure description (newlines are flattened).
+ * @returns {never}
+ */
+function reportAndExit(eventName, reason) {
+  const text = `run-register: ${reason}; this run's writes will be unattested`.replace(/\s*[\r\n]+\s*/g, ' ');
+  process.stdout.write(
+    `${JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: text } })}\n`,
+  );
+  process.exit(0);
+}
+
+let payload;
+try {
+  payload = JSON.parse(readFileSync(0, 'utf8'));
+} catch (cause) {
+  reportAndExit(DEFAULT_EVENT_NAME, `malformed hook payload on stdin (${String(cause)})`);
+}
+
+if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+  reportAndExit(DEFAULT_EVENT_NAME, 'malformed hook payload on stdin (expected a JSON object)');
+}
+
+const eventName = typeof payload.hook_event_name === 'string' ? payload.hook_event_name : DEFAULT_EVENT_NAME;
+
+if (typeof payload.session_id !== 'string' || payload.session_id === '') {
+  reportAndExit(eventName, 'malformed hook payload on stdin (no string session_id)');
+}
+
+const argv = ['run', 'register', '--harness', HARNESS, '--session', payload.session_id];
+if (typeof payload.agent_id === 'string') {
+  argv.push('--agent-id', payload.agent_id);
+  if (typeof payload.agent_type === 'string') argv.push('--agent-type', payload.agent_type);
+}
+
+const child = spawnSync(VERB_BINARY, argv, {
+  stdio: ['ignore', 'pipe', 'pipe'],
+  maxBuffer: CHILD_OUTPUT_BYTE_CEILING,
+  encoding: 'utf8',
+});
+
+if (child.error) {
+  const code = /** @type {NodeJS.ErrnoException} */ (child.error).code;
+  reportAndExit(
+    eventName,
+    code === 'ENOENT'
+      ? `\`${VERB_BINARY}\` not found on PATH`
+      : `could not run \`${VERB_BINARY} run register\` (${String(child.error)})`,
+  );
+}
+
+if (typeof child.status !== 'number') {
+  reportAndExit(eventName, `\`${VERB_BINARY} run register\` was killed by signal ${child.signal}`);
+}
+
+if (child.status !== 0) {
+  const detail = (child.stderr ?? '').trim().split(/\r?\n/)[0] ?? '';
+  reportAndExit(
+    eventName,
+    `\`${VERB_BINARY} run register\` failed with exit ${child.status}${detail === '' ? '' : `: ${detail}`}`,
+  );
+}
+
+process.exit(0);
