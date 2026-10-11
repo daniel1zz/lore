@@ -30,6 +30,22 @@ if (process.argv.includes("--mcp-server")) {
   // JSON-RPC protocol channel, not free-form CLI output.
   const { installSyncStdio } = await import("./adapters/cli/stdio-sync.js");
   installSyncStdio();
+  // spec-run-identity-slice-1 D1: resolve the invocation identity ONCE, here, before any command runs.
+  // `--harness-run <id>` is harness-owned: it is consumed (stripped from argv) so no command sees it as an
+  // unknown flag, and it is verified against the corpus's run registry at the first write
+  // (`withVerifiedWriteContext`, wired by `createApp`). `process.argv` is rewritten because several commands
+  // read it directly (`rawArgv`) besides citty's own `rawArgs`.
+  const { resolveCliInvocation, setInvocationIdentity } = await import("./adapters/cli/invocation-identity.js");
+  const { RunIdentityArgumentError } = await import("@lore/core/node");
+  try {
+    const resolution = resolveCliInvocation(process.argv.slice(2));
+    setInvocationIdentity(resolution.identity);
+    process.argv = [...process.argv.slice(0, 2), ...resolution.argv];
+  } catch (error) {
+    if (!(error instanceof RunIdentityArgumentError)) throw error;
+    process.stderr.write(`Error: ${error.message}\n`); // CLI surface
+    process.exit(2);
+  }
   const { runMain } = await import("citty");
   const { default: main } = await import("./adapters/cli/index.js");
   // SPEC-073 D2: citty's own built-in `showUsage` renders a multi-char

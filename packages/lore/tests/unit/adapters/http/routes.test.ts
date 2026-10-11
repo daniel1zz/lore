@@ -402,13 +402,13 @@ describe("POST /api/docs", () => {
       else process.env["LORE_ACTOR"] = ORIGINAL_LORE_ACTOR;
     });
 
-    it("REGRESSION — bearer-token actor keeps doc.created_by as the literal 'system' (unchanged attribution)", async () => {
+    it("REGRESSION — bearer-token actor is the doc.created_by author, never the literal 'system' (spec-run-identity-slice-1 D1)", async () => {
       const { req, url } = makePostRequest("/api/docs", { type: "prd", title: "Bearer Attribution PRD" });
       const res = await handleApiRoute(req, url, app, TEST_ACTOR);
       expect(res!.status).toBe(201);
       const body = await parseResponse(res!);
       const doc = body.data as Record<string, unknown>;
-      expect(doc.created_by).toBe("system");
+      expect(doc.created_by).toBe(TEST_ACTOR.name);
     });
 
     it("a cookie-session actor's create resolves doc.created_by via the actor chain, never 'system' or the static bootstrap identity", async () => {

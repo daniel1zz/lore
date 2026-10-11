@@ -2212,6 +2212,7 @@ export class SQLiteStore implements StoreInterface {
       created_at: nowIso,
       created_by: actor,
       slug: updated.value.slug,
+      harness_run: patch.harness_run ?? null,
     });
     if (!versionResult.ok) return versionResult;
     return updated;
@@ -2231,6 +2232,7 @@ export class SQLiteStore implements StoreInterface {
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
     prefix: RuleIdPrefix = "BR",
+    harnessRun: string | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     try {
       this.db.run("BEGIN IMMEDIATE");
@@ -2244,7 +2246,7 @@ export class SQLiteStore implements StoreInterface {
       const ruleId = `${prefix}-${nextRow.next_n}`;
       const nowIso = new Date().toISOString();
       const leaf = this.applyRuleLeafPatchSync(
-        { id: leafId, expectedVersion, extra: buildExtra(ruleId) },
+        { id: leafId, expectedVersion, extra: buildExtra(ruleId), harness_run: harnessRun },
         actor,
         nowIso,
       );

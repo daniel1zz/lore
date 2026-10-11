@@ -236,24 +236,25 @@ describe("STATE — sequential writes each resolve their OWN opts.by independent
 
 // ─── REGRESSION ───────────────────────────────────────────────────────────────
 
-describe("REGRESSION — doc.created_by/versionRecord.created_by stay 'system' (out of G2 scope)", () => {
-  it("create()'s DocRecord.created_by and versions row stay 'system' even with an explicit opts.by", async () => {
+// spec-run-identity-slice-1 D1/D4 retired the literal 'system' author: doc.created_by and the version rows now
+// carry the SAME resolved actor as the audit entry.
+describe("REGRESSION — doc.created_by/versionRecord.created_by carry the resolved actor, never 'system'", () => {
+  it("create()'s DocRecord.created_by and versions row carry the explicit opts.by", async () => {
     const store = makeStore();
     const cs = new CorpusService(store);
     const doc = await createPlan(cs, "Scope Boundary Create", { by: "agent:alice" });
-    expect(doc.created_by).toBe("system");
+    expect(doc.created_by).toBe("agent:alice");
 
     const versions = await store.findVersions(doc.id);
     if (!versions.ok) throw new Error(JSON.stringify(versions.error));
-    expect(versions.value[0]?.created_by).toBe("system");
+    expect(versions.value[0]?.created_by).toBe("agent:alice");
 
-    // Meanwhile the audit entry DOES carry the resolved actor — the asymmetry is
-    // the documented, deliberate scope boundary this spec draws.
+    // The audit entry carries the same resolved actor: one author per write.
     const entries = await auditFor(store, doc.id, "create");
     expect(entries[0]?.actor).toBe("agent:alice");
   });
 
-  it("set()'s versions row stays 'system' even with an explicit opts.by", async () => {
+  it("set()'s versions row carries the explicit opts.by", async () => {
     const store = makeStore();
     const cs = new CorpusService(store);
     const doc = await createPlan(cs, "Scope Boundary Set");
@@ -261,8 +262,9 @@ describe("REGRESSION — doc.created_by/versionRecord.created_by stay 'system' (
     await cs.set(doc.id, { title: "Renamed" }, { by: "agent:bob" });
     const versions = await store.findVersions(doc.id);
     if (!versions.ok) throw new Error(JSON.stringify(versions.error));
-    const latest = versions.value[versions.value.length - 1];
-    expect(latest?.created_by).toBe("system");
+    // reason: select the set()'s own row by action — `findVersions` ordering is not part of this test's contract.
+    const updateRow = versions.value.find((v) => v.action === "update");
+    expect(updateRow?.created_by).toBe("agent:bob");
   });
 
   it("a bare `new CorpusService(store)` construction (no gate/telemetry DI) still resolves opts.by correctly", async () => {

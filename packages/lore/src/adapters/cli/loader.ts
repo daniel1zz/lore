@@ -73,6 +73,7 @@ import {
 } from "@lore/core/node";
 import { createApp, type App } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
+import { getInvocationIdentity } from "./invocation-identity.js";
 import { resolveCorpus } from "./corpus-resolution.js";
 import {
   guardTaskLifecycleWrites,
@@ -449,7 +450,14 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
   // "internal unexpected throw" errClass (SPEC-073 §Design) actually reachable.
   let appOrResult: App | Result<App, LoreError>;
   try {
-    appOrResult = createApp(dbPath, telemetryOnlyConfig);
+    // reason: the identity the CLI entry resolved (index.ts) wraps the store inside createApp
+    // (spec-run-identity-slice-1 D3); undefined for MCP/HTTP/tests, which never set one.
+    const invocationIdentity = getInvocationIdentity();
+    appOrResult = createApp(
+      dbPath,
+      telemetryOnlyConfig,
+      invocationIdentity === undefined ? undefined : { identity: invocationIdentity },
+    );
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`Error: Storage failure: ${message}`); // CLI surface
