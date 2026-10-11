@@ -235,13 +235,13 @@ describe("SPEC-104 AC-ACTOR-2 — explicit --by / $LORE_ACTOR win over worktree 
     expect(result).toEqual({ actor: "alice", source: "explicit" });
   });
 
-  it("$LORE_ACTOR (env) wins over worktree derivation inside a linked worktree", () => {
+  it("$LORE_ACTOR is never read: worktree derivation still wins inside a linked worktree (BR-1055)", () => {
     const wt = join(tmpRoot, "wt-env-wins");
     addWorktree(mainRepo, wt, "env-wins-branch");
 
     const result = resolveActorWithSource(undefined, { LORE_ACTOR: "agent:bob" }, wt);
 
-    expect(result).toEqual({ actor: "agent:bob", source: "env" });
+    expect(result).toEqual({ actor: "agent:env-wins-branch", source: "worktree-derived" });
   });
 
   it("neither explicit nor env resolution ever warns, worktree or not", () => {
@@ -275,8 +275,8 @@ describe("SPEC-104 AC-ACTOR-3 — main checkout resolves OS username, byte-ident
     expect(result).toEqual({ actor: username, source: "os-fallback" });
     expect(stderr).toBe(
       `⚠ actor resolved to OS username "${username}" — corpus writes under this identity ` +
-        "aren't traceable to an agent. Pass --by <id> or export LORE_ACTOR=agent:<slug> " +
-        "(or ai:<...>) for a traceable actor.\n",
+        "aren't traceable to an agent. Install the agent integration (`lore setup`) so writes " +
+        "carry an attested run.\n",
     );
   });
 

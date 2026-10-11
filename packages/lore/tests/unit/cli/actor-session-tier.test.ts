@@ -82,12 +82,12 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
       expect(result).toEqual({ actor: "alice", source: "explicit" });
     });
 
-    it("$LORE_ACTOR wins over a present session id when --by is absent", () => {
+    it("a present session id wins over a set $LORE_ACTOR (which is never read, BR-1055)", () => {
       const result = resolveActorWithSource(undefined, {
         LORE_ACTOR: "agent:x",
         CLAUDE_CODE_SESSION_ID: "abc",
       });
-      expect(result).toEqual({ actor: "agent:x", source: "env" });
+      expect(result).toEqual({ actor: "agent:session-abc", source: "session" });
     });
 
     it("session tier fires from CLAUDE_CODE_SESSION_ID when no --by and no $LORE_ACTOR (literal SPEC-069 AC example)", () => {
@@ -121,9 +121,12 @@ describe("SPEC-069 AC-069-1: resolveActorWithSource session tier", () => {
   });
 
   describe("BOUNDARY — whitespace-only values fall through exactly one tier", () => {
-    it("a whitespace-only --by falls through to $LORE_ACTOR", () => {
-      const result = resolveActorWithSource("   ", { LORE_ACTOR: "agent:carol" });
-      expect(result).toEqual({ actor: "agent:carol", source: "env" });
+    it("a whitespace-only --by falls through to the session tier, never to $LORE_ACTOR", () => {
+      const result = resolveActorWithSource("   ", {
+        LORE_ACTOR: "agent:carol",
+        CLAUDE_CODE_SESSION_ID: "deadbeef",
+      });
+      expect(result).toEqual({ actor: "agent:session-deadbeef", source: "session" });
     });
 
     it("a whitespace-only $LORE_ACTOR falls through to the session tier", () => {
