@@ -188,6 +188,14 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // subagent-stop-commit-guard.mjs — blocks a worktree subagent from terminating with unpersisted (uncommitted or unbranched) work.
   { file: "subagent-stop-commit-guard.mjs", runner: "node", event: "SubagentStop" },
 
+  // run-register.mjs — registers this session's / helper's run via `lore run register` (fail-open, loud) so a fresh install attributes its first write (BR-1044, spec-run-identity-slice-1 D1/D2).
+  { file: "run-register.mjs", runner: "node", event: "SessionStart" },
+  { file: "run-register.mjs", runner: "node", event: "SubagentStart" },
+
+  // pre-tool-harness-run.mjs — rewrites each lore call to carry `--harness-run <run>` (updatedInput only, never a permissionDecision — D12); covers raw Bash and every lore MCP tool.
+  { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
+  { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },
+
   // claude-md-guard.sh — CLAUDE.md two-zone admission check on Edit|Write (delegates the actual ceiling measurement to `lore status --check-claude-md`).
   { file: "claude-md-guard.sh", runner: "bash", event: "PostToolUse", matcher: "Edit|Write" },
 ] as const;

@@ -422,6 +422,9 @@ const DECLARED_FILES = [
   "hooks/lore-gate-g4-task-claim.sh",
   // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
   "hooks/claude-md-guard.sh",
+  // run-register + pre-tool-harness-run (run identity slice 1, BR-1044) — both in HOOK_REGISTRATIONS
+  "hooks/run-register.mjs",
+  "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
   // project (4 .sh gates + pre-push + tree.yaml template + verification-profile config template, SPEC-058 D6)
   "project/g1-spec-create.sh",
