@@ -68,9 +68,9 @@
  * reason. Reads its input from ITS OWN stdin (`CoverageCheckStdinPayload`, D8/D9's
  * doc below explains why stdin rather than flags), never touches the corpus/store,
  * and never routes through `assets/hooks/lib/turn-state.mjs` (D8 — that module's
- * `resolveSessionId()` reads an env var unset in this harness; a Stop hook and a
- * Bash-tool child resolve DIFFERENT ppids, so side-written state would be invisible
- * across them). Side-effect class: IO (stdin + the transcript file `readFileSync`)
+ * `resolveSessionId(payload)` needs a hook stdin payload, which a Bash-tool child
+ * does not have; the Stop hook's own payload arrives here via stdin instead).
+ * Side-effect class: IO (stdin + the transcript file `readFileSync`)
  * — otherwise pure; no store, no network, no wall-clock reads.
  *
  * Source: SPEC-041 §3 D6; spec-resume-ticket-coverage-a-shipped-upper-bound-left-the

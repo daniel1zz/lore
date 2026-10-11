@@ -109,7 +109,7 @@ import {
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync, spawn } from 'node:child_process';
-import { resolveSessionId } from './lib/turn-state.mjs';
+import { readHookPayload, resolveSessionId } from './lib/turn-state.mjs';
 
 // No longer read for a roster (removed 2026-07-17 — harness lists agents
 // natively); retained because Phase D derives <claude-dir> as its dirname,
@@ -151,9 +151,22 @@ function emit(additionalContext) {
 }
 
 // ── Clear stale autopilot lock ─────────────────────────────────────
-const sessionId = resolveSessionId();
-const lockFile = join(SESSION_STATE_BASE, 'sessions', sessionId, 'autopilot.lock');
-try { if (existsSync(lockFile)) rmSync(lockFile); } catch {}
+// Session id = the SessionStart stdin payload `session_id` (common input field,
+// https://code.claude.com/docs/en/hooks) — the same source every turn-state hook
+// uses. No usable id (empty/malformed stdin) is NOT guessed (no env/ppid
+// fallback, lore issue #156): the lock clear AND the GC below are skipped,
+// because without the current id the GC could not protect the live session dir.
+// Session start itself still proceeds (fail-open).
+let sessionId = null;
+try {
+  sessionId = resolveSessionId(readHookPayload());
+} catch (err) {
+  process.stderr.write(`[session-start-resume] session id not measured, autopilot-lock clear and GC skipped: ${err.message}\n`);
+}
+if (sessionId !== null) {
+  const lockFile = join(SESSION_STATE_BASE, 'sessions', sessionId, 'autopilot.lock');
+  try { if (existsSync(lockFile)) rmSync(lockFile); } catch {}
+}
 
 // ── GC: sweep session-state dirs idle > 14 days ────────────────────
 // Turn-state marks (read/edit jsonl + per-turn dirs) accumulate one dir per
@@ -162,7 +175,7 @@ try { if (existsSync(lockFile)) rmSync(lockFile); } catch {}
 // touching the CURRENT session's dir.
 try {
   const sessionsRoot = join(SESSION_STATE_BASE, 'sessions');
-  if (existsSync(sessionsRoot)) {
+  if (sessionId !== null && existsSync(sessionsRoot)) {
     const cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
     for (const name of readdirSync(sessionsRoot)) {
       if (name === sessionId) continue;

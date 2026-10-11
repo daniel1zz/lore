@@ -208,3 +208,103 @@ describe("AC5: missing or unreadable state is not-measured, not edited", () => {
     expect(readdirSync(base)).toEqual([]);
   });
 });
+
+// ── Other consumers of lib/turn-state.mjs (regression 2026-10-11: 40 tests turned red) ──────────
+
+import { existsSync, utimesSync } from "node:fs";
+import { sessionStartMarkerFilename } from "@lore/core";
+import { readSessionStartIso } from "../../../src/flows/feed-flow.js";
+
+describe("turn-state consumers migrated to the payload session id", () => {
+  const RESUME = "session-start-resume.mjs";
+  const GATE = "pre-subagent-gate.mjs";
+
+  function runResume(base: string, input: string) {
+    const r = spawnSync("node", [join(HOOKS, RESUME)], {
+      input,
+      cwd: base,
+      encoding: "utf8",
+      timeout: 20000,
+      env: { ...process.env, CLAUDE_STATE_BASE_OVERRIDE: base, CLAUDE_SESSION_ID: "env-decoy-session" },
+    });
+    return { code: r.status, stderr: r.stderr };
+  }
+
+  function seed(base: string) {
+    const live = join(base, "sessions", SID);
+    const stale = join(base, "sessions", "stale-session");
+    mkdirSync(live, { recursive: true });
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(join(live, "autopilot.lock"), "x");
+    const old = new Date(Date.now() - 20 * 24 * 3600 * 1000);
+    utimesSync(live, old, old); // even an old-looking current session must survive the GC
+    utimesSync(stale, old, old);
+    return { live, stale };
+  }
+
+  it("session-start-resume: payload id -> clears THAT session's lock, GC keeps it, sweeps the stale one", () => {
+    const base = stateBase();
+    const { live, stale } = seed(base);
+    const r = runResume(base, JSON.stringify({ session_id: SID, hook_event_name: "SessionStart", source: "startup" }));
+    expect(r.code).toBe(0);
+    expect(existsSync(join(live, "autopilot.lock"))).toBe(false);
+    expect(existsSync(live)).toBe(true);
+    expect(existsSync(stale)).toBe(false);
+  });
+
+  it("session-start-resume: no usable payload -> exit 0, nothing swept or cleared, one stderr line (never the env/ppid guess)", () => {
+    const base = stateBase();
+    const { live, stale } = seed(base);
+    const r = runResume(base, "");
+    expect(r.code).toBe(0);
+    expect(existsSync(join(live, "autopilot.lock"))).toBe(true);
+    expect(existsSync(stale)).toBe(true);
+    expect(r.stderr).toContain("not measured");
+  });
+
+  it("pre-subagent-gate: read-files.jsonl is found through the payload-derived turn dir", () => {
+    const base = stateBase();
+    startTurn(base);
+    const turnId = readFileSync(join(base, "sessions", SID, "current-turn.id"), "utf8").trim();
+    writeFileSync(join(base, "sessions", SID, turnId, "read-files.jsonl"), JSON.stringify({ file: "/x/a.ts" }) + "\n");
+    const gate = (file: string) =>
+      run(GATE, base, {
+        session_id: SID,
+        tool_name: "Edit",
+        tool_input: { file_path: file, old_string: "a", new_string: "b" },
+      });
+    expect(gate("/x/a.ts").stderr).toContain("exempt");
+    expect(gate("/x/other.ts").stderr).toContain("file not Read this turn");
+  });
+});
+
+describe("session-start marker: writer == reader (both resolve the session via CLAUDE_CODE_SESSION_ID)", () => {
+  // Docs (https://code.claude.com/docs/en/env-vars): CLAUDE_CODE_SESSION_ID is "Set automatically to the
+  // current session ID in Bash and PowerShell tool subprocesses, hook command subprocesses ... For Bash,
+  // PowerShell, and hooks this matches the `session_id` field in the hook JSON input" — so the hook-side
+  // writer and the CLI-side reader (`lore feed`, a Bash child) agree without sharing turn-state.mjs.
+  it("the marker the SessionStart hook writes is the one readSessionStartIso reads back", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "marker-pin-"));
+    cleanup.push(tmp);
+    const sid = `pin-${Math.random().toString(36).slice(2)}`;
+    const env: Record<string, string | undefined> = { ...process.env, TMPDIR: tmp, CLAUDE_CODE_SESSION_ID: sid };
+    delete env.CLAUDE_SESSION_ID;
+    const r = spawnSync("node", [join(HOOKS, "session-start-marker.mjs")], {
+      input: JSON.stringify({ session_id: sid, hook_event_name: "SessionStart" }),
+      env,
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(readdirSync(tmp)).toEqual([sessionStartMarkerFilename(sid)]);
+    const prevTmp = process.env.TMPDIR; // readSessionStartIso resolves os.tmpdir() from the live process env
+    process.env.TMPDIR = tmp;
+    let read: ReturnType<typeof readSessionStartIso>;
+    try {
+      read = readSessionStartIso({ CLAUDE_CODE_SESSION_ID: sid });
+    } finally {
+      if (prevTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = prevTmp;
+    }
+    expect(read.kind).toBe("measured");
+  });
+});
