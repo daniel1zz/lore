@@ -49,6 +49,7 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
+import { getInvocationIdentity } from "../invocation-identity.js";
 import { hasZeroReleaseEvidence, ZERO_EVIDENCE_RELEASE_WARNING } from "../../../service/task-workflow-service.js";
 
 export default defineCommand({
@@ -85,6 +86,8 @@ export default defineCommand({
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
       const releaseOpts = {
         by,
+        // reason: spec-run-identity-slice-1 D6/BR-1043 — see commands/claim.ts: the releasing run is explicit.
+        harnessRun: getInvocationIdentity()?.harnessRun ?? null,
         ...(typeof args.reason === "string" ? { reason: args.reason } : {}),
         force: args.force === true,
         source: app.callerSurface,

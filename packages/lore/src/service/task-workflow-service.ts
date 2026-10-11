@@ -316,7 +316,7 @@
 
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
-import { err, ok, type Result } from "@lore/core";
+import { err, ok, hasClaimConflict, type ClaimHolder, type ClaimParty, type RunId, type Result } from "@lore/core";
 import type { LoreError } from "@lore/core";
 import type { ActorSource } from "@lore/core/node";
 import {
@@ -403,6 +403,12 @@ import {
 export interface ClaimOpts {
   /** Resolved actor identity (CLI: --by > $LORE_ACTOR > OS username). */
   by: string;
+  /**
+   * The harness run the invoking agent integration vouched for (spec-run-identity-slice-1 D6, BR-1040),
+   * passed EXPLICITLY by the adapter — this service decides on identity, so it never reads ambient state.
+   * `null`/absent = unattested claimant (an adapter that does not thread a run yet claims unattested).
+   */
+  harnessRun?: RunId | null;
   /** Optional git branch where the work is happening (SPEC-025 non-goal: no worktree paths). */
   branch?: string;
   /**
@@ -455,6 +461,8 @@ export interface ClaimOpts {
 export interface ReleaseOpts {
   /** Resolved actor identity. */
   by: string;
+  /** See {@link ClaimOpts.harnessRun} — decides who may release without `force` (BR-1043) and is recorded in history. */
+  harnessRun?: RunId | null;
   /** Optional free-text reason (e.g. a failure summary), recorded in version history. */
   reason?: string;
   /** Release even when `by` is not the current holder. */
@@ -800,6 +808,46 @@ function readClaim(task: DocRecord): TaskClaim | undefined {
   if (raw === undefined || raw === null) return undefined;
   const parsed = taskClaimSchema.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * The stored lease as a {@link ClaimHolder} for core's `hasClaimConflict` (D6). `legacy` = the RAW stored claim
+ * has no `harness_run` KEY at all (written before runs existed, BR-1042) — read from the raw value because
+ * the parsed claim cannot tell an absent key from `null` (unattested).
+ *
+ * @param stale - Staleness the caller wants judged: claim paths pass the real staleness; release passes `false`
+ *   (a stale holder still releases by its own identity — staleness only unlocks TAKEOVER by a claim).
+ */
+export function buildClaimHolder(doc: DocRecord, claim: TaskClaim, stale: boolean): ClaimHolder {
+  const raw = doc.extra["claim"] as Record<string, unknown>;
+  const legacy = !Object.hasOwn(raw, "harness_run");
+  return { by: claim.by, harnessRun: (claim.harness_run ?? null) as RunId | null, legacy, stale };
+}
+
+/** The acting party of a claim/release: its name and the run it explicitly carries (null = unattested). */
+export function buildClaimParty(opts: { by: string; harnessRun?: RunId | null }): ClaimParty {
+  return { by: opts.by, harnessRun: opts.harnessRun ?? null };
+}
+
+/** `CLAIM_CONFLICT` naming the holder, the holding run (absent for a legacy claim) and the claim's age (BR-1040/BR-1043). */
+export function buildClaimConflictError(
+  docId: string,
+  claim: TaskClaim,
+  holder: ClaimHolder,
+  nowIso: string,
+): LoreError {
+  return {
+    code: "CLAIM_CONFLICT",
+    id: docId,
+    holder: claim.by,
+    age_minutes: ageMinutesBetween(nowIso, claim.at),
+    ...(holder.legacy ? {} : { holder_run: holder.harnessRun }),
+  };
+}
+
+/** History wording for the run on a claim/release: the run id, or `unattested`. */
+export function describeClaimRun(run: string | null | undefined): string {
+  return run ?? "unattested";
 }
 
 /**
@@ -2596,24 +2644,23 @@ export class TaskWorkflowService {
     if (!gateResult.ok) return gateResult;
 
     const existingClaim = readClaim(task);
+    const claimant = buildClaimParty(opts);
     let carryForward = false;
 
     if (existingClaim !== undefined) {
       const stale = isClaimStale(existingClaim, nowIso, this.claimTtlMinutes);
-      const sameHolder = existingClaim.by === opts.by;
-      if (!stale && !sameHolder && opts.steal !== true) {
-        return err({
-          code: "CLAIM_CONFLICT",
-          id: task.id,
-          holder: existingClaim.by,
-          age_minutes: ageMinutesBetween(nowIso, existingClaim.at),
-        });
+      // reason: spec-run-identity-slice-1 D6 / invariant I2 — the ONE conflict predicate lives in core
+      // (`hasClaimConflict`); both claim paths call it, never `existingClaim.by === opts.by`.
+      const holder = buildClaimHolder(task, existingClaim, stale);
+      const decision = hasClaimConflict(holder, claimant);
+      if (decision.kind === "conflict" && opts.steal !== true) {
+        return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
       }
       // reason: SPEC-042 D2 — carry-forward applies ONLY to a same-holder FRESH
       // refresh. A stale takeover (even by the SAME `by`) or a different holder
       // (first acquire, steal) starts fresh with no inherited branch/machine/
       // worktree — staleness deliberately breaks session continuity.
-      carryForward = !stale && sameHolder;
+      carryForward = decision.kind === "refresh";
     }
 
     // reason: AC-OWN-2 auto-capture (spec-multi-session-concurrency-queryable-
@@ -2652,15 +2699,23 @@ export class TaskWorkflowService {
         // §Opt-in). `buildTaskClaim` never carries it forward.
         ...(sessionId !== undefined ? { session_id: sessionId } : {}),
         ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
+        // reason: BR-1040/BR-1042 — a new claim ALWAYS stores the key (null when unattested); only a legacy
+        // claim lacks it, and a legacy claim is never written here without being replaced by this one.
+        harness_run: claimant.harnessRun,
       },
       carryForward,
     );
     const newExtra: Record<string, unknown> = { ...task.extra, claim: newClaim };
 
-    const summary =
-      existingClaim !== undefined && existingClaim.by !== opts.by
-        ? `Claimed by ${opts.by} (previous holder: ${existingClaim.by})`
-        : `Claimed by ${opts.by}`;
+    const previousHolderRun = existingClaim === undefined ? undefined : existingClaim.harness_run;
+    const takeoverNote =
+      existingClaim !== undefined &&
+      (existingClaim.by !== opts.by || (previousHolderRun !== undefined && (previousHolderRun ?? null) !== claimant.harnessRun))
+        ? ` (previous holder: ${existingClaim.by}${previousHolderRun === undefined ? "" : `, run ${describeClaimRun(previousHolderRun)}`}; claiming run ${describeClaimRun(claimant.harnessRun)})`
+        : claimant.harnessRun !== null
+          ? ` (run ${claimant.harnessRun})`
+          : "";
+    const summary = `Claimed by ${opts.by}${takeoverNote}`;
 
     // reason: issue #106 / BR-961 — the worktree HEAD at claim time is the "base" that defines a
     // task's OWN commits (branch commits beyond it). Recorded on the claim AUDIT row (which survives
@@ -2671,6 +2726,8 @@ export class TaskWorkflowService {
       by: opts.by,
       steal: opts.steal === true,
       ...(existingClaim !== undefined ? { previous_holder: existingClaim.by } : {}),
+      ...(previousHolderRun !== undefined ? { previous_run: previousHolderRun } : {}),
+      harness_run: claimant.harnessRun,
       ...(opts.worktree !== undefined ? { worktree: opts.worktree } : {}),
       ...(claimBase !== undefined && claimBase.ok ? { base_sha: claimBase.value } : {}),
     });
@@ -2861,14 +2918,14 @@ export class TaskWorkflowService {
     }
 
     const nowIso = now();
-    const isHolder = existingClaim.by === opts.by;
+    const releaser = buildClaimParty(opts);
+    // reason: BR-1043 — stale=false: a stale holder still releases by its own identity; staleness only
+    // unlocks takeover by a CLAIM. Only a `refresh` verdict (same run, or by-name for a legacy / fully
+    // unattested pair) is the holder.
+    const holder = buildClaimHolder(task, existingClaim, false);
+    const isHolder = hasClaimConflict(holder, releaser).kind === "refresh";
     if (!isHolder && opts.force !== true) {
-      return err({
-        code: "CLAIM_CONFLICT",
-        id: task.id,
-        holder: existingClaim.by,
-        age_minutes: ageMinutesBetween(nowIso, existingClaim.at),
-      });
+      return err(buildClaimConflictError(task.id, existingClaim, holder, nowIso));
     }
 
     // task-lore-evidence-and-lore-release-accept-an-attestation-from —
@@ -2884,14 +2941,20 @@ export class TaskWorkflowService {
     const newExtra: Record<string, unknown> = { ...task.extra };
     delete newExtra["claim"];
 
-    const forcedNote = !isHolder ? ` (forced, previous holder: ${existingClaim.by})` : "";
+    const heldRunNote = holder.legacy ? "" : `, run ${describeClaimRun(holder.harnessRun)}`;
+    const forcedNote = !isHolder
+      ? ` (forced, previous holder: ${existingClaim.by}${heldRunNote}; releasing run ${describeClaimRun(releaser.harnessRun)})`
+      : "";
+    const runNote = isHolder && releaser.harnessRun !== null ? ` (run ${releaser.harnessRun})` : "";
     const reasonNote = opts.reason !== undefined ? `: ${opts.reason}` : "";
-    const summary = `Released by ${opts.by}${forcedNote}${reasonNote}`;
+    const summary = `Released by ${opts.by}${runNote}${forcedNote}${reasonNote}`;
 
     const writeResult = await this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "release", {
       by: opts.by,
       force: opts.force === true,
       previous_holder: existingClaim.by,
+      ...(holder.legacy ? {} : { previous_run: holder.harnessRun }),
+      harness_run: releaser.harnessRun,
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
     });
 

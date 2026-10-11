@@ -721,6 +721,13 @@ export const taskClaimSchema = z.object({
    * Like `worktree`, NEVER carried forward on a refresh (see {@link buildTaskClaim}).
    */
   corpus_scope: z.string().min(1).optional(),
+  /**
+   * The harness run that took this lease (spec-run-identity-slice-1 D6, BR-1040/BR-1042). THREE states, all
+   * load-bearing: a run id = attested claim; `null` = a claim written after runs existed by an unattested
+   * caller; KEY ABSENT = a LEGACY claim written before runs existed, compared by `by` alone (BR-1042).
+   * Never carried forward on a refresh — the refreshing claimant's own run is recorded.
+   */
+  harness_run: z.string().nullable().optional(),
 });
 
 /** Derived TypeScript type for a task claim lease. */
@@ -737,6 +744,8 @@ export interface ClaimCaptureInput {
   session_id?: string;
   /** See {@link taskClaimSchema}'s `corpus_scope` — explicit-only, NEVER carried forward. */
   corpus_scope?: string;
+  /** See {@link taskClaimSchema}'s `harness_run` — `null` = unattested claimant; `undefined` = key not written. NEVER carried forward. */
+  harness_run?: string | null;
 }
 
 /**
@@ -827,6 +836,9 @@ export function buildTaskClaim(
     ...(worktree !== undefined ? { worktree } : {}),
     ...(sessionId !== undefined ? { session_id: sessionId } : {}),
     ...(corpusScope !== undefined ? { corpus_scope: corpusScope } : {}),
+    // reason: BR-1042 — `undefined` writes NO key (a caller that never resolved a run); `null` writes the
+    // key as null (unattested). Never `?? base?.harness_run`: a refresh records the REFRESHING run.
+    ...(input.harness_run !== undefined ? { harness_run: input.harness_run } : {}),
   };
 }
 

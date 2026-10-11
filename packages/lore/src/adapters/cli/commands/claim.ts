@@ -60,6 +60,7 @@ import type { ActorSource } from "@lore/core/node";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActorWithIdentitySource } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
+import { getInvocationIdentity } from "../invocation-identity.js";
 
 export default defineCommand({
   meta: {
@@ -110,6 +111,9 @@ export default defineCommand({
       const machine = typeof args.machine === "string" ? args.machine : hostname();
       const claimOpts = {
         by,
+        // reason: spec-run-identity-slice-1 D6 — the claimant's run is passed EXPLICITLY (services that decide on
+        // identity never read ambient state); `--harness-run` was stripped and resolved once at the CLI entry.
+        harnessRun: getInvocationIdentity()?.harnessRun ?? null,
         ...(typeof args.branch === "string" ? { branch: args.branch } : {}),
         machine,
         ...(typeof args.worktree === "string" ? { worktree: args.worktree } : {}),
