@@ -9,7 +9,7 @@
 
 import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
-import { exitCode, formatError, resolveActor, resolveActorAlias } from "../utils.js";
+import { exitCode, formatError, resolveActor } from "../utils.js";
 
 export default defineCommand({
   meta: {
@@ -26,16 +26,6 @@ export default defineCommand({
       type: "string",
       description: "Why the spec is being reopened (required; stored in the audit log and version history)",
     },
-    by: {
-      type: "string",
-      description:
-        "Reviewer identity performing the reopen - canonical flag name (SPEC-051 D2). " +
-        "--reviewer is an accepted alias. Defaults to $LORE_ACTOR env var, then OS username.",
-    },
-    reviewer: {
-      type: "string",
-      description: "Alias for --by.",
-    },
     json: {
       type: "boolean",
       description: "Output as JSON",
@@ -48,15 +38,7 @@ export default defineCommand({
     }
     const { app } = loadLoreApp();
     try {
-      const aliasResolution = resolveActorAlias(
-        typeof args.by === "string" ? args.by : undefined,
-        typeof args.reviewer === "string" ? args.reviewer : undefined,
-      );
-      if (!aliasResolution.ok) {
-        process.stderr.write(`Error: ${aliasResolution.error}\n`);
-        process.exit(2);
-      }
-      const reviewer = resolveActor(aliasResolution.value);
+      const reviewer = resolveActor();
 
       const result = await app.reviewService.reopen(args.id, args.reason, { reviewer });
       if (!result.ok) {
