@@ -442,7 +442,7 @@ function retractedTaskRefusal(task: DocRecord, validity: ValidityStatus): LoreEr
       `(${details}). A retracted task is work that was explicitly withdrawn, so there is ` +
       `no pack to serve and nothing to start. Read the document itself with ` +
       `\`lore get ${task.slug}\` — direct address always shows a retracted doc, by design. ` +
-      `If the retraction was itself wrong, \`lore invalidate ${task.slug} --undo --by <actor>\` ` +
+      `If the retraction was itself wrong, \`lore invalidate ${task.slug} --undo\` ` +
       `restores the task and this command with it.`,
     value: task.slug,
   };

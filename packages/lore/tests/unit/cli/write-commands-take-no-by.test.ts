@@ -63,6 +63,21 @@ async function collectCliLeaves(): Promise<CliLeaf[]> {
   return out;
 }
 
+interface McpToolSchema {
+  readonly shape?: Record<string, unknown>;
+  safeParse(input: unknown): { success: boolean; error?: { issues: Array<{ code: string; keys?: string[] }> } };
+}
+
+async function collectMcpToolSchemas(): Promise<Map<string, McpToolSchema>> {
+  const { registerTools } = await import("../../../src/adapters/mcp/tools.js");
+  const server = new McpServer({ name: "ac-roi-1", version: "0.0.0" });
+  registerTools(server, { callerSurface: "mcp" } as unknown as App);
+  const registered = (server as unknown as { _registeredTools: Record<string, { inputSchema?: McpToolSchema }> })._registeredTools;
+  const out = new Map<string, McpToolSchema>();
+  for (const [name, tool] of Object.entries(registered)) if (tool.inputSchema !== undefined) out.set(name, tool.inputSchema);
+  return out;
+}
+
 async function collectMcpToolShapes(): Promise<Map<string, readonly string[]>> {
   const { registerTools } = await import("../../../src/adapters/mcp/tools.js");
   const server = new McpServer({ name: "ac-roi-1", version: "0.0.0" });
@@ -109,6 +124,28 @@ describe("AC-ROI-1 write commands take no `by`", () => {
   it("AC-ROI-1: no MCP tool schema has a `reviewer` property", async () => {
     const shapes = await collectMcpToolShapes();
     expect([...shapes.entries()].filter(([, keys]) => keys.includes("reviewer")).map(([name]) => name)).toEqual([]);
+  });
+
+  it("AC-ROI-1: every registered MCP tool schema REFUSES an undeclared `by` loudly (strict), never strips it", async () => {
+    const schemas = await collectMcpToolSchemas();
+    const refusing: string[] = [];
+    const stripping: string[] = [];
+    const notAnObject: string[] = [];
+    for (const [name, schema] of schemas) {
+      if (MCP_ALLOWED.includes(name)) continue; // read-side filters declare `by` themselves
+      // reason: a refine-wrapped schema (ZodEffects) has no `.strict()`; the only one is the READ tool lore_rule_find,
+      // which never carried a `by` and attributes nothing. Pinned by equality below so a new one cannot hide.
+      if (schema.shape === undefined) {
+        notAnObject.push(name);
+        continue;
+      }
+      const result = schema.safeParse({ by: "agent:someone-else" });
+      const refused = result.error?.issues.some((i) => i.code === "unrecognized_keys" && i.keys?.includes("by")) === true;
+      (refused ? refusing : stripping).push(name);
+    }
+    expect(refusing.length).toBeGreaterThan(30);
+    expect(stripping).toEqual([]);
+    expect(notAnObject).toEqual(["lore_rule_find"]);
   });
 
   it("AC-ROI-1: the strict-flag seam rejects `--by` on a write command", async () => {
