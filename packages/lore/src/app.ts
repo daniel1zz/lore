@@ -48,7 +48,7 @@ import {
   AiConfigSchema,
 } from "@lore/core";
 import { err, ok, type Result, type LoreError } from "@lore/core";
-import type { CallerSurface, AiDefaultSource } from "@lore/core";
+import type { CallerSurface, AiDefaultSource, InvocationIdentity } from "@lore/core";
 import type { AiDefaultPerSurface } from "@lore/core";
 import { resolveAiDefault } from "./ai/resolve-ai.js";
 import { NoOpTelemetry, type Telemetry } from "@lore/core";
@@ -77,6 +77,8 @@ import { ImpactService } from "./service/impact-service.js";
 import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { RuleStateService } from "./service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
+import { RunService } from "./service/run-service.js";
+import { withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
 import { VerifyRunnerService } from "./service/verify-runner-service.js";
@@ -293,6 +295,12 @@ export interface App {
    * Source: SPEC-041 §3 D1, §9.1
    */
   sessionService?: SessionService;
+  /**
+   * RunService — register/look up harness runs (spec-run-identity-slice-1 D5). Built over the SAME store
+   * `createApp` selected (SQLite or Turso, D-007), never a second handle. Optional like `sessionService`
+   * so hand-built App test stubs stay valid; always present from `createApp`.
+   */
+  runService?: RunService;
   /**
    * ValidityService — the SOLE write path for `knowledge`/`adr` bi-temporal validity
    * metadata (`extra.validity`, `lore invalidate`). Store + own telemetry wiring, same
@@ -566,6 +574,19 @@ export interface App {
 }
 
 /**
+ * Write context a CLI entry hands to {@link createApp}: the invocation identity resolved ONCE
+ * (spec-run-identity-slice-1 D1) and the sink for the unregistered-run warning (default: stderr).
+ */
+export interface AppWriteContext {
+  readonly identity: InvocationIdentity;
+  readonly warn?: (line: string) => void;
+}
+
+function warnOnStderr(line: string): void {
+  process.stderr.write(`${line}\n`); // CLI surface
+}
+
+/**
  * Build an App backed by a SQLiteStore.
  * @param store - SQLiteStore instance
  * @param telemetry - Telemetry sink; defaults to NoOpTelemetry (no file I/O unless opted in)
@@ -777,6 +798,7 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store),
     taskWorkflowService,
     sessionService,
+    runService: new RunService(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
     // SPEC-043 §Design Decisions D2. 3rd arg wires the SPEC-044 D12 OPTIONAL calibration
@@ -1141,6 +1163,7 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store),
     taskWorkflowService,
     sessionService,
+    runService: new RunService(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
     // SPEC-043 §Design Decisions D2. 3rd arg wires the SPEC-044 D12 OPTIONAL calibration
@@ -1328,10 +1351,15 @@ function buildAppFromTurso(
  * D-007 invariant: with sync.enabled=true there is NO silent fallback to SQLiteStore.
  */
 export function createApp(dbPath: string): App;
-export function createApp(dbPath: string, config: LoreConfig | undefined): App | Result<App, LoreError>;
+export function createApp(
+  dbPath: string,
+  config: LoreConfig | undefined,
+  writeContext?: AppWriteContext,
+): App | Result<App, LoreError>;
 export function createApp(
   dbPath: string,
   config?: LoreConfig,
+  writeContext?: AppWriteContext,
 ): App | Result<App, LoreError> {
   // Resolve telemetry from config — defaults to NoOp when telemetry section is absent.
   // reason: AC-C3 — createApp default behavior MUST NOT produce file side effects.
@@ -1453,7 +1481,14 @@ export function createApp(
     config.sync === undefined ||
     !config.sync.enabled
   ) {
-    const sqliteStore = new SQLiteStore(dbPath);
+    // reason: spec-run-identity-slice-1 D3 — the ONE place a CLI invocation's identity meets the store: every
+    // service below receives the wrapped store, so no write path can skip the stamp. The Proxy forwards every
+    // member (`getDatabase`, `close`, trace methods) to the same SQLiteStore, hence the structural cast.
+    const baseSqliteStore = new SQLiteStore(dbPath);
+    const sqliteStore =
+      writeContext === undefined
+        ? baseSqliteStore
+        : (withVerifiedWriteContext(baseSqliteStore, writeContext.identity, writeContext.warn ?? warnOnStderr) as SQLiteStore);
     // reason: SPEC-102 — local-only mode has no separate replica file; trace
     // writes route through the SAME sqliteStore every other corpus write
     // uses. `undefined` when trace.enabled resolves false — every
@@ -1556,12 +1591,17 @@ export function createApp(
   // silently land only-local (D-005 EC item 5).
   const { url: remoteUrl, token: authToken } = credResult.value;
   try {
-    const store = new TursoStore({
+    const baseTursoStore = new TursoStore({
       localPath: dbPath,
       remoteUrl,
       authToken,
       syncInterval: config.sync.interval,
     });
+    // reason: same chokepoint as the SQLite branch (spec-run-identity-slice-1 D3); structural cast over a Proxy.
+    const store =
+      writeContext === undefined
+        ? baseTursoStore
+        : (withVerifiedWriteContext(baseTursoStore, writeContext.identity, writeContext.warn ?? warnOnStderr) as TursoStore);
     // reason: SPEC-102 D3 — trace writes in Turso mode go through a SEPARATE
     // local `bun:sqlite` handle on the SAME replica file `apiKeyDb`/
     // `sessionStore` already open (`buildAppFromTurso`'s identical

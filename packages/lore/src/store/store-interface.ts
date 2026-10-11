@@ -357,6 +357,12 @@ export interface RuleLeafPatch {
   expectedVersion: number;
   /** The leaf's NEW `extra` (already reflecting the removal / append). */
   extra: Record<string, unknown>;
+  /**
+   * Harness run stamped on the leaf's `action: "update"` version row (migration-016); absent/null =
+   * unattested. Set by `withWriteContext` — never by a service (the store builds this version row
+   * itself, so the decorator cannot reach it through a `VersionRecord` argument).
+   */
+  harness_run?: string | null;
 }
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -729,6 +735,8 @@ export interface StoreInterface {
    * @param actor - Recorded as `allocated_by` and the version row's `created_by`.
    * @param prefix - The id family (`BR` business leaf, `AS` architecture standard, `AD` debt registry);
    *   each family numbers from 1 independently (migration-015). Defaults to `BR`, the original family.
+   * @param harnessRun - Harness run stamped on the leaf's version row (migration-016); absent/null = unattested.
+   *   Supplied only by `withWriteContext`.
    * @returns `{ ruleId, doc }` (the updated leaf) or a loud error; never a duplicate id.
    */
   allocateRuleAndUpdateLeaf(
@@ -737,6 +745,7 @@ export interface StoreInterface {
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
     prefix?: RuleIdPrefix,
+    harnessRun?: string | null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
 
   /**

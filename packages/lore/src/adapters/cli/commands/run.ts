@@ -35,8 +35,7 @@ import {
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
-import { SQLiteStore } from "../../../store/sqlite-store.js";
-import { RunService } from "../../../service/run-service.js";
+import type { RunService } from "../../../service/run-service.js";
 import { runFragmentsRender } from "../../../flows/fragments-flow.js";
 import { buildFlowDeps } from "./fragments.js";
 
@@ -97,12 +96,13 @@ function renderRunText(run: RunRecord): string {
 }
 
 async function withRunService(body: (service: RunService) => Promise<void>): Promise<void> {
-  const { app, dbPath } = loadLoreApp();
-  const store = new SQLiteStore(dbPath);
+  // reason: RunService comes from the App so it sits on the store `createApp` selected (sync.enabled -> TursoStore,
+  // root CLAUDE.md D-007) rather than a private SQLiteStore handle that would bypass store selection.
+  const { app } = loadLoreApp();
   try {
-    await body(new RunService(store));
+    if (app.runService === undefined) throw new Error("App was built without a runService");
+    await body(app.runService);
   } finally {
-    store.close();
     app.close();
   }
 }

@@ -2546,8 +2546,8 @@ export class TursoStore implements StoreInterface {
     await tx.execute({
       sql: `INSERT INTO versions
              (doc_id, version, content, extra, status, title,
-              action, created_at, created_by, change_summary, slug)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              action, created_at, created_by, change_summary, slug, harness_run)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         updated.id,
         updated.version,
@@ -2560,6 +2560,7 @@ export class TursoStore implements StoreInterface {
         actor,
         null,
         updated.slug,
+        patch.harness_run ?? null,
       ] as InValue[],
     });
     return ok(updated);
@@ -2599,9 +2600,10 @@ export class TursoStore implements StoreInterface {
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
     prefix: RuleIdPrefix = "BR",
+    harnessRun: string | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     return this.serializeRuleWrite(() =>
-      this.allocateRuleAndUpdateLeafSerialized(leafId, expectedVersion, buildExtra, actor, prefix),
+      this.allocateRuleAndUpdateLeafSerialized(leafId, expectedVersion, buildExtra, actor, prefix, harnessRun),
     );
   }
 
@@ -2611,6 +2613,7 @@ export class TursoStore implements StoreInterface {
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
     prefix: RuleIdPrefix,
+    harnessRun: string | null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     let tx: Transaction;
     try {
@@ -2629,7 +2632,7 @@ export class TursoStore implements StoreInterface {
       const nowIso = new Date().toISOString();
       const leaf = await this.applyRuleLeafPatchTx(
         tx,
-        { id: leafId, expectedVersion, extra: buildExtra(ruleId) },
+        { id: leafId, expectedVersion, extra: buildExtra(ruleId), harness_run: harnessRun },
         actor,
         nowIso,
       );

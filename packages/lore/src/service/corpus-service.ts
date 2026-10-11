@@ -88,6 +88,7 @@ import { NoOpTelemetry, type Telemetry, type TelemetryEvent } from "@lore/core";
 import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
+import { readWriteContext } from "../store/write-context-store.js";
 import type { GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
@@ -257,10 +258,9 @@ export type CreateDocResult = DocRecord & { readonly orphan_advisory?: string };
  *   (`resolveActorWithSource`: `$LORE_ACTOR` → session tier → OS username).
  * - `attributeCreatedBy` — when `true`, the SAME resolved actor ALSO stamps
  *   `doc.created_by` (create only) and `versionRecord.created_by`
- *   (create/set/delete), instead of the historical literal `"system"` default
- *   SPEC-079 G2 deliberately left in place. Opt-in and additive: every
- *   pre-existing caller that omits it keeps the exact byte-for-byte `"system"`
- *   behavior regression-pinned by `audit-actor-fidelity.test.ts`. Wired ONLY
+ *   (create/set/delete). RETAINED but inert since spec-run-identity-slice-1 D1: every
+ *   write now stamps the resolved actor on `created_by`, so the flag no longer changes
+ *   anything (kept only so the HTTP adapter's call sites keep compiling). Formerly wired ONLY
  *   from the HTTP adapter's cookie-session write paths (`adr-dashboard-cookie-
  *   session-writes-attribute-author-via`) — a human using the dashboard on the
  *   SAME machine as `lore serve` (SPEC-016's local-bootstrap model) has an
@@ -911,8 +911,9 @@ export class CorpusService {
    * the SAME `--by`/`$LORE_ACTOR`/session-tier/OS-username precedence chain
    * the CLI's `resolveActor` already applies (`resolveActorWithSource`,
    * `@lore/core/node`), reused here so a service-layer write (through the
-   * CLI, MCP, or HTTP dashboard) is never silently attributed to the literal
-   * `"system"` when its caller doesn't (or can't) supply `opts.by`.
+   * CLI, MCP, or HTTP dashboard) is always attributed to a real name when its caller
+   * doesn't (or can't) supply `opts.by`: the name of the store's write context
+   * (`withWriteContext`, resolved once at the CLI entry) comes before the env chain.
    *
    * @param by - Explicit actor value threaded from the caller's `opts.by`
    *   (adapters resolve their own surface's actor identity and pass it
@@ -920,7 +921,8 @@ export class CorpusService {
    * @returns The resolved actor string — never empty.
    */
   private resolveWriteActor(by?: string): string {
-    return resolveActorWithSource(by, process.env).actor;
+    if (by !== undefined) return resolveActorWithSource(by, process.env).actor;
+    return readWriteContext(this.store)?.identity.claimed ?? resolveActorWithSource(undefined, process.env).actor;
   }
 
   // ── Resolve ──────────────────────────────────────────────────────────────
@@ -1669,12 +1671,9 @@ export class CorpusService {
       parent_id: resolvedParentId,
       created_at: now,
       updated_at: now,
-      // reason: literal "system" is the historical default (SPEC-079 G2 left it
-      // out of scope); `opts.attributeCreatedBy` (cookie-session HTTP writes
-      // only, see WriteActorOpts) opts into the SAME resolved actor already
-      // computed above for the audit entry — see `adr-dashboard-cookie-session-
-      // writes-attribute-author-via`.
-      created_by: opts?.attributeCreatedBy === true ? resolvedActor : "system",
+      // reason: the SAME resolved actor as the audit entry (spec-run-identity-slice-1 D1/D4) — one author
+      // per write, never the literal historical default.
+      created_by: resolvedActor,
       version: 1,
       deleted_at: null,
       tags: data.tags ?? [],
@@ -1715,10 +1714,8 @@ export class CorpusService {
     };
     const creationAudit: AuditEntry = {
       timestamp: now,
-      // SPEC-079 G2 — resolved actor (--by > $LORE_ACTOR > session tier > OS
-      // username), never the literal "system". `doc.created_by`/the versions
-      // row above are OUT of this spec's scope (unchanged, still "system") —
-      // see corpus-service.ts's SPEC-079 note at the top of this method.
+      // SPEC-079 G2 / spec-run-identity-slice-1 D1 — resolved actor (--by > write-context name >
+      // $LORE_ACTOR > session tier > OS username); `doc.created_by` and the versions row carry the SAME value.
       actor: resolvedActor,
       session_id: id,
       action: "create",
@@ -1759,7 +1756,7 @@ export class CorpusService {
     // writeProvenanceLink's JSDoc. The created doc is already durably persisted above;
     // this is metadata layered on top and must never turn a successful create into an
     // error.
-    await this.writeProvenanceLink(insertResult.value);
+    await this.writeProvenanceLink(insertResult.value, resolvedActor);
 
     // Create-time orphan advisory (task-create-time-orphan-advisory-warn-or-default-
     // parent-to-root). reason: skipped entirely for the internal handoff/uat bypass
@@ -1842,7 +1839,7 @@ export class CorpusService {
    *   method exists purely for its side effect and its own failure is not the
    *   caller's concern.
    */
-  private async writeProvenanceLink(newDoc: DocRecord): Promise<void> {
+  private async writeProvenanceLink(newDoc: DocRecord, actor: string): Promise<void> {
     try {
       const skillResult = await this.findFeedingSkill(newDoc.type);
       if (!skillResult.ok) {
@@ -1870,7 +1867,7 @@ export class CorpusService {
         to_id: newDoc.id,
         link_type: "governs",
         created_at: new Date().toISOString(),
-        created_by: "system",
+        created_by: actor,
       });
 
       if (!linkResult.ok && linkResult.error.code !== "DUPLICATE_LINK") {
@@ -2793,11 +2790,8 @@ export class CorpusService {
       title: docPatch.title ?? existing.title,
       action: "update",
       created_at: now,
-      // reason: literal "system" is the historical default (SPEC-079 G2 left it
-      // out of scope); `opts.attributeCreatedBy` (cookie-session HTTP writes
-      // only) opts into the resolved actor — see `adr-dashboard-cookie-session-
-      // writes-attribute-author-via`.
-      created_by: opts?.attributeCreatedBy === true ? resolvedActor : "system",
+      // reason: the SAME resolved actor as the audit entry (spec-run-identity-slice-1 D1/D4).
+      created_by: resolvedActor,
       // reason: SPEC-072 D1 — `slug` follows the EXACT same "state as of this
       // version" convention as content/extra/status/title above (docPatch's
       // new value when the patch changed it, else the unchanged existing
@@ -2853,7 +2847,7 @@ export class CorpusService {
       versionRecord,
       {
         timestamp: now,
-        // SPEC-079 G2 — resolved actor, never the literal "system".
+        // SPEC-079 G2 — the resolved actor.
         actor: resolvedActor,
         session_id: existing.id,
         action: "update",
@@ -3219,15 +3213,12 @@ export class CorpusService {
       title: "",
       action: "delete",
       created_at: now,
-      // reason: literal "system" is the historical default (SPEC-079 G2 left it
-      // out of scope); `opts.attributeCreatedBy` (cookie-session HTTP writes
-      // only) opts into the resolved actor — see `adr-dashboard-cookie-session-
-      // writes-attribute-author-via`.
-      created_by: opts?.attributeCreatedBy === true ? resolvedActor : "system",
+      // reason: the SAME resolved actor as the audit entry (spec-run-identity-slice-1 D1/D4).
+      created_by: resolvedActor,
     };
     const auditEntry: AuditEntry = {
       timestamp: now,
-      // SPEC-079 G2 — resolved actor, never the literal "system".
+      // SPEC-079 G2 — the resolved actor.
       actor: resolvedActor,
       session_id: id,
       action: "delete",
@@ -4458,8 +4449,7 @@ export class CorpusService {
    *   exactly ONE audit entry (`action: "link"`, `doc_id` = the FROM doc,
    *   `details: {to_id, link_type}`) — AUDIT-ONLY, no `versions` row (a link
    *   is not a doc-content snapshot). `linkRecord.created_by` carries the
-   *   SAME resolved actor (`opts.by` > env chain) rather than the literal
-   *   `"system"` (G2).
+   *   SAME resolved actor (`opts.by` > env chain) as the audit row (G2).
    */
   async link(
     fromIdOrSlug: string,

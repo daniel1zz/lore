@@ -11,6 +11,14 @@
  *     — including `extras.also_audit` —, `softDeleteWithProvenance`, `addLinkWithProvenance`,
  *     `setDocParentWithProvenance`). Stamping OVERWRITES any value the caller put on the record: the run
  *     comes from the carrier, never from a service building the row. A null `harnessRun` stamps NULL.
+ *   - The NAME SOURCE (D11, BR-1032) is stored on the audit row as `details.name_source`
+ *     (`flag|env|mcp|session|worktree|os`) — no schema change. It is stamped only when the row's `actor`
+ *     equals `ctx.identity.claimed`: a row written under a different actor (an explicit per-call name)
+ *     must not inherit a source that describes another name. Renders read it back from `details`.
+ *   - Rule-registry writes (`allocateRuleAndUpdateLeaf`, `moveRule`) build their version row INSIDE the
+ *     store, so the run is carried in as a parameter (`harnessRun` / `RuleLeafPatch.harness_run`).
+ *   - {@link readWriteContext} lets a service that must DECIDE an author when its caller gave none
+ *     (CorpusService, handoff) read the context of the store it was handed.
  *   - Everything else delegates untouched (reads, `insertRun`/`getRun`, rule-registry methods, lifecycle),
  *     with `this` bound to the underlying store. The underlying store is never mutated: an unwrapped
  *     store keeps stamping nothing.
@@ -22,7 +30,20 @@
  * Side-effect class: pure wrapper (no I/O of its own).
  */
 
-import type { AuditEntry, VersionRecord, WriteContext } from "@lore/core";
+import type { AuditEntry, InvocationIdentity, VersionRecord } from "@lore/core";
+
+/**
+ * What the decorator reads from a write context. Structurally satisfied by core's `WriteContext`
+ * (`harnessRun: RunId | null` is assignable to `string | null`); declared as plain strings so a caller holding a
+ * run id as an unbranded string (tests, MCP arguments) needs no cast.
+ */
+export interface StampingContext {
+  readonly identity: {
+    readonly harnessRun: string | null;
+    readonly claimed: string;
+    readonly claimedSource: string;
+  };
+}
 import type { StoreInterface } from "./store-interface.js";
 
 type Stamp = { harness_run: string | null };
@@ -33,6 +54,10 @@ interface StampedArgs {
   readonly audit?: number;
   /** Position of a `ProvenanceWriteExtras` whose `also_audit` entries are stamped too. */
   readonly extras?: number;
+  /** Positions of `RuleLeafPatch` arguments whose `harness_run` is stamped. */
+  readonly patches?: readonly number[];
+  /** Position of a trailing `harnessRun: string | null` parameter that receives the run. */
+  readonly harnessRunArg?: number;
 }
 
 const STAMPED: Readonly<Record<string, StampedArgs>> = {
@@ -44,16 +69,31 @@ const STAMPED: Readonly<Record<string, StampedArgs>> = {
   softDeleteWithProvenance: { version: 1, audit: 2 },
   addLinkWithProvenance: { audit: 1 },
   setDocParentWithProvenance: { audit: 2 },
+  allocateRuleAndUpdateLeaf: { harnessRunArg: 5 },
+  moveRule: { patches: [1, 2] },
 };
+
+/** Contexts of the stores {@link withWriteContext} returned (WeakMap: no change to `StoreInterface`). */
+const CONTEXT_BY_STORE = new WeakMap<object, StampingContext>();
+
+/** The {@link StampingContext} a store was wrapped with, or `undefined` for an unwrapped store. */
+export function readWriteContext(store: StoreInterface): StampingContext | undefined {
+  return CONTEXT_BY_STORE.get(store);
+}
 
 function stampRecord<T extends object>(record: T, stamp: Stamp): T {
   return { ...record, ...stamp };
 }
 
+function stampAudit(entry: AuditEntry, stamp: Stamp, ctx: StampingContext): AuditEntry {
+  const stamped = stampRecord(entry, stamp);
+  if (entry.actor !== ctx.identity.claimed) return stamped;
+  return { ...stamped, details: { ...entry.details, name_source: ctx.identity.claimedSource } };
+}
+
 /** Wrap `store` so every provenance write carries `ctx.identity.harnessRun`. */
-export function withWriteContext(store: StoreInterface, ctx: WriteContext): StoreInterface {
-  const stamp: Stamp = { harness_run: ctx.identity.harnessRun };
-  return new Proxy(store, {
+export function withWriteContext(store: StoreInterface, ctx: StampingContext): StoreInterface {
+  const wrapped: StoreInterface = new Proxy(store, {
     get(target, prop) {
       const value: unknown = Reflect.get(target, prop, target);
       if (typeof value !== "function") return value;
@@ -61,17 +101,76 @@ export function withWriteContext(store: StoreInterface, ctx: WriteContext): Stor
       const spec = typeof prop === "string" ? STAMPED[prop] : undefined;
       if (spec === undefined) return bound;
       return (...args: unknown[]) => {
+        // reason: read per call (not once at wrap time) so `withVerifiedWriteContext` can downgrade an unknown
+        // run to null after its one-time registry lookup without rebuilding the proxy.
+        const stamp: Stamp = { harness_run: ctx.identity.harnessRun };
         const next = [...args];
         if (spec.version !== undefined) next[spec.version] = stampRecord(args[spec.version] as VersionRecord, stamp);
-        if (spec.audit !== undefined) next[spec.audit] = stampRecord(args[spec.audit] as AuditEntry, stamp);
+        if (spec.audit !== undefined) next[spec.audit] = stampAudit(args[spec.audit] as AuditEntry, stamp, ctx);
         if (spec.extras !== undefined) {
           const extras = args[spec.extras] as { also_audit?: readonly AuditEntry[] } | undefined;
           if (extras?.also_audit !== undefined) {
-            next[spec.extras] = { ...extras, also_audit: extras.also_audit.map((a) => stampRecord(a, stamp)) };
+            next[spec.extras] = { ...extras, also_audit: extras.also_audit.map((a) => stampAudit(a, stamp, ctx)) };
           }
         }
+        for (const position of spec.patches ?? []) {
+          next[position] = stampRecord(args[position] as object, stamp);
+        }
+        if (spec.harnessRunArg !== undefined) next[spec.harnessRunArg] = stamp.harness_run;
         return bound(...next);
       };
     },
   });
+  CONTEXT_BY_STORE.set(wrapped, ctx);
+  return wrapped;
+}
+
+/** Sink for the one-per-write-context warning about an unregistered `--harness-run` id (CLI: stderr). */
+export type UnknownRunWarn = (line: string) => void;
+
+type RunCheck = { readonly ok: true } | { readonly ok: false; readonly error: unknown };
+
+/**
+ * {@link withWriteContext} plus the D7 run check: before the FIRST stamped write the claimed run is looked up
+ * with `store.getRun`; an id with no registered run is downgraded to unattested (`harness_run` NULL — never
+ * refused, never guessed) and ONE warning naming the id goes to `warn`. An identity with no run costs no
+ * lookup. The name and its source are kept either way. A failing lookup is returned as the write's own error
+ * (no silent downgrade). Non-stamped methods are not delayed.
+ */
+export function withVerifiedWriteContext(
+  store: StoreInterface,
+  identity: InvocationIdentity,
+  warn: UnknownRunWarn,
+): StoreInterface {
+  const live: { identity: InvocationIdentity } = { identity };
+  const inner = withWriteContext(store, live);
+  const claimedRun = identity.harnessRun;
+  if (claimedRun === null) return inner;
+  let verified: Promise<RunCheck> | undefined;
+  const verifyOnce = (): Promise<RunCheck> => {
+    verified ??= store.getRun(claimedRun).then((found): RunCheck => {
+      if (!found.ok) return { ok: false, error: found.error };
+      if (found.value === null) {
+        live.identity = { ...identity, harnessRun: null };
+        warn(
+          `warning: --harness-run ${claimedRun} is not a registered run; this write is recorded unattested (register it with \`lore run register\`)`,
+        );
+      }
+      return { ok: true };
+    });
+    return verified;
+  };
+  const outer: StoreInterface = new Proxy(inner, {
+    get(target, prop) {
+      const value: unknown = Reflect.get(target, prop, target);
+      if (typeof value !== "function" || typeof prop !== "string" || STAMPED[prop] === undefined) return value;
+      return async (...args: unknown[]) => {
+        const check = await verifyOnce();
+        if (!check.ok) return { ok: false, error: check.error };
+        return (value as (...a: unknown[]) => unknown)(...args);
+      };
+    },
+  });
+  CONTEXT_BY_STORE.set(outer, live);
+  return outer;
 }

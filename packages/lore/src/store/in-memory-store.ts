@@ -666,6 +666,7 @@ export class InMemoryStore implements StoreInterface {
       created_at: nowIso,
       created_by: actor,
       slug: updated.slug,
+      harness_run: patch.harness_run ?? null,
     });
     return ok(updated);
   }
@@ -677,6 +678,7 @@ export class InMemoryStore implements StoreInterface {
     buildExtra: (ruleId: string) => Record<string, unknown>,
     actor: string,
     prefix: RuleIdPrefix = "BR",
+    harnessRun: string | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     const nextN =
       this.ruleRegistry
@@ -689,7 +691,7 @@ export class InMemoryStore implements StoreInterface {
     let leaf: Result<DocRecord, LoreError>;
     try {
       leaf = this.applyRuleLeafPatchSync(
-        { id: leafId, expectedVersion, extra: buildExtra(ruleId) },
+        { id: leafId, expectedVersion, extra: buildExtra(ruleId), harness_run: harnessRun },
         actor,
         nowIso,
       );
