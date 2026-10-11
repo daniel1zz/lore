@@ -71,7 +71,7 @@ import {
   loadGlobalConfig,
   resolveGlobalConfigPath,
 } from "@lore/core/node";
-import { createApp, type App } from "../../app.js";
+import { createApp, createAppWithWriteContext, type App } from "../../app.js";
 import { findLoreDbPath, formatError, exitCode } from "./utils.js";
 import { getInvocationIdentity, replaceInvocationIdentity } from "./invocation-identity.js";
 import { resolveCorpus } from "./corpus-resolution.js";
@@ -400,10 +400,10 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
 
   // Strip sync section — reason: prevents createApp returning Result<App>.
   // Corpus-level commands never need TursoStore; they use local SQLiteStore + telemetry only.
-  let telemetryOnlyConfig: LoreConfig | undefined;
+  let telemetryOnlyConfig: (LoreConfig & { sync?: never }) | undefined;
   if (rawConfig !== undefined) {
     const { sync: _sync, ...configWithoutSync } = rawConfig;
-    telemetryOnlyConfig = configWithoutSync as LoreConfig;
+    telemetryOnlyConfig = configWithoutSync as LoreConfig & { sync?: never };
   }
 
   // ─── Global config + defaults merge ─────────────────────────────────────────
@@ -453,13 +453,13 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     // reason: the identity the CLI entry resolved (index.ts) wraps the store inside createApp
     // (spec-run-identity-slice-1 D3); undefined for MCP/HTTP/tests, which never set one.
     const invocationIdentity = getInvocationIdentity();
-    appOrResult = createApp(
-      dbPath,
-      telemetryOnlyConfig,
+    appOrResult =
       invocationIdentity === undefined
-        ? undefined
-        : { identity: invocationIdentity, onVerified: replaceInvocationIdentity },
-    );
+        ? createApp(dbPath, telemetryOnlyConfig)
+        : createAppWithWriteContext(dbPath, telemetryOnlyConfig, {
+            identity: invocationIdentity,
+            onVerified: replaceInvocationIdentity,
+          });
   } catch (thrown) {
     const message = thrown instanceof Error ? thrown.message : String(thrown);
     console.error(`Error: Storage failure: ${message}`); // CLI surface

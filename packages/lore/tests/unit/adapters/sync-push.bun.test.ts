@@ -55,6 +55,7 @@ import { MIGRATION_012_SQL } from "../../../src/store/migrations/migration-012.j
 import { MIGRATION_013_SQL } from "../../../src/store/migrations/migration-013.js";
 import { MIGRATION_014_SQL } from "../../../src/store/migrations/migration-014.js";
 import { MIGRATION_015_SQL } from "../../../src/store/migrations/migration-015.js";
+import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "../../../src/store/migrations/migration-016.js";
 import { computeFtsShadowValues, computeAuditEntryHash } from "../../../src/store/store-shared.js";
 
 // ─── Fixture Helpers ─────────────────────────────────────────────────────────
@@ -239,6 +240,16 @@ async function applyMigrationsToClient(client: Client, localStore: SQLiteStore):
   // for the user_version parity guard below.
   await client.executeMultiple(MIGRATION_014_SQL);
   await client.executeMultiple(MIGRATION_015_SQL);
+
+  // migration-016 (spec-run-identity-slice-1: `runs` table + nullable `harness_run`
+  // columns on audit/versions) is TWO-PHASE like turso-store.ts's own chain: add each
+  // column only where `PRAGMA table_info` lacks it (no ADD COLUMN IF NOT EXISTS), then
+  // one BEGIN/COMMIT string creates `runs` and bumps user_version. Mirrored for the parity guard.
+  for (const { table, column, ddl } of MIGRATION_016_ADD_COLUMNS) {
+    const info = await client.execute(`PRAGMA table_info(${table})`);
+    if (!info.rows.some((r) => String(r["name"]) === column)) await client.execute(ddl);
+  }
+  await client.executeMultiple(MIGRATION_016_SQL);
 
   // ─── Parity guard ────────────────────────────────────────────────────────
   // Assert the remote fixture's PRAGMA user_version matches the REAL

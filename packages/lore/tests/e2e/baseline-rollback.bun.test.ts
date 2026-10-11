@@ -69,7 +69,7 @@ interface Capture {
 function runLore(args: string[], cwd: string): RunResult {
   const proc = Bun.spawnSync([LORE_BIN, ...args], {
     cwd,
-    env: { ...process.env, HOME: cwd, CLAUDECODE: "1", LORE_ACTOR: "agent:baseline-rollback-e2e" },
+    env: { ...process.env, HOME: cwd, CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "baseline-rollback-e2e-session" },
   });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }

@@ -1391,6 +1391,27 @@ export function createApp(
   return built;
 }
 
+/**
+ * Builds the App for ONE write context over a config that provably carries no `sync` section.
+ *
+ * reason: the CLI loader hands the invocation identity to the store chokepoint at construction
+ * (spec-run-identity-slice-1 D3). `createApp`'s Turso branch falls back to a synchronous `createRequire`
+ * that throws from the compiled binary (libsql-lazy-load AC-LL-10), so a `createApp` call site must stay
+ * one- or two-argument with a sync-stripped config. This entry point carries the third argument under a
+ * type that forbids `sync`: a sync-bearing config no longer type-checks, so the Turso branch is
+ * unreachable by construction rather than by scan.
+ *
+ * @param config - Config with `sync` forbidden (`sync?: never`); `undefined` for a corpus without config.
+ * @returns the App, or the Result error arm `createApp` keeps for an unknown `ai.provider`.
+ */
+export function createAppWithWriteContext(
+  dbPath: string,
+  config: (LoreConfig & { sync?: never }) | undefined,
+  writeContext: AppWriteContext,
+): App | Result<App, LoreError> {
+  return createApp(dbPath, config, writeContext);
+}
+
 function createAppUnscoped(
   dbPath: string,
   config?: LoreConfig,
