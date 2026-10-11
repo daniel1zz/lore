@@ -11,6 +11,7 @@
  * Side-effect class: IO edge (spawns processes, writes only under the mkdtemp root). Step logic lives in
  * scripts/lib/fresh-install-probe-steps.ts.
  */
+import { Database } from "bun:sqlite";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -186,9 +187,17 @@ function firstWriteAttested(bin: string, root: string, project: string, claudeHo
   const claim = spawnSync("sh", ["-c", rewritten], { cwd: project, env: hookEnv, encoding: "utf8", timeout: STEP_TIMEOUT_MS });
   if (claim.status !== 0) return { exit: claim.status ?? "-", verdict: { pass: false, reason: `rewritten claim exited ${String(claim.status)}: ${(claim.stderr ?? "").slice(0, 160)}` } };
 
-  const log = runBin(bin, ["log", slug, "--json"], project, env);
+  // No CLI surface renders harness_run yet (`lore log --json` carries only created_by), so read the claim's audit row from the
+  // probe corpus directly: the attestation is the stored audit.harness_run column, not a rendered string.
   const run = `cc:${FIXTURE_SESSION}`;
-  if (!log.stdout.includes(run)) return { exit: log.exitCode, verdict: { pass: false, reason: `claim audit row does not carry ${run}` } };
+  const db = new Database(join(project, ".lore", "lore.db"), { readonly: true });
+  let claimRuns: (string | null)[];
+  try {
+    claimRuns = (db.query("SELECT harness_run FROM audit WHERE action = 'claim'").all() as { harness_run: string | null }[]).map((r) => r.harness_run);
+  } finally {
+    db.close();
+  }
+  if (!claimRuns.includes(run)) return { exit: 0, verdict: { pass: false, reason: `claim audit row does not carry ${run} (claim rows: ${JSON.stringify(claimRuns)})` } };
   return { exit: 0, verdict: { pass: true, reason: `hooks registered; claim of ${slug} attributed to ${run}` } };
 }
 

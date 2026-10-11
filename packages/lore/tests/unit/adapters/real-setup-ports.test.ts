@@ -408,6 +408,9 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/lore-gate-g4-task-claim.sh",
   // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
   "hooks/claude-md-guard.sh",
+  // run-register + pre-tool-harness-run (run identity slice 1, BR-1044)
+  "hooks/run-register.mjs",
+  "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
   // governance/corpus-workflow.md AND governance/seat-briefing.md are
   // DELIBERATELY ABSENT here (SPEC-083 D3, extended by SPEC-085 D3): both
