@@ -64,7 +64,7 @@ import {
   type RuleLifecycle,
 } from "@lore/core";
 import type { CreateDocInput } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
+import { resolveWriteActorFor } from "../store/write-context-store.js";
 import type { StoreInterface } from "../store/store-interface.js";
 import { NON_BUSINESS_PREFIX } from "./leaf-coverage.js";
 import { resolveDoc } from "./resolve.js";
@@ -717,7 +717,7 @@ export class RuleService {
   // ── private helpers ────────────────────────────────────────────────────────
 
   private resolveActor(by?: string): string {
-    return resolveActorWithSource(by, process.env).actor;
+    return resolveWriteActorFor(this.store, by);
   }
 
   /** Resolve id|slug to a live baseline doc, optionally restricted to node kind(s). */

@@ -21,7 +21,7 @@ import type { DocType, DocId, DocRecord, DocStatus } from "@lore/core";
 import { err, ok, type LoreError, type Result } from "@lore/core";
 import { isParentlessType, isValidParentType, ROOT_TYPES } from "@lore/core";
 import { ancestorChainWalk } from "@lore/core";
-import { resolveActorWithSource } from "@lore/core/node";
+import { resolveWriteActorFor } from "../store/write-context-store.js";
 
 // ─── Public Types ──────────────────────────────────────────────────────────
 
@@ -266,7 +266,7 @@ export class TreeCheckService {
 
     // SPEC-079 G2 — resolved once for the whole run, reused for every
     // applied repair's audit entry below.
-    const resolvedActor = resolveActorWithSource(opts?.by, process.env).actor;
+    const resolvedActor = resolveWriteActorFor(this.store, opts?.by);
 
     for (const drift of fixableDrifts) {
       const doc = drift.actual!;
