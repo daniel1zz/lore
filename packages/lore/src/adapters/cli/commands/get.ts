@@ -87,6 +87,13 @@ import { exitCode, formatError, formatNavigation, formatShortId } from "../utils
 import { projectValidityStatus } from "../../../service/validity-service.js";
 import type { ResolvedComponent } from "../../../service/outline-service.js";
 import { renderDocBodyWithoutLossNotice } from "../../../flows/feed-flow.js";
+import { SQLiteStore } from "../../../store/sqlite-store.js";
+import {
+  UNATTESTED,
+  formatAttributionLabels,
+  loadVersionAttributions,
+  type WriteAttribution,
+} from "../../../service/attribution-report.js";
 import { composeWithStructuredExtraNotice, type RenderedBodyFacts } from "../get-render.js";
 
 /**
@@ -134,7 +141,10 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { app } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp();
+    // reason: `App` does not expose its store; the attribution read (BR-1037) is a read-only projection over the
+    // same file — the second-handle pattern `lore status` already uses.
+    const attributionStore = new SQLiteStore(dbPath);
     try {
       const result = await app.corpusService.get(args.id);
 
@@ -177,6 +187,17 @@ export default defineCommand({
         displayBody = await renderDocBodyWithoutLossNotice(app, doc);
       }
 
+      // BR-1037 — the LATEST write's attested run and claimed name (source included), from the SAME
+      // projection `lore log` renders, so one write reads identically on both surfaces. A doc with no version
+      // row has no attested write: it reads `unattested` with its stored author.
+      const latest = await loadVersionAttributions(attributionStore, doc.id, 1);
+      if (!latest.ok) {
+        process.stderr.write(formatError(latest.error) + "\n");
+        process.exitCode = exitCode(latest.error);
+        return;
+      }
+      const attribution: WriteAttribution = latest.value[0]?.attribution ?? { attested: UNATTESTED, claimed: doc.created_by };
+
       // BR-1008 — Implements (spec) / Implemented by (baseline node), computed from citations on demand.
       const relations = await loadSpecRelations(app, doc);
       if (!relations.ok) {
@@ -191,8 +212,8 @@ export default defineCommand({
         // change it (see placement rule 2 in this file's header).
         const validityStatus = projectValidityStatus(doc, new Date().toISOString());
         const data = resolvedComponents !== undefined
-          ? { ...result.value, validity_status: validityStatus, ...relations.value.json, resolved_components: resolvedComponents }
-          : { ...result.value, validity_status: validityStatus, ...relations.value.json };
+          ? { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json, resolved_components: resolvedComponents }
+          : { ...result.value, validity_status: validityStatus, attribution, ...relations.value.json };
         console.log(JSON.stringify({ ok: true, data }, null, 2));
         return;
       }
@@ -206,6 +227,7 @@ export default defineCommand({
       console.log(
         `Created: ${doc.created_at.slice(0, 10)} by ${doc.created_by} | Updated: ${doc.updated_at.slice(0, 10)}`,
       );
+      console.log(`Last write: ${formatAttributionLabels(attribution)}`);
       if (doc.tags.length > 0) {
         console.log(`Tags: ${doc.tags.join(", ")}`);
       }
@@ -230,6 +252,7 @@ export default defineCommand({
       }
       console.log(formatNavigation(navigation));
     } finally {
+      attributionStore.close();
       app.close();
     }
   },

@@ -6,6 +6,9 @@ import { defineCommand } from "citty";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, formatTable, parsePositiveIntArg } from "../utils.js";
 import type { DocId } from "@lore/core";
+import { SQLiteStore } from "../../../store/sqlite-store.js";
+import { resolveDocId } from "../../../service/resolve.js";
+import { formatAttributionLabels, loadVersionAttributions, type WriteAttribution } from "../../../service/attribution-report.js";
 
 export default defineCommand({
   meta: {
@@ -29,7 +32,10 @@ export default defineCommand({
     },
   },
   async run({ args }) {
-    const { app } = loadLoreApp();
+    const { app, dbPath } = loadLoreApp();
+    // reason: `App` does not expose its store; attribution (BR-1037) is a read-only projection over the same
+    // file, the same second-handle pattern `lore status` uses.
+    const attributionStore = new SQLiteStore(dbPath);
     try {
       // BUG-007 audit: an unvalidated NaN --limit reaches the store's `LIMIT ?`
       // bind and throws a bare bun:sqlite "datatype mismatch" — validate first.
@@ -47,7 +53,25 @@ export default defineCommand({
         return;
       }
 
-      const entries = result.value;
+      const resolved = await resolveDocId(attributionStore, args.id);
+      if (!resolved.ok) {
+        process.stderr.write(formatError(resolved.error) + "\n");
+        process.exitCode = exitCode(resolved.error);
+        return;
+      }
+      const loaded = await loadVersionAttributions(attributionStore, resolved.value, limitResult.value);
+      if (!loaded.ok) {
+        process.stderr.write(formatError(loaded.error) + "\n");
+        process.exitCode = exitCode(loaded.error);
+        return;
+      }
+      const attributionByVersion = new Map<number, WriteAttribution>(loaded.value.map((l) => [l.version.version, l.attribution]));
+      const attributionOf = (version: number): WriteAttribution => {
+        const a = attributionByVersion.get(version);
+        if (a === undefined) throw new Error(`no attribution loaded for version ${version}`);
+        return a;
+      };
+      const entries = result.value.map((e) => ({ ...e, ...attributionOf(e.version) }));
 
       if (args.json) {
         console.log(JSON.stringify({ ok: true, data: { entries, total: entries.length } }, null, 2));
@@ -61,7 +85,7 @@ export default defineCommand({
 
       // SPEC-072 D3 — Slug column renders the value when present; a legacy
       // row with no slug renders an empty cell, never an "unknown" placeholder.
-      const headers = ["Version", "Action", "Author", "Timestamp", "Slug", "Summary"];
+      const headers = ["Version", "Action", "Author", "Timestamp", "Slug", "Summary", "Attribution"];
       const rows = entries.map((e) => [
         `v${e.version}`,
         e.action,
@@ -69,11 +93,13 @@ export default defineCommand({
         e.created_at.slice(0, 19).replace("T", " "),
         e.slug ?? "",
         (e.change_summary ?? "").slice(0, 30),
+        formatAttributionLabels(e),
       ]);
 
       console.log(`Version history for ${args.id}:`);
       console.log(formatTable(headers, rows));
     } finally {
+      attributionStore.close();
       app.close();
     }
   },

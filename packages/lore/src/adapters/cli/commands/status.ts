@@ -208,6 +208,7 @@ import { resolveCiteGateRaw } from "@lore/core";
 import { resolveCiteGateFor } from "../../../service/ac-write-chokepoint.js";
 import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
 import { decideAcCiteStatus, ENFORCE_REFUSES_NOTHING_WARNING, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
+import { AttributionReport, type AttributionShare } from "../../../service/attribution-report.js";
 import type { AcCiteStatus } from "../../../service/ac-cite-status.js";
 import { discoverMemoryFiles } from "../../real-memory-file-probe.js";
 import { runMemoryFileChecks } from "../../../service/claude-md-admission.js";
@@ -220,7 +221,10 @@ import {
 } from "../claude-md-render.js";
 
 /** All CallerSurface values in a stable display order. */
-const ALL_SURFACES: ReadonlyArray<CallerSurface> = [
+/** BR-1039 — the stated period of the attribution share, in days ending now. */
+const ATTRIBUTION_WINDOW_DAYS = 14;
+
+const ALL_SURFACES:ReadonlyArray<CallerSurface> = [
   "cli",
   "agent",
   "mcp",
@@ -1790,6 +1794,7 @@ export default defineCommand({
       // AC-BLS2-11: `ac_cite` is emitted only with baseline docs or a stored gate mode (a corpus with
       // neither prints exactly what slice 1 printed), so it stays null when neither holds.
       let acCiteStatus: AcCiteStatus | null = null;
+      let attributionShare: AttributionShare;
       let specCitationCensus: SpecCitationCensus | null = null;
       try {
         const repoRoot = resolveGitRoot(process.cwd());
@@ -1807,6 +1812,15 @@ export default defineCommand({
 
         // baseline slice 3b BR-1011 (AC-BLS3B-3) — the spec citation census, emitted only when the corpus has baseline
         // docs (AC-BLS2-11: a corpus without them prints exactly what it printed before).
+        // BR-1039 — claims, evidence and handoffs of the last ATTRIBUTION_WINDOW_DAYS days and how many carry an attested run.
+        const shareResult = await new AttributionReport(baselineStore).share(ATTRIBUTION_WINDOW_DAYS, () => new Date());
+        if (!shareResult.ok) {
+          process.stderr.write(formatError(shareResult.error) + "\n");
+          process.exitCode = exitCode(shareResult.error);
+          return;
+        }
+        attributionShare = shareResult.value;
+
         const censusBaseline = await baselineStore.findMany({ type: "baseline" });
         if (!censusBaseline.ok) {
           process.stderr.write(formatError(censusBaseline.error) + "\n");
@@ -1874,6 +1888,7 @@ export default defineCommand({
                 // `invalid_docs`) — an omitted key would let a consumer read
                 // "absent" as "this binary is fine".
                 binary_provenance: provenanceOrNull(embeddedProvenance),
+                harness_run_attribution: attributionShare,
                 ...(baselineStatus !== null ? { baseline: baselineStatus } : {}),
                 ...(acCiteStatus !== null ? { ac_cite: acCiteStatus } : {}),
                 ...(specCitationCensus !== null ? specCitationCensus : {}),
@@ -1999,6 +2014,12 @@ export default defineCommand({
       // "never a silent count" discipline as `Retracted:` above: not knowing
       // which binary issued this report is itself the fact worth printing.
       console.log(formatBinaryProvenanceStatusLine(embeddedProvenance));
+
+      // BR-1039 — printed UNCONDITIONALLY (including 0 of 0), same "never a silent count" discipline as above.
+      console.log(
+        `Attribution (last ${attributionShare.window_days} days): ${attributionShare.attested} of ${attributionShare.total} ` +
+          `claims/evidence/handoffs carry an attested run (share ${attributionShare.share})`,
+      );
 
       // BR-670 / AC-FIP-4 — rule totals over BOTH trees, one line, only when the baseline block exists
       // (a corpus without baseline docs prints byte-identical output). AD debt entries are named apart.
