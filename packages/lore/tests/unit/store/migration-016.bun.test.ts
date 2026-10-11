@@ -229,7 +229,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     const raw = new Database(path);
     const before = rowsWithoutHarnessRun(raw, "audit", "id");
     raw.close();
-    expect(before.length).toBe(4); // 3 creates/sets seeded above + guard against an empty comparison
+    expect(before.length).toBe(3); // 2 creates + 1 set seeded above; guards against an empty comparison
 
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
