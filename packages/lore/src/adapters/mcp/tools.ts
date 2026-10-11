@@ -574,7 +574,6 @@ export const LoreReopenSchema = z.object({
   harness_run: HARNESS_RUN_FIELD,
   id_or_slug: z.string(),
   reason: z.string(),
-  reviewer: z.string().optional(),
 });
 
 /** Input schema for lore_context_bundle. */
@@ -2021,9 +2020,8 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
     "Reopen an approved spec that has no evidence yet, moving it back to draft so it can be edited (refused when any task holds evidence for it)",
     LoreReopenSchema,
     async (args) => {
-      // reason: exactOptionalPropertyTypes - only pass reviewer when defined
-      const opts = args.reviewer !== undefined ? { reviewer: args.reviewer } : {};
-      const result = await reviewService.reopen(args.id_or_slug, args.reason, opts);
+      // reason: the reviewer is the call's own identity (no `reviewer`/`by` argument, AC-ROI-1).
+      const result = await reviewService.reopen(args.id_or_slug, args.reason, { reviewer: args.by });
       if (!result.ok) return errorContent(result.error);
       return textContent({ doc: result.value });
     },
