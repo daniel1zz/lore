@@ -12,7 +12,7 @@
  * scripts/lib/fresh-install-probe-steps.ts.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import yaml from "yaml";
@@ -85,6 +85,113 @@ function collectInstalledFiles(project: string, claudeHome: string): ScannedFile
   return files;
 }
 
+// ── first-write-attested (AC-RID-16; BR-1044) ───────────────────────────────────
+
+const FIXTURE_SESSION = "probe-session-0001";
+const FIRST_WRITE_STEP = "first-write-attested";
+/** The spec writes the MCP matcher two ways (`mcp__lore__*` vs `mcp__.*lore_.*`); this asserts the regex form, the form every
+ *  existing lore gate hook already registers in HOOK_REGISTRATIONS (spec open item S4). */
+const MCP_MATCHER = "mcp__.*lore_.*";
+
+interface HookEntry {
+  readonly matcher: string | undefined;
+  readonly command: string;
+}
+
+function hookEntries(settings: unknown, event: string): HookEntry[] {
+  const hooks = (settings as { hooks?: Record<string, unknown> } | null)?.hooks;
+  const groups = hooks?.[event];
+  if (!Array.isArray(groups)) return [];
+  const out: HookEntry[] = [];
+  for (const g of groups as { matcher?: string; hooks?: { command?: string }[] }[]) {
+    for (const h of g.hooks ?? []) if (typeof h.command === "string") out.push({ matcher: g.matcher, command: h.command });
+  }
+  return out;
+}
+
+function findString(value: unknown, key: string): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec[key] === "string") return rec[key] as string;
+  for (const v of Object.values(rec)) {
+    const found = findString(v, key);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function runHook(command: string, payload: unknown, project: string, env: NodeJS.ProcessEnv) {
+  const res = spawnSync("sh", ["-c", command], {
+    cwd: project,
+    env: { ...env, CLAUDE_PROJECT_DIR: project },
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+    timeout: STEP_TIMEOUT_MS,
+  });
+  return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+}
+
+function firstWriteAttested(bin: string, root: string, project: string, claudeHome: string, env: NodeJS.ProcessEnv): { exit: number | "-"; verdict: StepVerdict } {
+  // `lore setup --claude-dir` registers the hooks in <claude-dir>/settings.json (SPEC-046), not in the project.
+  const settingsPath = join(claudeHome, "settings.json");
+  if (!existsSync(settingsPath)) return { exit: "-", verdict: { pass: false, reason: `${settingsPath} missing after lore setup --claude-dir` } };
+  const settings: unknown = JSON.parse(readFileSync(settingsPath, "utf8"));
+
+  const missing: string[] = [];
+  const find = (event: string, script: string, matcher: string | undefined): HookEntry | undefined => {
+    const hit = hookEntries(settings, event).find((e) => e.command.includes(script) && (matcher === undefined || e.matcher === matcher));
+    if (hit === undefined) missing.push(`${event}${matcher === undefined ? "" : `[${matcher}]`} -> ${script}`);
+    return hit;
+  };
+  const sessionStart = find("SessionStart", "run-register.mjs", undefined);
+  find("SubagentStart", "run-register.mjs", undefined);
+  const preBash = find("PreToolUse", "pre-tool-harness-run.mjs", "Bash");
+  find("PreToolUse", "pre-tool-harness-run.mjs", MCP_MATCHER);
+  if (missing.length > 0 || sessionStart === undefined || preBash === undefined) {
+    return { exit: "-", verdict: { pass: false, reason: `installed settings lack hook registration(s): ${missing.join("; ")}` } };
+  }
+
+  // `lore` on PATH inside the hooks must be the probe's binary, never an installed one.
+  const shimDir = join(root, "bin");
+  mkdirSync(shimDir, { recursive: true });
+  symlinkSync(bin, join(shimDir, "lore"));
+  const hookEnv: NodeJS.ProcessEnv = { ...env, PATH: `${shimDir}:${env["PATH"] ?? ""}` };
+  delete hookEnv["LORE_ACTOR"];
+
+  const reg = runHook(sessionStart.command, { session_id: FIXTURE_SESSION, cwd: project, hook_event_name: "SessionStart", source: "startup" }, project, hookEnv);
+  if (reg.status !== 0) return { exit: reg.status ?? "-", verdict: { pass: false, reason: `run-register hook exited ${String(reg.status)}: ${reg.stderr.slice(0, 160)}` } };
+
+  const created = runBin(bin, ["create", "task", "--adhoc", "--ac-scope", "", "--title", "First Write Probe Task", "--json"], project, env);
+  if (created.exitCode !== 0) return { exit: created.exitCode, verdict: { pass: false, reason: `create task failed: ${created.stderr.slice(0, 160)}` } };
+  const slug = findString(JSON.parse(created.stdout), "slug");
+  if (slug === undefined) return { exit: 0, verdict: { pass: false, reason: "create task --json carried no slug" } };
+
+  const pre = runHook(
+    preBash.command,
+    { session_id: FIXTURE_SESSION, cwd: project, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: `lore claim ${slug}` } },
+    project,
+    hookEnv,
+  );
+  if (pre.status !== 0) return { exit: pre.status ?? "-", verdict: { pass: false, reason: `pre-tool-harness-run hook exited ${String(pre.status)}: ${pre.stderr.slice(0, 160)}` } };
+  let rewritten: string | undefined;
+  try {
+    rewritten = findString(JSON.parse(pre.stdout), "command");
+  } catch {
+    rewritten = undefined;
+  }
+  if (rewritten === undefined || !rewritten.includes("--harness-run")) {
+    return { exit: 0, verdict: { pass: false, reason: `hook did not rewrite the command with --harness-run: ${pre.stdout.slice(0, 160)}` } };
+  }
+
+  const claim = spawnSync("sh", ["-c", rewritten], { cwd: project, env: hookEnv, encoding: "utf8", timeout: STEP_TIMEOUT_MS });
+  if (claim.status !== 0) return { exit: claim.status ?? "-", verdict: { pass: false, reason: `rewritten claim exited ${String(claim.status)}: ${(claim.stderr ?? "").slice(0, 160)}` } };
+
+  const log = runBin(bin, ["log", slug, "--json"], project, env);
+  const run = `cc:${FIXTURE_SESSION}`;
+  if (!log.stdout.includes(run)) return { exit: log.exitCode, verdict: { pass: false, reason: `claim audit row does not carry ${run}` } };
+  return { exit: 0, verdict: { pass: true, reason: `hooks registered; claim of ${slug} attributed to ${run}` } };
+}
+
 function main(): number {
   let args;
   try {
@@ -133,6 +240,16 @@ function main(): number {
       }
       verdicts.push(verdict);
       console.log(formatStepLine(step.name, exit, verdict));
+    }
+    {
+      let r: { exit: number | "-"; verdict: StepVerdict };
+      try {
+        r = firstWriteAttested(bin, root, project, claudeHome, env);
+      } catch (e) {
+        r = { exit: "-", verdict: { pass: false, reason: e instanceof Error ? e.message : String(e) } };
+      }
+      verdicts.push(r.verdict);
+      console.log(formatStepLine(FIRST_WRITE_STEP, r.exit, r.verdict));
     }
   } finally {
     if (args.keep) console.log(`kept: ${project}`);
