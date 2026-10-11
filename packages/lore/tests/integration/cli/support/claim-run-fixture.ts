@@ -31,7 +31,7 @@ const PACKAGE_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/
 const ENTRY = join(PACKAGE_ROOT, "src", "index.ts");
 
 export type Kind = "task" | "phase";
-export const KINDS: readonly Kind[] = ["task", "phase"];
+export const KINDS: Kind[] = ["task", "phase"];
 
 /** Exit code of CLAIM_CONFLICT (utils.ts::exitCode — same family as STALE_VERSION). */
 export const CLAIM_CONFLICT_EXIT = 5;
