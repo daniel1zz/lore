@@ -494,7 +494,7 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
   "context/corpus-workflow-3-execute.md": "acf9e945bef3b056c200d06e0f7714b4711f54cd9bd59d0d6a824545937ae944",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
-  "context/corpus-workflow-4-close.md": "7a94ba672efcee7233c93439b05ebd1556e96978436513062a45c7ba93334aeb",
+  "context/corpus-workflow-4-close.md": "6739e28d8081b7d2de8d060b7796786aea384515635245ea5d2ad3c03c78ba6a",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
