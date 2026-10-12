@@ -267,8 +267,9 @@ const C5_STATUS_ADDITIONS = ["index_mismatch", "exemptions_active", "exemptions_
 
 /** Literal `data` key set of `status --json` in a no-baseline corpus before slice 3a added `ac_cite` (observed, then frozen).
  *  RE-BASELINE (spec-run-identity-slice-1, status.ts): `harness_run_attribution` is the one additive key that slice made;
- *  RE-BASELINE (spec-run-only-write-identity-and-run-end-claim-release Scope 8): `identity_sources` + `orphaned_dirty`; the set is still compared exactly. */
-const PRE_SLICE_3A_STATUS_DATA_KEYS: string[] = ["total_docs", "invalid_docs", "by_type", "by_status", "last_updated", "db_size_bytes", "invalidated_feeding_source_warnings", "exempt_plans", "ai_defaults", "open_stale_candidates", "code_anchor_specs", "verification_profiles", "pass_unfalsified_count", "unclaimed_oracle", "unredeemed_allow_missing_path_count", "capture_source_runner_count", "capture_source_self_report_count", "adopted_abandoned_count", "binary_provenance", "harness_run_attribution", "identity_sources", "orphaned_dirty"];
+ *  RE-BASELINE (spec-run-only-write-identity-and-run-end-claim-release Scope 8): `identity_sources` + `orphaned_dirty`;
+ *  RE-BASELINE (spec-evidence-labels-and-reds-are-honest D2, #48): `capture_source_runner_unattested_count`; the set is still compared exactly. */
+const PRE_SLICE_3A_STATUS_DATA_KEYS: string[] = ["total_docs", "invalid_docs", "by_type", "by_status", "last_updated", "db_size_bytes", "invalidated_feeding_source_warnings", "exempt_plans", "ai_defaults", "open_stale_candidates", "code_anchor_specs", "verification_profiles", "pass_unfalsified_count", "unclaimed_oracle", "unredeemed_allow_missing_path_count", "capture_source_runner_count", "capture_source_self_report_count", "capture_source_runner_unattested_count", "adopted_abandoned_count", "binary_provenance", "harness_run_attribution", "identity_sources", "orphaned_dirty"];
 
 function allOutput(cap: Capture): string {
   return Object.values(cap)
