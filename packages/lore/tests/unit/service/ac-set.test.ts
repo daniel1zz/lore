@@ -374,7 +374,9 @@ describe("REGRESSION — leaves sibling criteria and other extra keys untouched 
 const FIVE_TOKEN_LESS_COMMANDS = [
   "bun run test",
   "bun run typecheck",
-  'test $(grep -rln "TODO" packages/lore/src | wc -l) -eq 0',
+  // reason: pipe-free since BR-1078 (#19) — the original `... | wc -l` form is now refused at declaration; this
+  // fixture exists to be token-less (no test-file path), not to carry a pipe.
+  'test -z "$(grep -rln TODO packages/lore/src)"',
   "bun run dev -- setup --dry-run --claude-dir /tmp/lore-setup-probe",
   "diff <(shasum assets/hooks/pre-push) <(shasum hooks/pre-push)",
 ];
