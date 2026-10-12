@@ -751,6 +751,8 @@ describe("OutlineService.resolve", () => {
         endRun: (id, endedAt, reason) => store.endRun(id, endedAt, reason),
         reopenRun: (id) => store.reopenRun(id),
         getRunEnd: (id) => store.getRunEnd(id),
+        // reason: spec-worktree-removal-is-decided-by-who-is-inside-not-by-how — new required StoreInterface method.
+        listRunsByAgentRef: (agentRef) => store.listRunsByAgentRef(agentRef),
         countAttributedWrites: (windowStart, kinds) => store.countAttributedWrites(windowStart, kinds),
       };
 

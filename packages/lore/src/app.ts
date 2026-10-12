@@ -97,6 +97,7 @@ import { OrdinalMigrationService } from "./service/ordinal-migration-service.js"
 import { SpecParentMigrationService } from "./service/spec-parent-migration-service.js";
 import { SeatService } from "./service/seat-service.js";
 import { RealGitPort } from "./adapters/real-git-port.js";
+import { realpathNative } from "./adapters/real-realpath-port.js";
 import { ConfigService } from "./service/config-service.js";
 import { GlobalConfigService } from "./service/global-config-service.js";
 import { resolveDoc } from "./service/resolve.js";
@@ -826,7 +827,7 @@ function buildAppFromSqlite(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
@@ -1199,7 +1200,7 @@ function buildAppFromTurso(
     phaseService: new PhaseService(store, recordLockService),
     taskWorkflowService,
     sessionService,
-    runService: new RunService(store, undefined, taskWorkflowService),
+    runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.

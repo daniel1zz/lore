@@ -1169,6 +1169,13 @@ export interface StoreInterface {
   getRun(id: RunId): Promise<Result<RunRecord | null, LoreError>>;
 
   /**
+   * Every registered run whose `agent_ref` equals `agentRef` (a resumed agent can register more than one run id
+   * across sessions), newest `registered_at` first, ties broken by `id` ASC. `ok([])` when none. Consumed by
+   * `RunService.occupancy` (spec-worktree-removal-is-decided-by-who-is-inside-not-by-how D1).
+   */
+  listRunsByAgentRef(agentRef: string): Promise<Result<RunRecord[], LoreError>>;
+
+  /**
    * Mark a run ended (migration-017). FIRST END WINS: a run already ended keeps its `ended_at` / `end_reason`
    * (`already-ended`); an unregistered id writes nothing (`unknown-run`, normal for SubagentStop of an
    * internal agent).

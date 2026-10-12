@@ -2902,6 +2902,17 @@ export class SQLiteStore implements StoreInterface {
     }
   }
 
+  async listRunsByAgentRef(agentRef: string): Promise<Result<RunRecord[], LoreError>> {
+    try {
+      const rows = this.db
+        .prepare("SELECT * FROM runs WHERE agent_ref = ? ORDER BY registered_at DESC, id ASC")
+        .all(agentRef) as RunRow[];
+      return ok(rows.map(rowToRunRecord));
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>> {
     try {
       // reason: `ended_at IS NULL` in the WHERE makes the FIRST end win and the call idempotent.

@@ -31,7 +31,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -39,12 +39,6 @@ import { tmpdir } from "node:os";
 // packages/lore/tests/unit/hooks/git-safety-gate.test.ts -> repo root is 5 levels up.
 const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const HOOK = join(REPO_ROOT, "assets", "hooks", "pre-bash-git-safety-gate.mjs");
-
-// Read the ACTUAL runtime constant out of the hook's source, rather than
-// hardcoding a second "30" here that could silently drift from it.
-const WINDOW_MATCH = readFileSync(HOOK, "utf8").match(/const WORKTREE_LIVENESS_WINDOW_MINUTES = (\d+);/);
-if (!WINDOW_MATCH) throw new Error("could not read WORKTREE_LIVENESS_WINDOW_MINUTES out of the hook source");
-const WORKTREE_LIVENESS_WINDOW_MINUTES_UNDER_TEST = Number(WINDOW_MATCH[1]);
 
 /** Run the hook with a PreToolUse payload; exit code read directly (never piped). */
 function run(command: string, cwd?: string): { code: number; stderr: string } {
@@ -92,7 +86,7 @@ describe("git-safety-gate — ALLOW classification (exit 0, no regression)", () 
   // fix) — it is no longer an unconditional allow. It now depends on repo
   // state; see the BLOCK-classification case above (unresolvable path) and the
   // dedicated "non-force git worktree remove" describe block below (real repo
-  // state: unmerged / recent-reflog / clean+merged+quiet).
+  // state: unmerged / occupied / clean+merged+unoccupied).
   const cases: Array<[string, string]> = [
     ["worktree list", "git worktree list"],
     ["branch -d (merged-only)", "git branch -d some-branch"],
@@ -474,46 +468,18 @@ describe("git-safety-gate — argument-aware probes (D1-D5)", () => {
 // AC1 (the incident, NEGATIVE): clean + unmerged + non-force → BLOCK, naming
 //     the losing commits. Covered here AND as the "unresolvable path" case
 //     added to the BLOCK-classification table above.
-// AC2 (NEGATIVE): reflog activity inside the 30-minute liveness window blocks
-//     even when the branch IS merged — merged-ness answers "will commits be
-//     lost", never "is someone in there".
 // AC3 (REGRESSION): --force on a dirty worktree still blocks — already pinned
 //     by "worktree remove --force on a DIRTY worktree names the uncommitted
 //     file" above; the message text there is unchanged by this task.
-// AC4 (REGRESSION, do-not-over-block): clean + merged + QUIET (no reflog
-//     activity in the window) + non-force → PASS THROUGH — the mandated
-//     post-merge cleanup path (CLAUDE.md). "Quiet" is simulated by backdating
-//     the worktree's own per-worktree HEAD reflog file directly (real elapsed
-//     time is not available to a test), which is the same file
-//     minutesSinceLastReflogActivity reads.
 // AC5 (BOUNDARY): a DETACHED-HEAD worktree — must not crash, must not fail
 //     open when unmerged or recently-active, and must still pass through when
-//     genuinely clean+merged+quiet.
-// AC6 (control) and AC7 (consumer probe) are process-level checks recorded as
-//     `manual` oracle evidence for this task, not unit tests: AC6 re-runs
-//     these same payloads against a reverted copy of this file (git show
-//     HEAD:… before this change) and asserts exit 0; AC7 re-runs `lore setup`
-//     against a throwaway HOME and asserts the installed copy carries
-//     WORKTREE_LIVENESS_WINDOW_MINUTES.
-describe("git-safety-gate — non-force `git worktree remove` (AC1/AC2/AC4/AC5)", () => {
+//     genuinely clean+merged+unoccupied.
+// AC2/AC4 (reflog-quiet window) were RETIRED by task-run-occupancy-read-and-git-safety-hook-decide-worktree
+// (AC-WL-4): occupancy, not elapsed time, now decides the pass-through — see
+// git-safety-worktree-occupancy.test.ts for the replacement cases.
+describe("git-safety-gate — non-force `git worktree remove` (AC1/AC5)", () => {
   let base: string;
   let repo: string;
-
-  /**
-   * Rewrites `cwd`'s own per-worktree `HEAD` reflog so its most recent entry
-   * looks `minutesAgo` minutes old — the same file
-   * `minutesSinceLastReflogActivity` (pre-bash-git-safety-gate.mjs) reads.
-   * Real elapsed time is not obtainable inside a test run, so the fixture
-   * rewrites the epoch timestamp field directly rather than sleeping.
-   */
-  function backdateReflog(cwd: string, minutesAgo: number): void {
-    const gd = spawnSync("git", ["rev-parse", "--absolute-git-dir"], { cwd, encoding: "utf8" });
-    if (gd.status !== 0) throw new Error(`git rev-parse --absolute-git-dir failed: ${gd.stderr}`);
-    const logPath = join(gd.stdout.trim(), "logs", "HEAD");
-    const ts = Math.floor(Date.now() / 1000 - minutesAgo * 60);
-    const rewritten = readFileSync(logPath, "utf8").replace(/\d{9,11}(?=\s[+-]\d{4})/g, String(ts));
-    writeFileSync(logPath, rewritten);
-  }
 
   beforeAll(() => {
     base = mkdtempSync(join(tmpdir(), "gsg-wt-remove-"));
@@ -547,52 +513,6 @@ describe("git-safety-gate — non-force `git worktree remove` (AC1/AC2/AC4/AC5)"
     git(["worktree", "remove", "--force", wt], repo); // cleanup via real git, not the hook
   }, 15000);
 
-  it("AC2: clean + MERGED but reflog active inside the window still BLOCKS, non-force", () => {
-    const wt = join(base, "wt-ac2-recent");
-    git(["worktree", "add", "-q", wt, "merged-branch"], repo);
-    // No backdating: the worktree-add checkout itself is the recent activity.
-    const { code, stderr } = run(`git worktree remove ${wt}`, repo);
-    expect(code).toBe(2);
-    expect(stderr).toMatch(/liveness window/);
-    expect(stderr).toMatch(/merged into main/);
-    git(["worktree", "remove", "--force", wt], repo);
-  }, 15000);
-
-  it("AC2 control: the same MERGED worktree, once QUIET, is not blocked for the same reason (isolates the liveness signal from merged-ness)", () => {
-    const wt = join(base, "wt-ac2-control");
-    git(["worktree", "add", "-q", wt, "merged-branch"], repo);
-    backdateReflog(wt, 45);
-    const { code } = run(`git worktree remove ${wt}`, repo);
-    expect(code).toBe(0);
-    git(["worktree", "remove", wt], repo);
-  }, 15000);
-
-  it("AC4: clean + MERGED + QUIET + non-force PASSES THROUGH (the mandated post-merge cleanup path)", () => {
-    const wt = join(base, "wt-ac4-quiet");
-    git(["worktree", "add", "-q", wt, "merged-branch"], repo);
-    backdateReflog(wt, WORKTREE_LIVENESS_WINDOW_MINUTES_UNDER_TEST + 15);
-    const { code, stderr } = run(`git worktree remove ${wt}`, repo);
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-    git(["worktree", "remove", wt], repo); // real git accepts it too — proves it was genuinely safe
-  }, 15000);
-
-  it("AC4 boundary: exactly at the window edge is NOT yet quiet (>= means the edge itself still passes, one second under still blocks)", () => {
-    const atEdge = join(base, "wt-ac4-edge-at");
-    git(["worktree", "add", "-q", atEdge, "merged-branch"], repo);
-    backdateReflog(atEdge, WORKTREE_LIVENESS_WINDOW_MINUTES_UNDER_TEST);
-    expect(run(`git worktree remove ${atEdge}`, repo).code).toBe(0);
-    git(["worktree", "remove", atEdge], repo);
-
-    const underEdge = join(base, "wt-ac4-edge-under");
-    git(["worktree", "add", "-q", underEdge, "merged-branch"], repo);
-    backdateReflog(underEdge, WORKTREE_LIVENESS_WINDOW_MINUTES_UNDER_TEST - 1);
-    const { code, stderr } = run(`git worktree remove ${underEdge}`, repo);
-    expect(code).toBe(2);
-    expect(stderr).toMatch(/liveness window/);
-    git(["worktree", "remove", "--force", underEdge], repo);
-  }, 20000);
-
   it("AC5 boundary: a DETACHED-HEAD worktree, UNMERGED, does not crash and does not fail open", () => {
     const headSha = spawnSync("git", ["rev-parse", "unmerged-branch"], { cwd: repo, encoding: "utf8" }).stdout.trim();
     const wt = join(base, "wt-ac5-detached-unmerged");
@@ -602,17 +522,6 @@ describe("git-safety-gate — non-force `git worktree remove` (AC1/AC2/AC4/AC5)"
     expect(stderr).toMatch(/NOT merged into main/);
     expect(stderr).toContain("detached HEAD");
     git(["worktree", "remove", "--force", wt], repo);
-  }, 15000);
-
-  it("AC5 boundary: a DETACHED-HEAD worktree, clean + merged + quiet, PASSES THROUGH (no crash, no false block)", () => {
-    const headSha = spawnSync("git", ["rev-parse", "main"], { cwd: repo, encoding: "utf8" }).stdout.trim();
-    const wt = join(base, "wt-ac5-detached-quiet");
-    git(["worktree", "add", "-q", "--detach", wt, headSha], repo);
-    backdateReflog(wt, WORKTREE_LIVENESS_WINDOW_MINUTES_UNDER_TEST + 15);
-    const { code, stderr } = run(`git worktree remove ${wt}`, repo);
-    expect(code).toBe(0);
-    expect(stderr).toBe("");
-    git(["worktree", "remove", wt], repo);
   }, 15000);
 
   it("AC1 REGRESSION control: the pre-fix hook (matching --force only) let AC1's exact incident payload through — proves the fix, not the fixture, produces the block", () => {

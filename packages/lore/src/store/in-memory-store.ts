@@ -1454,6 +1454,13 @@ export class InMemoryStore implements StoreInterface {
     return ok(run === undefined ? null : structuredClone(run));
   }
 
+  async listRunsByAgentRef(agentRef: string): Promise<Result<RunRecord[], LoreError>> {
+    const rows = [...this.runs.values()]
+      .filter((run) => run.agentRef === agentRef)
+      .sort((a, b) => b.registeredAt.localeCompare(a.registeredAt) || a.id.localeCompare(b.id));
+    return ok(rows.map((run) => structuredClone(run)));
+  }
+
   async endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>> {
     if (!this.runs.has(id)) return ok("unknown-run");
     // reason: first end wins — mirrors SQLite's `WHERE ended_at IS NULL`.

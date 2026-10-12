@@ -3200,6 +3200,34 @@ export class TursoStore implements StoreInterface {
     }
   }
 
+  async listRunsByAgentRef(agentRef: string): Promise<Result<RunRecord[], LoreError>> {
+    try {
+      await this.ensureReady();
+      const rs = await this.client.execute({
+        sql: "SELECT * FROM runs WHERE agent_ref = ? ORDER BY registered_at DESC, id ASC",
+        args: [agentRef],
+      });
+      return ok(
+        rs.rows.map((row) =>
+          rowToRunRecord({
+            id: rowStr(row, "id"),
+            kind: rowStr(row, "kind"),
+            harness: rowStr(row, "harness"),
+            session_ref: rowStr(row, "session_ref"),
+            agent_ref: rowStrOrNull(row, "agent_ref"),
+            agent_type: rowStrOrNull(row, "agent_type"),
+            parent_run_id: rowStrOrNull(row, "parent_run_id"),
+            branch: rowStrOrNull(row, "branch"),
+            composition: rowStr(row, "composition"),
+            registered_at: rowStr(row, "registered_at"),
+          } satisfies RunRow),
+        ),
+      );
+    } catch (e) {
+      return wrapStoreError(e);
+    }
+  }
+
   async endRun(id: RunId, endedAt: string, reason: string): Promise<Result<RunEndOutcome, LoreError>> {
     try {
       await this.ensureReady();
