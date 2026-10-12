@@ -2482,7 +2482,8 @@ function feedRecordEdit(ctx: GateContext, _failures: PredicateResult[]): string 
       break;
     case "criteria":
       lines.push(
-        "This attempt changed acceptance criteria (lore ac add|set|rm): a changed criterion changes what was accepted, so it belongs to a new spec. `lore ac cite` is not affected.",
+        "This attempt changed acceptance criteria (lore ac add|set|rm): a changed criterion changes what was accepted, so it belongs to a new spec. " +
+          `A defect in ONE existing criterion is the exception: lore ac set ${slug} <AC-id> <field flags> --correction "<reason>" (audited, one version, status kept; ac add|rm have no correction exit). \`lore ac cite\` is not affected.`,
       );
       break;
     case "phase-structure":

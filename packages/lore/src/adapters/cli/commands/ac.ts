@@ -193,7 +193,7 @@ import { AcExemptionService } from "../../../service/ac-exemption-service.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { deriveAcCoverageState, getAllowedTransitions, ok } from "@lore/core";
 import type { AcceptanceCriterion, AcCoverageFact, LoreError, Result } from "@lore/core";
-import type { AcService, AcListResult, DeclarePathOpts, SetCriterionPatch } from "../../../service/ac-service.js";
+import type { AcService, AcListResult, DeclarePathOpts, SetCriterionOpts, SetCriterionPatch } from "../../../service/ac-service.js";
 import type { App } from "../../../app.js";
 import type { CiteWarning } from "../../../service/ac-citations.js";
 // reason: `isPlanMember` is SHARED, store-less predicate infrastructure (its own
@@ -298,12 +298,17 @@ export default defineCommand({
             "script mode only: the EXACT exit code (never \"non-zero\") this mutation is declared to " +
             "produce when --command runs against the mutated file.",
         },
+        correction: {
+          type: "string",
+          description: "NOT accepted here — exits 2; a correction fixes ONE existing criterion: `lore ac set --correction`",
+        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
         },
       },
       async run({ args }) {
+        if (refuseCorrectionFlag(args, "add")) return;
         const { app, dbPath } = loadLoreApp();
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
@@ -524,12 +529,17 @@ export default defineCommand({
           type: "boolean",
           description: "Remove even when evidence still references this id (existing ac_ref becomes dangling)",
         },
+        correction: {
+          type: "string",
+          description: "NOT accepted here — exits 2; a correction fixes ONE existing criterion: `lore ac set --correction`",
+        },
         json: {
           type: "boolean",
           description: "Output result as JSON",
         },
       },
       async run({ args }) {
+        if (refuseCorrectionFlag(args, "rm")) return;
         const { app } = loadLoreApp();
         try {
           const result = await requireAcService(app).removeCriterion(args.spec as string, args.id as string, {
@@ -636,6 +646,13 @@ export default defineCommand({
             "script mode only: REPLACE the EXACT exit code (never \"non-zero\") the mutation is declared to " +
             "produce. Required together with the other three --falsifier-* flags.",
         },
+        correction: {
+          type: "string",
+          description:
+            "Reason for an audited fix of this ONE criterion on a LOCKED (approved) spec: skips the record-edit " +
+            "refusal and the approved→draft demotion, writes one version, keeps the status, records the reason. " +
+            "Must be non-empty. `ac add|rm` have no correction exit.",
+        },
         mode: {
           type: "string",
           description: "NOT editable — exits 2; use `ac rm --force` then `ac add --mode <new>` instead",
@@ -668,15 +685,32 @@ export default defineCommand({
           return;
         }
 
+        // --correction needs a non-empty reason: argv-decidable, so exit 2 BEFORE the app loads or anything
+        // is written (BR-1069, mirrors `lore set --correction`).
+        let correctionOpt: { reason: string } | undefined;
+        if (args.correction !== undefined) {
+          const reason = typeof args.correction === "string" ? args.correction.trim() : "";
+          if (reason === "") {
+            process.stderr.write('Error: --correction requires a non-empty reason (--correction "<why this is a fix>").\n');
+            process.exitCode = 2;
+            return;
+          }
+          correctionOpt = { reason };
+        }
+
         const { app, dbPath } = loadLoreApp();
         try {
           const beforeStatus = await fetchSpecStatus(app, args.spec as string);
 
+          const setOpts: SetCriterionOpts = {
+            ...buildDeclarePathOpts(args, dbPath),
+            ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
+          };
           const result = await requireAcService(app).setCriterion(
             args.spec as string,
             args.id as string,
             patch,
-            buildDeclarePathOpts(args, dbPath),
+            setOpts,
           );
 
           if (!result.ok) {
@@ -694,6 +728,7 @@ export default defineCommand({
           }
 
           console.log(`Updated acceptance criterion "${args.id as string}" on spec ${args.spec as string}`);
+          if (correctionOpt !== undefined) console.log(`  (correction recorded: ${correctionOpt.reason})`);
           renderCriteriaList({ criteria: result.value, coverage: null, dangling: [] });
         } finally {
           app.close();
@@ -702,6 +737,23 @@ export default defineCommand({
     }),
   },
 });
+
+/**
+ * `lore ac add|rm` accept NO correction (BR-1069, D4): a new or removed criterion is a new decision, not a
+ * fix. When `--correction` is on the command line, write the refusal naming the only criterion correction
+ * and set exit 2 — argv-decidable, so this runs BEFORE the app loads.
+ *
+ * @returns `true` when the call was refused (the caller must return).
+ */
+function refuseCorrectionFlag(args: Record<string, unknown>, verb: "add" | "rm"): boolean {
+  if (args.correction === undefined) return false;
+  process.stderr.write(
+    `Error: lore ac ${verb} does not accept --correction — a ${verb === "add" ? "new" : "removed"} criterion is a ` +
+      "new decision, not a fix. The only criterion correction is `lore ac set --correction \"<reason>\"` on ONE existing criterion.\n",
+  );
+  process.exitCode = 2;
+  return true;
+}
 
 // ─── Input Assembly ──────────────────────────────────────────────────────────
 
