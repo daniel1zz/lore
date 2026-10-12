@@ -886,7 +886,18 @@ export class AcService {
     // already-existing path is a guaranteed no-op.
     const editedCriterion = parsed.data[index];
     let declaration: AllowMissingPathDeclaration | undefined;
-    if (editedCriterion !== undefined) {
+    // reason: issue #179 (task-gh-1343388703-179) — the path check guards a NEWLY declared command. A
+    // statement/rubric/note-only edit leaves `verify.command` byte-identical, so re-validating it would force
+    // `--allow-missing-path` again on a red-first AC whose test is not on disk yet. Do not "simplify" this
+    // back to an unconditional check.
+    const commandChanged =
+      editedCriterion !== undefined &&
+      !(
+        editedCriterion.verify.mode === "script" &&
+        target.verify.mode === "script" &&
+        editedCriterion.verify.command === target.verify.command
+      );
+    if (editedCriterion !== undefined && commandChanged) {
       const pathCheck = checkDeclaredPathExistence(editedCriterion, opts);
       if (!pathCheck.ok) return pathCheck;
       if (pathCheck.value.declaration !== null) declaration = pathCheck.value.declaration;

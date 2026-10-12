@@ -459,3 +459,60 @@ describe("NEGATIVE/BOUNDARY — setCriterion declared-path-existence (AC-OX-4)",
     expect(result.ok).toBe(true);
   });
 });
+
+// ─── Issue #179: statement-only edit must not re-validate an UNCHANGED command path ───
+
+describe("REGRESSION — setCriterion re-validates the command path only when the command changed (task-gh-1343388703-179)", () => {
+  const GHOST_COMMAND = "bunx vitest run packages/x/ghost.test.ts";
+  const pathContext = { fileExists: () => false, cwd: "/repo" };
+
+  async function seedRedFirstCriterion() {
+    const { corpusService, acService } = makeServices();
+    const prdId = await createPrd(corpusService);
+    const specId = await createSpec(corpusService, prdId);
+    // Declared red-first: no pathContext on add, so the not-yet-written test path is stored as-is.
+    const added = await acService.addCriterion(
+      specId,
+      scriptCriterion({ verify: { mode: "script", oracle: "test", command: GHOST_COMMAND } }),
+    );
+    expect(added.ok).toBe(true);
+    return { acService, specId };
+  }
+
+  it("a statement-only edit leaves the unchanged missing-path command alone and needs no --allow-missing-path", async () => {
+    const { acService, specId } = await seedRedFirstCriterion();
+    const result = await acService.setCriterion(specId, "AC-X-1", { statement: "Reworded statement" }, { pathContext });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]?.statement).toBe("Reworded statement");
+    const verify = result.value[0]?.verify;
+    expect(verify?.mode === "script" ? verify.command : undefined).toBe(GHOST_COMMAND);
+    expect(result.value[0]?.oracle_generation).toBeUndefined();
+  });
+
+  it("a --command edit to a different missing path is still refused", async () => {
+    const { acService, specId } = await seedRedFirstCriterion();
+    const result = await acService.setCriterion(
+      specId,
+      "AC-X-1",
+      { command: "bunx vitest run packages/x/other-ghost.test.ts" },
+      { pathContext },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("a byte-identical --command alongside a statement change is not a command change", async () => {
+    const { acService, specId } = await seedRedFirstCriterion();
+    const result = await acService.setCriterion(
+      specId,
+      "AC-X-1",
+      { statement: "Again reworded", command: GHOST_COMMAND },
+      { pathContext },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value[0]?.oracle_generation).toBeUndefined();
+  });
+});
