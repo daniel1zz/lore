@@ -102,6 +102,7 @@ import { resolveCaptureTimeoutMs, tailChars, type CaptureSource, type EvidenceEn
 // error raised anywhere. Deriving the field types from `EvidenceInput` turns that
 // silent drop into a build failure.
 import type { EvidenceInput } from "../service/task-workflow-service.js";
+import { mergeStderrIntoStdout } from "../service/merged-stream-command.js";
 
 /**
  * Default capture window in ms, DERIVED from the config schema rather than
@@ -321,7 +322,7 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
   // step during a long oracle could manufacture a phantom timeout (or mask a real
   // one) on the elapsed conjunct below.
   const startedAt = performance.now();
-  const spawnResult = spawnSync(request.command, {
+  const spawnResult = spawnSync(mergeStderrIntoStdout(request.command), {
     shell: true,
     cwd: request.cwd,
     encoding: "utf8",
@@ -444,7 +445,11 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
     };
   }
 
-  const combined = [spawnResult.stdout, spawnResult.stderr].filter((s) => s.length > 0).join("\n");
+  // reason: stderr was merged into stdout by {@link mergeStderrIntoStdout}, so
+  // `spawnResult.stdout` already IS the terminal-ordered combined stream and
+  // `spawnResult.stderr` is empty by construction. Do NOT re-add a stdout+stderr
+  // join here — that concatenation is the #181 defect (summary pushed out of the tail).
+  const combined = spawnResult.stdout;
   // reason: SPEC-143 AC-CT-2 write-through — every number below was already
   // measured above; this is where they finally reach the persisted row instead of
   // dying in this function (see {@link CapturedProvenance} for the measured defect,
