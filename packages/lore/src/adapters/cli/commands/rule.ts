@@ -8,9 +8,9 @@
  *       debt-registry) and append a `live` rule. The four-part standard flags are AS-only, all four or none.
  *   set <BR-n> [--statement ..] [--confidence ..] [--enforced-by ..] [--example ..]
  *              [--current-reality ..] [--target-rule ..] [--current-exception AD-n ... | --current-exceptions-none] [--migration ..]
- *              [--lifecycle deprecated|retired] [--note <retirement note>] [--move-to <leaf>]
- *       Edit a rule, move it forward through its lifecycle (never back to live; retired needs
- *       --note), or relocate it to another leaf keeping its id.
+ *              [--lifecycle retired] [--note <retirement note>] [--move-to <leaf>]
+ *       Edit a rule, retire it (retired needs --note; `deprecated` is refused: retire it, or record the retirement
+ *       in a spec's change set), or relocate it to another leaf keeping its id.
  *
  *   propose <spec> add --leaf <leaf> --statement <s> --example <e>... --enforced-by <v>
  *   propose <spec> modify <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
@@ -18,6 +18,9 @@
  *       Write the spec's rule change set (`extra.rule_changes`); `add` reserves the next BR-n as `proposed` and
  *       touches no leaf. The baseline takes the change only when the spec lands.
  *   changes <spec> [--json]                                      the spec's change set
+ *   apply <spec> [--json]                                        land the change set: exit 0 applied | 4 refused (names the
+ *       criteria citing a changed rule without a runner-attested pass; nothing written) | 2 usage. Idempotent. Plan close
+ *       runs the same apply; a deprecated spec's proposed ids are retired "never landed: <spec>".
  *
  *   show <BR-n> [--json]                                         statement, leaf, confidence, state, citing criteria
  *                                                                (a proposed id: "proposed by <spec>, not in the baseline")
@@ -241,6 +244,41 @@ export default defineCommand({
         }
       },
     }),
+    apply: defineCommand({
+      meta: {
+        name: "apply",
+        description:
+          "Land a spec's rule change set in the baseline: proposed ids become live, modifies rewrite, retires retire — only when every criterion citing a changed rule has a runner-attested pass (exit 4 otherwise, naming them)",
+      },
+      args: {
+        spec: { type: "positional", description: "Spec document ID or slug", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const json = args.json === true;
+        const { app } = loadLoreApp();
+        try {
+          if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
+          const result = await app.ruleChangeService.apply(args.spec as string, { by: resolveActor() });
+          if (!result.ok) return reportFailure(result.error, json);
+          const outcome = result.value;
+          if (json) return void console.log(JSON.stringify({ ok: true, data: outcome }, null, 2));
+          if (outcome.kind === "noop") {
+            const why = {
+              "no-changes": "has no rule changes",
+              "already-applied": "rule changes already landed",
+              "already-abandoned": "is deprecated and its proposed rules are already retired",
+            }[outcome.reason];
+            return void console.log(`${outcome.spec}: nothing to apply (${why}).`);
+          }
+          const verb = outcome.kind === "applied" ? "Applied rule changes of" : "Retired the proposed rules (never landed) of";
+          console.log(`${verb} ${outcome.spec}:`);
+          for (const leaf of outcome.leaves) console.log(`  ${leaf.leaf} (v${leaf.version}): ${leaf.rules.join(", ")}`);
+        } finally {
+          app.close();
+        }
+      },
+    }),
     changes: defineCommand({
       meta: { name: "changes", description: "List a spec's rule change set (what it proposes, modifies and retires)" },
       args: {
@@ -321,7 +359,7 @@ export default defineCommand({
         "current-exception": { type: "string", description: "[architecture standard, repeatable] Replace the exceptions wholesale with these live debt entry ids (AD-n)" },
         "current-exceptions-none": { type: "boolean", description: "[architecture standard] State that the standard has no current exceptions (empty list)" },
         migration: { type: "string", description: "[architecture standard] How the exceptions get closed" },
-        lifecycle: { type: "string", description: "deprecated | retired (forward-only; never back to live)" },
+        lifecycle: { type: "string", description: "retired (never back to live; `deprecated` is refused — see `lore rule propose <spec> retire`)" },
         note: { type: "string", description: "Retirement note — required with --lifecycle retired, stored as retired_note" },
         "move-to": { type: "string", description: "Destination baseline leaf (ID or slug); the BR-n id is unchanged" },
         json: { type: "boolean", description: "Output result as JSON" },

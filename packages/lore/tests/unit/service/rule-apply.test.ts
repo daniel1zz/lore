@@ -25,7 +25,7 @@ import { ownProposedRules } from "../../../src/service/rule-changes.js";
 import { requireSpecCitesLiveRule } from "../../../src/service/spec-approval-citation.js";
 
 const ADD_A = { op: "add" as const, leaf: "leaf-a", statement: "Landed rule on leaf A", examples: ["a1"], enforced_by: "guaranteed" as const };
-const ADD_B = { op: "add" as const, leaf: "leaf-b", statement: "Landed rule on leaf B", examples: ["b1"], enforced_by: "both" as const };
+const ADD_B = { op: "add" as const, statement: "Landed rule on leaf B", examples: ["b1"], enforced_by: "both" as const };
 
 type Kind = "attested-pass" | "attested-fail" | "self-reported-pass" | "expected-fail" | "none";
 
@@ -93,10 +93,10 @@ async function versionLog(world: World, id: DocId) {
 
 /** A spec with the full change set of case (a): add on A, modify BR-1, retire BR-2, add on B. */
 async function fullSpec(world: World, kinds: Record<string, Kind>) {
-  await addLeafB(world);
+  const leafB = await addLeafB(world);
   const spec = await makeSpec(world, "Landing spec");
   const addA = await mustPropose(world, spec.slug, ADD_A);
-  const addB = await mustPropose(world, spec.slug, ADD_B);
+  const addB = await mustPropose(world, spec.slug, { ...ADD_B, leaf: leafB.slug });
   await mustPropose(world, spec.slug, { op: "modify", id: "BR-1", statement: "BR-1 rewritten by landing" });
   await mustPropose(world, spec.slug, { op: "retire", id: "BR-2", note: "no longer true after landing" });
   await mustCite(world, spec.slug, "AC-L-1", [addA.id]);
@@ -104,7 +104,7 @@ async function fullSpec(world: World, kinds: Record<string, Kind>) {
   await mustCite(world, spec.slug, "AC-L-3", ["BR-2"]);
   const rows = Object.entries(kinds).filter(([, k]) => k !== "none").map(([ac, k]) => evidence(ac, k as Exclude<Kind, "none">, "2026-10-12T10:00:00.000Z"));
   const plan = await recordEvidence(world, await reload(world, spec.id), rows);
-  return { spec: await reload(world, spec.id), plan, addA, addB };
+  return { spec: await reload(world, spec.id), plan, addA, addB, leafB };
 }
 
 const ALL_PASS: Record<string, Kind> = { "AC-L-1": "attested-pass", "AC-L-2": "attested-pass", "AC-L-3": "attested-pass" };
@@ -112,11 +112,8 @@ const ALL_PASS: Record<string, Kind> = { "AC-L-1": "attested-pass", "AC-L-2": "a
 describe("rule apply: landing (AC-CS-2a)", () => {
   it("HAPPY: writes each touched leaf ONCE naming the spec; proposed -> live, modify rewrites, retire carries its note", async () => {
     const world = await makeWorld();
-    const { spec, addA, addB } = await fullSpec(world, ALL_PASS);
+    const { spec, addA, addB, leafB } = await fullSpec(world, ALL_PASS);
     const leafA0 = await reload(world, world.leafId);
-    const leafB0 = (await world.store.findMany({ type: "baseline" }));
-    const leafB = leafB0.ok ? leafB0.value.find((d) => d.slug === "leaf-b") : undefined;
-    if (leafB === undefined) throw new Error("leaf-b missing");
 
     const applied = await world.changes.apply(spec.slug, { by: "agent:t" });
     expect(applied.ok).toBe(true);

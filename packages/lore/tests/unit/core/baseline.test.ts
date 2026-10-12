@@ -102,10 +102,11 @@ describe("baseline schema and lint", () => {
       expect(t("deprecated", "live")).toBe(false);
     });
 
-    it("transition helper accepts live->deprecated->retired", () => {
+    it("transition helper accepts live->retired and deprecated->retired, and refuses live->deprecated (D4)", () => {
       const t = transition();
-      expect(t("live", "deprecated")).toBe(true);
+      expect(t("live", "retired")).toBe(true);
       expect(t("deprecated", "retired")).toBe(true);
+      expect(t("live", "deprecated")).toBe(false);
     });
   });
 

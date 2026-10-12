@@ -126,8 +126,15 @@ async function world(
     if (!added.ok) throw new Error(`addRule failed: ${JSON.stringify(added.error)}`);
     ruleIds.push(added.value.ruleId);
     if (def.lifecycle !== undefined) {
-      const set = await rules.setRule(added.value.ruleId, { lifecycle: def.lifecycle }, { by: "fixture" });
-      if (!set.ok) throw new Error(`setRule failed: ${JSON.stringify(set.error)}`);
+      // reason: `rule set --lifecycle deprecated` is refused since D4 (spec-a-spec-carries-its-rule-changes-the-
+      // baseline-takes-them), but deprecated rules still exist in older corpora: seed the state on the leaf directly.
+      const current = await store.find(leaf.id);
+      if (!current.ok || current.value === null) throw new Error("leaf vanished");
+      const marked = (current.value.extra["rules"] as Array<{ id: string }>).map((r) =>
+        r.id === added.value.ruleId ? { ...r, lifecycle: def.lifecycle } : r,
+      );
+      const set = await store.update(leaf.id, { extra: { ...current.value.extra, rules: marked } });
+      if (!set.ok) throw new Error(`seeding a deprecated rule failed: ${JSON.stringify(set.error)}`);
     }
   }
   const spec = await mustCreate(corpus, { type: "spec", title: "S",content: "body" } as CreateDocInput);

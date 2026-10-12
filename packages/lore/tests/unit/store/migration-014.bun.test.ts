@@ -351,11 +351,13 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
     const rules = makeRuleService(store);
     const db = store.getDatabase();
 
-    const dep = await rules.setRule("BR-1", { lifecycle: "deprecated" }, { by: "agent:test" });
+    // reason: `rule set --lifecycle deprecated` is refused since D4 (spec-a-spec-carries-its-rule-changes-the-
+    // baseline-takes-them); `retired` exercises the same leaf-write -> registry trigger path.
+    const dep = await rules.setRule("BR-1", { lifecycle: "retired", note: "gone" }, { by: "agent:test" });
     expect(dep.ok).toBe(true);
     const leafA = (await store.find(LEAF_A)) as { ok: true; value: DocRecord };
     expect(db.query("SELECT lifecycle, version FROM rule_registry WHERE id = 'BR-1'").get()).toEqual({
-      lifecycle: "deprecated",
+      lifecycle: "retired",
       version: leafA.value.version,
     });
     expect(leafA.value.version).toBeGreaterThan(LEAF_A_VERSION);
@@ -381,7 +383,7 @@ describe("migration-014 (registry lifecycle/version, ac_cites, rule_depends, ac_
       `CREATE TRIGGER t_block_registry_update BEFORE UPDATE ON rule_registry
        BEGIN SELECT RAISE(ABORT, 'registry update blocked'); END`,
     );
-    const res = await makeRuleService(store).setRule("BR-1", { lifecycle: "deprecated" }, { by: "agent:test" });
+    const res = await makeRuleService(store).setRule("BR-1", { lifecycle: "retired", note: "gone" }, { by: "agent:test" });
     expect(res.ok).toBe(false);
     const leafA = (await store.find(LEAF_A)) as { ok: true; value: DocRecord };
     const rules = leafA.value.extra["rules"] as Array<{ id: string; lifecycle: string }>;

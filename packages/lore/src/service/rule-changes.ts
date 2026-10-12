@@ -4,14 +4,15 @@
  * Purpose: ONE place that answers "what does this spec propose / modify / retire?" and "which other spec already
  *   changes this rule?", shared by the citation gate (`ac-write-chokepoint.ts`), `RuleChangeService`,
  *   `RuleReadService` and the review judge input, so no service imports another.
- * Public surface: {@link ruleChangesOf}, {@link ownProposedRules}, {@link findProposal},
- *   {@link findOtherSpecChange}, {@link SpecRuleChange}.
+ * Public surface: {@link ruleChangesOf}, {@link ownProposedRules}, {@link unlandedRuleChanges}, {@link isLanded},
+ *   {@link findProposal}, {@link findOtherSpecChange}, {@link SpecRuleChange}.
  * Invariants:
  *   - Pure: no store, IO or clock. Every function takes already-loaded spec docs.
  *   - Lenient on READ: an entry that fails `ruleChangeSchema` is skipped (a corrupt row must not hide the valid
  *     ones, nor throw inside a gate); the dedicated writer validates strictly on WRITE.
  *   - A spec with status `deprecated` has abandoned its change set: its entries never block another spec and are
- *     not offered as a proposal. (Landing, which marks a change set applied, arrives with `lore rule apply`.)
+ *     not offered as a proposal. An entry carrying `applied_at` has LANDED (`lore rule apply`): it is history, not
+ *     a pending claim, so it neither blocks another spec nor counts as a proposal (the tree now holds the rule).
  * Side-effect class: pure.
  * Source: spec-a-spec-carries-its-rule-changes-the-baseline-takes-them (Model, Edge cases).
  */
@@ -39,6 +40,16 @@ export function ownProposedRules(extra: Readonly<Record<string, unknown>>): Arra
   return ruleChangesOf(extra).flatMap((change) => (change.op === "add" ? [change] : []));
 }
 
+/** True once `lore rule apply` has written the entry into the tree. */
+export function isLanded(change: RuleChange): boolean {
+  return change.applied_at !== undefined;
+}
+
+/** The entries of a spec's change set that have not landed yet, in stored order. */
+export function unlandedRuleChanges(extra: Readonly<Record<string, unknown>>): RuleChange[] {
+  return ruleChangesOf(extra).filter((change) => !isLanded(change));
+}
+
 function isAbandoned(spec: DocRecord): boolean {
   return (spec.deleted_at ?? null) !== null || spec.status === "deprecated";
 }
@@ -52,7 +63,7 @@ function isAbandoned(spec: DocRecord): boolean {
 export function findProposal(ruleId: string, specs: readonly DocRecord[]): SpecRuleChange | undefined {
   for (const spec of specs) {
     if (isAbandoned(spec)) continue;
-    const change = ownProposedRules(spec.extra).find((c) => c.id === ruleId);
+    const change = ownProposedRules(spec.extra).find((c) => c.id === ruleId && !isLanded(c));
     if (change !== undefined) return { spec, change };
   }
   return undefined;
@@ -69,7 +80,7 @@ export function findOtherSpecChange(
 ): SpecRuleChange | undefined {
   for (const spec of specs) {
     if ((spec.id as string) === exceptSpecId || isAbandoned(spec)) continue;
-    const change = ruleChangesOf(spec.extra).find((c) => c.id === ruleId && c.op !== "add");
+    const change = ruleChangesOf(spec.extra).find((c) => c.id === ruleId && c.op !== "add" && !isLanded(c));
     if (change !== undefined) return { spec, change };
   }
   return undefined;

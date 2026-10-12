@@ -821,6 +821,11 @@ function buildAppFromSqlite(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
+  // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
+  // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
+  // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
+  const ruleChangeService = new RuleChangeService(store, recordLockService);
+  corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     corpusService,
     ...phaseServices,
@@ -929,7 +934,7 @@ function buildAppFromSqlite(
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
-    ruleChangeService: new RuleChangeService(store, recordLockService),
+    ruleChangeService,
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
@@ -1211,6 +1216,11 @@ function buildAppFromTurso(
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
+  // reason: plan close and spec deprecation land / abandon a spec's rule change set through ONE writer
+  // (D3, spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); the instance is shared with the
+  // `lore rule` verbs so a claim-scoped authoring guard armed on it covers both.
+  const ruleChangeService = new RuleChangeService(store, recordLockService);
+  corpusService.setRuleChangeLanding(ruleChangeService);
   return {
     corpusService,
     ...phaseServices,
@@ -1314,7 +1324,7 @@ function buildAppFromTurso(
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
     // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
-    ruleChangeService: new RuleChangeService(store, recordLockService),
+    ruleChangeService,
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,

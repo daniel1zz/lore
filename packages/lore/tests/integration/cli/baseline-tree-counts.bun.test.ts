@@ -118,9 +118,9 @@ describe("lore baseline tree rule counts (AC-BLC-6, BR-674)", () => {
     expect(rowOf(businessLeaf)).toContain("[rules: live 1 / deprecated 0 / retired 0]");
   });
 
-  it("STATE: deprecating a debt entry moves it from live to deprecated in the row", () => {
-    mustRun(["rule", "set", "AD-2", "--lifecycle", "deprecated"]);
-    expect(rowOf(debtRegistry)).toContain("[rules: live 1 / deprecated 1 / retired 0]");
+  it("STATE: retiring a debt entry moves it from live to retired in the row (no rule enters deprecated since D4)", () => {
+    mustRun(["rule", "set", "AD-2", "--lifecycle", "retired", "--note", "paid down"]);
+    expect(rowOf(debtRegistry)).toContain("[rules: live 1 / deprecated 0 / retired 1]");
   });
 
   it("--json entries carry the same tallies for standard and debt-registry", () => {
@@ -129,7 +129,7 @@ describe("lore baseline tree rule counts (AC-BLC-6, BR-674)", () => {
     }).data;
     const bySlug = new Map(entries.map((e) => [e.slug, e.rules]));
     expect(bySlug.get(standard)).toEqual({ live: 1, deprecated: 0, retired: 0 });
-    expect(bySlug.get(debtRegistry)).toEqual({ live: 1, deprecated: 1, retired: 0 });
+    expect(bySlug.get(debtRegistry)).toEqual({ live: 1, deprecated: 0, retired: 1 });
     expect(bySlug.get(section)).toEqual({ live: 0, deprecated: 0, retired: 0 });
   });
 });

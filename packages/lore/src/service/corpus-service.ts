@@ -80,6 +80,8 @@ import {
   type LinkType,
 } from "@lore/core";
 import { requireSpecCitesLiveRule, specCitesLiveRuleInCorpus } from "./spec-approval-citation.js";
+import { ownProposedRules } from "./rule-changes.js";
+import type { RuleChangeLandingPort } from "./rule-landing-port.js";
 import { isParentlessType, isValidParentType, parentlessRefusalMessage, PARENT_TYPE_CONTRACT } from "@lore/core";
 import type {
   SearchHit,
@@ -869,6 +871,22 @@ export class CorpusService {
 
   /** Present iff {@link setRuleStateService} was called. */
   private ruleStateService: { full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
+
+  /**
+   * Hands the corpus service the one writer from a spec's rule change set to the baseline tree (D3 of
+   * spec-a-spec-carries-its-rule-changes-the-baseline-takes-them). With it armed, closing a plan whose spec has an
+   * unlanded change set LANDS the change set first and is refused while landing would fail, and moving a spec to
+   * `deprecated` retires its still-proposed ids "never landed". Called once by `app.ts`; absent (every bare
+   * `new CorpusService(store)`) ⇒ neither happens, byte-identical to a corpus with no change sets.
+   *
+   * @param port - anything exposing `RuleChangeService.apply`
+   */
+  setRuleChangeLanding(port: RuleChangeLandingPort): void {
+    this.ruleChangeLanding = port;
+  }
+
+  /** Present iff {@link setRuleChangeLanding} was called. */
+  private ruleChangeLanding: RuleChangeLandingPort | undefined;
 
   /**
    * Hands the corpus service the approval path a `set(status: "approved")` must take (BR-1071): the
@@ -2699,7 +2717,7 @@ export class CorpusService {
     // for that reason first. Same predicate `ReviewService.approve` runs (spec-approval-citation.ts).
     if (existing.type === "spec" && newStatus === "approved" && existing.status !== "approved") {
       const effectiveExtra = parsedPatch.data.extra !== undefined ? parsedPatch.data.extra : existing.extra;
-      const cited = await requireSpecCitesLiveRule(this.store, existing.slug, effectiveExtra["acceptance_criteria"]);
+      const cited = await requireSpecCitesLiveRule(this.store, existing.slug, effectiveExtra["acceptance_criteria"], ownProposedRules(effectiveExtra));
       if (!cited.ok) return cited;
     }
 
@@ -2957,6 +2975,21 @@ export class CorpusService {
       }
     }
 
+    // Landing of the plan's spec's rule change set (D3 of spec-a-spec-carries-its-rule-changes-the-baseline-
+    // takes-them): closing the plan is the moment the spec lands, so `apply` runs HERE, after every plan-close
+    // gate has passed and before the plan's own write. Unconditional on `gateEnforcer` (like the cascade): it is
+    // a data-integrity step, not an advisory predicate. A refusal (a citing criterion without a runner-attested
+    // pass) refuses the close and names the criteria; `apply` is idempotent, so a close that later fails on a
+    // stale write simply re-runs it as a no-op.
+    if (isPlanClosing && this.ruleChangeLanding !== undefined && existing.parent_id !== null) {
+      const parent = await this.store.find(existing.parent_id);
+      if (!parent.ok) return parent;
+      if (parent.value !== null && parent.value.type === "spec") {
+        const landed = await this.ruleChangeLanding.apply(parent.value.slug, { by: this.resolveWriteActor(opts?.by) });
+        if (!landed.ok) return landed;
+      }
+    }
+
     // BUG-002 (audit finding) — update + version snapshot + update audit entry as
     // ONE atomic composite write (StoreInterface.updateWithProvenance), mirroring
     // _createImpl's fix above. The version snapshot's content/extra/status/title
@@ -3058,6 +3091,24 @@ export class CorpusService {
       },
     );
     if (!updateResult.ok) return updateResult;
+
+    // A spec moved to `deprecated` before its change set landed abandons it: its still-proposed ids become
+    // `retired` "never landed: <spec>" (spec-a-spec-carries-its-rule-changes-the-baseline-takes-them, Edge cases).
+    // After the status write, so a refused/stale deprecation never retires anything; `apply` on a deprecated spec
+    // is idempotent, so a failure here is repaired by re-running `lore rule apply <spec>` (named in the error).
+    if (existing.type === "spec" && newStatus === "deprecated" && existing.status !== "deprecated" && this.ruleChangeLanding !== undefined) {
+      const abandoned = await this.ruleChangeLanding.apply(existing.slug, { by: resolvedActor });
+      if (!abandoned.ok) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "rule_changes",
+          message:
+            `${existing.slug} is now deprecated, but retiring its proposed rules failed (${abandoned.error.code}); ` +
+            `re-run \`lore rule apply ${existing.slug}\` to retire them`,
+          value: abandoned.error,
+        });
+      }
+    }
 
     // SPEC-103 §Mechanisms M1, §Design Decisions D4 — uniform edit-reset semantics:
     // an edit to an approved ledger doc (assessment/retro/handoff/uat) still applies
@@ -4018,11 +4069,12 @@ export class CorpusService {
    * criterion cite a live BR/AS rule? The SAME measure `approve` and `set` refuse on
    * (`specCitesLiveRuleInCorpus`) — exposed here because adapters hold no store.
    *
-   * @param rawAcceptanceCriteria - the spec's `extra.acceptance_criteria` as stored
+   * @param specExtra - the spec's `extra` as stored: its `acceptance_criteria` and its own change set
+   *   (`rule_changes`), whose proposed ids count as citable by THIS spec only
    * @returns `ok(true | false)`; a store read failure is returned as itself (never read as "cites nothing")
    */
-  async specCitesLiveRule(rawAcceptanceCriteria: unknown): Promise<Result<boolean, LoreError>> {
-    return specCitesLiveRuleInCorpus(this.store, rawAcceptanceCriteria);
+  async specCitesLiveRule(specExtra: Readonly<Record<string, unknown>>): Promise<Result<boolean, LoreError>> {
+    return specCitesLiveRuleInCorpus(this.store, specExtra["acceptance_criteria"], ownProposedRules(specExtra));
   }
 
   /**
