@@ -198,6 +198,56 @@ describe("rule apply: the evidence gate (AC-CS-2b)", () => {
   });
 });
 
+describe("rule apply: unproven changes (AC-CS-2f)", () => {
+  it("NEGATIVE: an add cited by NO criterion is refused naming the id; nothing is written", async () => {
+    const world = await makeWorld();
+    const spec = await makeSpec(world, "Uncited add");
+    const add = await mustPropose(world, spec.slug, ADD_A);
+    const leaf0 = await reload(world, world.leafId);
+    const refused = await world.changes.apply(spec.slug);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect("message" in refused.error && refused.error.message).toContain(add.id);
+    expect("message" in refused.error && refused.error.message).toContain("unproven");
+    expect((await reload(world, world.leafId)).version).toBe(leaf0.version);
+    expect(await registryState(world, add.id)).toBe("proposed");
+  });
+
+  it("NEGATIVE: a modify cited by no criterion is refused naming the id, even when another change is proven", async () => {
+    const world = await makeWorld();
+    const spec = await makeSpec(world, "Uncited modify");
+    const add = await mustPropose(world, spec.slug, ADD_A);
+    await mustPropose(world, spec.slug, { op: "modify", id: "BR-1", statement: "unproven rewrite" });
+    await mustCite(world, spec.slug, "AC-U-1", [add.id]);
+    await recordEvidence(world, await reload(world, spec.id), [evidence("AC-U-1", "attested-pass", "2026-10-12T10:00:00.000Z")]);
+    const refused = await world.changes.apply(spec.slug);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect("message" in refused.error && refused.error.message).toContain("BR-1");
+    expect(await registryState(world, add.id)).toBe("proposed");
+  });
+
+  it("HAPPY: a retire needs no citing criterion", async () => {
+    const world = await makeWorld();
+    const spec = await makeSpec(world, "Uncited retire");
+    await mustPropose(world, spec.slug, { op: "retire", id: "BR-1", note: "no longer true" });
+    const landed = await world.changes.apply(spec.slug);
+    expect(landed.ok && landed.value.kind).toBe("applied");
+    expect(await registryState(world, "BR-1")).toBe("retired");
+  });
+
+  it("STATE: plan close inherits it and is refused naming the unproven id", async () => {
+    const world = await makeWorld();
+    const spec = await makeSpec(world, "Uncited at close");
+    const add = await mustPropose(world, spec.slug, ADD_A);
+    const plan = await world.corpus.create({ type: "plan", title: "Plan unproven", parent_id: spec.id, content: "p" });
+    if (!plan.ok) throw new Error("plan create failed");
+    await setStatus(world, plan.value.id, "active");
+    const closed = await world.corpus.set(plan.value.slug, { status: "archived" });
+    expect(closed.ok).toBe(false);
+    if (!closed.ok) expect("message" in closed.error && closed.error.message).toContain(add.id);
+  });
+});
+
 describe("rule apply: idempotence (AC-CS-2c)", () => {
   it("STATE: apply twice is a no-op the second time (no leaf or spec version moves)", async () => {
     const world = await makeWorld();
