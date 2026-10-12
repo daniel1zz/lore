@@ -1,4 +1,11 @@
 /**
+ * `lore context list | add | remove <id> [--scope project|user] [--json]` (also in this file) drive the
+ * fragment selection (`flows/selection-flow.ts`, spec-rule-store-git-tracked-fragment-selection-on-demand-
+ * skill AC-RS-7): `add`/`remove` write the scope's `selection.yaml` (CAS; CONFLICT exits 5, unknown id
+ * exits 4) and, only when bytes changed, run `runContextRefresh` for that scope. `refresh` itself folds both
+ * `selection.yaml` files, resolves the user config dir with the shared resolver (BR-1065) and passes the
+ * embedded manifest's shipped skill names (`buildRefreshFragmentDeps`, also used by `lore setup`).
+ *
  * `lore context init | refresh` — the CLI verb family for the two-zone
  * CLAUDE.md capability (spec-context-verb-family-two-zone-claude-md-anatomy-
  * lore, §Public Interface, §Design Decisions D2/D3). Thin adapter over
