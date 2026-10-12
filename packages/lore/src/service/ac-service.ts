@@ -12,7 +12,9 @@
  * `addCriterion`, `removeCriterion` and `setCriterion` are REFUSED (`VALIDATION_ERROR`,
  * `field: "gate:record-edit"`, exit 4) on a spec that has ever been approved — an added, removed or
  * edited criterion changes what was accepted, so it belongs to a new spec. `citeCriterion` is NOT
- * a rewrite and stays open. The check is `RecordLockService.assertEditable(spec, "criteria")`,
+ * a rewrite and stays open. EXCEPTION (BR-1069): `setCriterion` with `opts.correction` fixes ONE existing
+ * criterion of a locked spec as an audited correction (one version, status kept, reason in change_summary and
+ * the audit row); `addCriterion` / `removeCriterion` have no such exit. The check is `RecordLockService.assertEditable(spec, "criteria")`,
  * run BEFORE any validation or write; `RecordLockService` is a REQUIRED constructor argument so a
  * service composed without it does not compile (D17). This REVERSES the older shape
  * "`lore ac add` logs a version and does not demote": on a locked spec it now refuses.
@@ -276,6 +278,16 @@ export interface DeclarePathOpts {
    * Source: spec-baseline-slice-2 §C3 (actor provenance on AC writes).
    */
   by?: string;
+}
+
+/**
+ * Options for {@link AcService.setCriterion}: the D8 path options plus the audited correction exit.
+ * A SEPARATE type so `addCriterion` / `removeCriterion` (which keep {@link DeclarePathOpts}) can never
+ * receive a correction (spec-a-criterion-of-a-locked-specification-can-be-fixed-as-an D4, BR-1069).
+ */
+export interface SetCriterionOpts extends DeclarePathOpts {
+  /** Audited fix of this one criterion: skips ONLY the record-edit gate and the approved→draft demotion (D2). */
+  readonly correction?: { readonly reason: string };
 }
 
 /**
@@ -739,7 +751,7 @@ export class AcService {
     specIdOrSlug: string,
     acId: string,
     patch: SetCriterionPatch,
-    opts: DeclarePathOpts = {},
+    opts: SetCriterionOpts = {},
   ): Promise<Result<AcceptanceCriterion[], LoreError>> {
     const hasAnyField =
       patch.statement !== undefined ||
@@ -767,8 +779,28 @@ export class AcService {
 
     // record-edit gate (spec-documents-are-living-or-records D6) - BEFORE any write. For a locked spec the
     // edit is refused instead of demoting the spec (the demotion below now only serves an unlocked spec).
-    const gate = await this.recordLock.assertEditable(spec, "criteria");
-    if (!gate.ok) return gate;
+    // reason: BR-1069/D2 — a correction on a LOCKED spec skips ONLY this gate and the demotion below; an
+    // empty reason is refused before anything else. On an unlocked spec the gate is a no-op and the reason
+    // is still recorded (D3).
+    const correction = opts.correction;
+    let correctionApplies = false;
+    if (correction !== undefined) {
+      if (correction.reason.trim().length === 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "correction.reason",
+          message: "a correction needs a non-empty reason (--correction \"<why this is a fix, not a change>\")",
+          value: correction.reason,
+        });
+      }
+      const lock = await this.recordLock.resolve(spec);
+      if (!lock.ok) return lock;
+      correctionApplies = lock.value.standing === "record" && lock.value.locked;
+    }
+    if (!correctionApplies) {
+      const gate = await this.recordLock.assertEditable(spec, "criteria");
+      if (!gate.ok) return gate;
+    }
 
     const existing = extractCriteria(spec);
     const index = existing.findIndex((c) => c.id === acId);
@@ -866,12 +898,14 @@ export class AcService {
     // untouched. `true` is passed literally because reaching this line means a
     // field WAS edited — the no-field-flag case already returned VALIDATION_ERROR
     // (D3) — and every editable field on a criterion is governing contract content.
-    const newStatus = resolveStatusAfterContractEdit(spec.status, true);
+    // reason: D5 — a correction on a locked spec keeps the status (no approved→draft, no re-approval write).
+    const newStatus = correctionApplies ? spec.status : resolveStatusAfterContractEdit(spec.status, true);
 
     const citeAudit = patch.cites !== undefined ? await this.citeAuditDetails(patch.cites) : undefined;
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "set", {
+      ...(correction !== undefined ? { correctionReason: correction.reason.trim() } : {}),
       ...(opts.by !== undefined ? { by: opts.by } : {}),
       status: newStatus,
       acId,
@@ -1010,6 +1044,8 @@ export class AcService {
       auditDetails?: Record<string, unknown>;
       /** The calling actor; omitted → the env actor chain (see writeCriteria). */
       by?: string;
+      /** Trimmed correction reason (setCriterion only): change_summary `Correction: <reason>` + audit `details.correction`. */
+      correctionReason?: string;
     } = {},
   ): Promise<Result<DocRecord, LoreError>> {
     const now = new Date().toISOString();
@@ -1068,7 +1104,9 @@ export class AcService {
         created_at: now,
         created_by: actor,
         change_summary:
-          operation === "set"
+          opts.correctionReason !== undefined
+            ? `Correction: ${opts.correctionReason}`
+            : operation === "set"
             ? buildSetChangeSummary(criteria.length, opts.acId, spec.status, newStatus)
             : operation === "cite"
               ? `Acceptance criterion ${opts.acId ?? ""} citations updated — ${criteria.length} entries`
@@ -1089,6 +1127,7 @@ export class AcService {
           criteria_count: criteria.length,
           version: newVersion,
           ...(opts.acId !== undefined ? { ac_id: opts.acId } : {}),
+          ...(opts.correctionReason !== undefined ? { correction: { reason: opts.correctionReason } } : {}),
         },
       },
       {

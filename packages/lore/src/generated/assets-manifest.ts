@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "16602eabe9dc7e00f01f436e5831d85ebf235452b8b7b6526a1b574f12615231",
+  tree_digest: "e72153d159cf4c3006962f0679a390d1e1f3cab5140b9540d546fa5a4d19b3df",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "e7b1610edfb25cae9d0bfcc3ffe6bcdf62940c1c37e8a5528508ea0a057429e1" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "c2cb50556fcce86bfecb5e9136732c9002cfef4268d09edf790a683883c5af36" },
@@ -53,7 +53,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/agent-rules.md", kind: "context", ownership: "managed", sha256: "440516ec3907f3cc199ee6a7517324898fbba11e5b1fac5d2e74e89faa35fa57" },
   { path: "context/corpus-workflow-0-overview.md", kind: "context", ownership: "managed", sha256: "a3a243597a5414169a7f7f65a1028f477edfe4311fede245b590296952bfea4a" },
   { path: "context/corpus-workflow-1-feed.md", kind: "context", ownership: "managed", sha256: "ed94a84a0ce97182d494a5f455f88f365b0990420ec48592b6439be3b6f5afd9" },
-  { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "4299e5b72297459291eaa7f44e168d42dacebb7a1fd5c071f9f2b6a89fdf4fa5" },
+  { path: "context/corpus-workflow-2-produce.md", kind: "context", ownership: "managed", sha256: "8b4fbfe3a25e2b7fff977f15ab95b9cf515eee6746594626091a7b07f21b1716" },
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "6c9f8e02575ca9794aabeb95bc92defab4389915bb0ae3ff3d61844428a4c810" },
   { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "9bcff64a93457a8968867cb456c282a90081f4a5be72a9b17652a5a31cbc1f85" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "0f1dd1c23a9d03f3c3972870ef9bafc24b48d365a9e80bbdab8169a56ca58807" },
