@@ -210,7 +210,9 @@ function archiveViaFastTrack(tmpDir: string, slug: string): void {
   const lore = loreRunnerFor(runLore, tmpDir);
   lore(["ac", "add", slug, "AC-FT-1", "--statement", "the fixing spec behaviour responds in < 200ms", "--mode", "human"]);
   citeSpecViaCli(lore, tmpDir, undefined, slug, "AC-FT-1");
-  setStatus(tmpDir, slug, "approved");
+  // #65: `set --status approved` now runs the approve checks (BR-1071); this fixture has no judgment, so it takes the audited escape.
+  const approved = runLore(["approve", slug, "--override-no-judgment"], tmpDir);
+  if (approved.exitCode !== 0) throw new Error(`approve ${slug} failed: ${approved.stderr}`);
   setStatus(tmpDir, slug, "active");
   setStatus(tmpDir, slug, "archived");
 }
