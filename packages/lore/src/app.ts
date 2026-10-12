@@ -20,6 +20,7 @@ import { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { SQLiteStore } from "./store/sqlite-store.js";
 import { TursoStore, probeTmpdirUsability } from "./store/turso-store.js";
+import type { StoreInterface } from "./store/store-interface.js";
 import { CorpusService } from "./service/corpus-service.js";
 import { ReviewService } from "./service/review-service.js";
 import { VersionService } from "./service/version-service.js";
@@ -119,6 +120,9 @@ import { ResolutionProjector } from "./service/resolution-projector.js";
 // this is no longer "optional here, absent in production").
 import { GhResolutionLabelPort } from "./service/resolution-label-port.js";
 import { GhRunner, createNodeGhExecFile } from "./service/gh-runner.js";
+import { GhIssueCloser } from "./service/issue-closer-port.js";
+import { IssueCloseOnArchive } from "./service/issue-close-on-archive.js";
+import { isGithubUpstreamCfg, resolveFeedbackUpstreamCfg } from "./adapters/cli/report-issue-wiring.js";
 
 export interface App {
   corpusService: CorpusService;
@@ -516,6 +520,14 @@ export interface App {
    * valid without a mechanical touch; every REAL `createApp()` call gets one.
    */
   resolutionProjector?: ResolutionProjector;
+  /**
+   * The post-archive GitHub issue step (spec-archiving-the-work-that-resolves-a-defect-report-closes
+   * D1-D4): the SAME instance `corpusService` and `taskWorkflowService` run after every archive, and
+   * what `lore issues --sync` reads drift through. Always present on a `createApp()` App; its closer is
+   * wired only when `feedback.upstream` is a GitHub repository (otherwise it reports "GitHub not
+   * configured" instead of acting). Optional for hand-built App test stubs.
+   */
+  issueClose?: IssueCloseOnArchive;
   /**
    * TraceStatsService — read-only aggregation surface for `lore trace stats`
    * (SPEC-102). Store-only, no telemetry, same DI shape as `AuditService`
@@ -1449,6 +1461,22 @@ function buildAppFromTurso(
  *
  * D-007 invariant: with sync.enabled=true there is NO silent fallback to SQLiteStore.
  */
+/**
+ * Builds the post-archive issue step and hands it to every service that commits an archive
+ * (spec-archiving-the-work-that-resolves-a-defect-report-closes D4). The closer exists only for a
+ * GitHub-repo `feedback.upstream` — NOT the vendor-consent shape, which names the lore vendor's own
+ * intake repository, an issue tracker this corpus must never close issues on.
+ */
+function wireIssueCloseOnArchive(app: App, store: StoreInterface, config: LoreConfig | undefined): void {
+  const upstream = resolveFeedbackUpstreamCfg(config);
+  const repo = upstream !== undefined && isGithubUpstreamCfg(upstream) ? upstream.repo : undefined;
+  const closer = repo === undefined ? undefined : new GhIssueCloser(new GhRunner({ execFile: createNodeGhExecFile() }));
+  const step = new IssueCloseOnArchive(store, closer, repo);
+  app.corpusService.setArchiveIssueClosePort(step);
+  app.taskWorkflowService.setArchiveIssueClosePort(step);
+  app.issueClose = step;
+}
+
 export function createApp(dbPath: string): App;
 export function createApp(
   dbPath: string,
@@ -1672,7 +1700,7 @@ function createAppUnscoped(
       traceRecorder,
       () => resolveWriteActorFor(sqliteStore),
     );
-    return buildAppFromSqlite(
+    const sqliteApp = buildAppFromSqlite(
       sqliteStore,
       telemetry,
       aiProviderService,
@@ -1695,6 +1723,8 @@ function createAppUnscoped(
       pruneState,
       citeGateRaw,
     );
+    wireIssueCloseOnArchive(sqliteApp, sqliteStore, config);
+    return sqliteApp;
   }
 
   // Sync is enabled — resolve credentials (fail loud on missing/empty token, D-007)
@@ -1778,9 +1808,7 @@ function createAppUnscoped(
     // 3rd arg wires SPEC-102's OPTIONAL TraceRecorder — see the SQLite branch's
     // identical comment.
     const gateEnforcer = new GateEnforcer(config, store.appendAuditEntry.bind(store), traceRecorder, () => resolveWriteActorFor(store));
-    return {
-      ok: true,
-      value: buildAppFromTurso(
+    const tursoApp = buildAppFromTurso(
         store,
         dbPath,
         telemetry,
@@ -1804,8 +1832,9 @@ function createAppUnscoped(
         judgmentRequiredTypes,
         pruneState,
         citeGateRaw,
-      ),
-    };
+      );
+    wireIssueCloseOnArchive(tursoApp, store, config);
+    return { ok: true, value: tursoApp };
   } catch (e) {
     telemetry.close();
     const message =

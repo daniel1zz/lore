@@ -37,6 +37,8 @@ import { defineCommand } from "citty";
 import { computeArchiveCandidates, resolveClaimTtlMinutes, resolveHandoffTtlMinutes } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
+import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
+import { emitIssueCloseItems } from "../issue-close-output.js";
 
 /**
  * The literal, copy-pasteable repair command printed for every `--sweep`
@@ -147,6 +149,8 @@ export default defineCommand({
     const by = resolveActor();
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
     const outcomes: Array<{ slug: string; ok: boolean; detail: string; skipped?: true; floor?: string }> = [];
+    // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.
+    const issueCloseItems: IssueCloseItem[] = [];
 
     for (const candidate of candidates) {
       const doc = docsById.get(candidate.doc_id);
@@ -166,6 +170,7 @@ export default defineCommand({
         continue;
       }
       outcomes.push({ slug: candidate.slug, ok: true, detail: `archived → v${result.value.version}` });
+      issueCloseItems.push(...(result.value.issueClose ?? []));
     }
 
     if (args.json) {
@@ -177,6 +182,7 @@ export default defineCommand({
         console.log(`  [${o.ok ? "OK" : o.skipped === true ? "SKIPPED" : "FAILED"}] ${o.slug} — ${o.detail}`);
       }
     }
+    emitIssueCloseItems(issueCloseItems, { json: args.json === true });
     process.exitCode = 0;
   },
 });

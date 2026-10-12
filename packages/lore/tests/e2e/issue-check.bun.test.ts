@@ -1,10 +1,10 @@
 /**
  * `lore status --check-issues` (D5, spec-issue-closure-loop-computed-
  * resolution-agent-reachable) — the deterministic, report-only detector that
- * flags (a) an unclosed escalation (a `resolves` in-edge whose source doc is
- * terminal while the issue task itself is not `archived`) and (b) a stale
- * open report (computed resolution `open`, older than
- * `feedback.stale_after_days`, D5b). Spawns the COMPILED `dist/lore` binary
+ * flags a stale open report (computed resolution `open`, older than
+ * `feedback.stale_after_days`, D5b). Its former shape (a) "unclosed escalation"
+ * was RETIRED by spec-archiving-the-work-that-resolves-a-defect-report-closes
+ * D6 — a computed-`fixed` report is never flagged. Spawns the COMPILED `dist/lore` binary
  * (Bun.spawnSync) against THROWAWAY corpora (mkdtemp + `lore init`) — NEVER
  * the repo's own `.lore/` corpus (project CLAUDE.md hard rule).
  *
@@ -52,12 +52,9 @@
  *               day under → NOT flagged (INCLUSIVE boundary, mirrors
  *               `staleness.ts`'s documented `age_days === min_age_days`
  *               precedent)
- *   ERROR:      a `resolves` edge whose source doc is `archived` while the
- *               issue task itself is still `draft` → unclosed escalation,
- *               exit 3
- *   STATE:      archiving the issue task makes the SAME escalation stop being
- *               flagged on a subsequent run (mirrors `cli-drift.bun.test.ts`'s
- *               "a fixed spec stops appearing in drifts[]" precedent);
+ *   RETIRED:    a `resolves` edge whose source doc is `archived` while the
+ *               issue task itself is still `draft` is NO LONGER flagged
+ *               (exit 0, D6); archiving the issue task leaves it unflagged;
  *               byte-comparison of every issue doc's raw `docs` row before
  *               and after a `--check-issues` run proves it mutates nothing
  *   REGRESSION: plain `lore status --json` (no `--check-issues`) never
@@ -300,12 +297,6 @@ function snapshotDocRow(tmpDir: string, id: string): unknown {
   }
 }
 
-interface UnclosedEscalationJson {
-  id: string;
-  slug: string;
-  title: string;
-}
-
 interface StaleOpenJson {
   id: string;
   slug: string;
@@ -317,7 +308,6 @@ interface StaleOpenJson {
 interface IssueCheckJson {
   checked: number;
   consistent: boolean;
-  unclosed_escalations: UnclosedEscalationJson[];
   stale_open: StaleOpenJson[];
 }
 
@@ -363,7 +353,7 @@ afterAll(() => {
 
 // ─── Corpus A: escalation lifecycle (HAPPY / ERROR / STATE) + mutates-nothing ──
 
-describe("AC-ICL-6: unclosed escalation lifecycle", () => {
+describe("AC-ICL-6 (amended by D6 of spec-archiving-the-work-that-resolves-a-defect-report-closes): a computed-fixed report is never flagged", () => {
   const tmpDir = makeCorpus("escalation");
   const prd = createPrd(tmpDir);
   const plan = createPlan(tmpDir, prd.slug, "Escalation Fixture Plan");
@@ -388,7 +378,6 @@ describe("AC-ICL-6: unclosed escalation lifecycle", () => {
     expect(data).toBeDefined();
     expect(data!.consistent).toBe(true);
     expect(data!.checked).toBe(1);
-    expect(data!.unclosed_escalations).toEqual([]);
     expect(data!.stale_open).toEqual([]);
   });
 
@@ -399,36 +388,31 @@ describe("AC-ICL-6: unclosed escalation lifecycle", () => {
     const { result, data } = checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data!.consistent).toBe(true);
-    expect(data!.unclosed_escalations).toEqual([]);
   });
 
-  it("AC-ICL-6: ERROR — a resolves edge from the now-archived spec computes fixed while the issue task is still draft → unclosed escalation, exit 3", () => {
+  it("AC-ICL-6 (D6): a resolves edge from the now-archived spec computes fixed while the issue task is still draft → NOT flagged, exit 0", () => {
     insertResolvesLink(tmpDir, fixingSpec.id, issueTask.id, new Date().toISOString());
 
     const { result, data } = checkIssues(tmpDir);
-    expect(result.exitCode).toBe(3);
-    expect(data!.consistent).toBe(false);
-    expect(data!.unclosed_escalations).toEqual([
-      { id: issueTask.id, slug: issueTask.slug, title: "Filed report: escalation fixture" },
-    ]);
+    expect(result.exitCode).toBe(0);
+    expect(data!.consistent).toBe(true);
     expect(data!.stale_open).toEqual([]);
   });
 
-  it("AC-ICL-6: mutates nothing — every issue doc's raw docs row is byte-identical before and after a flagged --check-issues run", () => {
+  it("AC-ICL-6: mutates nothing — every issue doc's raw docs row is byte-identical before and after a --check-issues run", () => {
     const before = snapshotDocRow(tmpDir, issueTask.id);
     const result = runLore(["status", "--check-issues"], tmpDir);
-    expect(result.exitCode).toBe(3); // still flagged (unchanged from the previous test)
+    expect(result.exitCode).toBe(0);
     const after = snapshotDocRow(tmpDir, issueTask.id);
     expect(after).toEqual(before);
   });
 
-  it("AC-ICL-6: STATE — archiving the issue task itself clears the SAME escalation on the next run", () => {
+  it("AC-ICL-6: STATE — archiving the issue task itself leaves the verdict unchanged (still consistent)", () => {
     setStatus(tmpDir, issueTask.slug, "archived"); // task type: draft -> archived is a valid direct edge
 
     const { result, data } = checkIssues(tmpDir);
     expect(result.exitCode).toBe(0);
     expect(data!.consistent).toBe(true);
-    expect(data!.unclosed_escalations).toEqual([]);
   });
 });
 
@@ -488,7 +472,6 @@ describe("AC-ICL-6: stale open report boundary (feedback.stale_after_days)", () 
   it("AC-ICL-6: BOUNDARY — age one day under stale_after_days is NOT flagged", () => {
     const { data } = checkIssues(tmpDir);
     expect(data!.stale_open.some((row) => row.slug === underBoundary.slug)).toBe(false);
-    expect(data!.unclosed_escalations).toEqual([]);
   });
 });
 
@@ -556,7 +539,6 @@ describe("AC-ICL-6: malformed extra.issue_report + default feedback.stale_after_
     expect(result.exitCode).toBe(0);
     expect(data!.consistent).toBe(true);
     expect(data!.stale_open).toEqual([]);
-    expect(data!.unclosed_escalations).toEqual([]);
   });
 });
 

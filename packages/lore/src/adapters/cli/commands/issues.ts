@@ -191,6 +191,7 @@ import {
   type Result,
 } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
+import { runIssuesSync } from "../issues-sync.js";
 import { relativeTime, formatTable, exitCode, formatError } from "../utils.js";
 import { classifyFeedbackUpstream, resolveGithubJoinedRows, type GithubUpstreamCfg } from "../report-issue-wiring.js";
 import {
@@ -575,12 +576,43 @@ export default defineCommand({
       description:
         "Detect drift between the corpus-computed resolution and each issue's current resolution:* GitHub label — writes nothing, exits 11 on any divergence, 0 when clean",
     },
+    sync: {
+      type: "boolean",
+      description:
+        "List GitHub issue drift (a fixed report whose archived fix left the issue open or unlabelled; a terminal report missing its resolution:* label) — writes nothing without --apply",
+    },
+    apply: {
+      type: "boolean",
+      description: "With --sync: repair the drift — close + label fixed reports, only label the other terminal states; exits 1 when any repair fails",
+    },
     json: {
       type: "boolean",
       description: "Output as JSON",
     },
   },
   async run({ args }) {
+    // spec-archiving-the-work-that-resolves-a-defect-report-closes D3 — --sync is its own operation
+    // (never a narrowing of the listing); --apply means nothing alone. Usage errors exit 2 BEFORE the
+    // corpus is opened.
+    if (args.apply === true && args.sync !== true) {
+      process.stderr.write("Error: --apply is only meaningful with --sync.\n");
+      process.exitCode = 2;
+      return;
+    }
+    if (args.sync === true && (args.verify === true || args.open === true || args.resolved === true || args.all === true || args.local === true)) {
+      process.stderr.write("Error: --sync cannot be combined with --verify, --open, --resolved, --all or --local.\n");
+      process.exitCode = 2;
+      return;
+    }
+    if (args.sync === true) {
+      const { app: syncApp } = loadLoreApp();
+      try {
+        process.exitCode = await runIssuesSync(syncApp.issueClose, { apply: args.apply === true, json: args.json === true });
+      } finally {
+        syncApp.close();
+      }
+      return;
+    }
     const modeFlagsSet = [args.open === true, args.resolved === true, args.all === true].filter(
       Boolean,
     ).length;

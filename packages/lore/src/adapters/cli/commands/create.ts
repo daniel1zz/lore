@@ -70,6 +70,7 @@ import { KNOWLEDGE_SUB_TYPES, SPEC_KINDS, extractFileAnchors } from "@lore/core"
 import { createWithSupersedes, renderSupersedeRepairMessage } from "../../../flows/supersede-flow.js";
 import { collectFileAnchorResolution, renderFileAnchorAdvisory } from "../../../service/anchor-resolution.js";
 import { buildFileAnchorProbeContext } from "../../real-fs-probe.js";
+import { resolveResolvesTargets, type ResolvesTarget } from "../create-resolves.js";
 import {
   checkTaskCreateAdhocConflicts,
   checkTaskCreateRequiredFlags,
@@ -126,6 +127,7 @@ const TYPE_SPECIFIC_FLAGS: Readonly<Record<string, readonly DocType[]>> = {
   "requires-uat": ["plan"],
   adhoc: ["task"],
   linkage: ["task"],
+  resolves: ["spec", "plan", "task"],
 };
 
 /** citty/mri yields a single string for one occurrence of a repeatable flag, an array for ≥2, or `undefined` for zero. Normalizes to a string array. */
@@ -231,6 +233,11 @@ export default defineCommand({
       type: "string",
       description:
         "ID or slug of an existing knowledge/adr doc this new doc supersedes — creates then invalidates the old doc in one command (SPEC-043 D11). The target's type is validated BEFORE any write: a non-knowledge/adr target (e.g. a task) is refused with exit 4 and creates NOTHING (task-a-task-cannot-be-retracted-supersedes-emits-a-repair). Half-failure past that point (create ok, invalidate fails) reports a nonzero exit naming the exact repair command; the new doc is still created.",
+    },
+    resolves: {
+      type: "string",
+      description:
+        "[spec|plan|task, repeatable] Bind the new document to a filed defect report: a GitHub issue number (the report `lore issue adopt <n>` created) or its task-gh-… slug. Writes a `resolves` link in the same command, so archiving this document closes the report's GitHub issue. Every target must exist and carry extra.issue_report — otherwise nothing is created (exit 4). Source: spec-archiving-the-work-that-resolves-a-defect-report-closes D5",
     },
     ai: {
       type: "boolean",
@@ -510,6 +517,20 @@ export default defineCommand({
         resolvedPlanId = planResolve.value;
       }
 
+      // spec-archiving-the-work-that-resolves-a-defect-report-closes D5 — every --resolves target is resolved
+      // and validated BEFORE any write: one bad value refuses the whole creation (exit 4, nothing written).
+      const resolvesTokens = normalizeRepeatable(args.resolves);
+      let resolvesTargets: ResolvesTarget[] = [];
+      if (resolvesTokens.length > 0) {
+        const resolved = await resolveResolvesTargets(app.corpusService, resolvesTokens);
+        if (!resolved.ok) {
+          process.stderr.write(formatError(resolved.error) + "\n");
+          process.exitCode = exitCode(resolved.error);
+          return;
+        }
+        resolvesTargets = resolved.value;
+      }
+
       // Assemble type-specific extra object
       const extra = buildExtra(
         docType,
@@ -599,6 +620,17 @@ export default defineCommand({
         doc = result.value;
       }
 
+      // D5 — the `resolves` links are written in the same command, right after the create. A failure here
+      // (not expected: the targets were validated above) is loud, names the exact repair command, and exits
+      // non-zero; the document is already created.
+      const linkedResolves: string[] = [];
+      const resolvesFailures: Array<{ slug: string; error: LoreError }> = [];
+      for (const target of resolvesTargets) {
+        const linked = await app.corpusService.link(doc.id, target.id, "resolves", { by: resolvedActor });
+        if (linked.ok) linkedResolves.push(target.slug);
+        else resolvesFailures.push({ slug: target.slug, error: linked.error });
+      }
+
       if (args.json) {
         const data =
           supersedeError !== undefined
@@ -608,14 +640,29 @@ export default defineCommand({
                 supersede_repair_command: renderSupersedeRepairMessage(args.supersedes!, doc.slug),
               }
             : doc;
-        console.log(JSON.stringify({ ok: true, data }, null, 2));
+        console.log(
+          JSON.stringify(
+            { ok: true, data: linkedResolves.length > 0 ? { ...data, resolves_linked: linkedResolves } : data },
+            null,
+            2,
+          ),
+        );
       } else {
         console.log(`Created ${doc.type} document`);
         console.log(`  ID:     ${doc.id}`);
         console.log(`  Slug:   ${doc.slug}`);
         console.log(`  Title:  ${doc.title}`);
         console.log(`  Status: ${doc.status} (v${doc.version})`);
+        if (linkedResolves.length > 0) console.log(`  Resolves: ${linkedResolves.join(", ")}`);
         console.log(`\nRun \`lore get ${doc.slug}\` to view the document.`);
+      }
+
+      for (const failure of resolvesFailures) {
+        process.stderr.write(
+          `Error: ${doc.slug} was created but its resolves link to ${failure.slug} failed (${formatError(failure.error)})\n` +
+            `  Repair: lore link ${doc.slug} ${failure.slug} --type resolves\n`,
+        );
+        process.exitCode = exitCode(failure.error);
       }
 
       // Loud orphan (D11, never silent) — create succeeded but the follow-up

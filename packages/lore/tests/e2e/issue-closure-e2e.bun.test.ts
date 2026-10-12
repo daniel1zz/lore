@@ -32,30 +32,26 @@
  * CLAUDE.md hard rule) — every fixture lives under `os.tmpdir()`, asserted at
  * creation.
  *
- * The decisive transition this task calls out explicitly: `--check-issues`
- * must flag an unclosed escalation (computed `fixed`, issue task not yet
- * `archived`) with an EXECUTABLE remediation command, and go quiet the
- * instant — and only the instant — the issue task itself reaches `archived`.
- * A detector that never fires and one that never stops firing both pass a
- * one-sided test; the STATE case below asserts both directions on the SAME
- * fixture.
+ * The "unclosed escalation" shape of `--check-issues` (computed `fixed`, issue
+ * task not yet `archived`) is RETIRED by spec-archiving-the-work-that-resolves-
+ * a-defect-report-closes D6: archiving the fix now closes the GitHub issue, so
+ * the computed resolution plus the closed issue are the record. The STATE and
+ * BOUNDARY cases below assert the retirement — a computed-`fixed` report is
+ * never flagged, before or after its issue task is archived.
  *
  * Six-dimension coverage:
  *   HAPPY:      filed issue + archived spec carrying a `resolves` edge
  *               computes `fixed`; `--open` omits it, `--resolved` includes it.
- *   STATE:      the decisive 5->6 transition, both directions: `--check-issues`
- *               flags the unclosed escalation (exit 3, executable remediation
- *               naming the exact issue slug) WHILE the issue task is not yet
- *               archived, then goes quiet (exit 0, consistent) the moment it
- *               is archived — and the row still reads `fixed`, never reverts.
+ *   STATE:      `--check-issues` stays quiet (exit 0, consistent) for a
+ *               computed-`fixed` report both while the issue task is not yet
+ *               archived and after it is — and the row still reads `fixed`.
  *   NEGATIVE:   a `resolves` edge whose source has NOT reached a terminal
  *               status (still `draft`) computes `resolving`, never `fixed` —
  *               `--check-issues` never false-positives on a fix in flight,
  *               and the report is NOT excluded from `--open`.
  *   BOUNDARY:   D2's "active OR archived" boundary — a fixing PLAN (not just
  *               a spec) reaching ONLY `active` (never archived) already
- *               computes `fixed` and already trips the unclosed-escalation
- *               detector, before the fixing doc itself is ever archived.
+ *               computes `fixed`, and `--check-issues` still does not flag it.
  *   ERROR:      inside a real, already-`fixed` corpus, `lore issue resolve
  *               --state fixed` (the anti-pattern this whole spec forbids) is
  *               rejected unconditionally and provably writes nothing — the
@@ -121,16 +117,9 @@ interface IssuesListPayload {
   reports: IssueRow[];
 }
 
-interface UnclosedEscalationJson {
-  id: string;
-  slug: string;
-  title: string;
-}
-
 interface IssueCheckJson {
   checked: number;
   consistent: boolean;
-  unclosed_escalations: UnclosedEscalationJson[];
   stale_open: unknown[];
 }
 
@@ -336,8 +325,8 @@ describe("AC-ICL-8: filed issue + archived spec resolves-edge computes fixed", (
 
 // ─── AC-ICL-8: STATE (the decisive 5->6 transition, both directions) ───────
 
-describe("AC-ICL-8: --check-issues flags the unclosed escalation exactly while the gap exists, and quiets exactly when it closes", () => {
-  it("AC-ICL-8: STATE — flags with an executable remediation naming the issue slug, then goes quiet after archival, resolution stays fixed", async () => {
+describe("AC-ICL-8 (amended by D6 of spec-archiving-the-work-that-resolves-a-defect-report-closes): --check-issues never flags a computed-fixed report", () => {
+  it("AC-ICL-8: STATE — quiet while the issue task is not archived AND after it is archived; resolution stays fixed", async () => {
     const dir = freshDir("lore-icl8-state-");
     initCorpus(dir);
 
@@ -352,34 +341,27 @@ describe("AC-ICL-8: --check-issues flags the unclosed escalation exactly while t
     const linkResult = runLore(["link", fixingSpec.slug, issue.slug, "--type", "resolves"], dir);
     expect(linkResult.exitCode).toBe(0);
 
-    // Direction A: the gap exists (fixed, issue task still draft) -> flagged, exit 3.
+    // D6: computed `fixed` with the issue task still draft is NOT flagged any more.
     const beforeJson = runLore(["status", "--check-issues", "--json"], dir);
-    expect(beforeJson.exitCode).toBe(3);
+    expect(beforeJson.exitCode).toBe(0);
     const beforeData = parseJson<{ issues: IssueCheckJson }>(beforeJson.stdout).data?.issues;
     expect(beforeData).toBeDefined();
-    expect(beforeData!.consistent).toBe(false);
-    expect(beforeData!.unclosed_escalations).toEqual([
-      { id: issue.id, slug: issue.slug, title: issue.title },
-    ]);
+    expect(beforeData!.consistent).toBe(true);
+    expect(beforeData!.checked).toBe(1);
+    expect(Object.keys(beforeData!).sort()).toEqual(["checked", "consistent", "stale_open"]);
 
-    // Same check, plain-text render — the remediation must be EXECUTABLE: it
-    // names the exact issue slug and a real verb (`lore done`/`lore set ...
-    // --status archived`), not a generic "resolve this" instruction.
     const beforeText = runLore(["status", "--check-issues"], dir);
-    expect(beforeText.exitCode).toBe(3);
-    expect(beforeText.stdout).toContain(`lore done ${issue.slug}`);
-    expect(beforeText.stdout).toContain(`lore set ${issue.slug} --status archived`);
+    expect(beforeText.exitCode).toBe(0);
+    expect(beforeText.stdout).not.toContain("unclosed escalation");
 
-    // Close the gap exactly as the remediation prescribes.
     const archiveResult = runLore(["set", issue.slug, "--status", "archived"], dir);
     expect(archiveResult.exitCode).toBe(0);
 
-    // Direction B: the gap is closed -> quiet, exit 0, consistent.
+    // Archiving the issue task changes nothing about the verdict: still quiet.
     const afterJson = runLore(["status", "--check-issues", "--json"], dir);
     expect(afterJson.exitCode).toBe(0);
     const afterData = parseJson<{ issues: IssueCheckJson }>(afterJson.stdout).data?.issues;
     expect(afterData!.consistent).toBe(true);
-    expect(afterData!.unclosed_escalations).toEqual([]);
 
     // The row itself still reads "fixed" — archiving the issue task closes
     // the ESCALATION, it does not change the COMPUTED RESOLUTION.
@@ -420,7 +402,6 @@ describe("AC-ICL-8: a resolves edge whose source is not yet terminal never false
     expect(checkResult.exitCode).toBe(0);
     const checkData = parseJson<{ issues: IssueCheckJson }>(checkResult.stdout).data?.issues;
     expect(checkData!.consistent).toBe(true);
-    expect(checkData!.unclosed_escalations).toEqual([]);
 
     const openResult = runLore(["issues", "--open", "--json"], dir);
     expect(openResult.exitCode).toBe(0);
@@ -432,7 +413,7 @@ describe("AC-ICL-8: a resolves edge whose source is not yet terminal never false
 // ─── AC-ICL-8: BOUNDARY ──────────────────────────────────────────────────────
 
 describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not just a spec) as the fixing doc", () => {
-  it("AC-ICL-8: BOUNDARY — a fixing plan reaching only active already computes fixed and already trips the escalation detector", async () => {
+  it("AC-ICL-8: BOUNDARY — a fixing plan reaching only active already computes fixed, and --check-issues does not flag it (D6)", async () => {
     const dir = freshDir("lore-icl8-boundary-");
     initCorpus(dir);
 
@@ -456,12 +437,9 @@ describe("AC-ICL-8: D2's active-OR-archived boundary, proven with a PLAN (not ju
     expect(row?.resolution).toBe("fixed");
 
     const checkResult = runLore(["status", "--check-issues", "--json"], dir);
-    expect(checkResult.exitCode).toBe(3);
+    expect(checkResult.exitCode).toBe(0);
     const checkData = parseJson<{ issues: IssueCheckJson }>(checkResult.stdout).data?.issues;
-    expect(checkData!.consistent).toBe(false);
-    expect(checkData!.unclosed_escalations).toEqual([
-      { id: issue.id, slug: issue.slug, title: issue.title },
-    ]);
+    expect(checkData!.consistent).toBe(true);
   }, 30_000);
 });
 
