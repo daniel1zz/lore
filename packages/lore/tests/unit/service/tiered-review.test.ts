@@ -40,7 +40,6 @@ import { GENERATE_PROMPT_VERSION } from "../../../src/ai/templates.js";
 import type {
   AIProvider,
   CreateDocInput,
-  DocId,
   DocRecord,
   GenerateInput,
   GenerateOutput,
@@ -146,11 +145,7 @@ async function makeApp(
   );
   // AC-AP-3 (BR-1071): app.ts hands CorpusService the approve path as an injected port, so a
   // `set(..., { status: "approved" })` is judged exactly like `approve`. Wired here the same way.
-  // reason: `setApprovalPort` is added by task-skill-implement-set-to-approved-delegates-to-the-approve;
-  // until then the call is a TypeError (the declared red), and the structural cast keeps typecheck green.
-  (corpusService as unknown as {
-    setApprovalPort(port: { approve: (id: string, o: Record<string, unknown>) => ReturnType<ReviewService["approve"]> }): void;
-  }).setApprovalPort({ approve: (id, o) => reviewService.approve(id as DocId, o as never) });
+  corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   return { store, corpusService, judgmentService, reviewService, enforcer };
 }
 
