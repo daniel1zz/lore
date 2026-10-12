@@ -228,7 +228,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     const { rowids } = await seedSchema12();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(17);
+    expect(userVersion(db)).toBe(18);
 
     // docs + rowids (external-content FTS depends on rowid stability)
     const after = db.query("SELECT rowid AS rid, id FROM docs").all() as { rid: number; id: string }[];
@@ -320,7 +320,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     raw.close();
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(17);
+    expect(userVersion(db)).toBe(18);
     expect((db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys).toBe(1);
     expect(db.query("SELECT name FROM sqlite_master WHERE name = 'docs_new'").all()).toEqual([]);
     store.close();
@@ -339,7 +339,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     expect(preserved.ok && preserved.value?.id).toBe("01HM013SPEC0000000000001");
     turso.close();
     const raw = new Database(path);
-    expect(userVersion(raw)).toBe(17);
+    expect(userVersion(raw)).toBe(18);
     expect(namesOf(raw, "index", "docs")).toEqual(EXPECTED_DOC_INDEXES);
     expect(namesOf(raw, "trigger", "docs")).toEqual(EXPECTED_DOC_TRIGGERS_HEAD);
     raw.close();
@@ -352,7 +352,7 @@ describe("migration-013 (docs.type admits 'baseline' + rule_registry)", () => {
     first.close();
 
     const second = new SQLiteStore(path);
-    expect(userVersion(second.getDatabase())).toBe(17);
+    expect(userVersion(second.getDatabase())).toBe(18);
     second.close();
 
     const raw = new Database(path);

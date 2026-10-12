@@ -721,7 +721,7 @@ export default defineCommand({
           }
 
           await reportDemotionIfAny(app, args.spec as string, beforeStatus);
-          if (patch.cites !== undefined) await reportCiteWarnings(requireAcService(app), patch.cites);
+          if (patch.cites !== undefined) await reportCiteWarnings(requireAcService(app), patch.cites, args.spec as string);
 
           if (args.json) {
             console.log(JSON.stringify({ ok: true, data: { criteria: result.value } }, null, 2));
@@ -980,9 +980,9 @@ function printCiteWarnings(warnings: readonly CiteWarning[]): void {
 }
 
 /** Judge `ids` against the baseline and print the warnings; a failed lookup is reported, never swallowed. */
-async function reportCiteWarnings(ac: AcService, ids: readonly string[]): Promise<void> {
+async function reportCiteWarnings(ac: AcService, ids: readonly string[], spec: string): Promise<void> {
   if (ids.length === 0) return;
-  const checked = await ac.checkCites(ids);
+  const checked = await ac.checkCites(ids, spec);
   if (!checked.ok) {
     process.stderr.write(`Warning: could not check cited rules against the baseline: ${formatError(checked.error)}\n`);
     return;
@@ -1003,7 +1003,7 @@ async function reportCiteFeedbackOnAdd(
 ): Promise<void> {
   const cites = (candidate as { cites?: string[] }).cites ?? [];
   if (cites.length > 0) {
-    await reportCiteWarnings(ac, cites);
+    await reportCiteWarnings(ac, cites, spec);
     return;
   }
   const has = await ac.hasBaselineDocs();

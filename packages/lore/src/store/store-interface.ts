@@ -18,7 +18,7 @@ import type {
   ReviewJudgment,
   ReviewJudgmentKind,
   RuleIdPrefix,
-  RuleLifecycle,
+  RuleRegistryState,
   RunId,
   RunRecord,
   SearchHit,
@@ -295,8 +295,11 @@ export interface RuleRegistryRow {
   allocated_at: string;
   /** Actor identity that allocated the id. */
   allocated_by: string;
-  /** The rule's lifecycle in its owning leaf (migration-014); kept in the same transaction as the leaf write. */
-  lifecycle: RuleLifecycle;
+  /**
+   * The rule's state: its lifecycle in its owning leaf (migration-014, kept in the same transaction as the leaf
+   * write), or `proposed` (migration-018) — reserved by a spec's change set, listed by no leaf.
+   */
+  lifecycle: RuleRegistryState;
   /** The owning leaf doc's `version` (migration-014); kept in the same transaction as the leaf write. */
   version: number;
 }
@@ -375,6 +378,29 @@ export interface RuleLeafPatch {
    * itself, so the decorator cannot reach it through a `VersionRecord` argument).
    */
   harness_run?: string | null;
+  /** New status of the written doc (a spec demoted by a contract edit); absent = unchanged. */
+  status?: DocStatus;
+  /** `change_summary` of the `action: "update"` version row; absent = none. */
+  change_summary?: string;
+}
+
+/**
+ * The spec write that {@link StoreInterface.reserveProposedRuleAndUpdateSpec} commits together with the
+ * reservation of a `proposed` rule id.
+ */
+export interface ProposedRuleWrite {
+  /** The SPEC whose `extra.rule_changes` receives the new `add` entry. */
+  specId: DocId;
+  /** CAS guard: the spec's `version` the caller read. */
+  expectedVersion: number;
+  /** Pure builder of the spec's new `extra` given the reserved id. */
+  buildExtra: (ruleId: string) => Record<string, unknown>;
+  /** The leaf the rule will land on at apply time; stored as the registry row's `leaf_doc_id`. */
+  ownerLeafId: DocId;
+  /** New spec status (e.g. approved -> draft demotion); absent = unchanged. */
+  status?: DocStatus;
+  /** `change_summary` of the spec's version row. */
+  changeSummary?: string;
 }
 
 // ─── Interface ─────────────────────────────────────────────────────────────
@@ -755,6 +781,28 @@ export interface StoreInterface {
     leafId: DocId,
     expectedVersion: number,
     buildExtra: (ruleId: string) => Record<string, unknown>,
+    actor: string,
+    prefix?: RuleIdPrefix,
+    harnessRun?: string | null,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>>;
+
+  /**
+   * Reserve the next permanent rule id of family `prefix` in registry state `proposed` AND write it into a
+   * SPEC's change set in ONE write transaction (spec-a-spec-carries-its-rule-changes-the-baseline-takes-them):
+   * `n = COALESCE(MAX(n),0)+1` over that prefix's rows (read INSIDE the transaction), CAS-update the spec's
+   * `extra` to `write.buildExtra(id)` (+ optional status), insert the spec's `action: "update"` version row,
+   * insert the registry row with `lifecycle = 'proposed'`, `leaf_doc_id = write.ownerLeafId`. NO leaf is
+   * touched. Any failure rolls EVERYTHING back — a CAS miss never burns an id.
+   *
+   * @param write - the spec write and the leaf the rule will land on; unknown/soft-deleted spec → `DOC_NOT_FOUND`;
+   *   version mismatch → `STALE_VERSION`.
+   * @param actor - Recorded as `allocated_by` and the version row's `created_by`.
+   * @param prefix - id family; the change set is business-only today, so callers pass `BR` (the default).
+   * @param harnessRun - Harness run stamped on the spec's version row (migration-016); supplied only by `withWriteContext`.
+   * @returns `{ ruleId, doc }` (the updated spec) or a loud error; never a duplicate id.
+   */
+  reserveProposedRuleAndUpdateSpec(
+    write: ProposedRuleWrite,
     actor: string,
     prefix?: RuleIdPrefix,
     harnessRun?: string | null,

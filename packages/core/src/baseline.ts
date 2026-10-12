@@ -90,6 +90,15 @@ export const RULE_ENFORCEMENTS = ["guaranteed", "both", "prompt-only"] as const;
 export const RULE_LIFECYCLES = ["live", "deprecated", "retired"] as const;
 export type RuleLifecycle = (typeof RULE_LIFECYCLES)[number];
 
+/**
+ * The states of a permanent rule id in the registry: the three leaf lifecycles plus `proposed` — an id a
+ * spec's change set has reserved that is NOT in the tree yet (spec-a-spec-carries-its-rule-changes-the-
+ * baseline-takes-them, Model). A leaf's `extra.rules[].lifecycle` stays {@link RULE_LIFECYCLES}: a
+ * `proposed` rule is never listed by a leaf.
+ */
+export const RULE_REGISTRY_STATES = [...RULE_LIFECYCLES, "proposed"] as const;
+export type RuleRegistryState = (typeof RULE_REGISTRY_STATES)[number];
+
 /** One behavioural rule of a baseline leaf. `observed` = what the system does today, intent unconfirmed (BL-12). */
 export const baselineRuleSchema = z
   .object({
@@ -330,3 +339,56 @@ export function lintRuleStatement(statement: string, options: RuleLintOptions): 
   collect(CONFIG_KEY_PATTERN, "config-key", () => true);
   return flags;
 }
+
+// ─── Spec rule change set (`extra.rule_changes`) ─────────────────────────────
+
+const ruleChangeText = z.string().min(1).max(500);
+const ruleChangeExamples = z.array(z.string().max(300)).min(1).max(3);
+
+/**
+ * One entry of a spec's change set. `add` reserves a new `BR-n` (registry state `proposed`) and names the
+ * leaf slug it will land on; `modify` / `retire` name a LIVE id. Strict: an unknown key is a typo, not data.
+ */
+export const ruleChangeSchema = z.discriminatedUnion("op", [
+  z
+    .object({
+      op: z.literal("add"),
+      id: z.string().regex(BASELINE_RULE_ID_PATTERN, "a proposed rule id must match BR-<n>"),
+      leaf: z.string().min(1),
+      statement: ruleChangeText,
+      examples: ruleChangeExamples,
+      enforced_by: z.enum(RULE_ENFORCEMENTS),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("modify"),
+      id: z.string().regex(BASELINE_RULE_ID_PATTERN, "a modified rule id must match BR-<n>"),
+      statement: ruleChangeText.optional(),
+      examples: ruleChangeExamples.optional(),
+      enforced_by: z.enum(RULE_ENFORCEMENTS).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("retire"),
+      id: z.string().regex(BASELINE_RULE_ID_PATTERN, "a retired rule id must match BR-<n>"),
+      note: z.string().min(1),
+    })
+    .strict(),
+]);
+export type RuleChange = z.infer<typeof ruleChangeSchema>;
+
+/** A spec's whole change set. Ids are unique within it: one entry per rule id; a modify changes something. */
+export const specRuleChangesSchema = z.array(ruleChangeSchema).superRefine((changes, ctx) => {
+  const seen = new Set<string>();
+  changes.forEach((change, index) => {
+    if (seen.has(change.id)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate rule id ${change.id} in the change set`, path: [index, "id"] });
+    }
+    seen.add(change.id);
+    if (change.op === "modify" && change.statement === undefined && change.examples === undefined && change.enforced_by === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "a modify must change at least one of statement, examples, enforced_by", path: [index] });
+    }
+  });
+});

@@ -525,6 +525,7 @@ export function loadLoreApp(opts: LoadLoreAppOptions = {}): {
     claimTtlMinutes: resolveClaimTtlMinutes(telemetryOnlyConfig),
   };
   app.ruleService?.setCorpusWriteContext(corpusWriteAuthority);
+  app.ruleChangeService?.setCorpusWriteContext(corpusWriteAuthority);
   app.acService?.setCorpusWriteContext(corpusWriteAuthority);
 
   // SPEC-102 §Migration Strategy — opportunistic bounded-batch trace

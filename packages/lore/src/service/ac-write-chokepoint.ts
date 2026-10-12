@@ -67,6 +67,7 @@ import {
   type CiteGateFinding,
 } from "./ac-cite-gate.js";
 import { loadRuleIndexData } from "./rule-index-loader.js";
+import { ownProposedRules } from "./rule-changes.js";
 
 /** The refusal code — also the `LoreError` discriminant in `@lore/core` errors.ts. */
 export const AC_WRITE_NOT_VIA_AC_VERB = "AC_WRITE_NOT_VIA_AC_VERB" as const;
@@ -424,7 +425,12 @@ export async function admitAcWrite(
 
   const baseline = await store.findMany({ type: "baseline" });
   if (!baseline.ok) return baseline;
-  const index = indexBaseline(baseline.value);
+  // reason: a criterion may cite an id this spec's OWN change set proposes (BR-86/BR-257 as modified by
+  // spec-a-spec-carries-its-rule-changes-the-baseline-takes-them); a create has no stored spec yet, so none.
+  const stored = await store.find(input.target.id as DocId);
+  if (!stored.ok) return stored;
+  const ownProposed = stored.value === null ? [] : ownProposedRules(stored.value.extra);
+  const index = indexBaseline(baseline.value, ownProposed);
   // reason: BR-959 / #105 — an unexpired exemption must be known BEFORE the decision. A failed read is
   // returned, never read as "no exemptions" (that would refuse a legitimately exempted write).
   const exemptions = await store.listAcExemptions();
@@ -435,9 +441,12 @@ export async function admitAcWrite(
 
   if (decision.kind === "skip") return ok(unconstrained);
   if (decision.kind === "admit") {
+    // reason: the in-transaction liveness re-check reads the REGISTRY, where an own proposed id is `proposed`
+    // by design — it is admitted above through the change set, so it must not be re-required live there.
+    const ownIds = new Set(ownProposed.map((p) => p.id));
     return ok({
       advisories,
-      requireLiveRules: decision.requireLiveRules,
+      requireLiveRules: decision.requireLiveRules.filter((id) => !ownIds.has(id)),
       wouldRefuseAudit: decision.findings.map((f) =>
         wouldRefuseEntry(input.target, input.actor, nowIso, config.value.mode, f),
       ),

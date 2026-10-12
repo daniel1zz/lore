@@ -660,6 +660,7 @@ describe("OutlineService.resolve", () => {
         // every other explicit delegate here).
         allocateRuleAndUpdateLeaf: (leafId, expectedVersion, buildExtra, actor) =>
           store.allocateRuleAndUpdateLeaf(leafId, expectedVersion, buildExtra, actor),
+        reserveProposedRuleAndUpdateSpec: (write, actor) => store.reserveProposedRuleAndUpdateSpec(write, actor),
         moveRule: (ruleId, fromLeaf, toLeaf, actor) => store.moveRule(ruleId, fromLeaf, toLeaf, actor),
         listRuleRegistry: () => store.listRuleRegistry(),
         // reason: migration-014 indexes — new required StoreInterface methods; mechanical delegates.
