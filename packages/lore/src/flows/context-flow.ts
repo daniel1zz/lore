@@ -139,6 +139,7 @@ import { collectContextFacts, type ContextFacts } from "../service/context-facts
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 import { discoverFragments } from "../service/context-fragments/discover.js";
+import { resolveUserConfigDir } from "../service/context-fragments/user-config-dir.js";
 import {
   isLoreRulesFileName,
   parseRulesFile,
@@ -187,8 +188,14 @@ export interface FragmentRefreshDeps {
   assetsRoot: string;
   /** Home directory; the user-scope target dir is `<home>/.claude/rules`. */
   home: string;
-  /** User-layer fragments live at `<xdgConfigHome>/lore/context/*.md`. */
+  /** User-layer fragments live at `<userConfigDir>/context/*.md`; `userConfigDir` defaults to the XDG resolution of this value. */
   xdgConfigHome: string;
+  /**
+   * The user's lore config folder when the caller already resolved it (`resolveUserConfigDir`, BR-1065 —
+   * the CLI adapters always do, so `LORE_CONFIG_HOME` is honoured). Absent -> resolved here from
+   * `xdgConfigHome` alone (the `XDG_CONFIG_HOME/lore` rule), for in-process callers that pass no env.
+   */
+  userConfigDir?: string;
   /** Raw global (XDG) config layer. */
   globalConfig: ContextConfigLayer;
   /** Raw project (`.lore/config.yaml`) config layer. */
@@ -462,6 +469,7 @@ function resolveFragmentDeps(deps: ContextFlowDeps): Result<FragmentRefreshDeps 
     xdgConfigHome,
     globalConfig,
     projectConfig,
+    ...(deps.userConfigDir === undefined ? {} : { userConfigDir: deps.userConfigDir }),
     ...(deps.shippedSkillNames === undefined ? {} : { shippedSkillNames: deps.shippedSkillNames }),
   });
 }
@@ -483,7 +491,10 @@ async function selectScopeFragments(
 
   const discovered = await discoverFragments(fs, {
     shipped: joinPortPath(fragmentDeps.assetsRoot, "context"),
-    user: joinPortPath(fragmentDeps.xdgConfigHome, "lore", "context"),
+    user: joinPortPath(
+      fragmentDeps.userConfigDir ?? resolveUserConfigDir({ XDG_CONFIG_HOME: fragmentDeps.xdgConfigHome }, fragmentDeps.home),
+      "context",
+    ),
     project: PROJECT_FRAGMENTS_DIR,
   });
   if (!discovered.ok) return discovered;
@@ -512,7 +523,7 @@ async function selectScopeFragments(
 /** One planned action on a rules file; `write`/`delete` carry the bytes the CAS hash was taken over. */
 type RulesAction =
   | { kind: "write"; outcome: RulesFileOutcome; content: string; readBytes: string | null }
-  | { kind: "delete"; outcome: RulesFileOutcome; readBytes: string | null }
+  | { kind: "delete"; outcome: RulesFileOutcome; readBytes: string | null; removeDirIfEmpty?: string }
   | { kind: "none"; outcome: RulesFileOutcome };
 
 /**
@@ -653,7 +664,12 @@ async function planSkillDirs(
         value: path,
       });
     }
-    actions.push({ kind: "delete", outcome: { id: name.slice(SKILL_DIR_PREFIX.length), path, state: "pruned" }, readBytes: bytes });
+    actions.push({
+      kind: "delete",
+      outcome: { id: name.slice(SKILL_DIR_PREFIX.length), path, state: "pruned" },
+      readBytes: bytes,
+      removeDirIfEmpty: joinPortPath(skillsDir, name),
+    });
   }
   return ok(actions);
 }
@@ -806,7 +822,12 @@ export async function runContextRefresh(
     if (action.kind === "write") {
       await deps.fs.writeFile(action.outcome.path, action.content);
       rulesWritten.push(action.outcome.path);
-    } else if (action.kind === "delete") await deps.fs.deleteFile?.(action.outcome.path);
+    } else if (action.kind === "delete") {
+      await deps.fs.deleteFile?.(action.outcome.path);
+      // reason: a pruned skill leaves an empty `lore-<id>/` dir; remove it only when empty so a
+      // hand-added file beside SKILL.md keeps its folder (BR-1064, BR-1060).
+      if (action.removeDirIfEmpty !== undefined) await deps.fs.removeDirIfEmpty?.(action.removeDirIfEmpty);
+    }
   }
 
   if (claudeMdRefusalMessage !== null) {

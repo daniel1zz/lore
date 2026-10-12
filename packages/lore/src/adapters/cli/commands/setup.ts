@@ -137,7 +137,7 @@ import { seedAcCiteModeAudited } from "./baseline-adopt.js";
 import { parseDocument } from "yaml";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
 import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
-import { makeRealContextFsPort, toContextLayer } from "./context.js";
+import { buildRefreshFragmentDeps, makeRealContextFsPort, toContextLayer } from "./context.js";
 import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 
 import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
@@ -630,17 +630,22 @@ async function runProjectContextProjection(opts: {
   if (!globalConfig.ok) return globalConfig;
   const budgets = resolveRepoMemoryFileBudgets(opts.repoDir);
   if (!budgets.ok) return budgets;
-  const home = homedir();
+  // reason: the SAME dep builder `lore context refresh` uses — user config dir via the shared resolver,
+  // both selection files folded in, shipped skill names from the embedded manifest — so setup and
+  // refresh can never select different fragments.
+  const fragmentDeps = buildRefreshFragmentDeps({
+    repoRoot: opts.repoDir,
+    assetsRoot: opts.assetsRoot,
+    home: homedir(),
+    globalLayer: toContextLayer(globalConfig.value),
+    projectLayer: toContextLayer(projectConfig.value),
+  });
+  if (!fragmentDeps.ok) return fragmentDeps;
   const refreshed = await runContextRefresh(
     {
       fs: makeRealContextFsPort(opts.repoDir),
       budgets: budgets.value,
-      assetsRoot: opts.assetsRoot,
-      home,
-      // reason: XDG rule (same as commands/context.ts) — a non-empty $XDG_CONFIG_HOME replaces ~/.config.
-      xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(home, ".config"),
-      globalConfig: toContextLayer(globalConfig.value),
-      projectConfig: toContextLayer(projectConfig.value),
+      ...fragmentDeps.value,
     },
     "",
     // reason: setup must not re-splice the scaffolded CLAUDE.md (its facts-Z1 lacks the root H2s the

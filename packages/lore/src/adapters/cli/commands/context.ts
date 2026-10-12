@@ -71,7 +71,7 @@
  *   §Public Interface, §Design Decisions D2/D3; AC-CTX-3.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,7 +81,8 @@ import {
   formatMemoryFileBudgetSubstitution,
   resolveMemoryFileBudgetsFromConfigResult,
 } from "@lore/core";
-import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets } from "@lore/core";
+import { err, ok } from "@lore/core";
+import type { CallerSurface, ContextConfigLayer, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 import { exitCode, findLoreDbPath, formatError } from "../utils.js";
 import { resolveAssetsRoot, type SetupPathContext } from "../setup-args.js";
@@ -96,10 +97,22 @@ import {
 import { buildContextNarrativePrompt } from "../../../ai/context-narrative-template.js";
 import { buildProviderRegistry } from "../../../ai/registry.js";
 import { resolveAiDefault } from "../../../ai/resolve-ai.js";
+import { runSelectionChange, runSelectionList, type SelectionFlowDeps } from "../../../flows/selection-flow.js";
+import {
+  emptySelection,
+  parseSelection,
+  SELECTION_FILE,
+  selectionToLayer,
+  type SelectionScope,
+} from "../../../service/context-fragments/selection.js";
+import { resolveUserConfigDir } from "../../../service/context-fragments/user-config-dir.js";
+import { listShippedSkillNames } from "./fragments.js";
 
-/** The two registered `lore context` topics. */
-type ContextTopic = "init" | "refresh";
-const KNOWN_TOPICS: readonly ContextTopic[] = ["init", "refresh"];
+/** The registered `lore context` topics: the CLAUDE.md pair (init, refresh) and the selection trio (list, add, remove). */
+type ContextTopic = "init" | "refresh" | "list" | "add" | "remove";
+const KNOWN_TOPICS: readonly ContextTopic[] = ["init", "refresh", "list", "add", "remove"];
+/** Topics that take `--scope`. */
+const SCOPED_TOPICS: readonly ContextTopic[] = ["refresh", "add", "remove"];
 
 /** `--scope` values accepted by `refresh` (spec-context-fragments D4/D15): the repo (CLAUDE.md + `.claude/rules/lore-*.md`) or `~/.claude/rules/lore-*.md`. */
 const KNOWN_SCOPES: readonly ContextRefreshScope[] = ["project", "user"];
@@ -201,6 +214,17 @@ export function makeRealContextFsPort(repoRoot: string): FsWritePort {
       // other failure (permissions, a directory at the path) stays loud.
       rmSync(resolvePath(path), { force: true });
     },
+    async removeDirIfEmpty(path: string): Promise<void> {
+      // reason: `rmdir` is the atomic "only if empty" primitive — an absent or non-empty dir is the
+      // expected no-op; any other failure (permissions, a file at the path) stays loud.
+      try {
+        rmdirSync(resolvePath(path));
+      } catch (cause) {
+        const code = (cause as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ENOTEMPTY" || code === "EEXIST") return;
+        throw cause;
+      }
+    },
   };
 }
 
@@ -285,6 +309,88 @@ function renderOutcome(
   }
 }
 
+/** Raw text of one selection file; `null` when absent (legitimate); an unreadable file fails loud. */
+function readSelectionText(path: string): Result<string | null, LoreError> {
+  if (!existsSync(path)) return ok(null);
+  try {
+    return ok(readFileSync(path, "utf8"));
+  } catch (cause) {
+    return err({ code: "VALIDATION_ERROR", field: "path", message: `${path}: ${cause instanceof Error ? cause.message : String(cause)}`, value: path });
+  }
+}
+
+/**
+ * Folds both scopes' `selection.yaml` into the project/global config layers (BR-1062) so refresh
+ * selects fragments exactly as `lore fragments check` does: the selection file, not the settings file,
+ * owns the disable list. A malformed selection file, or a settings-file disable list, is a
+ * VALIDATION_ERROR (never silently ignored).
+ */
+export function foldSelections(opts: {
+  repoRoot: string;
+  userConfigDir: string;
+  globalLayer: ContextConfigLayer;
+  projectLayer: ContextConfigLayer;
+}): Result<{ globalConfig: ContextConfigLayer; projectConfig: ContextConfigLayer }, LoreError> {
+  const folded: Record<SelectionScope, ContextConfigLayer> = { user: opts.globalLayer, project: opts.projectLayer };
+  const sources: Record<SelectionScope, string> = {
+    user: join(opts.userConfigDir, SELECTION_FILE.user),
+    project: join(opts.repoRoot, SELECTION_FILE.project),
+  };
+  for (const scope of ["user", "project"] as const) {
+    const text = readSelectionText(sources[scope]);
+    if (!text.ok) return text;
+    const selection = text.value === null ? ok(emptySelection()) : parseSelection(text.value, sources[scope]);
+    if (!selection.ok) return selection;
+    const layer = selectionToLayer(selection.value, folded[scope], scope);
+    if (!layer.ok) return layer;
+    folded[scope] = layer.value;
+  }
+  return ok({ globalConfig: folded.user, projectConfig: folded.project });
+}
+
+/**
+ * The fragment deps `runContextRefresh` needs, shared by `lore context` and `lore setup --project`:
+ * user config dir from the shared resolver (BR-1065), both selection files folded in, and the shipped
+ * skill names from the embedded manifest (BR-1064) so a fragment can never shadow a shipped skill.
+ */
+export function buildRefreshFragmentDeps(opts: {
+  repoRoot: string;
+  assetsRoot: string;
+  home: string;
+  globalLayer: ContextConfigLayer;
+  projectLayer: ContextConfigLayer;
+}): Result<
+  {
+    assetsRoot: string;
+    home: string;
+    xdgConfigHome: string;
+    userConfigDir: string;
+    globalConfig: ContextConfigLayer;
+    projectConfig: ContextConfigLayer;
+    shippedSkillNames: string[];
+  },
+  LoreError
+> {
+  const userConfigDir = resolveUserConfigDir(process.env, opts.home);
+  const layers = foldSelections({ repoRoot: opts.repoRoot, userConfigDir, globalLayer: opts.globalLayer, projectLayer: opts.projectLayer });
+  if (!layers.ok) return layers;
+  return ok({
+    assetsRoot: opts.assetsRoot,
+    home: opts.home,
+    // reason: still required by the flow's all-or-nothing dep check; `userConfigDir` is what it reads.
+    xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(opts.home, ".config"),
+    userConfigDir,
+    globalConfig: layers.value.globalConfig,
+    projectConfig: layers.value.projectConfig,
+    shippedSkillNames: listShippedSkillNames(),
+  });
+}
+
+function reportFailure(error: LoreError): void {
+  process.stderr.write(formatError(error) + "\n");
+  process.exitCode = exitCode(error);
+}
+
 export default defineCommand({
   meta: {
     name: "context",
@@ -293,7 +399,12 @@ export default defineCommand({
   args: {
     topic: {
       type: "positional",
-      description: "Context subcommand: init | refresh",
+      description: "Context subcommand: init | refresh | list | add | remove",
+      required: false,
+    },
+    id: {
+      type: "positional",
+      description: "[add | remove only] Fragment id to re-enable (add) or disable (remove)",
       required: false,
     },
     force: {
@@ -310,7 +421,7 @@ export default defineCommand({
     },
     scope: {
       type: "string",
-      description: "[refresh only] Scope to refresh: project (default, repo CLAUDE.md + .claude/rules/lore-*.md) | user (~/.claude/rules/lore-*.md)",
+      description: "[refresh | add | remove] Scope: project (default; repo CLAUDE.md + .claude/rules/lore-*.md + .lore/context/selection.yaml) | user (~/.claude/rules/lore-*.md + the user config dir selection.yaml)",
     },
     json: {
       type: "boolean",
@@ -332,10 +443,10 @@ export default defineCommand({
     }
 
     const scopeArg = typeof args.scope === "string" ? args.scope : undefined;
-    if (scopeArg !== undefined && (topic !== "refresh" || !KNOWN_SCOPES.includes(scopeArg as ContextRefreshScope))) {
+    if (scopeArg !== undefined && (!SCOPED_TOPICS.includes(topic as ContextTopic) || !KNOWN_SCOPES.includes(scopeArg as ContextRefreshScope))) {
       const reason =
-        topic !== "refresh"
-          ? "--scope applies to `refresh` only"
+        !SCOPED_TOPICS.includes(topic as ContextTopic)
+          ? "--scope applies to `refresh`, `add` and `remove` only"
           : `unknown --scope "${scopeArg}" (expected: ${KNOWN_SCOPES.join(" | ")})`;
       process.stderr.write(`Error: ${reason}\n`);
       process.exitCode = 2;
@@ -375,25 +486,90 @@ export default defineCommand({
       isCompiled: Bun.main.startsWith("/$bunfs/"),
       execPath: process.execPath,
     };
+    const assetsRoot = resolveAssetsRoot(pathCtx);
+    const scope: ContextRefreshScope = (scopeArg as ContextRefreshScope | undefined) ?? "project";
     // reason: init and refresh receive identical deps; only refresh consumes the fragment deps (it owns the
-    // lore rules files, D15), so "init then refresh" leaves CLAUDE.md byte-identical (AC-CTX-3).
-    const fragmentDeps = {
-      assetsRoot: resolveAssetsRoot(pathCtx),
-      home,
-      // reason: XDG Base Directory rule (same as config-node.ts) — a set, non-empty
-      // $XDG_CONFIG_HOME replaces the ~/.config default.
-      xdgConfigHome: process.env["XDG_CONFIG_HOME"] || join(home, ".config"),
-      globalConfig: toContextLayer(globalConfigResult.value),
-      projectConfig: toContextLayer(config),
-    };
+    // lore rules files, D15), so "init then refresh" leaves CLAUDE.md byte-identical (AC-CTX-3). Built on
+    // demand because the selection files are folded in at build time and `add`/`remove` rewrite them
+    // before refreshing.
+    const buildFragmentDeps = () =>
+      buildRefreshFragmentDeps({
+        repoRoot,
+        assetsRoot,
+        home,
+        globalLayer: toContextLayer(globalConfigResult.value),
+        projectLayer: toContextLayer(config),
+      });
 
     if (topic === "refresh") {
-      const result = await runContextRefresh(
-        { fs: fsPort, budgets, ...fragmentDeps },
-        "",
-        { scope: (scopeArg as ContextRefreshScope | undefined) ?? "project" },
-      );
+      const fragmentDeps = buildFragmentDeps();
+      if (!fragmentDeps.ok) return reportFailure(fragmentDeps.error);
+      const result = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope });
       renderOutcome(json, result);
+      return;
+    }
+
+    if (topic === "list" || topic === "add" || topic === "remove") {
+      const userConfigDir = resolveUserConfigDir(process.env, home);
+      const selectionDeps: SelectionFlowDeps = {
+        fs: fsPort,
+        roots: {
+          shipped: join(assetsRoot, "context"),
+          user: join(userConfigDir, "context"),
+          project: join(repoRoot, ".lore", "context"),
+        },
+        selectionPaths: {
+          project: join(repoRoot, SELECTION_FILE.project),
+          user: join(userConfigDir, SELECTION_FILE.user),
+        },
+      };
+
+      if (topic === "list") {
+        const listed = await runSelectionList(selectionDeps);
+        if (!listed.ok) return reportFailure(listed.error);
+        if (json) {
+          console.log(JSON.stringify({ ok: true, data: listed.value }, null, 2));
+          return;
+        }
+        for (const row of listed.value) {
+          console.log(`${row.selected ? "on " : "off"}  ${row.id}  (${row.layer}, ${row.delivery}, ${row.size} chars)`);
+        }
+        return;
+      }
+
+      const id = typeof args.id === "string" ? args.id : "";
+      if (id === "") {
+        process.stderr.write(`Error: lore context ${topic} requires a fragment id (lore context ${topic} <id> [--scope project|user])\n`);
+        process.exitCode = 2;
+        return;
+      }
+      const changed = await runSelectionChange(selectionDeps, { action: topic, id, scope });
+      if (!changed.ok) return reportFailure(changed.error);
+
+      // reason: a no-op change (the file already held the resulting bytes) skips the refresh, so a
+      // repeat `remove` leaves every file byte-identical (BR-1063 idempotence).
+      let refreshed: Awaited<ReturnType<typeof runContextRefresh>> | null = null;
+      if (changed.value.changed) {
+        const fragmentDeps = buildFragmentDeps();
+        if (!fragmentDeps.ok) return reportFailure(fragmentDeps.error);
+        refreshed = await runContextRefresh({ fs: fsPort, budgets, ...fragmentDeps.value }, "", { scope });
+      }
+      if (refreshed !== null && !refreshed.ok) {
+        // The selection write already landed; say so before the refresh error so a retry is obvious.
+        process.stderr.write(`Recorded ${changed.value.path}, but the refresh failed:\n`);
+        return reportFailure(refreshed.error);
+      }
+      if (json) {
+        console.log(
+          JSON.stringify({ ok: true, data: { change: changed.value, refresh: refreshed === null ? null : refreshed.value } }, null, 2),
+        );
+        return;
+      }
+      const verb = topic === "remove" ? "Disabled" : "Enabled";
+      console.log(
+        `${verb} "${id}" in the ${scope} selection (${changed.value.path})${changed.value.changed ? "" : " — already so, nothing changed"}`,
+      );
+      if (refreshed !== null && refreshed.ok) renderOutcome(false, refreshed);
       return;
     }
 
@@ -423,8 +599,10 @@ export default defineCommand({
       );
     }
 
+    const initDeps = buildFragmentDeps();
+    if (!initDeps.ok) return reportFailure(initDeps.error);
     const result = await runContextInit(
-      { fs: fsPort, budgets, ...fragmentDeps },
+      { fs: fsPort, budgets, ...initDeps.value },
       "",
       narrative !== undefined ? { narrative, force: args.force === true } : { force: args.force === true },
     );

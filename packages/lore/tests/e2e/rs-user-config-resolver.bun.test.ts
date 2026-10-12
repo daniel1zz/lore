@@ -68,7 +68,7 @@ function makeSandbox(): Sandbox {
     loreHomeContextDir: join(loreHome, "context"),
     env,
   };
-  for (const step of [["init"], ["context", "init", "--no-ai"]]) {
+  for (const step of [["init"], ["context", "init", "--no-ai"], ["context", "refresh"]]) {
     const run = lore(sb, ...step);
     if (run.code !== 0) throw new Error(`harness: lore ${step.join(" ")} failed in fixture setup: ${run.stderr}`);
   }
