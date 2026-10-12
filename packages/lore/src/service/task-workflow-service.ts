@@ -608,6 +608,23 @@ type PlanTerminalityFact =
   | { kind: "fully_terminal"; plan_slug: string }
   | ({ kind: "membership_disagreement" } & PlanMembershipDisagreement);
 
+/** The `lore done` floors, by stable id (order = evaluation order). */
+export type DoneFloorId = "attested-pass" | "red-first" | "no-new-tests" | "unfiltered-test-file";
+
+/** One floor's refusal: the id plus the exact LoreError `done()` returns (`details.floor` set). */
+export interface DoneFloorRefusal {
+  floor: DoneFloorId;
+  error: LoreError;
+}
+
+/** Builds a floor refusal, stamping `details.floor` so callers never parse the message. */
+function doneFloorRefusal(
+  floor: DoneFloorId,
+  error: Extract<LoreError, { code: "VALIDATION_ERROR" }>,
+): Result<{ refusal: DoneFloorRefusal }, never> {
+  return ok({ refusal: { floor, error: { ...error, details: { floor } } } });
+}
+
 export interface DoneResult {
   task: DocRecord;
   already_done: boolean;
@@ -3358,23 +3375,33 @@ export class TaskWorkflowService {
     return result;
   }
 
-  private async _doneImpl(
-    idOrSlug: string,
-    opts: DoneOpts,
-    now: () => string,
-  ): Promise<Result<DoneResult, LoreError>> {
-    const taskResult = await this.resolveTask(idOrSlug);
-    if (!taskResult.ok) return taskResult;
-    let task = taskResult.value;
-
-    // reason: idempotent no-op BEFORE any evidence/claim validation — a second `lore
-    // done` on an already-archived task must succeed even if, say, its evidence log
-    // somehow no longer holds a pass (it can't be edited post-archival in practice, but
-    // this ordering makes that irrelevant rather than a latent footgun).
-    if (task.status === "archived" || task.status === "deprecated") {
-      return ok({ task, already_done: true, transitions: [] });
-    }
-
+  /**
+   * The four `lore done` floors as DATA — the single copy (spec-approval-and-plan-
+   * closure-go-through-the-same-checks-on D5, issue #47). Pure over `task` + its
+   * evidence: no write, no claim read. Floor order is the contract: attested-pass,
+   * red-first, no-new-tests, unfiltered-test-file; the first failing floor wins.
+   *
+   * `escapes` carries the audited override reasons: an absent one means "not
+   * requested". A blank-but-present reason is a usage error returned as `err` (NOT a
+   * floor refusal). The override branches live here only because they gate floors 1
+   * and 3 mid-sequence; {@link checkDoneFloors} always passes `{}`, so it never reads
+   * them.
+   *
+   * @returns `ok({refusal})` — the first failing floor with its exact LoreError
+   *   (`details.floor` set) or `null`, plus the override reasons actually consumed;
+   *   `err` only for a blank override reason
+   */
+  private evaluateDoneFloors(
+    task: DocRecord,
+    escapes: { overrideReason?: string; noNewTestsReason?: string },
+  ): Result<
+    {
+      refusal: DoneFloorRefusal | null;
+      overrideReason?: string;
+      noNewTestsReason?: string;
+    },
+    LoreError
+  > {
     const evidence = readEvidence(task);
     // ⛔ WHAT SATISFIES THIS FLOOR CHANGED 2026-08-23 (SPEC-143 AC-CT-2), and the
     // comment that used to sit below asserted the opposite — it called a self-report
@@ -3394,13 +3421,13 @@ export class TaskWorkflowService {
     let overrideReason: string | undefined;
     if (!hasAttestedPass) {
       // reason: adr-lore-done-requires-a-runner-attested-pass-the-sixth-false — a
-      // self-reported result:pass is not sufficient to archive. `opts.overrideReason`
+      // self-reported result:pass is not sufficient to archive. `escapes.overrideReason`
       // is the ONE audited bypass — checked here, not before this branch, so a task
       // that already holds an attested pass never even looks at it (never "always
       // audit"). A zero-length trimmed reason is refused identically to an absent
       // one, never silently treated as "no override requested".
-      if (opts.overrideReason === undefined || opts.overrideReason.trim() === "") {
-        if (opts.overrideReason !== undefined) {
+      if (escapes.overrideReason === undefined || escapes.overrideReason.trim() === "") {
+        if (escapes.overrideReason !== undefined) {
           return err({
             code: "VALIDATION_ERROR",
             field: "overrideReason",
@@ -3408,7 +3435,7 @@ export class TaskWorkflowService {
               "--override-attestation requires a non-empty, non-whitespace reason — " +
               "the CLI usage-error check (exit 2) should have caught this before " +
               "reaching the service; a direct caller must supply a real reason too",
-            value: opts.overrideReason,
+            value: escapes.overrideReason,
           });
         }
         // reason: the message is built by ONE pure function over the SAME rows
@@ -3418,14 +3445,14 @@ export class TaskWorkflowService {
         // must not be able to move the error a caller matches on. `value` keeps
         // the per-row `{result, attested}` pair so a programmatic caller never has
         // to parse prose for what the message states in words.
-        return err({
+        return doneFloorRefusal("attested-pass", {
           code: "VALIDATION_ERROR",
           field: "extra.verification_evidence",
           message: buildAttestationFloorRefusal(task.slug, evidence),
           value: evidence.map((e) => ({ result: e.result, attested: e.attestation !== undefined })),
         });
       }
-      overrideReason = opts.overrideReason;
+      overrideReason = escapes.overrideReason;
     }
 
     // reason: the red-first floor (task-red-first-discipline-is-asked-for-in-
@@ -3436,7 +3463,7 @@ export class TaskWorkflowService {
     // this one is reached only after the pass floor above already succeeded,
     // so it can never mask (or be masked by) that check.
     if (readRedFirstDeclared(task) && !evidence.some((e) => isRedRunResult(e.result))) {
-      return err({
+      return doneFloorRefusal("red-first", {
         code: "VALIDATION_ERROR",
         field: "extra.verification_evidence",
         message:
@@ -3457,8 +3484,8 @@ export class TaskWorkflowService {
     // opt in keeps working byte-identically, since this branch returns false for it.
     let noNewTestsReason: string | undefined;
     if (requiresNoNewTestsDeclaration(task, evidence)) {
-      if (opts.noNewTestsReason === undefined || opts.noNewTestsReason.trim() === "") {
-        if (opts.noNewTestsReason !== undefined) {
+      if (escapes.noNewTestsReason === undefined || escapes.noNewTestsReason.trim() === "") {
+        if (escapes.noNewTestsReason !== undefined) {
           return err({
             code: "VALIDATION_ERROR",
             field: "noNewTestsReason",
@@ -3466,7 +3493,7 @@ export class TaskWorkflowService {
               "--declare-no-new-tests requires a non-empty, non-whitespace reason — the CLI " +
               "usage-error check (exit 2) should have caught this before reaching the " +
               "service; a direct caller must supply a real reason too",
-            value: opts.noNewTestsReason,
+            value: escapes.noNewTestsReason,
           });
         }
         const acScope = extractDeclaredAcScope(task) ?? [];
@@ -3482,7 +3509,7 @@ export class TaskWorkflowService {
             ? "declares an EMPTY extra.ac_scope ([] — an explicit \"no criterion claimed\", " +
               "which is a decision and not a silence)"
             : `declares extra.ac_scope (${acScope.join(", ")})`;
-        return err({
+        return doneFloorRefusal("no-new-tests", {
           code: "VALIDATION_ERROR",
           field: "extra.verification_evidence",
           message:
@@ -3495,7 +3522,7 @@ export class TaskWorkflowService {
           value: evidence.map((e) => e.result),
         });
       }
-      noNewTestsReason = opts.noNewTestsReason;
+      noNewTestsReason = escapes.noNewTestsReason;
     }
 
     // reason: the unfiltered-test-file-run floor (task-every-ac-oracle-is-t-
@@ -3505,7 +3532,7 @@ export class TaskWorkflowService {
     // [] here and never fires this branch.
     const missingUnfilteredRuns = findMissingUnfilteredTestFileRuns(task, evidence);
     if (missingUnfilteredRuns.length > 0) {
-      return err({
+      return doneFloorRefusal("unfiltered-test-file", {
         code: "VALIDATION_ERROR",
         field: "extra.verification_evidence",
         message:
@@ -3518,6 +3545,60 @@ export class TaskWorkflowService {
         value: missingUnfilteredRuns,
       });
     }
+
+    return ok({
+      refusal: null,
+      ...(overrideReason !== undefined ? { overrideReason } : {}),
+      ...(noNewTestsReason !== undefined ? { noNewTestsReason } : {}),
+    });
+  }
+
+  /**
+   * Which `lore done` floor, if any, refuses `taskIdOrSlug` right now — WITHOUT
+   * archiving or writing anything and WITHOUT any override. `done()` returns this same
+   * `error` unchanged, so a caller that must not archive past a floor (plan-close
+   * cascade, archive sweep) sees exactly what `lore done` would say. An
+   * already-terminal task has nothing to check: `null`.
+   *
+   * @param taskIdOrSlug - Task document ULID or slug
+   * @returns `ok({floor, error})` first failing floor (`error.details.floor === floor`),
+   *   `ok(null)` when every floor is met
+   * @throws DOC_NOT_FOUND, VALIDATION_ERROR (not a task)
+   */
+  async checkDoneFloors(taskIdOrSlug: string): Promise<Result<DoneFloorRefusal | null, LoreError>> {
+    const taskResult = await this.resolveTask(taskIdOrSlug);
+    if (!taskResult.ok) return taskResult;
+    const task = taskResult.value;
+    if (task.status === "archived" || task.status === "deprecated") return ok(null);
+    const evaluated = this.evaluateDoneFloors(task, {});
+    if (!evaluated.ok) return evaluated;
+    return ok(evaluated.value.refusal);
+  }
+
+  private async _doneImpl(
+    idOrSlug: string,
+    opts: DoneOpts,
+    now: () => string,
+  ): Promise<Result<DoneResult, LoreError>> {
+    const taskResult = await this.resolveTask(idOrSlug);
+    if (!taskResult.ok) return taskResult;
+    let task = taskResult.value;
+
+    // reason: idempotent no-op BEFORE any evidence/claim validation — a second `lore
+    // done` on an already-archived task must succeed even if, say, its evidence log
+    // somehow no longer holds a pass (it can't be edited post-archival in practice, but
+    // this ordering makes that irrelevant rather than a latent footgun).
+    if (task.status === "archived" || task.status === "deprecated") {
+      return ok({ task, already_done: true, transitions: [] });
+    }
+
+    const evaluated = this.evaluateDoneFloors(task, {
+      ...(opts.overrideReason !== undefined ? { overrideReason: opts.overrideReason } : {}),
+      ...(opts.noNewTestsReason !== undefined ? { noNewTestsReason: opts.noNewTestsReason } : {}),
+    });
+    if (!evaluated.ok) return evaluated;
+    if (evaluated.value.refusal !== null) return err(evaluated.value.refusal.error);
+    const { overrideReason, noNewTestsReason } = evaluated.value;
 
     const nowIso = now();
     const claim = readClaim(task);
