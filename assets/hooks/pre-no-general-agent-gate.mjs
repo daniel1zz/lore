@@ -35,6 +35,7 @@ or quality gate. Use a specialized subagent instead:
     - lore-implementer : implement lore tasks (code + tests + oracle evidence)
     - lore-reviewer    : read-only code review against lore spec ACs
     - researcher       : SDK / pattern / benchmark evaluation (ADR output)
+    - tester           : write and run tests (independent of the implementer)
 
   Built-in:
     - Explore            : fast codebase exploration
