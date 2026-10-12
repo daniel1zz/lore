@@ -32,9 +32,10 @@
  * Source: spec-baseline-slice-1-rules-with-permanent-ids-ac-citations §C6, QA-3/4/5.
  */
 
-import { err, extractEvidence, ok, parseCodeAnchor, ruleIdPrefixOfNode } from "@lore/core";
+import { err, ok, parseCodeAnchor, ruleIdPrefixOfNode } from "@lore/core";
 import type { DocRecord, DocType, EvidenceEntry, LoreError, Result, RuleLifecycle } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { attestedRunKey, indexLatestAttestedRuns } from "./attested-ac-runs.js";
 
 // ─── Public contract ────────────────────────────────────────────────────────────────────────
 
@@ -184,10 +185,6 @@ function declaredAcsOf(spec: DocRecord): DeclaredAc[] {
   return out;
 }
 
-function isConclusiveAttested(e: EvidenceEntry): e is EvidenceEntry & { result: "pass" | "fail" } {
-  return e.attestation !== undefined && (e.result === "pass" || e.result === "fail");
-}
-
 /** Index of rules in citable rule-holding docs (business leaf, architecture standard): first occurrence of an id wins (same rule as `buildRuleIndex`). */
 function collectRules(leaves: readonly DocRecord[]): Array<{ id: string; leaf: string; lifecycle: RuleLifecycle }> {
   const seen = new Map<string, { id: string; leaf: string; lifecycle: RuleLifecycle }>();
@@ -222,46 +219,23 @@ function buildSnapshot(docs: readonly DocRecord[]): Snapshot {
     else if (doc.type === "task") tasks.push(doc);
   }
 
-  const specById = new Map(specs.map((s) => [s.id, s]));
-  const specsByAcId = new Map<string, string[]>();
   const declared = new Map<string, DeclaredAc[]>();
-  for (const spec of specs) {
-    const acs = declaredAcsOf(spec);
-    declared.set(spec.id, acs);
-    for (const ac of acs) specsByAcId.set(ac.id, [...(specsByAcId.get(ac.id) ?? []), spec.id]);
-  }
+  for (const spec of specs) declared.set(spec.id, declaredAcsOf(spec));
 
-  // Latest attested conclusive run per (spec, AC); ambiguous ad-hoc rows are counted and dropped.
-  const latest = new Map<string, EvidenceEntry>();
-  let ambiguousAcRef = 0;
-  const offer = (specId: string, entry: EvidenceEntry): void => {
-    const key = `${specId}\u0000${entry.ac_ref}`;
-    const current = latest.get(key);
-    if (current === undefined || entry.recorded_at >= current.recorded_at) latest.set(key, entry);
-  };
-  for (const task of tasks) {
-    const planId = task.extra["plan_id"];
-    const lineageSpecId =
-      typeof planId === "string" ? plans.get(planId)?.parent_id ?? null : null;
-    const hasLineage = typeof planId === "string";
-    for (const entry of extractEvidence(task)) {
-      if (entry.ac_ref === undefined || !isConclusiveAttested(entry)) continue;
-      if (hasLineage) {
-        if (lineageSpecId !== null && specById.has(lineageSpecId)) offer(lineageSpecId, entry);
-        continue;
-      }
-      const owners = specsByAcId.get(entry.ac_ref) ?? [];
-      if (owners.length > 1) ambiguousAcRef += 1;
-      else if (owners.length === 1) offer(owners[0] as string, entry);
-    }
-  }
+  // Latest attested conclusive run per (spec, AC); ambiguous ad-hoc rows are counted and dropped. The attribution
+  // is the shared `attested-ac-runs` module (also the gate of `lore rule apply`) — never re-derived here.
+  const { latest, ambiguousAcRef } = indexLatestAttestedRuns({
+    specs: specs.map((spec) => ({ id: spec.id, acIds: (declared.get(spec.id) ?? []).map((ac) => ac.id) })),
+    plans: [...plans.values()],
+    tasks,
+  });
 
   const citing = new Map<string, CitingInput[]>();
   for (const spec of specs) {
     const anchorPaths = anchorPathsOf(spec);
     for (const ac of declared.get(spec.id) ?? []) {
       if (!ac.isScript) continue;
-      const run = latest.get(`${spec.id}\u0000${ac.id}`) ?? null;
+      const run = latest.get(attestedRunKey(spec.id, ac.id)) ?? null;
       for (const ruleId of ac.cites) {
         const input: RuleStateInput = {
           spec: spec.slug,

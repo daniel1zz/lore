@@ -13,8 +13,8 @@
  *   are root|branch|leaf, architecture nodes root|section|module-card|standard|debt-registry. Rules
  *   live on a business `leaf` (ids `BR-n`), an architecture `standard` (`AS-n`) and an architecture
  *   `debt-registry` (`AD-n`) only; the id family must match the node. Glossary only on a business
- *   root|branch; rule lifecycle only moves forward (live -> deprecated -> retired, or live ->
- *   retired); a retired rule carries a `retired_note`. The four-part standard fields
+ *   root|branch; rule lifecycle only moves forward and nothing new enters `deprecated` (live ->
+ *   retired; a rule already deprecated may still go -> retired); a retired rule carries a `retired_note`. The four-part standard fields
  *   (current_reality / target_rule / current_exceptions / migration) exist only on `AS-n` rules and
  *   are all-or-nothing.
  * Side effects: none (pure). ⛔ Browser-safe barrel member — no Node import. The lint's
@@ -283,14 +283,19 @@ export function validateBaselineParent(
   return { ok: true };
 }
 
-/** Allowed forward moves of a rule's lifecycle. Nothing returns to `live`. */
+/**
+ * Allowed forward moves of a rule's lifecycle. Nothing returns to `live`, and nothing NEW enters `deprecated`
+ * (D4 of spec-a-spec-carries-its-rule-changes-the-baseline-takes-them: a snapshot rule is true or not; "still
+ * true, going away" belongs to the change set that will retire it). `deprecated -> retired` stays lawful so the
+ * rules that already sit in `deprecated` can leave it.
+ */
 const LAWFUL_RULE_TRANSITIONS: Readonly<Record<RuleLifecycle, readonly RuleLifecycle[]>> = {
-  live: ["deprecated", "retired"],
+  live: ["retired"],
   deprecated: ["retired"],
   retired: [],
 };
 
-/** True only for live->deprecated, live->retired, deprecated->retired. */
+/** True only for live->retired and deprecated->retired. */
 export function isLawfulRuleLifecycleTransition(from: string, to: string): boolean {
   const allowed = (LAWFUL_RULE_TRANSITIONS as Record<string, readonly string[] | undefined>)[from];
   return allowed !== undefined && allowed.includes(to);
@@ -343,6 +348,8 @@ export function lintRuleStatement(statement: string, options: RuleLintOptions): 
 // ─── Spec rule change set (`extra.rule_changes`) ─────────────────────────────
 
 const ruleChangeText = z.string().min(1).max(500);
+/** ISO 8601 time the entry landed in the tree (`lore rule apply`); absent = not landed yet. Written only by apply. */
+const ruleChangeAppliedAt = z.string().min(1).optional();
 const ruleChangeExamples = z.array(z.string().max(300)).min(1).max(3);
 
 /**
@@ -358,6 +365,7 @@ export const ruleChangeSchema = z.discriminatedUnion("op", [
       statement: ruleChangeText,
       examples: ruleChangeExamples,
       enforced_by: z.enum(RULE_ENFORCEMENTS),
+      applied_at: ruleChangeAppliedAt,
     })
     .strict(),
   z
@@ -367,6 +375,7 @@ export const ruleChangeSchema = z.discriminatedUnion("op", [
       statement: ruleChangeText.optional(),
       examples: ruleChangeExamples.optional(),
       enforced_by: z.enum(RULE_ENFORCEMENTS).optional(),
+      applied_at: ruleChangeAppliedAt,
     })
     .strict(),
   z
@@ -374,6 +383,7 @@ export const ruleChangeSchema = z.discriminatedUnion("op", [
       op: z.literal("retire"),
       id: z.string().regex(BASELINE_RULE_ID_PATTERN, "a retired rule id must match BR-<n>"),
       note: z.string().min(1),
+      applied_at: ruleChangeAppliedAt,
     })
     .strict(),
 ]);

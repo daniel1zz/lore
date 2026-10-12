@@ -34,6 +34,7 @@ import {
 import type { StoreInterface } from "../store/store-interface.js";
 import { resolveDoc } from "./resolve.js";
 import { requireSpecCitesLiveRule } from "./spec-approval-citation.js";
+import { ownProposedRules } from "./rule-changes.js";
 import {
   buildUpstreamSpecContext,
   countScriptModeAcceptanceCriteria,
@@ -276,7 +277,7 @@ export class ReviewService {
     // (judgment, AC count, oracle coverage) is refused for that reason first; a spec that
     // would otherwise pass is still refused here.
     if (doc.type === "spec") {
-      const citationResult = await requireSpecCitesLiveRule(this.store, doc.slug, doc.extra["acceptance_criteria"]);
+      const citationResult = await requireSpecCitesLiveRule(this.store, doc.slug, doc.extra["acceptance_criteria"], ownProposedRules(doc.extra));
       if (!citationResult.ok) return citationResult;
     }
     return gated;

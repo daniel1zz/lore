@@ -974,6 +974,18 @@ function validateSetRulePatch(patch: SetRulePatch): Result<void, LoreError> {
   if (!SETTABLE_RULE_FIELDS.some((field) => patch[field] !== undefined)) {
     return err(validationError("patch", "nothing to change: pass at least one of statement, confidence, enforced_by, examples, lifecycle, note, moveTo, current_reality, target_rule, current_exceptions, migration"));
   }
+  // reason: D4 of spec-a-spec-carries-its-rule-changes-the-baseline-takes-them — a snapshot rule is true or it is
+  // not; "still true, going away" belongs to the change set that will retire it. Refused HERE (before any read)
+  // so the prose names the two real exits instead of the generic lifecycle-transition error.
+  if (patch.lifecycle === "deprecated") {
+    return err(validationError(
+      "lifecycle",
+      "no rule enters the 'deprecated' lifecycle: a rule is either true of the product or it is not. " +
+        "Retire a rule that is no longer true (lore rule set <id> --lifecycle retired --note <why>), or, for a rule " +
+        "that is going away with a spec, record it in that spec's change set (lore rule propose <spec> retire <id> --note <why>)",
+      patch.lifecycle,
+    ));
+  }
   if (patch.lifecycle === "retired" && (patch.note === undefined || patch.note.trim() === "")) {
     return err(validationError("note", "lifecycle=retired requires --note (stored as retired_note)"));
   }
@@ -988,7 +1000,7 @@ function applyRulePatch(current: BaselineRule, patch: SetRulePatch): Result<Base
   if (patch.lifecycle !== undefined && !isLawfulRuleLifecycleTransition(current.lifecycle, patch.lifecycle)) {
     return err(validationError(
       "lifecycle",
-      `rule ${current.id} cannot move ${current.lifecycle} -> ${patch.lifecycle}; lifecycle is forward-only (live -> deprecated -> retired)`,
+      `rule ${current.id} cannot move ${current.lifecycle} -> ${patch.lifecycle}; lifecycle is forward-only and only ever ends in retired (live -> retired, deprecated -> retired)`,
       patch.lifecycle,
     ));
   }

@@ -104,6 +104,30 @@ async function setRule(id: string, patch: Parameters<RuleService["setRule"]>[1])
   if (!r.ok) throw new Error(`setRule ${id} failed: ${JSON.stringify(r.error)}`);
 }
 
+/**
+ * Put a rule into the `deprecated` lifecycle by writing the leaf directly. `RuleService.setRule` refuses
+ * `--lifecycle deprecated` since D4 of spec-a-spec-carries-its-rule-changes-the-baseline-takes-them, but rules that
+ * were deprecated earlier still exist and the diff must keep reading them.
+ */
+async function forceDeprecated(ruleId: string): Promise<void> {
+  const leaves = await store.findMany({ type: "baseline" });
+  if (!leaves.ok) throw new Error("baseline read failed");
+  const leaf = leaves.value.find((d) => (d.extra["rules"] as Array<{ id: string }> | undefined)?.some((r) => r.id === ruleId));
+  if (leaf === undefined) throw new Error(`no leaf holds ${ruleId}`);
+  const extra = {
+    ...leaf.extra,
+    rules: (leaf.extra["rules"] as Array<{ id: string }>).map((r) => (r.id === ruleId ? { ...r, lifecycle: "deprecated" } : r)),
+  };
+  const next = leaf.version + 1;
+  const updated = await store.update(leaf.id, { extra, version: next, updated_at: new Date().toISOString() }, { expected_version: leaf.version });
+  if (!updated.ok) throw new Error(`forceDeprecated failed: ${JSON.stringify(updated.error)}`);
+  const logged = await store.insertVersion({
+    doc_id: leaf.id, version: next, content: leaf.content, extra, status: leaf.status, title: leaf.title,
+    action: "update", created_at: new Date().toISOString(), created_by: "agent:test", slug: leaf.slug,
+  });
+  if (!logged.ok) throw new Error("insertVersion failed");
+}
+
 function criterion(id: string, cites: string[]): unknown {
   return {
     id, statement: `Criterion ${id} is satisfied.`,
@@ -199,7 +223,7 @@ describe("resume lists rule changes since claim (BL-15)", () => {
     const fx = await makeFixture();
     await claimAt(fx.task, T_CLAIM);
     at(T_POST);
-    await setRule(fx.governed, { lifecycle: "deprecated" });
+    await forceDeprecated(fx.governed);
 
     const diff = await diffOf(fx.task);
     expect(diff.changes).toEqual([{ rule_id: fx.governed, kind: "lifecycle", old: "live", new: "deprecated" }]);

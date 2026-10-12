@@ -1237,7 +1237,7 @@ async function runSpecPromoteGate(
   // rule; this pre-flight must say the same. Measured with the SAME function approve uses (through
   // CorpusService), so the gate and the approval cannot disagree; a read failure is surfaced, never
   // read as "cites".
-  const citesResult = await app.corpusService.specCitesLiveRule(specResult.value.doc.extra["acceptance_criteria"]);
+  const citesResult = await app.corpusService.specCitesLiveRule(specResult.value.doc.extra);
   if (!citesResult.ok) {
     process.stderr.write(formatError(citesResult.error) + "\n");
     process.exitCode = exitCode(citesResult.error);

@@ -62,6 +62,8 @@ export async function makeWorld(): Promise<World> {
   const lock = new RecordLockService(store, new GateEnforcer(undefined));
   const corpus = new CorpusService(store, lock);
   const rules = new RuleService(store, corpus.create.bind(corpus));
+  const changes = new RuleChangeService(store, lock);
+  corpus.setRuleChangeLanding(changes);
   const branchId = await insertBaseline(store, "branch-a", { node: "branch", label: "A" }, null);
   const leafId = await insertBaseline(store, "leaf-a", { node: "leaf", label: "A leaf" }, branchId);
   const seeded = await rules.addRule(
@@ -74,7 +76,7 @@ export async function makeWorld(): Promise<World> {
     store,
     corpus,
     rules,
-    changes: new RuleChangeService(store, lock),
+    changes,
     read: new RuleReadService(store),
     impact: new ImpactService(store),
     ac: new AcService(store, lock, { citeGate: { mode: "enforce", armed_branches: ["branch-a"] } }),

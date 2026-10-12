@@ -343,10 +343,10 @@ describe("RuleService.setRule", () => {
     expect(back.ok).toBe(false);
   });
 
-  it("refuses deprecated -> live", async () => {
+  it("refuses live -> deprecated (D4: no rule enters deprecated) and leaves the rule live", async () => {
     await makeTree();
     const svc = await makeRuleService(store);
-    expect((await svc.setRule("BR-2", { lifecycle: "deprecated" }, { by: "t" })).ok).toBe(true);
+    expect((await svc.setRule("BR-2", { lifecycle: "deprecated" }, { by: "t" })).ok).toBe(false);
     expect((await svc.setRule("BR-2", { lifecycle: "live" }, { by: "t" })).ok).toBe(false);
   });
 
