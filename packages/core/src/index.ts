@@ -36,6 +36,7 @@ export * from "./ai.js";
 export * from "./text-normalise.js";
 export * from "./truncate.js";
 export * from "./attestation-completeness.js";
+export * from "./command-pipe.js";
 export * from "./oracle-file-existence.js";
 export * from "./task-workflow.js";
 export * from "./acceptance.js";
