@@ -16,7 +16,7 @@
  * instead of opening the corpus DB. The writer of the lore rules files stays `lore context` (D13, D15).
  *
  * Layer roots: shipped `<assetsRoot>/context`, user `<global config dir>/context`
- * (`$LORE_CONFIG_HOME` > `$XDG_CONFIG_HOME/lore` > `~/.config/lore`), project `<root>/.lore/context`,
+ * (`resolveUserConfigDir`: `$LORE_CONFIG_HOME` > `$XDG_CONFIG_HOME/lore` > `~/.config/lore`), project `<root>/.lore/context`,
  * where `<root>` is the nearest ancestor of `--cwd` that holds `.lore/` (else `--cwd` itself).
  *
  * Side-effect class: IO (file reads, one `lore bootstrap` spawn for `pointers`, stdout/stderr writes).
@@ -37,6 +37,7 @@ import {
   type FsReadPort,
 } from "@lore/core";
 import { resolveGlobalConfigPath } from "@lore/core/node";
+import { EMBEDDED_ASSETS_MANIFEST } from "../../../generated/assets-manifest.js";
 import {
   buildHookBanner,
   HOOK_OUTLETS,
@@ -47,6 +48,8 @@ import {
   type HookOutlet,
 } from "../../../flows/fragments-flow.js";
 import { buildProjectPointers } from "../../../flows/project-pointers-flow.js";
+import { SELECTION_FILE } from "../../../service/context-fragments/selection.js";
+import { resolveUserConfigDir } from "../../../service/context-fragments/user-config-dir.js";
 import { resolveAssetsRoot, resolveTargetDir, type SetupPathContext } from "../setup-args.js";
 import { writeAllSync } from "../stdio-sync.js";
 
@@ -87,12 +90,29 @@ function resolveProjectRoot(start: string): string {
   }
 }
 
-/** `$LORE_CONFIG_HOME` > `$XDG_CONFIG_HOME/lore` > `~/.config/lore` — directory of the user layer + global config. */
-function resolveUserConfigDir(): string {
-  const loreHome = process.env["LORE_CONFIG_HOME"];
-  if (loreHome) return loreHome;
-  const xdg = process.env["XDG_CONFIG_HOME"];
-  return xdg ? join(xdg, "lore") : join(homedir(), ".config", "lore");
+/** Skill directory names lore ships: `skills/lore-<name>/...` entries of the embedded manifest (BR-1064). */
+function listShippedSkillNames(): string[] {
+  const names = new Set<string>();
+  for (const entry of EMBEDDED_ASSETS_MANIFEST.entries) {
+    const match = /^skills\/(lore-[^/]+)\//.exec(entry.path);
+    if (match?.[1] !== undefined) names.add(match[1]);
+  }
+  return [...names].sort();
+}
+
+type SelectionTextResult = { ok: true; value: string | null } | { ok: false; error: FragmentsFlowError };
+
+/** Raw text of a `selection.yaml`; `null` when the file is absent (legitimate), an unreadable one is an error. */
+function readSelectionText(path: string): SelectionTextResult {
+  if (!existsSync(path)) return { ok: true, value: null };
+  try {
+    return { ok: true, value: readFileSync(path, "utf8") };
+  } catch (cause) {
+    return {
+      ok: false,
+      error: { code: "VALIDATION_ERROR", message: `${path}: ${cause instanceof Error ? cause.message : String(cause)}` },
+    };
+  }
 }
 
 /** Absolute-path, read-only FsReadPort (collapses ordinary failure like `real-fs-probe.ts`). */
@@ -152,13 +172,18 @@ export function buildFlowDeps(cwd: string): DepsResult {
   if (!project.ok) return project;
   const assetsRoot = resolveAssets();
   const claudeDir = resolveTargetDir({ env: process.env, homeDir: homedir() });
+  const userConfigDir = resolveUserConfigDir(process.env, homedir());
+  const userSelection = readSelectionText(join(userConfigDir, SELECTION_FILE.user));
+  if (!userSelection.ok) return userSelection;
+  const projectSelection = readSelectionText(join(projectRoot, SELECTION_FILE.project));
+  if (!projectSelection.ok) return projectSelection;
   return {
     ok: true,
     value: {
       fs: buildAbsoluteFsPort(),
       roots: {
         shipped: join(assetsRoot, "context"),
-        user: join(resolveUserConfigDir(), "context"),
+        user: join(userConfigDir, "context"),
         project: join(projectRoot, ".lore", "context"),
       },
       globalConfig: global.value,
@@ -167,6 +192,9 @@ export function buildFlowDeps(cwd: string): DepsResult {
       agentsDir: join(assetsRoot, "agents"),
       userSettings: { scope: "user", path: join(claudeDir, "settings.json") },
       projectSettings: { scope: "project", path: join(projectRoot, ".claude", "settings.local.json") },
+      userSelectionText: userSelection.value,
+      projectSelectionText: projectSelection.value,
+      shippedSkillNames: listShippedSkillNames(),
     },
   };
 }
