@@ -11,6 +11,7 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocStatus,
   DocType,
   LinkRecord,
   LinkType,
@@ -40,6 +41,7 @@ import type {
   AcCiteRow,
   NeverReadDoc,
   RuleDependsRow,
+  ProposedRuleWrite,
   RuleLeafPatch,
   RuleRegistryRow,
   AcExemptionRow,
@@ -657,6 +659,7 @@ export class InMemoryStore implements StoreInterface {
       extra: patch.extra,
       version: nextVersion,
       updated_at: nowIso,
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
     };
     this.docs.set(patch.id, updated);
     this.versions.push({
@@ -669,6 +672,7 @@ export class InMemoryStore implements StoreInterface {
       action: "update",
       created_at: nowIso,
       created_by: actor,
+      ...(patch.change_summary !== undefined ? { change_summary: patch.change_summary } : {}),
       slug: updated.slug,
       harness_run: patch.harness_run ?? null,
     });
@@ -684,6 +688,53 @@ export class InMemoryStore implements StoreInterface {
     prefix: RuleIdPrefix = "BR",
     harnessRun: string | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    return this.allocateRuleSync(
+      { docId: leafId, expectedVersion, buildExtra, harnessRun },
+      { ownerDocId: leafId, proposed: false },
+      actor,
+      prefix,
+    );
+  }
+
+  /** @see StoreInterface.reserveProposedRuleAndUpdateSpec */
+  async reserveProposedRuleAndUpdateSpec(
+    write: ProposedRuleWrite,
+    actor: string,
+    prefix: RuleIdPrefix = "BR",
+    harnessRun: string | null = null,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    return this.allocateRuleSync(
+      {
+        docId: write.specId,
+        expectedVersion: write.expectedVersion,
+        buildExtra: write.buildExtra,
+        harnessRun,
+        ...(write.status !== undefined ? { status: write.status } : {}),
+        ...(write.changeSummary !== undefined ? { changeSummary: write.changeSummary } : {}),
+      },
+      { ownerDocId: write.ownerLeafId, proposed: true },
+      actor,
+      prefix,
+    );
+  }
+
+  /**
+   * Shared body of {@link allocateRuleAndUpdateLeaf} and {@link reserveProposedRuleAndUpdateSpec}; NO `await`,
+   * so the whole read-allocate-write runs in one synchronous turn (see {@link applyRuleLeafPatchSync}).
+   */
+  private allocateRuleSync(
+    doc: {
+      docId: DocId;
+      expectedVersion: number;
+      buildExtra: (ruleId: string) => Record<string, unknown>;
+      harnessRun: string | null;
+      status?: DocStatus;
+      changeSummary?: string;
+    },
+    registry: { ownerDocId: DocId; proposed: boolean },
+    actor: string,
+    prefix: RuleIdPrefix,
+  ): Result<{ ruleId: string; doc: DocRecord }, LoreError> {
     const nextN =
       this.ruleRegistry
         .filter((row) => row.id.startsWith(`${prefix}-`))
@@ -691,34 +742,51 @@ export class InMemoryStore implements StoreInterface {
     const ruleId = `${prefix}-${nextN}`;
     const nowIso = new Date().toISOString();
     const versionCount = this.versions.length;
-    const before = this.docs.get(leafId);
-    let leaf: Result<DocRecord, LoreError>;
+    const before = this.docs.get(doc.docId);
+    let written: Result<DocRecord, LoreError>;
     try {
-      leaf = this.applyRuleLeafPatchSync(
-        { id: leafId, expectedVersion, extra: buildExtra(ruleId), harness_run: harnessRun },
+      written = this.applyRuleLeafPatchSync(
+        {
+          id: doc.docId,
+          expectedVersion: doc.expectedVersion,
+          extra: doc.buildExtra(ruleId),
+          harness_run: doc.harnessRun,
+          ...(doc.status !== undefined ? { status: doc.status } : {}),
+          ...(doc.changeSummary !== undefined ? { change_summary: doc.changeSummary } : {}),
+        },
         actor,
         nowIso,
       );
     } catch (e) {
-      this.restoreDocSnapshot(leafId, before);
+      this.restoreDocSnapshot(doc.docId, before);
       this.versions.length = versionCount;
       return err({ code: "STORE_ERROR", message: e instanceof Error ? e.message : "buildExtra threw" });
     }
-    if (!leaf.ok) {
-      this.restoreDocSnapshot(leafId, before);
+    if (!written.ok) {
+      this.restoreDocSnapshot(doc.docId, before);
       this.versions.length = versionCount;
-      return leaf;
+      return written;
+    }
+    let registryVersion = written.value.version;
+    if (registry.proposed) {
+      const owner = this.docs.get(registry.ownerDocId);
+      if (owner === undefined || owner.deleted_at != null) {
+        this.restoreDocSnapshot(doc.docId, before);
+        this.versions.length = versionCount;
+        return err({ code: "DOC_NOT_FOUND", id: registry.ownerDocId });
+      }
+      registryVersion = owner.version;
     }
     this.ruleRegistry.push({
       id: ruleId,
       n: nextN,
-      leaf_doc_id: leafId,
+      leaf_doc_id: registry.ownerDocId,
       allocated_at: nowIso,
       allocated_by: actor,
-      lifecycle: listedRuleLifecycle(leaf.value.extra, ruleId) ?? "live",
-      version: leaf.value.version,
+      lifecycle: registry.proposed ? "proposed" : (listedRuleLifecycle(written.value.extra, ruleId) ?? "live"),
+      version: registryVersion,
     });
-    return ok({ ruleId, doc: leaf.value });
+    return ok({ ruleId, doc: written.value });
   }
 
   /** @see StoreInterface.moveRule */

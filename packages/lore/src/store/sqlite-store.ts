@@ -29,6 +29,7 @@ import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
+import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
 // Re-exported here (beside the migration chain it describes) from a
 // bun:sqlite-free sibling module so bun-only readonly-probe callers (e.g.
 // store/schema-probe.ts's `probeSchemaVersion`, consumed by
@@ -43,6 +44,7 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocStatus,
   DocType,
   LinkRecord,
   LinkType,
@@ -75,6 +77,7 @@ import type {
   CalibrationWindowFilter,
   NeverReadDoc,
   SearchHit,
+  ProposedRuleWrite,
   RuleLeafPatch,
   RuleRegistryRow,
   AcExemptionRow,
@@ -616,6 +619,21 @@ export class SQLiteStore implements StoreInterface {
           if (!cols.some((c) => c.name === column)) this.db.exec(ddl);
         }
         this.db.exec(MIGRATION_017_SQL);
+      } catch (error) {
+        try {
+          this.db.exec("ROLLBACK;");
+        } catch {
+          // reason: same as migration-004/005/006 — safe to ignore, see above.
+        }
+        throw error;
+      }
+    }
+
+    if (currentVersion < 18) {
+      // reason: migration-018 (rule_registry rebuilt so lifecycle may be 'proposed', triggers re-created) is one
+      // BEGIN/COMMIT with no PRAGMA toggles, like 015 — a failure only needs ROLLBACK.
+      try {
+        this.db.exec(MIGRATION_018_SQL);
       } catch (error) {
         try {
           this.db.exec("ROLLBACK;");
@@ -2133,6 +2151,17 @@ export class SQLiteStore implements StoreInterface {
   }
 
   /**
+   * The `version` of a live doc, read inside the caller's open transaction; `null` for a missing or soft-deleted
+   * doc (the proposed-id reservation then rolls back rather than register an id against a leaf that is gone).
+   */
+  private readDocVersionSync(docId: DocId): number | null {
+    const row = this.db
+      .prepare("SELECT version, deleted_at FROM docs WHERE id = ?")
+      .get(docId) as { version: number; deleted_at: string | null } | null;
+    return row === null || row.deleted_at !== null ? null : Number(row.version);
+  }
+
+  /**
    * @see StoreInterface.softDeleteWithProvenance
    */
   async softDeleteWithProvenance(
@@ -2219,7 +2248,12 @@ export class SQLiteStore implements StoreInterface {
     }
     const updated = this.updateDocSync(
       patch.id,
-      { extra: patch.extra, version: patch.expectedVersion + 1, updated_at: nowIso },
+      {
+        extra: patch.extra,
+        version: patch.expectedVersion + 1,
+        updated_at: nowIso,
+        ...(patch.status !== undefined ? { status: patch.status } : {}),
+      },
       { expected_version: patch.expectedVersion },
     );
     if (!updated.ok) return updated;
@@ -2233,6 +2267,7 @@ export class SQLiteStore implements StoreInterface {
       action: "update",
       created_at: nowIso,
       created_by: actor,
+      ...(patch.change_summary !== undefined ? { change_summary: patch.change_summary } : {}),
       slug: updated.value.slug,
       harness_run: patch.harness_run ?? null,
     });
@@ -2256,6 +2291,54 @@ export class SQLiteStore implements StoreInterface {
     prefix: RuleIdPrefix = "BR",
     harnessRun: string | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    return this.allocateRuleCore(
+      { docId: leafId, expectedVersion, buildExtra, harnessRun },
+      { ownerDocId: leafId, proposed: false },
+      actor,
+      prefix,
+    );
+  }
+
+  /** @see StoreInterface.reserveProposedRuleAndUpdateSpec */
+  async reserveProposedRuleAndUpdateSpec(
+    write: ProposedRuleWrite,
+    actor: string,
+    prefix: RuleIdPrefix = "BR",
+    harnessRun: string | null = null,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    return this.allocateRuleCore(
+      {
+        docId: write.specId,
+        expectedVersion: write.expectedVersion,
+        buildExtra: write.buildExtra,
+        harnessRun,
+        ...(write.status !== undefined ? { status: write.status } : {}),
+        ...(write.changeSummary !== undefined ? { changeSummary: write.changeSummary } : {}),
+      },
+      { ownerDocId: write.ownerLeafId, proposed: true },
+      actor,
+      prefix,
+    );
+  }
+
+  /**
+   * One write transaction shared by {@link allocateRuleAndUpdateLeaf} (a rule written into its leaf, state read
+   * from the leaf) and {@link reserveProposedRuleAndUpdateSpec} (a `proposed` id reserved while the SPEC is
+   * written). `BEGIN IMMEDIATE` stays BEFORE the `MAX(n)` read (see the first method's reason).
+   */
+  private allocateRuleCore(
+    doc: {
+      docId: DocId;
+      expectedVersion: number;
+      buildExtra: (ruleId: string) => Record<string, unknown>;
+      harnessRun: string | null;
+      status?: DocStatus;
+      changeSummary?: string;
+    },
+    registry: { ownerDocId: DocId; proposed: boolean },
+    actor: string,
+    prefix: RuleIdPrefix,
+  ): Result<{ ruleId: string; doc: DocRecord }, LoreError> {
     try {
       this.db.run("BEGIN IMMEDIATE");
     } catch (e) {
@@ -2267,14 +2350,28 @@ export class SQLiteStore implements StoreInterface {
         .get(prefix) as { next_n: number };
       const ruleId = `${prefix}-${nextRow.next_n}`;
       const nowIso = new Date().toISOString();
-      const leaf = this.applyRuleLeafPatchSync(
-        { id: leafId, expectedVersion, extra: buildExtra(ruleId), harness_run: harnessRun },
+      const written = this.applyRuleLeafPatchSync(
+        {
+          id: doc.docId,
+          expectedVersion: doc.expectedVersion,
+          extra: doc.buildExtra(ruleId),
+          harness_run: doc.harnessRun,
+          ...(doc.status !== undefined ? { status: doc.status } : {}),
+          ...(doc.changeSummary !== undefined ? { change_summary: doc.changeSummary } : {}),
+        },
         actor,
         nowIso,
       );
-      if (!leaf.ok) {
+      if (!written.ok) {
         this.db.run("ROLLBACK");
-        return leaf;
+        return written;
+      }
+      // A proposed id is listed by NO leaf: its state is 'proposed' and its version is the owner leaf's current
+      // one (the leaf is not written); a missing/deleted owner aborts the reservation.
+      const registryVersion = registry.proposed ? this.readDocVersionSync(registry.ownerDocId) : written.value.version;
+      if (registryVersion === null) {
+        this.db.run("ROLLBACK");
+        return err({ code: "DOC_NOT_FOUND", id: registry.ownerDocId });
       }
       this.db
         .prepare(
@@ -2287,14 +2384,14 @@ export class SQLiteStore implements StoreInterface {
           ruleId,
           prefix,
           nextRow.next_n,
-          leafId,
+          registry.ownerDocId,
           nowIso,
           actor,
-          listedRuleLifecycle(leaf.value.extra, ruleId) ?? "live",
-          leaf.value.version,
+          registry.proposed ? "proposed" : (listedRuleLifecycle(written.value.extra, ruleId) ?? "live"),
+          registryVersion,
         );
       this.db.run("COMMIT");
-      return ok({ ruleId, doc: leaf.value });
+      return ok({ ruleId, doc: written.value });
     } catch (e) {
       try {
         this.db.run("ROLLBACK");

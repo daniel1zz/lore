@@ -12,8 +12,16 @@
  *       Edit a rule, move it forward through its lifecycle (never back to live; retired needs
  *       --note), or relocate it to another leaf keeping its id.
  *
+ *   propose <spec> add --leaf <leaf> --statement <s> --example <e>... --enforced-by <v>
+ *   propose <spec> modify <BR-n> [--statement <s>] [--example <e>...] [--enforced-by <v>]
+ *   propose <spec> retire <BR-n> --note <why>             [--correction "<why>" on a locked spec, BR-1069]
+ *       Write the spec's rule change set (`extra.rule_changes`); `add` reserves the next BR-n as `proposed` and
+ *       touches no leaf. The baseline takes the change only when the spec lands.
+ *   changes <spec> [--json]                                      the spec's change set
+ *
  *   show <BR-n> [--json]                                         statement, leaf, confidence, state, citing criteria
- *   find --spec <slug> | --file <path> | --text <q> [--json]     ranked rule ids
+ *                                                                (a proposed id: "proposed by <spec>, not in the baseline")
+ *   find --spec <slug> | --file <path> | --text <q> [--include-retired] [--json]   ranked LIVE rule ids
  *   impact <BR-n> [--json]                                       citing criteria, dependent leaves, depends_on cycles
  *
  * `lore set` cannot touch `extra.rules` (CorpusService replace guard) — this is the only writer.
@@ -28,6 +36,7 @@ import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import type { App } from "../../../app.js";
 import type { AddRuleInput, SetRulePatch } from "../../../service/rule-service.js";
+import type { ProposeRuleChangeInput, RuleEnforcement } from "../../../service/rule-change-service.js";
 
 /** citty/mri yields one string for a single occurrence of a repeatable flag, an array for >= 2, `undefined` for none. */
 function repeatable(value: unknown): string[] | undefined {
@@ -95,7 +104,12 @@ export default defineCommand({
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
           const v = result.value;
-          console.log(`${v.id} [${v.state}, ${v.confidence}] on ${v.leaf}\n${v.statement}`);
+          if (v.state === "proposed") {
+            // A proposed rule is not part of the baseline: it has no confidence and no leaf yet (spec: change set).
+            console.log(`${v.id} [proposed] — proposed by ${v.proposed_by ?? "(unknown spec)"}, not in the baseline\nWill land on ${v.leaf}.\n${v.statement}`);
+          } else {
+            console.log(`${v.id} [${v.state}, ${v.confidence}] on ${v.leaf}\n${v.statement}`);
+          }
           console.log(v.citingCriteria.length === 0 ? "Cited by: (none)" : `Cited by:\n${v.citingCriteria.map((c) => `  ${c.spec} ${c.ac}`).join("\n")}`);
         } finally {
           app.close();
@@ -108,6 +122,7 @@ export default defineCommand({
         spec: { type: "string", description: "Rules cited by this spec (slug or id)" },
         file: { type: "string", description: "Rules cited by specs whose code anchors include this file" },
         text: { type: "string", description: "Rules whose statement contains this text (case-insensitive)" },
+        "include-retired": { type: "boolean", description: "Also list retired rules (tombstones); default lists only rules that still describe the product" },
         json: { type: "boolean", description: "Output result as JSON" },
       },
       async run({ args }) {
@@ -118,7 +133,7 @@ export default defineCommand({
           if (app.ruleReadService === undefined) return failUsage("RuleReadService is not available in this build.", args.json === true);
           const query =
             typeof args.spec === "string" ? { spec: args.spec } : typeof args.file === "string" ? { file: args.file } : { text: args.text as string };
-          const result = await app.ruleReadService.find(query);
+          const result = await app.ruleReadService.find(query, { includeTombstones: args["include-retired"] === true });
           if (!result.ok) return reportFailure(result.error, args.json === true);
           if (args.json) return void console.log(JSON.stringify({ ok: true, data: { rules: result.value } }, null, 2));
           console.log(result.value.length === 0 ? "No matching rules." : result.value.join("\n"));
@@ -147,6 +162,106 @@ export default defineCommand({
           console.log(`Citing criteria (${v.citingCriteria.length}):${v.citingCriteria.map((c) => `\n  ${c.spec} ${c.ac}`).join("")}`);
           console.log(`Dependent leaves (${v.dependentLeaves.length}):${v.dependentLeaves.map((l) => `\n  ${l}`).join("")}`);
           console.log(`Cycles (${v.cycles.length}):${v.cycles.map((c) => `\n  ${c.join(" <-> ")}`).join("")}`);
+        } finally {
+          app.close();
+        }
+      },
+    }),
+    propose: defineCommand({
+      meta: {
+        name: "propose",
+        description:
+          "Add an entry to a spec's rule change set: `add` reserves the next BR-n (proposed, not in the baseline), `modify` / `retire` name a live rule",
+      },
+      args: {
+        spec: { type: "positional", description: "Spec document ID or slug", required: true },
+        op: { type: "positional", description: "add | modify | retire", required: true },
+        rule: { type: "positional", description: "Rule id BR-n (modify | retire only)", required: false },
+        leaf: { type: "string", description: "[add] Baseline leaf the rule will land on (ID or slug)" },
+        statement: { type: "string", description: "[add | modify] The behavioural rule, <= 500 chars" },
+        example: { type: "string", description: "[add | modify, repeatable, 1-3] A concrete example, <= 300 chars" },
+        "enforced-by": { type: "string", description: "[add | modify] guaranteed | both | prompt-only" },
+        note: { type: "string", description: "[retire] Why the rule is no longer true" },
+        correction: { type: "string", description: "Fix a LOCKED spec's change set as an audited correction; the value is the reason (BR-1069)" },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const json = args.json === true;
+        const op = args.op as string;
+        const examples = repeatable(args.example);
+        let input: ProposeRuleChangeInput;
+        if (op === "add") {
+          if (args.rule !== undefined) return failUsage("`add` takes no rule id: the registry allocates it", json);
+          if (args.leaf === undefined || args.statement === undefined || args["enforced-by"] === undefined) {
+            return failUsage("`add` requires --leaf, --statement, --example (1-3) and --enforced-by", json);
+          }
+          input = {
+            op: "add",
+            leaf: args.leaf as string,
+            statement: args.statement as string,
+            examples: examples ?? [],
+            enforced_by: args["enforced-by"] as RuleEnforcement,
+          };
+        } else if (op === "modify" || op === "retire") {
+          if (args.rule === undefined) return failUsage(`\`${op}\` requires the rule id: lore rule propose <spec> ${op} <BR-n> ...`, json);
+          if (op === "retire") {
+            if (args.note === undefined) return failUsage("`retire` requires --note <why>", json);
+            input = { op: "retire", id: args.rule as string, note: args.note as string };
+          } else {
+            input = {
+              op: "modify",
+              id: args.rule as string,
+              ...(args.statement !== undefined ? { statement: args.statement as string } : {}),
+              ...(examples !== undefined ? { examples } : {}),
+              ...(args["enforced-by"] !== undefined
+                ? { enforced_by: args["enforced-by"] as RuleEnforcement }
+                : {}),
+            };
+          }
+        } else {
+          return failUsage(`op must be add, modify or retire (got '${op}')`, json);
+        }
+        const { app } = loadLoreApp();
+        try {
+          if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", json);
+          const result = await app.ruleChangeService.propose(args.spec as string, input, {
+            by: resolveActor(),
+            ...(args.correction !== undefined ? { correction: { reason: args.correction as string } } : {}),
+          });
+          if (!result.ok) return reportFailure(result.error, json);
+          const { change, doc } = result.value;
+          if (json) return void console.log(JSON.stringify({ ok: true, data: { change, spec: doc.slug, version: doc.version } }, null, 2));
+          console.log(
+            change.op === "add"
+              ? `Reserved ${change.id} (proposed, not in the baseline) for ${change.leaf} in ${doc.slug} (v${doc.version}).`
+              : `Recorded ${change.op} of ${change.id} in ${doc.slug} (v${doc.version}); the baseline is unchanged until the spec lands.`,
+          );
+        } finally {
+          app.close();
+        }
+      },
+    }),
+    changes: defineCommand({
+      meta: { name: "changes", description: "List a spec's rule change set (what it proposes, modifies and retires)" },
+      args: {
+        spec: { type: "positional", description: "Spec document ID or slug", required: true },
+        json: { type: "boolean", description: "Output result as JSON" },
+      },
+      async run({ args }) {
+        const { app } = loadLoreApp();
+        try {
+          if (app.ruleChangeService === undefined) return failUsage("RuleChangeService is not available in this build.", args.json === true);
+          const result = await app.ruleChangeService.changes(args.spec as string);
+          if (!result.ok) return reportFailure(result.error, args.json === true);
+          if (args.json) return void console.log(JSON.stringify({ ok: true, data: result.value }, null, 2));
+          const { spec, changes } = result.value;
+          if (changes.length === 0) return void console.log(`${spec}: no rule changes.`);
+          console.log(`${spec}: ${changes.length} rule change(s)`);
+          for (const c of changes) {
+            if (c.op === "add") console.log(`  add ${c.id} on ${c.leaf}: ${c.statement}`);
+            else if (c.op === "retire") console.log(`  retire ${c.id}: ${c.note}`);
+            else console.log(`  modify ${c.id}${c.statement !== undefined ? `: ${c.statement}` : ""}`);
+          }
         } finally {
           app.close();
         }

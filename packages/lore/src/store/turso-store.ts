@@ -43,6 +43,7 @@ import { MIGRATION_014_SQL } from "./migrations/migration-014.js";
 import { MIGRATION_016_ADD_COLUMNS, MIGRATION_016_SQL } from "./migrations/migration-016.js";
 import { MIGRATION_017_ADD_COLUMNS, MIGRATION_017_SQL } from "./migrations/migration-017.js";
 import { MIGRATION_015_SQL } from "./migrations/migration-015.js";
+import { MIGRATION_018_SQL } from "./migrations/migration-018.js";
 import type { RuleIdPrefix } from "@lore/core";
 import { listedRuleLifecycle } from "./index-rows.js";
 import type {
@@ -50,6 +51,7 @@ import type {
   CalibrationRecord,
   DocId,
   DocRecord,
+  DocStatus,
   DocType,
   LinkRecord,
   LinkType,
@@ -79,6 +81,7 @@ import type {
   CalibrationWindowFilter,
   NeverReadDoc,
   SearchHit,
+  ProposedRuleWrite,
   RuleLeafPatch,
   RuleRegistryRow,
   AcExemptionRow,
@@ -720,6 +723,12 @@ export class TursoStore implements StoreInterface {
           if (!info.rows.some((r) => rowStr(r, "name") === column)) await this.client.execute(ddl);
         }
         await this.client.executeMultiple(MIGRATION_017_SQL);
+      }
+
+      if (currentVersion < 18) {
+        // reason: migration-018 (rule_registry rebuilt so lifecycle may be 'proposed', triggers re-created) is one
+        // BEGIN/COMMIT string rebuilt via rule_registry_new — `executeMultiple`, same as 015.
+        await this.client.executeMultiple(MIGRATION_018_SQL);
       }
     })();
 
@@ -2512,6 +2521,7 @@ export class TursoStore implements StoreInterface {
       extra: patch.extra,
       version: patch.expectedVersion + 1,
       updated_at: nowIso,
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
     };
     const tagsJson = JSON.stringify(updated.tags);
     // reason: same shadow-column obligation as update() — an UPDATE that skips
@@ -2571,7 +2581,7 @@ export class TursoStore implements StoreInterface {
         "update",
         nowIso,
         actor,
-        null,
+        patch.change_summary ?? null,
         updated.slug,
         patch.harness_run ?? null,
       ] as InValue[],
@@ -2616,17 +2626,56 @@ export class TursoStore implements StoreInterface {
     harnessRun: string | null = null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     return this.serializeRuleWrite(() =>
-      this.allocateRuleAndUpdateLeafSerialized(leafId, expectedVersion, buildExtra, actor, prefix, harnessRun),
+      this.allocateRuleSerialized(
+        { docId: leafId, expectedVersion, buildExtra, harnessRun },
+        { ownerDocId: leafId, proposed: false },
+        actor,
+        prefix,
+      ),
     );
   }
 
-  private async allocateRuleAndUpdateLeafSerialized(
-    leafId: DocId,
-    expectedVersion: number,
-    buildExtra: (ruleId: string) => Record<string, unknown>,
+  /** @see StoreInterface.reserveProposedRuleAndUpdateSpec */
+  async reserveProposedRuleAndUpdateSpec(
+    write: ProposedRuleWrite,
+    actor: string,
+    prefix: RuleIdPrefix = "BR",
+    harnessRun: string | null = null,
+  ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
+    return this.serializeRuleWrite(() =>
+      this.allocateRuleSerialized(
+        {
+          docId: write.specId,
+          expectedVersion: write.expectedVersion,
+          buildExtra: write.buildExtra,
+          harnessRun,
+          ...(write.status !== undefined ? { status: write.status } : {}),
+          ...(write.changeSummary !== undefined ? { changeSummary: write.changeSummary } : {}),
+        },
+        { ownerDocId: write.ownerLeafId, proposed: true },
+        actor,
+        prefix,
+      ),
+    );
+  }
+
+  /**
+   * One write transaction shared by {@link allocateRuleAndUpdateLeaf} (a rule written into its leaf) and
+   * {@link reserveProposedRuleAndUpdateSpec} (a `proposed` id reserved while the SPEC is written) — mirror of
+   * `SQLiteStore.allocateRuleCore`.
+   */
+  private async allocateRuleSerialized(
+    doc: {
+      docId: DocId;
+      expectedVersion: number;
+      buildExtra: (ruleId: string) => Record<string, unknown>;
+      harnessRun: string | null;
+      status?: DocStatus;
+      changeSummary?: string;
+    },
+    registry: { ownerDocId: DocId; proposed: boolean },
     actor: string,
     prefix: RuleIdPrefix,
-    harnessRun: string | null,
   ): Promise<Result<{ ruleId: string; doc: DocRecord }, LoreError>> {
     let tx: Transaction;
     try {
@@ -2643,33 +2692,55 @@ export class TursoStore implements StoreInterface {
       const nextN = rowNum(nextRs.rows[0] as Row, "next_n");
       const ruleId = `${prefix}-${nextN}`;
       const nowIso = new Date().toISOString();
-      const leaf = await this.applyRuleLeafPatchTx(
+      const written = await this.applyRuleLeafPatchTx(
         tx,
-        { id: leafId, expectedVersion, extra: buildExtra(ruleId), harness_run: harnessRun },
+        {
+          id: doc.docId,
+          expectedVersion: doc.expectedVersion,
+          extra: doc.buildExtra(ruleId),
+          harness_run: doc.harnessRun,
+          ...(doc.status !== undefined ? { status: doc.status } : {}),
+          ...(doc.changeSummary !== undefined ? { change_summary: doc.changeSummary } : {}),
+        },
         actor,
         nowIso,
       );
-      if (!leaf.ok) {
+      if (!written.ok) {
         await tx.rollback();
-        return leaf;
+        return written;
+      }
+      let registryVersion = written.value.version;
+      if (registry.proposed) {
+        // reason: a proposed id is listed by NO leaf and the leaf is not written, so its registry version is the
+        // owner leaf's current one; a missing/deleted owner aborts the reservation (rolled back below).
+        const ownerRs = await tx.execute({
+          sql: "SELECT version, deleted_at FROM docs WHERE id = ?",
+          args: [registry.ownerDocId],
+        });
+        const ownerRow = ownerRs.rows[0];
+        if (!ownerRow || rowStrOrNull(ownerRow, "deleted_at") !== null) {
+          await tx.rollback();
+          return err({ code: "DOC_NOT_FOUND", id: registry.ownerDocId });
+        }
+        registryVersion = rowNum(ownerRow, "version");
       }
       await tx.execute({
-        // reason: the docs_idx_baseline_au trigger ran inside the leaf UPDATE BEFORE this row existed,
-        // so lifecycle/version are written explicitly (mirrors SQLiteStore.allocateRuleAndUpdateLeaf).
+        // reason: the docs_idx_baseline_au trigger ran inside the doc UPDATE BEFORE this row existed,
+        // so lifecycle/version are written explicitly (mirrors SQLiteStore.allocateRuleCore).
         sql: "INSERT INTO rule_registry (id, prefix, n, leaf_doc_id, allocated_at, allocated_by, lifecycle, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         args: [
           ruleId,
           prefix,
           nextN,
-          leafId,
+          registry.ownerDocId,
           nowIso,
           actor,
-          listedRuleLifecycle(leaf.value.extra, ruleId) ?? "live",
-          leaf.value.version,
+          registry.proposed ? "proposed" : (listedRuleLifecycle(written.value.extra, ruleId) ?? "live"),
+          registryVersion,
         ] as InValue[],
       });
       await tx.commit();
-      return ok({ ruleId, doc: leaf.value });
+      return ok({ ruleId, doc: written.value });
     } catch (e) {
       try {
         await tx.rollback();

@@ -9,7 +9,7 @@
  *
  * ── PINNED CONTRACT (the implementation builds to exactly this) ─────────────────────────
  *   - `packages/lore/src/store/migrations/migration-016.ts` exports `MIGRATION_016_SQL: string`.
- *   - `LATEST_SCHEMA_VERSION === 17`; opening a schema-15 file lands on `PRAGMA user_version = 17`.
+ *   - `LATEST_SCHEMA_VERSION === 18` (018 adds the proposed registry state); opening a schema-15 file lands on `PRAGMA user_version = 18`.
  *   - SQLite gains table `runs` and nullable columns `audit.harness_run`, `versions.harness_run`
  *     (TEXT). Pre-existing rows are untouched, `harness_run` NULL. A second open changes nothing.
  *   - `StoreInterface.insertRun(run: RunRecord): Promise<Result<…, LoreError>>` — ok on both the
@@ -206,11 +206,11 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     raw.close();
   });
 
-  it("STATE: LATEST_SCHEMA_VERSION is 17 and opening a schema-15 file lands on user_version 17", async () => {
+  it("STATE: LATEST_SCHEMA_VERSION is 18 and opening a schema-15 file lands on user_version 18", async () => {
     await seedSchema15();
     const store = new SQLiteStore(path);
-    expect(LATEST_SCHEMA_VERSION).toBe(17);
-    expect(userVersion(store.getDatabase())).toBe(17);
+    expect(LATEST_SCHEMA_VERSION).toBe(18);
+    expect(userVersion(store.getDatabase())).toBe(18);
     store.close();
   });
 
@@ -285,7 +285,7 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
 
     const second = new SQLiteStore(path);
     const db = second.getDatabase();
-    expect(userVersion(db)).toBe(17);
+    expect(userVersion(db)).toBe(18);
     expect(db.query("SELECT * FROM audit ORDER BY id").all()).toEqual(audit1);
     expect(db.query("SELECT * FROM versions ORDER BY doc_id, version").all()).toEqual(versions1);
     expect(columnNames(db, "audit")).toEqual(auditCols1);
@@ -306,10 +306,10 @@ describe("migration-016 (runs table, audit/versions.harness_run) — v15 corpus"
     store.close();
   });
 
-  it("REGRESSION: a fresh (never-migrated) corpus is created at the same shape: version 17 + runs + columns", () => {
+  it("REGRESSION: a fresh (never-migrated) corpus is created at the same shape: version 18 + runs + columns", () => {
     const store = new SQLiteStore(path);
     const db = store.getDatabase();
-    expect(userVersion(db)).toBe(17);
+    expect(userVersion(db)).toBe(18);
     expect(tableExists(db, "runs")).toBe(true);
     expect(columnNames(db, "audit")).toContain("harness_run");
     expect(columnNames(db, "versions")).toContain("harness_run");

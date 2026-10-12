@@ -12,6 +12,10 @@
  *   - `findRules` ranking is deterministic: spec/file queries rank by citing-criterion count desc, then
  *     BR-n ascending (a file query only considers specs whose code anchor matches, `#Symbol` stripped);
  *     text queries rank statement-prefix matches first, then BR-n ascending.
+ *   - Snapshot views list only rules a leaf lists: a PROPOSED id (reserved by a spec's change set, listed by no
+ *     leaf) never appears in `findRules` or `computeImpact`, and a retired tombstone is hidden from `findRules`
+ *     unless the caller asks (`includeTombstones`); `buildRuleView` (`rule show`) reads both by id, a proposed
+ *     one with the proposing spec (`proposed_by`).
  *   - Impact closure uses a visited set and Tarjan on an explicit work stack: terminates on any graph.
  *     Cycles are strongly connected components (size > 1 or a self-edge) reachable from the origin leaf,
  *     reported once with sorted member slugs; the origin leaf is excluded from `dependentLeaves`.
@@ -19,8 +23,9 @@
  * Source: spec-baseline-slice-2-completeness-census-per-branch-citation C6 (BL-10, BL-15).
  */
 
-import { ruleIdPrefix, ruleIdPrefixOfNode, type DocRecord, type RuleLifecycle } from "@lore/core";
+import { ruleIdPrefix, ruleIdPrefixOfNode, type DocRecord, type RuleLifecycle, type RuleRegistryState } from "@lore/core";
 import type { AcCiteRow, RuleDependsRow } from "../store/store-interface.js";
+import { findProposal } from "./rule-changes.js";
 
 export interface CitingCriterion {
   spec: string;
@@ -30,14 +35,23 @@ export interface CitingCriterion {
 export interface RuleView {
   id: string;
   statement: string;
-  /** Slug of the baseline node (leaf, standard or debt-registry) carrying the rule. */
+  /** Slug of the baseline node (leaf, standard or debt-registry) carrying the rule — for a proposed rule, the leaf it will land on. */
   leaf: string;
   confidence: string;
-  state: RuleLifecycle;
+  /** `proposed` = reserved by a spec's change set, NOT in the baseline (see {@link RuleView.proposed_by}). */
+  state: RuleRegistryState;
   citingCriteria: CitingCriterion[];
+  /** Slug of the spec whose change set proposes this rule; present only when `state` is `proposed`. */
+  proposed_by?: string;
 }
 
 export type RuleFindQuery = { spec: string } | { file: string } | { text: string };
+
+/** Options of {@link findRules}. */
+export interface RuleFindOptions {
+  /** Also list retired rules (tombstones). Default: the snapshot only — a retired rule is no longer true. */
+  includeTombstones?: boolean;
+}
 
 export interface ImpactReport {
   citingCriteria: CitingCriterion[];
@@ -142,10 +156,25 @@ function citingCriteriaOf(ruleId: string, data: RuleIndexData): CitingCriterion[
   return out;
 }
 
-/** What `rule show` returns, or `undefined` when no live leaf lists the rule. */
+/**
+ * What `rule show` returns, or `undefined` when no leaf lists the rule and no spec proposes it. A retired rule
+ * is a tombstone, readable by id (BR-643); a proposed rule is reported with the spec that proposes it.
+ */
 export function buildRuleView(ruleId: string, data: RuleIndexData): RuleView | undefined {
   const rule = collectLeafRules(data.baseline).get(ruleId);
-  if (rule === undefined) return undefined;
+  if (rule === undefined) {
+    const proposal = findProposal(ruleId, data.specs);
+    if (proposal === undefined || proposal.change.op !== "add") return undefined;
+    return {
+      id: ruleId,
+      statement: proposal.change.statement,
+      leaf: proposal.change.leaf,
+      confidence: "",
+      state: "proposed",
+      citingCriteria: citingCriteriaOf(ruleId, data),
+      proposed_by: proposal.spec.slug,
+    };
+  }
   return {
     id: rule.id,
     statement: rule.statement,
@@ -156,12 +185,21 @@ export function buildRuleView(ruleId: string, data: RuleIndexData): RuleView | u
   };
 }
 
-/** Ranked rule ids for a spec, file or text query (see the module invariants for the ordering). */
-export function findRules(query: RuleFindQuery, data: RuleIndexData): string[] {
+/**
+ * Ranked rule ids for a spec, file or text query (see the module invariants for the ordering). A snapshot view:
+ * only rules a leaf lists — a PROPOSED id (no leaf lists it) and a retired tombstone (unless
+ * `opts.includeTombstones`) never appear, whichever query found them.
+ */
+export function findRules(query: RuleFindQuery, data: RuleIndexData, opts: RuleFindOptions = {}): string[] {
+  const listed = collectLeafRules(data.baseline);
+  const inSnapshot = (ruleId: string): boolean => {
+    const rule = listed.get(ruleId);
+    return rule !== undefined && (opts.includeTombstones === true || rule.lifecycle !== "retired");
+  };
   if ("text" in query) {
     const needle = query.text.trim().toLowerCase();
     if (needle === "") return [];
-    const hits = [...collectLeafRules(data.baseline).values()].filter((r) => r.statement.toLowerCase().includes(needle));
+    const hits = [...listed.values()].filter((r) => inSnapshot(r.id) && r.statement.toLowerCase().includes(needle));
     const rank = (r: LeafRule) => (r.statement.toLowerCase().startsWith(needle) ? 0 : 1);
     hits.sort((a, b) => rank(a) - rank(b) || compareRuleIds(a.id, b.id));
     return hits.map((r) => r.id);
@@ -182,7 +220,9 @@ export function findRules(query: RuleFindQuery, data: RuleIndexData): string[] {
   for (const row of data.cites) {
     if (specIds.has(row.doc_id)) count.set(row.rule_id, (count.get(row.rule_id) ?? 0) + 1);
   }
-  return [...count.keys()].sort((a, b) => (count.get(b) ?? 0) - (count.get(a) ?? 0) || compareRuleIds(a, b));
+  return [...count.keys()]
+    .filter(inSnapshot)
+    .sort((a, b) => (count.get(b) ?? 0) - (count.get(a) ?? 0) || compareRuleIds(a, b));
 }
 
 type Edges = Map<string, Set<string>>;

@@ -123,12 +123,23 @@ export interface BaselineCiteIndex {
   readonly branches: readonly string[];
 }
 
+/** An id the citing spec's own change set proposes (an `add`), and the slug of the leaf it will land on. */
+export interface OwnProposedRule {
+  readonly id: string;
+  readonly leaf: string;
+}
+
 /**
  * Index the baseline docs for the gate. One pass over the leaves' rule lists; no spec is touched.
  *
  * @param baselineDocs - every baseline doc (root, branches, leaves)
+ * @param ownProposed - the ids the CITING spec's change set proposes: citable by that spec only, never listed by
+ *   a leaf. Another spec's proposal is simply not passed, so it reads "missing" and is refused.
  */
-export function indexBaseline(baselineDocs: readonly DocRecord[]): BaselineCiteIndex {
+export function indexBaseline(
+  baselineDocs: readonly DocRecord[],
+  ownProposed: readonly OwnProposedRule[] = [],
+): BaselineCiteIndex {
   const slugById = new Map<string, string>();
   const branches: string[] = [];
   for (const doc of baselineDocs) {
@@ -146,6 +157,17 @@ export function indexBaseline(baselineDocs: readonly DocRecord[]): BaselineCiteI
     const parent = rule.leaf.parent_id;
     const branchSlug = parent === null || parent === undefined ? undefined : slugById.get(parent as string);
     if (branchSlug !== undefined) branchOfRule.set(rule.id, branchSlug);
+  }
+  // reason: a criterion may cite an id its OWN spec's change set proposes (BR-86, BR-257 as modified by
+  // spec-a-spec-carries-its-rule-changes-the-baseline-takes-them). The id is not in any leaf, so it enters the
+  // index here as `live` for THIS spec's write only; a tree rule of the same id (landed) keeps its own state.
+  for (const proposed of ownProposed) {
+    if (Object.prototype.hasOwnProperty.call(states, proposed.id)) continue;
+    states[proposed.id] = "live";
+    const leaf = baselineDocs.find((doc) => (doc.deleted_at ?? null) === null && doc.slug === proposed.leaf);
+    const parent = leaf?.parent_id;
+    const branchSlug = parent === null || parent === undefined ? undefined : slugById.get(parent as string);
+    if (branchSlug !== undefined) branchOfRule.set(proposed.id, branchSlug);
   }
   return { states, branchOfRule, branches: branches.sort() };
 }

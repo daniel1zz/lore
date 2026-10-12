@@ -127,6 +127,7 @@ import { findSpecChildPlans, findSpecEvidenceTasks, findTasksUnderPlans } from "
 import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
+import { ownProposedRules } from "./rule-changes.js";
 import { admitAcWrite, applyAcChange, decorateCiteRefusal, resolveCiteGateFor } from "./ac-write-chokepoint.js";
 import type { CiteGateConfig } from "./ac-cite-gate.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
@@ -486,7 +487,7 @@ export class AcService {
 
     // §C4 — report-only citation warnings, recorded in the audit entry (never rejected, never dropped).
     const addedCites = newCriterion?.cites;
-    const citeAudit = addedCites !== undefined ? await this.citeAuditDetails(addedCites) : undefined;
+    const citeAudit = addedCites !== undefined ? await this.citeAuditDetails(addedCites, spec.id) : undefined;
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "add", {
@@ -571,7 +572,7 @@ export class AcService {
     }
 
     const warningsResult =
-      flags.remove === true ? ok<CiteWarning[]>([]) : await this.checkCites(requested);
+      flags.remove === true ? ok<CiteWarning[]>([]) : await this.checkCites(requested, spec.id);
     if (!warningsResult.ok) return warningsResult;
     const warnings = warningsResult.value;
 
@@ -593,10 +594,16 @@ export class AcService {
    * re-uses it to print the same warnings `add`/`set` recorded in the audit entry. Reads the
    * store directly — no RuleService dependency.
    */
-  async checkCites(ids: readonly string[]): Promise<Result<CiteWarning[], LoreError>> {
+  async checkCites(ids: readonly string[], specIdOrSlug?: string): Promise<Result<CiteWarning[], LoreError>> {
     const leaves = await this.store.findMany({ type: "baseline" });
     if (!leaves.ok) return leaves;
-    return ok(citeWarnings(ids, buildRuleIndex(leaves.value)));
+    const warnings = citeWarnings(ids, buildRuleIndex(leaves.value));
+    if (specIdOrSlug === undefined || warnings.length === 0) return ok(warnings);
+    // reason: an id the citing spec's OWN change set proposes is citable (BR-86/BR-257), so it is not "dangling".
+    const spec = await this.resolveSpec(specIdOrSlug);
+    if (!spec.ok) return spec;
+    const own = new Set(ownProposedRules(spec.value.extra).map((p) => p.id));
+    return ok(warnings.filter((w) => !own.has(w.id)));
   }
 
   /** True when the corpus holds at least one baseline doc (gates the `ac add` no-cite hint — AC-BLS1-8). */
@@ -608,8 +615,9 @@ export class AcService {
 
   private async citeAuditDetails(
     cites: readonly string[],
+    specIdOrSlug: string,
   ): Promise<Result<Record<string, unknown>, LoreError>> {
-    const w = await this.checkCites(cites);
+    const w = await this.checkCites(cites, specIdOrSlug);
     if (!w.ok) return w;
     return ok({ cites: [...cites], cite_warnings: w.value });
   }
@@ -912,7 +920,7 @@ export class AcService {
     // reason: D5 — a correction on a locked spec keeps the status (no approved→draft, no re-approval write).
     const newStatus = correctionApplies ? spec.status : resolveStatusAfterContractEdit(spec.status, true);
 
-    const citeAudit = patch.cites !== undefined ? await this.citeAuditDetails(patch.cites) : undefined;
+    const citeAudit = patch.cites !== undefined ? await this.citeAuditDetails(patch.cites, spec.id) : undefined;
     if (citeAudit !== undefined && !citeAudit.ok) return citeAudit;
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "set", {

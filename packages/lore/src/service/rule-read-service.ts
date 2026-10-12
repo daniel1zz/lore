@@ -16,7 +16,7 @@ import type { LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 import { loadRuleIndexData } from "./rule-index-loader.js";
 import { buildRuleView, findRules } from "./rule-index-queries.js";
-import type { RuleFindQuery, RuleView } from "./rule-index-queries.js";
+import type { RuleFindOptions, RuleFindQuery, RuleView } from "./rule-index-queries.js";
 
 export class RuleReadService {
   constructor(private readonly store: StoreInterface) {}
@@ -30,9 +30,9 @@ export class RuleReadService {
   }
 
   /** Rule ids relevant to a spec (cited by it), a file (cited by specs anchored to it) or a text. */
-  async find(query: RuleFindQuery): Promise<Result<string[], LoreError>> {
+  async find(query: RuleFindQuery, opts: RuleFindOptions = {}): Promise<Result<string[], LoreError>> {
     const data = await loadRuleIndexData(this.store);
     if (!data.ok) return data;
-    return ok(findRules(query, data.value));
+    return ok(findRules(query, data.value, opts));
   }
 }

@@ -72,6 +72,7 @@ import { AuditService } from "./service/audit-service.js";
 import { AcService } from "./service/ac-service.js";
 import { RequirementService } from "./service/requirement-service.js";
 import { RuleService } from "./service/rule-service.js";
+import { RuleChangeService } from "./service/rule-change-service.js";
 import { RuleReadService } from "./service/rule-read-service.js";
 import { ImpactService } from "./service/impact-service.js";
 import { PrdOutlineService } from "./service/prd-outline-service.js";
@@ -427,6 +428,12 @@ export interface App {
    * optional-DI shape as `requirementService`; always wired in production.
    */
   ruleService?: RuleService;
+  /**
+   * RuleChangeService — the sole writer of a spec's rule change set (`extra.rule_changes`:
+   * `lore rule propose|changes`). Needs the ONE RecordLockService; optional like `ruleService` so bare test
+   * stubs stay valid; always wired in production.
+   */
+  ruleChangeService?: RuleChangeService;
   /**
    * RuleReadService / ImpactService — the read path of baseline rules (`lore rule show|find|impact`,
    * spec baseline-slice-2 C6). Store-only; optional like `ruleService` so bare test stubs stay valid.
@@ -915,6 +922,8 @@ function buildAppFromSqlite(
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
+    // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
+    ruleChangeService: new RuleChangeService(store, recordLockService),
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
@@ -1292,6 +1301,8 @@ function buildAppFromTurso(
     // reason: RuleService gets the WIRED corpusService.create (gates + provenance guards apply to
     // node creation); its `createDoc` port is required — RuleService builds no CorpusService of its own.
     ruleService: new RuleService(store, corpusService.create.bind(corpusService)),
+    // reason: the change set of a locked spec is gated by the ONE RecordLockService, like criteria edits.
+    ruleChangeService: new RuleChangeService(store, recordLockService),
     ruleReadService: new RuleReadService(store),
     impactService: new ImpactService(store),
     recordLockService,
