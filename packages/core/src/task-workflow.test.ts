@@ -460,7 +460,7 @@ describe("evidenceEntrySchema.attestation", () => {
 //               load-bearing optionality attestation itself has)
 //   STATE:      a MIXED array (one legacy entry with none, one new entry with
 //               each of the two values) parses as a whole
-//   REGRESSION: CAPTURE_SOURCES is locked to exactly ["runner", "self-report"]
+//   REGRESSION: CAPTURE_SOURCES is locked to exactly ["runner", "self-report", "runner-unattested"]
 
 describe("evidenceEntrySchema.capture_source — HAPPY", () => {
   it("parses an entry with capture_source \"runner\"", () => {
@@ -487,6 +487,33 @@ describe("evidenceEntrySchema.capture_source — HAPPY", () => {
     });
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.capture_source).toBe("self-report");
+  });
+});
+
+describe("evidenceEntrySchema.capture_source — runner-unattested (issue #48, BR-1073)", () => {
+  it("parses an inconclusive entry labelled capture_source \"runner-unattested\" with no attestation (AC-EH-2 a)", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "echo hi",
+      result: "inconclusive",
+      recorded_at: "2026-08-01T10:00:00.000Z",
+      recorded_by: "agent:x",
+      capture_source: "runner-unattested",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.capture_source).toBe("runner-unattested");
+  });
+
+  it("still rejects the near-miss value \"runner_unattested\" (AC-EH-2 a)", () => {
+    const result = evidenceEntrySchema.safeParse({
+      oracle: "test",
+      command: "echo hi",
+      result: "inconclusive",
+      recorded_at: "2026-08-01T10:00:00.000Z",
+      recorded_by: "agent:x",
+      capture_source: "runner_unattested",
+    });
+    expect(result.success).toBe(false);
   });
 });
 
@@ -548,8 +575,8 @@ describe("evidenceEntrySchema.capture_source — STATE", () => {
 });
 
 describe("CAPTURE_SOURCES — REGRESSION (locked enum)", () => {
-  it("is locked to exactly [\"runner\", \"self-report\"]", () => {
-    expect(CAPTURE_SOURCES).toEqual(["runner", "self-report"]);
+  it("is locked to exactly [\"runner\", \"self-report\", \"runner-unattested\"]", () => {
+    expect(CAPTURE_SOURCES).toEqual(["runner", "self-report", "runner-unattested"]);
   });
 });
 

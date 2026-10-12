@@ -1307,7 +1307,7 @@ describe("green control still fires", () => {
       expect(recorder.calls).toHaveLength(1);
       const entry = recorder.calls[0]!.entry;
       expect(entry.result).toBe("inconclusive");
-      expect(entry.capture_source).toBe("runner");
+      expect(entry.capture_source).toBe("runner-unattested");
       expect(entry.ac_ref).toBe("AC-SD-7-GREEN");
       // AC-FR-11 — NO attestation block on an inconclusive green-control row,
       // materialization enabled or not.

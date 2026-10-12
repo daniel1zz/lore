@@ -47,7 +47,15 @@
  * task-raise-the-evidence-tail-guard-s-predicate-to-its-own AC-FR-5
  */
 
-import { extractEvidence, type AssessmentResult, type PlanBundle } from "@lore/core";
+import { classifyCaptureSource, extractEvidence, type AssessmentResult, type PlanBundle } from "@lore/core";
+
+/** The three disjoint `capture_source` buckets; `ratio` = runner / total (0 when no evidence). */
+export interface CaptureSourceDistribution {
+  runnerCount: number;
+  selfReportCount: number;
+  runnerUnattestedCount: number;
+  ratio: number;
+}
 import { formatTable } from "./utils.js";
 
 /**
@@ -68,20 +76,32 @@ import { formatTable } from "./utils.js";
  */
 export function computeCaptureSourceDistribution(
   bundle: PlanBundle,
-): { runnerCount: number; selfReportCount: number; ratio: number } {
+): CaptureSourceDistribution {
   let runnerCount = 0;
   let selfReportCount = 0;
+  let runnerUnattestedCount = 0;
   for (const task of bundle.tasks) {
     for (const entry of extractEvidence(task)) {
-      if (entry.capture_source === "runner") {
-        runnerCount += 1;
-      } else {
-        selfReportCount += 1;
+      const bucket = classifyCaptureSource(entry.capture_source);
+      switch (bucket) {
+        case "runner":
+          runnerCount += 1;
+          break;
+        case "self-report":
+          selfReportCount += 1;
+          break;
+        case "runner-unattested":
+          runnerUnattestedCount += 1;
+          break;
+        default: {
+          const unreachable: never = bucket;
+          return unreachable;
+        }
       }
     }
   }
-  const total = runnerCount + selfReportCount;
-  return { runnerCount, selfReportCount, ratio: total === 0 ? 0 : runnerCount / total };
+  const total = runnerCount + selfReportCount + runnerUnattestedCount;
+  return { runnerCount, selfReportCount, runnerUnattestedCount, ratio: total === 0 ? 0 : runnerCount / total };
 }
 
 /**
@@ -95,12 +115,13 @@ export function computeCaptureSourceDistribution(
  *   `undefined` for a legacy pre-SPEC-040 result (additive, never thrown).
  */
 export function formatCaptureSourceLine(
-  distribution: { runnerCount: number; selfReportCount: number; ratio: number },
+  distribution: CaptureSourceDistribution,
   attestedRatio: number | undefined,
 ): string {
   return (
     `Evidence trust: capture_source ${distribution.runnerCount} runner / ` +
-    `${distribution.selfReportCount} self-report (ratio ${distribution.ratio.toFixed(2)})` +
+    `${distribution.selfReportCount} self-report / ` +
+    `${distribution.runnerUnattestedCount} runner-unattested (ratio ${distribution.ratio.toFixed(2)})` +
     (attestedRatio !== undefined ? `, attested_evidence_ratio ${attestedRatio.toFixed(2)}` : "")
   );
 }

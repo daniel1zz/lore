@@ -43,7 +43,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "child_process";
-import { mkdirSync, rmSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { DocRecord, PlanBundle } from "@lore/core";
@@ -321,5 +321,143 @@ describe("AC-FR-5 — capture_source visibility + generic count↔enumerator con
     // A legacy pre-SPEC-040 result carries no `facts` at all — additive, never thrown.
     const lineWithoutAttested = formatCaptureSourceLine(distribution, undefined);
     expect(lineWithoutAttested).not.toContain("attested_evidence_ratio");
+  });
+});
+
+// ─── runner-unattested bucket (issue #48, BR-1073) — AC-EH-2 c, d, e ──────────
+//
+// `status --json`/`--enumerate` read the corpus through the real CLI, and the
+// runner-unattested + legacy rows cannot be produced by any public writer (that
+// is the point of the label), so they are written DIRECTLY into the throwaway
+// corpus's store by a one-shot `bun` script (bun:sqlite is unreachable from
+// vitest itself). RED today: the label is counted inside the self-report bucket
+// and no runner-unattested count/enumerator exists.
+
+const SQLITE_STORE_TS = join(PACKAGE_ROOT, "src", "store", "sqlite-store.ts");
+
+/** Appends one hand-built evidence row to `taskSlug`'s stored doc, bypassing every writer. */
+function injectEvidenceRow(taskSlug: string, row: Record<string, unknown>): void {
+  const script = join(tmpDir, `inject-${Math.random().toString(36).slice(2)}.ts`);
+  writeFileSync(
+    script,
+    `import { SQLiteStore } from ${JSON.stringify(SQLITE_STORE_TS)};
+const store = new SQLiteStore(${JSON.stringify(join(tmpDir, ".lore", "lore.db"))});
+const found = await store.findBySlug(${JSON.stringify(taskSlug)});
+if (!found.ok || found.value === null) throw new Error("task not found: " + ${JSON.stringify(taskSlug)});
+const prior = (found.value.extra["verification_evidence"] ?? []) as unknown[];
+const updated = await store.update(found.value.id, {
+  extra: { ...found.value.extra, verification_evidence: [...prior, ${JSON.stringify(row)}] },
+});
+if (!updated.ok) throw new Error(JSON.stringify(updated.error));
+`,
+  );
+  const r = spawnSync("bun", ["run", script], { cwd: tmpDir, encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`inject failed: ${r.stderr}${r.stdout}`);
+}
+
+/** 2 runner (CLI --capture), 1 self-report (CLI manual), 1 runner-unattested + 1 legacy (injected). */
+function seedMixedFixture(): { unattestedTask: string } {
+  const planSlug = createPlan();
+  for (const title of ["Runner A", "Runner B"]) {
+    const t = createTask(planSlug, title);
+    const w = runLore(["evidence", t, "--oracle", "test", "--command", "echo hi", "--result", "pass", "--capture"], tmpDir);
+    expect(w.exitCode).toBe(0);
+  }
+  const selfTask = createTask(planSlug, "Self Report");
+  const sw = runLore(
+    ["evidence", selfTask, "--oracle", "manual", "--command", "manual check", "--result", "pass", "--output-tail", "ok, checked by hand"],
+    tmpDir,
+  );
+  expect(sw.exitCode).toBe(0);
+  const unattestedTask = createTask(planSlug, "Unattested Control");
+  injectEvidenceRow(unattestedTask, {
+    oracle: "test",
+    command: "bunx vitest run x.test.ts",
+    result: "inconclusive",
+    recorded_at: "2026-01-01T00:00:00.000Z",
+    recorded_by: "agent:runner",
+    capture_source: "runner-unattested",
+    output_tail: "green control failed",
+  });
+  const legacyTask = createTask(planSlug, "Legacy Row");
+  injectEvidenceRow(legacyTask, {
+    oracle: "tsc",
+    command: "bun run typecheck",
+    result: "pass",
+    recorded_at: "2026-01-01T00:00:00.000Z",
+    recorded_by: "agent:legacy",
+  });
+  return { unattestedTask };
+}
+
+describe("AC-EH-2 c/d — status counts and enumerates runner-unattested as its own bucket", () => {
+  it("(c) 2 runner + 1 self-report + 1 runner-unattested + 1 legacy: counts 2 / 2 / 1 and the three sum to 5", () => {
+    seedMixedFixture();
+    const status = statusJson();
+    expect(status["capture_source_runner_count"]).toBe(2);
+    // self-report = the explicit self-report row + the legacy row with no capture_source.
+    expect(status["capture_source_self_report_count"]).toBe(2);
+    expect(status["capture_source_runner_unattested_count"]).toBe(1);
+    const sum =
+      (status["capture_source_runner_count"] as number) +
+      (status["capture_source_self_report_count"] as number) +
+      ((status["capture_source_runner_unattested_count"] as number | undefined) ?? 0);
+    expect(sum).toBe(5);
+  });
+
+  it("(d) --enumerate capture_source_runner_unattested_count lists exactly that one row and exits 0", () => {
+    const { unattestedTask } = seedMixedFixture();
+    const result = enumerate("capture_source_runner_unattested_count");
+    expect(result.exitCode).toBe(0);
+    expect(result.count).toBe(1);
+    expect(result.members).toHaveLength(1);
+    expect(result.members?.[0]).toContain(unattestedTask);
+  });
+});
+
+describe("AC-EH-2 e — computeCaptureSourceDistribution / formatCaptureSourceLine render runner-unattested under its own label", () => {
+  it("the distribution carries a distinct runnerUnattestedCount and the line names it, separate from runner and self-report", () => {
+    const rowOf = (capture_source: string | undefined) => ({
+      oracle: "test",
+      command: "bunx vitest run x.test.ts",
+      result: "pass",
+      recorded_at: "2026-01-01T00:00:00.000Z",
+      recorded_by: "agent:x",
+      ...(capture_source === undefined ? {} : { capture_source }),
+    });
+    const taskOf = (id: string, rows: unknown[]): DocRecord =>
+      ({
+        id,
+        slug: id,
+        type: "task",
+        title: id,
+        status: "draft",
+        content: "body",
+        parent_id: null,
+        extra: { verification_evidence: rows },
+        version: 1,
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+        deleted_at: null,
+      }) as unknown as DocRecord;
+    const bundle: PlanBundle = {
+      plan: taskOf("plan-eh", []) as unknown as DocRecord,
+      tasks: [
+        taskOf("t-a", [rowOf("runner"), rowOf("runner")]),
+        taskOf("t-b", [rowOf("self-report"), rowOf(undefined)]),
+        taskOf("t-c", [rowOf("runner-unattested")]),
+      ],
+    };
+
+    const distribution = computeCaptureSourceDistribution(bundle) as unknown as Record<string, number>;
+    expect(distribution["runnerCount"]).toBe(2);
+    expect(distribution["selfReportCount"]).toBe(2);
+    // reason: field name pinned by the paired implement task; absent today.
+    expect(distribution["runnerUnattestedCount"]).toBe(1);
+
+    const line = formatCaptureSourceLine(distribution as unknown as Parameters<typeof formatCaptureSourceLine>[0], undefined);
+    expect(line).toContain("2 runner /");
+    expect(line).toContain("2 self-report");
+    expect(line).toContain("1 runner-unattested");
   });
 });

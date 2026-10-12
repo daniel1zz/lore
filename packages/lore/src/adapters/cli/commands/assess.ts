@@ -457,6 +457,7 @@ export default defineCommand({
                 capture_source: {
                   runner_count: captureSourceDistribution.runnerCount,
                   self_report_count: captureSourceDistribution.selfReportCount,
+                  runner_unattested_count: captureSourceDistribution.runnerUnattestedCount,
                   ratio: captureSourceDistribution.ratio,
                 },
               },
