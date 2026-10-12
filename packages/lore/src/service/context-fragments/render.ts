@@ -48,6 +48,9 @@ function getOutletCap(outlet: OutletId): number | null {
     case "rules:project":
     case "rules:user":
       return null;
+    case "skills:project":
+    case "skills:user":
+      throw new Error(`outlet ${outlet} is not yet routed`); // T2/T3 route this
     default: {
       const unreachable: never = outlet;
       throw new Error(`unhandled outlet: ${String(unreachable)}`);

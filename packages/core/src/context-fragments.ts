@@ -38,6 +38,12 @@ export const AUDIENCE_PATTERN = /^(main|subagent:(\*|[A-Za-z0-9_:-]+))$/;
 
 export const FRAGMENT_MODES = ["static", "dynamic"] as const;
 
+/** How a fragment reaches the model: always-loaded rules file, or an on-demand skill. */
+export const FRAGMENT_DELIVERIES = ["rules", "skill"] as const;
+
+/** Max chars of a skill `description` (BR-1061; Claude Code truncates skill listings beyond this). */
+export const SKILL_DESCRIPTION_MAX = 1536;
+
 export const FragmentFrontmatterSchema = z
   .object({
     id: z.string().min(1),
@@ -45,11 +51,26 @@ export const FragmentFrontmatterSchema = z
     audience: z.array(z.string().regex(AUDIENCE_PATTERN, "audience must be 'main' or 'subagent:<*|agent_type>'")).min(1),
     mode: z.enum(FRAGMENT_MODES),
     when: z.object({ language: z.array(z.string().min(1)).min(1).optional() }).strict().optional(),
+    delivery: z.enum(FRAGMENT_DELIVERIES).default("rules"),
+    description: z.string().min(1).max(SKILL_DESCRIPTION_MAX).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((fm, ctx) => {
+    if (fm.delivery !== "skill") return;
+    if (fm.description === undefined) {
+      ctx.addIssue({ code: "custom", path: ["description"], message: "delivery: skill requires a description" });
+    }
+    if (fm.mode !== "static") {
+      ctx.addIssue({ code: "custom", path: ["mode"], message: "delivery: skill requires mode: static" });
+    }
+    if (fm.audience.length !== 1 || fm.audience[0] !== "main") {
+      ctx.addIssue({ code: "custom", path: ["audience"], message: "delivery: skill requires audience: [main]" });
+    }
+  });
 
 export type FragmentFrontmatter = z.infer<typeof FragmentFrontmatterSchema>;
 export type Audience = FragmentFrontmatter["audience"][number];
+export type FragmentDelivery = (typeof FRAGMENT_DELIVERIES)[number];
 export type FragmentMode = (typeof FRAGMENT_MODES)[number];
 
 /** A discovered fragment: validated frontmatter + body + where it came from. */
@@ -65,6 +86,8 @@ export interface Fragment {
 export const OUTLET_IDS = [
   "rules:project",
   "rules:user",
+  "skills:project",
+  "skills:user",
   "hook:session-start",
   "hook:subagent-start",
 ] as const;
@@ -88,8 +111,8 @@ export interface ResolvedContextConfig {
 
 /**
  * Resolve the effective language + disabled ids for one outlet.
- * - rules:user    → GLOBAL layer only
- * - rules:project → PROJECT layer only
+ * - rules:user, skills:user       → GLOBAL layer only
+ * - rules:project, skills:project → PROJECT layer only
  * - hook:*            → project language over global; disable lists unioned
  * Pure: never mutates its inputs.
  */
@@ -105,12 +128,14 @@ export function resolveContextConfig(
 
   switch (outlet) {
     case "rules:user":
+    case "skills:user":
       return {
         language: g.language ?? null,
         languageSource: g.language !== undefined ? "global" : "none",
         disabled: new Set(gDisable),
       };
     case "rules:project":
+    case "skills:project":
       return {
         language: p.language ?? null,
         languageSource: p.language !== undefined ? "project" : "none",

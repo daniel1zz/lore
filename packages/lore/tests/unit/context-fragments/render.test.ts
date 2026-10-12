@@ -17,7 +17,7 @@ import { parseRulesFile, renderRulesFile } from "../../../src/service/context-fr
 
 function frag(id: string, body: string, audience: string[] = ["main"], mode: "static" | "dynamic" = "dynamic"): Fragment {
   return {
-    frontmatter: { id, title: `title ${id}`, audience, mode },
+    frontmatter: { id, title: `title ${id}`, audience, mode, delivery: "rules" },
     body,
     layer: "shipped",
     path: `/fixture/${id}.md`,
