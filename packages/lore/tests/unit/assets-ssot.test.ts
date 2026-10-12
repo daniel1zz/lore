@@ -455,6 +455,11 @@ const DECLARED_FILES = [
   // RE-BASELINE (task-skill-implement-shipped-agents-set-omitclaudemd-true, AC-CF-9): shipped agents now set
   // omitClaudeMd, so the subagent-audience rules they used to get from CLAUDE.md ship as this fragment.
   "context/agent-rules.md",
+  // task-rs-t13-migration-promoted-shipped-fragments-agent-rules (AC-RS-13): lore-tool facts promoted from the user layer
+  "context/lore-ac-design.md",
+  "context/lore-evidence-attestation.md",
+  "context/lore-dispatch-bundle.md",
+  "context/lore-worktree-dispatch.md",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",
@@ -487,7 +492,9 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
   "context/corpus-workflow-2-produce.md": "d2aec41b999e977dd56d65398062d76402940878a1eb1dcdaa9736d196d37ab9",
   "context/corpus-workflow-3-execute.md": "acf9e945bef3b056c200d06e0f7714b4711f54cd9bd59d0d6a824545937ae944",
-  "context/corpus-workflow-4-close.md": "2d733c70f38923594543a8981cc913320c76433fe56bed2b7d3f5e02b41ce713",
+  // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
+  // boundary bullet moved from the user-layer lore-loop fragment (user-03).
+  "context/corpus-workflow-4-close.md": "7a94ba672efcee7233c93439b05ebd1556e96978436513062a45c7ba93334aeb",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
