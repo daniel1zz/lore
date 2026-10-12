@@ -40,6 +40,7 @@ import { GENERATE_PROMPT_VERSION } from "../../../src/ai/templates.js";
 import type {
   AIProvider,
   CreateDocInput,
+  DocId,
   DocRecord,
   GenerateInput,
   GenerateOutput,
@@ -143,6 +144,13 @@ async function makeApp(
     judgmentService,
     opts.judgmentRequiredTypes ?? ["spec", "adr"],
   );
+  // AC-AP-3 (BR-1071): app.ts hands CorpusService the approve path as an injected port, so a
+  // `set(..., { status: "approved" })` is judged exactly like `approve`. Wired here the same way.
+  // reason: `setApprovalPort` is added by task-skill-implement-set-to-approved-delegates-to-the-approve;
+  // until then the call is a TypeError (the declared red), and the structural cast keeps typecheck green.
+  (corpusService as unknown as {
+    setApprovalPort(port: { approve: (id: string, o: Record<string, unknown>) => ReturnType<ReviewService["approve"]> }): void;
+  }).setApprovalPort({ approve: (id, o) => reviewService.approve(id as DocId, o as never) });
   return { store, corpusService, judgmentService, reviewService, enforcer };
 }
 
@@ -307,7 +315,7 @@ describe("AC-TIER-2 ledger edit atomic reset + re-fast-track", () => {
   });
 
   it("REGRESSION: editing an approved spec still resets to draft (unaffected by M1)", async () => {
-    const { corpusService } = await makeApp();
+    const { corpusService, judgmentService } = await makeApp();
     const prd = await mustCreate(corpusService, { type: "prd", title: "Root", content: "# PRD" } as CreateDocInput);
     const specDraft = await mustCreate(corpusService, {
       type: "spec",
@@ -315,6 +323,13 @@ describe("AC-TIER-2 ledger edit atomic reset + re-fast-track", () => {
       content: "## Overview\n\noriginal",
       extra: { spec_kind: "feature", acceptance_criteria: [SCRIPT_AC] },
     } as CreateDocInput);
+    // Re-baselined (AC-AP-3, BR-1071): this case used to reach `approved` through an UNJUDGED
+    // `set(status: "approved")` - the bypass issue #65 closes. It now reaches approved the way
+    // production does: an approve judgment of the current version, then the status change.
+    const judged = await judgmentService.record(
+      makeNewJudgment({ doc_id: specDraft.id, doc_version: specDraft.version, decision: "approve" }),
+    );
+    if (!judged.ok) throw new Error(`record judgment failed (test setup): ${JSON.stringify(judged.error)}`);
     const approved = await corpusService.set(specDraft.id, { status: "approved" });
     if (!approved.ok) throw new Error(`approve failed: ${JSON.stringify(approved.error)}`);
     expect(approved.value.status).toBe("approved");

@@ -4,6 +4,7 @@
  * Source: SPEC-001 §3.1
  */
 
+import { isDeepStrictEqual } from "node:util";
 import { ulid } from "ulidx";
 import { err, ok, DEDICATED_EXTRA_KEYS, type Result } from "@lore/core";
 import { admitAcWrite, applyAcChange } from "./ac-write-chokepoint.js";
@@ -286,6 +287,32 @@ export interface WriteActorOpts {
 export interface SetOptions extends WriteActorOpts {
   readonly expectedVersion?: number;
   readonly correction?: { readonly reason: string };
+}
+
+/**
+ * The approval path `set(status: "approved")` delegates to (spec-approval-and-plan-closure-go-through-
+ * the-same-checks-on D1/D2, BR-1071). Declared STRUCTURALLY here so this service never imports
+ * `review-service.ts` (no cross-service imports); `app.ts` wires `ReviewService.approve` into it.
+ * The result is read as a `DocRecord` — `ApproveResult` is one, plus an optional advisory field.
+ */
+export interface ApprovalPort {
+  approve(
+    idOrSlug: string,
+    opts: { readonly reviewer: string; readonly expectedVersion?: number },
+  ): Promise<Result<DocRecord, LoreError>>;
+}
+
+/**
+ * The `lore done` floors as data, for callers that must not archive a task past one (plan-close
+ * cascade, archive sweep; spec-approval-and-plan-closure-go-through-the-same-checks-on D5, BR-1072).
+ * Declared STRUCTURALLY so this service never imports `task-workflow-service.ts`; `app.ts` wires
+ * `TaskWorkflowService.checkDoneFloors` into it. `ok(null)` = every floor met; `ok({floor, error})` =
+ * the first failing floor with the exact error `done()` would return (`error.details.floor === floor`).
+ */
+export interface DoneFloorPort {
+  checkDoneFloors(
+    taskIdOrSlug: string,
+  ): Promise<Result<{ readonly floor: string; readonly error: LoreError } | null, LoreError>>;
 }
 
 /**
@@ -842,6 +869,36 @@ export class CorpusService {
 
   /** Present iff {@link setRuleStateService} was called. */
   private ruleStateService: { full(): Promise<Result<RuleStateFull, LoreError>> } | undefined;
+
+  /**
+   * Hands the corpus service the approval path a `set(status: "approved")` must take (BR-1071): the
+   * same judgment, spec/plan-promote and rule-citation checks as `lore approve`, recorded as an approval.
+   * Called once per App construction site in `app.ts`. An unwired service (every bare
+   * `new CorpusService(store)`) approves with NO gate and writes directly — tests only; production
+   * wiring is guarded by AC-AP-7.
+   *
+   * @param port - anything exposing `ReviewService.approve`'s call shape
+   */
+  setApprovalPort(port: ApprovalPort): void {
+    this.approvalPort = port;
+  }
+
+  /** Present iff {@link setApprovalPort} was called. */
+  private approvalPort: ApprovalPort | undefined;
+
+  /**
+   * Hands the corpus service the done-floor check a plan close / sweep must apply to each task
+   * (BR-1072). Called once per App construction site in `app.ts` (guarded by AC-AP-7). An unwired
+   * service (every bare `new CorpusService(store)`) has no port: tests only.
+   *
+   * @param port - anything exposing `TaskWorkflowService.checkDoneFloors`'s call shape
+   */
+  setDoneFloorPort(port: DoneFloorPort): void {
+    this.doneFloorPort = port;
+  }
+
+  /** Present iff {@link setDoneFloorPort} was called. */
+  private doneFloorPort: DoneFloorPort | undefined;
 
   /**
    * Sets the foreign-corpus-write guard's ambient facts for every write this
@@ -2135,6 +2192,40 @@ export class CorpusService {
 
     const existing = findResult.value;
     const now = new Date().toISOString();
+
+    // BR-1071 (issues #65 #50) — setting a status to approved IS an approval: it takes the approve path
+    // (judgment, spec/plan-promote, rule-citation checks; an `approve` version + audit row), never a
+    // direct write that skips them. A pure approval carries no other change (D4): a changed field or a
+    // correction next to `approved` is refused before any write, naming the two-step form. A resend of
+    // a stored value is not a change (the dashboard and MCP resend whole forms).
+    if (parsedPatch.data.status === "approved" && existing.status !== "approved" && this.approvalPort !== undefined) {
+      const patchData = parsedPatch.data;
+      const changed: string[] = [];
+      if (patchData.title !== undefined && patchData.title !== existing.title) changed.push("title");
+      if (patchData.content !== undefined && bodyDiffers(existing.content, patchData.content)) changed.push("content");
+      if (patchData.priority !== undefined && patchData.priority !== existing.priority) changed.push("priority");
+      if (patchData.slug !== undefined && patchData.slug !== existing.slug) changed.push("slug");
+      if (patchData.tags !== undefined && !isDeepStrictEqual(patchData.tags, existing.tags)) changed.push("tags");
+      if (patchData.extra !== undefined && !isDeepStrictEqual(patchData.extra, existing.extra)) changed.push("extra");
+      if (opts?.correction !== undefined) changed.push("correction");
+      if (changed.length > 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          field: "status",
+          message:
+            `setting status to approved is an approval and carries no other change, but this call also changes ` +
+            `${changed.join(", ")} — make the edit first with "lore set", then approve in a separate step ` +
+            `("lore set --status approved" or "lore approve")`,
+          value: patchData.status,
+        });
+      }
+      const approved = await this.approvalPort.approve(existing.id, {
+        reviewer: this.resolveWriteActor(opts?.by),
+        ...(opts?.expectedVersion !== undefined ? { expectedVersion: opts.expectedVersion } : {}),
+      });
+      if (!approved.ok) return approved;
+      return ok(approved.value);
+    }
 
     // record-edit gate (spec-documents-are-living-or-records D4/D6/D13/D14) — BEFORE any write and before
     // the rest of this method's validation, so a locked record's refusal is never masked by an unrelated

@@ -128,7 +128,7 @@ import { resolveDoc } from "./resolve.js";
 import type { RecordLockService } from "./record-lock-service.js";
 import { buildRuleIndex, citeWarnings, type CiteWarning } from "./ac-citations.js";
 import { ownProposedRules } from "./rule-changes.js";
-import { admitAcWrite, applyAcChange, decorateCiteRefusal, resolveCiteGateFor } from "./ac-write-chokepoint.js";
+import { admitAcWrite, applyAcChange, decorateCiteRefusal, pipeAdvisories, resolveCiteGateFor } from "./ac-write-chokepoint.js";
 import type { CiteGateConfig } from "./ac-cite-gate.js";
 import { CorpusWriteAuthority, type CorpusWriteAuthorityContext } from "./foreign-corpus-write-guard.js";
 
@@ -279,6 +279,12 @@ export interface DeclarePathOpts {
    * Source: spec-baseline-slice-2 §C3 (actor provenance on AC writes).
    */
   by?: string;
+  /**
+   * Receives each non-blocking advisory of a SUCCESSFUL write, one call per note (BR-1078: an unsafe pipe in an
+   * oracle-`other` command, stored as written). The CLI prints each on stderr; omitted → advisories are dropped.
+   * Never called for a refused write.
+   */
+  onAdvisory?: (advisory: string) => void;
 }
 
 /**
@@ -492,6 +498,7 @@ export class AcService {
 
     const writeResult = await this.writeCriteria(spec, parsed.data, "add", {
       ...(opts.by !== undefined ? { by: opts.by } : {}),
+      ...(opts.onAdvisory !== undefined ? { onAdvisory: opts.onAdvisory } : {}),
       ...(declaration !== undefined ? { declaration } : {}),
       ...(citeAudit !== undefined ? { auditDetails: citeAudit.value } : {}),
     });
@@ -926,6 +933,7 @@ export class AcService {
     const writeResult = await this.writeCriteria(spec, parsed.data, "set", {
       ...(correction !== undefined ? { correctionReason: correction.reason.trim() } : {}),
       ...(opts.by !== undefined ? { by: opts.by } : {}),
+      ...(opts.onAdvisory !== undefined ? { onAdvisory: opts.onAdvisory } : {}),
       status: newStatus,
       acId,
       ...(declaration !== undefined ? { declaration } : {}),
@@ -1063,6 +1071,8 @@ export class AcService {
       auditDetails?: Record<string, unknown>;
       /** The calling actor; omitted → the env actor chain (see writeCriteria). */
       by?: string;
+      /** Receives each chokepoint advisory once the write has committed ({@link DeclarePathOpts.onAdvisory}). */
+      onAdvisory?: (advisory: string) => void;
       /** Trimmed correction reason (setCriterion only): change_summary `Correction: <reason>` + audit `details.correction`. */
       correctionReason?: string;
     } = {},
@@ -1157,6 +1167,7 @@ export class AcService {
     if (!written.ok) {
       return { ok: false, error: await decorateCiteRefusal(this.store, written.error, { target, existing, next: criteria }) };
     }
+    for (const advisory of pipeAdvisories(existing, criteria)) opts.onAdvisory?.(advisory);
     return written;
   }
 }

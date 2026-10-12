@@ -4,7 +4,13 @@
  *
  * Public surface: {@link applyAcChange}, {@link admitAcWrite}, {@link decorateCiteRefusal},
  * {@link resolveCiteGateFor}, {@link AcWritePath}, {@link AC_WRITE_NOT_VIA_AC_VERB},
- * {@link isValidFalsifierExitCode}, {@link FALSIFIER_EXIT_CODE_MIN}, {@link FALSIFIER_EXIT_CODE_MAX}.
+ * {@link isValidFalsifierExitCode}, {@link FALSIFIER_EXIT_CODE_MIN}, {@link FALSIFIER_EXIT_CODE_MAX},
+ * {@link pipeAdvisories}.
+ * Pipe refusal (BR-1078, spec-evidence-labels-and-reds-are-honest D3/D7, issue #19): on every sanctioned path
+ * (`ac-verb`, `create`, `restore`, `import`) a script criterion that is ADDED or whose command / oracle CHANGED,
+ * with an unquoted shell pipe (`@lore/core` `commandHasUnsafePipe`, the one detector), is refused with
+ * VALIDATION_ERROR field `command` under every oracle except `other`; under `other` it is admitted and
+ * {@link admitAcWrite} returns the note in `advisories`. A stored unchanged command is never re-checked.
  * Invariants:
  *   - A change is detected on the canonical JSON of the array (`JSON.stringify`; order and every
  *     field significant) — reordered, reworded, appended, dropped, added-from-absent all count.
@@ -39,6 +45,7 @@ import {
   err,
   ok,
   specAcceptanceCriteriaSchema,
+  unsafePipeSegment,
   type AcCiteViolation,
   type AcceptanceCriterion,
   type AuditEntry,
@@ -131,6 +138,82 @@ function falsifierRangeRefusal(
   return undefined;
 }
 
+/** The oracle under which an unsafe pipe is advised, never refused (user decision U1, spec D7): `other`. */
+const PIPE_ADVISORY_ORACLE = "other";
+
+interface ScriptCommand {
+  readonly oracle: string;
+  readonly command: string;
+}
+
+/** `{ oracle, command }` per script criterion of a raw array; non-script or malformed entries are skipped. */
+function scriptCommandsById(raw: unknown): Map<string, ScriptCommand> {
+  const found = new Map<string, ScriptCommand>();
+  if (!Array.isArray(raw)) return found;
+  for (const criterion of raw as unknown[]) {
+    if (typeof criterion !== "object" || criterion === null) continue;
+    const { id, verify } = criterion as { id?: unknown; verify?: unknown };
+    if (typeof id !== "string" || typeof verify !== "object" || verify === null) continue;
+    const { mode, oracle, command } = verify as { mode?: unknown; oracle?: unknown; command?: unknown };
+    if (mode !== "script" || typeof oracle !== "string" || typeof command !== "string") continue;
+    found.set(id, { oracle, command });
+  }
+  return found;
+}
+
+/** Every `[acId, oracle, command, pipe segment]` of `incoming` that is new or whose command / oracle changed and has an unsafe pipe. */
+function changedPipedCommands(
+  stored: unknown,
+  incoming: unknown,
+): Array<{ acId: string; oracle: string; command: string; segment: string }> {
+  const before = scriptCommandsById(stored);
+  const found: Array<{ acId: string; oracle: string; command: string; segment: string }> = [];
+  for (const [acId, now] of scriptCommandsById(incoming)) {
+    const was = before.get(acId);
+    if (was !== undefined && was.command === now.command && was.oracle === now.oracle) continue;
+    const segment = unsafePipeSegment(now.command);
+    if (segment !== null) found.push({ acId, ...now, segment });
+  }
+  return found;
+}
+
+/**
+ * BR-1078: the first criterion that is ADDED or whose command / oracle CHANGED, runs a script under any
+ * oracle except `other`, and has an unquoted shell pipe — as a refusal; `undefined` when none. A pipeline's
+ * exit status is its LAST stage's, so a check piped into `tail` can never fail. `lore verify` runs commands
+ * under `sh -c`, so the repair named is the POSIX temp-file form (no here-string, no `pipefail`).
+ */
+function pipeRefusal(stored: unknown, incoming: unknown, docId: string | undefined): LoreError | undefined {
+  const first = changedPipedCommands(stored, incoming).find((c) => c.oracle !== PIPE_ADVISORY_ORACLE);
+  if (first === undefined) return undefined;
+  return {
+    code: "VALIDATION_ERROR",
+    field: "command",
+    ...(docId !== undefined ? { id: docId } : {}),
+    message:
+      `AC "${first.acId}": the ${first.oracle} command has an unquoted shell pipe (\`${first.segment}\`) — a pipeline exits ` +
+      `with its LAST stage's status, so the check can fail and the criterion still pass. Run the check on its own, ` +
+      `then inspect the saved output: \`f=$(mktemp); <check> > "$f" 2>&1; ec=$?; cat "$f"; [ "$ec" -eq 0 ] && grep -q <pattern> "$f"\` ` +
+      `(plain POSIX — \`lore verify\` runs commands under \`sh -c\`, so no here-string and no pipefail).`,
+    value: first.command,
+  };
+}
+
+/**
+ * Advisories for the criteria that are ADDED or whose command / oracle changed in `next` against `existing`,
+ * under oracle `other` only (every other oracle is refused by {@link applyAcChange}). One line per criterion,
+ * each starting `advisory:`. Pure; the CLI prints each on stderr without touching the exit code.
+ */
+export function pipeAdvisories(existing: unknown, next: unknown): string[] {
+  return changedPipedCommands(existing, next)
+    .filter((c) => c.oracle === PIPE_ADVISORY_ORACLE)
+    .map(
+      (c) =>
+        `advisory: AC "${c.acId}" (oracle other) has an unquoted shell pipe (\`${c.segment}\`) — the exit code ` +
+        `\`lore verify\` records is the last stage's, not the check's. Stored as written.`,
+    );
+}
+
 /**
  * BR-980: a debt entry `AD-n` is never citable. Every criterion in `incoming` that cites one yields
  * one violation; works on the raw (unvalidated) value, so it holds on every write path.
@@ -192,6 +275,12 @@ export function applyAcChange(
   // unchanged is not re-checked (a pre-existing 0 must not block unrelated edits).
   const rangeRefusal = falsifierRangeRefusal(before?.[KEY], after[KEY], docId);
   if (rangeRefusal !== undefined) return err(rangeRefusal);
+  // reason: BR-1078 holds on every sanctioned path, like BR-1076 above; a wholesale write is refused or
+  // echoed below, so it never reaches here with a changed command, and a stored command is not re-checked.
+  if (path !== "wholesale") {
+    const pipeBlocked = pipeRefusal(before?.[KEY], after[KEY], docId);
+    if (pipeBlocked !== undefined) return err(pipeBlocked);
+  }
   if (path === "ac-verb") return ok(undefined);
   if (path !== "wholesale") {
     const incoming = after[KEY];
@@ -250,9 +339,11 @@ export interface AcWriteAdmission {
   requireLiveRules: string[];
   /** One would-refuse audit entry per refused criterion (report mode); appended in the write's transaction. */
   wouldRefuseAudit: AuditEntry[];
+  /** Non-blocking notes for the caller to surface (BR-1078: an unsafe pipe under oracle `other`); `[]` when none, never absent. */
+  advisories: string[];
 }
 
-const NO_ADMISSION_CONSTRAINTS: AcWriteAdmission = { requireLiveRules: [], wouldRefuseAudit: [] };
+const NO_ADMISSION_CONSTRAINTS: AcWriteAdmission = { requireLiveRules: [], wouldRefuseAudit: [], advisories: [] };
 
 function isConfiguredMode(raw: unknown): boolean {
   return typeof raw === "object" && raw !== null && (raw as Record<string, unknown>)["mode"] !== undefined;
@@ -324,9 +415,13 @@ export async function admitAcWrite(
 ): Promise<Result<AcWriteAdmission, LoreError>> {
   const config = await resolveCiteGateFor(store, input.rawGateConfig);
   if (!config.ok) return config;
-  if (config.value.mode === "off") return ok(NO_ADMISSION_CONSTRAINTS);
+  // reason: BR-1078 advisories are independent of the cite gate — computed BEFORE the mode-off early return
+  // so a corpus with the gate off still hears about an unsafe pipe under oracle `other`.
+  const advisories = pipeAdvisories(input.existing, input.next);
+  const unconstrained: AcWriteAdmission = { ...NO_ADMISSION_CONSTRAINTS, advisories };
+  if (config.value.mode === "off") return ok(unconstrained);
   // reason: QA-1 — an untouched write (no added/revised criterion) costs one config probe and nothing else.
-  if (changedCriteria(input.existing, input.next).length === 0) return ok(NO_ADMISSION_CONSTRAINTS);
+  if (changedCriteria(input.existing, input.next).length === 0) return ok(unconstrained);
 
   const baseline = await store.findMany({ type: "baseline" });
   if (!baseline.ok) return baseline;
@@ -344,12 +439,13 @@ export async function admitAcWrite(
   const exempted = activeExemptedAcIds(exemptions.value, input.target.id, nowIso);
   const decision = decideCiteGate(config.value, input.existing, input.next, index, exempted);
 
-  if (decision.kind === "skip") return ok(NO_ADMISSION_CONSTRAINTS);
+  if (decision.kind === "skip") return ok(unconstrained);
   if (decision.kind === "admit") {
     // reason: the in-transaction liveness re-check reads the REGISTRY, where an own proposed id is `proposed`
     // by design — it is admitted above through the change set, so it must not be re-required live there.
     const ownIds = new Set(ownProposed.map((p) => p.id));
     return ok({
+      advisories,
       requireLiveRules: decision.requireLiveRules.filter((id) => !ownIds.has(id)),
       wouldRefuseAudit: decision.findings.map((f) =>
         wouldRefuseEntry(input.target, input.actor, nowIso, config.value.mode, f),

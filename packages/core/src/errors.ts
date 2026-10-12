@@ -9,7 +9,14 @@ export type LoreError =
   | { code: "DOC_NOT_FOUND"; id: string; suggestions?: string[] }
   | { code: "SLUG_NOT_FOUND"; slug: string; suggestions?: string[] }
   | { code: "STALE_VERSION"; id: string; expected: number; actual: number }
-  | { code: "VALIDATION_ERROR"; field: string; message: string; value?: unknown }
+  | {
+      code: "VALIDATION_ERROR";
+      field: string;
+      message: string;
+      value?: unknown;
+      /** Machine-readable refusal facts. `floor` = the `lore done` floor id that refused (never parse `message`). */
+      details?: { floor?: string };
+    }
   | { code: "SCHEMA_VIOLATION"; type: string; missing: string[]; extra?: string[] }
   | { code: "LINK_CYCLE"; path: string[] }
   | { code: "DUPLICATE_SLUG"; slug: string; existing_id: string }
