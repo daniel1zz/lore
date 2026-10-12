@@ -21,6 +21,8 @@ import {
   type FragmentsFlowDeps,
 } from "../../../src/flows/fragments-flow.js";
 import { runContextRefresh } from "../../../src/flows/context-flow.js";
+import { discoverFragments } from "../../../src/service/context-fragments/discover.js";
+import { renderSkillFile } from "../../../src/service/context-fragments/section.js";
 
 const ROOTS = { shipped: "/a/context", user: "/u/context", project: "/p/.lore/context" };
 const CLAUDE_MD = "/p/CLAUDE.md";
@@ -304,5 +306,149 @@ describe("D12 buildHookBanner", () => {
 
   it("short message passes through untruncated", () => {
     expect(buildHookBanner({ code: "VALIDATION_ERROR", message: "bad" })).toBe("lore fragments VALIDATION_ERROR: bad");
+  });
+});
+
+// ─── rule-store T6: duplicate / selection / skill findings ──────────────────
+// Spec: spec-rule-store-fragment-selection-on-demand-skill (Scope 6, AC-RS-8 unit half;
+// BR-1062, BR-1064, BR-1066, BR-1067). Each new finding kind has a failing case AND a clean control.
+describe("AC-RS-8 runFragmentsCheck rule-store findings", () => {
+  const dyn = (id: string, body: string, layer: keyof typeof ROOTS = "project") => ({
+    [`${ROOTS[layer]}/${id}.md`]: fragmentFile(id, ["main"], "dynamic", body),
+  });
+  const skillSource = (id: string, body: string) => ({
+    [`${ROOTS.project}/${id}.md`]: `---\nid: ${id}\ntitle: t ${id}\naudience: [main]\nmode: static\ndelivery: skill\ndescription: d ${id}\n---\n${body}\n`,
+  });
+  const SKILLS_DIR = "/p/.claude/skills";
+  const selectionText = (ids: string[]) => `schemaVersion: 1\ndisable: [${ids.join(", ")}]\n`;
+
+  /** The REAL renderer's SKILL.md for every skill fragment in `files`, keyed by absolute path. */
+  async function renderedSkills(files: Record<string, string>): Promise<Record<string, string>> {
+    const found = await discoverFragments(new InMemoryFsPort(files), {
+      shipped: "/none-shipped",
+      user: "/none-user",
+      project: ROOTS.project,
+    });
+    if (!found.ok) throw new Error(`fixture discovery failed: ${found.error.message}`);
+    const out: Record<string, string> = {};
+    for (const fragment of found.value) {
+      if (fragment.frontmatter.delivery !== "skill") continue;
+      const rendered = renderSkillFile(fragment);
+      if (!rendered.ok) throw new Error(rendered.error.message);
+      out[`${SKILLS_DIR}/${rendered.value.dirName}/SKILL.md`] = rendered.value.content;
+    }
+    return out;
+  }
+
+  const kinds = (r: Awaited<ReturnType<typeof runFragmentsCheck>>) => r.findings.map((f) => f.kind);
+
+  it("duplicate_line: the same line in two fragments one session reads fails; distinct lines are clean", async () => {
+    const dup = await runFragmentsCheck(
+      makeDeps({ ...dyn("a", "Always run the linter first."), ...dyn("b", "Always run the linter first.") }),
+    );
+    expect(dup.ok).toBe(false);
+    const finding = dup.findings.find((f) => f.kind === "duplicate_line");
+    expect(finding?.code).toBe("VALIDATION_ERROR");
+    expect(finding?.message).toContain("Always run the linter first.");
+    expect(finding?.message).toContain("a");
+    expect(finding?.message).toContain("b");
+
+    const clean = await runFragmentsCheck(
+      makeDeps({ ...dyn("a", "Always run the linter first."), ...dyn("b", "Never skip the type check.") }),
+    );
+    expect(clean.findings).toEqual([]);
+  });
+
+  it("duplicate_line: fragments of different reading groups are not compared (main vs helper control)", async () => {
+    const files = {
+      ...dyn("m", "Shared line."),
+      [`${ROOTS.project}/h.md`]: fragmentFile("h", ["subagent:*"], "dynamic", "Shared line."),
+    };
+    expect(kinds(await runFragmentsCheck(makeDeps(files)))).not.toContain("duplicate_line");
+  });
+
+  it("selection_unknown_id: a disable id no fragment has fails; a known id is clean", async () => {
+    const files = dyn("known", "Some rule.");
+    const bad = await runFragmentsCheck(makeDeps(files, { projectSelectionText: selectionText(["ghost-id"]) }));
+    expect(bad.ok).toBe(false);
+    const finding = bad.findings.find((f) => f.kind === "selection_unknown_id");
+    expect(finding?.message).toContain("ghost-id");
+    expect(finding?.message).toContain("project");
+
+    const userBad = await runFragmentsCheck(makeDeps(files, { userSelectionText: selectionText(["ghost-user"]) }));
+    expect(userBad.findings.find((f) => f.kind === "selection_unknown_id")?.message).toContain("ghost-user");
+
+    const clean = await runFragmentsCheck(makeDeps(files, { projectSelectionText: selectionText(["known"]) }));
+    expect(clean.findings).toEqual([]);
+  });
+
+  it("selection_in_config: fragments.disable left in a settings-file layer fails; the same list in selection.yaml is clean", async () => {
+    const files = dyn("known", "Some rule.");
+    const inConfig = await runFragmentsCheck(
+      makeDeps(files, { projectConfig: { context: { fragments: { disable: ["known"] } } } }),
+    );
+    expect(inConfig.ok).toBe(false);
+    const finding = inConfig.findings.find((f) => f.kind === "selection_in_config");
+    expect(finding?.message).toContain("selection.yaml");
+    expect(finding?.message).toContain("known");
+
+    const inSelection = await runFragmentsCheck(makeDeps(files, { projectSelectionText: selectionText(["known"]) }));
+    expect(kinds(inSelection)).not.toContain("selection_in_config");
+  });
+
+  it("selection file that is not valid YAML/shape is a finding, not a throw", async () => {
+    const r = await runFragmentsCheck(makeDeps(dyn("known", "x"), { projectSelectionText: "disable: nope" }));
+    expect(r.ok).toBe(false);
+    expect(r.findings.find((f) => f.kind === "selection")?.message).toContain("selection");
+  });
+
+  it("selection really disables: a duplicate vanishes once one side is disabled in selection.yaml", async () => {
+    const files = { ...dyn("a", "Same line here."), ...dyn("b", "Same line here.") };
+    expect(kinds(await runFragmentsCheck(makeDeps(files)))).toContain("duplicate_line");
+    const r = await runFragmentsCheck(makeDeps(files, { projectSelectionText: selectionText(["b"]) }));
+    expect(r.findings).toEqual([]);
+  });
+
+  it("skill_collision: a skill fragment named like a shipped skill fails; another name is clean", async () => {
+    const files = skillSource("ai-native-coding", "Body.");
+    const deps = async (shipped: string[]) =>
+      makeDeps({ ...files, ...(await renderedSkills(files)) }, { shippedSkillNames: shipped });
+
+    const hit = await runFragmentsCheck(await deps(["lore-ai-native-coding", "lore-plan"]));
+    expect(hit.ok).toBe(false);
+    const finding = hit.findings.find((f) => f.kind === "skill_collision");
+    expect(finding?.message).toContain("lore-ai-native-coding");
+    expect(finding?.message).toContain("ai-native-coding");
+
+    const clean = await runFragmentsCheck(await deps(["lore-plan"]));
+    expect(clean.findings).toEqual([]);
+  });
+
+  it("skills_drift: missing, changed and extra project skill dirs fail; fresh dirs and foreign dirs are clean", async () => {
+    const files = skillSource("my-skill", "Body one.");
+    const rendered = await renderedSkills(files);
+    const fresh = await runFragmentsCheck(makeDeps({ ...files, ...rendered }));
+    expect(fresh.findings).toEqual([]); // control: the real renderer's output is clean
+
+    const missing = await runFragmentsCheck(makeDeps(files));
+    expect(missing.findings.find((f) => f.kind === "skills_drift")?.message).toContain("lore-my-skill");
+
+    const stalePath = `${SKILLS_DIR}/lore-my-skill/SKILL.md`;
+    const changed = await runFragmentsCheck(makeDeps({ ...files, ...rendered, [stalePath]: `${rendered[stalePath]}edited\n` }));
+    expect(changed.findings.find((f) => f.kind === "skills_drift")?.message).toContain("changed");
+
+    const ghost = await renderedSkills(skillSource("ghost", "Gone."));
+    const extra = await runFragmentsCheck(makeDeps({ ...files, ...rendered, ...ghost }));
+    expect(extra.findings.find((f) => f.kind === "skills_drift")?.message).toContain("lore-ghost");
+
+    const foreign = await runFragmentsCheck(
+      makeDeps({
+        ...files,
+        ...rendered,
+        [`${SKILLS_DIR}/lore-shipped-thing/SKILL.md`]: "---\nname: x\n---\nnot fingerprinted\n",
+        [`${SKILLS_DIR}/team-skill/SKILL.md`]: "mine",
+      }),
+    );
+    expect(foreign.findings).toEqual([]);
   });
 });
