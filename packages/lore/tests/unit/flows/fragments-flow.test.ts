@@ -48,6 +48,7 @@ function makeDeps(files: Record<string, string>, over: Partial<FragmentsFlowDeps
     agentsDir: "/a/agents",
     userSettings: { scope: "user", path: USER_SETTINGS },
     projectSettings: { scope: "project", path: PROJECT_SETTINGS },
+    shippedSkillNames: [],
     ...over,
   };
 }

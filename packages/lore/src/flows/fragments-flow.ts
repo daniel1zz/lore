@@ -106,9 +106,9 @@ export interface FragmentsFlowDeps {
   /**
    * Skill directory names shipped with lore (`lore-*` entries under the embedded manifest's `skills/`),
    * supplied by the adapter. A skill fragment whose `lore-<id>` equals one is a `skill_collision` (BR-1064).
-   * ABSENT means the collision check is NOT RUN - the adapter MUST supply it for `lore fragments check`.
+   * REQUIRED: a missing list would silently disable the collision check (lore forbids silent fallbacks).
    */
-  readonly shippedSkillNames?: readonly string[];
+  readonly shippedSkillNames: readonly string[];
 }
 
 // ─── discovery / selection helpers ──────────────────────────────────────────
@@ -579,8 +579,7 @@ function checkSelectionIds(
 }
 
 /** BR-1064: a skill fragment must not render onto a skill directory lore itself ships. */
-function checkSkillCollisions(shippedSkillNames: readonly string[] | undefined, all: readonly Fragment[]): CheckFinding[] {
-  if (shippedSkillNames === undefined) return [];
+function checkSkillCollisions(shippedSkillNames: readonly string[], all: readonly Fragment[]): CheckFinding[] {
   const shipped = new Set(shippedSkillNames);
   const findings: CheckFinding[] = [];
   for (const fragment of all) {
