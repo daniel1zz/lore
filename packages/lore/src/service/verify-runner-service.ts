@@ -185,7 +185,7 @@ import { existsSync, readdirSync, statSync, mkdtempSync, readFileSync, writeFile
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { err, ok } from "@lore/core";
+import { err, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
 import type {
   Result,
   LoreError,
@@ -1931,7 +1931,10 @@ export class VerifyRunnerService {
             command: criterion.verify.command,
             result: "inconclusive",
             recorded_by: opts.by,
-            capture_source: "runner",
+            // reason: spec-evidence-labels-and-reds-are-honest D1 (#48) — lore spawned
+            // this (so not "self-report") but the row carries no attestation (so not
+            // "runner"); the honest third label, refused by the writers if paired with one.
+            capture_source: RUNNER_UNATTESTED_CAPTURE_SOURCE,
             ac_ref: criterion.id,
             output_tail: greenCombinedOutputTail,
             // reason: NO `attestation` key at all (AC-FR-11) — this row proves

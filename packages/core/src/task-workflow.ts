@@ -160,10 +160,90 @@ export type EvidenceResult = (typeof EVIDENCE_RESULTS)[number];
  * measured to fail twice (hand-authored prose containing a runner-summary-
  * looking substring passed a shape check cleanly).
  */
-export const CAPTURE_SOURCES = ["runner", "self-report"] as const;
+export const CAPTURE_SOURCES = ["runner", "self-report", "runner-unattested"] as const;
 
 /** Derived TypeScript union for {@link EvidenceEntry.capture_source}. */
 export type CaptureSource = (typeof CAPTURE_SOURCES)[number];
+
+/**
+ * The label the trusted runner stamps on a row it wrote itself that proves
+ * NOTHING (green control failed / could not launch). Spawned by lore, therefore
+ * not `"self-report"`; carries no attestation, therefore not `"runner"`.
+ * Every consumer references this constant, never the bare literal
+ * (spec-evidence-labels-and-reds-are-honest D1, issue #48, BR-1073).
+ */
+export const RUNNER_UNATTESTED_CAPTURE_SOURCE = "runner-unattested" satisfies CaptureSource;
+
+/** Labels a PUBLIC write path (`lore evidence`, MCP `lore_evidence_add`) may carry — the runner-only label is excluded. */
+export type PublicCaptureSource = Exclude<CaptureSource, typeof RUNNER_UNATTESTED_CAPTURE_SOURCE>;
+
+/**
+ * The ONE reader-side bucketing of a row's `capture_source`, shared by every
+ * distribution/count surface (`lore status`, `lore assess`). An ABSENT value
+ * (a legacy row) reads as `"self-report"`, never as "unknown, therefore fine".
+ * `"runner-unattested"` is its own bucket — NOT attested, NOT self-reported.
+ * The `never` default makes a future `CAPTURE_SOURCES` member a compile error here.
+ */
+export function classifyCaptureSource(captureSource: CaptureSource | undefined): CaptureSource {
+  if (captureSource === undefined) return "self-report";
+  switch (captureSource) {
+    case "runner":
+    case "self-report":
+    case "runner-unattested":
+      return captureSource;
+    default: {
+      const unreachable: never = captureSource;
+      return unreachable;
+    }
+  }
+}
+
+/**
+ * The ONE place the evidence writers decide a row's stored `capture_source`
+ * (shared by `TaskWorkflowService` and `PhaseWorkflowService`, which may not
+ * import each other).
+ *
+ * - `"runner-unattested"` + an attestation is a contradiction (the label says
+ *   NOT attested) → `VALIDATION_ERROR`, nothing written.
+ * - any other label + an attestation → `"runner"` (an attested row is proven
+ *   runner-captured by construction).
+ * - no attestation → the caller's label, verbatim.
+ */
+export function resolveWrittenCaptureSource(entry: {
+  readonly capture_source: CaptureSource;
+  readonly attestation?: unknown;
+}): Result<CaptureSource, LoreError> {
+  if (entry.attestation === undefined) return ok(entry.capture_source);
+  if (entry.capture_source === RUNNER_UNATTESTED_CAPTURE_SOURCE) {
+    return err({
+      code: "VALIDATION_ERROR",
+      field: "capture_source",
+      message:
+        `capture_source "${RUNNER_UNATTESTED_CAPTURE_SOURCE}" says the row carries no attestation, ` +
+        'but one was supplied — a row is either attested ("runner") or unattested, never both.',
+      value: entry.capture_source,
+    });
+  }
+  return ok("runner");
+}
+
+/**
+ * Refuses a PUBLIC write path's attempt to self-label a row
+ * `"runner-unattested"` — that label is minted only by the trusted runner
+ * (`VerifyRunnerService`) via `recordVerifiedEvidence`. Checked against the raw
+ * value because the compile-time type can be bypassed with a cast.
+ */
+export function rejectSelfLabelledRunnerUnattested(captureSource: string): Result<void, LoreError> {
+  if (captureSource !== RUNNER_UNATTESTED_CAPTURE_SOURCE) return ok(undefined);
+  return err({
+    code: "VALIDATION_ERROR",
+    field: "capture_source",
+    message:
+      `capture_source "${RUNNER_UNATTESTED_CAPTURE_SOURCE}" is runner-issued; ` +
+      "not a valid value for a caller-supplied evidence row.",
+    value: captureSource,
+  });
+}
 
 // ─── Oracle Generations (spec-the-defect-channel-cannot-be-honestly- ────────
 // ─── maintained-an §M5, AC-DC-8) ────────────────────────────────────────────
