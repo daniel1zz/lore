@@ -317,7 +317,7 @@ export default defineCommand({
           const result = await requireAcService(app).addCriterion(
             args.spec as string,
             criterion,
-            buildDeclarePathOpts(args, dbPath),
+            { ...buildDeclarePathOpts(args, dbPath), onAdvisory: printAdvisory },
           );
 
           if (!result.ok) {
@@ -704,6 +704,7 @@ export default defineCommand({
 
           const setOpts: SetCriterionOpts = {
             ...buildDeclarePathOpts(args, dbPath),
+            onAdvisory: printAdvisory,
             ...(correctionOpt !== undefined ? { correction: correctionOpt } : {}),
           };
           const result = await requireAcService(app).setCriterion(
@@ -737,6 +738,10 @@ export default defineCommand({
     }),
   },
 });
+
+const printAdvisory = (advisory: string): void => {
+  process.stderr.write(advisory + "\n");
+};
 
 /**
  * `lore ac add|rm` accept NO correction (BR-1069, D4): a new or removed criterion is a new decision, not a
