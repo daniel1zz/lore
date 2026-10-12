@@ -813,6 +813,7 @@ function buildAppFromSqlite(
     judgmentRequiredTypes,
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
+  corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
   return {
     corpusService,
     ...phaseServices,
@@ -1200,6 +1201,7 @@ function buildAppFromTurso(
     judgmentRequiredTypes,
   );
   corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
+  corpusService.setDoneFloorPort({ checkDoneFloors: (id) => taskWorkflowService.checkDoneFloors(id) });
   return {
     corpusService,
     ...phaseServices,

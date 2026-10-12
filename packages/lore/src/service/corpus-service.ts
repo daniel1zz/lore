@@ -303,6 +303,19 @@ export interface ApprovalPort {
 }
 
 /**
+ * The `lore done` floors as data, for callers that must not archive a task past one (plan-close
+ * cascade, archive sweep; spec-approval-and-plan-closure-go-through-the-same-checks-on D5, BR-1072).
+ * Declared STRUCTURALLY so this service never imports `task-workflow-service.ts`; `app.ts` wires
+ * `TaskWorkflowService.checkDoneFloors` into it. `ok(null)` = every floor met; `ok({floor, error})` =
+ * the first failing floor with the exact error `done()` would return (`error.details.floor === floor`).
+ */
+export interface DoneFloorPort {
+  checkDoneFloors(
+    taskIdOrSlug: string,
+  ): Promise<Result<{ readonly floor: string; readonly error: LoreError } | null, LoreError>>;
+}
+
+/**
  * Names a structured `extra` field that a `lore set` / HTTP PATCH / MCP `lore_set`
  * patch would silently DROP, plus the dedicated writer that should be used instead.
  * `null` means no drop detected — the common case.
@@ -872,6 +885,20 @@ export class CorpusService {
 
   /** Present iff {@link setApprovalPort} was called. */
   private approvalPort: ApprovalPort | undefined;
+
+  /**
+   * Hands the corpus service the done-floor check a plan close / sweep must apply to each task
+   * (BR-1072). Called once per App construction site in `app.ts` (guarded by AC-AP-7). An unwired
+   * service (every bare `new CorpusService(store)`) has no port: tests only.
+   *
+   * @param port - anything exposing `TaskWorkflowService.checkDoneFloors`'s call shape
+   */
+  setDoneFloorPort(port: DoneFloorPort): void {
+    this.doneFloorPort = port;
+  }
+
+  /** Present iff {@link setDoneFloorPort} was called. */
+  private doneFloorPort: DoneFloorPort | undefined;
 
   /**
    * Sets the foreign-corpus-write guard's ambient facts for every write this
