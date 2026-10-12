@@ -239,7 +239,9 @@ describe("lore set --decision-status accepted — REGRESSION", () => {
   it("AC-DS-4: accepting an approved ADR leaves status approved (no draft demotion)", () => {
     const slug = createAdr(tmpDir, "Approved ADR No Demotion", "proposed");
 
-    const promoteResult = runLore(["set", slug, "--status", "approved"], tmpDir);
+    // BR-1071: `set --status approved` is an approval and an unjudged ADR is refused (exit 4); this case is
+    // about the decision-status write after approval, not about judging, so it approves with the audited override.
+    const promoteResult = runLore(["approve", slug, "--override-no-judgment"], tmpDir);
     expect(promoteResult.exitCode).toBe(0);
     expect(getDoc(tmpDir, slug).status).toBe("approved");
 

@@ -174,9 +174,23 @@ try {
       }
       results.push({ kind: "create_phase", id: createResult.value.id, slug: createResult.value.slug });
     } else if (op.kind === "record_judgment") {
+      // reason: BR-1071 — \`lore set --status approved\` is an approval, so a spec reaches approved only through
+      // a judgment of its CURRENT version. \`docSlug\` resolves the id + current version at seed time
+      // (the CLI-built fixtures above do not know either).
+      let judgedId = op.docId;
+      let judgedVersion = op.docVersion;
+      if (op.docSlug !== undefined) {
+        const got = await app.corpusService.get(op.docSlug);
+        if (!got.ok) {
+          console.error("RESOLVE_DOC_FAILED", JSON.stringify(got.error));
+          process.exit(1);
+        }
+        judgedId = got.value.doc.id;
+        judgedVersion = got.value.doc.version;
+      }
       const recordResult = await app.judgmentService.record({
-        doc_id: op.docId,
-        doc_version: op.docVersion,
+        doc_id: judgedId,
+        doc_version: judgedVersion,
         decision: "approve",
         confidence: 0.9,
         reasons: [{ dimension: "completeness", finding: "seeded for gate-evaluation-trace.test.ts" }],
@@ -294,6 +308,8 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
           "ac add",
         );
         citeSpecViaCli((args) => runLoreOk(args, tmpDir, args.join(" ")).stdout, tmpDir, prd, spec, "AC-GET3-1");
+        // BR-1071: set --status approved takes the approve path, so the judged type needs a judgment of its current version.
+        seedServiceOps(join(tmpDir, ".lore", "lore.db"), tmpDir, [{ kind: "record_judgment", docSlug: spec }]);
         runLoreOk(["set", spec, "--status", "approved"], tmpDir, "set --status approved (spec-promote)");
 
         const entries = queryAudit(spec, tmpDir);
@@ -324,6 +340,8 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
           "ac add",
         );
         citeSpecViaCli((args) => runLoreOk(args, tmpDir, args.join(" ")).stdout, tmpDir, prd, spec, "AC-GET4-1");
+        // BR-1071: the ancestor spec is approved through its judgment, exactly as `lore approve` would require.
+        seedServiceOps(join(tmpDir, ".lore", "lore.db"), tmpDir, [{ kind: "record_judgment", docSlug: spec }]);
         runLoreOk(["set", spec, "--status", "approved"], tmpDir, "approve ancestor spec");
 
         const plan = parseSlug(
@@ -523,6 +541,8 @@ describe("every-checkpoint-leaves-a-trace — a passing gate evaluation is query
           "ac add",
         );
         citeSpecViaCli((args) => runLoreOk(args, tmpDir, args.join(" ")).stdout, tmpDir, prd, spec, "AC-GETD-1");
+        // BR-1071: the judgment requirement is independent of the spec-promote switch under test.
+        seedServiceOps(join(tmpDir, ".lore", "lore.db"), tmpDir, [{ kind: "record_judgment", docSlug: spec }]);
         runLoreOk(["set", spec, "--status", "approved"], tmpDir, "set --status approved (spec-promote disabled)");
 
         const entries = queryAudit(spec, tmpDir);
