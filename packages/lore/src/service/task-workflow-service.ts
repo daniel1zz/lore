@@ -369,6 +369,7 @@ import { resolveDoc } from "./resolve.js";
 //   lives in `plan-membership.ts`'s SSOT note — do not reintroduce one
 //   (task-three-byte-identical-copies-of-isplanmember-survive).
 import { isPlanMember } from "./plan-membership.js";
+import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import {
   applyWorktreeRemoval,
   buildActiveClaimedPathSet,
@@ -662,6 +663,11 @@ export interface DoneResult {
    * error: a kept / not-measured worktree is reported here and `done` still succeeds.
    */
   worktree_outcomes?: WorktreeOutcome[];
+  /**
+   * The post-archive GitHub issue step's lines (spec-archiving-the-work-that-resolves-a-defect-report-
+   * closes D4) — present only after a real archive walk with the archive port wired; possibly empty.
+   */
+  issue_close?: IssueCloseItem[];
 }
 
 /**
@@ -2336,6 +2342,18 @@ export class TaskWorkflowService {
     this.resolveAdhocGoverningAcCriteria = resolveAdhocGoverningAcCriteria;
   }
 
+  /**
+   * Hands the workflow service the post-archive step that closes the GitHub issues of the defect reports
+   * the archived task resolves (spec-archiving-the-work-that-resolves-a-defect-report-closes D4). Wired by
+   * `app.ts` (a service never imports another service); the SAME instance `CorpusService` holds. An unwired
+   * service (every bare construction) runs no step: tests only.
+   */
+  setArchiveIssueClosePort(port: ArchiveIssueClosePort): void {
+    this.archiveIssueClosePort = port;
+  }
+
+  private archiveIssueClosePort: ArchiveIssueClosePort | undefined;
+
   // ── addEvidence ───────────────────────────────────────────────────────────
 
   /**
@@ -3687,11 +3705,17 @@ export class TaskWorkflowService {
 
     const worktreeOutcomes = await this.cleanupRecordedWorktrees(task, opts.by, now(), opts.callerSession ?? null);
 
+    // spec-archiving-the-work-that-resolves-a-defect-report-closes D1/D4 — post-commit, never fatal: the
+    // walk above is already committed, the step returns lines rather than an error.
+    const issueClose =
+      this.archiveIssueClosePort === undefined ? undefined : await this.archiveIssueClosePort.onArchived(task, opts.by);
+
     return ok({
       task,
       already_done: false,
       transitions,
       worktree_outcomes: worktreeOutcomes,
+      ...(issueClose !== undefined ? { issue_close: issueClose } : {}),
       ...(planFact?.kind === "fully_terminal"
         ? { plan_now_fully_terminal: { plan_slug: planFact.plan_slug } }
         : {}),

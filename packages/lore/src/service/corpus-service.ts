@@ -111,6 +111,7 @@ import { collectKnownRuleIds } from "./baseline-rule-ids.js";
 import { buildRuleIndex, collectLiveScriptCitedRuleIds } from "./ac-citations.js";
 import { pickBaselineRoot, pickStrategyDocument } from "./navigation-roots.js";
 import { hasIssueReport, type ResolvesInEdgeLike, type ResolutionSourceDocLike } from "./issue-resolution.js";
+import type { ArchiveIssueClosePort, IssueCloseItem } from "./issue-close-on-archive.js";
 import { isPlanMember } from "./plan-membership.js";
 import { bodyDiffers, type RecordLockService } from "./record-lock-service.js";
 import { ANCHOR_SCANNED_DOC_TYPES } from "./drift-check-service.js";
@@ -773,7 +774,19 @@ export interface PlanCloseCascadeResult {
    */
   readonly skipped: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string; floor?: string }>;
   readonly failed: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string }>;
+  /**
+   * Lines from the post-archive issue-close step for the cascaded tasks (spec-archiving-the-work-that-
+   * resolves-a-defect-report-closes D4). Absent when no archive port is wired.
+   */
+  readonly issueClose?: ReadonlyArray<IssueCloseItem>;
 }
+
+/**
+ * What {@link CorpusService.set} returns: the updated doc, plus `cascade` for an actual plan close and
+ * `issueClose` — the post-archive GitHub issue step's lines — for ANY transition to `archived` when the
+ * archive port is wired (possibly empty). Absent otherwise.
+ */
+export type CorpusSetResult = DocRecord & { cascade?: PlanCloseCascadeResult; issueClose?: IssueCloseItem[] };
 
 // ─── CorpusService ─────────────────────────────────────────────────────────
 
@@ -921,6 +934,27 @@ export class CorpusService {
 
   /** Present iff {@link setDoneFloorPort} was called. */
   private doneFloorPort: DoneFloorPort | undefined;
+
+  /**
+   * Hands the corpus service the post-archive step that closes the GitHub issues of the defect reports
+   * an archived document resolves (spec-archiving-the-work-that-resolves-a-defect-report-closes D4).
+   * Called once per App construction site in `app.ts`. An unwired service (every bare
+   * `new CorpusService(store)`) runs no step: tests only.
+   *
+   * @param port - the shared step instance (the same one `TaskWorkflowService` holds)
+   */
+  setArchiveIssueClosePort(port: ArchiveIssueClosePort): void {
+    this.archiveIssueClosePort = port;
+  }
+
+  /** Present iff {@link setArchiveIssueClosePort} was called. */
+  private archiveIssueClosePort: ArchiveIssueClosePort | undefined;
+
+  /** Runs the post-archive step for one just-archived doc; `[]` when no port is wired. */
+  private async runArchiveIssueClose(doc: DocRecord, actor: string): Promise<IssueCloseItem[]> {
+    if (this.archiveIssueClosePort === undefined) return [];
+    return this.archiveIssueClosePort.onArchived(doc, actor);
+  }
 
   /**
    * Sets the foreign-corpus-write guard's ambient facts for every write this
@@ -2186,10 +2220,10 @@ export class CorpusService {
     idOrSlug: string,
     patch: DocPatch,
     opts?: SetOptions,
-  ): Promise<Result<DocRecord & { cascade?: PlanCloseCascadeResult }, LoreError>> {
+  ): Promise<Result<CorpusSetResult, LoreError>> {
     // reason: spec-corpus-resolution-carries-provenance-and-a-foreign-write §D5.
     {
-      const refusal = this.refuseIfForeignCorpusWrite<DocRecord & { cascade?: PlanCloseCascadeResult }>();
+      const refusal = this.refuseIfForeignCorpusWrite<CorpusSetResult>();
       if (refusal !== undefined) return refusal;
     }
 
@@ -3203,12 +3237,23 @@ export class CorpusService {
     // returned doc as an ADDITIONAL property (see `PlanCloseCascadeResult`'s own
     // JSDoc), never a `set()` signature change, so every pre-existing caller that
     // only reads `DocRecord` fields stays byte-identical.
+    // spec-archiving-the-work-that-resolves-a-defect-report-closes D1/D4 — post-commit, never fatal: the
+    // step returns lines, not an error, because the archive above is already committed.
+    const isArchiving = newStatus === "archived" && existing.status !== "archived";
+    const ownIssueClose = isArchiving ? await this.runArchiveIssueClose(updateResult.value, resolvedActor) : [];
+    const withIssueClose = (lines: IssueCloseItem[]): { issueClose?: IssueCloseItem[] } =>
+      this.archiveIssueClosePort !== undefined && isArchiving ? { issueClose: lines } : {};
+
     if (isPlanClosing) {
       const cascade = await this.cascadeArchiveOnPlanClose(updateResult.value, now, resolvedActor);
-      return ok({ ...updateResult.value, cascade });
+      return ok({
+        ...updateResult.value,
+        cascade,
+        ...withIssueClose([...ownIssueClose, ...(cascade.issueClose ?? [])]),
+      });
     }
 
-    return ok(updateResult.value);
+    return ok({ ...updateResult.value, ...withIssueClose(ownIssueClose) });
   }
 
   /**
@@ -3280,6 +3325,7 @@ export class CorpusService {
     const plan_ = computePlanCloseCascadeTargets(children, nowIso, this.claimTtlMinutes ?? 120);
 
     const archived: Array<{ doc_id: DocId; slug: string; kind: "task" | "handoff" }> = [];
+    const issueClose: IssueCloseItem[] = [];
     const failed: Array<{ doc_id: DocId; slug: string; reason: string }> = [];
     const skipped: Array<{ doc_id: DocId; slug: string; reason: string; floor?: string }> = [
       ...plan_.skipped,
@@ -3373,9 +3419,17 @@ export class CorpusService {
         continue;
       }
       archived.push({ doc_id: doc.id, slug: doc.slug, kind: target.kind });
+      // reason: a cascaded TASK may itself resolve a defect report (D4: every archive path reaches the
+      // step). The doc is the post-write state `updateWithProvenance` returned.
+      if (target.kind === "task") issueClose.push(...(await this.runArchiveIssueClose(writeResult.value, actor)));
     }
 
-    return { archived, skipped, failed };
+    return {
+      archived,
+      skipped,
+      failed,
+      ...(this.archiveIssueClosePort !== undefined ? { issueClose } : {}),
+    };
   }
 
   /**
@@ -3401,7 +3455,7 @@ export class CorpusService {
     rule: ArchiveCandidateRule,
     reason: string,
     opts?: WriteActorOpts,
-  ): Promise<Result<DocRecord, LoreError>> {
+  ): Promise<Result<DocRecord & { issueClose?: IssueCloseItem[] }, LoreError>> {
     // reason: spec-approval-and-plan-closure-go-through-the-same-checks-on D8 / AC-AP-10 (BR-1072) —
     // a straggler task is archived only if `lore done`'s floors would let it through; a refusal comes
     // back as the exact `done()` error (`error.details.floor` names the floor), nothing is written.
@@ -3447,7 +3501,10 @@ export class CorpusService {
         details: { rule, reason, version: newVersion },
       },
     );
-    return writeResult;
+    if (!writeResult.ok) return writeResult;
+    // spec-archiving-the-work-that-resolves-a-defect-report-closes D4 — the sweep is an archive path too.
+    if (this.archiveIssueClosePort === undefined) return writeResult;
+    return ok({ ...writeResult.value, issueClose: await this.runArchiveIssueClose(writeResult.value, resolvedActor) });
   }
 
   /**

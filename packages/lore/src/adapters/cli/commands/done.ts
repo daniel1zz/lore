@@ -153,6 +153,7 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
 import { resolveCallerSession } from "../caller-session.js";
 import { formatDoneMessage, formatLastTaskAdvisory } from "../done-render.js";
+import { emitIssueCloseItems } from "../issue-close-output.js";
 
 /**
  * Resolves `--override-attestation-cite <n>`'s citation into a self-contained
@@ -453,16 +454,19 @@ export default defineCommand({
                 already_done: result.value.already_done,
                 transitions: result.value.transitions,
                 ...(result.value.worktree_outcomes !== undefined ? { worktree_outcomes: result.value.worktree_outcomes } : {}),
+                ...(result.value.issue_close !== undefined ? { issue_close: result.value.issue_close } : {}),
               },
             },
             null,
             2,
           ),
         );
+        emitIssueCloseItems(result.value.issue_close, { json: true });
         return;
       }
 
       console.log(formatDoneMessage(result.value));
+      emitIssueCloseItems(result.value.issue_close, { json: false });
     } finally {
       app.close();
     }

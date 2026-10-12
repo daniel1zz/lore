@@ -110,6 +110,8 @@ import { openEditor } from "../editor.js";
 import { formatAttestationExemptionNotice } from "../plan-exempt-validation.js";
 import { PLAN_CLOSE_VACUITY_NOTICE_FIELD } from "../../../service/checkpoint-registry.js";
 import type { PlanCloseCascadeResult } from "../../../service/corpus-service.js";
+import type { IssueCloseItem } from "../../../service/issue-close-on-archive.js";
+import { emitIssueCloseItems } from "../issue-close-output.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
 import { SPEC_KINDS } from "@lore/core";
 import {
@@ -683,10 +685,15 @@ export default defineCommand({
       }
 
       const doc = result.value;
+      // spec-archiving-the-work-that-resolves-a-defect-report-closes D3/D4 — the post-archive GitHub step's
+      // lines. Failures/warnings go to stderr in BOTH modes; success lines print after the update line.
+      const issueCloseItems = (doc as { issueClose?: IssueCloseItem[] }).issueClose;
       if (args.json) {
         console.log(JSON.stringify({ ok: true, data: doc }, null, 2));
+        emitIssueCloseItems(issueCloseItems, { json: true });
       } else {
         console.log(`Updated ${doc.slug} → v${doc.version}`);
+        emitIssueCloseItems(issueCloseItems, { json: false });
         if (priorStatusForDemotionAdvisory === "approved" && doc.status === "draft") {
           console.log(APPROVED_DEMOTION_ADVISORY);
         }

@@ -4,10 +4,12 @@
  * With --check-tree --fix: auto-fix orphan/misplaced drift.
  * With --check-drift: verify spec-declared code_anchors against the working tree
  *   (SPEC-045 §Design Decisions D5) — deterministic, zero LLM calls.
- * With --check-issues: flag unclosed issue escalations (computed `fixed` while the
- *   issue task itself is not `archived`) and stale open reports (computed `open` and
- *   older than `feedback.stale_after_days`) — deterministic, report-only, mutates
- *   nothing (spec-issue-closure-loop-computed-resolution-agent-reachable §D5).
+ * With --check-issues: flag stale open reports (computed `open` and older than
+ *   `feedback.stale_after_days`) — deterministic, report-only, mutates nothing
+ *   (spec-issue-closure-loop-computed-resolution-agent-reachable §D5). A report whose
+ *   computed resolution is `fixed` is NOT flagged: archiving the fix closes its GitHub
+ *   issue, so the computed resolution plus the closed issue are the record
+ *   (spec-archiving-the-work-that-resolves-a-defect-report-closes D6).
  * With --check-claude-md: lint project memory files (CLAUDE.md by default)
  *   against corpus-governed line/byte ceilings (spec-project-claude-md-
  *   content-contract-governance-injected §D9) — see that branch's own inline
@@ -207,9 +209,8 @@ import {
   computeIssueResolution,
   hasIssueReport,
   isDanglingAdoption,
-  type ResolutionSourceDocLike,
-  type ResolvesInEdgeLike,
 } from "../../../service/issue-resolution.js";
+import { computeIssueCheck, type IssueCheckPayload } from "../status-issue-check.js";
 // reason: loadConfig reads `.lore/config.yaml` via plain Node fs — only
 // reachable via the `@lore/core/node` subpath (browser-safety split,
 // packages/core/src/CLAUDE.md). NOT a bun:sqlite dependency, so it's safe to
@@ -371,142 +372,7 @@ function renderDriftSection(payload: CodeDriftPayload): void {
   }
 }
 
-// ── `--check-issues` detector (D5, spec-issue-closure-loop-computed-resolution-agent-reachable) ──
-
-/** One issue task flagged as an "unclosed escalation" (D5a shape (a)). */
-interface UnclosedEscalation {
-  id: string;
-  slug: string;
-  title: string;
-}
-
-/** One issue task flagged as a "stale open report" (D5a shape (b)). */
-interface StaleOpenReport {
-  id: string;
-  slug: string;
-  title: string;
-  reported_at: string;
-  age_days: number;
-}
-
-/** `--check-issues` result payload — mirrors the other check sections' `{checked, consistent, ...}` shape. */
-interface IssueCheckPayload {
-  checked: number;
-  consistent: boolean;
-  unclosed_escalations: UnclosedEscalation[];
-  stale_open: StaleOpenReport[];
-}
-
-/**
- * Defensive `extra.issue_report.reported_at` reader — mirrors the same
- * null/array/typeof guard shape every defensive `extra.issue_report` reader
- * in this codebase uses (duplicated rather than imported: every such reader
- * is scoped to a different field for a different caller, and
- * `extra.issue_report` is deliberately untyped passthrough — see
- * `packages/core/src/issue-report.ts`'s own header). A malformed/legacy
- * `extra`, or an `issue_report` missing/mistyped `reported_at`, degrades to
- * `undefined` rather than throwing.
- */
-function readReportedAt(extra: unknown): string | undefined {
-  if (extra === null || typeof extra !== "object" || Array.isArray(extra)) return undefined;
-  const issueReport = (extra as Record<string, unknown>)["issue_report"];
-  if (issueReport === null || typeof issueReport !== "object" || Array.isArray(issueReport)) return undefined;
-  const reportedAt = (issueReport as Record<string, unknown>)["reported_at"];
-  return typeof reportedAt === "string" ? reportedAt : undefined;
-}
-
-/**
- * D5 — `lore status --check-issues` detector. REPORT-ONLY: every call below
- * is a read (`corpusService.listFull`/`corpusService.get`) — never a write
- * (AC-ICL-6's byte-comparison oracle proves this at the test layer).
- *
- * Flags two shapes:
- *   (a) unclosed escalation — {@link computeIssueResolution} (P1,
- *       `issue-resolution.ts`, CONSUMED not reimplemented) returns `fixed`
- *       (>=1 `resolves` in-edge whose source doc reached active/archived)
- *       while the issue task's OWN status is not yet `archived` — the "code
- *       shipped, task never closed" shape this whole spec exists to make
- *       loud.
- *   (b) stale open report — computed resolution is `open` (no `resolves`
- *       edge at all) and `extra.issue_report.reported_at` is `staleAfterDays`
- *       days old OR OLDER (INCLUSIVE boundary — mirrors `staleness.ts`'s
- *       documented `age_days === min_age_days` INCLUDED precedent, SPEC-044
- *       D1, so this codebase's two day-threshold detectors agree on what
- *       "older than N days" means at the exact boundary).
- *
- * `resolvesInEdges`/`sourceDocs` are read via `corpusService.get(issueId)`'s
- * `navigation.related` (the only doc-level "which docs link to me, by what
- * type" surface a CLI command may call — adapters/cli carries no business
- * logic, `packages/lore/src/service/CLAUDE.md`) filtered to `link_type ===
- * "resolves"`. This relies on `CorpusService.link`'s write-time D1b
- * validation (`corpus-service.ts`, "a resolves edge's to MUST be a task
- * carrying extra.issue_report"): every `resolves`-typed entry on an issue
- * task's OWN `related` list is therefore structurally an IN-edge (the issue
- * task is always the `to` side in a well-formed corpus) — an issue task
- * ALSO independently being the `from` side of a different resolves edge
- * (double-duty fixing-artifact-that-is-itself-a-report) is a pathological
- * state outside this detector's scope.
- *
- * @param app - Wired application instance (read-only calls only)
- * @param staleAfterDays - Resolved `feedback.stale_after_days` (D5b)
- * @returns `ok(payload)`; `err` only on an underlying store read failure
- */
-async function computeIssueCheck(
-  app: ReturnType<typeof loadLoreApp>["app"],
-  staleAfterDays: number,
-): Promise<Result<IssueCheckPayload, LoreError>> {
-  const tasksResult = await app.corpusService.listFull({ type: "task" });
-  if (!tasksResult.ok) return tasksResult;
-
-  const issueTasks = tasksResult.value.docs.filter((doc) => hasIssueReport(doc.extra));
-
-  const unclosedEscalations: UnclosedEscalation[] = [];
-  const staleOpen: StaleOpenReport[] = [];
-  const nowMs = Date.now();
-
-  for (const issueTask of issueTasks) {
-    const getResult = await app.corpusService.get(issueTask.id);
-    if (!getResult.ok) return getResult;
-
-    const resolvesRelated = getResult.value.navigation.related.filter(
-      (related) => related.link_type === "resolves",
-    );
-    const resolvesInEdges: ResolvesInEdgeLike[] = resolvesRelated.map((related) => ({ from_id: related.id }));
-    const sourceDocs: ResolutionSourceDocLike[] = resolvesRelated.map((related) => ({
-      id: related.id,
-      status: related.status,
-    }));
-
-    const resolution = computeIssueResolution({ extra: issueTask.extra }, resolvesInEdges, sourceDocs);
-
-    if (resolution === "fixed" && issueTask.status !== "archived") {
-      unclosedEscalations.push({ id: issueTask.id, slug: issueTask.slug, title: issueTask.title });
-    }
-
-    if (resolution === "open") {
-      const reportedAt = readReportedAt(issueTask.extra);
-      if (reportedAt !== undefined) {
-        const ageDays = Math.floor((nowMs - new Date(reportedAt).getTime()) / 86_400_000);
-        if (Number.isFinite(ageDays) && ageDays >= staleAfterDays) {
-          staleOpen.push({
-            id: issueTask.id,
-            slug: issueTask.slug,
-            title: issueTask.title,
-            reported_at: reportedAt,
-            age_days: ageDays,
-          });
-        }
-      }
-    }
-  }
-
-  return ok({
-    checked: issueTasks.length,
-    consistent: unclosedEscalations.length === 0 && staleOpen.length === 0,
-    unclosed_escalations: unclosedEscalations,
-    stale_open: staleOpen,
-  });
-}
+// ── `--check-issues` detector — `computeIssueCheck` lives in `../status-issue-check.ts` (vitest-safe sibling) ──
 
 /**
  * Text rendering for the `--check-issues` section (D5) — used regardless of
@@ -518,14 +384,8 @@ function renderIssuesSection(payload: IssueCheckPayload): void {
     console.log(`Issue closure: consistent (${payload.checked} issue report(s) checked).`);
     return;
   }
-  const total = payload.unclosed_escalations.length + payload.stale_open.length;
+  const total = payload.stale_open.length;
   console.log(`Issue closure: ${total} issue(s) flagged (${payload.checked} checked):`);
-  for (const row of payload.unclosed_escalations) {
-    console.log(
-      `  - ${row.slug} [unclosed escalation]: computed resolution is fixed but the issue task is not archived ` +
-        `(fix: \`lore done ${row.slug}\` or \`lore set ${row.slug} --status archived\` once verified)`,
-    );
-  }
   for (const row of payload.stale_open) {
     console.log(
       `  - ${row.slug} [stale open]: reported ${row.reported_at}, ${row.age_days}d old, still open ` +
@@ -1094,7 +954,7 @@ export default defineCommand({
     "check-issues": {
       type: "boolean",
       description:
-        "Flag unclosed issue escalations (computed fixed, task not archived) and stale open reports (older than feedback.stale_after_days). Report-only, mutates nothing. Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget.",
+        "Flag stale open reports (older than feedback.stale_after_days). Report-only, mutates nothing. Breach → exit 3. Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget.",
     },
     "check-claude-md": {
       type: "boolean",
@@ -1565,7 +1425,7 @@ export default defineCommand({
         let issuesInconsistent = false;
         if (checkIssuesRequested) {
           const staleAfterDays = resolveStaleAfterDays(config);
-          const issuesResult = await computeIssueCheck(app, staleAfterDays);
+          const issuesResult = await computeIssueCheck(app.corpusService, staleAfterDays);
           if (!issuesResult.ok) {
             process.stderr.write(formatError(issuesResult.error) + "\n");
             process.exitCode = exitCode(issuesResult.error);
