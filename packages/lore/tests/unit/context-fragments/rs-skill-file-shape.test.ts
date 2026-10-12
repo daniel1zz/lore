@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SESSION_FRAGMENT_CAP, type Fragment } from "@lore/core";
 import { renderOutlet } from "../../../src/service/context-fragments/render.js";
-import { isLoreSkillDir, parseSkillFile, renderSkillFile } from "../../../src/service/context-fragments/section.js";
+import { isLoreSkillDir, isLoreSkillFileBytes, parseSkillFile, renderSkillFile } from "../../../src/service/context-fragments/section.js";
 
 function skillFragment(id: string, body: string, description = "Use when editing rules: handles \"quotes\", colons: and more."): Fragment {
   return {
@@ -104,6 +104,22 @@ describe("AC-RS-5 skill file shape", () => {
     expect(isLoreSkillDir(join(root, "lore-absent"))).toBe(false);
     const file = rendered(skillFragment("real", "b"));
     expect(isLoreSkillDir(writeSkill("lore-other", file.content))).toBe(false);
+  });
+
+  it("AC-RS-5: isLoreSkillDir (disk) and isLoreSkillFileBytes (port bytes) agree on every fixture", () => {
+    const file = rendered(skillFragment("agree", "body text"));
+    const fixtures: Array<{ label: string; dirName: string; bytes: string; expected: boolean }> = [
+      { label: "intact", dirName: file.dirName, bytes: file.content, expected: true },
+      { label: "tampered hash", dirName: file.dirName, bytes: file.content.replace(/hash=[0-9a-f]{8}/, "hash=00000000"), expected: false },
+      { label: "edited body", dirName: file.dirName, bytes: file.content.replace("body text", "body edited"), expected: false },
+      { label: "renamed dir", dirName: "lore-renamed", bytes: file.content, expected: false },
+      { label: "fingerprint-less", dirName: "lore-plain2", bytes: "---\nname: lore-plain2\ndescription: d\n---\nbody\n", expected: false },
+    ];
+    for (const fixture of fixtures) {
+      const onDisk = isLoreSkillDir(writeSkill(fixture.dirName, fixture.bytes));
+      expect(isLoreSkillFileBytes(fixture.dirName, fixture.bytes), `bytes: ${fixture.label}`).toBe(fixture.expected);
+      expect(onDisk, `disk: ${fixture.label}`).toBe(isLoreSkillFileBytes(fixture.dirName, fixture.bytes));
+    }
   });
 
   it("AC-RS-5: parseSkillFile returns null for non-skill content", () => {
