@@ -8,8 +8,8 @@
  *   - text = bodies in the given order joined by "\n\n"; no prefix/suffix, no trim.
  *   - chars = text.length (the separator counts toward the cap).
  *   - hook outlets refuse text.length > cap (strictly greater: exactly-cap passes);
- *     rules:* outlets have no render cap (each rules file is
- *     budget-checked per file by the flow instead, D15).
+ *     rules:* and skills:* outlets have no render cap (each rules file is
+ *     budget-checked per file by the flow instead, D15; skill files are uncapped, BR-1064).
  * Side-effect class: pure.
  */
 import {
@@ -47,10 +47,9 @@ function getOutletCap(outlet: OutletId): number | null {
       return SUBAGENT_FRAGMENT_CAP;
     case "rules:project":
     case "rules:user":
-      return null;
     case "skills:project":
     case "skills:user":
-      throw new Error(`outlet ${outlet} is not yet routed`); // T2/T3 route this
+      return null;
     default: {
       const unreachable: never = outlet;
       throw new Error(`unhandled outlet: ${String(unreachable)}`);
