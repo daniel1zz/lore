@@ -24,16 +24,27 @@
  *   - The corpus is read-only here except for `issue_close_failed` audit rows; the issue task's own
  *     status is never changed (spec Out of scope).
  *
+ * Completion of a report's OWN task (spec-completing-an-adopted-report-s-own-task-closes-its-github D1-D3):
+ *   - `onTaskCompleted(task, actor)` — called ONLY by `TaskWorkflowService.done`; closes the GitHub issue
+ *     the completed task itself IS (comment `Fixed by task <slug> (completed <date>)`). Any other archive
+ *     path never calls it, so a sweep / plain status change stays label-only (D2).
+ *   - HOW a task is known to have been completed (D3, `planSync`): the done walk's own audit row —
+ *     `action: "update"`, `details.done === true`, `details.status_to === "archived"` — which
+ *     `TaskWorkflowService.writeTaskStatus` writes for every `lore done` step and no other path writes.
+ *     `lore done` itself requires a runner-attested pass, so the row is the store-recorded proof.
+ *
  * Side-effect class: IO (store reads, audit append, GitHub via the injected `IssueCloser`).
  *
- * Source: spec-archiving-the-work-that-resolves-a-defect-report-closes, AC-IC-1, AC-IC-4.
+ * Source: spec-archiving-the-work-that-resolves-a-defect-report-closes, AC-IC-1, AC-IC-4;
+ * spec-completing-an-adopted-report-s-own-task-closes-its-github, AC-IT-1.
  */
 
 import { TERMINAL_ISSUE_RESOLUTIONS, computeIssueResolution, hasIssueReport } from "./issue-resolution.js";
 import type { IssueCloser } from "./issue-closer-port.js";
 import { readGithubIssueRef, resolutionToLabel } from "./resolution-projector.js";
 import type { GithubIssueRef } from "./resolution-projector.js";
-import type { DocRecord, IssueResolution, LoreError } from "@lore/core";
+import { ok } from "@lore/core";
+import type { DocRecord, IssueResolution, LoreError, Result } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
 
 /** Audit action written once per failed GitHub call (close, comment or label). */
@@ -67,6 +78,15 @@ export interface ArchiveIssueClosePort {
    * @returns the lines to show; empty when the document resolves no report and says nothing about one
    */
   onArchived(doc: DocRecord, actor: string): Promise<IssueCloseItem[]>;
+
+  /**
+   * Called by `lore done` ONLY, after the walk committed: when `task` itself is a filed report with a
+   * GitHub ref, closes that issue (D1). Same contract as {@link onArchived}: never throws, returns lines.
+   *
+   * @param task - the task as archived by the done walk
+   * @param actor - the resolved actor of the done write
+   */
+  onTaskCompleted(task: DocRecord, actor: string): Promise<IssueCloseItem[]>;
 }
 
 /** One `lore issues --sync` drift row (spec Public Interface). */
@@ -76,6 +96,8 @@ export interface IssueDriftEntry {
   readonly computed: IssueResolution;
   readonly github_state: "open" | "closed";
   readonly missing_label: boolean;
+  /** Present (true) only when the report's own task was archived through `lore done` (D3) — it is closed, not just labelled. */
+  readonly completed_via_done?: true;
 }
 
 /** One `--sync --apply` outcome. `closed` = THIS apply closed it; `labelled` = the label is now present. */
@@ -209,6 +231,43 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
     return items;
   }
 
+  async onTaskCompleted(task: DocRecord, actor: string): Promise<IssueCloseItem[]> {
+    if (!hasIssueReport(task.extra)) return [];
+    const facts = await this.readReportFacts(task.id);
+    if (!facts.ok) {
+      return [
+        {
+          kind: "read_failed",
+          message: `issue close step could not read ${task.slug}: ${describeError(facts.error)} — run lore issues --sync`,
+          stream: "stderr",
+        },
+      ];
+    }
+    if (facts.facts === null) return [];
+    const { computed } = facts.facts;
+    // reason: an explicit terminal verdict (wontfix, duplicate, ...) outranks completion — completing the
+    // task must not close an issue the maintainers ruled "not a defect". Only closed / fixed close.
+    if (computed !== "closed" && computed !== "fixed") return [];
+
+    const ref = readGithubIssueRef(task.extra);
+    if (ref === undefined) {
+      return [
+        {
+          kind: "no_github_ref",
+          message: `issue ${task.slug}: local-only report (no GitHub issue), nothing to close`,
+          stream: "stdout",
+        },
+      ];
+    }
+    if (this.closer === undefined) {
+      return [{ kind: "not_configured", message: NOT_CONFIGURED_MESSAGE, stream: "stdout" }];
+    }
+    return this.closeOne(this.closer, this.effectiveRef(ref), task, actor, {
+      comment: `Fixed by task ${task.slug} (completed ${this.now().slice(0, 10)})`,
+      label: resolutionToLabel(computed),
+    });
+  }
+
   /**
    * Finds every drifted report (D3 a/b) without writing anything.
    *
@@ -229,7 +288,13 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
       if (!facts.ok) return { kind: "store_error", error: facts.error };
       if (facts.facts === null) continue;
       const { computed, hasArchivedSource } = facts.facts;
-      const wantsClose = computed === "fixed" && hasArchivedSource;
+      let completedViaDone = false;
+      if (computed === "closed") {
+        const completion = await this.wasCompletedThroughDone(task);
+        if (!completion.ok) return { kind: "store_error", error: completion.error };
+        completedViaDone = completion.value;
+      }
+      const wantsClose = (computed === "fixed" && hasArchivedSource) || completedViaDone;
       const wantsLabelOnly = computed !== "fixed" && TERMINAL_ISSUE_RESOLUTIONS.has(computed);
       if (!wantsClose && !wantsLabelOnly) continue;
 
@@ -248,6 +313,7 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
         computed,
         github_state: snapshot.value.state,
         missing_label: missingLabel,
+        ...(completedViaDone ? { completed_via_done: true as const } : {}),
       });
     }
     return { kind: "planned", plan: { drift, unreadable } };
@@ -277,7 +343,7 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
       const ref = this.effectiveRef(rawRef);
       let closed = false;
       let error: string | undefined;
-      if (entry.computed === "fixed" && entry.github_state === "open") {
+      if ((entry.computed === "fixed" || entry.completed_via_done === true) && entry.github_state === "open") {
         const closeResult = await closer.closeIssue(ref);
         if (closeResult.ok) {
           closed = !closeResult.value.alreadyClosed;
@@ -302,6 +368,14 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
   }
 
   // ── internals ─────────────────────────────────────────────────────────────
+
+  /** D3 — true iff the done walk's own audit row shows `lore done` archived this task. */
+  private async wasCompletedThroughDone(task: DocRecord): Promise<Result<boolean, LoreError>> {
+    if (task.status !== "archived") return ok(false);
+    const rows = await this.store.queryAudit({ doc_id: task.id, action: "update" });
+    if (!rows.ok) return rows;
+    return ok(rows.value.some((row) => row.details?.["done"] === true && row.details?.["status_to"] === "archived"));
+  }
 
   /** The configured repo wins over the stored one (rename-proof); the stored ref supplies the number. */
   private effectiveRef(ref: GithubIssueRef): GithubIssueRef {
@@ -354,9 +428,11 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
     ref: GithubIssueRef,
     doc: DocRecord,
     actor: string,
+    wording?: { readonly comment: string; readonly label: string },
   ): Promise<IssueCloseItem[]> {
     const items: IssueCloseItem[] = [];
     const number = ref.issueNumber;
+    const label = wording?.label ?? resolutionToLabel("fixed");
     const closeResult = await closer.closeIssue(ref);
     if (!closeResult.ok) {
       const reason = describeError(closeResult.error);
@@ -384,7 +460,7 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
         message: `issue #${number}: closed on GitHub (fixed by ${doc.slug})`,
         stream: "stdout",
       });
-      const comment = `Fixed by ${doc.type} ${doc.slug} (archived ${this.now().slice(0, 10)})`;
+      const comment = wording?.comment ?? `Fixed by ${doc.type} ${doc.slug} (archived ${this.now().slice(0, 10)})`;
       const commentResult = await closer.commentIssue(ref, comment);
       if (!commentResult.ok) {
         const reason = describeError(commentResult.error);
@@ -398,14 +474,14 @@ export class IssueCloseOnArchive implements ArchiveIssueClosePort {
       }
     }
 
-    const labelResult = await closer.labelIssue(ref, resolutionToLabel("fixed"));
+    const labelResult = await closer.labelIssue(ref, label);
     if (!labelResult.ok) {
       const reason = describeError(labelResult.error);
       const audited = await this.auditFailureForDoc(doc, actor, "label", number, reason);
       items.push({
         kind: "label_failed",
         number,
-        message: `issue #${number}: closed, but the ${resolutionToLabel("fixed")} label FAILED: ${reason} — run lore issues --sync${audited}`,
+        message: `issue #${number}: closed, but the ${label} label FAILED: ${reason} — run lore issues --sync${audited}`,
         stream: "stderr",
       });
     }
