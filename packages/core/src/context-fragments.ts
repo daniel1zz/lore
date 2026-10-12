@@ -46,7 +46,15 @@ export const SKILL_DESCRIPTION_MAX = 1536;
 
 export const FragmentFrontmatterSchema = z
   .object({
-    id: z.string().min(1),
+    // reason: `lore context refresh` prefixes `lore-` onto every rules file name (.claude/rules/lore-<id>.md)
+    // and skill directory (skills/lore-<id>/), so an id already starting `lore-` yields `lore-lore-…`.
+    id: z
+      .string()
+      .min(1)
+      .refine((id) => !id.startsWith("lore-"), {
+        message:
+          "fragment id must not start with 'lore-': refresh prefixes 'lore-' onto rules files and skill dirs, so it would render as 'lore-lore-…'",
+      }),
     title: z.string().min(1),
     audience: z.array(z.string().regex(AUDIENCE_PATTERN, "audience must be 'main' or 'subagent:<*|agent_type>'")).min(1),
     mode: z.enum(FRAGMENT_MODES),
