@@ -3,7 +3,8 @@
  * `extra.acceptance_criteria` passes through (baseline slice 2a §C3, closes issue #36 for ACs).
  *
  * Public surface: {@link applyAcChange}, {@link admitAcWrite}, {@link decorateCiteRefusal},
- * {@link resolveCiteGateFor}, {@link AcWritePath}, {@link AC_WRITE_NOT_VIA_AC_VERB}.
+ * {@link resolveCiteGateFor}, {@link AcWritePath}, {@link AC_WRITE_NOT_VIA_AC_VERB},
+ * {@link isValidFalsifierExitCode}, {@link FALSIFIER_EXIT_CODE_MIN}, {@link FALSIFIER_EXIT_CODE_MAX}.
  * Invariants:
  *   - A change is detected on the canonical JSON of the array (`JSON.stringify`; order and every
  *     field significant) — reordered, reworded, appended, dropped, added-from-absent all count.
@@ -16,6 +17,11 @@
  *     `_createImpl` on the same array. An invalid array is refused with VALIDATION_ERROR.
  *   - `"wholesale"` (CorpusService.set — hence CLI `lore set`, MCP `lore_set`, HTTP PATCH)
  *     passes only when the incoming array is byte-identical to the stored one (an echo).
+ *   - Falsifier range (BR-1076, spec-evidence-labels-and-reds-are-honest D3/D4): on EVERY path a criterion
+ *     that is ADDED or whose falsifier CHANGED must declare `expected_exit_code` as an integer in 1..255,
+ *     else VALIDATION_ERROR field `falsifier.expected_exit_code`. A stored criterion whose falsifier is
+ *     unchanged is never re-checked, and `acFalsifierSchema` is deliberately NOT tightened (a stored 0 must
+ *     still parse; `lore verify --falsify` refuses it at run time, BR-1074).
  *   - {@link applyAcChange} is pure: no IO, no clock. Returns a Result; never throws.
  *   - {@link admitAcWrite} is the citation-gate half (spec C4, AC-BLS2-2): the SAME chokepoint decides, on
  *     every sanctioned path (`ac-verb`, `create`), whether an ADDED or REVISED criterion may be written. It
@@ -63,6 +69,66 @@ const AC_CITE_REQUIRED = "AC_CITE_REQUIRED" as const;
 export type AcWritePath = "ac-verb" | "create" | "restore" | "import" | "wholesale";
 
 const KEY = "acceptance_criteria";
+
+/** Lowest exit code a falsifier may declare: 0 is success, so a mutation that "must still pass" is no falsifier (BR-1076). */
+export const FALSIFIER_EXIT_CODE_MIN = 1;
+/** Highest exit code a process can report. */
+export const FALSIFIER_EXIT_CODE_MAX = 255;
+
+/** True when `code` is an integer in {@link FALSIFIER_EXIT_CODE_MIN}..{@link FALSIFIER_EXIT_CODE_MAX}. */
+export function isValidFalsifierExitCode(code: unknown): code is number {
+  return (
+    typeof code === "number" &&
+    Number.isInteger(code) &&
+    code >= FALSIFIER_EXIT_CODE_MIN &&
+    code <= FALSIFIER_EXIT_CODE_MAX
+  );
+}
+
+/** `{ id, falsifier JSON }` per criterion of a raw array; entries that are not objects are skipped (the schema reports them). */
+function falsifiersById(raw: unknown): Map<string, { canonical: string; exitCode: unknown }> {
+  const found = new Map<string, { canonical: string; exitCode: unknown }>();
+  if (!Array.isArray(raw)) return found;
+  for (const criterion of raw as unknown[]) {
+    if (typeof criterion !== "object" || criterion === null) continue;
+    const { id, verify } = criterion as { id?: unknown; verify?: unknown };
+    if (typeof id !== "string" || typeof verify !== "object" || verify === null) continue;
+    const falsifier = (verify as { falsifier?: unknown }).falsifier;
+    if (typeof falsifier !== "object" || falsifier === null) continue;
+    found.set(id, {
+      canonical: JSON.stringify(falsifier),
+      exitCode: (falsifier as { expected_exit_code?: unknown }).expected_exit_code,
+    });
+  }
+  return found;
+}
+
+/**
+ * BR-1076: the first criterion in `incoming` that is new, or whose falsifier differs from `stored`,
+ * with an `expected_exit_code` outside 1..255 — as a refusal; `undefined` when none.
+ */
+function falsifierRangeRefusal(
+  stored: unknown,
+  incoming: unknown,
+  docId: string | undefined,
+): LoreError | undefined {
+  const before = falsifiersById(stored);
+  for (const [acId, falsifier] of falsifiersById(incoming)) {
+    if (before.get(acId)?.canonical === falsifier.canonical) continue;
+    if (isValidFalsifierExitCode(falsifier.exitCode)) continue;
+    return {
+      code: "VALIDATION_ERROR",
+      field: "falsifier.expected_exit_code",
+      ...(docId !== undefined ? { id: docId } : {}),
+      message:
+        `AC "${acId}": falsifier expected_exit_code must be one whole number from ` +
+        `${FALSIFIER_EXIT_CODE_MIN} to ${FALSIFIER_EXIT_CODE_MAX} (0 is success, so it can never be the outcome of a ` +
+        `failing mutation); got ${JSON.stringify(falsifier.exitCode)}`,
+      value: falsifier.exitCode,
+    };
+  }
+  return undefined;
+}
 
 /**
  * BR-980: a debt entry `AD-n` is never citable. Every criterion in `incoming` that cites one yields
@@ -121,6 +187,10 @@ export function applyAcChange(
       violations: debtViolations,
     });
   }
+  // reason: BR-1076 holds on every path, like BR-980 above; a write that leaves a stored falsifier
+  // unchanged is not re-checked (a pre-existing 0 must not block unrelated edits).
+  const rangeRefusal = falsifierRangeRefusal(before?.[KEY], after[KEY], docId);
+  if (rangeRefusal !== undefined) return err(rangeRefusal);
   if (path === "ac-verb") return ok(undefined);
   if (path !== "wholesale") {
     const incoming = after[KEY];

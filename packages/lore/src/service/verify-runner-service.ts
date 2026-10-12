@@ -225,6 +225,7 @@ import {
 } from "./verify-spawn.js";
 import type { VerifiedEvidenceInput } from "./task-workflow-service.js";
 import { materializeFalsifierDependencies } from "./falsifier-dep-materialization.js";
+import { FALSIFIER_EXIT_CODE_MAX, FALSIFIER_EXIT_CODE_MIN, isValidFalsifierExitCode } from "./ac-write-chokepoint.js";
 
 // ─── Git state probe (baseline slice 1 §C5) ────────────────────────────────
 
@@ -1672,6 +1673,22 @@ export class VerifyRunnerService {
           "<spec> <id> --falsifier-path <path> --falsifier-find <text> --falsifier-replace " +
           "<text> --falsifier-exit-code <n>') before running the attested-red path",
         value: acId,
+      });
+    }
+
+    // BR-1074 / spec-evidence-labels-and-reds-are-honest D5: a stored out-of-range expected exit code
+    // (a 0 declared before BR-1076 existed) is refused BEFORE the scratch worktree, the green control or
+    // any evidence write — the schema still parses it (D4), so this is the only run-time guard.
+    if (!isValidFalsifierExitCode(falsifier.expected_exit_code)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "verify.falsifier.expected_exit_code",
+        message:
+          `AC "${acId}" stores falsifier expected_exit_code ${JSON.stringify(falsifier.expected_exit_code)}, ` +
+          `outside ${FALSIFIER_EXIT_CODE_MIN}..${FALSIFIER_EXIT_CODE_MAX} — nothing was run and no evidence was ` +
+          `recorded. Correct it with: lore ac set ${spec.slug} ${acId} --correction "<reason>" ` +
+          `--falsifier-exit-code <n> (repeat the other --falsifier-* flags)`,
+        value: falsifier.expected_exit_code,
       });
     }
 
