@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "dfd87805aeec18226964a653f707ed5be06af59eea1760545c7b3cd13630d22a",
+  tree_digest: "0a16b00c21e620a7136e190e47abe4c7735fdcd609942158bc4265aaca58271e",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "70733a90f0b8beffc57be7b5361d18aaa92517be8dc8fd257aa83d00614be3ac" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "c2cb50556fcce86bfecb5e9136732c9002cfef4268d09edf790a683883c5af36" },
@@ -123,7 +123,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "skills/lore-auto-wire/scripts/check-tools.sh", kind: "skill", ownership: "managed", sha256: "9be51f9df4717b93f50bd024440db60edd60f7d326a3c960cd72e0169c9d25bf" },
   { path: "skills/lore-auto-wire/scripts/fix-path.sh", kind: "skill", ownership: "managed", sha256: "76828df5440be276233fbd147f28bfeac00e91f73815ca9e85dc3911c436932f" },
   { path: "skills/lore-autopilot/SKILL.md", kind: "skill", ownership: "managed", sha256: "95a98b425a6adc1d90596b7cac64f107b9d0800fbe5f9648e78b6f00a8846830" },
-  { path: "skills/lore-baseline/SKILL.md", kind: "skill", ownership: "managed", sha256: "3153e3254d2cf2354b3fee2a0588c2a7174c9d68a42dbeef65fcead8c7bc9167" },
+  { path: "skills/lore-baseline/SKILL.md", kind: "skill", ownership: "managed", sha256: "fcde0d1dd2a7974c36e54f39812113cbcc06cf8cfe320e9add35510cc7970733" },
   { path: "skills/lore-baseline/templates/branch.md", kind: "skill", ownership: "managed", sha256: "0db3c50293303cb7f879f0df0001d33a582f598f3d0a5f47151f99ce2e106049" },
   { path: "skills/lore-baseline/templates/leaf.md", kind: "skill", ownership: "managed", sha256: "b01451b45fe0b59d16a77df35a8575c105716ad60802d6bb9b2090cd52da237d" },
   { path: "skills/lore-best-practice/SKILL.md", kind: "skill", ownership: "managed", sha256: "76d58d4eeb539105b06bf514b27b75df8b74814746f06a211f7b6f605f1dbc37" },
