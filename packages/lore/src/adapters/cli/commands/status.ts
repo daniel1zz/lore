@@ -36,6 +36,14 @@
  *   hardcodes every slug as "existing" so the check structurally never fires
  *   there). Breach → exit 3, folded into the SAME exit-precedence tier as
  *   --check-drift/--check-requirements/--check-prd-budget/--check-issues.
+ * With --check-fragments: run the SAME fragments check as `lore fragments check`
+ *   (`flows/fragments-flow.ts::runFragmentsCheck`, deps from `commands/fragments.ts::buildFlowDeps`)
+ *   and exit 4 when any finding is present, 0 when clean (spec-rule-store-git-tracked-fragment-
+ *   selection-on-demand-skill Scope 7, AC-RS-9, BR-1066). Exit 4 is the SAME number
+ *   `lore fragments check` uses (the VALIDATION_ERROR family), NOT the 3 of the other --check-*
+ *   flags: a fragments finding is a validation failure of the rule store, and sharing the code
+ *   means `lore status --check-fragments` and `lore fragments check` agree on the exit number.
+ *   Standalone, corpus-free: see the dispatch note below.
  * With --json: output check result(s) as a JSON envelope.
  *
  * The PLAIN run (no --check-* flag) additionally reports, UNCONDITIONALLY and
@@ -109,10 +117,14 @@
  *
  * Dispatch precedence inside this command, highest first:
  *   --check-binary-provenance → --enumerate → --check-claude-md →
- *   the app-backed --check-* family → the plain run.
- * The first three are mutually exclusive by design (each returns), so combining
+ *   --check-fragments → the app-backed --check-* family → the plain run.
+ * The first four are mutually exclusive by design (each returns), so combining
  * them runs only the highest; the app-backed family composes internally as
- * documented above. This precedence is asserted by
+ * documented above. --check-fragments sits directly below --check-claude-md for
+ * the same Module-Boundary reason: it reads config YAML and fragment files only
+ * (`lore fragments` is a bootstrap-stage command that must never reach
+ * `loadLoreApp`/`bun:sqlite`), so it cannot join the app-backed fold and runs
+ * alone when combined with those flags. This precedence is asserted by
  * `tests/integration/binary-provenance-check.test.ts`.
  */
 
@@ -125,6 +137,9 @@ import { exitCode, formatError } from "../utils.js";
 import type { AcService } from "../../../service/ac-service.js";
 import { buildStalenessFlowDeps, listFreshStalenessEscalates } from "../../../flows/staleness-flow.js";
 import { loadTreeBlueprint } from "../../../flows/blueprint-flow.js";
+import { runFragmentsCheck } from "../../../flows/fragments-flow.js";
+import { buildFlowDeps as buildFragmentsFlowDeps } from "./fragments.js";
+import { writeAllSync } from "../stdio-sync.js";
 import {
   buildDriftFlowDeps,
   buildListSpecs,
@@ -223,6 +238,13 @@ import {
 /** All CallerSurface values in a stable display order. */
 /** BR-1039 — the stated period of the attribution share, in days ending now. */
 const ATTRIBUTION_WINDOW_DAYS = 14;
+
+/**
+ * Exit code of a failing `--check-fragments` — deliberately the SAME number as
+ * `commands/fragments.ts::CHECK_FAILED_EXIT` (that constant is module-private there; the e2e
+ * `rs-status-check-fragments.bun.test.ts` pins the two commands to agree).
+ */
+const FRAGMENTS_CHECK_FAILED_EXIT = 4;
 
 const ALL_SURFACES:ReadonlyArray<CallerSurface> = [
   "cli",
@@ -1081,6 +1103,11 @@ export default defineCommand({
       description:
         "Verify the product-baseline tree: registry <-> leaf rule ids agree, no rule sits on a non-leaf node, every depends_on names an existing rule. Any finding -> exit 3 (each is printed). Composes with --check-tree/--check-drift/--check-requirements/--check-prd-budget/--check-issues/--check-memory-pointers.",
     },
+    "check-fragments": {
+      type: "boolean",
+      description:
+        "Run the same context-fragments check as `lore fragments check` (caps, duplicate lines, selection, skill collisions, rules/skills drift, language drift). Any finding → exit 4, clean → 0. Config/files only, never loads the corpus DB. Standalone — runs alone when combined with the app-backed --check-* flags.",
+    },
     "check-binary-provenance": {
       type: "boolean",
       description:
@@ -1250,6 +1277,36 @@ export default defineCommand({
       }
 
       process.exitCode = findings.length > 0 ? 3 : 0;
+      return;
+    }
+
+    // ── check-fragments branch (spec-rule-store-git-tracked-fragment-selection-on-demand-skill, AC-RS-9) ──
+    // reason: corpus-free like --check-claude-md — `buildFragmentsFlowDeps` reads config YAML and
+    // fragment files only, so this MUST return before `loadLoreApp`. The deps builder and the
+    // check are the ones `lore fragments check` uses, so the two commands cannot disagree on a
+    // finding; only the stdout/stderr rendering below is repeated (it is module-private there).
+    if (args["check-fragments"] === true) {
+      const deps = buildFragmentsFlowDeps(process.cwd());
+      if (!deps.ok) {
+        if (args.json) writeAllSync(1, `${JSON.stringify({ ok: false, error: deps.error })}\n`);
+        process.stderr.write(`lore status --check-fragments: ${deps.error.code}: ${deps.error.message}\n`);
+        process.exitCode = FRAGMENTS_CHECK_FAILED_EXIT;
+        return;
+      }
+      const report = await runFragmentsCheck(deps.value);
+      if (args.json) {
+        writeAllSync(1, `${JSON.stringify({ ok: report.ok, data: report })}\n`);
+      } else {
+        writeAllSync(
+          1,
+          `lore status --check-fragments: ${report.checks.length} outlet checks across ${report.agentTypes.length} agent types — ` +
+            `${report.ok ? "ok" : `${report.findings.length} finding(s)`}\n`,
+        );
+      }
+      for (const finding of report.findings) {
+        process.stderr.write(`[${finding.kind}] ${finding.code}: ${finding.message}\n`);
+      }
+      process.exitCode = report.ok ? 0 : FRAGMENTS_CHECK_FAILED_EXIT;
       return;
     }
 
