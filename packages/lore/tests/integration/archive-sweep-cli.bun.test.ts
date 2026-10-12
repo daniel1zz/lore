@@ -51,6 +51,7 @@
  *               effect.
  */
 
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { appendFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -171,6 +172,18 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
     expect(taskResult.exitCode).toBe(0);
     const taskSlug = parseSlug(taskResult.stdout);
 
+    // RE-BASELINED (task-skill-test-red-archive-apply-leaves-floor-refused, issue #173, BR-1072, spec
+    // spec-approval-and-plan-closure-go-through-the-same-checks-on D8): the ORIGINAL straggler here carried NO
+    // evidence and the case asserted `archive --apply` archived it and the re-sweep exited 0 (AC-097-3 under
+    // D3's "unconditional" sentence). D8 supersedes that sentence — the sweep now archives a straggler only if
+    // `lore done` would — so the HAPPY straggler carries a runner-captured pass. The evidence-less path is
+    // pinned by the floor-refused case below.
+    const evidenceResult = runLore(
+      ["evidence", taskSlug, "--oracle", "test", "--command", "echo 'Ran 3 tests'", "--result", "pass", "--capture"],
+      tmpDir,
+    );
+    expect(evidenceResult.exitCode).toBe(0);
+
     const sweepResult = runLore(["archive", "--sweep", "--json"], tmpDir);
     expect(sweepResult.exitCode).toBe(3);
     const sweepPayload = JSON.parse(sweepResult.stdout) as {
@@ -197,6 +210,72 @@ describe("lore archive — HAPPY/STATE (sweep -> apply -> re-sweep)", () => {
     expect(getResult.exitCode).toBe(0);
     const getPayload = JSON.parse(getResult.stdout) as { data: { doc: { status: string } } };
     expect(getPayload.data.doc.status).toBe("archived");
+  });
+});
+
+describe("lore archive — NEGATIVE/STATE (a floor-refused straggler stays open; D8 / BR-1072 / #173)", () => {
+  it("an evidence-less straggler is skipped with its floor, stays open, --json carries floor, --sweep still lists it (exit 3), and a handoff still archives", () => {
+    disablePlanCloseGate(tmpDir);
+    const prdSlug = parseSlug(
+      runLore(["create", "prd", "--title", "Floor Sweep PRD", "--content", "root", "--no-ai"], tmpDir).stdout,
+    );
+    const planSlug = parseSlug(
+      runLore(
+        ["create", "plan", "--title", "Floor Sweep Plan", "--parent", prdSlug, "--content", "x", "--no-ai"],
+        tmpDir,
+      ).stdout,
+    );
+    expect(runLore(["set", planSlug, "--status", "approved"], tmpDir).exitCode).toBe(0);
+    expect(runLore(["set", planSlug, "--status", "archived"], tmpDir).exitCode).toBe(0);
+
+    // Straggler with NO evidence: `lore done` would refuse it with floor `attested-pass`.
+    const taskSlug = parseSlug(
+      runLore(
+        ["create", "task", "--title", "Bare Straggler", "--parent", planSlug, "--plan-id", planSlug, "--content", "x", "--no-ai"],
+        tmpDir,
+      ).stdout,
+    );
+
+    // Expired handoff under the archived plan (created_at backdated past the 7-day default TTL).
+    const handoffSlug = parseSlug(runLore(["handoff", "--next", "resume", "--plan", planSlug], tmpDir).stdout);
+    const handoffId = (
+      JSON.parse(runLore(["get", handoffSlug, "--json"], tmpDir).stdout) as { data: { doc: { id: string } } }
+    ).data.doc.id;
+    const db = new Database(join(tmpDir, ".lore", "lore.db"));
+    try {
+      db.query("UPDATE docs SET created_at = ? WHERE id = ?").run(
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        handoffId,
+      );
+    } finally {
+      db.close();
+    }
+
+    const applyResult = runLore(["archive", "--apply", "--json"], tmpDir);
+    expect(applyResult.exitCode).toBe(0);
+    const applyPayload = JSON.parse(applyResult.stdout) as {
+      data: { outcomes: Array<{ slug: string; ok: boolean; floor?: string }> };
+    };
+    // --json carries the refusing floor on the straggler's outcome.
+    expect(applyPayload.data.outcomes.find((o) => o.slug === taskSlug)?.floor).toBe("attested-pass");
+    // A handoff is not a task: it still archives.
+    expect(applyPayload.data.outcomes.find((o) => o.slug === handoffSlug)?.ok).toBe(true);
+
+    // The task stayed open.
+    const getTask = JSON.parse(runLore(["get", taskSlug, "--json"], tmpDir).stdout) as {
+      data: { doc: { status: string } };
+    };
+    expect(getTask.data.doc.status).not.toBe("archived");
+
+    // Human output names the skipped slug and the floor (a second --apply; the task is still a candidate).
+    const humanApply = runLore(["archive", "--apply"], tmpDir);
+    expect(humanApply.stdout).toContain(`[SKIPPED] ${taskSlug} — refused by attested-pass`);
+
+    // The re-sweep keeps reporting it (never silent), exit 3.
+    const reSweep = runLore(["archive", "--sweep", "--json"], tmpDir);
+    expect(reSweep.exitCode).toBe(3);
+    const reSweepPayload = JSON.parse(reSweep.stdout) as { data: { candidates: Array<{ slug: string }> } };
+    expect(reSweepPayload.data.candidates.map((c) => c.slug)).toEqual([taskSlug]);
   });
 });
 
