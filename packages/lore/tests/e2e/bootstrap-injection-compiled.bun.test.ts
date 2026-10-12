@@ -3,6 +3,13 @@
  *   task-skill-test-t6-compiled-binary-e2e-injection-knobs-json-pin,
  *   AC-080-3, AC-080-6.
  *
+ * RETIRED CASES (spec-session-start-injection-carries-only-the-session-s-own
+ * D10): the cases asserting the old tier-1 injection payload (contract key
+ * order, seat-scoped resume_hint slot, count knobs, archive_candidates
+ * surfacing) were DELETED; the seat-only replacements live in
+ * `bootstrap-seat-injection-compiled.bun.test.ts` (AC-SI-2, AC-SI-4). The
+ * descriptions below that mention them are historical.
+ *
  * Compiled-binary end-to-end oracle for `lore bootstrap --injection` (the
  * tier-1 SessionStart-hook payload) and its `workflow.bootstrap_injection.*`
  * config knobs. Every prior SPEC-080 AC (AC-080-1/2/4/5) is vitest/source-mode
@@ -213,45 +220,6 @@ function seedCorpus(dir: string): SeededCorpus {
 }
 
 /**
- * The SPEC-080 §Projection Contract's literal field-order list for an
- * ORDINARY (non-seat-scoped) session — positions 1-9; `omitted` is always
- * the final key. `scope_declaration` (spec-context-provenance-injected-corpus-global-state-and-a
- * D1) leads unconditionally — the boundary a consumer reading top-down must
- * meet before any data. `resume_hint` is ABSENT here (never present-as-null)
- * per spec-session-start-handoff-neutrality D1: the user is the router, an
- * ambient "resume this" guess misdirects every session but one in a
- * multi-session workflow.
- */
-const INJECTION_CONTRACT_ORDER = [
-  "scope_declaration",
-  "my_claims",
-  "active_sessions",
-  "armed_gates",
-  "root",
-  "pending_reviews",
-  "active_plans",
-  "latest_handoffs",
-  "corpus",
-  "omitted",
-] as const;
-
-/**
- * The SAME contract, SEAT-SCOPED — `resume_hint` is retained immediately
- * AFTER `scope_declaration` (still position 2, not 1 — the declaration
- * always leads even the seat-scoped hint) when `--seat-branch` resolves to
- * a live plan (spec-session-start-handoff-neutrality D2): that hint derives
- * from the session's own worktree branch, not a corpus-wide guess. Built by
- * splicing `resume_hint` in after the leading declaration — NOT a naive
- * `["resume_hint", ...INJECTION_CONTRACT_ORDER]` prepend, which would wrongly
- * place `resume_hint` before `scope_declaration`.
- */
-const SEAT_SCOPED_INJECTION_CONTRACT_ORDER = [
-  "scope_declaration",
-  "resume_hint",
-  ...INJECTION_CONTRACT_ORDER.slice(1),
-] as const;
-
-/**
  * Plain `bootstrap --json`'s `data` payload — the untouched `BootstrapReport`
  * shape, REGRESSION-pinned as an exact 10-key set. `archive_candidates` (SPEC
  * spec-lifecycle-archival-plan-close-cascade-deterministic §Design Decisions
@@ -301,64 +269,6 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     }
   });
 
-  it("HAPPY: --injection prints compact JSON in literal contract key order with the omitted ledger, dead plan excluded", () => {
-    const result = runLore(["bootstrap", "--injection"], dir);
-    expect(result.exitCode).toBe(0);
-
-    const raw = result.stdout.trim();
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-    // Compact serialization: re-stringifying the parsed object with no
-    // indentation reproduces the exact stdout string — proves both "no
-    // pretty-printing whitespace" AND "key order is preserved end to end"
-    // in one assertion (JS objects/JSON.stringify iterate string keys in
-    // insertion order).
-    expect(JSON.stringify(parsed)).toBe(raw);
-    expect(raw).not.toContain("\n  ");
-    expect(raw).not.toContain("\n");
-
-    expect(Object.keys(parsed)).toEqual([...INJECTION_CONTRACT_ORDER]);
-
-    // NEGATIVE (spec-session-start-handoff-neutrality D1): an ordinary
-    // (no --seat-branch) session's injection carries ZERO resume_hint keys —
-    // never present, not even as null. Checked both structurally
-    // (Object.keys/hasOwnProperty) and textually (raw stdout) so a
-    // regression can't slip through via a differently-cased or
-    // differently-nested reintroduction.
-    expect(parsed).not.toHaveProperty("resume_hint");
-    expect(raw).not.toContain("resume_hint");
-
-    const activePlans = parsed["active_plans"] as Array<{ slug: string }>;
-    const activePlanSlugs = activePlans.map((p) => p.slug);
-    expect(activePlanSlugs).toContain("plan-a-actionable");
-    expect(activePlanSlugs).toContain("plan-b-actionable");
-    expect(activePlanSlugs).not.toContain("plan-c-dead");
-
-    // Single typed omission ledger (SPEC-080 D2) — default budgets (5/3/3/8000)
-    // never cap either actionable plan or handoff below what's kept, but
-    // active_plans folds in the dead-plan exclusion (3 total active plans -
-    // 2 kept actionable ones = 1). pending_slugs caps the pending QUEUE, which
-    // per SPEC-103 M1 no longer includes the 2 handoff docs (ledger sub_type
-    // `handoff` fast-tracks draft→approved at create, leaving the queue) — 6
-    // draft docs (prd + 3 plans + 2 tasks) capped at the default
-    // max_pending_slugs=3 (3 dropped) — both per buildBootstrapInjection's
-    // documented single-formula omission math.
-    expect(parsed["omitted"]).toEqual({
-      active_plans: 1,
-      latest_handoffs: 0,
-      pending_slugs: 3,
-      budget_drops: 0,
-    });
-    expect(parsed["budget_exceeded"]).toBeUndefined();
-
-    // AC-097-4: this fixture has zero archive candidates (no archived/deprecated
-    // plan, no aged/superseded handoff) — present-iff-positive means the key is
-    // ENTIRELY ABSENT from the injection, not present as `0` (zero-candidate
-    // shape stays byte-stable vs the pre-existing SPEC-080(bootstrap-injection) key order).
-    expect(parsed).not.toHaveProperty("archive_candidates");
-    expect(raw).not.toContain("archive_candidates");
-  });
-
   it("REGRESSION: plain --json on the same corpus has exactly the literal 10-key BootstrapReport set", () => {
     const result = runLore(["bootstrap", "--json"], dir);
     expect(result.exitCode).toBe(0);
@@ -393,107 +303,6 @@ describe("AC-080-3: compiled dist/lore bootstrap --injection / --json default-bu
     expect(combined.stdout).toBe(injectionOnly.stdout);
   });
 
-  it("HAPPY: a --seat-branch that resolves to a live plan retains resume_hint at its contract position-1 slot, scoped to that plan's own newest handoff (spec-session-start-handoff-neutrality D2)", () => {
-    const shortSlug = seeded.planASlug.replace(/^plan-/, "");
-    const result = runLore(["bootstrap", "--injection", "--seat-branch", `plan/${shortSlug}`], dir);
-    expect(result.exitCode).toBe(0);
-
-    const raw = result.stdout.trim();
-    const parsed = JSON.parse(raw) as { resume_hint?: { plan_slug: string | null; handoff_slug: string } };
-
-    expect(Object.keys(parsed)).toEqual([...SEAT_SCOPED_INJECTION_CONTRACT_ORDER]);
-    expect(parsed.resume_hint).toBeDefined();
-    // reason: the seat's OWN plan (Plan A) has its own handoff — a
-    // wrongly-unscoped implementation would instead surface the
-    // corpus-global newest handoff, which per the fixture's HandoffB write
-    // order (written after HandoffA in seedCorpus) would belong to Plan B —
-    // the exact failure mode this assertion is designed to catch.
-    expect(parsed.resume_hint?.plan_slug).toBe(seeded.planASlug);
-  });
-
-  it("NEGATIVE: an unresolvable --seat-branch (no matching plan) is treated as ordinary — resume_hint is still absent from the injection", () => {
-    const result = runLore(
-      ["bootstrap", "--injection", "--seat-branch", "plan/nonexistent-slug-xyz"],
-      dir,
-    );
-    expect(result.exitCode).toBe(0);
-
-    const raw = result.stdout.trim();
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    // reason: an unresolvable seat branch also sets `seat_unresolved: true`
-    // on the report (SPEC-057 D3), which reaches the injection via the D8
-    // OCP unknown-field mechanism, appended between corpus and omitted — a
-    // SEPARATE, already-covered contract concern (SPEC-080), not something
-    // this D1/D2 case re-pins. Filtering it out isolates the assertion this
-    // test actually owns: resume_hint's absence.
-    const { seat_unresolved: _seatUnresolved, ...withoutSeatUnresolved } = parsed;
-    expect(Object.keys(withoutSeatUnresolved)).toEqual([...INJECTION_CONTRACT_ORDER]);
-    expect(parsed).not.toHaveProperty("resume_hint");
-    expect(parsed["seat_unresolved"]).toBe(true);
-  });
-});
-
-describe("AC-080-6: workflow.bootstrap_injection config knobs reach the projection end-to-end", () => {
-  let dir: string;
-
-  beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), "lore-t6-bootstrap-injection-knobs-"));
-    expect(dir.startsWith(REPO_ROOT)).toBe(false);
-    initCorpus(dir);
-    seedCorpus(dir);
-
-    const cfgPath = join(dir, ".lore", "config.yaml");
-    const existing = readFileSync(cfgPath, "utf8");
-    const override =
-      "\nworkflow:\n  bootstrap_injection:\n    max_active_plans: 1\n    max_handoffs: 1\n" +
-      "    max_pending_slugs: 1\n    char_budget: 2000\n";
-    writeFileSync(cfgPath, existing + override, "utf8");
-  });
-
-  afterAll(() => {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      /* best-effort cleanup */
-    }
-  });
-
-  it("BOUNDARY: non-default max_active_plans/max_handoffs/max_pending_slugs/char_budget are never decorative", () => {
-    const result = runLore(["bootstrap", "--injection"], dir);
-    expect(result.exitCode).toBe(0);
-
-    const parsed = JSON.parse(result.stdout.trim()) as {
-      active_plans: unknown[];
-      latest_handoffs: unknown[];
-      pending_reviews: { count: number; slugs: string[] };
-      omitted: { active_plans: number; latest_handoffs: number; pending_slugs: number; budget_drops: number };
-      budget_exceeded?: true;
-    };
-
-    // max_active_plans: 1 — exactly 1 of the 2 actionable plans kept; the
-    // dead plan (never actionable) plus the 1 dropped actionable plan fold
-    // into one omitted count (3 total active plans - 1 kept = 2).
-    expect(parsed.active_plans).toHaveLength(1);
-    expect(parsed.omitted.active_plans).toBe(2);
-
-    // max_handoffs: 1 — 1 of the 2 per-plan handoff groups kept.
-    expect(parsed.latest_handoffs).toHaveLength(1);
-    expect(parsed.omitted.latest_handoffs).toBe(1);
-
-    // max_pending_slugs: 1 — sample capped to 1, true queue size (6 draft
-    // docs: prd + 3 plans + 2 tasks; the 2 handoffs are excluded per SPEC-103
-    // M1 — ledger sub_type `handoff` fast-tracks draft→approved at create,
-    // so they never enter the pending queue) untouched in `count`.
-    expect(parsed.pending_reviews.slugs).toHaveLength(1);
-    expect(parsed.pending_reviews.count).toBe(6);
-    expect(parsed.omitted.pending_slugs).toBe(5);
-
-    // char_budget: 2000 — this fixture's capped payload is well under 2000
-    // chars, so the budget rule never needs to drop a whole entry.
-    expect(result.stdout.trim().length).toBeLessThanOrEqual(2000);
-    expect(parsed.omitted.budget_drops).toBe(0);
-    expect(parsed.budget_exceeded).toBeUndefined();
-  });
 });
 
 describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archival-plan-close-cascade-deterministic D4)", () => {
@@ -568,22 +377,6 @@ describe("AC-097-4: archive_candidates injection surfacing (spec-lifecycle-archi
     } catch {
       /* best-effort cleanup */
     }
-  });
-
-  it("HAPPY: --injection includes archive_candidates (positive count) positioned between corpus and omitted", () => {
-    const result = runLore(["bootstrap", "--injection"], dir);
-    expect(result.exitCode).toBe(0);
-
-    const raw = result.stdout.trim();
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-    const corpusIdx = Object.keys(parsed).indexOf("corpus");
-    const archiveIdx = Object.keys(parsed).indexOf("archive_candidates");
-    const omittedIdx = Object.keys(parsed).indexOf("omitted");
-    expect(archiveIdx).toBeGreaterThan(corpusIdx);
-    expect(archiveIdx).toBeLessThan(omittedIdx);
-
-    expect(parsed["archive_candidates"]).toBe(1);
   });
 
   it("REGRESSION: plain --json also carries archive_candidates: 1 on the same corpus", () => {

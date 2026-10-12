@@ -69,7 +69,7 @@
  *                      retired strings are absent from the hook source.
  *   "scope closure"    (AC-CP-4) — see MCP-surface note above.
  *   "governance rule"  (AC-CP-9) — the governance FEED text names every
- *                      `BOOTSTRAP_INJECTION_KNOWN_KEYS` member except
+ *                      `BOOTSTRAP_RESUME_CLOSURE_KEYS` member except
  *                      `resume_hint` (excluded by the handoff-neutrality
  *                      zero-occurrence invariant) and every
  *                      `SOURCE_CATEGORY_TOKENS` member; paired assertion that
@@ -97,16 +97,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
-  BOOTSTRAP_FRAMING_LINE,
-  BOOTSTRAP_INJECTION_KNOWN_KEYS,
-  BOOTSTRAP_SCOPE_DECLARATION,
+  BOOTSTRAP_RESUME_CLOSURE_KEYS,
   RESUME_SCOPE_CLOSURE,
   SOURCE_CATEGORY_TOKENS,
 } from "@lore/core";
@@ -122,7 +120,6 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 // mirrors every sibling compiled-binary e2e suite's own REPO_ROOT derivation.
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
-const HOOK_PATH = join(REPO_ROOT, "assets", "hooks", "session-start-resume.mjs");
 const HOOK_SSOT_PATH = join(REPO_ROOT, "assets", "hooks", "session-start-resume.mjs");
 // RE-BASELINE (task-skill-implement-hooks-new-session-start-fragments-thin): the
 // governance prose moved from the retired assets/governance/corpus-workflow.md
@@ -205,107 +202,6 @@ afterAll(() => {
   cleanupAll();
 });
 
-// ─── "framing line" (AC-CP-10) ──────────────────────────────────────────────
-
-/**
- * Writes an executable `lore` shim on its own dir that `exec`s the REAL
- * compiled `dist/lore` binary — never a stub with canned output (contrast
- * `tests/unit/hooks/session-bootstrap-injection.test.ts`, which deliberately
- * DOES use a stub to isolate the hook's fail-open contract; that file already
- * covers those isolated cases). Returned dir is meant to be PREPENDED to
- * PATH so it shadows any real `lore` earlier in resolution order.
- */
-function makeRealLoreShimDir(): string {
-  const dir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-real-shim-")));
-  const shimPath = join(dir, "lore");
-  writeFileSync(shimPath, `#!/bin/sh\nexec "${LORE_BIN}" "$@"\n`);
-  chmodSync(shimPath, 0o755);
-  return dir;
-}
-
-/** Spawns the REAL checked-in hook file as a `node` subprocess, PATH-shimmed to the REAL compiled binary, cwd inside a real `.lore/`-bearing corpus. `LORE_SETUP_NO_CHECK=1` disables the unrelated Phase F detached refresh (this suite is scoped to Phase C/E only). */
-function runHookAgainstRealBinary(corpusDir: string): { additionalContext: string; raw: string } {
-  const shimDir = makeRealLoreShimDir();
-  const stateBase = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-hook-state-")));
-  const claudeDir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-hook-claude-")));
-
-  const proc = Bun.spawnSync(["node", HOOK_PATH], {
-    cwd: corpusDir,
-    env: {
-      ...process.env,
-      PATH: `${shimDir}:${process.env["PATH"] ?? ""}`,
-      CLAUDE_SESSION_ID: `t5-context-provenance-${Math.random().toString(36).slice(2)}`,
-      CLAUDE_STATE_BASE_OVERRIDE: stateBase,
-      CLAUDE_AGENTS_DIR_OVERRIDE: join(claudeDir, "agents"),
-      LORE_SETUP_NO_CHECK: "1",
-    },
-  });
-
-  const stdout = proc.stdout.toString();
-  const stderr = proc.stderr.toString();
-  if (proc.exitCode !== 0) {
-    throw new Error(`hook did not exit 0: exit=${proc.exitCode} stderr=${stderr}`);
-  }
-  const parsed = JSON.parse(stdout) as { hookSpecificOutput?: { additionalContext?: string } };
-  return { additionalContext: parsed.hookSpecificOutput?.additionalContext ?? "", raw: stdout };
-}
-
-describe("AC-CP-10: verb + injection + hook composition, end-to-end against the REAL compiled binary (D2)", () => {
-  let dir: string;
-
-  beforeAll(() => {
-    dir = trackDir(mkdtempSync(join(tmpdir(), "lore-t5-framing-line-")));
-    expect(dir.startsWith(REPO_ROOT)).toBe(false);
-    initCorpus(dir);
-  });
-
-  it("framing line — governance verb identity, bare unsplit injection JSON, and the real hook's outside-fence/inside-fence composition", () => {
-    // (a) `lore governance bootstrap-framing` stdout === BOOTSTRAP_FRAMING_LINE by identity.
-    const framingResult = runLore(["governance", "bootstrap-framing"], dir);
-    expect(framingResult.exitCode).toBe(0);
-    expect(framingResult.stdout).toBe(BOOTSTRAP_FRAMING_LINE);
-    expect(BOOTSTRAP_FRAMING_LINE.endsWith("\n")).toBe(false);
-    expect(framingResult.stdout.endsWith("\n")).toBe(false);
-
-    // (b) `lore bootstrap --injection` stdout is bare compact JSON, JSON.parse
-    // accepts it whole with NO splitting (SPEC-080 AC-080-3) — a prose prefix
-    // would make JSON.parse throw entirely, and a re-stringify mismatch would
-    // reveal any surrounding text JSON.parse tolerated (leading/trailing
-    // whitespace only).
-    const directInjection = runLore(["bootstrap", "--injection"], dir);
-    expect(directInjection.exitCode).toBe(0);
-    const rawInjection = directInjection.stdout.trim();
-    const directParsed = JSON.parse(rawInjection) as Record<string, unknown>;
-    expect(JSON.stringify(directParsed)).toBe(rawInjection);
-    expect(rawInjection).not.toContain("\n");
-
-    // (d) both retired strings are gone from the checked-in hook source.
-    const hookSource = readFileSync(HOOK_PATH, "utf8");
-    expect(hookSource).not.toContain("## Lore Bootstrap (hook-injected)");
-    expect(hookSource).not.toContain("Corpus pointer set");
-
-    // (c) the REAL hook, spawning the REAL binary, composes the framing line
-    // OUTSIDE a ```json fence with the injection JSON INSIDE it.
-    const { additionalContext } = runHookAgainstRealBinary(dir);
-
-    const framingIndex = additionalContext.indexOf(BOOTSTRAP_FRAMING_LINE);
-    expect(framingIndex).toBeGreaterThanOrEqual(0);
-
-    const fenceMatch = additionalContext.match(/```json\n([\s\S]*?)\n```/);
-    expect(fenceMatch).not.toBeNull();
-    const fenceStartIndex = additionalContext.indexOf(fenceMatch![0]);
-    expect(framingIndex).toBeLessThan(fenceStartIndex);
-
-    const fencedJson = fenceMatch![1]!;
-    expect(fencedJson).not.toContain(BOOTSTRAP_FRAMING_LINE);
-    const fencedParsed = JSON.parse(fencedJson) as Record<string, unknown>;
-    expect(fencedParsed).toHaveProperty("scope_declaration");
-    // Ties the hook's relayed JSON back to the SAME real binary output —
-    // proves the hook relayed the REAL injection, not a stub's canned text.
-    expect(fencedParsed).toEqual(directParsed);
-  });
-});
-
 // ─── "scope closure" (AC-CP-4) ──────────────────────────────────────────────
 
 type McpServerInternal = {
@@ -374,7 +270,7 @@ describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout a
     app.close();
   });
 
-  it("scope closure — RESUME_SCOPE_CLOSURE verbatim on both surfaces, naming every BOOTSTRAP_INJECTION_KNOWN_KEYS member", async () => {
+  it("scope closure — RESUME_SCOPE_CLOSURE verbatim on both surfaces, naming every BOOTSTRAP_RESUME_CLOSURE_KEYS member", async () => {
     const cliResult = runLore(["feed", "session-resume", "--plan", planSlug], dir);
     expect(cliResult.exitCode).toBe(0);
     expect(cliResult.stdout).toContain(RESUME_SCOPE_CLOSURE);
@@ -385,8 +281,8 @@ describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout a
     const data = parseToolResult(mcpResult) as { feed: string };
     expect(data.feed).toContain(RESUME_SCOPE_CLOSURE);
 
-    expect(BOOTSTRAP_INJECTION_KNOWN_KEYS.size).toBeGreaterThan(0);
-    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+    expect(BOOTSTRAP_RESUME_CLOSURE_KEYS.size).toBeGreaterThan(0);
+    for (const key of BOOTSTRAP_RESUME_CLOSURE_KEYS) {
       expect(RESUME_SCOPE_CLOSURE).toContain(key);
     }
   });
@@ -394,8 +290,8 @@ describe("AC-CP-4: resume ticket scope closure on BOTH the compiled CLI stdout a
 
 // ─── "governance rule" (AC-CP-9) ────────────────────────────────────────────
 
-describe("AC-CP-9: compiled dist/lore governance FEED rule names every injected key (except resume_hint) + every source category (D4)", () => {
-  it("governance rule — FEED text names every BOOTSTRAP_INJECTION_KNOWN_KEYS member except resume_hint, every SOURCE_CATEGORY_TOKENS member, and resume_hint stays absent from the asset", () => {
+describe("AC-CP-9: compiled dist/lore governance FEED rule names every source category (D4)", () => {
+  it("governance rule — FEED text names every SOURCE_CATEGORY_TOKENS member, and resume_hint stays absent from the asset", () => {
     // RE-BASELINE: originally `lore governance` stdout (the retired
     // corpus-workflow topic; now exits non-zero, D9) — the same assertions run
     // against the fragment sources that replaced it. Not a weakening: the
@@ -406,18 +302,6 @@ describe("AC-CP-9: compiled dist/lore governance FEED rule names every injected 
     expect(retired.stderr).toContain("retired");
     expect(GOVERNANCE_FRAGMENT_FILES.length).toBeGreaterThan(0);
     const result = { stdout: governanceFragmentText() };
-
-    // The exclusion is MANDATORY, not incidental: spec-session-start-handoff-neutrality
-    // pins resume_hint to ZERO literal occurrences in this SAME asset, so an
-    // unconditional ten-key iteration is unsatisfiable — checked directly below.
-    expect(BOOTSTRAP_INJECTION_KNOWN_KEYS.has("resume_hint")).toBe(true);
-    let namedCount = 0;
-    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
-      if (key === "resume_hint") continue;
-      expect(result.stdout).toContain(key);
-      namedCount += 1;
-    }
-    expect(namedCount).toBe(BOOTSTRAP_INJECTION_KNOWN_KEYS.size - 1);
 
     expect(SOURCE_CATEGORY_TOKENS.length).toBeGreaterThan(0);
     for (const token of SOURCE_CATEGORY_TOKENS) {
@@ -442,9 +326,6 @@ describe("AC-CP-9: compiled dist/lore governance FEED rule names every injected 
       : [];
     expect(ruleFiles.length).toBe(GOVERNANCE_FRAGMENT_FILES.length);
     const delivered = ruleFiles.map((f) => readFileSync(join(rulesDir, f), "utf8")).join("\n");
-    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
-      if (key !== "resume_hint") expect(delivered).toContain(key);
-    }
     for (const token of SOURCE_CATEGORY_TOKENS) {
       expect(delivered).toContain(token);
     }
@@ -495,11 +376,6 @@ describe("AC-CP-6: throwaway out-of-tree corpus reproduces both boundary declara
 
     // (b) both boundary declarations reproduce here, matching their exported
     // constants by identity.
-    const injectionResult = runLore(["bootstrap", "--injection"], dir);
-    expect(injectionResult.exitCode).toBe(0);
-    const parsedInjection = JSON.parse(injectionResult.stdout.trim()) as { scope_declaration: string };
-    expect(parsedInjection.scope_declaration).toBe(BOOTSTRAP_SCOPE_DECLARATION);
-
     const resumeResult = runLore(["feed", "session-resume", "--plan", planSlug], dir);
     expect(resumeResult.exitCode).toBe(0);
     expect(resumeResult.stdout).toContain(RESUME_SCOPE_CLOSURE);

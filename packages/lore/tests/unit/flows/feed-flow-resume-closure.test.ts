@@ -14,7 +14,7 @@
  *
  * Every assertion pins IDENTITY against the exported `RESUME_SCOPE_CLOSURE`
  * constant (D6) — never a remembered substring — and iterates the exported
- * `BOOTSTRAP_INJECTION_KNOWN_KEYS` set to assert the constant names each
+ * `BOOTSTRAP_RESUME_CLOSURE_KEYS` set to assert the constant names each
  * member, so a future field added to that set fails this suite until
  * `RESUME_SCOPE_CLOSURE` (derived from it in `@lore/core`) is regenerated.
  *
@@ -31,7 +31,7 @@
  *   STATE:      a live readiness pointer renders BETWEEN the ticket content and
  *               the closure block — the closure is always the LAST block
  *   REGRESSION: a multi-actor result also carries the closure exactly once;
- *               `RESUME_SCOPE_CLOSURE` names every `BOOTSTRAP_INJECTION_KNOWN_KEYS`
+ *               `RESUME_SCOPE_CLOSURE` names every `BOOTSTRAP_RESUME_CLOSURE_KEYS`
  *               member (iterated, one assertion per member)
  *
  * @spec_ref spec-context-provenance-injected-corpus-global-state-and-a §Design
@@ -39,7 +39,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { BOOTSTRAP_INJECTION_KNOWN_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
+import { BOOTSTRAP_RESUME_CLOSURE_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { renderResumeFeed } from "../../../src/flows/feed-flow.js";
 import type { ResumeHandoffRecord, ResumeResult } from "../../../src/service/session-service.js";
 
@@ -152,9 +152,9 @@ describe("renderResumeFeed — D3 scope closure", () => {
       expect(feed.split(RESUME_SCOPE_CLOSURE)).toHaveLength(2);
     });
 
-    it("RESUME_SCOPE_CLOSURE names every BOOTSTRAP_INJECTION_KNOWN_KEYS member (iterated, one assertion per member)", () => {
-      expect(BOOTSTRAP_INJECTION_KNOWN_KEYS.size).toBeGreaterThan(0);
-      for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+    it("RESUME_SCOPE_CLOSURE names every BOOTSTRAP_RESUME_CLOSURE_KEYS member (iterated, one assertion per member)", () => {
+      expect(BOOTSTRAP_RESUME_CLOSURE_KEYS.size).toBeGreaterThan(0);
+      for (const key of BOOTSTRAP_RESUME_CLOSURE_KEYS) {
         expect(RESUME_SCOPE_CLOSURE.includes(key)).toBe(true);
       }
     });

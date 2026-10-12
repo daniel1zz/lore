@@ -604,32 +604,28 @@ const WorkflowConfigSchema = z
       .strict()
       .optional(),
     /**
-     * `lore bootstrap --injection`'s tier-1 payload trimming knobs
-     * (SPEC-080(bootstrap-injection; corpus slug
-     * spec-080-bootstrap-injection-projection-tier-1-tier-2-payload)
-     * §Public Interface `BootstrapInjectionBudgets`) — count caps + char
-     * budget consumed by `buildBootstrapInjection` (`session.ts`). Unlike
-     * `task_feed` above (whose fields are optional/no-default because the
-     * FLOW module owns the default constant), every field here carries its
-     * own Zod-level default — the `claim_ttl_minutes` DI precedent: `app.ts`
-     * resolves this section via `resolveBootstrapInjectionBudgets` below and
-     * threads the result into `buildBootstrapInjection` as a plain scalar
-     * object, never a raw config passthrough (SPEC-080(bootstrap-injection) §Module Boundary).
+     * `lore bootstrap --injection` knobs
+     * (spec-session-start-injection-carries-only-the-session-s-own D5).
+     * Only `char_budget` is live (the compact-length ceiling that SETS
+     * `budget_exceeded`, never slices). `max_active_plans`/`max_handoffs`/
+     * `max_pending_slugs` are RETIRED — the injection no longer carries the
+     * fields they capped — but still parse (a hard parse failure would break
+     * every consumer config that set them).
      *
-     * @invariant Absence of the whole `workflow` section, or of
-     *   `bootstrap_injection` within it, or of an individual field, ALL fall
-     *   back to that field's own schema default (5 / 3 / 3 / 8000) — same
-     *   "absence = default" shape as `staleness`/`drift`/`attestation` above.
+     * @invariant The three retired keys are OPTIONAL with NO schema default: a
+     *   `.default()` would make "the user set this" undetectable, and
+     *   `resolveBootstrapInjectionBudgets` must emit ONE stderr deprecation
+     *   line per SET key (no silent acceptance). Values are never consumed.
      */
     bootstrap_injection: z
       .object({
-        /** Max `active_plans[]` entries kept in the injection payload. Default: 5. */
-        max_active_plans: z.number().int().positive().default(5),
-        /** Max `latest_handoffs[]` entries kept in the injection payload. Default: 3. */
-        max_handoffs: z.number().int().positive().default(3),
-        /** Max `pending_reviews.slugs[]` entries kept in the injection payload. Default: 3. */
-        max_pending_slugs: z.number().int().positive().default(3),
-        /** Compact-serialized char budget the payload is trimmed against. Default: 8000. */
+        /** @deprecated Retired — parsed, warned about once per process, never used. */
+        max_active_plans: z.number().int().positive().optional(),
+        /** @deprecated Retired — parsed, warned about once per process, never used. */
+        max_handoffs: z.number().int().positive().optional(),
+        /** @deprecated Retired — parsed, warned about once per process, never used. */
+        max_pending_slugs: z.number().int().positive().optional(),
+        /** Compact-serialized char budget; exceeding it sets `budget_exceeded`, never slices. Default: 8000. */
         char_budget: z.number().int().positive().default(8000),
       })
       .strict()
@@ -2183,32 +2179,52 @@ export function resolveSetupCheckReminderEnabled(config: LoreConfig | undefined)
 }
 
 /**
- * Resolve the effective `workflow.bootstrap_injection.*` budgets as a
- * `BootstrapInjectionBudgets` (SPEC-080(bootstrap-injection) §Public Interface) from an optional
- * LoreConfig. Mirrors {@link resolveStalenessDefaults} exactly — absence of
- * the whole config, the `workflow` section, or `workflow.bootstrap_injection`
- * specifically all fall back to the schema defaults ({5, 3, 3, 8000}).
+ * The retired `workflow.bootstrap_injection.*` count-cap keys
+ * (spec-session-start-injection-carries-only-the-session-s-own D5). Still
+ * parsed, never consumed; a SET key earns one stderr deprecation line.
+ */
+const RETIRED_BOOTSTRAP_INJECTION_KEYS = ["max_active_plans", "max_handoffs", "max_pending_slugs"] as const;
+
+/**
+ * Module-level "already warned about this retired key" set — once PER KEY per
+ * PROCESS (D5). Deliberately not keyed on the config object: the spec's
+ * contract is "one stderr line per set key, once per process".
+ */
+const retiredBootstrapKeyWarned = new Set<string>();
+
+/**
+ * Resolve the effective `workflow.bootstrap_injection.*` budget as a
+ * `BootstrapInjectionBudgets` from an optional LoreConfig. Absence of the whole
+ * config, the `workflow` section, or `workflow.bootstrap_injection` falls back
+ * to the schema default ({charBudget: 8000}).
+ *
+ * Side effect (the ONE in this resolver, D5): for each RETIRED key present in
+ * the config (`max_active_plans`, `max_handoffs`, `max_pending_slugs`) it
+ * writes a single deprecation line to stderr, once per key per process. The
+ * values themselves are never used.
  *
  * @param config - Parsed LoreConfig, or undefined when no config file was loaded
- * @returns `{maxActivePlans, maxHandoffs, maxPendingSlugs, charBudget}` — the
- *   exact scalar shape `buildBootstrapInjection` (`session.ts`) accepts as
- *   its `budgets` parameter (the `claim_ttl_minutes` DI precedent: a caller
- *   resolves this ONCE and threads the plain object, never a raw config
- *   passthrough).
+ * @returns `{charBudget}` — the exact shape `buildBootstrapInjection` accepts
  * @example
  *   resolveBootstrapInjectionBudgets(undefined)
- *   // => { maxActivePlans: 5, maxHandoffs: 3, maxPendingSlugs: 3, charBudget: 8000 }
+ *   // => { charBudget: 8000 }
  *   resolveBootstrapInjectionBudgets({ ..., workflow: { bootstrap_injection: { char_budget: 4000 } } })
- *   // => { maxActivePlans: 5, maxHandoffs: 3, maxPendingSlugs: 3, charBudget: 4000 }
+ *   // => { charBudget: 4000 }
  */
 export function resolveBootstrapInjectionBudgets(config: LoreConfig | undefined): BootstrapInjectionBudgets {
   const section = (config?.workflow ?? WorkflowConfigSchema.parse({})).bootstrap_injection;
-  return {
-    maxActivePlans: section.max_active_plans,
-    maxHandoffs: section.max_handoffs,
-    maxPendingSlugs: section.max_pending_slugs,
-    charBudget: section.char_budget,
-  };
+  for (const key of RETIRED_BOOTSTRAP_INJECTION_KEYS) {
+    if (section[key] === undefined || retiredBootstrapKeyWarned.has(key)) continue;
+    retiredBootstrapKeyWarned.add(key);
+    // reason: the documented ONE side effect of this resolver (D5) — a retired
+    // knob must be announced, never silently accepted. stderr only: stdout is
+    // the hook's blind pipe.
+    console.warn(
+      `lore: workflow.bootstrap_injection.${key} is deprecated and ignored — the session-start injection ` +
+        "no longer carries that field; remove it from .lore/config.yaml.",
+    );
+  }
+  return { charBudget: section.char_budget };
 }
 
 /**

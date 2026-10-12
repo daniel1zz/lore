@@ -16,49 +16,32 @@
  * invoking identity (utils.ts::resolveActor) is used. Only filters `my_claims`; every other field is
  * corpus-wide regardless of `by`.
  *
- * **`--injection` (SPEC-080(bootstrap-injection) §Module Boundary CLI bullet, D3, D5)** — renders the
- * SAME `BootstrapReportWithStaleness` through `@lore/core`'s
- * `buildBootstrapInjection`, printing its compact `json` verbatim (never the
- * `{ok, data}` envelope plain `--json` uses — the hook is a blind pipe, D3, and
- * expects exactly this string on stdout — SPEC-080 AC-080-3's bare-JSON
- * contract is a documented public CLI shape, `lore bootstrap --injection | jq`
- * being a real consumer, so this stream carries NOTHING else. The
- * spec-context-provenance-injected-corpus-global-state-and-a D2 scope-boundary
- * line is served from a SEPARATE verb, `lore governance bootstrap-framing`
- * (`commands/governance.ts`) — the hook's Phase E spawns both independently
- * rather than this command mixing prose into its JSON stream; see that
- * module's header for why "one stream the hook must split" was rejected in
- * favor of "two spawns, each relayed verbatim"). Budgets resolve from
- * `workflow.bootstrap_injection.*` via `resolveBootstrapInjectionBudgets(config)`,
- * the SAME `config` this command already threads through from `loadLoreApp()` for
- * telemetry (`app.ts` needs no change — `loadLoreApp()` already resolves and
- * returns the parsed project config; there is exactly one config-resolution path
- * here, mirroring the `claimTtlMinutes` DI precedent SPEC-080(bootstrap-injection) names). **Combined
- * `--injection --json` decision**: `--injection` takes precedence and produces the
- * SAME compact injection payload as `--injection` alone — never a rejection. The
- * SessionStart hook only ever spawns `--injection` on its own, so the two flags
- * have no real combined use case; erroring on a harmless overlap would just be
- * one more exit-2 path for callers to special-case. Plain `--json` and the human
- * text format are BYTE-UNCHANGED by this addition (`--injection` is a strict
- * additive branch ahead of the existing `if (args.json)` check).
+ * **`--injection` (spec-session-start-injection-carries-only-the-session-s-own)** —
+ * the SessionStart hook's payload carries ONLY the seat's own open items:
+ * the unfinished claims `SessionService.seatClaims` finds for the seat
+ * (matched by branch name OR realpath of the worktree directory, D11) plus
+ * the seat plan's `resume_hint`, composed by `@lore/core`'s pure
+ * `buildBootstrapInjection`. A main-checkout session (no seat flags), or a
+ * seat with neither, prints NOTHING (exit 0, empty stdout — D2: any text is a
+ * per-session cost with zero information). The stream carries bare compact
+ * JSON and nothing else (the hook is a blind pipe); the scope-boundary line is
+ * served by the separate `lore governance bootstrap-framing` verb, spawned by
+ * the hook only when this command printed a payload.
  *
- * **`resume_hint` neutrality (spec-session-start-handoff-neutrality D1, D2)** —
- * the injection payload OMITS `resume_hint` entirely for an ordinary session
- * (the user is the router; an ambient "resume this" guess misdirects every
- * session but one in a multi-session workflow). The ONE exception is a
- * seat-scoped call (`--seat-branch` given AND `SessionService.bootstrap`
- * resolved it to a live plan, i.e. `result.value.seat_unresolved` is NOT
- * `true`) — that hint derives from the session's own worktree branch, not a
- * corpus-wide guess, so `seatScoped` is computed HERE (this command holds
- * both halves of the signal) and threaded into `buildBootstrapInjection` as
- * its third argument. Plain `--json`'s full `BootstrapReport` is unaffected —
- * `resume_hint` still appears there unconditionally, same as before.
+ * `--seat-branch` and `--seat-worktree` are REQUIRED TOGETHER in `--injection`
+ * mode (D11): the `process.cwd()` default for `--seat-worktree` is removed for
+ * this mode and either flag without the other exits 2. Plain `bootstrap`
+ * keeps its SPEC-057 behaviour (`--seat-branch` alone, worktree defaulting to
+ * cwd) byte-unchanged. `--injection` takes precedence over `--json`. The
+ * budget (`workflow.bootstrap_injection.char_budget`) resolves via
+ * `resolveBootstrapInjectionBudgets(config)`, which also announces any retired
+ * count-cap key on stderr (D5).
  *
  * Exit codes: 0 = success (including an empty corpus — `root: null`, every array
  *   `[]`, AC-SL-10), non-zero only on an underlying store error.
  *
- * Source: SPEC-041 §3 D1, D2; SPEC-080(bootstrap-injection) §Module Boundary, D3, D5;
- * spec-session-start-handoff-neutrality §Design Decisions D1, D2
+ * Source: SPEC-041 §3 D1, D2; spec-session-start-injection-carries-only-the-session-s-own
+ * §Module Boundary, D1-D3, D11
  */
 
 import { defineCommand } from "citty";
@@ -207,29 +190,26 @@ export default defineCommand({
     injection: {
       type: "boolean",
       description:
-        "SPEC-080(bootstrap-injection) tier-1 injection projection — print buildBootstrapInjection's compact " +
-        "JSON ([resume_hint/]my_claims/active_sessions/armed_gates/root/pending_reviews/" +
-        "active_plans/latest_handoffs/corpus/omitted[/budget_exceeded]) instead of the " +
-        "full report. resume_hint appears ONLY for a seat-scoped call (--seat-branch " +
-        "resolved to a live plan) — an ordinary session omits it entirely " +
-        "(spec-session-start-handoff-neutrality D1, D2). Takes precedence over --json " +
-        "when both are given (same compact injection payload either way — see this " +
-        "file's module header).",
+        "Session-start injection — print ONLY the seat's own open items as compact JSON " +
+        "(scope_declaration, [resume_hint,] seat_claims[, budget_exceeded]), or NOTHING (exit 0) " +
+        "when there are none. Requires --seat-branch AND --seat-worktree together (exit 2 otherwise); " +
+        "without them (main checkout) prints nothing. Takes precedence over --json.",
     },
     "seat-branch": {
       type: "string",
       description:
-        "SPEC-057 D2 — the caller's resolved seat/worktree branch (the SessionStart hook's Phase D " +
-        "detection, or a manual invocation). When given, resume_hint scopes to the matching plan's own " +
-        "newest handoff; an unresolvable branch degrades to the corpus-global newest handoff and sets " +
-        "seat_unresolved: true.",
+        "The caller's seat/worktree branch (the SessionStart hook's Phase D detection, or a manual " +
+        "invocation). Plain bootstrap: scopes resume_hint to the matching plan's own newest handoff; an " +
+        "unresolvable branch degrades to the corpus-global newest handoff and sets seat_unresolved: true. " +
+        "--injection: matched against each task claim's recorded worktree; must be paired with --seat-worktree.",
     },
     "seat-worktree": {
       type: "string",
       description:
-        "SPEC-057 D2 — the caller's worktree path, paired with --seat-branch. Currently unconsulted by " +
-        "resolution (kept for signature completeness); defaults to the current working directory when " +
-        "--seat-branch is given but this is omitted.",
+        "The caller's worktree directory, paired with --seat-branch. --injection: REQUIRED with " +
+        "--seat-branch and matched (realpath-normalised) against absolute-path claim worktrees. Plain " +
+        "bootstrap: unconsulted by resolution; defaults to the current working directory when " +
+        "--seat-branch is given alone.",
     },
   },
   async run({ args }) {
@@ -243,12 +223,52 @@ export default defineCommand({
 
       const by = resolveActor(typeof args.by === "string" ? args.by : undefined);
       const seatBranch = typeof args["seat-branch"] === "string" ? args["seat-branch"] : undefined;
+      const seatWorktreeArg = typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : undefined;
+
+      if (args.injection) {
+        // D11 — the pair is required together in this mode; no cwd default.
+        if ((seatBranch === undefined) !== (seatWorktreeArg === undefined)) {
+          process.stderr.write(
+            "Error: --seat-branch and --seat-worktree must be given together with --injection.\n",
+          );
+          process.exitCode = 2;
+          return;
+        }
+        // Resolved BEFORE the main-checkout early-out so a retired knob is announced on every call (D5).
+        const budgets = resolveBootstrapInjectionBudgets(config);
+        if (seatBranch === undefined || seatWorktreeArg === undefined) return; // main checkout: print NOTHING (D2)
+
+        const injectionSeat = { branch: seatBranch, worktree: seatWorktreeArg };
+        const injectionReport = await app.sessionService.bootstrap(by, undefined, injectionSeat);
+        if (!injectionReport.ok) {
+          process.stderr.write(formatError(injectionReport.error) + "\n");
+          process.exitCode = exitCode(injectionReport.error);
+          return;
+        }
+        const seatClaims = await app.sessionService.seatClaims(injectionSeat);
+        if (!seatClaims.ok) {
+          process.stderr.write(formatError(seatClaims.error) + "\n");
+          process.exitCode = exitCode(seatClaims.error);
+          return;
+        }
+        const { json } = buildBootstrapInjection(
+          {
+            report: injectionReport.value,
+            seat: {
+              ...injectionSeat,
+              planResolved: injectionReport.value.seat_unresolved !== true,
+              claims: seatClaims.value,
+            },
+          },
+          budgets,
+        );
+        if (json !== "") console.log(json);
+        return;
+      }
+
       const seat =
         seatBranch !== undefined
-          ? {
-              branch: seatBranch,
-              worktree: typeof args["seat-worktree"] === "string" ? args["seat-worktree"] : process.cwd(),
-            }
+          ? { branch: seatBranch, worktree: seatWorktreeArg ?? process.cwd() }
           : undefined;
       const result = await app.sessionService.bootstrap(by, undefined, seat);
 
@@ -295,24 +315,7 @@ export default defineCommand({
         },
       };
 
-      if (args.injection) {
-        // SPEC-080(bootstrap-injection) D3, D5 — resolve budgets from the SAME config loadLoreApp() already
-        // parsed (one resolution path, claimTtlMinutes DI precedent), then print the
-        // projection's compact json verbatim. Takes precedence over --json (module
-        // header's "Combined --injection --json decision").
-        const budgets = resolveBootstrapInjectionBudgets(config);
-        // spec-session-start-handoff-neutrality D1, D2 — "seat-scoped" (resume_hint
-        // survives the injection) can ONLY be computed HERE: this command already
-        // holds both halves of the signal (whether `--seat-branch` was given at
-        // all, and whether SessionService resolved it to a live plan via the
-        // ABSENCE of `seat_unresolved: true`) — the seat signal deliberately never
-        // round-trips through `BootstrapReport` itself (D1's "do not touch the
-        // full report's schema/shape" constraint), so `buildBootstrapInjection`
-        // cannot re-derive this from `report` alone.
-        const seatScoped = seat !== undefined && result.value.seat_unresolved !== true;
-        const { json } = buildBootstrapInjection(reportWithStaleness, budgets, seatScoped);
-        console.log(json);
-      } else if (args.json) {
+      if (args.json) {
         console.log(JSON.stringify({ ok: true, data: reportWithStaleness }, null, 2));
       } else {
         console.log(formatBootstrapReport(reportWithStaleness, by));
