@@ -480,7 +480,10 @@ const CORPUS_WORKFLOW_FRAGMENT_RELS = [
 /** sha256 of each fragment BODY (text after the frontmatter) — measured equal to the verbatim sections of the deleted file. */
 const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)[number], string> = {
   "context/corpus-workflow-0-overview.md": "31bec6c00584c31708413d8c34e0494bbfe758b9d3d43c6bc3d1e8780c0b070f",
-  "context/corpus-workflow-1-feed.md": "c855096f19fc2fa7b727112789303c542dbe91c2d6df56ff7edffd145c3eaa30",
+  // RE-BASELINE (task-prose-sweep-shipped-assets-say-pull-lore-bootstrap-when, AC-SI-5): the feed rule no longer
+  // calls the bootstrap hook-injected; it says the injection carries only the seat's claims + plan handoff and
+  // corpus state is pulled on demand (`lore bootstrap` / `lore ready` / `lore pending`).
+  "context/corpus-workflow-1-feed.md": "1be0b0593fba4b02cd75a2ddba4e8a7df8579a3e00b0e6bdc09d61dbfa9edab9",
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
   "context/corpus-workflow-2-produce.md": "d2aec41b999e977dd56d65398062d76402940878a1eb1dcdaa9736d196d37ab9",
   "context/corpus-workflow-3-execute.md": "acf9e945bef3b056c200d06e0f7714b4711f54cd9bd59d0d6a824545937ae944",

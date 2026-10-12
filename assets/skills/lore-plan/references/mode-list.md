@@ -4,7 +4,7 @@
 
 ## Mandatory
 
-- **Session start**: the hook-injected bootstrap (`lore bootstrap --json`) already carries active_plans — consume it, don't re-derive
+- **Session start**: the injection carries no plan list; run `lore bootstrap --json` on demand for active_plans
 - If an active (unfinished) plan exists → MUST prompt user to resume or skip
 
 ## Workflow

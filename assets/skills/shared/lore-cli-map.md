@@ -14,7 +14,7 @@ AI judges are advisory only. Never bypass a gate (`LORE_GATE_BYPASS=1`) without 
 
 | DocMan (retired) | lore equivalent |
 |---|---|
-| `get_session_bootstrap` | hook-injected at SessionStart (`lore bootstrap --json`: root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, active_sessions) — consume, don't re-call |
+| `get_session_bootstrap` | pulled on demand with `lore bootstrap --json` (root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, active_sessions); the session-start injection carries only this seat's claims and plan handoff |
 | `search` | `lore search "<q>" [--type t] --json` |
 | `get_doc` / `get_topic_context` | `lore get <id-or-slug>` (+ `--resolve-mdx`); `lore tree [<plan>]` |
 | `create_intent` | `lore create prd --title ... --content ...` |

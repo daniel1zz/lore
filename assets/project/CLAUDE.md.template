@@ -12,7 +12,7 @@ This repository's shared knowledge, plans, and tasks live in the local Lore corp
 - `lore search <query>` — full-text search the corpus
 - `lore get <id-or-slug>` — read a document
 - `lore tree` — view the document hierarchy
-- `lore bootstrap` — session pointer set (root PRD, active plans, pending reviews, your claims)
+- `lore bootstrap` — session pointer set (root PRD, active plans, pending reviews, your claims), pulled on demand; also `lore ready <plan>` / `lore pending`
 - `lore status` — corpus health snapshot
 
 This file's content contract (what belongs here vs. the corpus, and the line/byte ceiling) is printed by `lore governance claude-md` — read it before editing this file by hand.
