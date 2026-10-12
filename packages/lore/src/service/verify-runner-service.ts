@@ -2005,6 +2005,50 @@ export class VerifyRunnerService {
         FALSIFIER_OUTPUT_TAIL_MAX_CHARS,
       );
 
+      // reason: spec-evidence-labels-and-reds-are-honest D9 / BR-1075 (#53 ii) — a mutated run
+      // that found no tests (discovery refusal) or ended 126/127 (command not runnable / not
+      // found) proves nothing about the mutation, so it is NEVER an attested expected-fail,
+      // even when the declared exit code equals the observed one. Checked BEFORE `matched`
+      // so the declared code cannot launder it; a timeout is a different signal and excluded.
+      const discoveryRefusal =
+        !timedOut && criterion.verify.oracle === "test" ? findDiscoveryRefusal(outputTail) : null;
+      const unrunnableExit = !timedOut && (exitCode === 126 || exitCode === 127);
+      if (discoveryRefusal !== null || unrunnableExit) {
+        const why =
+          discoveryRefusal !== null
+            ? `${discoveryRefusal.runner} reported a discovery refusal ("${discoveryRefusal.evidence}") — no test ran`
+            : `the command ended with exit code ${exitCode} (not runnable / not found)`;
+        const refusalTail = tailChars(
+          `${combinedOutputTail}\n[attested-red] AC "${criterion.id}": ${why}; the mutated run ` +
+            "proves nothing about the falsifier — recorded inconclusive (runner-unattested), " +
+            "never an expected fail.",
+          FALSIFIER_OUTPUT_TAIL_MAX_CHARS,
+        );
+        const inconclusiveResult = await this.recordVerifiedEvidence(
+          task.id,
+          {
+            oracle: criterion.verify.oracle,
+            command: criterion.verify.command,
+            result: "inconclusive",
+            recorded_by: opts.by,
+            capture_source: RUNNER_UNATTESTED_CAPTURE_SOURCE,
+            ac_ref: criterion.id,
+            output_tail: refusalTail,
+            // reason: NO `attestation` — an attested row would promise a proven red.
+          },
+          opts.nowIso,
+        );
+        if (!inconclusiveResult.ok) return inconclusiveResult;
+        return ok({
+          task: { id: task.id, slug: task.slug },
+          ac_id: criterion.id,
+          expected_exit_code: falsifier.expected_exit_code,
+          exit_code: exitCode,
+          output_tail: refusalTail,
+          result: "inconclusive",
+        });
+      }
+
       if (!matched) {
         return err({
           code: "VALIDATION_ERROR",
