@@ -106,6 +106,17 @@ describe("AC-RS-5 refresh writes and prunes skill folders", () => {
     expect(fs.ops.filter((op) => op.includes("lore-plan"))).toEqual([]);
   });
 
+  it("AC-RS-5 a fingerprinted SKILL.md copied into a differently named lore-* dir is not pruned", async () => {
+    const { fs, deps } = setup(PROJECT_FRAGMENT_FOO);
+    await runContextRefresh(deps, "", { scope: "project", rulesOnly: true });
+    const copied = (await fs.readFile(FOO_PATH)) ?? "";
+    await fs.inner.writeFile(`${PROJECT_DIR}/lore-copy/SKILL.md`, copied);
+    const result = await runContextRefresh(deps, "", { scope: "project", rulesOnly: true });
+    expect(result.ok).toBe(true);
+    expect(await fs.readFile(`${PROJECT_DIR}/lore-copy/SKILL.md`)).toBe(copied);
+    expect(fs.ops.filter((op) => op.includes("lore-copy"))).toEqual([]);
+  });
+
   it("AC-RS-5 a hand-edited skill file is diverged_skip and never overwritten or pruned", async () => {
     const { fs, deps } = setup(PROJECT_FRAGMENT_FOO);
     await runContextRefresh(deps, "", { scope: "project", rulesOnly: true });

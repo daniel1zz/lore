@@ -45,8 +45,8 @@
  *     fingerprint), where skillsDir = `<project>/.claude/skills` (scope project, also under `rulesOnly`) or
  *     `<home>/.claude/skills` (scope user). Same per-file states as rules files. A `lore-*` dir is
  *     pruned ONLY when its SKILL.md carries an intact fingerprint whose id and name agree with the dir
- *     name (the `isLoreSkillDir` predicate, evaluated on bytes read through the port so the CAS covers
- *     it); a fingerprint-less or hand-edited dir is never touched, because shipped lore skills live in
+ *     name (`isLoreSkillFileBytes`, the same predicate `isLoreSkillDir` uses, evaluated on bytes read through
+ *     the port so the CAS covers it); a fingerprint-less or hand-edited dir is never touched, because shipped lore skills live in
  *     `lore-*` dirs too. A skill fragment whose dir name equals a skill shipped with lore
  *     (`deps.shippedSkillNames`, else `<assetsRoot>/skills/lore-*` listed through the port) is refused
  *     with VALIDATION_ERROR (exit 4) and zero writes. Pruning removes SKILL.md (the port deletes
@@ -142,6 +142,7 @@ import { discoverFragments } from "../service/context-fragments/discover.js";
 import {
   isLoreRulesFileName,
   parseRulesFile,
+  isLoreSkillFileBytes,
   parseSkillFile,
   renderRulesFile,
   renderSkillFile,
@@ -149,7 +150,6 @@ import {
   RULES_FILE_SUFFIX,
   SKILL_DIR_PREFIX,
   SKILL_FILE_NAME,
-  skillDirName,
 } from "../service/context-fragments/section.js";
 import { checkOverrides, selectFragments } from "../service/context-fragments/select.js";
 
@@ -644,8 +644,7 @@ async function planSkillDirs(
     const path = joinPortPath(skillsDir, name, SKILL_FILE_NAME);
     const bytes = await deps.fs.readFile(path);
     if (bytes === null) continue;
-    const parsed = parseSkillFile(bytes);
-    if (parsed === null || !parsed.intact || parsed.name !== name || skillDirName(parsed.id) !== name) continue;
+    if (!isLoreSkillFileBytes(name, bytes)) continue;
     if (deps.fs.deleteFile === undefined) {
       return err({
         code: "VALIDATION_ERROR",
@@ -654,7 +653,7 @@ async function planSkillDirs(
         value: path,
       });
     }
-    actions.push({ kind: "delete", outcome: { id: parsed.id, path, state: "pruned" }, readBytes: bytes });
+    actions.push({ kind: "delete", outcome: { id: name.slice(SKILL_DIR_PREFIX.length), path, state: "pruned" }, readBytes: bytes });
   }
   return ok(actions);
 }

@@ -5,7 +5,7 @@
  *
  * Public surface: `RULES_FILE_PREFIX`, `RULES_FILE_SUFFIX`, `rulesFileName`, `renderRulesFile`,
  * `parseRulesFile`, `isLoreRulesFileName`, `RulesFileRender`, `ParsedRulesFile`; skill files (BR-1064):
- * `renderSkillFile`, `parseSkillFile`, `isLoreSkillDir`, `skillDirName`, `SKILL_DIR_PREFIX`,
+ * `renderSkillFile`, `parseSkillFile`, `isLoreSkillFileBytes`, `isLoreSkillDir`, `skillDirName`, `SKILL_DIR_PREFIX`,
  * `SKILL_FILE_NAME`, `SkillFileRender`, `ParsedSkillFile`.
  * Invariants:
  *   - File = `<!-- lore:managed fragment=<id> hash=<8hex> -->\n` + rest; `rest` is the fragment
@@ -208,7 +208,21 @@ export function parseSkillFile(content: string): ParsedSkillFile | null {
 }
 
 /**
- * True iff `dirPath/SKILL.md` exists, parses, is intact, and its name/fingerprint id agree with the directory name.
+ * The ONE ownership predicate for a skill directory: true iff `bytes` parse as a lore SKILL.md, the
+ * fingerprint is intact, and the frontmatter name and fingerprint id both agree with `dirName`.
+ * Pure; shared by `isLoreSkillDir` (disk) and the refresh flow (bytes read through its fs port).
+ *
+ * @param dirName The skill directory's base name (`lore-<id>`).
+ * @param bytes Complete SKILL.md contents.
+ */
+export function isLoreSkillFileBytes(dirName: string, bytes: string): boolean {
+  const parsed = parseSkillFile(bytes);
+  if (parsed === null || !parsed.intact) return false;
+  return parsed.name === dirName && skillDirName(parsed.id) === dirName;
+}
+
+/**
+ * True iff `dirPath/SKILL.md` exists and {@link isLoreSkillFileBytes} holds for it under `basename(dirPath)`.
  * A diverged or foreign skill directory is false and must never be overwritten or deleted by lore.
  *
  * @param dirPath Absolute path of a candidate `lore-<id>` skill directory.
@@ -223,7 +237,5 @@ export function isLoreSkillDir(dirPath: string): boolean {
     if (code === "ENOENT" || code === "ENOTDIR") return false;
     throw error;
   }
-  const parsed = parseSkillFile(content);
-  if (parsed === null || !parsed.intact) return false;
-  return parsed.name === skillDirName(parsed.id) && basename(dirPath) === parsed.name;
+  return isLoreSkillFileBytes(basename(dirPath), content);
 }
