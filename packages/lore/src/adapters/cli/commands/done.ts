@@ -151,6 +151,7 @@ import type { DocRecord, EvidenceEntry, LoreError, Result } from "@lore/core";
 import { loadLoreApp } from "../loader.js";
 import { exitCode, formatError, resolveActor } from "../utils.js";
 import { requirePhaseWorkflowService } from "../phase-wiring.js";
+import { resolveCallerSession } from "../caller-session.js";
 import { formatDoneMessage, formatLastTaskAdvisory } from "../done-render.js";
 
 /**
@@ -401,10 +402,13 @@ export default defineCommand({
         return;
       }
       const by = resolveActor();
+      // reason: the worktree-removal test's "mine" side (D2) — raw session id, unknown stays absent.
+      const callerSession = resolveCallerSession(undefined, process.env);
       const doneOpts = {
         by,
         harnessRun: verifiedIdentity?.value?.harnessRun ?? null,
         source: app.callerSurface,
+        ...(callerSession !== undefined ? { callerSession } : {}),
         ...(hasOverrideAttestation ? { overrideReason: overrideAttestationRaw } : {}),
         ...(citedOverrideReason !== undefined ? { overrideReason: citedOverrideReason } : {}),
         ...(hasNoNewTests ? { noNewTestsReason: noNewTestsRaw } : {}),

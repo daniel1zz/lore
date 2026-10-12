@@ -6,37 +6,40 @@
  * Public surface:
  *   - {@link WorktreeGitProbe}            — the ONLY IO seam: every git/fs question the predicate asks
  *   - {@link createRealWorktreeProbe}     — the real implementation (git subprocesses, plain commands)
- *   - {@link parseQuietMinutes}           — `LORE_WORKTREE_QUIET_MINUTES` -> minutes (default 30), fail loud
  *   - {@link collectRecordedWorktrees}    — claim audit history (+ current claim) -> recorded worktrees + claim-time base
  *   - {@link gatherWorktreeFacts}         — probe -> {@link WorktreeFacts} (IO, never throws)
- *   - {@link decideWorktreeCleanup}       — PURE: facts + quiet window + clock -> decision
+ *   - {@link decideWorktreeCleanup}       — PURE: facts -> decision (the removal clauses come from `decideWorktreeRemoval`)
  *   - {@link evaluateRecordedWorktree}    — gather + decide
  *   - {@link applyWorktreeRemoval}        — `git worktree remove` then `git branch -d` (never forced)
  *   - {@link formatWorktreeOutcomeLine}   — the `worktree: ...` line `lore done` prints
  *
  * Invariants:
- *   - REMOVE only when ALL hold: path exists and is a LINKED worktree of the repo (never the main
- *     checkout); no tracked/untracked changes; >= 1 commit beyond the worktree HEAD recorded at claim
- *     time (`base_sha`) with every such commit reachable from `main`; no reflog activity for the quiet
- *     window; not `git worktree lock`ed; not recorded by a still-active task's claim; the caller's cwd
- *     is not inside it.
+ *   - REMOVE only when ALL hold: the single worktree-removal test (`worktree-removal-test.ts`: linked, clean, merged,
+ *     not locked, nobody inside, owned-or-abandoned — the ONE copy of those clauses) says removable; >= 1 commit
+ *     beyond the worktree HEAD recorded at claim time (`base_sha`); not recorded by a still-active task's claim.
+ *     No elapsed time is consulted (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a D5).
  *   - NO silent fallback: any git call that fails, or a missing claim-time base, yields
  *     `not-measured` (with the reason) — NEVER `remove`. "Unmeasured" is never read as "safe".
  *   - Removal is plain `git worktree remove` + `git branch -d`; neither `--force` nor `-D` ever appears.
  *     Git itself therefore refuses a dirty/locked worktree or an unmerged branch even if a probe lied.
  *
- * Side-effect class: pure ({@link decideWorktreeCleanup}, {@link parseQuietMinutes},
- *   {@link collectRecordedWorktrees}, {@link formatWorktreeOutcomeLine}); IO via the injected probe
- *   (everything else). The real probe spawns `git` subprocesses and reads the filesystem.
+ * Side-effect class: pure ({@link decideWorktreeCleanup}, {@link collectRecordedWorktrees},
+ *   {@link formatWorktreeOutcomeLine}); IO via the injected probe and removal-facts port (everything else). The
+ *   real probe spawns `git` subprocesses and reads the filesystem.
  *
- * Source: issue #106; BR-961, BR-962.
+ * Source: issue #106; BR-961, BR-962; spec-one-worktree-removal-test-for-the-guard-lore-done-and-a (BR-1079).
  */
 
 import { spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { err, ok, type LoreError, type Result } from "@lore/core";
 import type { AuditEntry } from "@lore/core";
+import {
+  decideWorktreeRemoval,
+  type Measured,
+  type WorktreeRemovalFacts,
+  type WorktreeRemovalFactsPort,
+} from "./worktree-removal-test.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -68,8 +71,8 @@ export interface WorktreeGitProbe {
   isDirty(path: string): ProbeResult<boolean>;
   /** `git rev-list --count <range>` run in `cwd`. */
   countCommits(cwd: string, range: string): ProbeResult<number>;
-  /** Newest reflog entry time (epoch seconds) across `HEAD` of the worktree and `refs/heads/<branch>`. */
-  newestReflogEpochSeconds(path: string, branch: string): ProbeResult<number>;
+  /** The integration branch (`main`, else `master`) a worktree must be merged into, resolved in `cwd`. */
+  integrationBranch(cwd: string): ProbeResult<string>;
   /** `git rev-parse HEAD` in `path`. */
   headSha(path: string): ProbeResult<string>;
   /** Plain `git worktree remove <path>` run from `repoRoot`. */
@@ -85,26 +88,22 @@ export interface RecordedWorktree {
   readonly baseSha: string | undefined;
 }
 
-/** What the probe measured about one recorded worktree — the pure decision's only input. */
+/** What was measured about one recorded worktree — the pure decision's only input. */
 export type WorktreeFacts =
   | { readonly kind: "gone" }
   | { readonly kind: "not-measured"; readonly reason: string }
-  | { readonly kind: "main-checkout" }
   | { readonly kind: "claimed-by-active-task" }
-  | { readonly kind: "cwd-inside-worktree" }
   | {
       readonly kind: "measured";
-      readonly locked: boolean;
-      readonly dirty: boolean;
-      readonly ownCommitCount: number;
-      /** Commits of the branch not reachable from `main`. Only meaningful when `ownCommitCount > 0`. */
-      readonly unmergedCount: number;
-      readonly newestReflogEpochSeconds: number;
+      /** The facts the single removal test reads. */
+      readonly removal: WorktreeRemovalFacts;
+      /** Commits beyond the claim-time base; a miss names why (detached HEAD, no base, git failure, main checkout). */
+      readonly ownCommitCount: Measured<number>;
     };
 
 export type WorktreeDecisionKind = "remove" | "keep" | "not-measured" | "gone";
 
-/** Decision plus the reason token(s): `no-own-commits`, `uncommitted-changes`, `unmerged-commits`, `recent-activity`, `locked`, ... */
+/** Decision plus the reason token(s): `no-own-commits`, `uncommitted-changes`, `unmerged-commits`, `run-not-ended`, `locked`, ... */
 export interface WorktreeDecision {
   readonly decision: WorktreeDecisionKind;
   readonly reason: string;
@@ -119,8 +118,8 @@ export interface WorktreeEvaluation extends WorktreeDecision {
 
 /** Context shared by every evaluation in one `done` / `sweep` pass. */
 export interface WorktreeEvaluationContext {
-  readonly quietMinutes: number;
-  readonly nowEpochSeconds: number;
+  /** The caller's harness session id (D2); `null` = unknown, never the owner. */
+  readonly callerSession: string | null;
   /** Paths (resolved forms) recorded by the current claim of a NOT-yet-terminal task. */
   readonly activeClaimedPaths: ReadonlySet<string>;
 }
@@ -130,32 +129,6 @@ export interface WorktreeOutcome {
   readonly worktree: string;
   readonly decision: WorktreeDecisionKind;
   readonly reason: string;
-}
-
-// ── Pure: quiet window ──────────────────────────────────────────────────────
-
-/** Default reflog quiet window, minutes. */
-export const DEFAULT_WORKTREE_QUIET_MINUTES = 30;
-
-/**
- * Parses `LORE_WORKTREE_QUIET_MINUTES`. Unset -> {@link DEFAULT_WORKTREE_QUIET_MINUTES}. A set value
- * must be a non-negative integer; anything else is a loud VALIDATION_ERROR (never a silent default).
- *
- * @example parseQuietMinutes(undefined) // ok(30)
- * @example parseQuietMinutes("0")       // ok(0)
- * @example parseQuietMinutes("soon")    // err(VALIDATION_ERROR)
- */
-export function parseQuietMinutes(raw: string | undefined): Result<number, LoreError> {
-  if (raw === undefined) return ok(DEFAULT_WORKTREE_QUIET_MINUTES);
-  if (!/^[0-9]+$/.test(raw.trim())) {
-    return err({
-      code: "VALIDATION_ERROR",
-      field: "LORE_WORKTREE_QUIET_MINUTES",
-      message: `LORE_WORKTREE_QUIET_MINUTES must be a non-negative integer number of minutes, got "${raw}"`,
-      value: raw,
-    });
-  }
-  return ok(Number(raw.trim()));
 }
 
 // ── Pure: recorded worktrees from claim history ─────────────────────────────
@@ -193,45 +166,36 @@ export function collectRecordedWorktrees(
 // ── Pure: the decision ──────────────────────────────────────────────────────
 
 /**
- * The cleanup predicate (BR-961), pure over measured facts.
+ * The cleanup predicate (BR-961), pure over measured facts. The removal clauses are `decideWorktreeRemoval`'s;
+ * `lore done` adds only "the branch carries >= 1 own commit beyond the claim-time base".
  *
- * `measured` facts: every failing clause is listed (comma-joined, fixed order: locked,
- * uncommitted-changes, no-own-commits, unmerged-commits, recent-activity) -> `keep`; all clauses
- * holding -> `remove`. `unmerged-commits` is only reported when the branch has own commits.
- * "Recent" means the newest reflog entry is younger than `quietMinutes` (so `0` never blocks).
+ * `measured` facts: every failing clause is listed (comma-joined: the removal test's tokens in its fixed order, then
+ * `no-own-commits`) -> `keep`; an unmeasurable clause with nothing proven keeps -> `not-measured`; all clauses holding
+ * -> `remove`.
  *
- * @param facts - what the probe measured
- * @param quietMinutes - reflog quiet window (see {@link parseQuietMinutes})
- * @param nowEpochSeconds - injected clock
  * @example
- * decideWorktreeCleanup({kind:"gone"}, 30, 0) // {decision:"gone", reason:"path does not exist"}
+ * decideWorktreeCleanup({kind:"gone"}) // {decision:"gone", reason:"path does not exist"}
  */
-export function decideWorktreeCleanup(
-  facts: WorktreeFacts,
-  quietMinutes: number,
-  nowEpochSeconds: number,
-): WorktreeDecision {
+export function decideWorktreeCleanup(facts: WorktreeFacts): WorktreeDecision {
   switch (facts.kind) {
     case "gone":
       return { decision: "gone", reason: "path does not exist" };
     case "not-measured":
       return { decision: "not-measured", reason: facts.reason };
-    case "main-checkout":
-      return { decision: "keep", reason: "main-checkout" };
     case "claimed-by-active-task":
       return { decision: "keep", reason: "claimed-by-active-task" };
-    case "cwd-inside-worktree":
-      return { decision: "keep", reason: "cwd-inside-worktree" };
     case "measured": {
-      const reasons: string[] = [];
-      if (facts.locked) reasons.push("locked");
-      if (facts.dirty) reasons.push("uncommitted-changes");
-      if (facts.ownCommitCount < 1) reasons.push("no-own-commits");
-      else if (facts.unmergedCount > 0) reasons.push("unmerged-commits");
-      const ageSeconds = nowEpochSeconds - facts.newestReflogEpochSeconds;
-      if (ageSeconds < quietMinutes * 60) reasons.push("recent-activity");
-      if (reasons.length > 0) return { decision: "keep", reason: reasons.join(", ") };
-      return { decision: "remove", reason: "clean, merged, quiet" };
+      const removal = decideWorktreeRemoval(facts.removal);
+      const keep = removal.verdict === "keep" ? [...removal.reasons] : [];
+      const unmeasured = removal.verdict === "not-measured" ? [...removal.reasons] : [];
+      if (facts.ownCommitCount.ok) {
+        if (facts.ownCommitCount.value < 1) keep.push("no-own-commits");
+      } else {
+        unmeasured.push(facts.ownCommitCount.reason);
+      }
+      if (keep.length > 0) return { decision: "keep", reason: keep.join(", ") };
+      if (unmeasured.length > 0) return { decision: "not-measured", reason: unmeasured.join("; ") };
+      return { decision: "remove", reason: "clean, merged, unoccupied" };
     }
     default: {
       const unreachable: never = facts;
@@ -255,19 +219,17 @@ export function buildActiveClaimedPathSet(probe: WorktreeGitProbe, paths: readon
   return set;
 }
 
-function isInside(child: string, parent: string): boolean {
-  return child === parent || child.startsWith(parent.endsWith("/") ? parent : `${parent}/`);
-}
-
 /**
- * Measures one recorded worktree through `probe`. NEVER throws; every probe failure becomes
- * `{kind:"not-measured", reason}` (a missing claim-time base included — there is no safe default).
+ * Measures one recorded worktree through `probe` and the removal-facts port. NEVER throws; every probe failure becomes
+ * `{kind:"not-measured", reason}` or a `Measured` miss (a missing claim-time base included — there is no safe default).
  */
-export function gatherWorktreeFacts(
+export async function gatherWorktreeFacts(
   probe: WorktreeGitProbe,
+  removal: WorktreeRemovalFactsPort,
   recorded: RecordedWorktree,
   activeClaimedPaths: ReadonlySet<string>,
-): { readonly facts: WorktreeFacts; readonly repoRoot?: string; readonly branch?: string } {
+  callerSession: string | null,
+): Promise<{ readonly facts: WorktreeFacts; readonly repoRoot?: string; readonly branch?: string }> {
   if (!probe.pathExists(recorded.path)) return { facts: { kind: "gone" } };
 
   const forms = normalizedForms(probe, recorded.path);
@@ -280,54 +242,35 @@ export function gatherWorktreeFacts(
   const index = entries.findIndex((entry) => probe.realPath(entry.path) === real);
   if (index < 0) return { facts: { kind: "not-measured", reason: "not a linked worktree of its repository" } };
   const entry = entries[index] as ListedWorktree;
-  const mainEntry = entries[0] as ListedWorktree;
-  if (index === 0) return { facts: { kind: "main-checkout" } };
-
-  const cwdReal = probe.realPath(probe.currentWorkingDirectory());
-  if (isInside(cwdReal, real)) return { facts: { kind: "cwd-inside-worktree" } };
-
-  const repoRoot = mainEntry.path;
+  const repoRoot = (entries[0] as ListedWorktree).path;
   const branch = entry.branch;
-  if (branch === undefined) return { facts: { kind: "not-measured", reason: "detached HEAD (no branch to delete)" } };
-  if (recorded.baseSha === undefined) {
-    return { facts: { kind: "not-measured", reason: "no claim-time base recorded (claim predates worktree-cleanup tracking)" } };
-  }
 
-  const dirty = probe.isDirty(recorded.path);
-  if (!dirty.ok) return { facts: { kind: "not-measured", reason: `git status failed: ${dirty.reason}` } };
-  const own = probe.countCommits(recorded.path, `${recorded.baseSha}..${branch}`);
-  if (!own.ok) return { facts: { kind: "not-measured", reason: `own-commit count failed: ${own.reason}` } };
-  let unmergedCount = 0;
-  if (own.value > 0) {
-    const unmerged = probe.countCommits(recorded.path, `main..${branch}`);
-    if (!unmerged.ok) return { facts: { kind: "not-measured", reason: `merged-into-main check failed: ${unmerged.reason}` } };
-    unmergedCount = unmerged.value;
+  const removalFacts = await removal.gatherRemovalFacts(recorded.path, callerSession);
+  let ownCommitCount: Measured<number>;
+  if (index === 0) ownCommitCount = { ok: false, reason: "main checkout" };
+  else if (branch === undefined) ownCommitCount = { ok: false, reason: "detached HEAD (no branch to delete)" };
+  else if (recorded.baseSha === undefined) {
+    ownCommitCount = { ok: false, reason: "no claim-time base recorded (claim predates worktree-cleanup tracking)" };
+  } else {
+    const own = probe.countCommits(recorded.path, `${recorded.baseSha}..${branch}`);
+    ownCommitCount = own.ok ? own : { ok: false, reason: `own-commit count failed: ${own.reason}` };
   }
-  const reflog = probe.newestReflogEpochSeconds(recorded.path, branch);
-  if (!reflog.ok) return { facts: { kind: "not-measured", reason: `reflog read failed: ${reflog.reason}` } };
-
   return {
-    facts: {
-      kind: "measured",
-      locked: entry.locked,
-      dirty: dirty.value,
-      ownCommitCount: own.value,
-      unmergedCount,
-      newestReflogEpochSeconds: reflog.value,
-    },
+    facts: { kind: "measured", removal: removalFacts, ownCommitCount },
     repoRoot,
-    branch,
+    ...(branch !== undefined ? { branch } : {}),
   };
 }
 
 /** Gathers facts for `recorded` and decides. */
-export function evaluateRecordedWorktree(
+export async function evaluateRecordedWorktree(
   probe: WorktreeGitProbe,
+  removal: WorktreeRemovalFactsPort,
   recorded: RecordedWorktree,
   ctx: WorktreeEvaluationContext,
-): WorktreeEvaluation {
-  const gathered = gatherWorktreeFacts(probe, recorded, ctx.activeClaimedPaths);
-  const decision = decideWorktreeCleanup(gathered.facts, ctx.quietMinutes, ctx.nowEpochSeconds);
+): Promise<WorktreeEvaluation> {
+  const gathered = await gatherWorktreeFacts(probe, removal, recorded, ctx.activeClaimedPaths, ctx.callerSession);
+  const decision = decideWorktreeCleanup(gathered.facts);
   return {
     worktree: recorded.path,
     ...decision,
@@ -411,13 +354,6 @@ function parseListPorcelain(stdout: string): ListedWorktree[] {
   return entries;
 }
 
-function reflogEpoch(cwd: string, ref: string): number | undefined {
-  const out = runGit(cwd, ["reflog", "show", "--date=unix", "--format=%gd", "-1", ref]);
-  if (!out.ok) return undefined;
-  const match = /@\{(\d+)\}/.exec(out.value);
-  return match === null ? undefined : Number(match[1]);
-}
-
 /** The production {@link WorktreeGitProbe}: real `git` subprocesses (plain, never forced) and `node:fs`. */
 export function createRealWorktreeProbe(): WorktreeGitProbe {
   return {
@@ -446,11 +382,11 @@ export function createRealWorktreeProbe(): WorktreeGitProbe {
       const count = Number(out.value.trim());
       return Number.isInteger(count) && count >= 0 ? { ok: true, value: count } : { ok: false, reason: `unparseable rev-list count "${out.value.trim()}"` };
     },
-    newestReflogEpochSeconds: (path, branch) => {
-      const epochs = [reflogEpoch(path, "HEAD"), reflogEpoch(path, `refs/heads/${branch}`)].filter(
-        (epoch): epoch is number => epoch !== undefined,
-      );
-      return epochs.length === 0 ? { ok: false, reason: "no readable reflog entry for HEAD or the branch" } : { ok: true, value: Math.max(...epochs) };
+    integrationBranch: (cwd) => {
+      for (const candidate of ["main", "master"]) {
+        if (runGit(cwd, ["rev-parse", "--verify", "--quiet", candidate]).ok) return { ok: true, value: candidate };
+      }
+      return { ok: false, reason: "neither `main` nor `master` exists" };
     },
     headSha: (path) => {
       const out = runGit(path, ["rev-parse", "HEAD"]);
