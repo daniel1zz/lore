@@ -56,10 +56,6 @@
  *               ALONE (no leading framing line), and — matching Phase C/D's
  *               own contract for their topics — NO degradation entry is
  *               added for the missing framing line by itself
- *   REGRESSION: the pre-existing fail-open contract (non-zero exit AND
- *               empty-stdout-at-exit-0 for the bootstrap spawn) and the
- *               backstop-overflow contract are BOTH still byte-identical in
- *               effect to before this task's change
  *
  * @spec_ref AC-CP-10
  */
@@ -357,25 +353,5 @@ describe("session-bootstrap-injection — STATE", () => {
     // entry names it (Phase C's own workflowBlock failure is silent the
     // same way).
     expect(ctx).not.toContain("Degradation Report");
-  });
-});
-
-// ─── REGRESSION — the bootstrap spawn's pre-existing fail-open is unchanged ───
-
-describe("session-bootstrap-injection — REGRESSION", () => {
-  it("exit 0 with empty bootstrap stdout is fail-open — same pre-existing degradation message, no fenced block", () => {
-    const cwd = mkLoreCwd();
-    // Omitting bootstrapStdout entirely reproduces "binary ran, exited 0,
-    // printed nothing" — the pre-existing empty-stdout fail-open shape,
-    // byte-unchanged by this task's D2 correction.
-    const stubDir = makeLoreStub({});
-
-    const result = runHook({ cwd, extraEnv: { PATH: `${stubDir}:${process.env.PATH}` } });
-
-    expect(result.status).toBe(0);
-    const ctx = parseAdditionalContext(result.stdout as string);
-    expect(ctx).not.toContain("```");
-    expect(ctx).toContain("Degradation Report");
-    expect(ctx).toContain("lore bootstrap failed (exit 0)");
   });
 });

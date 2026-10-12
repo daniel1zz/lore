@@ -20,43 +20,34 @@
  *          `<main-checkout>/assets/governance/seat-briefing.md`) is retired
  *          along with the install-set entry (D3). Placeholder substitution
  *          and the fail-open contract are unchanged.
- * Phase E: lore bootstrap injection (corpus-global state snapshot, when the
+ * Phase E: lore bootstrap injection (the seat's OWN items only, when the
  *          resolved corpus root — main checkout for a linked worktree, cwd
- *          otherwise — has .lore/). SPEC-080 D3, strengthened by
- *          spec-context-provenance-injected-corpus-global-state-and-a D2 —
- *          this hook is a BLIND PIPE, now via TWO independent spawns of the
- *          SAME resolved binary rather than one mixed stream:
+ *          otherwise — has .lore/). spec-session-start-injection-carries-only-
+ *          the-session-s-own D2/D6/D11/D12. This hook is a BLIND PIPE:
+ *            (E-b) `lore bootstrap --injection` runs FIRST. A linked-worktree
+ *                  seat passes `--seat-branch <branch> --seat-worktree
+ *                  <realpath of git rev-parse --show-toplevel>` (the binary
+ *                  requires both together); the main checkout passes neither.
+ *                  Exit 0 + EMPTY stdout means "nothing to inject": no fence,
+ *                  no framing line, NO degradation entry, and E-a is never
+ *                  spawned. A non-zero exit or a missing binary still degrades.
  *            (E-a) `lore governance bootstrap-framing` — the scope-boundary
- *                  line (`BOOTSTRAP_FRAMING_LINE`, `@lore/core`), fetched
- *                  EXACTLY the same way Phase C fetches its own topic and
- *                  Phase D fetches `seat-briefing`. Fail-open, same contract
- *                  as those two phases: a missing binary, non-zero exit, or
- *                  empty stdout leaves this line absent — never a
+ *                  line (`BOOTSTRAP_FRAMING_LINE`, `@lore/core`), spawned ONLY
+ *                  when E-b produced a payload. Fail-open, same contract as
+ *                  Phase C/D's governance topics: a missing binary, non-zero
+ *                  exit, or empty stdout leaves the line absent, never a
  *                  degradation entry (advisory framing, not the payload).
- *            (E-b) `lore bootstrap --injection` — UNCHANGED from before D2:
- *                  bare compact JSON, nothing else, on stdout (SPEC-080
- *                  AC-080-3's documented public CLI contract — a `| jq`
- *                  consumer never sees a prose line prepended to its JSON).
- *          The two are composed as ONE rendered block: E-a's line OUTSIDE
- *          the markdown fence (the position the hook's own retired header
- *          used to occupy), E-b's JSON INSIDE it. This hook still never
- *          parses, re-serializes, or inspects either spawn's output — it
- *          relays each verbatim and only decides WHERE the seam between them
- *          goes, never what either side contains. (An earlier draft of this
- *          hook printed the framing line as `bootstrap --injection`'s own
- *          stdout line 1, requiring this hook to split one stream at a
- *          newline — REJECTED: it broke SPEC-080 AC-080-3's bare-JSON
- *          contract and made the hook parse-adjacent instead of purely
- *          blind. Two spawns, two verbatim relays, is strictly the stronger
- *          blind pipe.) `INJECTION_BACKSTOP_CAP` (12000 chars) remains a
- *          pure safety backstop on E-b's JSON stdout alone (never E-a's much
- *          shorter framing line) — the projection is already char-budgeted
- *          binary-side, so exceeding this cap signals a binary-side bug. On
- *          overflow the hook drops the ENTIRE composed block (framing line
- *          included, even if E-a already succeeded) rather than slicing
- *          stdout, and records a degradation entry naming the observed
- *          length — a scope-boundary line with no data below it to bound
- *          would be misleading, not merely incomplete.
+ *          The two are composed as ONE rendered block: E-a's line OUTSIDE the
+ *          markdown fence, E-b's JSON INSIDE it. This hook never parses,
+ *          re-serializes, or inspects either spawn's output — it relays each
+ *          verbatim. (Printing the framing line inside `--injection`'s own
+ *          stdout was rejected: it breaks the bare-JSON `--injection`
+ *          contract and makes the hook parse-adjacent.)
+ *          `INJECTION_BACKSTOP_CAP` (12000 chars) remains a pure safety
+ *          backstop on E-b's JSON stdout alone — the projection is already
+ *          char-budgeted binary-side, so exceeding it signals a binary-side
+ *          bug. On overflow the hook drops the whole block rather than
+ *          slicing stdout and records a degradation entry naming the length.
  * Phase F: session-start advisory — cache-first asset-freshness check
  *          (SPEC-076 §C6). Reads `<claude-dir>/.lore-setup-check.json`
  *          (written by `lore setup --check`, T4 of SPEC-076) — a fresh
@@ -90,10 +81,6 @@
  *          or the reminder enabled) behaves byte-identically to before this
  *          task — fail-open on absence.
  *
- * Bootstrap is hook-injected (was lazy-loaded by AI). Rationale: SessionStart
- * is low-frequency, `lore bootstrap` is a slim progressive-disclosure pointer
- * set, 100% delivery rate beats AI self-trigger (~70-90%).
- *
  * Graceful degradation — a missing lore binary or corpus must never block
  * session start. Projects without .lore/ simply get no bootstrap block.
  * Phase D follows the same rule: any git/fs error there must never block
@@ -104,7 +91,7 @@
  */
 
 import {
-  existsSync, readFileSync, readdirSync, rmSync, statSync,
+  existsSync, readFileSync, readdirSync, realpathSync, rmSync, statSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -200,12 +187,16 @@ const degradations = [];
 // mirrors SPEC-042's "derived, never stored" session ethos.
 let seatBlock = '';
 let bootstrapCwd = process.cwd();
-// SPEC-057 AC-S-4 — the resolved seat/worktree branch, threaded onto Phase E's
-// `lore bootstrap` spawn as `--seat-branch <branch>` so SessionService can scope
-// resume_hint to this worktree's seat plan. Stays `null` for a main-checkout
-// session (bootstrapCwd never redirects) — Phase E's spawn args stay
-// byte-unchanged in that case (REGRESSION, AC-S-4).
+// The resolved seat/worktree branch, threaded onto Phase E's `lore bootstrap
+// --injection` spawn as `--seat-branch <branch>` (with `--seat-worktree`, below).
+// Stays `null` for a main-checkout session (bootstrapCwd never redirects) —
+// Phase E's spawn args carry neither seat flag in that case.
 let seatBranchForBootstrap = null;
+// Realpath of this session's worktree top level (`git rev-parse --show-toplevel`,
+// run from cwd so a subdirectory start still names the worktree root). The binary
+// matches claims recorded as a worktree path against it (D11/D12) and REQUIRES it
+// together with `--seat-branch` in `--injection` mode. `null` iff the branch is.
+let seatWorktreeForBootstrap = null;
 try {
   const commonDirRaw = spawnSync('git', ['rev-parse', '--git-common-dir'], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
@@ -237,13 +228,24 @@ try {
           branch = `worktree-${shortSha}`;
         }
 
-        // SPEC-057 AC-S-4 — threaded onto Phase E's `lore bootstrap --seat-branch`
-        // below. Set for EVERY linked-worktree session with a resolved corpus root,
-        // including the detached-HEAD synthetic `worktree-<shortsha>` label —
-        // SessionService.bootstrap's own `parseSeatBranch` resolves that as
-        // unresolvable and degrades to corpus-global + `seat_unresolved: true`,
-        // never this hook's job to pre-filter.
-        seatBranchForBootstrap = branch;
+        // Threaded onto Phase E's `lore bootstrap --injection --seat-branch
+        // <branch> --seat-worktree <top level>` below. Set for EVERY
+        // linked-worktree session with a resolved corpus root, including the
+        // detached-HEAD synthetic `worktree-<shortsha>` label (it simply matches
+        // no claim) — never this hook's job to pre-filter. The two flags are set
+        // together or not at all: the binary exits 2 on either alone.
+        const topLevelRaw = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+          cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+        });
+        if (topLevelRaw.status === 0 && topLevelRaw.stdout.trim()) {
+          seatWorktreeForBootstrap = realpathSync(topLevelRaw.stdout.trim());
+          seatBranchForBootstrap = branch;
+        } else {
+          process.stderr.write(
+            'session-start-resume: linked worktree top level unresolvable '
+            + "('git rev-parse --show-toplevel' failed); bootstrap injection runs without a seat\n",
+          );
+        }
 
         const actorSlug = branch
           .toLowerCase()
@@ -294,45 +296,22 @@ try {
 }
 
 // ── Phase E: lore bootstrap injection ──────────────────────────────
-// Corpus-global state snapshot (root doc, active plans + task counts,
-// pending reviews, active sessions, stale candidates). Only when the
-// resolved corpus root (main checkout for a linked worktree, cwd
-// otherwise) has .lore/.
+// The seat's OWN items only (see this file's module-header "Phase E" note).
+// Only when the resolved corpus root (main checkout for a linked worktree,
+// cwd otherwise) has .lore/.
 let bootstrapBlock = '';
 if (existsSync(join(bootstrapCwd, '.lore'))) {
-  // Phase E-a: the scope-boundary framing line
-  // (spec-context-provenance-injected-corpus-global-state-and-a D2) — spawns
-  // `lore governance bootstrap-framing`, the SAME resolved binary and the
-  // SAME verb Phase C/D already spawn for their own topics. Fail-open,
-  // IDENTICAL contract to those two phases: a missing binary, non-zero
-  // exit, or empty stdout leaves `framingLine` at `''` and the JSON-only
-  // block below still renders — this is advisory framing describing the
-  // payload, not the payload itself, so its own absence is never
-  // degradation-worthy on its own (mirrors Phase C's `workflowBlock`, which
-  // also pushes no degradation entry on failure).
-  let framingLine = '';
-  try {
-    const framingResult = spawnSync('lore', ['governance', 'bootstrap-framing'], {
-      cwd: bootstrapCwd,
-      encoding: 'utf8',
-      timeout: 5000,
-    });
-    if (framingResult.status === 0 && typeof framingResult.stdout === 'string'
-        && framingResult.stdout.length > 0) {
-      framingLine = framingResult.stdout;
-    }
-  } catch { /* fail-open — framing-line injection must never block session start */ }
-
-  // Phase E-b: the bootstrap --injection JSON payload — UNCHANGED single-stream
-  // contract (SPEC-080 D3, AC-080-3): bare compact JSON, nothing else, on
-  // stdout. Blind pipe — this hook never parses, re-serializes, or inspects
-  // a single field.
-  // SPEC-057 AC-S-4 — `--seat-branch <branch>` is appended ONLY for a linked-worktree
-  // session with a resolved corpus root (`seatBranchForBootstrap` non-null); a
-  // main-checkout session's spawn args stay byte-unchanged (REGRESSION).
+  // E-b first: the bootstrap --injection JSON payload — bare compact JSON,
+  // nothing else, on stdout (SPEC-080 AC-080-3). Blind pipe — this hook never
+  // parses, re-serializes, or inspects a single field. Seat flags are passed
+  // together, for a linked-worktree session only; a main-checkout session
+  // passes neither and the binary prints nothing.
   const bootstrapArgs = ['bootstrap', '--injection'];
-  if (seatBranchForBootstrap !== null) {
-    bootstrapArgs.push('--seat-branch', seatBranchForBootstrap);
+  if (seatBranchForBootstrap !== null && seatWorktreeForBootstrap !== null) {
+    bootstrapArgs.push(
+      '--seat-branch', seatBranchForBootstrap,
+      '--seat-worktree', seatWorktreeForBootstrap,
+    );
   }
   const r = spawnSync('lore', bootstrapArgs, {
     cwd: bootstrapCwd,
@@ -341,22 +320,38 @@ if (existsSync(join(bootstrapCwd, '.lore'))) {
     env: { ...process.env, CLAUDECODE: '1' }, // agent surface → AI defaults off (SPEC-024)
   });
   const stdout = r.status === 0 && typeof r.stdout === 'string' ? r.stdout.trim() : '';
-  if (stdout) {
+  if (r.status === 0 && stdout === '') {
+    // Exit 0 + empty stdout is the binary's "this seat has nothing to inject"
+    // answer: no fence, no framing line, NO degradation entry, and the
+    // framing spawn below never happens.
+  } else if (stdout) {
     if (stdout.length > INJECTION_BACKSTOP_CAP) {
-      // Drops the ENTIRE composed block — including a successfully-fetched
-      // `framingLine` — never just the JSON half. A scope-boundary line with
-      // no data below it to bound would be misleading, not merely
-      // incomplete, so E-a's own success buys it no separate survival here.
+      // Drops the whole block, never slices mid-JSON.
       degradations.push({
         component: 'lore bootstrap',
         reason: `injection payload ${stdout.length} chars exceeds ${INJECTION_BACKSTOP_CAP} backstop `
           + '— binary-side bug, run `lore setup` / investigate',
       });
     } else {
-      // D2 placement: the framing line goes OUTSIDE the markdown fence —
-      // exactly where this hook's own retired header used to sit — and the
-      // JSON payload stays INSIDE it, fence language tag restored to `json`
-      // now that the fenced content is strictly JSON again.
+      // E-a: the scope-boundary framing line — spawned ONLY now that there is
+      // a payload for it to bound. Fail-open, same contract as Phase C/D's
+      // governance topics: a missing binary, non-zero exit, or empty stdout
+      // leaves `framingLine` at '' and the bare fence still renders — advisory
+      // framing is never degradation-worthy on its own.
+      let framingLine = '';
+      try {
+        const framingResult = spawnSync('lore', ['governance', 'bootstrap-framing'], {
+          cwd: bootstrapCwd,
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        if (framingResult.status === 0 && typeof framingResult.stdout === 'string'
+            && framingResult.stdout.length > 0) {
+          framingLine = framingResult.stdout;
+        }
+      } catch { /* fail-open — framing-line injection must never block session start */ }
+
+      // D2 placement: framing line OUTSIDE the markdown fence, JSON INSIDE it.
       const fence = `\`\`\`json\n${stdout}\n\`\`\``;
       bootstrapBlock = framingLine ? `${framingLine}\n\n${fence}` : fence;
     }
