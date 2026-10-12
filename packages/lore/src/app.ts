@@ -78,6 +78,9 @@ import { PrdOutlineService } from "./service/prd-outline-service.js";
 import { RuleStateService } from "./service/rule-state-service.js";
 import { SpawnGitPort, resolveGitRoot } from "./service/rule-state-git-port.js";
 import { RunService } from "./service/run-service.js";
+import { WorktreeRemovalService, type WorktreeRemovalRunStore } from "./service/worktree-removal-service.js";
+import { createRealWorktreeProbe } from "./service/worktree-cleanup.js";
+import { createRealProcessScanPort } from "./adapters/real-process-scan-port.js";
 import { ensureVerifiedIdentity, resolveWriteActorFor, withVerifiedWriteContext } from "./store/write-context-store.js";
 import { PlanExemptionService } from "./service/plan-exemption-service.js";
 import { UatService } from "./service/uat-service.js";
@@ -303,6 +306,12 @@ export interface App {
    * so hand-built App test stubs stay valid; always present from `createApp`.
    */
   runService?: RunService;
+  /**
+   * WorktreeRemovalService — THE "may this worktree be removed now" test's measurement + `lore worktree check|sweep`
+   * (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a). Optional like `runService` so hand-built App test
+   * stubs stay valid; always present from `createApp`.
+   */
+  worktreeRemovalService?: WorktreeRemovalService;
   /**
    * The invocation identity with its run VERIFIED against the registry (once; unregistered → `harnessRun`
    * null + one warning); `ok(undefined)` when this App was built without a write context (MCP/HTTP/tests).
@@ -751,6 +760,7 @@ function buildAppFromSqlite(
   // generation-carrying siblings of the 4th/6th args — `resolveDeclaredAcCriteria`/
   // `resolveDeclaredAcCriteriaForAdhocTask` return the full criterion (not just its id),
   // which `resolveAcOracleGeneration` needs and a bare id set structurally cannot supply.
+  const worktreeRemovalService = buildWorktreeRemovalService(store);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -761,6 +771,13 @@ function buildAppFromSqlite(
     process.env,
     corpusService.resolveDeclaredAcCriteria.bind(corpusService),
     corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService),
+    // reason: args 10-13 keep their real-IO defaults; arg 14 is the single worktree-removal test's facts for `done`'s
+    // cleanup (both composition roots must pass it, or `lore done` reports every worktree not-measured).
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    worktreeRemovalService,
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
@@ -828,6 +845,7 @@ function buildAppFromSqlite(
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
+    worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
@@ -1128,6 +1146,7 @@ function buildAppFromTurso(
   // reason: 8th/9th args — see buildAppFromSqlite's identical comment (both
   // composition roots must wire the generation-carrying siblings, or the
   // Turso-backed surface silently stamps no `ac_oracle_generation`).
+  const worktreeRemovalService = buildWorktreeRemovalService(store);
   const taskWorkflowService = new TaskWorkflowService(
     store,
     telemetry,
@@ -1138,6 +1157,13 @@ function buildAppFromTurso(
     process.env,
     corpusService.resolveDeclaredAcCriteria.bind(corpusService),
     corpusService.resolveDeclaredAcCriteriaForAdhocTask.bind(corpusService),
+    // reason: args 10-13 keep their real-IO defaults; arg 14 is the single worktree-removal test's facts for `done`'s
+    // cleanup (both composition roots must pass it, or `lore done` reports every worktree not-measured).
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    worktreeRemovalService,
   );
   // reason: SessionService (SPEC-041 §3 D1) — createHandoffDoc is CorpusService's
   // internal creation seam (the SOLE legitimate write path for knowledge/handoff
@@ -1201,6 +1227,7 @@ function buildAppFromTurso(
     taskWorkflowService,
     sessionService,
     runService: new RunService(store, undefined, taskWorkflowService, realpathNative),
+    worktreeRemovalService,
     verifiedInvocationIdentity: () => ensureVerifiedIdentity(store),
     // reason: ValidityService owns extra.validity (bi-temporal invalidation) — store +
     // own telemetry wiring, same DI shape as TaskWorkflowService/JudgmentService.
@@ -1759,4 +1786,17 @@ function createAppUnscoped(
       ...(cause !== undefined ? { cause } : {}),
     } satisfies LoreError);
   }
+}
+
+/**
+ * Builds the worktree-removal service over `store`. Run occupancy comes from a CLAIM-PORT-LESS `RunService` (occupancy
+ * reads only the store + realpath), which also avoids the TaskWorkflowService <-> RunService construction cycle.
+ */
+function buildWorktreeRemovalService(store: ConstructorParameters<typeof RunService>[0] & WorktreeRemovalRunStore): WorktreeRemovalService {
+  return new WorktreeRemovalService({
+    probe: createRealWorktreeProbe(),
+    processScan: createRealProcessScanPort(),
+    occupancy: new RunService(store, undefined, undefined, realpathNative),
+    runs: store,
+  });
 }

@@ -2,9 +2,14 @@
  * @spec_ref spec-lore-owns-worktree-cleanup-archive-removes-the-task-s AC-WTC-1 AC-WTC-2
  * @task task-implement-106-make-ac-wtc-1-ac-wtc-2-ac-wtc-3-green
  *
- * Unit coverage for `service/worktree-cleanup.ts` over a FAKE probe: the pure decision (every clause,
- * boundary of the quiet window), quiet-minutes parsing, claim-history collection, the not-measured
- * discipline (a failing git call is never `remove`), and removal ordering (plain remove then branch -d).
+ * Unit coverage for `service/worktree-cleanup.ts` over a FAKE probe and a FAKE removal-facts port: the pure decision
+ * (every clause), claim-history collection, the not-measured discipline (a failing git call is never `remove`), and
+ * removal ordering (plain remove then branch -d).
+ *
+ * RE-BASELINE (task-single-worktree-removal-test-used-by-the-hook-lore-done, AC-WS-5): the quiet window
+ * (`recent-activity`, `parseQuietMinutes`, reflog age) is deleted — the removal clauses now come from the single
+ * `decideWorktreeRemoval` (covered by worktree-removal-test.test.ts); only the clauses `lore done` adds itself
+ * (own commits, claim-time base, active claim, branch) are asserted here, plus that the single test's verdict flows through.
  */
 
 import { describe, expect, it } from "vitest";
@@ -16,72 +21,79 @@ import {
   decideWorktreeCleanup,
   evaluateRecordedWorktree,
   formatWorktreeOutcomeLine,
-  parseQuietMinutes,
   type ListedWorktree,
   type ProbeResult,
+  type RecordedWorktree,
   type WorktreeFacts,
   type WorktreeGitProbe,
 } from "../../../src/service/worktree-cleanup.js";
+import type { Measured, WorktreeRemovalFacts, WorktreeRemovalFactsPort } from "../../../src/service/worktree-removal-test.js";
 
-const NOW = 1_000_000;
+const ok = <T,>(value: T): Measured<T> => ({ ok: true, value });
 
-const measured = (over: Partial<Extract<WorktreeFacts, { kind: "measured" }>> = {}): WorktreeFacts => ({
-  kind: "measured",
-  locked: false,
-  dirty: false,
-  ownCommitCount: 2,
-  unmergedCount: 0,
-  newestReflogEpochSeconds: NOW - 3600,
+const removableFacts = (over: Partial<WorktreeRemovalFacts> = {}): WorktreeRemovalFacts => ({
+  linked: ok(true),
+  callerInside: ok(false),
+  dirty: ok(false),
+  unmerged: ok(false),
+  locked: ok(false),
+  agentRunLive: ok(false),
+  openClaims: ok([]),
+  processesInside: ok([]),
+  owner: ok(null),
   ...over,
 });
 
+const measured = (
+  over: { removal?: Partial<WorktreeRemovalFacts>; ownCommitCount?: Measured<number> } = {},
+): WorktreeFacts => ({
+  kind: "measured",
+  removal: removableFacts(over.removal),
+  ownCommitCount: over.ownCommitCount ?? ok(2),
+});
+
 describe("decideWorktreeCleanup (pure)", () => {
-  it("removes when every clause holds", () => {
-    expect(decideWorktreeCleanup(measured(), 30, NOW).decision).toBe("remove");
+  it("removes when the removal test says removable and the branch has own commits", () => {
+    expect(decideWorktreeCleanup(measured())).toEqual({ decision: "remove", reason: "clean, merged, unoccupied" });
   });
 
   it.each([
-    ["locked", measured({ locked: true }), "locked"],
-    ["dirty", measured({ dirty: true }), "uncommitted-changes"],
-    ["zero own commits", measured({ ownCommitCount: 0 }), "no-own-commits"],
-    ["unmerged", measured({ unmergedCount: 1 }), "unmerged-commits"],
-    ["recent", measured({ newestReflogEpochSeconds: NOW - 60 }), "recent-activity"],
+    ["locked", measured({ removal: { locked: ok(true) } }), "locked"],
+    ["dirty", measured({ removal: { dirty: ok(true) } }), "uncommitted-changes"],
+    ["zero own commits", measured({ ownCommitCount: ok(0) }), "no-own-commits"],
+    ["unmerged", measured({ removal: { unmerged: ok(true) } }), "unmerged-commits"],
+    ["owning run not ended", measured({ removal: { agentRunLive: ok(true) } }), "run-not-ended"],
+    ["main checkout", measured({ removal: { linked: ok(false) } }), "main-checkout"],
+    ["caller inside", measured({ removal: { callerInside: ok(true) } }), "caller-inside"],
   ] as const)("keeps with a reason token: %s", (_name, facts, token) => {
-    const d = decideWorktreeCleanup(facts, 30, NOW);
+    const d = decideWorktreeCleanup(facts);
     expect(d.decision).toBe("keep");
     expect(d.reason).toContain(token);
   });
 
-  it("lists every failing clause, and does not report unmerged-commits when there are no own commits", () => {
-    const d = decideWorktreeCleanup(measured({ dirty: true, ownCommitCount: 0, unmergedCount: 5 }), 30, NOW);
+  it("lists every failing clause: the removal test's tokens, then no-own-commits", () => {
+    const d = decideWorktreeCleanup(measured({ removal: { dirty: ok(true) }, ownCommitCount: ok(0) }));
     expect(d.reason).toBe("uncommitted-changes, no-own-commits");
   });
 
-  it("quiet window boundary: exactly N minutes old is quiet; one second younger is recent; N=0 never blocks", () => {
-    expect(decideWorktreeCleanup(measured({ newestReflogEpochSeconds: NOW - 1800 }), 30, NOW).decision).toBe("remove");
-    expect(decideWorktreeCleanup(measured({ newestReflogEpochSeconds: NOW - 1799 }), 30, NOW).reason).toContain("recent-activity");
-    expect(decideWorktreeCleanup(measured({ newestReflogEpochSeconds: NOW }), 0, NOW).decision).toBe("remove");
+  it("a measured fact set carries no time value: nothing recent can keep a worktree", () => {
+    expect(JSON.stringify(measured())).not.toMatch(/reflog|epoch|recent|quiet/i);
+  });
+
+  it("an unmeasurable removal clause or own-commit count is not-measured, never remove; a proven keep outranks it", () => {
+    const processes = decideWorktreeCleanup(measured({ removal: { processesInside: { ok: false, reason: "no lsof" } } }));
+    expect(processes.decision).toBe("not-measured");
+    expect(processes.reason).toContain("processes-not-measured");
+    const base = decideWorktreeCleanup(measured({ ownCommitCount: { ok: false, reason: "no claim-time base" } }));
+    expect(base).toEqual({ decision: "not-measured", reason: "no claim-time base" });
+    const both = decideWorktreeCleanup(measured({ removal: { dirty: ok(true) }, ownCommitCount: { ok: false, reason: "x" } }));
+    expect(both).toEqual({ decision: "keep", reason: "uncommitted-changes" });
   });
 
   it("non-measured facts map to their own decisions, never remove", () => {
-    expect(decideWorktreeCleanup({ kind: "gone" }, 30, NOW).decision).toBe("gone");
-    expect(decideWorktreeCleanup({ kind: "not-measured", reason: "boom" }, 30, NOW)).toEqual({ decision: "not-measured", reason: "boom" });
-    for (const kind of ["main-checkout", "claimed-by-active-task", "cwd-inside-worktree"] as const) {
-      expect(decideWorktreeCleanup({ kind }, 30, NOW)).toEqual({ decision: "keep", reason: kind });
-    }
-  });
-});
-
-describe("parseQuietMinutes", () => {
-  it("defaults to 30, accepts 0 and integers, refuses everything else loudly", () => {
-    expect(parseQuietMinutes(undefined)).toEqual({ ok: true, value: 30 });
-    expect(parseQuietMinutes("0")).toEqual({ ok: true, value: 0 });
-    expect(parseQuietMinutes("45")).toEqual({ ok: true, value: 45 });
-    for (const bad of ["", "soon", "-1", "1.5"]) {
-      const r = parseQuietMinutes(bad);
-      expect(r.ok).toBe(false);
-      if (!r.ok) expect(r.error.code).toBe("VALIDATION_ERROR");
-    }
+    expect(decideWorktreeCleanup({ kind: "gone" }).decision).toBe("gone");
+    expect(decideWorktreeCleanup({ kind: "not-measured", reason: "boom" })).toEqual({ decision: "not-measured", reason: "boom" });
+    expect(decideWorktreeCleanup({ kind: "claimed-by-active-task" })).toEqual({ decision: "keep", reason: "claimed-by-active-task" });
   });
 });
 
@@ -116,8 +128,7 @@ interface FakeState {
   listed: ProbeResult<readonly ListedWorktree[]>;
   dirty: ProbeResult<boolean>;
   own: ProbeResult<number>;
-  unmerged: ProbeResult<number>;
-  reflog: ProbeResult<number>;
+  removal: WorktreeRemovalFacts;
   removeOk: boolean;
   branchOk: boolean;
   calls: string[];
@@ -129,8 +140,7 @@ function fakeProbe(over: Partial<FakeState> = {}): { probe: WorktreeGitProbe; st
     listed: { ok: true, value: [{ path: "/repo", branch: "main", locked: false }, { path: "/wt/a", branch: "feat", locked: false }] },
     dirty: { ok: true, value: false },
     own: { ok: true, value: 1 },
-    unmerged: { ok: true, value: 0 },
-    reflog: { ok: true, value: NOW - 7200 },
+    removal: removableFacts(),
     removeOk: true,
     branchOk: true,
     calls: [],
@@ -142,8 +152,8 @@ function fakeProbe(over: Partial<FakeState> = {}): { probe: WorktreeGitProbe; st
     currentWorkingDirectory: () => "/repo",
     listWorktrees: () => state.listed,
     isDirty: () => state.dirty,
-    countCommits: (_cwd, range) => (range.startsWith("main..") ? state.unmerged : state.own),
-    newestReflogEpochSeconds: () => state.reflog,
+    countCommits: () => state.own,
+    integrationBranch: () => ({ ok: true, value: "main" }),
     headSha: () => ({ ok: true, value: "abc" }),
     branchTip: () => ({ ok: true, value: "abc" }),
     removeWorktree: (root, p) => {
@@ -158,22 +168,40 @@ function fakeProbe(over: Partial<FakeState> = {}): { probe: WorktreeGitProbe; st
   return { probe, state };
 }
 
-const ctx = (active: ReadonlySet<string> = new Set()) => ({ quietMinutes: 30, nowEpochSeconds: NOW, activeClaimedPaths: active });
+const ctx = (active: ReadonlySet<string> = new Set()) => ({ callerSession: "S1", activeClaimedPaths: active });
+const portFor = (state: FakeState): WorktreeRemovalFactsPort & { asked: [string, string | null][] } => {
+  const asked: [string, string | null][] = [];
+  return {
+    asked,
+    gatherRemovalFacts: async (path, session) => {
+      asked.push([path, session]);
+      return state.removal;
+    },
+  };
+};
 const rec = { path: "/wt/a", baseSha: "base" };
 
-describe("evaluateRecordedWorktree (fake probe)", () => {
-  it("remove for a fully eligible worktree, carrying repoRoot + branch", () => {
-    const { probe } = fakeProbe();
-    const e = evaluateRecordedWorktree(probe, rec, ctx());
+describe("evaluateRecordedWorktree (fake probe + fake removal facts)", () => {
+  const evaluate = (over: Partial<FakeState>, recorded: RecordedWorktree = rec, active: ReadonlySet<string> = new Set()) => {
+    const { probe, state } = fakeProbe(over);
+    const port = portFor(state);
+    return evaluateRecordedWorktree(probe, port, recorded, ctx(active)).then((e) => ({ e, port }));
+  };
+
+  it("remove for a fully eligible worktree, carrying repoRoot + branch; the caller session reaches the removal port", async () => {
+    const { e, port } = await evaluate({});
     expect(e).toMatchObject({ decision: "remove", repoRoot: "/repo", branch: "feat" });
+    expect(port.asked).toEqual([["/wt/a", "S1"]]);
   });
 
-  it("gone when the path is missing", () => {
-    expect(evaluateRecordedWorktree(fakeProbe({ exists: false }).probe, rec, ctx()).decision).toBe("gone");
+  it("gone when the path is missing (the removal port is never asked)", async () => {
+    const { e, port } = await evaluate({ exists: false });
+    expect(e.decision).toBe("gone");
+    expect(port.asked).toEqual([]);
   });
 
-  it("not-measured (never remove) when the claim recorded no base", () => {
-    const e = evaluateRecordedWorktree(fakeProbe().probe, { path: "/wt/a", baseSha: undefined }, ctx());
+  it("not-measured (never remove) when the claim recorded no base", async () => {
+    const { e } = await evaluate({}, { path: "/wt/a", baseSha: undefined });
     expect(e.decision).toBe("not-measured");
     expect(e.reason).toContain("no claim-time base");
   });
@@ -181,29 +209,34 @@ describe("evaluateRecordedWorktree (fake probe)", () => {
   const failed = { ok: false, reason: "x" } as const;
   it.each<[string, Partial<FakeState>]>([
     ["listing fails", { listed: failed }],
-    ["status fails", { dirty: failed }],
     ["own-count fails", { own: failed }],
-    ["merged check fails", { unmerged: failed }],
-    ["reflog fails", { reflog: failed }],
-  ])("not-measured when a git call fails: %s", (_n, over) => {
-    expect(evaluateRecordedWorktree(fakeProbe(over).probe, rec, ctx()).decision).toBe("not-measured");
+    ["a removal clause is unmeasurable", { removal: removableFacts({ dirty: failed }) }],
+  ])("not-measured when a measurement fails: %s", async (_n, over) => {
+    expect((await evaluate(over)).e.decision).toBe("not-measured");
   });
 
-  it("not-measured when the path is not a listed worktree (a plain directory)", () => {
+  it("the single test's keep verdict flows through (owning run not ended)", async () => {
+    const { e } = await evaluate({ removal: removableFacts({ agentRunLive: ok(true) }) });
+    expect(e).toMatchObject({ decision: "keep", reason: "run-not-ended" });
+    expect(e.repoRoot).toBeUndefined();
+  });
+
+  it("not-measured when the path is not a listed worktree (a plain directory)", async () => {
     const listed = { ok: true, value: [{ path: "/repo", branch: "main", locked: false }] } as const;
-    expect(evaluateRecordedWorktree(fakeProbe({ listed }).probe, rec, ctx()).reason).toContain("not a linked worktree");
+    expect((await evaluate({ listed })).e.reason).toContain("not a linked worktree");
   });
 
-  it("keeps the main checkout, a detached worktree is not-measured", () => {
-    expect(evaluateRecordedWorktree(fakeProbe().probe, { path: "/repo", baseSha: "b" }, ctx()).reason).toBe("main-checkout");
+  it("the main checkout is kept by the removal test's token; a detached worktree is not-measured", async () => {
+    const main = await evaluate({ removal: removableFacts({ linked: ok(false) }) }, { path: "/repo", baseSha: "b" });
+    expect(main.e).toMatchObject({ decision: "keep", reason: "main-checkout" });
     const listed = { ok: true, value: [{ path: "/repo", branch: "main", locked: false }, { path: "/wt/a", branch: undefined, locked: false }] } as const;
-    expect(evaluateRecordedWorktree(fakeProbe({ listed }).probe, rec, ctx()).decision).toBe("not-measured");
+    expect((await evaluate({ listed })).e.decision).toBe("not-measured");
   });
 
-  it("keeps a worktree still claimed by an active task", () => {
+  it("keeps a worktree still claimed by an active task", async () => {
     const { probe } = fakeProbe();
     const active = buildActiveClaimedPathSet(probe, ["/wt/a"]);
-    expect(evaluateRecordedWorktree(probe, rec, ctx(active)).reason).toBe("claimed-by-active-task");
+    expect((await evaluate({}, rec, active)).e.reason).toBe("claimed-by-active-task");
   });
 });
 

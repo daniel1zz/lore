@@ -138,8 +138,8 @@ const main = defineCommand({
     // file's own module header.
     territory: () => import("./commands/territory.js").then(wrapDefault("territory")),
     session: () => import("./commands/session.js").then(wrapDefault("session")),
-    // worktree (issue #106, BR-961/BR-962) — `worktree sweep [--apply]` removes the claim-recorded
-    // worktrees of archived tasks when safe; see commands/worktree.ts's module header.
+    // worktree — `worktree check <path>` / `worktree sweep [--apply]`: lore's ONE "may this worktree be removed
+    // now" test (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a); see commands/worktree.ts's header.
     worktree: () => import("./commands/worktree.js").then(wrapDefault("worktree")),
   },
 });

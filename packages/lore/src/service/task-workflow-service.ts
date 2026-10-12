@@ -372,14 +372,12 @@ import {
   collectRecordedWorktrees,
   createRealWorktreeProbe,
   evaluateRecordedWorktree,
-  parseQuietMinutes,
   resolveClaimHead,
   type RecordedWorktree,
-  type WorktreeDecisionKind,
-  type WorktreeEvaluation,
   type WorktreeGitProbe,
   type WorktreeOutcome,
 } from "./worktree-cleanup.js";
+import type { WorktreeRemovalFactsPort } from "./worktree-removal-test.js";
 import type { TaskCommitRange } from "./task-commit-range.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import { compareClaimSessions, type SessionComparison, type SiblingClaimInfo } from "./gate-predicates.js";
@@ -558,6 +556,12 @@ export interface DoneOpts {
    * ignored-when-unneeded contract.
    */
   noNewTestsReason?: string;
+  /**
+   * The caller's harness session id (`CLAUDE_CODE_SESSION_ID` / `CLAUDE_SESSION_ID`, resolved by the CLI) — the
+   * "mine" side of the worktree-removal test's owned-or-abandoned clause (spec-one-worktree-removal-test-for-the-
+   * guard-lore-done-and-a D2). Absent = unknown: never the owner of anything.
+   */
+  callerSession?: string;
 }
 
 /**
@@ -638,14 +642,6 @@ export interface DoneResult {
    * error: a kept / not-measured worktree is reported here and `done` still succeeds.
    */
   worktree_outcomes?: WorktreeOutcome[];
-}
-
-/** One `lore worktree sweep` row (issue #106): a claim-recorded worktree of an archived/deprecated task and its decision. */
-export interface WorktreeSweepRow {
-  task: string;
-  worktree: string;
-  decision: WorktreeDecisionKind;
-  reason: string;
 }
 
 /**
@@ -2301,11 +2297,13 @@ export class TaskWorkflowService {
       worktree: string,
       sessionId: string,
     ) => Promise<void> = unbindClaimSessionForTrailer,
-    // reason: issue #106 — the git/fs probe behind `done()`'s worktree cleanup and
-    // `sweepWorktrees()`; defaults to real git so every shipped surface cleans up without
+    // reason: issue #106 — the git/fs probe behind `done()`'s worktree cleanup; defaults to real git so every shipped surface cleans up without
     // `app.ts` wiring (same leaf-IO-port precedent as `detectBranch` above).
     private readonly worktreeProbe: WorktreeGitProbe = createRealWorktreeProbe(),
-    private readonly nowEpochSeconds: () => number = () => Math.floor(Date.now() / 1000),
+    // reason: the single worktree-removal test's facts (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a);
+    // wired by `app.ts` (a service never imports another service). ABSENT => `done`'s cleanup reports every recorded
+    // worktree `not-measured`, never removes — no silent "safe" default.
+    private readonly worktreeRemoval?: WorktreeRemovalFactsPort,
   ) {
     this.telemetry = telemetry;
     this.claimTtlMinutes = config.claimTtlMinutes;
@@ -3591,7 +3589,7 @@ export class TaskWorkflowService {
     if (!planFactResult.ok) return planFactResult;
     const planFact = planFactResult.value;
 
-    const worktreeOutcomes = await this.cleanupRecordedWorktrees(task, opts.by, now());
+    const worktreeOutcomes = await this.cleanupRecordedWorktrees(task, opts.by, now(), opts.callerSession ?? null);
 
     return ok({
       task,
@@ -3688,7 +3686,7 @@ export class TaskWorkflowService {
     task: DocRecord,
     by: string,
     nowIso: string,
-    trigger: "done" | "sweep",
+    trigger: "done",
     outcomes: readonly WorktreeOutcome[],
   ): Promise<Result<void, LoreError>> {
     return this.store.appendAuditEntry({
@@ -3707,7 +3705,12 @@ export class TaskWorkflowService {
    * (BR-961 predicate), removes the `remove` ones, and stores the outcomes in one audit row
    * (`action: "worktree-cleanup"`, `trigger: "done"`).
    */
-  private async cleanupRecordedWorktrees(task: DocRecord, by: string, nowIso: string): Promise<WorktreeOutcome[]> {
+  private async cleanupRecordedWorktrees(
+    task: DocRecord,
+    by: string,
+    nowIso: string,
+    callerSession: string | null,
+  ): Promise<WorktreeOutcome[]> {
     const unmeasurable = (reason: string): WorktreeOutcome[] => [
       { worktree: "(recorded worktrees)", decision: "not-measured", reason },
     ];
@@ -3715,18 +3718,21 @@ export class TaskWorkflowService {
     if (!recordedResult.ok) return unmeasurable(`claim history unreadable: ${recordedResult.error.code}`);
     if (recordedResult.value.length === 0) return [];
 
-    const quiet = parseQuietMinutes(this.processEnv["LORE_WORKTREE_QUIET_MINUTES"]);
-    if (!quiet.ok) {
-      return recordedResult.value.map((r) => ({ worktree: r.path, decision: "not-measured" as const, reason: `invalid LORE_WORKTREE_QUIET_MINUTES "${this.processEnv["LORE_WORKTREE_QUIET_MINUTES"] ?? ""}" (want a non-negative integer)` }));
+    const removal = this.worktreeRemoval;
+    if (removal === undefined) {
+      return recordedResult.value.map((r) => ({
+        worktree: r.path,
+        decision: "not-measured" as const,
+        reason: "worktree-removal test not wired into this TaskWorkflowService",
+      }));
     }
     const activeResult = await this.collectActiveClaimedPaths();
     if (!activeResult.ok) return unmeasurable(`active-claim scan failed: ${activeResult.error.code}`);
 
     const outcomes: WorktreeOutcome[] = [];
     for (const recorded of recordedResult.value) {
-      const evaluation = evaluateRecordedWorktree(this.worktreeProbe, recorded, {
-        quietMinutes: quiet.value,
-        nowEpochSeconds: this.nowEpochSeconds(),
+      const evaluation = await evaluateRecordedWorktree(this.worktreeProbe, removal, recorded, {
+        callerSession,
         activeClaimedPaths: activeResult.value,
       });
       outcomes.push(applyWorktreeRemoval(this.worktreeProbe, evaluation));
@@ -3736,53 +3742,6 @@ export class TaskWorkflowService {
       outcomes.push({ worktree: "(audit)", decision: "not-measured", reason: `cleanup outcome not audited: ${auditResult.error.code}` });
     }
     return outcomes;
-  }
-
-  /**
-   * `lore worktree sweep` — evaluates every worktree recorded by a claim of an ARCHIVED/DEPRECATED task
-   * (current claim + claim audit history) against the BR-961 predicate. Report-only unless
-   * `opts.apply`; with `apply`, removes exactly the `remove` rows (plain `git worktree remove` +
-   * `git branch -d`), one audit row per removal. A worktree no claim recorded is never listed.
-   *
-   * @returns rows sorted by task slug then path; an `apply` failure is a `not-measured` row whose
-   *   reason starts `remove-failed:`; a malformed `LORE_WORKTREE_QUIET_MINUTES` is a VALIDATION_ERROR.
-   */
-  async sweepWorktrees(opts: { apply: boolean; by: string }, now: () => string = defaultNow): Promise<Result<WorktreeSweepRow[], LoreError>> {
-    const quiet = parseQuietMinutes(this.processEnv["LORE_WORKTREE_QUIET_MINUTES"]);
-    if (!quiet.ok) return quiet;
-    const activeResult = await this.collectActiveClaimedPaths();
-    if (!activeResult.ok) return activeResult;
-
-    const terminal: DocRecord[] = [];
-    for (const status of ["archived", "deprecated"] as const) {
-      const found = await this.store.findMany({ type: "task", status });
-      if (!found.ok) return found;
-      terminal.push(...found.value);
-    }
-    terminal.sort((a, b) => a.slug.localeCompare(b.slug));
-
-    const rows: WorktreeSweepRow[] = [];
-    for (const task of terminal) {
-      const recordedResult = await this.readRecordedWorktrees(task);
-      if (!recordedResult.ok) return recordedResult;
-      for (const recorded of recordedResult.value) {
-        const evaluation: WorktreeEvaluation = evaluateRecordedWorktree(this.worktreeProbe, recorded, {
-          quietMinutes: quiet.value,
-          nowEpochSeconds: this.nowEpochSeconds(),
-          activeClaimedPaths: activeResult.value,
-        });
-        const outcome: WorktreeOutcome =
-          opts.apply && evaluation.decision === "remove"
-            ? applyWorktreeRemoval(this.worktreeProbe, evaluation)
-            : { worktree: evaluation.worktree, decision: evaluation.decision, reason: evaluation.reason };
-        if (opts.apply && evaluation.decision === "remove") {
-          const auditResult = await this.recordWorktreeCleanupAudit(task, opts.by, now(), "sweep", [outcome]);
-          if (!auditResult.ok) return auditResult;
-        }
-        rows.push({ task: task.slug, worktree: outcome.worktree, decision: outcome.decision, reason: outcome.reason });
-      }
-    }
-    return ok(rows);
   }
 
   // ── Anchor Mutations (SPEC-042 D3) ──────────────────────────────────────────

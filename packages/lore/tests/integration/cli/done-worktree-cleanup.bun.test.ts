@@ -7,11 +7,12 @@
  * `git branch -d` (never force), but ONLY when the predicate holds:
  *   - the recorded path is a linked worktree, clean (no tracked/untracked changes),
  *   - its branch has >= 1 own commit (not in the base at claim time) ALL reachable from main,
- *   - no reflog activity for LORE_WORKTREE_QUIET_MINUTES (default 30),
+ *   - (RE-BASELINE task-single-worktree-removal-test-used-by-the-hook-lore-done, AC-WS-5: the 30-minute quiet window
+ *     is DELETED — occupancy decides, see done-worktree-cleanup-compiled.bun.test.ts; a commit seconds old is removable)
  *   - not git-locked.
  * Otherwise the worktree is KEPT, `lore done` still exits 0, and the output line
  * `worktree: kept <path>: <reason>` names the reason token:
- *   no-own-commits | uncommitted-changes | unmerged-commits | recent-activity | locked.
+ *   no-own-commits | uncommitted-changes | unmerged-commits | locked.
  * A worktree no claim recorded is never touched.
  *
  * Throwaway repo + throwaway corpus (`lore init` inside a mkdtemp git repo); never this
@@ -45,7 +46,7 @@ interface Run {
 function baseEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CODE_SESSION_ID: SESSION_ID, GIT_TERMINAL_PROMPT: "0" };
   // The default (30 min) window must be what an unset env means; never inherit a stray override.
-  delete env.LORE_WORKTREE_QUIET_MINUTES;
+  delete env.LORE_WORKTREE_QUIET_MINUTES; // retired knob: even an inherited value must change nothing
   return { ...env, ...extra };
 }
 
@@ -139,7 +140,7 @@ describe("done removes the recorded worktree (#106)", () => {
     mustOk(lore(["init"]), "lore init");
     mustOk(lore(["create", "prd", "--title", "Root", "--json"]), "create root prd");
 
-    // removable: clean + own commit merged into main + (quiet window disabled by the test's env)
+    // removable: clean + own commit merged into main + 
     removable = makeClaimed("removable");
     ownCommit(removable);
     mergeToMain(removable);
@@ -174,7 +175,7 @@ describe("done removes the recorded worktree (#106)", () => {
     ownCommit(unmerged);
     recordEvidence(unmerged);
 
-    // recent activity: fully removable, but the test runs `done` with the DEFAULT quiet window.
+    // seconds-old commit: fully removable — elapsed time is never consulted.
     recent = makeClaimed("recent");
     ownCommit(recent);
     mergeToMain(recent);
@@ -207,7 +208,7 @@ describe("done removes the recorded worktree (#106)", () => {
   // ─── HAPPY ────────────────────────────────────────────────────────────────
 
   it("removes a clean, merged, quiet worktree: directory gone, branch deleted, output says removed, exit 0", () => {
-    const r = done(removable, { LORE_WORKTREE_QUIET_MINUTES: "0" });
+    const r = done(removable);
     expect(r.status).toBe(0);
     expect(worktreeLine(r)).toMatch(/^worktree: removed /);
     expect(worktreeLine(r)).toContain(removable.path);
@@ -229,7 +230,7 @@ describe("done removes the recorded worktree (#106)", () => {
   // ─── NEGATIVE: each keep reason ──────────────────────────────────────────
 
   it("keeps a zero-commit branch (never started, not landed): exit 0, reason no-own-commits", () => {
-    const r = done(zeroCommit, { LORE_WORKTREE_QUIET_MINUTES: "0" });
+    const r = done(zeroCommit);
     expect(r.status).toBe(0);
     expect(worktreeLine(r)).toMatch(/^worktree: kept /);
     expect(worktreeLine(r)).toContain("no-own-commits");
@@ -238,7 +239,7 @@ describe("done removes the recorded worktree (#106)", () => {
   }, 120_000);
 
   it("keeps a worktree with an untracked file: exit 0, reason uncommitted-changes", () => {
-    const r = done(dirtyUntracked, { LORE_WORKTREE_QUIET_MINUTES: "0" });
+    const r = done(dirtyUntracked);
     expect(r.status).toBe(0);
     expect(worktreeLine(r)).toMatch(/^worktree: kept /);
     expect(worktreeLine(r)).toContain("uncommitted-changes");
@@ -247,7 +248,7 @@ describe("done removes the recorded worktree (#106)", () => {
   }, 120_000);
 
   it("keeps a worktree with a modified tracked file: exit 0, reason uncommitted-changes", () => {
-    const r = done(dirtyTracked, { LORE_WORKTREE_QUIET_MINUTES: "0" });
+    const r = done(dirtyTracked);
     expect(r.status).toBe(0);
     expect(worktreeLine(r)).toMatch(/^worktree: kept /);
     expect(worktreeLine(r)).toContain("uncommitted-changes");
@@ -255,7 +256,7 @@ describe("done removes the recorded worktree (#106)", () => {
   }, 120_000);
 
   it("keeps a worktree whose own commit is not reachable from main: exit 0, reason unmerged-commits", () => {
-    const r = done(unmerged, { LORE_WORKTREE_QUIET_MINUTES: "0" });
+    const r = done(unmerged);
     expect(r.status).toBe(0);
     expect(worktreeLine(r)).toMatch(/^worktree: kept /);
     expect(worktreeLine(r)).toContain("unmerged-commits");
@@ -264,18 +265,17 @@ describe("done removes the recorded worktree (#106)", () => {
     expect(branchExists(unmerged.branch)).toBe(true);
   }, 120_000);
 
-  it("keeps a worktree with reflog activity inside the DEFAULT 30-minute window: exit 0, reason recent-activity", () => {
-    // LORE_WORKTREE_QUIET_MINUTES deliberately unset -> default 30; the commit was seconds ago.
+  it("removes a worktree whose last commit is seconds old: no elapsed-time clause exists (RE-BASELINE, AC-WS-5)", () => {
     const r = done(recent);
     expect(r.status).toBe(0);
-    expect(worktreeLine(r)).toMatch(/^worktree: kept /);
-    expect(worktreeLine(r)).toContain("recent-activity");
-    expect(existsSync(recent.path)).toBe(true);
-    expect(branchExists(recent.branch)).toBe(true);
+    expect(worktreeLine(r)).toBe(`worktree: removed ${recent.path}`);
+    expect(r.out).not.toContain("recent-activity");
+    expect(existsSync(recent.path)).toBe(false);
+    expect(branchExists(recent.branch)).toBe(false);
   }, 120_000);
 
   it("keeps a git-locked worktree: exit 0, reason locked, lock still in place", () => {
-    const r = done(locked, { LORE_WORKTREE_QUIET_MINUTES: "0" });
+    const r = done(locked);
     expect(r.status).toBe(0);
     expect(worktreeLine(r)).toMatch(/^worktree: kept /);
     expect(worktreeLine(r)).toContain("locked");
@@ -294,7 +294,7 @@ describe("done removes the recorded worktree (#106)", () => {
   it("the main checkout is never removed and every kept worktree is still registered with git", () => {
     const list = git(repo, "worktree", "list", "--porcelain").stdout;
     expect(existsSync(repo)).toBe(true);
-    for (const c of [zeroCommit, dirtyUntracked, dirtyTracked, unmerged, recent, locked]) {
+    for (const c of [zeroCommit, dirtyUntracked, dirtyTracked, unmerged, locked]) {
       expect(list).toContain(c.path);
     }
   });

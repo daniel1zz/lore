@@ -38,9 +38,10 @@
  *   git clean -f/-fd/-fdx             → `git clean -n` preview of what dies
  *   git stash drop <rev> / clear      → that entry / the whole `git stash list`
  *   git worktree remove [--force] <p> → dirty state, branch/detached-HEAD merged
- *                                        into base?, and OCCUPANCY (owning agent run /
- *                                        open claim not ended, a foreign process
- *                                        with its cwd inside) —
+ *                                        into base?, and lore's ONE removal test
+ *                                        (`lore worktree check`: owning run / open
+ *                                        claim not ended, a process inside, another
+ *                                        live session's worktree) —
  *                                        force or not, BOTH are assessed; see the
  *                                        rule entry for the one pass-through case
  *   git branch -D <b>                 → branch merged/ancestor? unmerged commits?
@@ -56,15 +57,16 @@
  *
  * `git worktree remove` WITHOUT --force is now MATCHED (2026-08-02 fix) and
  * passes through ONLY when the probe finds the worktree CLEAN, its branch (or
- * detached HEAD) MERGED into the default branch, AND nobody inside it — the
- * exact legitimate post-merge cleanup path CLAUDE.md mandates. Merged-ness
- * alone answers "will commits be lost", never "is someone in there", so
- * occupancy is read directly: the owning agent run (and any open claim's run)
- * has not ended (`lore run occupancy`), or a process other than this hook's own
- * ancestry has its cwd inside (lsof, else /proc). Every other combination
- * (dirty, unmerged, occupied, or an occupancy signal that cannot be measured)
- * blocks too, --force or not — the previous blanket "no --force is safe" claim
- * here was false in exactly the case that mattered most.
+ * detached HEAD) MERGED into the default branch, AND lore's removal test says
+ * removable — the exact legitimate post-merge cleanup path CLAUDE.md mandates.
+ * Merged-ness alone answers "will commits be lost", never "is someone in there",
+ * so the hook asks `lore worktree check <path> --session <payload session_id> --json`:
+ * the ONE place that decides occupancy (owning agent run / open claim not ended, a
+ * process other than the caller's own ancestry inside, another live session's
+ * worktree). The hook carries no process scan of its own. Every other combination
+ * (dirty, unmerged, any lore verdict other than `removable`, or a check that cannot
+ * be read) blocks too, --force or not — the previous blanket "no --force is safe"
+ * claim here was false in exactly the case that mattered most.
  *
  * Incident rationale for the occupancy rule (replaces a 30-minute reflog-quiet
  * window chosen 2026-08-02, when no liveness signal existed): on 2026-10-12 four
@@ -72,7 +74,8 @@
  * their agents had already stopped (`runs.ended_at` was written at subagent
  * stop), and an agent thinking for 31 minutes without a commit would have been
  * unprotected. Elapsed time is never consulted now. See
- * spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (BR-1070).
+ * spec-worktree-removal-is-decided-by-who-is-inside-not-by-how (BR-1070) and
+ * spec-one-worktree-removal-test-for-the-guard-lore-done-and-a (BR-1079).
  *
  * Escape hatch: a matched op is BLOCKED with a clear message; when genuinely
  * needed the human runs it in their own shell (they can run anything directly).
@@ -89,7 +92,7 @@
  * narrows it (D4), and `probeDirtyTree` stays argument-blind on purpose (D2).
  */
 
-import { readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -383,118 +386,25 @@ function extractPathArg(inner, verbRe) {
 const WORKTREE_REMOVE_VERB_RE = /\bgit\s+worktree\s+remove\b/;
 const WORKTREE_REMOVE_FORCE_RE = /\bgit\s+worktree\s+remove\b[^\n]*?\s(--force|-f)(?=\s|$)/;
 
-// ── occupancy: who is inside a worktree (spec-worktree-removal-is-decided-by-
-// who-is-inside-not-by-how-long-it-has-been-quiet, D1–D6) ──────────────────────
-//
-// Three direct signals decide whether a clean, merged worktree may be removed:
-//   1. the owning agent run / an open claim's run has not ended  (`lore run occupancy`)
-//   2. a process other than this hook's own ancestry has its cwd inside it (lsof, or /proc)
-//   3. (folded into 1) an open claim recorded for it whose run is alive
-// Elapsed time since the last commit / reflog entry is NEVER consulted (D6), and an
-// unmeasurable signal REFUSES (D4) — there is no time-based fallback.
+// ── occupancy: delegated to lore's ONE removal test ───────────────────────────
+// (spec-one-worktree-removal-test-for-the-guard-lore-done-and-a D1/D2). `lore worktree check` owns every
+// occupancy clause — owning run / open claim not ended, a process inside, another live session's worktree — and the
+// process scan itself; the hook only asks, then names each reason. Elapsed time is never consulted, and a check that
+// cannot be read REFUSES (never a guess).
+
+const CHECK_VERDICTS = new Set(['removable', 'keep', 'not-measured']);
 
 /**
- * Directory whose entries are `<pid>/cwd` links — `/proc` on Linux. Overridable so a
- * test can simulate a host without /proc; never set in production.
- */
-const PROC_DIR = process.env.LORE_GIT_SAFETY_PROC_DIR || '/proc';
-
-/**
- * Pids that must NOT count as "standing inside": this hook's own pid and its parent
- * chain (the shell / harness that launched it may legitimately sit in the worktree —
- * that is the caller, not a peer).
- *
- * @returns {Set<number>}
- */
-function ownAncestryPids() {
-  const pids = new Set([process.pid, process.ppid]);
-  let cur = process.ppid;
-  for (let depth = 0; depth < 64 && cur > 1; depth++) {
-    const r = spawnSync('ps', ['-o', 'ppid=', '-p', String(cur)], { encoding: 'utf8' });
-    if (r.error || r.status !== 0) break;
-    const parent = Number.parseInt((r.stdout || '').trim(), 10);
-    if (!Number.isInteger(parent) || parent <= 0 || pids.has(parent)) break;
-    pids.add(parent);
-    cur = parent;
-  }
-  return pids;
-}
-
-/** Best-effort command name of a pid, for the refusal text only. */
-function commandOfPid(pid) {
-  const r = spawnSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8' });
-  const name = r.error || r.status !== 0 ? '' : (r.stdout || '').trim();
-  return name || '(command unknown)';
-}
-
-/**
- * @param {string} cwdOfProcess a process's working directory
- * @param {string[]} roots the worktree path in every spelling (given + realpath)
- */
-function isInside(cwdOfProcess, roots) {
-  return roots.some((root) => cwdOfProcess === root || cwdOfProcess.startsWith(root.endsWith('/') ? root : `${root}/`));
-}
-
-/**
- * Processes (other than `excluded`) whose cwd is the worktree or under it.
- *
- * @param {string[]} roots
- * @param {Set<number>} excluded
- * @returns {{ ok: true, inside: { pid: number, command: string }[] } | { ok: false, detail: string }}
- *   `ok: false` = the signal could not be measured (neither lsof nor /proc usable) — callers REFUSE (D4).
- */
-function processesInside(roots, excluded) {
-  const found = new Map();
-  const lsof = spawnSync('lsof', ['-n', '-d', 'cwd', '-F', 'pn'], { cwd: CWD, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-  if (lsof.pid) excluded.add(lsof.pid); // lsof itself sits in the hook's cwd
-  if (!lsof.error) {
-    const out = lsof.stdout || '';
-    // reason: a non-zero lsof exit with output is the normal "some processes were not inspectable" case; only a
-    // failure that produced NO listing is unmeasurable.
-    if (lsof.status !== 0 && !/^p\d+$/m.test(out)) {
-      return { ok: false, detail: `lsof exited ${lsof.status ?? 'abnormally'}${lsof.stderr ? `: ${firstLines(lsof.stderr.trim(), 1)}` : ''}` };
-    }
-    let pid = null;
-    for (const line of out.split('\n')) {
-      if (line.startsWith('p')) pid = Number.parseInt(line.slice(1), 10);
-      else if (line.startsWith('n') && pid !== null && Number.isInteger(pid) && !excluded.has(pid) && isInside(line.slice(1), roots)) {
-        found.set(pid, null);
-      }
-    }
-  } else if (lsof.error.code === 'ENOENT') {
-    let entries;
-    try {
-      entries = readdirSync(PROC_DIR).filter((name) => /^\d+$/.test(name));
-    } catch {
-      return { ok: false, detail: `lsof is not installed and ${PROC_DIR} is not readable` };
-    }
-    for (const name of entries) {
-      const pid = Number.parseInt(name, 10);
-      if (excluded.has(pid)) continue;
-      let target;
-      try {
-        target = readlinkSync(`${PROC_DIR}/${name}/cwd`);
-      } catch {
-        continue; // process gone or not inspectable (another user's) — not a measurement of "inside"
-      }
-      if (isInside(target, roots)) found.set(pid, null);
-    }
-  } else {
-    return { ok: false, detail: `lsof could not run (${lsof.error.code || lsof.error.message})` };
-  }
-  return { ok: true, inside: [...found.keys()].sort((a, b) => a - b).map((pid) => ({ pid, command: commandOfPid(pid) })) };
-}
-
-/**
- * Reads `lore run occupancy --worktree <path> --json` and validates its documented shape.
+ * Reads `lore worktree check <path> --session <id> --json` and validates its documented shape.
  *
  * @param {string} worktree absolute worktree path
- * @returns {{ ok: true, data: { agent_run: { id: string, ended: boolean, parent_ended: boolean | null } | null,
- *   open_claims: { task_slug: string, run_id: string | null, run_ended: boolean | null }[], occupied: boolean } }
- *   | { ok: false, detail: string }}
+ * @returns {{ ok: true, data: { verdict: string, reasons: string[], owner: object | null,
+ *   occupancy: { agent_run: { id: string } | null, open_claims: { task_slug: string, run_id: string | null, run_ended: boolean | null }[] } | null,
+ *   processes: { pid: number, command: string }[] } } | { ok: false, detail: string }}
  */
-function readRunOccupancy(worktree) {
-  const r = spawnSync('lore', ['run', 'occupancy', '--worktree', worktree, '--json'], { cwd: CWD, encoding: 'utf8' });
+function readWorktreeCheck(worktree) {
+  const session = typeof payload?.session_id === 'string' && payload.session_id ? ['--session', payload.session_id] : [];
+  const r = spawnSync('lore', ['worktree', 'check', worktree, ...session, '--json'], { cwd: CWD, encoding: 'utf8' });
   if (r.error) return { ok: false, detail: `lore could not run (${r.error.code || r.error.message})` };
   if (r.status !== 0) return { ok: false, detail: `lore exited ${r.status}${r.stderr ? `: ${firstLines(r.stderr.trim(), 1)}` : ''}` };
   let parsed;
@@ -504,61 +414,82 @@ function readRunOccupancy(worktree) {
     return { ok: false, detail: 'lore printed output that is not JSON' };
   }
   const d = parsed?.data;
-  const runOk = (x) => x === null || (typeof x?.id === 'string' && typeof x?.ended === 'boolean');
-  const claimsOk = Array.isArray(d?.open_claims) && d.open_claims.every((c) => typeof c?.task_slug === 'string');
-  if (parsed?.ok !== true || typeof d?.occupied !== 'boolean' || d.agent_run === undefined || !runOk(d.agent_run) || !claimsOk) {
-    return { ok: false, detail: 'lore printed JSON that is not the documented occupancy shape' };
-  }
+  const shapeOk =
+    parsed?.ok === true &&
+    CHECK_VERDICTS.has(d?.verdict) &&
+    Array.isArray(d?.reasons) &&
+    d.reasons.every((x) => typeof x === 'string') &&
+    Array.isArray(d?.processes) &&
+    d.processes.every((x) => Number.isInteger(x?.pid) && typeof x?.command === 'string');
+  if (!shapeOk) return { ok: false, detail: 'lore printed JSON that is not the documented worktree-check shape' };
   return { ok: true, data: d };
 }
 
 /**
- * Occupancy verdict for a clean, merged worktree.
+ * One block-message line per reason lore gave, naming the way out where there is one.
+ *
+ * @param {string} reason a reason token (or a `<clause>-not-measured: <detail>` entry)
+ * @param {ReturnType<typeof readWorktreeCheck> & { ok: true }} check
+ * @param {string} absolute worktree path
+ * @returns {string[]}
+ */
+function describeCheckReason(reason, check, absolute) {
+  const d = check.data;
+  if (reason === 'run-not-ended') {
+    const id = d.occupancy?.agent_run?.id;
+    return [
+      id
+        ? `agent run ${id} owns this worktree and has no end recorded — its agent may still be working here. ` +
+          `If that agent is gone: lore run end ${id} --reason "<why>"`
+        : `a run of the agent owning this worktree has no end recorded — see \`lore run occupancy --worktree ${absolute}\`.`,
+    ];
+  }
+  if (reason === 'open-claim') {
+    const claims = (d.occupancy?.open_claims ?? []).filter((c) => c.run_ended !== true);
+    if (claims.length === 0) return [`an open task claim names this worktree — see \`lore run occupancy --worktree ${absolute}\`.`];
+    return claims.map(
+      (claim) =>
+        `task ${claim.task_slug} holds an open claim recorded for this worktree (` +
+        (claim.run_id === null ? 'its claim names no run' : `run ${claim.run_id} has no end recorded`) +
+        `) — release it: lore release ${claim.task_slug}` +
+        (claim.run_id === null ? '' : `, or if that run is gone: lore run end ${claim.run_id} --reason "<why>"`),
+    );
+  }
+  if (reason === 'process-inside') {
+    if (d.processes.length === 0) return ['a process has its working directory inside this worktree.'];
+    return d.processes.map(
+      (proc) => `process ${proc.pid} (${proc.command}) has its working directory inside this worktree — wait for it to exit or stop it (kill ${proc.pid}).`,
+    );
+  }
+  if (reason === 'foreign-live-session') {
+    const owner = d.owner;
+    return [
+      `agent run ${owner?.run_id ?? '(unknown)'} belongs to another session${owner ? ` (${owner.session})` : ''} that is still live — ` +
+        'it may resume its stopped agent in this worktree. Wait until that session ends, or ask it to remove its own worktree.',
+    ];
+  }
+  if (/-not-measured: /.test(reason)) return [`cannot measure (${reason}) — refusing rather than guessing.`];
+  return [`lore worktree check reports: ${reason}`];
+}
+
+/**
+ * Occupancy verdict for a clean, merged worktree: lore's removal test.
  *
  * @param {string} path worktree path as typed (resolved against the session cwd here)
- * @returns {{ refusals: string[] }} empty = nobody is inside and every signal was measured
+ * @returns {{ refusals: string[] }} empty = lore says removable
  */
 function assessOccupancy(path) {
   const absolute = resolvePath(CWD, path);
-  let real = absolute;
-  try { real = realpathSync(absolute); } catch { /* already known to exist via git status; keep the lexical spelling */ }
-  const roots = [...new Set([absolute, real])];
-  const refusals = [];
-
-  const runs = readRunOccupancy(absolute);
-  if (!runs.ok) {
-    refusals.push(`cannot measure the owning run (${runs.detail}) — refusing rather than guessing; fix \`lore run occupancy --worktree ${absolute}\` first.`);
-  } else {
-    const { agent_run: run, open_claims: claims } = runs.data;
-    const runLive = run !== null && !run.ended && run.parent_ended !== true;
-    if (runLive) {
-      refusals.push(
-        `agent run ${run.id} owns this worktree and has no end recorded — its agent may still be working here. ` +
-          `If that agent is gone: lore run end ${run.id} --reason "<why>"`,
-      );
-    }
-    for (const claim of claims) {
-      if (claim.run_ended === true) continue;
-      refusals.push(
-        `task ${claim.task_slug} holds an open claim recorded for this worktree (` +
-          (claim.run_id === null ? 'its claim names no run' : `run ${claim.run_id} has no end recorded`) +
-          `) — release it: lore release ${claim.task_slug}` +
-          (claim.run_id === null ? '' : `, or if that run is gone: lore run end ${claim.run_id} --reason "<why>"`),
-      );
-    }
-    if (runs.data.occupied && refusals.length === 0) {
-      refusals.push('the run registry reports this worktree occupied (an earlier run of its agent has no end recorded) — see `lore run occupancy --worktree ' + absolute + '`.');
-    }
+  const check = readWorktreeCheck(absolute);
+  if (!check.ok) {
+    return {
+      refusals: [`cannot read lore's removal test (${check.detail}) — refusing rather than guessing; fix \`lore worktree check ${absolute}\` first.`],
+    };
   }
-
-  const procs = processesInside(roots, ownAncestryPids());
-  if (!procs.ok) {
-    refusals.push(`cannot measure processes inside (${procs.detail}) — refusing rather than guessing.`);
-  } else {
-    for (const proc of procs.inside) {
-      refusals.push(`process ${proc.pid} (${proc.command}) has its working directory inside this worktree — wait for it to exit or stop it (kill ${proc.pid}).`);
-    }
-  }
+  if (check.data.verdict === 'removable') return { refusals: [] };
+  const refusals = check.data.reasons.flatMap((reason) => describeCheckReason(reason, check, absolute));
+  // reason: a non-removable verdict that lists no reason must still block — never read as "nothing wrong".
+  if (refusals.length === 0) refusals.push(`lore worktree check says ${check.data.verdict} without a reason — refusing.`);
   return { refusals };
 }
 
@@ -625,7 +556,7 @@ function probeWorktreeRemove(inner) {
   if (forced) {
     return (
       `Assessment: worktree is CLEAN, ${label} is merged into ${base}, and nobody is inside it ` +
-      `(owning run ended, no process working there, no open claim) — SAFE. --force is only ` +
+      `(lore worktree check: removable) — SAFE. --force is only ` +
       `needed for untracked leftovers (e.g. node_modules); run it yourself to confirm.`
     );
   }
@@ -693,8 +624,8 @@ const RULES = [
     safe:
       'Verify the work landed — `git log <base>..<branch>` empty OR the branch merged. A merge that says ' +
       '"Already up to date" on a branch that SHOULD carry work is the STOP signal. Merged-ness alone is not ' +
-      'enough: also check nobody is inside — `lore run occupancy --worktree <path>` (owning agent run / open ' +
-      'claim not ended) and no process with its cwd there — a peer can still be mid-session on a merged ' +
+      'enough: also check nobody is inside — `lore worktree check <path>` (owning agent run / open ' +
+      'claim not ended, a process with its cwd there, another live session\'s worktree) — a peer can still be mid-session on a merged ' +
       'branch. Only a CLEAN + MERGED + UNOCCUPIED worktree is safe to remove WITHOUT --force — that IS the mandated post-merge ' +
       'cleanup path (CLAUDE.md) and this gate lets it through; every other combination needs the human/agent ' +
       'to run it directly in their own shell.',
