@@ -5,8 +5,10 @@
  * Public surface:
  *   - runFragmentsRender(deps, opts) — the additionalContext string one hook outlet emits
  *     (dynamic block, plus the D7 stale-rules-file notice at session start).
- *   - runFragmentsCheck(deps) — every outlet × agent type vs caps, lore rules-file drift, override refusal
- *     and Claude Code `language` drift; findings, never throws.
+ *   - runFragmentsCheck(deps) — every outlet × agent type vs caps, lore rules-file and project skill drift,
+ *     override refusal, Claude Code `language` drift, plus the rule-store findings (duplicate_line,
+ *     selection_unknown_id, selection_in_config, skill_collision; spec-rule-store-... Scope 6);
+ *     findings, never throws. Any finding makes `ok` false (the adapter maps that to exit 4).
  *   - composeSessionStart(parts) / buildHookBanner(error) — pure assembly helpers (exported for tests).
  *   - FragmentsFlowDeps, FragmentsFlowError, FRAGMENTS_STALE_MARKER.
  *
@@ -34,8 +36,25 @@ import {
 } from "@lore/core";
 import { discoverFragments, type FragmentRoots } from "../service/context-fragments/discover.js";
 import { renderOutlet } from "../service/context-fragments/render.js";
-import { isLoreRulesFileName, renderRulesFile } from "../service/context-fragments/section.js";
+import { findDuplicateLines, type ReadingGroup } from "../service/context-fragments/duplicates.js";
+import {
+  isLoreRulesFileName,
+  parseSkillFile,
+  renderRulesFile,
+  renderSkillFile,
+  SKILL_DIR_PREFIX,
+  SKILL_FILE_NAME,
+  skillDirName,
+} from "../service/context-fragments/section.js";
 import { checkOverrides, selectFragments } from "../service/context-fragments/select.js";
+import {
+  emptySelection,
+  parseSelection,
+  selectionToLayer,
+  SELECTION_FILE,
+  type Selection,
+  type SelectionScope,
+} from "../service/context-fragments/selection.js";
 
 /** Fixed marker the D7 backstop notice starts with (AC-CF-12). */
 export const FRAGMENTS_STALE_MARKER = "lore:stale-managed-context";
@@ -77,9 +96,72 @@ export interface FragmentsFlowDeps {
   readonly agentsDir: string;
   readonly userSettings: LanguageSettingsTarget;
   readonly projectSettings: LanguageSettingsTarget;
+  /**
+   * Raw text of the project / user `selection.yaml` (BR-1060). `null` or absent = no such file =
+   * nothing disabled (an absent file is a legitimate state, not a missing input). The adapter reads the
+   * files; the flow never touches env or the user config dir.
+   */
+  readonly userSelectionText?: string | null;
+  readonly projectSelectionText?: string | null;
+  /**
+   * Skill directory names shipped with lore (`lore-*` entries under the embedded manifest's `skills/`),
+   * supplied by the adapter. A skill fragment whose `lore-<id>` equals one is a `skill_collision` (BR-1064).
+   * ABSENT means the collision check is NOT RUN - the adapter MUST supply it for `lore fragments check`.
+   */
+  readonly shippedSkillNames?: readonly string[];
 }
 
 // ─── discovery / selection helpers ──────────────────────────────────────────
+
+/** A selection problem found while folding `selection.yaml` into the config layers. */
+interface SelectionProblem {
+  readonly kind: "selection" | "selection_in_config";
+  readonly message: string;
+}
+
+interface AppliedSelection {
+  /** `deps` whose config layers carry the selection's disable lists (what every selectFragments call must use). */
+  readonly deps: FragmentsFlowDeps;
+  readonly problems: readonly SelectionProblem[];
+  readonly selections: Readonly<Record<SelectionScope, Selection>>;
+}
+
+/**
+ * Fold both scopes' `selection.yaml` into the config layers (BR-1062): the selection file, not the
+ * settings file, owns `fragments.disable`. A bad selection file or a settings-file disable list is a
+ * problem (never thrown); that scope then keeps its un-folded layer so checking can continue.
+ */
+function applySelection(deps: FragmentsFlowDeps): AppliedSelection {
+  const problems: SelectionProblem[] = [];
+  const scopes = [
+    { scope: "user", text: deps.userSelectionText ?? null, layer: deps.globalConfig, source: `<user config dir>/${SELECTION_FILE.user}` },
+    { scope: "project", text: deps.projectSelectionText ?? null, layer: deps.projectConfig, source: SELECTION_FILE.project },
+  ] as const;
+  const layers: Record<SelectionScope, ContextConfigLayer> = { user: deps.globalConfig, project: deps.projectConfig };
+  const selections: Record<SelectionScope, Selection> = { user: emptySelection(), project: emptySelection() };
+
+  for (const { scope, text, layer, source } of scopes) {
+    if (text !== null) {
+      const parsed = parseSelection(text, source);
+      if (!parsed.ok) {
+        problems.push({ kind: "selection", message: parsed.error.message });
+        continue;
+      }
+      selections[scope] = parsed.value;
+    }
+    const folded = selectionToLayer(selections[scope], layer, scope);
+    if (!folded.ok) {
+      problems.push({ kind: "selection_in_config", message: folded.error.message });
+      continue;
+    }
+    layers[scope] = folded.value;
+  }
+  return {
+    deps: { ...deps, globalConfig: layers.user, projectConfig: layers.project },
+    problems,
+    selections,
+  };
+}
 
 const LAYERS = ["shipped", "user", "project"] as const;
 
@@ -129,12 +211,22 @@ function renderSafely(selected: readonly Fragment[], outlet: OutletId): FlowResu
 
 // ─── rules-file drift (D7, D15) ─────────────────────────────────────────────
 
-/** `<project>/.claude/rules`, derived from the project CLAUDE.md path (POSIX-absolute paths, like the rest of `deps`). */
-function projectRulesDir(deps: FragmentsFlowDeps): string {
+/** `<project>/.claude`, derived from the project CLAUDE.md path (POSIX-absolute paths, like the rest of `deps`). */
+function projectClaudeDir(deps: FragmentsFlowDeps): string {
   const path = deps.projectClaudeMdPath;
   const slash = path.lastIndexOf("/");
   const root = slash <= 0 ? "" : path.slice(0, slash);
-  return `${root}/.claude/rules`;
+  return `${root}/.claude`;
+}
+
+/** `<project>/.claude/rules`. */
+function projectRulesDir(deps: FragmentsFlowDeps): string {
+  return `${projectClaudeDir(deps)}/rules`;
+}
+
+/** `<project>/.claude/skills`. */
+function projectSkillsDir(deps: FragmentsFlowDeps): string {
+  return `${projectClaudeDir(deps)}/skills`;
 }
 
 /** Outcome of comparing the project's lore rules files with a fresh `rules:project` render. */
@@ -189,6 +281,56 @@ async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fr
   }
 
   return { ok: true, value: { drifted: files.length > 0, changed, files } };
+}
+
+/** One drifted project skill directory (`lore-<id>` + why), for `check` findings. */
+export interface SkillsDriftFile {
+  readonly dirName: string;
+  readonly reason: "missing" | "changed" | "extra";
+}
+
+/**
+ * Mirror of `detectProjectRulesDrift` for `<project>/.claude/skills`: a selected `skills:project`
+ * fragment whose `lore-<id>/SKILL.md` is missing or differs from `renderSkillFile` is drift, and so is
+ * an intact lore-owned skill dir (fingerprinted SKILL.md) for a fragment no longer selected. Dirs
+ * without a lore fingerprint (shipped or team skills) are never consulted.
+ */
+async function detectProjectSkillsDrift(
+  deps: FragmentsFlowDeps,
+  all: readonly Fragment[],
+): Promise<FlowResult<readonly SkillsDriftFile[]>> {
+  const selected = selectSafely(all, deps, "skills:project", undefined);
+  if (!selected.ok) return selected;
+
+  const skillsDir = projectSkillsDir(deps);
+  const presentLore: string[] = [];
+  for (const name of (await deps.fs.listDir(skillsDir)).filter((n) => n.startsWith(SKILL_DIR_PREFIX)).sort()) {
+    const stored = await deps.fs.readFile(`${skillsDir}/${name}/${SKILL_FILE_NAME}`);
+    const parsed = stored === null ? null : parseSkillFile(stored);
+    if (parsed !== null && parsed.intact && parsed.name === name && skillDirName(parsed.id) === name) presentLore.push(name);
+  }
+  // reason: same adoption rule as rules files - a never-managed project (no lore skill dir, no CLAUDE.md,
+  // only shipped skill fragments) has nothing to be stale against.
+  const adopted =
+    presentLore.length > 0 ||
+    (await deps.fs.exists(deps.projectClaudeMdPath)) ||
+    selected.value.some((fragment) => fragment.layer !== "shipped");
+  if (!adopted) return { ok: true, value: [] };
+
+  const files: SkillsDriftFile[] = [];
+  const expected = new Set<string>();
+  for (const fragment of selected.value) {
+    const rendered = renderSkillFile(fragment);
+    if (!rendered.ok) return { ok: false, error: { code: "VALIDATION_ERROR", message: rendered.error.message } };
+    expected.add(rendered.value.dirName);
+    const stored = await deps.fs.readFile(`${skillsDir}/${rendered.value.dirName}/${SKILL_FILE_NAME}`);
+    if (stored === null) files.push({ dirName: rendered.value.dirName, reason: "missing" });
+    else if (stored !== rendered.value.content) files.push({ dirName: rendered.value.dirName, reason: "changed" });
+  }
+  for (const name of presentLore) {
+    if (!expected.has(name)) files.push({ dirName: name, reason: "extra" });
+  }
+  return { ok: true, value: files };
 }
 
 // ─── render ─────────────────────────────────────────────────────────────────
@@ -275,9 +417,13 @@ export interface FragmentsRenderOutput {
  * @returns ok with the additionalContext string, or the typed error the adapter turns into the D12 banner.
  */
 export async function runFragmentsRender(
-  deps: FragmentsFlowDeps,
+  rawDeps: FragmentsFlowDeps,
   opts: FragmentsRenderOptions,
 ): Promise<FlowResult<FragmentsRenderOutput>> {
+  const applied = applySelection(rawDeps);
+  const firstProblem = applied.problems[0];
+  if (firstProblem !== undefined) return { ok: false, error: { code: "VALIDATION_ERROR", message: firstProblem.message } };
+  const deps = applied.deps;
   const discovered = await discoverAllLayers(deps);
   if (!discovered.ok) return discovered;
 
@@ -318,6 +464,11 @@ export type FindingKind =
   | "cap"
   | "selection"
   | "rules_drift"
+  | "duplicate_line"
+  | "selection_unknown_id"
+  | "selection_in_config"
+  | "skill_collision"
+  | "skills_drift"
   | "language_drift"
   | "language_unknown"
   | "settings_unreadable"
@@ -407,13 +558,84 @@ async function checkLanguageDrift(deps: FragmentsFlowDeps): Promise<CheckFinding
   return findings;
 }
 
+/** BR-1066: every id in a scope's `disable` list must name a discovered fragment (any layer). */
+function checkSelectionIds(
+  selections: Readonly<Record<SelectionScope, Selection>>,
+  all: readonly Fragment[],
+): CheckFinding[] {
+  const known = new Set(all.map((fragment) => fragment.frontmatter.id));
+  const findings: CheckFinding[] = [];
+  for (const scope of ["project", "user"] as const) {
+    for (const id of selections[scope].disable) {
+      if (known.has(id)) continue;
+      findings.push({
+        kind: "selection_unknown_id",
+        code: "VALIDATION_ERROR",
+        message: `${scope} ${SELECTION_FILE[scope]} disables unknown fragment id "${id}"; no discovered fragment has that id. Remove it or fix the spelling.`,
+      });
+    }
+  }
+  return findings;
+}
+
+/** BR-1064: a skill fragment must not render onto a skill directory lore itself ships. */
+function checkSkillCollisions(shippedSkillNames: readonly string[] | undefined, all: readonly Fragment[]): CheckFinding[] {
+  if (shippedSkillNames === undefined) return [];
+  const shipped = new Set(shippedSkillNames);
+  const findings: CheckFinding[] = [];
+  for (const fragment of all) {
+    if (fragment.frontmatter.delivery !== "skill") continue;
+    const dirName = skillDirName(fragment.frontmatter.id);
+    if (!shipped.has(dirName)) continue;
+    findings.push({
+      kind: "skill_collision",
+      code: "VALIDATION_ERROR",
+      message: `skill fragment "${fragment.frontmatter.id}" (${fragment.path}) would render as skill directory ${dirName}, which lore already ships; rename the fragment id.`,
+    });
+  }
+  return findings;
+}
+
+/**
+ * BR-1067: one finding per (line, fragment pair), naming every reading group that reads both
+ * (a wildcard-audience pair is read by every helper type; it is reported once, not once per type).
+ */
+function checkDuplicateLines(groups: readonly ReadingGroup[]): CheckFinding[] {
+  const merged = new Map<string, { line: string; kind: string; first: string; second: string; groups: string[] }>();
+  for (const duplicate of findDuplicateLines(groups)) {
+    const key = JSON.stringify([duplicate.line, duplicate.first.id, duplicate.second.id, duplicate.kind]);
+    const entry = merged.get(key);
+    if (entry !== undefined) {
+      entry.groups.push(duplicate.group);
+      continue;
+    }
+    merged.set(key, {
+      line: duplicate.line,
+      kind: duplicate.kind,
+      first: `${duplicate.first.id} (${duplicate.first.path})`,
+      second: `${duplicate.second.id} (${duplicate.second.path})`,
+      groups: [duplicate.group],
+    });
+  }
+  return [...merged.values()].map((entry) => ({
+    kind: "duplicate_line",
+    code: "VALIDATION_ERROR",
+    message: `duplicate line (${entry.kind}) "${entry.line}" in ${entry.first} and ${entry.second}; read together by: ${entry.groups.join(", ")}. Keep it in one fragment.`,
+  }));
+}
+
 /**
  * Check every outlet × agent type. Never throws; every problem is a finding, and `ok` is
  * true only when there are none.
  */
-export async function runFragmentsCheck(deps: FragmentsFlowDeps): Promise<FragmentsCheckReport> {
+export async function runFragmentsCheck(rawDeps: FragmentsFlowDeps): Promise<FragmentsCheckReport> {
   const findings: CheckFinding[] = [];
   const checks: CheckRow[] = [];
+  const applied = applySelection(rawDeps);
+  const deps = applied.deps;
+  for (const problem of applied.problems) {
+    findings.push({ kind: problem.kind, code: "VALIDATION_ERROR", message: problem.message });
+  }
   const agentTypes = await enumerateAgentTypes(deps);
   if (agentTypes.length <= 1) {
     findings.push({
@@ -431,6 +653,19 @@ export async function runFragmentsCheck(deps: FragmentsFlowDeps): Promise<Fragme
     const overrides = checkOverrides(all, { global: deps.globalConfig, project: deps.projectConfig });
     if (!overrides.ok) {
       findings.push({ kind: "override_refusal", code: "VALIDATION_ERROR", message: overrides.error.message });
+    }
+
+    findings.push(...checkSelectionIds(applied.selections, all));
+    findings.push(...checkSkillCollisions(rawDeps.shippedSkillNames, all));
+
+    // Reading groups (BR-1067): what ONE session reads together. Main = both rules outlets + session-start
+    // + both skills outlets; each helper type = its own subagent-start row.
+    const mainFragments: Fragment[] = [];
+    const helperGroups: ReadingGroup[] = [];
+    for (const skillsOutlet of ["skills:project", "skills:user"] as const) {
+      const selectedSkills = selectSafely(all, deps, skillsOutlet, undefined);
+      if (!selectedSkills.ok) findings.push({ kind: "selection", ...selectedSkills.error });
+      else mainFragments.push(...selectedSkills.value);
     }
 
     for (const outlet of CHECK_OUTLETS) {
@@ -454,8 +689,12 @@ export async function runFragmentsCheck(deps: FragmentsFlowDeps): Promise<Fragme
           chars: rendered.value.length,
           fragmentIds: selected.value.map((fragment) => fragment.frontmatter.id),
         });
+        if (outlet === "hook:subagent-start") helperGroups.push({ group: agentType === WILDCARD_AGENT_TYPE ? agentType : `subagent:${agentType}`, fragments: selected.value });
+        else mainFragments.push(...selected.value);
       }
     }
+
+    findings.push(...checkDuplicateLines([{ group: "main", fragments: mainFragments }, ...helperGroups]));
 
     const drift = await detectProjectRulesDrift(deps, all);
     if (!drift.ok) {
@@ -467,6 +706,21 @@ export async function runFragmentsCheck(deps: FragmentsFlowDeps): Promise<Fragme
           code: "VALIDATION_ERROR",
           message:
             `${projectRulesDir(deps)}/${file.fileName}: lore rules file is ${file.reason} versus a fresh render` +
+            ". Run `lore context refresh`.",
+        });
+      }
+    }
+
+    const skillsDrift = await detectProjectSkillsDrift(deps, all);
+    if (!skillsDrift.ok) {
+      findings.push({ kind: "skills_drift", ...skillsDrift.error });
+    } else {
+      for (const file of skillsDrift.value) {
+        findings.push({
+          kind: "skills_drift",
+          code: "VALIDATION_ERROR",
+          message:
+            `${projectSkillsDir(deps)}/${file.dirName}/${SKILL_FILE_NAME}: lore skill is ${file.reason} versus a fresh render` +
             ". Run `lore context refresh`.",
         });
       }
