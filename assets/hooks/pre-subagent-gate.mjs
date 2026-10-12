@@ -2,8 +2,9 @@
 /**
  * pre-subagent-gate.mjs — PreToolUse hook on Edit|Write|MultiEdit.
  *
- * ADVISORY gate (stderr warning only — every path exits 0, never blocks):
- * warns the main agent against direct code edits unless:
+ * ADVISORY gate (every path exits 0, never blocks; BR-1068). The notice goes to the MODEL via
+ * PreToolUse hookSpecificOutput.additionalContext on stdout — Claude Code never shows stderr
+ * from a hook that exits 0. Warns the main agent against direct code edits unless:
  *   1. diff ≤ 3 lines AND file was already Read this turn
  *   2. User explicitly said "直接改" / "just do it" (session opt-out via env)
  *   3. Running inside a subagent (CLAUDE_AGENT_TYPE set)
@@ -126,8 +127,13 @@ const reason = !fileRead
   ? `file not Read this turn`
   : `diff ${diffLines} lines > ${MAX_EXEMPT_LINES} threshold`;
 
-process.stderr.write(`⚠️ [SUBAGENT_GATE] WARNING: ${tool} on ${filePath}
+const notice = `[SUBAGENT_GATE] ${tool} on ${filePath} was NOT blocked.
 Reason: ${reason}
 Consider dispatching a subagent for large edits.
-`);
+Exemptions: a ${MAX_EXEMPT_LINES}-line exemption (diff of at most ${MAX_EXEMPT_LINES} lines on a file already Read this turn); config and markdown files; subagents.
+Escape settings: CLAUDE_SUBAGENT_GATE_BYPASS=1 (single-turn override), CLAUDE_NO_SUBAGENT_MODE=1 (session-level opt-out).`;
+
+process.stdout.write(JSON.stringify({
+  hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: notice },
+}));
 process.exit(0);

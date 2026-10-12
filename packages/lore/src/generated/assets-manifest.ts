@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "c0b84a708c48d6f4c4dcd4da21a7a137d02ca405118d9d44b291f18d16099b7c",
+  tree_digest: "6891f6b70690df6886663885be4f317c8802c36690f0c9a6e1be509890a222c9",
   entries: [
   { path: "agents/lore-explorer.md", kind: "agent", ownership: "managed", sha256: "e7b1610edfb25cae9d0bfcc3ffe6bcdf62940c1c37e8a5528508ea0a057429e1" },
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "c2cb50556fcce86bfecb5e9136732c9002cfef4268d09edf790a683883c5af36" },
@@ -68,8 +68,8 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/post-edit-mark.mjs", kind: "hook", ownership: "managed", sha256: "4caa2049028cd8fd2e51ca409c8d2a82e030c4d151829948e060b76e8c519601" },
   { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "b7d0bc3640910c1a7c01c381b96e391661bdd636898e0c2c83b570fd988f76cf" },
   { path: "hooks/pre-dispatch-isolation-gate.mjs", kind: "hook", ownership: "managed", sha256: "1479ddc2b6f596a8c3709d8e84571b2b5bbccda39d73ef23dca45d69150c8866" },
-  { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "e238cfcf73ba5794f3decbcd0efccfc8869ce0c593032923810a0ddd41cd3b1b" },
-  { path: "hooks/pre-subagent-gate.mjs", kind: "hook", ownership: "managed", sha256: "28c715cc0fa3d94fdb392a89aeaacad8bc710445d6e0d0bf30f898f92d0d177a" },
+  { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "92b2876139672ced4f3707c463db481bbe3fefd1ec2e780865320ad6ddb6e8bf" },
+  { path: "hooks/pre-subagent-gate.mjs", kind: "hook", ownership: "managed", sha256: "2281861fda52f2e0141dc0fdb32c91853457d946990d42485164a34ac101df23" },
   { path: "hooks/pre-tool-harness-run.mjs", kind: "hook", ownership: "managed", sha256: "e57b3cc55a33721832ad30d7d4da97beec619238562b801645ed4eae336374ce" },
   { path: "hooks/run-end.mjs", kind: "hook", ownership: "managed", sha256: "3615dadf253fa5ec2142ba8262e6478c5b487752de8699c17f2fd69952d5d60d" },
   { path: "hooks/run-register.mjs", kind: "hook", ownership: "managed", sha256: "312433bb68a6545782c06f1b48f85487015b6e4b660c740dec3a3a51cc4a218f" },
