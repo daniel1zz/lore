@@ -785,3 +785,109 @@ describe("CAPMCP — lore_evidence_add honours workflow.evidence.capture_timeout
     expect(stored[0]?.output_tail).toContain(marker);
   });
 });
+
+// ─── CAPRED — captured reds need a failed-test summary; 126/127 is never a red ──
+//
+// AC-EH-9 (a-c), issue #53, BR-1077/BR-152, spec D8-D10. The refusal comes from the
+// shared `findCapturedRedProofGap` precheck (not-yet-existing; the paired implement
+// task wires it into tools.ts after `findCapturedFailDiscoveryRefusal`). Each case
+// fails TODAY on an assertion: the broken-command red is currently ACCEPTED.
+// Dimensions: ERROR (a, c: refusal + nothing written), HAPPY/BOUNDARY (b: a
+// runner-shaped failure summary is recorded — known limit D8: the check proves such a
+// line appeared, not that a test ran).
+
+describe("CAPRED — lore_evidence_add refuses a broken-command red", () => {
+  it("CAPRED-a: capture + test + expected-fail + `cd /nonexistent && true` is refused naming the missing runner summary; evidence count unchanged", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "test",
+      command: "cd /nonexistent-dir-for-red && true",
+      result: "expected-fail",
+      capture: true,
+      caller_cwd: makeMarkerDir("x"),
+    });
+
+    expect(result.isError, "a red from a failed cd must be refused, not recorded").toBe(true);
+    const error = parseResult(result) as { code: string; message: string };
+    expect(error.code).toBe("VALIDATION_ERROR");
+    expect(error.message).toContain("summary");
+    expect(await storedEvidence(taskId)).toHaveLength(0);
+  });
+
+  it("CAPRED-b: capture + test + expected-fail + a printed vitest failure line + exit 1 records one expected-fail row (D8 known limit)", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "test",
+      command: "printf 'Tests  1 failed (1)\\n'; exit 1",
+      result: "expected-fail",
+      capture: true,
+      caller_cwd: makeMarkerDir("x"),
+    });
+
+    expect(result.isError).toBeFalsy();
+    const stored = await storedEvidence(taskId);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.result).toBe("expected-fail");
+    expect(stored[0]?.output_tail).toContain("Tests  1 failed (1)");
+  });
+
+  it("CAPRED-c: capture + oracle other + fail + `exit 127` is refused naming 127; no row written", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "other",
+      command: "exit 127",
+      result: "fail",
+      capture: true,
+      caller_cwd: makeMarkerDir("x"),
+    });
+
+    expect(result.isError, "exit 127 must never be recorded as a failure").toBe(true);
+    const error = parseResult(result) as { code: string; message: string };
+    expect(error.message).toContain("127");
+    expect(await storedEvidence(taskId)).toHaveLength(0);
+  });
+
+  it("CAPRED-c2: exit 127 WITH output (a real 'command not found' line) is refused naming 127; no row - today the non-empty tail lets it through as a runner fail", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "other",
+      command: "printf 'sh: nope: command not found\\n'; exit 127",
+      result: "fail",
+      capture: true,
+      caller_cwd: makeMarkerDir("x"),
+    });
+
+    expect(result.isError, "exit 127 with output must never be recorded as a failure").toBe(true);
+    const error = parseResult(result) as { code: string; message: string };
+    expect(error.message).toContain("127");
+    expect(await storedEvidence(taskId)).toHaveLength(0);
+  });
+
+  it("CAPRED-r: REGRESSION - capture false with the same no-summary tail is unaffected by the red-proof check", async () => {
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await getToolHandler(server, "lore_evidence_add")({
+      id_or_slug: taskId,
+      oracle: "test",
+      command: "cd /nonexistent-dir-for-red && true",
+      result: "fail",
+      output_tail: "cd: no such file or directory",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect((await storedEvidence(taskId))[0]?.capture_source).toBe("self-report");
+  });
+});
