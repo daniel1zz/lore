@@ -102,6 +102,7 @@ import { resolveCaptureTimeoutMs, tailChars, type CaptureSource, type EvidenceEn
 // error raised anywhere. Deriving the field types from `EvidenceInput` turns that
 // silent drop into a build failure.
 import type { EvidenceInput } from "../service/task-workflow-service.js";
+import { mergeStderrIntoStdout } from "../service/merged-stream-command.js";
 
 /**
  * Default capture window in ms, DERIVED from the config schema rather than
@@ -139,30 +140,6 @@ export const CAPTURE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 
 /** Persisted `output_tail` ceiling — mirrors `evidenceEntrySchema`'s own max. */
 export const CAPTURE_TAIL_CHARS = 4000;
-
-/**
- * Prefixes the oracle command with `exec 2>&1` so the shell routes stderr into the
- * SAME pipe as stdout for the whole command (task-gh-1343388703-181, lore issue #181).
- *
- * Why this and not a wrapper such as `( cmd ) 2>&1`: `exec` redirects the shell's own
- * descriptors and then runs the caller's text unchanged in that same shell, so the
- * exit status IS the command's own — there is no subshell or pipe stage whose status
- * could replace it. The newline keeps the caller's text on its own line, so a trailing
- * `# comment` or a heredoc in it cannot swallow anything we add.
- *
- * Why a single pipe: capture used to keep stdout then stderr (concatenated), so a
- * runner printing its summary on stdout and noise on stderr lost the summary from the
- * 4000-char tail. One pipe keeps the order a terminal shows, so the runner's final
- * summary line is the last line of the tail.
- *
- * @param command - the oracle command exactly as the caller wrote it
- * @returns the shell text to spawn
- * @example
- * mergeStderrIntoStdout("bun test"); // => "exec 2>&1\nbun test"
- */
-export function mergeStderrIntoStdout(command: string): string {
-  return `exec 2>&1\n${command}`;
-}
 
 /** What to spawn, where, and what the caller claims the outcome will be. */
 export interface CaptureRequest {
