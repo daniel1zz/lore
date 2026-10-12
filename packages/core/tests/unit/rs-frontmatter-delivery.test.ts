@@ -8,6 +8,15 @@ import { FragmentFrontmatterSchema, OUTLET_IDS, resolveContextConfig } from "../
 const base = { id: "x", title: "X", audience: ["main"], mode: "static" } as const;
 const skill = { ...base, delivery: "skill", description: "When to load this skill" };
 
+describe("fragment id must not carry the lore- prefix (task-rs-t13 mechanism)", () => {
+  it("accepts `x` and refuses `lore-x` naming why", () => {
+    expect(FragmentFrontmatterSchema.safeParse(base).success).toBe(true);
+    const r = FragmentFrontmatterSchema.safeParse({ ...base, id: "lore-x" });
+    expect(r.success).toBe(false);
+    if (!r.success) expect(r.error.issues[0]?.message).toContain("refresh prefixes 'lore-'");
+  });
+});
+
 describe("AC-RS-1 fragment frontmatter delivery", () => {
   it("AC-RS-1 absent delivery parses as rules", () => {
     const r = FragmentFrontmatterSchema.safeParse(base);

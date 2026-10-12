@@ -456,10 +456,10 @@ const DECLARED_FILES = [
   // omitClaudeMd, so the subagent-audience rules they used to get from CLAUDE.md ship as this fragment.
   "context/agent-rules.md",
   // task-rs-t13-migration-promoted-shipped-fragments-agent-rules (AC-RS-13): lore-tool facts promoted from the user layer
-  "context/lore-ac-design.md",
-  "context/lore-evidence-attestation.md",
-  "context/lore-dispatch-bundle.md",
-  "context/lore-worktree-dispatch.md",
+  "context/ac-design.md",
+  "context/evidence-attestation.md",
+  "context/dispatch-bundle.md",
+  "context/worktree-dispatch.md",
   // governance
   "governance/seat-briefing.md",
   "governance/claude-md-contract.md",

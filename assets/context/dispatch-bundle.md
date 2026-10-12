@@ -1,4 +1,9 @@
-<!-- lore:managed fragment=lore-dispatch-bundle hash=aef74d21 -->
+---
+id: dispatch-bundle
+title: "Subagent dispatch bundle and context watermarks"
+audience: [main]
+mode: static
+---
 ## Subagent dispatch
 
 - Bundle five sections: Task Objective / Spec Reference / AC / Context Digest / File Anchors.

@@ -1,9 +1,4 @@
----
-id: lore-worktree-dispatch
-title: "Worktree dispatch: lore protocol for parallel implementers"
-audience: [main]
-mode: static
----
+<!-- lore:managed fragment=worktree-dispatch hash=75e56971 -->
 ## Worktree dispatch
 
 - Before each dispatch re-check that the upstream governance docs are claimable: a sibling task's wrap-up can block a later claim that the implementer cannot self-resolve. Re-check one by one, never from the batch-start snapshot.

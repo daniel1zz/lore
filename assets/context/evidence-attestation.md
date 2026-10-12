@@ -1,4 +1,9 @@
-<!-- lore:managed fragment=lore-evidence-attestation hash=ea7d10b9 -->
+---
+id: evidence-attestation
+title: "Evidence attestation: --capture versus verify"
+audience: [main, "subagent:lore-implementer", "subagent:tester"]
+mode: static
+---
 ## Evidence attestation
 
 - `lore evidence --capture` writes a real attestation (with exit_code) that clears the `lore done` attested floor, but it only proves the command the CALLER chose exited 0. `lore verify` attests a command derived from the AC's declared scope and adds completeness / executed_files / execution_root / execution_mode. AC evidence goes through verify; `--capture` is auxiliary. A fix applies only after the writing binary is rebuilt.

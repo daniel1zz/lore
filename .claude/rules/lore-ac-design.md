@@ -1,9 +1,4 @@
----
-id: lore-ac-design
-title: "Designing acceptance criteria that cannot go falsely green"
-audience: [main]
-mode: static
----
+<!-- lore:managed fragment=ac-design hash=014f591b -->
 ## AC design
 
 - An AC proves only what it asserts; the gap between "goal met" and "AC green" is the AC author's job. After writing an oracle, name the simplest case where the goal fails yet the oracle stays green, and assert it. Assert the exit code EXACTLY plus the rule name in the output, never "non-zero"; a probe outside the linted tree proves nothing; three green runs do not clear a flaky oracle; an SSOT AC must check that residual duplicates are gone, not only that the new function exists. Make every oracle go red once (weaken the rule, build a tie) — a green-only run is not verification.

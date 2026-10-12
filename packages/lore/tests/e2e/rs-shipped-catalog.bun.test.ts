@@ -18,7 +18,7 @@ import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
 const LORE_BIN = join(REPO_ROOT, "dist", "lore");
 const SUBAGENT_FRAGMENT_CAP = 9400;
-const PROMOTED_IDS = ["lore-ac-design", "lore-evidence-attestation", "lore-dispatch-bundle", "lore-worktree-dispatch"] as const;
+const PROMOTED_IDS = ["ac-design", "evidence-attestation", "dispatch-bundle", "worktree-dispatch"] as const;
 const SCOPED_ORACLES_ID = "project-scoped-oracles-in-worktrees";
 
 interface Spawned {
