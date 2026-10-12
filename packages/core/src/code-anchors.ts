@@ -27,6 +27,15 @@
  *   its path-validation rules (POSIX, repo-relative, no `..`, trailing `/` = dir
  *   scope, ≤512 chars) without re-deriving them, while keeping per-entry symbol
  *   association intact.
+ * @invariant Test-title grammar (issue #178): `path#"title"` — a double-quoted title,
+ *   `\"` and `\\` the only escapes, valid ONLY on a test file (`*.test.ts`, which
+ *   covers `*.bun.test.ts`). The leading `#"` cannot collide with the identifier form
+ *   (an identifier never starts with `"`), so detection is the FIRST `#"` in the raw
+ *   string and a title may itself contain `#`. It resolves when the exact title is a
+ *   `describe`/`it`/`test` title in the file ({@link scanTestTitles}); otherwise
+ *   `symbol_missing`. A quoted title on a non-test file is refused LOUD (a title has
+ *   no meaning outside a test file). Parsed into `ParsedCodeAnchor.title`, never
+ *   `.symbol`.
  * @invariant Symbol grammar: `/^[A-Za-z_$][A-Za-z0-9_$]*$/`, ASCII-only — a
  *   Unicode-named export cannot be anchored (explicit Scope-Out; authoring rejects it
  *   LOUD). The regex deliberately admits reserved words (`default` is meaningful,
@@ -69,6 +78,12 @@ import type { DocType } from "./types.js";
 /** ASCII-only JS identifier grammar for a code anchor's `#Symbol` suffix (D1). */
 const CODE_ANCHOR_SYMBOL_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
+/** A title anchor is legal only on a test file: `*.test.ts` (includes `*.bun.test.ts`). */
+const TEST_FILE_PATH_RE = /\.test\.ts$/;
+
+/** `describe`/`it`/`test` call (optionally `.only`/`.skip`/`.each`-style member) with a string-literal first argument. */
+const TEST_TITLE_CALL_RE = /\b(?:describe|it|test)(?:\.\w+)*\(\s*(["'`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
+
 /** One code anchor, parsed and grammar-validated (D1). */
 export interface ParsedCodeAnchor {
   /** The original raw anchor string, verbatim (round-trips into drift rows). */
@@ -79,6 +94,8 @@ export interface ParsedCodeAnchor {
   isDir: boolean;
   /** ASCII identifier, present iff a `#Symbol` suffix was declared (never on a dir anchor). */
   symbol?: string;
+  /** Exact test title, present iff the anchor used the `#"title"` form (test files only). Mutually exclusive with `symbol`. */
+  title?: string;
 }
 
 /**
@@ -104,7 +121,8 @@ export interface ParsedCodeAnchor {
  * // => err(...) — non-ASCII symbol
  */
 export function parseCodeAnchor(raw: string): Result<ParsedCodeAnchor, LoreError> {
-  const hashIndex = raw.lastIndexOf("#");
+  const titleIndex = raw.indexOf('#"');
+  const hashIndex = titleIndex !== -1 ? titleIndex : raw.lastIndexOf("#");
   const pathPart = hashIndex === -1 ? raw : raw.slice(0, hashIndex);
   const symbolPart = hashIndex === -1 ? undefined : raw.slice(hashIndex + 1);
 
@@ -145,18 +163,65 @@ export function parseCodeAnchor(raw: string): Result<ParsedCodeAnchor, LoreError
     });
   }
 
+  if (symbolPart.startsWith('"')) {
+    return parseTitleAnchor(raw, path, symbolPart);
+  }
+
   if (!CODE_ANCHOR_SYMBOL_RE.test(symbolPart)) {
     return err({
       code: "VALIDATION_ERROR",
       field: "code_anchors",
       message:
         `code anchor symbol must be an ASCII identifier matching ` +
-        `/^[A-Za-z_$][A-Za-z0-9_$]*$/: "${raw}"`,
+        `/^[A-Za-z_$][A-Za-z0-9_$]*$/ (or a quoted "test title" on a test file): "${raw}"`,
       value: raw,
     });
   }
 
   return ok({ raw, path, isDir: false, symbol: symbolPart });
+}
+
+/**
+ * Validates the quoted-title suffix of one anchor (issue #178). `quoted` is the text
+ * after `#`, starting with `"`.
+ *
+ * @returns `ok(parsed)` with `title` set, or `err(VALIDATION_ERROR)` for a non-test
+ *   file, an unterminated/empty quote, or a stray unescaped quote inside the title.
+ */
+function parseTitleAnchor(raw: string, path: string, quoted: string): Result<ParsedCodeAnchor, LoreError> {
+  const fail = (reason: string): Result<ParsedCodeAnchor, LoreError> =>
+    err({ code: "VALIDATION_ERROR", field: "code_anchors", message: `${reason}: "${raw}"`, value: raw });
+
+  if (!TEST_FILE_PATH_RE.test(path)) {
+    return fail(
+      `a quoted test-title anchor is only valid on a test file (*.test.ts / *.bun.test.ts) — ` +
+        `"${path}" is not one; anchor a non-test file by exported identifier (path#Symbol)`,
+    );
+  }
+  if (quoted.length < 3 || !quoted.endsWith('"')) {
+    return fail('a test-title anchor must be a non-empty, terminated double-quoted string (path#"title")');
+  }
+  const body = quoted.slice(1, -1);
+  let title = "";
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "\\") {
+      const next = body[i + 1];
+      if (next !== '"' && next !== "\\") return fail('a test-title anchor only supports the escapes \\" and \\\\');
+      title += next;
+      i++;
+    } else if (ch === '"') {
+      return fail('an unescaped " inside a test-title anchor (write \\")');
+    } else {
+      title += ch;
+    }
+  }
+  return ok({ raw, path, isDir: false, title });
+}
+
+/** Inverse of the title escape in {@link parseTitleAnchor}. */
+function quoteTitle(title: string): string {
+  return `"${title.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 /**
@@ -174,6 +239,7 @@ export function parseCodeAnchor(raw: string): Result<ParsedCodeAnchor, LoreError
  */
 export function serializeCodeAnchor(parsed: ParsedCodeAnchor): string {
   const base = parsed.isDir ? `${parsed.path}/` : parsed.path;
+  if (parsed.title !== undefined) return `${base}#${quoteTitle(parsed.title)}`;
   return parsed.symbol !== undefined ? `${base}#${parsed.symbol}` : base;
 }
 
@@ -272,6 +338,30 @@ export function scanExportedSymbols(source: string): Set<string> {
   }
 
   return symbols;
+}
+
+/**
+ * Lexical scan of the `describe`/`it`/`test` titles in a test file's source (issue
+ * #178) — same spirit as {@link scanExportedSymbols}: not a parser. A `describe`/
+ * `it`/`test` call (member forms such as `it.skip(` included) whose first argument is
+ * a string literal (`"`, `'` or backtick) yields that literal, backslash escapes
+ * collapsed. Computed titles and `${}` interpolations are not evaluated (documented
+ * false-positive source: the anchor reports `symbol_missing`).
+ *
+ * @param source - Full file text of the ONE anchored test file.
+ * @returns Every title recognized (deduplicated).
+ *
+ * @example
+ * scanTestTitles('describe("A: b (c)", () => { it(\'d\', () => {}); });');
+ * // => Set(["A: b (c)", "d"])
+ */
+export function scanTestTitles(source: string): Set<string> {
+  const titles = new Set<string>();
+  for (const match of source.matchAll(TEST_TITLE_CALL_RE)) {
+    const literal = match[2];
+    if (literal !== undefined) titles.add(literal.replace(/\\(.)/g, "$1"));
+  }
+  return titles;
 }
 
 // ─── Drift Classification (D2, D4) ──────────────────────────────────────────
@@ -464,6 +554,20 @@ export function computeDrift(
     }
 
     // probe.stat === "file"
+    if (anchor.title !== undefined) {
+      if (probe.content === undefined) {
+        drifts.push({
+          ...docIdentityOf(entry),
+          anchor: anchor.raw,
+          kind: "probe_error",
+          detail: `file content unavailable to verify test title "${anchor.title}"`,
+        });
+      } else if (!scanTestTitles(probe.content).has(anchor.title)) {
+        drifts.push({ ...docIdentityOf(entry), anchor: anchor.raw, kind: "symbol_missing" });
+      }
+      continue;
+    }
+
     if (anchor.symbol === undefined) {
       continue; // plain file anchor, exists — consistent.
     }
