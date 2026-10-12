@@ -90,7 +90,7 @@ import type { PlanBundle } from "@lore/core";
 import type { ReviewBundle } from "@lore/core";
 import type { TreeBlueprint } from "@lore/core";
 import { resolveWriteActorFor } from "../store/write-context-store.js";
-import type { GateEnforcer } from "./gate-enforcer.js";
+import { describeLoreError, type GateEnforcer } from "./gate-enforcer.js";
 import type { TraceRecorder } from "./trace-recorder.js";
 import type { GateContext } from "./checkpoint-registry.js";
 import {
@@ -765,7 +765,11 @@ export interface CorpusStatus {
  */
 export interface PlanCloseCascadeResult {
   readonly archived: ReadonlyArray<{ doc_id: DocId; slug: string; kind: "task" | "handoff" }>;
-  readonly skipped: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string }>;
+  /**
+   * `floor` is present iff the skip is a `lore done` floor refusal (the first failing floor's id,
+   * from the injected {@link DoneFloorPort}); a fresh-claim skip carries no `floor`.
+   */
+  readonly skipped: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string; floor?: string }>;
   readonly failed: ReadonlyArray<{ doc_id: DocId; slug: string; reason: string }>;
 }
 
@@ -3226,6 +3230,9 @@ export class CorpusService {
 
     const archived: Array<{ doc_id: DocId; slug: string; kind: "task" | "handoff" }> = [];
     const failed: Array<{ doc_id: DocId; slug: string; reason: string }> = [];
+    const skipped: Array<{ doc_id: DocId; slug: string; reason: string; floor?: string }> = [
+      ...plan_.skipped,
+    ];
 
     for (const target of plan_.toArchive) {
       const doc = children.find((c) => c.id === target.doc_id);
@@ -3244,6 +3251,35 @@ export class CorpusService {
           reason: `invalid transition ${doc.status} -> archived`,
         });
         continue;
+      }
+
+      // reason: spec-approval-and-plan-closure-go-through-the-same-checks-on D5/D6 (BR-1072) — a
+      // member task is archived only if `lore done`'s floors would let it through. The check is
+      // the injected port (the ONE copy of the floors, `TaskWorkflowService.checkDoneFloors`);
+      // this service never re-derives a floor. Port `err` => `failed` (a store-level fault is not
+      // a verdict), a refusal => `skipped` with the floor id, task left untouched. Handoffs have
+      // no floors. Deliberately NOT gated by `workflow.gates."plan-close".enabled` (BR-214).
+      // An UNWIRED service (bare `new CorpusService(store)`, no port) keeps the pre-port
+      // behaviour (spec D3): every unclaimed task archives.
+      if (target.kind === "task" && this.doneFloorPort !== undefined) {
+        const floorResult = await this.doneFloorPort.checkDoneFloors(doc.id);
+        if (!floorResult.ok) {
+          failed.push({
+            doc_id: doc.id,
+            slug: doc.slug,
+            reason: `done-floor check failed: ${describeLoreError(floorResult.error)}`,
+          });
+          continue;
+        }
+        if (floorResult.value !== null) {
+          skipped.push({
+            doc_id: doc.id,
+            slug: doc.slug,
+            reason: `refused by ${floorResult.value.floor}`,
+            floor: floorResult.value.floor,
+          });
+          continue;
+        }
       }
 
       const newVersion = doc.version + 1;
@@ -3288,7 +3324,7 @@ export class CorpusService {
       archived.push({ doc_id: doc.id, slug: doc.slug, kind: target.kind });
     }
 
-    return { archived, skipped: plan_.skipped, failed };
+    return { archived, skipped, failed };
   }
 
   /**

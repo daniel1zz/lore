@@ -544,3 +544,100 @@ describe("AC-PCI-21: an undeclared scope carrying evidence is denied through the
     expect(archived.stderr).not.toContain("attestation-scope-undeclared");
   });
 });
+
+/**
+ * AC-AP-6 (spec-approval-and-plan-closure-go-through-the-same-checks-on, BR-1072,
+ * D7, issue #47) — the compiled `lore set <plan> --status archived` says, in HUMAN
+ * output too, which tasks the cascade archived and which it left open and why.
+ *
+ * Its OWN throwaway corpus. The `plan-close` gate is switched OFF here (BR-214) so
+ * the plan itself closes regardless of attestation scope: task A declares no
+ * `ac_scope` (a declared scope with no red run would trip the no-new-tests floor,
+ * and an undeclared scope with evidence would trip the plan-close scope conjunct,
+ * which is a different checkpoint from the one under test). The cascade's per-task
+ * floors are NOT switched off by that config, so the only thing that differs
+ * between A and B is the evidence: A holds a runner-attested pass (`lore verify`),
+ * B holds none.
+ */
+function writeConfigPlanCloseGateOff(dir: string): void {
+  const config: LoreConfig = {
+    project: { name: "ap6-compiled-e2e", author: "ap6-tester" },
+    workflow: {
+      gates: {
+        "plan-close": { enabled: false },
+        "task-create": { enabled: false },
+      },
+      review: { judgment_required_types: [] },
+    },
+  } as unknown as LoreConfig;
+  const result = saveConfig(dir, config);
+  if (!result.ok) throw new Error(`saveConfig failed: ${JSON.stringify(result.error)}`);
+}
+
+describe("AC-AP-6: compiled plan close prints the cascade in human output and carries the floor in --json", () => {
+  let dir: string;
+  let specSlug: string;
+
+  beforeAll(() => {
+    dir = trackDir(mkdtempSync(join(tmpdir(), "lore-ap6-")));
+    expect(dir.startsWith(REPO_ROOT)).toBe(false);
+    const initResult = runLore(["init"], dir);
+    if (initResult.exitCode !== 0) throw new Error(`lore init failed: ${initResult.stderr}`);
+    writeConfigPlanCloseGateOff(dir);
+
+    const prdSlug = createPrd(dir, "AP-6 Root PRD");
+    specSlug = createSpec(dir, prdSlug, "AP-6 Governing Spec");
+    addScriptAc(dir, specSlug, AC_ID, AC_COMMAND);
+    citeSpecViaCli(loreRunnerFor(runLore, dir), dir, undefined, specSlug, AC_ID);
+    const approveSpec = runLore(["approve", specSlug], dir);
+    if (approveSpec.exitCode !== 0) throw new Error(`approve spec failed (setup): ${approveSpec.stderr}`);
+  });
+
+  /** One plan, attested task A, evidence-less task B, plan approved and ready to close. */
+  function seedPlan(label: string): { planSlug: string; a: string; b: string } {
+    const planSlug = createPlan(dir, specSlug, `AP-6 Plan ${label}`);
+    const a = createTask(dir, planSlug, `AP-6 Task A ${label}`);
+    const b = createTask(dir, planSlug, `AP-6 Task B ${label}`);
+    const verified = verifyAttested(dir, planSlug, a, AC_ID);
+    if (verified.exitCode !== 0) throw new Error(`verify A failed (setup): ${verified.stdout}${verified.stderr}`);
+    const approved = approvePlan(dir, planSlug);
+    if (approved.exitCode !== 0) throw new Error(`approve plan failed (setup): ${approved.stderr}`);
+    return { planSlug, a, b };
+  }
+
+  it("AP-6 human: stdout names the archived task and the skipped task with its floor, and the skipped task stays open", () => {
+    const { planSlug, a, b } = seedPlan("human");
+
+    const closed = archivePlan(dir, planSlug);
+    expect(closed.exitCode).toBe(0);
+
+    const lines = closed.stdout.split("\n").map((l) => l.trim());
+    expect(lines, `stdout was:\n${closed.stdout}`).toContain(`Cascade archived: ${a}`);
+    expect(lines, `stdout was:\n${closed.stdout}`).toContain(`Cascade skipped: ${b} (attested-pass)`);
+
+    const getB = runLore(["get", b], dir);
+    expect(getB.exitCode).toBe(0);
+    expect(getB.stdout).not.toContain("Status: archived");
+    const getA = runLore(["get", a], dir);
+    expect(getA.stdout).toContain("Status: archived");
+  });
+
+  it("AP-6 json: the same close with --json carries cascade.skipped[0].floor === 'attested-pass'", () => {
+    const { planSlug, a, b } = seedPlan("json");
+
+    const closed = runLore(["set", planSlug, "--status", "archived", "--json"], dir);
+    expect(closed.exitCode).toBe(0);
+
+    const parsed = JSON.parse(closed.stdout) as {
+      data: {
+        cascade: {
+          archived: Array<{ slug: string }>;
+          skipped: Array<{ slug: string; floor?: string }>;
+        };
+      };
+    };
+    expect(parsed.data.cascade.archived.map((x) => x.slug)).toEqual([a]);
+    expect(parsed.data.cascade.skipped.map((x) => x.slug)).toEqual([b]);
+    expect(parsed.data.cascade.skipped[0]!.floor).toBe("attested-pass");
+  });
+});
