@@ -33,6 +33,8 @@ const LAYER_RANK: Readonly<Record<FragmentLayer, number>> = { shipped: 0, user: 
 const OUTLET_LAYERS: Readonly<Record<OutletId, ReadonlySet<FragmentLayer>>> = {
   "rules:project": new Set<FragmentLayer>(["shipped", "project"]),
   "rules:user": new Set<FragmentLayer>(["user"]),
+  "skills:project": new Set<FragmentLayer>(), // T2/T3 route this
+  "skills:user": new Set<FragmentLayer>(), // T2/T3 route this
   "hook:session-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
   "hook:subagent-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
 };
@@ -82,6 +84,9 @@ function matchesOutletRouting(fragment: Fragment, outlet: OutletId, agentType: s
     case "rules:project":
     case "rules:user":
       return mode === "static" && audience.includes("main");
+    case "skills:project":
+    case "skills:user":
+      return false; // T2/T3 route this
     case "hook:session-start":
       return mode === "dynamic" && audience.includes("main");
     case "hook:subagent-start":
