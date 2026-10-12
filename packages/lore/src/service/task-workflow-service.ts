@@ -787,6 +787,31 @@ export interface TaskAnchorNonResolution extends NonResolvingFileAnchor {
  */
 export type ReadyAnchorResolution = FileAnchorResolutionReport<TaskAnchorNonResolution>;
 
+/** See {@link ReadyReport.counts}. */
+export interface ReadyCounts {
+  /** Rows with `ready === true`. */
+  ready: number;
+  /** Non-archived rows holding a claim (fresh or stale — see each record's `claim.stale`). */
+  claimed: number;
+  /** Rows whose task status is `archived`. */
+  archived: number;
+  /** `records.length`. */
+  total: number;
+}
+
+/** Single derivation of {@link ReadyCounts}; shared by the task and phase `ready` paths. */
+export function computeReadyCounts(records: readonly ReadyRecord[]): ReadyCounts {
+  let ready = 0;
+  let claimed = 0;
+  let archived = 0;
+  for (const r of records) {
+    if (r.ready) ready += 1;
+    if (r.task.status === "archived") archived += 1;
+    else if (r.claim !== undefined) claimed += 1;
+  }
+  return { ready, claimed, archived, total: records.length };
+}
+
 /**
  * `TaskWorkflowService.ready`'s return shape (SPEC-042 D7) — the pre-SPEC-042
  * flat `ReadyRecord[]` becomes `.records` (D7's "keep ReadyRecord flat-array
@@ -801,6 +826,13 @@ export type ReadyAnchorResolution = FileAnchorResolutionReport<TaskAnchorNonReso
  */
 export interface ReadyReport {
   records: ReadyRecord[];
+  /**
+   * Counts over `records`, so no consumer has to re-derive them (gh-177: `.records` also
+   * carries archived rows, so `records.length` is NOT the ready count). `total` ===
+   * `records.length`. `ready`/`claimed`/`archived` are NOT a partition: a ready task may
+   * also be claimed, so their sum can exceed `total`.
+   */
+  counts: ReadyCounts;
   sessions: ReadySession[];
   anchor_conflicts: AnchorConflict[];
   /**
@@ -4112,6 +4144,7 @@ export class TaskWorkflowService {
     if (tasks.length === 0) {
       return ok({
         records: [],
+        counts: computeReadyCounts([]),
         sessions: [],
         anchor_conflicts: [],
         // reason: a task-less plan declares no anchors, so a supplied probe
@@ -4163,6 +4196,7 @@ export class TaskWorkflowService {
 
     return ok({
       records: recordsWithAnchorless,
+      counts: computeReadyCounts(recordsWithAnchorless),
       sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes, staleByTask.value),
       anchor_conflicts: anchorConflicts,
       anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),
