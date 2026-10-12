@@ -532,6 +532,7 @@ describe("lore ready — JSON shape", () => {
     // assertion matches its type instead of its text.
     expect(parsed.data?.ready).toEqual({
       records: [],
+      counts: { ready: 0, claimed: 0, archived: 0, total: 0 },
       sessions: [],
       anchor_conflicts: [],
       anchor_resolution: { probed: true, root: expect.any(String), unresolved: [] },

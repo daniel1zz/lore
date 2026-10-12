@@ -80,6 +80,7 @@ function build(over: Partial<World> = {}): { service: WorktreeRemovalService; wo
     },
     integrationBranch: () => world.integration,
     headSha: () => ({ ok: true, value: "abc" }),
+    branchTip: () => ({ ok: true, value: "abc" }),
     removeWorktree: (root, p) => {
       world.calls.push(`remove ${root} ${p}`);
       return world.removeOk ? { ok: true, value: true } : { ok: false, reason: "refused" };

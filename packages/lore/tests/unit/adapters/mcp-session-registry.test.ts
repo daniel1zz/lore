@@ -376,9 +376,10 @@ describe("lore_ready — REGRESSION: MCP payload deep-equals a direct service ca
     // this parity oracle: a surface that silently reported `{probed:true,
     // unresolved:[]}` without probing would diverge here.
     const notProbed = { probed: false, reason: "no-fs-probe" };
-    expect(mcpData.ready).toEqual({ records: [], sessions: [], anchor_conflicts: [], anchor_resolution: notProbed });
+    const zero = { ready: 0, claimed: 0, archived: 0, total: 0 }; // task-gh-1343388703-177 additive counts
+    expect(mcpData.ready).toEqual({ records: [], counts: zero, sessions: [], anchor_conflicts: [], anchor_resolution: notProbed });
     expect(directResult.value).toEqual({
-      records: [],
+      records: [], counts: zero,
       sessions: [],
       anchor_conflicts: [],
       anchor_resolution: notProbed,

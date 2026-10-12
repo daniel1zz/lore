@@ -32,7 +32,7 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import type { AuditEntry } from "@lore/core";
 import {
   decideWorktreeRemoval,
@@ -75,6 +75,8 @@ export interface WorktreeGitProbe {
   integrationBranch(cwd: string): ProbeResult<string>;
   /** `git rev-parse HEAD` in `path`. */
   headSha(path: string): ProbeResult<string>;
+  /** `git rev-parse --verify refs/heads/<name>` run in `cwd` (any worktree of the repo — branch refs are shared). */
+  branchTip(cwd: string, name: string): ProbeResult<string>;
   /** Plain `git worktree remove <path>` run from `repoRoot`. */
   removeWorktree(repoRoot: string, path: string): ProbeResult<true>;
   /** Plain `git branch -d <branch>` run from `repoRoot`. */
@@ -129,6 +131,38 @@ export interface WorktreeOutcome {
   readonly worktree: string;
   readonly decision: WorktreeDecisionKind;
   readonly reason: string;
+}
+
+// ── Head resolution: worktree path OR branch name ───────────────────────────
+
+/** Which resolution produced a measured sha. */
+export type HeadSource = "worktree" | "branch";
+
+/**
+ * Measures the HEAD a claim's `--worktree` value stands for. Lore's own dispatch protocol claims
+ * with `--worktree "$(git branch --show-current)"`, i.e. a branch NAME, so a path-only reading
+ * would leave every real claim unmeasured (issue #180 retry).
+ *
+ * An ABSOLUTE path naming an existing directory is a worktree: `rev-parse HEAD` inside it.
+ * Anything else is a branch name: `refs/heads/<name>` resolved from `repoCwd` (branch refs are
+ * shared by every worktree). A relative value is never read as a directory — it would resolve
+ * against the caller's cwd and silently measure the wrong repository for a branch named like a
+ * folder.
+ *
+ * @example
+ * resolveClaimHead(probe, "feature-x", "/repo") // → {ok:true, value:{sha, source:"branch"}}
+ */
+export function resolveClaimHead(
+  probe: WorktreeGitProbe,
+  target: string,
+  repoCwd: string,
+): ProbeResult<{ sha: string; source: HeadSource }> {
+  if (isAbsolute(target) && probe.pathExists(target)) {
+    const head = probe.headSha(target);
+    return head.ok ? { ok: true, value: { sha: head.value, source: "worktree" } } : head;
+  }
+  const tip = probe.branchTip(repoCwd, target);
+  return tip.ok ? { ok: true, value: { sha: tip.value, source: "branch" } } : tip;
 }
 
 // ── Pure: recorded worktrees from claim history ─────────────────────────────
@@ -390,6 +424,10 @@ export function createRealWorktreeProbe(): WorktreeGitProbe {
     },
     headSha: (path) => {
       const out = runGit(path, ["rev-parse", "HEAD"]);
+      return out.ok ? { ok: true, value: out.value.trim() } : out;
+    },
+    branchTip: (cwd, name) => {
+      const out = runGit(cwd, ["rev-parse", "--verify", `refs/heads/${name}`]);
       return out.ok ? { ok: true, value: out.value.trim() } : out;
     },
     removeWorktree: (repoRoot, path) => {

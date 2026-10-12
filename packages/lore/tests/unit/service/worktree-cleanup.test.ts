@@ -155,6 +155,7 @@ function fakeProbe(over: Partial<FakeState> = {}): { probe: WorktreeGitProbe; st
     countCommits: () => state.own,
     integrationBranch: () => ({ ok: true, value: "main" }),
     headSha: () => ({ ok: true, value: "abc" }),
+    branchTip: () => ({ ok: true, value: "abc" }),
     removeWorktree: (root, p) => {
       state.calls.push(`remove ${root} ${p}`);
       return state.removeOk ? { ok: true, value: true } : { ok: false, reason: "dirty" };

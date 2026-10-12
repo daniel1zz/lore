@@ -48,7 +48,8 @@ Everything else (test failures, gate denials, ≤3 blocked tasks, claim conflict
 ## Phase 1 — Discovery
 
 1. `lore ready <plan> --json` → the readiness report:
-   - `records[]` — ready tasks (status + blockers computed over `blocks` links)
+   - `counts` — `{ready, claimed, archived, total}`; use `counts.ready` for the ready count
+   - `records[]` — every task row, archived included (status + blockers computed over `blocks` links); filter `ready === true` to list ready tasks
    - `sessions[]` — fresh claims grouped by `(by, machine, worktree)`: who else is already working
    - `anchor_conflicts[]` — pre-existing anchor overlaps
 2. `lore get <plan>` + `lore tree <plan>` → phases, task bodies; note the governing spec (parent) and `lore ac list <spec>` for its structured ACs.

@@ -415,7 +415,7 @@ function collectProbes(declared: DriftInputEntry[], probe: FsProbe): Map<string,
   for (const entry of declared) {
     const existing = descriptors.get(entry.anchor.path) ?? { needsListDir: false, needsContent: false };
     if (entry.anchor.isDir) existing.needsListDir = true;
-    if (entry.anchor.symbol !== undefined) existing.needsContent = true;
+    if (entry.anchor.symbol !== undefined || entry.anchor.title !== undefined) existing.needsContent = true;
     descriptors.set(entry.anchor.path, existing);
   }
 

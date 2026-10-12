@@ -372,11 +372,13 @@ import {
   collectRecordedWorktrees,
   createRealWorktreeProbe,
   evaluateRecordedWorktree,
+  resolveClaimHead,
   type RecordedWorktree,
   type WorktreeGitProbe,
   type WorktreeOutcome,
 } from "./worktree-cleanup.js";
 import type { WorktreeRemovalFactsPort } from "./worktree-removal-test.js";
+import type { TaskCommitRange } from "./task-commit-range.js";
 import { buildUpstreamSpecContext, buildAnchorGateContext, isNonPlanParentError } from "./checkpoint-registry.js";
 import { compareClaimSessions, type SessionComparison, type SiblingClaimInfo } from "./gate-predicates.js";
 import { collectFileAnchorResolution, type FileAnchorProbeContext } from "./anchor-resolution.js";
@@ -783,6 +785,31 @@ export interface TaskAnchorNonResolution extends NonResolvingFileAnchor {
  */
 export type ReadyAnchorResolution = FileAnchorResolutionReport<TaskAnchorNonResolution>;
 
+/** See {@link ReadyReport.counts}. */
+export interface ReadyCounts {
+  /** Rows with `ready === true`. */
+  ready: number;
+  /** Non-archived rows holding a claim (fresh or stale — see each record's `claim.stale`). */
+  claimed: number;
+  /** Rows whose task status is `archived`. */
+  archived: number;
+  /** `records.length`. */
+  total: number;
+}
+
+/** Single derivation of {@link ReadyCounts}; shared by the task and phase `ready` paths. */
+export function computeReadyCounts(records: readonly ReadyRecord[]): ReadyCounts {
+  let ready = 0;
+  let claimed = 0;
+  let archived = 0;
+  for (const r of records) {
+    if (r.ready) ready += 1;
+    if (r.task.status === "archived") archived += 1;
+    else if (r.claim !== undefined) claimed += 1;
+  }
+  return { ready, claimed, archived, total: records.length };
+}
+
 /**
  * `TaskWorkflowService.ready`'s return shape (SPEC-042 D7) — the pre-SPEC-042
  * flat `ReadyRecord[]` becomes `.records` (D7's "keep ReadyRecord flat-array
@@ -797,6 +824,13 @@ export type ReadyAnchorResolution = FileAnchorResolutionReport<TaskAnchorNonReso
  */
 export interface ReadyReport {
   records: ReadyRecord[];
+  /**
+   * Counts over `records`, so no consumer has to re-derive them (gh-177: `.records` also
+   * carries archived rows, so `records.length` is NOT the ready count). `total` ===
+   * `records.length`. `ready`/`claimed`/`archived` are NOT a partition: a ready task may
+   * also be claimed, so their sum can exceed `total`.
+   */
+  counts: ReadyCounts;
   sessions: ReadySession[];
   anchor_conflicts: AnchorConflict[];
   /**
@@ -2856,7 +2890,18 @@ export class TaskWorkflowService {
     // task's OWN commits (branch commits beyond it). Recorded on the claim AUDIT row (which survives
     // `lore release`, unlike `extra.claim`). An unmeasurable HEAD is left ABSENT: cleanup then reports
     // `not-measured`, never guesses a base.
-    const claimBase = opts.worktree !== undefined ? this.worktreeProbe.headSha(opts.worktree) : undefined;
+    // `--worktree` is a path OR a branch name (the dispatch protocol passes `git branch --show-current`),
+    // so the base is resolved by `resolveClaimHead`, never by `headSha` alone (issue #180 retry).
+    const claimBaseResolved =
+      opts.worktree !== undefined
+        ? resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
+        : undefined;
+    const claimBase =
+      claimBaseResolved === undefined
+        ? undefined
+        : claimBaseResolved.ok
+          ? ({ ok: true, value: claimBaseResolved.value.sha } as const)
+          : claimBaseResolved;
     const writeResult = await this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "claim", {
       by: opts.by,
       steal: opts.steal === true,
@@ -3495,6 +3540,14 @@ export class TaskWorkflowService {
       }
     }
 
+    // reason: issue #180 — record WHERE the task's commits are (claim base_sha .. worktree HEAD) so
+    // `lore assess` does not depend on the slug appearing in a merge message. Measured here, after every
+    // floor passed and BEFORE the archive walk and the worktree cleanup below (cleanup may remove the
+    // worktree this reads). One git call (`rev-parse HEAD`); the base comes from the claim audit row.
+    const rangeRecorded = await this.recordCommitRange(task, nowIso, opts.by);
+    if (!rangeRecorded.ok) return rangeRecorded;
+    task = rangeRecorded.value;
+
     const walk = computeArchiveWalk(task.status);
     const transitions: DocStatus[] = [];
     for (const nextStatus of walk) {
@@ -3555,6 +3608,52 @@ export class TaskWorkflowService {
           }
         : {}),
     });
+  }
+
+  /**
+   * Measures and writes `extra.commit_range` (see `task-commit-range.ts`). Never refuses `done` on
+   * a measurement problem — an unmeasurable range is RECORDED as `not-measured` with its reason, so
+   * `lore assess` can tell "not measured" from "no commits"; only a failed store write is an error.
+   * The worktree is the current claim's, else the latest one the claim audit history recorded
+   * (a released claim drops `extra.claim` but its audit row survives).
+   */
+  private async recordCommitRange(task: DocRecord, nowIso: string, by: string): Promise<Result<DocRecord, LoreError>> {
+    const notMeasured = (reason: string): TaskCommitRange => ({ state: "not-measured", reason, recorded_at: nowIso });
+    let range: TaskCommitRange;
+    const recordedResult = await this.readRecordedWorktrees(task);
+    if (!recordedResult.ok) {
+      range = notMeasured(`claim history unreadable: ${recordedResult.error.code}`);
+    } else {
+      const currentWorktree = readClaim(task)?.worktree;
+      const recorded =
+        recordedResult.value.find((r) => r.path === currentWorktree) ?? recordedResult.value[recordedResult.value.length - 1];
+      if (recorded === undefined) {
+        range = notMeasured("no claim recorded a worktree, so there is no HEAD to measure");
+      } else {
+        const head = resolveClaimHead(this.worktreeProbe, recorded.path, this.worktreeProbe.currentWorkingDirectory());
+        range = head.ok
+          ? {
+              state: "recorded",
+              head: head.value.sha,
+              head_source: head.value.source,
+              ...(recorded.baseSha !== undefined ? { base: recorded.baseSha } : {}),
+              worktree: recorded.path,
+              recorded_at: nowIso,
+            }
+          : notMeasured(`worktree/branch ${recorded.path} HEAD unreadable: ${head.reason}`);
+      }
+    }
+    return this.writeTaskExtra(
+      task,
+      { ...task.extra, commit_range: range },
+      nowIso,
+      by,
+      range.state === "recorded"
+        ? `lore done: recorded commit range ${range.base === undefined ? "(head only)" : range.base.slice(0, 12)}..${range.head.slice(0, 12)}`
+        : `lore done: commit range not measured (${range.reason})`,
+      "update",
+      { by, commit_range: range },
+    );
   }
 
   // ── Worktree cleanup (issue #106, BR-961 / BR-962) ──────────────────────────
@@ -4071,6 +4170,7 @@ export class TaskWorkflowService {
     if (tasks.length === 0) {
       return ok({
         records: [],
+        counts: computeReadyCounts([]),
         sessions: [],
         anchor_conflicts: [],
         // reason: a task-less plan declares no anchors, so a supplied probe
@@ -4122,6 +4222,7 @@ export class TaskWorkflowService {
 
     return ok({
       records: recordsWithAnchorless,
+      counts: computeReadyCounts(recordsWithAnchorless),
       sessions: deriveSessions(tasks, nowIso, this.claimTtlMinutes, staleByTask.value),
       anchor_conflicts: anchorConflicts,
       anchor_resolution: this.computeAnchorResolution(tasks, anchorProbe),

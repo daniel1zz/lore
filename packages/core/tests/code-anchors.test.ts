@@ -33,6 +33,7 @@ import {
   serializeCodeAnchor,
   normalizeCodeAnchorEntries,
   scanExportedSymbols,
+  scanTestTitles,
   computeDrift,
   type DriftInputEntry,
   type AnchorProbe,
@@ -450,5 +451,52 @@ describe("ERROR — computeDrift probe_error edge cases", () => {
     const probes = new Map<string, AnchorProbe>([["src/a.ts", { stat: "file" }]]);
     const result = computeDrift(declared, probes);
     expect(result.drifts[0]?.kind).toBe("probe_error");
+  });
+});
+
+describe("test-title anchors (issue #178)", () => {
+  const TITLE = 'tests/a.test.ts#"AC-1: renders (happy path)"';
+
+  it("HAPPY — parses a quoted title and round-trips through serialize", () => {
+    const parsed = parseCodeAnchor(TITLE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.title).toBe("AC-1: renders (happy path)");
+    expect(parsed.value.symbol).toBeUndefined();
+    expect(serializeCodeAnchor(parsed.value)).toBe(TITLE);
+  });
+
+  it("BOUNDARY — a title may contain # and escaped quotes", () => {
+    const parsed = parseCodeAnchor('tests/a.bun.test.ts#"x #1 \\"q\\""');
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.title).toBe('x #1 "q"');
+    expect(parsed.value.path).toBe("tests/a.bun.test.ts");
+  });
+
+  it("NEGATIVE — non-test file, unterminated, empty, stray quote are all refused", () => {
+    for (const raw of ['src/a.ts#"t"', 'tests/a.test.ts#"open', 'tests/a.test.ts#""', 'tests/a.test.ts#"a"b"']) {
+      expect(parseCodeAnchor(raw).ok).toBe(false);
+    }
+    const refused = parseCodeAnchor('src/a.ts#"t"');
+    expect(!refused.ok && refused.error.code === "VALIDATION_ERROR" && refused.error.message).toMatch(/test file/);
+  });
+
+  it("scanTestTitles — finds describe/it/test titles in all quote styles and ignores non-calls", () => {
+    const titles = scanTestTitles(
+      "describe('A: b', () => {});\nit.skip(\"c (d)\", () => {});\ntest(`e`, () => {});\nconst describeX = 'nope';",
+    );
+    expect([...titles].sort()).toEqual(["A: b", "c (d)", "e"]);
+  });
+
+  it("computeDrift — resolved when present, symbol_missing when absent, probe_error without content", () => {
+    const parsed = parseCodeAnchor(TITLE);
+    if (!parsed.ok) throw new Error("fixture must parse");
+    const entry = makeEntry({ anchor: parsed.value });
+    const probe = (content?: string) =>
+      new Map<string, AnchorProbe>([["tests/a.test.ts", { stat: "file", content }]]);
+    expect(computeDrift([entry], probe('describe("AC-1: renders (happy path)", () => {});')).consistent).toBe(true);
+    expect(computeDrift([entry], probe('describe("renamed", () => {});')).drifts[0]?.kind).toBe("symbol_missing");
+    expect(computeDrift([entry], probe(undefined)).drifts[0]?.kind).toBe("probe_error");
   });
 });

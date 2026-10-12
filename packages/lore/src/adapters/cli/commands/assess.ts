@@ -93,6 +93,7 @@ import {
 } from "../assess-render.js";
 import { assessmentFreshness } from "../../../service/gate-predicates.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../assess-commit-derivation.js";
+import { collectRecordedRanges } from "../../../service/task-commit-range.js";
 
 /** One-line stderr/text summary of how this run's diff (if any) was obtained. */
 function formatDiffSourceLine(source: DiffSourceRecord): string {
@@ -107,10 +108,11 @@ function formatDiffSourceLine(source: DiffSourceRecord): string {
       return "Diff source: diff_text (explicit override)";
     case "auto_derived":
       if (source.status === "derived") {
+        const measuredZero = source.tasks_without_commits.length - source.tasks_not_measured.length;
         const gapNote =
-          source.tasks_without_commits.length > 0
-            ? ` (${String(source.tasks_without_commits.length)} task(s) had no discoverable commits)`
-            : "";
+          (source.tasks_not_measured.length > 0
+            ? ` (${String(source.tasks_not_measured.length)} task(s) NOT MEASURED: no recorded commit range and no slug match)`
+            : "") + (measuredZero > 0 ? ` (${String(measuredZero)} task(s) recorded an empty commit range)` : "");
         return `Diff source: derived from ${String(source.commits.length)} commit(s) across this plan's tasks${gapNote}`;
       }
       if (source.status === "unverifiable_convention_mismatch") {
@@ -285,15 +287,23 @@ export default defineCommand({
         // MISMATCH, not genuine absence, so it must be told apart from a plan that plausibly
         // has no merged work yet.
         const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
-        const derivation = deriveCommitSetForPlan(process.cwd(), bundle.tasks.map((t) => t.slug), allTasksArchived);
+        const derivation = deriveCommitSetForPlan(
+          process.cwd(),
+          bundle.tasks.map((t) => t.slug),
+          allTasksArchived,
+          collectRecordedRanges(bundle.tasks),
+        );
         diffSource = { mode: "auto_derived", ...derivation };
         if (derivation.status === "derived") {
           diffText = derivation.diff_text;
           const gapNote =
-            derivation.tasks_without_commits.length > 0
-              ? ` (${String(derivation.tasks_without_commits.length)} task(s) had no discoverable commits: ` +
-                `${derivation.tasks_without_commits.join(", ")})`
-              : "";
+            (derivation.tasks_not_measured.length > 0
+              ? ` (${String(derivation.tasks_not_measured.length)} task(s) NOT MEASURED — no recorded commit range and ` +
+                `no slug match, which is not the same as zero commits: ${derivation.tasks_not_measured.join(", ")})`
+              : "") +
+            (derivation.tasks_without_commits.length > derivation.tasks_not_measured.length
+              ? ` (${String(derivation.tasks_without_commits.length - derivation.tasks_not_measured.length)} task(s) recorded an empty commit range)`
+              : "");
           process.stderr.write(
             `Derived diff from ${String(derivation.commits.length)} commit(s) across this plan's tasks${gapNote}.\n`,
           );

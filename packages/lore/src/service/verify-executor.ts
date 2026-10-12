@@ -44,7 +44,10 @@
  *     `STORE_ERROR` is this codebase's general infra-failure code (see
  *     `migration-service.ts`'s "cannot read source directory" precedent) — no
  *     SPEC-039-specific LoreError variant exists (core is out of this task's scope).
- *   - `outputTail` is stdout+stderr CONCATENATED then windowed to at most 4000 chars
+ *   - stderr is routed into stdout through ONE pipe (`merged-stream-command.ts`, shared
+ *     with `lore evidence --capture`; task-gh-1343388703-181), so the stream below is in
+ *     terminal order. Only a bare-binary argv (no `sh -c`) still concatenates.
+ *   - `outputTail` is the single merged stream (stdout+stderr in terminal order) windowed to at most 4000 chars
  *     (matches `evidenceEntrySchema.output_tail`'s cap) via `verify-spawn.ts`'s pure
  *     `selectOutputTailWindow` (spec-evidence-output-tail-integrity-a-self-reported-non-pass
  *     §D4) — the plain stream-END tail UNLESS `spec.acRef` is set and that id occurs
@@ -68,6 +71,7 @@
 
 import { err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
+import { mergeStderrIntoShellArgv } from "./merged-stream-command.js";
 import { selectOutputTailWindow } from "./verify-spawn.js";
 import type { VerifySpawnSpec, VerifyExecutionResult } from "./verify-spawn.js";
 
@@ -105,9 +109,13 @@ export async function executeVerifySpawnSpec(
 ): Promise<Result<VerifyExecutionResult, LoreError>> {
   const t0 = performance.now();
 
+  // reason: stderr is routed into stdout (task-gh-1343388703-181) so the tail keeps terminal
+  // order; see merged-stream-command.ts. `merged: false` only for a bare-binary argv.
+  const { argv: spawnArgv, merged: streamsMerged } = mergeStderrIntoShellArgv(spec.cmd);
+
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = Bun.spawn([...spec.cmd], {
+    proc = Bun.spawn([...spawnArgv], {
       cwd: spec.cwd,
       // SPEC-039 §2 D6 — new process group so a timeout kill reaches forked
       // descendants too (see module header for the full rationale).
@@ -158,7 +166,13 @@ export async function executeVerifySpawnSpec(
   // LAST occurrence over the literal stream end (see selectOutputTailWindow's own
   // JSDoc for the full precedence: absent/not-found/already-visible all fall back to
   // the plain stream tail unconditionally).
-  const outputTail = selectOutputTailWindow(stdout + stderr, spec.acRef, OUTPUT_TAIL_MAX_CHARS);
+  const outputTail = selectOutputTailWindow(
+    // reason: when merged, `stderr` is empty by construction; the concat only applies to a
+    // bare-binary argv that has no shell to redirect through.
+    streamsMerged ? stdout : stdout + stderr,
+    spec.acRef,
+    OUTPUT_TAIL_MAX_CHARS,
+  );
 
   return ok({ exitCode, outputTail, durationMs, timedOut });
 }

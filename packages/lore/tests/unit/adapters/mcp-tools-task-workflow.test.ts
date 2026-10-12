@@ -800,6 +800,7 @@ describe("lore_ready", () => {
         // CLI `lore ready`, which DOES probe, is covered by
         // `tests/integration/cli/task-workflow.test.ts` +
         // `tests/unit/adapters/cli-anchor-resolution.bun.test.ts`.
+        counts: { ready: 0, claimed: 0, archived: 0, total: 0 },
         anchor_resolution: { probed: false, reason: "no-fs-probe" },
       });
     });
