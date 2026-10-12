@@ -33,7 +33,7 @@
  *               SessionService-driven --json output for the same seeded corpus;
  *               the MCP `lore_feed` session-resume response's `feed` field
  *               carries the exported `RESUME_SCOPE_CLOSURE` constant verbatim
- *               (identity) and names every `BOOTSTRAP_INJECTION_KNOWN_KEYS`
+ *               (identity) and names every `BOOTSTRAP_RESUME_CLOSURE_KEYS`
  *               member — spec-context-provenance-injected-corpus-global-state-and-a
  *               §Design Decisions D3, AC-CP-4, task
  *               task-t3-scope-closure-on-the-resume-ticket-cli-stdout-and-mcp.
@@ -63,7 +63,7 @@ import { MigrationService } from "../../../src/service/migration-service.js";
 import { TreeCheckService } from "../../../src/service/tree-check-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
 import { SessionService } from "../../../src/service/session-service.js";
-import { BOOTSTRAP_INJECTION_KNOWN_KEYS, handoffExtraSchema, NoOpTelemetry, ok, RESUME_SCOPE_CLOSURE } from "@lore/core";
+import { BOOTSTRAP_RESUME_CLOSURE_KEYS, handoffExtraSchema, NoOpTelemetry, ok, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import type { BootstrapReport, DocRecord, HandoffExtra } from "@lore/core";
 import type { App } from "../../../src/app.js";
 import type { ApiKeyStore } from "../../../src/adapters/http/auth.js";
@@ -362,7 +362,7 @@ describe("lore_feed session-resume dispatch (SPEC-041 §3 D5)", () => {
     expect(feedData.feed).toContain("wire SessionService into app.ts");
   });
 
-  it("REGRESSION (AC-CP-4, MCP surface): the derivation-path call (no --handoff, only --plan) carries RESUME_SCOPE_CLOSURE verbatim and names every BOOTSTRAP_INJECTION_KNOWN_KEYS member", async () => {
+  it("REGRESSION (AC-CP-4, MCP surface): the derivation-path call (no --handoff, only --plan) carries RESUME_SCOPE_CLOSURE verbatim and names every BOOTSTRAP_RESUME_CLOSURE_KEYS member", async () => {
     const plan = await createPlan("Plan A");
     const handoffCall = getToolHandler(server, "lore_handoff");
     const handoffResult = await handoffCall({ ...VALID_HANDOFF, plan_ref: plan.slug });
@@ -382,7 +382,7 @@ describe("lore_feed session-resume dispatch (SPEC-041 §3 D5)", () => {
     // rest of `ResumeFeedOutcome` by `textContent`, tools.ts) really carries
     // the SAME text `renderResumeFeed` produces for the CLI surface.
     expect(feedData.feed.includes(RESUME_SCOPE_CLOSURE)).toBe(true);
-    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+    for (const key of BOOTSTRAP_RESUME_CLOSURE_KEYS) {
       expect(RESUME_SCOPE_CLOSURE.includes(key)).toBe(true);
     }
   });

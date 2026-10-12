@@ -77,8 +77,10 @@ import {
   isInvalidated,
   computeArchiveCandidates,
 } from "@lore/core";
+import { isAbsolute, resolve as resolvePath } from "node:path";
 import type {
   BootstrapReport,
+  BootstrapSeatClaim,
   BlockerInfo,
   CreateDocInput,
   DocId,
@@ -104,6 +106,7 @@ import {
   type WriteSessionHeartbeat,
   type ReadSessionHeartbeat,
 } from "../adapters/session-heartbeat-port.js";
+import { realpathNative, type RealpathPort } from "../adapters/real-realpath-port.js";
 
 const defaultNow = (): string => new Date().toISOString();
 
@@ -252,7 +255,91 @@ export class SessionService {
     private readonly probeProcessStartTimePort: ProcessStartTimeProbe = probeProcessStartTime,
     private readonly writeHeartbeatPort: WriteSessionHeartbeat = writeSessionHeartbeat,
     private readonly readHeartbeatPort: ReadSessionHeartbeat = readSessionHeartbeat,
+    private readonly realpathPort: RealpathPort = realpathNative,
   ) {}
+
+  // ── Seat claims (session-start injection) ─────────────────────────────────
+
+  /**
+   * The unfinished claims recorded for the seat (the linked worktree this
+   * session sits in) — the ONLY claim-derived data the session-start injection
+   * carries (spec-session-start-injection-carries-only-the-session-s-own D1,
+   * D3, D11, D12). READ-ONLY: writes nothing.
+   *
+   * A task matches when its `extra.claim.worktree` EQUALS `seat.branch`, OR is
+   * an ABSOLUTE path that resolves to the same directory as `seat.worktree`
+   * (D11: `claim.worktree` holds either form today — issue #158). Tasks whose
+   * status is `archived`/`deprecated` are excluded here (D3; BR-331's
+   * archived-claim noise in the full report is deliberately not inherited).
+   *
+   * Path comparison (D12): both sides go through the injected `realpath` port
+   * (macOS `/tmp` vs `/private/tmp`). A path that no longer exists (ENOENT —
+   * e.g. `lore done` already removed the worktree) falls back, EXPLICITLY, to
+   * `path.resolve` of the string; any other realpath failure is surfaced as a
+   * `STORE_ERROR`, never swallowed. A non-absolute `claim.worktree` (a branch
+   * name, `.`, `foo`) is compared as a branch only and never as a path; an
+   * empty string matches nothing.
+   *
+   * @param seat - `{branch, worktree}` — the same signal type `bootstrap` takes.
+   * @returns `ok(BootstrapSeatClaim[])` sorted by `claimed_at` ascending; `stale`
+   *   uses the same `claimTtlMinutes` as `bootstrap`. `err` only on a store read
+   *   failure or a non-ENOENT realpath failure.
+   * @example
+   * await sessionService.seatClaims({ branch: "feat-x", worktree: "/repo/.claude/worktrees/x" });
+   */
+  async seatClaims(seat: BootstrapSeatSignal): Promise<Result<BootstrapSeatClaim[], LoreError>> {
+    const nowIso = defaultNow();
+    const allDocsResult = await this.store.findMany({});
+    if (!allDocsResult.ok) return allDocsResult;
+    const allDocs = allDocsResult.value;
+    const slugById = new Map<DocId, string>(allDocs.map((d) => [d.id, d.slug]));
+
+    try {
+      const seatDirectory = this.resolveDirectory(seat.worktree);
+      const matched: BootstrapSeatClaim[] = [];
+      for (const task of allDocs) {
+        if (task.type !== "task" || task.status === "archived" || task.status === "deprecated") continue;
+        const claim = extractClaim(task);
+        const recorded = claim?.worktree;
+        if (claim === undefined || recorded === undefined || recorded === "") continue;
+        const matchesBranch = recorded === seat.branch;
+        const matchesPath = !matchesBranch && isAbsolute(recorded) && this.resolveDirectory(recorded) === seatDirectory;
+        if (!matchesBranch && !matchesPath) continue;
+        const declaredPlanId = task.extra["plan_id"];
+        matched.push({
+          task_slug: task.slug,
+          plan_slug: typeof declaredPlanId === "string" ? (slugById.get(declaredPlanId) ?? "(unknown)") : "(unknown)",
+          claimed_at: claim.at,
+          stale: isClaimStale(claim, nowIso, this.deps.claimTtlMinutes),
+        });
+      }
+      matched.sort((a, b) => (a.claimed_at < b.claimed_at ? -1 : a.claimed_at > b.claimed_at ? 1 : 0));
+      return ok(matched);
+    } catch (cause) {
+      return err({
+        code: "STORE_ERROR",
+        message: `seatClaims: could not resolve a worktree path: ${cause instanceof Error ? cause.message : String(cause)}`,
+        ...(cause instanceof Error ? { cause } : {}),
+      });
+    }
+  }
+
+  /**
+   * Normalises a directory for the D11 comparison: the injected realpath port,
+   * with an EXPLICIT `path.resolve` fallback for ENOENT only (D12). Throws any
+   * other port error — the caller (`seatClaims`) maps it to `STORE_ERROR`.
+   */
+  private resolveDirectory(directory: string): string {
+    try {
+      return this.realpathPort(directory);
+    } catch (cause) {
+      // reason: ENOENT is an expected fact (a worktree `lore done` already
+      // removed), not an error — fall back to lexical resolution so a claim
+      // still matches its own recorded string. Every other code is real.
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return resolvePath(directory);
+      throw cause;
+    }
+  }
 
   // ── Bootstrap (S1) ────────────────────────────────────────────────────────
 

@@ -25,7 +25,7 @@
  *               prefixes + formatResumeItemId combine correctly;
  *               disposition tokens are well-formed; cardinality renderer
  *               happy path (4, 6); RESUME_SCOPE_CLOSURE still names every
- *               BOOTSTRAP_INJECTION_KNOWN_KEYS member (regression-shaped,
+ *               BOOTSTRAP_RESUME_CLOSURE_KEYS member (regression-shaped,
  *               proves this task did not touch the upper-bound constant)
  *   NEGATIVE:   the constructed "would fail if merged" case — see the
  *               dedicated describe block below; a negative control proving
@@ -42,7 +42,7 @@
  *               input produce byte-identical output, interleaved with
  *               different-input calls to rule out hidden internal state
  *   REGRESSION: RESUME_SCOPE_CLOSURE is unchanged by this task (iterates
- *               BOOTSTRAP_INJECTION_KNOWN_KEYS, never a hand-copied
+ *               BOOTSTRAP_RESUME_CLOSURE_KEYS, never a hand-copied
  *               substring, per the task packet's explicit instruction)
  *
  * Source: spec-resume-ticket-coverage-a-shipped-upper-bound-left-the
@@ -60,7 +60,7 @@ import {
   RESUME_DISPOSITION_DONE,
   RESUME_DISPOSITION_DEFERRED_PREFIX,
   renderResumeCoverageCardinalityLine,
-  BOOTSTRAP_INJECTION_KNOWN_KEYS,
+  BOOTSTRAP_RESUME_CLOSURE_KEYS,
 } from "../../src/session.js";
 
 // ─── HAPPY ─────────────────────────────────────────────────────────────────
@@ -127,9 +127,9 @@ describe("HAPPY — cardinality renderer, standard case", () => {
 });
 
 describe("HAPPY (regression-shaped) — RESUME_SCOPE_CLOSURE unaffected by this task", () => {
-  it("HAPPY: RESUME_SCOPE_CLOSURE still names every BOOTSTRAP_INJECTION_KNOWN_KEYS member, derived from the set itself (not a hand-copied field list)", () => {
-    expect(BOOTSTRAP_INJECTION_KNOWN_KEYS.size).toBeGreaterThan(0);
-    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+  it("HAPPY: RESUME_SCOPE_CLOSURE still names every BOOTSTRAP_RESUME_CLOSURE_KEYS member, derived from the set itself (not a hand-copied field list)", () => {
+    expect(BOOTSTRAP_RESUME_CLOSURE_KEYS.size).toBeGreaterThan(0);
+    for (const key of BOOTSTRAP_RESUME_CLOSURE_KEYS) {
       expect(RESUME_SCOPE_CLOSURE).toContain(key);
     }
   });
@@ -211,7 +211,7 @@ describe("STATE — renderResumeCoverageCardinalityLine is referentially transpa
 describe("REGRESSION — RESUME_SCOPE_CLOSURE text is unchanged by this task (T1 constraint)", () => {
   it("REGRESSION: RESUME_SCOPE_CLOSURE still opens with its own scope-closure marker and still names every known injection key, iterated from the set rather than hand-copied", () => {
     expect(RESUME_SCOPE_CLOSURE.startsWith("SCOPE CLOSURE:")).toBe(true);
-    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+    for (const key of BOOTSTRAP_RESUME_CLOSURE_KEYS) {
       expect(RESUME_SCOPE_CLOSURE).toContain(key);
     }
   });

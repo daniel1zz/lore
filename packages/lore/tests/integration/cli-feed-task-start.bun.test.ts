@@ -46,7 +46,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import yaml from "yaml";
-import { BOOTSTRAP_INJECTION_KNOWN_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
+import { BOOTSTRAP_RESUME_CLOSURE_KEYS, RESUME_SCOPE_CLOSURE } from "@lore/core";
 import { assertFreshBinary } from "./helpers/assert-fresh-binary";
 import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 import { sessionActorFor, withSessionIdentity } from "../helpers/session-actor";
@@ -579,7 +579,7 @@ describe("REGRESSION — spec-create / session-resume / phase-start outputs are 
     // substring — the stdout literally ENDS with the constant (the module's
     // own `renderResumeFeed` invariant: closure is always the last block).
     expect(result.stdout.endsWith(RESUME_SCOPE_CLOSURE + "\n")).toBe(true);
-    for (const key of BOOTSTRAP_INJECTION_KNOWN_KEYS) {
+    for (const key of BOOTSTRAP_RESUME_CLOSURE_KEYS) {
       expect(RESUME_SCOPE_CLOSURE.includes(key)).toBe(true);
     }
   });
