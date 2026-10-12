@@ -40,8 +40,19 @@
  *     scope, no rules files (scope "user" with none is an error). Scope "user" never touches any
  *     CLAUDE.md. Each rules file must pass the `context.memory_files.rules` budget or the whole
  *     call is refused with zero writes.
+ *   - Lore skill folders (spec-rule-store BR-1064/BR-1060, AC-RS-5): in the same pass refresh selects
+ *     `skills:<scope>` fragments and writes `<skillsDir>/lore-<id>/SKILL.md` (frontmatter `description` +
+ *     fingerprint), where skillsDir = `<project>/.claude/skills` (scope project, also under `rulesOnly`) or
+ *     `<home>/.claude/skills` (scope user). Same per-file states as rules files. A `lore-*` dir is
+ *     pruned ONLY when its SKILL.md carries an intact fingerprint whose id and name agree with the dir
+ *     name (the `isLoreSkillDir` predicate, evaluated on bytes read through the port so the CAS covers
+ *     it); a fingerprint-less or hand-edited dir is never touched, because shipped lore skills live in
+ *     `lore-*` dirs too. A skill fragment whose dir name equals a skill shipped with lore
+ *     (`deps.shippedSkillNames`, else `<assetsRoot>/skills/lore-*` listed through the port) is refused
+ *     with VALIDATION_ERROR (exit 4) and zero writes. Pruning removes SKILL.md (the port deletes
+ *     files, not directories), so an empty `lore-<id>/` shell may remain; it has no SKILL.md and is inert.
  *   - Compare-and-swap writes (D8, AC-CF-13): refresh hashes the bytes it read for EVERY target
- *     (CLAUDE.md, each rules file it will write or delete), re-reads ALL of them right before the
+ *     (CLAUDE.md, each rules file and skill file it will write or delete), re-reads ALL of them right before the
  *     first write and proceeds ONLY if every hash is unchanged; otherwise it returns
  *     `err(CONFLICT)` with ZERO writes. Residual window: between that re-read and each
  *     write/delete the `FsWritePort` has no atomic primitive, so the race is narrowed to one
@@ -128,7 +139,18 @@ import { collectContextFacts, type ContextFacts } from "../service/context-facts
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 import { discoverFragments } from "../service/context-fragments/discover.js";
-import { isLoreRulesFileName, parseRulesFile, renderRulesFile, RULES_FILE_PREFIX, RULES_FILE_SUFFIX } from "../service/context-fragments/section.js";
+import {
+  isLoreRulesFileName,
+  parseRulesFile,
+  parseSkillFile,
+  renderRulesFile,
+  renderSkillFile,
+  RULES_FILE_PREFIX,
+  RULES_FILE_SUFFIX,
+  SKILL_DIR_PREFIX,
+  SKILL_FILE_NAME,
+  skillDirName,
+} from "../service/context-fragments/section.js";
 import { checkOverrides, selectFragments } from "../service/context-fragments/select.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -171,6 +193,11 @@ export interface FragmentRefreshDeps {
   globalConfig: ContextConfigLayer;
   /** Raw project (`.lore/config.yaml`) config layer. */
   projectConfig: ContextConfigLayer;
+  /**
+   * Skill directory names shipped with lore (`lore-<name>`), which a skill fragment must never
+   * shadow. Absent -> listed from `<assetsRoot>/skills` through the port.
+   */
+  shippedSkillNames?: readonly string[];
 }
 
 /** Which memory file a refresh targets. */
@@ -244,6 +271,9 @@ export interface RulesFileOutcome {
   state: RulesFileState;
 }
 
+/** Per-skill-folder outcome; `path` is the `SKILL.md` port path. Same states as rules files. */
+export type SkillDirOutcome = RulesFileOutcome;
+
 /** Outcome of one {@link runContextRefresh} call. */
 export interface ContextRefreshReport {
   /** Path written: {@link CLAUDE_MD_PATH} (project scope) or the user rules dir `<home>/.claude/rules` (user scope). */
@@ -252,6 +282,8 @@ export interface ContextRefreshReport {
   sections: SpliceResult["perSection"];
   /** One entry per lore rules file considered (selected or pruned); empty without fragment deps. */
   rules: RulesFileOutcome[];
+  /** One entry per lore skill folder considered (selected or pruned); empty without fragment deps. */
+  skills: SkillDirOutcome[];
   /**
    * Advisory `downgraded` findings from adoption=warn (spec-claude-md-root-
    * section-structure-check-and-adoption-mode D2, AC-STR-6): deterministic
@@ -392,6 +424,12 @@ const PROJECT_RULES_DIR = ".claude/rules";
 /** User rules directory, relative to `deps.home`. */
 const USER_RULES_RELATIVE = ".claude/rules";
 
+/** Project skills directory, relative to the port root (the repo). */
+const PROJECT_SKILLS_DIR = ".claude/skills";
+
+/** User skills directory, relative to `deps.home`. */
+const USER_SKILLS_RELATIVE = ".claude/skills";
+
 function joinPortPath(root: string, ...parts: string[]): string {
   return [root.endsWith("/") ? root.slice(0, -1) : root, ...parts].join("/");
 }
@@ -418,16 +456,30 @@ function resolveFragmentDeps(deps: ContextFlowDeps): Result<FragmentRefreshDeps 
         "must all be set together.",
     });
   }
-  return ok({ assetsRoot, home, xdgConfigHome, globalConfig, projectConfig });
+  return ok({
+    assetsRoot,
+    home,
+    xdgConfigHome,
+    globalConfig,
+    projectConfig,
+    ...(deps.shippedSkillNames === undefined ? {} : { shippedSkillNames: deps.shippedSkillNames }),
+  });
 }
 
-/** discover -> checkOverrides -> select for one rules outlet. */
+/** Fragments selected for the two file outlets of one scope. */
+interface ScopeSelection {
+  rules: Fragment[];
+  skills: Fragment[];
+}
+
+/** discover -> checkOverrides -> select for the scope's rules outlet and skills outlet. */
 async function selectScopeFragments(
   fs: FsWritePort,
   fragmentDeps: FragmentRefreshDeps,
   scope: ContextRefreshScope,
-): Promise<Result<Fragment[], LoreError>> {
-  const outlet: OutletId = scope === "user" ? "rules:user" : "rules:project";
+): Promise<Result<ScopeSelection, LoreError>> {
+  const outlets: Record<keyof ScopeSelection, OutletId> =
+    scope === "user" ? { rules: "rules:user", skills: "skills:user" } : { rules: "rules:project", skills: "skills:project" };
 
   const discovered = await discoverFragments(fs, {
     shipped: joinPortPath(fragmentDeps.assetsRoot, "context"),
@@ -439,9 +491,13 @@ async function selectScopeFragments(
   const overrides = checkOverrides(discovered.value, { global: fragmentDeps.globalConfig, project: fragmentDeps.projectConfig });
   if (!overrides.ok) return overrides;
 
-  const config = resolveContextConfig(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet);
   try {
-    return ok(selectFragments(discovered.value, { outlet, config }));
+    const selectFor = (outlet: OutletId): Fragment[] =>
+      selectFragments(discovered.value, {
+        outlet,
+        config: resolveContextConfig(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet),
+      });
+    return ok({ rules: selectFor(outlets.rules), skills: selectFor(outlets.skills) });
   } catch (e) {
     // reason: selectFragments throws on a `when` key with no registered matcher (fail loud by
     // design); the flow converts it to the Result channel instead of letting it escape.
@@ -525,6 +581,80 @@ async function planRulesFiles(
       });
     }
     actions.push({ kind: "delete", outcome: { id, path, state: "pruned" }, readBytes: await deps.fs.readFile(path) });
+  }
+  return ok(actions);
+}
+
+/** Names of the skill directories shipped with lore: the injected list, else `<assetsRoot>/skills/lore-*`. */
+async function resolveShippedSkillNames(fs: FsWritePort, fragmentDeps: FragmentRefreshDeps): Promise<ReadonlySet<string>> {
+  if (fragmentDeps.shippedSkillNames !== undefined) return new Set(fragmentDeps.shippedSkillNames);
+  const names = await fs.listDir(joinPortPath(fragmentDeps.assetsRoot, "skills"));
+  return new Set(names.filter((name) => name.startsWith(SKILL_DIR_PREFIX)));
+}
+
+/**
+ * Plans (reads only) what refresh does to every lore skill folder of one scope: create / update /
+ * unchanged / diverged_skip per selected fragment, delete SKILL.md of every fingerprinted `lore-*`
+ * dir whose fragment is gone. Refuses (zero actions) a fragment that would shadow a shipped skill.
+ */
+async function planSkillDirs(
+  deps: ContextFlowDeps,
+  skillsDir: string,
+  selected: readonly Fragment[],
+  shipped: ReadonlySet<string>,
+): Promise<Result<RulesAction[], LoreError>> {
+  const actions: RulesAction[] = [];
+  const keep = new Set<string>();
+
+  for (const fragment of selected) {
+    const rendered = renderSkillFile(fragment);
+    if (!rendered.ok) return rendered;
+    const { id, dirName, content } = rendered.value;
+    if (shipped.has(dirName)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "fragment.id",
+        message:
+          `refusing to write skill ${skillsDir}/${dirName} — fragment "${id}" (${fragment.path}) would shadow the skill ` +
+          `"${dirName}" shipped with lore; rename the fragment id. Nothing was written.`,
+        value: id,
+      });
+    }
+    keep.add(dirName);
+    const path = joinPortPath(skillsDir, dirName, SKILL_FILE_NAME);
+    const existing = await deps.fs.readFile(path);
+    if (existing === null) {
+      actions.push({ kind: "write", outcome: { id, path, state: "created" }, content, readBytes: null });
+      continue;
+    }
+    const parsed = parseSkillFile(existing);
+    if (parsed === null || !parsed.intact || parsed.id !== id || parsed.name !== dirName) {
+      actions.push({ kind: "none", outcome: { id, path, state: "diverged_skip" } });
+    } else if (existing === content) {
+      actions.push({ kind: "none", outcome: { id, path, state: "unchanged" } });
+    } else {
+      actions.push({ kind: "write", outcome: { id, path, state: "updated" }, content, readBytes: existing });
+    }
+  }
+
+  // reason: prune by FINGERPRINT, never by the `lore-` prefix alone — shipped lore skills and any
+  // hand-made `lore-*` dir share the prefix and carry no intact fingerprint (BR-1064, BR-1060).
+  const candidates = (await deps.fs.listDir(skillsDir)).filter((name) => name.startsWith(SKILL_DIR_PREFIX) && !keep.has(name)).sort();
+  for (const name of candidates) {
+    const path = joinPortPath(skillsDir, name, SKILL_FILE_NAME);
+    const bytes = await deps.fs.readFile(path);
+    if (bytes === null) continue;
+    const parsed = parseSkillFile(bytes);
+    if (parsed === null || !parsed.intact || parsed.name !== name || skillDirName(parsed.id) !== name) continue;
+    if (deps.fs.deleteFile === undefined) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "deps.fs",
+        message: `cannot prune stale ${path}: the injected FsWritePort has no deleteFile.`,
+        value: path,
+      });
+    }
+    actions.push({ kind: "delete", outcome: { id: parsed.id, path, state: "pruned" }, readBytes: bytes });
   }
   return ok(actions);
 }
@@ -637,14 +767,22 @@ export async function runContextRefresh(
   // ── lore rules files plan ──
   const rulesDir =
     fragmentDeps === null ? null : scope === "user" ? joinPortPath(fragmentDeps.home, USER_RULES_RELATIVE) : PROJECT_RULES_DIR;
-  let actions: RulesAction[] = [];
+  let ruleActions: RulesAction[] = [];
+  let skillActions: RulesAction[] = [];
   if (fragmentDeps !== null && rulesDir !== null) {
     const selected = await selectScopeFragments(deps.fs, fragmentDeps, scope);
     if (!selected.ok) return selected;
-    const planned = await planRulesFiles(deps, rulesDir, selected.value, budgets);
+    const planned = await planRulesFiles(deps, rulesDir, selected.value.rules, budgets);
     if (!planned.ok) return planned;
-    actions = planned.value;
+    ruleActions = planned.value;
+
+    const skillsDir = scope === "user" ? joinPortPath(fragmentDeps.home, USER_SKILLS_RELATIVE) : PROJECT_SKILLS_DIR;
+    const shipped = await resolveShippedSkillNames(deps.fs, fragmentDeps);
+    const plannedSkills = await planSkillDirs(deps, skillsDir, selected.value.skills, shipped);
+    if (!plannedSkills.ok) return plannedSkills;
+    skillActions = plannedSkills.value;
   }
+  const actions: RulesAction[] = [...ruleActions, ...skillActions];
 
   // ── D8 compare-and-swap: re-read EVERY target before the FIRST write; any change = zero writes ──
   const casTargets: Array<{ path: string; readBytes: string | null }> = [];
@@ -664,7 +802,7 @@ export async function runContextRefresh(
   }
 
   if (claudeMdWrite !== null) await deps.fs.writeFile(CLAUDE_MD_PATH, claudeMdWrite.content);
-  const rulesWritten: string[] = [];
+  const rulesWritten: string[] = []; // rules AND skill files: D16 lists every lore file written
   for (const action of actions) {
     if (action.kind === "write") {
       await deps.fs.writeFile(action.outcome.path, action.content);
@@ -686,7 +824,8 @@ export async function runContextRefresh(
   return ok({
     path: (scope === "user" || rulesOnly) && rulesDir !== null ? rulesDir : CLAUDE_MD_PATH,
     sections: sectionOutcomes,
-    rules: actions.map((action) => action.outcome),
+    rules: ruleActions.map((action) => action.outcome),
+    skills: skillActions.map((action) => action.outcome),
     downgraded,
   });
 }
