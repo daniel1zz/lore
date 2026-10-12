@@ -295,7 +295,7 @@ export default defineCommand({
         "falsifier-exit-code": {
           type: "string",
           description:
-            "script mode only: the EXACT exit code (never \"non-zero\") this mutation is declared to " +
+            "script mode only: the EXACT exit code (never \"non-zero\"; a whole number from 1 to 255) this mutation is declared to " +
             "produce when --command runs against the mutated file.",
         },
         correction: {
@@ -643,7 +643,7 @@ export default defineCommand({
         "falsifier-exit-code": {
           type: "string",
           description:
-            "script mode only: REPLACE the EXACT exit code (never \"non-zero\") the mutation is declared to " +
+            "script mode only: REPLACE the EXACT exit code (never \"non-zero\"; a whole number from 1 to 255) the mutation is declared to " +
             "produce. Required together with the other three --falsifier-* flags.",
         },
         correction: {
