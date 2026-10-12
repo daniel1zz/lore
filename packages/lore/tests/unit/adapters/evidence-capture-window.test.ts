@@ -68,6 +68,7 @@ import {
   CAPTURE_TAIL_CHARS,
   DEFAULT_CAPTURE_TIMEOUT_MS,
 } from "../../../src/adapters/evidence-capture.js";
+import * as precheck from "../../../src/adapters/cli/evidence-precheck.js";
 
 /** Hedging vocabulary the timeout message must never contain (governing task item 2). */
 const HEDGE_WORDS = ["possibly", "maybe", "perhaps", "probably", "might be"];
@@ -249,10 +250,33 @@ describe("captureOracleCommand window — ERROR", () => {
       timeoutMs: 30_000,
     });
 
-    // the shell reports 127; declared `fail` matches a nonzero exit, so this captures
+    // RE-BASELINED (issue #53, BR-1077, BR-152; spec D10). ORIGINAL assertion:
+    //   `expect(outcome.value.observedExitCode).not.toBe(0)` — "the shell reports 127;
+    //   declared `fail` matches a nonzero exit, so this captures" (i.e. an exit-127
+    //   command not found was ACCEPTED as a measured fail). That is the defect: a
+    //   missing binary is not a red. captureOracleCommand is UNCHANGED (it still
+    //   reports the observed outcome, D10); the precheck now decides, so the outcome
+    //   is fed through findCapturedRedProofGap and refused, naming 127.
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
-    expect(outcome.value.observedExitCode).not.toBe(0);
+    expect(outcome.value.observedExitCode).toBe(127);
+
+    const gapFn = (precheck as unknown as { findCapturedRedProofGap?: (i: unknown) => { code: string; message: string } | null })
+      .findCapturedRedProofGap;
+    expect(
+      typeof gapFn,
+      "findCapturedRedProofGap is not exported from evidence-precheck.ts yet (paired implement task adds it)",
+    ).toBe("function");
+    const refusal = (gapFn as (i: unknown) => { code: string; message: string } | null)({
+      oracle: "test",
+      result: "fail",
+      capture: true,
+      exitCode: outcome.value.observedExitCode,
+      outputTail: outcome.value.outputTail,
+    });
+    expect(refusal, "exit 127 must be refused as a red").not.toBeNull();
+    expect(refusal?.code).toBe("VALIDATION_ERROR");
+    expect(refusal?.message).toContain("127");
   });
 
   it("CAPWIN-E2: an unspawnable cwd is still reported as a spawn failure, never as a timeout", () => {

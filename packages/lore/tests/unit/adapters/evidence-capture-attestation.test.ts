@@ -351,7 +351,13 @@ describe("PRODUCTION WIRING — lore evidence --capture must persist a real atte
           "--oracle",
           "test",
           "--command",
-          `echo '${token} 1 failed'; exit 3`,
+          // RE-BASELINED (issue #53, BR-1077, AC-EH-8 i). ORIGINAL command:
+          //   `echo '${token} 1 failed'; exit 3` — no runner summary at all, which the
+          // captured-red proof now refuses (a red needs a recognised runner summary with
+          // a failed test in the stored tail). The command now prints a vitest summary
+          // failure line before exiting 3; exit code, attestation and token assertions
+          // below are unchanged.
+          `echo '${token}'; printf 'Tests  1 failed (1)\\n'; exit 3`,
           "--result",
           "fail",
           "--capture",
@@ -366,6 +372,7 @@ describe("PRODUCTION WIRING — lore evidence --capture must persist a real atte
       expect(row.result).toBe("fail");
       expect(row.capture_source).toBe("runner");
       expect(row.output_tail ?? "").toContain(token);
+      expect(row.output_tail ?? "").toContain("Tests  1 failed (1)");
 
       // Attestation presence must NOT be conditional on success.
       expect(row.attestation, attestationMissingMessage("captured fail", row)).toBeDefined();

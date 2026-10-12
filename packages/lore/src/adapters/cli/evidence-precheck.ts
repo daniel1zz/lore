@@ -171,6 +171,7 @@ import {
   extractCaseFilterPatterns,
   findRegexMetacharacters,
   parseExecutedUnits,
+  parseFailedCaseCount,
   // reason: task-wire-the-discovery-refusal-guard-into-the-evidence-capture
   // (spec-oracle-executability-a-runner-s-discovery-refusal-is-not-a §M6.2's
   // evidence-path sibling, AC-OX-12) — the SIXTH guard hosted here,
@@ -1153,5 +1154,72 @@ export function findCapturedFailDiscoveryRefusal(input: {
       "runner actually executes something, then re-run with --capture; or, if the run " +
       "genuinely never executed anything on purpose, record nothing and investigate why.",
     value: input.command,
+  };
+}
+
+/**
+ * Captured-red proof (spec-evidence-labels-and-reds-are-honest D8/D9/D10,
+ * issue #53; BR-1077, BR-152). A captured `fail`/`expected-fail` is a red
+ * only if the command genuinely ran something and failed:
+ *   - exit 126/127 (not runnable / not found) is never a red, for ANY oracle;
+ *   - oracle test/e2e needs, in the STORED output tail, a recognised runner
+ *     summary reporting >= 1 failed test. A summary pushed out of the stored
+ *     window by trailing stderr is refused with a `2>&1` hint.
+ * Known limit: a hand-printed summary line passes ("a summary appeared", not
+ * "a test ran"). Playwright output has no recognised summary and is refused.
+ *
+ * Shared verbatim by CLI `lore evidence` and MCP `lore_evidence_add`, so both
+ * surfaces return the same LoreError. `captureOracleCommand` is unchanged (D10).
+ *
+ * @param input.capture - false => never judged (typed-in output is not a capture)
+ * @param input.exitCode - the observed exit code of the captured run
+ * @param input.outputTail - the STORED tail (CAPTURE_TAIL_CHARS window)
+ * @returns VALIDATION_ERROR (exit 4) naming what is missing, or `null`
+ *
+ * @example
+ * findCapturedRedProofGap({ oracle: "test", result: "expected-fail", capture: true,
+ *   exitCode: 1, outputTail: "cd: no such file\n" }) // => VALIDATION_ERROR
+ */
+export function findCapturedRedProofGap(input: {
+  oracle: string;
+  result: string;
+  capture: boolean;
+  exitCode: number | null;
+  outputTail?: string;
+}): LoreError | null {
+  if (!input.capture) return null;
+  if (input.result !== "fail" && input.result !== "expected-fail") return null;
+
+  if (input.exitCode === 126 || input.exitCode === 127) {
+    return {
+      code: "VALIDATION_ERROR",
+      field: "command",
+      message:
+        `--capture observed exit code ${input.exitCode} (command not runnable or not found), ` +
+        `so nothing was measured: it cannot be recorded as "${input.result}" for any check ` +
+        "(BR-1077). Fix the command so it actually runs, then re-run with --capture.",
+      value: input.exitCode,
+    };
+  }
+
+  if (input.oracle !== "test" && input.oracle !== "e2e") return null;
+
+  const failed = parseFailedCaseCount(input.outputTail ?? "");
+  if (failed !== null && failed >= 1) return null;
+
+  const missing =
+    failed === null
+      ? `the stored output tail carries no runner summary this check recognises (${RUNNER_SUMMARY_FORMATS_DESCRIPTION})`
+      : "the runner summary in the stored output tail reports 0 failed tests";
+  return {
+    code: "VALIDATION_ERROR",
+    field: "command",
+    message:
+      `--capture cannot record a "${input.result}" for oracle ${input.oracle}: ${missing}. ` +
+      "A red must show a failed test, otherwise a broken command (failed cd, bad flag) would " +
+      "satisfy the red-first floor (BR-1077). Only the last 4000 characters are stored; if the " +
+      "runner's summary was pushed out by later stderr, add `2>&1` to --command so the summary " +
+      "stays at the end. Playwright output has no recognised summary and cannot be captured as a red.",
+    value: input.outputTail ?? "",
   };
 }
