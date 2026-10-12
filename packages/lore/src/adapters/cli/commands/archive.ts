@@ -94,13 +94,31 @@ export default defineCommand({
     const candidates = computeArchiveCandidates(listResult.value.docs, nowIso, ttl);
 
     if (sweepRequested) {
+      // Annotate each floor-refused task straggler with its floor (read-only; the service asks the
+      // same DoneFloorPort `--apply` does). The candidate is still listed and still exits 3.
+      const refusingFloors = new Map<string, string>();
+      const sweepDocs = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
+      for (const c of candidates) {
+        const doc = sweepDocs.get(c.doc_id);
+        if (doc === undefined) continue;
+        const floorResult = await app.corpusService.checkSweepCandidateFloor(doc, c.rule);
+        if (!floorResult.ok) {
+          process.stderr.write(formatError(floorResult.error) + "\n");
+          process.exitCode = exitCode(floorResult.error);
+          return;
+        }
+        if (floorResult.value !== null) refusingFloors.set(c.doc_id, floorResult.value.floor);
+      }
       if (args.json) {
         console.log(
           JSON.stringify(
             {
               ok: true,
               data: {
-                candidates: candidates.map((c) => ({ ...c, repair: REPAIR_COMMAND })),
+                candidates: candidates.map((c) => {
+                  const floor = refusingFloors.get(c.doc_id);
+                  return floor === undefined ? { ...c, repair: REPAIR_COMMAND } : { ...c, repair: REPAIR_COMMAND, floor };
+                }),
               },
             },
             null,
@@ -112,8 +130,13 @@ export default defineCommand({
       } else {
         console.log(`${candidates.length} archive candidate(s):`);
         for (const c of candidates) {
+          const floor = refusingFloors.get(c.doc_id);
           console.log(`  [${c.rule}] ${c.slug} — ${c.reason}`);
-          console.log(`    repair: ${REPAIR_COMMAND}`);
+          console.log(
+            floor === undefined
+              ? `    repair: ${REPAIR_COMMAND}`
+              : `    refused by ${floor}: --apply will skip it until the floor is cleared (see \`lore done ${c.slug}\`)`,
+          );
         }
       }
       process.exitCode = candidates.length === 0 ? 0 : 3;
@@ -123,7 +146,7 @@ export default defineCommand({
     // --apply
     const by = resolveActor();
     const docsById = new Map(listResult.value.docs.map((d) => [d.id, d] as const));
-    const outcomes: Array<{ slug: string; ok: boolean; detail: string }> = [];
+    const outcomes: Array<{ slug: string; ok: boolean; detail: string; skipped?: true; floor?: string }> = [];
 
     for (const candidate of candidates) {
       const doc = docsById.get(candidate.doc_id);
@@ -133,6 +156,12 @@ export default defineCommand({
       }
       const result = await app.corpusService.archiveSweepCandidate(doc, candidate.rule, candidate.reason, { by });
       if (!result.ok) {
+        const floor = result.error.code === "VALIDATION_ERROR" ? result.error.details?.floor : undefined;
+        if (floor !== undefined) {
+          // A `lore done` floor refusal: the task stays open (not a failure), still reported by --sweep.
+          outcomes.push({ slug: candidate.slug, ok: false, skipped: true, floor, detail: `refused by ${floor}` });
+          continue;
+        }
         outcomes.push({ slug: candidate.slug, ok: false, detail: formatError(result.error) });
         continue;
       }
@@ -145,7 +174,7 @@ export default defineCommand({
       console.log("No archive candidates to apply.");
     } else {
       for (const o of outcomes) {
-        console.log(`  [${o.ok ? "OK" : "FAILED"}] ${o.slug} — ${o.detail}`);
+        console.log(`  [${o.ok ? "OK" : o.skipped === true ? "SKIPPED" : "FAILED"}] ${o.slug} — ${o.detail}`);
       }
     }
     process.exitCode = 0;
