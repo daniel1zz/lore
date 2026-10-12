@@ -271,6 +271,7 @@ import { collectFileAnchorResolution } from "../../service/anchor-resolution.js"
 import { buildAssessSummaryText } from "./assess-render.js";
 import { requirePhaseWorkflowService, getPhaseStatus, buildPhaseFeedFlowDeps } from "../cli/phase-wiring.js";
 import { deriveCommitSetForPlan, type DiffSourceRecord } from "../cli/assess-commit-derivation.js";
+import { collectRecordedRanges } from "../../service/task-commit-range.js";
 import {
   findMissingOracleFilesForEvidence,
   findFilteredPassRefusal,
@@ -2603,7 +2604,12 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
         // `deriveCommitSetForPlan`'s `allTasksArchived` parameter is REQUIRED (no default),
         // so this computation cannot be omitted and still compile.
         const allTasksArchived = bundle.tasks.every((t) => t.status === "archived");
-        const derivation = deriveCommitSetForPlan(process.cwd(), bundle.tasks.map((t) => t.slug), allTasksArchived);
+        const derivation = deriveCommitSetForPlan(
+          process.cwd(),
+          bundle.tasks.map((t) => t.slug),
+          allTasksArchived,
+          collectRecordedRanges(bundle.tasks),
+        );
         diffSource = { mode: "auto_derived", ...derivation };
         if (derivation.status === "derived") {
           diffText = derivation.diff_text;
