@@ -177,7 +177,7 @@ describe("findCapturedRedProofGap reads the STORED tail (AC-EH-8 j)", () => {
 
   it("BOUNDARY (j) control: a summary that stays inside the stored tail is accepted", () => {
     const outcome = captureOracleCommand({
-      command: `printf 'e%.0s' $(seq 1 ${CAPTURE_TAIL_CHARS + 500}) >&2; printf 'Tests  1 failed (1)\\n'; exit 1`,
+      command: `printf 'e%.0s' $(seq 1 ${CAPTURE_TAIL_CHARS + 500}) >&2; printf '\\nTests  1 failed (1)\\n'; exit 1`,
       cwd: process.cwd(),
       declaredResult: "expected-fail",
       timeoutMs: 30_000,
