@@ -7,8 +7,10 @@
  *   - Pure (no IO, no clock); never mutates inputs; output is id-ascending (deterministic).
  *   - Pipeline order: outlet layer routing -> id override (project > user > shipped)
  *     -> disable -> audience/mode routing -> `when` matchers.
- *   - rules:project sees ONLY shipped+project layers; rules:user sees ONLY the user
- *     layer. This is what keeps each rules-file render independent of the other scope.
+ *   - rules:project / skills:project see ONLY shipped+project layers; rules:user / skills:user
+ *     see ONLY the user layer. This keeps each project-scoped render independent of user scope.
+ *   - delivery: skill fragments route to exactly one skills outlet and to no rules:* / hook:* outlet
+ *     (BR-1061, BR-1060).
  *   - A `when` key missing from WHEN_MATCHERS fails loud (throws) - never silently matches.
  * Side-effect class: pure.
  */
@@ -33,8 +35,8 @@ const LAYER_RANK: Readonly<Record<FragmentLayer, number>> = { shipped: 0, user: 
 const OUTLET_LAYERS: Readonly<Record<OutletId, ReadonlySet<FragmentLayer>>> = {
   "rules:project": new Set<FragmentLayer>(["shipped", "project"]),
   "rules:user": new Set<FragmentLayer>(["user"]),
-  "skills:project": new Set<FragmentLayer>(), // T2/T3 route this
-  "skills:user": new Set<FragmentLayer>(), // T2/T3 route this
+  "skills:project": new Set<FragmentLayer>(["shipped", "project"]),
+  "skills:user": new Set<FragmentLayer>(["user"]),
   "hook:session-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
   "hook:subagent-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
 };
@@ -79,18 +81,19 @@ function isStaticMain(fragment: Fragment): boolean {
 }
 
 function matchesOutletRouting(fragment: Fragment, outlet: OutletId, agentType: string | undefined): boolean {
-  const { audience, mode } = fragment.frontmatter;
+  const { audience, mode, delivery } = fragment.frontmatter;
+  const isSkill = delivery === "skill";
   switch (outlet) {
     case "rules:project":
     case "rules:user":
-      return mode === "static" && audience.includes("main");
+      return !isSkill && mode === "static" && audience.includes("main");
     case "skills:project":
     case "skills:user":
-      return false; // T2/T3 route this
+      return isSkill && mode === "static" && audience.includes("main");
     case "hook:session-start":
-      return mode === "dynamic" && audience.includes("main");
+      return !isSkill && mode === "dynamic" && audience.includes("main");
     case "hook:subagent-start":
-      return audience.some((a) => a === "subagent:*" || (agentType !== undefined && a === `subagent:${agentType}`));
+      return !isSkill && audience.some((a) => a === "subagent:*" || (agentType !== undefined && a === `subagent:${agentType}`));
     default: {
       const unreachable: never = outlet;
       throw new Error(`selectFragments: unknown outlet ${String(unreachable)}`);
