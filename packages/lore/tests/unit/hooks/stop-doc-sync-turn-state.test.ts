@@ -274,7 +274,8 @@ describe("turn-state consumers migrated to the payload session id", () => {
         tool_input: { file_path: file, old_string: "a", new_string: "b" },
       });
     expect(gate("/x/a.ts").stderr).toContain("exempt");
-    expect(gate("/x/other.ts").stderr).toContain("file not Read this turn");
+    // The non-exempt notice moved to stdout additionalContext (task-rs-t12; BR-1068): stderr from an exit-0 hook never reaches the model.
+    expect(gate("/x/other.ts").stdout).toContain("file not Read this turn");
   });
 });
 
