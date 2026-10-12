@@ -13,8 +13,9 @@
  *   setCorpusWriteContext(ctx)                      (claim-scoped authoring guard, armed once per CLI process)
  *
  * Landing invariants (`apply`):
- *   - Evidence-gated (D2): every criterion of the spec citing a changed id needs a runner-attested pass
- *     (`measureLandingEvidence`); otherwise VALIDATION_ERROR naming the criteria and NOTHING is written.
+ *   - Evidence-gated (D2): every criterion of the spec citing a changed id needs a runner-attested pass, and every
+ *     `add` / `modify` id must be cited by some criterion (an unproven change); a `retire` needs no evidence
+ *     (`measureLandingEvidence`). Otherwise VALIDATION_ERROR naming the criteria / ids and NOTHING is written.
  *   - Each touched leaf is written ONCE (one version, status demoted like any contract edit, the spec named in
  *     the version's change summary); `proposed` ids become `live` (the registry follows the leaf in the same
  *     transaction), `modify` rewrites statement/examples/enforced_by, `retire` sets `retired` + note.
@@ -264,17 +265,30 @@ export class RuleChangeService implements RuleChangeLandingPort {
       plans: plans.value,
       tasks: tasks.value,
       changedRuleIds: new Set(pending.map((change) => change.id)),
+      provableRuleIds: new Set(pending.filter((change) => change.op !== "retire").map((change) => change.id)),
     });
     if (!measured.ok) return err(validationError("acceptance_criteria", measured.reason));
-    if (measured.shortfalls.length === 0) return ok(undefined);
-    const lines = measured.shortfalls.map(
-      (s) => `${s.acId} (cites ${s.cites.join(", ")}: ${s.reason === "no-attested-run" ? "no runner-attested pass" : "its latest runner-attested run failed"})`,
-    );
+    if (measured.shortfalls.length === 0 && measured.unproven.length === 0) return ok(undefined);
+    const parts: string[] = [];
+    if (measured.shortfalls.length > 0) {
+      const lines = measured.shortfalls.map(
+        (s) => `${s.acId} (cites ${s.cites.join(", ")}: ${s.reason === "no-attested-run" ? "no runner-attested pass" : "its latest runner-attested run failed"})`,
+      );
+      parts.push(
+        `${measured.shortfalls.length} criterion(s) citing a changed rule lack a runner-attested pass — ${lines.join("; ")}. ` +
+          `Record one with \`lore verify\` (a self-reported or expected-fail row does not count)`,
+      );
+    }
+    if (measured.unproven.length > 0) {
+      parts.push(
+        `unproven change(s) — no criterion of ${spec.slug} cites ${measured.unproven.join(", ")}, so nothing would vouch for it. ` +
+          `Cite it with \`lore ac cite ${spec.slug} <ac-id> <rule-id>\``,
+      );
+    }
     return err(validationError(
       "rule_changes",
-      `cannot land the rule changes of ${spec.slug}: ${measured.shortfalls.length} criterion(s) citing a changed rule lack a runner-attested pass — ` +
-        `${lines.join("; ")}. Record one with \`lore verify\` (a self-reported or expected-fail row does not count), then re-run \`lore rule apply ${spec.slug}\``,
-      measured.shortfalls,
+      `cannot land the rule changes of ${spec.slug}: ${parts.join("; ")}; then re-run \`lore rule apply ${spec.slug}\``,
+      { shortfalls: measured.shortfalls, unproven: measured.unproven },
     ));
   }
 

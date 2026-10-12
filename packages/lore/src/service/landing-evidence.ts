@@ -1,22 +1,23 @@
 /**
  * Module: landing-evidence — which criteria of a spec have a runner-attested pass (the gate of `lore rule apply`).
  *
- * Purpose: answer, for ONE spec, "does every criterion citing a changed rule id hold a runner-attested pass?"
- *   (D2: landing is evidence-gated, not status-gated). Self-reported rows, `expected-fail` rows and criteria
- *   without any run never count.
- * Public surface: {@link measureLandingEvidence}, {@link LandingEvidenceInput}, {@link LandingShortfall}.
+ * Purpose: answer, for ONE spec, "does every criterion citing a changed rule id hold a runner-attested pass, and is
+ *   every added / modified id cited by at least one criterion?" (D2: landing is evidence-gated, not status-gated).
+ *   Self-reported rows, `expected-fail` rows and criteria without any run never count; an `add` / `modify` id that
+ *   no criterion cites is an UNPROVEN change (nothing would ever vouch for it). A `retire` needs no evidence.
+ * Public surface: {@link measureLandingEvidence}, {@link LandingEvidenceInput}, {@link LandingShortfall},
+ *   {@link LandingMeasure}.
  * Invariants:
  *   - Pure: no store, IO or clock; every function takes already-loaded docs.
- *   - Only runner-attested (`attestation` present), conclusive (`pass` | `fail`) rows count; the LATEST per
- *     criterion wins. Evidence reaches a criterion by plan lineage (a task of a plan whose parent is the spec); a
- *     task with no plan lineage reaches it only when exactly ONE spec declares that criterion id — the same
- *     attribution rule `RuleStateService` applies, so the two never disagree about what a run belongs to.
+ *   - Which run belongs to which criterion is `attested-ac-runs.ts` — the SAME module `RuleStateService` uses, so
+ *     the two never disagree.
  *   - A malformed `acceptance_criteria` is returned as an error value, never read as "no criteria".
  * Side-effect class: pure.
  * Source: spec-a-spec-carries-its-rule-changes-the-baseline-takes-them (D2); rule-state-service.ts (attribution).
  */
 
-import { extractEvidence, specAcceptanceCriteriaSchema, type DocRecord, type EvidenceEntry } from "@lore/core";
+import { specAcceptanceCriteriaSchema, type DocRecord } from "@lore/core";
+import { attestedRunKey, indexLatestAttestedRuns } from "./attested-ac-runs.js";
 
 /** The docs the measure reads. `specs` must hold every spec (ad-hoc evidence attribution needs all of them). */
 export interface LandingEvidenceInput {
@@ -24,8 +25,10 @@ export interface LandingEvidenceInput {
   readonly specs: readonly DocRecord[];
   readonly plans: readonly DocRecord[];
   readonly tasks: readonly DocRecord[];
-  /** Rule ids the unlanded change set changes (adds, modifies, retires). */
+  /** Rule ids the unlanded change set changes (adds, modifies, retires): a criterion citing one needs a pass. */
   readonly changedRuleIds: ReadonlySet<string>;
+  /** The subset (adds and modifies) that some criterion must cite; a retire is not in it. */
+  readonly provableRuleIds: ReadonlySet<string>;
 }
 
 /** One criterion citing a changed id that has no runner-attested pass, and why. */
@@ -36,10 +39,11 @@ export interface LandingShortfall {
   readonly reason: "no-attested-run" | "latest-attested-run-failed";
 }
 
-type Conclusive = EvidenceEntry & { result: "pass" | "fail" };
-
-function isConclusiveAttested(entry: EvidenceEntry): entry is Conclusive {
-  return entry.attestation !== undefined && (entry.result === "pass" || entry.result === "fail");
+/** What blocks landing: criteria without a pass, and add/modify ids no criterion cites. Both empty = may land. */
+export interface LandingMeasure {
+  readonly shortfalls: LandingShortfall[];
+  /** Sorted ids of `add` / `modify` entries cited by no criterion of the spec. */
+  readonly unproven: string[];
 }
 
 function declaredAcIdsOf(spec: DocRecord): string[] {
@@ -47,62 +51,34 @@ function declaredAcIdsOf(spec: DocRecord): string[] {
   return parsed.success ? parsed.data.map((c) => c.id) : [];
 }
 
-/** The latest attested conclusive run of each criterion of `input.spec`, keyed by criterion id. */
-function latestRunsOfSpec(input: LandingEvidenceInput): Map<string, Conclusive> {
-  const planParent = new Map(input.plans.map((p) => [p.id as string, p.parent_id as string | null]));
-  const ownersOfAc = new Map<string, string[]>();
-  for (const spec of input.specs) {
-    for (const acId of declaredAcIdsOf(spec)) ownersOfAc.set(acId, [...(ownersOfAc.get(acId) ?? []), spec.id as string]);
-  }
-  const latest = new Map<string, Conclusive>();
-  const offer = (entry: Conclusive): void => {
-    const acRef = entry.ac_ref as string;
-    const current = latest.get(acRef);
-    if (current === undefined || entry.recorded_at >= current.recorded_at) latest.set(acRef, entry);
-  };
-  for (const task of input.tasks) {
-    const planId = task.extra["plan_id"];
-    const hasLineage = typeof planId === "string";
-    const lineageSpecId = hasLineage ? planParent.get(planId) ?? null : null;
-    for (const entry of extractEvidence(task)) {
-      if (entry.ac_ref === undefined || !isConclusiveAttested(entry)) continue;
-      if (hasLineage) {
-        if (lineageSpecId === (input.spec.id as string)) offer(entry);
-        continue;
-      }
-      const owners = ownersOfAc.get(entry.ac_ref) ?? [];
-      if (owners.length === 1 && owners[0] === (input.spec.id as string)) offer(entry);
-    }
-  }
-  return latest;
-}
-
 /**
- * The criteria of `input.spec` that cite a changed id and lack a runner-attested pass.
- *
- * @returns `ok: true` with the shortfalls (empty = the change set may land); `ok: false` with the reason when the
- *   stored `acceptance_criteria` cannot be read (the gate never guesses).
+ * @returns `ok: true` with the {@link LandingMeasure}; `ok: false` with the reason when the stored
+ *   `acceptance_criteria` cannot be read (the gate never guesses).
  * @example
- * measureLandingEvidence({ spec, specs, plans, tasks, changedRuleIds: new Set(["BR-9"]) });
- * // => { ok: true, shortfalls: [{ acId: "AC-1", cites: ["BR-9"], reason: "no-attested-run" }] }
+ * measureLandingEvidence({ spec, specs, plans, tasks, changedRuleIds: new Set(["BR-9"]), provableRuleIds: new Set(["BR-9"]) });
+ * // => { ok: true, shortfalls: [], unproven: ["BR-9"] }   (no criterion cites BR-9)
  */
-export function measureLandingEvidence(
-  input: LandingEvidenceInput,
-): { ok: true; shortfalls: LandingShortfall[] } | { ok: false; reason: string } {
+export function measureLandingEvidence(input: LandingEvidenceInput): ({ ok: true } & LandingMeasure) | { ok: false; reason: string } {
   const raw = input.spec.extra["acceptance_criteria"];
-  if (raw === undefined) return { ok: true, shortfalls: [] };
-  const parsed = specAcceptanceCriteriaSchema.safeParse(raw);
+  const parsed = raw === undefined ? { success: true as const, data: [] } : specAcceptanceCriteriaSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, reason: `the stored acceptance_criteria of ${input.spec.slug} is invalid: ${parsed.error.issues[0]?.message ?? "invalid"}` };
   }
-  const latest = latestRunsOfSpec(input);
+  const { latest } = indexLatestAttestedRuns({
+    specs: input.specs.map((spec) => ({ id: spec.id as string, acIds: declaredAcIdsOf(spec) })),
+    plans: input.plans,
+    tasks: input.tasks,
+  });
+  const cited = new Set<string>();
   const shortfalls: LandingShortfall[] = [];
   for (const criterion of parsed.data) {
     const cites = [...new Set(criterion.cites ?? [])].filter((id) => input.changedRuleIds.has(id)).sort();
+    for (const id of cites) cited.add(id);
     if (cites.length === 0) continue;
-    const run = latest.get(criterion.id);
+    const run = latest.get(attestedRunKey(input.spec.id as string, criterion.id));
     if (run === undefined) shortfalls.push({ acId: criterion.id, cites, reason: "no-attested-run" });
     else if (run.result !== "pass") shortfalls.push({ acId: criterion.id, cites, reason: "latest-attested-run-failed" });
   }
-  return { ok: true, shortfalls };
+  const unproven = [...input.provableRuleIds].filter((id) => !cited.has(id)).sort();
+  return { ok: true, shortfalls, unproven };
 }
