@@ -140,6 +140,30 @@ export const CAPTURE_MAX_BUFFER_BYTES = 20 * 1024 * 1024;
 /** Persisted `output_tail` ceiling — mirrors `evidenceEntrySchema`'s own max. */
 export const CAPTURE_TAIL_CHARS = 4000;
 
+/**
+ * Prefixes the oracle command with `exec 2>&1` so the shell routes stderr into the
+ * SAME pipe as stdout for the whole command (task-gh-1343388703-181, lore issue #181).
+ *
+ * Why this and not a wrapper such as `( cmd ) 2>&1`: `exec` redirects the shell's own
+ * descriptors and then runs the caller's text unchanged in that same shell, so the
+ * exit status IS the command's own — there is no subshell or pipe stage whose status
+ * could replace it. The newline keeps the caller's text on its own line, so a trailing
+ * `# comment` or a heredoc in it cannot swallow anything we add.
+ *
+ * Why a single pipe: capture used to keep stdout then stderr (concatenated), so a
+ * runner printing its summary on stdout and noise on stderr lost the summary from the
+ * 4000-char tail. One pipe keeps the order a terminal shows, so the runner's final
+ * summary line is the last line of the tail.
+ *
+ * @param command - the oracle command exactly as the caller wrote it
+ * @returns the shell text to spawn
+ * @example
+ * mergeStderrIntoStdout("bun test"); // => "exec 2>&1\nbun test"
+ */
+export function mergeStderrIntoStdout(command: string): string {
+  return `exec 2>&1\n${command}`;
+}
+
 /** What to spawn, where, and what the caller claims the outcome will be. */
 export interface CaptureRequest {
   /** The oracle command, run through a shell exactly as the caller wrote it. */
@@ -321,7 +345,7 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
   // step during a long oracle could manufacture a phantom timeout (or mask a real
   // one) on the elapsed conjunct below.
   const startedAt = performance.now();
-  const spawnResult = spawnSync(request.command, {
+  const spawnResult = spawnSync(mergeStderrIntoStdout(request.command), {
     shell: true,
     cwd: request.cwd,
     encoding: "utf8",
@@ -444,7 +468,11 @@ export function captureOracleCommand(request: CaptureRequest): CaptureOutcome {
     };
   }
 
-  const combined = [spawnResult.stdout, spawnResult.stderr].filter((s) => s.length > 0).join("\n");
+  // reason: stderr was merged into stdout by {@link mergeStderrIntoStdout}, so
+  // `spawnResult.stdout` already IS the terminal-ordered combined stream and
+  // `spawnResult.stderr` is empty by construction. Do NOT re-add a stdout+stderr
+  // join here — that concatenation is the #181 defect (summary pushed out of the tail).
+  const combined = spawnResult.stdout;
   // reason: SPEC-143 AC-CT-2 write-through — every number below was already
   // measured above; this is where they finally reach the persisted row instead of
   // dying in this function (see {@link CapturedProvenance} for the measured defect,
