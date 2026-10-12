@@ -62,7 +62,7 @@ const HOOK_EVENT_NAMES: Readonly<Record<HookOutlet, string>> = {
 };
 
 /** Exit code for a failed `check` — the VALIDATION_ERROR family (adapters/cli/utils.ts `exitCode`). */
-const CHECK_FAILED_EXIT = 4;
+export const CHECK_FAILED_EXIT = 4;
 const USAGE_EXIT = 2;
 const BOOTSTRAP_TIMEOUT_MS = 5000;
 
@@ -91,7 +91,7 @@ function resolveProjectRoot(start: string): string {
 }
 
 /** Skill directory names lore ships: `skills/lore-<name>/...` entries of the embedded manifest (BR-1064). */
-function listShippedSkillNames(): string[] {
+export function listShippedSkillNames(): string[] {
   const names = new Set<string>();
   for (const entry of EMBEDDED_ASSETS_MANIFEST.entries) {
     const match = /^skills\/(lore-[^/]+)\//.exec(entry.path);
@@ -243,12 +243,17 @@ async function runRender(args: Record<string, unknown>, cwd: string): Promise<vo
   emitHookJson(outlet, result.value.additionalContext);
 }
 
-async function runCheck(args: Record<string, unknown>, cwd: string): Promise<void> {
+/**
+ * Runs the fragments check and renders it (stdout summary / `--json` report, findings on stderr),
+ * setting the exit code. `label` names the invoking command in the human lines; shared with
+ * `lore status --check-fragments` so the two cannot render a finding differently.
+ */
+export async function runCheck(args: Record<string, unknown>, cwd: string, label = "lore fragments check"): Promise<void> {
   const json = args["json"] === true;
   const deps = buildFlowDeps(cwd);
   if (!deps.ok) {
     if (json) writeAllSync(1, `${JSON.stringify({ ok: false, error: deps.error })}\n`);
-    process.stderr.write(`lore fragments check: ${deps.error.code}: ${deps.error.message}\n`);
+    process.stderr.write(`${label}: ${deps.error.code}: ${deps.error.message}\n`);
     process.exitCode = CHECK_FAILED_EXIT;
     return;
   }
@@ -258,7 +263,7 @@ async function runCheck(args: Record<string, unknown>, cwd: string): Promise<voi
   } else {
     writeAllSync(
       1,
-      `lore fragments check: ${report.checks.length} outlet checks across ${report.agentTypes.length} agent types — ` +
+      `${label}: ${report.checks.length} outlet checks across ${report.agentTypes.length} agent types — ` +
         `${report.ok ? "ok" : `${report.findings.length} finding(s)`}\n`,
     );
   }

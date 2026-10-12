@@ -48,6 +48,12 @@ export interface FsWritePort extends FsReadPort {
    * refuse loudly when the port lacks it, never skip silently.
    */
   deleteFile?(path: string): Promise<void>;
+  /**
+   * Removes the directory at `path` ONLY when it exists and holds no entries; a no-op when it is absent
+   * or non-empty (never recursive, never throws for those two cases). Optional: a port without real
+   * directories (the in-memory double) may omit it, and a caller treats the cleanup as best-effort.
+   */
+  removeDirIfEmpty?(path: string): Promise<void>;
 }
 
 /**
@@ -102,6 +108,9 @@ export class InMemoryFsPort implements FsWritePort {
   async deleteFile(path: string): Promise<void> {
     this.files.delete(path);
   }
+
+  /** No-op: this double has no real directories — a directory exists only while a file lives under it. */
+  async removeDirIfEmpty(_path: string): Promise<void> {}
 }
 
 /** Removes exactly one trailing `/` from `path`, if present (private path helper, not exported — `listDir` prefix matching only). */
