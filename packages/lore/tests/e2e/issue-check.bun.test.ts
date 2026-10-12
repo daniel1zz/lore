@@ -71,7 +71,6 @@ import { mkdtempSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
-import { citeSpecViaCli, loreRunnerFor } from "../helpers/cli-live-rule.js";
 
 // tests/e2e/ -> tests/ -> packages/lore/ -> packages/ -> repo root (4 levels up),
 // mirrors tests/e2e/bootstrap-injection-compiled.bun.test.ts's own REPO_ROOT derivation.
@@ -201,15 +200,22 @@ function setStatus(tmpDir: string, slug: string, status: string): void {
   if (result.exitCode !== 0) throw new Error(`set --status ${status} on ${slug} failed: ${result.stderr}`);
 }
 
-/** Walks a doc from `draft` all the way to `archived` via the fast-track edge (draft -> approved -> active -> archived) — valid for spec/plan/adr per VALID_TRANSITIONS. */
+/**
+ * Puts a doc at `archived` by writing the status column of this THROWAWAY corpus directly.
+ *
+ * reason: the earlier fixture walked draft -> approved -> active -> archived through `lore set`, but
+ * approving a spec now also needs a cited rule (BR-1007) AND a review judgment (the `review-judgment`
+ * gate, NO_JUDGMENT) — neither is what this suite tests, and the second needs an AI judge. This suite
+ * only needs "the fixing doc is archived"; the real archive path is exercised by
+ * `issue-close-on-archive-compiled.bun.test.ts`.
+ */
 function archiveViaFastTrack(tmpDir: string, slug: string): void {
-  // BR-1007: a spec is approved only when a criterion cites a live rule; the fixing spec gets one.
-  const lore = loreRunnerFor(runLore, tmpDir);
-  lore(["ac", "add", slug, "AC-FT-1", "--statement", "the fixing spec behaviour responds in < 200ms", "--mode", "human"]);
-  citeSpecViaCli(lore, tmpDir, undefined, slug, "AC-FT-1");
-  setStatus(tmpDir, slug, "approved");
-  setStatus(tmpDir, slug, "active");
-  setStatus(tmpDir, slug, "archived");
+  const db = new Database(dbPath(tmpDir));
+  try {
+    db.query("UPDATE docs SET status = 'archived' WHERE slug = ?").run(slug);
+  } finally {
+    db.close();
+  }
 }
 
 function dbPath(tmpDir: string): string {
