@@ -15,6 +15,11 @@
  *       `worktree: not-measured`), and keeps a claim whose worktree has uncommitted changes, marked `orphaned_dirty`
  *       naming that worktree. An unknown run id exits 0 and writes nothing (SubagentStop also fires for internal
  *       agents). Registering an ended run again reopens it.
+ *   occupancy --worktree <path> [--json]
+ *       Read-only (spec-worktree-removal-is-decided-by-who-is-inside-not-by-how): the worktree's owning agent run
+ *       (basename `agent-<agentId>`) and the open task claims recorded for it, each with whether its run has ended,
+ *       plus `occupied`. `--json` prints `{ok, data}`. Consumed by the git-safety hook. Exit 2 without
+ *       `--worktree`, 1 on a store failure.
  *   attest-input
  *       Reads a Claude Code PreToolUse payload on stdin and prints hook JSON carrying `updatedInput` with the
  *       run (derived from `session_id` + `agent_id`) inserted by the core rewrite. ⛔ The output NEVER carries
@@ -43,9 +48,10 @@ import { exitCode, formatError } from "../utils.js";
 import { writeAllSync } from "../stdio-sync.js";
 import type { RunService } from "../../../service/run-service.js";
 import { runFragmentsRender } from "../../../flows/fragments-flow.js";
+import { detectWorktreeBranch } from "../../real-git-port.js";
 import { buildFlowDeps } from "./fragments.js";
 
-const ACTIONS = ["register", "show", "end", "attest-input"] as const;
+const ACTIONS = ["register", "show", "end", "occupancy", "attest-input"] as const;
 type Action = (typeof ACTIONS)[number];
 
 const USAGE_EXIT = 2;
@@ -196,7 +202,43 @@ async function runEnd(args: Record<string, unknown>): Promise<void> {
   });
 }
 
-const preToolUsePayloadSchema = z.object({
+async function runOccupancy(args: Record<string, unknown>): Promise<void> {
+  const worktree = stringArg(args, "worktree");
+  if (worktree === undefined) return usageError("lore run occupancy requires --worktree <path>");
+  // reason: a claim may record the worktree's BRANCH instead of its path (issue #158); an unmeasurable branch
+  // (absent directory, detached HEAD) leaves only the path comparison.
+  const measured = await detectWorktreeBranch(worktree);
+  await withRunService(async (service) => {
+    const result = await service.occupancy({
+      worktree,
+      ...(measured.status === "measured" ? { branch: measured.branch } : {}),
+    });
+    if (!result.ok) {
+      process.stderr.write(`${formatError(result.error)}\n`);
+      process.exitCode = exitCode(result.error);
+      return;
+    }
+    const occupancy = result.value;
+    if (args["json"] === true) {
+      writeAllSync(1, `${JSON.stringify({ ok: true, data: occupancy }, null, 2)}\n`);
+      return;
+    }
+    const run = occupancy.agent_run;
+    const lines = [
+      `Worktree: ${occupancy.worktree}`,
+      run === null
+        ? "Agent run: none (not an agent-<id> worktree)"
+        : `Agent run: ${run.id} (${run.ended ? "ended" : "no end recorded"}; parent ${run.parent_ended === null ? "not measured" : run.parent_ended ? "ended" : "no end recorded"})`,
+      ...occupancy.open_claims.map(
+        (c) => `Claim: ${c.task_slug} run ${c.run_id ?? "-"} (${c.run_ended === null ? "not measured" : c.run_ended ? "ended" : "no end recorded"})`,
+      ),
+      `Occupied: ${occupancy.occupied ? "yes" : "no"}`,
+    ];
+    writeAllSync(1, `${lines.join("\n")}\n`);
+  });
+}
+
+const preToolUsePayloadSchema =z.object({
   session_id: z.string().min(1),
   agent_id: z.string().min(1).optional(),
   tool_name: z.string(),
@@ -241,7 +283,8 @@ export default defineCommand({
     name: "run",
     description:
       "Harness run identity: `register --harness claude-code --session <id> [--agent-id <id> --agent-type <t>]`, " +
-      "`show <run id> [--json]`, `end <run id> --reason <r>`, `attest-input` (PreToolUse payload on stdin -> hook JSON).",
+      "`show <run id> [--json]`, `end <run id> --reason <r>`, `occupancy --worktree <path> [--json]`, " +
+      "`attest-input` (PreToolUse payload on stdin -> hook JSON).",
   },
   args: {
     action: { type: "positional", description: "register | show | end | attest-input", required: false },
@@ -253,6 +296,7 @@ export default defineCommand({
     parent: { type: "string", description: "register: parent run hint (main runs only)" },
     branch: { type: "string", description: "register: branch the run works on" },
     reason: { type: "string", description: "end: why the run ended (required)" },
+    worktree: { type: "string", description: "occupancy: worktree directory to measure (required)" },
     json: { type: "boolean", description: "Output JSON", default: false },
   },
   async run({ args }) {
@@ -266,6 +310,8 @@ export default defineCommand({
         return runShow(rest);
       case "end":
         return runEnd(rest);
+      case "occupancy":
+        return runOccupancy(rest);
       case "attest-input":
         return runAttestInput();
       default: {

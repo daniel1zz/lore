@@ -18,9 +18,11 @@
  * @invariant A subagent's parent is DERIVED (`cc:<session>`), never taken from a caller hint (D2); the
  *   hint applies to a main run only.
  */
+import { basename } from "node:path";
 import {
   deriveRunId,
   err,
+  extractClaim,
   ok,
   runRecordSchema,
   type CompositionRecord,
@@ -30,8 +32,46 @@ import {
   type RunRecord,
 } from "@lore/core";
 import type { StoreInterface } from "../store/store-interface.js";
+import { claimNamesWorktree, makeDirectoryResolver, type RealpathFn } from "./seat-claim-match.js";
 
-export type RunStore = Pick<StoreInterface, "insertRun" | "getRun" | "endRun" | "reopenRun" | "getRunEnd">;
+export type RunStore = Pick<
+  StoreInterface,
+  "insertRun" | "getRun" | "endRun" | "reopenRun" | "getRunEnd" | "listRunsByAgentRef" | "findMany"
+>;
+
+/** Claude Code names a subagent worktree `agent-<agentId>` (spec-worktree-removal D1). */
+const AGENT_WORKTREE_BASENAME = /^agent-([A-Za-z0-9]+)$/;
+
+/** The owning agent run of a worktree (the most recently registered run of its agent). */
+export interface OccupancyAgentRun {
+  readonly id: string;
+  readonly ended: boolean;
+  /** `null` when the run has no parent run or the parent is not registered (not measured). */
+  readonly parent_ended: boolean | null;
+}
+
+/** One non-terminal task claim recorded for the worktree. `run_ended: null` = no run id, or run not registered. */
+export interface OccupancyOpenClaim {
+  readonly task_slug: string;
+  readonly run_id: string | null;
+  readonly run_ended: boolean | null;
+}
+
+/** Result of {@link RunService.occupancy}; the `--json` `data` of `lore run occupancy`. */
+export interface RunOccupancy {
+  readonly worktree: string;
+  readonly agent_run: OccupancyAgentRun | null;
+  readonly open_claims: readonly OccupancyOpenClaim[];
+  /** Some run of the owning agent is live, OR some open claim is not known to be ended (null counts as live). */
+  readonly occupied: boolean;
+}
+
+export interface OccupancyInput {
+  /** Directory of the worktree (need not exist: ENOENT falls back to `path.resolve`). */
+  readonly worktree: string;
+  /** The worktree's checked-out branch when measured; a claim recording the branch name matches it. */
+  readonly branch?: string;
+}
 
 /** One claim handled by a run end — structurally `TaskWorkflowService.endRunClaims`'s outcome (services never cross-import). */
 export interface RunEndClaimReport {
@@ -74,6 +114,8 @@ export class RunService {
     private readonly store: RunStore,
     private readonly now: () => Date = () => new Date(),
     private readonly claims?: RunClaimEnder,
+    /** Required by {@link RunService.occupancy} only (the claim path comparison); wired by `app.ts`. */
+    private readonly realpathPort?: RealpathFn,
   ) {}
 
   /**
@@ -157,6 +199,91 @@ export class RunService {
     const released = await this.claims.endRunClaims(runId as RunId, reason, () => this.now().toISOString());
     if (!released.ok) return released;
     return ok({ outcome: ended.value, claims: released.value });
+  }
+
+  /**
+   * Who is working in a worktree, from the run registry and the task claims (read-only; writes nothing).
+   * D1: a basename `agent-<agentId>` owns every run with that `agent_ref`; the run reported is the most recently
+   * registered, and the worktree is occupied if ANY of them is live (neither it nor its parent run has an end).
+   * D2: every non-terminal task whose `claim.worktree` names this worktree (branch or same directory) is listed;
+   * a claim whose run has no end, or names no run, counts as occupied.
+   *
+   * @returns ok(RunOccupancy); VALIDATION_ERROR for a blank path or a service built without a realpath port;
+   *   STORE_ERROR from the store or a non-ENOENT realpath failure.
+   */
+  async occupancy(input: OccupancyInput): Promise<Result<RunOccupancy, LoreError>> {
+    if (input.worktree === "") return err(validationError("worktree", "a worktree path is required", input.worktree));
+    if (this.realpathPort === undefined) {
+      return err(validationError("realpath", "RunService was built without a realpath port; cannot compare worktrees"));
+    }
+    const tasks = await this.store.findMany({ type: "task" });
+    if (!tasks.ok) return tasks;
+    let resolvedDirectory: string;
+    const claimsOfWorktree: { slug: string; runId: string | null }[] = [];
+    try {
+      const resolveDirectory = makeDirectoryResolver(this.realpathPort);
+      resolvedDirectory = resolveDirectory(input.worktree);
+      for (const task of tasks.value) {
+        if (task.status === "archived" || task.status === "deprecated") continue;
+        const claim = extractClaim(task);
+        if (claim === undefined) continue;
+        if (!claimNamesWorktree(claim.worktree, { branch: input.branch, resolvedDirectory }, resolveDirectory)) continue;
+        claimsOfWorktree.push({
+          slug: task.slug,
+          runId: typeof claim.harness_run === "string" && claim.harness_run !== "" ? claim.harness_run : null,
+        });
+      }
+    } catch (cause) {
+      return err({
+        code: "STORE_ERROR",
+        message: `occupancy: could not resolve a worktree path: ${cause instanceof Error ? cause.message : String(cause)}`,
+        ...(cause instanceof Error ? { cause } : {}),
+      });
+    }
+    claimsOfWorktree.sort((a, b) => a.slug.localeCompare(b.slug));
+
+    const openClaims: OccupancyOpenClaim[] = [];
+    for (const claim of claimsOfWorktree) {
+      if (claim.runId === null) {
+        openClaims.push({ task_slug: claim.slug, run_id: null, run_ended: null });
+        continue;
+      }
+      const end = await this.store.getRunEnd(claim.runId as RunId);
+      if (!end.ok) return end;
+      openClaims.push({
+        task_slug: claim.slug,
+        run_id: claim.runId,
+        run_ended: end.value === null ? null : end.value.endedAt !== null,
+      });
+    }
+
+    const agentMatch = AGENT_WORKTREE_BASENAME.exec(basename(resolvedDirectory));
+    let agentRun: OccupancyAgentRun | null = null;
+    let agentLive = false;
+    if (agentMatch !== null) {
+      const runs = await this.store.listRunsByAgentRef(agentMatch[1] as string);
+      if (!runs.ok) return runs;
+      for (const [index, run] of runs.value.entries()) {
+        const end = await this.store.getRunEnd(run.id);
+        if (!end.ok) return end;
+        const ended = end.value !== null && end.value.endedAt !== null;
+        let parentEnded: boolean | null = null;
+        if (run.parentRunId !== null) {
+          const parentEnd = await this.store.getRunEnd(run.parentRunId);
+          if (!parentEnd.ok) return parentEnd;
+          parentEnded = parentEnd.value === null ? null : parentEnd.value.endedAt !== null;
+        }
+        if (!ended && parentEnded !== true) agentLive = true;
+        if (index === 0) agentRun = { id: run.id, ended, parent_ended: parentEnded };
+      }
+    }
+
+    return ok({
+      worktree: resolvedDirectory,
+      agent_run: agentRun,
+      open_claims: openClaims,
+      occupied: agentLive || openClaims.some((claim) => claim.run_ended !== true),
+    });
   }
 
   /** The registered run, or DOC_NOT_FOUND naming the id. */

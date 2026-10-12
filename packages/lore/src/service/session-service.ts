@@ -77,7 +77,7 @@ import {
   isInvalidated,
   computeArchiveCandidates,
 } from "@lore/core";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { claimNamesWorktree, makeDirectoryResolver } from "./seat-claim-match.js";
 import type {
   BootstrapReport,
   BootstrapSeatClaim,
@@ -295,16 +295,15 @@ export class SessionService {
     const slugById = new Map<DocId, string>(allDocs.map((d) => [d.id, d.slug]));
 
     try {
-      const seatDirectory = this.resolveDirectory(seat.worktree);
+      const resolveDirectory = makeDirectoryResolver(this.realpathPort);
+      const resolvedDirectory = resolveDirectory(seat.worktree);
       const matched: BootstrapSeatClaim[] = [];
       for (const task of allDocs) {
         if (task.type !== "task" || task.status === "archived" || task.status === "deprecated") continue;
         const claim = extractClaim(task);
         const recorded = claim?.worktree;
         if (claim === undefined || recorded === undefined || recorded === "") continue;
-        const matchesBranch = recorded === seat.branch;
-        const matchesPath = !matchesBranch && isAbsolute(recorded) && this.resolveDirectory(recorded) === seatDirectory;
-        if (!matchesBranch && !matchesPath) continue;
+        if (!claimNamesWorktree(recorded, { branch: seat.branch, resolvedDirectory }, resolveDirectory)) continue;
         const declaredPlanId = task.extra["plan_id"];
         matched.push({
           task_slug: task.slug,
@@ -321,23 +320,6 @@ export class SessionService {
         message: `seatClaims: could not resolve a worktree path: ${cause instanceof Error ? cause.message : String(cause)}`,
         ...(cause instanceof Error ? { cause } : {}),
       });
-    }
-  }
-
-  /**
-   * Normalises a directory for the D11 comparison: the injected realpath port,
-   * with an EXPLICIT `path.resolve` fallback for ENOENT only (D12). Throws any
-   * other port error — the caller (`seatClaims`) maps it to `STORE_ERROR`.
-   */
-  private resolveDirectory(directory: string): string {
-    try {
-      return this.realpathPort(directory);
-    } catch (cause) {
-      // reason: ENOENT is an expected fact (a worktree `lore done` already
-      // removed), not an error — fall back to lexical resolution so a claim
-      // still matches its own recorded string. Every other code is real.
-      if ((cause as NodeJS.ErrnoException).code === "ENOENT") return resolvePath(directory);
-      throw cause;
     }
   }
 
