@@ -145,6 +145,7 @@ function expectCorrectingRefusal(result: Result<unknown, LoreError>): void {
   expect(result.ok).toBe(false);
   if (result.ok) return;
   expect(result.error.code).toBe("VALIDATION_ERROR");
+  if (result.error.code !== "VALIDATION_ERROR") return;
   expect(result.error.message).toContain("lore ac set");
   expect(result.error.message).toContain("--falsifier-exit-code");
 }
