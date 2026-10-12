@@ -146,6 +146,13 @@ export interface ApproveOpts {
    * named, never a silent bypass.
    */
   overrideNoJudgment?: boolean;
+  /**
+   * The doc version the caller last saw (HTTP `If-Match`, set()'s `expectedVersion`). When it differs
+   * from the version `approve` reads, the call returns `STALE_VERSION` BEFORE any write, so a
+   * `set(status: "approved")` delegated here (BR-1071) keeps the optimistic-concurrency contract the
+   * direct write had. Absent = no caller-side version claim (the CAS still guards the write itself).
+   */
+  expectedVersion?: number;
 }
 
 /**
@@ -681,6 +688,15 @@ export class ReviewService {
     if (!findResult.ok) return findResult;
 
     const doc = findResult.value;
+
+    if (opts?.expectedVersion !== undefined && opts.expectedVersion !== doc.version) {
+      return err({
+        code: "STALE_VERSION",
+        id: doc.id,
+        expected: opts.expectedVersion,
+        actual: doc.version,
+      });
+    }
 
     if (!isValidTransition(doc.status, "approved")) {
       return err({
