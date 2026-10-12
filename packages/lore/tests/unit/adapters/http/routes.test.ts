@@ -1021,6 +1021,7 @@ describe("GET /api/ready/:planIdOrSlug", () => {
         // whose working tree this process cannot speak for), so it reports
         // "not probed" EXPLICITLY rather than `{probed:true, unresolved:[]}`,
         // which would claim a clean scan that never ran.
+        counts: { ready: 0, claimed: 0, archived: 0, total: 0 },
         anchor_resolution: { probed: false, reason: "no-fs-probe" },
         claim_ttl_minutes: app.taskWorkflowService.claimTtlMinutes,
       });

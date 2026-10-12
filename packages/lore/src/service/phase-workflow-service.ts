@@ -173,6 +173,7 @@ import type {
   DoneOpts,
   DoneResult,
 } from "./task-workflow-service.js";
+import { computeReadyCounts } from "./task-workflow-service.js";
 import {
   rejectBlankClaimWorktree,
   computeArchiveWalk,
@@ -1332,6 +1333,7 @@ export class PhaseWorkflowService {
     if (children.length === 0) {
       return ok({
         records: [],
+        counts: computeReadyCounts([]),
         sessions: [],
         anchor_conflicts: [],
         anchor_resolution: unprobedFileAnchors("no-fs-probe"),
@@ -1372,6 +1374,7 @@ export class PhaseWorkflowService {
 
     return ok({
       records,
+      counts: computeReadyCounts(records),
       sessions: deriveSessions(children, nowIso, this.claimTtlMinutes, staleByDoc.value),
       anchor_conflicts: anchorConflicts,
       // reason: task-a-mistyped-task-file-anchor-is-stored-and-consulted — the
