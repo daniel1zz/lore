@@ -373,6 +373,7 @@ import {
   createRealWorktreeProbe,
   evaluateRecordedWorktree,
   parseQuietMinutes,
+  resolveClaimHead,
   type RecordedWorktree,
   type WorktreeDecisionKind,
   type WorktreeEvaluation,
@@ -2859,7 +2860,18 @@ export class TaskWorkflowService {
     // task's OWN commits (branch commits beyond it). Recorded on the claim AUDIT row (which survives
     // `lore release`, unlike `extra.claim`). An unmeasurable HEAD is left ABSENT: cleanup then reports
     // `not-measured`, never guesses a base.
-    const claimBase = opts.worktree !== undefined ? this.worktreeProbe.headSha(opts.worktree) : undefined;
+    // `--worktree` is a path OR a branch name (the dispatch protocol passes `git branch --show-current`),
+    // so the base is resolved by `resolveClaimHead`, never by `headSha` alone (issue #180 retry).
+    const claimBaseResolved =
+      opts.worktree !== undefined
+        ? resolveClaimHead(this.worktreeProbe, opts.worktree, this.worktreeProbe.currentWorkingDirectory())
+        : undefined;
+    const claimBase =
+      claimBaseResolved === undefined
+        ? undefined
+        : claimBaseResolved.ok
+          ? ({ ok: true, value: claimBaseResolved.value.sha } as const)
+          : claimBaseResolved;
     const writeResult = await this.writeTaskExtra(task, newExtra, nowIso, opts.by, summary, "claim", {
       by: opts.by,
       steal: opts.steal === true,
@@ -3588,16 +3600,17 @@ export class TaskWorkflowService {
       if (recorded === undefined) {
         range = notMeasured("no claim recorded a worktree, so there is no HEAD to measure");
       } else {
-        const head = this.worktreeProbe.headSha(recorded.path);
+        const head = resolveClaimHead(this.worktreeProbe, recorded.path, this.worktreeProbe.currentWorkingDirectory());
         range = head.ok
           ? {
               state: "recorded",
-              head: head.value,
+              head: head.value.sha,
+              head_source: head.value.source,
               ...(recorded.baseSha !== undefined ? { base: recorded.baseSha } : {}),
               worktree: recorded.path,
               recorded_at: nowIso,
             }
-          : notMeasured(`worktree ${recorded.path} HEAD unreadable: ${head.reason}`);
+          : notMeasured(`worktree/branch ${recorded.path} HEAD unreadable: ${head.reason}`);
       }
     }
     return this.writeTaskExtra(

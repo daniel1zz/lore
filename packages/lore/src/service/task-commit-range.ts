@@ -26,6 +26,8 @@ export const recordedCommitRangeSchema = z.discriminatedUnion("state", [
   z.object({
     state: z.literal("recorded"),
     head: z.string().min(1),
+    /** How `head` was resolved: HEAD inside a worktree directory, or the tip of a branch NAME. */
+    head_source: z.enum(["worktree", "branch"]),
     /** Absent for a claim recorded before base_sha existed — head-only range. */
     base: z.string().min(1).optional(),
     worktree: z.string().min(1),

@@ -20,6 +20,9 @@ import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
 import { CorpusService } from "../../../src/service/corpus-service.js";
 import { TaskWorkflowService } from "../../../src/service/task-workflow-service.js";
+import { createRealWorktreeProbe } from "../../../src/service/worktree-cleanup.js";
+import { collectRecordedRanges, readMeasuredCommitRange } from "../../../src/service/task-commit-range.js";
+import { deriveCommitSetForPlan } from "../../../src/adapters/cli/assess-commit-derivation.js";
 import type { CreateDocInput } from "@lore/core";
 
 const GIT_ENV = {
@@ -80,6 +83,63 @@ async function makeArchivableTask(): Promise<{ svc: TaskWorkflowService; taskId:
   return { svc, taskId: task.value.id };
 }
 
+describe("lore done under the dispatch protocol: --worktree is a branch NAME (issue #180 retry)", () => {
+  it("records state:recorded with head = the branch tip, and assess attributes the commits though the merge lacks the slug", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "lore-done-branch-test-")));
+    dirs.push(repo);
+    run(repo, "init", "-q", "-b", "main");
+    const base = commit(repo, "seed.txt", "seed");
+    run(repo, "checkout", "-q", "-b", "agent-branch-x");
+
+    // `.claude/rules/lore-worktree-dispatch.md`: implementers claim with the branch NAME.
+    const probe = { ...createRealWorktreeProbe(), currentWorkingDirectory: () => repo };
+    const store = new InMemoryStore();
+    const cs = new CorpusService(store, new RecordLockService(store, new GateEnforcer(undefined)));
+    const svc = new TaskWorkflowService(
+      store, undefined, { claimTtlMinutes: 120 },
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      probe,
+    );
+    const plan = await cs.create({ type: "plan", title: "Branch plan", content: "body" } as CreateDocInput);
+    if (!plan.ok) throw new Error("plan");
+    const created = await cs.create({
+      type: "task", title: "Branch task", parent_id: plan.value.id, content: "body",
+      extra: { plan_id: plan.value.id },
+    } as CreateDocInput);
+    if (!created.ok) throw new Error("task");
+    const taskId = created.value.id;
+    const ev = await svc.recordVerifiedEvidence(
+      taskId,
+      {
+        oracle: "tsc", command: "bun run typecheck", result: "pass", recorded_by: "runner",
+        capture_source: "runner",
+        attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+      },
+      "2026-10-12T09:00:00.000Z",
+    );
+    if (!ev.ok) throw new Error("evidence");
+
+    const claim = await svc.claim(taskId, { by: "alice", worktree: "agent-branch-x" });
+    expect(claim.ok).toBe(true);
+    const c1 = commit(repo, "a.txt", "feat: a");
+    const c2 = commit(repo, "b.txt", "feat: b");
+    run(repo, "checkout", "-q", "main");
+    run(repo, "merge", "--no-ff", "-q", "-m", "merge branch without the slug", "agent-branch-x");
+
+    const done = await svc.done(taskId, { by: "alice" });
+    expect(done.ok).toBe(true);
+    if (!done.ok) return;
+    const range = readMeasuredCommitRange(done.value.task.extra);
+    expect(range).toMatchObject({ state: "recorded", head: c2, base, head_source: "branch" });
+
+    const ranges = collectRecordedRanges([{ slug: done.value.task.slug, extra: done.value.task.extra }]);
+    const derived = deriveCommitSetForPlan(repo, [done.value.task.slug], true, ranges);
+    expect(derived.status).toBe("derived");
+    expect(derived.commits.map((c) => c.sha)).toEqual([c1, c2]);
+    expect(derived.attribution[done.value.task.slug]).toBe("recorded_range");
+  });
+});
+
 describe("lore done records extra.commit_range (issue #180)", () => {
   it("HAPPY: records base (claim base_sha) and head (worktree HEAD at done time)", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "lore-done-range-test-")));
@@ -97,7 +157,7 @@ describe("lore done records extra.commit_range (issue #180)", () => {
     expect(done.ok).toBe(true);
     if (!done.ok) return;
     expect(done.value.task.status).toBe("archived");
-    expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", base, head, worktree: repo });
+    expect(done.value.task.extra["commit_range"]).toMatchObject({ state: "recorded", base, head, worktree: repo, head_source: "worktree" });
   });
 
   it("BOUNDARY: a task never claimed with a worktree records not-measured with a reason, and still archives", async () => {
