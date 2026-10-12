@@ -801,6 +801,18 @@ function buildAppFromSqlite(
   // {enforcer, getPlanBundle} gate bundle gating "phase-claim" rather than "task-claim")
   // so this file's own composition bodies stay minimal — see that module's header.
   const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
+  // reason: hoisted to a local so the SAME ReviewService instance is both the App's `reviewService` and
+  // the approval path CorpusService.set(status: "approved") delegates to (BR-1071, issues #65 #50) —
+  // services never import each other, so the port is wired here, never inside CorpusService.
+  const reviewService = new ReviewService(
+    store,
+    recordLockService,
+    claimTtlMinutes,
+    { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+    judgmentService,
+    judgmentRequiredTypes,
+  );
+  corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   return {
     corpusService,
     ...phaseServices,
@@ -813,14 +825,7 @@ function buildAppFromSqlite(
     // gate's IO dependency (judgmentService, constructed above) and its resolved
     // per-type config value (judgmentRequiredTypes), mirroring the claimTtlMinutes/
     // gateEnforcer resolved-value DI shape every other optional dependency here uses.
-    reviewService: new ReviewService(
-      store,
-      recordLockService,
-      claimTtlMinutes,
-      { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
-      judgmentService,
-      judgmentRequiredTypes,
-    ),
+    reviewService,
     versionService: new VersionService(store, recordLockService),
     outlineService,
     migrationService: new MigrationService(store),
@@ -1183,6 +1188,18 @@ function buildAppFromTurso(
   // reason: SPEC-056 phase execution model (PhaseWorkflowService + PhaseChecklistService)
   // — see buildAppFromSqlite's identical comment.
   const phaseServices = buildPhaseServices(store, telemetry, claimTtlMinutes, gateEnforcer, corpusService);
+  // reason: hoisted to a local so the SAME ReviewService instance is both the App's `reviewService` and
+  // the approval path CorpusService.set(status: "approved") delegates to (BR-1071, issues #65 #50) —
+  // services never import each other, so the port is wired here, never inside CorpusService.
+  const reviewService = new ReviewService(
+    store,
+    recordLockService,
+    claimTtlMinutes,
+    { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
+    judgmentService,
+    judgmentRequiredTypes,
+  );
+  corpusService.setApprovalPort({ approve: (id, o) => reviewService.approve(id, o) });
   return {
     corpusService,
     ...phaseServices,
@@ -1194,14 +1211,7 @@ function buildAppFromTurso(
     // gate's IO dependency (judgmentService, constructed above) and its resolved
     // per-type config value (judgmentRequiredTypes), mirroring the claimTtlMinutes/
     // gateEnforcer resolved-value DI shape every other optional dependency here uses.
-    reviewService: new ReviewService(
-      store,
-      recordLockService,
-      claimTtlMinutes,
-      { enforcer: gateEnforcer, getPlanBundle: corpusService.getPlanBundle.bind(corpusService) },
-      judgmentService,
-      judgmentRequiredTypes,
-    ),
+    reviewService,
     versionService: new VersionService(store, recordLockService),
     outlineService,
     migrationService: new MigrationService(store),

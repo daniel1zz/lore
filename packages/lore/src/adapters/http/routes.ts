@@ -22,6 +22,7 @@ import { ALLOWED_ORIGINS, resolveDocWriteOpts } from "./auth.js";
 import type { MachineAuthStores } from "./machine-auth.js";
 import { jsonOk, jsonError, loreErrorResponse, parseJsonBody, splitDocPatchBody, corsHeaders } from "./middleware.js";
 import { handleDashboardRoute } from "./dashboard-routes.js";
+import { resolveExpectedVersion } from "./concurrency.js";
 import { handleGetConfig, handleGetMachineConfig } from "./config-routes.js";
 import { handleGetIssueReports } from "./issue-reports-routes.js";
 import type { ListFilters, SearchFilters } from "../../service/corpus-service.js";
@@ -800,7 +801,12 @@ async function handleSingleDoc(
     // spec-documents-are-living-or-records D15: `correction` is a write option, split out of the patch.
     const split = splitDocPatchBody(body);
     if (!split.ok) return loreErrorResponse(split.error);
+    // reason: D-OR-1 / AC-AP-2(e) — a bearer caller's `If-Match` is the same optimistic-concurrency
+    // handle the dashboard route threads into set(); a status:approved PATCH delegates to approve,
+    // which refuses a stale version with STALE_VERSION (409) before any write.
+    const expectedVersion = resolveExpectedVersion(req);
     const result = await app.corpusService.set(idOrSlug, split.value.patch, {
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
       ...resolveDocWriteOpts(actor),
       ...(split.value.correction !== undefined ? { correction: split.value.correction } : {}),
     });
