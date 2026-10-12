@@ -3402,6 +3402,13 @@ export class CorpusService {
     reason: string,
     opts?: WriteActorOpts,
   ): Promise<Result<DocRecord, LoreError>> {
+    // reason: spec-approval-and-plan-closure-go-through-the-same-checks-on D8 / AC-AP-10 (BR-1072) —
+    // a straggler task is archived only if `lore done`'s floors would let it through; a refusal comes
+    // back as the exact `done()` error (`error.details.floor` names the floor), nothing is written.
+    const floorResult = await this.checkSweepCandidateFloor(doc, rule);
+    if (!floorResult.ok) return floorResult;
+    if (floorResult.value !== null) return err(floorResult.value.error);
+
     if (!isValidTransition(doc.status, "archived", doc.type)) {
       return err({
         code: "INVALID_TRANSITION",
@@ -3441,6 +3448,25 @@ export class CorpusService {
       },
     );
     return writeResult;
+  }
+
+  /**
+   * Which `lore done` floor, if any, would refuse archiving this sweep candidate — read-only, the
+   * ONE place the sweep (`--sweep` report and `--apply`) asks the injected {@link DoneFloorPort}.
+   * Only the R4 task straggler rule is floor-gated; handoff rules (R2/R3) have no floors.
+   *
+   * An UNWIRED service (bare `new CorpusService(store)`, no port) keeps the pre-port behaviour
+   * (spec D3 "unconditional"): `ok(null)`, every candidate passes.
+   *
+   * @returns `ok(null)` = archivable; `ok({floor, error})` = refused; `err` = the port itself failed
+   *   (a store-level fault is not a verdict).
+   */
+  async checkSweepCandidateFloor(
+    doc: DocRecord,
+    rule: ArchiveCandidateRule,
+  ): Promise<Result<{ readonly floor: string; readonly error: LoreError } | null, LoreError>> {
+    if (rule !== "done_plan_straggler" || this.doneFloorPort === undefined) return ok(null);
+    return this.doneFloorPort.checkDoneFloors(doc.id);
   }
 
   // ── Delete ───────────────────────────────────────────────────────────────
