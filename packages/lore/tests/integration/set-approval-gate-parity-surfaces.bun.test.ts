@@ -163,7 +163,7 @@ describe("AC-AP-2 MCP lore_set to approved", () => {
     const beforeA = await versionRows(a.id);
 
     const viaApprove = await callMcp("lore_approve", { id_or_slug: b.id, reviewer: "agent:mcp-test" });
-    const viaSet = await callMcp("lore_set", { id_or_slug: a.id, patch: { status: "approved" }, by: "agent:mcp-test" });
+    const viaSet = await callMcp("lore_set", { id_or_slug: a.id, status: "approved" });
 
     expect(viaApprove.isError).toBe(true);
     expect(viaSet.isError).toBe(true);
@@ -179,7 +179,7 @@ describe("AC-AP-2 MCP lore_set to approved", () => {
     );
     const before = await versionRows(plan.id);
 
-    const viaSet = await callMcp("lore_set", { id_or_slug: plan.id, patch: { status: "approved" }, by: "agent:mcp-test" });
+    const viaSet = await callMcp("lore_set", { id_or_slug: plan.id, status: "approved" });
 
     expect(viaSet.isError).toBe(true);
     expect(viaSet.text).toContain("plan-promote");
@@ -190,7 +190,7 @@ describe("AC-AP-2 MCP lore_set to approved", () => {
     const spec = await makeSpec("Surface mcp judged spec", { cite: true });
     await judge(spec.id);
 
-    const viaSet = await callMcp("lore_set", { id_or_slug: spec.id, patch: { status: "approved" }, by: "agent:mcp-test" });
+    const viaSet = await callMcp("lore_set", { id_or_slug: spec.id, status: "approved" });
 
     expect(viaSet.isError).toBe(false);
     expect((await versionRows(spec.id)).newestAction).toBe("approve");
