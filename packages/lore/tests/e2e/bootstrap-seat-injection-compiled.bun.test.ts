@@ -27,16 +27,25 @@ interface RunResult {
   readonly exitCode: number;
 }
 
-function runLore(args: string[], cwd: string): RunResult {
-  const proc = Bun.spawnSync([LORE_BIN, ...args], {
-    cwd,
-    env: { ...process.env, HOME: cwd, CLAUDECODE: "1" },
-  });
+/** Session used by every call that is not a specific claimant (init/create/handoff/read-only). */
+const BASE_SESSION = "5ea70000-seat-e2e-base";
+
+/**
+ * Hermetic spawn env: never inherits the caller's session/actor vars (an agent shell sets
+ * CLAUDE_CODE_SESSION_ID; `lore verify` strips it, which would collapse every claimant to
+ * the OS user and trip the claim-conflict gate). Each simulated session passes its own id.
+ */
+function runLore(args: string[], cwd: string, session: string = BASE_SESSION): RunResult {
+  const env: Record<string, string | undefined> = { ...process.env, HOME: cwd, CLAUDECODE: "1" };
+  delete env["CLAUDE_SESSION_ID"];
+  delete env["LORE_ACTOR"];
+  env["CLAUDE_CODE_SESSION_ID"] = session;
+  const proc = Bun.spawnSync([LORE_BIN, ...args], { cwd, env });
   return { stdout: proc.stdout.toString(), stderr: proc.stderr.toString(), exitCode: proc.exitCode ?? 1 };
 }
 
-function mustRun(args: string[], cwd: string): RunResult {
-  const r = runLore(args, cwd);
+function mustRun(args: string[], cwd: string, session: string = BASE_SESSION): RunResult {
+  const r = runLore(args, cwd, session);
   if (r.exitCode !== 0) throw new Error(`lore ${args.join(" ")} failed (${r.exitCode}): ${r.stderr}`);
   return r;
 }
@@ -63,16 +72,26 @@ function seed(dir: string): Seeded {
 }
 
 let taskCounter = 0;
-/** Creates a fresh task under `plan` and claims it with `--worktree <worktree>`; returns its slug. */
+/** Distinct session per claimant; the first 8 chars differ (the actor is `agent:session-<id8>`). */
+const claimantSessions = new Map<string, string>();
+function sessionFor(slug: string): string {
+  const session = claimantSessions.get(slug);
+  if (session === undefined) throw new Error(`no claimant session recorded for ${slug}`);
+  return session;
+}
+
+/** Creates a fresh task under `plan` and claims it as its own simulated session with `--worktree <worktree>`; returns its slug. */
 function claimTask(dir: string, plan: string, worktree: string): string {
   taskCounter += 1;
+  const session = `c1a1${taskCounter.toString(16).padStart(4, "0")}-seat-e2e-claimant`;
   const slug = parseSlug(
     mustRun(
       ["create", "task", "--title", `Seat task ${taskCounter}`, "--parent", plan, "--plan-id", plan, "--content", "x", "--no-ai"],
       dir,
     ).stdout,
   );
-  mustRun(["claim", slug, "--worktree", worktree], dir);
+  mustRun(["claim", slug, "--worktree", worktree], dir, session);
+  claimantSessions.set(slug, session);
   return slug;
 }
 
@@ -167,8 +186,8 @@ describe("AC-SI-2: compiled dist/lore bootstrap --injection is seat-only", () =>
   it("(d) after lore done archives the claimed task -> stdout empty", () => {
     const slug = claimTask(dir, seeded.plan, "feat-done");
     expect(claimSlugs(injection(dir, "feat-done", scratch))).toEqual([slug]);
-    mustRun(["evidence", slug, "--oracle", "test", "--command", "echo ok", "--result", "pass", "--capture"], dir);
-    mustRun(["done", slug], dir);
+    mustRun(["evidence", slug, "--oracle", "test", "--command", "echo ok", "--result", "pass", "--capture"], dir, sessionFor(slug));
+    mustRun(["done", slug], dir, sessionFor(slug));
     const r = injection(dir, "feat-done", scratch);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toBe("");
