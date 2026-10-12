@@ -304,6 +304,7 @@ import {
   findCaptureFlagConflict,
   findPipeRefusal,
   findCapturedFailDiscoveryRefusal,
+  findCapturedRedProofGap,
   describePrecheckRoots,
   describeDerivedCdTarget,
 } from "../evidence-precheck.js";
@@ -492,6 +493,19 @@ export default defineCommand({
       if (capturedDiscoveryRefusal !== null) {
         process.stderr.write(formatError(capturedDiscoveryRefusal) + "\n");
         process.exitCode = exitCode(capturedDiscoveryRefusal);
+        return;
+      }
+      // reason: captured-red proof (#53, D8-D10) — same shared guard as MCP.
+      const capturedRedProofGap = findCapturedRedProofGap({
+        oracle: args.oracle as string,
+        result: args.result as string,
+        capture: captureRequested,
+        exitCode: captured.value.observedExitCode,
+        outputTail,
+      });
+      if (capturedRedProofGap !== null) {
+        process.stderr.write(formatError(capturedRedProofGap) + "\n");
+        process.exitCode = exitCode(capturedRedProofGap);
         return;
       }
     } else if (typeof args["output-tail"] === "string") {

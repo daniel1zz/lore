@@ -630,6 +630,50 @@ function countMatchedVitestCases(testsLineBody: string): number {
 }
 
 /**
+ * bun test's failed-count line, e.g. `" 1 fail"` (bun prints ` N pass` /
+ * ` N fail` before `Ran N tests across M files.`; measured 2026-10-12).
+ * Anchored to a whole line so prose such as "1 failure" never matches.
+ */
+const BUN_FAIL_LINE_PATTERN_GLOBAL = /^[ \t]*(\d+)[ \t]+fail[ \t]*$/gm;
+
+/**
+ * Failed-test count from a runner's own summary, for the captured-red proof
+ * (spec-evidence-labels-and-reds-are-honest D8, issue #53). Reuses the SAME
+ * summary patterns {@link parseExecutedUnits} recognises; failed counts are
+ * summed across every recognised summary in `stdout`, like its file counts.
+ *
+ * Known limit (spec D8): a hand-printed summary line is indistinguishable from
+ * a runner's — this proves "a summary appeared", not "a test ran".
+ *
+ * @param stdout - captured output (the stored tail)
+ * @returns the summed failed count (`0` when a summary is present but reports
+ *   no failure); `null` when no recognised summary is present at all
+ *
+ * @example
+ * parseFailedCaseCount("Tests  1 failed | 2 passed (3)") // => 1
+ * @example
+ * parseFailedCaseCount(" 1 pass\n 1 fail\nRan 2 tests across 1 file.") // => 1
+ * @example
+ * parseFailedCaseCount("cd: no such file or directory") // => null
+ */
+export function parseFailedCaseCount(stdout: string): number | null {
+  let recognised = false;
+  let failed = 0;
+  for (const line of stdout.matchAll(VITEST_TESTS_LINE_PATTERN_GLOBAL)) {
+    recognised = true;
+    const segment = /(\d+)\s+failed\b/.exec(line[1] ?? "");
+    if (segment !== null) failed += Number(segment[1]);
+  }
+  if (BUN_SUMMARY_PATTERN.test(stdout)) {
+    recognised = true;
+    for (const line of stdout.matchAll(BUN_FAIL_LINE_PATTERN_GLOBAL)) {
+      failed += Number(line[1]);
+    }
+  }
+  return recognised ? failed : null;
+}
+
+/**
  * Recognises the run-summary tail of the two runners this repo uses (bun
  * test, vitest) and extracts the TOTAL count of files (and, when parseable,
  * tests) actually executed — SUMMED ACROSS EVERY recognised summary

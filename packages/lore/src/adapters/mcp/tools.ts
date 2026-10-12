@@ -279,6 +279,7 @@ import {
   findCaptureFlagConflict,
   findPipeRefusal,
   findCapturedFailDiscoveryRefusal,
+  findCapturedRedProofGap,
   describePrecheckRoots,
 } from "../cli/evidence-precheck.js";
 import { captureOracleCommand, type EvidenceProvenance } from "../evidence-capture.js";
@@ -2284,6 +2285,17 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       });
       if (capturedDiscoveryRefusal !== null) {
         return errorContent(capturedDiscoveryRefusal);
+      }
+      // reason: captured-red proof (#53, D8-D10) — same shared guard as the CLI.
+      const capturedRedProofGap = findCapturedRedProofGap({
+        oracle: args.oracle,
+        result: args.result,
+        capture: captureRequested,
+        exitCode: captured.value.observedExitCode,
+        outputTail: capturedTail,
+      });
+      if (capturedRedProofGap !== null) {
+        return errorContent(capturedRedProofGap);
       }
     }
 
