@@ -347,7 +347,7 @@ describe("AC-FR-12 — SURFACE + PERSISTENCE: lore verify --falsify green-contro
       expect(row).toBeDefined();
       expect(row?.result).toBe("inconclusive");
       expect(row?.attestation).toBeUndefined();
-      expect(row?.capture_source).toBe("runner");
+      expect(row?.capture_source).toBe("runner-unattested");
       expect(row?.recorded_by).toBe(sessionActorFor("falsify-oracle-test"));
     },
   );
@@ -516,6 +516,6 @@ describe("MINOR fix — the green control's own LAUNCH failure records inconclus
     expect(row).toBeDefined();
     expect(row?.result).toBe("inconclusive");
     expect(row?.attestation).toBeUndefined();
-    expect(row?.capture_source).toBe("runner");
+    expect(row?.capture_source).toBe("runner-unattested");
   });
 });

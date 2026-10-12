@@ -143,6 +143,8 @@ import {
   type PhaseCompletionState,
   type AcCoverageFact,
   type CaptureSource,
+  resolveWrittenCaptureSource,
+  rejectSelfLabelledRunnerUnattested,
 } from "@lore/core";
 import type { DocId, DocRecord, DocStatus } from "@lore/core";
 import { NoOpTelemetry, type Telemetry, type TelemetryEvent, type TaskWorkflowEventName } from "@lore/core";
@@ -622,6 +624,11 @@ export class PhaseWorkflowService {
     const tailCheck = rejectMissingNonPassOutputTail(entry.result, entry.output_tail);
     if (!tailCheck.ok) return tailCheck;
 
+    // spec-evidence-labels-and-reds-are-honest D1 (#48) parity — a public caller may
+    // not self-label "runner-unattested"; shared guard from @lore/core.
+    const selfLabelCheck = rejectSelfLabelledRunnerUnattested(entry.capture_source);
+    if (!selfLabelCheck.ok) return selfLabelCheck;
+
     // reason: SPEC-143 AC-CT-2 parity with TaskWorkflowService._addEvidenceImpl's
     // identical hand-off — runs LAST, after every admission guard, so a captured
     // phase-doc row is held to exactly the same checks and only what gets WRITTEN
@@ -727,7 +734,9 @@ export class PhaseWorkflowService {
     // compile-time required, so this is a correctness override for an attested row,
     // never a fallback for an omitted one (task-capture-source-is-optional-at-the-
     // evidence-write-boundary, mirroring TaskWorkflowService.appendEvidenceEntry).
-    const captureSource: CaptureSource = entry.attestation !== undefined ? "runner" : entry.capture_source;
+    const captureSourceResult = resolveWrittenCaptureSource(entry);
+    if (!captureSourceResult.ok) return captureSourceResult;
+    const captureSource: CaptureSource = captureSourceResult.value;
     const candidate = {
       oracle: entry.oracle,
       command: entry.command,

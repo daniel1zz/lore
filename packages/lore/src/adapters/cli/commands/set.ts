@@ -109,6 +109,7 @@ import { exitCode, formatError, resolveActor } from "../utils.js";
 import { openEditor } from "../editor.js";
 import { formatAttestationExemptionNotice } from "../plan-exempt-validation.js";
 import { PLAN_CLOSE_VACUITY_NOTICE_FIELD } from "../../../service/checkpoint-registry.js";
+import type { PlanCloseCascadeResult } from "../../../service/corpus-service.js";
 import type { DocStatus, Priority, SpecKind } from "@lore/core";
 import { SPEC_KINDS } from "@lore/core";
 import {
@@ -709,6 +710,18 @@ export default defineCommand({
         // successful plan → archived transition; `formatAttestationExemptionNotice`
         // returns null unless the exemption is ACTIVE by the gate's own rule.
         if (doc.type === "plan" && doc.status === "archived") {
+          // reason: spec-approval-and-plan-closure-go-through-the-same-checks-on D7 — the cascade
+          // outcome was --json-only, so a task the done floors refused stayed open with no word on
+          // the terminal. Print exactly what `data.cascade` carries (skip: the refusing floor, or
+          // "fresh claim" when no floor); failures are printed too, never silent.
+          const cascade = (doc as { cascade?: PlanCloseCascadeResult }).cascade;
+          if (cascade !== undefined) {
+            for (const a of cascade.archived) console.log(`Cascade archived: ${a.slug}`);
+            for (const s of cascade.skipped) {
+              console.log(`Cascade skipped: ${s.slug} (${s.floor ?? "fresh claim"})`);
+            }
+            for (const f of cascade.failed) console.log(`Cascade failed: ${f.slug} (${f.reason})`);
+          }
           const exemptionNotice = formatAttestationExemptionNotice(doc.extra);
           if (exemptionNotice !== null) console.log(exemptionNotice);
           // reason: task-assert-the-plan-close-vacuity-discriminator-on-the-render

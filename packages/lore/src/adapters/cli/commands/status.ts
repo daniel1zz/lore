@@ -217,7 +217,7 @@ import {
 // Boundary invariant 2 must NEVER reach loadLoreApp/bun:sqlite — mirrors
 // setup-check.ts's identical precedent for this exact import.
 import { loadConfig } from "@lore/core/node";
-import { resolveCiteGateRaw } from "@lore/core";
+import { resolveCiteGateRaw, classifyCaptureSource } from "@lore/core";
 import { resolveCiteGateFor } from "../../../service/ac-write-chokepoint.js";
 import { BASELINE_ADOPT_AUDIT_ACTION } from "./baseline-adopt.js";
 import { decideAcCiteStatus, ENFORCE_REFUSES_NOTHING_WARNING, lastAdoptedModeOf } from "../../../service/ac-cite-status.js";
@@ -723,9 +723,10 @@ async function collectFalsifiabilitySignals(
  */
 async function collectCaptureSourceMembers(
   app: ReturnType<typeof loadLoreApp>["app"],
-): Promise<Result<{ runner: string[]; selfReport: string[] }, LoreError>> {
+): Promise<Result<{ runner: string[]; selfReport: string[]; runnerUnattested: string[] }, LoreError>> {
   const runner: string[] = [];
   const selfReport: string[] = [];
+  const runnerUnattested: string[] = [];
 
   for (const type of ["task", "phase"] as const) {
     const listResult = await app.corpusService.listFull({ type });
@@ -735,16 +736,27 @@ async function collectCaptureSourceMembers(
       const entries = extractEvidence(doc);
       entries.forEach((entry, index) => {
         const member = `${doc.slug}#${index}`;
-        if (entry.capture_source === "runner") {
-          runner.push(member);
-        } else {
-          selfReport.push(member);
+        const bucket = classifyCaptureSource(entry.capture_source);
+        switch (bucket) {
+          case "runner":
+            runner.push(member);
+            break;
+          case "self-report":
+            selfReport.push(member);
+            break;
+          case "runner-unattested":
+            runnerUnattested.push(member);
+            break;
+          default: {
+            const unreachable: never = bucket;
+            throw new Error(`unhandled capture_source bucket: ${String(unreachable)}`);
+          }
         }
       });
     }
   }
 
-  return ok({ runner, selfReport });
+  return ok({ runner, selfReport, runnerUnattested });
 }
 
 /**
@@ -927,6 +939,11 @@ const COUNT_FIELD_ENUMERATORS: Record<
     if (!membersResult.ok) return membersResult;
     return ok(membersResult.value.selfReport);
   },
+  capture_source_runner_unattested_count: async (app) => {
+    const membersResult = await collectCaptureSourceMembers(app);
+    if (!membersResult.ok) return membersResult;
+    return ok(membersResult.value.runnerUnattested);
+  },
   code_anchor_specs: async (app) => collectCodeAnchorSpecMembers(app),
   adopted_abandoned_count: async (app) => collectAdoptedAbandonedMembers(app),
 };
@@ -1107,7 +1124,7 @@ export default defineCommand({
     enumerate: {
       type: "string",
       description:
-        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
+        "Enumerate the MEMBERS behind a count field the plain run reports (e.g. pass_unfalsified_count, unredeemed_allow_missing_path_count, capture_source_runner_count, capture_source_self_report_count, capture_source_runner_unattested_count, code_anchor_specs, adopted_abandoned_count). Unknown field → exit 4, naming it and the known set.",
     },
   },
   async run({ args }) {
@@ -1794,6 +1811,7 @@ export default defineCommand({
       }
       const captureSourceRunnerCount = captureSourceMembersResult.value.runner.length;
       const captureSourceSelfReportCount = captureSourceMembersResult.value.selfReport.length;
+      const captureSourceRunnerUnattestedCount = captureSourceMembersResult.value.runnerUnattested.length;
 
       // spec-the-defect-channel-cannot-be-honestly-maintained-an §M7, AC-DC-16
       // — corpus-wide count of DANGLING `adopted` claims (owner archived/
@@ -1930,6 +1948,7 @@ export default defineCommand({
                 unredeemed_allow_missing_path_count: unredeemedAllowMissingPathCount,
                 capture_source_runner_count: captureSourceRunnerCount,
                 capture_source_self_report_count: captureSourceSelfReportCount,
+                capture_source_runner_unattested_count: captureSourceRunnerUnattestedCount,
                 adopted_abandoned_count: adoptedAbandonedCount,
                 // ALWAYS present, `null` included (same convention as
                 // `invalid_docs`) — an omitted key would let a consumer read
@@ -2042,7 +2061,7 @@ export default defineCommand({
       // / `--enumerate capture_source_self_report_count`. REPORT-ONLY.
       console.log(
         `Capture source: ${captureSourceRunnerCount} runner-captured / ${captureSourceSelfReportCount} ` +
-          "self-reported (across every task/phase evidence entry — report-only, see " +
+          `self-reported / ${captureSourceRunnerUnattestedCount} runner-unattested (across every task/phase evidence entry — report-only, see ` +
           "spec-falsifiability-reachability-a-feedable-checkpoint-an §D5)",
       );
 

@@ -522,3 +522,126 @@ describe("REGRESSION — AC-4: a stored row lacking capture_source entirely stil
     expect(record?.latest_evidence?.result).toBe("pass");
   });
 });
+
+// ─── runner-unattested label (issue #48, BR-1073) — AC-EH-2 b, b2, f ──────────
+//
+// RED against current code: today's appendEvidenceEntry (both copies) OVERRIDES
+// capture_source to "runner" whenever an attestation is present, so a
+// 'runner-unattested' + attestation row is silently relabelled and WRITTEN
+// instead of refused. The paired implement task replaces the override with a
+// refusal for this one contradictory combination.
+
+const RUNNER_UNATTESTED_WITH_ATTESTATION = {
+  oracle: "tsc",
+  command: "bun run typecheck",
+  result: "pass",
+  recorded_by: "runner",
+  // reason: cast — CAPTURE_SOURCES gains "runner-unattested" in the paired
+  // implement task; until then the union does not contain it, so the contradictory
+  // row (label says NOT attested, attestation says attested) is built through a cast.
+  capture_source: "runner-unattested",
+  attestation: { runner: "lore-cli", exit_code: 0, duration_ms: 1, timed_out: false },
+} as unknown as VerifiedEvidenceInput;
+
+describe("ERROR — AC-EH-2 b: TaskWorkflowService refuses a runner-unattested row that carries an attestation", () => {
+  it("recordVerifiedEvidence returns VALIDATION_ERROR and writes nothing", async () => {
+    const { corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const result = await taskWorkflowService.recordVerifiedEvidence(
+      taskId,
+      RUNNER_UNATTESTED_WITH_ATTESTATION,
+      "2026-08-03T10:00:00.000Z",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.extra["verification_evidence"]).toBeUndefined();
+  });
+});
+
+describe("ERROR — AC-EH-2 b2: PhaseWorkflowService's writer refuses the same row the same way", () => {
+  it("recordChecklistVerifiedEvidence returns VALIDATION_ERROR and writes nothing", async () => {
+    const { store, service } = makePhaseServices();
+    await mustInsert(store, makePlanRecord());
+    await mustInsert(
+      store,
+      makePhaseRecord({
+        extra: {
+          checklist: [
+            {
+              id: "CHK-1",
+              statement: "unit suite green",
+              bind: { kind: "script", oracle: "test", command: "bun test" },
+            },
+          ],
+        },
+      }),
+    );
+
+    const result = await service.recordChecklistVerifiedEvidence(
+      "capture-source-phase",
+      {
+        ...RUNNER_UNATTESTED_WITH_ATTESTATION,
+        oracle: "test",
+        command: "bun test",
+        checklist_ref: "CHK-1",
+      } as unknown as Parameters<typeof service.recordChecklistVerifiedEvidence>[1],
+      "2026-08-03T10:00:00.000Z",
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+
+    const stored = await store.findBySlug("capture-source-phase");
+    expect(stored.ok).toBe(true);
+    if (!stored.ok || stored.value === null) return;
+    expect(stored.value.extra["verification_evidence"]).toBeUndefined();
+  });
+});
+
+describe("STATE — AC-EH-2 f: a directly-stored pass labelled runner-unattested (no attestation) never satisfies done()'s floor", () => {
+  it("done() refuses with floor 'attested-pass' and the task stays unarchived", async () => {
+    const { store, corpusService, taskWorkflowService } = makeServices();
+    const planId = await createPlan(corpusService);
+    const taskId = await createTask(corpusService, planId);
+
+    const current = await corpusService.get(taskId);
+    expect(current.ok).toBe(true);
+    if (!current.ok) return;
+    // Bypasses the writer on purpose — the writer never produces a PASS with this
+    // label; this row models hand-edited or imported data, and must still not count.
+    const forgedPass = {
+      oracle: "tsc",
+      command: "bun run typecheck",
+      result: "pass",
+      recorded_at: "2026-08-03T10:00:00.000Z",
+      recorded_by: "alice",
+      capture_source: "runner-unattested",
+      // attestation deliberately ABSENT
+    };
+    const updateResult = await store.update(taskId, {
+      extra: { ...current.value.doc.extra, verification_evidence: [forgedPass] },
+    });
+    expect(updateResult.ok).toBe(true);
+
+    const doneResult = await taskWorkflowService.done(taskId, { by: "alice" });
+    expect(doneResult.ok).toBe(false);
+    if (doneResult.ok) return;
+    expect(doneResult.error.code).toBe("VALIDATION_ERROR");
+    // AC-EH-2 f names `error.details.floor`. LoreError carries no `details` today
+    // (field/value/message only) — see the task report; asserted verbatim, cast.
+    const details = (doneResult.error as unknown as { details?: { floor?: string } }).details;
+    expect(details?.floor).toBe("attested-pass");
+
+    const after = await corpusService.get(taskId);
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect(after.value.doc.status).not.toBe("archived");
+  });
+});

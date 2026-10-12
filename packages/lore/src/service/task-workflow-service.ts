@@ -341,6 +341,9 @@ import {
   isInvalidated,
   unprobedFileAnchors,
   resolveOracleGeneration,
+  resolveWrittenCaptureSource,
+  rejectSelfLabelledRunnerUnattested,
+  type PublicCaptureSource,
   type AcceptanceCriterion,
   type AcScopeEditOp,
   type ClaimRunLiveness,
@@ -697,8 +700,11 @@ export type EvidenceInput = Omit<
   "recorded_at" | "attestation" | "result" | "capture_source" | "ac_oracle_generation"
 > & {
   result: Exclude<EvidenceEntry["result"], "inconclusive">;
-  /** REQUIRED — see this type's own header comment. The value the caller can actually PROVE, never a convenient default. */
-  capture_source: CaptureSource;
+  /**
+   * REQUIRED — see this type's own header comment. The value the caller can actually PROVE, never a convenient default.
+   * `"runner-unattested"` is excluded: only the trusted runner mints it (via {@link VerifiedEvidenceInput}).
+   */
+  capture_source: PublicCaptureSource;
   /**
    * The attestation MEASURED by this process's own capture spawn (SPEC-143 AC-CT-2) —
    * distinct from the excluded `attestation` key, and refused-by-construction rather
@@ -2448,6 +2454,11 @@ export class TaskWorkflowService {
     const tailCheck = rejectMissingNonPassOutputTail(entry.result, entry.output_tail);
     if (!tailCheck.ok) return tailCheck;
 
+    // spec-evidence-labels-and-reds-are-honest D1 (#48) — "runner-unattested" is
+    // minted only by the trusted runner; a public caller may not self-label it.
+    const selfLabelCheck = rejectSelfLabelledRunnerUnattested(entry.capture_source);
+    if (!selfLabelCheck.ok) return selfLabelCheck;
+
     // task-a-non-empty-output-tail-can-be-hand-authored-prose-and-the — the PASS-side
     // sibling of the guard immediately above (see that task's own JSDoc for the
     // asymmetry this closes). Exempts any row `capture_source: "runner"` already proved
@@ -2593,7 +2604,11 @@ export class TaskWorkflowService {
     // default standing in for an omitted value. Reaching for a nullish-coalescing
     // self-report default here again reopens the exact silent-fallback defect this
     // task removed — the type refusing omission is the point, not an inconvenience.
-    const captureSource: CaptureSource = entry.attestation !== undefined ? "runner" : entry.capture_source;
+    // `resolveWrittenCaptureSource` is the one copy shared with PhaseWorkflowService
+    // and also refuses the contradictory "runner-unattested"+attestation row (#48).
+    const captureSourceResult = resolveWrittenCaptureSource(entry);
+    if (!captureSourceResult.ok) return captureSourceResult;
+    const captureSource: CaptureSource = captureSourceResult.value;
     const candidate = {
       oracle: entry.oracle,
       command: entry.command,
