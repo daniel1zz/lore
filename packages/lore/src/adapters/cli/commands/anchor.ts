@@ -30,6 +30,15 @@
  * `extra.verification_evidence`, AC-S3-5 regression; spec: `extra.spec_kind`/
  * `extra.acceptance_criteria`).
  *
+ * Test-title anchors (issue #178): a spec/knowledge anchor on a `*.test.ts` file (incl.
+ * `*.bun.test.ts`) may name a `describe`/`it`/`test` title instead of an exported
+ * identifier — `tests/x.test.ts#"AC-1: widget renders (happy path)"`. The quoted form
+ * cannot collide with the identifier form (an identifier never starts with `"`); a
+ * title may contain spaces, colons, parentheses and `#`; `\"` and `\\` are the only
+ * escapes. `--check-drift` resolves it when the exact title is a describe/it/test title
+ * in the file (`symbol_missing` otherwise). A quoted title on a NON-test file is refused
+ * (exit 4). Grammar owner: `@lore/core` `code-anchors.ts`.
+ *
  * `add` on a TASK target additionally prints the non-resolving-anchor advisory to
  * stderr (task-a-mistyped-task-file-anchor-is-stored-and-consulted) — see
  * `emitFileAnchorAdvisory` below for the stderr/stdout split, why the FULL
@@ -190,7 +199,7 @@ export default defineCommand({
         path: {
           type: "positional",
           description:
-            "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope). Spec/knowledge: path[#Symbol] (SPEC-045).",
+            "[repeatable] Task: repo-relative POSIX path (trailing '/' = directory scope). Spec/knowledge: path[#Symbol] (SPEC-045), or path#\"test title\" on a *.test.ts file to anchor a describe/it/test title (\\\" and \\\\ are the only escapes).",
           required: true,
         },
         json: {
