@@ -16,7 +16,7 @@
 
 # Skill("plan","create")
 
-1. Context: bootstrap (hook-injected) + lore search "auth" --type spec --json
+1. Context: `lore bootstrap` (pulled on demand) + lore search "auth" --type spec --json
    → spec-user-auth found, status=approved
    lore ac list spec-user-auth → AC-AUTH-1..4 declared (plan-promote gate will pass)
 
@@ -114,7 +114,7 @@ lore approve plan-user-authentication → ok
 ## Example: Resume (with risk + schedule awareness)
 
 ```
-Bootstrap (hook-injected) → active plan plan-user-authentication detected
+`lore bootstrap` on demand → active plan plan-user-authentication detected
 lore feed session-resume --plan plan-user-authentication
 → latest handoff: decisions (bcrypt rounds=12), next steps, no failing oracle
 

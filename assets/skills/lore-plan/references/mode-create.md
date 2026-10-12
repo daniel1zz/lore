@@ -18,7 +18,7 @@ For small plans (≤3 tasks, single session, clear scope), skip the full ceremon
 
 ```yaml
 # 1. Gather context — find upstream docs
-- Hook-injected bootstrap (lore bootstrap --json ran at SessionStart) → active_plans, armed_gates, pending_reviews — consume, don't re-call
+- Pull `lore bootstrap --json` on demand (the session-start injection does not carry it) → active_plans, armed_gates, pending_reviews
 - lore search "{task keywords}" --type prd --json     → find the PRD this plan implements
 - lore search "{task keywords}" --type spec --json    → find the governing spec
 - lore search "{task keywords}" --type adr --json     → find design decisions

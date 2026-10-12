@@ -3,7 +3,7 @@
 Before skill execution, load relevant project docs from the lore corpus (`lore` CLI).
 
 ## Discovery Sequence
-1. Consume the hook-injected `lore bootstrap --json` at SessionStart (root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, active_sessions) — don't re-call mid-skill.
+1. Pull corpus state with `lore bootstrap --json` on demand (root, active_plans, pending_reviews, my_claims, armed_gates, latest_handoffs, resume_hint, active_sessions); the session-start injection carries only this seat's claims and plan handoff. Also `lore ready <plan>` / `lore pending`.
 2. `lore search "{feature}" --type spec --json` / `--type prd --json` / `--type adr --json` — filter results to `status: approved` client-side.
 3. `lore get "{id-or-slug}" --resolve-mdx --json` — full content + resolved MDX placeholders.
 4. `lore tree "{id-or-slug}"` — traceability chain (parent/child hierarchy); `lore get` renders inbound/outbound links for deeper traversal.

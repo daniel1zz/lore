@@ -44,7 +44,7 @@ Find the entry point with `Grep`, trace the call chain, summarize with file:line
 3. Cross-reference with actual code; report gaps between spec and implementation
 
 ### "what's the current state?"
-`lore tree <plan>` for plan structure, `lore ready <plan> --json` for readiness / sessions / anchor conflicts, `lore status` for corpus health. Session bootstrap is hook-injected — do not re-derive it.
+`lore tree <plan>` for plan structure, `lore ready <plan> --json` for readiness / sessions / anchor conflicts, `lore status` for corpus health. The session-start injection carries only this seat's own claims and plan handoff; pull corpus state with `lore bootstrap` on demand.
 
 ## Output Format
 

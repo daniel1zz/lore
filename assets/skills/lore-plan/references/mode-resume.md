@@ -5,14 +5,14 @@
 ## Triggers
 
 - "continue", "resume", "pick up where left off", specific plan slug
-- Session start: hook-injected bootstrap (`lore bootstrap --json`) surfaces active_plans / my_claims / latest_handoffs / resume_hint
+- Session start: the injection carries only this seat's claims and plan handoff; run `lore bootstrap --json` on demand for active_plans / latest_handoffs / resume_hint
 - Workflow routes here when active plan detected
 
 ## Workflow
 
 ```yaml
 # 1. Identify plan
-- Hook-injected bootstrap → active_plans + resume_hint (consume, don't re-call)
+- `lore bootstrap --json` on demand → active_plans + resume_hint
 - If specific plan slug → lore get <plan-slug> → load plan content
 - If not specified → lore list --type plan --json → prompt user to select
 

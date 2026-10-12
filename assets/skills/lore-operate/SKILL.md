@@ -104,7 +104,7 @@ Load operational context:
 3. Check `shared/ops-runbook-generation.md` for runbook management standards
 4. If incident mode → also load recent incident history from lore (`lore search "incident" --type knowledge --json`)
 
-Tools: `lore: lore search, lore get` (session context is already hook-injected via `lore bootstrap --json` at SessionStart — consume, don't re-call) | `serena: execute_shell_command, search_for_pattern`
+Tools: `lore: lore search, lore get` (the session-start injection carries only this seat's claims and plan handoff; pull corpus state with `lore bootstrap --json` on demand) | `serena: execute_shell_command, search_for_pattern`
 
 Output: `[CONTEXT_LOADED] runbooks: {N} | SLOs: {N} | alerts: {N} | incidents_recent: {N}`
 
