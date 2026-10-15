@@ -68,6 +68,15 @@ function runSetup(claudeDir: string, args: string[] = []): { stdout: string; std
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", exitCode: result.status ?? 1 };
 }
 
+/**
+ * With PATH emptied the MCP registration step cannot find `claude`, so a converge that wrote every file
+ * still exits 1 (same convention as setup.test.ts AC-046-E.H3). The files-written line is the success signal.
+ */
+function expectConverged(run: { stdout: string; stderr: string; exitCode: number }): void {
+  expect(run.stdout, run.stderr).toContain("lore setup complete");
+  expect(run.exitCode).toBe(1);
+}
+
 function readSettings(claudeDir: string): Settings {
   return JSON.parse(readFileSync(join(claudeDir, "settings.json"), "utf8")) as Settings;
 }
@@ -81,8 +90,7 @@ function sessionStartCommands(claudeDir: string): { matcher: string | undefined;
 /** A claude dir installed by THIS build, then rewound to the state a build that shipped the retired hook left. */
 function installWithLegacyHook(): string {
   const claudeDir = mkdtempSync(join(sandbox, "claude-"));
-  const install = runSetup(claudeDir);
-  if (install.exitCode !== 0) throw new Error(`install failed (${install.exitCode}): ${install.stderr}\n${install.stdout}`);
+  expectConverged(runSetup(claudeDir));
 
   const hookPath = join(claudeDir, "hooks", RETIRED_HOOK);
   const content = "#!/usr/bin/env node\n// legacy session-start-fragments hook planted by AC-UR-5\n";
@@ -139,8 +147,7 @@ describe("lore setup retires session-start-fragments.mjs (AC-UR-5)", () => {
     expect(existsSync(join(claudeDir, "hooks", RETIRED_HOOK))).toBe(true);
     expect(sessionStartCommands(claudeDir).filter((e) => e.command.includes(RETIRED_HOOK))).toHaveLength(2);
 
-    const converge = runSetup(claudeDir);
-    expect(converge.exitCode).toBe(0);
+    expectConverged(runSetup(claudeDir));
 
     expect(existsSync(join(claudeDir, "hooks", RETIRED_HOOK))).toBe(false);
     const after = sessionStartCommands(claudeDir);
@@ -159,7 +166,7 @@ describe("lore setup retires session-start-fragments.mjs (AC-UR-5)", () => {
 
   it("AC-UR-5.B1: a fresh install of this build never writes the retired file or entry", () => {
     const claudeDir = mkdtempSync(join(sandbox, "claude-fresh-"));
-    expect(runSetup(claudeDir).exitCode).toBe(0);
+    expectConverged(runSetup(claudeDir));
     expect(existsSync(join(claudeDir, "hooks", RETIRED_HOOK))).toBe(false);
     expect(JSON.stringify(readSettings(claudeDir))).not.toContain(RETIRED_HOOK);
     expect(sessionStartCommands(claudeDir).some((e) => e.command.includes(KEPT_HOOK))).toBe(true);
@@ -167,10 +174,10 @@ describe("lore setup retires session-start-fragments.mjs (AC-UR-5)", () => {
 
   it("AC-UR-5.S1: a second converge after the retirement changes nothing", () => {
     const claudeDir = installWithLegacyHook();
-    expect(runSetup(claudeDir).exitCode).toBe(0);
+    expectConverged(runSetup(claudeDir));
     const settingsBefore = readFileSync(join(claudeDir, "settings.json"), "utf8");
     const manifestBefore = readFileSync(join(claudeDir, ".lore-setup-manifest.json"), "utf8");
-    expect(runSetup(claudeDir).exitCode).toBe(0);
+    expectConverged(runSetup(claudeDir));
     expect(readFileSync(join(claudeDir, "settings.json"), "utf8")).toBe(settingsBefore);
     expect(readFileSync(join(claudeDir, ".lore-setup-manifest.json"), "utf8")).toBe(manifestBefore);
   });

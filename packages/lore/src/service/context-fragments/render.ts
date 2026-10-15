@@ -13,7 +13,6 @@
  * Side-effect class: pure.
  */
 import {
-  SESSION_FRAGMENT_CAP,
   SUBAGENT_FRAGMENT_CAP,
   err,
   ok,
@@ -41,8 +40,6 @@ export type BudgetExceededError = Extract<LoreError, { code: "BUDGET_EXCEEDED" }
 /** Cap for an outlet, or `null` when the outlet is uncapped (rules:*). */
 function getOutletCap(outlet: OutletId): number | null {
   switch (outlet) {
-    case "hook:session-start":
-      return SESSION_FRAGMENT_CAP;
     case "hook:subagent-start":
       return SUBAGENT_FRAGMENT_CAP;
     case "rules:project":

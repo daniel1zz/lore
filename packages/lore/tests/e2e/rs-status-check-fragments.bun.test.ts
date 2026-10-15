@@ -78,9 +78,9 @@ function makeSandbox(): Sandbox {
   return sb;
 }
 
-function writeDynamicMainFragment(dir: string, id: string, body: string): void {
+function writeDynamicHelperFragment(dir: string, id: string, body: string): void {
   mkdirSync(dir, { recursive: true });
-  const front = ["---", `id: ${id}`, `title: fixture ${id}`, 'audience: ["main"]', "mode: dynamic", "---", ""].join("\n");
+  const front = ["---", `id: ${id}`, `title: fixture ${id}`, 'audience: ["subagent:*"]', "mode: dynamic", "---", ""].join("\n");
   writeFileSync(join(dir, `${id}.md`), `${front}${body}\n`, "utf8");
 }
 
@@ -89,8 +89,8 @@ const DUPLICATED_LINE = "Always run the fixture linter before committing.";
 describe("AC-RS-9 lore status --check-fragments", () => {
   it("cross-layer duplicate line: exits 4 and reports the same duplicate_line finding as `lore fragments check`", () => {
     const sb = makeSandbox();
-    writeDynamicMainFragment(sb.userContextDir, "fixture-user-rule", DUPLICATED_LINE);
-    writeDynamicMainFragment(sb.projectContextDir, "fixture-project-rule", DUPLICATED_LINE);
+    writeDynamicHelperFragment(sb.userContextDir, "fixture-user-rule", DUPLICATED_LINE);
+    writeDynamicHelperFragment(sb.projectContextDir, "fixture-project-rule", DUPLICATED_LINE);
 
     const direct = lore(sb, "fragments", "check");
     // Liveness control: the fixture really is a finding for the reference command, so the status
@@ -108,8 +108,8 @@ describe("AC-RS-9 lore status --check-fragments", () => {
 
   it("--json carries the duplicate_line finding in the same report shape as `lore fragments check --json`", () => {
     const sb = makeSandbox();
-    writeDynamicMainFragment(sb.userContextDir, "fixture-user-rule", DUPLICATED_LINE);
-    writeDynamicMainFragment(sb.projectContextDir, "fixture-project-rule", DUPLICATED_LINE);
+    writeDynamicHelperFragment(sb.userContextDir, "fixture-user-rule", DUPLICATED_LINE);
+    writeDynamicHelperFragment(sb.projectContextDir, "fixture-project-rule", DUPLICATED_LINE);
 
     const direct = lore(sb, "fragments", "check", "--json");
     const status = lore(sb, "status", "--check-fragments", "--json");
@@ -123,8 +123,8 @@ describe("AC-RS-9 lore status --check-fragments", () => {
 
   it("clean fixture: exits 0 (and `lore fragments check` agrees)", () => {
     const sb = makeSandbox();
-    writeDynamicMainFragment(sb.userContextDir, "fixture-user-rule", "Fixture user line one.");
-    writeDynamicMainFragment(sb.projectContextDir, "fixture-project-rule", "Fixture project line two.");
+    writeDynamicHelperFragment(sb.userContextDir, "fixture-user-rule", "Fixture user line one.");
+    writeDynamicHelperFragment(sb.projectContextDir, "fixture-project-rule", "Fixture project line two.");
 
     const direct = lore(sb, "fragments", "check");
     expect(direct.code).toBe(0);

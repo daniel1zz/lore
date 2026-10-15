@@ -15,12 +15,13 @@ import { z } from "zod";
 export const HOOK_STRING_CAP = 10_000;
 /** Reserved for the subagent pointer line appended after fragments. */
 export const POINTER_CEILING = 600;
-/** Reserved for the truncation/budget notice appended after session fragments. */
-export const NOTICE_RESERVE = 400;
+/**
+ * Ceiling of the failure banner a hook outlet emits in place of its block (D12). It is NOT reserved out of the
+ * fragment cap: the banner REPLACES the block, so the cap is only ever reduced by the pointer line (BR-907).
+ */
+export const HOOK_BANNER_CAP = 400;
 /** Max fragment chars at hook:subagent-start (HOOK_STRING_CAP - POINTER_CEILING). */
 export const SUBAGENT_FRAGMENT_CAP = HOOK_STRING_CAP - POINTER_CEILING;
-/** Max fragment chars at hook:session-start (HOOK_STRING_CAP - NOTICE_RESERVE). */
-export const SESSION_FRAGMENT_CAP = HOOK_STRING_CAP - NOTICE_RESERVE;
 
 // ─── Language names (D3) ───
 
@@ -91,12 +92,14 @@ export interface Fragment {
 
 // ─── Outlets & config resolution (D11, D14) ───
 
+// reason: `hook:session-start` is retired (spec-one-upgrade-reminder-at-session-start-covers-the-global, BR-912):
+// a dynamic main fragment reached the model only through that outlet, so it now reaches nowhere and
+// `lore fragments check` refuses it (kind `dynamic_main`). Do not re-add the id without a replacement delivery path.
 export const OUTLET_IDS = [
   "rules:project",
   "rules:user",
   "skills:project",
   "skills:user",
-  "hook:session-start",
   "hook:subagent-start",
 ] as const;
 export type OutletId = (typeof OUTLET_IDS)[number];
@@ -121,7 +124,7 @@ export interface ResolvedContextConfig {
  * Resolve the effective language + disabled ids for one outlet.
  * - rules:user, skills:user       → GLOBAL layer only
  * - rules:project, skills:project → PROJECT layer only
- * - hook:*            → project language over global; disable lists unioned
+ * - hook:subagent-start → project language over global; disable lists unioned
  * Pure: never mutates its inputs.
  */
 export function resolveContextConfig(
@@ -149,7 +152,6 @@ export function resolveContextConfig(
         languageSource: p.language !== undefined ? "project" : "none",
         disabled: new Set(pDisable),
       };
-    case "hook:session-start":
     case "hook:subagent-start": {
       const language = p.language ?? g.language ?? null;
       const languageSource: LanguageSource =

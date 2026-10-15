@@ -26,7 +26,6 @@ const EXPECTED_FILES = [
   "pre-bash-git-safety-gate.mjs",
   "session-start-resume.mjs",
   // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
-  "session-start-fragments.mjs", // task-skill-implement-hooks-new-session-start-fragments-thin
   "session-start-marker.mjs",
   "user-prompt-turn-start.mjs", // turn-state producers of stop-doc-sync (issue #156)
   "post-edit-mark.mjs",
@@ -81,14 +80,14 @@ describe("HAPPY: buildHookSettingsEntries", () => {
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 14 core-governance-and-security hook files", () => {
+  it("declares exactly the 13 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 18 entries (14 hooks; per-matcher expansion for the 2 session-start-fragments registrations)", () => {
-    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-fragments: 2 (startup/resume + compact), session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop) = 18
-    expect(HOOK_REGISTRATIONS).toHaveLength(18);
+  it("expands to exactly 16 entries (13 hooks; per-event expansion for run-register, pre-tool-harness-run and run-end)", () => {
+    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop) = 16
+    expect(HOOK_REGISTRATIONS).toHaveLength(16);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {

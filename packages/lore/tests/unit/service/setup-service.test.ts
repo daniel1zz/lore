@@ -784,7 +784,6 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
         "pre-bash-git-safety-gate.mjs",
         "session-start-resume.mjs",
         // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
-        "session-start-fragments.mjs", // task-skill-implement-hooks-new-session-start-fragments-thin
         "session-start-marker.mjs",
         "stop-doc-sync.mjs",
         // stop-doc-sync turn-state producers (issue #156).

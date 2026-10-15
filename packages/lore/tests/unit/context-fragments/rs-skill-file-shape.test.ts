@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SESSION_FRAGMENT_CAP, type Fragment } from "@lore/core";
+import { HOOK_STRING_CAP, type Fragment } from "@lore/core";
 import { renderOutlet } from "../../../src/service/context-fragments/render.js";
 import { isLoreSkillDir, isLoreSkillFileBytes, parseSkillFile, renderSkillFile } from "../../../src/service/context-fragments/section.js";
 
@@ -128,11 +128,11 @@ describe("AC-RS-5 skill file shape", () => {
   });
 
   it("AC-RS-5: skills:* outlets have no cap", () => {
-    const huge = skillFragment("huge", "x".repeat(SESSION_FRAGMENT_CAP * 5));
+    const huge = skillFragment("huge", "x".repeat(HOOK_STRING_CAP * 5));
     for (const outlet of ["skills:project", "skills:user"] as const) {
       const result = renderOutlet([huge], outlet);
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.value.chars).toBe(SESSION_FRAGMENT_CAP * 5);
+      if (result.ok) expect(result.value.chars).toBe(HOOK_STRING_CAP * 5);
     }
   });
 });

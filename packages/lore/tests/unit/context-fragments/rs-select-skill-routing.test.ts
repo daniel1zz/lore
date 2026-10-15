@@ -30,7 +30,6 @@ const OUTLETS: OutletId[] = [
   "rules:user",
   "skills:project",
   "skills:user",
-  "hook:session-start",
   "hook:subagent-start",
 ];
 

@@ -37,7 +37,6 @@ const OUTLET_LAYERS: Readonly<Record<OutletId, ReadonlySet<FragmentLayer>>> = {
   "rules:user": new Set<FragmentLayer>(["user"]),
   "skills:project": new Set<FragmentLayer>(["shipped", "project"]),
   "skills:user": new Set<FragmentLayer>(["user"]),
-  "hook:session-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
   "hook:subagent-start": new Set<FragmentLayer>(["shipped", "user", "project"]),
 };
 
@@ -90,8 +89,6 @@ function matchesOutletRouting(fragment: Fragment, outlet: OutletId, agentType: s
     case "skills:project":
     case "skills:user":
       return isSkill && mode === "static" && audience.includes("main");
-    case "hook:session-start":
-      return !isSkill && mode === "dynamic" && audience.includes("main");
     case "hook:subagent-start":
       return !isSkill && audience.some((a) => a === "subagent:*" || (agentType !== undefined && a === `subagent:${agentType}`));
     default: {

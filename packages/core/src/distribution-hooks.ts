@@ -156,10 +156,6 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // session-start-resume.mjs — injects bootstrap/seat/resume-hint state at session open.
   { file: "session-start-resume.mjs", runner: "node", event: "SessionStart" },
 
-  // session-start-fragments.mjs — blind pipe to `lore fragments render --outlet hook:session-start` (dynamic main fragments + stale-Z1 backstop). Second SessionStart entry so each hook string meets the 10,000-char cap on its own (D6); the `compact` matcher re-injects after /compact (D10).
-  { file: "session-start-fragments.mjs", runner: "node", event: "SessionStart" },
-  { file: "session-start-fragments.mjs", runner: "node", event: "SessionStart", matcher: "compact" },
-
   // session-start-marker.mjs — records this session's own start time (tmpdir marker, keyed by session id) so `lore feed session-resume` can tell a just-authored handoff from a genuinely earlier session's.
   { file: "session-start-marker.mjs", runner: "node", event: "SessionStart" },
 
