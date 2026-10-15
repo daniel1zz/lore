@@ -15,14 +15,14 @@
  * plain !== 'worktree' comparison are both sound. Do not "harden" this against
  * a null case that the harness never produces.
  *
- * WHY ONLY TWO AGENT TYPES (deliberately narrow):
- *   `lore-implementer` and `tester` are the types whose whole definition is
- *   writing code/tests, and they are the ones the measured incident involved.
+ * WHY ONLY ONE AGENT TYPE (deliberately narrow):
+ *   `lore-implementer` is the only shipped write type (it also writes tests),
+ *   and it is the type the measured incident involved.
  *   `claude` and `general-purpose` are NOT listed: the first is a catch-all
  *   routinely used for read-only work (listing it would produce false denials,
  *   and a gate that cries wolf gets bypassed), and the second is already denied
  *   outright by pre-no-general-agent-gate.mjs. Read-only types (Explore,
- *   lore-explorer, lore-reviewer, Plan, researcher) cannot corrupt a shared
+ *   lore-reader, Plan, researcher) cannot corrupt a shared
  *   checkout because they cannot write to it.
  *
  * WHY THE BASE CHECK IS DIAGNOSTIC AND NOT A DENIAL:
@@ -46,7 +46,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 /** Subagent types whose purpose is writing source/tests. See module doc for why this list is short. */
-const WRITING_AGENTS = new Set(['lore-implementer', 'tester']);
+const WRITING_AGENTS = new Set(['lore-implementer']);
 
 let payload = {};
 try {
@@ -88,7 +88,7 @@ Use \`git merge --ff-only\`, never \`git reset --hard\` (the git-safety gate
 blocks it, correctly).
 
 If this subagent genuinely does not write files, dispatch a read-only type
-instead (Explore, lore-explorer, lore-reviewer, Plan, researcher).
+instead (Explore, lore-reader, Plan, researcher).
 `);
   process.exit(2);
 }

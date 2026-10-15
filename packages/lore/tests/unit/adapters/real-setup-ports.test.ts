@@ -381,9 +381,8 @@ const DECLARED_FILES_IN_SCOPE = [
   "skills/shared/testing-standards-detection.md",
   "skills/shared/troubleshooting-knowledge.md",
   "skills/shared/verification-discipline.md",
-  "agents/lore-explorer.md",
   "agents/lore-implementer.md",
-  "agents/lore-reviewer.md",
+  "agents/lore-reader.md",
   "hooks/session-start-resume.mjs",
   // session-start-marker (same-session-authorship fact for the resume-ticket
   // coverage floor, task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01)
