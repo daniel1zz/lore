@@ -8,6 +8,9 @@ priority: medium
 created: 2026-10-15
 updated: 2026-10-15
 tags: [claude-md, content-tiers, eviction]
+parent: PRD-001
+links:
+  - {id: ADR-046, type: relates-to}
 ---
 Verbatim text of the root CLAUDE.md above its auto-generated blocks, as of commit d4db38b3 (2026-10-15), before it was compressed to tier 1 under the Content Tiers rule of the CLAUDE.md content contract (`lore governance claude-md`, commit 101fd79b).
 
