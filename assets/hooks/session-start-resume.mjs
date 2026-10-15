@@ -48,15 +48,19 @@
  *          char-budgeted binary-side, so exceeding it signals a binary-side
  *          bug. On overflow the hook drops the whole block rather than
  *          slicing stdout and records a degradation entry naming the length.
- * Phase F: session-start advisory — cache-first asset-freshness check
- *          (SPEC-076 §C6). Reads `<claude-dir>/.lore-setup-check.json`
- *          (written by `lore setup --check`, T4 of SPEC-076) — a fresh
- *          (<24h) `sync` cache injects nothing, a fresh `stale` cache injects
- *          exactly one advisory line, and a missing/expired/corrupted cache
- *          fires a DETACHED, UNREF'D `lore setup --check --json` refresh
- *          (never awaited — this session gets nothing, the NEXT session may
- *          see a fresh cache). `LORE_SETUP_NO_CHECK=1` is a hard kill-switch
- *          checked BEFORE any cache read.
+ * Phase F: session-start upgrade advisory (SPEC-076 §C6, BR-1086). Reads BOTH
+ *          the global cache `<claude-dir>/.lore-setup-check.json` and the
+ *          project cache `<repo>/.lore/.lore-project-check.json` (repo = nearest
+ *          ancestor of cwd with `.lore/`) and emits ONE directive line: which
+ *          side(s) are behind, why (binary version changed / settings changed /
+ *          files edited by hand, named) and the command to run before other work
+ *          (`lore setup`, `lore setup --project`). Hand-edited files are named
+ *          and never advised to be replaced. Both in sync -> nothing. No rule
+ *          text is injected. A missing / unparseable / expired cache fires a
+ *          DETACHED, UNREF'D refresh of that side (`lore setup --check --json` /
+ *          `lore setup --project --check --json` in the repo; never awaited) and
+ *          is never read as "in sync". `LORE_SETUP_NO_CHECK=1` is a hard
+ *          kill-switch checked BEFORE any cache read.
  *
  *          Known gap (documented, not silently dropped): SPEC-076 §C6's
  *          illustrative advisory text shows "(binary X / installed Y)", but
@@ -121,6 +125,9 @@ const INJECTION_BACKSTOP_CAP = 12000;
 // same "deliberate literal duplicate" precedent `setup-check.ts`'s own module
 // doc documents for `MANIFEST_FILENAME`.
 const SETUP_CHECK_CACHE_FILENAME = '.lore-setup-check.json';
+// Project check cache (BR-1085), repo-relative — literal duplicate of `PROJECT_CHECK_CACHE_RELATIVE_PATH`
+// in `adapters/cli/setup-check.ts`, same reason as the filename above.
+const PROJECT_CHECK_CACHE_RELATIVE_PATH = '.lore/.lore-project-check.json';
 // 24h — SPEC-076 §C6/D4: the timestamp only gates *when* to recheck; the
 // truth of "sync vs stale" always comes from the cache's own `status` field
 // (oh-my-zsh lesson named explicitly in the spec), never re-derived here.
@@ -382,27 +389,18 @@ ${items}
 Action: Check installation. Non-critical features are unaffected.`;
 }
 
-// ── Phase F: session-start advisory — cache-first freshness (SPEC-076 §C6) ─
-// See this file's module-header "Phase F" note for the full contract,
-// including the documented `setup.check_reminder` config-knob gap.
+// ── Phase F: session-start upgrade advisory — cache-first, global + project ─
+// See this file's module-header "Phase F" note for the full contract.
 
 /**
- * Fires a DETACHED, UNREF'D `lore setup --check --json` refresh — never
- * awaited, never blocks this session. `--claude-dir` is passed explicitly
- * (rather than relying on the child's own `$CLAUDE_CONFIG_DIR`/`~/.claude`
- * default resolution) so the refresh always targets the SAME directory this
- * phase read the cache from, including under a test's
- * `CLAUDE_AGENTS_DIR_OVERRIDE`. An 'error' listener is attached so a missing
- * `lore` binary (ENOENT) surfaces as a swallowed async event instead of an
- * unhandled 'error' throw — fail-open (I6), mirrors every other phase in
- * this hook.
+ * Fires a DETACHED, UNREF'D refresh — never awaited, never blocks this
+ * session. `args` is the full `lore` argv; `cwd` pins the project refresh to
+ * the repo whose cache was read. An 'error' listener turns a missing `lore`
+ * binary (ENOENT) into a swallowed async event — fail-open (I6).
  */
-function spawnSetupCheckRefresh(claudeDir) {
+function spawnDetachedLore(args, cwd) {
   try {
-    const child = spawn('lore', ['setup', '--check', '--json', '--claude-dir', claudeDir], {
-      detached: true,
-      stdio: 'ignore',
-    });
+    const child = spawn('lore', args, { detached: true, stdio: 'ignore', ...(cwd ? { cwd } : {}) });
     child.on('error', () => {});
     child.unref();
   } catch {
@@ -410,49 +408,121 @@ function spawnSetupCheckRefresh(claudeDir) {
   }
 }
 
+/** Nearest ancestor of `start` holding a `.lore/` directory, or null (no project side then). */
+function findProjectRoot(start) {
+  let dir = resolve(start);
+  for (;;) {
+    try {
+      if (statSync(join(dir, '.lore')).isDirectory()) return dir;
+    } catch {
+      // not here — keep walking up
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Reads one check cache. Returns { kind: 'usable', cache } for a parsed,
+ * well-shaped, <24h cache; { kind: 'refresh' } for a missing / unparseable /
+ * mis-shaped / expired one. A cache that fails to parse is NEVER read as
+ * "in sync" (BR-1086) — it schedules a refresh instead.
+ */
+function readCheckCache(cachePath) {
+  let cache = null;
+  if (existsSync(cachePath)) {
+    try {
+      cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    } catch {
+      cache = null;
+    }
+  }
+  const valid = cache !== null && typeof cache === 'object'
+    && typeof cache.checked_at === 'string'
+    && typeof cache.binary_version === 'string'
+    && (cache.status === 'sync' || cache.status === 'stale');
+  if (!valid) return { kind: 'refresh' };
+  const ageMs = Date.now() - Date.parse(cache.checked_at);
+  const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < SETUP_CHECK_CACHE_TTL_MS;
+  return fresh ? { kind: 'usable', cache } : { kind: 'refresh' };
+}
+
+const ADVISORY_FILE_CAP = 5;
+
+function nameFiles(paths) {
+  const list = paths.filter((p) => typeof p === 'string');
+  const shown = list.slice(0, ADVISORY_FILE_CAP).join(', ');
+  return list.length > ADVISORY_FILE_CAP ? `${shown} (+${list.length - ADVISORY_FILE_CAP} more)` : shown;
+}
+
+/**
+ * Describes ONE behind side: `{ text, needsCommand }`. Reasons are derived from
+ * the cache's per-state `files` lists (same rule as `deriveSetupCheckReasons`:
+ * a `#` entry is a settings key, any other behind path is a binary-shipped
+ * file); a legacy cache with no `files` detail falls back to counts + binary
+ * version. Diverged files are only ever named as hand-edited and left alone —
+ * `needsCommand` is false when they are the sole reason, so no command that
+ * could replace them is advised.
+ */
+function describeBehindSide(label, cache) {
+  const f = cache.files && typeof cache.files === 'object' ? cache.files : null;
+  if (!f) {
+    const c = cache.stale_counts;
+    const n = c && typeof c === 'object' ? (c.outdated ?? 0) + (c.diverged ?? 0) + (c.missing ?? 0) : null;
+    const detail = n === null ? `binary ${cache.binary_version}` : `${n} file(s), binary ${cache.binary_version}`;
+    return { text: `${label}: ${detail}`, needsCommand: true };
+  }
+  const list = (k) => (Array.isArray(f[k]) ? f[k].filter((p) => typeof p === 'string') : []);
+  const behind = [...list('outdated'), ...list('missing'), ...list('orphaned')];
+  const settingsEntries = behind.filter((p) => p.includes('#'));
+  const plainFiles = behind.filter((p) => !p.includes('#'));
+  const diverged = list('diverged');
+  const parts = [];
+  if (plainFiles.length > 0) parts.push(`binary version changed (binary ${cache.binary_version}; ${nameFiles(plainFiles)})`);
+  if (settingsEntries.length > 0) parts.push(`${label} settings changed (${nameFiles(settingsEntries)})`);
+  if (diverged.length > 0) parts.push(`edited by hand, left as they are: ${nameFiles(diverged)}`);
+  if (parts.length === 0) parts.push(`binary ${cache.binary_version}`);
+  return { text: `${label}: ${parts.join('; ')}`, needsCommand: behind.length > 0 || diverged.length === 0 };
+}
+
 let advisoryBlock = '';
 try {
   if (process.env.LORE_SETUP_NO_CHECK !== '1') {
     const claudeDir = dirname(AGENTS_DIR);
-    const cachePath = join(claudeDir, SETUP_CHECK_CACHE_FILENAME);
+    const projectRoot = findProjectRoot(process.cwd());
+    const sides = [{
+      label: 'global',
+      command: '`lore setup`',
+      read: readCheckCache(join(claudeDir, SETUP_CHECK_CACHE_FILENAME)),
+      refresh: () => spawnDetachedLore(['setup', '--check', '--json', '--claude-dir', claudeDir]),
+    }];
+    if (projectRoot !== null) {
+      sides.push({
+        label: 'project',
+        command: '`lore setup --project`',
+        read: readCheckCache(join(projectRoot, PROJECT_CHECK_CACHE_RELATIVE_PATH)),
+        refresh: () => spawnDetachedLore(['setup', '--project', '--check', '--json'], projectRoot),
+      });
+    }
 
-    let cache = null;
-    if (existsSync(cachePath)) {
-      try {
-        cache = JSON.parse(readFileSync(cachePath, 'utf8'));
-      } catch {
-        cache = null; // corrupted JSON — treated as unusable below, never throws
+    const behind = [];
+    for (const side of sides) {
+      if (side.read.kind === 'refresh') {
+        side.refresh(); // this session gets nothing from this side; the NEXT one may see a fresh cache
+      } else if (side.read.cache.status === 'stale' && side.read.cache.reminder_enabled !== false) {
+        // `reminder_enabled === false` is stamped only when `setup.check_reminder`
+        // resolved to false; absence (legacy cache) means enabled — fail-open.
+        behind.push({ ...describeBehindSide(side.label, side.read.cache), command: side.command });
       }
     }
 
-    const isValidCache = cache !== null && typeof cache === 'object'
-      && typeof cache.checked_at === 'string'
-      && typeof cache.binary_version === 'string'
-      && (cache.status === 'sync' || cache.status === 'stale');
-
-    if (!isValidCache) {
-      // Missing file, corrupted JSON, or a shape that doesn't match
-      // SetupCheckCache — all treated identically: fire a background refresh,
-      // inject nothing THIS session (never wait for it).
-      spawnSetupCheckRefresh(claudeDir);
-    } else {
-      const ageMs = Date.now() - Date.parse(cache.checked_at);
-      const fresh = Number.isFinite(ageMs) && ageMs >= 0 && ageMs < SETUP_CHECK_CACHE_TTL_MS;
-      if (!fresh) {
-        spawnSetupCheckRefresh(claudeDir);
-      } else if (cache.status === 'stale' && cache.reminder_enabled !== false) {
-        // `cache.reminder_enabled === false` is written ONLY when the team's
-        // `setup.check_reminder` config resolved to false (setup-check.ts's
-        // resolveCheckReminderEnabled); a legacy cache with no such field
-        // falls through this check unaffected (fail-open, REGRESSION-safe).
-        const counts = cache.stale_counts;
-        const countsNote = counts && typeof counts === 'object'
-          ? `${(counts.outdated ?? 0) + (counts.diverged ?? 0) + (counts.missing ?? 0)} file(s), binary ${cache.binary_version}`
-          : `binary ${cache.binary_version}`;
-        advisoryBlock = `⚠ lore assets outdated (${countsNote}) — run \`lore setup\``;
-      }
-      // fresh + sync, OR fresh + stale with reminder_enabled === false →
-      // advisoryBlock stays '' (0 bytes, 0 spawn)
+    if (behind.length > 0) {
+      const commands = behind.filter((b) => b.needsCommand).map((b) => b.command);
+      const action = commands.length > 0
+        ? `run before other work: ${commands.join(' then ')}`
+        : 'nothing to run: lore setup leaves hand-edited files as they are';
+      advisoryBlock = `⚠ lore assets outdated — ${behind.map((b) => b.text).join(' | ')} — ${action}`;
     }
   }
 } catch {
