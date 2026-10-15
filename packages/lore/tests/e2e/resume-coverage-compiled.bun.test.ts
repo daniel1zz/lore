@@ -197,6 +197,11 @@ const HOOK_ASSET_REL = "hooks/stop-handoff-coverage.mjs";
 const GOVERNANCE_ASSET_REL = "context/corpus-workflow-1-feed.md";
 const HOOK_SSOT_PATH = join(ASSETS_ROOT, "hooks", "stop-handoff-coverage.mjs");
 const GOVERNANCE_SSOT_PATH = join(ASSETS_ROOT, "context", "corpus-workflow-1-feed.md");
+// RE-BASELINE (task-skill-implement-move-the-six-checkpoint-backed-rules): the per-item disposition
+// obligation bullet moved VERBATIM out of the always-loaded FEED fragment into the lore-plan resume mode
+// reference (the Stop-time coverage check enforces it). Its delivery surface is now that skill file.
+const RESUME_MODE_REL = join("skills", "lore-plan", "references", "mode-resume.md");
+const RESUME_MODE_SSOT_PATH = join(ASSETS_ROOT, RESUME_MODE_REL);
 
 /**
  * `lore init` + `lore context init` + `lore context refresh` in a throwaway corpus; returns the text of
@@ -654,9 +659,14 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     expect(governanceVerb.exitCode).not.toBe(0);
     expect(governanceVerb.stderr.toString()).toContain("retired");
 
-    const fragmentBody = governanceSsotBytes.toString("utf8").replace(/^---\n[\s\S]*?\n---\n/, "");
-    const rules = refreshedFeedRulesFile("lore-t4-rules-");
-    expect(rules).toContain(fragmentBody.split("\n").find((l) => l.includes("ACCOUNT, not to complete"))?.trim() ?? "<<no ACCOUNT line in fragment>>");
+    // The obligation bullet is NO LONGER in the FEED fragment (moved to the lore-plan resume mode
+    // reference): the fragment must not carry it, the rules file must not ship it, and the moved
+    // line must be byte-present in the skill asset AND in the claude-dir install.
+    const resumeModeBody = readFileSync(RESUME_MODE_SSOT_PATH, "utf8");
+    const accountLine = resumeModeBody.split("\n").find((l) => l.includes("ACCOUNT, not to complete"))?.trim() ?? "<<no ACCOUNT line in resume mode>>";
+    expect(governanceSsotBytes.toString("utf8")).not.toContain("ACCOUNT, not to complete");
+    expect(refreshedFeedRulesFile("lore-t4-rules-")).not.toContain("ACCOUNT, not to complete");
+    expect(readFileSync(join(targetDir, RESUME_MODE_REL), "utf8")).toContain(accountLine);
 
     // ── (d) NEGATIVE / liveness control for the byte comparison ─────────────
     // Perturb the INSTALLED copy and prove the comparison flips — a
@@ -698,12 +708,14 @@ describe("AC-RC-8: both changed assets actually SHIP — installed hook bytes + 
     // assets/governance/corpus-workflow.md and cross-checked `lore governance`
     // stdout (ENOENT after D9). Same constants, now asserted against the whole
     // FEED fragment file AND the project lore rules file it ships through (D15).
-    const feedSection = readFileSync(GOVERNANCE_SSOT_PATH, "utf8");
+    const feedSection = readFileSync(RESUME_MODE_SSOT_PATH, "utf8");
     expect(feedSection.length).toBeGreaterThan(0);
 
     const rules = refreshedFeedRulesFile("lore-t4-boundary-rules-");
     expect(rules.length).toBeGreaterThan(0); // D15: refresh must have written the rules file
-    for (const surface of [feedSection, rules]) {
+    // The obligation no longer rides the always-loaded rules file; the skill reference is its surface.
+    expect(rules).not.toContain(RESUME_DISPOSITION_MARKER);
+    for (const surface of [feedSection]) {
       for (const prefix of [RESUME_ITEM_ID_PREFIX_KEY_DECISION, RESUME_ITEM_ID_PREFIX_NEXT_STEP]) {
         expect(surface).toContain(`\`${prefix}<n>\``);
       }

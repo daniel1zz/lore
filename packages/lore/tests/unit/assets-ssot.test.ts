@@ -474,15 +474,19 @@ const CORPUS_WORKFLOW_FRAGMENT_RELS = [
   "context/corpus-workflow-4-close.md",
 ] as const;
 /** sha256 of each fragment BODY (text after the frontmatter) — measured equal to the verbatim sections of the deleted file. */
+// RE-BASELINE (task-skill-implement-move-the-six-checkpoint-backed-rules, AC-RT-1): the feed / produce / execute pins
+// below were re-measured after six checkpoint-backed bullets moved VERBATIM out of these always-loaded fragments
+// (resume disposition -> lore-plan resume mode; living-vs-record -> lore-design; claim identity + COMMIT BEFORE YOU
+// ATTEST -> lore-autopilot / lore-implementer). Only whole bullets were removed; no remaining text changed.
 const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)[number], string> = {
   "context/corpus-workflow-0-overview.md": "31bec6c00584c31708413d8c34e0494bbfe758b9d3d43c6bc3d1e8780c0b070f",
   // RE-BASELINE (task-prose-sweep-shipped-assets-say-pull-lore-bootstrap-when, AC-SI-5): the feed rule no longer
   // calls the bootstrap hook-injected; it says the injection carries only the seat's claims + plan handoff and
   // corpus state is pulled on demand (`lore bootstrap` / `lore ready` / `lore pending`).
-  "context/corpus-workflow-1-feed.md": "1be0b0593fba4b02cd75a2ddba4e8a7df8579a3e00b0e6bdc09d61dbfa9edab9",
+  "context/corpus-workflow-1-feed.md": "f7a14020883d4b7dc95373225155639b4fd74c35c70d85fae4da03b6be604a36",
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
-  "context/corpus-workflow-2-produce.md": "d2aec41b999e977dd56d65398062d76402940878a1eb1dcdaa9736d196d37ab9",
-  "context/corpus-workflow-3-execute.md": "acf9e945bef3b056c200d06e0f7714b4711f54cd9bd59d0d6a824545937ae944",
+  "context/corpus-workflow-2-produce.md": "cc4ed9f31e30468f2fddea7f4d296620ec81399c62a1b835b4d1388465f4def2",
+  "context/corpus-workflow-3-execute.md": "26c7fa3bda9e61b53fc18bdc11d2183abe9900e136439884a39fe9effc3b90c9",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
   "context/corpus-workflow-4-close.md": "6739e28d8081b7d2de8d060b7796786aea384515635245ea5d2ad3c03c78ba6a",

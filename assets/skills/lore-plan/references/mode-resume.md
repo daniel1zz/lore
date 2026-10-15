@@ -55,6 +55,12 @@
 - Highlight critical path tasks (--priority critical/high) among ready tasks
 ```
 
+## Resume ticket disposition
+
+Enforced by the Stop-time resume-ticket coverage check:
+
+- A consumed resume ticket is bounded from BELOW as well as from above: it prints one ordinal-tagged line per item (`KD<n>` per key decision, `NS<n>` per next step), preceded by a cardinality line stating how many items there are in total. Account for EVERY printed item before the session ends — one line each, `**[RESUME_DISPOSITION]** <item-id>: done` or `**[RESUME_DISPOSITION]** <item-id>: deferred:<reason>`. The obligation is to ACCOUNT, not to complete: a ticket whose items are all legitimately out of this session's scope closes cleanly once every item carries its own deferral reason AND that reason names WHERE the deferred work went — a filed issue reference (`#<n>`) or a corpus slug. A reason alone is not a destination: it is refused behind its own stderr prefix, distinct from the bare-`deferred:` one, because "no reason given" and "a reason that parks the work nowhere" are different mistakes with different fixes. New problems found mid-session belong in `lore report-issue`, not in this session's scope — that is what makes the deferral honest and lets the original task close (measured 2026-08-25: of 696 next-step items across 139 handoffs, 458 were bare prose that entered no queue). None may go unmentioned — the Stop-time coverage check names the undispositioned ids and blocks the turn. Obeying the scope declaration alone does not satisfy this duty; the two bound opposite directions (measured 2026-07-30: a report dropped 3 of 10 printed items while trespassing on nothing).
+
 ## Constraint Briefing Format
 
 ```markdown
