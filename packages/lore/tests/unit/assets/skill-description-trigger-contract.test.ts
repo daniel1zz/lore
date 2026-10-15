@@ -222,10 +222,9 @@ describe("shipped skill descriptions state when to use the skill (BR-1099)", () 
     });
   });
 
-  it("AC-SD-7: the repo copy of the lore skill is in sync and the authoring guide states the standard", () => {
-    const assetCopy = frontmatterOf(join(SKILLS_DIR, "lore/SKILL.md")).description;
-    const repoCopy = frontmatterOf(join(REPO_ROOT, ".claude/skills/lore/SKILL.md")).description;
-    expect(repoCopy).toBe(assetCopy);
+  it("AC-SD-7: the lore skill has no repo copy and the authoring guide states the standard", () => {
+    // assets/skills/lore is the single source; a hand-synced .claude/skills/lore copy drifts (issue #218).
+    expect(existsSync(join(REPO_ROOT, ".claude/skills/lore/SKILL.md"))).toBe(false);
     const guide = frontmatterOf(join(SKILLS_DIR, "lore-write-a-skill/SKILL.md")).body;
     expect(guide).toContain("Use when");
     expect(guide).toMatch(/500[- ]char/);
