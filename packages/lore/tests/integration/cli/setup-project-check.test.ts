@@ -27,6 +27,11 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { HOOK_ASSET_NAMES } from "../../../src/flows/setup-project-flow.js";
+
+/** A project hook the current binary ships — derived from the SSOT so a hook retirement cannot break this suite again. */
+const SHIPPED_HOOK: string = HOOK_ASSET_NAMES[0];
+
 const PACKAGE_ROOT = new URL("../../../", import.meta.url).pathname.replace(/\/$/, "");
 const INDEX_TS = join(PACKAGE_ROOT, "src", "index.ts");
 const BUN_BIN = execSync("command -v bun", { encoding: "utf8" }).trim();
@@ -175,10 +180,10 @@ describe("lore setup --project --check (AC-UR-1)", () => {
 
   it("AC-UR-1.N3: a deleted project-scope hook is missing, exit 3", () => {
     const repo = freshRepo();
-    rmSync(join(repo, "hooks", "g2-spec-promote.sh"));
+    rmSync(join(repo, "hooks", SHIPPED_HOOK));
     const { run, data } = runCheck(repo);
     expect(run.exitCode).toBe(3);
-    expect(data?.files.missing).toEqual(["hooks/g2-spec-promote.sh"]);
+    expect(data?.files.missing).toEqual([`hooks/${SHIPPED_HOOK}`]);
     expect(data?.files.outdated).toEqual([]);
     expect(data?.files.diverged).toEqual([]);
     expect(data?.files.orphaned).toEqual([]);
@@ -221,7 +226,7 @@ describe("lore setup --project --check (AC-UR-1)", () => {
 
   it("AC-UR-1.S1: the tree is byte-identical before and after a check except the project check cache", () => {
     const repo = freshRepo();
-    rmSync(join(repo, "hooks", "g3-plan-promote.sh")); // a stale tree, so the run takes the full non-sync path
+    rmSync(join(repo, "hooks", SHIPPED_HOOK)); // a stale tree, so the run takes the full non-sync path
     const before = snapshotTree(repo);
     const { run } = runCheck(repo);
     expect(run.exitCode).toBe(3);
@@ -232,7 +237,7 @@ describe("lore setup --project --check (AC-UR-1)", () => {
 
   it("AC-UR-1.R1: the cache carries the shared shape (scope, binary version, per-state files, reasons) and a re-check is idempotent", () => {
     const repo = freshRepo();
-    rmSync(join(repo, "hooks", "g4-task-claim.sh"));
+    rmSync(join(repo, "hooks", SHIPPED_HOOK));
     const name = rulesFiles(repo)[0] as string;
     writeFileSync(join(repo, RULES_DIR, name), `${readFileSync(join(repo, RULES_DIR, name), "utf8")}\nhand edit\n`, "utf8");
     const first = runCheck(repo);
