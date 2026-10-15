@@ -108,13 +108,16 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [adr] Helper agent types split only on mechanism-enforced capability; roles are composed per dispatch (approved)
+- [task] plan-close cascade AC-097-2 is red on main: a plan with no children is not archived (draft)
+- [task] setup.test AC-046-E.R1 is red on main: a second --dry-run right after a real install does not report every file as 'would skip' (draft)
+- [task] check-shipped-defaults AC-GD-1 fresh-install clause is red on main (draft)
 - [adr] Rule delivery tiers (gate / hook / skill) and optimistic interception at the nearest cheap-repair checkpoint (approved)
 - [task] A rule proposed in a draft spec's change set cannot be corrected or withdrawn before it lands (draft)
 - [task] Pin the CLAUDE.md contract's Content Tiers rule with regression assertions (archived)
 - [task] setup-manifest-fields AC-076-6.S1 is red on main: the second no-op converge rewrites the manifest because the recorded settings.json sha256 changes (draft)
 - [task] lore setup --check reports 'assets in sync' while manifest-tracked files the payload no longer ships are still installed (draft)
 - [task] lore review rejects every not-yet-started task on evidence_completeness, so the pre-claim review verdict carries no signal (draft)
-- [adr] Helper agent types split only on mechanism-enforced capability; roles are composed per dispatch (draft)
 - [task] lore ac cite cannot re-point a criterion whose existing citation was retired; only lore ac set --cite can (draft)
 - [task] A deprecated baseline rule cannot name its replacement: lore rule set --lifecycle deprecated refuses --note (draft)
 - [task] plan-promote accepts an AC routed to a phase with zero tasks, so lore verify has no task to attest it on (draft)

@@ -3,7 +3,7 @@ id: ADR-046
 type: adr
 role: decision
 title: "Helper agent types split only on mechanism-enforced capability; roles are composed per dispatch"
-status: draft
+status: approved
 priority: medium
 created: 2026-10-15
 updated: 2026-10-15
