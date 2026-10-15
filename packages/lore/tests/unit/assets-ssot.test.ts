@@ -407,6 +407,9 @@ const DECLARED_FILES = [
   "hooks/post-edit-mark.mjs",
   // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
   "hooks/stop-handoff-coverage.mjs",
+  // stop-turn-review (turn-end review of the main session, spec-interception-moves-off-every-tool-call-one-turn-end-review;
+  // not yet in the roster — task B4 registers it)
+  "hooks/stop-turn-review.mjs",
   "hooks/subagent-context.mjs",
   "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
