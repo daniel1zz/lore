@@ -6,11 +6,11 @@ mode: static
 ---
 ## EXECUTE — claim before you work, evidence over assertion
 
-- `lore ready <plan> --json` to see readiness / sessions / anchor_conflicts, then pick a ready task.
-- External oracles only (tsc / test / browser, etc.) — never let an LLM self-grade its own work.
-- Shared mutable state must be re-evidenced in the turn you assert it: claims, readiness, sessions, and sibling-plan progress drift under concurrent sessions — an earlier-in-context query result is a snapshot ("as of then"), never current state. Re-query before any progressive-tense claim ("still open", "currently claimed").
-- Never discard lore's own output. `lore set|approve|reject|claim|release|evidence|invalidate|archive` print state transitions and gate preconditions on stdout — most critically, editing an approved doc's content demotes it back to `draft`, which silently freezes every downstream `task-claim` until you re-review and re-approve. Writing `lore set ... >/dev/null 2>&1` for terser logs discards the one signal that predicts the next gate denial, and you will misread the resulting `UPSTREAM_NOT_APPROVED` as a tool defect rather than your own muted warning. Need less noise? Pipe through `| tail -3` — never redirect the stream away.
-- Oracle passes → `lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual> --command "<cmd>" --result pass`. Give every row a REAL captured tail via `--output-tail-file <the file you redirected the run into>` — a hand-typed summary satisfies the record's form while carrying none of its content, and an empty tail makes the row unverifiable by anyone but you. Record your RED runs too, as `--result expected-fail`, so red-first survives in the corpus instead of only in a transcript. For script-bound ACs, prefer `lore verify <plan>` (attested: the exit code decides pass/fail, never self-reported).
-- Measure every oracle's exit code WITHOUT a pipe — `<cmd> > out.log 2>&1; echo $?`. A piped `$?` is the pipe's status, not the command's, and it silently converts a gate denial or a failing suite into an apparent success.
-- `lore release <task>` drops the advisory lease only — it does not archive the task and does not remove it from the ready set. Readiness is always computed, never hand-marked by anyone.
-- `lore done <task>` is the sole command that walks `approved → active → archived`; it belongs to whoever can assert the work is merged into main. An implementer working inside its own worktree structurally cannot make that assertion, so its own sequence stops at `release` — archival is a separate step, run later by whoever can.
+- `lore ready <plan> --json` (readiness / sessions / anchor_conflicts), then pick a ready task.
+- External oracles only (tsc / test / browser); never let an LLM self-grade its own work.
+- Re-query shared mutable state (claims, readiness, sessions, sibling-plan progress) in the turn you assert it, before any "still open" / "currently claimed" claim.
+- Never discard lore's stdout (`lore set|approve|reject|claim|release|evidence|invalidate|archive` print state transitions and gate preconditions); trim with `| tail -3`, never redirect it away.
+- Oracle passes → `lore evidence <task> --oracle <tsc|test|lint|build|e2e|manual> --command "<cmd>" --result pass --output-tail-file <file the run was redirected into>`; never a hand-typed or empty tail. Record RED runs as `--result expected-fail`. For script-bound ACs prefer `lore verify <plan>`.
+- Measure an oracle's exit code WITHOUT a pipe: `<cmd> > out.log 2>&1; echo $?`.
+- `lore release <task>` drops the lease only; it does not archive. Never hand-mark readiness.
+- `lore done <task>` alone walks `approved → active → archived`, run by whoever can assert the work is merged into main; an implementer in its own worktree stops at `release`.
