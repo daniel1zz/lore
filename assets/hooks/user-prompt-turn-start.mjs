@@ -2,7 +2,7 @@
 /**
  * user-prompt-turn-start.mjs — UserPromptSubmit hook, producer of `current-turn.id`.
  *
- * Opens a fresh turn per user message so stop-doc-sync.mjs can tell "edits made THIS turn"
+ * Opens a fresh turn per user message so stop-turn-review.mjs can tell "edits made THIS turn"
  * from edits of earlier turns. Session dir comes from the stdin payload `session_id`
  * (UserPromptSubmit input, https://code.claude.com/docs/en/hooks) — the same source the
  * PostToolUse producer and the Stop consumer use.

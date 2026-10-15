@@ -28,7 +28,7 @@
  *
  * Flow: stop_hook_active=true -> exit 0 silent (loop prevention) | turn state unreadable ->
  * exit 0 + ONE stderr line "turn state not measured: ..." (lore issue #156, same policy as
- * stop-doc-sync.mjs) | measure (a)(b)(c) | no finding -> exit 0 silent | else one block.
+ * the retired stop-doc-sync hook) | measure (a)(b)(c) | no finding -> exit 0 silent | else one block.
  *
  * Side-effect class: IO — reads the turn dir and `.lore/config.yaml`, spawns git (temporary
  * index under os.tmpdir(), removed afterwards) and, conditionally, `lore`. Writes only to

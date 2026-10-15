@@ -215,7 +215,7 @@ function buildPayload(loreHookEntries: SettingsHookEntry[] = [{ event: "Stop", c
     files: [
       { path: "skills/lore/SKILL.md", kind: "skill", content: "# Lore skill\n", sha256: "placeholder" },
       { path: "agents/lore-explorer.md", kind: "agent", content: "# Explorer agent\n", sha256: "placeholder" },
-      { path: "hooks/stop-doc-sync.mjs", kind: "hook", content: "#!/usr/bin/env node\nconsole.log('stop');\n", sha256: "placeholder" },
+      { path: "hooks/stop-turn-review.mjs", kind: "hook", content: "#!/usr/bin/env node\nconsole.log('stop');\n", sha256: "placeholder" },
       { path: "governance/corpus-workflow.md", kind: "governance", content: "# Corpus workflow\n", sha256: "placeholder" },
       { path: "settings.json", kind: "settings-hook", content: JSON.stringify(loreHookEntries), sha256: "placeholder" },
     ],
@@ -307,7 +307,7 @@ describe("HAPPY", () => {
     }
 
     // hook-kind assets get the executable bit; other kinds don't.
-    expect(fs.executableFlags.get(path.join(TARGET_DIR, "hooks/stop-doc-sync.mjs"))).toBe(true);
+    expect(fs.executableFlags.get(path.join(TARGET_DIR, "hooks/stop-turn-review.mjs"))).toBe(true);
     expect(fs.executableFlags.get(path.join(TARGET_DIR, "skills/lore/SKILL.md"))).toBeUndefined();
 
     // settings.json merge landed the lore hook entry.
@@ -516,7 +516,7 @@ describe("STATE", () => {
       await expect(fsp.access(path.join(targetDir, ".lore-backups"))).rejects.toThrow();
       await expect(fsp.access(path.join(targetDir, "skills", "lore", "SKILL.md"))).rejects.toThrow();
       await expect(fsp.access(path.join(targetDir, "agents", "lore-explorer.md"))).rejects.toThrow();
-      await expect(fsp.access(path.join(targetDir, "hooks", "stop-doc-sync.mjs"))).rejects.toThrow();
+      await expect(fsp.access(path.join(targetDir, "hooks", "stop-turn-review.mjs"))).rejects.toThrow();
       await expect(fsp.access(path.join(targetDir, "governance", "corpus-workflow.md"))).rejects.toThrow();
       // AC-046-F: the now-empty directories our removed files leave behind (skills/,
       // skills/lore/, agents/, hooks/, governance/) are pruned too — the ONLY thing
@@ -774,7 +774,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
       );
     }
 
-    // All 14 distinct hook files are present in the merged command set.
+    // All 12 distinct hook files are present in the merged command set.
     // Hardcoded on purpose (same tripwire as assets-ssot.test.ts's roster): a
     // newly declared HOOK_REGISTRATIONS row must be answered by DECLARING it
     // here, never by deriving this list from the registry under test.
@@ -785,15 +785,14 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
         "session-start-resume.mjs",
         // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
         "session-start-marker.mjs",
-        "stop-doc-sync.mjs",
-        // stop-doc-sync turn-state producers (issue #156).
+        "stop-turn-review.mjs",
+        // stop-turn-review turn-state producers (issue #156).
         "user-prompt-turn-start.mjs",
         "post-edit-mark.mjs",
         // Stop-time resume-ticket coverage floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31).
         "stop-handoff-coverage.mjs",
         "subagent-context.mjs",
         "subagent-stop-commit-guard.mjs",
-        "claude-md-guard.sh",
         // Run identity slice 1 (BR-1044).
         "run-register.mjs",
         // Run end on SessionEnd/SubagentStop (BR-1059).

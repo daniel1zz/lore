@@ -5,9 +5,9 @@
  * bun test (not vitest): in-process CLI regression, same "import the command
  * module + call its exported `run()` against a real SQLite db in a throwaway
  * tmp corpus" harness `gate-p2-cross-tier.bun.test.ts` establishes — NOT a
- * `dist/lore` subprocess spawn (no rebuild required, and no risk of tripping
- * the `g4-task-claim.sh` PreToolUse hook, which only intercepts actual Bash
- * tool-call strings containing `lore claim`, never an in-process module call).
+ * `dist/lore` subprocess spawn (no rebuild required). The task-claim checkpoint refuses in
+ * the write itself (`task-workflow-service.ts` calls
+ * `gate-enforcer.ts::GateEnforcer.enforce("task-claim")` on the claim path), so an in-process call is gated too.
  *
  * ⛔ Never touches the repo's own `.lore/` corpus — every test operates inside
  * its own `mkdtempSync` directory (project CLAUDE.md hard rule).

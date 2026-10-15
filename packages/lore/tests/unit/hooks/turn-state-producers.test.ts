@@ -1,26 +1,30 @@
 /**
- * Task task-gh-1343388703-156 (lore issue #156): stop-doc-sync must not block a turn that made no
- * edits, and every producer of the turn state it reads must ship + be registered.
+ * Task task-gh-1343388703-156 (lore issue #156), ported to the turn-end review by
+ * spec-interception-moves-off-every-tool-call-one-turn-end-review AC-TE-5: every producer of the turn
+ * state stop-turn-review.mjs reads must ship AND be registered, and producers and consumers must resolve
+ * the same session dir from the payload. (The stop-doc-sync behaviour cases died with that hook; the
+ * stop-turn-review behaviour itself is pinned by tests/integration/hooks/stop-turn-review*.test.ts.)
  *
  * Isolation: CLAUDE_STATE_BASE_OVERRIDE points at a mkdtemp dir; CLAUDE_SESSION_ID is set to a
  * DIFFERENT value than the payload session_id to prove the payload wins (AC4). Never touches
  * the repo's `.lore/`.
  *
- * Six dimensions: HAPPY (no-edit silent / edit blocks once), NEGATIVE (missing session_id),
- * BOUNDARY (edit in an earlier turn does not leak), ERROR (unreadable state), STATE (producer and
- * consumer share the session dir across separate processes), REGRESSION (2b compliant pass, file list).
+ * Dimensions: HAPPY (producers registered), NEGATIVE (missing session_id), STATE (producer and consumer
+ * share the session dir across separate processes), ERROR (edit marker without a started turn),
+ * REGRESSION (session-start consumers resolve the payload session id).
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { HOOK_REGISTRATIONS } from "@lore/core";
+import { HOOK_REGISTRATIONS, sessionStartMarkerFilename } from "@lore/core";
+import { readSessionStartIso } from "../../../src/flows/feed-flow.js";
 
 const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..", "..", "..");
 const HOOKS = join(REPO_ROOT, "assets", "hooks");
-const CONSUMER = "stop-doc-sync.mjs";
+const CONSUMER = "stop-turn-review.mjs";
 const TURN_START = "user-prompt-turn-start.mjs";
 const EDIT_MARK = "post-edit-mark.mjs";
 
@@ -30,7 +34,7 @@ afterEach(() => {
 });
 
 function stateBase(): string {
-  const d = mkdtempSync(join(tmpdir(), "stop-doc-sync-"));
+  const d = mkdtempSync(join(tmpdir(), "turn-state-"));
   cleanup.push(d);
   return d;
 }
@@ -46,81 +50,27 @@ function run(file: string, base: string, payload: Record<string, unknown> | stri
 }
 
 const SID = "sess-1";
-const stop = (base: string, extra: Record<string, unknown> = {}) =>
-  run(CONSUMER, base, { session_id: SID, hook_event_name: "Stop", stop_hook_active: false, ...extra });
 const startTurn = (base: string, sid = SID) =>
   run(TURN_START, base, { session_id: sid, hook_event_name: "UserPromptSubmit", prompt: "hi" });
 const edit = (base: string, tool = "Edit", input: Record<string, unknown> = { file_path: "/x/a.ts" }) =>
   run(EDIT_MARK, base, { session_id: SID, hook_event_name: "PostToolUse", tool_name: tool, tool_input: input });
 
-describe("AC1: no-edit turn passes silently", () => {
-  it("AC1 turn started, no edit -> exit 0, empty stdout, empty stderr", () => {
-    const base = stateBase();
-    expect(startTurn(base).code).toBe(0);
-    const r = stop(base);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toBe("");
-  });
-
-  it("AC1 an edit in an EARLIER turn does not leak into the next no-edit turn", () => {
-    const base = stateBase();
-    startTurn(base);
-    edit(base);
-    startTurn(base);
-    const r = stop(base);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
-  });
-});
-
-describe("AC2: edited turn blocks once, unchanged", () => {
-  it.each(["Edit", "Write", "MultiEdit", "NotebookEdit"])("AC2 %s -> block with changed-file list", (tool) => {
-    const base = stateBase();
-    startTurn(base);
-    edit(base, tool, tool === "NotebookEdit" ? { notebook_path: "/x/n.ipynb" } : { file_path: "/x/a.ts" });
-    const r = stop(base);
-    expect(r.code).toBe(0);
-    const out = JSON.parse(r.stdout);
-    expect(out.decision).toBe("block");
-    expect(out.reason).toContain("<stop-gate>");
-    expect(out.reason).toContain(tool === "NotebookEdit" ? "/x/n.ipynb" : "/x/a.ts");
-  });
-
-  it("AC2 stop_hook_active=true -> silent (loop prevention)", () => {
-    const base = stateBase();
-    startTurn(base);
-    edit(base);
-    const r = stop(base, { stop_hook_active: true });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
-  });
-
-  it("AC2 2b: last_assistant_message already carries [DOC_SYNC] -> silent", () => {
-    const base = stateBase();
-    startTurn(base);
-    edit(base);
-    const r = stop(base, { last_assistant_message: "done\n**[DOC_SYNC]** updated: NONE | reason: x" });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
-  });
-});
-
 describe("AC3: every producer of consumer-read state ships and is registered", () => {
   const consumerSrc = readFileSync(join(HOOKS, CONSUMER), "utf8");
   const libSrc = readFileSync(join(HOOKS, "lib", "turn-state.mjs"), "utf8");
-  // State files the consumer reads: quoted *.flag / *.jsonl / *.id literals in consumer + its lib.
+  // State files the consumer reads: quoted *.flag / *.jsonl / *.id / *.json literals in consumer + its lib.
   const stateFiles = [
-    ...new Set([...(consumerSrc + libSrc).matchAll(/['"]([\w-]+\.(?:flag|jsonl|id))['"]/g)].map((m) => m[1]!)),
+    ...new Set([...(consumerSrc + libSrc).matchAll(/['"]([\w-]+\.(?:flag|jsonl|id|json))['"]/g)].map((m) => m[1]!)),
   ];
   const expectedEvent: Record<string, string> = {
     "current-turn.id": "UserPromptSubmit",
-    "edited.flag": "PostToolUse",
+    "turn-start-snapshot.json": "UserPromptSubmit",
     "edited-files.jsonl": "PostToolUse",
   };
   const hookFiles = readdirSync(HOOKS).filter((f) => f.endsWith(".mjs"));
 
-  it("AC3 the consumer reads the state files this test knows how to pair", () => {
+  it("AC3 the consumer is registered on Stop and reads the state files this test knows how to pair", () => {
+    expect(HOOK_REGISTRATIONS.some((r) => r.file === CONSUMER && r.event === "Stop")).toBe(true);
     expect(stateFiles.sort()).toEqual(Object.keys(expectedEvent).sort());
   });
 
@@ -146,6 +96,11 @@ describe("AC3: every producer of consumer-read state ships and is registered", (
     for (const t of ["Edit", "Write", "MultiEdit", "NotebookEdit"]) expect(re.test(t)).toBe(true);
     expect(re.test("Read")).toBe(false);
   });
+
+  it("AC3 the stop-doc-sync consumer is gone: no shipped hook file or registration names it", () => {
+    expect(existsSync(join(HOOKS, "stop-doc-sync.mjs"))).toBe(false);
+    expect(HOOK_REGISTRATIONS.some((r) => r.file === "stop-doc-sync.mjs")).toBe(false);
+  });
 });
 
 describe("AC4: producer and consumer resolve the same session dir from the payload", () => {
@@ -155,49 +110,24 @@ describe("AC4: producer and consumer resolve the same session dir from the paylo
     expect(readdirSync(join(base, "sessions"))).toEqual(["payload-sid"]);
   });
 
-  it("AC4 two separate producer processes + consumer agree (no ppid dependence)", () => {
+  it("AC4 two separate producer processes agree on one session dir and one edit record (no ppid dependence)", () => {
     const base = stateBase();
     startTurn(base);
     edit(base);
     expect(readdirSync(join(base, "sessions"))).toEqual([SID]);
-    expect(JSON.parse(stop(base).stdout).decision).toBe("block");
+    const turnId = readFileSync(join(base, "sessions", SID, "current-turn.id"), "utf8").trim();
+    const records = readFileSync(join(base, "sessions", SID, turnId, "edited-files.jsonl"), "utf8").trim().split("\n");
+    expect(records).toHaveLength(1);
   });
 });
 
-describe("AC5: missing or unreadable state is not-measured, not edited", () => {
-  it("AC5 no turn state at all -> exit 0, empty stdout, one stderr line saying not measured", () => {
-    const base = stateBase();
-    const r = stop(base);
+describe("AC5: missing state is reported as not measured", () => {
+  it("AC5 the consumer with no turn state at all -> exit 0, empty stdout, one stderr line saying not measured", () => {
+    const r = run(CONSUMER, stateBase(), { session_id: SID, hook_event_name: "Stop", stop_hook_active: false });
     expect(r.code).toBe(0);
     expect(r.stdout).toBe("");
     expect(r.stderr.trim().split("\n")).toHaveLength(1);
     expect(r.stderr).toContain("not measured");
-  });
-
-  it("AC5 payload without session_id -> exit 0, not measured, no block", () => {
-    const base = stateBase();
-    const r = run(CONSUMER, base, { hook_event_name: "Stop" });
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toContain("not measured");
-  });
-
-  it("AC5 malformed stdin -> exit 0, not measured", () => {
-    const r = run(CONSUMER, stateBase(), "{nope");
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
-    expect(r.stderr).toContain("not measured");
-  });
-
-  it("AC5 turn id points at a path that is a file, not a dir -> not measured, no block", () => {
-    const base = stateBase();
-    const sdir = join(base, "sessions", SID);
-    mkdirSync(sdir, { recursive: true });
-    writeFileSync(join(sdir, "current-turn.id"), "t1");
-    writeFileSync(join(sdir, "t1"), "i am a file");
-    const r = stop(base);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toBe("");
   });
 
   it("AC5 edit marker without a started turn writes nothing and says so on stderr", () => {
@@ -211,13 +141,8 @@ describe("AC5: missing or unreadable state is not-measured, not edited", () => {
 
 // ── Other consumers of lib/turn-state.mjs (regression 2026-10-11: 40 tests turned red) ──────────
 
-import { existsSync, utimesSync } from "node:fs";
-import { sessionStartMarkerFilename } from "@lore/core";
-import { readSessionStartIso } from "../../../src/flows/feed-flow.js";
-
 describe("turn-state consumers migrated to the payload session id", () => {
   const RESUME = "session-start-resume.mjs";
-  const GATE = "pre-subagent-gate.mjs";
 
   function runResume(base: string, input: string) {
     const r = spawnSync("node", [join(HOOKS, RESUME)], {
@@ -260,22 +185,6 @@ describe("turn-state consumers migrated to the payload session id", () => {
     expect(existsSync(join(live, "autopilot.lock"))).toBe(true);
     expect(existsSync(stale)).toBe(true);
     expect(r.stderr).toContain("not measured");
-  });
-
-  it("pre-subagent-gate: read-files.jsonl is found through the payload-derived turn dir", () => {
-    const base = stateBase();
-    startTurn(base);
-    const turnId = readFileSync(join(base, "sessions", SID, "current-turn.id"), "utf8").trim();
-    writeFileSync(join(base, "sessions", SID, turnId, "read-files.jsonl"), JSON.stringify({ file: "/x/a.ts" }) + "\n");
-    const gate = (file: string) =>
-      run(GATE, base, {
-        session_id: SID,
-        tool_name: "Edit",
-        tool_input: { file_path: file, old_string: "a", new_string: "b" },
-      });
-    expect(gate("/x/a.ts").stderr).toContain("exempt");
-    // The non-exempt notice moved to stdout additionalContext (task-rs-t12; BR-1068): stderr from an exit-0 hook never reaches the model.
-    expect(gate("/x/other.ts").stdout).toContain("file not Read this turn");
   });
 });
 

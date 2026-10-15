@@ -387,15 +387,13 @@ const DECLARED_FILES_IN_SCOPE = [
   // session-start-marker (same-session-authorship fact for the resume-ticket
   // coverage floor, task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01)
   "hooks/session-start-marker.mjs",
-  "hooks/stop-doc-sync.mjs",
   "hooks/stop-turn-review.mjs",
-  // stop-doc-sync turn-state producers (issue #156)
+  // stop-turn-review turn-state producers (issue #156)
   "hooks/user-prompt-turn-start.mjs",
   "hooks/post-edit-mark.mjs",
   // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
   "hooks/stop-handoff-coverage.mjs",
   "hooks/subagent-context.mjs",
-  "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
   // pre-dispatch-isolation-gate (denies an implementation subagent dispatched
   // without isolation:"worktree"; orchestration-policy, so deliberately NOT in
@@ -404,8 +402,6 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/pre-bash-git-safety-gate.mjs",
   // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
   "hooks/subagent-stop-commit-guard.mjs",
-  // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
-  "hooks/claude-md-guard.sh",
   // run-register + pre-tool-harness-run (run identity slice 1, BR-1044)
   "hooks/run-register.mjs",
   // run-end + shared run-id helper (SessionEnd/SubagentStop run end, BR-1059)
@@ -431,7 +427,6 @@ const DECLARED_FILES_IN_SCOPE = [
 ].sort();
 
 const DECLARED_EXECUTABLE_PATHS = new Set([
-  "hooks/claude-md-guard.sh",
   "hooks/session-start-resume.mjs",
   "hooks/subagent-context.mjs",
   "hooks/pre-no-general-agent-gate.mjs",

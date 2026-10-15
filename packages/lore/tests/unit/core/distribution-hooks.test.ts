@@ -6,10 +6,10 @@
  * Dimension mapping:
  *   HAPPY:      buildHookSettingsEntries produces the correct
  *               command/event/matcher shape for a real claudeDir
- *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 12-hook / 18-entry
+ *   BOUNDARY:   HOOK_REGISTRATIONS is exactly the declared 12-hook / 15-entry
  *               (all matchers expanded) set; a trailing slash on claudeDir
  *               does not double up in the command string
- *   NEGATIVE:   pre-subagent-gate.mjs / pre-no-general-agent-gate.mjs are
+ *   NEGATIVE:   pre-dispatch-isolation-gate.mjs / pre-no-general-agent-gate.mjs are
  *               NOT present anywhere in the declared set
  *   STATE:      calling with the literal "{{CLAUDE_DIR}}" placeholder token
  *               embeds the token verbatim in every command (RealAssetSource's
@@ -27,14 +27,14 @@ const EXPECTED_FILES = [
   "session-start-resume.mjs",
   // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
   "session-start-marker.mjs",
-  "user-prompt-turn-start.mjs", // turn-state producers of stop-doc-sync (issue #156)
+  "user-prompt-turn-start.mjs", // turn-state producers of stop-turn-review (issue #156)
   "post-edit-mark.mjs",
-  "stop-doc-sync.mjs",
+  // Turn-end review of the main session; replaced stop-doc-sync.mjs and claude-md-guard.sh (spec-interception-moves-off-every-tool-call-one-turn-end-review, AC-TE-5).
+  "stop-turn-review.mjs",
   // Stop-time resume-ticket coverage floor (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31).
   "stop-handoff-coverage.mjs",
   "subagent-context.mjs",
   "subagent-stop-commit-guard.mjs",
-  "claude-md-guard.sh",
   // Run identity slice 1 (BR-1044): attribute a fresh install's first write to a run.
   "run-register.mjs",
   // Run end on SessionEnd/SubagentStop (BR-1059).
@@ -65,29 +65,29 @@ describe("HAPPY: buildHookSettingsEntries", () => {
     expect(entries.filter((e) => e.command.includes("lore-gate")).map((e) => e.command)).toEqual([]);
   });
 
-  it("registers BOTH Stop hooks as distinct matcher-less entries — the coverage-floor hook joins stop-doc-sync rather than replacing it", () => {
+  it("registers BOTH Stop hooks as distinct matcher-less entries — the coverage-floor hook joins stop-turn-review rather than replacing it", () => {
     const entries = buildHookSettingsEntries("/home/user/.claude");
     const stopEntries = entries.filter((e) => e.event === "Stop");
 
     // Asserted as a set comparison rather than two `find`s: a registration that
     // OVERWROTE the incumbent (same event, one entry) would satisfy a lone
-    // `find` for the new hook while silently unwiring the doc-sync gate.
+    // `find` for the new hook while silently unwiring the turn-end review.
     expect(stopEntries).toEqual([
-      { event: "Stop", command: "node /home/user/.claude/hooks/stop-doc-sync.mjs" },
+      { event: "Stop", command: "node /home/user/.claude/hooks/stop-turn-review.mjs" },
       { event: "Stop", command: "node /home/user/.claude/hooks/stop-handoff-coverage.mjs" },
     ]);
   });
 });
 
 describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
-  it("declares exactly the 13 core-governance-and-security hook files", () => {
+  it("declares exactly the 12 core-governance-and-security hook files", () => {
     const files = [...new Set(HOOK_REGISTRATIONS.map((r) => r.file))].sort();
     expect(files).toEqual([...EXPECTED_FILES].sort());
   });
 
-  it("expands to exactly 16 entries (13 hooks; per-event expansion for run-register, pre-tool-harness-run and run-end)", () => {
-    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-doc-sync: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, claude-md-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop) = 16
-    expect(HOOK_REGISTRATIONS).toHaveLength(16);
+  it("expands to exactly 15 entries (12 hooks; per-event expansion for run-register, pre-tool-harness-run and run-end)", () => {
+    // pre-bash-git-safety-gate: 1, session-start-resume: 1, session-start-marker: 1, stop-turn-review: 1, stop-handoff-coverage: 1, subagent-context: 1, subagent-stop-commit-guard: 1, run-register: 2 (SessionStart + SubagentStart), pre-tool-harness-run: 2 (Bash + mcp__.*lore_.*), user-prompt-turn-start: 1, post-edit-mark: 1, run-end: 2 (SessionEnd + SubagentStop) = 15
+    expect(HOOK_REGISTRATIONS).toHaveLength(15);
   });
 
   it("tolerates a trailing slash on claudeDir without a double slash in the command", () => {
@@ -109,9 +109,9 @@ describe("BOUNDARY: HOOK_REGISTRATIONS shape", () => {
 });
 
 describe("NEGATIVE: excluded orchestration-policy hooks", () => {
-  it("never registers pre-subagent-gate.mjs or pre-no-general-agent-gate.mjs", () => {
+  it("never registers pre-dispatch-isolation-gate.mjs or pre-no-general-agent-gate.mjs", () => {
     const files = HOOK_REGISTRATIONS.map((r) => r.file);
-    expect(files).not.toContain("pre-subagent-gate.mjs");
+    expect(files).not.toContain("pre-dispatch-isolation-gate.mjs");
     expect(files).not.toContain("pre-no-general-agent-gate.mjs");
   });
 });

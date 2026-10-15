@@ -395,22 +395,20 @@ const DECLARED_FILES = [
   // agents
   "agents/lore-implementer.md",
   "agents/lore-reader.md",
-  // hooks (11 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
+  // hooks (.mjs hooks + shared lib modules)
   "hooks/session-start-resume.mjs",
   // session-start-marker (same-session-authorship fact for the resume-ticket
   // coverage floor, task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01)
   "hooks/session-start-marker.mjs",
-  "hooks/stop-doc-sync.mjs",
-  // stop-doc-sync turn-state producers (issue #156) — both in HOOK_REGISTRATIONS
+  // stop-turn-review turn-state producers (issue #156) — both in HOOK_REGISTRATIONS
   "hooks/user-prompt-turn-start.mjs",
   "hooks/post-edit-mark.mjs",
   // stop-handoff-coverage (Stop-time resume-ticket coverage floor, spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, 2026-07-31)
   "hooks/stop-handoff-coverage.mjs",
   // stop-turn-review (turn-end review of the main session, spec-interception-moves-off-every-tool-call-one-turn-end-review;
-  // not yet in the roster — task B4 registers it)
+  // in HOOK_REGISTRATIONS on Stop; replaced stop-doc-sync.mjs and claude-md-guard.sh)
   "hooks/stop-turn-review.mjs",
   "hooks/subagent-context.mjs",
-  "hooks/pre-subagent-gate.mjs",
   "hooks/pre-no-general-agent-gate.mjs",
   // pre-dispatch-isolation-gate (denies an implementation subagent dispatched
   // without isolation:"worktree"; orchestration-policy, so deliberately NOT in
@@ -420,8 +418,6 @@ const DECLARED_FILES = [
   "hooks/pre-bash-git-safety-gate.mjs",
   // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
   "hooks/subagent-stop-commit-guard.mjs",
-  // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
-  "hooks/claude-md-guard.sh",
   // run-register + pre-tool-harness-run (run identity slice 1, BR-1044) — both in HOOK_REGISTRATIONS
   "hooks/run-register.mjs",
   // run-end + shared run-id helper (SessionEnd/SubagentStop run end, BR-1059)
