@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "e47c23339f67533e8ae59f848c6a3bbb0f27643a9db58629430d2d297ca6ef04",
+  tree_digest: "099764086ba9c6a66cd0db2125322585fac70529df29cd0ac5ae5548abd2695c",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "5dec1ded60d7e8d5de82d90695c884f9a43b37772e0f862e8b57c6868f1c9638" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -68,7 +68,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/lore-gate-g2-spec-promote.sh", kind: "hook", ownership: "managed", sha256: "16383138488773260bdb738c03ba5a05d331097605d99980d7a4559c5c8a43ba" },
   { path: "hooks/lore-gate-g3-plan-promote.sh", kind: "hook", ownership: "managed", sha256: "a41d6ffc71f529d485a71dc193268e72aab5f43e7d8c02df6803746a71147a91" },
   { path: "hooks/lore-gate-g4-task-claim.sh", kind: "hook", ownership: "managed", sha256: "af8890e3cdefc4cba2eca2e9f1c4a36367ad475ee69f659cb40f8122b7303ee1" },
-  { path: "hooks/post-edit-mark.mjs", kind: "hook", ownership: "managed", sha256: "4caa2049028cd8fd2e51ca409c8d2a82e030c4d151829948e060b76e8c519601" },
+  { path: "hooks/post-edit-mark.mjs", kind: "hook", ownership: "managed", sha256: "32557f6cc5dbb1b7108137d4be83fe952d62f660eeca26d163b57caa0863b48c" },
   { path: "hooks/pre-bash-git-safety-gate.mjs", kind: "hook", ownership: "managed", sha256: "a4c488eba1a74d0b1ebde8d447457073f1b80c1d3c3ad150e1e33e6b5e72418a" },
   { path: "hooks/pre-dispatch-isolation-gate.mjs", kind: "hook", ownership: "managed", sha256: "0523ea4e462be20350e483acf232749e3f6a965a42322e12a5d95c311059df8a" },
   { path: "hooks/pre-no-general-agent-gate.mjs", kind: "hook", ownership: "managed", sha256: "795dcedc192ba2cee8bb00938afee11b2a513db682e13f6bc6cdaec191ae0892" },
@@ -83,7 +83,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/stop-handoff-coverage.mjs", kind: "hook", ownership: "managed", sha256: "d2751888f5fe102e919092ff443bd73536e6abbcb846e3425ad3a43e4da6ef47" },
   { path: "hooks/subagent-context.mjs", kind: "hook", ownership: "managed", sha256: "383beb756e74a7bcaadb884c839bb22d0a5f1c467ba4641e2ab0411eb2eb96be" },
   { path: "hooks/subagent-stop-commit-guard.mjs", kind: "hook", ownership: "managed", sha256: "19de55e36e53490b8386acf19de9efef4c89f96a8d6d7ac1160b60156bd201d8" },
-  { path: "hooks/user-prompt-turn-start.mjs", kind: "hook", ownership: "managed", sha256: "18b6e68850885ac5520caad7b75e7e461c270339bfe3836f79bd20309a7c3f86" },
+  { path: "hooks/user-prompt-turn-start.mjs", kind: "hook", ownership: "managed", sha256: "c7b2e51fccebcb4b81437e6f25ed0b70b629b7e9eb3e53e1b96f72363e0708c3" },
   { path: "project/CLAUDE.md.skeleton", kind: "project", ownership: "user_once", sha256: "f5dc3ff590bf1791ad5372220de491c7973216d62153452eee022b9518814fc4" },
   { path: "project/CLAUDE.md.template", kind: "project", ownership: "merged", sha256: "18c6a76d66f28df567dcef19dc57a0f3c1a598184e578ed81bc74940cf043f64" },
   { path: "project/g1-spec-create.sh", kind: "project", ownership: "managed", sha256: "9187e53dc43bf0b96e679ece7a17a8ac3dea8ef780214047472dc58940bfa8fa" },
