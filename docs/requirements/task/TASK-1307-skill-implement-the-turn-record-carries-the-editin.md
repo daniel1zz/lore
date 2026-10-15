@@ -3,7 +3,7 @@ id: TASK-1307
 type: task
 role: plan
 title: "[Skill:implement] the turn record carries the editing agent's id and a turn-start working-tree snapshot"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: Foundations"
 created: 2026-10-15

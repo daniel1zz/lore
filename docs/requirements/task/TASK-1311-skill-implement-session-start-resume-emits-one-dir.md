@@ -3,7 +3,7 @@ id: TASK-1311
 type: task
 role: plan
 title: "[Skill:implement] session-start-resume emits one directive upgrade advisory from the global and project check caches"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: Advisory and outlet retirement"
 created: 2026-10-15

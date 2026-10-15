@@ -3,7 +3,7 @@ id: TASK-1304
 type: task
 role: plan
 title: "[Skill:implement] the shipped roster and this repo's settings swap the retired per-call and stop hooks for stop-turn-review"
-status: draft
+status: archived
 priority: high
 phase: "Phase 3: Roster swap"
 created: 2026-10-15

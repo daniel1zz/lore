@@ -3,7 +3,7 @@ id: TASK-1312
 type: task
 role: plan
 title: "[Skill:implement] lore setup --project --check classifies every project-managed file with exit 0/3 and writes only its own cache"
-status: draft
+status: archived
 priority: high
 phase: "Phase 1: Project check"
 created: 2026-10-15

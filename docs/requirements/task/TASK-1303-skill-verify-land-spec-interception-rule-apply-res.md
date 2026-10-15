@@ -3,7 +3,7 @@ id: TASK-1303
 type: task
 role: plan
 title: "[Skill:verify] land spec-interception: rule apply, restate BR-1089/BR-1090, anchors, lore verify, full suite on main"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 4: Land and verify"
 created: 2026-10-15

@@ -3,7 +3,7 @@ id: TASK-1305
 type: task
 role: plan
 title: "[Skill:implement] stop-turn-review reviews the main session's turn once: source edits (setting-gated), anchor drift, CLAUDE.md budget"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: Turn-end review"
 created: 2026-10-15

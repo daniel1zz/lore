@@ -3,7 +3,7 @@ id: TASK-1309
 type: task
 role: plan
 title: "[Skill:verify] land spec-one-upgrade-reminder: rule apply, code anchors, lore verify, full suite on main"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 3: Land and verify"
 created: 2026-10-15

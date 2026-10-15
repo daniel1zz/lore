@@ -3,7 +3,7 @@ id: TASK-1310
 type: task
 role: plan
 title: "[Skill:implement] retire the hook:session-start outlet and the session-start-fragments hook; fragments check refuses dynamic main fragments"
-status: draft
+status: archived
 priority: high
 phase: "Phase 2: Advisory and outlet retirement"
 created: 2026-10-15

@@ -3,7 +3,7 @@ id: TASK-1301
 type: task
 role: plan
 title: "[Skill:verify] land spec-an-active-spec: rule apply, anchors, lore verify, full suite on main"
-status: draft
+status: archived
 priority: medium
 phase: "Phase 2: Land and verify"
 created: 2026-10-15

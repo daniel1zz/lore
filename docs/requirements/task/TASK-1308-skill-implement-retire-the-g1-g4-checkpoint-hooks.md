@@ -3,7 +3,7 @@ id: TASK-1308
 type: task
 role: plan
 title: "[Skill:implement] retire the g1-g4 checkpoint hooks after proving the writes refuse the same cases on CLI and MCP"
-status: draft
+status: archived
 priority: critical
 phase: "Phase 1: Foundations"
 created: 2026-10-15

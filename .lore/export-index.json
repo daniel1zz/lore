@@ -10284,6 +10284,202 @@
     "01M4ZFEDJ1NJVGG73P3E9CKHEB": {
       "human_id": "KN-676",
       "file_path": "docs/requirements/knowledge/KN-676-assessment-rule-store-option-a-2026-10-15.md"
+    },
+    "01M4ZTN6TN16FP6Q18TN52EW1G": {
+      "human_id": "SPEC-184",
+      "file_path": "docs/requirements/spec/SPEC-184-shipped-skill-descriptions-state-when-to-use-the-s.md"
+    },
+    "01M4ZNED7PV9P2NFDMCH3YWSMV": {
+      "human_id": "SPEC-183",
+      "file_path": "docs/requirements/spec/SPEC-183-lore-owned-agent-context-is-generated-from-templat.md"
+    },
+    "01M4ZVS52KTW0EPC4E2CBPN7R2": {
+      "human_id": "KN-677",
+      "file_path": "docs/requirements/knowledge/KN-677-assessment-shipped-skill-descriptions-state-when-t.md"
+    },
+    "01M4ZTEZVHBRHJMJN22M3N0ZGV": {
+      "human_id": "KN-678",
+      "file_path": "docs/requirements/knowledge/KN-678-retro-template-variables-for-lore-owned-context-td.md"
+    },
+    "01M4ZTDAM9M92TG6GZBEQDFJC0": {
+      "human_id": "KN-679",
+      "file_path": "docs/requirements/knowledge/KN-679-assessment-generate-lore-owned-agent-context-from.md"
+    },
+    "01M4ZNPS844FYBKQTZ2GA61TQQ": {
+      "human_id": "KN-680",
+      "file_path": "docs/requirements/knowledge/KN-680-handoff-agent-session-66711aa8.md"
+    },
+    "01M4ZNPFVCBWMQK1HJ8YSNE2D7": {
+      "human_id": "KN-681",
+      "file_path": "docs/requirements/knowledge/KN-681-retro-landing-the-delivery-tiers-adr-in-one-sessio.md"
+    },
+    "01M4ZN67BJDHQB147GZ8YMT4TJ": {
+      "human_id": "KN-682",
+      "file_path": "docs/requirements/knowledge/KN-682-assessment-move-the-six-checkpoint-backed-rules-fr.md"
+    },
+    "01M4ZN50Y7PSSGCG8AASDAT8S5": {
+      "human_id": "KN-683",
+      "file_path": "docs/requirements/knowledge/KN-683-assessment-an-active-spec-counts-as-approved-for.md"
+    },
+    "01M4ZN47JXCZ1PS9A45KMX9PM9": {
+      "human_id": "KN-684",
+      "file_path": "docs/requirements/knowledge/KN-684-assessment-interception-moves-off-every-tool-call.md"
+    },
+    "01M4ZN2J5PASVWNAGJ2D4S6R8P": {
+      "human_id": "KN-685",
+      "file_path": "docs/requirements/knowledge/KN-685-assessment-unified-upgrade-reminder-and-retirement.md"
+    },
+    "01M4ZTQ4VWMBXQ2F440P62R8A4": {
+      "human_id": "PLAN-184",
+      "file_path": "docs/requirements/plan/PLAN-184-shipped-skill-descriptions-state-when-to-use-the-s.md"
+    },
+    "01M4ZNJNDM6S6TD7DG17SP1B4N": {
+      "human_id": "PLAN-185",
+      "file_path": "docs/requirements/plan/PLAN-185-generate-lore-owned-agent-context-from-templates-a.md"
+    },
+    "01M4ZFTKN6HC1T7Z9P07NB6BR4": {
+      "human_id": "PLAN-186",
+      "file_path": "docs/requirements/plan/PLAN-186-move-the-six-checkpoint-backed-rules-from-always-l.md"
+    },
+    "01M4ZTQ9MDATVN6BYPMP5FPYYQ": {
+      "human_id": "TASK-1325",
+      "file_path": "docs/requirements/task/TASK-1325-rewrite-shipped-skill-descriptions-to-the-trigger.md"
+    },
+    "01M4ZTE4D2F93XVSM38DNW2VNJ": {
+      "human_id": "TASK-1326",
+      "file_path": "docs/requirements/task/TASK-1326-malformed-lore-tokens-e-g-lore-bad-pass-through-ex.md"
+    },
+    "01M4ZNS6Q9WVK1EK7TN06NRQGZ": {
+      "human_id": "TASK-1327",
+      "file_path": "docs/requirements/task/TASK-1327-skill-verify-full-suite-lore-verify-and-spec-ancho.md"
+    },
+    "01M4ZT9HWWYJGF9HVPZ5CMG0SV": {
+      "human_id": "TASK-1328",
+      "file_path": "docs/requirements/task/TASK-1328-check-shipped-defaults-red-on-main-local-lore-conf.md"
+    },
+    "01M4ZNS3A40E8EXR233DVYF1EY": {
+      "human_id": "TASK-1329",
+      "file_path": "docs/requirements/task/TASK-1329-skill-test-install-time-asset-expansion-manifest-p.md"
+    },
+    "01M4ZNS49NQNXFQHZ7BQCD4JHS": {
+      "human_id": "TASK-1330",
+      "file_path": "docs/requirements/task/TASK-1330-skill-implement-replace-hand-copied-lore-facts-wit.md"
+    },
+    "01M4ZNS5RF7TPB517J1Y3RKNGB": {
+      "human_id": "TASK-1331",
+      "file_path": "docs/requirements/task/TASK-1331-skill-test-mcp-tool-count-variable-and-no-hand-typ.md"
+    },
+    "01M4ZNS67V23K65RPMBN7VCTDW": {
+      "human_id": "TASK-1332",
+      "file_path": "docs/requirements/task/TASK-1332-skill-implement-mcp-tool-count-variable-and-remove.md"
+    },
+    "01M4ZRQ0V1W4Q89YSH3739TGAA": {
+      "human_id": "TASK-1333",
+      "file_path": "docs/requirements/task/TASK-1333-repo-tracked-claude-skills-lore-skill-md-is-a-hand.md"
+    },
+    "01M4ZNS5891WC2YFZAM1APP1XC": {
+      "human_id": "TASK-1334",
+      "file_path": "docs/requirements/task/TASK-1334-skill-implement-route-the-settings-hook-claude-dir.md"
+    },
+    "01M4ZNS4RXZJKAX3C7D7QHAJQN": {
+      "human_id": "TASK-1335",
+      "file_path": "docs/requirements/task/TASK-1335-skill-test-claude-dir-invocation-variable-red-scen.md"
+    },
+    "01M4ZQG3FP9FCG31GX6DC8DNZ1": {
+      "human_id": "TASK-1336",
+      "file_path": "docs/requirements/task/TASK-1336-skill-implement-fragment-body-line-offset-is-a-req.md"
+    },
+    "01M4ZNS3T1W0X8F04G42M5QVWZ": {
+      "human_id": "TASK-1337",
+      "file_path": "docs/requirements/task/TASK-1337-skill-implement-expand-variables-in-installed-asse.md"
+    },
+    "01M4ZNS2CG490JS9AV70Y1VAN9": {
+      "human_id": "TASK-1338",
+      "file_path": "docs/requirements/task/TASK-1338-skill-test-fragment-outlet-expansion-and-project.md"
+    },
+    "01M4ZNS2TZH5PQDQY78DBTKSN3": {
+      "human_id": "TASK-1339",
+      "file_path": "docs/requirements/task/TASK-1339-skill-implement-expand-variables-in-fragment-outle.md"
+    },
+    "01M4ZNS1XNVPSK82CBFQ7J7RZT": {
+      "human_id": "TASK-1340",
+      "file_path": "docs/requirements/task/TASK-1340-skill-implement-core-variable-registry-and-expandt.md"
+    },
+    "01M4ZNS1EXJ3C9GSN5GYVZ3DCS": {
+      "human_id": "TASK-1341",
+      "file_path": "docs/requirements/task/TASK-1341-skill-test-core-variable-expander-red-scenarios.md"
+    },
+    "01M4ZPW1HXYZQRAJPVT6H92E08": {
+      "human_id": "TASK-1342",
+      "file_path": "docs/requirements/task/TASK-1342-red-test-task-in-a-tdd-pair-can-never-reach-lore-d.md"
+    },
+    "01M4ZPBWQK0QNGER2MNMEY45RM": {
+      "human_id": "TASK-1343",
+      "file_path": "docs/requirements/task/TASK-1343-no-way-to-edit-a-plan-phase-s-description-after-ta.md"
+    },
+    "01M4ZNFPX17M02ZCSDWTDFNYHT": {
+      "human_id": "TASK-1344",
+      "file_path": "docs/requirements/task/TASK-1344-br-1032-still-lists-a-flag-and-an-environment-sett.md"
+    },
+    "01M4ZNBHDN90V35GEP9XDY0Q1Y": {
+      "human_id": "TASK-1345",
+      "file_path": "docs/requirements/task/TASK-1345-br-1092-ac-te-5-say-only-the-git-safety-hook-may-r.md"
+    },
+    "01M4ZG56T6HDY8HKKEZEE53R9V": {
+      "human_id": "TASK-1346",
+      "file_path": "docs/requirements/task/TASK-1346-skill-verify-land-spec-always-loaded-rules-rule-ap.md"
+    },
+    "01M4ZN66GC8PRZT0N73ET4Y99M": {
+      "human_id": "TASK-1347",
+      "file_path": "docs/requirements/task/TASK-1347-lore-design-mode-must-be-the-first-arg-token-but-t.md"
+    },
+    "01M4ZMZSRFEPKSH4CZGNP27RY1": {
+      "human_id": "TASK-1348",
+      "file_path": "docs/requirements/task/TASK-1348-landing-a-spec-s-rule-change-set-plan-close-lore-r.md"
+    },
+    "01M4ZG56CW6968440TFG96QJS9": {
+      "human_id": "TASK-1349",
+      "file_path": "docs/requirements/task/TASK-1349-skill-implement-move-the-six-checkpoint-backed-rul.md"
+    },
+    "01M4ZJEFSECHQDBZXSE09JJV0A": {
+      "human_id": "TASK-1350",
+      "file_path": "docs/requirements/task/TASK-1350-ac-rt-2-declared-command-omits-lore-context-init-s.md"
+    },
+    "01M4ZHSKPWX9BKVWP0BZY0ZS1G": {
+      "human_id": "TASK-1351",
+      "file_path": "docs/requirements/task/TASK-1351-pre-bash-git-safety-gate-classifies-git-worktree-r.md"
+    },
+    "01M4ZHSEX4BB3ZJNYX5CCVTKM6": {
+      "human_id": "TASK-1352",
+      "file_path": "docs/requirements/task/TASK-1352-migration-coverage-happy-test-is-red-on-main-docs.md"
+    },
+    "01M4ZHA4NNPQQ5D5ZJ8941Q1SQ": {
+      "human_id": "TASK-1353",
+      "file_path": "docs/requirements/task/TASK-1353-root-claude-md-module-index-states-16-lore-mcp-too.md"
+    },
+    "01M4ZG3WPDKXYZ0QBZNSYG129X": {
+      "human_id": "TASK-1354",
+      "file_path": "docs/requirements/task/TASK-1354-setup-test-ac-046-e-r1-fails-on-main-second-lore-s.md"
+    },
+    "01M4ZG3SS00P4RDKXM441DJZ2J": {
+      "human_id": "TASK-1355",
+      "file_path": "docs/requirements/task/TASK-1355-worktree-under-repo-root-resolves-lore-core-from-t.md"
+    },
+    "01M4ZG3ZET5WRJBVT3SEZ7CBKQ": {
+      "human_id": "TASK-1356",
+      "file_path": "docs/requirements/task/TASK-1356-lore-init-s-lore-gitignore-does-not-ignore-the-mac.md"
+    },
+    "01M4ZFXYRG4TG1G4KPSTMBS60C": {
+      "human_id": "TASK-1357",
+      "file_path": "docs/requirements/task/TASK-1357-claim-plan-promote-refusal-text-still-says-the-anc.md"
+    },
+    "01M4ZFT81VHTYAS36J50TVSPRA": {
+      "human_id": "TASK-1358",
+      "file_path": "docs/requirements/task/TASK-1358-lore-report-issue-from-a-helper-agent-after-lore-r.md"
+    },
+    "01M4ZFSQBTV5EZXK40JXYSD13F": {
+      "human_id": "TASK-1359",
+      "file_path": "docs/requirements/task/TASK-1359-lore-run-attest-input-hard-codes-mcp-lore-prefix-r.md"
     }
   }
 }
