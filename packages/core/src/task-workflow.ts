@@ -1060,15 +1060,16 @@ export function renewClaimForEvidence(
  * it back — `@lore/core` is the leaf of the dependency graph and must not depend on
  * `@lore/lore` — so the shared fact lives here and the service layer imports it.
  *
- * @invariant Deliberately `["approved"]` ONLY — `"active"` is NOT included, even
- *   though an `active` doc has moved past `approved` in the SPEC-002 lifecycle
- *   (`draft → in-review → approved → active → archived`). A spec can be
- *   `active`-but-being-revised; only `approved` is stable enough to clear an
- *   upstream gate. If a future caller needs `active` to also clear a gate, that is
- *   a new, deliberate product decision requiring its own spec amendment — not a
- *   default to fall into here.
+ * @invariant Exactly `{"approved", "active"}` — `active` is past `approved` in the
+ *   SPEC-002 lifecycle (`draft → in-review → approved → active → archived`), so it
+ *   clears the gate too (spec-an-active-spec-counts-as-approved-for-claiming-its-tasks,
+ *   BR-104 as modified, BR-111; resolves #52). Reason it is safe: a spec is a record
+ *   (`packages/core/src/doc-standing.ts`), and a settled spec is locked — it cannot be
+ *   "active but being revised". Revising one means `lore reopen` (back to `draft`,
+ *   which is refused again) or writing a new spec. `draft`, `in-review`, `archived`
+ *   and `deprecated` still refuse.
  */
-export const UPSTREAM_APPROVED_STATUSES: ReadonlySet<string> = new Set(["approved"]);
+export const UPSTREAM_APPROVED_STATUSES: ReadonlySet<string> = new Set(["approved", "active"]);
 
 /**
  * Flat per-task readiness record (D9 — grouping by phase is a CLI presentation

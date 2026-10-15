@@ -18,13 +18,14 @@
  *   a gate that rejected `undefined` would block the normal create path.
  * @invariant `upstreamApproved`'s notion of "approved enough" is sourced exclusively
  *   from `UPSTREAM_APPROVED_STATUSES` (`@lore/core`, task-workflow.ts) — the SAME
- *   constant `evaluateReadiness`'s `upstream_unapproved` advisory consumes. Only
- *   `"approved"` clears the check, `"active"` does NOT. Readiness (a read-side
- *   advisory) and this predicate (a write-path gate) are two independent corpus-fact
- *   expressions of the same rule; they used to each hardcode their own identical
- *   single-entry approved-status set, kept in sync only by a comment — now both
- *   import the one definition, so they cannot silently diverge. See the constant's own JSDoc (in
- *   `@lore/core`) for the full justification of why `"active"` was excluded.
+ *   constant `evaluateReadiness`'s `upstream_unapproved` advisory consumes. Both
+ *   `"approved"` and `"active"` clear the check (a settled spec is a locked record;
+ *   spec-an-active-spec-counts-as-approved-for-claiming-its-tasks). Readiness (a
+ *   read-side advisory) and this predicate (a write-path gate) are two independent
+ *   corpus-fact expressions of the same rule; they used to each hardcode their own
+ *   identical approved-status set, kept in sync only by a comment — now both import
+ *   the one definition, so they cannot silently diverge. See the constant's own JSDoc
+ *   (in `@lore/core`) for why `"active"` counts.
  * @invariant `upstreamHasAcceptanceCriteria`'s notion of "declared acceptance
  *   criteria" is sourced exclusively from `specAcceptanceCriteriaSchema`
  *   (`@lore/core`, acceptance.ts) via a schema-based `safeParse` — the exact same
@@ -253,9 +254,9 @@ export function hasSkeleton(content: string): PredicateResult {
  *   (`softDelete` never touches `status`, so without this check a soft-deleted
  *   `approved` spec would silently keep passing this gate forever); `{ok:
  *   false, reason: "UPSTREAM_NOT_APPROVED"}` when the type matches, the doc is
- *   not deleted, but the status isn't approved-enough (see
- *   `UPSTREAM_APPROVED_STATUSES`'s JSDoc, `@lore/core`, for why `"active"` still
- *   fails this check).
+ *   not deleted, but the status isn't approved-enough (`draft`, `in-review`,
+ *   `archived`, `deprecated`; `"active"` passes — see `UPSTREAM_APPROVED_STATUSES`'s
+ *   JSDoc, `@lore/core`).
  * @example
  * upstreamApproved({ type: "spec", status: "approved", deleted_at: null }, "spec");
  *   // => { ok: true }
