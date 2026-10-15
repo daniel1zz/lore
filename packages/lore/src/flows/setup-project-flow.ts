@@ -269,7 +269,7 @@ export type InitCorpus = (repoDir: string) => Promise<Result<void, LoreError>>;
 
 /**
  * Reads one named file out of the `assets/project/` SSOT tree by its bare
- * filename (e.g. `"g1-spec-create.sh"`, `"lore.tree.yaml.template"`) — never
+ * filename (e.g. `"pre-push"`, `"lore.tree.yaml.template"`) — never
  * a hardcoded absolute repo path; repo-root-relative resolution is injected
  * by the adapter (mirrors `FsProbe`'s "real impl built in the adapter"
  * placement). Deliberately simpler than the global installer's `AssetSource`
@@ -401,7 +401,7 @@ export type HookFileStatus = "done" | "skipped" | "failed" | "conflict";
 
 /** One hooks/* file's copy outcome. */
 export interface HookFileResult {
-  /** Repo-relative target path, e.g. `"hooks/g1-spec-create.sh"`. */
+  /** Repo-relative target path, e.g. `"hooks/pre-push"`. */
   file: string;
   status: HookFileStatus;
   /** Human-readable detail — populated for `"conflict"`/`"failed"`. */
@@ -486,10 +486,6 @@ export interface ProjectScaffoldReport {
 
 /** The `assets/project/*` hook filenames copied verbatim into `<repo>/hooks/`. */
 const HOOK_ASSET_NAMES = [
-  "g1-spec-create.sh",
-  "g2-spec-promote.sh",
-  "g3-plan-promote.sh",
-  "g4-task-claim.sh",
   "pre-push",
 ] as const;
 

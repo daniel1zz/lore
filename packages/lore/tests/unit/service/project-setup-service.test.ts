@@ -17,7 +17,7 @@
  * Coverage:
  *   HAPPY:      fresh git repo -> full scaffold, all steps done, hooks
  *               executable, hooksPath == "hooks"
- *   NEGATIVE:   pre-existing DIFFERENT hooks/g1-spec-create.sh -> conflict
+ *   NEGATIVE:   pre-existing DIFFERENT hooks/pre-push -> conflict
  *               reported, file left byte-for-byte untouched
  *   BOUNDARY:   (a) fully-scaffolded repo re-run -> everything skipped
  *               (idempotency); (b) repo with no `.git` -> git-config step
@@ -71,10 +71,6 @@ const REPO_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..",
 const PROJECT_ASSETS_DIR = join(REPO_ROOT, "assets", "project");
 
 const HOOK_FILES = [
-  "g1-spec-create.sh",
-  "g2-spec-promote.sh",
-  "g3-plan-promote.sh",
-  "g4-task-claim.sh",
   "pre-push",
 ];
 
@@ -253,27 +249,27 @@ describe("scaffoldProject — HAPPY", () => {
 // ─── NEGATIVE ────────────────────────────────────────────────────────────────
 
 describe("scaffoldProject — NEGATIVE", () => {
-  it("existing DIFFERENT hooks/g1-spec-create.sh reports conflict and is left untouched", async () => {
+  it("existing DIFFERENT hooks/pre-push reports conflict and is left untouched", async () => {
     const repoDir = makeThrowawayGitRepo();
     mkdirSync(join(repoDir, "hooks"), { recursive: true });
     const customContent = "#!/usr/bin/env bash\n# user-customized, do not overwrite\n";
-    writeFileSync(join(repoDir, "hooks", "g1-spec-create.sh"), customContent, { mode: 0o755 });
+    writeFileSync(join(repoDir, "hooks", "pre-push"), customContent, { mode: 0o755 });
 
     const service = new ProjectSetupService(makeRealDeps());
     const result = await service.scaffold(repoDir);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const g1Row = result.value.hooks.find((h) => h.file === "hooks/g1-spec-create.sh");
+    const g1Row = result.value.hooks.find((h) => h.file === "hooks/pre-push");
     expect(g1Row?.status).toBe("conflict");
     expect(g1Row?.detail).toBeDefined();
 
     // Untouched — byte-for-byte the user's custom content, not the shipped asset.
-    const onDisk = readFileSync(join(repoDir, "hooks", "g1-spec-create.sh"), "utf-8");
+    const onDisk = readFileSync(join(repoDir, "hooks", "pre-push"), "utf-8");
     expect(onDisk).toBe(customContent);
 
     // Every OTHER hook file still scaffolds normally — one conflict never blocks the rest.
-    const otherRows = result.value.hooks.filter((h) => h.file !== "hooks/g1-spec-create.sh");
+    const otherRows = result.value.hooks.filter((h) => h.file !== "hooks/pre-push");
     for (const row of otherRows) {
       expect(row.status).toBe("done");
     }
@@ -328,7 +324,7 @@ describe("scaffoldProject — BOUNDARY", () => {
 describe("scaffoldProject — ERROR", () => {
   it("injected fs write failure on one hook file: that file fails, remaining hooks and later steps still attempted", async () => {
     const repoDir = makeThrowawayGitRepo();
-    const failingTarget = join(repoDir, "hooks", "g2-spec-promote.sh");
+    const failingTarget = join(repoDir, "hooks", "pre-push");
     const deps: ProjectScaffoldFlowDeps = {
       ...makeRealDeps(),
       fs: withInjectedWriteFailure(makeRealFs(), failingTarget),
@@ -338,7 +334,7 @@ describe("scaffoldProject — ERROR", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const failedRow = result.value.hooks.find((h) => h.file === "hooks/g2-spec-promote.sh");
+    const failedRow = result.value.hooks.find((h) => h.file === "hooks/pre-push");
     expect(failedRow?.status).toBe("failed");
     expect(failedRow?.detail).toContain("injected write failure");
     expect(existsSync(failingTarget)).toBe(false);
@@ -346,7 +342,7 @@ describe("scaffoldProject — ERROR", () => {
     // Policy under test (documented in setup-project-flow.ts module invariants):
     // steps and per-file operations are fully independent — a failure never
     // aborts the remaining hook files or the remaining steps.
-    const otherHookRows = result.value.hooks.filter((h) => h.file !== "hooks/g2-spec-promote.sh");
+    const otherHookRows = result.value.hooks.filter((h) => h.file !== "hooks/pre-push");
     for (const row of otherHookRows) {
       expect(row.status).toBe("done");
     }

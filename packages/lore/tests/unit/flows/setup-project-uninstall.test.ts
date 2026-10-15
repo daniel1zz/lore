@@ -223,13 +223,13 @@ describe("uninstallProject — ERROR", () => {
   });
 
   it("a thrown fs call mid-loop aborts with STORE_ERROR naming the partial progress; manifest is NEVER removed in that path", async () => {
-    const okEntry = entry({ path: "hooks/g1-spec-create.sh", kind: "hook" });
+    const okEntry = entry({ path: "hooks/pre-push", kind: "hook" });
     const failingEntry = entry({ path: "lore.tree.yaml", kind: "governance" });
     const manifest = buildManifest([okEntry, failingEntry]);
 
     const { fs: baseFs } = makeFakeFs({
       [join(REPO_DIR, ".lore", ".lore-project-manifest.json")]: JSON.stringify(manifest),
-      [join(REPO_DIR, "hooks/g1-spec-create.sh")]: "#!/bin/sh\n",
+      [join(REPO_DIR, "hooks/pre-push")]: "#!/bin/sh\n",
       [join(REPO_DIR, "lore.tree.yaml")]: "root: {}\n",
       // No backup for either entry -> both hit the `remove()` branch.
     });
@@ -259,7 +259,7 @@ describe("uninstallProject — ERROR", () => {
     expect("message" in result.error && result.error.message).toContain("removing 1");
     // The manifest read (removeCalls counted the failed one) never got as far
     // as the manifest-removal call — manifest-last ordering holds on failure too.
-    expect(removeCalls).toBe(2); // hooks/g1-spec-create.sh (ok) + lore.tree.yaml (throws)
+    expect(removeCalls).toBe(2); // hooks/pre-push (ok) + lore.tree.yaml (throws)
   });
 });
 
@@ -339,7 +339,7 @@ describe("uninstallProject — STATE", () => {
     writeFileSync(join(repoDir, "hooks", "custom-user-hook.sh"), "#!/bin/sh\necho mine\n", { mode: 0o755 });
     const preInstallHash = hashTree(repoDir);
 
-    // Hand-simulated "install": scaffold wrote a fresh hooks/g1-spec-create.sh
+    // Hand-simulated "install": scaffold wrote a fresh hooks/pre-push
     // and a fresh lore.tree.yaml — neither had a pre-existing counterpart, so
     // neither has a backup (both hit uninstallProject's "remove" branch).
     // CLAUDE.md is written too but DELIBERATELY left OUT of the manifest, to
@@ -347,14 +347,14 @@ describe("uninstallProject — STATE", () => {
     // on disk" — uninstallProject must never touch an untracked path.
     const writtenAt = "2026-07-21T00:00:00.000Z";
     mkdirSync(join(repoDir, ".lore"), { recursive: true });
-    writeFileSync(join(repoDir, "hooks", "g1-spec-create.sh"), "#!/bin/sh\necho lore-shipped\n", { mode: 0o755 });
+    writeFileSync(join(repoDir, "hooks", "pre-push"), "#!/bin/sh\necho lore-shipped\n", { mode: 0o755 });
     writeFileSync(join(repoDir, "lore.tree.yaml"), "root: {}\n", { mode: 0o644 });
     writeFileSync(join(repoDir, "CLAUDE.md"), "# lore-shipped stub (untracked by this fixture's manifest)\n", {
       mode: 0o644,
     });
 
     const manifest: SetupManifest = buildManifest([
-      entry({ path: "hooks/g1-spec-create.sh", kind: "hook", written_at: writtenAt }),
+      entry({ path: "hooks/pre-push", kind: "hook", written_at: writtenAt }),
       entry({ path: "lore.tree.yaml", kind: "governance", written_at: writtenAt }),
     ]);
     writeFileSync(join(repoDir, ".lore", ".lore-project-manifest.json"), JSON.stringify(manifest));
@@ -369,7 +369,7 @@ describe("uninstallProject — STATE", () => {
 
     const report: ProjectUninstallReport = result.value;
     expect(report.restored.sort()).toEqual([]);
-    expect(report.removed.sort()).toEqual(["hooks/g1-spec-create.sh", "lore.tree.yaml"]);
+    expect(report.removed.sort()).toEqual(["hooks/pre-push", "lore.tree.yaml"]);
 
     // Manually-managed CLAUDE.md (not manifest-tracked in this fixture) and
     // the `.lore/` dir left behind by the manifest write are NOT this flow's
@@ -380,7 +380,7 @@ describe("uninstallProject — STATE", () => {
 
     const finalHash = hashTree(repoDir);
     expect(finalHash).toBe(preInstallHash);
-    expect(existsSync(join(repoDir, "hooks", "g1-spec-create.sh"))).toBe(false);
+    expect(existsSync(join(repoDir, "hooks", "pre-push"))).toBe(false);
     expect(existsSync(join(repoDir, "lore.tree.yaml"))).toBe(false);
     // The pre-existing, untracked user content survived untouched throughout.
     expect(readFileSync(join(repoDir, "README.md"), "utf-8")).toBe("# my project\n");
@@ -408,15 +408,15 @@ describe("uninstallProject — REGRESSION", () => {
   });
 
   it("a restored 'hook'-kind entry gets the executable mode; every other kind gets the non-executable mode", async () => {
-    const hookEntry = entry({ path: "hooks/g1-spec-create.sh", kind: "hook", written_at: "2026-07-21T00:00:00.000Z" });
+    const hookEntry = entry({ path: "hooks/pre-push", kind: "hook", written_at: "2026-07-21T00:00:00.000Z" });
     const governanceEntry = entry({ path: "CLAUDE.md", kind: "governance", written_at: "2026-07-21T00:00:00.000Z" });
     const manifest = buildManifest([hookEntry, governanceEntry]);
 
     const { fs } = makeFakeFs({
       [join(REPO_DIR, ".lore", ".lore-project-manifest.json")]: JSON.stringify(manifest),
-      [join(REPO_DIR, ".lore", ".lore-backups", "2026-07-21T00:00:00.000Z", "hooks/g1-spec-create.sh")]: "#!/bin/sh\necho old\n",
+      [join(REPO_DIR, ".lore", ".lore-backups", "2026-07-21T00:00:00.000Z", "hooks/pre-push")]: "#!/bin/sh\necho old\n",
       [join(REPO_DIR, ".lore", ".lore-backups", "2026-07-21T00:00:00.000Z", "CLAUDE.md")]: "# old\n",
-      [join(REPO_DIR, "hooks/g1-spec-create.sh")]: "#!/bin/sh\necho new\n",
+      [join(REPO_DIR, "hooks/pre-push")]: "#!/bin/sh\necho new\n",
       [join(REPO_DIR, "CLAUDE.md")]: "# new\n",
     });
 
@@ -432,7 +432,7 @@ describe("uninstallProject — REGRESSION", () => {
     const result = await uninstallProject(fsWithModeCapture, { repoDir: REPO_DIR });
     expect(result.ok).toBe(true);
 
-    const hookWrite = writeCalls.find((w) => w.path === join(REPO_DIR, "hooks/g1-spec-create.sh"));
+    const hookWrite = writeCalls.find((w) => w.path === join(REPO_DIR, "hooks/pre-push"));
     const governanceWrite = writeCalls.find((w) => w.path === join(REPO_DIR, "CLAUDE.md"));
     expect(hookWrite?.mode).toBe(0o755);
     expect(governanceWrite?.mode).toBe(0o644);

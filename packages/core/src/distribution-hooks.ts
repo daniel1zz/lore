@@ -153,24 +153,6 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // pre-bash-git-safety-gate.mjs — blocks destructive git commands (reset --hard, branch -D, worktree remove --force, ...).
   { file: "pre-bash-git-safety-gate.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
 
-  // lore-gate-g1-spec-create.sh — spec-create checkpoint (gate hooks double-mount: both a raw Bash call and the MCP tool call are covered).
-  { file: "lore-gate-g1-spec-create.sh", runner: "bash", event: "PreToolUse", matcher: "Bash" },
-  { file: "lore-gate-g1-spec-create.sh", runner: "bash", event: "PreToolUse", matcher: "mcp__.*lore_create.*" },
-
-  // lore-gate-g2-spec-promote.sh — spec-promote checkpoint (approve AND set can both promote a spec to approved).
-  { file: "lore-gate-g2-spec-promote.sh", runner: "bash", event: "PreToolUse", matcher: "Bash" },
-  { file: "lore-gate-g2-spec-promote.sh", runner: "bash", event: "PreToolUse", matcher: "mcp__.*lore_approve.*" },
-  { file: "lore-gate-g2-spec-promote.sh", runner: "bash", event: "PreToolUse", matcher: "mcp__.*lore_set.*" },
-
-  // lore-gate-g3-plan-promote.sh — plan-promote checkpoint (same approve/set duality as g2, on a plan doc).
-  { file: "lore-gate-g3-plan-promote.sh", runner: "bash", event: "PreToolUse", matcher: "Bash" },
-  { file: "lore-gate-g3-plan-promote.sh", runner: "bash", event: "PreToolUse", matcher: "mcp__.*lore_approve.*" },
-  { file: "lore-gate-g3-plan-promote.sh", runner: "bash", event: "PreToolUse", matcher: "mcp__.*lore_set.*" },
-
-  // lore-gate-g4-task-claim.sh — task-claim checkpoint (anchor-overlap safety on lore claim).
-  { file: "lore-gate-g4-task-claim.sh", runner: "bash", event: "PreToolUse", matcher: "Bash" },
-  { file: "lore-gate-g4-task-claim.sh", runner: "bash", event: "PreToolUse", matcher: "mcp__.*lore_claim.*" },
-
   // session-start-resume.mjs — injects bootstrap/seat/resume-hint state at session open.
   { file: "session-start-resume.mjs", runner: "node", event: "SessionStart" },
 

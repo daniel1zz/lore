@@ -404,10 +404,6 @@ const DECLARED_FILES_IN_SCOPE = [
   "hooks/pre-bash-git-safety-gate.mjs",
   // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
   "hooks/subagent-stop-commit-guard.mjs",
-  "hooks/lore-gate-g1-spec-create.sh",
-  "hooks/lore-gate-g2-spec-promote.sh",
-  "hooks/lore-gate-g3-plan-promote.sh",
-  "hooks/lore-gate-g4-task-claim.sh",
   // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
   "hooks/claude-md-guard.sh",
   // run-register + pre-tool-harness-run (run identity slice 1, BR-1044)
@@ -435,10 +431,6 @@ const DECLARED_FILES_IN_SCOPE = [
 ].sort();
 
 const DECLARED_EXECUTABLE_PATHS = new Set([
-  "hooks/lore-gate-g1-spec-create.sh",
-  "hooks/lore-gate-g2-spec-promote.sh",
-  "hooks/lore-gate-g3-plan-promote.sh",
-  "hooks/lore-gate-g4-task-claim.sh",
   "hooks/claude-md-guard.sh",
   "hooks/session-start-resume.mjs",
   "hooks/subagent-context.mjs",

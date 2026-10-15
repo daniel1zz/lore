@@ -44,10 +44,6 @@ import {
 const REPO_DIR = "/repo";
 
 const HOOK_ASSET_CONTENTS: Record<string, string> = {
-  "g1-spec-create.sh": "#!/usr/bin/env bash\necho g1\n",
-  "g2-spec-promote.sh": "#!/usr/bin/env bash\necho g2\n",
-  "g3-plan-promote.sh": "#!/usr/bin/env bash\necho g3\n",
-  "g4-task-claim.sh": "#!/usr/bin/env bash\necho g4\n",
   "pre-push": "#!/usr/bin/env bash\necho pre-push\n",
 };
 const HOOK_TARGET_PATHS = Object.keys(HOOK_ASSET_CONTENTS).map((name) => `hooks/${name}`);
@@ -258,7 +254,7 @@ describe("setup-project-flow — manifest ledger (SPEC-060 D1) — BOUNDARY", ()
 
   it("a conflicting hook file is excluded from the ledger entirely", async () => {
     const fs = new InMemoryProjectFs();
-    fs.files.set(`${REPO_DIR}/hooks/g1-spec-create.sh`, {
+    fs.files.set(`${REPO_DIR}/hooks/pre-push`, {
       content: "#!/usr/bin/env bash\n# user-customized\n",
       mode: 0o755,
     });
@@ -267,18 +263,18 @@ describe("setup-project-flow — manifest ledger (SPEC-060 D1) — BOUNDARY", ()
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const g1 = result.value.hooks.find((h) => h.file === "hooks/g1-spec-create.sh");
+    const g1 = result.value.hooks.find((h) => h.file === "hooks/pre-push");
     expect(g1?.status).toBe("conflict");
 
     const manifest = readManifest(fs);
     const entryPaths = manifest.entries.map((e) => e.path);
-    expect(entryPaths).not.toContain("hooks/g1-spec-create.sh");
+    expect(entryPaths).not.toContain("hooks/pre-push");
     expect(entryPaths.sort()).toEqual(
-      [...HOOK_TARGET_PATHS.filter((p) => p !== "hooks/g1-spec-create.sh"), "lore.tree.yaml"].sort(),
+      [...HOOK_TARGET_PATHS.filter((p) => p !== "hooks/pre-push"), "lore.tree.yaml"].sort(),
     );
 
     // The user's customized content is untouched.
-    expect(fs.readFile(`${REPO_DIR}/hooks/g1-spec-create.sh`)).toBe("#!/usr/bin/env bash\n# user-customized\n");
+    expect(fs.readFile(`${REPO_DIR}/hooks/pre-push`)).toBe("#!/usr/bin/env bash\n# user-customized\n");
   });
 });
 
@@ -287,26 +283,26 @@ describe("setup-project-flow — manifest ledger (SPEC-060 D1) — BOUNDARY", ()
 describe("setup-project-flow — manifest ledger (SPEC-060 D1) — ERROR", () => {
   it("an injected write failure excludes that one path from the ledger; siblings still tracked", async () => {
     const fs = new InMemoryProjectFs();
-    const failingPath = `${REPO_DIR}/hooks/g2-spec-promote.sh`;
+    const failingPath = `${REPO_DIR}/hooks/pre-push`;
     const deps: ProjectScaffoldFlowDeps = { ...makeDeps(fs), fs: withInjectedWriteFailure(fs, failingPath) };
 
     const result = await scaffoldProject(deps, { repoDir: REPO_DIR });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    const g2 = result.value.hooks.find((h) => h.file === "hooks/g2-spec-promote.sh");
+    const g2 = result.value.hooks.find((h) => h.file === "hooks/pre-push");
     expect(g2?.status).toBe("failed");
     expect(g2?.detail).toContain("injected write failure");
 
     const manifest = readManifest(fs);
     const entryPaths = manifest.entries.map((e) => e.path);
-    expect(entryPaths).not.toContain("hooks/g2-spec-promote.sh");
+    expect(entryPaths).not.toContain("hooks/pre-push");
     expect(entryPaths.sort()).toEqual(
-      [...HOOK_TARGET_PATHS.filter((p) => p !== "hooks/g2-spec-promote.sh"), "lore.tree.yaml"].sort(),
+      [...HOOK_TARGET_PATHS.filter((p) => p !== "hooks/pre-push"), "lore.tree.yaml"].sort(),
     );
 
     // Every other hook + tree_yaml still succeeded and is tracked.
-    const otherHooks = result.value.hooks.filter((h) => h.file !== "hooks/g2-spec-promote.sh");
+    const otherHooks = result.value.hooks.filter((h) => h.file !== "hooks/pre-push");
     for (const h of otherHooks) expect(h.status).toBe("done");
     expect(result.value.tree_yaml.status).toBe("done");
   });
@@ -323,27 +319,27 @@ describe("setup-project-flow — manifest ledger (SPEC-060 D1) — STATE", () =>
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     const manifestAfterFirst = readManifest(fs);
-    expect(manifestAfterFirst.entries.map((e) => e.path)).toContain("hooks/g3-plan-promote.sh");
+    expect(manifestAfterFirst.entries.map((e) => e.path)).toContain("hooks/pre-push");
 
     // User hand-edits a previously lore-written hook.
     const userEdited = "#!/usr/bin/env bash\n# hand-edited after install\n";
-    fs.files.set(`${REPO_DIR}/hooks/g3-plan-promote.sh`, { content: userEdited, mode: 0o755 });
+    fs.files.set(`${REPO_DIR}/hooks/pre-push`, { content: userEdited, mode: 0o755 });
 
     const second = await scaffoldProject(deps, { repoDir: REPO_DIR });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
 
-    const g3 = second.value.hooks.find((h) => h.file === "hooks/g3-plan-promote.sh");
+    const g3 = second.value.hooks.find((h) => h.file === "hooks/pre-push");
     expect(g3?.status).toBe("conflict");
 
     // Never overwritten, never deleted — the user's edit survives byte-for-byte.
-    expect(fs.readFile(`${REPO_DIR}/hooks/g3-plan-promote.sh`)).toBe(userEdited);
+    expect(fs.readFile(`${REPO_DIR}/hooks/pre-push`)).toBe(userEdited);
 
     // Dropped from the ledger — lore no longer claims this path.
     const manifestAfterSecond = readManifest(fs);
-    expect(manifestAfterSecond.entries.map((e) => e.path)).not.toContain("hooks/g3-plan-promote.sh");
+    expect(manifestAfterSecond.entries.map((e) => e.path)).not.toContain("hooks/pre-push");
     // Every other previously-tracked path is still tracked.
-    for (const p of HOOK_TARGET_PATHS.filter((p) => p !== "hooks/g3-plan-promote.sh")) {
+    for (const p of HOOK_TARGET_PATHS.filter((p) => p !== "hooks/pre-push")) {
       expect(manifestAfterSecond.entries.map((e) => e.path)).toContain(p);
     }
   });

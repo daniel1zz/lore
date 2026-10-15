@@ -236,7 +236,7 @@ describe("lore setup — HAPPY", () => {
     expect(existsSync(join(repoDir, ".lore", "config.yaml"))).toBe(true);
     expect(existsSync(join(repoDir, ".lore", "lore.db"))).toBe(true);
     // Real ProjectFsPort/ExecPort/ProjectAssetSource wiring reached disk.
-    expect(existsSync(join(repoDir, "hooks", "g1-spec-create.sh"))).toBe(true);
+    expect(existsSync(join(repoDir, "hooks", "pre-push"))).toBe(true);
     expect(existsSync(join(repoDir, "lore.tree.yaml"))).toBe(true);
     const hooksPath = spawnSync("git", ["config", "--get", "core.hooksPath"], { cwd: repoDir, encoding: "utf8" });
     expect(hooksPath.stdout.trim()).toBe("hooks");
@@ -428,7 +428,7 @@ describe("lore setup — STATE", () => {
       expect(existsSync(manifestAbsPath)).toBe(false);
       expect(existsSync(join(repoDir, ".lore", ".lore-backups"))).toBe(false);
       expect(existsSync(join(repoDir, "lore.tree.yaml"))).toBe(false);
-      for (const hookName of ["g1-spec-create.sh", "g2-spec-promote.sh", "g3-plan-promote.sh", "g4-task-claim.sh"]) {
+      for (const hookName of ["pre-push"]) {
         expect(existsSync(join(repoDir, "hooks", hookName))).toBe(false);
       }
       expect(readFileSync(join(repoDir, ".gitignore"), "utf-8")).toBe(preGitignore);
@@ -462,7 +462,7 @@ describe("lore setup — STATE", () => {
 
       // (c) the `hooks/` DIRECTORY itself is left behind, now empty —
       // `uninstallProject` removes exactly the manifest-tracked FILE paths
-      // (e.g. "hooks/g1-spec-create.sh"), never the containing directory
+      // (e.g. "hooks/pre-push"), never the containing directory
       // (a defensible choice: a user may have added their own unrelated files
       // under hooks/ that this reversal must not touch either way).
       if (existsSync(join(repoDir, "hooks"))) {

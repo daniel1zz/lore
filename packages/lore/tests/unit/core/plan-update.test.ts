@@ -240,7 +240,7 @@ describe("HAPPY: merged-ownership outdated file", () => {
 
 describe("NEGATIVE: diverged file is never actioned", () => {
   it("disk sha != manifest sha (any embedded sha) classifies as diverged and appears in NO write/merge set", () => {
-    const path = "hooks/lore-gate-g4-task-claim.sh";
+    const path = "hooks/pre-bash-git-safety-gate.mjs";
     const embedded = makeEmbedded([embeddedEntry({ path, kind: "hook", sha256: "whatever-embedded-sha" })], "digest-A");
     const installed = makeInstalled(
       [installedEntry({ path, kind: "hook", sha256: "recorded-sha" })],

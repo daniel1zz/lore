@@ -418,10 +418,6 @@ const DECLARED_FILES = [
   "hooks/pre-bash-git-safety-gate.mjs",
   // subagent-stop-commit-guard (SubagentStop data-loss backstop, SPEC-046 amendment, 2026-07-21)
   "hooks/subagent-stop-commit-guard.mjs",
-  "hooks/lore-gate-g1-spec-create.sh",
-  "hooks/lore-gate-g2-spec-promote.sh",
-  "hooks/lore-gate-g3-plan-promote.sh",
-  "hooks/lore-gate-g4-task-claim.sh",
   // claude-md-guard (PostToolUse CLAUDE.md admission check, spec-context-verb-family-two-zone-claude-md-anatomy-lore D10/D11)
   "hooks/claude-md-guard.sh",
   // run-register + pre-tool-harness-run (run identity slice 1, BR-1044) — both in HOOK_REGISTRATIONS
@@ -432,10 +428,6 @@ const DECLARED_FILES = [
   "hooks/pre-tool-harness-run.mjs",
   "hooks/lib/turn-state.mjs",
   // project (4 .sh gates + pre-push + tree.yaml template + verification-profile config template, SPEC-058 D6)
-  "project/g1-spec-create.sh",
-  "project/g2-spec-promote.sh",
-  "project/g3-plan-promote.sh",
-  "project/g4-task-claim.sh",
   "project/pre-push",
   "project/lore.tree.yaml.template",
   "project/lore-config-template.yaml",

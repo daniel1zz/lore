@@ -62,10 +62,6 @@ import { spliceManagedSections, type ManagedSection } from "../../src/service/co
 const REPO_DIR = "/repo";
 
 const HOOK_ASSET_CONTENTS: Record<string, string> = {
-  "g1-spec-create.sh": "#!/usr/bin/env bash\necho g1\n",
-  "g2-spec-promote.sh": "#!/usr/bin/env bash\necho g2\n",
-  "g3-plan-promote.sh": "#!/usr/bin/env bash\necho g3\n",
-  "g4-task-claim.sh": "#!/usr/bin/env bash\necho g4\n",
   "pre-push": "#!/usr/bin/env bash\necho pre-push\n",
 };
 const TREE_YAML_CONTENT = "root: prd\n";
