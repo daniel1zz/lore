@@ -37,8 +37,8 @@
  * end-review, Scope 4-5) is the ONE turn-end review of the main session. It
  * replaced three retired hook families: `stop-doc-sync.mjs` (turn-end doc
  * reminder), `claude-md-guard.sh` (per-edit CLAUDE.md ceiling check, now
- * finding (c) of the turn-end review) and the `lore-gate-g1..g4` checkpoint
- * hooks (the service-layer write refuses instead). BR-1092: no registered
+ * finding (c) of the turn-end review) and the four per-call checkpoint gate
+ * hooks (the service-layer write refuses instead: `GateEnforcer.enforce`). BR-1092: no registered
  * per-tool-call hook refuses anything except irreversible git operations
  * (`pre-bash-git-safety-gate.mjs`). Converge (BR-823 / BR-975) removes the
  * retired files and settings entries from older installs.
