@@ -1,0 +1,121 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/pre-bash-git-safety-gate.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/pre-tool-harness-run.mjs"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*lore_.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/pre-tool-harness-run.mjs"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/session-start-resume.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/session-start-marker.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/run-register.mjs"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/user-prompt-turn-start.mjs"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/post-edit-mark.mjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/stop-turn-review.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/stop-handoff-coverage.mjs"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/subagent-context.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/run-register.mjs"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/subagent-stop-commit-guard.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/run-end.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node <CLAUDE_DIR>/hooks/run-end.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
