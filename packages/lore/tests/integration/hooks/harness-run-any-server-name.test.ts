@@ -9,9 +9,9 @@
  * relayed the verb's `updatedInput` answer. A stub `lore` on PATH plays the verb for a registered
  * run, so no real state (~/.claude, this repo's .lore) is touched.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, chmodSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, chmodSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -85,5 +85,82 @@ describe("AC-TE-6 pre-tool-harness-run rewrites lore tools under any MCP server 
     const r = runHookFor("mcp__mylore__get_issue");
     expect(r.status).toBe(0);
     expect(r.stdout).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Real binary, no stub: the AC-TE-6 oracle. `dist/lore` is on PATH, a throwaway git repo carries a
+// `lore init` corpus, and the run is registered with `lore run register`. Never touches the repo's
+// own `.lore/` nor the real ~/.claude (HOME is scrubbed to the scratch root).
+// ---------------------------------------------------------------------------------------------
+
+const REAL_BIN_DIR = join(REPO_ROOT, "dist");
+const REAL_SESSION = "any-server-real-session";
+const REAL_RUN = `cc:${REAL_SESSION}`;
+
+function realEnv(root: string): NodeJS.ProcessEnv {
+  const e: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: join(root, "home"),
+    XDG_CONFIG_HOME: join(root, "xdg"),
+    CLAUDECODE: "1",
+    PATH: `${REAL_BIN_DIR}:${process.env["PATH"] ?? ""}`,
+  };
+  for (const k of ["LORE_ACTOR", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]) delete e[k];
+  return e;
+}
+
+describe("AC-TE-6 REAL_BINARY_NO_STUB: built dist/lore attributes the run under any MCP server name", () => {
+  let root = "";
+  let corpus = "";
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  const hookOutput = (toolName: string): { status: number | null; updatedInput: Record<string, unknown> | null; raw: string } => {
+    const r = spawnSync(process.execPath, [HOOK_PATH], {
+      cwd: corpus,
+      env: realEnv(root),
+      encoding: "utf8",
+      timeout: 60000,
+      input: JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_name: toolName,
+        tool_input: { slug: "x" },
+        session_id: REAL_SESSION,
+      }),
+    });
+    const raw = r.stdout;
+    if (raw === "") return { status: r.status, updatedInput: null, raw };
+    const parsed = JSON.parse(raw) as { hookSpecificOutput?: { updatedInput?: Record<string, unknown> } };
+    return { status: r.status, updatedInput: parsed.hookSpecificOutput?.updatedInput ?? null, raw };
+  };
+
+  it("fixture: dist/lore exists and registers the run", () => {
+    expect(existsSync(join(REAL_BIN_DIR, "lore")), "dist/lore missing: run `bun run build` first").toBe(true);
+    root = mkdtempSync(join(tmpdir(), "any-server-real-"));
+    // removed by afterAll below: the shared afterEach would delete it between tests
+    mkdirSync(join(root, "home"), { recursive: true });
+    mkdirSync(join(root, "xdg"), { recursive: true });
+    corpus = join(root, "corpus");
+    mkdirSync(corpus, { recursive: true });
+    const sh = (cmd: string, args: string[]): void => {
+      const r = spawnSync(cmd, args, { cwd: corpus, env: realEnv(root), encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`fixture \`${cmd} ${args.join(" ")}\` failed: ${r.stderr}${r.stdout}`);
+    };
+    sh("git", ["init", "-q", "-b", "main"]);
+    sh("lore", ["init"]);
+    sh("lore", ["run", "register", "--harness", "claude-code", "--session", REAL_SESSION]);
+  });
+
+  it.each(["mcp__lore__lore_get", "mcp__lore-dev__lore_get"])("%s gets updatedInput carrying the run", (tool) => {
+    const r = hookOutput(tool);
+    expect(r.status).toBe(0);
+    expect(r.raw).not.toContain("permissionDecision");
+    expect(r.updatedInput).toMatchObject({ slug: "x", harness_run: REAL_RUN });
+  });
+
+  it.each(["mcp__github__get_issue", "mcp__mylore__get_issue"])("%s gets no updatedInput", (tool) => {
+    const r = hookOutput(tool);
+    expect(r.status).toBe(0);
+    expect(r.updatedInput).toBeNull();
   });
 });

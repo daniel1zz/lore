@@ -52,7 +52,9 @@ const SHELL_TOOL_NAME = 'Bash';
  * A lore MCP tool under ANY registered server name: `mcp__<server>__lore_<verb>`.
  * reason: the server name is user-configurable (`mcp__lore-dev__...`), so a fixed
  * `mcp__lore__` prefix missed renamed servers (#146, BR-1093); requiring the `__lore_`
- * verb segment keeps `mcp__mylore__get_issue` and other servers' tools out.
+ * verb segment keeps `mcp__mylore__get_issue` and other servers' tools out. Twin of
+ * `LORE_MCP_TOOL` in packages/lore/src/adapters/cli/commands/run.ts (this file is standalone,
+ * so the shape cannot be imported) — change both together.
  */
 const LORE_MCP_TOOL = /^mcp__.+__lore_\w+$/;
 

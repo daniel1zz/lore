@@ -57,7 +57,13 @@ type Action = (typeof ACTIONS)[number];
 const USAGE_EXIT = 2;
 const VALIDATION_EXIT = 4;
 const CLAUDE_CODE_HARNESS = "claude-code";
-const MCP_LORE_PREFIX = "mcp__lore__";
+/**
+ * A lore MCP tool under ANY registered server name: `mcp__<server>__lore_<verb>` (#146, #202, BR-1093).
+ * reason: twin of `LORE_MCP_TOOL` in assets/hooks/pre-tool-harness-run.mjs — that hook ships as a standalone
+ * .mjs with no import path to this package, so the shape cannot be shared; change both together
+ * (pinned by tests/integration/hooks/harness-run-any-server-name.test.ts, REAL_BINARY_NO_STUB block).
+ */
+const LORE_MCP_TOOL = /^mcp__.+__lore_\w+$/;
 
 function isAction(value: string): value is Action {
   return (ACTIONS as readonly string[]).includes(value);
@@ -258,7 +264,7 @@ function computeUpdatedInput(raw: string): Record<string, unknown> | null {
   } catch {
     return null; // reason: D10 fail-open — the hook passes the call through on a payload we cannot attest
   }
-  if (payload.tool_name.startsWith(MCP_LORE_PREFIX)) return rewriteMcpInput(payload.tool_input, run);
+  if (LORE_MCP_TOOL.test(payload.tool_name)) return rewriteMcpInput(payload.tool_input, run);
   const command = payload.tool_input["command"];
   if (payload.tool_name !== "Bash" || typeof command !== "string") return null;
   const rewritten = rewriteBashCommand(command, run);
