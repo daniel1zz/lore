@@ -388,6 +388,7 @@ const DECLARED_FILES_IN_SCOPE = [
   // coverage floor, task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01)
   "hooks/session-start-marker.mjs",
   "hooks/stop-doc-sync.mjs",
+  "hooks/stop-turn-review.mjs",
   // stop-doc-sync turn-state producers (issue #156)
   "hooks/user-prompt-turn-start.mjs",
   "hooks/post-edit-mark.mjs",
