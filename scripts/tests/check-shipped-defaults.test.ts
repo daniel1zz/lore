@@ -36,8 +36,8 @@
  *   §Acceptance Criteria AC-GD-1
  */
 
-import { describe, it, expect, afterEach } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -393,6 +393,42 @@ describe("main(): HAPPY — AC-GD-1(a)/(b) duplicate values and allowlisted keys
   });
 });
 
+describe("main(): REGRESSION — issue #219: workflow.turn_end.main_session_source_edits is a per-project opt-in", () => {
+  // spec-interception-moves-off-every-tool-call-one-turn-end-review: default `off`;
+  // a project whose discipline has the main agent dispatch all code (this repo) sets `block`.
+  const turnEndConfig = `${TEST_PROJECT_HEADER}workflow:\n  turn_end:\n    main_session_source_edits: block\n`;
+  const realTemplateText = readFileSync(join(REPO_ROOT, "assets", "project", "lore-config-template.yaml"), "utf8");
+
+  it("the real shipped template, with the key set to block, exits 0 and reports no DRIFT for it", () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+    try {
+      const root = buildFixtureRepo(turnEndConfig, realTemplateText);
+      expect(main(root)).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.join("\n")).not.toContain("workflow.turn_end.main_session_source_edits");
+  });
+
+  it("CONTROL: with the allowlist lacking the key, the same fixture exits 3 naming DRIFT for it — the assertion above is discriminating", () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+    try {
+      const root = buildFixtureRepo(turnEndConfig, realTemplateText);
+      const withoutKey = PROJECT_SPECIFIC_KEYS.filter((e) => e.key !== "workflow.turn_end.main_session_source_edits");
+      expect(main(root, withoutKey)).toBe(3);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(errors.join("\n")).toContain("DRIFT workflow.turn_end.main_session_source_edits");
+  });
+});
+
 describe("main(): BOUNDARY — AC-GD-1(c) the three pinned rationale probes, each independently, via main()'s own IO shell", () => {
   // `allowlist` is injectable on `main()` PRECISELY so this suite can prove the IO
   // shell itself (not just the pure findAllowlistRationaleViolations predicate above)
@@ -600,7 +636,9 @@ describe("AC-GD-1 fresh-install clause: a genuinely fresh corpus materialises 12
     // never mind the WRONG field name (the real leaf lives at `workflow.evidence.*`,
     // not `workflow.gates.*` — `gates` is a per-checkpoint map keyed by checkpoint
     // NAME, e.g. "task-claim", and has no `capture_timeout_ms` field at any key).
-    expect(loaded.value.workflow).toBeUndefined();
-    expect(loaded.value.workflow?.gates).toBeUndefined();
+    // (`lore setup --project` now seeds a `workflow:` section, so the section itself is
+    // no longer undefined; the literal pinned path is still unreachable.)
+    const gates: Record<string, unknown> | undefined = loaded.value.workflow?.gates;
+    expect(gates?.capture_timeout_ms).toBeUndefined();
   });
 });

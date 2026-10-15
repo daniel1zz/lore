@@ -217,6 +217,11 @@ export const PROJECT_SPECIFIC_KEYS: readonly ProjectSpecificKeyEntry[] = [
       "Same tightened-below-shipped-ceiling reasoning as max_lines above; the two travel together as one role's ceiling pair (spec-project-claude-md-content-contract D2) and must not be split across dispositions.",
   },
   {
+    key: "workflow.turn_end.main_session_source_edits",
+    rationale:
+      "Designed per-project opt-in (spec-interception-moves-off-every-tool-call-one-turn-end-review): shipped default is off; a project whose discipline has the main agent dispatch all code sets block, as this repo does. Shipping block would break every consumer whose main agent edits source directly.",
+  },
+  {
     key: "workflow.gates",
     rationale:
       "Per-checkpoint gate arming is a deliberate, corpus-maturity opt-in (e.g. plan-close's prd_sync sub-predicate is default-OFF); shipping one project's arming choice would force unearned strictness on every fresh corpus.",
