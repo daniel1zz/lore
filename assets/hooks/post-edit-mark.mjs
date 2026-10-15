@@ -29,8 +29,15 @@ try {
   const input = payload.tool_input;
   const filePath = input?.file_path ?? input?.notebook_path;
   if (typeof filePath === 'string' && filePath.length > 0) {
-    appendFileSync(join(turnDir, 'edited-files.jsonl'),
-      JSON.stringify({ file: filePath, ts: Date.now() }) + '\n');
+    // Record format: {file, ts[, agent_id, agent_type]}. agent_id/agent_type are present only
+    // when the hook payload carries them (tool events inside a subagent — common input fields,
+    // https://code.claude.com/docs/en/hooks); absent = main-session edit. Never a placeholder.
+    const entry = { file: filePath, ts: Date.now() };
+    for (const key of ['agent_id', 'agent_type']) {
+      const value = payload[key];
+      if (typeof value === 'string' && value.length > 0) entry[key] = value;
+    }
+    appendFileSync(join(turnDir, 'edited-files.jsonl'), JSON.stringify(entry) + '\n');
   }
 } catch (err) {
   process.stderr.write(`[post-edit-mark] turn state not measured: ${err.message}\n`);
