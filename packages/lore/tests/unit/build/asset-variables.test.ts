@@ -21,8 +21,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CAPTURE_TAIL_CHARS } from "@lore/core";
 
-import { RealAssetSource } from "../../../src/adapters/real-asset-source.js";
-// @ts-expect-error — .mjs build script, no type declarations
+import { RealAssetSource, isRetiredFromInstall } from "../../../src/adapters/real-asset-source.js";
 import { ASSETS_ROOT, REPO_ROOT, buildManifest, sha256Hex } from "../../../../../scripts/embed-assets-manifest.mjs";
 import { LORE_CONTEXT_VARIABLES } from "../../../src/service/context-variables-registry.js";
 
@@ -73,12 +72,13 @@ describe("AC-CV-5 manifest hashes the expanded install bytes", () => {
   });
 
   it("every skill/agent/hook manifest sha256 equals sha256 of RealAssetSource.load() bytes", async () => {
-    const manifest = buildManifest(ASSETS_ROOT, REPO_ROOT) as { entries: { path: string; kind: string; sha256: string }[] };
+    const manifest = buildManifest(ASSETS_ROOT, REPO_ROOT) as unknown as { entries: { path: string; kind: string; sha256: string }[] };
     const loaded = await new RealAssetSource(ASSETS_ROOT as string).load();
     expect(loaded.ok).toBe(true);
     if (!loaded.ok) return;
     const byPath = new Map(loaded.value.files.map((f) => [f.path, f]));
-    const installed = manifest.entries.filter((e) => INSTALLED_KINDS.has(e.kind));
+    // Retired paths (e.g. skills/lore-init-context/SKILL.md) stay fingerprinted but are never loaded.
+    const installed = manifest.entries.filter((e) => INSTALLED_KINDS.has(e.kind) && !isRetiredFromInstall(e.path));
     expect(installed.length).toBeGreaterThan(0);
     const mismatches: string[] = [];
     for (const entry of installed) {
@@ -101,7 +101,7 @@ describe("AC-CV-5 manifest hashes the expanded install bytes", () => {
     if (!loaded.ok) return;
     const skill = loaded.value.files.find((f) => f.path === "skills/lore/SKILL.md");
     expect(skill).toBeDefined();
-    const text = typeof skill?.content === "string" ? skill.content : Buffer.from(skill?.content as Uint8Array).toString("utf8");
+    const text = typeof skill?.content === "string" ? skill.content : Buffer.from(skill?.content as unknown as Uint8Array).toString("utf8");
     expect(text).toContain(String(CAPTURE_TAIL_CHARS));
     expect(text).not.toContain("{{lore:");
   });
