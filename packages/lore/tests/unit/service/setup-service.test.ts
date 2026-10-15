@@ -708,18 +708,18 @@ describe("I6 — test-pollution safety guard", () => {
   });
 });
 
-// ─── {{CLAUDE_DIR}} settings-hook placeholder resolution ────────────────────
+// ─── {{lore:claude_dir}} settings-hook variable resolution ────────────────────
 //
 // Proves the real-distribution shape end-to-end: a `settings-hook` asset
-// carrying `buildHookSettingsEntries("{{CLAUDE_DIR}}")`-shaped content (what
+// carrying `buildHookSettingsEntries("{{lore:claude_dir}}")`-shaped content (what
 // `RealAssetSource` actually emits) gets its placeholder resolved to the real
 // `targetDir` BEFORE merging, so the on-disk `settings.json` carries real
 // absolute hook commands and `mergeSettings`' command-identity key stays
 // stable across repeated installs/uninstalls for a given targetDir.
 //
 // This whole describe block is a RED->GREEN proof: before this task's
-// `resolveClaudeDirPlaceholder` wiring in `SetupService.resolvePayload`, the
-// FIRST test below would have found the literal `{{CLAUDE_DIR}}` token
+// `expandTemplate` wiring in `SetupService.resolvePayload`, the
+// FIRST test below would have found the literal `{{lore:claude_dir}}` token
 // verbatim in the on-disk settings.json instead of `TARGET_DIR`.
 
 /** Builds a settings-hook-only payload using the SAME builder RealAssetSource calls, so these tests exercise the real distribution shape. */
@@ -729,15 +729,15 @@ function buildPlaceholderHookPayload(): AssetPayload {
       {
         path: "settings.json",
         kind: "settings-hook",
-        content: JSON.stringify(buildHookSettingsEntries("{{CLAUDE_DIR}}")),
+        content: JSON.stringify(buildHookSettingsEntries("{{lore:claude_dir}}")),
         sha256: "placeholder",
       },
     ],
   };
 }
 
-describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
-  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 14 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+describe("{{lore:claude_dir}} settings-hook variable resolution", () => {
+  it("resolves {{lore:claude_dir}} to the real targetDir in every registered hook command, all 14 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
     const fs = new MapFs();
     fs.seed(
       path.join(TARGET_DIR, "settings.json"),
@@ -758,7 +758,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
     expect(onDisk).toBeDefined();
 
     // No unresolved placeholder token survives onto disk.
-    expect(onDisk).not.toContain("{{CLAUDE_DIR}}");
+    expect(onDisk).not.toContain("{{lore:claude_dir}}");
 
     const parsed = JSON.parse(onDisk) as { hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ command: string }> }>> };
 
@@ -835,6 +835,32 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
     expect(fs.writerCalls).toHaveLength(0);
   });
 
+  it("fails loud (VALIDATION_ERROR naming the variable, zero writes) when a settings-hook command names an unregistered {{lore:}} variable", async () => {
+    const fs = new MapFs();
+    const mcp = new OkMcpRegistrar();
+    const payload: AssetPayload = {
+      files: [
+        {
+          path: "settings.json",
+          kind: "settings-hook",
+          content: JSON.stringify([
+            { event: "PreToolUse", matcher: "Bash", command: "node {{lore:no_such_variable}}/hooks/x.mjs" },
+          ]),
+          sha256: "placeholder",
+        },
+      ],
+    };
+    const service = new SetupService(new FixedAssetSource(payload), fs, fs, mcp);
+
+    const result = await service.install({ targetDir: TARGET_DIR, binPath: "/usr/local/bin/lore" });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected err");
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(JSON.stringify(result.error)).toContain("no_such_variable");
+    expect(fs.writerCalls).toHaveLength(0);
+    expect(fs.store.has(path.join(TARGET_DIR, "settings.json"))).toBe(false);
+  });
+
   it("resolves to a DIFFERENT targetDir's commands for a different install location (command identity is per-targetDir, not global)", async () => {
     const fsA = new MapFs();
     const serviceA = new SetupService(new FixedAssetSource(buildPlaceholderHookPayload()), fsA, fsA, new OkMcpRegistrar());
@@ -864,7 +890,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
       expect(installResult.ok).toBe(true);
 
       const mergedRaw = await fsp.readFile(path.join(targetDir, "settings.json"), "utf8");
-      expect(mergedRaw).not.toContain("{{CLAUDE_DIR}}");
+      expect(mergedRaw).not.toContain("{{lore:claude_dir}}");
       expect(mergedRaw).toContain(`${targetDir}/hooks/session-start-resume.mjs`);
 
       const uninstallResult = await service.uninstall({ targetDir });

@@ -419,7 +419,7 @@ const DECLARED_FILES_IN_SCOPE = [
   // directory is now empty.
   // settings.json — SYNTHETIC settings-hook entry (no real file on disk under
   // assets/), appended by RealAssetSource.load() from
-  // buildHookSettingsEntries("{{CLAUDE_DIR}}") (settings.json auto-registration
+  // buildHookSettingsEntries("{{lore:claude_dir}}") (settings.json auto-registration
   // amendment, 2026-07-20). Not tracked by assets-ssot.test.ts's DECLARED_FILES
   // (a real-file manifest) — this suite is the sole place this synthetic entry
   // is asserted against RealAssetSource's own output.
@@ -523,7 +523,7 @@ describe("RealAssetSource — HAPPY (real repo assets/)", () => {
     }
   });
 
-  it("appends exactly one synthetic settings.json entry whose content is the {{CLAUDE_DIR}}-placeholder hook-entry array", async () => {
+  it("appends exactly one synthetic settings.json entry whose content is the {{lore:claude_dir}}-variable hook-entry array", async () => {
     const source = new RealAssetSource(REPO_ASSETS_ROOT);
     const result = await source.load();
     expect(result.ok).toBe(true);
@@ -538,7 +538,7 @@ describe("RealAssetSource — HAPPY (real repo assets/)", () => {
     const parsed = JSON.parse(settingsFile.content) as Array<{ event: string; matcher?: string; command: string }>;
     expect(parsed.length).toBeGreaterThan(0);
     for (const entry of parsed) {
-      expect(entry.command).toContain("{{CLAUDE_DIR}}/hooks/");
+      expect(entry.command).toContain("{{lore:claude_dir}}/hooks/");
     }
     expect(settingsFile.sha256).toBe(sha256Hex(settingsFile.content));
   });

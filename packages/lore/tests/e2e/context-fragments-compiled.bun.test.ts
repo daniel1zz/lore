@@ -294,8 +294,10 @@ function shippedAgentFiles(): string[] {
  * The refreshed rules file carries the REGISTRY-EXPANDED body (AC-CV-3: `{{lore:}}` expands at refresh),
  * so the expected text is the shipped source run through the same helper, never the raw source.
  */
-function expandShippedBody(fm: unknown, rawBody: string, file: string): string {
-  const fragment: Fragment = { frontmatter: fm as FragmentFrontmatter, body: rawBody, layer: "shipped", path: file };
+function expandShippedBody(fm: unknown, rawFile: string, rawBody: string, file: string): string {
+  // bodyLineOffset = file lines before the body (frontmatter incl. both `---` fences), measured from the written file.
+  const bodyLineOffset = rawFile.slice(0, rawFile.length - rawBody.length).split("\n").length - 1;
+  const fragment: Fragment = { frontmatter: fm as FragmentFrontmatter, body: rawBody, layer: "shipped", path: file, bodyLineOffset };
   const result = expandFragments([fragment], "rules:project", { invocation: {} }, LORE_CONTEXT_VARIABLES);
   if (!result.ok) throw new Error(`shipped fragment ${file} failed to expand: ${JSON.stringify(result.error)}`);
   return (result.value[0] as Fragment).body.trim();
@@ -312,7 +314,7 @@ function shippedStaticMainFragments(): { id: string; body: string }[] {
     if (m === null) continue;
     const fm = parseYaml(m[1] as string) as { id?: string; audience?: string[]; mode?: string; when?: unknown };
     if (fm.mode === "static" && Array.isArray(fm.audience) && fm.audience.includes("main") && fm.when === undefined) {
-      out.push({ id: String(fm.id), body: expandShippedBody(fm, m[2] as string, f) });
+      out.push({ id: String(fm.id), body: expandShippedBody(fm, raw, m[2] as string, f) });
     }
   }
   return out;
