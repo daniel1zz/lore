@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { currentTurnDir, makeGitRepo, makeTmpDir, readJsonl, runHook } from "./hook-harness";
+import { makeFixture, markEdit, numberedLines, startTurn as startTurn_, stopTurn, writeRepoFile, writeTurnEndSetting } from "./turn-review-harness";
 
 function startTurn(stateBase: string, sid: string, cwd: string) {
   runHook("user-prompt-turn-start.mjs", { session_id: sid, cwd, hook_event_name: "UserPromptSubmit", prompt: "x" }, stateBase);
@@ -37,5 +38,27 @@ describe("AC-TE-2 turn record carries the editing agent", () => {
     const [entry] = readJsonl(join(currentTurnDir(base, "s3"), "edited-files.jsonl"));
     expect(entry).not.toHaveProperty("agent_id");
     expect(entry).not.toHaveProperty("agent_type");
+  });
+});
+
+describe("AC-TE-2 stop-turn-review never counts a helper agent's edits", () => {
+  const turn = (sid: string, agentId?: string) => {
+    const f = makeFixture(sid);
+    writeTurnEndSetting(f.repo, "block");
+    startTurn_(f);
+    markEdit(f, writeRepoFile(f.repo, "src/big.ts", numberedLines(50)), agentId);
+    return stopTurn(f);
+  };
+
+  it("AC-TE-2 a turn whose only edits carry an agent_id produces no output and exit 0", () => {
+    const r = turn("a1", "agent-abc");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe("");
+  });
+
+  it("AC-TE-2 control: the same edit without agent_id is counted as the main session's", () => {
+    const r = turn("a2");
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout).decision).toBe("block");
   });
 });
