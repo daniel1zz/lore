@@ -13,4 +13,4 @@ mode: static
 - After writing a handoff, ALWAYS report its ticket to the user: the handoff slug plus the resume command `lore feed session-resume --handoff <slug>`. This ticket is the ONLY sanctioned resumption path.
 - Maintenance: `lore pending` / `lore review --staleness --list` / `lore status --check-tree --check-drift` / `lore archive --sweep` (apply with `lore archive --apply`).
 - Suspect a lore defect? Re-verify your own input first; if confirmed, check `lore report-issue --list` for a prior filing, then `lore report-issue --title <t> --expected <e> --actual <a>` (needs `feedback.upstream`).
-- CLAUDE.md holds only permanent static discipline; events, state, history, retros and pending items belong in the corpus.
+- CLAUDE.md holds only permanent static discipline (rules, thresholds, paths, commands); events, state, history, retros and pending items belong in the corpus.
