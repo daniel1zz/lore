@@ -64,6 +64,7 @@ function fragment(id: string, body: string): Fragment {
     body,
     layer: "project",
     path: `.lore/context/${id}.md`,
+    bodyLineOffset: 6,
   } as unknown as Fragment;
 }
 

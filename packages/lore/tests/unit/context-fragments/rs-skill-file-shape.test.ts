@@ -17,6 +17,7 @@ function skillFragment(id: string, body: string, description = "Use when editing
     body,
     layer: "shipped",
     path: `/fixture/${id}.md`,
+    bodyLineOffset: 6,
   };
 }
 

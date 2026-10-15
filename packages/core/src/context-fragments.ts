@@ -88,6 +88,8 @@ export interface Fragment {
   readonly body: string;
   readonly layer: "shipped" | "user" | "project";
   readonly path: string;
+  /** 0-based line index in the FILE where the body starts (frontmatter lines incl. both `---` fences); stamped by discoverFragments, never estimated. */
+  readonly bodyLineOffset: number;
 }
 
 // ─── Outlets & config resolution (D11, D14) ───

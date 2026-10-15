@@ -27,6 +27,7 @@ function frag(id: string, layer: "shipped" | "user" | "project", mode: "static" 
     body: "x",
     layer,
     path: `/${layer}/${id}.md`,
+    bodyLineOffset: 6,
   } as unknown as Fragment;
 }
 

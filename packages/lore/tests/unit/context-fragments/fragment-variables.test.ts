@@ -64,6 +64,7 @@ function fragment(id: string, body: string, extra: Record<string, unknown> = {})
     body,
     layer: "project",
     path: `.lore/context/${id}.md`,
+    bodyLineOffset: 6,
   } as unknown as Fragment;
 }
 
@@ -351,4 +352,45 @@ describe("AC-CV-2 spawned CLI (source entry, HOME=<mkdtemp>)", () => {
     },
     SPAWN_TIMEOUT_MS,
   );
+});
+
+describe("AC-CV-2 error line is counted in the FILE even for flow-style frontmatter", () => {
+  it("ERROR: a bad {{lore:nope}} after flow-style YAML, a blank line and a comment names its exact file line", async () => {
+    const dir = tmp("lore-fv-flow-");
+    const project = join(dir, "project");
+    mkdirSync(project, { recursive: true });
+    const text = [
+      "---", // 1
+      "id: flowy", // 2
+      "title: Flowy", // 3
+      "audience: [main]", // 4
+      "", // 5
+      "# a comment inside the frontmatter", // 6
+      "when: {language: [zh]}", // 7
+      "mode: static", // 8
+      "---", // 9
+      "first body line", // 10
+      "bad {{lore:nope}} here", // 11
+      "",
+    ].join("\n");
+    writeFileSync(join(project, "flowy.md"), text);
+    const nodeFs = {
+      exists: async (path: string) => existsSync(path),
+      readFile: async (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : null),
+      listDir: async (path: string) => (existsSync(path) ? readdirSync(path) : []),
+    };
+    const discovered = await discoverFragments(nodeFs, {
+      shipped: join(dir, "no-shipped"),
+      user: join(dir, "no-user"),
+      project,
+    });
+    expect(discovered.ok).toBe(true);
+    if (!discovered.ok) return;
+    const [flowy] = discovered.value;
+    expect(flowy?.bodyLineOffset).toBe(9);
+    const result = expandFragments(discovered.value, "rules:project", EMPTY_CTX, LORE_CONTEXT_VARIABLES);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(JSON.stringify(result.error)).toContain(`${join(project, "flowy.md")}:11`);
+  });
 });
