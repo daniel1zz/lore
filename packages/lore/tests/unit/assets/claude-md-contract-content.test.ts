@@ -213,3 +213,57 @@ describe("claude-md contract asset — three prose additions (AC-CONTRACT-1)", (
     });
   });
 });
+
+describe("claude-md contract asset — Content Tiers rule (tier 1 = rule only, tier 2 = why)", () => {
+  const content = readContract();
+
+  describe("HAPPY — the Content Tiers section and its tier-1 admission rule", () => {
+    it("the Content Tiers heading exists and precedes `What Goes In vs What Stays Out`", () => {
+      const tiersIdx = content.indexOf("## Content Tiers — what every session pays for");
+      const goesInIdx = content.indexOf("## What Goes In vs What Stays Out");
+      expect(tiersIdx).toBeGreaterThanOrEqual(0);
+      expect(goesInIdx).toBeGreaterThanOrEqual(0);
+      expect(tiersIdx).toBeLessThan(goesInIdx);
+    });
+
+    it("a line belongs on tier 1 only when ALL three conditions hold", () => {
+      expect(content).toContain("A line belongs on tier 1 only when ALL three hold:");
+    });
+
+    it("a tier-1 line states the rule, never the reasoning", () => {
+      expect(content).toContain("A tier-1 line states the rule, never the reasoning");
+    });
+  });
+
+  describe("HAPPY — the three new What-Goes-In rows route to tier 2 / the module's own file", () => {
+    it.each([
+      { category: "Design intent and rationale", home: "OUT — tier 2 (corpus ADR, module CLAUDE.md)" },
+      { category: "Mechanism walkthroughs", home: "OUT — tier 2 (module CLAUDE.md or corpus reference)" },
+      { category: "Module-local facts", home: "OUT — that module's own CLAUDE.md" },
+    ])("row `$category` is present with its home `$home`", ({ category, home }) => {
+      const row = content.split("\n").find((line) => line.startsWith(`| ${category} |`));
+      expect(row).toBeDefined();
+      expect(row).toContain(home);
+    });
+  });
+
+  describe("HAPPY — root section 3 and the module taxonomy follow the tier rule", () => {
+    it("root section 3 Architecture is one-line invariants; design intent is tier 2", () => {
+      const idx = content.indexOf("3. **Architecture**");
+      expect(idx).toBeGreaterThanOrEqual(0);
+      const section = content.slice(idx, content.indexOf("4. **Module Index**", idx));
+      expect(section).toContain("stated as rules (tier 1)");
+      expect(section).toContain("are tier 2: a pointer line to the ADR or module file");
+    });
+
+    it("the module taxonomy applies the Content Tiers rule one level down", () => {
+      expect(content).toContain("The Content Tiers rule applies one level down");
+    });
+  });
+
+  describe("NEGATIVE — the retired wording is gone", () => {
+    it("root section 3 no longer asks for design intent and the why inline", () => {
+      expect(content).not.toContain("design intent and the *why* behind key decisions, not a");
+    });
+  });
+});
