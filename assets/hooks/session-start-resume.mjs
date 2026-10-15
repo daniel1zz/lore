@@ -393,14 +393,15 @@ Action: Check installation. Non-critical features are unaffected.`;
 // See this file's module-header "Phase F" note for the full contract.
 
 /**
- * Fires a DETACHED, UNREF'D refresh — never awaited, never blocks this
- * session. `args` is the full `lore` argv; `cwd` pins the project refresh to
+ * Fires a DETACHED, UNREF'D `lore setup [--project] --check --json` refresh —
+ * never awaited, never blocks this session. `scopeArgs` / `tailArgs` wrap the
+ * fixed `--check --json`; `cwd` pins the project refresh to
  * the repo whose cache was read. An 'error' listener turns a missing `lore`
  * binary (ENOENT) into a swallowed async event — fail-open (I6).
  */
-function spawnDetachedLore(args, cwd) {
+function spawnDetachedSetupCheck(scopeArgs, tailArgs, cwd) {
   try {
-    const child = spawn('lore', args, { detached: true, stdio: 'ignore', ...(cwd ? { cwd } : {}) });
+    const child = spawn('lore', ['setup', ...scopeArgs, '--check', '--json', ...tailArgs], { detached: true, stdio: 'ignore', ...(cwd ? { cwd } : {}) });
     child.on('error', () => {});
     child.unref();
   } catch {
@@ -495,14 +496,14 @@ try {
       label: 'global',
       command: '`lore setup`',
       read: readCheckCache(join(claudeDir, SETUP_CHECK_CACHE_FILENAME)),
-      refresh: () => spawnDetachedLore(['setup', '--check', '--json', '--claude-dir', claudeDir]),
+      refresh: () => spawnDetachedSetupCheck([], ['--claude-dir', claudeDir]),
     }];
     if (projectRoot !== null) {
       sides.push({
         label: 'project',
         command: '`lore setup --project`',
         read: readCheckCache(join(projectRoot, PROJECT_CHECK_CACHE_RELATIVE_PATH)),
-        refresh: () => spawnDetachedLore(['setup', '--project', '--check', '--json'], projectRoot),
+        refresh: () => spawnDetachedSetupCheck(['--project'], [], projectRoot),
       });
     }
 
