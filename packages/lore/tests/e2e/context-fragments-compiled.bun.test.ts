@@ -5,6 +5,8 @@
  *
  * Nothing of the feature exists yet: `lore fragments` is an unregistered
  * command, `assets/context/` and `assets/hooks/session-start-fragments.mjs`
+ * (RETIRED by spec-one-upgrade-reminder-at-session-start-covers-the-global: AC-CF-11 / AC-CF-12 below were
+ * re-baselined to assert the retirement; the hook file, its entries and the stale-rules notice no longer exist)
  * are absent, `subagent-context.mjs` still carries hard-coded per-type text,
  * `session-start-resume.mjs` still injects Phase C (the 10,370-char
  * corpus-workflow prose), `lore setup` does not project `context.language`,
@@ -84,7 +86,6 @@ const HOOK_STRING_CAP = 10_000;
 const OLD_EXECUTOR_SENTINEL = "类型→Skill：refactor→lore-refactor / bug|perf→lore-diagnose / tests→lore-test";
 /** One sentence from assets/governance/corpus-workflow.md (AC-CF-8 sentinel). */
 const CORPUS_WORKFLOW_SENTINEL = "a released-but-uncommitted worktree is what routine cleanup destroys";
-const STALE_MARKER = "lore:stale-managed-context";
 
 let BIN_DIR = "";
 let NODE_DIR = "";
@@ -533,19 +534,19 @@ describe("AC-CF-7 subagent hook delivers project fragment via lore fragments ren
 // ─── AC-CF-8 ────────────────────────────────────────────────────────────────
 
 describe("AC-CF-8 session start output under cap and governance prose moved to lore rules files", () => {
-  it("setup registers resume and fragments SessionStart hooks, neither emits over 10,000 chars, and the corpus-workflow sentinel lives in a project lore-corpus-workflow rules file, not in hook output", () => {
+  it("setup registers the resume SessionStart hook (the retired fragments hook is gone), it emits under 10,000 chars, and the corpus-workflow sentinel lives in a project lore-corpus-workflow rules file, not in hook output", () => {
     const sb = makeSandbox();
     expect(setupGlobal(sb).code).toBe(0);
 
     const commands = listSessionStartCommands(readJson(join(sb.home, ".claude", "settings.json"))).map((c) => c.command);
     expect(commands.some((c) => c.includes("session-start-resume.mjs"))).toBe(true);
-    expect(commands.some((c) => c.includes("session-start-fragments.mjs"))).toBe(true);
+    expect(commands.some((c) => c.includes("session-start-fragments.mjs"))).toBe(false);
 
     if (!existsSync(projectClaudeMd(sb))) contextInit(sb);
     lore(sb, "context", "refresh"); // exit code deliberately not asserted: the rules-file content below is the oracle
 
     let emitted = "";
-    for (const name of ["session-start-resume.mjs", "session-start-fragments.mjs"]) {
+    for (const name of ["session-start-resume.mjs"]) {
       const hookPath = join(sb.home, ".claude", "hooks", name);
       expect(existsSync(hookPath)).toBe(true);
       const r = runHook(sb, hookPath, sessionStartPayload("startup"));
@@ -614,95 +615,34 @@ describe("AC-CF-10 hook failure is loud and non-blocking", () => {
 
 // ─── AC-CF-11 ───────────────────────────────────────────────────────────────
 
-describe("AC-CF-11 compact matcher registered and re-injects dynamic main fragments", () => {
-  it("lore setup registers a SessionStart entry with matcher compact for session-start-fragments.mjs", () => {
+describe("AC-CF-11 / AC-CF-12 re-baselined: the session-start fragments hook and its compact entry are retired", () => {
+  it("lore setup registers no compact SessionStart entry for session-start-fragments.mjs and installs no such file", () => {
     const sb = makeSandbox();
     expect(setupGlobal(sb).code).toBe(0);
-    const compact = listSessionStartCommands(readJson(join(sb.home, ".claude", "settings.json"))).filter((c) => c.matcher === "compact");
-    expect(compact.some((c) => c.command.includes("session-start-fragments.mjs"))).toBe(true);
+    const entries = listSessionStartCommands(readJson(join(sb.home, ".claude", "settings.json")));
+    expect(entries.filter((c) => c.matcher === "compact" && c.command.includes("session-start-fragments.mjs"))).toEqual([]);
+    expect(existsSync(join(sb.home, ".claude", "hooks", "session-start-fragments.mjs"))).toBe(false);
   });
 
-  it("a compact-source payload makes the installed fragments hook re-emit a dynamic main fixture nonce", () => {
+  it("a dynamic main fixture is refused by `fragments check` (exit 4, id named) instead of being re-injected", () => {
     const sb = makeSandbox();
-    expect(setupGlobal(sb).code).toBe(0);
-    const n = nonce("cf11");
-    writeFragment(projectCtxDir(sb), "cf11-dynamic", { audience: ["main"], mode: "dynamic", body: `Dynamic rule ${n}` });
-
-    const hookPath = join(sb.home, ".claude", "hooks", "session-start-fragments.mjs");
-    expect(existsSync(hookPath)).toBe(true);
-    const r = runHook(sb, hookPath, sessionStartPayload("compact"));
-    expect(r.code).toBe(0);
-    const out = parseHookOutput(r.stdout);
-    expect(out).not.toBeNull();
-    expect((out as HookOut).hookEventName).toBe("SessionStart");
-    expect((out as HookOut).additionalContext).toContain(n);
+    writeFragment(projectCtxDir(sb), "cf11-dynamic", { audience: ["main"], mode: "dynamic", body: `Dynamic rule ${nonce("cf11")}` });
+    const r = lore(sb, "fragments", "check");
+    expect(r.code).toBe(4);
+    expect(r.stderr).toContain("cf11-dynamic");
   });
-});
 
-// ─── AC-CF-12 ───────────────────────────────────────────────────────────────
-
-describe("AC-CF-12 stale lore rules-file backstop notice", () => {
-  const FRAGMENTS_HOOK = join(HOOKS_DIR, "session-start-fragments.mjs");
-  const STATIC_ID = "cf12-static";
-
-  /** A corpus whose project lore rules files were refreshed with one static main fixture. */
-  function freshRules(): Sandbox {
+  it("the stale-rules backstop moved from the session hook to `fragments check`: a stale lore rules file is a rules_drift finding", () => {
     const sb = makeSandbox();
     contextInit(sb);
-    writeFragment(projectCtxDir(sb), STATIC_ID, { audience: ["main"], mode: "static", body: `Original static ${nonce("cf12-orig")}` });
+    const id = "cf12-static";
+    writeFragment(projectCtxDir(sb), id, { audience: ["main"], mode: "static", body: `Original static ${nonce("cf12-orig")}` });
     expect(lore(sb, "context", "refresh").code).toBe(0);
-    const rules = join(projectRulesDir(sb), `lore-${STATIC_ID}.md`);
-    expect(existsSync(rules)).toBe(true); // liveness: staleness below is measured against a real rules file
-    expect(readFileSync(rules, "utf8")).toContain("Original static");
-    return sb;
-  }
-
-  function startHook(sb: Sandbox): string {
-    const r = runHook(sb, FRAGMENTS_HOOK, sessionStartPayload("startup"));
-    expect(r.code).toBe(0);
-    const out = parseHookOutput(r.stdout);
-    expect(out).not.toBeNull();
-    return (out as HookOut).additionalContext;
-  }
-
-  it("fresh rules files produce neither the stale marker nor the fixture body", () => {
-    const sb = freshRules();
-    const text = startHook(sb);
-    expect(text).not.toContain(STALE_MARKER);
-    expect(text).not.toContain("Original static");
-  });
-
-  it("a stale lore rules file emits the stale marker and the changed fragment nonce", () => {
-    const sb = freshRules();
-    const changed = nonce("cf12-changed");
-    writeFragment(projectCtxDir(sb), STATIC_ID, { audience: ["main"], mode: "static", body: `Changed static ${changed}` });
-
-    const text = startHook(sb);
-    expect(text).toContain(STALE_MARKER);
-    expect(text).toContain(changed);
-  });
-
-  it("when changed bodies exceed the remaining budget the output lists the changed ids instead, within 10,000 chars", () => {
-    const sb = freshRules();
-    const dynamicHead = nonce("cf12-dyn");
-    const changedHead = nonce("cf12-big");
-    writeFragment(projectCtxDir(sb), "cf12-dynamic-block", {
-      audience: ["main"],
-      mode: "dynamic",
-      body: `${dynamicHead} ${"block ".repeat(1_550)}`, // ~9,300 chars: under the 9,600 block cap, leaves < 700 for the notice
-    });
-    writeFragment(projectCtxDir(sb), STATIC_ID, {
-      audience: ["main"],
-      mode: "static",
-      body: `${changedHead} ${"changed ".repeat(375)}`, // ~3,000 chars: cannot fit the remainder
-    });
-
-    const text = startHook(sb);
-    expect(text.length).toBeLessThanOrEqual(HOOK_STRING_CAP);
-    expect(text).toContain(dynamicHead);
-    expect(text).toContain(STALE_MARKER);
-    expect(text).toContain(STATIC_ID);
-    expect(text).not.toContain(changedHead);
+    expect(lore(sb, "fragments", "check").stderr).not.toContain("rules_drift");
+    writeFragment(projectCtxDir(sb), id, { audience: ["main"], mode: "static", body: `Changed static ${nonce("cf12-changed")}` });
+    const stale = lore(sb, "fragments", "check");
+    expect(stale.code).toBe(4);
+    expect(stale.stderr).toContain("rules_drift");
   });
 });
 

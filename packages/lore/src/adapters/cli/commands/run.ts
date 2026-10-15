@@ -5,8 +5,9 @@
  *            [--branch <name>] [--json]
  *       Registers a run (first registration wins; a repeat exits 0 and changes nothing). The command layer
  *       computes the composition record — the fragments the run's outlet selects (`hook:subagent-start` for a
- *       subagent, `hook:session-start` for a main run) with the sha256 of each fragment FILE — through the
- *       existing fragments flow and hands it to RunService, which only validates and persists (D5).
+ *       subagent; a main run receives no fragment through any outlet since `hook:session-start` was retired, so its
+ *       record is honestly empty) with the sha256 of each fragment FILE — through the existing fragments flow and
+ *       hands it to RunService, which only validates and persists (D5).
  *   show <run id> [--json]
  *       Prints a registered run; unknown id exits 3 naming the id.
  *   end <run id> --reason <r> [--json]
@@ -79,14 +80,17 @@ function stringArg(args: Record<string, unknown>, key: string): string | undefin
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-/** Composition for a run: what the fragment flow selects for its outlet, hashed from the fragment FILES. */
+/**
+ * Composition for a run: what the fragment flow selects for its outlet, hashed from the fragment FILES.
+ * A main run (no agent type) records NO fragments: its only dynamic outlet, `hook:session-start`, is retired
+ * (BR-912), so claiming fragments for it would record content the session never received. Static main
+ * fragments reach the session through rules files/skills, which this record has never covered.
+ */
 async function computeComposition(agentType: string | undefined): Promise<CompositionRecord | { error: string }> {
+  if (agentType === undefined) return { schemaVersion: 1, fragments: [] };
   const deps = buildFlowDeps(process.cwd());
   if (!deps.ok) return { error: `${deps.error.code}: ${deps.error.message}` };
-  const rendered = await runFragmentsRender(deps.value, {
-    outlet: agentType !== undefined ? "hook:subagent-start" : "hook:session-start",
-    ...(agentType !== undefined ? { agentType } : {}),
-  });
+  const rendered = await runFragmentsRender(deps.value, { outlet: "hook:subagent-start", agentType });
   if (!rendered.ok) return { error: `${rendered.error.code}: ${rendered.error.message}` };
   return {
     schemaVersion: 1,

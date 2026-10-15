@@ -399,7 +399,6 @@ const DECLARED_FILES = [
   "hooks/session-start-resume.mjs",
   // session-start-marker (same-session-authorship fact for the resume-ticket
   // coverage floor, task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01)
-  "hooks/session-start-fragments.mjs", // blind pipe to `lore fragments render` (task-skill-implement-hooks-new-session-start-fragments-thin)
   "hooks/session-start-marker.mjs",
   "hooks/stop-doc-sync.mjs",
   // stop-doc-sync turn-state producers (issue #156) — both in HOOK_REGISTRATIONS

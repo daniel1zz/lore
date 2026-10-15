@@ -3,20 +3,22 @@
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D7, D12, D13).
  *
  * Public surface:
- *   - runFragmentsRender(deps, opts) — the additionalContext string one hook outlet emits
- *     (dynamic block, plus the D7 stale-rules-file notice at session start).
+ *   - runFragmentsRender(deps, opts) — the additionalContext string the helper start outlet
+ *     (`hook:subagent-start`) emits. `hook:session-start` is retired (BR-912): its stale-rules notice (BR-909,
+ *     BR-910) is gone and the upgrade reminder lives in session-start-resume.mjs.
  *   - runFragmentsCheck(deps) — every outlet × agent type vs caps, lore rules-file and project skill drift,
  *     override refusal, Claude Code `language` drift, plus the rule-store findings (duplicate_line,
- *     selection_unknown_id, selection_in_config, skill_collision; spec-rule-store-... Scope 6);
+ *     selection_unknown_id, selection_in_config, skill_collision; spec-rule-store-... Scope 6) and the
+ *     `dynamic_main` finding (BR-1066: a dynamic main-session fragment reaches no outlet);
  *     findings, never throws. Any finding makes `ok` false (the adapter maps that to exit 4).
- *   - composeSessionStart(parts) / buildHookBanner(error) — pure assembly helpers (exported for tests).
- *   - FragmentsFlowDeps, FragmentsFlowError, FRAGMENTS_STALE_MARKER.
+ *   - buildHookBanner(error) — pure banner assembly (exported for tests).
+ *   - FragmentsFlowDeps, FragmentsFlowError.
  *
  * Invariants:
  *   - Read-only: this module has NO write port. Hooks never write rules files or CLAUDE.md (D7, D13, D15).
  *   - Every failure carries a stable `code` (VALIDATION_ERROR | BUDGET_EXCEEDED); nothing is
  *     swallowed — render returns it for the D12 banner, check reports it as a finding.
- *   - Session-start output (block + notice + changed bodies/ids) is always <= HOOK_STRING_CAP.
+ *   - Helper-start output is always <= SUBAGENT_FRAGMENT_CAP (render refuses an over-cap block, BR-907).
  *   - All paths in `deps` are absolute; `deps.fs` is read with them verbatim.
  *   - Layers are discovered ONE AT A TIME so selection / checkOverrides see un-merged
  *     fragments (discoverFragments merges by id, which would hide a cross-layer override).
@@ -25,9 +27,8 @@
  */
 import { z } from "zod";
 import {
-  HOOK_STRING_CAP,
+  HOOK_BANNER_CAP,
   LANGUAGE_NAMES,
-  NOTICE_RESERVE,
   resolveContextConfig,
   type ContextConfigLayer,
   type Fragment,
@@ -56,14 +57,11 @@ import {
   type SelectionScope,
 } from "../service/context-fragments/selection.js";
 
-/** Fixed marker the D7 backstop notice starts with (AC-CF-12). */
-export const FRAGMENTS_STALE_MARKER = "lore:stale-managed-context";
-
 /** A sentinel layer root that resolves to an empty layer on every FsReadPort. */
 const EMPTY_LAYER_ROOT = "\u0000lore-no-layer";
 
-/** Hook outlets `render` serves. */
-export const HOOK_OUTLETS = ["hook:session-start", "hook:subagent-start"] as const;
+/** Hook outlets `render` serves (`hook:session-start` is retired, BR-912). */
+export const HOOK_OUTLETS = ["hook:subagent-start"] as const;
 export type HookOutlet = (typeof HOOK_OUTLETS)[number];
 
 /** Why a flow step failed. `code` is what the D12 banner and `check` findings carry. */
@@ -232,8 +230,6 @@ function projectSkillsDir(deps: FragmentsFlowDeps): string {
 /** Outcome of comparing the project's lore rules files with a fresh `rules:project` render. */
 export interface RulesDrift {
   readonly drifted: boolean;
-  /** Fresh static main fragments whose rules file is missing or differs from the fresh render. */
-  readonly changed: readonly Fragment[];
   /** One entry per drifted file (`lore-<id>.md` + why), for `check` findings. */
   readonly files: readonly { readonly fileName: string; readonly reason: "missing" | "changed" | "extra" }[];
 }
@@ -256,10 +252,9 @@ async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fr
     present.length > 0 ||
     (await deps.fs.exists(deps.projectClaudeMdPath)) ||
     selected.value.some((fragment) => fragment.layer !== "shipped");
-  if (!adopted) return { ok: true, value: { drifted: false, changed: [], files: [] } };
+  if (!adopted) return { ok: true, value: { drifted: false, files: [] } };
 
   const files: { fileName: string; reason: "missing" | "changed" | "extra" }[] = [];
-  const changed: Fragment[] = [];
   const expectedNames = new Set<string>();
 
   for (const fragment of selected.value) {
@@ -269,10 +264,8 @@ async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fr
     const stored = await deps.fs.readFile(`${projectRulesDir(deps)}/${rendered.value.fileName}`);
     if (stored === null) {
       files.push({ fileName: rendered.value.fileName, reason: "missing" });
-      changed.push(fragment);
     } else if (stored !== rendered.value.content) {
       files.push({ fileName: rendered.value.fileName, reason: "changed" });
-      changed.push(fragment);
     }
   }
 
@@ -280,7 +273,7 @@ async function detectProjectRulesDrift(deps: FragmentsFlowDeps, all: readonly Fr
     if (!expectedNames.has(name)) files.push({ fileName: name, reason: "extra" });
   }
 
-  return { ok: true, value: { drifted: files.length > 0, changed, files } };
+  return { ok: true, value: { drifted: files.length > 0, files } };
 }
 
 /** One drifted project skill directory (`lore-<id>` + why), for `check` findings. */
@@ -335,61 +328,10 @@ async function detectProjectSkillsDrift(
 
 // ─── render ─────────────────────────────────────────────────────────────────
 
-/** Inputs of the pure session-start assembly. */
-export interface SessionStartParts {
-  /** Dynamic main fragment block (already within SESSION_FRAGMENT_CAP). */
-  readonly block: string;
-  /** Changed static fragments (empty when the rules files are fresh). */
-  readonly changed: readonly { readonly id: string; readonly body: string }[];
-  readonly stale: boolean;
-}
-
-const NOTICE_LINE =
-  `${FRAGMENTS_STALE_MARKER}: the project .claude/rules/lore-*.md files differ from a fresh render. ` +
-  "Run `lore context refresh` to update them; the changed content follows.";
-
-function joinNonEmpty(parts: readonly string[]): string {
-  return parts.filter((part) => part.length > 0).join("\n\n");
-}
-
-/**
- * Assemble the session-start string: block, then (when stale) the notice and the changed
- * bodies if they fit the remaining budget, else the changed ids with `+N more`.
- * Result length is always <= HOOK_STRING_CAP.
- */
-export function composeSessionStart(parts: SessionStartParts): string {
-  if (!parts.stale) return parts.block;
-
-  const notice = NOTICE_LINE.length <= NOTICE_RESERVE ? NOTICE_LINE : NOTICE_LINE.slice(0, NOTICE_RESERVE);
-  const head = joinNonEmpty([parts.block, notice]);
-  if (parts.changed.length === 0) return head;
-
-  const bodies = parts.changed.map((fragment) => fragment.body).join("\n\n");
-  const withBodies = `${head}\n\n${bodies}`;
-  if (withBodies.length <= HOOK_STRING_CAP) return withBodies;
-
-  const prefix = `${head}\n\nChanged fragment ids: `;
-  const room = HOOK_STRING_CAP - prefix.length;
-  if (room <= 0) return head;
-  const ids = parts.changed.map((fragment) => fragment.id);
-  const shown: string[] = [];
-  for (let i = 0; i < ids.length; i += 1) {
-    const remaining = ids.length - i - 1;
-    const tail = remaining > 0 ? `, +${remaining} more` : "";
-    const candidate = [...shown, ids[i] as string].join(", ");
-    // Always leave room for a `+N more` tail covering what would still be hidden.
-    if (candidate.length + tail.length > room) break;
-    shown.push(ids[i] as string);
-  }
-  const hidden = ids.length - shown.length;
-  const list = shown.join(", ") + (hidden > 0 ? `${shown.length > 0 ? ", " : ""}+${hidden} more` : "");
-  return `${prefix}${list}`.length <= HOOK_STRING_CAP ? `${prefix}${list}` : head;
-}
-
-/** Banner ceiling (D6/D12): the banner REPLACES the block and is at most NOTICE_RESERVE chars. */
+/** Banner ceiling (D6/D12): the banner REPLACES the block and is at most HOOK_BANNER_CAP chars. */
 export function buildHookBanner(error: FragmentsFlowError): string {
   const banner = `lore fragments ${error.code}: ${error.message}`;
-  return banner.length <= NOTICE_RESERVE ? banner : `${banner.slice(0, NOTICE_RESERVE - 3)}...`;
+  return banner.length <= HOOK_BANNER_CAP ? banner : `${banner.slice(0, HOOK_BANNER_CAP - 3)}...`;
 }
 
 /** One fragment's contribution, for `--explain`. */
@@ -412,7 +354,7 @@ export interface FragmentsRenderOutput {
 }
 
 /**
- * Render one hook outlet.
+ * Render one hook outlet (helper start only; `hook:session-start` is retired, BR-912).
  *
  * @returns ok with the additionalContext string, or the typed error the adapter turns into the D12 banner.
  */
@@ -439,18 +381,7 @@ export async function runFragmentsRender(
     path: fragment.path,
   }));
 
-  if (opts.outlet === "hook:subagent-start") {
-    return { ok: true, value: { additionalContext: block.value, explain } };
-  }
-
-  const drift = await detectProjectRulesDrift(deps, discovered.value);
-  if (!drift.ok) return drift;
-  const additionalContext = composeSessionStart({
-    block: block.value,
-    stale: drift.value.drifted,
-    changed: drift.value.changed.map((fragment) => ({ id: fragment.frontmatter.id, body: fragment.body })),
-  });
-  return { ok: true, value: { additionalContext, explain } };
+  return { ok: true, value: { additionalContext: block.value, explain } };
 }
 
 // ─── check ──────────────────────────────────────────────────────────────────
@@ -464,6 +395,7 @@ export type FindingKind =
   | "cap"
   | "selection"
   | "rules_drift"
+  | "dynamic_main"
   | "duplicate_line"
   | "selection_unknown_id"
   | "selection_in_config"
@@ -497,12 +429,7 @@ export interface FragmentsCheckReport {
   readonly findings: readonly CheckFinding[];
 }
 
-const CHECK_OUTLETS: readonly OutletId[] = [
-  "rules:project",
-  "rules:user",
-  "hook:session-start",
-  "hook:subagent-start",
-];
+const CHECK_OUTLETS: readonly OutletId[] = ["rules:project", "rules:user", "hook:subagent-start"];
 
 const SettingsLanguageSchema = z.object({ language: z.string().optional() }).passthrough();
 
@@ -574,6 +501,25 @@ function checkSelectionIds(
         message: `${scope} ${SELECTION_FILE[scope]} disables unknown fragment id "${id}"; no discovered fragment has that id. Remove it or fix the spelling.`,
       });
     }
+  }
+  return findings;
+}
+
+/**
+ * BR-1066: a dynamic main-session fragment is refused. Its only delivery path was the retired
+ * `hook:session-start` outlet, so it would silently reach no session. Rules-file (`static`) and skill
+ * (`delivery: skill`, always static) fragments and helper-audience fragments are unaffected.
+ */
+function checkDynamicMainFragments(all: readonly Fragment[]): CheckFinding[] {
+  const findings: CheckFinding[] = [];
+  for (const fragment of all) {
+    const { id, mode, audience } = fragment.frontmatter;
+    if (mode !== "dynamic" || !audience.includes("main")) continue;
+    findings.push({
+      kind: "dynamic_main",
+      code: "VALIDATION_ERROR",
+      message: `fragment "${id}" (${fragment.path}) is mode: dynamic with audience: main, but the session-start outlet is retired so it reaches no session. Make it mode: static (rules file) or give it a subagent audience.`,
+    });
   }
   return findings;
 }
@@ -656,8 +602,9 @@ export async function runFragmentsCheck(rawDeps: FragmentsFlowDeps): Promise<Fra
 
     findings.push(...checkSelectionIds(applied.selections, all));
     findings.push(...checkSkillCollisions(rawDeps.shippedSkillNames, all));
+    findings.push(...checkDynamicMainFragments(all));
 
-    // Reading groups (BR-1067): what ONE session reads together. Main = both rules outlets + session-start
+    // Reading groups (BR-1067): what ONE session reads together. Main = both rules outlets
     // + both skills outlets; each helper type = its own subagent-start row.
     const mainFragments: Fragment[] = [];
     const helperGroups: ReadingGroup[] = [];

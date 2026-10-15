@@ -11,11 +11,9 @@
  * `runContextRefresh` (the hash algorithm is the renderer's business, never re-derived here).
  */
 import { describe, expect, it } from "vitest";
-import { HOOK_STRING_CAP, InMemoryFsPort, NOTICE_RESERVE } from "@lore/core";
+import { HOOK_BANNER_CAP, InMemoryFsPort } from "@lore/core";
 import {
   buildHookBanner,
-  composeSessionStart,
-  FRAGMENTS_STALE_MARKER,
   runFragmentsCheck,
   runFragmentsRender,
   type FragmentsFlowDeps,
@@ -169,7 +167,7 @@ describe("AC-CF-4 runFragmentsCheck", () => {
   });
 
   it("no rules files and no static main fragments at all is not drift", async () => {
-    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/d.md`]: fragmentFile("d", ["main"], "dynamic", "dyn") }));
+    const r = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/d.md`]: fragmentFile("d", ["subagent:*"], "dynamic", "dyn") }));
     expect(r.findings).toEqual([]);
   });
 
@@ -230,44 +228,18 @@ describe("AC-CF-18 language drift in runFragmentsCheck", () => {
   });
 });
 
-describe("AC-CF-12 composeSessionStart / runFragmentsRender", () => {
-  it("fresh: block only, no marker", () => {
-    expect(composeSessionStart({ block: "B", stale: false, changed: [{ id: "x", body: "nonce" }] })).toBe("B");
-  });
-
-  it("stale: marker + changed bodies when they fit", () => {
-    const out = composeSessionStart({ block: "B", stale: true, changed: [{ id: "x", body: "NONCE-1" }] });
-    expect(out.startsWith("B\n\n")).toBe(true);
-    expect(out).toContain(FRAGMENTS_STALE_MARKER);
-    expect(out).toContain("NONCE-1");
-  });
-
-  it("stale + overflow: ids with +N more instead of bodies, within the hook cap", () => {
-    const changed = Array.from({ length: 400 }, (_, i) => ({ id: `fragment-id-number-${i}`, body: "y".repeat(100) }));
-    const out = composeSessionStart({ block: "b".repeat(9_300), stale: true, changed });
-    expect(out.length).toBeLessThanOrEqual(HOOK_STRING_CAP);
-    expect(out).toContain(FRAGMENTS_STALE_MARKER);
-    expect(out).toMatch(/\+\d+ more/);
-    expect(out).not.toContain("y".repeat(100));
-    expect(out).toContain("fragment-id-number-0");
-  });
-
-  it("stale with no per-fragment change still emits the notice", () => {
-    expect(composeSessionStart({ block: "", stale: true, changed: [] })).toContain(FRAGMENTS_STALE_MARKER);
-  });
-
-  it("render session-start end to end: fresh rules files silent, stale rules files carry marker + new body, dynamic block kept", async () => {
-    const dyn = { [`${ROOTS.project}/dyn.md`]: fragmentFile("dyn", ["main"], "dynamic", "DYN-BLOCK") };
+describe("runFragmentsRender (helper start only; hook:session-start retired, BR-912)", () => {
+  it("helper-start carries no stale-rules notice even when a rules file drifted (BR-909/BR-910 retired)", async () => {
+    const sub = { [`${ROOTS.project}/sub.md`]: fragmentFile("sub", ["subagent:*"], "dynamic", "SUB-BLOCK") };
     const st = (body: string) => ({ [`${ROOTS.project}/st.md`]: fragmentFile("st", ["main"], "static", body) });
-    const fresh = await runFragmentsRender(await depsWithRules({ ...dyn, ...st("Changed NONCE-9") }), { outlet: "hook:session-start" });
-    expect(fresh.ok && fresh.value.additionalContext.trim()).toBe("DYN-BLOCK");
-
-    const stale = await runFragmentsRender(await depsWithRules({ ...dyn, ...st("Original") }, { ...dyn, ...st("Changed NONCE-9") }), { outlet: "hook:session-start" });
+    const stale = await runFragmentsRender(await depsWithRules({ ...sub, ...st("Original") }, { ...sub, ...st("Changed NONCE-9") }), {
+      outlet: "hook:subagent-start",
+    });
     expect(stale.ok).toBe(true);
     if (!stale.ok) return;
-    expect(stale.value.additionalContext).toContain("DYN-BLOCK");
-    expect(stale.value.additionalContext).toContain(FRAGMENTS_STALE_MARKER);
-    expect(stale.value.additionalContext).toContain("NONCE-9");
+    expect(stale.value.additionalContext.trim()).toBe("SUB-BLOCK");
+    expect(stale.value.additionalContext).not.toContain("stale-managed-context");
+    expect(stale.value.additionalContext).not.toContain("NONCE-9");
   });
 
   it("render subagent-start selects subagent:<type> and rejects over-cap with BUDGET_EXCEEDED", async () => {
@@ -292,16 +264,16 @@ describe("AC-CF-12 composeSessionStart / runFragmentsRender", () => {
   });
 
   it("render surfaces discovery errors as VALIDATION_ERROR", async () => {
-    const r = await runFragmentsRender(makeDeps({ [`${ROOTS.project}/bad.md`]: "no frontmatter" }), { outlet: "hook:session-start" });
+    const r = await runFragmentsRender(makeDeps({ [`${ROOTS.project}/bad.md`]: "no frontmatter" }), { outlet: "hook:subagent-start" });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe("VALIDATION_ERROR");
   });
 });
 
 describe("D12 buildHookBanner", () => {
-  it("is at most NOTICE_RESERVE chars and keeps the error code first", () => {
+  it("is at most HOOK_BANNER_CAP chars and keeps the error code first", () => {
     const banner = buildHookBanner({ code: "BUDGET_EXCEEDED", message: "z".repeat(2_000) });
-    expect(banner.length).toBeLessThanOrEqual(NOTICE_RESERVE);
+    expect(banner.length).toBeLessThanOrEqual(HOOK_BANNER_CAP);
     expect(banner).toContain("BUDGET_EXCEEDED");
   });
 
@@ -314,8 +286,10 @@ describe("D12 buildHookBanner", () => {
 // Spec: spec-rule-store-fragment-selection-on-demand-skill (Scope 6, AC-RS-8 unit half;
 // BR-1062, BR-1064, BR-1066, BR-1067). Each new finding kind has a failing case AND a clean control.
 describe("AC-RS-8 runFragmentsCheck rule-store findings", () => {
+  // A helper-audience (wildcard) dynamic fragment: one reading group, no rules file needed. (A dynamic MAIN
+  // fragment is itself a `dynamic_main` finding now, BR-1066, so it cannot serve as a clean fixture.)
   const dyn = (id: string, body: string, layer: keyof typeof ROOTS = "project") => ({
-    [`${ROOTS[layer]}/${id}.md`]: fragmentFile(id, ["main"], "dynamic", body),
+    [`${ROOTS[layer]}/${id}.md`]: fragmentFile(id, ["subagent:*"], "dynamic", body),
   });
   const skillSource = (id: string, body: string) => ({
     [`${ROOTS.project}/${id}.md`]: `---\nid: ${id}\ntitle: t ${id}\naudience: [main]\nmode: static\ndelivery: skill\ndescription: d ${id}\n---\n${body}\n`,
@@ -360,9 +334,22 @@ describe("AC-RS-8 runFragmentsCheck rule-store findings", () => {
     expect(clean.findings).toEqual([]);
   });
 
+  it("dynamic_main: a dynamic fragment with audience main is a finding naming its id; static main and helper-dynamic are not (BR-1066)", async () => {
+    const hit = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/dm.md`]: fragmentFile("dm", ["main"], "dynamic", "x") }));
+    expect(hit.ok).toBe(false);
+    const finding = hit.findings.find((f) => f.kind === "dynamic_main");
+    expect(finding?.code).toBe("VALIDATION_ERROR");
+    expect(finding?.message).toContain('"dm"');
+
+    const helper = await runFragmentsCheck(makeDeps(dyn("dm", "x")));
+    expect(kinds(helper)).not.toContain("dynamic_main");
+    const stat = await runFragmentsCheck(makeDeps({ [`${ROOTS.project}/dm.md`]: fragmentFile("dm", ["main"], "static", "x") }));
+    expect(kinds(stat)).not.toContain("dynamic_main");
+  });
+
   it("duplicate_line: fragments of different reading groups are not compared (main vs helper control)", async () => {
     const files = {
-      ...dyn("m", "Shared line."),
+      [`${ROOTS.project}/m.md`]: fragmentFile("m", ["main"], "static", "Shared line."),
       [`${ROOTS.project}/h.md`]: fragmentFile("h", ["subagent:*"], "dynamic", "Shared line."),
     };
     expect(kinds(await runFragmentsCheck(makeDeps(files)))).not.toContain("duplicate_line");

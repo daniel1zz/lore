@@ -2,12 +2,13 @@
  * `lore fragments render | check | pointers` — read-only, hook-facing context-fragment verbs.
  * Spec: spec-context-fragments-config-driven-layered-rule-injection (D3, D6, D7, D12, D13).
  *
- *   - `render --outlet <hook:session-start|hook:subagent-start> [--agent-type T] [--cwd P] [--explain]`
+ *   - `render --outlet hook:subagent-start [--agent-type T] [--cwd P] [--explain]`
  *       prints `{"hookSpecificOutput":{"hookEventName","additionalContext"}}` to stdout. For a hook
  *       outlet ANY failure still exits 0 and emits a <= 400-char banner carrying the error code (D12:
- *       hooks never block start, never emit nothing).
+ *       hooks never block start, never emit nothing). `--outlet hook:session-start` is RETIRED (BR-912): exit 2
+ *       with a stderr line naming it, never a render.
  *   - `check [--json]` enumerates every outlet × agent type; exits 4 on cap overflow, rules-file drift,
- *       override refusal or Claude Code `language` drift (findings on stderr, or in the JSON report).
+ *       override refusal, a dynamic main-session fragment (BR-1066) or Claude Code `language` drift (findings on stderr, or in the JSON report).
  *   - `pointers --cwd P` prints the project pointer lines (<= POINTER_CEILING chars).
  *
  * Bootstrap-stage exemption (adapters/cli/CLAUDE.md "Key Invariants" #4, same as commands/governance.ts):
@@ -57,9 +58,11 @@ const ACTIONS = ["render", "check", "pointers"] as const;
 type Action = (typeof ACTIONS)[number];
 
 const HOOK_EVENT_NAMES: Readonly<Record<HookOutlet, string>> = {
-  "hook:session-start": "SessionStart",
   "hook:subagent-start": "SubagentStart",
 };
+
+/** The retired session-start outlet id (BR-912): refused with a usage error, never rendered. */
+const RETIRED_SESSION_START_OUTLET = "hook:session-start";
 
 /** Exit code for a failed `check` — the VALIDATION_ERROR family (adapters/cli/utils.ts `exitCode`). */
 export const CHECK_FAILED_EXIT = 4;
@@ -221,6 +224,13 @@ function emitHookJson(outlet: HookOutlet, additionalContext: string): void {
 
 async function runRender(args: Record<string, unknown>, cwd: string): Promise<void> {
   const outlet = typeof args["outlet"] === "string" ? args["outlet"] : "";
+  if (outlet === RETIRED_SESSION_START_OUTLET) {
+    usageError(
+      `lore fragments render: outlet ${RETIRED_SESSION_START_OUTLET} is retired; the only render target is ${HOOK_OUTLETS.join("|")}. ` +
+        "Session-start upgrade advice comes from the session-start-resume hook, and dynamic main fragments are refused by `lore fragments check`.",
+    );
+    return;
+  }
   if (!isHookOutlet(outlet)) {
     usageError(`lore fragments render requires --outlet <${HOOK_OUTLETS.join("|")}> (got "${outlet}"; known outlets: ${OUTLET_IDS.join(", ")})`);
     return;
@@ -300,13 +310,13 @@ export default defineCommand({
     name: "fragments",
     description:
       "Read-only context-fragment verbs, bootstrap-stage (no corpus DB): " +
-      "`render --outlet <hook:session-start|hook:subagent-start>` (hook JSON), " +
-      "`check [--json]` (caps, rules-file drift, override refusal, language drift), " +
+      "`render --outlet hook:subagent-start` (hook JSON), " +
+      "`check [--json]` (caps, rules-file drift, override refusal, dynamic main fragments, language drift), " +
       "`pointers --cwd P` (project pointer lines).",
   },
   args: {
     action: { type: "positional", description: "render | check | pointers", required: false },
-    outlet: { type: "string", description: "render: hook:session-start | hook:subagent-start" },
+    outlet: { type: "string", description: "render: hook:subagent-start" },
     "agent-type": { type: "string", description: "render: subagent type for hook:subagent-start" },
     cwd: { type: "string", description: "Project directory (default: current directory)" },
     explain: { type: "boolean", description: "render: print per-fragment id/layer/chars to stderr", default: false },

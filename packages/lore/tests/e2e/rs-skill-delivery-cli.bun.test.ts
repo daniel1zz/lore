@@ -5,7 +5,7 @@
  *
  * Contract: a user fragment with `delivery: skill` and a nonce makes `lore context refresh --scope user`
  * write `$HOME/.claude/skills/lore-<id>/SKILL.md` and NO `$HOME/.claude/rules/lore-<id>.md`; the nonce is
- * absent from the `hook:session-start` render and the `hook:subagent-start` render for lore-implementer.
+ * absent from the `hook:subagent-start` render for lore-implementer (the `hook:session-start` render is retired; it exits 2).
  * Pruning the fragment removes the SKILL.md and its now-empty `lore-<id>/` directory.
  *
  * Isolation: mkdtemp HOME + XDG + `lore init` corpus; never touches the repo's `.lore/` or the real HOME.
@@ -103,25 +103,24 @@ describe("AC-RS-10 skill-delivered fragment", () => {
     expect(existsSync(join(sb.home, ".claude", "rules", `lore-${FRAGMENT_ID}.md`))).toBe(false);
   });
 
-  it("the nonce is absent from the session-start and the lore-implementer subagent-start renders", () => {
+  it("the nonce is absent from the lore-implementer subagent-start render; the retired session-start render refuses", () => {
     const sb = makeSandbox();
     writeSkillFragment(sb);
-    // Liveness control: a dynamic main-audience fragment in the SAME user layer does reach the render,
+    // Liveness control: a dynamic helper-audience fragment in the SAME user layer does reach the render,
     // so the nonce's absence below is not because user-layer fragments are skipped.
     const controlNonce = "CONTROL-NONCE-5d2e";
     writeFileSync(
       join(sb.userContextDir, "rs-render-control.md"),
-      `---\nid: rs-render-control\ntitle: control\naudience: ["main"]\nmode: dynamic\n---\nControl line ${controlNonce}.\n`,
+      `---\nid: rs-render-control\ntitle: control\naudience: ["subagent:lore-implementer"]\nmode: dynamic\n---\nControl line ${controlNonce}.\n`,
       "utf8",
     );
     expect(lore(sb, "context", "refresh", "--scope", "user").code).toBe(0);
     const session = lore(sb, "fragments", "render", "--outlet", "hook:session-start");
-    expect(session.code).toBe(0);
-    expect(session.stdout).toContain(controlNonce);
-    expect(session.stdout).not.toContain(NONCE);
+    expect(session.code).toBe(2);
+    expect(session.stderr).toMatch(/retired/i);
     const subagent = lore(sb, "fragments", "render", "--outlet", "hook:subagent-start", "--agent-type", "lore-implementer");
     expect(subagent.code).toBe(0);
-    expect(subagent.stdout).toContain("additionalContext");
+    expect(subagent.stdout).toContain(controlNonce);
     expect(subagent.stdout).not.toContain(NONCE);
   });
 

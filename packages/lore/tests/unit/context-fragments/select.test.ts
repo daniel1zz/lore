@@ -21,7 +21,7 @@
  *   ERROR: err names the id.  STATE: inputs not mutated.  REGRESSION: determinism (id order).
  */
 import { describe, it, expect } from "vitest";
-import { resolveContextConfig, type Fragment, type OutletId, type ContextConfigLayer } from "@lore/core";
+import { OUTLET_IDS, resolveContextConfig, type Fragment, type OutletId, type ContextConfigLayer } from "@lore/core";
 import { selectFragments, checkOverrides } from "../../../src/service/context-fragments/select.js";
 
 type Layer = "shipped" | "user" | "project";
@@ -255,24 +255,29 @@ describe("AC-CF-20 cross-file override of a static main fragment is refused", ()
     expect(r.ok).toBe(true);
   });
 
-  it("accepts project targeting a user dynamic fragment and applies it at the hook outlet", () => {
-    const ud = frag("udyn", { layer: "user", mode: "dynamic" });
-    const over = frag("udyn", { layer: "project", mode: "dynamic", body: "PROJECT-OVERRIDE" });
+  it("accepts project targeting a user dynamic helper fragment and applies it at the helper hook outlet", () => {
+    const ud = frag("udyn", { layer: "user", mode: "dynamic", audience: ["subagent:*"] });
+    const over = frag("udyn", { layer: "project", mode: "dynamic", audience: ["subagent:*"], body: "PROJECT-OVERRIDE" });
     expect(checkOverrides([ud, over], { global: cfg(), project: cfg() }).ok).toBe(true);
-    const r = select([ud, over], "hook:session-start", cfg(), cfg());
+    const r = select([ud, over], "hook:subagent-start", cfg(), cfg());
     expect(r.map((f) => f.body)).toEqual(["PROJECT-OVERRIDE"]);
   });
 
-  it("applies a project disable of a user dynamic fragment at hook:session-start", () => {
-    const ud = frag("udyn", { layer: "user", mode: "dynamic" });
-    const r = select([ud], "hook:session-start", cfg(), cfg(undefined, ["udyn"]));
+  it("applies a project disable of a user dynamic helper fragment at hook:subagent-start", () => {
+    const ud = frag("udyn", { layer: "user", mode: "dynamic", audience: ["subagent:*"] });
+    const r = select([ud], "hook:subagent-start", cfg(), cfg(undefined, ["udyn"]));
     expect(ids(r)).toEqual([]);
   });
 
-  it("applies a global disable of a shipped dynamic fragment at hook:session-start", () => {
-    const dyn = frag("dyn", { layer: "shipped", mode: "dynamic" });
-    const r = select([dyn], "hook:session-start", cfg(undefined, ["dyn"]), cfg());
+  it("applies a global disable of a shipped dynamic helper fragment at hook:subagent-start", () => {
+    const dyn = frag("dyn", { layer: "shipped", mode: "dynamic", audience: ["subagent:*"] });
+    const r = select([dyn], "hook:subagent-start", cfg(undefined, ["dyn"]), cfg());
     expect(ids(r)).toEqual([]);
+  });
+
+  it("a dynamic main fragment reaches no outlet now that hook:session-start is retired (BR-912)", () => {
+    const dyn = frag("dynmain", { layer: "shipped", mode: "dynamic", audience: ["main"] });
+    for (const outlet of OUTLET_IDS) expect(ids(select([dyn], outlet, cfg(), cfg())), outlet).toEqual([]);
   });
 });
 

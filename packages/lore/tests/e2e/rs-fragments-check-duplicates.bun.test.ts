@@ -60,10 +60,11 @@ function makeSandbox(): Sandbox {
   return sb;
 }
 
-function writeMainFragment(dir: string, id: string, body: string): string {
+function writeHelperFragment(dir: string, id: string, body: string): string {
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${id}.md`);
-  writeFileSync(path, `---\nid: ${id}\ntitle: fixture ${id}\naudience: ["main"]\nmode: dynamic\n---\n${body}\n`, "utf8");
+  // reason: helper-audience dynamic fixture — a dynamic MAIN fragment is itself a `dynamic_main` check finding (BR-1066), so it cannot be a clean control.
+  writeFileSync(path, `---\nid: ${id}\ntitle: fixture ${id}\naudience: ["subagent:*"]\nmode: dynamic\n---\n${body}\n`, "utf8");
   return path;
 }
 
@@ -77,8 +78,8 @@ describe("AC-RS-8 lore fragments check duplicate and selection findings", () => 
 
   it("a whitespace-normalized duplicate across layers exits 4 naming both files; removing it exits 0", () => {
     const sb = makeSandbox();
-    const projectFile = writeMainFragment(join(sb.corpus, ".lore", "context"), "rs8-project", "Always run the scoped oracle before release.");
-    const userFile = writeMainFragment(join(sb.xdg, "lore", "context"), "rs8-user", "Always   run the  scoped oracle before release. ");
+    const projectFile = writeHelperFragment(join(sb.corpus, ".lore", "context"), "rs8-project", "Always run the scoped oracle before release.");
+    const userFile = writeHelperFragment(join(sb.xdg, "lore", "context"), "rs8-user", "Always   run the  scoped oracle before release. ");
     const bad = lore(sb, "fragments", "check");
     expect(bad.code).toBe(4);
     expect(bad.stderr).toContain("[duplicate_line]");
@@ -92,8 +93,8 @@ describe("AC-RS-8 lore fragments check duplicate and selection findings", () => 
 
   it("a selection.yaml disabling one side of a cross-layer duplicate clears it (adapter loads selection files)", () => {
     const sb = makeSandbox();
-    writeMainFragment(join(sb.corpus, ".lore", "context"), "rs8-project", "Always run the scoped oracle before release.");
-    writeMainFragment(join(sb.xdg, "lore", "context"), "rs8-user", "Always run the scoped oracle before release.");
+    writeHelperFragment(join(sb.corpus, ".lore", "context"), "rs8-project", "Always run the scoped oracle before release.");
+    writeHelperFragment(join(sb.xdg, "lore", "context"), "rs8-user", "Always run the scoped oracle before release.");
     expect(lore(sb, "fragments", "check").code).toBe(4);
     writeFileSync(join(sb.xdg, "lore", "context", "selection.yaml"), "schemaVersion: 1\ndisable: [rs8-user]\n", "utf8");
     const res = lore(sb, "fragments", "check");

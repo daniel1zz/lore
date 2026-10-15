@@ -22,9 +22,9 @@ import {
   FragmentFrontmatterSchema,
   HOOK_STRING_CAP,
   POINTER_CEILING,
-  NOTICE_RESERVE,
+  HOOK_BANNER_CAP,
+  OUTLET_IDS,
   SUBAGENT_FRAGMENT_CAP,
-  SESSION_FRAGMENT_CAP,
   LANGUAGE_NAMES,
 } from "../../src/context-fragments.js";
 
@@ -51,10 +51,6 @@ describe("resolveContextConfig outlet scoping (D11, D14)", () => {
     expect(resolveContextConfig(global, project, "hook:subagent-start").language).toBe("en");
   });
 
-  it("hook:session-start merges with project over global", () => {
-    expect(resolveContextConfig(global, project, "hook:session-start").language).toBe("en");
-  });
-
   it("hook outlets fall back to global language when project sets none", () => {
     const r = resolveContextConfig(cfg("zh"), cfg(), "hook:subagent-start");
     expect(r.language).toBe("zh");
@@ -76,7 +72,7 @@ describe("resolveContextConfig outlet scoping (D11, D14)", () => {
   });
 
   it("language is null when neither layer sets it", () => {
-    expect(resolveContextConfig({}, {}, "hook:session-start").language).toBeNull();
+    expect(resolveContextConfig({}, {}, "hook:subagent-start").language).toBeNull();
   });
 
   it("global disable list reaches rules:user", () => {
@@ -186,8 +182,8 @@ describe("cap constants (D6, GH #20)", () => {
     expect(HOOK_STRING_CAP).toBe(10_000);
   });
 
-  it("POINTER_CEILING is 600 and NOTICE_RESERVE is 400", () => {
-    expect([POINTER_CEILING, NOTICE_RESERVE]).toEqual([600, 400]);
+  it("POINTER_CEILING is 600 and HOOK_BANNER_CAP is 400", () => {
+    expect([POINTER_CEILING, HOOK_BANNER_CAP]).toEqual([600, 400]);
   });
 
   it("HOOK_STRING_CAP - POINTER_CEILING === SUBAGENT_FRAGMENT_CAP === 9400", () => {
@@ -195,9 +191,8 @@ describe("cap constants (D6, GH #20)", () => {
     expect(SUBAGENT_FRAGMENT_CAP).toBe(9400);
   });
 
-  it("HOOK_STRING_CAP - NOTICE_RESERVE === SESSION_FRAGMENT_CAP === 9600", () => {
-    expect(HOOK_STRING_CAP - NOTICE_RESERVE).toBe(SESSION_FRAGMENT_CAP);
-    expect(SESSION_FRAGMENT_CAP).toBe(9600);
+  it("hook:session-start is not an outlet (retired, BR-912): helper start is the only hook outlet", () => {
+    expect(OUTLET_IDS.filter((id) => id.startsWith("hook:"))).toEqual(["hook:subagent-start"]);
   });
 });
 
