@@ -73,8 +73,9 @@
  *     is a global opt-out, never a per-file one).
  *   - `eviction_required` is emitted from `lintMemoryFiles` and NOWHERE else,
  *     ON PURPOSE: that one function is the seam `lore status
- *     --check-claude-md`'s exit code, `assets/hooks/claude-md-guard.sh`'s
- *     PostToolUse block, `hooks/pre-push`, and `flows/context-flow.ts`'s
+ *     --check-claude-md`'s exit code and `--json` headroom (the latter read by
+ *     `assets/hooks/stop-turn-review.mjs` finding (c), which replaced the
+ *     retired `claude-md-guard.sh` PostToolUse block), `hooks/pre-push`, and `flows/context-flow.ts`'s
  *     `runContextRefresh` pre-write admission ALL already consume (via
  *     `runMemoryFileChecks`'s `deterministic` array, unchanged from
  *     `lintMemoryFiles`'s own output). Adding a second entry point would

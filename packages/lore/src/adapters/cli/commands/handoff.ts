@@ -157,8 +157,9 @@ const UNRECOGNIZED_DISPOSITION_STDERR_PREFIX = "Unrecognized disposition for res
  * The Claude Code Stop-hook contract's blocking decision value
  * (spec-resume-ticket-coverage-floor-blocking-channel-arming H1) — emitted as
  * `{"decision": "block", "reason": <text>}` on stdout at exit 0, the SAME
- * channel and shape `assets/hooks/stop-doc-sync.mjs` uses. That hook is this
- * repo's measured control arm (10/10 turns complied against this verb's
+ * channel and shape the retired `assets/hooks/stop-doc-sync.mjs` used (its
+ * successor `assets/hooks/stop-turn-review.mjs` emits the same block). That
+ * retired hook was this repo's measured control arm (10/10 turns complied against this verb's
  * previous exit-1 channel's 0/130), which is why the shape is copied rather
  * than invented. Not sourced from a shared constant because the Stop contract
  * is the HARNESS's vocabulary, not lore's corpus grammar — the two other
@@ -233,8 +234,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Coerces the Stop payload's `last_assistant_message` field to plain text —
- * mirrors `assets/hooks/stop-doc-sync.mjs`'s own probe-verified handling of
- * the SAME field (string in the common case; `JSON.stringify` as a
+ * mirrors the retired `assets/hooks/stop-doc-sync.mjs`'s probe-verified
+ * handling of the SAME field (successor: `assets/hooks/stop-turn-review.mjs`) (string in the common case; `JSON.stringify` as a
  * defensive fallback for any other JSON-serializable shape; empty string
  * when absent or unserializable).
  */
@@ -255,7 +256,8 @@ function coerceToPlainText(value: unknown): string {
  * `~/.claude/projects/-Users-apple-Projects-zz-lore/`: a Bash-tool result's
  * `content` is a plain string; other tool kinds (e.g. the Agent tool) carry
  * an array of `{type:"text", text}` blocks instead — the same shape
- * `stop-doc-sync.mjs` already handles for `assistant` message content. ONE
+ * the retired `stop-doc-sync.mjs` handled for `assistant` message content
+ * (successor: `stop-turn-review.mjs`). ONE
  * extractor serves both channels deliberately: they carry the identical
  * string-or-text-block union, and a second copy would be free to drift on
  * which shapes it accepts. Any other shape yields `""` — never throws.
@@ -782,7 +784,7 @@ interface MissingItem {
  *      makes "ready to copy" a measurable property.
  *
  * reason for carrying a template at all: the measured control arm. Over one
- * 7h46m session, `stop-doc-sync.mjs`'s reason (an instruction plus a
+ * 7h46m session, the retired `stop-doc-sync.mjs`'s reason (an instruction plus a
  * `Required output` template) earned 10/10 compliance while this verb's bare
  * stderr symptom line earned 0/130 — the model was never told what to write.
  * The `Required output` framing is copied from that arm deliberately.
@@ -975,8 +977,9 @@ function runCoverageCheck(): void {
     }
   }
   // H1: the verdict travels the Stop contract's block channel. One JSON object,
-  // no trailing newline (byte-identical framing to `stop-doc-sync.mjs`, whose
-  // relay this hook already mirrors), and the exit status stays 0 — a non-zero
+  // no trailing newline (byte-identical framing to the retired
+  // `stop-doc-sync.mjs`, whose relay this hook mirrored; successor
+  // `stop-turn-review.mjs`), and the exit status stays 0 — a non-zero
   // status is the channel measured to change nothing (H2).
   process.stdout.write(JSON.stringify({ decision: STOP_HOOK_BLOCK_DECISION, reason: buildBlockReason(missing) }));
 }

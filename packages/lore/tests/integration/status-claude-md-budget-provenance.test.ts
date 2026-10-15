@@ -248,13 +248,14 @@ describe("check-claude-md: an unparseable `context` block is announced, never si
     expect(bytes.used).toBe(FIXTURE_BYTES);
   });
 
-  it("keeps the exit-code contract intact — warn-and-proceed, so the two shipped hooks keep their verdicts", () => {
-    // reason: `assets/hooks/claude-md-guard.sh` maps 0 -> allow, 3 -> block,
-    // and ANY OTHER exit to "undocumented verdict - failing open". A refusal
-    // exit code would therefore turn "measured against the wrong budgets"
-    // into "not measured at all", silently, at the surface whose whole job is
-    // to block. The notice above is the signal; the exit code stays a
-    // measurement of the files.
+  it("keeps the exit-code contract intact — warn-and-proceed, so hooks/pre-push keeps its verdict", () => {
+    // reason: `hooks/pre-push` blocks the push on any non-zero exit, and
+    // `assets/hooks/stop-turn-review.mjs` finding (c) (which replaced the
+    // retired `claude-md-guard.sh`) reads the --json headroom and treats an
+    // unreadable report as "not measured". A refusal exit code would turn
+    // "measured against the wrong budgets" into "not measured at all",
+    // silently, at the surface whose whole job is to block. The notice above
+    // is the signal; the exit code stays a measurement of the files.
     expect(runLore(["status", "--check-claude-md"], tmpDir).exitCode).toBe(0);
   });
 });
