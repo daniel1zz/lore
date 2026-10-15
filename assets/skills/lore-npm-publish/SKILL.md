@@ -1,6 +1,6 @@
 ---
 name: lore-npm-publish
-description: "npm package publishing — MUST USE when publishing packages to npm/registry, bumping versions, generating changelogs, creating releases, or setting up a new npm package for first publish. Triggers: 'publish this package', 'bump version', 'release a new version', 'npm publish', 'first publish', 'publish to npm', 'create release', 'version bump', 'generate changelog', 'prerelease', 'publish alpha/beta/rc', 'dry run publish', 'check before publish', '发包', '发布npm', '版本升级'. Also use when user asks about publish configuration, .npmignore, package.json fields for publishing, or registry setup. Covers npm, pnpm, and yarn."
+description: "Use when publishing to npm or a registry, bumping versions, generating changelogs, cutting releases, or setting up a package's first publish: 'publish this package', 'bump version', 'npm publish', 'first publish', 'generate changelog', 'dry run publish', '发包', '发布npm'. Also for publish configuration (.npmignore, package.json fields). Covers npm, pnpm, yarn."
 ---
 
 # npm Publish
@@ -114,3 +114,7 @@ After publish:
 ## 2FA / OTP
 
 If the registry requires OTP, prompt the user to enter the code. Pass via `--otp <code>`. Never store OTP codes.
+
+## Also use when
+
+Other phrases that route here: 'release a new version', 'publish to npm', 'create release', 'version bump', 'prerelease', 'publish alpha/beta/rc', 'check before publish', '版本升级', and questions about registry setup. This skill is the required path for any npm publish.

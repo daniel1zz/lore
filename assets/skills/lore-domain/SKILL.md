@@ -1,6 +1,6 @@
 ---
 name: lore-domain
-description: "Use when user says 'analyze domain', 'document business rules', 'domain model', 'glossary', 'business workflow', '领域分析', '业务规则', or when needing to understand/create/update domain knowledge before implementation. Args: '<mode> [context]' — the FIRST token is the mode, one of: activate|analyze|create|quick-lens|quick-scenario|update."
+description: "Use when the user says 'analyze domain', 'domain model', 'glossary', 'business workflow', '领域分析', '领域模型', '业务流程', or needs to understand, create or update domain knowledge before implementation. NOT for permanent business rule ids and the citation gate (use lore-baseline), nor for role or scenario business reviews (use lore-biz-review). Args: '<mode> [context]' — the FIRST token is the mode, one of: activate|analyze|create|quick-lens|quick-scenario|update."
 ---
 
 # Domain - Mode: $0

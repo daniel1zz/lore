@@ -1,6 +1,6 @@
 ---
 name: lore-product-benchmark
-description: "Tear down 1-3 benchmark products into an evidence-backed Feature Matrix before designing anything. Use when starting a new product/feature, when asked 'what features should this have', 'what do competitors have', 'benchmark this', 'teardown', '对标', '标杆产品', '竞品功能拆解', or whenever a feature list is about to be invented from memory. Upstream of ideation/opportunity/PRD — supplies the raw feature inventory that those stages reason over."
+description: "Use when starting a new product or feature whose feature list must come from evidence, before ideation, opportunity or PRD work: 'what features should this have', 'what do competitors have', 'benchmark this', 'teardown', '对标', '标杆产品', '竞品功能拆解'. Tears down 1-3 benchmark products into a Feature Matrix."
 ---
 
 # Product Benchmark Teardown

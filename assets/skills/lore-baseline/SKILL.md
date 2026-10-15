@@ -1,6 +1,6 @@
 ---
 name: lore-baseline
-description: "Use when a requirement must become durable business documentation before code: author a product baseline tree (root / branch / leaf) with permanent rule ids, cite rules from acceptance criteria, and adopt the citation gate. Triggers: 'baseline', 'business rules', 'rule add', 'baseline tree', 'ac cite', 'baseline adopt', '业务基线', '业务规则', '需求拆解'. NOT for technical design or one-off specs."
+description: "Use when a requirement must become durable business documentation before code: a baseline tree (root / branch / leaf) with permanent rule ids, acceptance criteria citing rules, the citation gate. Triggers: 'baseline', 'business rules', 'rule add', 'baseline tree', 'ac cite', 'baseline adopt', '业务基线', '业务规则', '需求拆解'. NOT for domain models, glossaries or workflows (use lore-domain), technical design, or one-off specs."
 ---
 
 # Lore Baseline Authoring

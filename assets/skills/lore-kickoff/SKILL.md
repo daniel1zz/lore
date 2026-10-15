@@ -1,6 +1,6 @@
 ---
 name: lore-kickoff
-description: "Use when starting a brand new project, bootstrapping the lore corpus workflow for the first time (lore init, root PRD, first spec), or user says 'kickoff', 'new project', 'initialize project', 'Day 0', '项目启动', '新项目'."
+description: "Use when starting a brand new project, bootstrapping the lore corpus workflow for the first time (lore init, root PRD, first spec), or user says 'kickoff', 'new project', 'initialize project', 'Day 0', '项目启动', '新项目'. NOT for provisioning infrastructure (use lore-auto-wire) or configuring Claude Code for a project (use lore-project-bootstrap)."
 ---
 
 # Project Kickoff Orchestrator

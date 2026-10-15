@@ -1,6 +1,6 @@
 ---
 name: lore-test
-description: "Author or audit automated test suites (six-dimension coverage, external oracles). Use when user says 'write tests', 'add test coverage', 'regression test', 'check test quality', 'test this component', 'test this API', 'e2e test', 'integration test', 'unit test', 'frontend test', 'load test', 'security test', 'performance test', 'eval', 'test strategy', or asks about test infrastructure, coverage, flaky tests, mocking, or test architecture. NOT for test-first development methodology (use lore-tdd), NOT for runtime exploratory QA (use lore-dogfood), NOT for requirement-driven acceptance (use lore-uat). Args: '<mode> [context]' — the FIRST token is the mode, one of: accessibility|android|e2e|eval|exploratory|frontend|performance|property-based|security|strategy."
+description: "Use when the user says 'write tests', 'add test coverage', 'regression test', 'check test quality', 'test this component', 'test this API', 'e2e test', 'integration test', 'unit test', 'load test', 'test strategy', or asks about flaky tests, mocking or test architecture. NOT for test-first development (use lore-tdd), exploratory QA (use lore-dogfood), or requirement-driven acceptance (use lore-uat). Args: '<mode> [context]' — the FIRST token is the mode, one of: accessibility|android|e2e|eval|exploratory|frontend|performance|property-based|security|strategy."
 ---
 
 # Test - Mode: $0
@@ -650,3 +650,7 @@ describe('contract: /api/users/:id response', () => {
 | **Implementation Mirror** | Test logic mirrors if/else structure of source code | Test is a rewrite of the code, catches nothing | Test from spec, not from code structure |
 | **Over-Mock** | >50% of test lines are mock setup; removing mocks doesn't change outcomes | Tests prove mocks work, not code | Use real deps; mock only external boundaries |
 | **Fallback Blessing** | Tests assert that `?? default` returns `default` without checking if spec says to throw | Silently approves error-hiding patterns | For every fallback, verify spec intent: should it fallback or reject? |
+
+## Also use when
+
+Other phrases that route here: 'frontend test', 'security test', 'performance test', 'eval', and questions about test infrastructure or coverage. Authors or audits automated suites with six-dimension coverage and external oracles.

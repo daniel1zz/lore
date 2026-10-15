@@ -1,6 +1,6 @@
 ---
 name: lore-biz-review
-description: "Business domain review generator. Dual-axis: role-based AND scenario-based review."
+description: "Use when generating a domain-specific business review along two axes, by role (who reviews) or by scenario (what situation is reviewed): 'biz review', 'business review', 'role-based review', 'scenario review', '业务评审'. NOT for building the domain model itself (use lore-domain)."
 ---
 
 # Biz Review

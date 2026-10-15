@@ -1,6 +1,6 @@
 ---
 name: lore-ai-native-coding
-description: "AI-native coding paradigm reference for implementer / reviewer subagents. Use when writing or reviewing source code (implementation, not tests) to ensure the code itself carries enough context for the NEXT session's AI to safely modify it. Triggers: writing a new module, adding a function/class, changing an existing module's surface, designing an error model, modeling state, choosing a name, adding logging, deciding whether to abstract."
+description: "Use when writing or reviewing source code (implementation, not tests) so the code carries enough context for the next session's AI to modify it safely: a new module, function or class, a changed module surface, an error model, state modeling, naming, logging, or an abstraction decision."
 ---
 
 # AI-Native Coding

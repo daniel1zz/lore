@@ -1,6 +1,6 @@
 ---
 name: lore-write-a-skill
-description: Create new agent skills with proper structure, progressive disclosure, and bundled resources. Use when user wants to create, write, or build a new skill.
+description: "Use when the user wants to create, write, or build a new agent skill with proper structure, progressive disclosure and bundled resources."
 ---
 
 # Writing Skills
@@ -66,12 +66,13 @@ The description is **the only thing your agent sees** when deciding which skill 
 1. What capability this skill provides
 2. When/why to trigger it (specific keywords, contexts, file types)
 
-**Format**:
+**Format** (the lore-shipped standard, enforced by `skill-description-trigger-contract.test.ts`):
 
-- Max 1024 chars
-- Write in third person
-- First sentence: what it does
-- Second sentence: "Use when [specific triggers]"
+- Open with `Use when` — the description says WHEN to pick the skill, not HOW it works
+- Max 500 characters (the 500-character limit applies to the text before any `Args:` mode suffix)
+- Name user trigger phrases (zh/en), then `NOT for <neighbour> (use lore-x)` for each neighbouring skill
+- At most one short clause on what the skill does; process detail (steps, outputs, dispatch mechanics, history) belongs in the body
+- Redirect only to skills that exist, and never quote a trigger phrase another skill already claims
 
 **Good example**:
 

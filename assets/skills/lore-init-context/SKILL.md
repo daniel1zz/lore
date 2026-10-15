@@ -1,6 +1,6 @@
 ---
 name: lore-init-context
-description: Generate layered CLAUDE.md files for project context — root CLAUDE.md plus per-module CLAUDE.md with link-based discovery. Scans project structure, detects modules, **detects drift between existing CLAUDE.md and actual code**, and writes static knowledge (architecture, invariants, conventions) into native Claude Code context files. Replaces the retired session-start bootstrap injection and init_* MCP tooling with zero-dependency file-based context. Use when 'init context', 'generate context', 'setup CLAUDE.md layers', 'create module docs', 'initialize project knowledge', 'refresh context', '初始化上下文', '生成项目上下文', '更新上下文', or when onboarding AI to a codebase, starting a new project, migrating from bootstrap-based injection, or refreshing context after major structural changes. Also use whenever a project has only a root CLAUDE.md but would benefit from per-module context files, or when a root CLAUDE.md exists but has drifted from current code.
+description: "Use when the user says 'init context', 'generate context', 'setup CLAUDE.md layers', 'create module docs', 'refresh context', '初始化上下文', '生成项目上下文', '更新上下文', when a project has only a root CLAUDE.md, or when CLAUDE.md has drifted from the code. Generates root plus per-module CLAUDE.md files."
 ---
 
 # Context Layer Initialization
@@ -336,3 +336,9 @@ Everything outside markers is treated as user-owned. Drift-fix mode (Q2 = "Rewri
 ## Step 6: Contract Oracle
 
 After generating (or updating) files, if `lore` is on PATH run `lore status --check-claude-md`. Exit 3 means one or more generated files violate the deterministic line/byte ceiling from the contract — treat this as a failure and fix the offending file(s) before reporting done. Exit 0 (or `lore` absent) means this oracle passed or does not apply.
+
+## Also use when
+
+Other phrases that route here: 'initialize project knowledge', onboarding AI to a codebase, starting a new project's context, or refreshing context after major structural changes.
+
+History: this skill replaces the retired session-start bootstrap injection and the init_* MCP tooling with zero-dependency, file-based context. Use it when migrating from bootstrap-based injection. It detects drift between existing CLAUDE.md files and the actual code, and writes static knowledge (architecture, invariants, conventions) into native Claude Code context files.

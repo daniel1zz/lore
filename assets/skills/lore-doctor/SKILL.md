@@ -1,6 +1,6 @@
 ---
 name: lore-doctor
-description: "Diagnose and repair lore corpus health issues. Detects tree drift, code-anchor drift, orphans, stale drafts, stale knowledge/ADRs, stuck reviews, stale claim leases, and tasks without evidence. Supports fix mode. Use when user says 'doctor', 'corpus health', 'doc health', 'check the corpus', 'health check', '文档健康', '语料体检'."
+description: "Use when the user says 'doctor', 'corpus health', 'doc health', 'check the corpus', 'health check', '文档健康', '语料体检', or suspects tree drift, code-anchor drift, orphans, stale drafts, stuck reviews, stale claim leases or tasks without evidence in the lore corpus. Diagnoses and repairs (fix mode)."
 ---
 
 # Lore Doctor — Corpus Health Diagnostics & Repair
