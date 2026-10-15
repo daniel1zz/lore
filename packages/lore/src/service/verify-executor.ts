@@ -47,7 +47,7 @@
  *   - stderr is routed into stdout through ONE pipe (`merged-stream-command.ts`, shared
  *     with `lore evidence --capture`; task-gh-1343388703-181), so the stream below is in
  *     terminal order. Only a bare-binary argv (no `sh -c`) still concatenates.
- *   - `outputTail` is the single merged stream (stdout+stderr in terminal order) windowed to at most 4000 chars
+ *   - `outputTail` is the single merged stream (stdout+stderr in terminal order) windowed to at most `CAPTURE_TAIL_CHARS` chars
  *     (matches `evidenceEntrySchema.output_tail`'s cap) via `verify-spawn.ts`'s pure
  *     `selectOutputTailWindow` (spec-evidence-output-tail-integrity-a-self-reported-non-pass
  *     §D4) — the plain stream-END tail UNLESS `spec.acRef` is set and that id occurs
@@ -69,7 +69,7 @@
  * Source: SPEC-039 §2 D6; §3; §4 AC-VRF-5, AC-VRF-6; §M2 (env allowlist)
  */
 
-import { err, ok } from "@lore/core";
+import { CAPTURE_TAIL_CHARS, err, ok } from "@lore/core";
 import type { LoreError, Result } from "@lore/core";
 import { mergeStderrIntoShellArgv } from "./merged-stream-command.js";
 import { selectOutputTailWindow } from "./verify-spawn.js";
@@ -78,7 +78,7 @@ import type { VerifySpawnSpec, VerifyExecutionResult } from "./verify-spawn.js";
 export type { VerifyExecutionResult } from "./verify-spawn.js";
 
 /** Truncate to the last N chars — keeps the most recent (most relevant) output. */
-const OUTPUT_TAIL_MAX_CHARS = 4000;
+const OUTPUT_TAIL_MAX_CHARS = CAPTURE_TAIL_CHARS;
 
 /**
  * Best-effort signal to the WHOLE process group led by `pid` (SPEC-039 §2 D6).

@@ -197,6 +197,7 @@ import {
   describeDerivedCdTarget,
   findMissingOracleFiles,
   describePrecheckRoots,
+  CAPTURE_TAIL_CHARS,
   type FileExistsPort,
   type LoreError,
 } from "@lore/core";
@@ -1217,7 +1218,7 @@ export function findCapturedRedProofGap(input: {
     message:
       `--capture cannot record a "${input.result}" for oracle ${input.oracle}: ${missing}. ` +
       "A red must show a failed test, otherwise a broken command (failed cd, bad flag) would " +
-      "satisfy the red-first floor (BR-1077). Only the last 4000 characters are stored; if the " +
+      `satisfy the red-first floor (BR-1077). Only the last ${CAPTURE_TAIL_CHARS} characters are stored; if the ` +
       "runner's summary was pushed out by later stderr, add `2>&1` to --command so the summary " +
       "stays at the end. Playwright output has no recognised summary and cannot be captured as a red.",
     value: input.outputTail ?? "",

@@ -74,6 +74,9 @@ import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { parse as parseYaml } from "yaml";
 import { BOOTSTRAP_FRAMING_LINE } from "@lore/core";
+import type { Fragment, FragmentFrontmatter } from "@lore/core";
+import { LORE_CONTEXT_VARIABLES } from "../../src/service/context-variables-registry";
+import { expandFragments } from "../../src/service/context-fragments/expand";
 import { assertFreshBinary } from "../integration/helpers/assert-fresh-binary";
 
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -287,6 +290,17 @@ function shippedAgentFiles(): string[] {
   return readdirSync(join(ASSETS_DIR, "agents")).filter((f) => f.endsWith(".md"));
 }
 
+/**
+ * The refreshed rules file carries the REGISTRY-EXPANDED body (AC-CV-3: `{{lore:}}` expands at refresh),
+ * so the expected text is the shipped source run through the same helper, never the raw source.
+ */
+function expandShippedBody(fm: unknown, rawBody: string, file: string): string {
+  const fragment: Fragment = { frontmatter: fm as FragmentFrontmatter, body: rawBody, layer: "shipped", path: file };
+  const result = expandFragments([fragment], "rules:project", { invocation: {} }, LORE_CONTEXT_VARIABLES);
+  if (!result.ok) throw new Error(`shipped fragment ${file} failed to expand: ${JSON.stringify(result.error)}`);
+  return (result.value[0] as Fragment).body.trim();
+}
+
 /** Shipped static `main` fragments with no `when` clause, parsed from assets/context (empty when the dir is absent). */
 function shippedStaticMainFragments(): { id: string; body: string }[] {
   const dir = join(ASSETS_DIR, "context");
@@ -298,7 +312,7 @@ function shippedStaticMainFragments(): { id: string; body: string }[] {
     if (m === null) continue;
     const fm = parseYaml(m[1] as string) as { id?: string; audience?: string[]; mode?: string; when?: unknown };
     if (fm.mode === "static" && Array.isArray(fm.audience) && fm.audience.includes("main") && fm.when === undefined) {
-      out.push({ id: String(fm.id), body: (m[2] as string).trim() });
+      out.push({ id: String(fm.id), body: expandShippedBody(fm, m[2] as string, f) });
     }
   }
   return out;

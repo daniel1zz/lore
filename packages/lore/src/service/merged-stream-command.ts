@@ -12,7 +12,7 @@
  * service code must never import an adapter.
  *
  * Defect (task-gh-1343388703-181, lore issue #181): both spawn paths used to keep
- * stdout then stderr (concatenated) and a 4000-char tail, so a runner printing its
+ * stdout then stderr (concatenated) and a `CAPTURE_TAIL_CHARS`-sized tail, so a runner printing its
  * summary on stdout and noise on stderr lost the summary from the tail. One pipe
  * keeps the order a terminal shows.
  *

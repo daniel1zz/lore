@@ -136,7 +136,7 @@
  *   - No IO, no wall-clock reads, no randomness — `renderHandoffContent` is deterministic:
  *     the same `HandoffExtra` always renders the same Markdown string.
  *   - `handoffExtraSchema`'s nested caps (`judgment` ≤300 chars, `output_tail` ≤2000 chars)
- *     bound document growth the same way `evidenceEntrySchema.output_tail` (≤4000 chars,
+ *     bound document growth the same way `evidenceEntrySchema.output_tail` (≤`CAPTURE_TAIL_CHARS`,
  *     task-workflow.ts) does for evidence entries.
  *   - `bootstrapReportSchema` carries only slug/title/count/timestamp/boolean fields —
  *     never a doc's `content`. Titles are truncated to ≤120 chars by the SERVICE layer
@@ -226,7 +226,7 @@ export type HandoffKeyDecision = z.infer<typeof handoffKeyDecisionSchema>;
  * The oracle command that was failing (or last run) when the handoff was written,
  * plus a bounded tail of its output — the same "last known state of the world" a
  * human handoff comment would include. `output_tail` is capped at 2000 chars
- * (tighter than `evidenceEntrySchema.output_tail`'s 4000 — a handoff is a pointer
+ * (tighter than `evidenceEntrySchema.output_tail`'s `CAPTURE_TAIL_CHARS` — a handoff is a pointer
  * document, not a full oracle log).
  *
  * @example

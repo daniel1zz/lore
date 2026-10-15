@@ -64,7 +64,7 @@
  * Source: SPEC-039 §2 D5, D6, D9; §3; §4 AC-VRF-4; §M2 (env allowlist hardening)
  */
 
-import { headChars, tailChars } from "@lore/core";
+import { CAPTURE_TAIL_CHARS, headChars, tailChars } from "@lore/core";
 import type { AcceptanceCriterion } from "@lore/core";
 
 /** Fixed grace period between SIGTERM and SIGKILL escalation (SPEC-039 §2 D6). Not configurable. */
@@ -250,7 +250,7 @@ export interface VerifyExecutionResult {
    *  (e.g. 143 for SIGTERM, 137 for SIGKILL), not null. */
   readonly exitCode: number;
   /**
-   * stdout + stderr concatenated, truncated to 4000 chars via
+   * stdout + stderr concatenated, truncated to `CAPTURE_TAIL_CHARS` chars via
    * {@link selectOutputTailWindow} — the plain stream-tail UNLESS the spawn spec
    * carried an `acRef` that occurs earlier than that plain tail's window, in which
    * case this is a window around the id's LAST occurrence instead (D4).
@@ -315,25 +315,25 @@ export function deriveVerifyResult(exitCode: number | null, timedOut: boolean): 
  *   intends to attach one (`VerifySpawnSpec.acRef`, present iff `recordAcRef` is true
  *   for this run — see that field's own JSDoc). `undefined` or `""` means "no
  *   preference" — always the plain tail (AC-ETI-8 control).
- * @param maxChars - The `output_tail` budget (`OUTPUT_TAIL_MAX_CHARS`, 4000 in
+ * @param maxChars - The `output_tail` budget (`OUTPUT_TAIL_MAX_CHARS`, `CAPTURE_TAIL_CHARS` in
  *   production). `maxChars <= 0` returns `""`, matching `tailChars`'s own contract.
  * @returns The text to store as `output_tail`.
  *
  * @example
  * // acRef never occurs anywhere — byte-identical to the plain tail (AC-ETI-8).
- * selectOutputTailWindow("some unrelated output\n".repeat(500), "AC-ETI-7", 4000)
- * // => tailChars("some unrelated output\n".repeat(500), 4000)
+ * selectOutputTailWindow("some unrelated output\n".repeat(500), "AC-ETI-7", CAPTURE_TAIL_CHARS)
+ * // => tailChars("some unrelated output\n".repeat(500), CAPTURE_TAIL_CHARS)
  *
  * @example
  * // acRef occurs, but already inside the plain tail's window — left unchanged.
- * selectOutputTailWindow("noise ".repeat(10) + "AC-ETI-7 passed", "AC-ETI-7", 4000)
- * // => the full string (shorter than 4000 chars, nothing to override)
+ * selectOutputTailWindow("noise ".repeat(10) + "AC-ETI-7 passed", "AC-ETI-7", CAPTURE_TAIL_CHARS)
+ * // => the full string (shorter than `CAPTURE_TAIL_CHARS` chars, nothing to override)
  *
  * @example
  * // acRef scrolled out of the plain tail — windowed around its LAST occurrence instead.
  * const stream = "AC-ETI-7 passed\n" + "z".repeat(9000);
- * selectOutputTailWindow(stream, "AC-ETI-7", 4000).includes("AC-ETI-7") // => true
- * tailChars(stream, 4000).includes("AC-ETI-7") // => false — the bug this fixes
+ * selectOutputTailWindow(stream, "AC-ETI-7", CAPTURE_TAIL_CHARS).includes("AC-ETI-7") // => true
+ * tailChars(stream, CAPTURE_TAIL_CHARS).includes("AC-ETI-7") // => false — the bug this fixes
  */
 export function selectOutputTailWindow(
   stream: string,

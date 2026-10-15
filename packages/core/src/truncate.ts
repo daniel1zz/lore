@@ -28,7 +28,7 @@
  * oracle-output capture (this module's real callers: `lore evidence
  * --output-tail-file`, `lore verify`'s captured stdout+stderr, `lore handoff
  * --failing-tail-file`, and assess-prompt section truncation), an MB-scale string would
- * be fully re-materialised into a code-point array just to keep the last 4000 characters
+ * be fully re-materialised into a code-point array just to keep the last `CAPTURE_TAIL_CHARS` characters
  * of it.
  *
  * Instead: take the naive `.slice()` cut point, then inspect AT MOST the single pair of
