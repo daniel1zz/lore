@@ -21,6 +21,7 @@ function frag(id: string, body: string, audience: string[] = ["main"], mode: "st
     body,
     layer: "shipped",
     path: `/fixture/${id}.md`,
+    bodyLineOffset: 6,
   };
 }
 

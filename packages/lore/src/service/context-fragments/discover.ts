@@ -21,7 +21,6 @@
  * Side-effect class: Read-only IO through the injected FsReadPort.
  */
 import { parse as parseYaml } from "yaml";
-import type { LocatedFragment } from "./expand.js";
 import {
   err,
   FragmentFrontmatterSchema,
@@ -60,7 +59,7 @@ async function loadFragment(
   fs: FsReadPort,
   path: string,
   layer: Fragment["layer"],
-): Promise<Result<LocatedFragment, DiscoverError>> {
+): Promise<Result<Fragment, DiscoverError>> {
   const text = await fs.readFile(path);
   if (text === null) return fail(path, "fragment file could not be read");
 

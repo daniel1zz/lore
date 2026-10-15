@@ -48,6 +48,7 @@ function frag(
     body: opts.body ?? `body of ${id} from ${layer}`,
     layer: layer as Fragment["layer"],
     path: `/${layer}/${id}.md`,
+    bodyLineOffset: 6,
   } as Fragment;
 }
 

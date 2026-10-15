@@ -2,7 +2,7 @@
  * Fragment-outlet expansion of `{{lore:<name>}}` placeholders (the ONE helper every fragment path uses).
  * Spec: spec-lore-owned-agent-context-is-generated-from-templates-and (D2-D5, D10).
  *
- * Public surface: `expandFragments`, `LocatedFragment`, `FragmentExpansionContext`.
+ * Public surface: `expandFragments`, `FragmentExpansionContext`.
  * Invariants:
  *   - Pure: no IO; inputs are never mutated; the registry is an injected parameter.
  *   - All-or-nothing: the first refused fragment returns its error and no expanded list.
@@ -11,11 +11,9 @@
  *   - Callers run this on SELECTED fragments of one outlet, BEFORE render / fingerprint / duplicate
  *     detection / byte caps, so refresh, check and render all measure the same expanded text.
  * Line numbers: `discoverFragments` stamps `bodyLineOffset` (frontmatter lines incl. both `---` fences)
- * on every fragment it loads. A fragment built without it (tests, synthetic) falls back to the line
- * count of its re-serialised frontmatter, which is exact for block-style YAML only.
+ * on every fragment it loads; `Fragment.bodyLineOffset` is REQUIRED, so there is no estimate or fallback.
  * Side-effect class: pure.
  */
-import { stringify as stringifyYaml } from "yaml";
 import {
   expandTemplate,
   ok,
@@ -26,9 +24,6 @@ import {
   type Result,
 } from "@lore/core";
 
-/** A discovered fragment plus the number of file lines before its body (frontmatter block with fences). */
-export type LocatedFragment = Fragment & { readonly bodyLineOffset?: number };
-
 /** Caller-supplied values; fragment outlets never allow an invocation variable, so this is normally empty. */
 export interface FragmentExpansionContext {
   readonly invocation: Readonly<Record<string, string>>;
@@ -36,12 +31,6 @@ export interface FragmentExpansionContext {
 
 /** Marker of a candidate placeholder; bodies without it skip the expander entirely. */
 const PLACEHOLDER_MARKER = "{{lore:";
-
-function bodyLineOffset(fragment: LocatedFragment): number {
-  if (fragment.bodyLineOffset !== undefined) return fragment.bodyLineOffset;
-  const yamlLines = stringifyYaml(fragment.frontmatter).split("\n").filter((line, i, all) => i < all.length - 1 || line !== "").length;
-  return yamlLines + 2;
-}
 
 /**
  * Expand every `{{lore:<name>}}` in the bodies of `fragments` for one outlet.
@@ -66,7 +55,7 @@ export function expandFragments(
     }
     const result = expandTemplate(
       fragment.body,
-      { outlet, path: fragment.path, lineOffset: bodyLineOffset(fragment), invocation: ctx.invocation },
+      { outlet, path: fragment.path, lineOffset: fragment.bodyLineOffset, invocation: ctx.invocation },
       registry,
     );
     if (!result.ok) return result;
