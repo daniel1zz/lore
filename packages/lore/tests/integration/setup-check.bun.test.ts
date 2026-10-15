@@ -39,10 +39,10 @@
  *               cache file exists with `status: "sync"`.
  *   NEGATIVE:   mutating ONE managed file's on-disk bytes flips `--check` to
  *               exit 3 with `--json`'s `files.diverged` containing EXACTLY
- *               that one path; `--check --uninstall` / `--check --dry-run` /
- *               `--check --project` each exit 2, naming the rejected
- *               combination (never a silent global-only check for the
- *               `--project` case — SPEC-076 Scope-Alt).
+ *               that one path; `--check --uninstall` / `--check --dry-run`
+ *               each exit 2, naming the rejected combination. `--check
+ *               --project` is no longer refused (BR-1085): it checks the
+ *               project install (see N4).
  *   BOUNDARY:   `--check` against a target directory that was NEVER
  *               installed classifies every managed entry as `missing`
  *               (install-equivalent, SPEC-076 §C3), exit 3.
@@ -242,12 +242,15 @@ describe("lore setup --check — NEGATIVE", () => {
     expect(result.stderr).toContain("--dry-run");
   });
 
-  it("AC-076-2.N4: --check + --project exits 2, naming the unsupported combination (Scope-Alt, never a silent global-only check)", () => {
+  it("AC-076-2.N4: --check + --project checks the PROJECT install (BR-1085, supersedes the old exit-2 refusal) — never a silent global-only check", () => {
+    // reason: BR-849 was modified by spec-one-upgrade-reminder-at-session-start-covers-the-global: the combination
+    // is now supported. A scratch dir with no project ledger exits 4 naming the project scaffold command, proving
+    // the PROJECT path ran (the global path would classify the machine target instead). Full coverage of the
+    // project check: tests/integration/cli/setup-project-check.test.ts.
     const scratch = makeScratchDir("lore-setup-check-mutex-project-");
     const result = runSetup(["--check", "--project"], scratch);
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("--project");
-    expect(result.stderr.toLowerCase()).toContain("not supported");
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("lore setup --project");
   });
 });
 

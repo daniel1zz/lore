@@ -26,8 +26,12 @@
  * AC-076-2) is a FULLY SEPARATE, READ-ONLY dispatch — handled at the very top
  * of `run()`, before `validateSetupFlags`'s `SetupMode` resolution even runs,
  * since it composes with NONE of install/dry-run/uninstall/project's modes
- * (mutually exclusive with `--uninstall`/`--dry-run`; `--check --project` is
- * an explicit, named-exit-2 Scope-Alt — never a silent global-only check).
+ * (mutually exclusive with `--uninstall`/`--dry-run`/`--force-diverged`, each
+ * refused exit 2 naming it; BR-849). `--check --project` (BR-1085) checks the
+ * PROJECT install instead of the global one — `runProjectCheck` below
+ * classifies ledger hooks/skills, lore rules files and project settings
+ * entries and writes only the project check cache; it skips the GitHub-channel
+ * probe (a machine-level concern).
  * Thin pipe over `../setup-check.js::runSetupCheck`/`computeSetupCheckReport`
  * — see that module's own doc for the zero-mutation-beyond-the-check-cache
  * invariant. Immediately after that asset-freshness section, `--check` ALSO
@@ -129,19 +133,19 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createInterface } from "node:readline/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineCommand } from "citty";
 import { seedAcCiteModeAudited } from "./baseline-adopt.js";
 import { parseDocument } from "yaml";
 import { err, loadConfigFromString, ok, resolveMemoryFileBudgets } from "@lore/core";
-import type { AdoptionMode, LoreError, MemoryFileBudgets, Result } from "@lore/core";
+import type { AdoptionMode, FsWritePort, LoreError, MemoryFileBudgets, Result } from "@lore/core";
 import { buildRefreshFragmentDeps, makeRealContextFsPort, toContextLayer } from "./context.js";
 import { loadConfig, loadGlobalConfig } from "@lore/core/node";
 
 import { SetupService, type McpAddOutcome, type McpRegistrar, type SetupReceipt } from "../../../service/setup-service.js";
-import { ProjectSetupService } from "../../../service/project-setup-service.js";
+import { ProjectSetupService, checkProjectLedger } from "../../../service/project-setup-service.js";
 import {
   PROJECT_MANIFEST_RELATIVE_PATH,
   type ExecPort,
@@ -180,7 +184,8 @@ import {
   type SetupPathContext,
 } from "../setup-args.js";
 import { exitCode, formatError } from "../utils.js";
-import { computeSetupCheckReport, runSetupCheck } from "../setup-check.js";
+import { computeSetupCheckReport, finishProjectSetupCheck, runSetupCheck } from "../setup-check.js";
+import type { SetupCheckFiles } from "../setup-check.js";
 import { createNodeGhExecFile, GhRunner } from "../../../service/gh-runner.js";
 import { createGhRunnerHealthProbe, ghHealthExitCode, runGitHubHealthCheck } from "../setup-github-health.js";
 
@@ -619,11 +624,18 @@ function failWith(error: LoreError): void {
  * CLAUDE.md) so the lore rules files (`.claude/rules/lore-*.md`, D15) land, then the project-layer language projection. Runs AFTER the scaffold created
  * CLAUDE.md and `.lore/config.yaml`.
  */
-async function runProjectContextProjection(opts: {
+/**
+ * The fragment-refresh deps (`runContextRefresh`'s `budgets` + `FragmentRefreshDeps`) for one repo — the ONE
+ * builder behind both `lore setup --project` (writes the rules files) and `lore setup --project --check`
+ * (classifies them), so the two can never select different fragments.
+ */
+function buildProjectRefreshDeps(opts: {
   repoDir: string;
   assetsRoot: string;
-  claudeDir: string;
-}): Promise<Result<void, LoreError>> {
+}): Result<
+  { budgets: MemoryFileBudgets } & Extract<ReturnType<typeof buildRefreshFragmentDeps>, { ok: true }>["value"],
+  LoreError
+> {
   const projectConfig = loadConfig(opts.repoDir);
   if (!projectConfig.ok) return projectConfig;
   const globalConfig = loadGlobalConfig();
@@ -641,11 +653,20 @@ async function runProjectContextProjection(opts: {
     projectLayer: toContextLayer(projectConfig.value),
   });
   if (!fragmentDeps.ok) return fragmentDeps;
+  return ok({ budgets: budgets.value, ...fragmentDeps.value });
+}
+
+async function runProjectContextProjection(opts: {
+  repoDir: string;
+  assetsRoot: string;
+  claudeDir: string;
+}): Promise<Result<void, LoreError>> {
+  const refreshDeps = buildProjectRefreshDeps(opts);
+  if (!refreshDeps.ok) return refreshDeps;
   const refreshed = await runContextRefresh(
     {
       fs: makeRealContextFsPort(opts.repoDir),
-      budgets: budgets.value,
-      ...fragmentDeps.value,
+      ...refreshDeps.value,
     },
     "",
     // reason: setup must not re-splice the scaffolded CLAUDE.md (its facts-Z1 lacks the root H2s the
@@ -657,6 +678,133 @@ async function runProjectContextProjection(opts: {
   const plan = planLanguageProjections(opts.claudeDir, opts.repoDir);
   if (!plan.ok) return plan;
   return applyLanguageProjections(plan.value.filter((item) => item.layer === "project"));
+}
+
+// ─── --project --check (BR-1085): classify every project-managed file, write only the cache ──
+
+/**
+ * `makeRealContextFsPort` with every mutation turned into a no-op: `runContextRefresh` then PLANS the rules and
+ * skill files exactly as `lore setup --project` would write them (same selection, same fingerprint test) and
+ * reports each file's would-be state, while nothing reaches disk — the check's classification and the refresh's
+ * write decision are one code path, so they cannot disagree.
+ */
+function makeReadOnlyContextFsPort(repoDir: string): FsWritePort {
+  const real = makeRealContextFsPort(repoDir);
+  return {
+    exists: (path) => real.exists(path),
+    readFile: (path) => real.readFile(path),
+    listDir: (path) => real.listDir(path),
+    writeFile: async () => undefined,
+    deleteFile: async () => undefined,
+    removeDirIfEmpty: async () => undefined,
+  };
+}
+
+/** Repo-relative POSIX form of a context-port path (the port may hand back absolute paths). */
+function toRepoRelative(repoDir: string, portPath: string): string {
+  return (isAbsolute(portPath) ? relative(repoDir, portPath) : portPath).split("\\").join("/");
+}
+
+/**
+ * Classifies the lore rules files and fragment skill folders: a missing file is `missing`, an intact file that
+ * differs from a fresh render is `outdated`, a hand-edited one is `diverged`, and a file whose fragment is no
+ * longer selected is `orphaned`.
+ */
+async function classifyProjectRulesFiles(opts: { repoDir: string; assetsRoot: string }): Promise<Result<SetupCheckFiles, LoreError>> {
+  const refreshDeps = buildProjectRefreshDeps(opts);
+  if (!refreshDeps.ok) return refreshDeps;
+  const planned = await runContextRefresh(
+    { fs: makeReadOnlyContextFsPort(opts.repoDir), ...refreshDeps.value },
+    "",
+    { scope: "project", rulesOnly: true },
+  );
+  if (!planned.ok) return planned;
+  const files: SetupCheckFiles = { outdated: [], diverged: [], missing: [], orphaned: [] };
+  for (const outcome of [...planned.value.rules, ...planned.value.skills]) {
+    const path = toRepoRelative(opts.repoDir, outcome.path);
+    if (outcome.state === "created") files.missing.push(path);
+    else if (outcome.state === "updated") files.outdated.push(path);
+    else if (outcome.state === "diverged_skip") files.diverged.push(path);
+    else if (outcome.state === "pruned") files.orphaned.push(path);
+  }
+  return ok(files);
+}
+
+/**
+ * Classifies the lore entries lore projects into the project settings file (today: `language` from the project
+ * config's `context.language`): absent file or key -> `missing`; a different value -> `outdated`. No configured
+ * language means lore manages no entry, so nothing is reported. An unreadable settings file is a loud error.
+ */
+function classifyProjectSettingsEntries(repoDir: string): Result<SetupCheckFiles, LoreError> {
+  const files: SetupCheckFiles = { outdated: [], diverged: [], missing: [], orphaned: [] };
+  const plan = planLanguageProjections(repoDir, repoDir);
+  if (!plan.ok) return plan;
+  const settingsFs = createRealClaudeSettingsFs();
+  for (const item of plan.value.filter((entry) => entry.layer === "project")) {
+    const entry = `${toRepoRelative(repoDir, item.settingsPath)}#language`;
+    const raw = settingsFs.read(item.settingsPath);
+    if (raw === null) {
+      files.missing.push(entry);
+      continue;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (cause) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "settings",
+        message: `${item.settingsPath} is not valid JSON: ${cause instanceof Error ? cause.message : String(cause)}`,
+        value: item.settingsPath,
+      });
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        field: "settings",
+        message: `${item.settingsPath} must hold a JSON object at its root`,
+        value: item.settingsPath,
+      });
+    }
+    const current = (parsed as Record<string, unknown>)["language"];
+    if (current === undefined) files.missing.push(entry);
+    else if (current !== item.language) files.outdated.push(entry);
+  }
+  return ok(files);
+}
+
+/**
+ * `lore setup --project --check` — read-only: classifies every project-managed file (ledger hooks and baseline
+ * skill, lore rules files and fragment skills, lore entries in the project settings file), writes ONLY the
+ * project check cache, exits 0 in sync / 3 otherwise (4 on an unreadable ledger or settings file).
+ */
+async function runProjectCheck(opts: { json: boolean; assetsRoot: string }): Promise<void> {
+  const repoDir = process.cwd();
+  const ledger = await checkProjectLedger(
+    {
+      fs: makeRealProjectFs(),
+      assets: makeRealProjectAssetSource(join(opts.assetsRoot, "project")),
+      skillAssets: makeRealProjectSkillSource(opts.assetsRoot),
+    },
+    repoDir,
+  );
+  if (!ledger.ok) return failWith(ledger.error);
+  const rules = await classifyProjectRulesFiles({ repoDir, assetsRoot: opts.assetsRoot });
+  if (!rules.ok) return failWith(rules.error);
+  const settings = classifyProjectSettingsEntries(repoDir);
+  if (!settings.ok) return failWith(settings.error);
+
+  const parts = [ledger.value, rules.value, settings.value];
+  await finishProjectSetupCheck({
+    repoDir,
+    json: opts.json,
+    files: {
+      outdated: parts.flatMap((part) => part.outdated),
+      diverged: parts.flatMap((part) => part.diverged),
+      missing: parts.flatMap((part) => part.missing),
+      orphaned: parts.flatMap((part) => part.orphaned),
+    },
+  });
 }
 
 async function runProjectScaffold(opts: {
@@ -977,6 +1125,20 @@ async function runCheckDispatch(opts: { targetDir: string; json: boolean }): Pro
   }
 }
 
+/**
+ * The asset/bin path context shared by every mode that reads shipped assets.
+ * reason: Bun.isStandaloneExecutable does not exist on this repo's pinned Bun/bun-types
+ * (1.3.x) — see setup-args.ts's module doc for the empirically-verified `/$bunfs/`
+ * detection this repo uses instead.
+ */
+function buildSetupPathContext(): SetupPathContext {
+  return {
+    repoRoot: REPO_ROOT,
+    isCompiled: Bun.main.startsWith("/$bunfs/"),
+    execPath: process.execPath,
+  };
+}
+
 // ─── Command ─────────────────────────────────────────────────────────────────
 
 export default defineCommand({
@@ -1043,11 +1205,14 @@ export default defineCommand({
         return;
       }
       if (args.project === true) {
-        process.stderr.write(
-          "Error: --check --project is not supported yet — run `lore setup --check` (without --project) " +
-            "to check the global machine install only; project-scaffold freshness checking is deferred.\n",
-        );
-        process.exitCode = 2;
+        // reason: BR-849 — `--check --project` checks the PROJECT install (BR-1085). `--claude-dir` stays refused
+        // exactly as `--project` alone refuses it: the project scaffold has no machine target to redirect.
+        if (claudeDirFlag !== undefined) {
+          process.stderr.write("Error: --check --project cannot be combined with --claude-dir — the project check reads only the current repo.\n");
+          process.exitCode = 2;
+          return;
+        }
+        await runProjectCheck({ json, assetsRoot: resolveAssetsRoot(buildSetupPathContext()) });
         return;
       }
       const checkTargetDir = resolveTargetDir({
@@ -1084,14 +1249,7 @@ export default defineCommand({
     // through two branches for no behavioral difference (ProjectSetupService never reads it).
     process.env["LORE_SETUP_ALLOW_REAL"] = "1";
 
-    // reason: Bun.isStandaloneExecutable does not exist on this repo's pinned Bun/bun-types
-    // (1.3.x) — see setup-args.ts's module doc for the empirically-verified `/$bunfs/`
-    // detection this repo uses instead.
-    const pathCtx: SetupPathContext = {
-      repoRoot: REPO_ROOT,
-      isCompiled: Bun.main.startsWith("/$bunfs/"),
-      execPath: process.execPath,
-    };
+    const pathCtx = buildSetupPathContext();
     const assetsRoot = resolveAssetsRoot(pathCtx);
     const binPath = resolveBinPath(pathCtx);
 

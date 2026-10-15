@@ -34,7 +34,16 @@
  *     stale_counts?}`), additively extended by task task-skill-implement-t8b
  *     with an OPTIONAL `reminder_enabled: false` (present ONLY when the
  *     resolved `setup.check_reminder` config is `false` — see
- *     `resolveCheckReminderEnabled` below).
+ *     `resolveCheckReminderEnabled` below). **BR-1085**: this ONE shape is
+ *     shared by the global cache (`<claude-dir>/.lore-setup-check.json`) and
+ *     the project cache (`PROJECT_CHECK_CACHE_RELATIVE_PATH`), additionally
+ *     carrying `scope`, the per-state `files` lists and a `reasons` hint
+ *     (`SetupCheckReason`: binary version changed / settings changed / hand
+ *     edited) — the session-start advisory reads both through it.
+ *   - finishProjectSetupCheck(opts) — `lore setup --project --check`'s
+ *     finisher: builds the report from the per-state lists
+ *     `commands/setup.ts` collected, writes the project cache (its sole
+ *     write), prints, sets exit 0 sync / 3 stale.
  *
  * Invariants:
  *   - ZERO MUTATION beyond the check cache file (SPEC-076 Invariant I4 /
@@ -145,16 +154,42 @@ const CHECK_CACHE_FILENAME = ".lore-setup-check.json";
 /** Top-level `assets/` (== install-target) directories a managed-ownership entry can live under. */
 const MANAGED_TOP_LEVEL_DIRS = ["skills", "agents", "hooks", "governance"] as const;
 
-// ─── SetupCheckCache (SPEC-076 §C6 Downstream Handoff) ─────────────────────
+// ─── SetupCheckCache — ONE shape for the global AND the project check ──────
 
-/** Zod schema for the persisted check-cache file — see module doc. */
+/** Which install a check cache describes: the machine install (`<claude-dir>`) or one repo's project scaffold. */
+export const SETUP_CHECK_SCOPES = ["global", "project"] as const;
+
+/**
+ * WHY a cache is stale — a hint for the session-start advisory (BR-1086), derived from the per-state file lists:
+ *   - `binary_version_changed` — an outdated / missing / orphaned file this binary ships or retired;
+ *   - `settings_changed`       — a lore entry in the project settings file is missing or out of line (project scope only);
+ *   - `hand_edited`            — a diverged file (never advised to be overwritten; the advisory names the files).
+ * A cache can carry several; they are always listed in this order.
+ */
+export const SETUP_CHECK_REASONS = ["binary_version_changed", "settings_changed", "hand_edited"] as const;
+export type SetupCheckReason = (typeof SETUP_CHECK_REASONS)[number];
+
+/** Project settings entries appear in the file lists as `<settings file>#<key>`; this marker tells them apart from files. */
+const SETTINGS_ENTRY_MARKER = "#";
+
+/** Repo-relative path of the project check cache (the ONLY file `lore setup --project --check` writes). */
+export const PROJECT_CHECK_CACHE_RELATIVE_PATH = ".lore/.lore-project-check.json";
+
+/**
+ * Zod schema for the persisted check-cache file — SSOT for BOTH caches (BR-1085, consumed by the session-start
+ * advisory, task A2):
+ *   - global  `<claude-dir>/.lore-setup-check.json`   written by `lore setup --check`           (scope "global")
+ *   - project `<repo>/.lore/.lore-project-check.json` written by `lore setup --project --check` (scope "project")
+ * `scope` / `files` / `reasons` are optional ONLY so a cache written by a pre-BR-1085 binary still parses (read
+ * absent `scope` as "global" and absent `files` as "no detail"); every cache this module writes carries all three.
+ */
 const setupCheckCacheSchema = z.object({
   /** ISO-8601 timestamp of this check run. */
   checked_at: z.string().min(1),
-  /** The CURRENTLY-RUNNING binary's embedded `LORE_BINARY_VERSION` at check time. */
+  /** The binary version that WROTE this cache: the running binary's embedded `LORE_BINARY_VERSION` at check time. */
   binary_version: z.string().min(1),
   status: z.enum(["sync", "stale"]),
-  /** Present iff `status === "stale"` — per-state counts for the session-start advisory (Phase F, a later task). */
+  /** Present iff `status === "stale"` — per-state counts for the session-start advisory (orphaned counts live in `files`). */
   stale_counts: z
     .object({
       outdated: z.number().int().nonnegative(),
@@ -171,9 +206,22 @@ const setupCheckCacheSchema = z.object({
    * fail-open, byte-identical to pre-T8b cache shape.
    */
   reminder_enabled: z.literal(false).optional(),
+  /** Which install this cache describes. Absent on a legacy cache = `global`. */
+  scope: z.enum(SETUP_CHECK_SCOPES).optional(),
+  /** Per-state file lists (project: repo-relative POSIX paths; global: claude-dir-relative; settings entries `<file>#<key>`). */
+  files: z
+    .object({
+      outdated: z.array(z.string()),
+      diverged: z.array(z.string()),
+      missing: z.array(z.string()),
+      orphaned: z.array(z.string()),
+    })
+    .optional(),
+  /** Why the install is stale (empty when `status` is `sync`); see {@link SetupCheckReason}. */
+  reasons: z.array(z.enum(SETUP_CHECK_REASONS)).optional(),
 });
 
-/** Derived TypeScript type for the check-cache file (SPEC-076 §C6 Downstream Handoff). */
+/** Derived TypeScript type for the check-cache file — the shared global/project shape (SPEC-076 §C6 + BR-1085). */
 export type SetupCheckCache = z.infer<typeof setupCheckCacheSchema>;
 
 // ─── --json / report shape (SPEC-076 §C3's documented `--json` contract) ──
@@ -372,12 +420,35 @@ function resolveCheckReminderEnabled(cwd: string): boolean {
 
 // ─── Check-cache write (the SOLE write this command performs) ─────────────
 
-function buildCache(report: SetupCheckReport, checkedAt: string, reminderEnabled: boolean): SetupCheckCache {
+/**
+ * Derives the stale-reason hint from the per-state lists (see {@link SetupCheckReason}). A settings entry
+ * (`<file>#<key>`) in any non-diverged list is `settings_changed`; every other outdated / missing / orphaned
+ * file is `binary_version_changed`; any diverged file is `hand_edited`.
+ */
+export function deriveSetupCheckReasons(files: SetupCheckFiles): SetupCheckReason[] {
+  const isSettingsEntry = (path: string): boolean => path.includes(SETTINGS_ENTRY_MARKER);
+  const behind = [...files.outdated, ...files.missing, ...files.orphaned];
+  const reasons: SetupCheckReason[] = [];
+  if (behind.some((path) => !isSettingsEntry(path))) reasons.push("binary_version_changed");
+  if (behind.some(isSettingsEntry)) reasons.push("settings_changed");
+  if (files.diverged.length > 0) reasons.push("hand_edited");
+  return reasons;
+}
+
+function buildCache(
+  scope: (typeof SETUP_CHECK_SCOPES)[number],
+  report: SetupCheckReport,
+  checkedAt: string,
+  reminderEnabled: boolean,
+): SetupCheckCache {
   const base = {
     checked_at: checkedAt,
     binary_version: report.binary_version,
     status: report.summary,
     ...(reminderEnabled ? {} : { reminder_enabled: false as const }),
+    scope,
+    files: report.files,
+    reasons: deriveSetupCheckReasons(report.files),
   };
   if (report.summary !== "stale") return base;
   return {
@@ -390,22 +461,29 @@ function buildCache(report: SetupCheckReport, checkedAt: string, reminderEnabled
   };
 }
 
+/** Writes one cache (atomic temp+rename) at `cachePath`; the SOLE write either check performs. */
 async function writeCheckCache(
-  targetDir: string,
+  cachePath: string,
+  scope: (typeof SETUP_CHECK_SCOPES)[number],
   report: SetupCheckReport,
   nowIso: string,
   reminderEnabled: boolean,
 ): Promise<void> {
-  const cache = setupCheckCacheSchema.parse(buildCache(report, nowIso, reminderEnabled));
+  const cache = setupCheckCacheSchema.parse(buildCache(scope, report, nowIso, reminderEnabled));
   const writer = new RealSetupFsWriter();
-  await writer.write(join(targetDir, CHECK_CACHE_FILENAME), `${JSON.stringify(cache, null, 2)}\n`);
+  await writer.write(cachePath, `${JSON.stringify(cache, null, 2)}\n`);
 }
 
 // ─── Text rendering ─────────────────────────────────────────────────────────
 
-function renderSetupCheckReport(report: SetupCheckReport, targetDir: string): string {
+function renderSetupCheckReport(
+  report: SetupCheckReport,
+  targetDir: string,
+  scope: (typeof SETUP_CHECK_SCOPES)[number] = "global",
+): string {
+  const noun = scope === "project" ? "lore project install" : "lore assets";
   const lines: string[] = [
-    report.summary === "sync" ? `✓ lore assets in sync → ${targetDir}` : `✗ lore assets stale → ${targetDir}`,
+    report.summary === "sync" ? `✓ ${noun} in sync → ${targetDir}` : `✗ ${noun} stale → ${targetDir}`,
     `  binary_version: ${report.binary_version}`,
   ];
   if (report.installed_binary_version !== undefined) {
@@ -426,10 +504,17 @@ function renderSetupCheckReport(report: SetupCheckReport, targetDir: string): st
     lines.push("", `${label} (${paths.length}):`);
     for (const path of paths) {
       lines.push(`  ${path}`);
-      if (label === "diverged") {
+      if (label === "diverged" && scope === "global") {
         lines.push("    repair: lore setup --yes --force-diverged");
       }
+      // reason: a project hand edit is never advised to be overwritten (BR-1086) — `lore setup --project` skips it.
+      if (label === "diverged" && scope === "project") {
+        lines.push("    hand-edited: lore setup --project leaves it as is; review it by hand");
+      }
     }
+  }
+  if (scope === "project" && [report.files.outdated, report.files.missing, report.files.orphaned].some((l) => l.length > 0)) {
+    lines.push("", "repair outdated / missing / orphaned files: lore setup --project --yes");
   }
   for (const dbl of report.double_registrations ?? []) {
     lines.push(
@@ -506,7 +591,13 @@ export async function computeSetupCheckReport(opts: {
   };
 
   // The cache records ASSET freshness only (its `stale` drives the session-start "run lore setup" advisory).
-  await writeCheckCache(opts.targetDir, assetReport, now(), resolveCheckReminderEnabled(cwd));
+  await writeCheckCache(
+    join(opts.targetDir, CHECK_CACHE_FILENAME),
+    "global",
+    assetReport,
+    now(),
+    resolveCheckReminderEnabled(cwd),
+  );
 
   if (doubleRegistrations.length === 0) return ok(assetReport);
   return ok({ ...assetReport, summary: "stale", double_registrations: doubleRegistrations });
@@ -556,4 +647,62 @@ export async function runSetupCheck(opts: {
     console.log(renderSetupCheckReport(report, opts.targetDir));
   }
   process.exitCode = report.summary === "sync" ? 0 : 3;
+}
+
+// ─── Project check (BR-1085): collected by the caller, finished here ────────
+
+/**
+ * Finishes `lore setup --project --check`: builds the report from the per-state lists the caller collected
+ * (ledger hooks/skills, lore rules files, project settings entries), writes the project check cache — the
+ * run's ONLY write, at {@link PROJECT_CHECK_CACHE_RELATIVE_PATH} — then prints text or `--json` and sets
+ * `process.exitCode` (0 in sync / 3 otherwise). Lists are de-duplicated and sorted so two runs over an
+ * unchanged tree print and cache identical bytes.
+ *
+ * @param opts.repoDir - Absolute repo root (the cache lands under its `.lore/`).
+ * @param opts.files - Per-state repo-relative POSIX paths; settings entries as `<file>#<key>`.
+ * @param opts.json - `--json` flag value.
+ * @param opts.now - Time seam for the cache's `checked_at`.
+ * @throws Never — a cache write failure is printed to stderr with exit 1.
+ */
+export async function finishProjectSetupCheck(opts: {
+  repoDir: string;
+  files: SetupCheckFiles;
+  json: boolean;
+  now?: () => string;
+}): Promise<void> {
+  const tidy = (paths: string[]): string[] => [...new Set(paths)].sort();
+  const files: SetupCheckFiles = {
+    outdated: tidy(opts.files.outdated),
+    diverged: tidy(opts.files.diverged),
+    missing: tidy(opts.files.missing),
+    orphaned: tidy(opts.files.orphaned),
+  };
+  const inSync = Object.values(files).every((paths) => paths.length === 0);
+  const report: SetupCheckReport = {
+    summary: inSync ? "sync" : "stale",
+    binary_version: LORE_BINARY_VERSION,
+    files,
+  };
+
+  const cachePath = join(opts.repoDir, PROJECT_CHECK_CACHE_RELATIVE_PATH);
+  try {
+    await writeCheckCache(
+      cachePath,
+      "project",
+      report,
+      (opts.now ?? (() => new Date().toISOString()))(),
+      resolveCheckReminderEnabled(opts.repoDir),
+    );
+  } catch (cause) {
+    process.stderr.write(`Error: lore setup --project --check could not write its cache at ${cachePath}: ${describeCaught(cause)}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ ok: true, data: report }, null, 2));
+  } else {
+    console.log(renderSetupCheckReport(report, opts.repoDir, "project"));
+  }
+  process.exitCode = inSync ? 0 : 3;
 }
