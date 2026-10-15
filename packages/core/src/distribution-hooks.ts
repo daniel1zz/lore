@@ -93,7 +93,7 @@
  *     `merge-settings.ts`/`register-mcp.ts` precedent of keeping settings.json
  *     shaping logic import-safe from `@lore/dashboard`'s Vite bundle).
  *   - `buildHookSettingsEntries` does NOT know or care whether `claudeDir` is
- *     a real resolved path or the literal placeholder token `"{{CLAUDE_DIR}}"`
+ *     a real resolved path or the literal placeholder token `"{{lore:claude_dir}}"`
  *     — it just concatenates whatever string it's given with `/hooks/<file>`.
  *     This lets `RealAssetSource` (which has no knowledge of the eventual
  *     install target) call it with the placeholder to produce a
@@ -199,11 +199,11 @@ function stripTrailingSlash(dir: string): string {
 /**
  * Builds the desired `settings.json` hook-entry set for a given `claudeDir`
  * from {@link HOOK_REGISTRATIONS}. Pure 1:1 map — see module invariants for
- * why `claudeDir` may be a real path OR the `"{{CLAUDE_DIR}}"` placeholder
+ * why `claudeDir` may be a real path OR the `"{{lore:claude_dir}}"` placeholder
  * token.
  *
  * @param claudeDir - Target Claude Code config directory, OR the literal
- *   placeholder `"{{CLAUDE_DIR}}"` (see module doc). A trailing `/` is
+ *   placeholder `"{{lore:claude_dir}}"` (see module doc). A trailing `/` is
  *   tolerated.
  * @returns One {@link SettingsHookEntry} per {@link HOOK_REGISTRATIONS} row,
  *   in declaration order.
@@ -213,8 +213,8 @@ function stripTrailingSlash(dir: string): string {
  * // => { event: "PreToolUse", matcher: "Bash", command: "node /home/user/.claude/hooks/pre-bash-git-safety-gate.mjs" }
  *
  * @example
- * buildHookSettingsEntries("{{CLAUDE_DIR}}")[0].command;
- * // => "node {{CLAUDE_DIR}}/hooks/pre-bash-git-safety-gate.mjs"
+ * buildHookSettingsEntries("{{lore:claude_dir}}")[0].command;
+ * // => "node {{lore:claude_dir}}/hooks/pre-bash-git-safety-gate.mjs"
  */
 export function buildHookSettingsEntries(claudeDir: string): SettingsHookEntry[] {
   const trimmedDir = stripTrailingSlash(claudeDir);

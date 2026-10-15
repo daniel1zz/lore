@@ -182,7 +182,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 
-import { err, ok } from "@lore/core";
+import { err, ok, expandTemplate } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import {
   planInstall as computeInstallPlan,
@@ -203,6 +203,7 @@ import type {
 } from "@lore/core";
 
 import { EMBEDDED_ASSETS_MANIFEST, LORE_BINARY_VERSION } from "../generated/assets-manifest.js";
+import { LORE_CONTEXT_VARIABLES } from "./context-variables-registry.js";
 
 // ─── Ports ───────────────────────────────────────────────────────────────────
 
@@ -1002,25 +1003,28 @@ function computeAncestorDirsDeepestFirst(targetDir: string, removedPaths: string
 }
 
 /**
- * Placeholder token a `kind: "settings-hook"` asset's entry `command` strings
- * may carry in place of the real target dir (emitted by `RealAssetSource`,
- * which has no knowledge of the eventual install target — see
- * `@lore/core`'s `distribution-hooks.ts` doc comment). Substituted for the
- * real `targetDir` HERE, after JSON-parsing and BEFORE `mergeSettings` — so
- * the merged `command` strings (`mergeSettings`' identity key) are stable
- * across install/uninstall for a given `targetDir`.
+ * A `kind: "settings-hook"` asset's entry `command` strings carry the
+ * invocation variable `{{lore:claude_dir}}` in place of the real target dir
+ * (emitted by `RealAssetSource`, which has no knowledge of the eventual
+ * install target — see `@lore/core`'s `distribution-hooks.ts`). Resolved HERE
+ * through `expandTemplate` (outlet `setup:settings-hook`), after JSON-parsing
+ * and BEFORE `mergeSettings` — so the merged `command` strings
+ * (`mergeSettings`' identity key) are stable across install/uninstall for a
+ * given `targetDir`. A refused expansion is returned as an error, never left
+ * as a token in settings.json.
  */
-const CLAUDE_DIR_PLACEHOLDER = "{{CLAUDE_DIR}}";
-
-/** Replaces every occurrence of {@link CLAUDE_DIR_PLACEHOLDER} in `command` with `targetDir`. A no-op when the placeholder is absent. */
-function resolveClaudeDirPlaceholder(command: string, targetDir: string): string {
-  return command.split(CLAUDE_DIR_PLACEHOLDER).join(targetDir);
+function resolveClaudeDirVariable(command: string, targetDir: string, assetPath: string): Result<string, LoreError> {
+  return expandTemplate(
+    command,
+    { outlet: "setup:settings-hook", path: assetPath, lineOffset: 0, invocation: { claude_dir: targetDir } },
+    LORE_CONTEXT_VARIABLES,
+  );
 }
 
 /**
  * Resolves the FINAL content + sha256 for every payload file: a `kind:
  * "settings-hook"` entry's `content` is parsed as `SettingsHookEntry[]`,
- * each entry's `command` has {@link CLAUDE_DIR_PLACEHOLDER} substituted for
+ * each entry's `command` has `{{lore:claude_dir}}` resolved to
  * the real `targetDir`, and the result is merged (via `@lore/core`'s
  * `mergeSettings`) against the target's ON-DISK `settings.json` (read
  * through `reader`); every other kind's `content` is used verbatim. `sha256`
@@ -1048,10 +1052,13 @@ async function resolvePayload(
         });
       }
 
-      loreEntries = loreEntries.map((entry) => ({
-        ...entry,
-        command: resolveClaudeDirPlaceholder(entry.command, targetDir),
-      }));
+      const resolvedEntries: SettingsHookEntry[] = [];
+      for (const entry of loreEntries) {
+        const command = resolveClaudeDirVariable(entry.command, targetDir, file.path);
+        if (!command.ok) return command;
+        resolvedEntries.push({ ...entry, command: command.value });
+      }
+      loreEntries = resolvedEntries;
 
       const existingRaw = await reader.read(path.join(targetDir, file.path));
       // SPEC-076 §C5 (T7): enable orphan pruning — `hooksPathPrefix` mirrors
