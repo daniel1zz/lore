@@ -1,5 +1,5 @@
 /**
- * MCP tool registrations — 30 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * MCP tool registrations — the lore_* tools listed in tool-names.ts (history: 16 original + 4 SPEC-025 task-workflow tools
  * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
  * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool
  * + 2 SPEC-041 session tools: lore_bootstrap, lore_handoff; lore_feed additionally
@@ -200,6 +200,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { App } from "../../app.js";
 import { runWithAuditSurface } from "../../store/audit-surface.js";
+import { assertRegisteredToolsMatchNames, type LoreMcpToolName } from "./tool-names.js";
 import { McpCallScope, actorSourceOfName, requireCallIdentity } from "./call-scope.js";
 import type { LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
@@ -1446,7 +1447,7 @@ type ResolvedArgs<T> = "harness_run" extends keyof T
 function registerToolImpl<T>(
   server: McpServer,
   scope: McpCallScope,
-  name: string,
+  name: LoreMcpToolName,
   desc: string,
   schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   handler: (args: ResolvedArgs<T>) => Promise<CallToolResult>,
@@ -1612,13 +1613,19 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
   const auditService = scope.service("auditService");
   const judgmentService = scope.service("judgmentService");
   // reason: shadows the module-level registrar so every one of the call sites below binds this server's call scope.
+  // reason: AC-CV-8 — every registration records its name; the end of registerTools asserts the recorded set
+  // equals LORE_MCP_TOOL_NAMES, so the tool list (and the mcp_tool_count variable) cannot drift from reality.
+  const registeredNames = new Set<string>();
   const registerToolWithArgs = <T,>(
     srv: McpServer,
-    name: string,
+    name: LoreMcpToolName,
     desc: string,
     schema: z.ZodType<T, z.ZodTypeDef, unknown>,
     handler: (args: ResolvedArgs<T>) => Promise<CallToolResult>,
-  ): void => registerToolImpl(srv, scope, name, desc, schema, handler);
+  ): void => {
+    registeredNames.add(name);
+    registerToolImpl(srv, scope, name, desc, schema, handler);
+  };
 
   // lore_create
   registerToolWithArgs(server, "lore_create", "Create a new document in the Lore corpus", LoreCreateSchema, async (args) => {
@@ -2028,6 +2035,7 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
 
   // lore_schema — no input parameters; 3-arg form (correct for 0-arg tools)
   // reason: static info tool, no arguments needed
+  registeredNames.add("lore_schema");
   server.tool(
     "lore_schema",
     "Return static corpus schema information (doc types, link types, required fields)",
@@ -3421,6 +3429,8 @@ export function registerTools(server: McpServer, baseApp: App, getConfig?: () =>
       return errorContent(classification.error);
     },
   );
+
+  assertRegisteredToolsMatchNames(registeredNames);
 }
 
 // ─── Batch Operation Executor ────────────────────────────────────────────────

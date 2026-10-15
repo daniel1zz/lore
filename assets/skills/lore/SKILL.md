@@ -121,7 +121,7 @@ lore sync-docs [--from <dir>] [--dry-run]    # backfill disk .md spec files → 
 
 ## Agent/service integration
 
-- MCP (preferred for agents): `lore --mcp-server` — 23 `lore_*` tools: full-field CRUD, review/judgment (`lore_review`, `lore_pending` with `include_judgments`), task workflow (`lore_claim` / `lore_release` / `lore_evidence_add` / `lore_ready` — `by` is required explicitly), `lore_assess`, `lore_audit`. 
+- MCP (preferred for agents): `lore --mcp-server` — {{lore:mcp_tool_count}} `lore_*` tools: full-field CRUD, review/judgment (`lore_review`, `lore_pending` with `include_judgments`), task workflow (`lore_claim` / `lore_release` / `lore_evidence_add` / `lore_ready` — `by` is required explicitly), `lore_assess`, `lore_audit`. 
 - HTTP API: `lore serve` + `lore agent create --name <agent>` to issue API keys (`lore agent list|revoke`).
 
 ## Conventions
