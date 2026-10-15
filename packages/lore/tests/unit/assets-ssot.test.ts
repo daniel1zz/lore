@@ -487,22 +487,26 @@ const CORPUS_WORKFLOW_BODY_SHA256: Record<(typeof CORPUS_WORKFLOW_FRAGMENT_RELS)
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // intended rule-wording compression; no rule moved or dropped (verbatim before-text in
 // knowledge-always-loaded-lore-fragments-verbatim-source-before).
-  "context/corpus-workflow-1-feed.md": "3d0875d32d44ce72981c3a89434b7134e5ff436a5b15b61a676b01c40713f68d",
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
+  "context/corpus-workflow-1-feed.md": "c1ce4487a3e94a5d41c22d29719ea36b22003fe5637ec34b8cd90af4a010363d",
   // RE-BASELINE (task-ac-set-correction-audited-fix-of-one-criterion-on-a-locked, AC-CC-4): names `lore ac set --correction`
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // intended rule-wording compression; no rule moved or dropped (verbatim before-text in
 // knowledge-always-loaded-lore-fragments-verbatim-source-before).
-  "context/corpus-workflow-2-produce.md": "a5719c1d3ccd871330904f678451257a26aaf4904245cc92eef4db5803558f34",
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
+  "context/corpus-workflow-2-produce.md": "28f903b4674387c272bd14d8ec87b87de1e8ea09542825353271511a86544a19",
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // intended rule-wording compression; no rule moved or dropped (verbatim before-text in
 // knowledge-always-loaded-lore-fragments-verbatim-source-before).
-  "context/corpus-workflow-3-execute.md": "9adb1259a4280654be8803507960042f90a1dfb7e7af6c2cd94d86846d1908a5",
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
+  "context/corpus-workflow-3-execute.md": "2b43538cb59a8bd7e04fa600d3f1512df3dc56db0f1d03ccfe872ae7db0998df",
   // RE-BASELINE (task-rs-t13-migration-promoted-shipped-fragments-agent-rules, AC-RS-13): gains the CLAUDE.md-vs-corpus
   // boundary bullet moved from the user-layer lore-loop fragment (user-03).
 // RE-BASELINE (task-reword-the-ten-always-loaded-fragments-to-the-rule-only, spec-always-loaded-lore-fragments-state-the-rule-only-reasoning):
 // intended rule-wording compression; no rule moved or dropped (verbatim before-text in
 // knowledge-always-loaded-lore-fragments-verbatim-source-before).
-  "context/corpus-workflow-4-close.md": "d4ece34f664f755724e6d9a57f139a74ef91268ee7c27f0245218c40297cc9e8",
+// RE-BASELINE (task-restore-the-instruction-parts-the-rule-only-reword-dropped): restores how-to-act instructions the rule-only reword dropped.
+  "context/corpus-workflow-4-close.md": "0609d94f7bd00539decd2bab8739c17e7b4d2cd166231e2266ec5d96b18ca016",
 };
 
 /** Concatenated bodies of the corpus-workflow fragments, in file-name (= rendering) order. */
