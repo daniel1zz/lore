@@ -6,9 +6,8 @@ title: "Governance defaults must ship and every recorded gap must resolve: a shi
 status: approved
 priority: high
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

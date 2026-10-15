@@ -3,11 +3,11 @@ id: TASK-824
 type: task
 role: plan
 title: "Regression-lock the measured M2 labelling failure and confirm falsifier coverage"
-status: draft
+status: deprecated
 priority: medium
 phase: "P4 M2 regression and falsifier completeness"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-146
 plan: PLAN-146

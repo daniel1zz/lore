@@ -3,11 +3,11 @@ id: TASK-738
 type: task
 role: plan
 title: "Compute the frozen-file-list population as content-union-subprocess and name a file content scanning cannot reach"
-status: draft
+status: deprecated
 priority: medium
 phase: "backlog-and-arm"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PLAN-079
 plan: PLAN-079

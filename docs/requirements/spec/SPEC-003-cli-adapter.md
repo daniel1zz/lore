@@ -6,9 +6,8 @@ title: "CLI Adapter"
 status: approved
 priority: critical
 created: 2026-06-08
-updated: 2026-07-25
+updated: 2026-10-10
 tags: [cli, adapter, ux, phase-1]
-parent: PRD-001
 links:
   - {id: SPEC-001, type: implements}
   - {id: SPEC-002, type: relates-to}

@@ -6,9 +6,8 @@ title: "Dashboard production packaging — one-command lore dashboard (F5a)"
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-07-29
+updated: 2026-10-10
 tags: [dashboard, packaging, f5a]
-parent: PRD-001
 links:
   - {id: SPEC-100, type: implements}
 ---

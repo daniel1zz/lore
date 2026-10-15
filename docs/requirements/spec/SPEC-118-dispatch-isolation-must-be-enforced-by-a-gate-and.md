@@ -6,9 +6,8 @@ title: "Dispatch isolation must be enforced by a gate, and isolation does not im
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview
 

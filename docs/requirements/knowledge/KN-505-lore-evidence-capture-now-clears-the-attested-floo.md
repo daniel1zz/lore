@@ -13,6 +13,7 @@ links:
   - {id: ADR-027, type: informs}
   - {id: SPEC-143, type: informs}
   - {id: KN-507, type: relates-to}
+  - {id: TASK-362, type: supersedes}
 ---
 Measured 2026-08-23 by `agent:ct-t1-green-attest` and independently re-measured by `agent:main-orchestrator` while landing SPEC-143 AC-CT-2's GREEN stage (`task-skill-test-evidence-capture-attestation-red-test-scenarios`, merged into main). The first finding CHANGES A GATE'S BEHAVIOUR and invalidates a standing rule, so it is written first.
 

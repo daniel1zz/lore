@@ -3,12 +3,11 @@ id: SPEC-115
 type: spec
 role: spec
 title: "report-issue has no specified concurrency contract: AC-072-9 asserts an assumed one and flakes at ten percent on every tree"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-31
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview
 

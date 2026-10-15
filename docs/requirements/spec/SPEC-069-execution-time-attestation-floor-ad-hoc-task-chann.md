@@ -6,9 +6,8 @@ title: "Execution-time attestation floor + ad-hoc task channel"
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-08-01
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-039, type: relates-to}
   - {id: SPEC-058, type: relates-to}

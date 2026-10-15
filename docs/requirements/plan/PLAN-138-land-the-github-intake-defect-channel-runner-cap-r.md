@@ -3,10 +3,10 @@ id: PLAN-138
 type: plan
 role: plan
 title: "Land the GitHub-intake defect channel: runner, cap removal, intake, migration, transport removal, projection"
-status: approved
+status: deprecated
 priority: critical
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: [defect-channel, github, intake, migration]
 parent: SPEC-145
 phases:

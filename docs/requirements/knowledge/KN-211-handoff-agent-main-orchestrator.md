@@ -3,10 +3,10 @@ id: KN-211
 type: knowledge
 role: knowledge
 title: "Handoff — agent:main-orchestrator"
-status: approved
+status: archived
 priority: medium
 created: 2026-08-03
-updated: 2026-08-03
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

@@ -6,9 +6,8 @@ title: "CJK-aware slugify (pinyin transliteration) + lore set --slug repair path
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-07-23
+updated: 2026-10-10
 tags: [slugify, cjk, cli, core]
-parent: PRD-001
 ---
 # SPEC-068 — CJK-aware slugify + `lore set --slug` repair path
 

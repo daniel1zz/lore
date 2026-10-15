@@ -6,9 +6,8 @@ title: "The mirror oracles' two command surfaces are O(corpus) by accident: one 
 status: approved
 priority: medium
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: KN-528, type: relates-to}
   - {id: TASK-837, type: relates-to}

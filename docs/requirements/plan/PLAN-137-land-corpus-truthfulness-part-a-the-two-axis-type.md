@@ -3,10 +3,10 @@ id: PLAN-137
 type: plan
 role: plan
 title: "Land corpus truthfulness part A — the two-axis type foundation and the six implementation chains that consume it"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: []
 parent: SPEC-143
 phases:

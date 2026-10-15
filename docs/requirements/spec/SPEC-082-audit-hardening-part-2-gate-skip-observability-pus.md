@@ -6,9 +6,8 @@ title: "Audit hardening part 2: gate-skip observability + push-time chain verifi
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-081 — Audit hardening part 2: gate-skip observability + push-time chain verification
 

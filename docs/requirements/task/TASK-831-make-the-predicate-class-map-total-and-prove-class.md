@@ -3,11 +3,11 @@ id: TASK-831
 type: task
 role: plan
 title: "Make the predicate class map total and prove class-I predicates are grade-invariant"
-status: draft
+status: deprecated
 priority: medium
 phase: "P3 the total class map"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-147
 plan: PLAN-147

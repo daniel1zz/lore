@@ -3,10 +3,10 @@ id: PLAN-123
 type: plan
 role: plan
 title: "Land judgment verification: path-checked assess findings, a mirror-free diff, a worktree-rooted falsifier, and a close gate that asks about reds"
-status: approved
+status: deprecated
 priority: high
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
 parent: SPEC-137
 phases:

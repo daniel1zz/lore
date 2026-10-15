@@ -3,10 +3,10 @@ id: KN-468
 type: knowledge
 role: knowledge
 title: "The nine UNENFORCED standing lessons, evicted from CLAUDE.md with the mechanism each one still needs"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

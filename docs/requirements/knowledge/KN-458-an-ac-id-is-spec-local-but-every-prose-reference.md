@@ -3,10 +3,10 @@ id: KN-458
 type: knowledge
 role: knowledge
 title: "An AC id is spec-local but every prose reference treats it as global: 51 exact ids are claimed by more than one live spec"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-17
-updated: 2026-08-17
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

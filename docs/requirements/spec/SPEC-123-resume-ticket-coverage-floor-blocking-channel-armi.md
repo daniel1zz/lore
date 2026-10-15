@@ -6,9 +6,8 @@ title: "Resume-ticket coverage floor — blocking channel, arming provenance, cr
 status: approved
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-112, type: relates-to}
 ---

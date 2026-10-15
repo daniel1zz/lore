@@ -6,9 +6,8 @@ title: "git-safety-gate heredoc/string-literal awareness (command-position disci
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-050, type: relates-to}
 ---

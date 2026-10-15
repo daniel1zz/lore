@@ -6,9 +6,8 @@ title: "Dashboard adjudication workbench + route telemetry (PRD §21 F1+F2)"
 status: approved
 priority: high
 created: 2026-07-24
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-075, dashboard, workbench, telemetry]
-parent: PRD-001
 ---
 # SPEC-075 — Dashboard adjudication workbench + route telemetry (PRD §21 F1+F2)
 

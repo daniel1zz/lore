@@ -6,9 +6,8 @@ title: "Memory hygiene part 3: doc-code drift oracle (H3)"
 status: approved
 priority: high
 created: 2026-07-12
-updated: 2026-08-11
+updated: 2026-10-10
 tags: [memory-hygiene, drift, code-anchors, spec-045]
-parent: PRD-001
 ---
 # SPEC-045 — Memory hygiene part 3: doc-code drift oracle (PRD §16 H3)
 

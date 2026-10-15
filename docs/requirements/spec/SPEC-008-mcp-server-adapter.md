@@ -3,12 +3,11 @@ id: SPEC-008
 type: spec
 role: spec
 title: "MCP Server Adapter"
-status: approved
+status: deprecated
 priority: critical
 created: 2026-06-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [mcp, adapter, ai-agent, phase-2]
-parent: PRD-001
 links:
   - {id: SPEC-001, type: implements}
   - {id: SPEC-010, type: relates-to}

@@ -3,10 +3,10 @@ id: PLAN-150
 type: plan
 role: plan
 title: "Context fragments: config-driven layered rule injection"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-10
 tags: []
 parent: SPEC-155
 phases:

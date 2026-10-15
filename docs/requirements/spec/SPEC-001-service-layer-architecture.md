@@ -3,12 +3,11 @@ id: SPEC-001
 type: spec
 role: spec
 title: "Service Layer Architecture"
-status: approved
+status: deprecated
 priority: critical
 created: 2026-06-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [architecture, service-layer, core, phase-1]
-parent: PRD-001
 links:
   - {id: SPEC-002, type: relates-to}
   - {id: SPEC-003, type: relates-to}

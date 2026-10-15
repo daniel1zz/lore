@@ -3,12 +3,11 @@ id: SPEC-014
 type: spec
 role: spec
 title: "Monorepo Skeleton (Bun workspaces, P1 layout)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-28
-updated: 2026-06-30
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-014: Monorepo Skeleton
 

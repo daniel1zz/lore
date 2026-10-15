@@ -3,12 +3,11 @@ id: SPEC-015
 type: spec
 role: spec
 title: "Dashboard — Read-only Skeleton"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-28
-updated: 2026-07-14
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-015: Dashboard — Read-only Skeleton
 

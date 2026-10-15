@@ -6,9 +6,8 @@ title: "AC-as-code: structured acceptance criteria + oracle binding"
 status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-08-23
+updated: 2026-10-10
 tags: [acceptance, oracle, evidence, assess]
-parent: PRD-001
 links:
   - {id: ADR-001, type: implements}
 ---

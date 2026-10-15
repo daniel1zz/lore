@@ -6,9 +6,8 @@ title: "ADR decision_status has a create surface and no CLI update surface: a va
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview
 

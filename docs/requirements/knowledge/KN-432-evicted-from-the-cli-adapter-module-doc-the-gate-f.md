@@ -3,10 +3,10 @@ id: KN-432
 type: knowledge
 role: knowledge
 title: "Evicted from the CLI adapter module doc: the gate/feed pre-flight pair and why LORE_GATE_BYPASS is gate-scoped"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

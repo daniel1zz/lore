@@ -6,9 +6,8 @@ title: "Corpus resolution carries provenance, and a foreign write is a decision 
 status: approved
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-099, type: relates-to}
 ---

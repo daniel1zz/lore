@@ -3,10 +3,10 @@ id: KN-198
 type: knowledge
 role: knowledge
 title: "Retired from root CLAUDE.md — the Implementation Status section, verbatim"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-04
-updated: 2026-08-04
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

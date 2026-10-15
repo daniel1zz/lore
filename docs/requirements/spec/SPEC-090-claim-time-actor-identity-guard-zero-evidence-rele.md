@@ -6,9 +6,8 @@ title: "Claim-time actor-identity guard + zero-evidence release advisory"
 status: approved
 priority: medium
 created: 2026-07-14
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview/Goal
 

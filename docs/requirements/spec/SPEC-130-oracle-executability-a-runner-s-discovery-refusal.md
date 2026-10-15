@@ -6,9 +6,8 @@ title: "Oracle executability: a runner's discovery refusal is not a measurement,
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-08-23
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

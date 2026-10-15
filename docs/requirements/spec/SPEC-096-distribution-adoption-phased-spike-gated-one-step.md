@@ -3,12 +3,11 @@ id: SPEC-096
 type: spec
 role: spec
 title: "Distribution & Adoption (phased, spike-gated one-step install) (domain overview)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## 17. Distribution & Adoption (phased, spike-gated one-step install)
 

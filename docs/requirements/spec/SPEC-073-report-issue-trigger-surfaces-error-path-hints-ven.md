@@ -6,9 +6,8 @@ title: "report-issue trigger surfaces: error-path hints + vendored discipline st
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-073, report-issue, feedback-loop, trigger-surfaces]
-parent: PRD-001
 ---
 ## Overview
 
@@ -45,4 +44,4 @@ Structured via `lore ac add` (AC-073-1..4), all script-mode.
 
 - packages/lore/src/adapters/cli/report-issue-hint.ts#buildReportIssueHint
 - packages/lore/src/adapters/cli/loader.ts
-- assets/governance/corpus-workflow.md
+- assets/context/corpus-workflow-4-close.md

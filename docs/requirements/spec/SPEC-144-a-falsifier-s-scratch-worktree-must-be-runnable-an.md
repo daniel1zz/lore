@@ -6,9 +6,8 @@ title: "A falsifier's scratch worktree must be runnable AND observable: hybrid d
 status: approved
 priority: high
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: [falsifier, scratch-worktree, node-modules, isolation, mutation-observability]
-parent: PRD-001
 ---
 ## Overview/Goal
 

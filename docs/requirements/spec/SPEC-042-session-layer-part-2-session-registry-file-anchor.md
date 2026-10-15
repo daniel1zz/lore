@@ -6,9 +6,8 @@ title: "Session layer part 2: session registry + file-anchor claim safety (S3)"
 status: approved
 priority: high
 created: 2026-07-11
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [session, claims, file-anchors, spec-042, write-conflict]
-parent: PRD-001
 ---
 # SPEC-042 — Session layer part 2: session registry + file-anchor claim safety (PRD §15 S3)
 

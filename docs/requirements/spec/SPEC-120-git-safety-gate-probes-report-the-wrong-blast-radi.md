@@ -6,9 +6,8 @@ title: "git-safety-gate probes report the wrong blast radius — argument-blind 
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # git-safety-gate probes report the wrong blast radius — an argument-blind probe turns a precise op into a catastrophic one
 

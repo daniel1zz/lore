@@ -3,10 +3,10 @@ id: ADR-030
 type: adr
 role: decision
 title: "Falsifiability moves from the task tier to the oracle tier: a criterion never observed red is a distinct computed state, reported not gated"
-status: draft
+status: approved
 priority: high
 created: 2026-08-07
-updated: 2026-08-07
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

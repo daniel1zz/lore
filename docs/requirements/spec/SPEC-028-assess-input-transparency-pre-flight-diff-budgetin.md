@@ -3,12 +3,11 @@ id: SPEC-028
 type: spec
 role: spec
 title: "Assess input transparency: pre-flight diff budgeting + file-boundary truncation"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-03
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [assess, ai, spec-028]
-parent: PRD-001
 ---
 # SPEC-028 — Assess Input Transparency: pre-flight diff budgeting + file-boundary truncation
 

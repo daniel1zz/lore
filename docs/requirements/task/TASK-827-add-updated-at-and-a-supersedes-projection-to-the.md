@@ -3,11 +3,11 @@ id: TASK-827
 type: task
 role: plan
 title: "Add updated_at and a supersedes projection to the search hit, one query, default order frozen"
-status: draft
+status: deprecated
 priority: medium
 phase: "P1 the currency projection"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-146
 plan: PLAN-146

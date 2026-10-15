@@ -6,9 +6,8 @@ title: "Distribution integration model + asset update convergence"
 status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-046, type: relates-to}
   - {id: SPEC-048, type: relates-to}

@@ -3,10 +3,10 @@ id: PLAN-132
 type: plan
 role: plan
 title: "Land M7: an adopted state that frees defect-channel quota without retiring the claim, with abandonment counted"
-status: approved
+status: deprecated
 priority: high
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: SPEC-139
 phases:

@@ -6,9 +6,8 @@ title: "Lifecycle archival — plan-close cascade, deterministic archive sweep, 
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Lifecycle archival — plan-close cascade, deterministic archive sweep, injected candidate surfacing
 

@@ -3,12 +3,11 @@ id: SPEC-005
 type: spec
 role: spec
 title: "Review Workflow"
-status: approved
+status: deprecated
 priority: high
 created: 2026-06-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [review, workflow, human-in-the-loop, phase-1]
-parent: PRD-001
 links:
   - {id: SPEC-001, type: implements}
   - {id: SPEC-002, type: relates-to}

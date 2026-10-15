@@ -6,13 +6,13 @@ title: "The defect channel reaches no machine but its own: GitHub becomes intake
 status: approved
 priority: critical
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: [defect-channel, transport, github, intake, cap-removal]
-parent: PRD-001
 links:
   - {id: ADR-037, type: informs}
   - {id: SPEC-072, type: supersedes}
   - {id: SPEC-139, type: supersedes}
+  - {id: SPEC-115, type: supersedes}
 ---
 ## Overview
 

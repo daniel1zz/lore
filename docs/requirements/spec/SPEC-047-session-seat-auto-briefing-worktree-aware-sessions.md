@@ -6,9 +6,8 @@ title: "Session seat auto-briefing: worktree-aware SessionStart injection"
 status: approved
 priority: high
 created: 2026-07-16
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [session-layer, seat, worktree, hooks]
-parent: PRD-001
 ---
 **spec_kind:** feature · **implements →** PRD §15 Session Layer (S3 extension) + §17 asset SSOT
 

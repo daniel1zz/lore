@@ -6,9 +6,8 @@ title: "Out-of-box reporting channel — report-issue self-provisions its upstre
 status: deprecated
 priority: high
 created: 2026-07-29
-updated: 2026-08-24
+updated: 2026-10-10
 tags: [feedback-loop, distribution-first, dogfood]
-parent: PRD-001
 links:
   - {id: SPEC-073, type: relates-to}
   - {id: SPEC-099, type: implements}

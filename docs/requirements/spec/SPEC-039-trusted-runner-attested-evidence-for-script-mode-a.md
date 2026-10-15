@@ -6,9 +6,8 @@ title: "Trusted runner: attested evidence for script-mode ACs"
 status: approved
 priority: medium
 created: 2026-07-08
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [verify, attestation, evidence, runner, spec-039]
-parent: PRD-001
 links:
   - {id: ADR-001, type: relates-to}
 ---

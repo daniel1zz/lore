@@ -6,9 +6,8 @@ title: "Verify execution-root correctness under linked worktrees"
 status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-063 — Verify execution-root correctness under linked worktrees
 

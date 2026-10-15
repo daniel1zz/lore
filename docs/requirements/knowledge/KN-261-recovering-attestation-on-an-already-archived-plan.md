@@ -3,10 +3,10 @@ id: KN-261
 type: knowledge
 role: knowledge
 title: "Recovering attestation on an already-archived plan: the --task + explicit --ac escape is the sanctioned path, a plan-wide verify run is the catalogued false pass"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

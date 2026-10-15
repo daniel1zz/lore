@@ -3,10 +3,10 @@ id: PLAN-146
 type: plan
 role: plan
 title: "Land conclusion currency: a dated retrieval projection, an anchored falsifier for knowledge, and a convergence obligation"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: SPEC-152
 phases:

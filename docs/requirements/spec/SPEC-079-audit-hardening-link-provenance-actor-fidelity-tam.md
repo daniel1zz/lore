@@ -6,9 +6,8 @@ title: "Audit hardening: link provenance + actor fidelity + tamper-evident hash 
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-079 — Audit hardening: relationship provenance + actor fidelity + tamper-evident hash chain
 

@@ -6,9 +6,8 @@ title: "CLI strict flags: unknown-flag rejection + actor-flag unification"
 status: approved
 priority: medium
 created: 2026-07-17
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-051 — CLI strict flags: unknown-flag rejection + actor-flag unification
 

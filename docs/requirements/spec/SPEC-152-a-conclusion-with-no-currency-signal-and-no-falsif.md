@@ -3,12 +3,11 @@ id: SPEC-152
 type: spec
 role: spec
 title: "A conclusion with no currency signal and no falsifier: retrieval ranks a superseded claim above the one that replaced it"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

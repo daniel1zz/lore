@@ -6,9 +6,8 @@ title: "Trace layer — read/deny observability table, default-on, with lore tra
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-094, type: implements}
 ---

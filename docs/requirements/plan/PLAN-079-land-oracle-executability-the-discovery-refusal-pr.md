@@ -3,10 +3,10 @@ id: PLAN-079
 type: plan
 role: plan
 title: "Land oracle executability: the discovery-refusal primitive, both call sites, and the audited escape for not-yet-written tests"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-08-10
-updated: 2026-08-13
+updated: 2026-10-10
 tags: []
 parent: SPEC-130
 phases:

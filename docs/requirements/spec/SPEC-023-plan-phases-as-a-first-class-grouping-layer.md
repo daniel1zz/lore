@@ -3,12 +3,11 @@ id: SPEC-023
 type: spec
 role: spec
 title: "plan.phases as a first-class grouping layer"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-30
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [plan, task, schema, tree, phase, ux, phase-10, stub]
-parent: PRD-001
 ---
 # SPEC-023: `plan.phases` as a first-class grouping layer
 

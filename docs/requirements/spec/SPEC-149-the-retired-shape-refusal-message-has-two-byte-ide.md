@@ -6,9 +6,8 @@ title: "The retired-shape refusal message has two independent definitions and no
 status: approved
 priority: medium
 created: 2026-08-24
-updated: 2026-08-25
+updated: 2026-10-10
 tags: [defect-channel, ssot, mcp, oracle-design, green-control]
-parent: PRD-001
 ---
 ## Overview
 

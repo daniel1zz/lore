@@ -6,9 +6,8 @@ title: "Declaring ac_scope is required at task creation, so the runner-attested 
 status: draft
 priority: medium
 created: 2026-08-01
-updated: 2026-08-03
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview
 

@@ -3,12 +3,11 @@ id: SPEC-031
 type: spec
 role: spec
 title: "Dashboard read-path contract fixes + markdown typography"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-03
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [dashboard, contract, bugfix, spec-031]
-parent: PRD-001
 ---
 # SPEC-031 — Dashboard read-path contract fixes + markdown typography
 

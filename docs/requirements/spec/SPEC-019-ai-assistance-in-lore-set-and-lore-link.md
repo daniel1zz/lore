@@ -3,12 +3,11 @@ id: SPEC-019
 type: spec
 role: spec
 title: "AI assistance in lore set and lore link"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-30
-updated: 2026-07-02
+updated: 2026-10-10
 tags: [cli, ai, mutation, set, link, phase-10, stub]
-parent: PRD-001
 ---
 # SPEC-019: AI assistance in `lore set` and `lore link`
 

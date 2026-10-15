@@ -6,9 +6,8 @@ title: "Dashboard execution read surface (PRD §21 F3)"
 status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview/Goal
 

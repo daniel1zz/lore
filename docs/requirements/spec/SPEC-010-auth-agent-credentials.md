@@ -3,12 +3,11 @@ id: SPEC-010
 type: spec
 role: spec
 title: "Auth & Agent Credentials"
-status: approved
+status: deprecated
 priority: critical
 created: 2026-06-08
-updated: 2026-07-02
+updated: 2026-10-10
 tags: [auth, credentials, better-auth, agent-identity, phase-2]
-parent: PRD-001
 links:
   - {id: SPEC-008, type: relates-to}
   - {id: SPEC-011, type: relates-to}

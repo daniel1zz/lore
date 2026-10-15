@@ -3,11 +3,11 @@ id: TASK-750
 type: task
 role: plan
 title: "Settle the AC-DC-9 / AC-DC-14(b) conflict, then collapse quota occupancy to one seam"
-status: draft
+status: deprecated
 priority: high
 phase: "m7"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PLAN-132
 plan: PLAN-132

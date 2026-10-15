@@ -3,12 +3,11 @@ id: SPEC-036
 type: spec
 role: spec
 title: "Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-07
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-036, dashboard, ux, feedback-loop]
-parent: PRD-001
 ---
 # SPEC-036 — Dashboard browsing UX: breadcrumb + tag/status filters + type-differentiated presentation
 

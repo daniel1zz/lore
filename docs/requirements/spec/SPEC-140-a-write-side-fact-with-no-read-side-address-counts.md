@@ -6,9 +6,8 @@ title: "A write-side fact with no read-side address: counts with no member list,
 status: approved
 priority: medium
 created: 2026-08-11
-updated: 2026-08-12
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

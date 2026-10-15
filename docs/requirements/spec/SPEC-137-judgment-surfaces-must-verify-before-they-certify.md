@@ -6,9 +6,8 @@ title: "Judgment surfaces must verify before they certify: machine-checked findi
 status: approved
 priority: high
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

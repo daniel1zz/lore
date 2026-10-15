@@ -6,9 +6,8 @@ title: "Distribution part 2: npm single-platform publish + TTY postinstall (P2)"
 status: approved
 priority: medium
 created: 2026-07-16
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-046, type: relates-to}
 ---

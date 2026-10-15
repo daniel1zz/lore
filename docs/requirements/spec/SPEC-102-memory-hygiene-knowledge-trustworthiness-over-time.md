@@ -3,12 +3,11 @@ id: SPEC-102
 type: spec
 role: spec
 title: "Memory Hygiene (knowledge trustworthiness over time) (domain overview)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## 16. Memory Hygiene (knowledge trustworthiness over time)
 

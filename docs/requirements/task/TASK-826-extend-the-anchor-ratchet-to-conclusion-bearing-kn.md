@@ -3,11 +3,11 @@ id: TASK-826
 type: task
 role: plan
 title: "Extend the anchor ratchet to conclusion-bearing knowledge and build the anchor-owing predicate"
-status: draft
+status: deprecated
 priority: medium
 phase: "P2 the knowledge anchor ratchet"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-146
 plan: PLAN-146

@@ -3,11 +3,11 @@ id: TASK-675
 type: task
 role: plan
 title: "Update the four comments that recorded the diffSource wiring gap, now that AC-JV-5 closed it"
-status: draft
+status: deprecated
 priority: medium
 phase: "assess-verify"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
 parent: PLAN-123
 plan: PLAN-123

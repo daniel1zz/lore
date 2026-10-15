@@ -6,9 +6,8 @@ title: "CLAUDE.md governance — content-dimension checks: wire the dead admissi
 status: approved
 priority: medium
 created: 2026-08-23
-updated: 2026-08-24
+updated: 2026-10-10
 tags: [claude-md, memory-files, governance, admission, distribution]
-parent: PRD-001
 links:
   - {id: SPEC-095, type: relates-to}
   - {id: SPEC-098, type: relates-to}

@@ -6,9 +6,8 @@ title: "Issue closure loop — computed resolution + agent-reachable visibility"
 status: approved
 priority: medium
 created: 2026-07-29
-updated: 2026-07-29
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview/Goal
 

@@ -3,12 +3,11 @@ id: SPEC-021
 type: spec
 role: spec
 title: "lore export-docs — reverse sync from corpus to spec files"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-30
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [cli, corpus, sync, export, drift, phase-10, stub]
-parent: PRD-001
 links:
   - {id: KN-542, type: relates-to}
 ---

@@ -6,9 +6,8 @@ title: "Typecheck coverage: two named blind spots, and the stale comments that u
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

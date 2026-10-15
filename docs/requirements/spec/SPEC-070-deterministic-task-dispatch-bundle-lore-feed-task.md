@@ -6,9 +6,8 @@ title: "Deterministic task dispatch bundle: lore feed task-start"
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: ADR-005, type: relates-to}
 ---

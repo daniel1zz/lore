@@ -3,12 +3,11 @@ id: SPEC-016
 type: spec
 role: spec
 title: "Cookie Auth — CLI-managed local bootstrap"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-28
-updated: 2026-06-30
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-016: Cookie Auth — CLI-managed local bootstrap
 

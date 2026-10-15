@@ -6,9 +6,8 @@ title: "Multi-session concurrency: queryable ownership, checkout-scoped exclusio
 status: approved
 priority: medium
 created: 2026-08-12
-updated: 2026-08-13
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-095, type: implements}
   - {id: ADR-033, type: relates-to}

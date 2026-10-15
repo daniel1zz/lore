@@ -3,10 +3,10 @@ id: PLAN-133
 type: plan
 role: plan
 title: "Close the two bootstrap-fixpoint follow-ups: one anchored predicate in production, and a fixture-forced red for the anchor-value assertion"
-status: approved
+status: deprecated
 priority: high
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: SPEC-134
 phases:

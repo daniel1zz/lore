@@ -6,9 +6,8 @@ title: "CLI ergonomics: unique ID-prefix resolution + single-pass create-task va
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-051, type: relates-to}
 ---

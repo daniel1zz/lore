@@ -6,9 +6,8 @@ title: "Execution liveness signals: session actor tier, evidence claim renewal, 
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview/Goal
 

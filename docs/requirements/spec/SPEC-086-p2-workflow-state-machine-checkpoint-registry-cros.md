@@ -6,9 +6,8 @@ title: "P2 — Workflow state machine: checkpoint registry + cross-tier producti
 status: approved
 priority: high
 created: 2026-07-09
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [architecture, ioc, state-machine, checkpoint-registry, deterministic-gate]
-parent: PRD-001
 links:
   - {id: ADR-002, type: implements}
 ---

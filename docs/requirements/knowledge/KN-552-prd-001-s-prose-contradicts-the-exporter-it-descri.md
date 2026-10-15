@@ -3,10 +3,10 @@ id: KN-552
 type: knowledge
 role: knowledge
 title: "PRD-001's prose contradicts the exporter it describes, check:spec-mirror's exit code carries no signal, and the CLAUDE.md floor displaces its cost onto the next writer"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

@@ -3,12 +3,11 @@ id: SPEC-013
 type: spec
 role: spec
 title: "Eval Framework"
-status: active
+status: deprecated
 priority: medium
 created: 2026-06-24
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [eval, observability, phase-1]
-parent: PRD-001
 links:
   - {id: SPEC-007, type: relates-to}
   - {id: SPEC-012, type: relates-to}

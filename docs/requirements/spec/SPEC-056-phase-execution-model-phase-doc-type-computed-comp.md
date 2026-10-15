@@ -6,9 +6,8 @@ title: "Phase execution model: phase doc type, computed completion, checklist/tr
 status: approved
 priority: medium
 created: 2026-07-19
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-070, type: relates-to}
 ---

@@ -3,11 +3,11 @@ id: TASK-832
 type: task
 role: plan
 title: "Build gradeOf as a total layer-dominant function and prove no override path"
-status: draft
+status: deprecated
 priority: medium
 phase: "P2 the derived grade"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-147
 plan: PLAN-147

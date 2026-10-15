@@ -13,6 +13,7 @@ links:
   - {id: SPEC-110, type: informs}
   - {id: SPEC-080, type: relates-to}
   - {id: PLAN-101, type: informs}
+  - {id: ADR-043, type: informs}
 ---
 ## Context
 

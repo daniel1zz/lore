@@ -3,12 +3,11 @@ id: SPEC-030
 type: spec
 role: spec
 title: "Hermetic judge sessions + fail-loud AI config"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-03
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [assess, reliability, spec-030]
-parent: PRD-001
 ---
 # SPEC-030 — Hermetic Judge Sessions + Fail-Loud AI Config
 

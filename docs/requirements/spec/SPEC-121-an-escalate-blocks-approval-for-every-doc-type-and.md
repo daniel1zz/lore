@@ -6,9 +6,8 @@ title: "An escalate blocks approval for every doc type, and the denial names the
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # An escalate blocks approval for every doc type, and the denial names the questions
 

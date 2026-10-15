@@ -6,9 +6,8 @@ title: "Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratc
 status: approved
 priority: medium
 created: 2026-08-11
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Bootstrap fixpoint integrity: binary provenance, an anchor-coverage ratchet, and mirror content drift
 

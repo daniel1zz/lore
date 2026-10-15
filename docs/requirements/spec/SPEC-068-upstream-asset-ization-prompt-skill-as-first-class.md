@@ -6,9 +6,8 @@ title: "Upstream asset-ization — prompt & skill as first-class knowledge sub-t
 status: approved
 priority: high
 created: 2026-07-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [p1, upstream-asset, prompt-skill, ioc]
-parent: PRD-001
 links:
   - {id: ADR-002, type: implements}
 ---

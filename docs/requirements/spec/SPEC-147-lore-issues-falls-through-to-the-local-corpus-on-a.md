@@ -6,9 +6,8 @@ title: "lore issues falls through to the LOCAL corpus on a retired-shape upstrea
 status: approved
 priority: high
 created: 2026-08-24
-updated: 2026-08-25
+updated: 2026-10-10
 tags: [defect-channel, silent-fallback, issues, report-issue, config-shape]
-parent: PRD-001
 ---
 ## Overview
 

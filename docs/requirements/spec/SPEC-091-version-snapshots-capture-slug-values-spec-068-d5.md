@@ -6,9 +6,8 @@ title: "Version snapshots capture slug values (SPEC-068 D5 follow-up)"
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-10-10
 tags: [spec-072, version-history, slug]
-parent: PRD-001
 ---
 # SPEC-072 — version snapshots capture slug values (SPEC-068 D5 follow-up)
 

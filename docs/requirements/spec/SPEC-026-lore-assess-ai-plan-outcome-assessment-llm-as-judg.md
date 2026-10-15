@@ -6,9 +6,8 @@ title: "lore assess — AI plan-outcome assessment (LLM-as-judge feedback loop)"
 status: approved
 priority: high
 created: 2026-07-02
-updated: 2026-08-01
+updated: 2026-10-10
 tags: [ai, assessment, judge, feedback-loop, workflow]
-parent: PRD-001
 ---
 # SPEC-026: `lore assess` — AI plan-outcome assessment
 

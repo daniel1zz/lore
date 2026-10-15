@@ -3,10 +3,10 @@ id: KN-485
 type: knowledge
 role: knowledge
 title: "AC coverage counts evidence by plan lineage and ignores ac_scope, and an oracle generation cannot see its own test file being rewritten"
-status: draft
+status: archived
 priority: high
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

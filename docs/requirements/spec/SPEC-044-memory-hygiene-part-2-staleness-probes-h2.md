@@ -6,9 +6,8 @@ title: "Memory hygiene part 2: staleness probes (H2)"
 status: approved
 priority: high
 created: 2026-07-12
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [memory-hygiene, staleness, probes, spec-044]
-parent: PRD-001
 ---
 # SPEC-044 — Memory hygiene part 2: staleness probes (PRD §16 H2)
 

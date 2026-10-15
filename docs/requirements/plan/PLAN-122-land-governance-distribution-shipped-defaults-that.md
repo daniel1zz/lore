@@ -3,10 +3,10 @@ id: PLAN-122
 type: plan
 role: plan
 title: "Land governance distribution: shipped defaults that actually ship, one remedy for an unconfigured upstream, and a gap namespace that resolves"
-status: approved
+status: deprecated
 priority: high
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
 parent: SPEC-138
 phases:

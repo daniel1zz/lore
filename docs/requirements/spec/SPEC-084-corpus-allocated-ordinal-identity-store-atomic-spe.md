@@ -6,9 +6,8 @@ title: "Corpus-allocated ordinal identity: store-atomic SPEC/ADR numbering, pros
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: KN-162, type: relates-to}
   - {id: KN-168, type: supersedes}

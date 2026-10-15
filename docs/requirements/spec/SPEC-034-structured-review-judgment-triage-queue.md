@@ -3,12 +3,11 @@ id: SPEC-034
 type: spec
 role: spec
 title: "Structured review judgment + triage queue"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-06
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-034, feedback-loop, review-judgment, triage, tech-spec]
-parent: PRD-001
 links:
   - {id: SPEC-032, type: relates-to}
 ---

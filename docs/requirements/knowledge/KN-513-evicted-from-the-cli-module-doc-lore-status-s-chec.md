@@ -3,10 +3,10 @@ id: KN-513
 type: knowledge
 role: knowledge
 title: "Evicted from the CLI module doc: lore status's check-family behaviour, measured"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-23
-updated: 2026-08-24
+updated: 2026-10-10
 tags: [claude-md, eviction, status, exit-codes]
 parent: SPEC-145
 ---

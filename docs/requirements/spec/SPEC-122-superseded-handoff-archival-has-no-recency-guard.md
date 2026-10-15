@@ -6,9 +6,8 @@ title: "Superseded-handoff archival has no recency guard"
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Superseded-handoff archival has no recency guard, so a live session's ticket is an instant candidate
 

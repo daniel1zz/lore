@@ -3,12 +3,11 @@ id: SPEC-151
 type: spec
 role: spec
 title: "Governance weight must scale with measured blast radius: a gate with no risk input can only be all-on or all-off"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 
@@ -330,7 +329,7 @@ inheriting it.
   script: test — bunx vitest run packages/lore/tests/integration/fanin-ssot.test.ts packages/lore/tests/integration/changed-tests-consumer.test.ts packages/lore/tests/integration/grade-consumer.test.ts 2>&1 && echo 'AC-GRADE-2 PASS: exactly 1 tree-wide definition in @lore/core, an import-graph edge from each of the two consumers, and each consumer suite independently reached the recorded code under the declared mutation'
 - [·] [script] AC-GRADE-3: For EVERY predicate in the class-I (size-invariant) set, a task input at the LOWEST grade — R0 mechanical, named inline so this AC is checkable without D8 — still has that predicate evaluated and still able to refuse: at least one refusing case per predicate. The swept set is bounded from BOTH sides, not merely non-empty: the suite asserts the set it iterated EQUALS the class-I membership of the class map (same cardinality AND same members), so neither a shrunken set nor a silently reclassified predicate can pass. The class map is the iteration source, so a newly added class-I predicate enters the sweep automatically. Covered by describe "class-I predicates are grade-invariant" in packages/lore/tests/unit/service/gate-class-boundary.test.ts
   script: test — bunx vitest run packages/lore/tests/unit/service/gate-class-boundary.test.ts 2>&1 && echo 'AC-GRADE-3 PASS: the iterated set was asserted equal in cardinality and membership to the class map class-I set, and every member was evaluated at grade R0 and produced at least one refusal'
-- [·] [script] AC-GRADE-4: The class map is TOTAL, proven by an in-tree negative control: a test writes a predicate with no class assignment INTO the checked tree, spawns typecheck, asserts exit EXACTLY 2 with output naming that predicate, then restores the tree. Asserts the exact code, never "non-zero". A forward typecheck alone would stay green even if the map were declared Partial rather than total, which is why this AC drives the control instead. Covered by describe "an unassigned predicate fails typecheck at exit 2" in packages/lore/tests/integration/gate-class-totality.test.ts
+- [⚑] [script] AC-GRADE-4: The class map is TOTAL, proven by an in-tree negative control: a test writes a predicate with no class assignment INTO the checked tree, spawns typecheck, asserts exit EXACTLY 2 with output naming that predicate, then restores the tree. Asserts the exact code, never "non-zero". A forward typecheck alone would stay green even if the map were declared Partial rather than total, which is why this AC drives the control instead. Covered by describe "an unassigned predicate fails typecheck at exit 2" in packages/lore/tests/integration/gate-class-totality.test.ts
   script: test — bunx vitest run packages/lore/tests/integration/gate-class-totality.test.ts 2>&1 && echo 'AC-GRADE-4 PASS: an in-tree predicate with no class assignment drove typecheck to exit exactly 2 naming that predicate, and the tree was restored'
 - [·] [script] AC-GRADE-5: In a throwaway corpus (mkdtemp + lore init, cwd inside it), a task parented directly to a spec with NO plan: (a) lore claim exits 0; (b) lore evidence exits 0 and the task carries exactly one evidence row afterwards; (c) lore verify --task exits 0 AND the governing spec it resolved through --ac-scope has an id EQUAL to the task parent_id — asserted by identity, because a lookup that resolved to the WRONG spec would otherwise pass on "resolution succeeded" alone. Never writes to this repo own .lore/ corpus. Covered by describe "middle tier: spec parents task with no plan" in packages/lore/tests/integration/middle-tier-spec-task.test.ts
   script: e2e — bunx vitest run packages/lore/tests/integration/middle-tier-spec-task.test.ts 2>&1 && echo 'AC-GRADE-5 PASS: in a throwaway corpus claim and evidence each exited 0 leaving exactly one evidence row, and verify --task exited 0 having resolved a governing spec whose id equalled the task parent_id'

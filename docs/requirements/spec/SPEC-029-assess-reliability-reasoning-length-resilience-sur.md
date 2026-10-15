@@ -3,12 +3,11 @@ id: SPEC-029
 type: spec
 role: spec
 title: "Assess reliability: reasoning-length resilience + surface-correct error hints"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-03
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [assess, reliability, spec-029]
-parent: PRD-001
 ---
 # SPEC-029 — Assess Reliability: reasoning-length resilience + surface-correct error hints
 

@@ -3,11 +3,11 @@ id: TASK-676
 type: task
 role: plan
 title: "Replace the false git-tracked mechanism in the unconfigured-upstream disclosure with the real untracked-but-filesystem-shared one"
-status: draft
+status: deprecated
 priority: medium
 phase: "remedy"
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
 parent: PLAN-122
 plan: PLAN-122

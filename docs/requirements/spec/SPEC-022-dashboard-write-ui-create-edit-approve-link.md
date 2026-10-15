@@ -3,12 +3,11 @@ id: SPEC-022
 type: spec
 role: spec
 title: "Dashboard write UI (create / edit / approve / link)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-30
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [dashboard, ui, write, mutation, phase-10, implemented]
-parent: PRD-001
 links:
   - {id: SPEC-011, type: informs}
   - {id: SPEC-016, type: informs}

@@ -6,9 +6,8 @@ title: "Governance visibility: an armed gate that vacuously passes lends its aut
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-08-10
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

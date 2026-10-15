@@ -6,9 +6,8 @@ title: "Session layer part 1: bootstrap pointer-set + lossless handoff (S1+S2)"
 status: approved
 priority: high
 created: 2026-07-10
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [session, bootstrap, handoff, spec-041, context-continuity]
-parent: PRD-001
 ---
 # SPEC-041 — Session layer part 1: bootstrap pointer-set + lossless handoff (PRD §15 S1+S2)
 

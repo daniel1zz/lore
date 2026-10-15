@@ -3,10 +3,10 @@ id: KN-438
 type: knowledge
 role: knowledge
 title: "Evicted from the CLI adapter module doc: the claim/evidence/done bullet"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

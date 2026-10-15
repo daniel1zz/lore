@@ -6,9 +6,8 @@ title: "Falsifiability reachability: a feedable checkpoint, an attestable red, a
 status: approved
 priority: medium
 created: 2026-08-10
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview/Goal
 

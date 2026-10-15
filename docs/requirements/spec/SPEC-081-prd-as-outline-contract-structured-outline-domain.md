@@ -3,12 +3,11 @@ id: SPEC-081
 type: spec
 role: spec
 title: "PRD-as-outline contract: structured outline, domain-overview kind, plan-close sync predicate, budget oracle"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-004, type: relates-to}
   - {id: SPEC-032, type: relates-to}

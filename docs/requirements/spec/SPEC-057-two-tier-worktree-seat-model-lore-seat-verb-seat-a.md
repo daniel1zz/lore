@@ -6,9 +6,8 @@ title: "Two-tier worktree seat model: lore seat verb + seat-aware resume"
 status: approved
 priority: medium
 created: 2026-07-19
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Module Design: Two-tier worktree seat model — `lore seat` + seat-aware resume (PRD §15 S4, spec_kind: tech)
 

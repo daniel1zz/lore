@@ -6,9 +6,8 @@ title: "Verification profiles: per-spec_kind oracle-coverage floors"
 status: approved
 priority: medium
 created: 2026-07-19
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Module Design: Verification profiles — per-spec_kind oracle-coverage floors (PRD §18 P6, spec_kind: tech)
 

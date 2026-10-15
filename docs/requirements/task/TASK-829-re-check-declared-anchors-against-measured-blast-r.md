@@ -3,11 +3,11 @@ id: TASK-829
 type: task
 role: plan
 title: "Re-check declared anchors against measured blast radius and arm the shared cutoff"
-status: draft
+status: deprecated
 priority: medium
 phase: "P5 two-axis recheck and arming"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-147
 plan: PLAN-147

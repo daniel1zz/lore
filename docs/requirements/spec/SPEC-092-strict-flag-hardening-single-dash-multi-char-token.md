@@ -6,9 +6,8 @@ title: "Strict-flag hardening: single-dash multi-char tokens fail loud (SPEC-051
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-10-10
 tags: [spec-073, cli, strict-flags]
-parent: PRD-001
 ---
 # SPEC-073 — strict-flag hardening: single-dash multi-char tokens must fail loud (SPEC-051 follow-up)
 

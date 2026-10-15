@@ -6,10 +6,12 @@ title: "lore done's attestation refusal calls a capture_source:runner row SELF-R
 status: archived
 priority: medium
 created: 2026-08-03
-updated: 2026-08-06
+updated: 2026-08-26
 tags: []
 parent: PRD-001
 ---
+> ⚠ INVALIDATED 2026-08-26T11:42:34.133Z — superseded by knowledge-lore-evidence-capture-now-clears-the-attested-floor; SPEC-143 C5 gave --capture a real attestation block carrying exit_code, so this report's core claim -- that a --capture row is unattested and therefore cannot satisfy lore done's floor -- is false for every row written by a rebuilt binary. The floor asks presence, not provenance; only lore verify proves the command was derived from a declared scope.
+
 # Defect — `lore done`'s attestation refusal calls a `capture_source: "runner"` row "SELF-REPORTED"
 
 `lore done`'s refusal when no evidence row carries `attestation`

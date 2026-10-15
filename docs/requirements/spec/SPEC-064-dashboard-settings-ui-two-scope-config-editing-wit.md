@@ -6,9 +6,8 @@ title: "Dashboard Settings UI: two-scope config editing with precedence and blas
 status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-064 — Dashboard Settings UI: two-scope config editing with precedence and blast-radius disclosure
 

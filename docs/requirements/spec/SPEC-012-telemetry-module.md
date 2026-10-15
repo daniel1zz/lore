@@ -3,12 +3,11 @@ id: SPEC-012
 type: spec
 role: spec
 title: "Telemetry Module"
-status: active
+status: deprecated
 priority: medium
 created: 2026-06-24
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [telemetry, observability, phase-1]
-parent: PRD-001
 links:
   - {id: SPEC-001, type: implements}
   - {id: SPEC-003, type: relates-to}

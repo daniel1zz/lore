@@ -3,11 +3,11 @@ id: TASK-830
 type: task
 role: plan
 title: "Wire the waiver table cell by cell and open the spec-parents-task middle tier"
-status: draft
+status: deprecated
 priority: medium
 phase: "P4 wire the waivers and the middle tier"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-147
 plan: PLAN-147

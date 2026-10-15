@@ -6,9 +6,8 @@ title: "lore assess: project evidence rows instead of embedding the task body, a
 status: approved
 priority: high
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # lore assess: project evidence rows instead of embedding the task body, and never author an absence finding against content the judge could not read
 

@@ -6,9 +6,8 @@ title: "Worktree-derived actor identity — agent:<branch> as deterministic defa
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-090, type: relates-to}
   - {id: SPEC-093, type: implements}

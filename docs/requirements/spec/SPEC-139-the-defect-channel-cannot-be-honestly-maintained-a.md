@@ -6,9 +6,8 @@ title: "The defect channel cannot be honestly maintained: an unreleasable cap wh
 status: approved
 priority: medium
 created: 2026-08-11
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

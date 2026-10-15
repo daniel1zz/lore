@@ -6,9 +6,8 @@ title: "Eager libsql load makes every command depend on a healthy TMPDIR"
 status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-10
 tags: [store, compiled-binary, native-module, dogfood]
-parent: PRD-001
 ---
 ## Overview/Goal
 

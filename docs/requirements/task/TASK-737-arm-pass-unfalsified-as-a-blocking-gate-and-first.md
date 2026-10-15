@@ -3,11 +3,11 @@ id: TASK-737
 type: task
 role: plan
 title: "Arm pass_unfalsified as a blocking gate, and first declare the criterion that observes it"
-status: draft
+status: deprecated
 priority: medium
 phase: "backlog-and-arm"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PLAN-079
 plan: PLAN-079

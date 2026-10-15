@@ -3,10 +3,10 @@ id: KN-199
 type: knowledge
 role: knowledge
 title: "Retired from root CLAUDE.md — the 19 dogfooding standing lessons, verbatim"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-04
-updated: 2026-08-04
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

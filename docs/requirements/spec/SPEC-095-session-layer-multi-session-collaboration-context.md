@@ -3,12 +3,11 @@ id: SPEC-095
 type: spec
 role: spec
 title: "Session Layer (multi-session collaboration & context continuity) (domain overview)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-08-18
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## 15. Session Layer (multi-session collaboration & context continuity)
 

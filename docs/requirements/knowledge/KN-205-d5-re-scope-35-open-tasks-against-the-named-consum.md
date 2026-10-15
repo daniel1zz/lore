@@ -3,10 +3,10 @@ id: KN-205
 type: knowledge
 role: knowledge
 title: "D5 re-scope: 35 open tasks against the named-consumer criterion — 0 blocking, 14 must-fix, 8 onboarding-only, 13 descheduled"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-03
-updated: 2026-08-03
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

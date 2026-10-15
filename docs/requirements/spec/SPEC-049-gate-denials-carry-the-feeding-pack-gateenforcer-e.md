@@ -6,9 +6,8 @@ title: "Gate denials carry the feeding pack (GateEnforcer error enrichment)"
 status: approved
 priority: medium
 created: 2026-07-17
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-049 — Gate denials carry the feeding pack (GateEnforcer error enrichment)
 

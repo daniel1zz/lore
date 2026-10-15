@@ -6,9 +6,8 @@ title: "Context verb family — two-zone CLAUDE.md anatomy, lore context init re
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-08-23
+updated: 2026-10-10
 tags: [claude-md, context, distribution, governance]
-parent: PRD-001
 links:
   - {id: ADR-014, type: implements}
   - {id: SPEC-095, type: relates-to}

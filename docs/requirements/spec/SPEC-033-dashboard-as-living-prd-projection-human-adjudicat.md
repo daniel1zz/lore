@@ -3,12 +3,11 @@ id: SPEC-033
 type: spec
 role: spec
 title: "Dashboard as living-PRD projection + human adjudication surface"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-06
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-033, dashboard, feedback-loop, d6]
-parent: PRD-001
 links:
   - {id: SPEC-034, type: relates-to}
 ---

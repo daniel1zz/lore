@@ -6,9 +6,8 @@ title: "SPEC — AC-Quantifiability Gate (design-time standardization enforcemen
 status: draft
 priority: medium
 created: 2026-07-17
-updated: 2026-08-07
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC — AC-Quantifiability Gate (design-time standardization enforcement)
 

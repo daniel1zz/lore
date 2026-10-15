@@ -3,12 +3,11 @@ id: SPEC-009
 type: spec
 role: spec
 title: "Sync Engine (Turso)"
-status: approved
+status: deprecated
 priority: critical
 created: 2026-06-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [sync, turso, libsql, cloud, phase-2]
-parent: PRD-001
 ---
 # SPEC-009: Sync Engine (Turso Embedded Replicas)
 

@@ -3,10 +3,10 @@ id: PLAN-147
 type: plan
 role: plan
 title: "Land measured-blast-radius grading: one fan-in definition, a total class map, the middle tier, and a shared arming cutoff"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: SPEC-151
 phases:

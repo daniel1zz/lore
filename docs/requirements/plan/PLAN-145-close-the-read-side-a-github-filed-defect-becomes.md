@@ -3,10 +3,10 @@ id: PLAN-145
 type: plan
 role: plan
 title: "Close the read side: a GitHub-filed defect becomes claimable, on every surface"
-status: approved
+status: deprecated
 priority: critical
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: [defect-channel, github, read-side, claimable]
 parent: SPEC-150
 phases:

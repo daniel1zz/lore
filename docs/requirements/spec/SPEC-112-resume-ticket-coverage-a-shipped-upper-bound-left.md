@@ -6,9 +6,8 @@ title: "Resume-ticket coverage: a shipped upper bound left the lower bound unrep
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-110, type: relates-to}
   - {id: KN-326, type: relates-to}

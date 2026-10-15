@@ -3,12 +3,11 @@ id: SPEC-099
 type: spec
 role: spec
 title: "Upstream Issue Feedback Loop (consumer-reported defects → corpus) (domain overview)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-07-29
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## 20. Upstream Issue Feedback Loop (consumer-reported defects → corpus)
 

@@ -12,6 +12,7 @@ parent: PRD-001
 links:
   - {id: SPEC-143, type: relates-to}
   - {id: KN-471, type: relates-to}
+  - {id: ADR-043, type: informs}
 ---
 # Redeeming three advisories on SPEC-143 produced two more rounds of the same defect, and the review judge's escalation was the only mechanism that caught a real design break
 

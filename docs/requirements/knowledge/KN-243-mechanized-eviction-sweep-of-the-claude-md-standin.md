@@ -3,10 +3,10 @@ id: KN-243
 type: knowledge
 role: knowledge
 title: "Mechanized-eviction sweep of the CLAUDE.md standing-lessons layer: 4 evicted with demonstrated mechanisms, 15 kept as measured-unmechanized, 967 bytes freed"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

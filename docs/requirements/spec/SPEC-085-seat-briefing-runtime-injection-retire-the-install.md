@@ -6,11 +6,11 @@ title: "Seat-briefing runtime injection: retire the installed seat-briefing.md"
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-096, type: implements}
+  - {id: SPEC-083, type: supersedes}
 ---
 # SPEC-085 — Seat-briefing runtime injection: retire the installed seat-briefing.md (SPEC-083 follow-up)
 

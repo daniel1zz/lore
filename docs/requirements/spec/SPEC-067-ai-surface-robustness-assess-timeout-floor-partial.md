@@ -6,9 +6,8 @@ title: "AI-surface robustness: assess timeout floor, partial-provider fail-loud,
 status: approved
 priority: medium
 created: 2026-07-23
-updated: 2026-08-01
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-067 — AI-surface robustness: assess timeout floor, partial-provider fail-loud, judge grounding downgrades
 

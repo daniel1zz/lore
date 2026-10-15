@@ -6,9 +6,8 @@ title: "Corpus truthfulness: a verdict must carry the state it describes, and a 
 status: approved
 priority: critical
 created: 2026-08-17
-updated: 2026-08-23
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: KN-464, type: relates-to}
   - {id: KN-460, type: relates-to}

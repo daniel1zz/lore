@@ -3,11 +3,11 @@ id: TASK-739
 type: task
 role: plan
 title: "Clear the 29-criterion pass_unfalsified backlog across twelve specs, with a RUN falsifier for each"
-status: draft
+status: deprecated
 priority: high
 phase: "backlog-and-arm"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PLAN-079
 plan: PLAN-079

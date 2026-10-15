@@ -6,9 +6,8 @@ title: "Audit trail + calibration data"
 status: approved
 priority: high
 created: 2026-07-06
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-035, feedback-loop, audit, calibration, tech-spec]
-parent: PRD-001
 links:
   - {id: SPEC-034, type: relates-to}
 ---

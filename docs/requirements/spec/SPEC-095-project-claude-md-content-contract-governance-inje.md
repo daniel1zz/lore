@@ -6,9 +6,8 @@ title: "Project CLAUDE.md content contract — governance-injected prose target 
 status: approved
 priority: medium
 created: 2026-07-27
-updated: 2026-08-24
+updated: 2026-10-10
 tags: [claude-md, memory-files, distribution, governance]
-parent: PRD-001
 links:
   - {id: TASK-632, type: supersedes}
   - {id: ADR-004, type: implements}

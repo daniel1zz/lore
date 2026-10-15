@@ -3,12 +3,11 @@ id: SPEC-002
 type: spec
 role: spec
 title: "Corpus Schema"
-status: approved
+status: deprecated
 priority: critical
 created: 2026-06-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [schema, data-model, corpus, phase-1]
-parent: PRD-001
 links:
   - {id: SPEC-001, type: relates-to}
   - {id: SPEC-004, type: informs}

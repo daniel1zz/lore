@@ -3,11 +3,11 @@ id: TASK-833
 type: task
 role: plan
 title: "Move the pure import-graph core to @lore/core and prove both consumers call it"
-status: draft
+status: deprecated
 priority: medium
 phase: "P1 one fan-in definition"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-147
 plan: PLAN-147

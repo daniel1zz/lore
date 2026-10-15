@@ -3,11 +3,11 @@ id: TASK-741
 type: task
 role: plan
 title: "Correct the three mistyped AC oracle commands and drive all four recorded reds to an honest terminal state"
-status: draft
+status: deprecated
 priority: high
 phase: "corpus-cleanup"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PLAN-079
 plan: PLAN-079

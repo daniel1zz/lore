@@ -6,9 +6,8 @@ title: "Attestation completeness guard: detect zero-match / under-match test ora
 status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-061 — Attestation completeness guard: detect zero-match / under-match test oracles
 

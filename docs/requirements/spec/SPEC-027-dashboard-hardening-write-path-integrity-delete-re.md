@@ -3,12 +3,11 @@ id: SPEC-027
 type: spec
 role: spec
 title: "Dashboard hardening: write-path integrity, delete/restore, component test coverage"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-03
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [dashboard, hardening, spec-027]
-parent: PRD-001
 ---
 # SPEC-027 — Dashboard Hardening: write-path integrity, delete/restore surface, component test coverage
 

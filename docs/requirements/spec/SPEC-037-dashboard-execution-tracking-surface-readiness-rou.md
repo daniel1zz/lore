@@ -3,12 +3,11 @@ id: SPEC-037
 type: spec
 role: spec
 title: "Dashboard execution-tracking surface: readiness route + plan progress + evidence viewer"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-07
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-037, dashboard, ux, execution-tracking, feedback-loop]
-parent: PRD-001
 ---
 # SPEC-037 — Dashboard execution-tracking surface: readiness route + plan progress + evidence viewer
 

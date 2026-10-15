@@ -3,11 +3,11 @@ id: TASK-775
 type: task
 role: plan
 title: "[Skill:test] final verification — full suite, attested AC coverage, drift and assess"
-status: draft
+status: deprecated
 priority: critical
 phase: "P6: Verification"
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: []
 parent: PLAN-138
 plan: PLAN-138

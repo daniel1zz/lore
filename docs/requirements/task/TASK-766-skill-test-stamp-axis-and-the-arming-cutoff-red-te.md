@@ -3,11 +3,11 @@ id: TASK-766
 type: task
 role: plan
 title: "[Skill:test] stamp axis and the arming cutoff — RED test scenarios"
-status: draft
+status: deprecated
 priority: high
 phase: "P2 Stamp mechanisms"
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: []
 parent: PLAN-137
 plan: PLAN-137

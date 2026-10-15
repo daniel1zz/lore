@@ -3,12 +3,11 @@ id: SPEC-083
 type: spec
 role: spec
 title: "Governance prose runtime injection: retire the installed corpus-workflow.md"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-096, type: implements}
 ---

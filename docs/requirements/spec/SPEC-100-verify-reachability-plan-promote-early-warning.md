@@ -6,9 +6,8 @@ title: "Verify reachability — plan-promote early warning, reachability-aware a
 status: approved
 priority: medium
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-094, type: implements}
 ---

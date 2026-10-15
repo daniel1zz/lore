@@ -3,12 +3,11 @@ id: SPEC-024
 type: spec
 role: spec
 title: "Default --no-ai for agent and MCP execution paths"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-30
-updated: 2026-06-30
+updated: 2026-10-10
 tags: [ai, mcp, agent, defaults, latency, phase-10, stub]
-parent: PRD-001
 ---
 # SPEC-024: Default `--no-ai` for agent and MCP execution paths
 

@@ -6,9 +6,8 @@ title: "CLAUDE.md root section-structure check and adoption mode for existing pr
 status: approved
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-10
 tags: [claude-md, memory-files, governance, adoption, distribution]
-parent: PRD-001
 links:
   - {id: ADR-040, type: relates-to}
   - {id: SPEC-095, type: relates-to}

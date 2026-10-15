@@ -3,12 +3,11 @@ id: SPEC-020
 type: spec
 role: spec
 title: "HTTP-backed AI provider (alongside claude-cli)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-30
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [ai, http, provider, network, phase-10, stub]
-parent: PRD-001
 ---
 # SPEC-020: HTTP-backed AI provider
 

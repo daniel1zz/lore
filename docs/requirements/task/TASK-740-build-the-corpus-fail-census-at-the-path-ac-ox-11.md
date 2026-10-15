@@ -3,11 +3,11 @@ id: TASK-740
 type: task
 role: plan
 title: "Build the corpus fail census at the path AC-OX-11 already names, and record its first red"
-status: draft
+status: deprecated
 priority: high
 phase: "corpus-cleanup"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PLAN-079
 plan: PLAN-079

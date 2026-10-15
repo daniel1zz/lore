@@ -6,9 +6,8 @@ title: "dashboard Issues triage surface: badge, list, in-place adjudication"
 status: approved
 priority: medium
 created: 2026-07-24
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-074, report-issue, dashboard, triage]
-parent: PRD-001
 ---
 ## Overview
 

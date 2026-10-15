@@ -6,9 +6,8 @@ title: "Distribution part 1: asset SSOT + local safe installer (P0+P1)"
 status: approved
 priority: high
 created: 2026-07-16
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [distribution, installer, p17, setup]
-parent: PRD-001
 ---
 **spec_kind:** feature · **implements →** PRD §17 Distribution & Adoption (P0+P1 slice)
 

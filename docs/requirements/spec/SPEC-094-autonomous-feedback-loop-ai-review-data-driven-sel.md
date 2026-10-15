@@ -3,12 +3,11 @@ id: SPEC-094
 type: spec
 role: spec
 title: "Autonomous Feedback Loop (AI review, data-driven self-optimization) (domain overview)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-08-20
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## 14. Autonomous Feedback Loop (AI review, data-driven self-optimization)
 

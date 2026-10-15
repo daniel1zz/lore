@@ -6,9 +6,8 @@ title: "Upstream issue reporting: lore report-issue (consumer defect feedback lo
 status: deprecated
 priority: medium
 created: 2026-07-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: [spec-072, feedback-loop, report-issue, cross-corpus]
-parent: PRD-001
 ---
 # SPEC-072 — Upstream issue reporting: `lore report-issue` (feature spec)
 

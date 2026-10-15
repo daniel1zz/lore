@@ -6,9 +6,8 @@ title: "Requirement-layer quantifiability lint (close SPEC-052 upstream blind sp
 status: approved
 priority: medium
 created: 2026-07-20
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-059 — Requirement-layer quantifiability lint (close the SPEC-052 upstream blind spot)
 

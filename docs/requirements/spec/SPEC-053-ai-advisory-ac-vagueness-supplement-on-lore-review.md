@@ -6,9 +6,8 @@ title: "AI-advisory AC-vagueness supplement on lore review <spec>"
 status: approved
 priority: medium
 created: 2026-07-18
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-053 — AI-advisory AC-vagueness supplement on `lore review <spec>`
 

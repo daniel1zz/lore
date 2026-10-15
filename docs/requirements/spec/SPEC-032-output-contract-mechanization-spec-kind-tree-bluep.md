@@ -3,12 +3,11 @@ id: SPEC-032
 type: spec
 role: spec
 title: "Output-contract mechanization (spec_kind + tree blueprint + text-projection splice)"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-03
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [spec-032, output-contract, tech-spec, spec-kind, tree-blueprint]
-parent: PRD-001
 ---
 # SPEC-032 — Output-contract mechanization (spec_kind + tree blueprint + text-projection splice)
 

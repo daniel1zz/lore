@@ -3,11 +3,11 @@ id: TASK-746
 type: task
 role: plan
 title: "Obtain a machine-proven red for AC-BFI-14 and AC-BFI-15, blocked on --falsify comparing more than the exit code"
-status: draft
+status: deprecated
 priority: high
 phase: "two-follow-ups"
 created: 2026-08-21
-updated: 2026-08-21
+updated: 2026-10-10
 tags: []
 parent: PLAN-133
 plan: PLAN-133

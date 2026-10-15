@@ -6,9 +6,8 @@ title: "Memory hygiene part 1: bi-temporal invalidation (H1)"
 status: approved
 priority: high
 created: 2026-07-11
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [memory-hygiene, validity, invalidation, spec-043, bi-temporal]
-parent: PRD-001
 ---
 # SPEC-043 — Memory hygiene part 1: bi-temporal invalidation (PRD §16 H1)
 

@@ -6,9 +6,8 @@ title: "Config write layer: ConfigService, HTTP surface, and the edit-safety mod
 status: approved
 priority: medium
 created: 2026-07-21
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # SPEC-062 — Config write layer: ConfigService, HTTP surface, and the edit-safety model
 

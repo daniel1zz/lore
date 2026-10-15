@@ -3,10 +3,10 @@ id: PLAN-149
 type: plan
 role: plan
 title: "CLAUDE.md root section-structure check and adoption mode"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-10-07
-updated: 2026-10-07
+updated: 2026-10-10
 tags: [claude-md, memory-files, governance, adoption]
 parent: SPEC-154
 phases:

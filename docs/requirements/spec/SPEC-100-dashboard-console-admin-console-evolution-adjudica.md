@@ -3,12 +3,11 @@ id: SPEC-100
 type: spec
 role: spec
 title: "Dashboard Console (adjudication cockpit re-centered; admin-console breadth admission-gated) (domain overview)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-07-28
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # 21. Dashboard Console (adjudication cockpit re-centered; admin-console breadth admission-gated)
 

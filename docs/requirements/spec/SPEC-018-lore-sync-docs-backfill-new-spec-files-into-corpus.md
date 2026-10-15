@@ -3,12 +3,11 @@ id: SPEC-018
 type: spec
 role: spec
 title: "lore sync-docs — backfill new spec files into corpus"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-06-28
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [cli, corpus, sync, drift, docs, phase-9]
-parent: PRD-001
 ---
 # SPEC-018: `lore sync-docs` — backfill new spec files into corpus
 

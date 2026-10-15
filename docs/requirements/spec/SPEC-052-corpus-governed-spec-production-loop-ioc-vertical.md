@@ -6,9 +6,8 @@ title: "Corpus-governed spec-production loop — IoC vertical slice"
 status: approved
 priority: high
 created: 2026-07-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [architecture, hook-gate, active-feeding, ioc-slice, deterministic-gate]
-parent: PRD-001
 links:
   - {id: ADR-002, type: implements}
 ---

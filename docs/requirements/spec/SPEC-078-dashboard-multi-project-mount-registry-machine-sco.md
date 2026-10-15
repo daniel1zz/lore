@@ -6,9 +6,8 @@ title: "Dashboard multi-project: mount registry, machine-scope auth, project-add
 status: approved
 priority: medium
 created: 2026-07-25
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-064, type: relates-to}
 ---

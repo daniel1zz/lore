@@ -6,9 +6,8 @@ title: "plan-close predicates measure invariants: an applicability verdict in th
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: ADR-017, type: implements}
   - {id: ADR-001, type: informs}

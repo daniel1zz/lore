@@ -3,11 +3,11 @@ id: TASK-828
 type: task
 role: plan
 title: "Emit the three tables from gate --explain and close falsifier coverage for both specs"
-status: draft
+status: deprecated
 priority: medium
 phase: "P6 ship the rules as executables"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-147
 plan: PLAN-147

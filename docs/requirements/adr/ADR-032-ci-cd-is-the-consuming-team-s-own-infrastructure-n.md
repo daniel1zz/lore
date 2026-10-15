@@ -3,10 +3,10 @@ id: ADR-032
 type: adr
 role: decision
 title: "CI/CD is the consuming team's own infrastructure, not a lore deliverable — lore ships corpus gates, never a test runner or pipeline"
-status: draft
+status: approved
 priority: medium
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

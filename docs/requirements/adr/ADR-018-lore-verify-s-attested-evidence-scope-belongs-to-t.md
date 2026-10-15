@@ -3,10 +3,10 @@ id: ADR-018
 type: adr
 role: decision
 title: "lore verify's attested-evidence scope belongs to the task that declares it: default to declared-scope intersection, refuse an unknown scope, and demote the per-task attested floor to a reported fact"
-status: draft
+status: approved
 priority: medium
 created: 2026-07-31
-updated: 2026-07-31
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 links:

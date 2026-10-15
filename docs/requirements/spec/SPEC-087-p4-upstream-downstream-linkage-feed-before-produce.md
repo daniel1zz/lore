@@ -6,9 +6,8 @@ title: "P4 — Upstream-downstream linkage + feed-before-produce protocol"
 status: approved
 priority: high
 created: 2026-07-09
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [ioc, p4, feed-before-produce, provenance, governs, active-feeding]
-parent: PRD-001
 links:
   - {id: ADR-002, type: implements}
   - {id: SPEC-070, type: relates-to}

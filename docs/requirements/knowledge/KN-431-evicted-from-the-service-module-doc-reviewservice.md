@@ -3,10 +3,10 @@ id: KN-431
 type: knowledge
 role: knowledge
 title: "Evicted from the service module doc: ReviewService's judgment gate, and the two different byte floors that let an anchored doc pass the guard while reddening the suite"
-status: draft
+status: archived
 priority: medium
 created: 2026-08-11
-updated: 2026-08-11
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

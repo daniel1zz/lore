@@ -3,10 +3,10 @@ id: ADR-026
 type: adr
 role: decision
 title: "Judge flakiness: keep D5 unchanged — explicit human dismissal already ships as --override-judgment, and an N-consecutive-escalate threshold would reward re-rolls"
-status: draft
+status: approved
 priority: high
 created: 2026-08-01
-updated: 2026-08-01
+updated: 2026-10-10
 tags: []
 parent: PRD-001
 ---

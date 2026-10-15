@@ -2,6 +2,9 @@
   "env": {
     "CLAUDE_AC_TRACE_BYPASS": "1"
   },
+  "permissions": {
+    "deny": ["Agent(general-purpose)"]
+  },
   "hooks": {
     "PreToolUse": [
       {

@@ -6,9 +6,8 @@ title: "Bootstrap injection projection: tier-1/tier-2 payload split"
 status: approved
 priority: medium
 created: 2026-07-26
-updated: 2026-07-27
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-041, type: relates-to}
 ---

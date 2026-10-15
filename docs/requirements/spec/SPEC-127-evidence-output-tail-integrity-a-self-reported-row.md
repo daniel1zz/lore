@@ -6,9 +6,8 @@ title: "Evidence output_tail integrity: a self-reported row must carry captured 
 status: approved
 priority: high
 created: 2026-08-01
-updated: 2026-08-03
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Evidence output_tail integrity: a self-reported non-pass row must carry output, and a runner tail must witness the criterion it is filed under
 

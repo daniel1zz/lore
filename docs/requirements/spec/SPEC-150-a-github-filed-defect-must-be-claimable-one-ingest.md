@@ -6,9 +6,8 @@ title: "A GitHub-filed defect must be claimable: one ingest seam turns a listed 
 status: approved
 priority: critical
 created: 2026-08-24
-updated: 2026-08-25
+updated: 2026-10-10
 tags: [defect-channel, github, intake, read-side, claimable]
-parent: PRD-001
 links:
   - {id: SPEC-145, type: relates-to}
   - {id: SPEC-147, type: relates-to}

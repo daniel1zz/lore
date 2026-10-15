@@ -3,11 +3,11 @@ id: TASK-825
 type: task
 role: plan
 title: "Refuse an undeclared anchor intersection and consume the shared arming cutoff"
-status: draft
+status: deprecated
 priority: medium
 phase: "P3 the convergence obligation"
 created: 2026-08-24
-updated: 2026-08-24
+updated: 2026-10-10
 tags: []
 parent: PLAN-146
 plan: PLAN-146

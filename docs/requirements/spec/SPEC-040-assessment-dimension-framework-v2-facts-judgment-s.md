@@ -6,9 +6,8 @@ title: "Assessment dimension framework v2: facts/judgment split + typed findings
 status: approved
 priority: high
 created: 2026-07-10
-updated: 2026-07-27
+updated: 2026-10-10
 tags: [assess, judge, rubric, calibration, spec-040, instrument]
-parent: PRD-001
 ---
 # SPEC-040 — Assessment dimension framework v2: deterministic-facts / judgment split + typed findings
 

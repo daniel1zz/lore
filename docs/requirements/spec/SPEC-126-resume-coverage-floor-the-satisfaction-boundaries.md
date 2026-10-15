@@ -6,9 +6,8 @@ title: "Resume-coverage floor — the satisfaction boundaries: a deferral must c
 status: approved
 priority: high
 created: 2026-08-01
-updated: 2026-08-25
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: SPEC-123, type: relates-to}
   - {id: ADR-025, type: relates-to}

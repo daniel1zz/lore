@@ -6,9 +6,8 @@ title: "Phase writes are version-less BY DESIGN (SPEC-023) — the root CLAUDE.m
 status: approved
 priority: medium
 created: 2026-08-24
-updated: 2026-08-25
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 links:
   - {id: ADR-038, type: relates-to}
 ---

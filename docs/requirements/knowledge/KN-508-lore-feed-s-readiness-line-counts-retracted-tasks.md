@@ -3,10 +3,10 @@ id: KN-508
 type: knowledge
 role: knowledge
 title: "lore feed's readiness line counts retracted tasks while lore ready excludes them — two unfiltered call sites in session-service"
-status: draft
+status: archived
 priority: high
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: [governance, readiness, session-service, invalidated, north-star-property-1]
 parent: PRD-001
 links:

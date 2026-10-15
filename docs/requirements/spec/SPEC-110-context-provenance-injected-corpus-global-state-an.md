@@ -6,9 +6,8 @@ title: "Context provenance: injected corpus-global state and a pasted resume tic
 status: approved
 priority: medium
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## Overview
 

@@ -3,11 +3,11 @@ id: TASK-758
 type: task
 role: plan
 title: "[Skill:test] Plan-gate verification on merged main — dual runner, verify, drift, provenance, SPEC-038 restored"
-status: draft
+status: deprecated
 priority: critical
 phase: "P3 Phase-gate verification"
 created: 2026-08-23
-updated: 2026-08-23
+updated: 2026-10-10
 tags: []
 parent: PLAN-137
 plan: PLAN-137

@@ -3,7 +3,7 @@ id: TASK-909
 type: task
 role: plan
 title: "[Skill:review] verify AC-CF-1..21 on main, full suite, assess, anchors"
-status: draft
+status: archived
 priority: high
 phase: "Phase 4: Dogfood & verify"
 created: 2026-10-07

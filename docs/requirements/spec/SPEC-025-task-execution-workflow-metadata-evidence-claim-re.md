@@ -3,12 +3,11 @@ id: SPEC-025
 type: spec
 role: spec
 title: "Task execution workflow metadata (evidence / claim / ready)"
-status: approved
+status: deprecated
 priority: high
 created: 2026-07-02
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [task, workflow, claim, evidence, ready, coordination]
-parent: PRD-001
 ---
 # SPEC-025: Task execution workflow metadata
 

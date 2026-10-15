@@ -3,12 +3,11 @@ id: SPEC-101
 type: spec
 role: spec
 title: "Dashboard Multi-Project (single-instance switcher over the machine's registered corpora) (domain overview)"
-status: approved
+status: deprecated
 priority: medium
 created: 2026-07-26
-updated: 2026-07-26
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 ## 22. Dashboard Multi-Project (single-instance switcher over the machine's registered corpora)
 

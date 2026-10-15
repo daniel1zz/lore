@@ -6,9 +6,8 @@ title: "Oracle exclusivity in a shared checkout: a mirror check that cannot repa
 status: approved
 priority: high
 created: 2026-08-11
-updated: 2026-08-17
+updated: 2026-10-10
 tags: []
-parent: PRD-001
 ---
 # Overview
 

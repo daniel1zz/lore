@@ -3,12 +3,11 @@ id: SPEC-011
 type: spec
 role: spec
 title: "HTTP API Adapter"
-status: approved
+status: deprecated
 priority: high
 created: 2026-06-08
-updated: 2026-07-14
+updated: 2026-10-10
 tags: [http, api, adapter, phase-2]
-parent: PRD-001
 links:
   - {id: SPEC-001, type: implements}
   - {id: SPEC-010, type: relates-to}
