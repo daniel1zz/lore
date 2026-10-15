@@ -76,7 +76,7 @@
  *   ERROR:      n/a beyond the shared CLI-usage mutex already covered by
  *               `setup-converge-diverged.bun.test.ts`'s own ERROR dimension
  *               for this same command surface.
- *   REGRESSION: `node scripts/embed-assets-manifest.mjs --check` still exits
+ *   REGRESSION: `bun scripts/embed-assets-manifest.mjs --check` still exits
  *               0 in THIS worktree — proves this suite's own presence
  *               doesn't itself desynchronize the embedded manifest (the
  *               paired implement task regenerates it after adding the
