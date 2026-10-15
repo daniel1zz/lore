@@ -1,6 +1,6 @@
 ---
 name: lore-test
-description: "Author or audit automated test suites (six-dimension coverage, external oracles). Use when user says 'write tests', 'add test coverage', 'regression test', 'check test quality', 'test this component', 'test this API', 'e2e test', 'integration test', 'unit test', 'frontend test', 'load test', 'security test', 'performance test', 'eval', 'test strategy', or asks about test infrastructure, coverage, flaky tests, mocking, or test architecture. NOT for test-first development methodology (use lore-tdd), NOT for runtime exploratory QA (use lore-dogfood), NOT for requirement-driven acceptance (use lore-uat)."
+description: "Author or audit automated test suites (six-dimension coverage, external oracles). Use when user says 'write tests', 'add test coverage', 'regression test', 'check test quality', 'test this component', 'test this API', 'e2e test', 'integration test', 'unit test', 'frontend test', 'load test', 'security test', 'performance test', 'eval', 'test strategy', or asks about test infrastructure, coverage, flaky tests, mocking, or test architecture. NOT for test-first development methodology (use lore-tdd), NOT for runtime exploratory QA (use lore-dogfood), NOT for requirement-driven acceptance (use lore-uat). Args: '<mode> [context]' — the FIRST token is the mode, one of: accessibility|android|e2e|eval|exploratory|frontend|performance|property-based|security|strategy."
 ---
 
 # Test - Mode: $0

@@ -1,6 +1,6 @@
 ---
 name: lore-plan
-description: "Cross-session task planning and tracking on the lore corpus. Use when: user says 'plan this', 'break this down', 'create a task tree', 'what's the plan status', 'how should I approach this project', 'resume the plan', 'add a task', '计划' / '拆解任务', multi-step work spanning sessions, or any complex task needing structured decomposition with risk tracking and phase gates. Mode: create, resume, update, replan, status, list."
+description: "Cross-session task planning and tracking on the lore corpus. Use when: user says 'plan this', 'break this down', 'create a task tree', 'what's the plan status', 'how should I approach this project', 'resume the plan', 'add a task', '计划' / '拆解任务', multi-step work spanning sessions, or any complex task needing structured decomposition with risk tracking and phase gates. Mode: create, resume, update, replan, status, list. Args: '<mode> [context]' — the FIRST token is the mode, one of: create|list|replan|resume|status|update."
 ---
 
 # Plan - Mode: $0

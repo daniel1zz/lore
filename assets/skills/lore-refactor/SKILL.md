@@ -1,6 +1,6 @@
 ---
 name: lore-refactor
-description: "Use when reorganizing existing code, extracting modules, renaming, migrating libraries/frameworks, or paying down tech debt. No new features, only structural improvement."
+description: "Use when reorganizing existing code, extracting modules, renaming, migrating libraries/frameworks, or paying down tech debt. No new features, only structural improvement. Args: '<mode> [context]' — the FIRST token is the mode, one of: architecture|code|debt|migration."
 ---
 
 # Refactor - Mode: $0

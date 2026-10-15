@@ -1,6 +1,6 @@
 ---
 name: lore-operate
-description: "Use when user needs monitoring setup, incident response, scaling decisions, maintenance operations, chaos engineering, or SLO lifecycle management."
+description: "Use when user needs monitoring setup, incident response, scaling decisions, maintenance operations, chaos engineering, or SLO lifecycle management. Args: '<mode> [context]' — the FIRST token is the mode, one of: chaos|incident|maintenance|monitor|scaling."
 ---
 
 # Operate - Mode: $0

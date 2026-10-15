@@ -1,6 +1,6 @@
 ---
 name: lore-design
-description: "Use when making architecture decisions, defining APIs, designing data models, planning module structure, or creating UI/UX specifications. Any task requiring design before implementation."
+description: "Use when making architecture decisions, defining APIs, designing data models, planning module structure, or creating UI/UX specifications. Any task requiring design before implementation. Args: '<mode> [context]' — the FIRST token is the mode, one of: api|architecture|database|module|system."
 ---
 
 # Design — Skill (Level 0, self-executing)

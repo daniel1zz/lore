@@ -1,6 +1,6 @@
 ---
 name: lore-deploy
-description: "Use when deploying, configuring CI/CD pipelines, managing infrastructure, creating releases, or setting up monitoring/observability."
+description: "Use when deploying, configuring CI/CD pipelines, managing infrastructure, creating releases, or setting up monitoring/observability. Args: '<mode> [context]' — the FIRST token is the mode, one of: ci|container|infra|migration|observability|release."
 ---
 
 # Deploy - Mode: $0

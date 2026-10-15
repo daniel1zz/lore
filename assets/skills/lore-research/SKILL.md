@@ -1,6 +1,6 @@
 ---
 name: lore-research
-description: "Use when evaluating libraries, comparing SDKs, selecting tech stacks, benchmarking approaches, or exploring unfamiliar domains before implementation."
+description: "Use when evaluating libraries, comparing SDKs, selecting tech stacks, benchmarking approaches, or exploring unfamiliar domains before implementation. Args: '<mode> [context]' — the FIRST token is the mode, one of: benchmark|exploration|pattern|sdk."
 ---
 
 # Research — Skill

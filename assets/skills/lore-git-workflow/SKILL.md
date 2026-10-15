@@ -1,6 +1,6 @@
 ---
 name: lore-git-workflow
-description: "Use when user says 'commit', 'create PR', 'create branch', 'resolve conflict', 'merge', 'rebase', 'git workflow', or when needing structured git operations with quality gates."
+description: "Use when user says 'commit', 'create PR', 'create branch', 'resolve conflict', 'merge', 'rebase', 'git workflow', or when needing structured git operations with quality gates. Args: '<mode> [context]' — the FIRST token is the mode, one of: branch|commit|conflict|pr."
 ---
 
 # Git Workflow - Mode: $0

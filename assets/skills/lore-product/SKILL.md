@@ -1,6 +1,6 @@
 ---
 name: lore-product
-description: "Product work from idea to PRD across 9 modes: ideation, discovery, opportunity (derive the feature set via an Opportunity Solution Tree), validate (run four-risk experiments and grade the evidence), decompose (expand a validated solution into a user story map), prd, ux-research, roadmap, tech-assessment. Use when user says 'write a PRD', 'product requirements', 'roadmap', 'user research', 'ideation', 'feature discovery', 'tech assessment', 'what should we build', 'is this worth building', 'validate this idea', '写需求', '产品规划', '该做什么功能', '验证一下这个功能', or when creating product-level documentation before design/implementation."
+description: "Product work from idea to PRD across 9 modes: ideation, discovery, opportunity (derive the feature set via an Opportunity Solution Tree), validate (run four-risk experiments and grade the evidence), decompose (expand a validated solution into a user story map), prd, ux-research, roadmap, tech-assessment. Use when user says 'write a PRD', 'product requirements', 'roadmap', 'user research', 'ideation', 'feature discovery', 'tech assessment', 'what should we build', 'is this worth building', 'validate this idea', '写需求', '产品规划', '该做什么功能', '验证一下这个功能', or when creating product-level documentation before design/implementation. Args: '<mode> [context]' — the FIRST token is the mode, one of: decompose|discovery|ideation|opportunity|prd|roadmap|tech-assessment|ux-research|validate."
 ---
 
 # Product - Mode: $0

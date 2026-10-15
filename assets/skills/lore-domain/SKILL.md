@@ -1,6 +1,6 @@
 ---
 name: lore-domain
-description: "Use when user says 'analyze domain', 'document business rules', 'domain model', 'glossary', 'business workflow', '领域分析', '业务规则', or when needing to understand/create/update domain knowledge before implementation."
+description: "Use when user says 'analyze domain', 'document business rules', 'domain model', 'glossary', 'business workflow', '领域分析', '业务规则', or when needing to understand/create/update domain knowledge before implementation. Args: '<mode> [context]' — the FIRST token is the mode, one of: activate|analyze|create|quick-lens|quick-scenario|update."
 ---
 
 # Domain - Mode: $0
