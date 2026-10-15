@@ -130,6 +130,30 @@ relocates the bloat this contract's Eviction Rule already names as the
 failure mode — the content still loads, still costs, and now nothing here
 reports it.
 
+## Content Tiers — what every session pays for
+
+Every piece of guidance lives on exactly one tier. The root CLAUDE.md is
+tier 1 and nothing else: every session loads it whole, whatever files it
+touches, so every byte in it is paid by every session.
+
+| Tier | Loaded | Holds | Home |
+|---|---|---|---|
+| 1 | every session, always | what to do and what never to do — no *why* | root CLAUDE.md, unscoped rules |
+| 2 | on demand, when an agent goes deeper | design intent, the *why*, mechanism walkthroughs, rejected alternatives, module-specific facts | module CLAUDE.md (path-triggered), `paths:`-scoped rules, skills, corpus ADR / spec / knowledge |
+| 3 | only when investigating | full specs, incident histories, measurements | corpus, the code itself |
+
+A line belongs on tier 1 only when ALL three hold:
+
+1. Almost every session needs it, whatever files it touches.
+2. Not knowing it causes damage that no gate, hook or check refuses.
+3. It cannot be recovered from the code or the corpus in seconds.
+
+Fail any one and the content moves down a tier; tier 1 keeps at most one
+pointer line naming where it went (an index entry, see the Index-Entry
+Contract). A tier-1 line states the rule, never the reasoning: the reasoning
+is tier 2 and is read by the agent that needs to change the rule, not by
+every agent that must obey it.
+
 ## What Goes In vs What Stays Out
 
 | Category | Example | Home |
@@ -139,6 +163,9 @@ reports it.
 | Invariants | "the store is the source of truth" | IN — CLAUDE.md |
 | One-line standing lessons | a terse takeaway, no narrative | IN — CLAUDE.md |
 | Index pointers | one line + a link to the real detail | IN — CLAUDE.md |
+| Design intent and rationale | why a decision was made, what it trades off | OUT — tier 2 (corpus ADR, module CLAUDE.md); one pointer line in |
+| Mechanism walkthroughs | how a subsystem works internally | OUT — tier 2 (module CLAUDE.md or corpus reference) |
+| Module-local facts | a store's escaping rule, one service's contract | OUT — that module's own CLAUDE.md |
 | Events | "fixed on a given date", incident timestamps | OUT — corpus (knowledge / retro) |
 | Status narratives | "phase N is underway", sprint state | OUT — corpus (plan / task) |
 | Full incident histories | postmortems, root-cause writeups | OUT — corpus (knowledge / retro) |
@@ -160,8 +187,11 @@ as a failure):
    it.
 2. **Commands** — the verbatim build / test / lint / dev invocations. Nothing
    an AI has to guess at.
-3. **Architecture** — design intent and the *why* behind key decisions, not a
-   file listing and not implementation detail.
+3. **Architecture** — the repo-wide invariants every change must keep, one
+   line each, stated as rules (tier 1). The design intent and the *why*
+   behind them are tier 2: a pointer line to the ADR or module file, never
+   the reasoning inline. Not a file listing, not implementation detail, not
+   a fact only one module needs.
 4. **Module Index** — see the index-entry contract below.
 5. **Finding Live Project State** — how to query the project's own dynamic
    state (its own CLI/API if it has one, or the external system that tracks
@@ -201,7 +231,10 @@ A per-module CLAUDE.md (one directory below root, not recursive) covers:
   module files instead of duplicating their content.
 
 This mirrors the root taxonomy's shape: a short, verifiable set of headings,
-not free-form prose.
+not free-form prose. The Content Tiers rule applies one level down: a module
+file is loaded whole whenever its directory is touched, so it holds what
+every edit there needs; the *why* behind a module invariant goes to the
+corpus with a pointer line.
 
 ## Index-Entry Contract
 
