@@ -1,5 +1,5 @@
 /**
- * MCP tool registrations — 30 lore_* tools (16 original + 4 SPEC-025 task-workflow tools
+ * MCP tool registrations — the lore_* tools listed in tool-names.ts (history: 16 original + 4 SPEC-025 task-workflow tools
  * + 1 SPEC-026 assess tool + 1 SPEC-035 audit tool + 1 SPEC-034 review tool
  * + 1 SPEC-039 verify tool + 1 IoC vertical-slice tech-spec §4.1/§11 P4 feed tool
  * + 2 SPEC-041 session tools: lore_bootstrap, lore_handoff; lore_feed additionally
