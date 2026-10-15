@@ -485,7 +485,7 @@ export interface ProjectScaffoldReport {
 // ─── Asset/target name tables ───────────────────────────────────────────────
 
 /** The `assets/project/*` hook filenames copied verbatim into `<repo>/hooks/`. */
-const HOOK_ASSET_NAMES = [
+export const HOOK_ASSET_NAMES = [
   "g1-spec-create.sh",
   "g2-spec-promote.sh",
   "g3-plan-promote.sh",
@@ -1204,7 +1204,7 @@ function finalizeClaudeMdRow(seam: ManifestSeamResult): SimpleStepResult {
 }
 
 /** Where the lore-baseline skill files are installed: `<repo>/.claude/<asset path>`. */
-const SKILL_TARGET_PREFIX = ".claude/";
+export const SKILL_TARGET_PREFIX = ".claude/";
 
 /**
  * BL-8 — turns every shipped `skills/lore-baseline/**` file into a ledger candidate at `.claude/<path>` (kind `skill`).
