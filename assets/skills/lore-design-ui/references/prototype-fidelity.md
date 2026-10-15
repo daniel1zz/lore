@@ -82,7 +82,7 @@ Without these in the dispatch bundle, the subagent has no choice but to invent â
 | `/plan` (mode-create) | Generates UI tasks with line-range refs, verbatim-copy rule, parity-check terminal task. `lore verify <plan>` BLOCKS on missing items (see `mode-create.md` UI-task reference binding). |
 | `/writing-plans` (superpowers) | Same discipline as `/plan` when invoked for UI work. |
 | `lore-implementer` (subagent) | READS prototype + ui-standards SSOT, COPIES canonical markup, runs all 4 oracles in AC. |
-| `lore-reviewer` (subagent) | VERIFIES verbatim-copy via grep, runs visual parity diff, BLOCKs on drift. |
+| `lore-reader` (subagent) | VERIFIES verbatim-copy via grep, runs visual parity diff, BLOCKs on drift. |
 
 ## Trigger checkpoints
 

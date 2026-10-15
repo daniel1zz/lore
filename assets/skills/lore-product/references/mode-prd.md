@@ -94,7 +94,7 @@ These 5 lenses are the PRD lens of the ONE batched-governance S3 bundle review �
 Launch **5 parallel subagents**, each reviewing the draft PRD from a different stakeholder lens.
 Use `Agent` tool — send ALL 5 in a single message for true parallel execution.
 
-⛔ **Always pass an explicit `subagent_type`** — never rely on the `general-purpose` default (some environments hard-block it via a pre-agent gate, no bypass). Pick a READ-ONLY, review-natured specialized type your environment allows (e.g. `lore-reviewer` in lore-governed projects); the Identity Prompt below explicitly overrides that agent's default framing to the stakeholder lens, so any reviewer-shaped type works.
+⛔ **Always pass an explicit `subagent_type`** — never rely on the `general-purpose` default (some environments hard-block it via a pre-agent gate, no bypass). Pick a READ-ONLY, review-natured specialized type your environment allows (e.g. `lore-reader` in lore-governed projects); the Identity Prompt below explicitly overrides that agent's default framing to the stakeholder lens, so any reviewer-shaped type works.
 
 ### Stakeholder Matrix
 

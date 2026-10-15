@@ -47,7 +47,7 @@ There are two execution modes depending on your environment. Pick the one that a
 
 ### Mode A: Parallel subagents (preferred)
 
-If you can dispatch subagents (you are the orchestrating agent with `Agent()` tool access), launch specialists in parallel. Use `lore-reviewer` subagent type (read-only code review). Each gets the same file manifest but hunts for their specific category.
+If you can dispatch subagents (you are the orchestrating agent with `Agent()` tool access), launch specialists in parallel. Use `lore-reader` subagent type (read-only code review). Each gets the same file manifest but hunts for their specific category.
 
 Launch **all selected agents in a single turn** so they run concurrently.
 

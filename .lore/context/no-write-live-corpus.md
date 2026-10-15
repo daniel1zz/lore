@@ -1,7 +1,7 @@
 ---
 id: project-no-write-live-corpus
 title: "Never write the repo's own .lore/ from tests or smoke runs"
-audience: ["subagent:lore-implementer", "subagent:tester", "subagent:lore-reviewer"]
+audience: ["subagent:lore-implementer", "subagent:lore-reader"]
 mode: static
 ---
 ## Never write the repo's own `.lore/` corpus

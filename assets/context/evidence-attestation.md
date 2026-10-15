@@ -1,7 +1,7 @@
 ---
 id: evidence-attestation
 title: "Evidence attestation: --capture versus verify"
-audience: [main, "subagent:lore-implementer", "subagent:tester"]
+audience: [main, "subagent:lore-implementer"]
 mode: static
 ---
 ## Evidence attestation

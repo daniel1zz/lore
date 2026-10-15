@@ -124,7 +124,7 @@ AC:
 ## Enforcement
 
 - Spec-level structured ACs: `lore ac add <spec> <AC-ID> --statement "..." --mode script|ai|human` — script mode binds an oracle (`--oracle test --command "..."`), executed as attested evidence by `lore verify <plan>`; the `spec-promote` gate requires ≥1 AC before a spec can be approved
-- lore-reviewer audit (mode-create step 8.3, dimension `ac_oracle_binding`): scan AC text for banned verbs → flag; every user-facing task's content MUST contain an `Integration:` block — missing = NEEDS_WORK verdict
+- lore-reader audit (mode-create step 8.3, dimension `ac_oracle_binding`): scan AC text for banned verbs → flag; every user-facing task's content MUST contain an `Integration:` block — missing = NEEDS_WORK verdict
 - AC reviewer at phase gate: explicit check "is feature reachable from app entry point" per task
 - Dogfood gate: Integration AC supplies the dogfood test script — gate failure = re-open Integration AC, not "SKIP because Tauri"
 
@@ -132,5 +132,5 @@ AC:
 
 - 写 / review / 修改 AC 文本
 - `lore ac add` / `lore create task`（写 task AC 内容时）
-- Phase Gate AC review / lore-reviewer 5-dimension audit
+- Phase Gate AC review / lore-reader 5-dimension audit
 - 解释 implementer 为什么"按 AC 做完了"但功能不通

@@ -26,7 +26,7 @@ The ONLY governance flow for `lore-product` (prd), `lore-design`, `lore-plan` (c
 ## S3 — One bundle review
 
 1. ONE review round over the WHOLE bundle — every new or changed PRD/spec/ADR/plan/task at once, plus the approved specs it claims to extend. First dimension, always: cross-document contradiction.
-2. Several lenses are allowed (PRD stakeholder lenses, the design mode's quality gates, the plan's 5-dimension `lore-reviewer` audit), but all are dispatched in ONE message and every one of them reads the same full bundle — never one reviewer per artifact, never sequentially.
+2. Several lenses are allowed (PRD stakeholder lenses, the design mode's quality gates, the plan's 5-dimension `lore-reader` audit), but all are dispatched in ONE message and every one of them reads the same full bundle — never one reviewer per artifact, never sequentially.
 3. Apply every finding in ONE edit pass. At most one re-review, limited to what changed. Two rounds maximum; anything still open goes to S4 as a named open item, not into a third round.
 4. Then the binary's per-version judgment, exactly once per judgment-required doc (`workflow.review.judgment_required_types`, default spec + adr), on the FINAL version: `lore review <doc>` for each, issued in parallel. A reject/escalate → fix that doc → re-run `lore review` for that doc only. Plans and tasks need no judgment.
 

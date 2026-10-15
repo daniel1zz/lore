@@ -338,7 +338,7 @@ grep -n "fetch.*mock.*\(\)" <test-file>                 # empty fetch mock
 
 2. **Dispatch test subagent**:
 ```
-Agent(subagent_type="lore-implementer", prompt=`
+Agent(subagent_type="lore-implementer", isolation="worktree", prompt=`
   ## Task: Write tests for <module>
 
   ### Spec / Acceptance Criteria
@@ -639,7 +639,7 @@ describe('contract: /api/users/:id response', () => {
 9. **Real E2E for user-facing features**: agent-browser E2E against real dev server, not just mock tests.
 10. **Different inputs, different outputs**: Every happy-path function must be tested with ≥2 input sets producing different outputs. This defeats hardcoded-return implementations.
 
-## ⛔ AI Testing Anti-Patterns (Tester Agent Must Avoid)
+## ⛔ AI Testing Anti-Patterns (The lore-implementer Writing Tests Must Avoid)
 
 | Anti-Pattern | What It Looks Like | Why It's Dangerous | Fix |
 |---|---|---|---|

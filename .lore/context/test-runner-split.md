@@ -1,7 +1,7 @@
 ---
 id: project-test-runner-split
 title: "Test runner split: bun test vs vitest"
-audience: ["subagent:lore-implementer", "subagent:tester", "subagent:lore-reviewer"]
+audience: ["subagent:lore-implementer", "subagent:lore-reader"]
 mode: static
 ---
 ## Test runner split (this repo)

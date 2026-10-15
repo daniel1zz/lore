@@ -1,7 +1,7 @@
 ---
 id: project-scoped-oracles-in-worktrees
 title: "Scoped oracles in worktrees, full suite only on main"
-audience: [main, "subagent:lore-implementer", "subagent:tester"]
+audience: [main, "subagent:lore-implementer"]
 mode: static
 ---
 ## Scoped oracles in worktrees

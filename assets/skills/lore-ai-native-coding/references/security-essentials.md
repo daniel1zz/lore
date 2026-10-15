@@ -16,4 +16,4 @@ if (!apiKey) {
 
 ## Agent Support
 
-- Use `Skill(review, args="security")` for inline security audits, or dispatch **lore-reviewer** agent for isolated review in long sessions
+- Use `Skill(review, args="security")` for inline security audits, or dispatch **lore-reader** agent for isolated review in long sessions
