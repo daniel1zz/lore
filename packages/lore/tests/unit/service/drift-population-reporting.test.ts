@@ -34,7 +34,7 @@
 import { RecordLockService } from "../../../src/service/record-lock-service.js";
 import { GateEnforcer } from "../../../src/service/gate-enforcer.js";
 import { readFileSync, readdirSync } from "fs";
-import { join, relative, sep } from "path";
+import { basename, join, relative, sep } from "path";
 import { describe, expect, it } from "vitest";
 import type { CreateDocInput } from "@lore/core";
 import { InMemoryStore } from "../../../src/store/in-memory-store.js";
@@ -363,7 +363,8 @@ function collectTextFiles(dir: string, into: string[] = []): string[] {
       continue;
     }
     if (!entry.isFile()) continue;
-    if (SCANNED_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) into.push(join(dir, entry.name));
+    // reason: hooks/ now holds only the extensionless `pre-push` script; scan it too, else the hooks/ clause is vacuous.
+    if (SCANNED_EXTENSIONS.some((ext) => entry.name.endsWith(ext)) || (basename(dir) === "hooks" && !entry.name.includes("."))) into.push(join(dir, entry.name));
   }
   return into;
 }
