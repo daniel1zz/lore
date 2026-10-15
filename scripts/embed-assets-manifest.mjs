@@ -34,10 +34,18 @@
  *   - `sha256` is computed over each file's RAW BYTES (not utf8-decoded
  *     text) — `assets/` contains a mix of text and executable-bit scripts;
  *     hashing bytes uniformly avoids an encoding-dependent digest.
+ *   - Kinds skill/agent/hook are hashed over their EXPANDED bytes (every
+ *     `{{lore:<name>}}` replaced at outlet `asset:install`, via
+ *     `expandInstalledAsset` from `real-asset-source.ts`, the same function
+ *     `RealAssetSource.load()` uses), so the embedded sha256 equals the sha256
+ *     of the installed file (BR-1097, spec-lore-owned-agent-context-is-generated-
+ *     from-templates-and D6). An installed-kind file naming an unknown / invocation
+ *     variable, and ANY `{{lore:` in a governance or project asset, make the
+ *     build fail (exit 1, message names file:line and variable). Context
+ *     assets are hashed raw.
  *   - Ownership (`AssetOwnership`) is a LOCAL union in the generated file,
- *     not imported from `@lore/core` — SPEC-076 T2 (parallel task) is
- *     extending `@lore/core`'s schema with its own `AssetOwnership` type;
- *     this generator intentionally does not couple to that in-flight work.
+ *     not imported from `@lore/core`: the generated file stays dependency-free.
+ *     (This script itself DOES import the pure expander + registry, see above.)
  *     `deriveOwnership` maps kind -> "managed" by default, with explicit
  *     per-path overrides for the `project/` scaffold templates that are
  *     merged (`CLAUDE.md.template`, `gitignore.template`) or user-owned
@@ -58,6 +66,10 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// The SAME expander + registry the installer uses (BR-1097): the manifest hashes the bytes
+// `RealAssetSource.load()` installs, so both call `expandInstalledAsset` (one SSOT).
+import { EXPANDED_ASSET_KINDS, expandInstalledAsset } from "../packages/lore/src/adapters/real-asset-source.ts";
 
 /** Thrown for domain-specific failures (missing dir, unparsable version, corrupt check target). */
 export class AssetManifestError extends Error {
@@ -171,6 +183,40 @@ export function computeTreeDigest(entries) {
   return sha256Hex(Buffer.from(joined, "utf8"));
 }
 
+// ─── Template expansion ────────────────────────────────────────────────────────
+
+/** Kinds that must not carry any `{{lore:` token (copied verbatim, never expanded). */
+const LITERAL_ONLY_KINDS = new Set(["governance", "project"]);
+
+/**
+ * Returns the bytes the manifest hashes for one asset file.
+ * skill/agent/hook: the utf8 text expanded by `expandInstalledAsset` (what the installer writes).
+ * governance/project: raw bytes, refused when they contain `{{lore:`.
+ * context: raw bytes.
+ * @throws {AssetManifestError} naming file:line and variable on any refusal.
+ */
+function installedBytes(kind, path, bytes) {
+  if (EXPANDED_ASSET_KINDS.has(kind)) {
+    const expanded = expandInstalledAsset(path, bytes.toString("utf8"));
+    if (!expanded.ok) {
+      throw new AssetManifestError(`buildManifest: ${expanded.error.message}`);
+    }
+    return Buffer.from(expanded.value, "utf8");
+  }
+  if (LITERAL_ONLY_KINDS.has(kind)) {
+    const text = bytes.toString("utf8");
+    const at = text.indexOf("{{lore:");
+    if (at !== -1) {
+      const line = text.slice(0, at).split("\n").length;
+      const token = /^\{\{lore:[^}\s]*\}?\}?/.exec(text.slice(at))?.[0] ?? "{{lore:";
+      throw new AssetManifestError(
+        `buildManifest: ${path}:${line}: '${token}' is not allowed in a ${kind} asset (only skills, agents and hooks are expanded at install)`,
+      );
+    }
+  }
+  return bytes;
+}
+
 // ─── Binary version resolution ─────────────────────────────────────────────────
 
 /** Reads `<pkgJsonPath>`'s `version` field; returns `undefined` if the file or a non-empty string version is absent. */
@@ -218,7 +264,7 @@ export function buildManifest(assetsRoot, repoRoot) {
     }
     for (const relFile of walkFilesRelative(dirPath)) {
       const path = `${topDir}/${relFile}`;
-      const bytes = readFileSync(join(dirPath, relFile));
+      const bytes = installedBytes(kind, path, readFileSync(join(dirPath, relFile)));
       entries.push({ path, kind, ownership: deriveOwnership(kind, path), sha256: sha256Hex(bytes) });
     }
   }
@@ -307,7 +353,8 @@ export function extractEmbeddedTreeDigest(generatedFileSource) {
 /**
  * Runs the CLI: default mode regenerates+writes `GENERATED_FILE_PATH`;
  * `--check` recomputes and compares against the on-disk file's embedded
- * digest without writing (exit 0 match, exit 3 stale/missing/corrupt).
+ * digest without writing (exit 0 match, exit 3 stale/missing/corrupt). Either
+ * mode exits 1 when an asset's `{{lore:` cannot be expanded or is forbidden.
  * Calls `process.exit` — never call this from a test or from `scripts/build.ts`
  * (both should call `buildManifest`/`renderGeneratedFile` directly instead).
  */
@@ -321,7 +368,15 @@ function main() {
     return;
   }
 
-  const manifest = buildManifest(ASSETS_ROOT, REPO_ROOT);
+  let manifest;
+  try {
+    manifest = buildManifest(ASSETS_ROOT, REPO_ROOT);
+  } catch (caught) {
+    if (!(caught instanceof AssetManifestError)) throw caught;
+    process.stderr.write(`embed-assets-manifest: ${caught.message}\n`);
+    process.exit(1);
+    return;
+  }
 
   if (checkMode) {
     if (!existsSync(GENERATED_FILE_PATH)) {

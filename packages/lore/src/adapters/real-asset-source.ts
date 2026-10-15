@@ -63,6 +63,10 @@
  *     `assetFileSchema`'s non-empty constraint — `SetupService.resolvePayload`
  *     ALWAYS recomputes it over the FINAL on-disk bytes (its own invariant
  *     I5) and never trusts this value.
+ *   - Files of kind skill/agent/hook are returned EXPANDED: every
+ *     `{{lore:<name>}}` is replaced at outlet `asset:install` (BR-1097) via
+ *     {@link expandInstalledAsset}; an expansion refusal is returned as the
+ *     `Err` (never raw text). governance is returned verbatim.
  *   - `load()` never throws — an unreadable `assetsRoot`/subdirectory/file
  *     surfaces as `err(STORE_ERROR)` naming the failing path, never a
  *     partial or silently-empty payload.
@@ -92,7 +96,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { err, ok, buildHookSettingsEntries } from "@lore/core";
+import { err, ok, buildHookSettingsEntries, expandTemplate } from "@lore/core";
 import type { Result, LoreError } from "@lore/core";
 import type { AssetFile, AssetOwnership, AssetPayload, SetupEntryKind } from "@lore/core";
 
@@ -194,6 +198,7 @@ export function isRetiredFromInstall(path: string): boolean {
 }
 
 import type { AssetSource } from "../service/setup-service.js";
+import { LORE_CONTEXT_VARIABLES } from "../service/context-variables-registry.js";
 
 /**
  * Top-level `assets/` subdirectory name → the `SetupEntryKind` its files are tagged with.
@@ -206,6 +211,31 @@ const TOP_LEVEL_KIND_MAP: Record<string, SetupEntryKind> = {
   hooks: "hook",
   governance: "governance",
 };
+
+/**
+ * Asset kinds whose text is expanded at install time (BR-1097): the files lore
+ * copies into `<claude-dir>/`. `governance` is walked here too but is plain text
+ * (no `{{lore:}}` allowed, enforced by `scripts/embed-assets-manifest.mjs`).
+ */
+export const EXPANDED_ASSET_KINDS: ReadonlySet<string> = new Set(["skill", "agent", "hook"]);
+
+/**
+ * SSOT for the installed bytes of one skill/agent/hook file: expands every
+ * `{{lore:<name>}}` at outlet `asset:install` against {@link LORE_CONTEXT_VARIABLES}.
+ * Both `RealAssetSource.load()` and the manifest script call this, so the embedded
+ * sha256 and the installed bytes cannot drift apart (BR-1097).
+ *
+ * @param assetRelPath - path relative to `assets/` (named in refusals).
+ * @param content - the source text.
+ * @returns the expanded text, or VALIDATION_ERROR naming file:line and the variable.
+ */
+export function expandInstalledAsset(assetRelPath: string, content: string): Result<string, LoreError> {
+  return expandTemplate(
+    content,
+    { outlet: "asset:install", path: assetRelPath, lineOffset: 0, invocation: {} },
+    LORE_CONTEXT_VARIABLES,
+  );
+}
 
 /**
  * Ownership zone for every file walked out of the four `TOP_LEVEL_KIND_MAP`
@@ -321,6 +351,12 @@ export class RealAssetSource implements AssetSource {
             message: `RealAssetSource: failed to read file "${fullPath}": ${describeCaught(cause)}`,
             ...(cause instanceof Error ? { cause } : {}),
           });
+        }
+
+        if (EXPANDED_ASSET_KINDS.has(kind)) {
+          const expanded = expandInstalledAsset(assetRelPath, content);
+          if (!expanded.ok) return expanded;
+          content = expanded.value;
         }
 
         const isExecutable = (mode & 0o100) !== 0;
