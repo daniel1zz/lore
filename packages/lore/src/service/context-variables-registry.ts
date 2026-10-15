@@ -20,6 +20,8 @@ export const LORE_CONTEXT_VARIABLES: readonly ContextVariable[] = [
     outlets: ALL_OUTLETS,
     describe: "Persisted evidence output_tail ceiling, in characters.",
     value: () => String(CAPTURE_TAIL_CHARS),
+    // AC-CV-6: spellings that restate the ceiling by hand in lore-owned prose/code.
+    literalPatterns: [/\b4000[- ]char/, /\bmax\(4000\)/, /\btailChars\([^)]*,\s*4000\)/, /=\s*4000;/],
   },
   {
     name: "implementer_agent",

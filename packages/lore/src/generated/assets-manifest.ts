@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "7b12721cd1cf65bfe48e6bf697cd19d8f80c260291fe20815d7af4af732e11e6",
+  tree_digest: "74767b7a7f29cf5ad77150a931979781056f2a61e47a31b885e018ce694cee53",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "5229d158b6ce792f4bb0083b44995946d54cdc899983bc88a4b945769282ed0f" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -57,7 +57,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "context/corpus-workflow-3-execute.md", kind: "context", ownership: "managed", sha256: "c60b1f59dfc24992624dd20dd1f263caa4d24e3f958f00c26982f32bed77a79d" },
   { path: "context/corpus-workflow-4-close.md", kind: "context", ownership: "managed", sha256: "6df069a0c39ec5417da7cd9dfea509c423ee8ac17091d9999752ca5189b742ef" },
   { path: "context/dispatch-bundle.md", kind: "context", ownership: "managed", sha256: "fad2df8beb68f36fd591290ec8d91bbec836eeaf149708d8b6ec263b869cac39" },
-  { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "55fbf282dabbe7be865af2f6003db2e31eec0bf73fa6378684e8484523ae48fc" },
+  { path: "context/evidence-attestation.md", kind: "context", ownership: "managed", sha256: "115982a460e6d15f151e42a0a045c27dc64c249afb322704cd225de290c3828b" },
   { path: "context/worktree-dispatch.md", kind: "context", ownership: "managed", sha256: "33bf861aa543534d741c9606f11b74df9ef805005f82e8a36a3ac6b167f5d40f" },
   { path: "governance/claude-md-contract.md", kind: "governance", ownership: "managed", sha256: "ed17e74d667ae2725777713e2b6ee0b3ed3e1df848718ee0a6284bf8bc523bbb" },
   { path: "governance/seat-briefing.md", kind: "governance", ownership: "managed", sha256: "62d33fe1d7f5124e74247fb0491ef65600e11ff8179ba77efc29bbb130ad1894" },

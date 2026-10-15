@@ -203,7 +203,7 @@ import { runWithAuditSurface } from "../../store/audit-surface.js";
 import { McpCallScope, actorSourceOfName, requireCallIdentity } from "./call-scope.js";
 import type { LoreError, LoreConfig, CorpusProvenance } from "@lore/core";
 import type { LinkType } from "@lore/core";
-import { renderAssessmentContent } from "@lore/core";
+import { renderAssessmentContent, CAPTURE_TAIL_CHARS } from "@lore/core";
 import type { NewReviewJudgment, ReviewJudgment, Result, TreeBlueprint } from "@lore/core";
 import type { SetRulePatch } from "../../service/rule-service.js";
 import { ORACLE_KINDS, runDeterministicChecks, resolveCaptureTimeoutMs, resolveForeignCorpusWriteGateEnabled } from "@lore/core";
@@ -693,7 +693,7 @@ export const LoreEvidenceAddSchema = z.object({
   oracle: EVIDENCE_ORACLE_ENUM,
   command: z.string().min(1),
   result: EVIDENCE_RESULT_ENUM,
-  output_tail: z.string().max(4000).optional(),
+  output_tail: z.string().max(CAPTURE_TAIL_CHARS).optional(),
   harness_run: HARNESS_RUN_FIELD,
   ac_ref: z.string().optional(),
   checklist_ref: z.string().optional(),

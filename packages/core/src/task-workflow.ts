@@ -68,6 +68,7 @@
 
 import { z } from "zod";
 import { ok, err } from "./errors.js";
+import { CAPTURE_TAIL_CHARS } from "./context-variables.js";
 import type { Result, LoreError } from "./errors.js";
 import type { DocId, DocRecord, DocStatus, DocSummary, LinkRecord } from "./types.js";
 import type { CompletenessVerdict } from "./attestation-completeness.js";
@@ -391,7 +392,7 @@ export const ARMING_REV = 14992;
  * Append-only — entries are never edited or removed, only added (up to the 50-entry cap
  * enforced by taskExtraSchema in schemas.ts).
  *
- * @invariant output_tail is capped at 4000 chars — bounds document growth (SPEC-025 §5 risk table).
+ * @invariant output_tail is capped at CAPTURE_TAIL_CHARS — bounds document growth (SPEC-025 §5 risk table).
  * @invariant recorded_at is an ISO 8601 string set by the caller's time seam (D10), never
  *   generated inside this schema.
  * @invariant ac_ref is unconstrained format here (a free string) — validating that it
@@ -534,7 +535,7 @@ export const evidenceEntrySchema = z.object({
   oracle: z.enum(ORACLE_KINDS),
   command: z.string().min(1),
   result: z.enum(EVIDENCE_RESULTS),
-  output_tail: z.string().max(4000).optional(),
+  output_tail: z.string().max(CAPTURE_TAIL_CHARS).optional(),
   recorded_at: z.string(),
   recorded_by: z.string().min(1),
   /** Optional pointer to a declared acceptance criterion id (SPEC-038 §4). */

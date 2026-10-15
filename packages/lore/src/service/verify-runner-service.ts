@@ -185,7 +185,7 @@ import { existsSync, readdirSync, statSync, mkdtempSync, readFileSync, writeFile
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { err, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
+import { CAPTURE_TAIL_CHARS, err, ok, RUNNER_UNATTESTED_CAPTURE_SOURCE } from "@lore/core";
 import type {
   Result,
   LoreError,
@@ -451,12 +451,12 @@ export interface VerifyPlanResult {
 // JSDoc for why they are deliberately NOT mockable.
 
 /**
- * Cap for the falsifier run's recorded `output_tail` — same 4000-char budget
+ * Cap for the falsifier run's recorded `output_tail` — same `CAPTURE_TAIL_CHARS` budget
  * `verify-executor.ts`'s `OUTPUT_TAIL_MAX_CHARS` uses. Kept as its OWN local
  * constant here rather than imported: that one lives in the bun-only
  * executor module this class must never import (class-level Invariants).
  */
-const FALSIFIER_OUTPUT_TAIL_MAX_CHARS = 4000;
+const FALSIFIER_OUTPUT_TAIL_MAX_CHARS = CAPTURE_TAIL_CHARS;
 
 /**
  * A scratch git worktree created by {@link createFalsifierScratchWorktree} —

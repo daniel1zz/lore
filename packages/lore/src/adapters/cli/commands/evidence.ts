@@ -10,7 +10,7 @@
  * add-cannot-set-capture-source-and-has-no so `lore_evidence_add` over MCP can
  * reach the same mechanism; `shell: true`, this process's own `process.cwd()`
  * passed EXPLICITLY as the spawn cwd, and the capture window described below) and
- * uses its OWN captured stdout+stderr (tail-truncated to 4000 chars, same as
+ * uses its OWN captured stdout+stderr (tail-truncated to `CAPTURE_TAIL_CHARS` chars, same as
  * `--output-tail-file`) as `output_tail` — the agent never types or redirects
  * anything; the tail IS the runner's real output. Cross-checks the spawn's actual
  * exit code against the declared `--result` (`pass` requires exit 0; `fail`/
@@ -103,8 +103,8 @@
  * Actor identity: the invoking run, via utils.ts::resolveActor — this command takes no `--by`.
  *
  * --output-tail and --output-tail-file are mutually exclusive; when
- * --output-tail-file is given, only the last 4000 chars of the file are kept
- * (evidenceEntrySchema caps output_tail at 4000 chars). Intended use is
+ * --output-tail-file is given, only the last `CAPTURE_TAIL_CHARS` chars of the file are kept
+ * (evidenceEntrySchema caps output_tail at `CAPTURE_TAIL_CHARS`). Intended use is
  * recording *final* oracle runs (e.g. `bun run typecheck` exit output), not
  * per-keystroke CI logs — keep the file small.
  *
@@ -288,6 +288,7 @@ import { existsSync, readFileSync } from "fs";
 import { dirname } from "path";
 import { defineCommand } from "citty";
 import {
+  CAPTURE_TAIL_CHARS,
   ORACLE_KINDS,
   resolveCaptureTimeoutMs,
   tailChars,
@@ -340,11 +341,11 @@ export default defineCommand({
     },
     "output-tail": {
       type: "string",
-      description: "Inline output excerpt (≤4000 chars; mutually exclusive with --output-tail-file)",
+      description: `Inline output excerpt (≤${CAPTURE_TAIL_CHARS} chars; mutually exclusive with --output-tail-file)`,
     },
     "output-tail-file": {
       type: "string",
-      description: "Path to a file whose last 4000 chars are recorded as output_tail",
+      description: `Path to a file whose last ${CAPTURE_TAIL_CHARS} chars are recorded as output_tail`,
     },
     capture: {
       type: "boolean",
@@ -509,10 +510,10 @@ export default defineCommand({
         return;
       }
     } else if (typeof args["output-tail"] === "string") {
-      outputTail = tailChars(args["output-tail"], 4000);
+      outputTail = tailChars(args["output-tail"], CAPTURE_TAIL_CHARS);
     } else if (typeof args["output-tail-file"] === "string") {
       try {
-        outputTail = tailChars(readFileSync(args["output-tail-file"], "utf8"), 4000);
+        outputTail = tailChars(readFileSync(args["output-tail-file"], "utf8"), CAPTURE_TAIL_CHARS);
       } catch (e) {
         const message = e instanceof Error ? e.message : "unknown error";
         process.stderr.write(`Error: could not read --output-tail-file: ${message}\n`);
