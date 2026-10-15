@@ -272,7 +272,8 @@ describe("init-context skill retirement — NEGATIVE", () => {
 
 describe("init-context skill retirement — REGRESSION", () => {
   it("node scripts/embed-assets-manifest.mjs --check still exits 0 in this worktree (this suite never edits assets/, so the embedded manifest stays fresh)", () => {
-    const proc = Bun.spawnSync(["node", join(REPO_ROOT, "scripts", "embed-assets-manifest.mjs"), "--check"], {
+    // reason: the script imports the TS expander (spec-lore-owned-agent-context-is-generated-from-templates-and D6); its shebang and the build run it under bun.
+    const proc = Bun.spawnSync([process.execPath, join(REPO_ROOT, "scripts", "embed-assets-manifest.mjs"), "--check"], {
       cwd: REPO_ROOT,
     });
     expect(proc.exitCode).toBe(0);
