@@ -1,11 +1,6 @@
 ---
 name: lore-analyze
-description: >
-  Deep analysis skill using world-class thinking methodologies. 
-  Applies First Principles, MECE, Systems Thinking, Inversion, 5 Whys, 
-  Second-Order Effects, and Steelmanning to any high-level topic — 
-  strategy, business, product, decisions, or abstract problems. 
-  NOT for code-level analysis (use review/diagnose for that).
+description: "Use when the user needs deep high-level analysis of strategy, business models, product decisions, market dynamics or abstract problems: 'analyze this', 'first principles', 'think this through', '深度分析', '帮我想清楚'. NOT for code-level analysis (use lore-review or lore-diagnose) and NOT for scoring a concrete product (use lore-product-lens)."
 ---
 
 <EXTREMELY-IMPORTANT>

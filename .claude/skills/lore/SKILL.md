@@ -1,6 +1,6 @@
 ---
 name: lore
-description: Store and retrieve team knowledge via the lore CLI — a shared corpus of PRDs, specs, ADRs, plans, and knowledge docs with review workflow and version history. Use when the user says "记到 lore" / "存到知识库" / "查一下团队知识库" / "save this decision", when capturing decisions/learnings worth sharing across sessions or teammates, or before starting work that earlier PRDs/specs/ADRs may already cover.
+description: "Use when the user says \"记到 lore\" / \"存到知识库\" / \"查一下团队知识库\" / \"save this decision\", when capturing decisions or learnings worth sharing across sessions or teammates, or before work that earlier PRDs, specs or ADRs may already cover. Operates the lore CLI: a shared corpus of PRDs, specs, ADRs, plans and knowledge docs."
 ---
 
 # Lore — Team Knowledge Base

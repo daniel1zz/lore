@@ -1,6 +1,6 @@
 ---
 name: lore-product-to-prd
-description: "Turn an ALREADY-CONVERGED conversation into a PRD and publish it to the project issue tracker, synthesizing only what is already known — it interviews nobody, derives nothing, and validates nothing, so every requirement it emits is tagged unvalidated. Use when the user wants to capture a discussion that has already settled. NOT for a new product or a new user-facing bet — that is `/lore-product prd`, which enforces the benchmark → opportunity → validate chain."
+description: "Use when an ALREADY-CONVERGED conversation must be captured as a PRD on the project issue tracker: it synthesizes only what is known, interviews nobody, derives nothing, validates nothing, and tags every requirement unvalidated. NOT for a new product or user-facing bet (use `/lore-product prd`, which enforces the benchmark → opportunity → validate chain)."
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a PRD. Do NOT interview the user — just synthesize what you already know.

@@ -1,6 +1,6 @@
 ---
 name: lore-design-ui
-description: "Use when designing UI/UX before implementation — visual direction, component specs, design tokens, responsive layouts, accessibility, and full product prototypes. Triggers on 'design the UI', 'UI/UX spec', 'design system', 'mockup', 'prototype the screens', '界面设计', 'UI 方案'. NOT for writing production component code (use frontend-design) and NOT for looking up style/color/font references (use ui-ux-pro-max)."
+description: "Use when designing UI/UX before implementation: visual direction, component specs, design tokens, responsive layouts, accessibility, product prototypes. Triggers: 'design the UI', 'UI/UX spec', 'design system', 'mockup', 'prototype the screens', '界面设计', 'UI 方案'. NOT for architecture, API or data design (use lore-design), nor for writing production component code or looking up style, color and font references."
 ---
 
 # Design UI — Skill (Level 0, self-executing)

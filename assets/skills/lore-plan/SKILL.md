@@ -1,6 +1,6 @@
 ---
 name: lore-plan
-description: "Cross-session task planning and tracking on the lore corpus. Use when: user says 'plan this', 'break this down', 'create a task tree', 'what's the plan status', 'how should I approach this project', 'resume the plan', 'add a task', '计划' / '拆解任务', multi-step work spanning sessions, or any complex task needing structured decomposition with risk tracking and phase gates. Mode: create, resume, update, replan, status, list. Args: '<mode> [context]' — the FIRST token is the mode, one of: create|list|replan|resume|status|update."
+description: "Use when the user says 'plan this', 'break this down', 'create a task tree', \"what's the plan status\", 'resume the plan', 'add a task', '计划', '拆解任务', or when multi-step work spanning sessions needs structured decomposition with risk tracking and phase gates. Args: '<mode> [context]' — the FIRST token is the mode, one of: create|list|replan|resume|status|update."
 ---
 
 # Plan - Mode: $0
@@ -100,3 +100,7 @@ Plan's core is structured decomposition. **Uses `mcp__sequential-thinking__seque
 15. **File anchors are mandatory for parallel-dispatch tasks** — the `task-claim` (legacy) / `phase-claim` (SPEC-056) anchor-overlap gate only sees declared anchors. Tasks/phases with overlapping anchors get a `blocks` link (serialize) instead of leaving the conflict to dispatch time.
 16. **Expect gate denials** — exit 4 + feeding pack is the system working, not an error to route around. Fix per the pack, retry the write.
 17. **Concurrency discipline**: each concurrent implementer is a separate attested run (identity comes from the agent integration, no export needed); claims happen inside the implementer's worktree; before dispatch check `lore ready <plan> --json` → `sessions[]` / `anchor_conflicts[]`.
+
+## Also use when
+
+Other phrase that routes here: 'how should I approach this project'. Modes: create, resume, update, replan, status, list.

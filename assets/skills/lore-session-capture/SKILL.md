@@ -1,6 +1,6 @@
 ---
 name: lore-session-capture
-description: "Session reflection and knowledge persistence orchestrator. Captures decisions, patterns, and learnings from the current session and persists them into the lore corpus (per-project .lore/) via the lore CLI — including invalidating knowledge the session proved wrong, and writing a handoff doc for the next session. Use when: 'save session knowledge', 'persist what we learned', 'session handoff', 'prepare for next session', 'what did we decide', '记录会话知识', '会话交接', '保存决策', end of a productive session, or before context gets compressed."
+description: "Use when the user says 'save session knowledge', 'persist what we learned', 'session handoff', 'prepare for next session', 'what did we decide', '记录会话知识', '会话交接', '保存决策', at the end of a productive session, or before context gets compressed. NOT for auditing how the session went (use lore-session-review)."
 ---
 
 # Session Knowledge → lore
@@ -101,3 +101,7 @@ There is no `--content`/`--content-file` — the doc body is a deterministic pro
 
 - `lore get <slug>` each created doc; `lore tree` to confirm linkage.
 - Output summary: docs created (type, slug, action), docs updated, docs invalidated (old → new), links established, handoff slug + the `lore feed session-resume` consumption command, or "no handoff needed".
+
+## Also use when
+
+Captures decisions, patterns and learnings from the current session and persists them into the lore corpus (per-project .lore/) via the lore CLI, including invalidating knowledge the session proved wrong, and writes a handoff doc for the next session.

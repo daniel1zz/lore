@@ -1,6 +1,6 @@
 ---
 name: lore-project-bootstrap
-description: Configure Claude Code best practices for any project before writing business code. Auto-detects or collects project DNA (language, framework, business domain, platform dependencies) then generates project CLAUDE.md, .claude/settings.json, and skill recommendations. Optional enhanced mode adds hooks and MCP config. Use when 'bootstrap project', 'setup project', 'configure project for AI', 'prepare project', '项目装配', '项目初始化', or when starting a new project or onboarding Claude Code to an existing codebase.
+description: "Use when configuring Claude Code for a project before writing business code: 'bootstrap project', 'setup project', 'configure project for AI', 'prepare project', '项目装配', '项目初始化', or onboarding Claude Code to an existing codebase. NOT for starting the lore workflow on a new project (use lore-kickoff) or provisioning infrastructure (use lore-auto-wire)."
 ---
 
 # Project Bootstrap

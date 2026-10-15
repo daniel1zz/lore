@@ -1,6 +1,6 @@
 ---
 name: lore-iterative-review
-description: "Multi-round review-fix loop that drives code to zero issues. Dispatches parallel review subagents (code quality, security, testing), auto-fixes findings, re-reviews, and repeats until clean or max rounds reached. Use when user says 'review and fix', 'iterative review', 'review loop', 'keep reviewing until clean', 'multi-round review', 'review N rounds', '多轮review', '迭代review', '反复review', 'polish this code', 'review until done', or wants automated review->fix cycles rather than a one-shot review report. Even simple 'review and fix my code' should trigger this skill."
+description: "Use when the user wants automated review→fix cycles that repeat until clean rather than a one-shot report: 'review and fix', 'iterative review', 'review loop', 'keep reviewing until clean', 'review N rounds', '多轮review', '迭代review', 'polish this code'. NOT for a single review pass (use lore-review)."
 ---
 
 # Iterative Review — Review -> Fix -> Repeat
@@ -192,3 +192,7 @@ Maintain a `review_state` object across rounds (in memory, not persisted):
 ```
 
 This state is used for oscillation detection and the final report.
+
+## Also use when
+
+Other phrases that route here: 'multi-round review', 'review until done', '反复review', even a plain 'review and fix my code'. The loop dispatches parallel review subagents (code quality, security, testing), auto-fixes findings, re-reviews, and stops when clean or at the maximum number of rounds.

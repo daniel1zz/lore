@@ -1,6 +1,6 @@
 ---
 name: lore-harness-dev
-description: "Guide development of AI agents using the harness-agent framework. Use when: building a new agent, creating tools, setting up registries, configuring guards/modes/memory, writing evals, or deploying as MCP/HTTP server. Triggers on: 'create an agent', 'new harness', 'add a tool', 'set up eval', 'configure tracing', 'deploy agent', 'harness template', 'defineTool', 'defineRegistry', 'createHarness', 'agent registry', 'tool metadata', 'guard configuration', 'Langfuse eval', or any request involving building/extending agents on top of @harness/core. Also use when the user mentions vertical agents, agent templates, safety guards, execution modes, or agent memory layers."
+description: "Use when building or extending AI agents on the harness-agent framework (@harness/core): creating an agent or tool, registries, guards, modes, memory, evals, tracing, or deploying as an MCP/HTTP server. Triggers: 'create an agent', 'new harness', 'add a tool', 'set up eval', 'defineTool', 'createHarness', 'agent registry'."
 ---
 
 # harness-dev — Agent Development Guide
@@ -234,3 +234,7 @@ For multi-tool orchestration, external API integration, escalation hooks, budget
 - `references/templates.md` — Template SLOTS protocol + fork SOP
 - `references/eval-patterns.md` — Evaluator patterns + Langfuse experiment tips
 - `references/advanced-patterns.md` — Multi-tool orchestration, external API, hooks, LLM judge
+
+## Also use when
+
+Other phrases that route here: 'configure tracing', 'deploy agent', 'harness template', 'defineRegistry', 'tool metadata', 'guard configuration', 'Langfuse eval', and any mention of vertical agents, agent templates, safety guards, execution modes or agent memory layers.

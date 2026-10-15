@@ -1,6 +1,6 @@
 ---
 name: lore-improve-codebase-architecture
-description: Find deepening opportunities in a codebase, informed by the domain language in CONTEXT.md and the decisions in docs/adr/. Use when the user wants to improve architecture, find refactoring opportunities, consolidate tightly-coupled modules, or make a codebase more testable and AI-navigable.
+description: "Use when the user wants to find deepening opportunities in a codebase: consolidate tightly-coupled modules, make it more testable and AI-navigable, informed by the domain language in CONTEXT.md and the decisions in docs/adr/. NOT for executing a known restructure (use lore-refactor)."
 ---
 
 # Improve Codebase Architecture

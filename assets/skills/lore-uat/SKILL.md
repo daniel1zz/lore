@@ -1,6 +1,6 @@
 ---
 name: lore-uat
-description: "Product-level user acceptance testing (UAT) driven by product design intent. Builds a numbered requirement inventory and audits full coverage (every spec promise → journey → verdict, uncovered items block clean ACCEPT), derives real user journeys across session AND lifecycle scenarios (first-time, return-user next day, month-of-data accumulated state, sunset), executes them persona-blind via agent-browser while an independent judge rules every gate against a structured action trace, runs an independent UIUX production-bar audit (visual consistency, responsive, loading/empty/error states, a11y, copy, feedback — below bar blocks clean ACCEPT), then compiles accepted journeys into Playwright regression suites. Use when the user says '验收', 'acceptance', 'UAT', 'accept this product/feature', 'does this actually work for users', 'is this ready to ship', 'validate against the PRD', 'were ALL requirements verified', 'is the UI production quality', '所有需求都验证了吗', or after a feature/plan is marked complete and needs a delivery gate. Also use when the user complains that testing passed but the product still feels broken, or asks whether the product delivers what was designed. NOT for exploratory bug hunting (use lore-dogfood), NOT for writing test suites (use lore-test), NOT for verifying a single code change (use verify)."
+description: "Use when the user says '验收', 'acceptance', 'UAT', 'accept this product/feature', 'is this ready to ship', 'validate against the PRD', 'were ALL requirements verified', '所有需求都验证了吗', or after a feature or plan is complete and needs a delivery gate; also when tests passed but the product still feels broken. NOT for exploratory bug hunting (use lore-dogfood), writing test suites (use lore-test), or verifying one code change."
 ---
 
 # Accept — Product Acceptance as a Real User
@@ -117,3 +117,7 @@ acceptance-output/
 | `references/probe-and-compile-example.md` | Writing an H2 oracle probe (JUDGE) or compiling a spec (PERSIST) |
 | `references/playwright-compilation.md` | Entering PERSIST, or when a regression spec fails |
 | `references/drivers.md` | Target is not a desktop web app |
+
+## Also use when
+
+Other phrases that route here: 'does this actually work for users', 'is the UI production quality', and any question whether the product delivers what was designed. Product-level acceptance driven by design intent: a numbered requirement inventory with full coverage audit, real user journeys across session and lifecycle scenarios, persona-blind execution via agent-browser ruled by an independent judge, an independent UIUX production-bar audit, and accepted journeys compiled into Playwright regression suites.

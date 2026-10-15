@@ -1,6 +1,6 @@
 ---
 name: lore-product-lens
-description: "Multi-dimensional product review via parallel subagents. Evaluates a product across 6 lenses: scenario coverage, user group fitness, core feature completeness, market positioning, competitive analysis, and business viability. Use when user says 'review this product', 'product audit', 'product review', 'evaluate product', 'product health check', '产品审视', '产品评审', '产品分析', or wants a structured multi-angle assessment of any product, project, or feature set. Also triggers on 'product lens', 'multi-dimensional review', '多维度评审'. Even if the user only mentions one dimension (e.g., 'how's our positioning'), invoke this skill — it will let them scope down. Produces a scored matrix plus a MANDATORY routing phase that files every finding back into the lore corpus as an opportunity, ADR, PRD outline update, or task — a review that ends at a report is treated as incomplete."
+description: "Use when the user wants a structured multi-angle review of a product, project or feature set, even on one dimension such as positioning: 'review this product', 'product audit', 'product review', 'product health check', 'product lens', '产品审视', '产品评审', '产品分析'. NOT for abstract strategy analysis (use lore-analyze)."
 ---
 
 # Product Lens — Multi-Dimensional Product Review
@@ -219,3 +219,7 @@ lore link <report> <prd> --type=relates-to
 ### 4.3 Close the loop explicitly
 
 End the run by stating, in one block: how many findings were raised, how many were routed (and where), and how many were **deliberately dropped with a reason**. ⛔ Silent attrition — findings that appear in the report and are never mentioned again — is the failure mode this phase exists to prevent; a dropped finding must be dropped on the record, not by omission.
+
+## Also use when
+
+Other phrases that route here: 'evaluate product', 'multi-dimensional review', '多维度评审'. If the user names only one dimension (e.g. 'how's our positioning'), invoke this skill anyway; it lets them scope down. The review evaluates six lenses (scenario coverage, user group fitness, core feature completeness, market positioning, competitive analysis, business viability), produces a scored matrix, and ends with a mandatory routing phase that files every finding back into the lore corpus; a review that ends at a report is incomplete.

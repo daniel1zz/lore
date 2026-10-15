@@ -1,6 +1,6 @@
 ---
 name: lore-bug-hunt
-description: "Proactive multi-agent STATIC bug scan across a codebase — no app execution. Dispatches parallel specialist subagents — each focused on a different bug category (logic errors, boundary conditions, error handling, async/concurrency, security, type safety) — to systematically scan code for latent defects. Use when user says 'hunt bugs', 'find bugs', 'scan for bugs', 'audit this code', 'what bugs are hiding', 'proactive bug scan', 'bug sweep', 'code audit', '找bug', '扫描bug', '代码审计', or wants to proactively discover issues in existing code. Even if the user just says 'any bugs in this codebase?' or 'what could go wrong in src/', use this skill. NOT for a known reproducible bug (use lore-diagnose), NOT for a PR/diff review (use lore-review), NOT for runtime exploration of a running app (use lore-dogfood)."
+description: "Use when proactively scanning a codebase for latent bugs without running the app: 'hunt bugs', 'find bugs', 'scan for bugs', 'audit this code', 'bug sweep', 'any bugs in this codebase?', '找bug', '代码审计'. NOT for a known reproducible bug (use lore-diagnose), a PR or diff review (use lore-review), or a running app (use lore-dogfood)."
 ---
 
 # Bug Hunt — Proactive Multi-Agent Bug Discovery
@@ -221,3 +221,7 @@ Users can customize the hunt through natural language:
 - **Budget awareness**: 6 agents × 25 files each = significant token spend. If the user's scope is small (< 15 files), reduce to 3-4 most relevant categories.
 - **Respect category constraints**: If the user says "only async and error handling", dispatch exactly those 2. Don't silently add others.
 - **Don't over-report**: Quality over quantity. 3 concrete, well-evidenced findings beat 15 vague ones.
+
+## Also use when
+
+Other phrases that route here: 'what bugs are hiding', 'proactive bug scan', 'code audit', '扫描bug', 'what could go wrong in src/'. The skill dispatches parallel specialist subagents, one per bug category (logic errors, boundary conditions, error handling, async/concurrency, security, type safety); it is a static scan and never executes the app.

@@ -1,6 +1,6 @@
 ---
 name: lore-diagnose
-description: Disciplined diagnosis loop for hard bugs and performance regressions. Reproduce → minimise → hypothesise → instrument → fix → regression-test. Use when user says "diagnose this" / "debug this", reports a bug, says something is broken/throwing/failing, or describes a performance regression.
+description: "Use when the user says \"diagnose this\" / \"debug this\", reports a bug, says something is broken, throwing or failing, or describes a performance regression. Runs a reproduce, minimise, hypothesise, instrument, fix, regression-test loop."
 ---
 
 # Diagnose

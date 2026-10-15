@@ -1,6 +1,6 @@
 ---
 name: lore-auto-wire
-description: One-command project infrastructure autowiring — provisions database (Neon), auth (Better-Auth + shared OAuth), deployment (Vercel web / Railway workers), and all env vars from a single entry point. Self-evolving via discover mode that auto-finds CLIs, MCP servers, and skills for any platform. Use when user says 'auto-wire', 'new project', 'provision project', 'setup infra', 'init tools', 'wire up', 'configure everything', 'one-click setup', 'discover tools', 'find CLI for X', 'what MCP servers exist for X', '一键配置', '新项目', '自动装配', '配置基础设施', '发现工具', or wants to create/manage multi-project infrastructure without repetitive manual configuration. Also triggers on 'check what CLIs are installed', 'rotate secrets', 'add service to project', 'project status'.
+description: "Use when provisioning a project's infrastructure end to end (database, auth, deployment, env vars) or when the user says 'auto-wire', 'provision project', 'setup infra', 'wire up', 'one-click setup', 'discover tools', 'rotate secrets', 'add service to project', '一键配置', '自动装配', '配置基础设施', '发现工具'. NOT for starting a project's lore workflow (use lore-kickoff) and NOT for configuring Claude Code (use lore-project-bootstrap)."
 ---
 
 # lore-auto-wire — Multi-Project Infrastructure Autowiring
@@ -143,3 +143,9 @@ To add a new mode:
 1. Create `references/mode-<name>.md` with the procedure
 2. Add the mode to the router table above
 3. Add natural language triggers to the mode detection table
+
+## Also use when
+
+Provisions the database (Neon), auth (Better-Auth + shared OAuth), deployment (Vercel for web, Railway for workers) and all env vars from a single entry point. Self-evolving: discover mode finds CLIs, MCP servers and skills for any platform.
+
+Other phrases that route here: 'init tools', 'configure everything', 'find CLI for X', 'what MCP servers exist for X', 'check what CLIs are installed', 'project status', or any wish to create or manage multi-project infrastructure without repetitive manual configuration. A brand-new project's lore workflow ('new project', '新项目') starts in lore-kickoff instead.

@@ -1,6 +1,6 @@
 ---
 name: lore-dogfood
-description: Systematically explore a RUNNING web application in a real browser to find bugs, UX issues, and other problems. Use when asked to "dogfood", "QA", "exploratory test", "explore this app", "test this app/site/platform", or review the quality of a running web application. Produces a structured report with full reproduction evidence -- step-by-step screenshots, repro videos, and detailed repro steps for every issue -- so findings can be handed directly to the responsible teams. NOT for static code scanning without running the app (use lore-bug-hunt), NOT for requirement-driven acceptance gates (use lore-uat / an acceptance skill), NOT for authoring test suites (use lore-test).
+description: "Use when asked to \"dogfood\", \"QA\", \"exploratory test\", \"explore this app\", \"test this app/site/platform\", or to review the quality of a RUNNING web application in a real browser. NOT for static code scanning (use lore-bug-hunt), requirement-driven acceptance (use lore-uat), or authoring test suites (use lore-test)."
 allowed-tools: Bash(agent-browser:*), Bash(npx agent-browser:*)
 ---
 
