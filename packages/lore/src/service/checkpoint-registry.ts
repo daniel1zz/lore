@@ -1263,7 +1263,7 @@ function feedPlanPromote(ctx: GateContext, failures: PredicateResult[]): string 
   return feedUpstreamSpecCheckpoint(
     ctx,
     failures,
-    'Required for plan-promote: the ancestor spec must be "approved" and declare ' +
+    'Required for plan-promote: the ancestor spec must be "approved" or "active" and declare ' +
       "at least one structured acceptance criterion (`lore ac add`).",
   );
 }
@@ -1434,7 +1434,7 @@ function feedTaskOrPhaseClaim(
   return feedUpstreamSpecCheckpoint(
     ctx,
     failures,
-    `Required for ${checkpointLabel}: the ancestor spec must be "approved".`,
+    `Required for ${checkpointLabel}: the ancestor spec must be "approved" or "active".`,
   );
 }
 
