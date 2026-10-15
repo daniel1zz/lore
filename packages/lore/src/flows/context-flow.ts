@@ -139,6 +139,8 @@ import { collectContextFacts, type ContextFacts } from "../service/context-facts
 import { runMemoryFileChecks } from "../service/claude-md-admission.js";
 import { spliceManagedSections, type ManagedSection, type SpliceResult } from "../service/context-projection.js";
 import { discoverFragments } from "../service/context-fragments/discover.js";
+import { expandFragments } from "../service/context-fragments/expand.js";
+import { LORE_CONTEXT_VARIABLES } from "../service/context-variables-registry.js";
 import { resolveUserConfigDir } from "../service/context-fragments/user-config-dir.js";
 import {
   isLoreRulesFileName,
@@ -503,12 +505,20 @@ async function selectScopeFragments(
   if (!overrides.ok) return overrides;
 
   try {
-    const selectFor = (outlet: OutletId): Fragment[] =>
-      selectFragments(discovered.value, {
+    const selectFor = (outlet: OutletId): Result<Fragment[], LoreError> => {
+      const selected = selectFragments(discovered.value, {
         outlet,
         config: resolveContextConfig(fragmentDeps.globalConfig, fragmentDeps.projectConfig, outlet),
       });
-    return ok({ rules: selectFor(outlets.rules), skills: selectFor(outlets.skills) });
+      // reason: expansion happens BEFORE any render/fingerprint/budget check, through the one shared helper.
+      const expanded = expandFragments(selected, outlet, { invocation: {} }, LORE_CONTEXT_VARIABLES);
+      return expanded.ok ? ok([...expanded.value]) : expanded;
+    };
+    const rules = selectFor(outlets.rules);
+    if (!rules.ok) return rules;
+    const skills = selectFor(outlets.skills);
+    if (!skills.ok) return skills;
+    return ok({ rules: rules.value, skills: skills.value });
   } catch (e) {
     // reason: selectFragments throws on a `when` key with no registered matcher (fail loud by
     // design); the flow converts it to the Result channel instead of letting it escape.

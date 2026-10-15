@@ -21,6 +21,7 @@
  * Side-effect class: Read-only IO through the injected FsReadPort.
  */
 import { parse as parseYaml } from "yaml";
+import type { LocatedFragment } from "./expand.js";
 import {
   err,
   FragmentFrontmatterSchema,
@@ -59,7 +60,7 @@ async function loadFragment(
   fs: FsReadPort,
   path: string,
   layer: Fragment["layer"],
-): Promise<Result<Fragment, DiscoverError>> {
+): Promise<Result<LocatedFragment, DiscoverError>> {
   const text = await fs.readFile(path);
   if (text === null) return fail(path, "fragment file could not be read");
 
@@ -83,7 +84,9 @@ async function loadFragment(
     return fail(path, `fragment body must not contain '${FORBIDDEN_BODY_MARKER}'`);
   }
 
-  return ok({ frontmatter: parsed.data, body: split.body, layer, path });
+  // reason: the body's file line = frontmatter lines + the two `---` fences; expandFragments reports file:line from it.
+  const bodyLineOffset = split.frontmatter.split("\n").length + 2;
+  return ok({ frontmatter: parsed.data, body: split.body, layer, path, bodyLineOffset });
 }
 
 /**
