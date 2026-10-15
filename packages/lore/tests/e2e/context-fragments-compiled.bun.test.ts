@@ -324,7 +324,7 @@ describe("AC-CF-4 lore fragments check enumerates every agent type and refuses o
   it("exits 0 on the shipped assets and its JSON lists at least (agent files + 1) agent types", () => {
     const sb = makeSandbox();
     const agentFiles = shippedAgentFiles().length;
-    expect(agentFiles).toBeGreaterThanOrEqual(3);
+    expect(agentFiles).toBeGreaterThanOrEqual(2);
 
     const r = lore(sb, "fragments", "check", "--json");
     expect(r.code).toBe(0);
@@ -572,7 +572,7 @@ describe("AC-CF-9 installed shipped agents set omitClaudeMd true", () => {
 
     const agentsDir = join(sb.home, ".claude", "agents");
     const files = existsSync(agentsDir) ? readdirSync(agentsDir).filter((f) => f.endsWith(".md")) : [];
-    expect(files.length).toBeGreaterThanOrEqual(3);
+    expect(files.length).toBeGreaterThanOrEqual(2);
     for (const f of files) {
       const raw = readFileSync(join(agentsDir, f), "utf8");
       const m = /^---\n([\s\S]*?)\n---/.exec(raw);

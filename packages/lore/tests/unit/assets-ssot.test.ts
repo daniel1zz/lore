@@ -393,9 +393,8 @@ const DECLARED_FILES = [
   "skills/shared/troubleshooting-knowledge.md",
   "skills/shared/verification-discipline.md",
   // agents
-  "agents/lore-explorer.md",
   "agents/lore-implementer.md",
-  "agents/lore-reviewer.md",
+  "agents/lore-reader.md",
   // hooks (11 .mjs + 4 .sh gates + 1 admission-check .sh + 1 shared lib module)
   "hooks/session-start-resume.mjs",
   // session-start-marker (same-session-authorship fact for the resume-ticket

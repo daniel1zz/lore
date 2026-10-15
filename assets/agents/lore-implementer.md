@@ -1,6 +1,6 @@
 ---
 name: lore-implementer
-description: "Implementation agent for lore-managed tasks. Claims its task from inside its own worktree, implements code + tests, records oracle evidence via lore evidence, then releases. Never re-plans."
+description: "Implementation agent for lore-managed tasks. Claims its task from inside its own worktree, implements code and tests (also dispatched for test-only tasks), records oracle evidence via lore evidence, then releases. Never re-plans."
 model: sonnet
 color: green
 omitClaudeMd: true
@@ -10,7 +10,7 @@ omitClaudeMd: true
 
 Before writing or modifying any business-logic source file, invoke `Skill(lore-ai-native-coding)` to load the AI-native code paradigm reference. Its `Pre-Commit Checklist` (12 grep-verifiable items) is your final gate before recording pass evidence.
 
-**Skip** when the task only edits: config / docs / generated code, OR is test-only (route to tester subagent).
+**Skip** when the task only edits: config / docs / generated code, OR is test-only (writing tests is also your job; test files need no skill load).
 
 ---
 

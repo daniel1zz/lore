@@ -31,11 +31,9 @@ general-purpose is a catch-all without task-specific prompt, tool restriction,
 or quality gate. Use a specialized subagent instead:
 
   Custom:
-    - lore-explorer    : read-only codebase + lore corpus exploration
-    - lore-implementer : implement lore tasks (code + tests + oracle evidence)
-    - lore-reviewer    : read-only code review against lore spec ACs
+    - lore-reader      : read-only exploration, locating facts, and code review
+    - lore-implementer : the only write type (code + tests + oracle evidence)
     - researcher       : SDK / pattern / benchmark evaluation (ADR output)
-    - tester           : write and run tests (independent of the implementer)
 
   Built-in:
     - Explore            : fast codebase exploration

@@ -37,9 +37,11 @@ describe("AC-RS-12 hook notices", () => {
     expect(ctx).toContain("src/a.ts");
   });
 
-  it("AC-RS-12 pre-no-general-agent-gate refusal lists tester", () => {
+  it("AC-AT-3 pre-no-general-agent-gate refusal lists exactly lore-reader and lore-implementer", () => {
     const r = run(NO_GENERAL, { tool_name: "Agent", tool_input: { subagent_type: "general-purpose" } });
     expect(r.status).toBe(2);
-    expect(r.stderr).toContain("tester");
+    expect(r.stderr).toContain("lore-reader");
+    expect(r.stderr).toContain("lore-implementer");
+    expect(r.stderr).not.toMatch(/lore-explorer|lore-reviewer|tester/);
   });
 });

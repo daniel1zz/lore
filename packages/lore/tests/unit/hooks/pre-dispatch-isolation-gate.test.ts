@@ -58,7 +58,7 @@ function dispatchWithIsolation(subagentType: string, isolation = "worktree"): Re
 
 describe("pre-dispatch-isolation-gate", () => {
   describe("NEGATIVE — an implementation subagent without worktree isolation is denied", () => {
-    it("denies lore-implementer with exit 2 and names the missing field", () => {
+    it("AC-AT-2 denies lore-implementer with exit 2 and names the missing field", () => {
       const run = runHook(dispatchWithoutIsolation("lore-implementer"));
       expect(run.status).toBe(2);
       expect(run.stderr).toContain("DISPATCH_ISOLATION_GATE");
@@ -67,12 +67,6 @@ describe("pre-dispatch-isolation-gate", () => {
       // starts sending null/"" is visible in the message instead of silently
       // reclassified.
       expect(run.stderr).toContain("<absent>");
-    });
-
-    it("denies tester too", () => {
-      const run = runHook(dispatchWithoutIsolation("tester"));
-      expect(run.status).toBe(2);
-      expect(run.stderr).toContain("tester");
     });
 
     it("denies a non-worktree isolation value rather than treating any value as good enough", () => {
@@ -96,14 +90,16 @@ describe("pre-dispatch-isolation-gate", () => {
       expect(run.status).toBe(0);
     });
 
-    it("allows tester with isolation worktree", () => {
-      const run = runHook(dispatchWithIsolation("tester"));
-      expect(run.status).toBe(0);
+    it("AC-AT-2 allows lore-reader without isolation (read-only type) and the source names only current types", () => {
+      expect(runHook(dispatchWithoutIsolation("lore-reader")).status).toBe(0);
+      const source = readFileSync(HOOK_PATH, "utf8");
+      expect(source).toContain("lore-reader");
+      expect(source).not.toMatch(/lore-explorer|lore-reviewer|'tester'/);
     });
   });
 
   describe("BOUNDARY — the gate stays narrow on purpose", () => {
-    it.each(["Explore", "lore-explorer", "lore-reviewer", "Plan", "researcher"])(
+    it.each(["Explore", "lore-reader", "Plan", "researcher"])(
       "does not block read-only type %s even without isolation",
       (agentType) => {
         const run = runHook(dispatchWithoutIsolation(agentType));
