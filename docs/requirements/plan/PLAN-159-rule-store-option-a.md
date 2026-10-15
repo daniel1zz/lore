@@ -3,10 +3,10 @@ id: PLAN-159
 type: plan
 role: plan
 title: "Rule store option A"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-12
-updated: 2026-10-12
+updated: 2026-10-15
 tags: []
 parent: SPEC-169
 phases:

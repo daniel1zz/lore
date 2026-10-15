@@ -10268,6 +10268,22 @@
     "01M4ZEZV7J61BATXGDA3Z8NNC4": {
       "human_id": "TASK-1324",
       "file_path": "docs/requirements/task/TASK-1324-check-shipped-defaults-ac-gd-1-fresh-install-claus.md"
+    },
+    "01M4ZFJ0N86G8XK50C9TTHV8DT": {
+      "human_id": "SPEC-182",
+      "file_path": "docs/requirements/spec/SPEC-182-always-loaded-rules-keep-only-what-no-checkpoint-e.md"
+    },
+    "01M4ZFGQPRQVPH8XKJ446TBS2E": {
+      "human_id": "KN-674",
+      "file_path": "docs/requirements/knowledge/KN-674-root-claude-md-tier-2-text-verbatim-body-before-th.md"
+    },
+    "01M4ZFGV045MVYB9PCHTGNA071": {
+      "human_id": "KN-675",
+      "file_path": "docs/requirements/knowledge/KN-675-delivery-tier-audit-of-every-always-loaded-lore-ru.md"
+    },
+    "01M4ZFEDJ1NJVGG73P3E9CKHEB": {
+      "human_id": "KN-676",
+      "file_path": "docs/requirements/knowledge/KN-676-assessment-rule-store-option-a-2026-10-15.md"
     }
   }
 }

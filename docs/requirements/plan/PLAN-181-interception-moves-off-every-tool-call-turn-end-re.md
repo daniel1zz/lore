@@ -3,7 +3,7 @@ id: PLAN-181
 type: plan
 role: plan
 title: "Interception moves off every tool call: turn-end review and gate-hook retirement"
-status: draft
+status: approved
 priority: high
 created: 2026-10-15
 updated: 2026-10-15

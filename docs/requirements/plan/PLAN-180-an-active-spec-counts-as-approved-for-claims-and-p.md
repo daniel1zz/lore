@@ -3,7 +3,7 @@ id: PLAN-180
 type: plan
 role: plan
 title: "An active spec counts as approved for claims and plan approval"
-status: draft
+status: approved
 priority: high
 created: 2026-10-15
 updated: 2026-10-15

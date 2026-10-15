@@ -108,6 +108,7 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [knowledge] Delivery-tier audit of every always-loaded lore rule: 6 backstopped rules can move to skills, 41 have no mechanism (draft)
 - [adr] Helper agent types split only on mechanism-enforced capability; roles are composed per dispatch (approved)
 - [task] plan-close cascade AC-097-2 is red on main: a plan with no children is not archived (draft)
 - [task] setup.test AC-046-E.R1 is red on main: a second --dry-run right after a real install does not report every file as 'would skip' (draft)

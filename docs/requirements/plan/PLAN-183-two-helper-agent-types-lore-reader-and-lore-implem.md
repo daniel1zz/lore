@@ -3,7 +3,7 @@ id: PLAN-183
 type: plan
 role: plan
 title: "Two helper agent types: lore-reader and lore-implementer"
-status: approved
+status: archived
 priority: medium
 created: 2026-10-15
 updated: 2026-10-15

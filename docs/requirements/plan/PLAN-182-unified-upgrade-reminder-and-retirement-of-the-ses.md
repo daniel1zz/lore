@@ -3,7 +3,7 @@ id: PLAN-182
 type: plan
 role: plan
 title: "Unified upgrade reminder and retirement of the session-start fragment hook"
-status: draft
+status: approved
 priority: high
 created: 2026-10-15
 updated: 2026-10-15
