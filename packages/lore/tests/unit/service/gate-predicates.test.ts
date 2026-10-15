@@ -172,14 +172,11 @@ describe("gate-predicates", () => {
       });
     });
 
-    // BOUNDARY — the key decision this task made: "active" is a status further along
-    // the lifecycle than "approved" but does NOT clear this gate, to stay identical to
-    // evaluateReadiness's upstream_unapproved advisory (parentSpecStatus !== "approved").
-    it("fails with UPSTREAM_NOT_APPROVED when status is 'active' (deliberately NOT accepted — matches evaluateReadiness)", () => {
-      expect(upstreamApproved({ type: "spec", status: "active" }, "spec")).toEqual({
-        ok: false,
-        reason: "UPSTREAM_NOT_APPROVED",
-      });
+    // BOUNDARY — "active" is a settled (locked-record) spec and clears the gate, shared
+    // with evaluateReadiness via UPSTREAM_APPROVED_STATUSES
+    // (spec-an-active-spec-counts-as-approved-for-claiming-its-tasks).
+    it("passes when status is 'active' (a settled spec counts as approved)", () => {
+      expect(upstreamApproved({ type: "spec", status: "active" }, "spec")).toEqual({ ok: true });
     });
 
     // ERROR — wrong type

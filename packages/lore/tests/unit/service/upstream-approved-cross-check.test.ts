@@ -12,9 +12,9 @@
  * Pure functions only — no store, no IO, no bun:sqlite — hence vitest.
  *
  * Six-dimension coverage for this file:
- *   HAPPY:      "approved" clears both evaluateReadiness's upstream_unapproved
+ *   HAPPY:      "approved" and "active" clear both evaluateReadiness's upstream_unapproved
  *               advisory and upstreamApproved's gate
- *   NEGATIVE:   "active" fails both — the deliberately-excluded status
+ *   NEGATIVE:   "active" clears both — a settled spec is a locked record
  *   BOUNDARY:   every other DocStatus ("draft", "in-review", "archived",
  *               "deprecated") fails both, exhausting the DocStatus union
  *   ERROR:      n/a — pure functions with no Result channel on the readiness
@@ -62,14 +62,14 @@ const NO_BLOCKERS = new Map();
 
 describe("UPSTREAM_APPROVED_STATUSES cross-check", () => {
   // REGRESSION
-  it("pins the SSOT to exactly {'approved'} — nothing more, nothing less", () => {
+  it("pins the SSOT to exactly {'approved', 'active'} — nothing more, nothing less", () => {
     expect(UPSTREAM_APPROVED_STATUSES.has("approved")).toBe(true);
-    expect(UPSTREAM_APPROVED_STATUSES.has("active")).toBe(false);
+    expect(UPSTREAM_APPROVED_STATUSES.has("active")).toBe(true);
     expect(UPSTREAM_APPROVED_STATUSES.has("draft")).toBe(false);
     expect(UPSTREAM_APPROVED_STATUSES.has("in-review")).toBe(false);
     expect(UPSTREAM_APPROVED_STATUSES.has("archived")).toBe(false);
     expect(UPSTREAM_APPROVED_STATUSES.has("deprecated")).toBe(false);
-    expect(UPSTREAM_APPROVED_STATUSES.size).toBe(1);
+    expect(UPSTREAM_APPROVED_STATUSES.size).toBe(2);
   });
 
   // HAPPY
@@ -82,14 +82,14 @@ describe("UPSTREAM_APPROVED_STATUSES cross-check", () => {
     ).toEqual({ ok: true });
   });
 
-  // NEGATIVE — the deliberately-excluded status
-  it("'active' fails both — flagged unapproved by readiness, rejected by the gate", () => {
+  // HAPPY — active is settled, so it clears both
+  it("'active' clears both evaluateReadiness and upstreamApproved", () => {
     const records = evaluateReadiness([makeTask()], NO_LINKS, NO_BLOCKERS, NOW, 120, "active");
-    expect(records[0]?.upstream_unapproved).toBe(true);
+    expect(records[0]?.upstream_unapproved).toBeUndefined();
 
     expect(
       upstreamApproved({ type: "spec", status: "active", deleted_at: null }, "spec"),
-    ).toEqual({ ok: false, reason: "UPSTREAM_NOT_APPROVED" });
+    ).toEqual({ ok: true });
   });
 
   // BOUNDARY — exhaust the remaining DocStatus union members
