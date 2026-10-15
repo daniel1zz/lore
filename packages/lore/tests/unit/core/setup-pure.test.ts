@@ -243,11 +243,11 @@ describe("setup-manifest: planInstall", () => {
 const LORE_HOOK: SettingsHookEntry = {
   event: "PreToolUse",
   matcher: "Bash",
-  command: "/home/user/.claude/hooks/lore-gate-g1.mjs",
+  command: "/home/user/.claude/hooks/example-pretool-hook.mjs",
 };
 const LORE_HOOK_2: SettingsHookEntry = {
   event: "Stop",
-  command: "/home/user/.claude/hooks/stop-doc-sync.mjs",
+  command: "/home/user/.claude/hooks/example-stop-hook.mjs",
 };
 
 describe("merge-settings: mergeSettings", () => {

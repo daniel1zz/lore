@@ -15,7 +15,7 @@
  *
  *   1. unreadable / empty / non-object stdin -> fail loud (see below)
  *   2. `stop_hook_active === true` -> exit 0 silent (loop prevention, exactly
- *      as `stop-doc-sync.mjs` does)
+ *      as `stop-turn-review.mjs` does)
  *   3. forward `transcript_path` + `last_assistant_message` to the verb on its
  *      stdin, then relay its three results verbatim
  *
@@ -39,7 +39,7 @@
  *
  * ## Invariant: a fault of this hook's own is never reported as exit 0
  *
- * Deliberate divergence from `stop-doc-sync.mjs`'s fail-silent posture. Spec D7
+ * Deliberate divergence from `stop-turn-review.mjs`'s fail-silent posture. Spec D7
  * names the failure mode directly: a hook that exits 0 because it crashed early
  * is indistinguishable from one that exits 0 because the accounting was
  * complete. So every fault path here writes a diagnostic naming this file and
@@ -129,7 +129,7 @@ if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
 }
 
 // Loop prevention, keyed on the value `true` and not on field presence —
-// mirrors `stop-doc-sync.mjs`. Nothing is spawned on this path.
+// mirrors `stop-turn-review.mjs`. Nothing is spawned on this path.
 if (payload.stop_hook_active === true) process.exit(0);
 
 const forwarded = {};

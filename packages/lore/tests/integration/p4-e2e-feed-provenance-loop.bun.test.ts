@@ -38,7 +38,8 @@
  * Part 1 tie-in (§5.4, NON-AC-blocking): also asserts that a compliant
  * `lore gate spec-create` payload against this same corpus still prints exactly
  * "gate: pass" and exits 0 — the allow-path verdict is unchanged after this task's
- * gate.ts/g1 shim documentation-only edit (no predicate/branch logic was touched).
+ * gate.ts documentation-only edit (no predicate/branch logic was touched). The write itself
+ * refuses at `corpus-service.ts::CorpusService._createImpl` via `GateEnforcer.enforce("spec-create")`.
  *
  * Coverage dimensions:
  *   HAPPY      — AC-P4-7: the full feed -> produce -> provenance -> forward-query ->
@@ -220,7 +221,7 @@ describe("P4 e2e: feed-before-produce + provenance closed loop (AC-P4-7)", () =>
       expect(docCountAfterFeed).toBe(2);
 
       // ── Part 1 tie-in: compliant gate spec-create ALLOW verdict is unchanged ──
-      // (§5.4 — this task's gate.ts/g1-spec-create.sh edits are documentation-only;
+      // (§5.4 — this task's gate.ts edit is documentation-only;
       // no predicate or branch logic changed. This pins "gate: pass", exit 0 down
       // against the SAME corpus this e2e loop is using.)
       const compliantGateResult = await runGateSpecCreate({

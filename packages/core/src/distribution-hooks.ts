@@ -10,9 +10,9 @@
  * copied hook file actually RUN was left to the human, an inert-until-wired
  * gap noted in the root CLAUDE.md's SPEC-046 dogfood-log entry for
  * `pre-bash-git-safety-gate.mjs`. This module is the declared list that
- * closes that gap: eleven hooks classified "core governance + security" are
- * auto-registered; two orchestration-POLICY hooks
- * (`pre-subagent-gate.mjs`, `pre-no-general-agent-gate.mjs`) are deliberately
+ * closes that gap: the hooks classified "core governance + security" are
+ * auto-registered; the orchestration-POLICY hooks
+ * (`pre-no-general-agent-gate.mjs`, `pre-dispatch-isolation-gate.mjs`) are deliberately
  * EXCLUDED — they encode this specific team's subagent-dispatch discipline,
  * not a safety/governance invariant every `lore setup` consumer should
  * inherit unasked; a team that wants them can still hand-wire the copied
@@ -33,21 +33,21 @@
  * hook's own module header) so a mis-registration cannot itself wedge a
  * session, matching the risk profile of the rest of the set.
  *
- * `claude-md-guard.sh` (added D10/D11,
- * spec-context-verb-family-two-zone-claude-md-anatomy-lore) joins the set for
- * the same reason as the pair above: it is a data/governance backstop, not a
- * routing policy — it fires on PostToolUse Edit|Write, fast-paths away from
- * every non-`CLAUDE.md` edit, and only ever runs `lore status --check-
- * claude-md` (the sole budget measurement point) against a repo that
- * actually owns a `.lore/` corpus. Fail-open by construction (see the hook's
- * own module header) on every anomaly — a mis-registration cannot itself
- * block an unrelated Edit/Write.
+ * `stop-turn-review.mjs` (spec-interception-moves-off-every-tool-call-one-turn-
+ * end-review, Scope 4-5) is the ONE turn-end review of the main session. It
+ * replaced three retired hook families: `stop-doc-sync.mjs` (turn-end doc
+ * reminder), `claude-md-guard.sh` (per-edit CLAUDE.md ceiling check, now
+ * finding (c) of the turn-end review) and the `lore-gate-g1..g4` checkpoint
+ * hooks (the service-layer write refuses instead). BR-1092: no registered
+ * per-tool-call hook refuses anything except irreversible git operations
+ * (`pre-bash-git-safety-gate.mjs`). Converge (BR-823 / BR-975) removes the
+ * retired files and settings entries from older installs.
  *
  * `stop-handoff-coverage.mjs` (added 2026-07-31, owner classification decision
  * of spec-resume-ticket-coverage-a-shipped-upper-bound-left-the) joins the
- * governance set beside `stop-doc-sync.mjs`, its nearest sibling: both are
+ * governance set beside `stop-turn-review.mjs`, its nearest sibling: both are
  * turn-end accounting gates, differing only in WHAT must be accounted for
- * (docs the turn made stale vs. resume-ticket items the turn left
+ * (findings in the turn's own work vs. resume-ticket items the turn left
  * undispositioned). It constrains "the consumer accounts for every ticket
  * item" — a governance invariant any team consuming resume tickets needs, not
  * a statement about how this team routes subagents, which is what keeps it on
@@ -143,10 +143,11 @@ const RUN_END_HOOK_TIMEOUT_SECONDS = 10;
  * The full declared "core governance + security" hook set (owner decision,
  * 2026-07-20; `subagent-stop-commit-guard.mjs` added 2026-07-21;
  * `stop-handoff-coverage.mjs` added 2026-07-31; `session-start-marker.mjs`
- * added 2026-08-01) — already matcher-expanded, one entry per distinct
+ * added 2026-08-01; `stop-turn-review.mjs` replaced `stop-doc-sync.mjs` and
+ * `claude-md-guard.sh`) — already matcher-expanded, one entry per distinct
  * `(event, matcher)` pair.
- * Deliberately EXCLUDES `pre-subagent-gate.mjs` and
- * `pre-no-general-agent-gate.mjs` (orchestration-policy hooks, not
+ * Deliberately EXCLUDES `pre-no-general-agent-gate.mjs` and
+ * `pre-dispatch-isolation-gate.mjs` (orchestration-policy hooks, not
  * governance/security — see module doc).
  */
 export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
@@ -159,14 +160,14 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // session-start-marker.mjs — records this session's own start time (tmpdir marker, keyed by session id) so `lore feed session-resume` can tell a just-authored handoff from a genuinely earlier session's.
   { file: "session-start-marker.mjs", runner: "node", event: "SessionStart" },
 
-  // user-prompt-turn-start.mjs — producer of current-turn.id (opens a turn per user message); stop-doc-sync.mjs reads it. Consumer and producers MUST ship together (lore issue #156; pinned by stop-doc-sync-turn-state.test.ts).
+  // user-prompt-turn-start.mjs — producer of current-turn.id and turn-start-snapshot.json (opens a turn per user message); stop-turn-review.mjs reads them. Consumer and producers MUST ship together (lore issue #156; pinned by turn-state-producers.test.ts).
   { file: "user-prompt-turn-start.mjs", runner: "node", event: "UserPromptSubmit" },
 
-  // post-edit-mark.mjs — producer of edited.flag / edited-files.jsonl on every editing tool; stop-doc-sync.mjs reads them.
+  // post-edit-mark.mjs — producer of edited.flag / edited-files.jsonl on every editing tool; stop-turn-review.mjs reads them.
   { file: "post-edit-mark.mjs", runner: "node", event: "PostToolUse", matcher: "Edit|Write|MultiEdit|NotebookEdit" },
 
-  // stop-doc-sync.mjs — doc-sync reminder gate on turn end.
-  { file: "stop-doc-sync.mjs", runner: "node", event: "Stop" },
+  // stop-turn-review.mjs — the one turn-end review of the main session: opt-in source edits, anchor drift, CLAUDE.md ceiling; one block listing every finding, silent otherwise.
+  { file: "stop-turn-review.mjs", runner: "node", event: "Stop" },
 
   // stop-handoff-coverage.mjs — resume-ticket coverage floor on turn end: blind pipe to `lore handoff coverage-check` (no matcher; Stop does not scope by one).
   { file: "stop-handoff-coverage.mjs", runner: "node", event: "Stop" },
@@ -188,9 +189,6 @@ export const HOOK_REGISTRATIONS: readonly HookRegistration[] = [
   // pre-tool-harness-run.mjs — rewrites each lore call to carry `--harness-run <run>` (updatedInput only, never a permissionDecision — D12); covers raw Bash and every lore MCP tool.
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "Bash" },
   { file: "pre-tool-harness-run.mjs", runner: "node", event: "PreToolUse", matcher: "mcp__.*lore_.*" },
-
-  // claude-md-guard.sh — CLAUDE.md two-zone admission check on Edit|Write (delegates the actual ceiling measurement to `lore status --check-claude-md`).
-  { file: "claude-md-guard.sh", runner: "bash", event: "PostToolUse", matcher: "Edit|Write" },
 ] as const;
 
 /** Strips exactly one trailing `/` (never more — a caller-malformed `claudeDir` with repeated trailing slashes is out of scope). */

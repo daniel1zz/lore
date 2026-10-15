@@ -25,7 +25,7 @@
  * `CLAUDE_CODE_SESSION_ID` is set in Bash-tool AND hook subprocesses and "matches
  * the `session_id` field in the hook JSON input", so this writer and the
  * `lore feed` reader (a Bash child) resolve the SAME id. Writer and reader MUST
- * stay on this one env precedence (pinned by stop-doc-sync-turn-state.test.ts).
+ * stay on this one env precedence (pinned by turn-state-producers.test.ts).
  * `./lib/turn-state.mjs::resolveSessionId(payload)` (payload `session_id`, no env
  * fallback) is the turn-state hooks' resolver; it has no CLI-side equivalent, so
  * this marker does not use it.

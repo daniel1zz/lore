@@ -44,7 +44,7 @@ describe("renderInstallReceipt", () => {
         entry("skills/lore-kickoff/SKILL.md", "skill"),
         entry("agents/lore-explorer.md", "agent"),
         entry("hooks/session-start-resume.mjs", "hook"),
-        entry("hooks/stop-doc-sync.mjs", "hook"),
+        entry("hooks/stop-turn-review.mjs", "hook"),
         entry("hooks/subagent-context.mjs", "hook"),
         entry("governance/corpus-workflow.md", "governance"),
       ],

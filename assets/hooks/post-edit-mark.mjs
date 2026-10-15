@@ -3,7 +3,7 @@
  * post-edit-mark.mjs — PostToolUse hook on Edit|Write|MultiEdit|NotebookEdit.
  *
  * Producer of `edited.flag` + `edited-files.jsonl` in the current turn dir, which
- * stop-doc-sync.mjs reads to let no-edit turns stop silently. Session dir comes from the
+ * stop-turn-review.mjs reads to attribute source edits to the main session. Session dir comes from the
  * stdin payload `session_id`; the edited path from `tool_input.file_path` (Edit/Write/MultiEdit)
  * or `tool_input.notebook_path` (NotebookEdit) — PostToolUse input,
  * https://code.claude.com/docs/en/hooks.

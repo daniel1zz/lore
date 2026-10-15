@@ -8,12 +8,6 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          { "type": "command", "command": "node $CLAUDE_PROJECT_DIR/assets/hooks/pre-subagent-gate.mjs" }
-        ]
-      },
-      {
         "matcher": "Agent|Task",
         "hooks": [
           { "type": "command", "command": "node $CLAUDE_PROJECT_DIR/assets/hooks/pre-no-general-agent-gate.mjs" },

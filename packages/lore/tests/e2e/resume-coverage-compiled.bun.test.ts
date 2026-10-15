@@ -69,7 +69,7 @@
  *                     hand-written command string, so a rename that misses the
  *                     registry fails instead of drifting silently. Control
  *                     against a vacuous pass: the SAME parsed file must also
- *                     carry the incumbent `stop-doc-sync` Stop entry, so an
+ *                     carry the incumbent `stop-turn-review` Stop entry, so an
  *                     unparsed/empty/hook-less settings file cannot read as
  *                     "registered". Further liveness controls: a fabricated
  *                     never-registered command and a right-command/wrong-event
@@ -738,7 +738,7 @@ const HOOK_ASSET_BASENAME = HOOK_ASSET_REL.slice(HOOK_ASSET_REL.lastIndexOf("/")
  * believable while the control is green, and a broken parse cannot masquerade
  * as a missing registration (or vice versa).
  */
-const CONTROL_STOP_HOOK_BASENAME = "stop-doc-sync.mjs";
+const CONTROL_STOP_HOOK_BASENAME = "stop-turn-review.mjs";
 
 /** One flattened `hooks[event][].hooks[]` command, in `SettingsHookEntry` shape. */
 interface FlatSettingsHook {
@@ -792,7 +792,7 @@ function flattenSettingsHooks(settingsJsonText: string): FlatSettingsHook[] {
 }
 
 describe("AC-RC-13: the shipped Stop hook is WIRED, not merely copied — settings.json auto-registration on a fresh install (spec §Delivery constraint, D6)", () => {
-  it("stop hook registered — the fresh install's settings.json carries the Stop entry DERIVED from HOOK_REGISTRATIONS, with the pre-existing stop-doc-sync entry as the vacuous-pass control", () => {
+  it("stop hook registered — the fresh install's settings.json carries the Stop entry DERIVED from HOOK_REGISTRATIONS, with the pre-existing stop-turn-review entry as the vacuous-pass control", () => {
     // ── (a) The registry SSOT declares it, as a matcher-less Stop hook ───────
     // Registry membership is asserted FIRST and separately: T4 already proved
     // the file installs byte-identically, so an installed-but-unregistered
@@ -807,7 +807,7 @@ describe("AC-RC-13: the shipped Stop hook is WIRED, not merely copied — settin
       );
     }
     expect(registration.event).toBe("Stop");
-    // Stop does not scope by matcher (mirrors the `stop-doc-sync.mjs` row) — a
+    // Stop does not scope by matcher (mirrors the `stop-turn-review.mjs` row) — a
     // matcher here would narrow the hook to a tool name Stop never carries.
     expect(registration.matcher).toBeUndefined();
 
@@ -849,7 +849,7 @@ describe("AC-RC-13: the shipped Stop hook is WIRED, not merely copied — settin
     const flatHooks = flattenSettingsHooks(readFileSync(settingsPath, "utf8"));
 
     // ── (d) The control FIRST, then the positive, over the SAME parsed file ──
-    // Order is deliberate: the incumbent `stop-doc-sync` entry proves the
+    // Order is deliberate: the incumbent `stop-turn-review` entry proves the
     // parse+containment machinery finds a Stop registration that IS present,
     // so when the positive below fails the diagnosis is unambiguous ("this
     // hook is unregistered", never "the flattener is broken"). Measured under

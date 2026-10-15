@@ -2,7 +2,7 @@
  * turn-state.mjs — session/turn path resolution shared by the turn-state hooks:
  *   user-prompt-turn-start.mjs (UserPromptSubmit, writes current-turn.id)
  *   post-edit-mark.mjs         (PostToolUse, writes edited.flag / edited-files.jsonl)
- *   stop-doc-sync.mjs          (Stop, reads them)
+ *   stop-turn-review.mjs       (Stop, reads them)
  *
  * Contract:
  *   - resolveSessionId(payload): the hook stdin payload's `session_id`.
