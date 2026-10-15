@@ -79,7 +79,7 @@ describe("AC-RS-13 shipped catalog passes check within caps", () => {
   });
 
   it("AC-RS-13 agent-rules keeps only its non-overlapping line", () => {
-    const rendered = renderSubagent("lore-explorer");
+    const rendered = renderSubagent("lore-reader");
     expect(rendered).toContain("Never discard lore's own stdout/stderr");
     expect(rendered).not.toContain("Trust nothing you did not just measure");
     expect(rendered).not.toContain("Oracles are external");

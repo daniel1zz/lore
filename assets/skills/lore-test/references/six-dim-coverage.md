@@ -134,7 +134,7 @@ Root cause: Same agent writing implementation + tests has **Self-Verification Pa
 ### Dispatch pattern for test subagent
 
 ```
-Agent(subagent_type="lore-implementer", prompt=`
+Agent(subagent_type="lore-implementer", isolation="worktree", prompt=`
   Task: Write tests for <module>
   Spec/AC: <from plan task>
   Function signatures: <extracted from implementation>

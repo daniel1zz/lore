@@ -209,7 +209,7 @@ For each implement task, determine approach source:
      - `[Implement] {topic} — execute per approach` (skills: [implement], blocked by the [Plan] task)
      - The [Plan] task's AC includes: "Update the [Implement] task content with Approach field (lore set <task> --content-file ...)"
 
-**Rule**: implement task without Approach = not ready for execution. The lore-reviewer audit (8.3) will flag it.
+**Rule**: implement task without Approach = not ready for execution. The lore-reader audit (8.3) will flag it.
 
 # 4. Create plan document
 - # NOTE: `lore feed` supports artifact checkpoints only (spec-create etc.) — there is NO plan-promote feed checkpoint (verified 2026-07-19: `unknown checkpoint`). The plan-promote gate's rules are enforced at `lore approve` (step 8.6); nothing to pre-pull here.
@@ -395,7 +395,7 @@ Skip when: pure research/design plan, no implement tasks, or user explicitly opt
 **Anti-pattern guards**:
 - test task scenario count < paired impl task AC count → warn "insufficient test coverage"
 - scenarios contain implementation details like "call function X" → warn "tests should not anchor to implementation"
-- impl AC changed but scenarios not updated → the lore-reviewer audit (8.3) should flag as stale
+- impl AC changed but scenarios not updated → the lore-reader audit (8.3) should flag as stale
 
 # 6. Critical Path Analysis
 - After task docs + blocks links are created, identify the critical path:
@@ -436,7 +436,7 @@ Skip when: pure research/design plan, no implement tasks, or user explicitly opt
 
 # 8.3. Independent review — one lens of the single S3 bundle review
 - Do NOT dispatch a reviewer per plan. When EVERY plan of the initiative exists
-  as a draft, the S3 bundle review dispatches lore-reviewer ONCE over all of
+  as a draft, the S3 bundle review dispatches lore-reader ONCE over all of
   them (plus their specs) with this 5-dimension task-quality audit as its plan lens:
   1. executability — can a cold-start implementer execute each task from its content alone?
   2. ac_oracle_binding — is every AC verifiable by a named oracle (tsc/test/lint/build/e2e/script)?
@@ -514,7 +514,7 @@ All 6 INVEST criteria are enforced:
 
 Validation happens at **two** points:
 1. **Pre-execution** (step 8): `lore ready --json` structural check + coverage check +
-   independent lore-reviewer audit + the deterministic plan-promote gate → catches missing
+   independent lore-reader audit + the deterministic plan-promote gate → catches missing
    coverage, weak AC, unsplit tasks, anchor conflicts BEFORE any dispatch
 2. **Post-execution** (once, at the END of the initiative — all its plans in parallel; a
    pre-registered pilot plan is the only one assessed as it closes): `lore assess <plan> [--diff <git-range>]` —

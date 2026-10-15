@@ -37,7 +37,7 @@ Read `references/invariants.md` §Deterministic checks for per-check interpretat
 
 ## Phase 2 — Invariant judgment (independent judge, never self-graded)
 
-Dispatch a **read-only reviewer subagent** (e.g. `lore-reviewer`) as the judge — the session's own agent judging its own discipline is the Self-Verification Paradox this skill exists to counter. If subagent dispatch is unavailable (claude.ai), state that the review is self-graded and mark every verdict `confidence: low`.
+Dispatch a **read-only reviewer subagent** (e.g. `lore-reader`) as the judge — the session's own agent judging its own discipline is the Self-Verification Paradox this skill exists to counter. If subagent dispatch is unavailable (claude.ai), state that the review is self-graded and mark every verdict `confidence: low`.
 
 Give the judge: (a) a factual session summary you write (what was asked, what was dispatched, what merged — facts, not self-assessment), (b) Phase 1 results, (c) the invariant catalog `references/invariants.md`. The judge returns one verdict per invariant: `PASS | VIOLATION | N/A` + a one-line evidence quote. An invariant without evidence either way is `N/A (not exercised)`, never a silent PASS.
 

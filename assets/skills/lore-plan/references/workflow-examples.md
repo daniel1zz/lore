@@ -88,7 +88,7 @@
 8. Validation gate:
    lore ready plan-user-authentication --json   # structural: all tasks present, ready set non-empty, no anchor conflicts
    lore ac list spec-user-auth                  # coverage: every AC id in some task's Covers → 4/4
-   S3 bundle review: ONE lore-reviewer dispatch over spec-user-auth + this plan (5-dimension plan lens) → PASS
+   S3 bundle review: ONE lore-reader dispatch over spec-user-auth + this plan (5-dimension plan lens) → PASS
    lore review spec-user-auth                   # per-version judgment, once, on the final spec
    S4: one AskUserQuestion over the whole bundle (lore tree output, strategy chosen/rejected, branches) → 批准
    lore approve spec-user-auth && lore approve plan-user-authentication   # specs first; plan-promote → pass

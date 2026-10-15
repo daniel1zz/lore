@@ -89,7 +89,7 @@
 - lore ready <plan> --json → structural check: no orphaned tasks, no anchor conflicts,
   non-empty ready set (empty + nothing archived = cycle in blocks links)
 - Verify DoR compliance for new/modified tasks
-- Material restructure (>30% of remaining tasks) → ONE lore-reviewer pass over every
+- Material restructure (>30% of remaining tasks) → ONE lore-reader pass over every
   changed artifact together (batched-governance S3 scoped to the change) — the
   5-dimension audit (executability / ac_oracle_binding / context_sufficiency /
   atomicity / dependency & anchor safety)
