@@ -11,5 +11,7 @@ updated: 2026-10-12
 tags: []
 parent: PLAN-159
 plan: PLAN-159
+links:
+  - {id: TASK-1050, type: resolves}
 ---
 

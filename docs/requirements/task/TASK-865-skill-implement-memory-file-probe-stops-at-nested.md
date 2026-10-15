@@ -13,6 +13,7 @@ parent: PLAN-149
 plan: PLAN-149
 links:
   - {id: TASK-880, type: blocks}
+  - {id: TASK-866, type: resolves}
 ---
 Estimate: S
 Approach: in adapters/real-memory-file-probe.ts, during the root/module walk (and the .claude/rules walk if it can reach one), do not descend into any NON-ROOT directory that contains an entry named `.git` (directory or file) — same mechanism and doc style as the existing `.claude/worktrees` exclusion (N8). Update the module @invariant header to name the new exclusion (grep-checkable).

@@ -10120,6 +10120,142 @@
     "01M4FM41D39RZYV0WV86X2V2DR": {
       "human_id": "BASE-148",
       "file_path": "docs/requirements/baseline/BASE-148-print-a-governance-topic.md"
+    },
+    "01M4ZBW6CXN6VQTA3RWKRM5GKA": {
+      "human_id": "SPEC-178",
+      "file_path": "docs/requirements/spec/SPEC-178-two-helper-agent-types-lore-reader-and-lore-implem.md"
+    },
+    "01M4ZDKPR3XVTK08PCA7D66535": {
+      "human_id": "SPEC-180",
+      "file_path": "docs/requirements/spec/SPEC-180-interception-moves-off-every-tool-call-one-turn-en.md"
+    },
+    "01M4ZDYZES6PHAH2KM5RKB5AZ0": {
+      "human_id": "SPEC-181",
+      "file_path": "docs/requirements/spec/SPEC-181-an-active-spec-counts-as-approved-for-claiming-its.md"
+    },
+    "01M4ZDB4XAK5K4ZKTWXZCQDP6D": {
+      "human_id": "SPEC-179",
+      "file_path": "docs/requirements/spec/SPEC-179-one-upgrade-reminder-at-session-start-covers-the-g.md"
+    },
+    "01M4ZD60PM7K8TZJRRA2V0QNG7": {
+      "human_id": "ADR-047",
+      "file_path": "docs/requirements/adr/ADR-047-rule-delivery-tiers-gate-hook-skill-and-optimistic.md"
+    },
+    "01M4ZBTYTW6PKGDCJE7E4B6CZA": {
+      "human_id": "ADR-046",
+      "file_path": "docs/requirements/adr/ADR-046-helper-agent-types-split-only-on-mechanism-enforce.md"
+    },
+    "01M4ZD962505FCXYKEZ4DG4KWB": {
+      "human_id": "KN-672",
+      "file_path": "docs/requirements/knowledge/KN-672-assessment-two-helper-agent-types-lore-reader-and.md"
+    },
+    "01M4Z478BYFWH8XQC6XKVD3QXG": {
+      "human_id": "KN-673",
+      "file_path": "docs/requirements/knowledge/KN-673-assessment-rule-store-option-a-2026-10-15.md"
+    },
+    "01M4ZE2765T9F0VW438G97ZCH4": {
+      "human_id": "PLAN-180",
+      "file_path": "docs/requirements/plan/PLAN-180-an-active-spec-counts-as-approved-for-claims-and-p.md"
+    },
+    "01M4ZE26SQGZ87CYSBADA2RX8F": {
+      "human_id": "PLAN-181",
+      "file_path": "docs/requirements/plan/PLAN-181-interception-moves-off-every-tool-call-turn-end-re.md"
+    },
+    "01M4ZE26D5B4V12X6MMNV2YJ9T": {
+      "human_id": "PLAN-182",
+      "file_path": "docs/requirements/plan/PLAN-182-unified-upgrade-reminder-and-retirement-of-the-ses.md"
+    },
+    "01M4ZC22XR4R28YZ8G5CSTB5BS": {
+      "human_id": "PLAN-183",
+      "file_path": "docs/requirements/plan/PLAN-183-two-helper-agent-types-lore-reader-and-lore-implem.md"
+    },
+    "01M4ZE44FBZNYFK88XSCMQ54S3": {
+      "human_id": "TASK-1301",
+      "file_path": "docs/requirements/task/TASK-1301-skill-verify-land-spec-an-active-spec-rule-apply-a.md"
+    },
+    "01M4ZE441A1HW49KV2DSM8Y8BZ": {
+      "human_id": "TASK-1302",
+      "file_path": "docs/requirements/task/TASK-1302-skill-implement-upstream-approved-statuses-becomes.md"
+    },
+    "01M4ZE43KEA8XDKJC2Q9013GCR": {
+      "human_id": "TASK-1303",
+      "file_path": "docs/requirements/task/TASK-1303-skill-verify-land-spec-interception-rule-apply-res.md"
+    },
+    "01M4ZE435GNZZ4G2RBJHQT0S5K": {
+      "human_id": "TASK-1304",
+      "file_path": "docs/requirements/task/TASK-1304-skill-implement-the-shipped-roster-and-this-repo-s.md"
+    },
+    "01M4ZE42QJD48PNKWTM5NGGBEX": {
+      "human_id": "TASK-1305",
+      "file_path": "docs/requirements/task/TASK-1305-skill-implement-stop-turn-review-reviews-the-main.md"
+    },
+    "01M4ZE429K02Z0AKX198GZFK67": {
+      "human_id": "TASK-1306",
+      "file_path": "docs/requirements/task/TASK-1306-skill-implement-pre-tool-harness-run-rewrites-lore.md"
+    },
+    "01M4ZE41V90YTVZVHR41S7H8MB": {
+      "human_id": "TASK-1307",
+      "file_path": "docs/requirements/task/TASK-1307-skill-implement-the-turn-record-carries-the-editin.md"
+    },
+    "01M4ZE41DDDZY3Y41N2VPDRDR7": {
+      "human_id": "TASK-1308",
+      "file_path": "docs/requirements/task/TASK-1308-skill-implement-retire-the-g1-g4-checkpoint-hooks.md"
+    },
+    "01M4ZE40ZNJN2W6CKB45EZEWFT": {
+      "human_id": "TASK-1309",
+      "file_path": "docs/requirements/task/TASK-1309-skill-verify-land-spec-one-upgrade-reminder-rule-a.md"
+    },
+    "01M4ZE40HV2FQE5V80EH7BA0AF": {
+      "human_id": "TASK-1310",
+      "file_path": "docs/requirements/task/TASK-1310-skill-implement-retire-the-hook-session-start-outl.md"
+    },
+    "01M4ZE4040DNAGQ4H2TDZGSYA1": {
+      "human_id": "TASK-1311",
+      "file_path": "docs/requirements/task/TASK-1311-skill-implement-session-start-resume-emits-one-dir.md"
+    },
+    "01M4ZE3ZNKCYP11YW03X92W8NE": {
+      "human_id": "TASK-1312",
+      "file_path": "docs/requirements/task/TASK-1312-skill-implement-lore-setup-project-check-classifie.md"
+    },
+    "01M4ZDQWF4EHYNXVYE7E2VV811": {
+      "human_id": "TASK-1313",
+      "file_path": "docs/requirements/task/TASK-1313-a-rule-proposed-in-a-draft-spec-s-change-set-canno.md"
+    },
+    "01M4ZD9BXJ15JZ4S5CSE6TR0DW": {
+      "human_id": "TASK-1314",
+      "file_path": "docs/requirements/task/TASK-1314-pin-the-claude-md-contract-s-content-tiers-rule-wi.md"
+    },
+    "01M4ZC2WHYQS795ZSC0MZN1JED": {
+      "human_id": "TASK-1315",
+      "file_path": "docs/requirements/task/TASK-1315-t1-agent-definitions-dispatch-hooks-setup-retireme.md"
+    },
+    "01M4ZC2WZVWC04JVX9XBW0J8P6": {
+      "human_id": "TASK-1316",
+      "file_path": "docs/requirements/task/TASK-1316-t2-fragment-audiences-and-skill-references.md"
+    },
+    "01M4ZD158R4EKCW304JWXW84NJ": {
+      "human_id": "TASK-1317",
+      "file_path": "docs/requirements/task/TASK-1317-setup-manifest-fields-ac-076-6-s1-is-red-on-main-t.md"
+    },
+    "01M4ZD10WEPZRXM7KKMHMS884D": {
+      "human_id": "TASK-1318",
+      "file_path": "docs/requirements/task/TASK-1318-lore-setup-check-reports-assets-in-sync-while-mani.md"
+    },
+    "01M4ZC4M5HS27YRCF32RAAHF02": {
+      "human_id": "TASK-1319",
+      "file_path": "docs/requirements/task/TASK-1319-lore-review-rejects-every-not-yet-started-task-on.md"
+    },
+    "01M4Z46GS709KHKF8WJX3C0950": {
+      "human_id": "TASK-1320",
+      "file_path": "docs/requirements/task/TASK-1320-plan-promote-accepts-an-ac-routed-to-a-phase-with.md"
+    },
+    "01M4Z43ZTN9B5GH14CTSKE8ZMQ": {
+      "human_id": "TASK-1321",
+      "file_path": "docs/requirements/task/TASK-1321-rule-store-close-user-layer-migration-and-ac-rs-14.md"
+    },
+    "01M4ZDJ626T7E0DKZY7RSJQ9BM": {
+      "human_id": "BASE-149",
+      "file_path": "docs/requirements/baseline/BASE-149-check-a-turn-at-its-end.md"
     }
   }
 }

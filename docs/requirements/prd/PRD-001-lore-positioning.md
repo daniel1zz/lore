@@ -108,7 +108,16 @@ This PRD is the tree root. Each module is a child spec (kind=feature/tech/design
 
 The module tree below is rendered live from the corpus (SPEC-004 placeholder resolution) — a hand-maintained list demonstrably drifts (this section was 8 specs stale at v0.5, stopping at SPEC-011 while the corpus reached SPEC-031):
 
+- [adr] Rule delivery tiers (gate / hook / skill) and optimistic interception at the nearest cheap-repair checkpoint (approved)
+- [task] A rule proposed in a draft spec's change set cannot be corrected or withdrawn before it lands (draft)
+- [task] Pin the CLAUDE.md contract's Content Tiers rule with regression assertions (archived)
+- [task] setup-manifest-fields AC-076-6.S1 is red on main: the second no-op converge rewrites the manifest because the recorded settings.json sha256 changes (draft)
+- [task] lore setup --check reports 'assets in sync' while manifest-tracked files the payload no longer ships are still installed (draft)
+- [task] lore review rejects every not-yet-started task on evidence_completeness, so the pre-claim review verdict carries no signal (draft)
+- [adr] Helper agent types split only on mechanism-enforced capability; roles are composed per dispatch (draft)
 - [task] lore ac cite cannot re-point a criterion whose existing citation was retired; only lore ac set --cite can (draft)
+- [task] A deprecated baseline rule cannot name its replacement: lore rule set --lifecycle deprecated refuses --note (draft)
+- [task] plan-promote accepts an AC routed to a phase with zero tasks, so lore verify has no task to attest it on (draft)
 - [task] A data-migration criterion whose red state the migration itself destroys cannot satisfy lore done's red-first floor once the red was not recorded as evidence (draft)
 - [task] falsifier-dep-materialization BOUNDARY (RED ii) control intermittently fails: bun exits nonzero but the output lacks 'cannot find module' (draft)
 - [task] stop-doc-sync charges a subagent's worktree edits to the main agent's turn, and lists each edit event instead of each file (draft)
@@ -143,7 +152,6 @@ The module tree below is rendered live from the corpus (SPEC-004 placeholder res
 - [task] record-lock treats an archived never-approved knowledge record as ever-approved (draft)
 - [task] Record-edit gate makes falsifier declaration impossible on an approved spec (draft)
 - [task] Migration services rewrite locked records' titles/fields without the record-edit gate (draft)
-- [task] A deprecated baseline rule cannot name its replacement: lore rule set --lifecycle deprecated refuses --note (draft)
 - [task] lore approve on a doc type outside judgment_required_types says nothing when the latest review judgment is reject (draft)
 - [adr] Run identity is issued by lore and attested by the harness; self-reported actor names become a claimed label (approved)
 - [adr] Write identity is the attested run alone; a run's claims end with the run (approved)

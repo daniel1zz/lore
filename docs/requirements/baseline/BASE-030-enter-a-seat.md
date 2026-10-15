@@ -6,7 +6,7 @@ title: "Enter a seat"
 status: draft
 priority: medium
 created: 2026-10-09
-updated: 2026-10-12
+updated: 2026-10-15
 tags: []
 parent: BASE-027
 links:
@@ -24,7 +24,7 @@ Scope: taking a seat and returning to an existing one, and the agent-level count
 
 **Constraint.** The main checkout must have no uncommitted change (BR-367). It is brought up to date with its upstream first, when it has one (BR-368). The plan must have no open conflict between claims on the same files (BR-369). Returning needs an existing seat (BR-372). A plan name that matches nothing is not found (exit 3), and returning without naming a plan is a usage error (exit 2) (BR-373). A failed git step fails the request as a storage failure (exit 1) and nothing done so far is undone (BR-371).
 
-**Helper agents.** Where a project registers the shipped dispatch-isolation hook, starting a code- or test-writing helper agent (`lore-implementer`, `tester`) without its own working copy is refused with exit 2, naming the helper type and the isolation seen (`<absent>` when none). Read-only helpers, the general helper, isolated helpers and unreadable input pass; a base behind another branch only warns. Nothing is written to the corpus (BR-1023). Read in `assets/hooks/pre-dispatch-isolation-gate.mjs:59-93` (refusal) and `:138-143` (failures in the base check let the dispatch through), 2026-10-10.
+**Helper agents.** Where a project registers the shipped dispatch-isolation hook, starting a code- or test-writing helper agent (`lore-implementer`, the only shipped write type; test-writing work uses it too) without its own working copy is refused with exit 2, naming the helper type and the isolation seen (`<absent>` when none). Read-only helpers, the general helper, isolated helpers and unreadable input pass; a base behind another branch only warns. Nothing is written to the corpus (BR-1023). Read in `assets/hooks/pre-dispatch-isolation-gate.mjs:59-93` (refusal) and `:138-143` (failures in the base check let the dispatch through), 2026-10-10.
 
 **Event.** `SeatEntered` (a worktree and branch in git; nothing in the corpus).
 
