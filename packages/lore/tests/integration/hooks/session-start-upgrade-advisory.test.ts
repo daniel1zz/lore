@@ -177,7 +177,7 @@ describe("AC-UR-2 session-start upgrade advisory", () => {
     expect(lines[0]).toContain(".claude/rules/mine.md");
     expect(lines[0]).toContain("edited by hand");
     expect(lines[0]).not.toContain("--force-diverged");
-    expect(lines[0].toLowerCase()).not.toContain("overwrite");
+    expect((lines[0] ?? "").toLowerCase()).not.toContain("overwrite");
     expectNoRuleText(r.stdout);
   });
 
