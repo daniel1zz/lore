@@ -6,9 +6,9 @@
  *          D6). The governance prose (`lore governance`, formerly injected
  *          here) now ships as context fragments under assets/context/
  *          rendered into the project CLAUDE.md Z1 by `lore context refresh`
- *          (run by `lore setup --project`); dynamic fragments come from the
- *          SECOND SessionStart hook, `session-start-fragments.mjs`, so each
- *          hook string stays under the 10,000-char cap on its own. Phase
+ *          (run by `lore setup --project`); the session-start fragment outlet
+ *          and its hook were retired (spec-one-upgrade-reminder-at-session-
+ *          start-covers-the-global); Phase F carries the upgrade advisory. Phase
  *          letters D-F are kept unchanged so cross-references stay valid.
  * Phase D: linked-worktree seat detection (SPEC-047) — auto-injects the
  *          seat-briefing discipline block for sessions opened inside a

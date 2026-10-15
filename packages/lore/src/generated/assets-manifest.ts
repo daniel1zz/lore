@@ -45,7 +45,7 @@ export const LORE_BINARY_VERSION = "0.1.0" as const;
 
 export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   binary_version: LORE_BINARY_VERSION,
-  tree_digest: "d8f6739e2af6b97a302c18121ac774be4c9ab7192660feabe621d58a26cb0165",
+  tree_digest: "9f13ef68fc0c4a0547c7949abc0320fd2fa9290d2d06aa49ee570e11eb57948b",
   entries: [
   { path: "agents/lore-implementer.md", kind: "agent", ownership: "managed", sha256: "5dec1ded60d7e8d5de82d90695c884f9a43b37772e0f862e8b57c6868f1c9638" },
   { path: "agents/lore-reader.md", kind: "agent", ownership: "managed", sha256: "336b2da60cfe9afae51f17ac8f6f9f33e7c67b2f3639874795e22a0e257e8696" },
@@ -73,7 +73,7 @@ export const EMBEDDED_ASSETS_MANIFEST: EmbeddedAssetsManifest = {
   { path: "hooks/run-end.mjs", kind: "hook", ownership: "managed", sha256: "3615dadf253fa5ec2142ba8262e6478c5b487752de8699c17f2fd69952d5d60d" },
   { path: "hooks/run-register.mjs", kind: "hook", ownership: "managed", sha256: "312433bb68a6545782c06f1b48f85487015b6e4b660c740dec3a3a51cc4a218f" },
   { path: "hooks/session-start-marker.mjs", kind: "hook", ownership: "managed", sha256: "637a990d12307c6080e186465ccb85e39fada66ebe9ce0de72bf9a39b7037885" },
-  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "334a27d0ba23c818a5aee4cc7425c39bbf9bc9e45d478a3c0fd36f19aca38674" },
+  { path: "hooks/session-start-resume.mjs", kind: "hook", ownership: "managed", sha256: "b3bba3934118b5e8cdb0343d354ce65bad45a4a692469e28fcd115d3fc46c0be" },
   { path: "hooks/stop-doc-sync.mjs", kind: "hook", ownership: "managed", sha256: "f24ea03964b5e13cb55470da2ea2ef02d6cf1b96c1d0d0477358c8da80af2586" },
   { path: "hooks/stop-handoff-coverage.mjs", kind: "hook", ownership: "managed", sha256: "d2751888f5fe102e919092ff443bd73536e6abbcb846e3425ad3a43e4da6ef47" },
   { path: "hooks/stop-turn-review.mjs", kind: "hook", ownership: "managed", sha256: "51351bd27f28dab922afa1525de28202b9c74e859cdd3416bb45a3dad0df53d7" },
