@@ -15,7 +15,8 @@
  * An advisory nobody is obligated to act on is what produced that state, so
  * the floor is DETERMINISTIC and exit-relevant: it rides `lintMemoryFiles`,
  * the single seam `lore status --check-claude-md`'s exit code, the
- * `claude-md-guard.sh` PostToolUse hook, `hooks/pre-push`, and
+ * `stop-turn-review.mjs` Stop hook (finding (c); it replaced the retired
+ * `claude-md-guard.sh`), `hooks/pre-push`, and
  * `flows/context-flow.ts`'s pre-write admission all already consume.
  *
  * RED BASELINE (this file is authored BEFORE the implementation). Against

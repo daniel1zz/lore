@@ -995,8 +995,9 @@ export function formatResumeItemId(prefix: string, oneBasedIndex: number): strin
 /**
  * The disposition-line marker literal a consumer's per-item accounting is
  * tagged with — modeled directly on the `**[DOC_SYNC]**` shape
- * `assets/hooks/stop-doc-sync.mjs` already uses, which this harness has
- * measured effective at blocking a turn on an unmet per-turn obligation
+ * the retired `assets/hooks/stop-doc-sync.mjs` used (its successor
+ * `assets/hooks/stop-turn-review.mjs` keeps the block channel), which this
+ * harness measured effective at blocking a turn on an unmet per-turn obligation
  * (spec-resume-ticket-coverage-a-shipped-upper-bound-left-the, "Precedent
  * for the enforcement shape"). A disposition line is expected to read
  * `${RESUME_DISPOSITION_MARKER} <item-id>: <disposition>` — but this module

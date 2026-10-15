@@ -1286,7 +1286,9 @@ export const contextConfigSchema = z
          * `0.9` (90%) — the incident that motivated this field measured
          * 99.98% used with zero signal anywhere before the write; 90% still
          * leaves an author real runway to plan a trim ahead of the
-         * `claude-md-guard.sh` hook's hard denial.
+         * over-ceiling turn-end block (`assets/hooks/stop-turn-review.mjs`
+         * finding (c); the retired per-edit `claude-md-guard.sh` hard denial
+         * it replaced is gone).
          */
         warn_threshold_fraction: z.number().min(0).max(1).default(0.9),
         /**
@@ -2441,14 +2443,16 @@ export function resolveMemoryFileBudgetsFromConfigResult(
  * write(notice)` — a caller cannot accidentally announce a legitimate default.
  *
  * ⛔ Warn-and-proceed, not refuse. `lore status --check-claude-md`'s exit code
- * has exactly two documented verdicts at its two shipped consumers:
- * `assets/hooks/claude-md-guard.sh` maps `0 → allow`, `3 → block`, and every
- * OTHER code to "undocumented verdict — failing open", while `hooks/pre-push`
- * blocks the push on any non-zero. A refusal exit code would therefore
- * silently convert "measured against the wrong budgets" into "not measured at
- * all" at the guard hook — a strictly worse silence at the surface whose whole
- * purpose is to block an over-ceiling write. The notice is the signal; the
- * exit code stays a measurement of the files. `lore status --check-claude-md
+ * is a measurement of the files, consumed by `hooks/pre-push` (blocks the push
+ * on any non-zero). The turn-end consumer, `assets/hooks/stop-turn-review.mjs`
+ * finding (c), reads the `--json` headroom instead of the exit code and treats
+ * an unreadable report as "not measured"; the retired per-edit
+ * `claude-md-guard.sh` mapped `0 → allow`, `3 → block`, other → fail open. A
+ * refusal exit code would silently convert "measured against the wrong
+ * budgets" into "not measured at all" at the pre-push surface — a strictly
+ * worse silence at the surface whose whole purpose is to block an over-ceiling
+ * commit. The notice is the signal; the exit code stays a measurement of the
+ * files. `lore status --check-claude-md
  * --json` additionally carries the provenance in its payload, since a stderr
  * line is invisible to a `--json` consumer.
  *
