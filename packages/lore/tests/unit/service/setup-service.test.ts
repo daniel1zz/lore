@@ -737,7 +737,7 @@ function buildPlaceholderHookPayload(): AssetPayload {
 }
 
 describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
-  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 18 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
+  it("resolves {{CLAUDE_DIR}} to the real targetDir in every registered hook command, all 14 hook files registered, matchers/events correct, existing foreign hook preserved", async () => {
     const fs = new MapFs();
     fs.seed(
       path.join(TARGET_DIR, "settings.json"),
@@ -774,7 +774,7 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
       );
     }
 
-    // All 18 distinct hook files are present in the merged command set.
+    // All 14 distinct hook files are present in the merged command set.
     // Hardcoded on purpose (same tripwire as assets-ssot.test.ts's roster): a
     // newly declared HOOK_REGISTRATIONS row must be answered by DECLARING it
     // here, never by deriving this list from the registry under test.
@@ -782,10 +782,6 @@ describe("{{CLAUDE_DIR}} settings-hook placeholder resolution", () => {
     expect([...distinctFiles].sort()).toEqual(
       [
         "pre-bash-git-safety-gate.mjs",
-        "lore-gate-g1-spec-create.sh",
-        "lore-gate-g2-spec-promote.sh",
-        "lore-gate-g3-plan-promote.sh",
-        "lore-gate-g4-task-claim.sh",
         "session-start-resume.mjs",
         // Same-session-authorship marker (task-verifying-a-handoff-you-just-authored-arms-the-coverage, 2026-08-01).
         "session-start-fragments.mjs", // task-skill-implement-hooks-new-session-start-fragments-thin

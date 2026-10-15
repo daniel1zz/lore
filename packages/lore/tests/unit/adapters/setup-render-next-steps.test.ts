@@ -29,10 +29,6 @@ function baseReport(overrides: Partial<ProjectScaffoldReport> = {}): ProjectScaf
   return {
     init: { status: "done", detail: "/tmp/fake-repo/.lore" },
     hooks: [
-      { file: "hooks/g1-spec-create.sh", status: "done" },
-      { file: "hooks/g2-spec-promote.sh", status: "done" },
-      { file: "hooks/g3-plan-promote.sh", status: "done" },
-      { file: "hooks/g4-task-claim.sh", status: "done" },
       { file: "hooks/pre-push", status: "done" },
     ],
     tree_yaml: { status: "done", detail: "lore.tree.yaml" },
@@ -111,7 +107,7 @@ describe("renderProjectScaffoldReceipt", () => {
     const receipt = baseReceipt({
       init: { status: "failed", detail: "EACCES: permission denied" },
       hooks: [
-        { file: "hooks/g1-spec-create.sh", status: "conflict", detail: "existing file differs from the shipped asset — left untouched" },
+        { file: "hooks/pre-push", status: "conflict", detail: "existing file differs from the shipped asset — left untouched" },
       ],
     });
 
